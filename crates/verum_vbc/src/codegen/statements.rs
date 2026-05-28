@@ -333,7 +333,57 @@ impl VbcCodegen {
                 _ => None,
             });
 
-            // Then try expression inference
+            // Width-preserving `as TargetType` carve-out — when the RHS is a
+            // `Cast` to a sized-integer alias (`Byte` / `Int32` / `UInt64` and
+            // every aliased spelling), the cast's target type carries the
+            // canonical width that downstream method-dispatch relies on.
+            // `infer_expr_type_kind(Cast)` folds every integer-aliased target
+            // to the generic `TypeKind::Int` (see
+            // `primitive_path_ident_to_typekind`), which loses the Byte /
+            // Int32 / UInt64 width and routes subsequent receiver-method
+            // lookups through the Int handler — collapsing modulo-256
+            // `wrapping_add`, overflow-at-u8::MAX `checked_add`, etc. to
+            // i64 semantics. Preserve the width by inspecting the cast
+            // target directly, mirroring the same alias arms as
+            // `annotation_type` above.
+            //
+            // Architectural rule pinned: `let a = N as TargetType;` MUST
+            // record `variable_type[a]` at TargetType's VarTypeKind width,
+            // identical to `let a: TargetType = N as TargetType;`. The
+            // unannotated/annotated forms are dispatch-equivalent at every
+            // call site that consults `get_variable_type`. Regression-pinned
+            // in `core-tests/base/primitives/regression_test.vr` §A.
+            let cast_target_var_type: Option<VarTypeKind> = value.and_then(|expr| {
+                use verum_ast::expr::ExprKind;
+                let mut cur = expr;
+                // Peel any Paren wrappers — `(N as Byte)` is parsed as
+                // `Paren { Cast }` for the receiver-positional form;
+                // unwrap so the Cast arm fires for both shapes.
+                loop {
+                    match &cur.kind {
+                        ExprKind::Paren(inner) => cur = inner,
+                        _ => break,
+                    }
+                }
+                if let ExprKind::Cast { ty: cast_ty, .. } = &cur.kind {
+                    if let TypeKind::Path(path) = &cast_ty.kind {
+                        if let Some(ident) = path.as_ident() {
+                            return match ident.name.as_str() {
+                                "Byte" | "UInt8" | "U8" | "u8" => Some(VarTypeKind::Byte),
+                                "Int32" | "I32" | "i32" => Some(VarTypeKind::Int32),
+                                "UInt" | "UInt64" | "U64" | "u64"
+                                | "USize" | "UIntSize" | "Usize" | "usize" => {
+                                    Some(VarTypeKind::UInt64)
+                                }
+                                _ => None,
+                            };
+                        }
+                    }
+                }
+                None
+            });
+
+            // Then try expression inference (generic fallback).
             let expr_type =
                 value
                     .and_then(|expr| self.infer_expr_type_kind(expr))
@@ -347,8 +397,13 @@ impl VbcCodegen {
                         _ => VarTypeKind::Unknown,
                     });
 
-            // Annotation takes priority over expression inference
+            // Annotation has highest priority (matches the documented
+            // contract of `let x: T = expr` shadowing inferred type).
+            // Cast-target carve-out runs SECOND so the inferred-but-typed
+            // `let x = expr as T` retains T's width. Generic
+            // `expr_type` fallback runs THIRD for non-cast inferences.
             let var_type = annotation_type
+                .or(cast_target_var_type)
                 .or(expr_type)
                 .unwrap_or(VarTypeKind::Unknown);
             self.ctx.register_variable_type(&var_name, var_type);

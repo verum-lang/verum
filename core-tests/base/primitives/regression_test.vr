@@ -257,19 +257,24 @@ fn regression_unit_receiver_dispatch_pinned() {
 // then `a.method(b)` also routed through Int's handler because the cast's
 // target type wasn't propagated when the binding's RHS expression type was
 // extracted.  The let-binding RHS type-inference (`compile_let::expr_type`)
-// folds primitive integer widths to `VarTypeKind::Int`, losing the Byte
-// specificity even with my Cast arm in `extract_expr_type_name`.
+// folded primitive integer widths to `VarTypeKind::Int`, losing the Byte
+// specificity even though `extract_expr_type_name` carried the target.
 //
-// PARTIAL FIX: `let c: Byte = 255 as Byte` (explicit annotation) works
-// correctly because `annotation_type` at `compile_let:314` recognises
-// `Byte`/`UInt8`/`U8`/`u8` and emits `VarTypeKind::Byte`.  Unannotated
-// `let a = 255 as Byte` still drops to `VarTypeKind::Int` per the existing
-// `infer_expr_type_kind` Cast arm folding to `TypeKind::Int`.
+// CLOSED 2026-05-28 — fundamental fix in `crates/verum_vbc/src/codegen/
+// statements.rs::compile_let` (~line 336): added a `cast_target_var_type`
+// carve-out that inspects the RHS expression for `Cast { ty: <sized-int> }`
+// (with Paren peel) BEFORE the generic `infer_expr_type_kind` fallback and
+// returns `Some(VarTypeKind::Byte / Int32 / UInt64)` for every aliased
+// spelling.  Resolution order: `annotation_type > cast_target_var_type >
+// expr_type > Unknown` — annotated `let x: T = expr` retains the existing
+// contract that the annotation wins, while unannotated `let x = N as T`
+// now records `VarTypeKind::T` width identical to the annotated form.
 //
-// STILL OPEN for unannotated form — needs a width-preserving
-// `VarTypeKind`-from-cast-target step in `compile_let`.  Tracked as §A
-// residual in `core-tests/base/primitives/audit.md`.
-@ignore
+// Architectural rule pinned: `let a = N as TargetType;` and `let a:
+// TargetType = N as TargetType;` MUST be dispatch-equivalent at every
+// call site that consults `get_variable_type`.  Without this rule
+// downstream `effective_method_name`'s `byte$`/`int32$`/`uint64$`
+// width-prefixed routing collapsed to `Int.method` and i64 semantics.
 @test
 fn regression_let_bound_as_cast_propagates_type_pinned() {
     let a = 255 as Byte;
@@ -279,4 +284,25 @@ fn regression_let_bound_as_cast_propagates_type_pinned() {
     let c = 200 as Byte;
     let d = 100 as Byte;
     assert_eq(c.wrapping_add(d), 44 as Byte);
+}
+
+// CLOSE-OUT: companion pin for the Int32 / UInt64 width arms of the same
+// fix. Without the cast-target carve-out, `let x = N as Int32` / `as
+// UInt64` similarly collapsed to `VarTypeKind::Int` — closing the
+// alias-spelling matrix end-to-end.
+@test
+fn regression_let_bound_as_cast_propagates_int32_pinned() {
+    let x = 2_147_483_647 as Int32;
+    let y = 1 as Int32;
+    // wrapping_add on Int32 wraps at i32::MAX; pre-fix collapsed to i64
+    // and the assertion returned `2147483648`.
+    assert_eq(x.wrapping_add(y), -2_147_483_648 as Int32);
+}
+
+@test
+fn regression_let_bound_as_cast_propagates_uint64_pinned() {
+    let x = 18_446_744_073_709_551_615_u64 as UInt64;  // u64::MAX
+    let y = 1_u64 as UInt64;
+    // wrapping_add on UInt64 wraps at u64::MAX; same fix path.
+    assert_eq(x.wrapping_add(y), 0_u64 as UInt64);
 }

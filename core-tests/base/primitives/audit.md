@@ -208,12 +208,22 @@ intercept.  Pinned by `regression_test.vr::regression_unit_receiver_dispatch_pin
     stream that defaults to 64 (i64 semantics) for the bare
     `saturating_add` intrinsic.  Fix needs width propagation through
     the intrinsic-emission path keyed on the cast target's spelling.
-  * §A residual — let-bound cast `VarTypeKind` folding.  Unannotated
-    `let a = N as Byte` lands as `VarTypeKind::Int` because the
-    expr-type inference path at `compile_let:341` folds primitive
-    integer widths to `TypeKind::Int → VarTypeKind::Int`.  Needs a
-    cast-target-aware step that recovers the width spelling for
-    primitive-byte-shape RHS expressions.
+  * ~~§A residual — let-bound cast `VarTypeKind` folding.~~  **CLOSED
+    2026-05-28** via fundamental fix in `crates/verum_vbc/src/codegen/
+    statements.rs::compile_let` (~line 336).  Added a
+    `cast_target_var_type` carve-out that inspects the RHS expression
+    for `Cast { ty: <sized-int> }` (with Paren peel) BEFORE the
+    generic `infer_expr_type_kind` fallback.  Returns
+    `Some(VarTypeKind::Byte / Int32 / UInt64)` for every aliased
+    spelling.  Resolution order:
+    `annotation_type > cast_target_var_type > expr_type > Unknown` —
+    annotated `let x: T = expr` retains the existing contract that
+    the annotation wins, while unannotated `let x = N as T` now
+    records `VarTypeKind::T` width identical to the annotated form.
+    Architectural rule pinned at `regression_let_bound_as_cast_*`
+    (Byte / Int32 / UInt64 alias matrix): `let a = N as TargetType;`
+    and `let a: TargetType = N as TargetType;` MUST be dispatch-
+    equivalent at every call site consulting `get_variable_type`.
   * Cross-tier AOT validation — verify all green interpreter tests also
     pass under `verum test --aot`.  Pending separate AOT validation
     cycle for cast-receiver dispatch.
