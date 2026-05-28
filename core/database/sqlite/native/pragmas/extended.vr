@@ -210,11 +210,11 @@ public fn extended_lookup(name: &Text) -> Maybe<ExtendedPragma> {
     let mut i: Int = 0;
     while i < cat.len() {
         if ascii_lower(&cat[i].name) == target {
-            return Some(clone_ext(&cat[i]));
+            return Maybe.Some(clone_ext(&cat[i]));
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 public fn extended_count() -> Int { extended_catalogue().len() }

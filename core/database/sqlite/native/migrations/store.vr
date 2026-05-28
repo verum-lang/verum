@@ -19,22 +19,22 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "SQLite-specific MigrationStore implementing the universal protocol",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.database.sqlite.native.migrations.store;
 
 mount core.*;
-mount base.{Text, Bool, Maybe, Some, None, Result, Ok, Err};
+mount base.{Text, Bool, Maybe, Some, Maybe.None, Result, Ok, Err};
 mount collections.List;
 mount core.database.common.error.{DbError};
 mount core.database.common.migrations.store.{
@@ -76,7 +76,7 @@ implement MigrationStore for SqliteMigrationStore {
     async fn load_journal(&mut self) -> Result<MigrationJournal, DbError> {
         let sql = f"SELECT version, name, status, applied_at, error, checksum FROM {self.config.table_name} ORDER BY version";
         let entries = query_journal_rows(&mut self.conn, &sql).await?;
-        Ok(MigrationJournal { entries: entries })
+        Result.Ok(MigrationJournal { entries: entries })
     }
 
     async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError> {
@@ -86,8 +86,8 @@ implement MigrationStore for SqliteMigrationStore {
         let version = entry.version;
         let name_lit = sql_text_literal(&entry.name);
         let status_lit = sql_text_literal(&status_str);
-        let applied_lit = match applied_at_opt { Some(t) => f"{t}", None => "NULL".to_text() };
-        let error_lit = match &error_opt { Some(e) => sql_text_literal(e), None => "NULL".to_text() };
+        let applied_lit = match applied_at_opt { Maybe.Some(t) => f"{t}", Maybe.None => "NULL".to_text() };
+        let error_lit = match &error_opt { Maybe.Some(e) => sql_text_literal(e), Maybe.None => "NULL".to_text() };
         let checksum = entry.checksum;
         let sql = f"INSERT INTO {table} (version, name, status, applied_at, error, checksum)\n               VALUES ({version}, {name_lit}, {status_lit}, {applied_lit}, {error_lit}, {checksum})\n               ON CONFLICT(version) DO UPDATE SET\n                   name = excluded.name,\n                   status = excluded.status,\n                   applied_at = excluded.applied_at,\n                   error = excluded.error,\n                   checksum = excluded.checksum";
         execute_raw(&mut self.conn, &sql).await
@@ -95,8 +95,8 @@ implement MigrationStore for SqliteMigrationStore {
 
     /// SQLite's WAL-mode + database-level locking already serialises
     /// concurrent writers; no advisory-lock equivalent is needed.
-    async fn acquire_lock(&mut self) -> Result<(), DbError> { Ok(()) }
-    async fn release_lock(&mut self) -> Result<(), DbError> { Ok(()) }
+    async fn acquire_lock(&mut self) -> Result<(), DbError> { Result.Ok(()) }
+    async fn release_lock(&mut self) -> Result<(), DbError> { Result.Ok(()) }
 
     async fn execute_sql(&mut self, sql: &Text) -> Result<(), DbError> {
         if self.config.transactional {
@@ -104,10 +104,10 @@ implement MigrationStore for SqliteMigrationStore {
             execute_raw(&mut self.conn, &"BEGIN".to_text()).await?;
             let exec_res = execute_raw(&mut self.conn, sql).await;
             match exec_res {
-                Ok(_)  => execute_raw(&mut self.conn, &"COMMIT".to_text()).await,
-                Err(e) => {
+                Result.Ok(_)  => execute_raw(&mut self.conn, &"COMMIT".to_text()).await,
+                Result.Err(e) => {
                     let _ = execute_raw(&mut self.conn, &"ROLLBACK".to_text()).await;
-                    Err(e)
+                    Result.Err(e)
                 }
             }
         } else {
@@ -127,10 +127,10 @@ implement MigrationStore for SqliteMigrationStore {
 
 fn render_status(s: &MigrationStatus) -> (Text, Maybe<Int64>, Maybe<Text>) {
     match s {
-        MsPending          => ("pending".to_text(),      None,    None),
-        MsApplied(t)       => ("applied".to_text(),      Some(*t), None),
-        MsRolledBack(t)    => ("rolled_back".to_text(),  Some(*t), None),
-        MsFailed(e)        => ("failed".to_text(),       None,    Some(e.clone())),
+        MsPending          => ("pending".to_text(),      Maybe.None,    Maybe.None),
+        MsApplied(t)       => ("applied".to_text(),      Maybe.Some(*t), Maybe.None),
+        MsRolledBack(t)    => ("rolled_back".to_text(),  Maybe.Some(*t), Maybe.None),
+        MsFailed(e)        => ("failed".to_text(),       Maybe.None,    Maybe.Some(e.clone())),
     }
 }
 
@@ -186,7 +186,7 @@ async fn query_journal_rows(conn: &mut SqliteConnection, sql: &Text) -> Result<L
         });
         i = i + 1;
     }
-    Ok(entries)
+    Result.Ok(entries)
 }
 
 // =============================================================================

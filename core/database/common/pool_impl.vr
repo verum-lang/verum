@@ -44,7 +44,7 @@
 module core.database.common.pool_impl;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount sync.mutex.Mutex;
 mount sync.condvar.Condvar;
@@ -174,12 +174,12 @@ implement<C> ConnectionPool<C> {
         factory: fn() -> Result<C, DbError>,
     ) -> Result<ConnectionPool<C>, DbError> {
         if config.max_connections < 1 {
-            return Err(DbError.PoolFailure {
+            return Result.Err(DbError.PoolFailure {
                 kind: PoolErrorKind.PekConfigInvalid("max_connections < 1".clone()),
             });
         }
         if config.min_connections < 0 || config.min_connections > config.max_connections {
-            return Err(DbError.PoolFailure {
+            return Result.Err(DbError.PoolFailure {
                 kind: PoolErrorKind.PekConfigInvalid("min_connections out of range".clone()),
             });
         }
@@ -188,14 +188,14 @@ implement<C> ConnectionPool<C> {
         let mut i: Int = 0;
         while i < config.min_connections {
             match factory() {
-                Ok(c)  => {
+                Result.Ok(c)  => {
                     idle.push(c);
                     // Pre-warm a connection arena per eagerly-opened
                     // slot so the first acquirer never pays the
                     // initial mmap.
                     idle_arenas.push(SpindleArena.new_connection(i + 1));
                 }
-                Err(e) => { return Err(e); }
+                Result.Err(e) => { return Result.Err(e); }
             }
             i = i + 1;
         }
@@ -211,7 +211,7 @@ implement<C> ConnectionPool<C> {
             total_errors: 0,
             total_arena_resets: 0,
         };
-        Ok(ConnectionPool {
+        Result.Ok(ConnectionPool {
             config: config,
             factory: factory,
             inner: Mutex.new(inner),
@@ -245,25 +245,25 @@ implement<C> ConnectionPool<C> {
             // Fast path 1 — pop an idle slot under the inner-state lock.
             // -----------------------------------------------------------------
             let mut guard = match self.inner.lock() {
-                Ok(g)  => g,
-                Err(_) => { return Err(self.poisoned_err()); }
+                Result.Ok(g)  => g,
+                Result.Err(_) => { return Result.Err(self.poisoned_err()); }
             };
             if guard.idle.len() > 0 {
                 let conn = match guard.idle.pop() {
-                    Some(c) => c,
-                    None    => { return Err(self.poisoned_err()); }
+                    Maybe.Some(c) => c,
+                    Maybe.None    => { return Result.Err(self.poisoned_err()); }
                 };
                 let arena = match guard.idle_arenas.pop() {
-                    Some(a) => a,
-                    None    => SpindleArena.new_connection(guard.next_id),
+                    Maybe.Some(a) => a,
+                    Maybe.None    => SpindleArena.new_connection(guard.next_id),
                 };
                 guard.outstanding = guard.outstanding + 1;
                 guard.total_acquired = guard.total_acquired + 1;
                 let id = guard.next_id;
                 guard.next_id = guard.next_id + 1;
-                return Ok(PooledConnection {
-                    conn: Some(conn),
-                    arena: Some(arena),
+                return Result.Ok(PooledConnection {
+                    conn: Maybe.Some(conn),
+                    arena: Maybe.Some(arena),
                     pool: self,
                     id: id,
                 });
@@ -281,25 +281,25 @@ implement<C> ConnectionPool<C> {
                 let id_for_factory = guard.next_id;
                 let _ = guard;     // drop before factory call
                 match (self.factory)() {
-                    Ok(conn) => {
+                    Result.Ok(conn) => {
                         let mut g = match self.inner.lock() {
-                            Ok(g)  => g,
-                            Err(_) => { return Err(self.poisoned_err()); }
+                            Result.Ok(g)  => g,
+                            Result.Err(_) => { return Result.Err(self.poisoned_err()); }
                         };
                         g.total_acquired = g.total_acquired + 1;
                         let id = g.next_id;
                         g.next_id = g.next_id + 1;
-                        return Ok(PooledConnection {
-                            conn: Some(conn),
-                            arena: Some(SpindleArena.new_connection(id)),
+                        return Result.Ok(PooledConnection {
+                            conn: Maybe.Some(conn),
+                            arena: Maybe.Some(SpindleArena.new_connection(id)),
                             pool: self,
                             id: id,
                         });
                     }
-                    Err(e) => {
+                    Result.Err(e) => {
                         let mut g = match self.inner.lock() {
-                            Ok(g)  => g,
-                            Err(_) => { return Err(self.poisoned_err()); }
+                            Result.Ok(g)  => g,
+                            Result.Err(_) => { return Result.Err(self.poisoned_err()); }
                         };
                         if g.outstanding > 0 {
                             g.outstanding = g.outstanding - 1;
@@ -311,7 +311,7 @@ implement<C> ConnectionPool<C> {
                         // waiting on.
                         self.cond.notify_one();
                         let _ = id_for_factory;
-                        return Err(e);
+                        return Result.Err(e);
                     }
                 }
             }
@@ -324,23 +324,23 @@ implement<C> ConnectionPool<C> {
             let elapsed_ns = start.elapsed().as_nanos();
             if elapsed_ns >= total_deadline_ns {
                 guard.total_timeouts = guard.total_timeouts + 1;
-                return Err(DbError.PoolFailure {
+                return Result.Err(DbError.PoolFailure {
                     kind: PoolErrorKind.PekExhausted,
                 });
             }
             let remaining_ns = total_deadline_ns - elapsed_ns;
             match self.cond.wait_timeout(guard, remaining_ns) {
-                Ok((g, timed_out)) => {
+                Result.Ok((g, timed_out)) => {
                     if timed_out {
                         let mut g2 = g;
                         g2.total_timeouts = g2.total_timeouts + 1;
-                        return Err(DbError.PoolFailure {
+                        return Result.Err(DbError.PoolFailure {
                             kind: PoolErrorKind.PekExhausted,
                         });
                     }
                     let _ = g;     // drop and retry the fast paths
                 }
-                Err(_) => return Err(self.poisoned_err()),
+                Result.Err(_) => return Result.Err(self.poisoned_err()),
             }
         }
     }
@@ -375,8 +375,8 @@ implement<C> ConnectionPool<C> {
     public fn release(&self, conn: C, mut arena: SpindleArena, kind: ReleaseKind) {
         {
             let mut guard = match self.inner.lock() {
-                Ok(g)  => g,
-                Err(_) => { return; }   // poisoned — silently drop the conn
+                Result.Ok(g)  => g,
+                Result.Err(_) => { return; }   // poisoned — silently drop the conn
             };
             match kind {
                 Healthy => {
@@ -429,8 +429,8 @@ implement<C> ConnectionPool<C> {
         let start = Instant.now();
         loop {
             let mut guard = match self.inner.lock() {
-                Ok(g)  => g,
-                Err(_) => { return Err(self.poisoned_err()); }
+                Result.Ok(g)  => g,
+                Result.Err(_) => { return Result.Err(self.poisoned_err()); }
             };
             if guard.outstanding == 0 {
                 // Tear down every parked arena before dropping the
@@ -444,18 +444,18 @@ implement<C> ConnectionPool<C> {
                 }
                 guard.idle = List.new();
                 guard.idle_arenas = List.new();
-                return Ok(());
+                return Result.Ok(());
             }
             let elapsed_ns = start.elapsed().as_nanos();
             if elapsed_ns >= total_deadline_ns {
-                return Err(DbError.PoolFailure {
+                return Result.Err(DbError.PoolFailure {
                     kind: PoolErrorKind.PekDraining,
                 });
             }
             let remaining_ns = total_deadline_ns - elapsed_ns;
             match self.cond.wait_timeout(guard, remaining_ns) {
-                Ok((g, _timed_out)) => { let _ = g; /* loop re-checks */ }
-                Err(_) => return Err(self.poisoned_err()),
+                Result.Ok((g, _timed_out)) => { let _ = g; /* loop re-checks */ }
+                Result.Err(_) => return Result.Err(self.poisoned_err()),
             }
         }
     }
@@ -465,8 +465,8 @@ implement<C> ConnectionPool<C> {
     /// Useful for metrics emit (`db.pool.*`).
     public fn stats(&self) -> PoolStatsSnapshot {
         let guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => {
+            Result.Ok(g)  => g,
+            Result.Err(_) => {
                 return PoolStatsSnapshot {
                     total: 0, idle: 0, in_use: 0,
                     total_acquired: 0, total_timeouts: 0, total_errors: 0,
@@ -531,15 +531,15 @@ implement<C> PooledConnection<C> {
     /// query. Affine consume happens via release_*.
     public fn conn_mut(&mut self) -> &mut C {
         match &mut self.conn {
-            Some(c) => c,
-            None    => panic("PooledConnection: connection already released"),
+            Maybe.Some(c) => c,
+            Maybe.None    => panic("PooledConnection: connection already released"),
         }
     }
 
     public fn conn_ref(&self) -> &C {
         match &self.conn {
-            Some(c) => c,
-            None    => panic("PooledConnection: connection already released"),
+            Maybe.Some(c) => c,
+            Maybe.None    => panic("PooledConnection: connection already released"),
         }
     }
 
@@ -552,15 +552,15 @@ implement<C> PooledConnection<C> {
     /// parked back in the pool's idle queue.
     public fn arena_mut(&mut self) -> &mut SpindleArena {
         match &mut self.arena {
-            Some(a) => a,
-            None    => panic("PooledConnection: arena already released"),
+            Maybe.Some(a) => a,
+            Maybe.None    => panic("PooledConnection: arena already released"),
         }
     }
 
     public fn arena_ref(&self) -> &SpindleArena {
         match &self.arena {
-            Some(a) => a,
-            None    => panic("PooledConnection: arena already released"),
+            Maybe.Some(a) => a,
+            Maybe.None    => panic("PooledConnection: arena already released"),
         }
     }
 
@@ -568,8 +568,8 @@ implement<C> PooledConnection<C> {
     /// in-flight handle.
     public fn arena_stats(&self) -> Maybe<ArenaStats> {
         match &self.arena {
-            Some(a) => Some(ArenaStats.from_arena(a)),
-            None    => None,
+            Maybe.Some(a) => Maybe.Some(ArenaStats.from_arena(a)),
+            Maybe.None    => Maybe.None,
         }
     }
 
@@ -579,15 +579,15 @@ implement<C> PooledConnection<C> {
     /// acquirer sees the slot.
     public fn release_healthy(mut self) {
         let c = match self.conn {
-            Some(c) => c,
-            None    => { return; }
+            Maybe.Some(c) => c,
+            Maybe.None    => { return; }
         };
         let a = match self.arena {
-            Some(a) => a,
-            None    => SpindleArena.new_connection(self.id),
+            Maybe.Some(a) => a,
+            Maybe.None    => SpindleArena.new_connection(self.id),
         };
-        self.conn = None;
-        self.arena = None;
+        self.conn = Maybe.None;
+        self.arena = Maybe.None;
         self.pool.release(c, a, Healthy);
     }
 
@@ -595,15 +595,15 @@ implement<C> PooledConnection<C> {
     /// The arena is destroyed alongside.
     public fn release_discard(mut self, reason: Text) {
         let c = match self.conn {
-            Some(c) => c,
-            None    => { return; }
+            Maybe.Some(c) => c,
+            Maybe.None    => { return; }
         };
         let a = match self.arena {
-            Some(a) => a,
-            None    => SpindleArena.new_connection(self.id),
+            Maybe.Some(a) => a,
+            Maybe.None    => SpindleArena.new_connection(self.id),
         };
-        self.conn = None;
-        self.arena = None;
+        self.conn = Maybe.None;
+        self.arena = Maybe.None;
         self.pool.release(c, a, Discard(reason));
     }
 }

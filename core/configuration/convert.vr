@@ -34,23 +34,23 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "cross-format configuration conversion via the universal hub",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.configuration.convert;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 mount configuration.value.{ConfigValue, type_name};
 mount configuration.error.{ConfigError, ConfigErrorKind, FormatId, config_err};
 mount configuration.format.{ConfigFormat, FormatCapabilities};
@@ -96,7 +96,7 @@ public fn convert_value_to_text(
     let mut warnings: List<ConversionWarning> = List.new();
     let coerced = coerce_for_capabilities(value, &caps, policy.clone(), &"".to_text(), &mut warnings, dst.format_id())?;
     let text = dst.stringify(&coerced)?;
-    Ok(ConvertedDocument { text: text, warnings: warnings })
+    Result.Ok(ConvertedDocument { text: text, warnings: warnings })
 }
 
 /// Convert source text from one format directly to another.
@@ -238,38 +238,38 @@ fn coerce_for_capabilities(
 ) -> Result<ConfigValue, ConfigError> {
     match v {
         ConfigValue.ConfigNull => {
-            if caps.has_null { Ok(v.clone()) }
+            if caps.has_null { Result.Ok(v.clone()) }
             else {
                 require_lossy_ok(&policy, &"null".to_text(), &"empty-string".to_text(), path, warnings, &dst_id)?;
-                Ok(ConfigValue.ConfigString("".to_text()))
+                Result.Ok(ConfigValue.ConfigString("".to_text()))
             }
         }
         ConfigValue.ConfigBytes(b) => {
-            if caps.has_bytes { Ok(v.clone()) }
+            if caps.has_bytes { Result.Ok(v.clone()) }
             else {
                 require_lossy_ok(&policy, &"bytes".to_text(), &"base64-string".to_text(), path, warnings, &dst_id)?;
-                Ok(ConfigValue.ConfigString(encode_base64(b)))
+                Result.Ok(ConfigValue.ConfigString(encode_base64(b)))
             }
         }
         ConfigValue.ConfigOffsetDateTime(t) => {
-            if caps.has_offset_datetime { Ok(v.clone()) }
+            if caps.has_offset_datetime { Result.Ok(v.clone()) }
             else {
                 require_lossy_ok(&policy, &"offset-datetime".to_text(), &"string".to_text(), path, warnings, &dst_id)?;
-                Ok(ConfigValue.ConfigString(rfc3339_to_text(t)))
+                Result.Ok(ConfigValue.ConfigString(rfc3339_to_text(t)))
             }
         }
         ConfigValue.ConfigLocalDateTime(t) | ConfigValue.ConfigLocalDate(t) | ConfigValue.ConfigLocalTime(t) => {
-            if caps.has_local_datetime { Ok(v.clone()) }
+            if caps.has_local_datetime { Result.Ok(v.clone()) }
             else {
                 require_lossy_ok(&policy, &"local-datetime".to_text(), &"string".to_text(), path, warnings, &dst_id)?;
-                Ok(ConfigValue.ConfigString(rfc3339_to_text(t)))
+                Result.Ok(ConfigValue.ConfigString(rfc3339_to_text(t)))
             }
         }
         ConfigValue.ConfigDuration(d) => {
-            if caps.has_duration { Ok(v.clone()) }
+            if caps.has_duration { Result.Ok(v.clone()) }
             else {
                 require_lossy_ok(&policy, &"duration".to_text(), &"string".to_text(), path, warnings, &dst_id)?;
-                Ok(ConfigValue.ConfigString(duration_to_text(d)))
+                Result.Ok(ConfigValue.ConfigString(duration_to_text(d)))
             }
         }
         ConfigValue.ConfigTagged(tag, payload) => {
@@ -298,7 +298,7 @@ fn coerce_for_capabilities(
                     out.push(ConfigValue.ConfigString(configuration.value.type_name(items.get(i).unwrap())));
                     i = i + 1;
                 }
-                Ok(ConfigValue.ConfigArray(out))
+                Result.Ok(ConfigValue.ConfigArray(out))
             } else {
                 let mut out: List<ConfigValue> = List.new();
                 let mut i = 0;
@@ -307,7 +307,7 @@ fn coerce_for_capabilities(
                     out.push(coerce_for_capabilities(items.get(i).unwrap(), caps, policy.clone(), &sub, warnings, dst_id.clone())?);
                     i = i + 1;
                 }
-                Ok(ConfigValue.ConfigArray(out))
+                Result.Ok(ConfigValue.ConfigArray(out))
             }
         }
         ConfigValue.ConfigTable(t) => {
@@ -320,9 +320,9 @@ fn coerce_for_capabilities(
                 out.insert(k.clone(), coerce_for_capabilities(t.get(k).unwrap(), caps, policy.clone(), &sub, warnings, dst_id.clone())?);
                 i = i + 1;
             }
-            Ok(ConfigValue.ConfigTable(out))
+            Result.Ok(ConfigValue.ConfigTable(out))
         }
-        _ => Ok(v.clone()),
+        _ => Result.Ok(v.clone()),
     }
 }
 
@@ -336,7 +336,7 @@ fn require_lossy_ok(
 ) -> Result<(), ConfigError> {
     match policy {
         LossPolicy.Reject => {
-            Err(config_err(
+            Result.Err(config_err(
                 dst_id.clone(),
                 ConfigErrorKind.LossyConversion,
                 0, 0, 0,
@@ -345,14 +345,14 @@ fn require_lossy_ok(
                     .concat(path).concat(&")".to_text()),
             ))
         }
-        LossPolicy.Accept => Ok(()),
+        LossPolicy.Accept => Result.Ok(()),
         LossPolicy.AcceptWithWarnings => {
             warnings.push(ConversionWarning {
                 feature: feature.clone(),
                 coerced_to: coerced_to.clone(),
                 path: path.clone(),
             });
-            Ok(())
+            Result.Ok(())
         }
     }
 }

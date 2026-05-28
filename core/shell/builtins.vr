@@ -57,8 +57,8 @@ public fn cp(from: &Path, to: &Path) -> Result<Int, ShellError> {
 /// Move/rename. Atomic on the same volume, falls back to copy+delete across volumes.
 public fn mv(from: &Path, to: &Path) -> Result<(), ShellError> {
     match fs_rename(from, to) {
-        Ok(_)  => Ok(()),
-        Err(_) => {
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(_) => {
             let _ = cp(from, to)?;
             core.io.fs.remove_file(from).map_err(|io| ShellError.SpawnFailed {
                 command: f"mv {from} {to}",
@@ -79,13 +79,13 @@ public fn rm(path: &Path) -> Result<(), ShellError> {
 /// Recursive remove — directory and all its contents. Equivalent to `rm -rf`.
 public fn rm_rf(path: &Path) -> Result<(), ShellError> {
     match fs_metadata(path) {
-        Ok(m) if m.is_dir() =>
+        Result.Ok(m) if m.is_dir() =>
             core.io.fs.remove_dir_all(path).map_err(|io| ShellError.SpawnFailed {
                 command: f"rm -rf {path}",
                 reason:  f"{io}",
             }),
-        Ok(_) => rm(path),
-        Err(_) => Ok(()),  // already gone
+        Result.Ok(_) => rm(path),
+        Result.Err(_) => Result.Ok(()),  // already gone
     }
 }
 
@@ -140,8 +140,8 @@ public fn write_str(path: &Path, content: &Text) -> Result<(), ShellError> {
 /// Append bytes to a file (creates if missing).
 public fn append(path: &Path, content: &[Byte]) -> Result<(), ShellError> {
     let mut existing: List<Byte> = match fs_read(path) {
-        Ok(v) => v,
-        Err(_) => [],  // file may not exist yet
+        Result.Ok(v) => v,
+        Result.Err(_) => [],  // file may not exist yet
     };
     for b in content.iter() { existing.push(*b); }
     fs_write(path, &existing).map_err(|io| ShellError.SpawnFailed {
@@ -159,19 +159,19 @@ public fn path_exists(path: &Path) -> Bool {
 }
 
 public fn is_file(path: &Path) -> Bool {
-    match fs_metadata(path) { Ok(m) => m.is_file(), Err(_) => false }
+    match fs_metadata(path) { Result.Ok(m) => m.is_file(), Result.Err(_) => false }
 }
 
 public fn is_dir(path: &Path) -> Bool {
-    match fs_metadata(path) { Ok(m) => m.is_dir(), Err(_) => false }
+    match fs_metadata(path) { Result.Ok(m) => m.is_dir(), Result.Err(_) => false }
 }
 
 /// Locate a program in PATH (cross-platform `which`).
-/// Returns the absolute path of the first match or None.
+/// Returns the absolute path of the first match or Maybe.None.
 public fn which(program: &Text) -> Maybe<PathBuf> {
     let path_var = match core.base.env.var_opt(&"PATH".into()) {
-        Some(p) => p,
-        None    => return None,
+        Maybe.Some(p) => p,
+        Maybe.None    => return Maybe.None,
     };
     let separator: Char = path_separator();
     for entry in path_var.split(separator) {
@@ -183,12 +183,12 @@ public fn which(program: &Text) -> Maybe<PathBuf> {
             for suffix in suffixes.iter() {
                 let mut with_suf = candidate.clone();
                 with_suf.set_extension(suffix.trim_start_matches_char('.'));
-                if is_file(with_suf.as_path()) { return Some(with_suf); }
+                if is_file(with_suf.as_path()) { return Maybe.Some(with_suf); }
             }
         }
-        if is_file(candidate.as_path()) { return Some(candidate); }
+        if is_file(candidate.as_path()) { return Maybe.Some(candidate); }
     }
-    None
+    Maybe.None
 }
 
 /// Ergonomic wrapper: returns true iff the program exists in PATH.

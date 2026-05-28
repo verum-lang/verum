@@ -254,7 +254,7 @@ public fn hoare(pre: HeapPredicate, command: Text, post: HeapPredicate) -> Hoare
 ///    `&mut T`.
 ///  * `Own` — the function owns the binding (may move out, drop, etc.).
 ///    Pairs with affine ownership transfer.
-///  * `None` — no permission. Used for negative claims like "this
+///  * `Maybe.None` — no permission. Used for negative claims like "this
 ///    function cannot touch this region".
 public type Capability is
     | Read

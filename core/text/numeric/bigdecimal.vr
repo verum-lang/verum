@@ -55,7 +55,7 @@
 module core.text.numeric.bigdecimal;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount base.ordering.{Ordering, Less, Equal, Greater};
 mount collections.List;
 mount core.text.numeric.bigint.{
@@ -142,9 +142,9 @@ implement BigDecimal {
         -> Result<BigDecimal, BigDecimalError>
     {
         if scale < 0 || scale > MAX_SCALE_BIG {
-            return Err(BigDecimalError.ScaleOutOfRange { scale: scale });
+            return Result.Err(BigDecimalError.ScaleOutOfRange { scale: scale });
         }
-        Ok(BigDecimal { coefficient: coefficient, scale: scale })
+        Result.Ok(BigDecimal { coefficient: coefficient, scale: scale })
     }
 
     // -------------------------------------------------------------------------
@@ -173,12 +173,12 @@ implement BigDecimal {
     /// overflow risk since BigInt is unbounded).  Then BigInt-add.
     public fn add(&self, other: &BigDecimal) -> Result<BigDecimal, BigDecimalError> {
         let (a_coef, b_coef, scale) = align_scales(self, other);
-        Ok(BigDecimal { coefficient: a_coef.add(&b_coef), scale: scale })
+        Result.Ok(BigDecimal { coefficient: a_coef.add(&b_coef), scale: scale })
     }
 
     public fn sub(&self, other: &BigDecimal) -> Result<BigDecimal, BigDecimalError> {
         let (a_coef, b_coef, scale) = align_scales(self, other);
-        Ok(BigDecimal { coefficient: a_coef.sub(&b_coef), scale: scale })
+        Result.Ok(BigDecimal { coefficient: a_coef.sub(&b_coef), scale: scale })
     }
 
     /// Product `self * other`.  Coefficient = product of operand
@@ -187,9 +187,9 @@ implement BigDecimal {
     public fn mul(&self, other: &BigDecimal) -> Result<BigDecimal, BigDecimalError> {
         let scale = self.scale + other.scale;
         if scale > MAX_SCALE_BIG {
-            return Err(BigDecimalError.ScaleOutOfRange { scale: scale });
+            return Result.Err(BigDecimalError.ScaleOutOfRange { scale: scale });
         }
-        Ok(BigDecimal { coefficient: self.coefficient.mul(&other.coefficient), scale: scale })
+        Result.Ok(BigDecimal { coefficient: self.coefficient.mul(&other.coefficient), scale: scale })
     }
 
     /// Quotient `self / other` with caller-specified precision +
@@ -216,9 +216,9 @@ implement BigDecimal {
         precision: Int,
         mode: RoundingMode,
     ) -> Result<BigDecimal, BigDecimalError> {
-        if other.coefficient.is_zero() { return Err(BigDecimalError.DivByZero); }
+        if other.coefficient.is_zero() { return Result.Err(BigDecimalError.DivByZero); }
         if precision < 0 || precision > MAX_SCALE_BIG {
-            return Err(BigDecimalError.ScaleOutOfRange { scale: precision });
+            return Result.Err(BigDecimalError.ScaleOutOfRange { scale: precision });
         }
 
         let (dividend, divisor, _common_scale) = align_scales(self, other);
@@ -229,30 +229,30 @@ implement BigDecimal {
 
         // BigInt long division.
         let (quot_full, rem) = match scaled_dividend.div_rem(&divisor) {
-            Ok(t)  => t,
-            Err(_) => return Err(BigDecimalError.DivByZero),
+            Result.Ok(t)  => t,
+            Result.Err(_) => return Result.Err(BigDecimalError.DivByZero),
         };
 
         // Extract trailing digit + sticky bit, then drop the
         // rounding digit by dividing by 10.
         let ten = BigInt.from_int(10);
         let (kept, round_digit_bi) = match quot_full.div_rem(&ten) {
-            Ok(t)  => t,
-            Err(_) => return Err(BigDecimalError.DivByZero),
+            Result.Ok(t)  => t,
+            Result.Err(_) => return Result.Err(BigDecimalError.DivByZero),
         };
         let round_digit = match round_digit_bi.abs().to_int() {
-            Some(v) => v,
-            None    => 0,  // Shouldn't happen — round_digit fits in 0..=9
+            Maybe.Some(v) => v,
+            Maybe.None    => 0,  // Shouldn't happen — round_digit fits in 0..=9
         };
         let sticky = !rem.is_zero();
         let kept_is_neg = kept.is_negative();
         let kept_abs = kept.abs();
         let kept_last_digit_is_odd = match kept_abs.rem(&ten) {
-            Ok(d)  => match d.to_int() {
-                Some(v) => (v % 2) != 0,
-                None    => false,
+            Result.Ok(d)  => match d.to_int() {
+                Maybe.Some(v) => (v % 2) != 0,
+                Maybe.None    => false,
             },
-            Err(_) => false,
+            Result.Err(_) => false,
         };
 
         let bump_up = match mode {
@@ -289,7 +289,7 @@ implement BigDecimal {
             kept.add(&BigInt.one())
         };
 
-        Ok(BigDecimal { coefficient: final_coef, scale: precision })
+        Result.Ok(BigDecimal { coefficient: final_coef, scale: precision })
     }
 
     /// Convenience: divide with default banker's rounding (HalfEven).
@@ -378,13 +378,13 @@ implement BigDecimal {
     }
 
     /// Try to convert into a V0 `Decimal` (i64 coefficient).  Returns
-    /// `None` if the coefficient exceeds i64 range; `Some(d)` otherwise.
+    /// `Maybe.None` if the coefficient exceeds i64 range; `Maybe.Some(d)` otherwise.
     /// Useful for hot-path callers that optimistically expect the
     /// result of arbitrary-precision arithmetic to fit i64.
     public fn try_to_decimal(&self) -> Maybe<Decimal> {
         match self.coefficient.to_int() {
-            Some(c) => Some(Decimal { coefficient: c, scale: self.scale }),
-            None    => None,
+            Maybe.Some(c) => Maybe.Some(Decimal { coefficient: c, scale: self.scale }),
+            Maybe.None    => Maybe.None,
         }
     }
 }
@@ -416,7 +416,7 @@ public fn parse_bigdecimal(text: &Text) -> Result<BigDecimal, BigDecimalError> {
             break;
         }
     }
-    if i >= n { return Err(BigDecimalError.ParseEmpty); }
+    if i >= n { return Result.Err(BigDecimalError.ParseEmpty); }
 
     // Optional sign.
     let mut neg = false;
@@ -428,7 +428,7 @@ public fn parse_bigdecimal(text: &Text) -> Result<BigDecimal, BigDecimalError> {
         i = i + 1;
     }
     if i >= n {
-        return Err(BigDecimalError.ParseInvalidShape {
+        return Result.Err(BigDecimalError.ParseInvalidShape {
             reason: "lone sign with no digits".clone(),
         });
     }
@@ -448,14 +448,14 @@ public fn parse_bigdecimal(text: &Text) -> Result<BigDecimal, BigDecimalError> {
             i = i + 1;
         } else if b == ('.' as Int) {
             if saw_dot {
-                return Err(BigDecimalError.ParseInvalidShape {
+                return Result.Err(BigDecimalError.ParseInvalidShape {
                     reason: "multiple decimal points".clone(),
                 });
             }
             saw_dot = true;
             i = i + 1;
         } else if b == ('e' as Int) || b == ('E' as Int) {
-            return Err(BigDecimalError.ParseInvalidShape {
+            return Result.Err(BigDecimalError.ParseInvalidShape {
                 reason: "scientific notation (e/E) not supported in V0".clone(),
             });
         } else if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
@@ -466,26 +466,26 @@ public fn parse_bigdecimal(text: &Text) -> Result<BigDecimal, BigDecimalError> {
                 if bb == 0x20 || bb == 0x09 || bb == 0x0A || bb == 0x0D {
                     i = i + 1;
                 } else {
-                    return Err(BigDecimalError.ParseInvalidChar {
+                    return Result.Err(BigDecimalError.ParseInvalidChar {
                         byte_offset: i, byte: bb,
                     });
                 }
             }
             break;
         } else {
-            return Err(BigDecimalError.ParseInvalidChar {
+            return Result.Err(BigDecimalError.ParseInvalidChar {
                 byte_offset: i, byte: b,
             });
         }
     }
 
     if !saw_digit {
-        return Err(BigDecimalError.ParseInvalidShape {
+        return Result.Err(BigDecimalError.ParseInvalidShape {
             reason: "no digits".clone(),
         });
     }
     if frac_count > MAX_SCALE_BIG {
-        return Err(BigDecimalError.ScaleOutOfRange { scale: frac_count });
+        return Result.Err(BigDecimalError.ScaleOutOfRange { scale: frac_count });
     }
 
     // Build the coefficient by re-stitching digit_run as a
@@ -493,15 +493,15 @@ public fn parse_bigdecimal(text: &Text) -> Result<BigDecimal, BigDecimalError> {
     let mut coef_text: Text = if neg { "-".clone() } else { "".clone() };
     coef_text = coef_text + Text.from_bytes(&digit_run).unwrap_or("".clone());
     let coef = match parse_bigint(&coef_text) {
-        Ok(b)  => b,
-        Err(_) => {
-            return Err(BigDecimalError.ParseInvalidShape {
+        Result.Ok(b)  => b,
+        Result.Err(_) => {
+            return Result.Err(BigDecimalError.ParseInvalidShape {
                 reason: "digit run failed BigInt parse (defensive)".clone(),
             });
         }
     };
 
-    Ok(BigDecimal { coefficient: coef, scale: frac_count })
+    Result.Ok(BigDecimal { coefficient: coef, scale: frac_count })
 }
 
 // =============================================================================
@@ -547,8 +547,8 @@ fn clone_bigint(b: &BigInt) -> BigInt {
     // Clone protocol surface yet (V1: derive Clone).
     let t = b.to_text();
     match parse_bigint(&t) {
-        Ok(c)  => c,
-        Err(_) => BigInt.zero(),  // unreachable for well-formed BigInts
+        Result.Ok(c)  => c,
+        Result.Err(_) => BigInt.zero(),  // unreachable for well-formed BigInts
     }
 }
 

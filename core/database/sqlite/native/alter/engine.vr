@@ -103,8 +103,8 @@ implement AlterEngine {
             EpInit => { self.phase = EpValidating; }
             EpValidating => {
                 match validate(&self.op, snap) {
-                    Ok(_)  => { self.phase = EpGeneratingSql; }
-                    Err(e) => { self.phase = EpFailed(AefValidation(e)); }
+                    Result.Ok(_)  => { self.phase = EpGeneratingSql; }
+                    Result.Err(e) => { self.phase = EpFailed(AefValidation(e)); }
                 }
             }
             EpGeneratingSql => {
@@ -113,11 +113,11 @@ implement AlterEngine {
             }
             EpExecuting(sql) => {
                 match (sql_runner)(sql) {
-                    None        => {
+                    Maybe.None        => {
                         let d = delta_from(&self.op);
                         self.phase = EpApplyingDelta(d);
                     }
-                    Some(err)   => {
+                    Maybe.Some(err)   => {
                         self.phase = EpFailed(AefExecution(err));
                     }
                 }
@@ -132,9 +132,9 @@ implement AlterEngine {
 
     public fn delta(&self) -> Maybe<SchemaDelta> {
         match &self.phase {
-            EpDone(d)          => Some(clone_delta(d)),
-            EpApplyingDelta(d) => Some(clone_delta(d)),
-            _                  => None,
+            EpDone(d)          => Maybe.Some(clone_delta(d)),
+            EpApplyingDelta(d) => Maybe.Some(clone_delta(d)),
+            _                  => Maybe.None,
         }
     }
 }
@@ -165,11 +165,11 @@ public fn generate_sql(op: &AlterOp) -> Text {
             push(&mut out, &def.type_affinity);
             if def.not_null { push(&mut out, &" NOT NULL".clone()); }
             match &def.default_expr {
-                Some(e) => {
+                Maybe.Some(e) => {
                     push(&mut out, &" DEFAULT ".clone());
                     push(&mut out, e);
                 }
-                None => {}
+                Maybe.None => {}
             }
             if def.is_unique { push(&mut out, &" UNIQUE".clone()); }
         }
@@ -181,11 +181,11 @@ public fn generate_sql(op: &AlterOp) -> Text {
             push(&mut out, &" ALTER COLUMN ".clone());
             push(&mut out, col);
             match exp {
-                Some(e) => {
+                Maybe.Some(e) => {
                     push(&mut out, &" SET DEFAULT ".clone());
                     push(&mut out, e);
                 }
-                None => {
+                Maybe.None => {
                     push(&mut out, &" DROP DEFAULT".clone());
                 }
             }
@@ -261,7 +261,7 @@ fn clone_delta(d: &SchemaDelta) -> SchemaDelta {
             core.database.sqlite.native.alter.delta.SdColumnDefaultChanged(
                 t.clone(),
                 c.clone(),
-                match e { Some(s) => Some(s.clone()), None => None },
+                match e { Maybe.Some(s) => Maybe.Some(s.clone()), Maybe.None => Maybe.None },
             ),
     }
 }

@@ -160,16 +160,16 @@ implement Event {
     /// Extract the key event, if this is a Key variant.
     public fn as_key(&self) -> Maybe<KeyEvent> {
         match self {
-            Event.Key(ke) => Some(ke),
-            _ => None,
+            Event.Key(ke) => Maybe.Some(ke),
+            _ => Maybe.None,
         }
     }
 
     /// Extract the mouse event, if this is a Mouse variant.
     public fn as_mouse(&self) -> Maybe<MouseEvent> {
         match self {
-            Event.Mouse(me) => Some(me),
-            _ => None,
+            Event.Mouse(me) => Maybe.Some(me),
+            _ => Maybe.None,
         }
     }
 }

@@ -73,7 +73,7 @@ implement Arity {
         }
     }
 
-    /// Maximum number of values this arity accepts (None = unbounded).
+    /// Maximum number of values this arity accepts (Maybe.None = unbounded).
     public fn upper_bound(&self) -> Maybe<Int> {
         match self {
             Arity.Exactly(n) => Maybe.Some(*n),
@@ -492,10 +492,10 @@ implement CommandSpec {
     public fn new(name: Text, about: Text) -> CommandSpec {
         CommandSpec {
             name: name,
-            version: None,
+            version: Maybe.None,
             about: about,
-            long_about: None,
-            author: None,
+            long_about: Maybe.None,
+            author: Maybe.None,
             args: List.new(),
             flags: List.new(),
             subcommands: List.new(),
@@ -503,8 +503,8 @@ implement CommandSpec {
             examples: List.new(),
             aliases: List.new(),
             hidden: false,
-            deprecated: None,
-            after_help: None,
+            deprecated: Maybe.None,
+            after_help: Maybe.None,
             settings: Default.default(),
             handler: HandlerRef.NoHandler,
         }
@@ -512,7 +512,7 @@ implement CommandSpec {
 
     /// Set the version string.
     public fn with_version(mut self, version: Text) -> CommandSpec {
-        self.version = Some(version);
+        self.version = Maybe.Some(version);
         self
     }
 
@@ -551,15 +551,15 @@ implement CommandSpec {
         let mut i: Int = 0;
         while i < self.subcommands.len() {
             let sc = &self.subcommands[i];
-            if &sc.name == name { return Some(sc); }
+            if &sc.name == name { return Maybe.Some(sc); }
             let mut j: Int = 0;
             while j < sc.aliases.len() {
-                if &sc.aliases[j] == name { return Some(sc); }
+                if &sc.aliases[j] == name { return Maybe.Some(sc); }
                 j = j + 1;
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Find a flag by long-name.
@@ -567,12 +567,12 @@ implement CommandSpec {
         let mut i: Int = 0;
         while i < self.flags.len() {
             match &self.flags[i].long {
-                Some(name) => if name == long { return Some(&self.flags[i]); },
-                None => {},
+                Maybe.Some(name) => if name == long { return Maybe.Some(&self.flags[i]); },
+                Maybe.None => {},
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Find a flag by short-letter.
@@ -580,12 +580,12 @@ implement CommandSpec {
         let mut i: Int = 0;
         while i < self.flags.len() {
             match self.flags[i].short {
-                Some(c) => if c == ch { return Some(&self.flags[i]); },
-                None => {},
+                Maybe.Some(c) => if c == ch { return Maybe.Some(&self.flags[i]); },
+                Maybe.None => {},
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Collect every long-name in this command (for did-you-mean).
@@ -594,8 +594,8 @@ implement CommandSpec {
         let mut i: Int = 0;
         while i < self.flags.len() {
             match &self.flags[i].long {
-                Some(name) => r.push(name.clone()),
-                None => {},
+                Maybe.Some(name) => r.push(name.clone()),
+                Maybe.None => {},
             }
             i = i + 1;
         }

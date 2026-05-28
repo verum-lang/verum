@@ -137,7 +137,7 @@ fn clone_def(d: &TriggerDef) -> TriggerDef {
         });
         i = i + 1;
     }
-    let when_c = match &d.when_clause { Some(s) => Some(s.clone()), None => None };
+    let when_c = match &d.when_clause { Maybe.Some(s) => Maybe.Some(s.clone()), Maybe.None => Maybe.None };
     TriggerDef {
         name: d.name.clone(),
         schema_name: d.schema_name.clone(),

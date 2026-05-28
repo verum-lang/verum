@@ -24,16 +24,16 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "vendor-neutral migration plan + dependency-DAG topological sort",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.database.common.migrations.plan;
@@ -98,7 +98,7 @@ public fn build(steps: List<Migration>) -> Result<MigrationPlan, MigrationPlanEr
         let mut k: Int = i + 1;
         while k < steps.len() {
             if steps[i].version == steps[k].version {
-                return Err(PeDuplicateVersion(steps[i].version));
+                return Result.Err(PeDuplicateVersion(steps[i].version));
             }
             k = k + 1;
         }
@@ -111,7 +111,7 @@ public fn build(steps: List<Migration>) -> Result<MigrationPlan, MigrationPlanEr
         while d < steps[idx].depends_on.len() {
             let dep = steps[idx].depends_on[d];
             if !version_present(&steps, dep) {
-                return Err(PeUnknownDependency(steps[idx].version, dep));
+                return Result.Err(PeUnknownDependency(steps[idx].version, dep));
             }
             d = d + 1;
         }
@@ -119,12 +119,12 @@ public fn build(steps: List<Migration>) -> Result<MigrationPlan, MigrationPlanEr
     }
     // 3. Topological sort.
     let sorted = match toposort(&steps) {
-        Ok(s)  => s,
-        Err(e) => { return Err(e); }
+        Result.Ok(s)  => s,
+        Result.Err(e) => { return Result.Err(e); }
     };
     // 4. Aggregate fields.
     if sorted.len() == 0 {
-        return Ok(MigrationPlan {
+        return Result.Ok(MigrationPlan {
             ordered: List.new(),
             min_version: 0,
             max_version: 0,
@@ -141,7 +141,7 @@ public fn build(steps: List<Migration>) -> Result<MigrationPlan, MigrationPlanEr
         if !sorted[k].is_reversible() { reversible = false; }
         k = k + 1;
     }
-    Ok(MigrationPlan {
+    Result.Ok(MigrationPlan {
         ordered: sorted,
         min_version: min_v,
         max_version: max_v,
@@ -204,9 +204,9 @@ fn toposort(steps: &List<Migration>) -> Result<List<Migration>, MigrationPlanErr
             if in_degree[i] > 0 { cyc.push(steps[i].version); }
             i = i + 1;
         }
-        return Err(PeCycle(cyc));
+        return Result.Err(PeCycle(cyc));
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // =============================================================================

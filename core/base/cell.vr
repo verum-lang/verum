@@ -260,10 +260,10 @@ implement<T> RefCell<T> {
     /// Try to immutably borrow. Returns Err if already mutably borrowed.
     public fn try_borrow(&self) -> Result<Ref<T>, BorrowError> {
         if self.borrow_state.count < 0 {
-            Err(BorrowError { message: "already mutably borrowed" })
+            Result.Err(BorrowError { message: "already mutably borrowed" })
         } else {
             @vbc(REFCELL_BORROW, self);
-            Ok(Ref {
+            Result.Ok(Ref {
                 value: &self.value,
                 state: &self.borrow_state,
             })
@@ -273,10 +273,10 @@ implement<T> RefCell<T> {
     /// Try to mutably borrow. Returns Err if already borrowed.
     public fn try_borrow_mut(&self) -> Result<RefMut<T>, BorrowMutError> {
         if self.borrow_state.count != 0 {
-            Err(BorrowMutError { message: "already borrowed" })
+            Result.Err(BorrowMutError { message: "already borrowed" })
         } else {
             @vbc(REFCELL_BORROW_MUT, self);
-            Ok(RefMut {
+            Result.Ok(RefMut {
                 value: &mut self.value,
                 state: &self.borrow_state,
             })
@@ -458,7 +458,7 @@ implement<T> OnceCell<T> {
     /// Get a reference to the contained value, if initialized.
     ///
 
-    /// Returns `None` if the cell is empty.
+    /// Returns `Maybe.None` if the cell is empty.
     public fn get(&self) -> Maybe<T> where T: Clone {
         self.value.clone()
     }
@@ -466,8 +466,8 @@ implement<T> OnceCell<T> {
     /// Set the value of the cell.
     ///
 
-    /// Returns `Ok(())` if the cell was empty and the value was stored.
-    /// Returns `Err(value)` if the cell was already initialized, giving
+    /// Returns `Result.Ok(())` if the cell was empty and the value was stored.
+    /// Returns `Result.Err(value)` if the cell was already initialized, giving
     /// back the rejected value.
     public fn set(&self, value: T) -> Result<(), T> {
         if self.value.is_some() {
@@ -490,14 +490,14 @@ implement<T> OnceCell<T> {
         } else {
             let val = init();
             @vbc(ONCECELL_SET, self, val);
-            self.value.clone().expect("OnceCell::get_or_init: ONCECELL_SET intrinsic just stored Some(val)")
+            self.value.clone().expect("OnceCell::get_or_init: ONCECELL_SET intrinsic just stored Maybe.Some(val)")
         }
     }
 
     /// Take the value out of the cell, leaving it empty.
     ///
 
-    /// Returns `Some(value)` if the cell was initialized, `None` otherwise.
+    /// Returns `Maybe.Some(value)` if the cell was initialized, `Maybe.None` otherwise.
     /// After this call, the cell can be set again.
     public fn take(&self) -> Maybe<T> where T: Clone {
         if self.value.is_none() {
@@ -512,7 +512,7 @@ implement<T> OnceCell<T> {
     /// Consume the OnceCell and return the contained value.
     ///
 
-    /// Returns `Some(value)` if initialized, `None` otherwise.
+    /// Returns `Maybe.Some(value)` if initialized, `Maybe.None` otherwise.
     @inline(always)
     public fn into_inner(self) -> Maybe<T> {
         self.value
@@ -636,7 +636,7 @@ implement<T> LazyCell<T> {
                 .expect("LazyCell::force: init is_some until LAZYCELL_FORCE clears it (constructor stored Some)");
             let val = init_fn();
             @vbc(LAZYCELL_FORCE, self, val);
-            self.value.clone().expect("LazyCell::force: LAZYCELL_FORCE intrinsic just stored Some(val)")
+            self.value.clone().expect("LazyCell::force: LAZYCELL_FORCE intrinsic just stored Maybe.Some(val)")
         }
     }
 
@@ -649,7 +649,7 @@ implement<T> LazyCell<T> {
     /// Get the value if already initialized, without forcing evaluation.
     ///
 
-    /// Returns `None` if the cell hasn't been forced yet.
+    /// Returns `Maybe.None` if the cell hasn't been forced yet.
     public fn get(&self) -> Maybe<T> where T: Clone {
         self.value.clone()
     }

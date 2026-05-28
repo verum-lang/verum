@@ -131,7 +131,7 @@ implement Ipv4Addr {
     public fn parse(s: &Text) -> Result<Ipv4Addr, AddrParseError> {
         let parts = s.split(".");
         if parts.len() != 4 {
-            return Err(AddrParseError.InvalidFormat);
+            return Result.Err(AddrParseError.InvalidFormat);
         }
 
         // `&parts[i]` (taking a reference of an indexed list element)
@@ -149,7 +149,7 @@ implement Ipv4Addr {
         let c = parse_octet(&p2)?;
         let d = parse_octet(&p3)?;
 
-        Ok(Ipv4Addr.new(a, b, c, d))
+        Result.Ok(Ipv4Addr.new(a, b, c, d))
     }
 }
 
@@ -160,19 +160,19 @@ fn parse_octet(s: &Text) -> Result<Byte, AddrParseError> {
     // (#79's sibling — same stdlib-not-imported root cause). Inline the
     // error mapping with an explicit match to avoid the closure path.
     let n = match s.parse_int() {
-        Ok(v) => v,
-        Err(_) => return Err(AddrParseError.InvalidOctet),
+        Result.Ok(v) => v,
+        Result.Err(_) => return Result.Err(AddrParseError.InvalidOctet),
     };
     if n < 0 || n > 255 {
-        return Err(AddrParseError.InvalidOctet);
+        return Result.Err(AddrParseError.InvalidOctet);
     }
-    Ok(n as Byte)
+    Result.Ok(n as Byte)
 }
 
 /// Parse a hex segment (1-4 hex digits) for IPv6.
 fn parse_hex_segment(s: &Text) -> Result<Int, AddrParseError> {
     if s.is_empty() || s.len() > 4 {
-        return Err(AddrParseError.InvalidFormat);
+        return Result.Err(AddrParseError.InvalidFormat);
     }
 
     let mut res = 0;
@@ -194,12 +194,12 @@ fn parse_hex_segment(s: &Text) -> Result<Int, AddrParseError> {
             'd' | 'D' => 13,
             'e' | 'E' => 14,
             'f' | 'F' => 15,
-            _ => return Err(AddrParseError.InvalidFormat),
+            _ => return Result.Err(AddrParseError.InvalidFormat),
         };
         res = (res << 4) | digit;
     }
 
-    Ok(res)
+    Result.Ok(res)
 }
 
 implement Eq for Ipv4Addr {
@@ -328,15 +328,15 @@ implement Ipv6Addr {
     public fn parse(s: &Text) -> Result<Ipv6Addr, AddrParseError> {
         // Handle empty string
         if s.is_empty() {
-            return Err(AddrParseError.InvalidFormat);
+            return Result.Err(AddrParseError.InvalidFormat);
         }
 
         // Check for IPv4-mapped address (::ffff:x.x.x.x or ::x.x.x.x)
-        if let Some(idx) = s.rfind('.') {
+        if let Maybe.Some(idx) = s.rfind('.') {
             // Contains a dot - might be IPv4 suffix
-            if let Some(colon_idx) = s.rfind(':') {
+            if let Maybe.Some(colon_idx) = s.rfind(':') {
                 let ipv4_part = s.slice(colon_idx + 1, s.len());
-                if let Ok(ipv4) = Ipv4Addr.parse(ipv4_part) {
+                if let Result.Ok(ipv4) = Ipv4Addr.parse(ipv4_part) {
                     let prefix = s.slice(0, colon_idx);
                     let mut segments = [0; 8];
 
@@ -345,7 +345,7 @@ implement Ipv6Addr {
                         let (a, b, c, d) = ipv4.octets();
                         segments[6] = ((a as Int) << 8) | (b as Int);
                         segments[7] = ((c as Int) << 8) | (d as Int);
-                        return Ok(Ipv6Addr.new(
+                        return Result.Ok(Ipv6Addr.new(
                             segments[0], segments[1], segments[2], segments[3],
                             segments[4], segments[5], segments[6], segments[7]
                         ));
@@ -355,7 +355,7 @@ implement Ipv6Addr {
                         segments[5] = 0xFFFF;
                         segments[6] = ((a as Int) << 8) | (b as Int);
                         segments[7] = ((c as Int) << 8) | (d as Int);
-                        return Ok(Ipv6Addr.new(
+                        return Result.Ok(Ipv6Addr.new(
                             segments[0], segments[1], segments[2], segments[3],
                             segments[4], segments[5], segments[6], segments[7]
                         ));
@@ -370,7 +370,7 @@ implement Ipv6Addr {
 
         if num_parts > 2 {
             // More than one :: is invalid per RFC 4291
-            return Err(AddrParseError.InvalidFormat);
+            return Result.Err(AddrParseError.InvalidFormat);
         }
 
         let mut segments = [0; 8];
@@ -379,7 +379,7 @@ implement Ipv6Addr {
             // No :: abbreviation - must have exactly 8 colon-separated groups
             let groups = s.split(":");
             if groups.len() != 8 {
-                return Err(AddrParseError.InvalidFormat);
+                return Result.Err(AddrParseError.InvalidFormat);
             }
 
             let mut i = 0;
@@ -407,7 +407,7 @@ implement Ipv6Addr {
             let total_groups = left_groups.len() + right_groups.len();
             if total_groups > 7 {
                 // Too many groups (8 is max, :: takes at least 1 slot)
-                return Err(AddrParseError.InvalidFormat);
+                return Result.Err(AddrParseError.InvalidFormat);
             }
 
             // Fill in left groups
@@ -427,7 +427,7 @@ implement Ipv6Addr {
             // Middle segments (zeros) are already 0 from initialization
         }
 
-        Ok(Ipv6Addr.new(
+        Result.Ok(Ipv6Addr.new(
             segments[0], segments[1], segments[2], segments[3],
             segments[4], segments[5], segments[6], segments[7]
         ))
@@ -759,14 +759,14 @@ implement SocketAddr {
         // Use Text literal `":"` rather than char literal `':'` for the
         // separator — the latter currently fails in the VBC interpreter
         // when called from stdlib context (auto-promotion of char to Text
-        // takes a different codegen branch that returns None for
+        // takes a different codegen branch that returns Maybe.None for
         // non-empty strings). Tracked as part of #78. Once #75
         // (typechecker resolution narrowing) lands, both paths should
         // converge and this can revert to `':'`.
         let parts = s.rsplit_once(":");
         match parts {
-            None => return Err(AddrParseError.InvalidFormat),
-            Some((host, port_str)) => {
+            Maybe.None => return Result.Err(AddrParseError.InvalidFormat),
+            Maybe.Some((host, port_str)) => {
                 // Inline the error mapping with an explicit match
                 // instead of `.map_err(|_| ...)?` — the closure-based
                 // chain currently fails in the VBC interpreter when
@@ -775,11 +775,11 @@ implement SocketAddr {
                 // root-cause class as #79 (Result method dispatch
                 // coverage). Tracked under #78.
                 let port = match port_str.parse_int() {
-                    Ok(p) => p,
-                    Err(_) => return Err(AddrParseError.InvalidPort),
+                    Result.Ok(p) => p,
+                    Result.Err(_) => return Result.Err(AddrParseError.InvalidPort),
                 };
                 if port < 0 || port > 65535 {
-                    return Err(AddrParseError.InvalidPort);
+                    return Result.Err(AddrParseError.InvalidPort);
                 }
 
                 // Try IPv4 first. Explicit `&host` rather than relying
@@ -787,8 +787,8 @@ implement SocketAddr {
                 // codegen branch that, in this stdlib context, picks a
                 // different overload and silently produces Err. Tracked
                 // as part of #78 / #75 (typechecker resolution gap).
-                if let Ok(ipv4) = Ipv4Addr.parse(&host) {
-                    return Ok(SocketAddr.new_v4(ipv4, port));
+                if let Result.Ok(ipv4) = Ipv4Addr.parse(&host) {
+                    return Result.Ok(SocketAddr.new_v4(ipv4, port));
                 }
 
                 // Try IPv6 (strip brackets if present: [::1]:8080)
@@ -797,11 +797,11 @@ implement SocketAddr {
                 } else {
                     host.clone()
                 };
-                if let Ok(ipv6) = Ipv6Addr.parse(&ipv6_str) {
-                    return Ok(SocketAddr.new_v6(ipv6, port));
+                if let Result.Ok(ipv6) = Ipv6Addr.parse(&ipv6_str) {
+                    return Result.Ok(SocketAddr.new_v6(ipv6, port));
                 }
 
-                Err(AddrParseError.InvalidFormat)
+                Result.Err(AddrParseError.InvalidFormat)
             }
         }
     }
@@ -884,7 +884,7 @@ implement ToSocketAddrs for SocketAddr {
     fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
         let mut v: List<SocketAddr> = [];
         v.push(*self);
-        Ok(v)
+        Result.Ok(v)
     }
 }
 
@@ -893,12 +893,12 @@ implement ToSocketAddrs for (&Text, Int) {
     fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
         let (host, port) = *self;
         // Try IPv4 first
-        if let Ok(ip) = Ipv4Addr.parse(host) {
-            return Ok(List.of(SocketAddr.new_v4(ip, port)));
+        if let Result.Ok(ip) = Ipv4Addr.parse(host) {
+            return Result.Ok(List.of(SocketAddr.new_v4(ip, port)));
         }
         // Try IPv6
-        if let Ok(ip) = Ipv6Addr.parse(host) {
-            return Ok(List.of(SocketAddr.new_v6(ip, port)));
+        if let Result.Ok(ip) = Ipv6Addr.parse(host) {
+            return Result.Ok(List.of(SocketAddr.new_v6(ip, port)));
         }
         // DNS resolution for hostnames. Failures map to
         // `IoErrorKind.NotFound` (the host isn't in DNS) so
@@ -908,19 +908,19 @@ implement ToSocketAddrs for (&Text, Int) {
         // message so callers that *do* want the detail can
         // still inspect it.
         match dns_resolve(host, port) {
-            Ok(addrs) => {
+            Result.Ok(addrs) => {
                 if addrs.is_empty() {
-                    Err(IoError {
+                    Result.Err(IoError {
                         kind: IoErrorKind.NotFound,
-                        message: Some(f"Cannot resolve: {host}"),
+                        message: Maybe.Some(f"Cannot resolve: {host}"),
                     })
                 } else {
-                    Ok(addrs)
+                    Result.Ok(addrs)
                 }
             }
-            Err(e) => Err(IoError {
+            Result.Err(e) => Result.Err(IoError {
                 kind: IoErrorKind.NotFound,
-                message: Some(f"Cannot resolve {host}: {e}"),
+                message: Maybe.Some(f"Cannot resolve {host}: {e}"),
             }),
         }
     }
@@ -934,40 +934,40 @@ implement ToSocketAddrs for (&Text, Int) {
 implement ToSocketAddrs for Text {
     type Iter = List<SocketAddr>;
     fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
-        if let Ok(addr) = SocketAddr.parse(self) {
-            return Ok(List.of(addr));
+        if let Result.Ok(addr) = SocketAddr.parse(self) {
+            return Result.Ok(List.of(addr));
         }
         match self.rsplit_once(':') {
-            Some((host, port_str)) => {
+            Maybe.Some((host, port_str)) => {
                 let port = match port_str.parse_int() {
-                    Ok(p) => p,
-                    Err(_) => return Err(IoError.InvalidInput {
+                    Result.Ok(p) => p,
+                    Result.Err(_) => return Result.Err(IoError.InvalidInput {
                         reason: f"Invalid port: {port_str}",
                     }),
                 };
                 if port < 0 || port > 65535 {
-                    return Err(IoError.InvalidInput {
+                    return Result.Err(IoError.InvalidInput {
                         reason: f"Port out of range: {port}",
                     });
                 }
                 match dns_resolve(&host, port) {
-                    Ok(addrs) => {
+                    Result.Ok(addrs) => {
                         if addrs.is_empty() {
-                            Err(IoError {
+                            Result.Err(IoError {
                                 kind: IoErrorKind.NotFound,
-                                message: Some(f"Cannot resolve: {host}"),
+                                message: Maybe.Some(f"Cannot resolve: {host}"),
                             })
                         } else {
-                            Ok(addrs)
+                            Result.Ok(addrs)
                         }
                     }
-                    Err(e) => Err(IoError {
+                    Result.Err(e) => Result.Err(IoError {
                         kind: IoErrorKind.NotFound,
-                        message: Some(f"Cannot resolve {host}: {e}"),
+                        message: Maybe.Some(f"Cannot resolve {host}: {e}"),
                     }),
                 }
             }
-            None => Err(IoError.InvalidInput {
+            Maybe.None => Result.Err(IoError.InvalidInput {
                 reason: f"Invalid address (missing port): {self}",
             }),
         }

@@ -86,7 +86,7 @@ public type GeneratedColumn is {
 // -----------------------------------------------------------------------------
 
 public fn check_new(expr_sql: Text) -> CheckConstraint {
-    CheckConstraint { name: None, expr_sql: expr_sql, on_conflict: OcAbort }
+    CheckConstraint { name: Maybe.None, expr_sql: expr_sql, on_conflict: OcAbort }
 }
 
 public fn not_null_new(column: Text) -> NotNullConstraint {
@@ -94,7 +94,7 @@ public fn not_null_new(column: Text) -> NotNullConstraint {
 }
 
 public fn unique_new(columns: List<Text>) -> UniqueConstraint {
-    UniqueConstraint { name: None, columns: columns, on_conflict: OcAbort }
+    UniqueConstraint { name: Maybe.None, columns: columns, on_conflict: OcAbort }
 }
 
 public fn primary_key_new(columns: List<Text>) -> PrimaryKeyConstraint {
@@ -111,7 +111,7 @@ public fn foreign_key_new(
     target_cols: List<Text>,
 ) -> ForeignKeyConstraint {
     ForeignKeyConstraint {
-        name: None,
+        name: Maybe.None,
         from_columns: from_cols,
         target_table: target_table,
         target_columns: target_cols,
@@ -144,7 +144,7 @@ public fn constraint_set_new() -> ConstraintSet {
         checks: List.new(),
         not_nulls: List.new(),
         uniques: List.new(),
-        primary_key: None,
+        primary_key: Maybe.None,
         foreign_keys: List.new(),
         generated_columns: List.new(),
     }

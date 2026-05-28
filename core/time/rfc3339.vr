@@ -119,34 +119,34 @@ implement Eq for Rfc3339Error {
 public fn parse(s: &Text) -> Result<Rfc3339Time, Rfc3339Error> {
     let b = s.as_bytes();
     if b.len() < 20 {
-        return Err(Rfc3339Error.Malformed(Text.from("too short")));
+        return Result.Err(Rfc3339Error.Malformed(Text.from("too short")));
     }
     // YYYY-MM-DD
     let year  = take_digits(b, 0, 4)?;
-    if b[4] != ('-' as Byte) { return Err(Rfc3339Error.Malformed(Text.from("expected '-'"))); }
+    if b[4] != ('-' as Byte) { return Result.Err(Rfc3339Error.Malformed(Text.from("expected '-'"))); }
     let month = take_digits(b, 5, 2)?;
-    if b[7] != ('-' as Byte) { return Err(Rfc3339Error.Malformed(Text.from("expected '-'"))); }
+    if b[7] != ('-' as Byte) { return Result.Err(Rfc3339Error.Malformed(Text.from("expected '-'"))); }
     let day   = take_digits(b, 8, 2)?;
     if b[10] != ('T' as Byte) && b[10] != ('t' as Byte) && b[10] != (' ' as Byte) {
-        return Err(Rfc3339Error.Malformed(Text.from("expected 'T' or space")));
+        return Result.Err(Rfc3339Error.Malformed(Text.from("expected 'T' or space")));
     }
     let hour   = take_digits(b, 11, 2)?;
-    if b[13] != (':' as Byte) { return Err(Rfc3339Error.Malformed(Text.from("expected ':'"))); }
+    if b[13] != (':' as Byte) { return Result.Err(Rfc3339Error.Malformed(Text.from("expected ':'"))); }
     let minute = take_digits(b, 14, 2)?;
-    if b[16] != (':' as Byte) { return Err(Rfc3339Error.Malformed(Text.from("expected ':'"))); }
+    if b[16] != (':' as Byte) { return Result.Err(Rfc3339Error.Malformed(Text.from("expected ':'"))); }
     let mut second = take_digits(b, 17, 2)?;
 
     // Range checks.
     if month < 1 || month > 12 {
-        return Err(Rfc3339Error.OutOfRange(Text.from("month")));
+        return Result.Err(Rfc3339Error.OutOfRange(Text.from("month")));
     }
     let max_day = days_in_month(year, month);
     if day < 1 || day > max_day {
-        return Err(Rfc3339Error.OutOfRange(Text.from("day")));
+        return Result.Err(Rfc3339Error.OutOfRange(Text.from("day")));
     }
-    if hour > 23 { return Err(Rfc3339Error.OutOfRange(Text.from("hour"))); }
-    if minute > 59 { return Err(Rfc3339Error.OutOfRange(Text.from("minute"))); }
-    if second > 60 { return Err(Rfc3339Error.OutOfRange(Text.from("second"))); }
+    if hour > 23 { return Result.Err(Rfc3339Error.OutOfRange(Text.from("hour"))); }
+    if minute > 59 { return Result.Err(Rfc3339Error.OutOfRange(Text.from("minute"))); }
+    if second > 60 { return Result.Err(Rfc3339Error.OutOfRange(Text.from("second"))); }
     if second == 60 { second = 59; }   // leap-second collapse
 
     let mut i: Int = 19;
@@ -161,7 +161,7 @@ public fn parse(s: &Text) -> Result<Rfc3339Time, Rfc3339Error> {
         }
         let frac_len = i - frac_start;
         if frac_len == 0 {
-            return Err(Rfc3339Error.Malformed(Text.from("empty fraction")));
+            return Result.Err(Rfc3339Error.Malformed(Text.from("empty fraction")));
         }
         // Normalise to nanoseconds (9 digits): pad with zeros or
         // truncate.
@@ -187,23 +187,23 @@ public fn parse(s: &Text) -> Result<Rfc3339Time, Rfc3339Error> {
         // time-hour = 2DIGIT (00..23), time-minute = 2DIGIT (00..59).
         // Reject out-of-range offsets per the grammar.
         if off_h > 23 || off_m > 59 {
-            return Err(Rfc3339Error.OutOfRange(Text.from("offset")));
+            return Result.Err(Rfc3339Error.OutOfRange(Text.from("offset")));
         }
         i = i + 6;
         sign * (off_h * 60 + off_m)
     } else {
-        return Err(Rfc3339Error.Malformed(Text.from("missing timezone")));
+        return Result.Err(Rfc3339Error.Malformed(Text.from("missing timezone")));
     };
 
     if i != b.len() {
-        return Err(Rfc3339Error.Malformed(Text.from("trailing bytes")));
+        return Result.Err(Rfc3339Error.Malformed(Text.from("trailing bytes")));
     }
 
     // Compose (y, m, d, h, m, s) → unix seconds (UTC), applying offset.
     let local_unix = compose_unix(year, month, day, hour, minute, second);
     let unix_seconds = local_unix - (offset_minutes as Int) * 60;
 
-    Ok(Rfc3339Time {
+    Result.Ok(Rfc3339Time {
         unix_seconds:   unix_seconds,
         nanos:          nanos,
         offset_minutes: offset_minutes,
@@ -320,19 +320,19 @@ fn is_leap(y: Int) -> Bool {
 
 fn take_digits(b: &[Byte], off: Int, n: Int) -> Result<Int, Rfc3339Error> {
     if off + n > b.len() {
-        return Err(Rfc3339Error.Malformed(Text.from("truncated")));
+        return Result.Err(Rfc3339Error.Malformed(Text.from("truncated")));
     }
     let mut v: Int = 0;
     let mut i: Int = 0;
     while i < n {
         let c = b[off + i];
         if c < ('0' as Byte) || c > ('9' as Byte) {
-            return Err(Rfc3339Error.InvalidField(Text.from("non-digit")));
+            return Result.Err(Rfc3339Error.InvalidField(Text.from("non-digit")));
         }
         v = v * 10 + ((c - ('0' as Byte)) as Int);
         i = i + 1;
     }
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn push_padded(dst: &mut List<Byte>, n: Int, width: Int) {

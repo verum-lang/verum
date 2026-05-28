@@ -36,7 +36,7 @@
 module core.database.common.retry_run;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Some, None};
+mount base.{Result, Ok, Err, Text, Maybe, Some, Maybe.None};
 mount async.timer.sleep_ms;
 mount core.database.common.error.DbError;
 mount core.database.common.retry.{RetryPolicy, RetryAttemptInfo};
@@ -90,7 +90,7 @@ fn decide_retry(
 
 /// Run `body` against the configured policy, retrying on retryable
 /// errors with full-jitter exponential backoff. Returns the first
-/// `Ok(R)` or the final `Err(DbError)` after the budget is spent.
+/// `Result.Ok(R)` or the final `Result.Err(DbError)` after the budget is spent.
 ///
 
 /// The body is expected to be idempotent — the framework does not
@@ -105,11 +105,11 @@ public fn run_with_retry_sync<R, F: fn() -> Result<R, DbError>>(
     let mut attempt: Int = 0;
     loop {
         match body() {
-            Ok(value) => { return Ok(value); }
-            Err(e) => {
+            Result.Ok(value) => { return Result.Ok(value); }
+            Result.Err(e) => {
                 attempt = attempt + 1;
                 match decide_retry(&policy, attempt, e, &mut prng_state) {
-                    RdSurface(final_err) => { return Err(final_err); }
+                    RdSurface(final_err) => { return Result.Err(final_err); }
                     RdRetry { delay_ms } => {
                         if delay_ms > 0 { let _ = sleep_ms(delay_ms); }
                     }
@@ -134,11 +134,11 @@ public async fn run_with_retry<R, F: fn() -> Result<R, DbError>>(
     let mut attempt: Int = 0;
     loop {
         match body() {
-            Ok(value) => { return Ok(value); }
-            Err(e) => {
+            Result.Ok(value) => { return Result.Ok(value); }
+            Result.Err(e) => {
                 attempt = attempt + 1;
                 match decide_retry(&policy, attempt, e, &mut prng_state) {
-                    RdSurface(final_err) => { return Err(final_err); }
+                    RdSurface(final_err) => { return Result.Err(final_err); }
                     RdRetry { delay_ms } => {
                         if delay_ms > 0 { let _ = sleep_ms(delay_ms).await; }
                     }
@@ -165,12 +165,12 @@ public fn run_with_retry_inspect_sync<R, F: fn() -> Result<R, DbError>, G: fn(Re
     let mut attempt: Int = 0;
     loop {
         match body() {
-            Ok(value) => { return Ok(value); }
-            Err(e) => {
+            Result.Ok(value) => { return Result.Ok(value); }
+            Result.Err(e) => {
                 attempt = attempt + 1;
                 let msg = e.message();
                 match decide_retry(&policy, attempt, e, &mut prng_state) {
-                    RdSurface(final_err) => { return Err(final_err); }
+                    RdSurface(final_err) => { return Result.Err(final_err); }
                     RdRetry { delay_ms } => {
                         inspector(RetryAttemptInfo {
                             attempt: attempt,
@@ -197,12 +197,12 @@ public async fn run_with_retry_inspect<R, F: fn() -> Result<R, DbError>, G: fn(R
     let mut attempt: Int = 0;
     loop {
         match body() {
-            Ok(value) => { return Ok(value); }
-            Err(e) => {
+            Result.Ok(value) => { return Result.Ok(value); }
+            Result.Err(e) => {
                 attempt = attempt + 1;
                 let msg = e.message();
                 match decide_retry(&policy, attempt, e, &mut prng_state) {
-                    RdSurface(final_err) => { return Err(final_err); }
+                    RdSurface(final_err) => { return Result.Err(final_err); }
                     RdRetry { delay_ms } => {
                         inspector(RetryAttemptInfo {
                             attempt: attempt,

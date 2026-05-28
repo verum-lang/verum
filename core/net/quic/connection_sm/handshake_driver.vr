@@ -185,7 +185,7 @@ implement HandshakeDriver {
             handshake:  CryptoStream.new(),
             application: CryptoStream.new(),
             outbound:   [],
-            connected_secrets: None,
+            connected_secrets: Maybe.None,
         }
     }
 
@@ -196,7 +196,7 @@ implement HandshakeDriver {
             handshake:  CryptoStream.new(),
             application: CryptoStream.new(),
             outbound:   [],
-            connected_secrets: None,
+            connected_secrets: Maybe.None,
         }
     }
 
@@ -208,9 +208,9 @@ implement HandshakeDriver {
                 let (sm2, wire) = sm.start()?;
                 self.role = HandshakeRole.AsClient(sm2);
                 self.enqueue_outbound(PnSpaceKind.Initial, wire);
-                Ok(())
+                Result.Ok(())
             },
-            HandshakeRole.AsServer(_) => Err(TlsError.UnexpectedMessage),
+            HandshakeRole.AsServer(_) => Result.Err(TlsError.UnexpectedMessage),
         }
     }
 
@@ -235,11 +235,11 @@ implement HandshakeDriver {
                 self.enqueue_outbound(produced_space, out_wire);
             }
             match connected {
-                Some(ho) => { self.connected_secrets = Some(ho); },
-                None => {},
+                Maybe.Some(ho) => { self.connected_secrets = Maybe.Some(ho); },
+                Maybe.None => {},
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 
     fn stream_for(&mut self, space: &PnSpaceKind) -> &mut CryptoStream {
@@ -264,20 +264,20 @@ implement HandshakeDriver {
                 //  client Finished in Handshake space.
                 let target_space = self.client_out_space();
                 let connected: Maybe<HandshakeOutput> = match step.connected {
-                    Some(c) => Some(HandshakeOutput.ClientHandshakeOutput(c)),
-                    None    => None,
+                    Maybe.Some(c) => Maybe.Some(HandshakeOutput.ClientHandshakeOutput(c)),
+                    Maybe.None    => Maybe.None,
                 };
-                Ok((wire.len(), target_space, step.outbound_handshake, connected))
+                Result.Ok((wire.len(), target_space, step.outbound_handshake, connected))
             },
             HandshakeRole.AsServer(sm) => {
                 let (sm2, step) = sm.on_handshake(wire)?;
                 self.role = HandshakeRole.AsServer(sm2);
                 let target_space = self.server_out_space();
                 let connected: Maybe<HandshakeOutput> = match step.connected {
-                    Some(c) => Some(HandshakeOutput.ServerHandshakeOutput(c)),
-                    None    => None,
+                    Maybe.Some(c) => Maybe.Some(HandshakeOutput.ServerHandshakeOutput(c)),
+                    Maybe.None    => Maybe.None,
                 };
-                Ok((wire.len(), target_space, step.outbound_handshake, connected))
+                Result.Ok((wire.len(), target_space, step.outbound_handshake, connected))
             },
         }
     }
@@ -323,7 +323,7 @@ implement HandshakeDriver {
     }
 
     public fn handshake_complete(&self) -> Bool {
-        match &self.connected_secrets { Some(_) => true, None => false }
+        match &self.connected_secrets { Maybe.Some(_) => true, Maybe.None => false }
     }
 
     public fn completion(&self) -> Maybe<HandshakeOutput> {

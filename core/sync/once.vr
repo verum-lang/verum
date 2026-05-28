@@ -153,7 +153,7 @@ implement Once {
     fn call_once_slow<F: fn()>(&self, f: F) {
         loop {
             match self.state.compare_exchange(INCOMPLETE, RUNNING, MemoryOrdering.AcqRel, MemoryOrdering.Acquire) {
-                Ok(_) => {
+                Result.Ok(_) => {
                     // We won the race - use a guard to handle panics
                     // The guard will set POISONED if dropped without completing
                     let mut guard = OnceGuard { state: &self.state, completed: false };
@@ -168,15 +168,15 @@ implement Once {
 
                     return;
                 }
-                Err(COMPLETE) => {
+                Result.Err(COMPLETE) => {
                     // Already done
                     return;
                 }
-                Err(POISONED) => {
+                Result.Err(POISONED) => {
                     // Previous attempt panicked
                     panic("Once.call_once called after panic");
                 }
-                Err(RUNNING) => {
+                Result.Err(RUNNING) => {
                     // Another thread is running. Wait with
                     // spin_hint() so the CPU can issue PAUSE
                     // (x86) / YIELD (aarch64) and not burn
@@ -191,7 +191,7 @@ implement Once {
                         spin_hint();
                     }
                 }
-                Err(_) => {
+                Result.Err(_) => {
                     // Unexpected state, retry
                     compiler_fence(MemoryOrdering.SeqCst);
                 }
@@ -203,19 +203,19 @@ implement Once {
     ///
 
     /// Like `call_once` but `f` returns `Result<(), E>`:
-    ///  - If `f` returns `Ok(())`, the Once becomes COMPLETE and
-    ///  subsequent callers will see `Ok(false)` ("another
+    ///  - If `f` returns `Result.Ok(())`, the Once becomes COMPLETE and
+    ///  subsequent callers will see `Result.Ok(false)` ("another
     ///  thread completed it").
-    ///  - If `f` returns `Err(e)`, the Once is RESET to INCOMPLETE
+    ///  - If `f` returns `Result.Err(e)`, the Once is RESET to INCOMPLETE
     ///  and the next caller may retry — the Err is propagated to
     ///  this caller.
     ///  - If the Once is already COMPLETE on entry, returns
-    ///  `Ok(false)` immediately (no retry, no `f` execution).
+    ///  `Result.Ok(false)` immediately (no retry, no `f` execution).
     ///
 
-    /// Returns `Ok(true)` when this caller's `f` ran AND succeeded;
-    /// `Ok(false)` when another thread already completed init;
-    /// `Err(e)` when this caller's `f` ran AND failed.
+    /// Returns `Result.Ok(true)` when this caller's `f` ran AND succeeded;
+    /// `Result.Ok(false)` when another thread already completed init;
+    /// `Result.Err(e)` when this caller's `f` ran AND failed.
     ///
 
     /// This is the foundation primitive for `OnceLock.get_or_try_init`
@@ -228,23 +228,23 @@ implement Once {
     public fn try_call_once<E, F: fn() -> Result<(), E>>(&self, f: F) -> Result<Bool, E> {
         // Fast path: already complete
         if self.is_completed() {
-            return Ok(false);
+            return Result.Ok(false);
         }
 
         loop {
             match self.state.compare_exchange(INCOMPLETE, RUNNING, MemoryOrdering.AcqRel, MemoryOrdering.Acquire) {
-                Ok(_) => {
+                Result.Ok(_) => {
                     // We won the race - use a guard to handle panics
                     let mut guard = OnceGuard { state: &self.state, completed: false };
 
                     match f() {
-                        Ok(()) => {
+                        Result.Ok(()) => {
                             // Init succeeded — publish COMPLETE
                             self.state.store(COMPLETE, MemoryOrdering.Release);
                             guard.completed = true;
-                            return Ok(true);
+                            return Result.Ok(true);
                         }
-                        Err(e) => {
+                        Result.Err(e) => {
                             // Init failed — reset to INCOMPLETE so a future
                             // caller can retry. Disarm the guard explicitly
                             // (completed=true) so its Drop doesn't poison
@@ -252,18 +252,18 @@ implement Once {
                             // the RUNNING claim, not panicking through it.
                             self.state.store(INCOMPLETE, MemoryOrdering.Release);
                             guard.completed = true;
-                            return Err(e);
+                            return Result.Err(e);
                         }
                     }
                 }
-                Err(COMPLETE) => {
+                Result.Err(COMPLETE) => {
                     // Another thread completed it
-                    return Ok(false);
+                    return Result.Ok(false);
                 }
-                Err(POISONED) => {
+                Result.Err(POISONED) => {
                     panic("Once.try_call_once called after panic — use call_once_force to recover");
                 }
-                Err(RUNNING) => {
+                Result.Err(RUNNING) => {
                     // Another thread is initialising. Spin-wait until it
                     // either completes or surrenders the RUNNING claim.
                     while self.state.load(MemoryOrdering.Acquire) == RUNNING {
@@ -272,7 +272,7 @@ implement Once {
                     // Then retry the CAS (will hit COMPLETE on success
                     // or INCOMPLETE if the winning thread surrendered).
                 }
-                Err(_) => {
+                Result.Err(_) => {
                     compiler_fence(MemoryOrdering.SeqCst);
                 }
             }
@@ -298,7 +298,7 @@ implement Once {
 
             // Accept any state except RUNNING
             match self.state.compare_exchange(state, RUNNING, MemoryOrdering.AcqRel, MemoryOrdering.Acquire) {
-                Ok(_) => {
+                Result.Ok(_) => {
                     // Use guard for panic safety
                     let mut guard = OnceGuard { state: &self.state, completed: false };
 
@@ -308,17 +308,17 @@ implement Once {
                     guard.completed = true;
                     return;
                 }
-                Err(COMPLETE) => {
+                Result.Err(COMPLETE) => {
                     return;
                 }
-                Err(RUNNING) => {
+                Result.Err(RUNNING) => {
                     // Wait for current attempt to finish
                     while self.state.load(MemoryOrdering.Acquire) == RUNNING {
                         compiler_fence(MemoryOrdering.SeqCst);
                     }
                     // Then retry
                 }
-                Err(_) => {
+                Result.Err(_) => {
                     // Retry
                     compiler_fence(MemoryOrdering.SeqCst);
                 }
@@ -440,7 +440,7 @@ implement<T> OnceLock<T> {
     // Set value if not already set.
     //
 
-    // Returns Ok(()) on success, Err(value) if already initialised
+    // Returns Result.Ok(()) on success, Result.Err(value) if already initialised
     // OR if another thread won the initialisation race. Rejected
     // value is returned unchanged so the caller can decide what to
     // do with it.
@@ -455,12 +455,12 @@ implement<T> OnceLock<T> {
     // strictly.
     public fn set(&self, value: T) -> Result<(), T> {
         match self.try_get_or_set(value) {
-            Ok(_) => Ok(()),
-            Err(rejected) => Err(rejected),
+            Result.Ok(_) => Result.Ok(()),
+            Result.Err(rejected) => Result.Err(rejected),
         }
     }
 
-    // Take value, leaving None.
+    // Take value, leaving Maybe.None.
     public fn take(&mut self) -> Maybe<T> {
         if self.once.is_completed() {
             self.value.take()
@@ -489,7 +489,7 @@ implement<T> OnceLock<T> {
     public fn get_or_try_init<E, F: fn() -> Result<T, E>>(&self, f: F) -> Result<&T, E> {
         // Fast path: already initialised
         if self.once.is_completed() {
-            return Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
+            return Result.Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
         }
 
         // Slow path: race for INCOMPLETE → RUNNING transition.
@@ -498,7 +498,7 @@ implement<T> OnceLock<T> {
         // Drives the state CAS directly (parallel to try_get_or_set)
         // instead of going through try_call_once + closure. Reasons:
         //  1. Tier-0 closure-context codegen for `unsafe { *ptr =
-        //  Some(v) }` doesn't currently round-trip the captured
+        //  Maybe.Some(v) }` doesn't currently round-trip the captured
         //  `&self.value` correctly when invoked indirectly through
         //  `f()` (separate codegen issue tracked at task #40
         //  follow-up). The direct-CAS pattern bypasses that
@@ -522,27 +522,27 @@ implement<T> OnceLock<T> {
                 // surrender RUNNING → INCOMPLETE on failure (so the
                 // next caller can retry).
                 match f() {
-                    Ok(v) => {
+                    Result.Ok(v) => {
                         unsafe {
                             let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
                             *ptr = Maybe.Some(v);
                         }
                         self.once.state.store(COMPLETE, MemoryOrdering.Release);
-                        return Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
+                        return Result.Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
                     }
-                    Err(e) => {
+                    Result.Err(e) => {
                         self.once.state.store(INCOMPLETE, MemoryOrdering.Release);
-                        return Err(e);
+                        return Result.Err(e);
                     }
                 }
             }
             // CAS lost — observe the actual state and dispatch.
             let observed: Int = match cas {
-                Err(actual) => actual,
-                Ok(_) => unsafe { unreachable_unchecked() },
+                Result.Err(actual) => actual,
+                Result.Ok(_) => unsafe { unreachable_unchecked() },
             };
             if observed == COMPLETE {
-                return Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
+                return Result.Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
             }
             if observed == POISONED {
                 panic("OnceLock.get_or_try_init on poisoned Once");
@@ -563,8 +563,8 @@ implement<T> OnceLock<T> {
     /// across every contention path.
     ///
 
-    /// Returns `Ok(&T)` (the just-stored value) on successful set,
-    /// or `Err(value)` if either the OnceLock was already
+    /// Returns `Result.Ok(&T)` (the just-stored value) on successful set,
+    /// or `Result.Err(value)` if either the OnceLock was already
     /// initialised on entry OR another thread won the
     /// initialisation race. In both Err paths the original
     /// `value` is returned unchanged so the caller can decide
@@ -585,7 +585,7 @@ implement<T> OnceLock<T> {
     public fn try_get_or_set(&self, value: T) -> Result<&T, T> {
         // Fast path: already initialised
         if self.once.is_completed() {
-            return Err(value);
+            return Result.Err(value);
         }
 
         // Slow path: race for the INCOMPLETE → RUNNING transition.
@@ -596,8 +596,8 @@ implement<T> OnceLock<T> {
         //
 
         // Refactor: outer loop with a Bool wait flag instead of
-        // nested `Err(POISONED)` / `Err(RUNNING)` / `Err(_)` arms.
-        // Pattern matching `Err(<const>)` against Result's Int
+        // nested `Result.Err(POISONED)` / `Result.Err(RUNNING)` / `Result.Err(_)` arms.
+        // Pattern matching `Result.Err(<const>)` against Result's Int
         // payload is brittle in the current codegen — see task
         // #40 — so we destructure into the actual i64 first then
         // do plain integer comparisons.
@@ -615,14 +615,14 @@ implement<T> OnceLock<T> {
                     *ptr = Maybe.Some(value);
                 }
                 self.once.state.store(COMPLETE, MemoryOrdering.Release);
-                return Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
+                return Result.Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
             }
             let observed: Int = match cas {
-                Err(actual) => actual,
-                Ok(_) => unsafe { unreachable_unchecked() },
+                Result.Err(actual) => actual,
+                Result.Ok(_) => unsafe { unreachable_unchecked() },
             };
             if observed == COMPLETE {
-                return Err(value);
+                return Result.Err(value);
             }
             if observed == POISONED {
                 panic("OnceLock.try_get_or_set on poisoned Once — use try_get_or_set_force to recover");

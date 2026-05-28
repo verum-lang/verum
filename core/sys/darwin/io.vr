@@ -239,7 +239,7 @@ implement KqueueDriver {
     public fn new() -> Result<KqueueDriver, DarwinIoDriverError> {
         let kq_fd = unsafe { raw_kqueue() };
         if kq_fd < 0 {
-            return Err(DarwinIoDriverError.from_errno(errno()));
+            return Result.Err(DarwinIoDriverError.from_errno(errno()));
         }
 
         let mut driver = KqueueDriver {
@@ -277,13 +277,13 @@ implement KqueueDriver {
             driver.wake_registered = true;
         }
 
-        Ok(driver)
+        Result.Ok(driver)
     }
 
     /// Close the kqueue driver.
     public fn close(&mut self) -> Result<(), DarwinIoDriverError> {
         if !self.open {
-            return Ok(());
+            return Result.Ok(());
         }
 
         let result = unsafe { raw_close(self.kq) };
@@ -291,9 +291,9 @@ implement KqueueDriver {
         self.kq = -1;
 
         if result < 0 {
-            Err(DarwinIoDriverError.from_errno(errno()))
+            Result.Err(DarwinIoDriverError.from_errno(errno()))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -417,7 +417,7 @@ implement KqueueDriver {
         token: DarwinIoToken,
     ) -> Result<(), DarwinIoDriverError> {
         if !self.open {
-            return Err(Closed);
+            return Result.Err(Closed);
         }
 
         if self.num_changes >= MAX_EVENTS {
@@ -435,13 +435,13 @@ implement KqueueDriver {
         };
         self.num_changes += 1;
 
-        Ok(())
+        Result.Ok(())
     }
 
     /// Flush pending changes to kqueue.
     fn flush_changes(&mut self) -> Result<(), DarwinIoDriverError> {
         if self.num_changes == 0 {
-            return Ok(());
+            return Result.Ok(());
         }
 
         let no_timeout = Timespec { tv_sec: 0, tv_nsec: 0 };
@@ -459,9 +459,9 @@ implement KqueueDriver {
         self.num_changes = 0;
 
         if result < 0 {
-            Err(DarwinIoDriverError.from_errno(errno()))
+            Result.Err(DarwinIoDriverError.from_errno(errno()))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -480,7 +480,7 @@ implement KqueueDriver {
     /// Number of events ready
     public fn poll(&mut self, timeout_ms: Int) -> Result<Int, DarwinIoDriverError> {
         if !self.open {
-            return Err(Closed);
+            return Result.Err(Closed);
         }
 
         let timeout = if timeout_ms < 0 {
@@ -517,12 +517,12 @@ implement KqueueDriver {
         if result < 0 {
             let err = errno();
             if err == 4 {  // EINTR
-                Ok(0)
+                Result.Ok(0)
             } else {
-                Err(DarwinIoDriverError.from_errno(err))
+                Result.Err(DarwinIoDriverError.from_errno(err))
             }
         } else {
-            Ok(result)
+            Result.Ok(result)
         }
     }
 
@@ -538,7 +538,7 @@ implement KqueueDriver {
     /// where n is the return value.
     public fn get_event(&self, index: Int) -> Maybe<DarwinIoCqe> {
         if index < 0 || index >= MAX_EVENTS {
-            return None;
+            return Maybe.None;
         }
 
         let ev = &self.events[index];
@@ -550,7 +550,7 @@ implement KqueueDriver {
             ev.data as Int
         };
 
-        Some(DarwinIoCqe {
+        Maybe.Some(DarwinIoCqe {
             token: DarwinIoToken(ev.udata as UInt64),
             result: result,
             flags: ev.fflags,
@@ -624,7 +624,7 @@ public type KqueueEventIter is {
 implement KqueueEventIter {
     public fn next(&mut self) -> Maybe<DarwinIoCqe> {
         if self.index >= self.count {
-            None
+            Maybe.None
         } else {
             let event = self.driver.get_event(self.index);
             self.index += 1;
@@ -658,7 +658,7 @@ implement DarwinIoDriver {
 /// On macOS, this always returns a kqueue-based driver.
 public fn create_io_driver() -> Result<DarwinIoDriver, DarwinIoDriverError> {
     let kqueue = KqueueDriver.new()?;
-    Ok(DarwinIoDriver { kqueue: kqueue })
+    Result.Ok(DarwinIoDriver { kqueue: kqueue })
 }
 
 /// Check if kqueue is available.
@@ -764,7 +764,7 @@ implement IOEngine for KqueueDriver {
                     // kqueue doesn't have cancel — remove any registered events
                     let _ = self.remove_read(target as Int);
                     let _ = self.remove_write(target as Int);
-                    Ok(())
+                    Result.Ok(())
                 }
                 CompletionOp.Timeout { ts } => {
                     // Use kqueue timer for timeout
@@ -776,7 +776,7 @@ implement IOEngine for KqueueDriver {
                     // Remove any registered events first
                     let _ = self.remove_read(fd.as_raw() as Int);
                     let _ = self.remove_write(fd.as_raw() as Int);
-                    Ok(())
+                    Result.Ok(())
                 }
                 CompletionOp.ReadV { fd, .. } => {
                     self.add_read_oneshot(fd.as_raw() as Int, DarwinIoToken(user_data))
@@ -791,19 +791,19 @@ implement IOEngine for KqueueDriver {
             };
 
             match result {
-                Ok(()) => submitted += 1,
-                Err(_) => {}  // Continue with other ops
+                Result.Ok(()) => submitted += 1,
+                Result.Err(_) => {}  // Continue with other ops
             }
         }
 
         // Flush changes to kqueue
         match self.flush_changes() {
-            Ok(()) => Ok(submitted),
-            Err(e) => {
+            Result.Ok(()) => Result.Ok(submitted),
+            Result.Err(e) => {
                 if submitted > 0 {
-                    Ok(submitted)
+                    Result.Ok(submitted)
                 } else {
-                    Err(convert_error(e))
+                    Result.Err(convert_error(e))
                 }
             }
         }
@@ -816,38 +816,38 @@ implement IOEngine for KqueueDriver {
         timeout: Maybe<Duration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         let timeout_ms = match timeout {
-            Some(d) => d.as_millis() as Int,
-            None => -1,  // Infinite wait
+            Maybe.Some(d) => d.as_millis() as Int,
+            Maybe.None => -1,  // Infinite wait
         };
 
         // If min_complete is 0, use poll (no wait)
         let actual_timeout = if min_complete == 0 { 0 } else { timeout_ms };
 
         match self.poll(actual_timeout) {
-            Ok(count) => {
+            Result.Ok(count) => {
                 // Convert kqueue events to CompletionResults
                 let result_count = count.min(results.len() as Int);
                 for i in 0..result_count {
                     match self.get_event(i) {
-                        Some(cqe) => {
+                        Maybe.Some(cqe) => {
                             results[i] = CompletionResult {
                                 user_data: cqe.token.0,
                                 result: cqe.result as Int32,
                                 flags: cqe.flags,
                             };
                         }
-                        None => break,
+                        Maybe.None => break,
                     }
                 }
-                Ok(result_count)
+                Result.Ok(result_count)
             }
-            Err(e) => Err(convert_error(e)),
+            Result.Err(e) => Result.Err(convert_error(e)),
         }
     }
 
     fn wake(&self) -> Result<(), EngineIoError> {
         if !self.wake_registered {
-            return Err(EngineIoError.NotSupported);
+            return Result.Err(EngineIoError.NotSupported);
         }
 
         // Trigger the EVFILT_USER event to wake a blocked kevent() call.
@@ -874,9 +874,9 @@ implement IOEngine for KqueueDriver {
         };
 
         if result < 0 {
-            Err(EngineIoError.Other("kqueue wake failed"))
+            Result.Err(EngineIoError.Other("kqueue wake failed"))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 

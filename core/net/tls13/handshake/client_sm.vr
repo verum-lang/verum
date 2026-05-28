@@ -192,7 +192,7 @@ public type StepOutput is {
     /// Bytes of outbound handshake messages to transmit. Empty if no
     /// response is required at this step.
     outbound_handshake: List<Byte>,
-    /// If non-None, the handshake is done — application traffic can flow.
+    /// If non-Maybe.None, the handshake is done — application traffic can flow.
     connected:          Maybe<Connected>,
 };
 
@@ -218,9 +218,9 @@ implement ClientSm {
                 let next = ClientSm.WaitServerHelloSm(WaitServerHello {
                     config: config, transcript: t, saw_hrr: false, dhe_privs: dhe_privs,
                 });
-                Ok((next, wire))
+                Result.Ok((next, wire))
             },
-            _ => Err(TlsError.UnexpectedMessage),
+            _ => Result.Err(TlsError.UnexpectedMessage),
         }
     }
 
@@ -239,7 +239,7 @@ implement ClientSm {
             ClientSm.WaitCertSm(inner) => on_certificate(inner, msg, wire),
             ClientSm.WaitCertVerifySm(inner) => on_certificate_verify(inner, msg, wire),
             ClientSm.WaitFinishedSm(inner) => on_finished(inner, msg, wire),
-            _ => Err(TlsError.UnexpectedMessage),
+            _ => Result.Err(TlsError.UnexpectedMessage),
         }
     }
 
@@ -287,7 +287,7 @@ implement ClientSm {
                             rm_bytes,
                             now,
                         );
-                        Ok(PostHandshakeOutcome.NewSession(session))
+                        Result.Ok(PostHandshakeOutcome.NewSession(session))
                     },
                     HandshakeMessage.CertificateRequestMsg(cr) => {
                         // §4.6.2 — the caller MUST have advertised
@@ -298,12 +298,12 @@ implement ClientSm {
                         // lives in the application layer (it needs a
                         // client-certificate identity this library
                         // doesn't otherwise know about).
-                        Ok(PostHandshakeOutcome.CertificateRequestReceived(cr))
+                        Result.Ok(PostHandshakeOutcome.CertificateRequestReceived(cr))
                     },
-                    _ => Ok(PostHandshakeOutcome.Ignored),
+                    _ => Result.Ok(PostHandshakeOutcome.Ignored),
                 }
             },
-            _ => Err(TlsError.UnexpectedMessage),
+            _ => Result.Err(TlsError.UnexpectedMessage),
         }
     }
 }
@@ -330,7 +330,7 @@ fn on_server_hello(
         HandshakeMessage.HelloRetryRequestMsg(sh) => {
             if ws.saw_hrr {
                 // Only one HRR per handshake (RFC 8446 §4.1.4).
-                return Err(TlsError.UnexpectedMessage);
+                return Result.Err(TlsError.UnexpectedMessage);
             }
             // Reseed transcript per §4.4.1: message_hash(CH1).
             ws.transcript.reseed_for_hrr();
@@ -346,9 +346,9 @@ fn on_server_hello(
                 config: ws.config, transcript: ws.transcript,
                 saw_hrr: true, dhe_privs: ws.dhe_privs,
             });
-            Ok((next, StepOutput {
+            Result.Ok((next, StepOutput {
                 outbound_handshake: out_wire,
-                connected: None,
+                connected: Maybe.None,
             }))
         },
 
@@ -359,12 +359,12 @@ fn on_server_hello(
             // Pick the negotiated version from supported_versions ext.
             let negotiated_ver = select_server_version(&sh.extensions)?;
             if !negotiated_ver.eq(&TLS_1_3) {
-                return Err(TlsError.ProtocolVersion);
+                return Result.Err(TlsError.ProtocolVersion);
             }
 
             // Cipher suite
             let suite = sh.cipher_suite.clone();
-            if !suite.is_supported() { return Err(TlsError.HandshakeFailure); }
+            if !suite.is_supported() { return Result.Err(TlsError.HandshakeFailure); }
             let hash = suite.hash_kind();
 
             // key_share from server — match against our keypair.
@@ -402,10 +402,10 @@ fn on_server_hello(
                 client_hs_traffic: client_hs,
                 server_hs_traffic: server_hs,
             });
-            Ok((next, StepOutput { outbound_handshake: [], connected: None }))
+            Result.Ok((next, StepOutput { outbound_handshake: [], connected: Maybe.None }))
         },
 
-        _ => Err(TlsError.UnexpectedMessage),
+        _ => Result.Err(TlsError.UnexpectedMessage),
     }
 }
 
@@ -420,10 +420,10 @@ fn on_encrypted_extensions(
             // Validate: ALPN selection if we offered ALPN (§4.2.7).
             // We don't enforce here — caller inspects ee.extensions.
             let _ = ee;
-            Ok((ClientSm.WaitCertOrCrSm(WaitCertOrCr { inner: we }),
-                StepOutput { outbound_handshake: [], connected: None }))
+            Result.Ok((ClientSm.WaitCertOrCrSm(WaitCertOrCr { inner: we }),
+                StepOutput { outbound_handshake: [], connected: Maybe.None }))
         },
-        _ => Err(TlsError.UnexpectedMessage),
+        _ => Result.Err(TlsError.UnexpectedMessage),
     }
 }
 
@@ -436,15 +436,15 @@ fn on_cert_or_cr(
         HandshakeMessage.CertificateRequestMsg(cr) => {
             let mut inside = inner.inner;
             inside.transcript.append(wire);
-            Ok((ClientSm.WaitCertSm(WaitCert { inner: inside, cert_request: Some(cr) }),
-                StepOutput { outbound_handshake: [], connected: None }))
+            Result.Ok((ClientSm.WaitCertSm(WaitCert { inner: inside, cert_request: Maybe.Some(cr) }),
+                StepOutput { outbound_handshake: [], connected: Maybe.None }))
         },
         HandshakeMessage.CertificateMsg(cm) => {
             let mut inside = inner.inner;
             inside.transcript.append(wire);
-            on_certificate_inner(inside, cm, None)
+            on_certificate_inner(inside, cm, Maybe.None)
         },
-        _ => Err(TlsError.UnexpectedMessage),
+        _ => Result.Err(TlsError.UnexpectedMessage),
     }
 }
 
@@ -459,7 +459,7 @@ fn on_certificate(
             inside.transcript.append(wire);
             on_certificate_inner(inside, cm, inner.cert_request)
         },
-        _ => Err(TlsError.UnexpectedMessage),
+        _ => Result.Err(TlsError.UnexpectedMessage),
     }
 }
 
@@ -469,7 +469,7 @@ fn on_certificate_inner(
     cert_request: Maybe<CertificateRequest>,
 ) -> Result<(ClientSm, StepOutput), TlsError> {
     if cm.certificate_list.len() == 0 {
-        return Err(TlsError.BadCertificate);
+        return Result.Err(TlsError.BadCertificate);
     }
     let ee_entry = &cm.certificate_list[0];
     let peer_cert = parse_certificate(ee_entry.cert_data.as_slice())
@@ -482,12 +482,12 @@ fn on_certificate_inner(
         i = i + 1;
     }
 
-    Ok((ClientSm.WaitCertVerifySm(WaitCertVerify {
+    Result.Ok((ClientSm.WaitCertVerifySm(WaitCertVerify {
         inner: inside,
         cert_request: cert_request,
         peer_certificate: peer_cert,
         peer_chain_der: chain_der,
-    }), StepOutput { outbound_handshake: [], connected: None }))
+    }), StepOutput { outbound_handshake: [], connected: Maybe.None }))
 }
 
 fn on_certificate_verify(
@@ -515,20 +515,20 @@ fn on_certificate_verify(
                 let _ = validate_chain(
                     &parsed_chain,
                     &inner.inner.config.trust,
-                    Some(&inner.inner.config.server_name),
+                    Maybe.Some(&inner.inner.config.server_name),
                     current_unix_time(),
                 ).map_err(map_chain_error)?;
             }
 
             let mut inside = inner.inner;
             inside.transcript.append(wire);
-            Ok((ClientSm.WaitFinishedSm(WaitFinished {
+            Result.Ok((ClientSm.WaitFinishedSm(WaitFinished {
                 inner: inside,
                 cert_request: inner.cert_request,
                 peer_certificate: inner.peer_certificate,
-            }), StepOutput { outbound_handshake: [], connected: None }))
+            }), StepOutput { outbound_handshake: [], connected: Maybe.None }))
         },
-        _ => Err(TlsError.UnexpectedMessage),
+        _ => Result.Err(TlsError.UnexpectedMessage),
     }
 }
 
@@ -546,7 +546,7 @@ fn on_finished(
             let th = inner.inner.transcript.snapshot();
             let expected = hmac_for_hash(inner.inner.hash, srv_fin_key.as_slice(), th.as_slice());
             if !constant_time_bytes_eq(expected.as_slice(), fin.verify_data.as_slice()) {
-                return Err(TlsError.DecryptError);
+                return Result.Err(TlsError.DecryptError);
             }
 
             let mut transcript = inner.inner.transcript;
@@ -592,10 +592,10 @@ fn on_finished(
                 peer_certificate:  inner.peer_certificate,
             };
 
-            Ok((ClientSm.ConnectedSm(connected.clone()),
-                StepOutput { outbound_handshake: out_wire, connected: Some(connected) }))
+            Result.Ok((ClientSm.ConnectedSm(connected.clone()),
+                StepOutput { outbound_handshake: out_wire, connected: Maybe.Some(connected) }))
         },
-        _ => Err(TlsError.UnexpectedMessage),
+        _ => Result.Err(TlsError.UnexpectedMessage),
     }
 }
 
@@ -652,7 +652,7 @@ fn rebuild_client_hello_for_hrr(
     // HRR selected_group, trims key_shares accordingly, and echoes the
     // server's cookie if any.
     let (ch, _, _) = build_client_hello(config);
-    Ok(ch)
+    Result.Ok(ch)
 }
 
 fn check_downgrade_sentinel(random: &[Byte; 32]) -> Result<(), TlsError> {
@@ -666,43 +666,43 @@ fn check_downgrade_sentinel(random: &[Byte; 32]) -> Result<(), TlsError> {
         i = i + 1;
     }
     if is_tls12_sentinel || is_tls11_sentinel {
-        return Err(TlsError.ProtocolVersion);
+        return Result.Err(TlsError.ProtocolVersion);
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn select_server_version(exts: &List<Extension>) -> Result<ProtocolVersion, TlsError> {
     let mut i: Int = 0;
     while i < exts.len() {
         match &exts[i] {
-            Extension.SupportedVersionsServer { selected } => return Ok(selected.clone()),
+            Extension.SupportedVersionsServer { selected } => return Result.Ok(selected.clone()),
             _ => {},
         }
         i = i + 1;
     }
-    Err(TlsError.MissingExtension)
+    Result.Err(TlsError.MissingExtension)
 }
 
 fn select_server_key_share(exts: &List<Extension>) -> Result<KeyShareEntry, TlsError> {
     let mut i: Int = 0;
     while i < exts.len() {
         match &exts[i] {
-            Extension.KeyShareServer { share } => return Ok(share.clone()),
+            Extension.KeyShareServer { share } => return Result.Ok(share.clone()),
             _ => {},
         }
         i = i + 1;
     }
-    Err(TlsError.MissingExtension)
+    Result.Err(TlsError.MissingExtension)
 }
 
 fn find_dhe_priv(privs: &List<(NamedGroup, List<Byte>)>, g: &NamedGroup) -> Result<List<Byte>, TlsError> {
     let mut i: Int = 0;
     while i < privs.len() {
         let (gk, v) = &privs[i];
-        if gk.to_u16() == g.to_u16() { return Ok(v.clone()); }
+        if gk.to_u16() == g.to_u16() { return Result.Ok(v.clone()); }
         i = i + 1;
     }
-    Err(TlsError.IllegalParameter)
+    Result.Err(TlsError.IllegalParameter)
 }
 
 /// Compute the (EC)DHE shared secret for the negotiated group.
@@ -725,7 +725,7 @@ fn compute_dhe(
     match group {
         NamedGroup.X25519 => {
             if priv_bytes.len() != 32 || peer_pub_bytes.len() != 32 {
-                return Err(TlsError.IllegalParameter);
+                return Result.Err(TlsError.IllegalParameter);
             }
             let mut sk_raw: [Byte; 32] = [0_u8; 32];
             let mut pk_raw: [Byte; 32] = [0_u8; 32];
@@ -737,12 +737,12 @@ fn compute_dhe(
             }
             let sk = X25519.secret_key_from_bytes(&sk_raw);
             match X25519.diffie_hellman(&sk, &pk_raw) {
-                Ok(shared) => {
+                Result.Ok(shared) => {
                     let mut out: List<Byte> = List.with_capacity(32);
                     out.extend_from_slice(&shared[..]);
-                    Ok(out)
+                    Result.Ok(out)
                 },
-                Err(_) => Err(TlsError.IllegalParameter),
+                Result.Err(_) => Result.Err(TlsError.IllegalParameter),
             }
         },
 
@@ -750,7 +750,7 @@ fn compute_dhe(
             // Private half is a 32-byte scalar; public half is an
             // uncompressed 65-byte point (0x04 || X || Y).
             if priv_bytes.len() != 32 {
-                return Err(TlsError.IllegalParameter);
+                return Result.Err(TlsError.IllegalParameter);
             }
             let mut sk_raw: [Byte; 32] = [0_u8; 32];
             let mut i: Int = 0;
@@ -760,20 +760,20 @@ fn compute_dhe(
             let pk = P256.public_key_from_bytes(peer_pub_bytes.as_slice())
                 .map_err(|_| TlsError.IllegalParameter)?;
             match P256.ecdh(&sk, &pk) {
-                Ok(shared) => {
+                Result.Ok(shared) => {
                     // P256SharedSecret is a [Byte; 32] — same shape as X25519.
                     let mut out: List<Byte> = List.with_capacity(32);
                     out.extend_from_slice(shared.as_slice());
-                    Ok(out)
+                    Result.Ok(out)
                 },
-                Err(_) => Err(TlsError.IllegalParameter),
+                Result.Err(_) => Result.Err(TlsError.IllegalParameter),
             }
         },
 
         // P-384 / P-521 / X448 — not in v1 (spec §1.1). These groups
         // should never be selected if Tls13ClientConfig.groups was built
         // via default_offer_list.
-        _ => Err(TlsError.IllegalParameter),
+        _ => Result.Err(TlsError.IllegalParameter),
     }
 }
 
@@ -802,7 +802,7 @@ fn verify_certificate_signature(
     // client's signature_algorithms extension AND valid for
     // CertificateVerify (no SHA-1, no PKCS#1 v1.5 in TLS 1.3).
     if !cv.algorithm.is_valid_for_certificate_verify() {
-        return Err(TlsError.BadCertificate);
+        return Result.Err(TlsError.BadCertificate);
     }
 
     let pk = &cert.tbs.spki.public_key;
@@ -810,17 +810,17 @@ fn verify_certificate_signature(
         // EdDSA — raw 64-byte signature, message is `signed`.
         SignatureScheme.Ed25519Scheme => match pk {
             SubjectPublicKey.Ed25519(ed) => {
-                if cv.signature.len() != 64 { return Err(TlsError.DecryptError); }
+                if cv.signature.len() != 64 { return Result.Err(TlsError.DecryptError); }
                 let mut sig: Ed25519Signature = [0_u8; 64];
                 let mut i: Int = 0;
                 while i < 64 { sig[i] = cv.signature[i]; i = i + 1; }
                 let pk_arr: Ed25519Pk = ed.bytes;
                 match Ed25519.verify(&pk_arr, signed, &sig) {
-                    Ok(()) => Ok(()),
-                    Err(_) => Err(TlsError.DecryptError),
+                    Result.Ok(()) => Result.Ok(()),
+                    Result.Err(_) => Result.Err(TlsError.DecryptError),
                 }
             },
-            _ => Err(TlsError.BadCertificate),
+            _ => Result.Err(TlsError.BadCertificate),
         },
 
         // ECDSA P-256 / SHA-256 — DER-encoded SEQUENCE of two INTEGERs.
@@ -832,11 +832,11 @@ fn verify_certificate_signature(
                     .map_err(|_| TlsError.DecryptError)?;
                 let digest = Sha256.digest(signed);
                 match P256.verify_prehashed(&pk_ec, &digest, &sig) {
-                    Ok(()) => Ok(()),
-                    Err(_) => Err(TlsError.DecryptError),
+                    Result.Ok(()) => Result.Ok(()),
+                    Result.Err(_) => Result.Err(TlsError.DecryptError),
                 }
             },
-            _ => Err(TlsError.BadCertificate),
+            _ => Result.Err(TlsError.BadCertificate),
         },
 
         // RSA-PSS (RSAE-keyed) — most common TLS 1.3 signature
@@ -853,10 +853,10 @@ fn verify_certificate_signature(
 
         // ECDSA P-384 / SHA-384 — accepted schema but the P-384
         // primitive is not in v1 stdlib; reject cleanly.
-        SignatureScheme.EcdsaSecp384r1Sha384 => Err(TlsError.UnsupportedCertificate),
+        SignatureScheme.EcdsaSecp384r1Sha384 => Result.Err(TlsError.UnsupportedCertificate),
 
         // Any other scheme (shouldn't appear after is_valid_for_certificate_verify).
-        _ => Err(TlsError.UnsupportedCertificate),
+        _ => Result.Err(TlsError.UnsupportedCertificate),
     }
 }
 
@@ -876,11 +876,11 @@ fn verify_rsa_pss_cv(
                 RsaHash.Sha512_ => Sha512.digest(signed).to_list(),
             };
             match verify_pss_prehashed(&vk, hash, digest.as_slice(), cv.signature.as_slice()) {
-                Ok(()) => Ok(()),
-                Err(_) => Err(TlsError.DecryptError),
+                Result.Ok(()) => Result.Ok(()),
+                Result.Err(_) => Result.Err(TlsError.DecryptError),
             }
         },
-        _ => Err(TlsError.BadCertificate),
+        _ => Result.Err(TlsError.BadCertificate),
     }
 }
 
@@ -893,7 +893,7 @@ fn parse_chain(der: &List<List<Byte>>) -> Result<List<Certificate>, TlsError> {
         out.push(c);
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn map_chain_error(e: ChainError) -> TlsError {

@@ -2,7 +2,7 @@
 // core/intrinsics/type_info.vr - Type Information Intrinsics
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (compiler-provided)
+// Dependencies: Maybe.None (compiler-provided)
 //
 
 // # PREFERRED: Type Properties

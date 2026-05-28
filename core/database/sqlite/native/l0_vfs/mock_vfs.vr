@@ -167,7 +167,7 @@ fn blob_put(vfs: &mut MockVfs, blob: MockBlob) {
 
 public fn mock_open(vfs: &mut MockVfs, name: &Text, flags: OpenFlags) -> Result<MockFile, VfsError> {
     if !flags.read_only && !flags.read_write {
-        return Err(VfsError {
+        return Result.Err(VfsError {
             kind: InvalidArgument,
             message: "mock_open: neither read_only nor read_write set",
         });
@@ -178,9 +178,9 @@ public fn mock_open(vfs: &mut MockVfs, name: &Text, flags: OpenFlags) -> Result<
     if flags.create {
         let _ = blob_get_or_create(vfs, name);
     } else if !vfs.blobs.contains_key(name.clone()) {
-        return Err(VfsError { kind: NotFound, message: "no such blob" });
+        return Result.Err(VfsError { kind: NotFound, message: "no such blob" });
     }
-    Ok(MockFile {
+    Result.Ok(MockFile {
         name: name.clone(),
         lock_state: Unlocked,
         closed: false,
@@ -194,25 +194,25 @@ public fn mock_read(
     offset: Int,
 ) -> Result<(), VfsError> {
     if file.closed {
-        return Err(VfsError { kind: Closed, message: "read on closed file" });
+        return Result.Err(VfsError { kind: Closed, message: "read on closed file" });
     }
     if offset < 0 {
-        return Err(VfsError { kind: InvalidArgument, message: "negative offset" });
+        return Result.Err(VfsError { kind: InvalidArgument, message: "negative offset" });
     }
     if !vfs.blobs.contains_key(file.name.clone()) {
-        return Err(VfsError { kind: NotFound, message: "blob vanished" });
+        return Result.Err(VfsError { kind: NotFound, message: "blob vanished" });
     }
     let blob = vfs.blobs.get(file.name.clone());
     let want = buf.len();
     if offset + want > blob.bytes.len() {
-        return Err(VfsError { kind: ShortRead, message: "read past EOF" });
+        return Result.Err(VfsError { kind: ShortRead, message: "read past EOF" });
     }
     let mut i: Int = 0;
     while i < want {
         buf[i] = blob.bytes[offset + i];
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 public fn mock_write(
@@ -222,17 +222,17 @@ public fn mock_write(
     offset: Int,
 ) -> Result<(), VfsError> {
     if file.closed {
-        return Err(VfsError { kind: Closed, message: "write on closed file" });
+        return Result.Err(VfsError { kind: Closed, message: "write on closed file" });
     }
     if offset < 0 {
-        return Err(VfsError { kind: InvalidArgument, message: "negative offset" });
+        return Result.Err(VfsError { kind: InvalidArgument, message: "negative offset" });
     }
 
     // Disk-full injection — check projected size vs cap.
     if vfs.faults.disk_full_after_bytes >= 0 {
         let after = vfs.faults.disk_total_bytes + src.len();
         if after > vfs.faults.disk_full_after_bytes {
-            return Err(VfsError { kind: DiskFull, message: "mock disk cap exceeded" });
+            return Result.Err(VfsError { kind: DiskFull, message: "mock disk cap exceeded" });
         }
     }
 
@@ -266,7 +266,7 @@ public fn mock_write(
     vfs.faults.disk_total_bytes = vfs.faults.disk_total_bytes + effective_len;
 
     blob_put(vfs, blob);
-    Ok(())
+    Result.Ok(())
 }
 
 public fn mock_sync(
@@ -275,7 +275,7 @@ public fn mock_sync(
     _flags: SyncFlags,
 ) -> Result<(), VfsError> {
     if file.closed {
-        return Err(VfsError { kind: Closed, message: "sync on closed file" });
+        return Result.Err(VfsError { kind: Closed, message: "sync on closed file" });
     }
     vfs.faults.sync_counter = vfs.faults.sync_counter + 1;
     if vfs.faults.crash_after_sync_count >= 0
@@ -283,24 +283,24 @@ public fn mock_sync(
     {
         // Fire exactly once — disarm before raising.
         vfs.faults.crash_after_sync_count = -1;
-        return Err(VfsError { kind: IoError, message: "mock crash after fsync" });
+        return Result.Err(VfsError { kind: IoError, message: "mock crash after fsync" });
     }
-    Ok(())
+    Result.Ok(())
 }
 
 public fn mock_close(file: &mut MockFile) -> Result<(), VfsError> {
     file.closed = true;
-    Ok(())
+    Result.Ok(())
 }
 
 public fn mock_size(vfs: &MockVfs, file: &MockFile) -> Result<Int, VfsError> {
     if file.closed {
-        return Err(VfsError { kind: Closed, message: "size on closed file" });
+        return Result.Err(VfsError { kind: Closed, message: "size on closed file" });
     }
     if !vfs.blobs.contains_key(file.name.clone()) {
-        return Err(VfsError { kind: NotFound, message: "blob vanished" });
+        return Result.Err(VfsError { kind: NotFound, message: "blob vanished" });
     }
-    Ok(vfs.blobs.get(file.name.clone()).bytes.len())
+    Result.Ok(vfs.blobs.get(file.name.clone()).bytes.len())
 }
 
 public fn mock_truncate(
@@ -309,10 +309,10 @@ public fn mock_truncate(
     size: Int,
 ) -> Result<(), VfsError> {
     if file.closed {
-        return Err(VfsError { kind: Closed, message: "truncate on closed file" });
+        return Result.Err(VfsError { kind: Closed, message: "truncate on closed file" });
     }
     if size < 0 {
-        return Err(VfsError { kind: InvalidArgument, message: "negative size" });
+        return Result.Err(VfsError { kind: InvalidArgument, message: "negative size" });
     }
     let mut blob = blob_get_or_create(vfs, &file.name);
     while blob.bytes.len() > size {
@@ -322,5 +322,5 @@ public fn mock_truncate(
         blob.bytes.push(0 as Byte);
     }
     blob_put(vfs, blob);
-    Ok(())
+    Result.Ok(())
 }

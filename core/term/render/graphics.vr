@@ -180,7 +180,7 @@ implement GraphicsRenderer for SixelGraphics {
 
     fn clear_images(&mut self, area: Rect) -> IoResult<()> {
         // Sixel images are part of the character stream; clearing the area suffices
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -243,7 +243,7 @@ implement GraphicsRenderer for ItermGraphics {
 
     fn clear_images(&mut self, area: Rect) -> IoResult<()> {
         // iTerm2 images are inline; clearing the area suffices
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -344,7 +344,7 @@ implement GraphicsRenderer for BrailleGraphics {
             }
         }
 
-        Ok(())
+        Result.Ok(())
     }
 
     fn clear_images(&mut self, area: Rect) -> IoResult<()> {
@@ -355,7 +355,7 @@ implement GraphicsRenderer for BrailleGraphics {
                 self.writer.write_all(" ".as_bytes())?;
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 

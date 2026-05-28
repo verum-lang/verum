@@ -143,7 +143,7 @@ implement CronExpr {
     public fn parse(spec: &Text) -> Result<CronExpr, CronError> {
         let fields = split_whitespace(spec.as_bytes());
         if fields.len() != 5 {
-            return Err(CronError.WrongFieldCount(fields.len()));
+            return Result.Err(CronError.WrongFieldCount(fields.len()));
         }
         let minute_mask = parse_field(&fields[0], 0, 59, &[])?;
         let hour_mask   = parse_field(&fields[1], 0, 23, &[])?;
@@ -155,7 +155,7 @@ implement CronExpr {
         let dow_mask    = parse_field(dow_field, 0, 6, DOW_ALIASES)?;
         let dom_constrained = !is_full_wildcard(dom_field);
         let dow_constrained = !is_full_wildcard(dow_field);
-        Ok(CronExpr {
+        Result.Ok(CronExpr {
             minute_mask: minute_mask,
             hour_mask:   hour_mask,
             dom_mask:    dom_mask,
@@ -167,7 +167,7 @@ implement CronExpr {
     }
 
     /// Earliest fire time strictly after `after_unix` (wall-clock
-    /// seconds since epoch). Returns `Err(ValueOutOfRange)` only
+    /// seconds since epoch). Returns `Result.Err(ValueOutOfRange)` only
     /// for pathological inputs that admit no firing within the
     /// next ~8 years (beyond which the brute-force search gives up).
     public fn next_after_unix(&self, after_unix: Int) -> Result<Int, CronError> {
@@ -178,7 +178,7 @@ implement CronExpr {
         while guard < max_iters {
             let parts = decompose(t);
             if self.matches_parts(&parts) {
-                return Ok(t);
+                return Result.Ok(t);
             }
             // Jump to the next minute that could possibly match —
             // skip forward at increasing granularity when the
@@ -187,7 +187,7 @@ implement CronExpr {
             t = t + jump;
             guard = guard + 1;
         }
-        Err(CronError.ValueOutOfRange(Text.from("no match within 8 years")))
+        Result.Err(CronError.ValueOutOfRange(Text.from("no match within 8 years")))
     }
 
     fn matches_parts(&self, p: &CronParts) -> Bool {
@@ -239,9 +239,9 @@ fn parse_field(
         i = i + 1;
     }
     if mask == 0_u64 {
-        return Err(CronError.InvalidField(Text.from_utf8_unchecked(field.as_slice())));
+        return Result.Err(CronError.InvalidField(Text.from_utf8_unchecked(field.as_slice())));
     }
-    Ok(mask)
+    Result.Ok(mask)
 }
 
 fn parse_part(
@@ -256,7 +256,7 @@ fn parse_part(
         parse_int(&step_text)?
     } else { 1 };
     if step < 1 {
-        return Err(CronError.InvalidField(Text.from_utf8_unchecked(part.as_slice())));
+        return Result.Err(CronError.InvalidField(Text.from_utf8_unchecked(part.as_slice())));
     }
 
     let (start, end) = if range_text.len() == 1 && range_text[0] == ('*' as Byte) {
@@ -268,7 +268,7 @@ fn parse_part(
             let v = resolve_value(&halves.0, min_val, max_val, aliases)?;
             if step_text.len() == 0 {
                 // Bare single value.
-                return Ok(1_u64 << (v as UInt64));
+                return Result.Ok(1_u64 << (v as UInt64));
             }
             // "n/s" → n, n+s, n+2s, ..., max
             (v, max_val)
@@ -276,7 +276,7 @@ fn parse_part(
             let a = resolve_value(&halves.0, min_val, max_val, aliases)?;
             let b = resolve_value(&halves.1, min_val, max_val, aliases)?;
             if a > b {
-                return Err(CronError.InvalidField(
+                return Result.Err(CronError.InvalidField(
                     Text.from_utf8_unchecked(part.as_slice())));
             }
             (a, b)
@@ -289,7 +289,7 @@ fn parse_part(
         mask = mask | (1_u64 << (v as UInt64));
         v = v + step;
     }
-    Ok(mask)
+    Result.Ok(mask)
 }
 
 fn resolve_value(
@@ -302,16 +302,16 @@ fn resolve_value(
     let mut i: Int = 0;
     while i < aliases.len() {
         if bytes_eq_ci(text.as_slice(), aliases[i].name.as_bytes()) {
-            return Ok(aliases[i].value);
+            return Result.Ok(aliases[i].value);
         }
         i = i + 1;
     }
     let n = parse_int(text)?;
     if n < min_val || n > max_val {
-        return Err(CronError.ValueOutOfRange(
+        return Result.Err(CronError.ValueOutOfRange(
             Text.from_utf8_unchecked(text.as_slice())));
     }
-    Ok(n)
+    Result.Ok(n)
 }
 
 // =============================================================================
@@ -477,7 +477,7 @@ fn split_dash_once(src: &[Byte]) -> (List<Byte>, List<Byte>) {
 
 fn parse_int(src: &List<Byte>) -> Result<Int, CronError> {
     if src.len() == 0 {
-        return Err(CronError.InvalidField(Text.from("")));
+        return Result.Err(CronError.InvalidField(Text.from("")));
     }
     // SOUNDNESS: cron values top out at 59 (minute) — 5-digit cap is
     // wide-envelope room for `step` (which can theoretically be
@@ -487,24 +487,24 @@ fn parse_int(src: &List<Byte>) -> Result<Int, CronError> {
     // hostile-input recipe as #71 (pbkdf2 iter), #72 (json_pointer),
     // #73 (duration_parse).
     if src.len() > 6 {  // 5 digits + optional leading '-'
-        return Err(CronError.InvalidField(Text.from_utf8_unchecked(src.as_slice())));
+        return Result.Err(CronError.InvalidField(Text.from_utf8_unchecked(src.as_slice())));
     }
     let mut i: Int = 0;
     let mut negative = false;
     if src[0] == ('-' as Byte) { negative = true; i = 1; }
     if i >= src.len() {
-        return Err(CronError.InvalidField(Text.from_utf8_unchecked(src.as_slice())));
+        return Result.Err(CronError.InvalidField(Text.from_utf8_unchecked(src.as_slice())));
     }
     let mut v: Int = 0;
     while i < src.len() {
         let c = src[i];
         if c < ('0' as Byte) || c > ('9' as Byte) {
-            return Err(CronError.InvalidField(Text.from_utf8_unchecked(src.as_slice())));
+            return Result.Err(CronError.InvalidField(Text.from_utf8_unchecked(src.as_slice())));
         }
         v = v * 10 + ((c - ('0' as Byte)) as Int);
         i = i + 1;
     }
-    if negative { Ok(-v) } else { Ok(v) }
+    if negative { Result.Ok(-v) } else { Result.Ok(v) }
 }
 
 fn is_ws(b: Byte) -> Bool {

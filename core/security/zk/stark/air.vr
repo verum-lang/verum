@@ -186,29 +186,29 @@ implement AirBuilder {
     /// rows are in range.
     public fn build(self) -> Result<Air, AirError> {
         if (self.trace.length & (self.trace.length - 1)) != 0 {
-            return Err(AirError.NonPowerOfTwoTrace(self.trace.length));
+            return Result.Err(AirError.NonPowerOfTwoTrace(self.trace.length));
         }
         if self.trace.length < 2 {
-            return Err(AirError.TraceTooSmall(self.trace.length));
+            return Result.Err(AirError.TraceTooSmall(self.trace.length));
         }
         for b in self.boundaries.iter() {
             if b.row < 0 || b.row >= self.trace.length {
-                return Err(AirError.BoundaryRowOutOfRange { row: b.row, length: self.trace.length });
+                return Result.Err(AirError.BoundaryRowOutOfRange { row: b.row, length: self.trace.length });
             }
             if b.column < 0 || b.column >= self.trace.width {
-                return Err(AirError.BoundaryColumnOutOfRange { column: b.column, width: self.trace.width });
+                return Result.Err(AirError.BoundaryColumnOutOfRange { column: b.column, width: self.trace.width });
             }
         }
         match @intrinsic("verum.crypto.stark_air_validate_exprs",
                          &self.transitions, self.trace.width) {
-            true  => Ok(Air {
+            true  => Result.Ok(Air {
                 field: self.field,
                 trace: self.trace,
                 transitions: self.transitions,
                 boundaries:  self.boundaries,
                 public_input_arity: self.public_input_arity,
             }),
-            false => Err(AirError.InvalidExprColumn),
+            false => Result.Err(AirError.InvalidExprColumn),
         }
     }
 }

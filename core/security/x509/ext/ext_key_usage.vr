@@ -86,7 +86,7 @@ public fn parse(value: &[Byte]) -> Result<ExtKeyUsage, DerError> {
     }
     seq.expect_end()?;
     r.expect_end()?;
-    Ok(ExtKeyUsage { purposes: out })
+    Result.Ok(ExtKeyUsage { purposes: out })
 }
 
 fn classify(oid: &Oid) -> ExtKeyUsagePurpose {

@@ -55,7 +55,7 @@
 //  let token = CancellationToken.with_timeout(5.seconds());
 //  select {
 //  r = work() => r,
-//  _ = token.cancelled() => Err(Timeout),
+//  _ = token.cancelled() => Result.Err(Timeout),
 //  }
 //
 
@@ -260,7 +260,7 @@ implement CancellationFlag {
     public fn new() -> CancellationFlag {
         CancellationFlag {
             state: AtomicInt.new(STATE_ACTIVE),
-            reason: Mutex.new(None),
+            reason: Mutex.new(Maybe.None),
             waiters: Mutex.new(List.new()),
             callbacks: Mutex.new(List.new()),
             children: Mutex.new(List.new()),
@@ -276,8 +276,8 @@ implement CancellationFlag {
     public fn reason(&self) -> Maybe<CancelReason> {
         let guard = self.reason.lock().unwrap_or_else(|p| p.into_inner());
         match &*guard {
-            Some(r) => Some(r.clone()),
-            None => None,
+            Maybe.Some(r) => Maybe.Some(r.clone()),
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -297,7 +297,7 @@ implement CancellationFlag {
         // Record reason.
         {
             let mut rg = self.reason.lock().unwrap_or_else(|p| p.into_inner());
-            *rg = Some(r);
+            *rg = Maybe.Some(r);
         }
 
         // Drain wakers — take ownership of the list and release lock
@@ -336,7 +336,7 @@ implement CancellationFlag {
             cg.iter().map(|w| w.clone()).collect<List<_>>()
         };
         for weak in children_snapshot {
-            if let Some(child) = weak.upgrade() {
+            if let Maybe.Some(child) = weak.upgrade() {
                 // Propagated reason — children see ParentCancelled,
                 // not the parent's own reason (structured traceability).
                 let _ = child.cancel_with(CancelReason.ParentCancelled);
@@ -398,7 +398,7 @@ implement CancellationFlag {
     fn attach_child(&self, child: Weak<CancellationFlag>) {
         // If already cancelled, immediately propagate.
         if self.is_cancelled() {
-            if let Some(c) = child.upgrade() {
+            if let Maybe.Some(c) = child.upgrade() {
                 let _ = c.cancel_with(CancelReason.ParentCancelled);
             }
             return;
@@ -407,7 +407,7 @@ implement CancellationFlag {
         // Re-check under lock.
         if self.is_cancelled() {
             drop(cg);
-            if let Some(c) = child.upgrade() {
+            if let Maybe.Some(c) = child.upgrade() {
                 let _ = c.cancel_with(CancelReason.ParentCancelled);
             }
             return;
@@ -449,7 +449,7 @@ implement CancellationToken {
         self.inner.is_cancelled()
     }
 
-    /// Read the cancellation reason if set. None while active.
+    /// Read the cancellation reason if set. Maybe.None while active.
     public fn reason(&self) -> Maybe<CancelReason> {
         self.inner.reason()
     }
@@ -465,7 +465,7 @@ implement CancellationToken {
         let _ = self.inner.cancel_with(r);
     }
 
-    /// Return `Err(CancellationError)` if cancelled, else `Ok(())`.
+    /// Return `Result.Err(CancellationError)` if cancelled, else `Result.Ok(())`.
     /// Designed for checkpointing inside loops:
     ///
 
@@ -476,9 +476,9 @@ implement CancellationToken {
     public fn throw_if_cancelled(&self) -> Result<(), CancellationError> {
         if self.is_cancelled() {
             let r = self.reason().unwrap_or(CancelReason.Cancelled);
-            Err(CancellationError.new(r))
+            Result.Err(CancellationError.new(r))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -672,7 +672,7 @@ implement CancellationTokenSource {
         self.token.is_cancelled()
     }
 
-    /// Reason of a prior cancel (None if not cancelled).
+    /// Reason of a prior cancel (Maybe.None if not cancelled).
     public fn reason(&self) -> Maybe<CancelReason> {
         self.token.reason()
     }
@@ -778,7 +778,7 @@ implement Drop for CancelScope {
 //  token.with_shielded(async {
 //  // Even if token is cancelled here, we run to completion.
 //  db.commit_tx().await?;
-//  Ok(())
+//  Result.Ok(())
 //  }).await?;
 //  token.throw_if_cancelled()?;
 

@@ -280,7 +280,7 @@ public fn pager_open_memory() -> Result<Pager, PagerError> {
 /// power of two between `PAGE_SIZE_MIN` and `PAGE_SIZE_MAX` inclusive.
 public fn pager_open_memory_with_size(page_size: Int) -> Result<Pager, PagerError> {
     if !is_valid_page_size(page_size) {
-        return Err(PagerError {
+        return Result.Err(PagerError {
             kind: InvalidPageSize,
             message: "page size must be a power of two in [512, 65536]",
         });
@@ -288,16 +288,16 @@ public fn pager_open_memory_with_size(page_size: Int) -> Result<Pager, PagerErro
 
     let name: Text = ":memory:";
     let file = match open_memory_rwc(&name) {
-        Ok(f) => f,
-        Err(e) => {
-            return Err(PagerError {
+        Result.Ok(f) => f,
+        Result.Err(e) => {
+            return Result.Err(PagerError {
                 kind: IoError,
                 message: f"MemDbVfs.open_memory_rwc failed: {e.message}",
             });
         }
     };
 
-    Ok(Pager {
+    Result.Ok(Pager {
         backend: BeMemory(file),
         page_size: page_size,
         cache: page_cache_new(DEFAULT_CACHE_PAGES),
@@ -312,16 +312,16 @@ public fn pager_open_memory_with_size(page_size: Int) -> Result<Pager, PagerErro
 /// write) is reflected in the OpenFlags.
 public fn pager_open_file(path: &Text, page_size: Int, flags: OpenFlags) -> Result<Pager, PagerError> {
     if !is_valid_page_size(page_size) {
-        return Err(PagerError {
+        return Result.Err(PagerError {
             kind: InvalidPageSize,
             message: "page size must be a power of two in [512, 65536]",
         });
     }
     let vfs = PosixVfs.new();
     let file = match vfs.open(path, flags) {
-        Ok(f)  => f,
-        Err(e) => {
-            return Err(PagerError {
+        Result.Ok(f)  => f,
+        Result.Err(e) => {
+            return Result.Err(PagerError {
                 kind: IoError,
                 message: f"PosixVfs.open failed: {e.message}",
             });
@@ -332,7 +332,7 @@ public fn pager_open_file(path: &Text, page_size: Int, flags: OpenFlags) -> Resu
     // fail-fast at the cache layer rather than bubbling up from a
     // downstream `pwrite` EBADF / EROFS.
     if flags.read_only { cfg.read_only = true; }
-    Ok(Pager {
+    Result.Ok(Pager {
         backend: BeFile(file),
         page_size: page_size,
         cache: page_cache_new(DEFAULT_CACHE_PAGES),
@@ -352,8 +352,8 @@ public fn pager_open_memory_with_config(
     config: PagerConfig,
 ) -> Result<Pager, PagerError> {
     let mut p = match pager_open_memory_with_size(page_size) {
-        Ok(p)  => p,
-        Err(e) => { return Err(e); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let cap = if config.cache_pages < MIN_CACHE_PAGES { MIN_CACHE_PAGES } else { config.cache_pages };
     p.cache.configure(cap);
@@ -362,7 +362,7 @@ public fn pager_open_memory_with_config(
         sync: config.sync,
         read_only: config.read_only,
     };
-    Ok(p)
+    Result.Ok(p)
 }
 
 /// File-backed sibling of `pager_open_memory_with_config`.
@@ -373,8 +373,8 @@ public fn pager_open_file_with_config(
     config: PagerConfig,
 ) -> Result<Pager, PagerError> {
     let mut p = match pager_open_file(path, page_size, flags) {
-        Ok(p)  => p,
-        Err(e) => { return Err(e); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let cap = if config.cache_pages < MIN_CACHE_PAGES { MIN_CACHE_PAGES } else { config.cache_pages };
     p.cache.configure(cap);
@@ -383,7 +383,7 @@ public fn pager_open_file_with_config(
         sync: config.sync,
         read_only: config.read_only,
     };
-    Ok(p)
+    Result.Ok(p)
 }
 
 /// Convenience — opens read/write/create with the default page size.
@@ -409,7 +409,7 @@ public fn pager_close(p: &mut Pager) -> Result<(), PagerError> {
     let flush_result = if p.dirty_count > 0 && !p.config.read_only {
         pager_flush(p)
     } else {
-        Ok(())
+        Result.Ok(())
     };
     p.closed = true;
     p.cache.clear();
@@ -497,27 +497,27 @@ implement Pager {
 /// callers can mutate freely without invalidating the cache).
 public fn pager_read(p: &mut Pager, page_no: Int) -> Result<PageFrame, PagerError> {
     if p.closed {
-        return Err(PagerError { kind: Closed, message: "read on closed pager" });
+        return Result.Err(PagerError { kind: Closed, message: "read on closed pager" });
     }
     if page_no < 1 {
-        return Err(PagerError { kind: PageOutOfRange, message: "page_no < 1" });
+        return Result.Err(PagerError { kind: PageOutOfRange, message: "page_no < 1" });
     }
 
     // 1. Cache lookup
     match p.cache.get(page_no) {
-        Some(cached) => {
+        Maybe.Some(cached) => {
             // Hit — clone the cached buffer into a fresh frame for
             // the caller. Cloning a `List<Byte>` here is page_size-
             // bounded (≤ 64 KiB); the SQL plan layer ought to use
             // pin/unpin for hot inner loops, but for v1 we always
             // clone to keep ownership semantics simple.
-            return Ok(PageFrame {
+            return Result.Ok(PageFrame {
                 page_no: cached.page_no,
                 data: cached.data.clone(),
                 dirty: cached.dirty,
             });
         }
-        None => {
+        Maybe.None => {
             // Miss — fall through to backend fetch below.
         }
     }
@@ -534,14 +534,14 @@ public fn pager_read(p: &mut Pager, page_no: Int) -> Result<PageFrame, PagerErro
     match &p.backend {
         BeMemory(f) => {
             match memdb_read(f, &mut buf, offset) {
-                Ok(_) => {}
-                Err(_) => { read_ok = false; }  // EOF → zero-fill
+                Result.Ok(_) => {}
+                Result.Err(_) => { read_ok = false; }  // EOF → zero-fill
             }
         }
         BeFile(f) => {
             match f.read(&mut buf, offset) {
-                Ok(_) => {}
-                Err(_) => { read_ok = false; }  // EOF → zero-fill
+                Result.Ok(_) => {}
+                Result.Err(_) => { read_ok = false; }  // EOF → zero-fill
             }
         }
     }
@@ -558,7 +558,7 @@ public fn pager_read(p: &mut Pager, page_no: Int) -> Result<PageFrame, PagerErro
         last_access: 0,  // PageCache.put stamps with a fresh tick
     };
     p.cache.put(cached);
-    Ok(frame)
+    Result.Ok(frame)
 }
 
 /// Write a page. Updates the cache and marks the frame dirty;
@@ -572,19 +572,19 @@ public fn pager_read(p: &mut Pager, page_no: Int) -> Result<PageFrame, PagerErro
 /// if `PRAGMA query_only` or VFS-level read-only is in effect.
 public fn pager_write(p: &mut Pager, frame: &PageFrame) -> Result<(), PagerError> {
     if p.closed {
-        return Err(PagerError { kind: Closed, message: "write on closed pager" });
+        return Result.Err(PagerError { kind: Closed, message: "write on closed pager" });
     }
     if p.config.read_only {
-        return Err(PagerError {
+        return Result.Err(PagerError {
             kind: ReadOnly,
             message: "write attempted on read-only pager",
         });
     }
     if frame.page_no < 1 {
-        return Err(PagerError { kind: PageOutOfRange, message: "page_no < 1" });
+        return Result.Err(PagerError { kind: PageOutOfRange, message: "page_no < 1" });
     }
     if frame.data.len() != p.page_size {
-        return Err(PagerError {
+        return Result.Err(PagerError {
             kind: InvalidPageSize,
             message: "frame.data.len() does not match pager.page_size",
         });
@@ -608,7 +608,7 @@ public fn pager_write(p: &mut Pager, frame: &PageFrame) -> Result<(), PagerError
         last_access: 0,
     };
     p.cache.put(cached);
-    Ok(())
+    Result.Ok(())
 }
 
 /// Drain dirty cache frames to the backend. No fsync — call
@@ -621,20 +621,20 @@ public fn pager_write(p: &mut Pager, frame: &PageFrame) -> Result<(), PagerError
 /// generation. After flush, dirty_count goes to 0.
 public fn pager_flush(p: &mut Pager) -> Result<(), PagerError> {
     if p.closed {
-        return Err(PagerError { kind: Closed, message: "flush on closed pager" });
+        return Result.Err(PagerError { kind: Closed, message: "flush on closed pager" });
     }
     if p.config.read_only {
         // Read-only pagers shouldn't have anything dirty, but be defensive.
         if p.dirty_count > 0 {
-            return Err(PagerError {
+            return Result.Err(PagerError {
                 kind: ReadOnly,
                 message: "dirty pages on read-only pager — bug?",
             });
         }
-        return Ok(());
+        return Result.Ok(());
     }
     if p.dirty_count == 0 {
-        return Ok(());
+        return Result.Ok(());
     }
 
     let dirty = p.cache.dirty_pages();
@@ -647,18 +647,18 @@ public fn pager_flush(p: &mut Pager) -> Result<(), PagerError> {
         // but the actor-based v2 will need to handle it), skip.
         let cached_opt = p.cache.get(pno);
         match cached_opt {
-            None => {
+            Maybe.None => {
                 // Disappeared — count it out and continue.
                 i = i + 1;
                 continue;
             }
-            Some(cached) => {
+            Maybe.Some(cached) => {
                 let offset = (cached.page_no - 1) * p.page_size;
                 let write_result = match &mut p.backend {
                     BeMemory(f) => {
                         match memdb_write(f, cached.data.as_slice(), offset) {
-                            Ok(_)  => Ok(()),
-                            Err(_) => Err(PagerError {
+                            Result.Ok(_)  => Result.Ok(()),
+                            Result.Err(_) => Result.Err(PagerError {
                                 kind: IoError,
                                 message: "memdb_write failed in flush",
                             }),
@@ -666,8 +666,8 @@ public fn pager_flush(p: &mut Pager) -> Result<(), PagerError> {
                     }
                     BeFile(f) => {
                         match f.write(cached.data.as_slice(), offset) {
-                            Ok(_)  => Ok(()),
-                            Err(_) => Err(PagerError {
+                            Result.Ok(_)  => Result.Ok(()),
+                            Result.Err(_) => Result.Err(PagerError {
                                 kind: IoError,
                                 message: "PosixFile.write failed in flush",
                             }),
@@ -675,7 +675,7 @@ public fn pager_flush(p: &mut Pager) -> Result<(), PagerError> {
                     }
                 };
                 match write_result {
-                    Ok(_)  => {
+                    Result.Ok(_)  => {
                         // Clear the dirty bit so the next checkpoint /
                         // commit doesn't re-write the same page.
                         let cleaned = CachedFrame {
@@ -688,8 +688,8 @@ public fn pager_flush(p: &mut Pager) -> Result<(), PagerError> {
                         };
                         p.cache.put(cleaned);
                     }
-                    Err(e) => {
-                        return Err(e);
+                    Result.Err(e) => {
+                        return Result.Err(e);
                     }
                 }
             }
@@ -698,7 +698,7 @@ public fn pager_flush(p: &mut Pager) -> Result<(), PagerError> {
     }
 
     p.dirty_count = 0;
-    Ok(())
+    Result.Ok(())
 }
 
 /// Flush + fsync — durability guaranteed per `config.sync` mode.
@@ -712,21 +712,21 @@ public fn pager_flush(p: &mut Pager) -> Result<(), PagerError> {
 /// `SyncExtra` → adds directory fsync (rename safety)
 public fn pager_commit(p: &mut Pager) -> Result<(), PagerError> {
     if p.closed {
-        return Err(PagerError { kind: Closed, message: "commit on closed pager" });
+        return Result.Err(PagerError { kind: Closed, message: "commit on closed pager" });
     }
     if p.config.read_only {
         // Nothing to commit; not an error.
-        return Ok(());
+        return Result.Ok(());
     }
     match pager_flush(p) {
-        Ok(_)  => {}
-        Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}
+        Result.Err(e) => { return Result.Err(e); }
     }
 
     match &p.config.sync {
         SyncOff => {
             // No fsync. Caller takes responsibility for durability.
-            Ok(())
+            Result.Ok(())
         }
         SyncNormal | SyncFull | SyncExtra => {
             // The MemDb backend is intrinsically non-durable; no-op.
@@ -736,7 +736,7 @@ public fn pager_commit(p: &mut Pager) -> Result<(), PagerError> {
             // §8.1) will plumb that through when it lands. For now
             // we trust the OS page cache + configured fsync at the
             // VFS-level full_fsync path.
-            Ok(())
+            Result.Ok(())
         }
     }
 }
@@ -747,8 +747,8 @@ public fn pager_commit(p: &mut Pager) -> Result<(), PagerError> {
 /// `pager_commit`.
 public fn pager_write_sync(p: &mut Pager, frame: &PageFrame) -> Result<(), PagerError> {
     match pager_write(p, frame) {
-        Ok(_)  => {}
-        Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}
+        Result.Err(e) => { return Result.Err(e); }
     }
     pager_commit(p)
 }

@@ -5,7 +5,7 @@
 //
 
 // Provides arithmetic operations with explicit overflow handling:
-// - Checked: Returns Maybe<T>, None on overflow
+// - Checked: Returns Maybe<T>, Maybe.None on overflow
 // - Saturating: Clamps to min/max on overflow
 // - Wrapping: Wraps around (modular arithmetic)
 //
@@ -29,7 +29,7 @@ module core.math.checked;
 
 // Result of a checked arithmetic operation
 public type CheckedResult<T> is
-    | Ok(T)
+    | Result.Ok(T)
     | Overflow;
 
 // =============================================================================
@@ -471,11 +471,11 @@ implement<T> CheckedResult<T> {
         }
     }
 
-    /// Convert to Maybe<T>: Ok(v) -> Some(v), Overflow -> None.
+    /// Convert to Maybe<T>: Result.Ok(v) -> Maybe.Some(v), Overflow -> Maybe.None.
     public fn ok(self) -> Maybe<T> {
         match self {
-            CheckedResult.Ok(v) => Some(v),
-            CheckedResult.Overflow => None,
+            CheckedResult.Ok(v) => Maybe.Some(v),
+            CheckedResult.Overflow => Maybe.None,
         }
     }
 }

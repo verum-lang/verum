@@ -343,12 +343,12 @@ implement TcpStream {
 
         for socket_addr in addrs {
             match TcpStream.connect_addr(&socket_addr) {
-                Ok(stream) => return Ok(stream),
-                Err(e) => last_err = e,
+                Result.Ok(stream) => return Result.Ok(stream),
+                Result.Err(e) => last_err = e,
             }
         }
 
-        Err(last_err)
+        Result.Err(last_err)
     }
 
     /// Connect to a specific socket address (internal implementation).
@@ -379,13 +379,13 @@ implement TcpStream {
         let connect_result = sys_connect(fd, addr_ptr, addr_bytes.len() as Int);
 
         match connect_result {
-            Ok(()) => {
-                Ok(TcpStream {
+            Result.Ok(()) => {
+                Result.Ok(TcpStream {
                     fd: fd,
                     peer_addr: *addr,
                 })
             }
-            Err(e) => {
+            Result.Err(e) => {
                 // Clean up socket on failure
                 @cfg(any(target_os = "linux", target_os = "windows"))
                 let _ = close(fd);
@@ -393,7 +393,7 @@ implement TcpStream {
                 @cfg(target_os = "macos")
                 let _ = sys_close(fd);
 
-                Err(IoError.from_os(e))
+                Result.Err(IoError.from_os(e))
             }
         }
     }
@@ -442,13 +442,13 @@ implement TcpStream {
         let local_ptr = local_bytes.as_ptr() as &unsafe Byte;
         let bind_result = sys_bind(fd, local_ptr, local_bytes.len() as Int);
         match bind_result {
-            Ok(())  => {}
-            Err(e) => {
+            Result.Ok(())  => {}
+            Result.Err(e) => {
                 @cfg(any(target_os = "linux", target_os = "windows"))
                 let _ = close(fd);
                 @cfg(target_os = "macos")
                 let _ = sys_close(fd);
-                return Err(IoError.from_os(e));
+                return Result.Err(IoError.from_os(e));
             }
         }
 
@@ -460,18 +460,18 @@ implement TcpStream {
         @cfg(target_os = "macos")
         let connect_result = sys_connect(fd, peer_ptr, peer_bytes.len() as Int);
         match connect_result {
-            Ok(()) => {
-                Ok(TcpStream {
+            Result.Ok(()) => {
+                Result.Ok(TcpStream {
                     fd: fd,
                     peer_addr: peer,
                 })
             }
-            Err(e) => {
+            Result.Err(e) => {
                 @cfg(any(target_os = "linux", target_os = "windows"))
                 let _ = close(fd);
                 @cfg(target_os = "macos")
                 let _ = sys_close(fd);
-                Err(IoError.from_os(e))
+                Result.Err(IoError.from_os(e))
             }
         }
     }
@@ -496,12 +496,12 @@ implement TcpStream {
 
         for socket_addr in addrs {
             match TcpStream.connect_addr_async(&socket_addr).await {
-                Ok(stream) => return Ok(stream),
-                Err(e) => last_err = e,
+                Result.Ok(stream) => return Result.Ok(stream),
+                Result.Err(e) => last_err = e,
             }
         }
 
-        Err(last_err)
+        Result.Err(last_err)
     }
 
     /// Async connect implementation for a specific address.
@@ -547,21 +547,21 @@ implement TcpStream {
         const EAGAIN: Int = 35;
 
         match connect_result {
-            Ok(()) => {
+            Result.Ok(()) => {
                 // Connection completed immediately (rare but possible on localhost)
-                return Ok(TcpStream { fd: fd, peer_addr: *addr });
+                return Result.Ok(TcpStream { fd: fd, peer_addr: *addr });
             }
-            Err(e) if e.code == EINPROGRESS || e.code == EAGAIN => {
+            Result.Err(e) if e.code == EINPROGRESS || e.code == EAGAIN => {
                 // Expected for non-blocking connect - need to wait for completion
             }
-            Err(e) => {
+            Result.Err(e) => {
                 @cfg(any(target_os = "linux", target_os = "windows"))
                 let _ = close(fd);
 
                 @cfg(target_os = "macos")
                 let _ = sys_close(fd);
 
-                return Err(IoError.from_os(e));
+                return Result.Err(IoError.from_os(e));
             }
         }
 
@@ -576,26 +576,26 @@ implement TcpStream {
         let sock_err = safe_getsockopt_error(fd);
 
         match sock_err {
-            Ok(0) => {
-                Ok(TcpStream { fd: fd, peer_addr: *addr })
+            Result.Ok(0) => {
+                Result.Ok(TcpStream { fd: fd, peer_addr: *addr })
             }
-            Ok(err_code) => {
+            Result.Ok(err_code) => {
                 @cfg(any(target_os = "linux", target_os = "windows"))
                 let _ = close(fd);
 
                 @cfg(target_os = "macos")
                 let _ = sys_close(fd);
 
-                Err(IoError.from_errno(err_code))
+                Result.Err(IoError.from_errno(err_code))
             }
-            Err(e) => {
+            Result.Err(e) => {
                 @cfg(any(target_os = "linux", target_os = "windows"))
                 let _ = close(fd);
 
                 @cfg(target_os = "macos")
                 let _ = sys_close(fd);
 
-                Err(IoError.from_os(e))
+                Result.Err(IoError.from_os(e))
             }
         }
     }
@@ -606,7 +606,7 @@ implement TcpStream {
     /// This returns the cached address from connection time. For the actual
     /// current peer address (which should be the same), use peer_addr_syscall().
     public fn peer_addr(&self) -> Result<SocketAddr, IoError> {
-        Ok(self.peer_addr)
+        Result.Ok(self.peer_addr)
     }
 
     /// Get the local address of this stream.
@@ -656,8 +656,8 @@ implement TcpStream {
     /// Set the read timeout.
     ///
 
-    /// A value of None means reads will block indefinitely.
-    /// A value of Some(ms) sets the timeout in milliseconds.
+    /// A value of Maybe.None means reads will block indefinitely.
+    /// A value of Maybe.Some(ms) sets the timeout in milliseconds.
     public fn set_read_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
         let ms = timeout_ms.unwrap_or(0);
         @cfg(any(target_os = "linux", target_os = "windows")) {
@@ -671,8 +671,8 @@ implement TcpStream {
     /// Set the write timeout.
     ///
 
-    /// A value of None means writes will block indefinitely.
-    /// A value of Some(ms) sets the timeout in milliseconds.
+    /// A value of Maybe.None means writes will block indefinitely.
+    /// A value of Maybe.Some(ms) sets the timeout in milliseconds.
     public fn set_write_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
         let ms = timeout_ms.unwrap_or(0);
         @cfg(any(target_os = "linux", target_os = "windows")) {
@@ -763,7 +763,7 @@ implement TcpStream {
         @cfg(target_os = "macos")
         let new_fd = safe_fcntl(self.fd, F_DUPFD_CLOEXEC, 0).map_err(IoError.from_os)?;
 
-        Ok(TcpStream {
+        Result.Ok(TcpStream {
             fd: new_fd as FileDesc,
             peer_addr: self.peer_addr,
         })
@@ -797,7 +797,7 @@ implement Write for TcpStream {
     fn flush(&mut self) -> Result<(), IoError> {
         // TCP is not buffered at the application level; data is sent immediately
         // to the kernel buffer. For explicit control, use TCP_NODELAY.
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -823,7 +823,7 @@ implement AsyncRead for TcpStream {
         let mut byte_buf = [0_u8; STREAM_CHUNK_SIZE];
         let read_len = if cap < STREAM_CHUNK_SIZE { cap } else { STREAM_CHUNK_SIZE };
         if read_len == 0 {
-            return Poll.Ready(Ok(0));
+            return Poll.Ready(Result.Ok(0));
         }
 
         @cfg(any(target_os = "linux", target_os = "windows"))
@@ -838,17 +838,17 @@ implement AsyncRead for TcpStream {
         };
 
         match result {
-            Ok(n) => {
+            Result.Ok(n) => {
                 for i in 0..n as Int { buf.push(byte_buf[i]); }
-                Poll.Ready(Ok(n as Int))
+                Poll.Ready(Result.Ok(n as Int))
             }
-            Err(e) if e.would_block() => {
+            Result.Err(e) if e.would_block() => {
                 // Register waker with I/O engine for read-ready event.
                 let io_engine = IOEngine.current();
                 io_engine.register(self.fd, IOInterest.Read, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Err(IoError.from_os(e))),
+            Result.Err(e) => Poll.Ready(Result.Err(IoError.from_os(e))),
         }
     }
 }
@@ -856,7 +856,7 @@ implement AsyncRead for TcpStream {
 implement AsyncWrite for TcpStream {
     fn poll_write(&mut self, cx: &mut Context, buf: &List<Byte>) -> Poll<IoResult<Int>> {
         if buf.is_empty() {
-            return Poll.Ready(Ok(0));
+            return Poll.Ready(Result.Ok(0));
         }
 
         // Direct byte slice — no Int → Byte marshalling needed post-§4.
@@ -873,26 +873,26 @@ implement AsyncWrite for TcpStream {
         let result = sys_send(self.fd, &byte_buf[..write_len], MSG_DONTWAIT);
 
         match result {
-            Ok(n) => Poll.Ready(Ok(n as Int)),
-            Err(e) if e.would_block() => {
+            Result.Ok(n) => Poll.Ready(Result.Ok(n as Int)),
+            Result.Err(e) if e.would_block() => {
                 let io_engine = IOEngine.current();
                 io_engine.register(self.fd, IOInterest.Write, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Err(IoError.from_os(e))),
+            Result.Err(e) => Poll.Ready(Result.Err(IoError.from_os(e))),
         }
     }
 
     fn poll_flush(&mut self, _cx: &mut Context) -> Poll<IoResult<()>> {
         // TCP has no application-level buffering. Kernel buffer is controlled
         // via TCP_NODELAY; explicit flush is a no-op.
-        Poll.Ready(Ok(()))
+        Poll.Ready(Result.Ok(()))
     }
 
     fn poll_shutdown(&mut self, _cx: &mut Context) -> Poll<IoResult<()>> {
         match self.shutdown(Shutdown.Write) {
-            Ok(()) => Poll.Ready(Ok(())),
-            Err(e) => Poll.Ready(Err(e)),
+            Result.Ok(()) => Poll.Ready(Result.Ok(())),
+            Result.Err(e) => Poll.Ready(Result.Err(e)),
         }
     }
 }
@@ -932,8 +932,8 @@ implement TcpStream {
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
-            r = self.read_async(buf).await => Ok(r),
-            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = self.read_async(buf).await => Result.Ok(r),
+            reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
         }
     }
 
@@ -947,8 +947,8 @@ implement TcpStream {
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
-            r = self.write_async(buf).await => Ok(r),
-            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = self.write_async(buf).await => Result.Ok(r),
+            reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
         }
     }
 }
@@ -1090,12 +1090,12 @@ implement TcpListener {
 
         for socket_addr in addrs {
             match TcpListener.bind_addr_with_backlog(&socket_addr, backlog) {
-                Ok(listener) => return Ok(listener),
-                Err(e) => last_err = e,
+                Result.Ok(listener) => return Result.Ok(listener),
+                Result.Err(e) => last_err = e,
             }
         }
 
-        Err(last_err)
+        Result.Err(last_err)
     }
 
     /// Bind with SO_REUSEPORT for multi-threaded accept scaling.
@@ -1110,12 +1110,12 @@ implement TcpListener {
 
         for socket_addr in addrs {
             match TcpListener.bind_addr_reuseport(&socket_addr, DEFAULT_BACKLOG) {
-                Ok(listener) => return Ok(listener),
-                Err(e) => last_err = e,
+                Result.Ok(listener) => return Result.Ok(listener),
+                Result.Err(e) => last_err = e,
             }
         }
 
-        Err(last_err)
+        Result.Err(last_err)
     }
 
     /// Internal: bind to specific address with given backlog.
@@ -1145,7 +1145,7 @@ implement TcpListener {
             // fidelity is the architectural promise that distinguishes
             // v2 from the legacy v1 (`__tcp_listen_raw`) which
             // collapsed every failure to `-1`.
-            return Err(IoError.from_raw_os_error(-result));
+            return Result.Err(IoError.from_raw_os_error(-result));
         }
 
         // Recover the OS-assigned port when the caller passed `port=0`.
@@ -1167,7 +1167,7 @@ implement TcpListener {
             V6(v6) => SocketAddr.new_v6(*v6.ip(), actual_port),
         };
 
-        Ok(TcpListener {
+        Result.Ok(TcpListener {
             fd: FileDesc(result),
             local_addr: actual_addr,
         })
@@ -1192,7 +1192,7 @@ implement TcpListener {
 
         let result = __tcp_listen_v2_raw(host, port, backlog, flags);
         if result < 0 {
-            return Err(IoError.from_raw_os_error(-result));
+            return Result.Err(IoError.from_raw_os_error(-result));
         }
 
         let actual_port = if port == 0 {
@@ -1207,7 +1207,7 @@ implement TcpListener {
             V6(v6) => SocketAddr.new_v6(*v6.ip(), actual_port),
         };
 
-        Ok(TcpListener {
+        Result.Ok(TcpListener {
             fd: FileDesc(result),
             local_addr: actual_addr,
         })
@@ -1237,7 +1237,7 @@ implement TcpListener {
 
         let peer_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
 
-        Ok((
+        Result.Ok((
             TcpStream { fd: client_fd, peer_addr: peer_addr },
             peer_addr
         ))
@@ -1272,24 +1272,24 @@ implement TcpListener {
             let accept_result = sys_accept(self.fd, &mut addr_buf, &mut addr_len);
 
             match accept_result {
-                Ok(client_fd) => {
+                Result.Ok(client_fd) => {
                     @cfg(target_os = "macos")
                     let _ = safe_set_nosigpipe(client_fd, true);
 
                     let peer_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
-                    return Ok((
+                    return Result.Ok((
                         TcpStream { fd: client_fd, peer_addr: peer_addr },
                         peer_addr
                     ));
                 }
-                Err(e) if e.code == EAGAIN => {
+                Result.Err(e) if e.code == EAGAIN => {
                     // No connection ready - wait for read readiness
                     AsyncIoReady.readable(self.fd).await;
                     // Loop and try again
                     continue;
                 }
-                Err(e) => {
-                    return Err(IoError.from_os(e));
+                Result.Err(e) => {
+                    return Result.Err(IoError.from_os(e));
                 }
             }
         }
@@ -1297,14 +1297,14 @@ implement TcpListener {
 
     /// Get the local address this listener is bound to.
     public fn local_addr(&self) -> Result<SocketAddr, IoError> {
-        Ok(self.local_addr)
+        Result.Ok(self.local_addr)
     }
 
     /// Get an iterator over incoming connections.
     ///
 
     /// This is a convenience method that yields Result<TcpStream, IoError>.
-    /// The iterator never returns None - it continues accepting forever.
+    /// The iterator never returns Maybe.None - it continues accepting forever.
     public fn incoming(&self) -> Incoming {
         Incoming { listener: self }
     }
@@ -1368,7 +1368,7 @@ implement Iterator for Incoming {
     type Item = Result<TcpStream, IoError>;
 
     fn next(&mut self) -> Maybe<Result<TcpStream, IoError>> {
-        Some(self.listener.accept().map(|(stream, _)| stream))
+        Maybe.Some(self.listener.accept().map(|(stream, _)| stream))
     }
 }
 
@@ -1401,22 +1401,22 @@ implement<'a> Stream for AsyncIncoming<'a> {
         let accept_result = sys_accept(self.listener.fd, &mut addr_buf, &mut addr_len);
 
         match accept_result {
-            Ok(client_fd) => {
+            Result.Ok(client_fd) => {
                 @cfg(target_os = "macos")
                 let _ = safe_set_nosigpipe(client_fd, true);
 
                 match deserialize_socket_addr(&addr_buf[..addr_len as Int]) {
-                    Ok(peer) => Poll.Ready(Some(Ok(TcpStream { fd: client_fd, peer_addr: peer }))),
-                    Err(e) => Poll.Ready(Some(Err(e))),
+                    Result.Ok(peer) => Poll.Ready(Maybe.Some(Result.Ok(TcpStream { fd: client_fd, peer_addr: peer }))),
+                    Result.Err(e) => Poll.Ready(Maybe.Some(Result.Err(e))),
                 }
             }
-            Err(e) if e.code == EAGAIN => {
+            Result.Err(e) if e.code == EAGAIN => {
                 // No connection pending — register I/O readiness waker.
                 let io_engine = IOEngine.current();
                 io_engine.register(self.listener.fd, IOInterest.Read, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Some(Err(IoError.from_os(e)))),
+            Result.Err(e) => Poll.Ready(Maybe.Some(Result.Err(IoError.from_os(e)))),
         }
     }
 }
@@ -1450,8 +1450,8 @@ implement TcpListener {
         token: &CancellationToken,
     ) -> Result<Result<(TcpStream, SocketAddr), IoError>, CancellationError> {
         select {
-            r = self.accept_async().await => Ok(r),
-            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = self.accept_async().await => Result.Ok(r),
+            reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
         }
     }
 }
@@ -1590,7 +1590,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
 /// Deserialize a socket address from kernel sockaddr bytes.
 fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
     if buf.len() < 2 {
-        return Err(IoError.InvalidInput { reason: "Address buffer too small" });
+        return Result.Err(IoError.InvalidInput { reason: "Address buffer too small" });
     }
 
     // First byte is address family (in native byte order)
@@ -1598,17 +1598,17 @@ fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
 
     if family == AF_INET {
         if buf.len() < 8 {
-            return Err(IoError.InvalidInput { reason: "Invalid IPv4 address buffer" });
+            return Result.Err(IoError.InvalidInput { reason: "Invalid IPv4 address buffer" });
         }
 
         // Port is in network byte order (big-endian)
         let port = ((buf[2] as Int) << 8) | (buf[3] as Int);
         let ip = Ipv4Addr.new(buf[4], buf[5], buf[6], buf[7]);
 
-        Ok(SocketAddr.new_v4(ip, port))
+        Result.Ok(SocketAddr.new_v4(ip, port))
     } else if family == AF_INET6 {
         if buf.len() < SOCKADDR_IN6_SIZE {
-            return Err(IoError.InvalidInput { reason: "Invalid IPv6 address buffer" });
+            return Result.Err(IoError.InvalidInput { reason: "Invalid IPv6 address buffer" });
         }
 
         let port = ((buf[2] as Int) << 8) | (buf[3] as Int);
@@ -1630,8 +1630,8 @@ fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
             | ((buf[26] as UInt32) << 16)
             | ((buf[27] as UInt32) << 24);
 
-        Ok(SocketAddr.V6(SocketAddrV6.new(ip, port, 0, scope_id)))
+        Result.Ok(SocketAddr.V6(SocketAddrV6.new(ip, port, 0, scope_id)))
     } else {
-        Err(IoError.InvalidInput { reason: f"Unsupported address family: {family}" })
+        Result.Err(IoError.InvalidInput { reason: f"Unsupported address family: {family}" })
     }
 }

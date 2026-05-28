@@ -65,8 +65,8 @@ public type LockRegion is {
 ///
 
 /// `Conflict(owner_pid)` — another holder has an incompatible lock.
-/// The owning PID is `Some(pid)` when the platform can report it via
-/// `F_GETLK` / `F_OFD_GETLK`, otherwise `None`. `IoError` wraps any
+/// The owning PID is `Maybe.Some(pid)` when the platform can report it via
+/// `F_GETLK` / `F_OFD_GETLK`, otherwise `Maybe.None`. `IoError` wraps any
 /// non-conflict OS failure (EBADF, ENOLCK, etc.).
 public type LockError is
       Conflict(owner_pid: Maybe<Int>)
@@ -177,8 +177,8 @@ implement LockHandle {
 
 /// On success returns a fresh `LockHandle` that must be consumed by
 /// `unlock`. On conflict (EAGAIN / EWOULDBLOCK / ERROR_LOCK_VIOLATION)
-/// returns `Err(Conflict(...))`. Any other OS failure returns
-/// `Err(IoError(OSError))`.
+/// returns `Result.Err(Conflict(...))`. Any other OS failure returns
+/// `Result.Err(IoError(OSError))`.
 ///
 
 /// Implementation: dispatches to `core.sys.try_lock_region`,
@@ -198,12 +198,12 @@ public fn try_lock(
     let backend_len: Int = if region.length < 0 { 0 } else { region.length };
 
     match try_lock_region(fd, backend_kind, region.start, backend_len) {
-        Ok(_)  => Ok(LockHandle.new(fd, region, kind)),
-        Err(e) => {
+        Result.Ok(_)  => Result.Ok(LockHandle.new(fd, region, kind)),
+        Result.Err(e) => {
             if e.would_block() {
-                Err(Conflict(None))
+                Result.Err(Conflict(Maybe.None))
             } else {
-                Err(IoError(e))
+                Result.Err(IoError(e))
             }
         }
     }
@@ -217,14 +217,14 @@ public fn try_lock(
 /// guarded defensively for FFI-adjacent use), this is a no-op.
 public fn unlock(mut handle: LockHandle) -> Result<(), LockError> {
     if !handle.active {
-        return Ok(());
+        return Result.Ok(());
     }
     let backend_len: Int = if handle.region.length < 0 { 0 } else { handle.region.length };
     let res = unlock_region(handle.fd, handle.region.start, backend_len);
     handle.active = false;
     match res {
-        Ok(_)  => Ok(()),
-        Err(e) => Err(IoError(e)),
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(e) => Result.Err(IoError(e)),
     }
 }
 

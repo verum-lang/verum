@@ -109,11 +109,11 @@ implement DynamicTable {
     /// Evicts entries until current_size ≤ new capacity.
     public fn set_capacity(&mut self, new_cap: UInt64) -> Result<(), DynamicTableError> {
         if new_cap > self.max_capacity {
-            return Err(DynamicTableError.CapacityExceedsSettings);
+            return Result.Err(DynamicTableError.CapacityExceedsSettings);
         }
         self.capacity = new_cap;
         self.evict_to_fit(0_u64)?;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Returns true if inserting `entry_size` additional bytes would
@@ -133,14 +133,14 @@ implement DynamicTable {
         if entry.size > self.capacity {
             // RFC 9204 §3.2.2: entries larger than current capacity are
             // rejected; encoder MUST NOT emit them.
-            return Err(DynamicTableError.EntryTooLarge);
+            return Result.Err(DynamicTableError.EntryTooLarge);
         }
         self.evict_to_fit(entry.size)?;
         self.entries.push(entry.clone());
         self.current_size = self.current_size + entry.size;
         let abs = self.insert_count;
         self.insert_count = self.insert_count + 1_u64;
-        Ok(abs)
+        Result.Ok(abs)
     }
 
     /// Insert with name reference — reuse an existing entry's name;
@@ -154,13 +154,13 @@ implement DynamicTable {
     ) -> Result<UInt64, DynamicTableError> {
         let name = if is_static {
             match static_table_name(name_idx) {
-                Some(n) => n,
-                None    => return Err(DynamicTableError.InvalidNameRef),
+                Maybe.Some(n) => n,
+                Maybe.None    => return Result.Err(DynamicTableError.InvalidNameRef),
             }
         } else {
             match self.get_by_absolute(name_idx) {
-                Some(e) => e.name.clone(),
-                None    => return Err(DynamicTableError.InvalidNameRef),
+                Maybe.Some(e) => e.name.clone(),
+                Maybe.None    => return Result.Err(DynamicTableError.InvalidNameRef),
             }
         };
         self.insert(name, value)
@@ -171,8 +171,8 @@ implement DynamicTable {
     /// fresh against FIFO eviction.
     public fn duplicate(&mut self, abs_idx: UInt64) -> Result<UInt64, DynamicTableError> {
         let e = match self.get_by_absolute(abs_idx) {
-            Some(x) => x,
-            None    => return Err(DynamicTableError.InvalidNameRef),
+            Maybe.Some(x) => x,
+            Maybe.None    => return Result.Err(DynamicTableError.InvalidNameRef),
         };
         self.insert(e.name.clone(), e.value.clone())
     }
@@ -184,17 +184,17 @@ implement DynamicTable {
     public fn add_ref(&mut self, abs_idx: UInt64) -> Result<(), DynamicTableError> {
         let slot = self.absolute_to_slot(abs_idx)?;
         self.entries[slot].refs = self.entries[slot].refs + 1_u64;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Decrement ref count (field section acknowledged / cancelled).
     public fn release_ref(&mut self, abs_idx: UInt64) -> Result<(), DynamicTableError> {
         let slot = self.absolute_to_slot(abs_idx)?;
         if self.entries[slot].refs == 0_u64 {
-            return Err(DynamicTableError.RefUnderflow);
+            return Result.Err(DynamicTableError.RefUnderflow);
         }
         self.entries[slot].refs = self.entries[slot].refs - 1_u64;
-        Ok(())
+        Result.Ok(())
     }
 
     // ==================== lookups ====================
@@ -202,24 +202,24 @@ implement DynamicTable {
     public fn get_by_absolute(&self, abs_idx: UInt64) -> Maybe<DynEntry> {
         let slot = self.absolute_to_slot(abs_idx);
         match slot {
-            Ok(i) => Some(self.entries[i].clone()),
-            Err(_) => None,
+            Result.Ok(i) => Maybe.Some(self.entries[i].clone()),
+            Result.Err(_) => Maybe.None,
         }
     }
 
     /// Find the most-recently-inserted entry matching (name, value).
-    /// Returns the absolute index or None. Iterates tail-first so
+    /// Returns the absolute index or Maybe.None. Iterates tail-first so
     /// freshest matches win for better encoder efficiency.
     public fn find(&self, name: &Text, value: &Text) -> Maybe<UInt64> {
         let mut i: Int = self.entries.len() - 1;
         while i >= 0 {
             let e = &self.entries[i];
             if text_eq(&e.name, name) && text_eq(&e.value, value) {
-                return Some((i as UInt64) + self.dropped_count);
+                return Maybe.Some((i as UInt64) + self.dropped_count);
             }
             i = i - 1;
         }
-        None
+        Maybe.None
     }
 
     /// Find by name only — used for "Insert with Name Reference" or
@@ -229,11 +229,11 @@ implement DynamicTable {
         while i >= 0 {
             let e = &self.entries[i];
             if text_eq(&e.name, name) {
-                return Some((i as UInt64) + self.dropped_count);
+                return Maybe.Some((i as UInt64) + self.dropped_count);
             }
             i = i - 1;
         }
-        None
+        Maybe.None
     }
 
     // ==================== accessors ====================
@@ -248,13 +248,13 @@ implement DynamicTable {
 
     fn absolute_to_slot(&self, abs_idx: UInt64) -> Result<Int, DynamicTableError> {
         if abs_idx < self.dropped_count {
-            return Err(DynamicTableError.EntryEvicted);
+            return Result.Err(DynamicTableError.EntryEvicted);
         }
         let slot = (abs_idx - self.dropped_count) as Int;
         if slot >= self.entries.len() {
-            return Err(DynamicTableError.InvalidAbsIndex);
+            return Result.Err(DynamicTableError.InvalidAbsIndex);
         }
-        Ok(slot)
+        Result.Ok(slot)
     }
 
     /// Total size in bytes of the unreferenced (and therefore
@@ -275,18 +275,18 @@ implement DynamicTable {
     fn evict_to_fit(&mut self, incoming: UInt64) -> Result<(), DynamicTableError> {
         while self.current_size + incoming > self.capacity {
             if self.entries.len() == 0 {
-                return Err(DynamicTableError.EntryTooLarge);
+                return Result.Err(DynamicTableError.EntryTooLarge);
             }
             if self.entries[0].refs > 0_u64 {
                 // Newest in-flight reference is keeping us from
                 // evicting — fail loud per RFC 9204 §3.2.2.
-                return Err(DynamicTableError.EvictionBlocked);
+                return Result.Err(DynamicTableError.EvictionBlocked);
             }
             let head = self.entries.remove(0);
             self.current_size = self.current_size - head.size;
             self.dropped_count = self.dropped_count + 1_u64;
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -355,9 +355,9 @@ implement Eq for DynamicTableError {
 fn text_eq(a: &Text, b: &Text) -> Bool { a.as_bytes() == b.as_bytes() }
 
 fn static_table_name(idx: UInt64) -> Maybe<Text> {
-    if idx >= (STATIC_TABLE_SIZE as UInt64) { return None; }
+    if idx >= (STATIC_TABLE_SIZE as UInt64) { return Maybe.None; }
     match core.net.h3.qpack.static_table.get(idx as Int) {
-        Some(e) => Some(e.name),
-        None    => None,
+        Maybe.Some(e) => Maybe.Some(e.name),
+        Maybe.None    => Maybe.None,
     }
 }

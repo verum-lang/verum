@@ -46,31 +46,31 @@ public type Executor is {
 };
 
 implement Executor {
-    /// Get the current thread's executor, or None if not in async context.
+    /// Get the current thread's executor, or Maybe.None if not in async context.
     public fn current() -> Maybe<Executor> {
         // The executor handle is stored in TLS context slot 0
         // by the Runtime.block_on() method.
         @cfg(target_os = "linux")
         {
             match sys.linux.tls.ctx_get(0) {
-                Some(ptr) => Some(Executor { handle: ptr as Int }),
-                None => None,
+                Maybe.Some(ptr) => Maybe.Some(Executor { handle: ptr as Int }),
+                Maybe.None => Maybe.None,
             }
         }
 
         @cfg(target_os = "macos")
         {
             match sys.darwin.tls.ctx_get(0) {
-                Some(ptr) => Some(Executor { handle: ptr as Int }),
-                None => None,
+                Maybe.Some(ptr) => Maybe.Some(Executor { handle: ptr as Int }),
+                Maybe.None => Maybe.None,
             }
         }
 
         @cfg(target_os = "windows")
         {
             match sys.windows.tls.ctx_get(0) {
-                Some(ptr) => Some(Executor { handle: ptr as Int }),
-                None => None,
+                Maybe.Some(ptr) => Maybe.Some(Executor { handle: ptr as Int }),
+                Maybe.None => Maybe.None,
             }
         }
     }
@@ -120,7 +120,7 @@ public fn executor_block_on<F: Future>(future: F) -> F.Output;
 /// Synchronously poll a future once.
 ///
 
-/// Returns Some(result) if the future completed, None if it's pending.
+/// Returns Maybe.Some(result) if the future completed, Maybe.None if it's pending.
 /// Does NOT register a waker — the future won't make progress unless
 /// polled again.
 ///
@@ -133,8 +133,8 @@ public fn future_poll_sync<F: Future>(future: &mut F) -> Maybe<F.Output> {
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     match future.poll(&mut cx) {
-        Poll.Ready(val) => Some(val),
-        Poll.Pending => None,
+        Poll.Ready(val) => Maybe.Some(val),
+        Poll.Pending => Maybe.None,
     }
 }
 

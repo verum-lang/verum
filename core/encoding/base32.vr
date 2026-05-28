@@ -236,7 +236,7 @@ public fn encode(src: &[Byte]) -> List<Byte> {
 
 /// Decode a padded Base32 string (length MUST be multiple of 8).
 public fn decode(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
-    if src.len() % 8 != 0 { return Err(Base32Error.InvalidLength(src.len())); }
+    if src.len() % 8 != 0 { return Result.Err(Base32Error.InvalidLength(src.len())); }
     decode_core(src)
 }
 
@@ -253,7 +253,7 @@ public fn decode_no_pad(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
     // Valid tail lengths per block of 8 chars: 2, 4, 5, 7, 8.
     let tail = effective_len % 8;
     if tail == 1 || tail == 3 || tail == 6 {
-        return Err(Base32Error.InvalidLength(effective_len));
+        return Result.Err(Base32Error.InvalidLength(effective_len));
     }
     // Worst case: every src byte non-padding + up to 7 trailing '='.
     let mut padded: List<Byte> = List.with_capacity(src.len() + 8);
@@ -287,8 +287,8 @@ fn decode_core(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
                 pad = pad + 1;
             } else {
                 let v = decode_char(c);
-                if v < 0 { return Err(Base32Error.InvalidCharacter(c)); }
-                if pad > 0 { return Err(Base32Error.InvalidCharacter(c)); }
+                if v < 0 { return Result.Err(Base32Error.InvalidCharacter(c)); }
+                if pad > 0 { return Result.Err(Base32Error.InvalidCharacter(c)); }
                 group[k] = v;
             }
             k = k + 1;
@@ -303,7 +303,7 @@ fn decode_core(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
         // — soundness defect for any protocol that compares the
         // encoded form.
         if pad == 2 || pad == 5 || pad == 7 || pad == 8 {
-            return Err(Base32Error.InvalidLength(pad));
+            return Result.Err(Base32Error.InvalidLength(pad));
         }
         // Decode 8 5-bit groups into up to 5 bytes.
         let v0 = ((group[0] << 3) | (group[1] >> 2)) & 0xFF;
@@ -322,7 +322,7 @@ fn decode_core(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
         out.push(v4 as Byte);
         i = i + 8;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn tail_check(out: List<Byte>, group: [Int; 8], pad: Int) -> Result<List<Byte>, Base32Error> {
@@ -336,7 +336,7 @@ fn tail_check(out: List<Byte>, group: [Int; 8], pad: Int) -> Result<List<Byte>, 
         1 => (group[6] & 0x7) != 0,
         _ => false,
     };
-    if bad { Err(Base32Error.TrailingBits) } else { Ok(out) }
+    if bad { Result.Err(Base32Error.TrailingBits) } else { Result.Ok(out) }
 }
 
 // =============================================================================
@@ -368,7 +368,7 @@ public fn encode_hex(src: &[Byte]) -> List<Byte> {
 
 /// Decode a `=`-padded Base32hex string per RFC 4648 §7.
 public fn decode_hex(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
-    if src.len() % 8 != 0 { return Err(Base32Error.InvalidLength(src.len())); }
+    if src.len() % 8 != 0 { return Result.Err(Base32Error.InvalidLength(src.len())); }
     decode_core_with_alpha(src, ExtendedHex)
 }
 
@@ -383,7 +383,7 @@ public fn decode_hex_no_pad(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
     }
     let tail = effective_len % 8;
     if tail == 1 || tail == 3 || tail == 6 {
-        return Err(Base32Error.InvalidLength(effective_len));
+        return Result.Err(Base32Error.InvalidLength(effective_len));
     }
     // Worst case: every src byte non-padding + up to 7 trailing '='.
     let mut padded: List<Byte> = List.with_capacity(src.len() + 8);
@@ -472,8 +472,8 @@ fn decode_core_with_alpha(src: &[Byte], alpha: Base32Alphabet) -> Result<List<By
                 pad = pad + 1;
             } else {
                 let v = decode_char_for(alpha, c);
-                if v < 0 { return Err(Base32Error.InvalidCharacter(c)); }
-                if pad > 0 { return Err(Base32Error.InvalidCharacter(c)); }
+                if v < 0 { return Result.Err(Base32Error.InvalidCharacter(c)); }
+                if pad > 0 { return Result.Err(Base32Error.InvalidCharacter(c)); }
                 group[k] = v;
             }
             k = k + 1;
@@ -482,7 +482,7 @@ fn decode_core_with_alpha(src: &[Byte], alpha: Base32Alphabet) -> Result<List<By
         // both restrict pad counts to {0, 1, 3, 4, 6}; the §7 hex
         // alphabet inherits §3.5's trailing-bits clause unchanged.
         if pad == 2 || pad == 5 || pad == 7 || pad == 8 {
-            return Err(Base32Error.InvalidLength(pad));
+            return Result.Err(Base32Error.InvalidLength(pad));
         }
         let v0 = ((group[0] << 3) | (group[1] >> 2)) & 0xFF;
         out.push(v0 as Byte);
@@ -500,5 +500,5 @@ fn decode_core_with_alpha(src: &[Byte], alpha: Base32Alphabet) -> Result<List<By
         out.push(v4 as Byte);
         i = i + 8;
     }
-    Ok(out)
+    Result.Ok(out)
 }

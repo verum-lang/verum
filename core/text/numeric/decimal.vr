@@ -52,7 +52,7 @@
 module core.text.numeric.decimal;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount base.ordering.{Ordering, Less, Equal, Greater};
 mount collections.List;
 
@@ -165,9 +165,9 @@ implement Decimal {
     /// in-range (Int = i64).
     public fn from_parts(coefficient: Int, scale: Int) -> Result<Decimal, DecimalError> {
         if scale < 0 || scale > MAX_SCALE {
-            return Err(DecimalError.ScaleOutOfRange { scale: scale });
+            return Result.Err(DecimalError.ScaleOutOfRange { scale: scale });
         }
-        Ok(Decimal { coefficient: coefficient, scale: scale })
+        Result.Ok(Decimal { coefficient: coefficient, scale: scale })
     }
 
     // -------------------------------------------------------------------------
@@ -201,28 +201,28 @@ implement Decimal {
     /// the final addition exceeds i64 range.
     public fn add(&self, other: &Decimal) -> Result<Decimal, DecimalError> {
         let (a_coef, b_coef, scale) = match align_scales(self, other) {
-            Ok(t)  => t,
-            Err(e) => return Err(e),
+            Result.Ok(t)  => t,
+            Result.Err(e) => return Result.Err(e),
         };
         let sum = match checked_add(a_coef, b_coef) {
-            Some(v) => v,
-            None    => return Err(DecimalError.Overflow { op: "add".clone() }),
+            Maybe.Some(v) => v,
+            Maybe.None    => return Result.Err(DecimalError.Overflow { op: "add".clone() }),
         };
-        Ok(Decimal { coefficient: sum, scale: scale })
+        Result.Ok(Decimal { coefficient: sum, scale: scale })
     }
 
     /// Difference `self - other`.  Same scale-alignment + overflow
     /// discipline as `add`.
     public fn sub(&self, other: &Decimal) -> Result<Decimal, DecimalError> {
         let (a_coef, b_coef, scale) = match align_scales(self, other) {
-            Ok(t)  => t,
-            Err(e) => return Err(e),
+            Result.Ok(t)  => t,
+            Result.Err(e) => return Result.Err(e),
         };
         let diff = match checked_sub(a_coef, b_coef) {
-            Some(v) => v,
-            None    => return Err(DecimalError.Overflow { op: "sub".clone() }),
+            Maybe.Some(v) => v,
+            Maybe.None    => return Result.Err(DecimalError.Overflow { op: "sub".clone() }),
         };
-        Ok(Decimal { coefficient: diff, scale: scale })
+        Result.Ok(Decimal { coefficient: diff, scale: scale })
     }
 
     /// Product `self * other`.  Coefficient is the product of
@@ -233,13 +233,13 @@ implement Decimal {
     public fn mul(&self, other: &Decimal) -> Result<Decimal, DecimalError> {
         let scale = self.scale + other.scale;
         if scale > MAX_SCALE {
-            return Err(DecimalError.ScaleOutOfRange { scale: scale });
+            return Result.Err(DecimalError.ScaleOutOfRange { scale: scale });
         }
         let prod = match checked_mul(self.coefficient, other.coefficient) {
-            Some(v) => v,
-            None    => return Err(DecimalError.Overflow { op: "mul".clone() }),
+            Maybe.Some(v) => v,
+            Maybe.None    => return Result.Err(DecimalError.Overflow { op: "mul".clone() }),
         };
-        Ok(Decimal { coefficient: prod, scale: scale })
+        Result.Ok(Decimal { coefficient: prod, scale: scale })
     }
 
     /// Quotient `self / other` with caller-specified output scale and
@@ -279,9 +279,9 @@ implement Decimal {
         precision: Int,
         mode: RoundingMode,
     ) -> Result<Decimal, DecimalError> {
-        if other.coefficient == 0 { return Err(DecimalError.DivByZero); }
+        if other.coefficient == 0 { return Result.Err(DecimalError.DivByZero); }
         if precision < 0 || precision > MAX_SCALE {
-            return Err(DecimalError.ScaleOutOfRange { scale: precision });
+            return Result.Err(DecimalError.ScaleOutOfRange { scale: precision });
         }
 
         // Align scales — after alignment, both operands share the
@@ -289,8 +289,8 @@ implement Decimal {
         // division.  Aligned dividend / aligned divisor IS the
         // exact rational value (modulo precision/rounding).
         let (dividend, divisor, _common_scale) = match align_scales(self, other) {
-            Ok(t)  => t,
-            Err(e) => return Err(e),
+            Result.Ok(t)  => t,
+            Result.Err(e) => return Result.Err(e),
         };
 
         // Sign result.  XOR of operand signs.
@@ -309,18 +309,18 @@ implement Decimal {
         let total_steps = precision + 1;
         while step < total_steps {
             let rem10 = match checked_mul(rem, 10) {
-                Some(v) => v,
-                None    => return Err(DecimalError.Overflow { op: "div".clone() }),
+                Maybe.Some(v) => v,
+                Maybe.None    => return Result.Err(DecimalError.Overflow { op: "div".clone() }),
             };
             let digit = rem10 / abs_v;
             rem = rem10 - digit * abs_v;
             let q10 = match checked_mul(quot, 10) {
-                Some(v) => v,
-                None    => return Err(DecimalError.Overflow { op: "div".clone() }),
+                Maybe.Some(v) => v,
+                Maybe.None    => return Result.Err(DecimalError.Overflow { op: "div".clone() }),
             };
             quot = match checked_add(q10, digit) {
-                Some(v) => v,
-                None    => return Err(DecimalError.Overflow { op: "div".clone() }),
+                Maybe.Some(v) => v,
+                Maybe.None    => return Result.Err(DecimalError.Overflow { op: "div".clone() }),
             };
             step = step + 1;
         }
@@ -378,13 +378,13 @@ implement Decimal {
 
         if bump_up {
             kept = match checked_add(kept, 1) {
-                Some(v) => v,
-                None    => return Err(DecimalError.Overflow { op: "div".clone() }),
+                Maybe.Some(v) => v,
+                Maybe.None    => return Result.Err(DecimalError.Overflow { op: "div".clone() }),
             };
         }
 
         let signed = if neg { -kept } else { kept };
-        Ok(Decimal { coefficient: signed, scale: precision })
+        Result.Ok(Decimal { coefficient: signed, scale: precision })
     }
 
     /// Convenience: divide with default banker's rounding (HalfEven).
@@ -425,10 +425,10 @@ implement Decimal {
         // would have been multiplied is the larger-magnitude side
         // (positive case) or the smaller-magnitude side (negative).
         match align_scales(self, other) {
-            Ok((a, b, _)) => {
+            Result.Ok((a, b, _)) => {
                 if a < b { Less } else if a > b { Greater } else { Equal }
             }
-            Err(_) => {
+            Result.Err(_) => {
                 // Alignment overflow: fall back to comparing
                 // magnitudes after string-render (slow path, but
                 // correct for the rare case where two near-i64-MAX
@@ -548,7 +548,7 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
         }
     }
 
-    if i >= n { return Err(DecimalError.ParseEmpty); }
+    if i >= n { return Result.Err(DecimalError.ParseEmpty); }
 
     // Optional sign.
     let mut neg = false;
@@ -561,7 +561,7 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
     }
 
     if i >= n {
-        return Err(DecimalError.ParseInvalidShape {
+        return Result.Err(DecimalError.ParseInvalidShape {
             reason: "lone sign with no digits".clone(),
         });
     }
@@ -580,12 +580,12 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
             // bound check: coef * 10 + d > i64::MAX ⇒ overflow.
             let d = b - ('0' as Int);
             let c10 = match checked_mul(coef, 10) {
-                Some(v) => v,
-                None    => return Err(DecimalError.Overflow { op: "parse".clone() }),
+                Maybe.Some(v) => v,
+                Maybe.None    => return Result.Err(DecimalError.Overflow { op: "parse".clone() }),
             };
             let cnext = match checked_add(c10, d) {
-                Some(v) => v,
-                None    => return Err(DecimalError.Overflow { op: "parse".clone() }),
+                Maybe.Some(v) => v,
+                Maybe.None    => return Result.Err(DecimalError.Overflow { op: "parse".clone() }),
             };
             coef = cnext;
             digit_count = digit_count + 1;
@@ -594,7 +594,7 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
             i = i + 1;
         } else if b == ('.' as Int) {
             if saw_dot {
-                return Err(DecimalError.ParseInvalidShape {
+                return Result.Err(DecimalError.ParseInvalidShape {
                     reason: "multiple decimal points".clone(),
                 });
             }
@@ -602,7 +602,7 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
             i = i + 1;
         } else if b == ('e' as Int) || b == ('E' as Int) {
             // V0 rejects scientific notation explicitly.
-            return Err(DecimalError.ParseInvalidShape {
+            return Result.Err(DecimalError.ParseInvalidShape {
                 reason: "scientific notation (e/E) not supported in V0".clone(),
             });
         } else if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
@@ -614,30 +614,30 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
                 if bb == 0x20 || bb == 0x09 || bb == 0x0A || bb == 0x0D {
                     i = i + 1;
                 } else {
-                    return Err(DecimalError.ParseInvalidChar {
+                    return Result.Err(DecimalError.ParseInvalidChar {
                         byte_offset: i, byte: bb,
                     });
                 }
             }
             break;
         } else {
-            return Err(DecimalError.ParseInvalidChar {
+            return Result.Err(DecimalError.ParseInvalidChar {
                 byte_offset: i, byte: b,
             });
         }
     }
 
     if !saw_digit {
-        return Err(DecimalError.ParseInvalidShape {
+        return Result.Err(DecimalError.ParseInvalidShape {
             reason: "no digits".clone(),
         });
     }
     if frac_count > MAX_SCALE {
-        return Err(DecimalError.ScaleOutOfRange { scale: frac_count });
+        return Result.Err(DecimalError.ScaleOutOfRange { scale: frac_count });
     }
 
     let signed = if neg { -coef } else { coef };
-    Ok(Decimal { coefficient: signed, scale: frac_count })
+    Result.Ok(Decimal { coefficient: signed, scale: frac_count })
 }
 
 // =============================================================================
@@ -660,24 +660,24 @@ fn abs_int(x: Int) -> Int {
 
 fn align_scales(a: &Decimal, b: &Decimal) -> Result<(Int, Int, Int), DecimalError> {
     if a.scale == b.scale {
-        return Ok((a.coefficient, b.coefficient, a.scale));
+        return Result.Ok((a.coefficient, b.coefficient, a.scale));
     }
     if a.scale < b.scale {
         let diff = b.scale - a.scale;
         let mult = pow10(diff);
         let scaled = match checked_mul(a.coefficient, mult) {
-            Some(v) => v,
-            None    => return Err(DecimalError.Overflow { op: "align".clone() }),
+            Maybe.Some(v) => v,
+            Maybe.None    => return Result.Err(DecimalError.Overflow { op: "align".clone() }),
         };
-        Ok((scaled, b.coefficient, b.scale))
+        Result.Ok((scaled, b.coefficient, b.scale))
     } else {
         let diff = a.scale - b.scale;
         let mult = pow10(diff);
         let scaled = match checked_mul(b.coefficient, mult) {
-            Some(v) => v,
-            None    => return Err(DecimalError.Overflow { op: "align".clone() }),
+            Maybe.Some(v) => v,
+            Maybe.None    => return Result.Err(DecimalError.Overflow { op: "align".clone() }),
         };
-        Ok((a.coefficient, scaled, a.scale))
+        Result.Ok((a.coefficient, scaled, a.scale))
     }
 }
 
@@ -687,7 +687,7 @@ fn pow10(k: Int) -> Int {
     POW10[k]
 }
 
-/// Checked i64 add.  Returns None on overflow.
+/// Checked i64 add.  Returns Maybe.None on overflow.
 ///
 /// Verum lacks built-in checked_add primitives at the language level
 /// (V0 follow-up); detect overflow via the standard sign-based
@@ -696,51 +696,51 @@ fn pow10(k: Int) -> Int {
 fn checked_add(a: Int, b: Int) -> Maybe<Int> {
     let r = a + b;
     if (a >= 0) == (b >= 0) && (r >= 0) != (a >= 0) {
-        None
+        Maybe.None
     } else {
-        Some(r)
+        Maybe.Some(r)
     }
 }
 
-/// Checked i64 sub.  Returns None on overflow.
+/// Checked i64 sub.  Returns Maybe.None on overflow.
 fn checked_sub(a: Int, b: Int) -> Maybe<Int> {
     let r = a - b;
     // Overflow iff sign of (a - b) differs from sign of a AND
     // signs of a and b differ.  E.g., a positive minus a negative
     // produces a positive — overflow → negative.
     if (a >= 0) != (b >= 0) && (r >= 0) != (a >= 0) {
-        None
+        Maybe.None
     } else {
-        Some(r)
+        Maybe.Some(r)
     }
 }
 
-/// Checked i64 mul.  Returns None on overflow.  Uses the absolute-
+/// Checked i64 mul.  Returns Maybe.None on overflow.  Uses the absolute-
 /// value-bound approach: |a * b| ≤ i64::MAX ⟹ |a| ≤ i64::MAX / |b|.
 fn checked_mul(a: Int, b: Int) -> Maybe<Int> {
-    if a == 0 || b == 0 { return Some(0); }
+    if a == 0 || b == 0 { return Maybe.Some(0); }
     // Special-case i64::MIN: -i64::MIN overflows.  Verum Int =
     // i64; the magic constant is 2^63 = 9223372036854775808 which
     // is one greater than i64::MAX.  Take any operand at MIN and
     // any non-{0,1,-1} other ⇒ overflow.
     let i64_min: Int = -9223372036854775807 - 1;  // i64::MIN
     if a == i64_min {
-        if b == 0 { return Some(0); }
-        if b == 1 { return Some(a); }
-        return None;
+        if b == 0 { return Maybe.Some(0); }
+        if b == 1 { return Maybe.Some(a); }
+        return Maybe.None;
     }
     if b == i64_min {
-        if a == 0 { return Some(0); }
-        if a == 1 { return Some(b); }
-        return None;
+        if a == 0 { return Maybe.Some(0); }
+        if a == 1 { return Maybe.Some(b); }
+        return Maybe.None;
     }
     let abs_a = if a < 0 { -a } else { a };
     let abs_b = if b < 0 { -b } else { b };
     let i64_max: Int = 9223372036854775807;
     if abs_a > i64_max / abs_b {
-        None
+        Maybe.None
     } else {
-        Some(a * b)
+        Maybe.Some(a * b)
     }
 }
 

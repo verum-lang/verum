@@ -115,13 +115,13 @@ implement ShellResult {
 
     // ── Convert to error if non-zero exit ────────────────────────────────────
 
-    /// Returns `Ok(self)` if the process exited successfully, otherwise
-    /// `Err(ShellError::NonZeroExit { … })` carrying status + stderr.
+    /// Returns `Result.Ok(self)` if the process exited successfully, otherwise
+    /// `Result.Err(ShellError::NonZeroExit { … })` carrying status + stderr.
     public fn ok(self) -> Result<ShellResult, ShellError> {
         if self.status.success() {
-            Ok(self)
+            Result.Ok(self)
         } else {
-            Err(ShellError.NonZeroExit {
+            Result.Err(ShellError.NonZeroExit {
                 command: self.command.clone(),
                 status:  self.status,
                 stderr:  self.stderr(),
@@ -196,11 +196,11 @@ implement Iterator for ShellLinesIter {
 
     fn next(&mut self) -> Maybe<Text> {
         if self.pos >= self.lines.len() {
-            None
+            Maybe.None
         } else {
             let v = self.lines[self.pos].clone();
             self.pos = self.pos + 1;
-            Some(v)
+            Maybe.Some(v)
         }
     }
 }

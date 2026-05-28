@@ -163,7 +163,7 @@ implement RealUdpTransport {
         } else {
             let _ = socket.set_ip_recvtos(true);
         }
-        Ok(RealUdpTransport {
+        Result.Ok(RealUdpTransport {
             socket:     socket,
             local_addr: local,
             max_size:   1472,
@@ -187,26 +187,26 @@ implement UdpTransport for RealUdpTransport {
         let mut i: Int = 0;
         while i < 2048 { buf.push(0_u8); i = i + 1; }
         match self.socket.recv_from(buf.as_mut_slice()).await {
-            Ok((n, peer)) => {
+            Result.Ok((n, peer)) => {
                 // Trim to actual n bytes.
                 let mut data: List<Byte> = [];
                 let mut j: Int = 0;
                 while j < n { data.push(buf[j]); j = j + 1; }
                 // ECN lookup requires IP_TOS cmsg; default NotEct
                 // when Gap 6 extension isn't wired.
-                Ok(InboundDatagram {
+                Result.Ok(InboundDatagram {
                     data: data,
                     peer_addr: peer,
                     ecn: EcnCodepoint.NotEct,
                 })
             },
-            Err(_) => Err(TransportError.Io(Text.from_str("recv_from"))),
+            Result.Err(_) => Result.Err(TransportError.Io(Text.from_str("recv_from"))),
         }
     }
 
     async fn send(&self, data: &[Byte], to: &SocketAddr, ecn: EcnCodepoint) -> Result<(), TransportError> {
         if data.len() > self.max_size {
-            return Err(TransportError.TooLarge(data.len()));
+            return Result.Err(TransportError.TooLarge(data.len()));
         }
         // RFC 3168 — stamp the ECN codepoint into the IPv4 TOS byte
         // (or IPv6 Traffic Class for v6 sockets). Setsockopt here is
@@ -232,7 +232,7 @@ implement UdpTransport for RealUdpTransport {
 
     async fn close(&self) -> Result<(), TransportError> {
         let _ = self.socket.close();
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -346,7 +346,7 @@ implement UdpTransport for SimUdpTransport {
     async fn recv(&self) -> Result<InboundDatagram, TransportError> {
         loop {
             let mut net = self.network.lock().unwrap_or_else(|p| p.into_inner());
-            if net.closed { return Err(TransportError.Closed); }
+            if net.closed { return Result.Err(TransportError.Closed); }
             // Scan inflight for first datagram addressed to us.
             let mut idx: Int = 0;
             while idx < net.inflight.len() {
@@ -356,7 +356,7 @@ implement UdpTransport for SimUdpTransport {
             }
             if idx < net.inflight.len() {
                 let (from, _, data, ecn) = net.inflight.remove(idx);
-                return Ok(InboundDatagram {
+                return Result.Ok(InboundDatagram {
                     data:      data,
                     peer_addr: from,
                     ecn:       ecn,
@@ -370,23 +370,23 @@ implement UdpTransport for SimUdpTransport {
 
     async fn send(&self, data: &[Byte], to: &SocketAddr, ecn: EcnCodepoint) -> Result<(), TransportError> {
         let mut net = self.network.lock().unwrap_or_else(|p| p.into_inner());
-        if net.closed { return Err(TransportError.Closed); }
+        if net.closed { return Result.Err(TransportError.Closed); }
         net.sent_count = net.sent_count + 1_u64;
 
-        // Loss gate: consult deterministic PRNG. Returning Ok(()) on a
+        // Loss gate: consult deterministic PRNG. Returning Result.Ok(()) on a
         // drop is intentional — from the sender's perspective the
         // datagram left the host, mirroring real UDP which cannot
         // observe mid-path packet loss.
         if net.should_drop() {
             net.dropped_count = net.dropped_count + 1_u64;
-            return Ok(());
+            return Result.Ok(());
         }
 
         let mut owned: List<Byte> = [];
         let mut i: Int = 0;
         while i < data.len() { owned.push(data[i]); i = i + 1; }
         net.inflight.push((self.addr.clone(), to.clone(), owned, ecn));
-        Ok(())
+        Result.Ok(())
     }
 
     fn local_addr(&self) -> SocketAddr { self.addr.clone() }
@@ -395,7 +395,7 @@ implement UdpTransport for SimUdpTransport {
     async fn close(&self) -> Result<(), TransportError> {
         let mut net = self.network.lock().unwrap_or_else(|p| p.into_inner());
         net.closed = true;
-        Ok(())
+        Result.Ok(())
     }
 }
 

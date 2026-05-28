@@ -6,7 +6,7 @@ mount core.base.coercion.{IntCoercible};
 // common.vr - Common low-level system types
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None
+// Dependencies: Maybe.None
 // =============================================================================
 //
 
@@ -428,7 +428,7 @@ implement SysMemoryOrdering {
 /// # Returns
 ///
 
-/// Pointer to allocated memory, or None on failure.
+/// Pointer to allocated memory, or Maybe.None on failure.
 ///
 
 /// # Safety
@@ -437,7 +437,7 @@ implement SysMemoryOrdering {
 /// The returned memory is uninitialized. Caller must initialize before use.
 public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
     if size <= 0 {
-        return None;
+        return Maybe.None;
     }
 
     // Round up size to include alignment padding
@@ -461,12 +461,12 @@ public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
         );
 
         if ptr as Int == -1 {
-            return None;
+            return Maybe.None;
         }
 
         // Align pointer if needed
         let aligned_ptr = align_pointer(ptr, alignment);
-        Some(aligned_ptr)
+        Maybe.Some(aligned_ptr)
     }
 
     @cfg(target_os = "macos")
@@ -487,9 +487,9 @@ public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
         match result {
             Result.Ok(ptr) => {
                 let aligned_ptr = align_pointer(ptr, alignment);
-                Some(aligned_ptr)
+                Maybe.Some(aligned_ptr)
             }
-            Result.Err(_) => None,
+            Result.Err(_) => Maybe.None,
         }
     }
 
@@ -503,11 +503,11 @@ public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
         );
 
         if ptr as Int == 0 {
-            return None;
+            return Maybe.None;
         }
 
         let aligned_ptr = align_pointer(ptr, alignment);
-        Some(aligned_ptr)
+        Maybe.Some(aligned_ptr)
     }
 }
 
@@ -621,8 +621,8 @@ public fn get_thread_id() -> UInt64 {
 //  come with the full PosixVfs/Win32Vfs split in Phase 1).
 //
 
-// Partial reads at EOF return `Ok(n)` with `n < buf.len()`. Partial
-// writes return `Ok(n)` and must be looped by the caller if
+// Partial reads at EOF return `Result.Ok(n)` with `n < buf.len()`. Partial
+// writes return `Result.Ok(n)` and must be looped by the caller if
 // all-or-nothing semantics are required.
 // =============================================================================
 
@@ -637,7 +637,7 @@ public fn pread_raw(fd: FileDesc, buf: &unsafe Byte, count: Int, offset: Int) ->
     @cfg(target_os = "macos")
     { return super.darwin.libsystem.safe_pread_raw(fd, buf, count, offset); }
 
-    Err(OSError { code: -1, message: "pread_raw: unsupported platform".clone() })
+    Result.Err(OSError { code: -1, message: "pread_raw: unsupported platform".clone() })
 }
 
 /// Cross-platform `pread(2)` — read into `buf` from `fd` at `offset`.
@@ -671,9 +671,9 @@ public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSEr
         // hazard for non-canonical BOOL values.
         if ok == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
-            return Err(OSError { code: err, message: "ReadFile failed" });
+            return Result.Err(OSError { code: err, message: "ReadFile failed" });
         }
-        return Ok(bytes_read as Int);
+        return Result.Ok(bytes_read as Int);
     }
 }
 
@@ -702,9 +702,9 @@ public fn pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError
         // Win32 BOOL: 0 = FALSE. T0.4.5 — see ReadFile site above.
         if ok == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
-            return Err(OSError { code: err, message: "WriteFile failed" });
+            return Result.Err(OSError { code: err, message: "WriteFile failed" });
         }
-        return Ok(bytes_written as Int);
+        return Result.Ok(bytes_written as Int);
     }
 }
 
@@ -749,9 +749,9 @@ public fn full_fsync(fd: FileDesc) -> Result<(), OSError> {
         // Win32 BOOL: 0 = FALSE. T0.4.5 — see ReadFile site above.
         if ok == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
-            return Err(OSError { code: err, message: "FlushFileBuffers failed" });
+            return Result.Err(OSError { code: err, message: "FlushFileBuffers failed" });
         }
-        return Ok(());
+        return Result.Ok(());
     }
 }
 
@@ -794,15 +794,15 @@ public fn data_only_fsync(fd: FileDesc) -> Result<(), OSError> {
         };
         if ok == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
-            return Err(OSError { code: err, message: "FlushFileBuffers failed" });
+            return Result.Err(OSError { code: err, message: "FlushFileBuffers failed" });
         }
-        return Ok(());
+        return Result.Ok(());
     }
 }
 
 /// `fsync(dirfd)` on POSIX — opens the directory read-only, syncs, closes.
 /// Required to make `rename` / `creat` / `unlink` on the contained files
-/// survive a power cut. A no-op return of `Ok(())` on Windows because
+/// survive a power cut. A no-op return of `Result.Ok(())` on Windows because
 /// NTFS journals directory updates synchronously in the FS layer and
 /// has no analogous "open + sync dir" primitive.
 public fn sync_directory(path: &[Byte]) -> Result<(), OSError> {
@@ -823,7 +823,7 @@ public fn sync_directory(path: &[Byte]) -> Result<(), OSError> {
     }
 
     @cfg(target_os = "windows")
-    { return Ok(()); }
+    { return Result.Ok(()); }
 }
 
 // =============================================================================
@@ -902,7 +902,7 @@ fn lock_kind_to_ltype(k: FcntlLockKind) -> Int16 {
 ///
 
 /// `start` / `len` are absolute byte offsets; `len == 0` means "to EOF".
-/// Returns `Err(OSError { code: EAGAIN / EWOULDBLOCK, … })` on conflict
+/// Returns `Result.Err(OSError { code: EAGAIN / EWOULDBLOCK, … })` on conflict
 /// so callers can poll or wait; returns `Err` on other failures.
 ///
 
@@ -930,7 +930,7 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
         // F_OFD_SETLK = 37 on Linux; the third arg is `&Flock`.
         let ptr = &fl as Int;
         let _ = super.linux.syscall.fcntl(fd, 37 /* F_OFD_SETLK */, ptr)?;
-        return Ok(());
+        return Result.Ok(());
     }
 
     @cfg(target_os = "macos")
@@ -938,7 +938,7 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
         // F_SETLK = 8 on Darwin (see libsystem.vr constants).
         let ptr = &fl as Int;
         let _ = super.darwin.libsystem.safe_fcntl(fd, 8 /* F_SETLK */, ptr)?;
-        return Ok(());
+        return Result.Ok(());
     }
 
     @cfg(target_os = "windows")
@@ -965,9 +965,9 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
                 };
                 if ok == 0 {
                     let err = super.windows.kernel32.GetLastError() as Int;
-                    return Err(OSError { code: err, message: "UnlockFileEx failed" });
+                    return Result.Err(OSError { code: err, message: "UnlockFileEx failed" });
                 }
-                return Ok(());
+                return Result.Ok(());
             }
             _ => {
                 let mut flags: UInt32 =
@@ -991,9 +991,9 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
                 };
                 if ok == 0 {
                     let err = super.windows.kernel32.GetLastError() as Int;
-                    return Err(OSError { code: err, message: "LockFileEx failed" });
+                    return Result.Err(OSError { code: err, message: "LockFileEx failed" });
                 }
-                return Ok(());
+                return Result.Ok(());
             }
         }
     }
@@ -1017,8 +1017,8 @@ public fn unlock_region(fd: FileDesc, start: Int, len: Int) -> Result<(), OSErro
 // `truncate` — `ftruncate`. Required by VACUUM, DELETE-mode journal
 //  cleanup, and WAL TRUNCATE checkpoints.
 // `access` — `faccessat(AT_FDCWD)` (Linux) / `access(2)` (Darwin) /
-//  `GetFileAttributesW` probe (Windows). Returns Ok(true)
-//  on success, Ok(false) for EACCES/ENOENT/ENOTDIR/EROFS,
+//  `GetFileAttributesW` probe (Windows). Returns Result.Ok(true)
+//  on success, Result.Ok(false) for EACCES/ENOENT/ENOTDIR/EROFS,
 //  Err for actual errors. The "missing == false, not an
 //  error" convention is what every higher-level VFS
 //  wants (SQLite's xAccess, Go's os.Stat probe, etc.).
@@ -1048,7 +1048,7 @@ public fn file_size(fd: FileDesc) -> Result<Int, OSError> {
             _unused: [0 as Int64; 3],
         };
         super.linux.syscall.fstat(fd, &mut st)?;
-        return Ok(st.st_size as Int);
+        return Result.Ok(st.st_size as Int);
     }
 
     @cfg(target_os = "macos")
@@ -1065,7 +1065,7 @@ public fn file_size(fd: FileDesc) -> Result<Int, OSError> {
             st_flags: 0 as UInt32, st_gen: 0 as UInt32,
         };
         super.darwin.libsystem.safe_fstat(fd, &mut st)?;
-        return Ok(st.st_size as Int);
+        return Result.Ok(st.st_size as Int);
     }
 
     @cfg(target_os = "windows")
@@ -1080,9 +1080,9 @@ public fn file_size(fd: FileDesc) -> Result<Int, OSError> {
         };
         if ok == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
-            return Err(OSError { code: err, message: "GetFileSizeEx failed" });
+            return Result.Err(OSError { code: err, message: "GetFileSizeEx failed" });
         }
-        return Ok(size_out as Int);
+        return Result.Ok(size_out as Int);
     }
 }
 
@@ -1090,7 +1090,7 @@ public fn file_size(fd: FileDesc) -> Result<Int, OSError> {
 /// pages if length > current size, drops the tail otherwise.
 public fn truncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
     if length < 0 {
-        return Err(OSError.new(22, "truncate: length must be non-negative"));
+        return Result.Err(OSError.new(22, "truncate: length must be non-negative"));
     }
 
     @cfg(target_os = "linux")
@@ -1114,7 +1114,7 @@ public fn truncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
         };
         if ok_seek == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
-            return Err(OSError { code: err, message: "SetFilePointerEx failed" });
+            return Result.Err(OSError { code: err, message: "SetFilePointerEx failed" });
         }
         let ok_eof = unsafe {
             super.windows.kernel32.SetEndOfFile(
@@ -1123,9 +1123,9 @@ public fn truncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
         };
         if ok_eof == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
-            return Err(OSError { code: err, message: "SetEndOfFile failed" });
+            return Result.Err(OSError { code: err, message: "SetEndOfFile failed" });
         }
-        return Ok(());
+        return Result.Ok(());
     }
 }
 
@@ -1133,9 +1133,9 @@ public fn truncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
 ///
 
 /// `mode` is a bitwise-OR of the `ACCESS_*` constants. Returns
-/// `Ok(true)` if the kernel grants the access, `Ok(false)` for the
+/// `Result.Ok(true)` if the kernel grants the access, `Result.Ok(false)` for the
 /// "no access" / "not present" / "read-only filesystem" errno class,
-/// `Err(...)` for genuine I/O errors (EIO, EFAULT, ENAMETOOLONG, ELOOP).
+/// `Result.Err(...)` for genuine I/O errors (EIO, EFAULT, ENAMETOOLONG, ELOOP).
 public fn access(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
     @cfg(target_os = "linux")
     { return super.linux.syscall.faccessat(path, mode); }
@@ -1165,17 +1165,17 @@ public fn access(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
             let err = super.windows.kernel32.GetLastError() as Int;
             // ERROR_FILE_NOT_FOUND=2, ERROR_PATH_NOT_FOUND=3, ERROR_ACCESS_DENIED=5.
             if err == 2 || err == 3 || err == 5 {
-                return Ok(false);
+                return Result.Ok(false);
             }
-            return Err(OSError { code: err, message: "GetFileAttributesW failed" });
+            return Result.Err(OSError { code: err, message: "GetFileAttributesW failed" });
         }
         if (mode & ACCESS_W_OK) != 0 {
             // FILE_ATTRIBUTE_READONLY = 0x1
             if (attrs & 0x1) != 0 {
-                return Ok(false);
+                return Result.Ok(false);
             }
         }
-        return Ok(true);
+        return Result.Ok(true);
     }
 }
 
@@ -1205,7 +1205,7 @@ public fn access(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
 /// `Err` only on real errors; partial fills are looped internally.
 public fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
     if buf.len() == 0 {
-        return Ok(());
+        return Result.Ok(());
     }
 
     @cfg(target_os = "linux")
@@ -1214,20 +1214,20 @@ public fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
         while filled < buf.len() {
             let tail: &mut [Byte] = &mut buf[filled..];
             match super.linux.syscall.getrandom(tail, 0) {
-                Ok(n) => {
+                Result.Ok(n) => {
                     if n <= 0 {
-                        return Err(OSError.new(5, "getrandom returned 0 bytes"));
+                        return Result.Err(OSError.new(5, "getrandom returned 0 bytes"));
                     }
                     filled = filled + n;
                 }
-                Err(e) => {
+                Result.Err(e) => {
                     // EINTR (4) — interrupted by signal, retry.
                     if e.code == 4 { continue; }
-                    return Err(e);
+                    return Result.Err(e);
                 }
             }
         }
-        return Ok(());
+        return Result.Ok(());
     }
 
     @cfg(target_os = "macos")
@@ -1242,7 +1242,7 @@ public fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
             super.darwin.libsystem.safe_getentropy(raw, chunk)?;
             filled = filled + chunk;
         }
-        return Ok(());
+        return Result.Ok(());
     }
 
     @cfg(target_os = "windows")
@@ -1257,9 +1257,9 @@ public fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
             )
         };
         if status != 0 {
-            return Err(OSError { code: status as Int, message: "BCryptGenRandom failed" });
+            return Result.Err(OSError { code: status as Int, message: "BCryptGenRandom failed" });
         }
-        return Ok(());
+        return Result.Ok(());
     }
 }
 
@@ -1310,16 +1310,16 @@ implement ContextSlots {
     }
 
     /// Get a value from a slot.
-    /// Returns None if slot is not active.
+    /// Returns Maybe.None if slot is not active.
     @inline
     public fn get<T>(&self, slot: Int) -> Maybe<&T> {
         if slot < 0 || slot >= CONTEXT_SLOT_COUNT {
-            return None;
+            return Maybe.None;
         }
         let word = (slot / 64) as Int;
         let bit = (slot % 64) as UInt64;
         if (self.active[word] & (1_u64 << bit)) == 0_u64 {
-            return None;
+            return Maybe.None;
         }
         ctx_get(slot as UInt8).map(|ptr| unsafe { &*(ptr as *const T) })
     }
@@ -1426,7 +1426,7 @@ implement Eq for SysContextError {
 /// Get a value from a context slot.
 ///
 
-/// Returns None if the slot is not set or TLS is not initialized.
+/// Returns Maybe.None if the slot is not set or TLS is not initialized.
 /// This is the hot path - optimized for ~2ns access.
 ///
 
@@ -1440,7 +1440,7 @@ implement Eq for SysContextError {
 ///
 
 /// ```verum
-/// if let Some(db) = ctx_get(SLOT_DATABASE) {
+/// if let Maybe.Some(db) = ctx_get(SLOT_DATABASE) {
 ///  let conn = db as &DatabaseConnection;
 ///  // use connection...
 /// }
@@ -1541,7 +1541,7 @@ public fn ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
         let current = super.linux.tls.get_context_slots();
         let new_frame = super.linux.tls.ctx_push(current);
         super.linux.tls.set_context_slots(&new_frame);
-        Ok(current as &unsafe Byte)
+        Result.Ok(current as &unsafe Byte)
     }
 
     @cfg(target_os = "macos")
@@ -1555,7 +1555,7 @@ public fn ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
         let current = super.windows.tls.get_context_slots();
         let new_frame = super.windows.tls.ctx_push(current);
         super.windows.tls.set_context_slots(&new_frame);
-        Ok(current as &unsafe Byte)
+        Result.Ok(current as &unsafe Byte)
     }
 
     @cfg(runtime = "embedded")
@@ -1603,9 +1603,9 @@ module embedded_context {
             let word = slot / 64;
             let bit = slot % 64;
             if (EMBEDDED_CONTEXT.active[word] & (1 << bit)) != 0 {
-                Some(EMBEDDED_CONTEXT.slots[slot])
+                Maybe.Some(EMBEDDED_CONTEXT.slots[slot])
             } else {
-                None
+                Maybe.None
             }
         }
     }
@@ -1631,12 +1631,12 @@ module embedded_context {
     public fn embedded_ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
         unsafe {
             if EMBEDDED_CONTEXT.stack_depth >= CONTEXT_STACK_DEPTH {
-                return Err(SysContextError.StackOverflow { depth: EMBEDDED_CONTEXT.stack_depth });
+                return Result.Err(SysContextError.StackOverflow { depth: EMBEDDED_CONTEXT.stack_depth });
             }
             // Save current slots to stack
             EMBEDDED_CONTEXT.stack[EMBEDDED_CONTEXT.stack_depth] = EMBEDDED_CONTEXT.slots;
             EMBEDDED_CONTEXT.stack_depth += 1;
-            Ok(0 as &unsafe Byte)  // No actual pointer for embedded
+            Result.Ok(0 as &unsafe Byte)  // No actual pointer for embedded
         }
     }
 
@@ -1682,27 +1682,27 @@ public fn is_runtime_initialized() -> Bool {
 /// # Returns
 ///
 
-/// * `Ok(())` - Runtime initialized successfully
-/// * `Err(OSError)` - Initialization failed (TLS setup error)
+/// * `Result.Ok(())` - Runtime initialized successfully
+/// * `Result.Err(OSError)` - Initialization failed (TLS setup error)
 public fn init_runtime() -> Result<(), OSError> {
     @cfg(target_os = "linux")
     {
         match sys.linux.tls.init_main_thread_tls() {
-            Ok(_) => return Ok(()),
-            Err(e) => return Err(OSError.new(-1, f"TLS init failed: {e}")),
+            Result.Ok(_) => return Result.Ok(()),
+            Result.Err(e) => return Result.Err(OSError.new(-1, f"TLS init failed: {e}")),
         }
     }
 
     @cfg(target_os = "macos")
     {
         match sys.darwin.tls.init_main_thread_tls() {
-            Ok(_) => return Ok(()),
-            Err(e) => return Err(OSError.new(-1, f"TLS init failed: {e}")),
+            Result.Ok(_) => return Result.Ok(()),
+            Result.Err(e) => return Result.Err(OSError.new(-1, f"TLS init failed: {e}")),
         }
     }
 
     // Fallback for other platforms
-    Ok(())
+    Result.Ok(())
 }
 
 /// Clean up the V-LLSI runtime for the current thread.
@@ -1788,18 +1788,18 @@ public fn get_environ() -> &&Byte {
 /// Get a command line argument by index.
 ///
 
-/// Returns None if index is out of bounds.
+/// Returns Maybe.None if index is out of bounds.
 public fn get_arg(index: Int) -> Maybe<Text> {
     let argc = get_argc();
     if index < 0 || index >= argc {
-        return None;
+        return Maybe.None;
     }
 
     unsafe {
         let argv = get_argv();
         let arg_ptr = *argv.offset(index);
         if arg_ptr.is_null() {
-            return None;
+            return Maybe.None;
         }
 
         // Find length of null-terminated string
@@ -1808,14 +1808,14 @@ public fn get_arg(index: Int) -> Maybe<Text> {
             len = len + 1;
         }
         let arg_bytes = core.slice.from_raw_parts(arg_ptr as &Byte, len);
-        Some(Text.from_utf8_lossy(arg_bytes))
+        Maybe.Some(Text.from_utf8_lossy(arg_bytes))
     }
 }
 
 /// Get an environment variable by name.
 ///
 
-/// Returns None if the variable is not set.
+/// Returns Maybe.None if the variable is not set.
 public fn get_env(name: &[Byte]) -> Maybe<Text> {
     @cfg(target_os = "macos")
     {
@@ -1829,7 +1829,7 @@ public fn get_env(name: &[Byte]) -> Maybe<Text> {
         unsafe {
             let environ = get_environ();
             if environ.is_null() {
-                return None;
+                return Maybe.None;
             }
 
             let name_len = name.len();
@@ -1857,13 +1857,13 @@ public fn get_env(name: &[Byte]) -> Maybe<Text> {
                         value_len = value_len + 1;
                     }
                     let value_bytes = core.slice.from_raw_parts(value_ptr as &Byte, value_len);
-                    return Some(Text.from_utf8_lossy(value_bytes));
+                    return Maybe.Some(Text.from_utf8_lossy(value_bytes));
                 }
 
                 i = i + 1;
             }
 
-            None
+            Maybe.None
         }
     }
 }
@@ -1883,7 +1883,7 @@ public fn set_env(name: &[Byte], value: &[Byte]) -> Result<(), OSError> {
     {
         // Without libc, we cannot modify environ safely
         // This would require maintaining our own environment block
-        return Err(OSError.new(-1, "setenv not supported without libc"));
+        return Result.Err(OSError.new(-1, "setenv not supported without libc"));
     }
 
     @cfg(target_os = "windows")
@@ -1906,9 +1906,9 @@ public fn set_env(name: &[Byte], value: &[Byte]) -> Result<(), OSError> {
 
         let result = SetEnvironmentVariableA(name_buf as &unsafe Byte, value_buf as &unsafe Byte);
         if result {
-            return Ok(());
+            return Result.Ok(());
         } else {
-            return Err(OSError.new(-1, "SetEnvironmentVariableA failed"));
+            return Result.Err(OSError.new(-1, "SetEnvironmentVariableA failed"));
         }
     }
 }
@@ -1922,7 +1922,7 @@ public fn unset_env(name: &[Byte]) -> Result<(), OSError> {
 
     @cfg(target_os = "linux")
     {
-        return Err(OSError.new(-1, "unsetenv not supported without libc"));
+        return Result.Err(OSError.new(-1, "unsetenv not supported without libc"));
     }
 
     @cfg(target_os = "windows")
@@ -1938,9 +1938,9 @@ public fn unset_env(name: &[Byte]) -> Result<(), OSError> {
 
         let result = SetEnvironmentVariableA(name_buf as &unsafe Byte, 0 as &unsafe Byte);
         if result {
-            return Ok(());
+            return Result.Ok(());
         } else {
-            return Err(OSError.new(-1, "SetEnvironmentVariableA(null) failed"));
+            return Result.Err(OSError.new(-1, "SetEnvironmentVariableA(null) failed"));
         }
     }
 }

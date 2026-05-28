@@ -216,7 +216,7 @@ implement Row {
                 return self.values[i].as_ref();
             }
         }
-        None
+        Maybe.None
     }
 
     /// Get a column value by index.
@@ -224,7 +224,7 @@ implement Row {
         if index >= 0 && index < self.values.len() {
             self.values[index].as_ref()
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -300,7 +300,7 @@ implement AuthUser {
 ///  let user = Auth.current_user()
 ///  .ok_or("Not authenticated")?;
 ///  if !Auth.has_permission("admin:write") {
-///  return Err("Forbidden");
+///  return Result.Err("Forbidden");
 ///  }
 ///  // ... admin operation ...
 /// }
@@ -368,7 +368,7 @@ public context Config {
 /// ```verum
 /// fn get_user_profile(id: Int) -> Profile using [Cache, Database] {
 ///  let key = f"user:{id}:profile";
-///  if let Some(cached) = Cache.get(key) {
+///  if let Maybe.Some(cached) = Cache.get(key) {
 ///  return cached.deserialize<Profile>();
 ///  }
 ///  let profile = Database.query(...)?;
@@ -629,12 +629,12 @@ implement Display for Row {
                 f.write_str(", ")?;
             }
             let value = match self.values[i].as_ref() {
-                Some(v) => v.clone(),
-                None => "NULL",
+                Maybe.Some(v) => v.clone(),
+                Maybe.None => "NULL",
             };
             f.write_str(f"{self.columns[i]}={value}")?;
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 

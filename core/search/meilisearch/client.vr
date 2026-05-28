@@ -26,22 +26,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "MeiliSearch v1 REST client implementing SearchIndex".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.search.meilisearch.client;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int, Float};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int, Float};
 mount collections.{List, Map};
 mount encoding.json.{
     JsonValue, JsonObject,
@@ -107,18 +107,18 @@ implement<C: HttpClient> SearchIndex for MeiliClient<C> {
     }
 
     async fn upsert_documents(&self, docs: &List<Document>) -> Result<(), SearchError> {
-        if docs.is_empty() { return Ok(()); }
+        if docs.is_empty() { return Result.Ok(()); }
         let body_arr = documents_to_json_array(docs);
         let url = compose_url(&self.config, &f"/indexes/{self.config.index_uid}/documents");
         let _ = post_json(&self.http, &self.config, &url, &body_arr).await?;
-        Ok(())
+        Result.Ok(())
     }
 
     async fn delete_document(&self, id: &Text) -> Result<(), SearchError> {
         let url = compose_url(&self.config,
             &f"/indexes/{self.config.index_uid}/documents/{id}");
         let _ = delete(&self.http, &self.config, &url).await?;
-        Ok(())
+        Result.Ok(())
     }
 
     async fn delete_by_filter(&self, filter: &SearchFilter) -> Result<Int, SearchError> {
@@ -132,7 +132,7 @@ implement<C: HttpClient> SearchIndex for MeiliClient<C> {
         // /tasks/<n>. Callers that need an exact count call
         // `wait_for_task` separately.
         let _ = resp;
-        Ok(0)
+        Result.Ok(0)
     }
 
     async fn configure(&self, config: &IndexConfig) -> Result<(), SearchError> {
@@ -140,13 +140,13 @@ implement<C: HttpClient> SearchIndex for MeiliClient<C> {
         let url = compose_url(&self.config,
             &f"/indexes/{self.config.index_uid}/settings");
         let _ = patch_json(&self.http, &self.config, &url, &body).await?;
-        Ok(())
+        Result.Ok(())
     }
 
     async fn health(&self) -> Result<(), SearchError> {
         let url = compose_url(&self.config, "/health");
         let _ = get(&self.http, &self.config, &url).await?;
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -159,7 +159,7 @@ fn build_search_body(q: &SearchQuery) -> JsonValue {
     obj.insert("q".to_text(), json_string(q.q.clone()));
     obj.insert("limit".to_text(), json_number(q.limit as Float));
     obj.insert("offset".to_text(), json_number(q.offset as Float));
-    if let Some(filter) = &q.filter {
+    if let Maybe.Some(filter) = &q.filter {
         obj.insert("filter".to_text(), json_string(filter_to_text(filter)));
     }
     if !q.sort.is_empty() {
@@ -272,7 +272,7 @@ fn config_to_json(c: &IndexConfig) -> JsonValue {
         }
         obj.insert("synonyms".to_text(), json_object(syn_obj));
     }
-    if let Some(d) = &c.distinct_attribute {
+    if let Maybe.Some(d) = &c.distinct_attribute {
         obj.insert("distinctAttribute".to_text(), json_string(d.clone()));
     }
     if !c.ranking_rules.is_empty() {
@@ -345,12 +345,12 @@ fn parse_search_results(v: &JsonValue) -> Result<SearchResults, SearchError> {
     let processing_ms = obj.get("processingTimeMs").and_then(|v| v.as_int()).unwrap_or(0);
 
     let mut facets: List<FacetDistribution> = List.new();
-    if let Some(fd_obj) = obj.get("facetDistribution").and_then(|v| v.as_object()) {
+    if let Maybe.Some(fd_obj) = obj.get("facetDistribution").and_then(|v| v.as_object()) {
         for (field, dist_v) in fd_obj.iter() {
-            if let Some(dist_obj) = dist_v.as_object() {
+            if let Maybe.Some(dist_obj) = dist_v.as_object() {
                 let mut values: List<(Text, Int)> = List.new();
                 for (val, count_v) in dist_obj.iter() {
-                    if let Some(n) = count_v.as_int() {
+                    if let Maybe.Some(n) = count_v.as_int() {
                         values.push((val.clone(), n));
                     }
                 }
@@ -358,7 +358,7 @@ fn parse_search_results(v: &JsonValue) -> Result<SearchResults, SearchError> {
             }
         }
     }
-    Ok(SearchResults {
+    Result.Ok(SearchResults {
         hits,
         estimated_total_hits: estimated_total,
         offset,
@@ -386,7 +386,7 @@ fn auth_headers(cfg: &MeiliConfig, content_type: Maybe<&str>) -> Map<Text, Text>
     h.insert("authorization".to_text(), f"Bearer {cfg.api_key}");
     h.insert("user-agent".to_text(), "verum-meilisearch/0.1".to_text());
     h.insert("accept".to_text(), "application/json".to_text());
-    if let Some(ct) = content_type {
+    if let Maybe.Some(ct) = content_type {
         h.insert("content-type".to_text(), ct.to_text());
     }
     h
@@ -398,7 +398,7 @@ async fn get<C: HttpClient>(
     let req = Request {
         method:  Method.Get,
         url:     url.clone(),
-        headers: auth_headers(cfg, None),
+        headers: auth_headers(cfg, Maybe.None),
         body:    List.new(),
     };
     let resp = http.send(&req).await
@@ -412,7 +412,7 @@ async fn delete<C: HttpClient>(
     let req = Request {
         method:  Method.Delete,
         url:     url.clone(),
-        headers: auth_headers(cfg, None),
+        headers: auth_headers(cfg, Maybe.None),
         body:    List.new(),
     };
     let resp = http.send(&req).await
@@ -427,7 +427,7 @@ async fn post_json<C: HttpClient>(
     let req = Request {
         method:  Method.Post,
         url:     url.clone(),
-        headers: auth_headers(cfg, Some("application/json")),
+        headers: auth_headers(cfg, Maybe.Some("application/json")),
         body:    body_bytes,
     };
     let resp = http.send(&req).await
@@ -442,7 +442,7 @@ async fn patch_json<C: HttpClient>(
     let req = Request {
         method:  Method.Patch,
         url:     url.clone(),
-        headers: auth_headers(cfg, Some("application/json")),
+        headers: auth_headers(cfg, Maybe.Some("application/json")),
         body:    body_bytes,
     };
     let resp = http.send(&req).await
@@ -452,15 +452,15 @@ async fn patch_json<C: HttpClient>(
 
 async fn handle_response(resp: Response) -> Result<JsonValue, SearchError> {
     if resp.status.is_404() {
-        return Err(SearchError.IndexNotFound("404".to_text()));
+        return Result.Err(SearchError.IndexNotFound("404".to_text()));
     }
     if !resp.status.is_success() {
         let text = Text.from_utf8(resp.body.as_slice())
             .unwrap_or_else(|_| f"<{resp.body.len()} bytes>");
-        return Err(SearchError.Backend(f"HTTP {resp.status} body={text}"));
+        return Result.Err(SearchError.Backend(f"HTTP {resp.status} body={text}"));
     }
     if resp.body.is_empty() {
-        return Ok(JsonValue.Null);
+        return Result.Ok(JsonValue.Null);
     }
     encoding.json.decode(resp.body.as_slice())
         .map_err(|e| SearchError.Backend(f"json: {e}"))
@@ -487,14 +487,14 @@ pub async fn wait_for_task<C: HttpClient>(
             .and_then(|s| s.as_string())
             .unwrap_or_else(|| "".to_text());
         match status.as_str() {
-            "succeeded" => return Ok(()),
-            "failed"    => return Err(SearchError.Backend("task failed".to_text())),
-            "canceled"  => return Err(SearchError.Backend("task canceled".to_text())),
+            "succeeded" => return Result.Ok(()),
+            "failed"    => return Result.Err(SearchError.Backend("task failed".to_text())),
+            "canceled"  => return Result.Err(SearchError.Backend("task canceled".to_text())),
             _ => {
                 sleep_secs(1).await;
                 elapsed = elapsed + 1;
             }
         }
     }
-    Err(SearchError.Backend(f"task {task_uid} did not complete within {timeout_s}s"))
+    Result.Err(SearchError.Backend(f"task {task_uid} did not complete within {timeout_s}s"))
 }

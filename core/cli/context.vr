@@ -56,7 +56,7 @@ implement CliContext {
     public fn new(app_name: Text) -> CliContext {
         CliContext {
             app_name: app_name,
-            app_version: None,
+            app_version: Maybe.None,
             stdout_is_tty: false,
             stderr_is_tty: false,
             stdin_is_tty: false,
@@ -65,7 +65,7 @@ implement CliContext {
     }
 
     public fn with_version(mut self, v: Text) -> CliContext {
-        self.app_version = Some(v);
+        self.app_version = Maybe.Some(v);
         self
     }
 
@@ -112,11 +112,11 @@ implement GlobalFlags {
         let mut i: Int = 1;
         while i < path.len() {
             match cur.find_subcommand(&path[i]) {
-                Some(sc) => {
+                Maybe.Some(sc) => {
                     absorb_persistent(sc, outcome, &mut g);
                     cur = sc;
                 },
-                None => break,
+                Maybe.None => break,
             }
             i = i + 1;
         }
@@ -126,16 +126,16 @@ implement GlobalFlags {
     /// True iff a switch named `long` was set anywhere along the path.
     public fn switch_set(&self, long: &Text) -> Bool {
         match self.flags.get(long.clone()) {
-            Some(c) => c.occurrences > 0,
-            None => false,
+            Maybe.Some(c) => c.occurrences > 0,
+            Maybe.None => false,
         }
     }
 
-    /// First value for `long`, or None if absent.
+    /// First value for `long`, or Maybe.None if absent.
     public fn value(&self, long: &Text) -> Maybe<Text> {
         match self.flags.get(long.clone()) {
-            Some(c) => if c.values.len() > 0 { Some(c.values[0].clone()) } else { None },
-            None => None,
+            Maybe.Some(c) => if c.values.len() > 0 { Maybe.Some(c.values[0].clone()) } else { Maybe.None },
+            Maybe.None => Maybe.None,
         }
     }
 }
@@ -150,11 +150,11 @@ fn absorb_persistent(
         let f = &cmd.flags[i];
         if f.persistent {
             match &f.long {
-                Some(l) => match outcome.flags.get(l.clone()) {
-                    Some(c) => { g.flags.insert(l.clone(), c); },
-                    None => {},
+                Maybe.Some(l) => match outcome.flags.get(l.clone()) {
+                    Maybe.Some(c) => { g.flags.insert(l.clone(), c); },
+                    Maybe.None => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
         }
         i = i + 1;

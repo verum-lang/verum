@@ -23,7 +23,7 @@ mount base.{Bool, Maybe, Text};
 
 public type EntryPoint is {
     file: Text,
-    /// None => derive from file-stem
+    /// Maybe.None => derive from file-stem
     symbol: Maybe<Text>,
 }
 

@@ -173,8 +173,8 @@ implement ArenaPool {
         let arena = {
             let mut free = self.state.free.lock();
             match free.pop() {
-                Some(a) => a,
-                None    => {
+                Maybe.Some(a) => a,
+                Maybe.None    => {
                     // Burst: warm pool is empty. Bounded by max_total.
                     let cap = self.state.config.per_arena_bytes;
                     self.state.total.fetch_add(1, MemoryOrdering.AcqRel);
@@ -185,7 +185,7 @@ implement ArenaPool {
         };
         self.state.leases_total.fetch_add(1, MemoryOrdering.AcqRel);
         ArenaLease {
-            arena: Some(arena),
+            arena: Maybe.Some(arena),
             pool: self.state.clone(),
         }
     }
@@ -231,8 +231,8 @@ implement ArenaLease {
     /// Borrow the arena mutably; the caller bumps allocates into it.
     public fn arena_mut(&mut self) -> &mut GenerationalArena {
         match &mut self.arena {
-            Some(a) => a,
-            None    => panic("ArenaLease: arena already returned"),
+            Maybe.Some(a) => a,
+            Maybe.None    => panic("ArenaLease: arena already returned"),
         }
     }
 
@@ -240,16 +240,16 @@ implement ArenaLease {
     /// them with this value so CBGR can reject them after reset().
     public fn generation(&self) -> Int {
         match &self.arena {
-            Some(a) => a.generation(),
-            None    => 0,
+            Maybe.Some(a) => a.generation(),
+            Maybe.None    => 0,
         }
     }
 
     /// Bytes currently allocated in the arena.
     public fn used(&self) -> Int {
         match &self.arena {
-            Some(a) => a.used(),
-            None    => 0,
+            Maybe.Some(a) => a.used(),
+            Maybe.None    => 0,
         }
     }
 
@@ -258,8 +258,8 @@ implement ArenaLease {
     /// `WeftError.Overloaded` or trim their response.
     public fn capacity(&self) -> Int {
         match &self.arena {
-            Some(a) => a.capacity(),
-            None    => 0,
+            Maybe.Some(a) => a.capacity(),
+            Maybe.None    => 0,
         }
     }
 }
@@ -267,8 +267,8 @@ implement ArenaLease {
 implement Drop for ArenaLease {
     fn drop(&mut self) {
         let mut arena = match self.arena.take() {
-            Some(a) => a,
-            None    => return,
+            Maybe.Some(a) => a,
+            Maybe.None    => return,
         };
         // Generation bump — all ThinRefs into this arena invalidate.
         arena.reset();

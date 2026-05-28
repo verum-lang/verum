@@ -21,7 +21,7 @@
 // The breaker considers an invocation a "failure" iff:
 //
 
-//  * Inner returned `Err(_)` AND the error's ErrorCategory is
+//  * Inner returned `Result.Err(_)` AND the error's ErrorCategory is
 //  Transient or Upstream (retryable classes).
 //  * Response status is in {502, 503, 504}.
 //
@@ -145,7 +145,7 @@ implement<H: Handler> Handler for CircuitBreakerHandler<H> {
                     );
                     self.dispatch(req, s).await
                 } else {
-                    Err(WeftError.Overloaded)
+                    Result.Err(WeftError.Overloaded)
                 }
             }
             _ => self.dispatch(req, s).await,
@@ -182,8 +182,8 @@ implement<H: Handler> CircuitBreakerHandler<H> {
 /// count as breaker failures. Client 4xx do NOT.
 fn classify_as_failure(result: &Result<Response, WeftError>) -> Bool {
     match result {
-        Err(e) => e.category().is_retryable(),
-        Ok(r)  => {
+        Result.Err(e) => e.category().is_retryable(),
+        Result.Ok(r)  => {
             let code = r.status.code();
             code == 502 || code == 503 || code == 504
         }

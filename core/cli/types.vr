@@ -112,7 +112,7 @@ implement ArgKind {
 ///
 /// Implementors must be pure and deterministic: parsing the same string
 /// twice must yield identical results. Implementations should NOT throw
-/// or panic — surface failure via `Err(ParseError)`.
+/// or panic — surface failure via `Result.Err(ParseError)`.
 public type FromArg is protocol {
     /// Materialise `Self` from a string token. The token has been
     /// pre-stripped of any surrounding `--flag=` separator.
@@ -144,7 +144,7 @@ public type ValueEnum is protocol {
 
 implement FromArg for Text {
     fn from_arg(s: &Text) -> Result<Text, ParseError> {
-        Ok(s.clone())
+        Result.Ok(s.clone())
     }
 
     fn arg_kind() -> ArgKind { ArgKind.TextKind }
@@ -153,8 +153,8 @@ implement FromArg for Text {
 implement FromArg for Int {
     fn from_arg(s: &Text) -> Result<Int, ParseError> {
         match s.parse_int() {
-            Ok(n) => Ok(n),
-            Err(_) => Err(ParseError.invalid_value(s.clone(), "integer".to_text())),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(_) => Result.Err(ParseError.invalid_value(s.clone(), "integer".to_text())),
         }
     }
 
@@ -164,8 +164,8 @@ implement FromArg for Int {
 implement FromArg for Float {
     fn from_arg(s: &Text) -> Result<Float, ParseError> {
         match s.parse_float() {
-            Ok(x) => Ok(x),
-            Err(_) => Err(ParseError.invalid_value(s.clone(), "float".to_text())),
+            Result.Ok(x) => Result.Ok(x),
+            Result.Err(_) => Result.Err(ParseError.invalid_value(s.clone(), "float".to_text())),
         }
     }
 
@@ -175,9 +175,9 @@ implement FromArg for Float {
 implement FromArg for Bool {
     fn from_arg(s: &Text) -> Result<Bool, ParseError> {
         match s.to_lowercase().as_str() {
-            "true" | "1" | "yes" | "y" | "on" => Ok(true),
-            "false" | "0" | "no" | "n" | "off" => Ok(false),
-            _ => Err(ParseError.invalid_value(
+            "true" | "1" | "yes" | "y" | "on" => Result.Ok(true),
+            "false" | "0" | "no" | "n" | "off" => Result.Ok(false),
+            _ => Result.Err(ParseError.invalid_value(
                 s.clone(),
                 "boolean (true/false/yes/no/1/0/on/off)".to_text(),
             )),
@@ -191,14 +191,14 @@ implement FromArg for Char {
     fn from_arg(s: &Text) -> Result<Char, ParseError> {
         if s.char_count() == 1 {
             match s.chars().next() {
-                Some(c) => Ok(c),
-                None => Err(ParseError.invalid_value(
+                Maybe.Some(c) => Result.Ok(c),
+                Maybe.None => Result.Err(ParseError.invalid_value(
                     s.clone(),
                     "single character".to_text(),
                 )),
             }
         } else {
-            Err(ParseError.invalid_value(s.clone(), "single character".to_text()))
+            Result.Err(ParseError.invalid_value(s.clone(), "single character".to_text()))
         }
     }
 
@@ -209,8 +209,8 @@ implement FromArg for Char {
 implement<T: FromArg> FromArg for Maybe<T> {
     fn from_arg(s: &Text) -> Result<Maybe<T>, ParseError> {
         match T.from_arg(s) {
-            Ok(v) => Ok(Some(v)),
-            Err(e) => Err(e),
+            Result.Ok(v) => Result.Ok(Maybe.Some(v)),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -223,7 +223,7 @@ implement<T: FromArg> FromArg for Maybe<T> {
 
 implement FromArg for List<Byte> {
     fn from_arg(s: &Text) -> Result<List<Byte>, ParseError> {
-        Ok(s.as_bytes().to_list())
+        Result.Ok(s.as_bytes().to_list())
     }
 
     fn arg_kind() -> ArgKind { ArgKind.Generic }

@@ -137,11 +137,11 @@ implement LimitTracker {
         let mut i: Int = 0;
         while i < self.states.len() {
             if dimension_name(&self.states[i].dimension) == dim_name {
-                return Some(self.states[i].current);
+                return Maybe.Some(self.states[i].current);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn breach_count(&self, dim: &LimitDimension) -> Int {

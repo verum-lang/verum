@@ -152,39 +152,39 @@ public fn parse_header(value: &[Byte]) -> Result<H3Priority, PriorityParseError>
         }
         i = i + 1;
     }
-    Ok(pr)
+    Result.Ok(pr)
 }
 
 fn parse_member(seg: &[Byte], out: &mut H3Priority) -> Result<(), PriorityParseError> {
     let trimmed = trim_ws(seg);
-    if trimmed.len() == 0 { return Ok(()); }
+    if trimmed.len() == 0 { return Result.Ok(()); }
     // `u=<digit>` — single digit.
     if trimmed.len() >= 2 && trimmed[0] == ('u' as Byte) && trimmed[1] == ('=' as Byte) {
-        if trimmed.len() != 3 { return Err(PriorityParseError.Malformed); }
+        if trimmed.len() != 3 { return Result.Err(PriorityParseError.Malformed); }
         let c = trimmed[2];
         if c < ('0' as Byte) || c > ('9' as Byte) {
-            return Err(PriorityParseError.Malformed);
+            return Result.Err(PriorityParseError.Malformed);
         }
         let v = (c - ('0' as Byte)) as Int;
         if v > (MAX_URGENCY as Int) {
-            return Err(PriorityParseError.UrgencyOutOfRange(v));
+            return Result.Err(PriorityParseError.UrgencyOutOfRange(v));
         }
         out.urgency = v as UInt8;
-        return Ok(());
+        return Result.Ok(());
     }
     // `i`, `i=?1`, `i=?0`.
     if trimmed.len() == 1 && trimmed[0] == ('i' as Byte) {
         out.incremental = true;
-        return Ok(());
+        return Result.Ok(());
     }
     if trimmed.len() == 4 && trimmed[0] == ('i' as Byte)
         && trimmed[1] == ('=' as Byte) && trimmed[2] == ('?' as Byte)
     {
-        if trimmed[3] == ('1' as Byte) { out.incremental = true; return Ok(()); }
-        if trimmed[3] == ('0' as Byte) { out.incremental = false; return Ok(()); }
-        return Err(PriorityParseError.Malformed);
+        if trimmed[3] == ('1' as Byte) { out.incremental = true; return Result.Ok(()); }
+        if trimmed[3] == ('0' as Byte) { out.incremental = false; return Result.Ok(()); }
+        return Result.Err(PriorityParseError.Malformed);
     }
-    Err(PriorityParseError.Malformed)
+    Result.Err(PriorityParseError.Malformed)
 }
 
 fn slice(src: &[Byte], start: Int, end: Int) -> List<Byte> {

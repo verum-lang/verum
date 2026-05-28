@@ -97,7 +97,7 @@ public type QuicSendStream is {
 
 implement QuicApiStream {
     /// Write as many bytes as fit in the current connection + stream
-    /// flow-control budget. Returns `Ok(n)` where n may be < data.len()
+    /// flow-control budget. Returns `Result.Ok(n)` where n may be < data.len()
     /// — caller loops on a QuicStreamError-free result.
     pub async fn write(&mut self, data: &[Byte]) -> Result<Int, QuicStreamError> {
         // conn_fc_budget is supplied by the connection-layer caller;
@@ -105,11 +105,11 @@ implement QuicApiStream {
         // integration layer gates it against the live ConnFlowControl.
         let budget: UInt64 = 0xFFFFFFFFFFFFFFFF_u64;
         match self.send.write(data, budget) {
-            Ok(n) => Ok(n),
-            Err(SendError.AlreadyReset)        => Err(QuicStreamError.Reset(0_u64)),
-            Err(SendError.AlreadyFinished)     => Err(QuicStreamError.Closed),
-            Err(SendError.FinalSizeViolation)  => Err(QuicStreamError.Transport(Text.from_str("final size violation"))),
-            Err(SendError.FlowControlExceeded) => Err(QuicStreamError.FlowControl),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(SendError.AlreadyReset)        => Result.Err(QuicStreamError.Reset(0_u64)),
+            Result.Err(SendError.AlreadyFinished)     => Result.Err(QuicStreamError.Closed),
+            Result.Err(SendError.FinalSizeViolation)  => Result.Err(QuicStreamError.Transport(Text.from_str("final size violation"))),
+            Result.Err(SendError.FlowControlExceeded) => Result.Err(QuicStreamError.FlowControl),
         }
     }
 
@@ -118,10 +118,10 @@ implement QuicApiStream {
         let mut off: Int = 0;
         while off < data.len() {
             let n = self.write(&data[off..]).await?;
-            if n == 0 { return Err(QuicStreamError.FlowControl); }
+            if n == 0 { return Result.Err(QuicStreamError.FlowControl); }
             off = off + n;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Read the next contiguous chunk. Returns (bytes, is_fin). The
@@ -129,7 +129,7 @@ implement QuicApiStream {
     /// advance `recv.bytes_read`.
     pub async fn read(&mut self) -> Result<(List<Byte>, Bool), QuicStreamError> {
         let (bytes, is_fin) = self.recv.read();
-        Ok((bytes, is_fin))
+        Result.Ok((bytes, is_fin))
     }
 
     /// Read the full stream until FIN. Returns the concatenated body.
@@ -139,29 +139,29 @@ implement QuicApiStream {
             let (bytes, is_fin) = self.read().await?;
             let mut i: Int = 0;
             while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
-            if is_fin { return Ok(out); }
+            if is_fin { return Result.Ok(out); }
             // If nothing was read and no fin, the transport layer parks
             // this task until new frames arrive.
             if bytes.len() == 0 { break; }
         }
-        Ok(out)
+        Result.Ok(out)
     }
 
     /// Cleanly signal "we're done sending". Peer sees FIN on the
     /// next STREAM frame.
     pub async fn close(&mut self) -> Result<(), QuicStreamError> {
         match self.send.close() {
-            Ok(())                             => Ok(()),
-            Err(SendError.AlreadyReset)        => Ok(()),
-            Err(SendError.AlreadyFinished)     => Ok(()),
-            Err(_)                             => Err(QuicStreamError.Transport(Text.from_str("close failed"))),
+            Result.Ok(())                             => Result.Ok(()),
+            Result.Err(SendError.AlreadyReset)        => Result.Ok(()),
+            Result.Err(SendError.AlreadyFinished)     => Result.Ok(()),
+            Result.Err(_)                             => Result.Err(QuicStreamError.Transport(Text.from_str("close failed"))),
         }
     }
 
     /// Abort the stream with an application error code.
     pub async fn reset(&mut self, error_code: UInt64) -> Result<(), QuicStreamError> {
         let _ = self.send.reset(error_code);
-        Ok(())
+        Result.Ok(())
     }
 
     public fn stream_id(&self) -> UInt64 { self.stream_id }
@@ -178,7 +178,7 @@ implement QuicApiStream {
 implement QuicRecvStream {
     pub async fn read(&mut self) -> Result<(List<Byte>, Bool), QuicStreamError> {
         let (bytes, is_fin) = self.recv.read();
-        Ok((bytes, is_fin))
+        Result.Ok((bytes, is_fin))
     }
 
     pub async fn read_to_end(&mut self) -> Result<List<Byte>, QuicStreamError> {
@@ -187,10 +187,10 @@ implement QuicRecvStream {
             let (bytes, is_fin) = self.read().await?;
             let mut i: Int = 0;
             while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
-            if is_fin { return Ok(out); }
+            if is_fin { return Result.Ok(out); }
             if bytes.len() == 0 { break; }
         }
-        Ok(out)
+        Result.Ok(out)
     }
 
     public fn stream_id(&self) -> UInt64 { self.stream_id }
@@ -200,8 +200,8 @@ implement QuicSendStream {
     pub async fn write(&mut self, data: &[Byte]) -> Result<Int, QuicStreamError> {
         let budget: UInt64 = 0xFFFFFFFFFFFFFFFF_u64;
         match self.send.write(data, budget) {
-            Ok(n) => Ok(n),
-            Err(_) => Err(QuicStreamError.Closed),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(_) => Result.Err(QuicStreamError.Closed),
         }
     }
 
@@ -209,15 +209,15 @@ implement QuicSendStream {
         let mut off: Int = 0;
         while off < data.len() {
             let n = self.write(&data[off..]).await?;
-            if n == 0 { return Err(QuicStreamError.FlowControl); }
+            if n == 0 { return Result.Err(QuicStreamError.FlowControl); }
             off = off + n;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     pub async fn close(&mut self) -> Result<(), QuicStreamError> {
         let _ = self.send.close();
-        Ok(())
+        Result.Ok(())
     }
 
     public fn stream_id(&self) -> UInt64 { self.stream_id }

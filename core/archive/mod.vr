@@ -90,23 +90,23 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "uniform packaging subsystem (tar / zip / ar / cpio + Archive protocol)",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.archive;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 
 // Re-export the tar adapter so callers `mount core.archive.*` and have
 // it in scope.
@@ -246,7 +246,7 @@ public fn universal_to_tar_entry(e: &ArchiveEntry) -> TarEntry {
     TarEntry {
         path: e.path.clone(),
         mode: e.mode,
-        uid: Some(0), gid: Some(0),
+        uid: Maybe.Some(0), gid: Maybe.Some(0),
         size: e.content.len(),
         mtime: e.mtime,
         entry_type: entry_type,
@@ -274,23 +274,23 @@ implement Archive for TarFormat {
             i = i + 1;
         }
         match tar_write_archive(&tar_entries) {
-            Ok(b)  => Ok(b),
-            Err(e) => Err(ArchiveError.Format(f"{e}")),
+            Result.Ok(b)  => Result.Ok(b),
+            Result.Err(e) => Result.Err(ArchiveError.Format(f"{e}")),
         }
     }
 
     fn unpack(&self, bytes: &[Byte]) -> Result<List<ArchiveEntry>, ArchiveError> {
         match tar_read_archive(bytes) {
-            Ok(tar_entries) => {
+            Result.Ok(tar_entries) => {
                 let mut out: List<ArchiveEntry> = List.new();
                 let mut i = 0;
                 while i < tar_entries.len() {
                     out.push(tar_entry_to_universal(tar_entries.get(i).unwrap()));
                     i = i + 1;
                 }
-                Ok(out)
+                Result.Ok(out)
             }
-            Err(e) => Err(ArchiveError.Format(f"{e}")),
+            Result.Err(e) => Result.Err(ArchiveError.Format(f"{e}")),
         }
     }
 }
@@ -303,8 +303,8 @@ implement Archive for TarFormat {
 /// `UnsupportedAlgorithm` for not-yet-implemented formats (zip / ar / cpio).
 public fn adapter_for(a: ArchiveAlgorithm) -> Result<Heap<dyn Archive>, ArchiveError> {
     match a {
-        Tar => Ok(Heap.new(tar_format()) as Heap<dyn Archive>),
-        _   => Err(ArchiveError.UnsupportedAlgorithm(a)),
+        Tar => Result.Ok(Heap.new(tar_format()) as Heap<dyn Archive>),
+        _   => Result.Err(ArchiveError.UnsupportedAlgorithm(a)),
     }
 }
 

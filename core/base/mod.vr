@@ -31,7 +31,7 @@
 
 // The most commonly used items are re-exported at module level:
 // - Types: `Maybe`, `Result`, `Ordering`, `Heap`, `Shared`
-// - Constructors: `None`, `Some`, `Ok`, `Err`, `Less`, `Equal`, `Greater`
+// - Constructors: `Maybe.None`, `Some`, `Ok`, `Err`, `Less`, `Equal`, `Greater`
 // - Protocols: `Eq`, `Ord`, `Clone`, `Debug`, `Display`, `Default`, `Hash`
 // - Functions: `panic`, `assert`, `unreachable`, `todo`
 
@@ -99,12 +99,12 @@ public mount .ops.{
 };
 
 // From maybe — re-export the type AND its variant constructors so
-// callers can write `Some(x)` / `None` directly without having to
+// callers can write `Maybe.Some(x)` / `Maybe.None` directly without having to
 // reach for `Maybe.Some` / `Maybe.None`.
-public mount .maybe.{Maybe, Some, None};
+public mount .maybe.{Maybe, Some, Maybe.None};
 
 // From result — same: expose `Ok` / `Err` as bare names alongside
-// the wrapper type, matching idiomatic `Ok(value)` / `Err(error)`
+// the wrapper type, matching idiomatic `Result.Ok(value)` / `Result.Err(error)`
 // usage everywhere in the codebase and the conformance tests.
 public mount .result.{Result, Ok, Err, Error};
 
@@ -293,7 +293,7 @@ public mount .iterator.{
     ReduceResult,
     // ReduceResult variant constructors so users can write `Reduced(v)` /
     // `Continue(v)` bare (no `ReduceResult.` prefix) under the prelude
-    // wildcard glob. Same discipline as `Some` / `None` / `Ok` / `Err` /
+    // wildcard glob. Same discipline as `Some` / `Maybe.None` / `Ok` / `Err` /
     // `Less` / `Equal` / `Greater` already re-exported above. Without
     // these the typechecker's `try_resolve_variant_constructor("Reduced")`
     // misses the parent and falls into the rigid-param branch — surfaces

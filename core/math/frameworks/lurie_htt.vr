@@ -8,7 +8,7 @@
 //
 
 // Every axiom in this file is a direct postulate of a theorem in HTT.
-// None are re-proved here — HTT has never been fully mechanised in any
+// Maybe.None are re-proved here — HTT has never been fully mechanised in any
 // proof assistant. The @framework(lurie_htt, "<citation>") attribute
 // makes the dependency visible to `verum audit --framework-axioms`
 // and to certificate consumers.

@@ -230,7 +230,7 @@ implement KeyUpdateSm {
         let next_tx_keys = derive_space_keys(&next_tx_secret, key_len, chacha)
             .map_err(|_| KeyUpdateError.DeriveFailed)?;
 
-        Ok(KeyUpdateSm {
+        Result.Ok(KeyUpdateSm {
             aead: aead, key_len: key_len, use_chacha: chacha,
             phase: 0_u8,
             current_rx_secret: rx_secret, current_tx_secret: tx_secret,
@@ -271,9 +271,9 @@ implement KeyUpdateSm {
     public fn note_outbound_encrypted(&mut self) -> Result<(), KeyUpdateError> {
         self.usage.encrypted = self.usage.encrypted + 1_u64;
         if self.exceeded_confidentiality_limit() {
-            return Err(KeyUpdateError.ConfidentialityLimitExceeded);
+            return Result.Err(KeyUpdateError.ConfidentialityLimitExceeded);
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Drive from rx path on each successful decrypt.
@@ -286,9 +286,9 @@ implement KeyUpdateSm {
     public fn note_integrity_failure(&mut self) -> Result<(), KeyUpdateError> {
         self.usage.integrity_failures = self.usage.integrity_failures + 1_u64;
         if self.exceeded_integrity_limit() {
-            return Err(KeyUpdateError.IntegrityLimitExceeded);
+            return Result.Err(KeyUpdateError.IntegrityLimitExceeded);
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// §6.1 — an ACK we received was protected with the current
@@ -303,7 +303,7 @@ implement KeyUpdateSm {
     /// flips (handled by `on_inbound_phase`).
     public fn initiate_update(&mut self) -> Result<(), KeyUpdateError> {
         if !self.current_phase_ack {
-            return Err(KeyUpdateError.PendingRotationInProgress);
+            return Result.Err(KeyUpdateError.PendingRotationInProgress);
         }
         // Swap current ← next for tx side immediately.
         self.current_tx_secret = core.mem.replace(
@@ -327,7 +327,7 @@ implement KeyUpdateSm {
             .map_err(|_| KeyUpdateError.DeriveFailed)?;
         self.next_tx_secret = nn_secret;
         self.next_tx_keys = nn_keys;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Inspect the phase bit from an inbound 1-RTT short-header. If
@@ -359,7 +359,7 @@ implement KeyUpdateSm {
             .map_err(|_| KeyUpdateError.DeriveFailed)?;
         self.next_rx_secret = nn_secret;
         self.next_rx_keys = nn_keys;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn usage_snapshot(&self) -> KeyPhaseUsage {

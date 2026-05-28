@@ -52,10 +52,10 @@ public fn form_kind_name(f: &ParamForm) -> Text {
 
 public fn form_name(f: &ParamForm) -> Maybe<Text> {
     match f {
-        PfNamedColon(n)  => Some(prefix_with(58 as Byte, n)),
-        PfNamedDollar(n) => Some(prefix_with(36 as Byte, n)),
-        PfNamedAt(n)     => Some(prefix_with(64 as Byte, n)),
-        _                => None,
+        PfNamedColon(n)  => Maybe.Some(prefix_with(58 as Byte, n)),
+        PfNamedDollar(n) => Maybe.Some(prefix_with(36 as Byte, n)),
+        PfNamedAt(n)     => Maybe.Some(prefix_with(64 as Byte, n)),
+        _                => Maybe.None,
     }
 }
 
@@ -110,16 +110,16 @@ implement ParamIndex {
     /// twice gets ONE binding slot).
     public fn add_named(&mut self, form: ParamForm) -> Int {
         match form_name(&form) {
-            Some(name) => {
+            Maybe.Some(name) => {
                 match self.find_by_name(&name) {
-                    Some(s) => return s.index,
-                    None    => {}
+                    Maybe.Some(s) => return s.index,
+                    Maybe.None    => {}
                 }
                 let idx = self.specs.len() + 1;
                 self.specs.push(param_spec(idx, form));
                 idx
             }
-            None => {
+            Maybe.None => {
                 let idx = self.specs.len() + 1;
                 self.specs.push(param_spec(idx, form));
                 idx
@@ -133,26 +133,26 @@ implement ParamIndex {
         while i < self.specs.len() {
             if self.specs[i].index == index {
                 let s = &self.specs[i];
-                return Some(param_spec(s.index, clone_form(&s.form)));
+                return Maybe.Some(param_spec(s.index, clone_form(&s.form)));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn find_by_name(&self, full_name: &Text) -> Maybe<BindParamSpec> {
         let mut i: Int = 0;
         while i < self.specs.len() {
             match form_name(&self.specs[i].form) {
-                Some(n) => if n == *full_name {
+                Maybe.Some(n) => if n == *full_name {
                     let s = &self.specs[i];
-                    return Some(param_spec(s.index, clone_form(&s.form)));
+                    return Maybe.Some(param_spec(s.index, clone_form(&s.form)));
                 }
-                None => {}
+                Maybe.None => {}
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Highest registered index — equivalent to sqlite3_bind_parameter_count.

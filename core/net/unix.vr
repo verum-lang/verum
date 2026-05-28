@@ -285,13 +285,13 @@ const STREAM_CHUNK_SIZE: Int = 65536;
 fn serialize_unix_addr(path: &Text) -> Result<List<Byte>, UnixError> {
     let path_bytes = path.as_bytes();
     if path_bytes.len() >= SUN_PATH_MAX {
-        return Err(UnixError.PathTooLong {
+        return Result.Err(UnixError.PathTooLong {
             limit: SUN_PATH_MAX,
             actual: path_bytes.len(),
         });
     }
     if path_bytes.len() == 0 {
-        return Err(UnixError.InvalidPath("empty path".into()));
+        return Result.Err(UnixError.InvalidPath("empty path".into()));
     }
 
     // struct sockaddr_un layout, platform-specific (task #5):
@@ -323,7 +323,7 @@ fn serialize_unix_addr(path: &Text) -> Result<List<Byte>, UnixError> {
     // leading null byte, so null-termination is still useful (kernel
     // treats trailing null as end-of-name).
     buf.push(0);
-    Ok(buf)
+    Result.Ok(buf)
 }
 
 // =============================================================================
@@ -335,7 +335,7 @@ fn serialize_unix_addr(path: &Text) -> Result<List<Byte>, UnixError> {
 public type UnixStream is {
     fd: FileDesc,
     // Peer path captured at connect/accept-time for display/debugging.
-    // None for socketpair(2)-constructed streams.
+    // Maybe.None for socketpair(2)-constructed streams.
     peer_path: Maybe<Text>,
 };
 
@@ -355,10 +355,10 @@ implement UnixStream {
         let r = sys_connect(fd, addr.as_ptr() as &unsafe Byte, addr.len() as Int);
 
         match r {
-            Ok(()) => Ok(UnixStream { fd: fd, peer_path: Maybe.Some(path.clone()) }),
-            Err(e) => {
+            Result.Ok(()) => Result.Ok(UnixStream { fd: fd, peer_path: Maybe.Some(path.clone()) }),
+            Result.Err(e) => {
                 close_fd(fd);
-                Err(UnixError.from_os_error(e))
+                Result.Err(UnixError.from_os_error(e))
             }
         }
     }
@@ -377,14 +377,14 @@ implement UnixStream {
         // on Linux EINPROGRESS is still possible under very high server
         // load — handle it by waiting for write-readiness.
         match r {
-            Ok(()) => Ok(UnixStream { fd: fd, peer_path: Maybe.Some(path.clone()) }),
-            Err(e) if e.code == 115 /* EINPROGRESS */ => {
+            Result.Ok(()) => Result.Ok(UnixStream { fd: fd, peer_path: Maybe.Some(path.clone()) }),
+            Result.Err(e) if e.code == 115 /* EINPROGRESS */ => {
                 AsyncIoReady.writable(fd).await;
-                Ok(UnixStream { fd: fd, peer_path: Maybe.Some(path.clone()) })
+                Result.Ok(UnixStream { fd: fd, peer_path: Maybe.Some(path.clone()) })
             }
-            Err(e) => {
+            Result.Err(e) => {
                 close_fd(fd);
-                Err(UnixError.from_os_error(e))
+                Result.Err(UnixError.from_os_error(e))
             }
         }
     }
@@ -443,7 +443,7 @@ implement Write for UnixStream {
     }
 
     fn flush(&mut self) -> Result<(), IoError> {
-        Ok(())   // no application-level buffering
+        Result.Ok(())   // no application-level buffering
     }
 }
 
@@ -455,7 +455,7 @@ implement AsyncRead for UnixStream {
         let mut byte_buf = [0_u8; STREAM_CHUNK_SIZE];
         let read_len = if cap < STREAM_CHUNK_SIZE { cap } else { STREAM_CHUNK_SIZE };
         if read_len == 0 {
-            return Poll.Ready(Ok(0));
+            return Poll.Ready(Result.Ok(0));
         }
 
         @cfg(any(target_os = "linux", target_os = "windows"))
@@ -464,16 +464,16 @@ implement AsyncRead for UnixStream {
         let result = sys_recv(self.fd, &mut byte_buf[..read_len], MSG_DONTWAIT);
 
         match result {
-            Ok(n) => {
+            Result.Ok(n) => {
                 for i in 0..n as Int { buf.push(byte_buf[i]); }
-                Poll.Ready(Ok(n as Int))
+                Poll.Ready(Result.Ok(n as Int))
             }
-            Err(e) if e.would_block() => {
+            Result.Err(e) if e.would_block() => {
                 let io_engine = IOEngine.current();
                 io_engine.register(self.fd, IOInterest.Read, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Err(IoError.from_os(e))),
+            Result.Err(e) => Poll.Ready(Result.Err(IoError.from_os(e))),
         }
     }
 }
@@ -481,7 +481,7 @@ implement AsyncRead for UnixStream {
 implement AsyncWrite for UnixStream {
     fn poll_write(&mut self, cx: &mut Context, buf: &List<Byte>) -> Poll<Result<Int, IoError>> {
         if buf.is_empty() {
-            return Poll.Ready(Ok(0));
+            return Poll.Ready(Result.Ok(0));
         }
 
         let mut byte_buf = [0_u8; STREAM_CHUNK_SIZE];
@@ -494,24 +494,24 @@ implement AsyncWrite for UnixStream {
         let result = sys_send(self.fd, &byte_buf[..write_len], MSG_DONTWAIT);
 
         match result {
-            Ok(n) => Poll.Ready(Ok(n as Int)),
-            Err(e) if e.would_block() => {
+            Result.Ok(n) => Poll.Ready(Result.Ok(n as Int)),
+            Result.Err(e) if e.would_block() => {
                 let io_engine = IOEngine.current();
                 io_engine.register(self.fd, IOInterest.Write, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Err(IoError.from_os(e))),
+            Result.Err(e) => Poll.Ready(Result.Err(IoError.from_os(e))),
         }
     }
 
     fn poll_flush(&mut self, _cx: &mut Context) -> Poll<Result<(), IoError>> {
-        Poll.Ready(Ok(()))
+        Poll.Ready(Result.Ok(()))
     }
 
     fn poll_shutdown(&mut self, _cx: &mut Context) -> Poll<Result<(), IoError>> {
         match self.shutdown(ShutdownKind.Write) {
-            Ok(()) => Poll.Ready(Ok(())),
-            Err(e) => Poll.Ready(Err(e.to_io_error())),
+            Result.Ok(()) => Poll.Ready(Result.Ok(())),
+            Result.Err(e) => Poll.Ready(Result.Err(e.to_io_error())),
         }
     }
 }
@@ -538,8 +538,8 @@ implement UnixStream {
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
-            r = self.read_async(buf).await => Ok(r),
-            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = self.read_async(buf).await => Result.Ok(r),
+            reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
         }
     }
 
@@ -550,8 +550,8 @@ implement UnixStream {
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
-            r = self.write_async(buf).await => Ok(r),
-            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = self.write_async(buf).await => Result.Ok(r),
+            reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
         }
     }
 }
@@ -623,9 +623,9 @@ implement UnixListener {
         @cfg(target_os = "macos")
         let r = sys_bind(fd, addr.as_ptr() as &unsafe Byte, addr.len() as Int);
 
-        if let Err(e) = r {
+        if let Result.Err(e) = r {
             close_fd(fd);
-            return Err(UnixError.from_os_error(e));
+            return Result.Err(UnixError.from_os_error(e));
         }
 
         @cfg(any(target_os = "linux", target_os = "windows"))
@@ -633,12 +633,12 @@ implement UnixListener {
         @cfg(target_os = "macos")
         let r = sys_listen(fd, backlog);
 
-        if let Err(e) = r {
+        if let Result.Err(e) = r {
             close_fd(fd);
-            return Err(UnixError.from_os_error(e));
+            return Result.Err(UnixError.from_os_error(e));
         }
 
-        Ok(UnixListener { fd: fd, local_path: path.clone() })
+        Result.Ok(UnixListener { fd: fd, local_path: path.clone() })
     }
 
     /// Synchronous accept (blocks).
@@ -652,11 +652,11 @@ implement UnixListener {
         let r = sys_accept(self.fd, &mut addr_buf, &mut addr_len);
 
         match r {
-            Ok(client_fd) => {
+            Result.Ok(client_fd) => {
                 let peer = deserialize_unix_path(&addr_buf[..addr_len as Int]);
-                Ok((UnixStream { fd: client_fd, peer_path: peer.clone() }, peer))
+                Result.Ok((UnixStream { fd: client_fd, peer_path: peer.clone() }, peer))
             }
-            Err(e) => Err(UnixError.from_os_error(e)),
+            Result.Err(e) => Result.Err(UnixError.from_os_error(e)),
         }
     }
 
@@ -673,18 +673,18 @@ implement UnixListener {
             let r = sys_accept(self.fd, &mut addr_buf, &mut addr_len);
 
             match r {
-                Ok(client_fd) => {
+                Result.Ok(client_fd) => {
                     @cfg(target_os = "macos")
                     let _ = safe_set_nonblocking(client_fd, true);
 
                     let peer = deserialize_unix_path(&addr_buf[..addr_len as Int]);
-                    return Ok((UnixStream { fd: client_fd, peer_path: peer.clone() }, peer));
+                    return Result.Ok((UnixStream { fd: client_fd, peer_path: peer.clone() }, peer));
                 }
-                Err(e) if e.would_block() => {
+                Result.Err(e) if e.would_block() => {
                     AsyncIoReady.readable(self.fd).await;
                     continue;
                 }
-                Err(e) => return Err(UnixError.from_os_error(e)),
+                Result.Err(e) => return Result.Err(UnixError.from_os_error(e)),
             }
         }
     }
@@ -703,8 +703,8 @@ implement UnixListener {
         token: &CancellationToken,
     ) -> Result<Result<(UnixStream, Maybe<Text>), UnixError>, CancellationError> {
         select {
-            r = self.accept_async().await => Ok(r),
-            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = self.accept_async().await => Result.Ok(r),
+            reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
         }
     }
 
@@ -745,18 +745,18 @@ implement<'a> Stream for UnixIncoming<'a> {
         let r = sys_accept(self.listener.fd, &mut addr_buf, &mut addr_len);
 
         match r {
-            Ok(client_fd) => {
+            Result.Ok(client_fd) => {
                 @cfg(target_os = "macos")
                 let _ = safe_set_nonblocking(client_fd, true);
                 let peer = deserialize_unix_path(&addr_buf[..addr_len as Int]);
-                Poll.Ready(Maybe.Some(Ok(UnixStream { fd: client_fd, peer_path: peer })))
+                Poll.Ready(Maybe.Some(Result.Ok(UnixStream { fd: client_fd, peer_path: peer })))
             }
-            Err(e) if e.would_block() => {
+            Result.Err(e) if e.would_block() => {
                 let io_engine = IOEngine.current();
                 io_engine.register(self.listener.fd, IOInterest.Read, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Maybe.Some(Err(UnixError.from_os_error(e)))),
+            Result.Err(e) => Poll.Ready(Maybe.Some(Result.Err(UnixError.from_os_error(e)))),
         }
     }
 }
@@ -783,7 +783,7 @@ fn create_unix_socket() -> Result<FileDesc, UnixError> {
         let _ = safe_set_nosigpipe(fd, true);
         fd
     }
-    Ok(fd)
+    Result.Ok(fd)
 }
 
 fn create_unix_socket_nonblocking() -> Result<FileDesc, UnixError> {
@@ -796,7 +796,7 @@ fn create_unix_socket_nonblocking() -> Result<FileDesc, UnixError> {
         let _ = safe_set_nonblocking(fd, true).map_err(UnixError.from_os_error)?;
         fd
     }
-    Ok(fd)
+    Result.Ok(fd)
 }
 
 @inline
@@ -807,7 +807,7 @@ fn close_fd(fd: FileDesc) {
     let _ = sys_close(fd);
 }
 
-/// Reconstruct the path from a sockaddr_un buffer. Returns None when the
+/// Reconstruct the path from a sockaddr_un buffer. Returns Maybe.None when the
 /// peer is anonymous (e.g., socketpair peers have empty address).
 fn deserialize_unix_path(buf: &[Byte]) -> Maybe<Text> {
     if buf.len() < 2 { return Maybe.None; }
@@ -822,8 +822,8 @@ fn deserialize_unix_path(buf: &[Byte]) -> Maybe<Text> {
     while end > 0 && path_bytes[end - 1] == 0 { end = end - 1; }
     if end == 0 { return Maybe.None; }
     match Text.from_utf8(&path_bytes[..end]) {
-        Ok(t) => Maybe.Some(t),
-        Err(_) => Maybe.None,
+        Result.Ok(t) => Maybe.Some(t),
+        Result.Err(_) => Maybe.None,
     }
 }
 
@@ -861,8 +861,8 @@ implement UnixStream {
             self.fd, SOL_SOCKET as Int, SO_PEERCRED as Int,
             &mut buf, &mut len,
         ) {
-            Ok(()) => {}
-            Err(_) => return Err(UnixError.IoError("SO_PEERCRED failed".into())),
+            Result.Ok(()) => {}
+            Result.Err(_) => return Result.Err(UnixError.IoError("SO_PEERCRED failed".into())),
         }
         let pid = ((buf[0] as Int32)
                  | ((buf[1] as Int32) << 8)
@@ -876,7 +876,7 @@ implement UnixStream {
                  | ((buf[9] as UInt32) << 8)
                  | ((buf[10] as UInt32) << 16)
                  | ((buf[11] as UInt32) << 24));
-        Ok(PeerCred { pid: pid, uid: uid, gid: gid })
+        Result.Ok(PeerCred { pid: pid, uid: uid, gid: gid })
     }
 
     @cfg(target_os = "macos")
@@ -902,14 +902,14 @@ implement UnixStream {
             FileDesc(self.fd), SOL_LOCAL, LOCAL_PEERCRED,
             &mut buf, &mut len,
         ) {
-            Ok(()) => {}
-            Err(_) => return Err(UnixError.IoError("LOCAL_PEERCRED failed".into())),
+            Result.Ok(()) => {}
+            Result.Err(_) => return Result.Err(UnixError.IoError("LOCAL_PEERCRED failed".into())),
         }
         // We accept any xucred version; fields at offset 4 (uid) and 12
         // (gid_t cr_groups[0] = effective gid) have been stable since
         // 10.4. Reject obviously-malformed short replies.
         if len < 16 {
-            return Err(UnixError.IoError("LOCAL_PEERCRED short reply".into()));
+            return Result.Err(UnixError.IoError("LOCAL_PEERCRED short reply".into()));
         }
         let uid = ((buf[4]  as UInt32)
                  | ((buf[5]  as UInt32) << 8)
@@ -933,12 +933,12 @@ implement UnixStream {
         } else {
             -1 as Int32
         };
-        Ok(PeerCred { pid: pid, uid: uid, gid: gid })
+        Result.Ok(PeerCred { pid: pid, uid: uid, gid: gid })
     }
 
     @cfg(target_os = "windows")
     public fn peer_cred(&self) -> Result<PeerCred, UnixError> {
-        Err(UnixError.IoError("peer_cred: not available on Windows".into()))
+        Result.Err(UnixError.IoError("peer_cred: not available on Windows".into()))
     }
 }
 
@@ -1030,12 +1030,12 @@ implement UnixStream {
     /// receiving side retrieves them via `recv_fds`.
     ///
 
-    /// Currently stubbed — returns `Err(NotImplemented)`. Tracked as
+    /// Currently stubbed — returns `Result.Err(NotImplemented)`. Tracked as
     /// follow-up (net-framework.md §7.8 graceful-shutdown FD handoff).
     public fn send_fds(&self, _buf: &[Byte], _fds: &[FileDesc])
         -> Result<Int, FdPassingError>
     {
-        Err(FdPassingError.NotImplemented(
+        Result.Err(FdPassingError.NotImplemented(
             "SCM_RIGHTS sendmsg implementation pending — see net-framework.md §7.8".into()
         ))
     }
@@ -1044,7 +1044,7 @@ implement UnixStream {
     public fn recv_fds(&self, _buf: &mut [Byte], _fds: &mut List<FileDesc>)
         -> Result<Int, FdPassingError>
     {
-        Err(FdPassingError.NotImplemented(
+        Result.Err(FdPassingError.NotImplemented(
             "SCM_RIGHTS recvmsg implementation pending".into()
         ))
     }

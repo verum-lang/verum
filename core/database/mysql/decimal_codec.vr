@@ -76,7 +76,7 @@
 module core.database.mysql.decimal_codec;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.intrinsics.runtime.mem_raw.store_byte;
 mount core.database.common.error.{DbError, EncodeFault};
@@ -127,14 +127,14 @@ public fn decode_mysql_decimal(
 ) -> Result<Decimal, DbError> {
     let needed = mysql_decimal_byte_length(precision, scale);
     if (buf.len() as Int) < needed {
-        return Err(decode_err(
+        return Result.Err(decode_err(
             f"mysql DECIMAL: short payload (need {needed}b, have {buf.len() as Int}b)"
         ));
     }
     let text = decode_newdecimal_to_text(buf, precision, scale);
     match parse_decimal(&text) {
-        Ok(d)  => Ok(d),
-        Err(_) => Err(decode_err(
+        Result.Ok(d)  => Result.Ok(d),
+        Result.Err(_) => Result.Err(decode_err(
             f"mysql DECIMAL: text->Decimal reparse failed for '{text}' (precision={precision}, scale={scale})"
         )),
     }
@@ -228,14 +228,14 @@ public fn decode_mysql_decimal_to_bigdecimal(
 ) -> Result<BigDecimal, DbError> {
     let needed = mysql_decimal_byte_length(precision, scale);
     if (buf.len() as Int) < needed {
-        return Err(decode_err(
+        return Result.Err(decode_err(
             f"mysql DECIMAL: short payload (need {needed}b, have {buf.len() as Int}b)"
         ));
     }
     let text = decode_newdecimal_to_text(buf, precision, scale);
     match parse_bigdecimal(&text) {
-        Ok(bd) => Ok(bd),
-        Err(_) => Err(decode_err(
+        Result.Ok(bd) => Result.Ok(bd),
+        Result.Err(_) => Result.Err(decode_err(
             f"mysql DECIMAL: text->BigDecimal reparse failed for '{text}' (precision={precision}, scale={scale})"
         )),
     }

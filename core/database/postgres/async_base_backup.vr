@@ -30,7 +30,7 @@
 //        already eagerly read).
 //     3. A second spawn_blocking task drains the session:
 //          for each tablespace: next_tablespace_data → push
-//            BseTsChunk events; on None push BseTsEnd.
+//            BseTsChunk events; on Maybe.None push BseTsEnd.
 //          drain manifest_bytes → push BseManifestChunk; push
 //            BseManifestEnd.
 //          finish() → push BseFinished or BseFailed.
@@ -65,7 +65,7 @@
 module core.database.postgres.async_base_backup;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -133,8 +133,8 @@ implement AsyncBaseBackupSession {
     }
 
     /// Pull the next backup-stream event. After observing
-    /// BseFinished or BseFailed (or `None` when the channel is
-    /// drained) subsequent calls keep returning `None`.
+    /// BseFinished or BseFailed (or `Maybe.None` when the channel is
+    /// drained) subsequent calls keep returning `Maybe.None`.
     public async fn next_event(&self) -> Maybe<BackupStreamEvent> {
         let mut g = self.event_rx.lock().unwrap_or_else(|p| p.into_inner());
         let fut = g.recv_fut();
@@ -151,17 +151,17 @@ implement AsyncBaseBackupSession {
         // closes on the receiver side.
         loop {
             match self.next_event().await {
-                Some(BseFinished) | Some(BseFailed(_)) => { break; }
-                Some(_) => { /* keep draining */ }
-                None    => { break; }
+                Maybe.Some(BseFinished) | Maybe.Some(BseFailed(_)) => { break; }
+                Maybe.Some(_) => { /* keep draining */ }
+                Maybe.None    => { break; }
             }
         }
         let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
         match guard.take() {
-            Some(jh) => { let _ = jh.join().await; }
-            None     => {}
+            Maybe.Some(jh) => { let _ = jh.join().await; }
+            Maybe.None     => {}
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -185,8 +185,8 @@ public async fn connect_and_start_async(
         core.database.postgres.base_backup.start(conn, &opts_owned)
     });
     let session = match init_jh.join().await {
-        Ok(r)  => r?,
-        Err(_) => { return Err(actor_dropped("init: blocking-pool join")); }
+        Result.Ok(r)  => r?,
+        Result.Err(_) => { return Result.Err(actor_dropped("init: blocking-pool join")); }
     };
 
     let tablespaces = session.tablespaces().clone();
@@ -198,10 +198,10 @@ public async fn connect_and_start_async(
         run_drain(session, event_tx);
     });
 
-    Ok(AsyncBaseBackupSession {
+    Result.Ok(AsyncBaseBackupSession {
         tablespaces: tablespaces,
         event_rx: Shared.new(sync.mutex.Mutex.new(event_rx)),
-        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        join: Shared.new(sync.mutex.Mutex.new(Maybe.Some(join))),
     })
 }
 
@@ -219,17 +219,17 @@ fn run_drain(
     while ts_idx < n_ts {
         loop {
             match session.next_tablespace_data() {
-                Ok(Some(bytes)) => {
+                Result.Ok(Maybe.Some(bytes)) => {
                     match event_tx.send(BseTsChunk { ts_idx: ts_idx, bytes: bytes }) {
-                        Ok(())  => {}
-                        Err(_)  => { return; }    // receiver dropped
+                        Result.Ok(())  => {}
+                        Result.Err(_)  => { return; }    // receiver dropped
                     }
                 }
-                Ok(None) => {
+                Result.Ok(Maybe.None) => {
                     let _ = event_tx.send(BseTsEnd { ts_idx: ts_idx });
                     break;
                 }
-                Err(e) => {
+                Result.Err(e) => {
                     let _ = event_tx.send(BseFailed(e));
                     return;
                 }
@@ -241,17 +241,17 @@ fn run_drain(
     // Phase B — drain the manifest stream (no-op if MANIFEST 'no').
     loop {
         match session.manifest_bytes() {
-            Ok(Some(bytes)) => {
+            Result.Ok(Maybe.Some(bytes)) => {
                 match event_tx.send(BseManifestChunk { bytes: bytes }) {
-                    Ok(())  => {}
-                    Err(_)  => { return; }
+                    Result.Ok(())  => {}
+                    Result.Err(_)  => { return; }
                 }
             }
-            Ok(None) => {
+            Result.Ok(Maybe.None) => {
                 let _ = event_tx.send(BseManifestEnd);
                 break;
             }
-            Err(e) => {
+            Result.Err(e) => {
                 let _ = event_tx.send(BseFailed(e));
                 return;
             }
@@ -260,8 +260,8 @@ fn run_drain(
 
     // Phase C — finalise (drain to RFQ, consume session).
     match session.finish() {
-        Ok(())  => { let _ = event_tx.send(BseFinished); }
-        Err(e)  => { let _ = event_tx.send(BseFailed(e)); }
+        Result.Ok(())  => { let _ = event_tx.send(BseFinished); }
+        Result.Err(e)  => { let _ = event_tx.send(BseFailed(e)); }
     }
 }
 

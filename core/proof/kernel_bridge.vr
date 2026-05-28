@@ -271,7 +271,7 @@ public axiom kernel_yoneda_embedding() -> Bool
 
 /// Kernel discharge:
 /// `verum_kernel::yoneda::build_kan_extension(f, p, ...)` returns
-/// `Some(KanExtension)` iff `f` is fully-faithful AND target has
+/// `Maybe.Some(KanExtension)` iff `f` is fully-faithful AND target has
 /// appropriate colimits.
 @framework(msfs, "Bridge — kernel yoneda::build_kan_extension (HTT 4.3.3.7)")
 public axiom kernel_kan_extension() -> Bool
@@ -307,7 +307,7 @@ public axiom kernel_straightening_equivalence() -> Bool
 
 /// Kernel discharge:
 /// `verum_kernel::grothendieck::build_grothendieck(diagram)` returns
-/// `Some(GrothendieckConstruction)` for every well-formed input.
+/// `Maybe.Some(GrothendieckConstruction)` for every well-formed input.
 @framework(msfs, "Bridge — kernel grothendieck::build_grothendieck (HTT 5.1.4)")
 public axiom kernel_grothendieck_construction() -> Bool
     requires true

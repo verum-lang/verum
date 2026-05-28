@@ -161,11 +161,11 @@ implement<B: Debug, C: Debug> Debug for ControlFlow<B, C> {
 ///  type Residual = Maybe<Never>;
 ///
 
-///  fn from_output(output: T) -> Maybe<T> { Some(output) }
+///  fn from_output(output: T) -> Maybe<T> { Maybe.Some(output) }
 ///  fn branch(self) -> ControlFlow<Maybe<Never>, T> {
 ///  match self {
-///  Some(v) => Continue(v),
-///  None => Break(None),
+///  Maybe.Some(v) => Continue(v),
+///  Maybe.None => Break(Maybe.None),
 ///  }
 ///  }
 /// }
@@ -216,13 +216,13 @@ public type Try is protocol {
 /// where OuterError: From<InnerError> {
 ///  fn from_residual(residual: Result<Never, InnerError>) -> Result<T, OuterError> {
 ///  match residual {
-///  Err(e) => Err(OuterError.from(e)),
+///  Result.Err(e) => Result.Err(OuterError.from(e)),
 ///  // `Never` is genuinely uninhabited (alias to `!`),
-///  // so the `Ok(_)` arm is provably dead at every
+///  // so the `Result.Ok(_)` arm is provably dead at every
 ///  // call site. Use the UB-hint variant so the
 ///  // optimiser elides the tag test on the
 ///  // `?`-propagation hot path.
-///  Ok(_) => unsafe { unreachable_unchecked() },
+///  Result.Ok(_) => unsafe { unreachable_unchecked() },
 ///  }
 ///  }
 /// }
@@ -240,10 +240,10 @@ public type FromResidual<R> is protocol {
 ///
 
 /// Used in residual types to indicate "this branch is
-/// impossible". For example, `Maybe<Never>` can only be `None`
-/// (since `Some(Never)` would require constructing a value of
+/// impossible". For example, `Maybe<Never>` can only be `Maybe.None`
+/// (since `Maybe.Some(Never)` would require constructing a value of
 /// `Never`, which is impossible). Similarly, `Result<Never, E>`
-/// can only be `Err(e)`.
+/// can only be `Result.Err(e)`.
 ///
 
 /// Implementation: this is a transparent alias to the
@@ -255,8 +255,8 @@ public type FromResidual<R> is protocol {
 /// unreachable_unchecked` arms in `Maybe.from_residual` /
 /// `Result.from_residual` rely on. The alias to `!` restores
 /// the invariant: there is no syntax (safe or unsafe) that
-/// produces a value of `!`, so the residual `Some(_)` /
-/// `Ok(_)` arms are provably dead at every call site.
+/// produces a value of `!`, so the residual `Maybe.Some(_)` /
+/// `Result.Ok(_)` arms are provably dead at every call site.
 public type Never is !;
 
 // =============================================================================

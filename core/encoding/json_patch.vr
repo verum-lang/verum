@@ -139,7 +139,7 @@ public fn parse(patch_text: &Text) -> Result<JsonPatch, JsonPatchError> {
         Text.from("not valid JSON")))?;
     let arr = match v {
         JsonValue.JsonArray(a) => a,
-        _ => return Err(JsonPatchError.Malformed(Text.from("patch must be array"))),
+        _ => return Result.Err(JsonPatchError.Malformed(Text.from("patch must be array"))),
     };
     let mut ops: List<JsonPatchOp> = [];
     let mut i: Int = 0;
@@ -147,22 +147,22 @@ public fn parse(patch_text: &Text) -> Result<JsonPatch, JsonPatchError> {
         ops.push(parse_op(&arr[i])?);
         i = i + 1;
     }
-    Ok(JsonPatch { ops: ops })
+    Result.Ok(JsonPatch { ops: ops })
 }
 
 fn parse_op(v: &JsonValue) -> Result<JsonPatchOp, JsonPatchError> {
     let obj = match v {
         JsonValue.JsonObject(m) => m,
-        _ => return Err(JsonPatchError.Malformed(Text.from("op must be object"))),
+        _ => return Result.Err(JsonPatchError.Malformed(Text.from("op must be object"))),
     };
     let op_str = match obj.get(&Text.from("op")) {
-        Some(JsonValue.JsonString(s)) => s.clone(),
-        _ => return Err(JsonPatchError.MissingField(Text.from("op"))),
+        Maybe.Some(JsonValue.JsonString(s)) => s.clone(),
+        _ => return Result.Err(JsonPatchError.MissingField(Text.from("op"))),
     };
 
     let path_str = match obj.get(&Text.from("path")) {
-        Some(JsonValue.JsonString(s)) => s.clone(),
-        _ => return Err(JsonPatchError.MissingField(Text.from("path"))),
+        Maybe.Some(JsonValue.JsonString(s)) => s.clone(),
+        _ => return Result.Err(JsonPatchError.MissingField(Text.from("path"))),
     };
     let path = pointer_parse(&path_str)
         .map_err(|_| JsonPatchError.BadPointer(path_str.clone()))?;
@@ -170,38 +170,38 @@ fn parse_op(v: &JsonValue) -> Result<JsonPatchOp, JsonPatchError> {
     let name = op_str.as_bytes();
     if name == b"add" {
         let value = get_required_value(obj)?;
-        return Ok(JsonPatchOp.Add { path: path, value: value });
+        return Result.Ok(JsonPatchOp.Add { path: path, value: value });
     }
     if name == b"remove" {
-        return Ok(JsonPatchOp.Remove { path: path });
+        return Result.Ok(JsonPatchOp.Remove { path: path });
     }
     if name == b"replace" {
         let value = get_required_value(obj)?;
-        return Ok(JsonPatchOp.Replace { path: path, value: value });
+        return Result.Ok(JsonPatchOp.Replace { path: path, value: value });
     }
     if name == b"test" {
         let value = get_required_value(obj)?;
-        return Ok(JsonPatchOp.Test { path: path, value: value });
+        return Result.Ok(JsonPatchOp.Test { path: path, value: value });
     }
     if name == b"move" || name == b"copy" {
         let from_str = match obj.get(&Text.from("from")) {
-            Some(JsonValue.JsonString(s)) => s.clone(),
-            _ => return Err(JsonPatchError.MissingField(Text.from("from"))),
+            Maybe.Some(JsonValue.JsonString(s)) => s.clone(),
+            _ => return Result.Err(JsonPatchError.MissingField(Text.from("from"))),
         };
         let from = pointer_parse(&from_str)
             .map_err(|_| JsonPatchError.BadPointer(from_str))?;
         if name == b"move" {
-            return Ok(JsonPatchOp.Move { from: from, path: path });
+            return Result.Ok(JsonPatchOp.Move { from: from, path: path });
         }
-        return Ok(JsonPatchOp.Copy { from: from, path: path });
+        return Result.Ok(JsonPatchOp.Copy { from: from, path: path });
     }
-    Err(JsonPatchError.InvalidOp(op_str))
+    Result.Err(JsonPatchError.InvalidOp(op_str))
 }
 
 fn get_required_value(obj: &Map<Text, JsonValue>) -> Result<JsonValue, JsonPatchError> {
     match obj.get(&Text.from("value")) {
-        Some(v) => Ok(clone_value(v)),
-        None    => Err(JsonPatchError.MissingField(Text.from("value"))),
+        Maybe.Some(v) => Result.Ok(clone_value(v)),
+        Maybe.None    => Result.Err(JsonPatchError.MissingField(Text.from("value"))),
     }
 }
 
@@ -217,15 +217,15 @@ public fn apply(doc: &mut JsonValue, patch: &JsonPatch) -> Result<(), JsonPatchE
     let mut i: Int = 0;
     while i < patch.ops.len() {
         match apply_op(doc, &patch.ops[i]) {
-            Ok(_)  => {},
-            Err(e) => {
+            Result.Ok(_)  => {},
+            Result.Err(e) => {
                 *doc = snapshot;
-                return Err(e);
+                return Result.Err(e);
             },
         }
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn apply_op(doc: &mut JsonValue, op: &JsonPatchOp) -> Result<(), JsonPatchError> {
@@ -235,13 +235,13 @@ fn apply_op(doc: &mut JsonValue, op: &JsonPatchOp) -> Result<(), JsonPatchError>
         },
         JsonPatchOp.Replace { path, value } => {
             if !exists_at(doc, path) {
-                return Err(JsonPatchError.TargetNotFound(Text.from("replace target missing")));
+                return Result.Err(JsonPatchError.TargetNotFound(Text.from("replace target missing")));
             }
             set_at(doc, path, clone_value(value), true)
         },
         JsonPatchOp.Remove { path } => {
             if !exists_at(doc, path) {
-                return Err(JsonPatchError.TargetNotFound(Text.from("remove target missing")));
+                return Result.Err(JsonPatchError.TargetNotFound(Text.from("remove target missing")));
             }
             remove_at(doc, path)
         },
@@ -256,9 +256,9 @@ fn apply_op(doc: &mut JsonValue, op: &JsonPatchOp) -> Result<(), JsonPatchError>
         JsonPatchOp.Test { path, value } => {
             let actual = read_at(doc, path)?;
             if !json_equal(&actual, value) {
-                return Err(JsonPatchError.TestFailed(Text.from("test value mismatch")));
+                return Result.Err(JsonPatchError.TestFailed(Text.from("test value mismatch")));
             }
-            Ok(())
+            Result.Ok(())
         },
     }
 }
@@ -283,8 +283,8 @@ fn exists_at(doc: &JsonValue, path: &JsonPointer) -> Bool {
 
 fn read_at(doc: &JsonValue, path: &JsonPointer) -> Result<JsonValue, JsonPatchError> {
     match walk_path(doc, path) {
-        Some(v) => Ok(v),
-        None    => Err(JsonPatchError.TargetNotFound(Text.from("read"))),
+        Maybe.Some(v) => Result.Ok(v),
+        Maybe.None    => Result.Err(JsonPatchError.TargetNotFound(Text.from("read"))),
     }
 }
 
@@ -296,25 +296,25 @@ fn walk_path(doc: &JsonValue, path: &JsonPointer) -> Maybe<JsonValue> {
         cursor = match cursor {
             JsonValue.JsonObject(m) => {
                 match m.get(tok) {
-                    Some(v) => clone_value(v),
-                    None    => return None,
+                    Maybe.Some(v) => clone_value(v),
+                    Maybe.None    => return Maybe.None,
                 }
             },
             JsonValue.JsonArray(arr) => {
                 let idx = parse_array_index(tok);
                 match idx {
-                    Some(n) => {
-                        if n < 0 || n >= arr.len() { return None; }
+                    Maybe.Some(n) => {
+                        if n < 0 || n >= arr.len() { return Maybe.None; }
                         clone_value(&arr[n])
                     },
-                    None => return None,
+                    Maybe.None => return Maybe.None,
                 }
             },
-            _ => return None,
+            _ => return Maybe.None,
         };
         i = i + 1;
     }
-    Some(cursor)
+    Maybe.Some(cursor)
 }
 
 fn set_at(
@@ -323,19 +323,19 @@ fn set_at(
     if path.tokens.len() == 0 {
         // Replacing the document root.
         *doc = value;
-        return Ok(());
+        return Result.Ok(());
     }
     // Clone-path-and-rebuild strategy.
     let replaced = rebuild_with_set(doc, &path.tokens, 0, value, replace)?;
     *doc = replaced;
-    Ok(())
+    Result.Ok(())
 }
 
 fn rebuild_with_set(
     cur: &JsonValue, tokens: &List<Text>, at: Int, value: JsonValue, replace: Bool,
 ) -> Result<JsonValue, JsonPatchError> {
     if at >= tokens.len() {
-        return Ok(value);
+        return Result.Ok(value);
     }
     let tok = &tokens[at];
     match cur {
@@ -345,18 +345,18 @@ fn rebuild_with_set(
             let mut iter = keys;
             loop {
                 match iter.next() {
-                    Some(k) => {
+                    Maybe.Some(k) => {
                         match m.get(k) {
-                            Some(v) => { out.insert(k.clone(), clone_value(v)); },
-                            None => {},
+                            Maybe.Some(v) => { out.insert(k.clone(), clone_value(v)); },
+                            Maybe.None => {},
                         }
                     },
-                    None => break,
+                    Maybe.None => break,
                 }
             }
             let child_base = match m.get(tok) {
-                Some(v) => clone_value(v),
-                None    => JsonValue.JsonNull,
+                Maybe.Some(v) => clone_value(v),
+                Maybe.None    => JsonValue.JsonNull,
             };
             let new_child = if at + 1 == tokens.len() {
                 value
@@ -364,7 +364,7 @@ fn rebuild_with_set(
                 rebuild_with_set(&child_base, tokens, at + 1, value, replace)?
             };
             out.insert(tok.clone(), new_child);
-            Ok(JsonValue.JsonObject(out))
+            Result.Ok(JsonValue.JsonObject(out))
         },
         JsonValue.JsonArray(arr) => {
             // Token must be a decimal index or "-" (append marker).
@@ -373,12 +373,12 @@ fn rebuild_with_set(
                 len
             } else {
                 match parse_array_index(tok) {
-                    Some(n) => n,
-                    None    => return Err(JsonPatchError.BadPointer(tok.clone())),
+                    Maybe.Some(n) => n,
+                    Maybe.None    => return Result.Err(JsonPatchError.BadPointer(tok.clone())),
                 }
             };
             if idx < 0 || idx > len {
-                return Err(JsonPatchError.TargetNotFound(tok.clone()));
+                return Result.Err(JsonPatchError.TargetNotFound(tok.clone()));
             }
             let mut out: List<JsonValue> = [];
             let mut i: Int = 0;
@@ -411,20 +411,20 @@ fn rebuild_with_set(
                 i = idx + 1;
                 while i < arr.len() { out.push(clone_value(&arr[i])); i = i + 1; }
             }
-            Ok(JsonValue.JsonArray(out))
+            Result.Ok(JsonValue.JsonArray(out))
         },
-        _ => Err(JsonPatchError.TargetNotFound(tok.clone())),
+        _ => Result.Err(JsonPatchError.TargetNotFound(tok.clone())),
     }
 }
 
 fn remove_at(doc: &mut JsonValue, path: &JsonPointer) -> Result<(), JsonPatchError> {
     if path.tokens.len() == 0 {
         *doc = JsonValue.JsonNull;
-        return Ok(());
+        return Result.Ok(());
     }
     let rebuilt = rebuild_with_remove(doc, &path.tokens, 0)?;
     *doc = rebuilt;
-    Ok(())
+    Result.Ok(())
 }
 
 fn rebuild_with_remove(
@@ -438,12 +438,12 @@ fn rebuild_with_remove(
             let mut iter = keys;
             loop {
                 match iter.next() {
-                    Some(k) => {
+                    Maybe.Some(k) => {
                         if at + 1 == tokens.len() && k.as_bytes() == tok.as_bytes() {
                             // Skip this key — that's the removal.
                         } else {
                             match m.get(k) {
-                                Some(v) => {
+                                Maybe.Some(v) => {
                                     if k.as_bytes() == tok.as_bytes() {
                                         let new_v = rebuild_with_remove(v, tokens, at + 1)?;
                                         out.insert(k.clone(), new_v);
@@ -451,22 +451,22 @@ fn rebuild_with_remove(
                                         out.insert(k.clone(), clone_value(v));
                                     }
                                 },
-                                None => {},
+                                Maybe.None => {},
                             }
                         }
                     },
-                    None => break,
+                    Maybe.None => break,
                 }
             }
-            Ok(JsonValue.JsonObject(out))
+            Result.Ok(JsonValue.JsonObject(out))
         },
         JsonValue.JsonArray(arr) => {
             let idx = match parse_array_index(tok) {
-                Some(n) => n,
-                None    => return Err(JsonPatchError.BadPointer(tok.clone())),
+                Maybe.Some(n) => n,
+                Maybe.None    => return Result.Err(JsonPatchError.BadPointer(tok.clone())),
             };
             if idx < 0 || idx >= arr.len() {
-                return Err(JsonPatchError.TargetNotFound(tok.clone()));
+                return Result.Err(JsonPatchError.TargetNotFound(tok.clone()));
             }
             let mut out: List<JsonValue> = [];
             let mut i: Int = 0;
@@ -483,16 +483,16 @@ fn rebuild_with_remove(
                 }
                 i = i + 1;
             }
-            Ok(JsonValue.JsonArray(out))
+            Result.Ok(JsonValue.JsonArray(out))
         },
-        _ => Err(JsonPatchError.TargetNotFound(tok.clone())),
+        _ => Result.Err(JsonPatchError.TargetNotFound(tok.clone())),
     }
 }
 
 fn take_at(doc: &mut JsonValue, path: &JsonPointer) -> Result<JsonValue, JsonPatchError> {
     let v = read_at(doc, path)?;
     remove_at(doc, path)?;
-    Ok(v)
+    Result.Ok(v)
 }
 
 // =============================================================================
@@ -501,24 +501,24 @@ fn take_at(doc: &mut JsonValue, path: &JsonPointer) -> Result<JsonValue, JsonPat
 
 fn parse_array_index(s: &Text) -> Maybe<Int> {
     let b = s.as_bytes();
-    if b.len() == 0 { return None; }
-    if b.len() > 1 && b[0] == ('0' as Byte) { return None; }
+    if b.len() == 0 { return Maybe.None; }
+    if b.len() > 1 && b[0] == ('0' as Byte) { return Maybe.None; }
     // SOUNDNESS: same overflow-defense recipe as the sibling
     // core/encoding/json_pointer.vr (#72). Int.MAX is 19 decimal
     // digits; any longer digit run necessarily overflows the
     // accumulator. Reject pre-loop, then guard each multiply.
-    if b.len() > 19 { return None; }
+    if b.len() > 19 { return Maybe.None; }
     let mut v: Int = 0;
     let mut i: Int = 0;
     while i < b.len() {
         let c = b[i];
-        if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
-        if v > 922_337_203_685_477_580 { return None; }   // Int.MAX / 10
+        if c < ('0' as Byte) || c > ('9' as Byte) { return Maybe.None; }
+        if v > 922_337_203_685_477_580 { return Maybe.None; }   // Int.MAX / 10
         v = v * 10 + ((c - ('0' as Byte)) as Int);
-        if v < 0 { return None; }                          // wrap-around guard
+        if v < 0 { return Maybe.None; }                          // wrap-around guard
         i = i + 1;
     }
-    Some(v)
+    Maybe.Some(v)
 }
 
 fn clone_value(v: &JsonValue) -> JsonValue {
@@ -540,13 +540,13 @@ fn clone_value(v: &JsonValue) -> JsonValue {
             let mut iter = keys;
             loop {
                 match iter.next() {
-                    Some(k) => {
+                    Maybe.Some(k) => {
                         match m.get(k) {
-                            Some(v) => { out.insert(k.clone(), clone_value(v)); },
-                            None => {},
+                            Maybe.Some(v) => { out.insert(k.clone(), clone_value(v)); },
+                            Maybe.None => {},
                         }
                     },
-                    None => break,
+                    Maybe.None => break,
                 }
             }
             JsonValue.JsonObject(out)
@@ -576,15 +576,15 @@ fn json_equal(a: &JsonValue, b: &JsonValue) -> Bool {
             let mut iter = keys;
             loop {
                 match iter.next() {
-                    Some(k) => {
+                    Maybe.Some(k) => {
                         match (xm.get(k), ym.get(k)) {
-                            (Some(vx), Some(vy)) => {
+                            (Maybe.Some(vx), Maybe.Some(vy)) => {
                                 if !json_equal(vx, vy) { return false; }
                             },
                             _ => return false,
                         }
                     },
-                    None => break,
+                    Maybe.None => break,
                 }
             }
             true

@@ -103,11 +103,11 @@ fn alg_id(a: &CoseAlg) -> Int {
 
 fn alg_from_id(id: Int) -> Maybe<CoseAlg> {
     match id {
-        -8 => Some(CoseAlg.EdDSA),
-         5 => Some(CoseAlg.HS256),
-         6 => Some(CoseAlg.HS384),
-         7 => Some(CoseAlg.HS512),
-         _ => None,
+        -8 => Maybe.Some(CoseAlg.EdDSA),
+         5 => Maybe.Some(CoseAlg.HS256),
+         6 => Maybe.Some(CoseAlg.HS384),
+         7 => Maybe.Some(CoseAlg.HS512),
+         _ => Maybe.None,
     }
 }
 
@@ -215,10 +215,10 @@ fn protected_header_bstr(h: &CoseHeaders) -> List<Byte> {
     let mut entries: List<(CborValue, CborValue)> = [];
     entries.push((CborValue.CborUint(1_u64), alg_cbor(&h.alg)));
     match &h.kid {
-        Some(k) => {
+        Maybe.Some(k) => {
             entries.push((CborValue.CborUint(4_u64), CborValue.CborBytes(k.clone())));
         },
-        None => {},
+        Maybe.None => {},
     }
     encode_canonical(&CborValue.CborMap(entries))
 }
@@ -247,7 +247,7 @@ public fn sign1(
     key:          &CoseKey,
 ) -> Result<List<Byte>, CoseError> {
     if !key_matches_alg(&headers.alg, key) {
-        return Err(CoseError.WrongKeyKind);
+        return Result.Err(CoseError.WrongKeyKind);
     }
     let body_protected = protected_header_bstr(headers);
     let to_sign = sig_structure(&body_protected, external_aad, payload);
@@ -257,7 +257,7 @@ public fn sign1(
             let sig: Ed25519Signature = Ed25519.sign(sk, to_sign.as_slice());
             slice_to_vec(&sig[..])
         },
-        _ => return Err(CoseError.WrongKeyKind),
+        _ => return Result.Err(CoseError.WrongKeyKind),
     };
 
     // [protected, {}, payload, signature]
@@ -266,7 +266,7 @@ public fn sign1(
     msg.push(CborValue.CborMap([]));     // empty unprotected
     msg.push(CborValue.CborBytes(slice_to_vec(payload)));
     msg.push(CborValue.CborBytes(signature));
-    Ok(encode(&CborValue.CborArray(msg)))
+    Result.Ok(encode(&CborValue.CborArray(msg)))
 }
 
 /// Verify a COSE_Sign1 blob. On success, returns the payload bytes.
@@ -280,52 +280,52 @@ public fn verify_sign1(
     let v = decode(wire).map_err(|_| CoseError.CborDecode)?;
     let arr = match v {
         CborValue.CborArray(a) => a,
-        _                      => return Err(CoseError.MalformedStructure),
+        _                      => return Result.Err(CoseError.MalformedStructure),
     };
-    if arr.len() != 4 { return Err(CoseError.MalformedStructure); }
+    if arr.len() != 4 { return Result.Err(CoseError.MalformedStructure); }
     let protected = match &arr[0] {
         CborValue.CborBytes(b) => b.clone(),
-        _                      => return Err(CoseError.MalformedStructure),
+        _                      => return Result.Err(CoseError.MalformedStructure),
     };
     let payload = match &arr[2] {
         CborValue.CborBytes(b) => b.clone(),
-        _                      => return Err(CoseError.MalformedStructure),
+        _                      => return Result.Err(CoseError.MalformedStructure),
     };
     let signature = match &arr[3] {
         CborValue.CborBytes(b) => b.clone(),
-        _                      => return Err(CoseError.MalformedStructure),
+        _                      => return Result.Err(CoseError.MalformedStructure),
     };
 
     let headers = parse_protected(protected.as_slice())?;
     if !key_matches_alg(&headers.alg, key) {
-        return Err(CoseError.WrongKeyKind);
+        return Result.Err(CoseError.WrongKeyKind);
     }
 
     let to_verify = sig_structure(&protected, external_aad, payload.as_slice());
     match (&headers.alg, key) {
         (CoseAlg.EdDSA, CoseKey.Ed25519Verify(pk)) => {
-            if signature.len() != 64 { return Err(CoseError.SignatureMismatch); }
+            if signature.len() != 64 { return Result.Err(CoseError.SignatureMismatch); }
             let mut sig: [Byte; 64] = [0_u8; 64];
             let mut i: Int = 0;
             while i < 64 { sig[i] = signature[i]; i = i + 1; }
             match Ed25519.verify(pk, to_verify.as_slice(), &sig) {
-                Ok(())  => Ok(payload),
-                Err(_)  => Err(CoseError.SignatureMismatch),
+                Result.Ok(())  => Result.Ok(payload),
+                Result.Err(_)  => Result.Err(CoseError.SignatureMismatch),
             }
         },
         (CoseAlg.EdDSA, CoseKey.Ed25519Seeded(sk)) => {
             // Signer self-verify path.
             let pk = Ed25519.public_key(sk);
-            if signature.len() != 64 { return Err(CoseError.SignatureMismatch); }
+            if signature.len() != 64 { return Result.Err(CoseError.SignatureMismatch); }
             let mut sig: [Byte; 64] = [0_u8; 64];
             let mut i: Int = 0;
             while i < 64 { sig[i] = signature[i]; i = i + 1; }
             match Ed25519.verify(&pk, to_verify.as_slice(), &sig) {
-                Ok(())  => Ok(payload),
-                Err(_)  => Err(CoseError.SignatureMismatch),
+                Result.Ok(())  => Result.Ok(payload),
+                Result.Err(_)  => Result.Err(CoseError.SignatureMismatch),
             }
         },
-        _ => Err(CoseError.WrongKeyKind),
+        _ => Result.Err(CoseError.WrongKeyKind),
     }
 }
 
@@ -359,7 +359,7 @@ public fn mac0(
     key:          &CoseKey,
 ) -> Result<List<Byte>, CoseError> {
     if !key_matches_alg(&headers.alg, key) {
-        return Err(CoseError.WrongKeyKind);
+        return Result.Err(CoseError.WrongKeyKind);
     }
     let body_protected = protected_header_bstr(headers);
     let to_mac = mac_structure(&body_protected, external_aad, payload);
@@ -368,7 +368,7 @@ public fn mac0(
         (CoseAlg.HS256, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha256(s.as_slice(), to_mac.as_slice())[..]),
         (CoseAlg.HS384, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha384(s.as_slice(), to_mac.as_slice())[..]),
         (CoseAlg.HS512, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha512(s.as_slice(), to_mac.as_slice())[..]),
-        _ => return Err(CoseError.WrongKeyKind),
+        _ => return Result.Err(CoseError.WrongKeyKind),
     };
 
     let mut msg: List<CborValue> = [];
@@ -376,7 +376,7 @@ public fn mac0(
     msg.push(CborValue.CborMap([]));
     msg.push(CborValue.CborBytes(slice_to_vec(payload)));
     msg.push(CborValue.CborBytes(tag));
-    Ok(encode(&CborValue.CborArray(msg)))
+    Result.Ok(encode(&CborValue.CborArray(msg)))
 }
 
 public fn verify_mac0(
@@ -387,37 +387,37 @@ public fn verify_mac0(
     let v = decode(wire).map_err(|_| CoseError.CborDecode)?;
     let arr = match v {
         CborValue.CborArray(a) => a,
-        _                      => return Err(CoseError.MalformedStructure),
+        _                      => return Result.Err(CoseError.MalformedStructure),
     };
-    if arr.len() != 4 { return Err(CoseError.MalformedStructure); }
+    if arr.len() != 4 { return Result.Err(CoseError.MalformedStructure); }
     let protected = match &arr[0] {
         CborValue.CborBytes(b) => b.clone(),
-        _                      => return Err(CoseError.MalformedStructure),
+        _                      => return Result.Err(CoseError.MalformedStructure),
     };
     let payload = match &arr[2] {
         CborValue.CborBytes(b) => b.clone(),
-        _                      => return Err(CoseError.MalformedStructure),
+        _                      => return Result.Err(CoseError.MalformedStructure),
     };
     let tag = match &arr[3] {
         CborValue.CborBytes(b) => b.clone(),
-        _                      => return Err(CoseError.MalformedStructure),
+        _                      => return Result.Err(CoseError.MalformedStructure),
     };
 
     let headers = parse_protected(protected.as_slice())?;
     if !key_matches_alg(&headers.alg, key) {
-        return Err(CoseError.WrongKeyKind);
+        return Result.Err(CoseError.WrongKeyKind);
     }
     let to_mac = mac_structure(&protected, external_aad, payload.as_slice());
     let expected = match (&headers.alg, key) {
         (CoseAlg.HS256, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha256(s.as_slice(), to_mac.as_slice())[..]),
         (CoseAlg.HS384, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha384(s.as_slice(), to_mac.as_slice())[..]),
         (CoseAlg.HS512, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha512(s.as_slice(), to_mac.as_slice())[..]),
-        _ => return Err(CoseError.WrongKeyKind),
+        _ => return Result.Err(CoseError.WrongKeyKind),
     };
     if constant_time_eq(expected.as_slice(), tag.as_slice()) {
-        Ok(payload)
+        Result.Ok(payload)
     } else {
-        Err(CoseError.SignatureMismatch)
+        Result.Err(CoseError.SignatureMismatch)
     }
 }
 
@@ -450,15 +450,15 @@ fn mac_structure(body_protected: &List<Byte>, external_aad: &[Byte], payload: &[
 fn parse_protected(bstr: &[Byte]) -> Result<CoseHeaders, CoseError> {
     if bstr.len() == 0 {
         // Empty bstr = empty map by convention.
-        return Err(CoseError.MalformedStructure);
+        return Result.Err(CoseError.MalformedStructure);
     }
     let v = decode(bstr).map_err(|_| CoseError.CborDecode)?;
     let entries = match v {
         CborValue.CborMap(m) => m,
-        _                    => return Err(CoseError.MalformedStructure),
+        _                    => return Result.Err(CoseError.MalformedStructure),
     };
-    let mut alg_id: Maybe<Int> = None;
-    let mut kid: Maybe<List<Byte>> = None;
+    let mut alg_id: Maybe<Int> = Maybe.None;
+    let mut kid: Maybe<List<Byte>> = Maybe.None;
     let mut i: Int = 0;
     while i < entries.len() {
         let (k, val) = &entries[i];
@@ -468,26 +468,26 @@ fn parse_protected(bstr: &[Byte]) -> Result<CoseHeaders, CoseError> {
         };
         if key == 1 {
             match val {
-                CborValue.CborUint(u) => alg_id = Some(*u as Int),
-                CborValue.CborNint(n) => alg_id = Some(-1 - (*n as Int)),
-                _                      => return Err(CoseError.MalformedStructure),
+                CborValue.CborUint(u) => alg_id = Maybe.Some(*u as Int),
+                CborValue.CborNint(n) => alg_id = Maybe.Some(-1 - (*n as Int)),
+                _                      => return Result.Err(CoseError.MalformedStructure),
             }
         } else if key == 4 {
             match val {
-                CborValue.CborBytes(b) => kid = Some(b.clone()),
-                _                      => return Err(CoseError.MalformedStructure),
+                CborValue.CborBytes(b) => kid = Maybe.Some(b.clone()),
+                _                      => return Result.Err(CoseError.MalformedStructure),
             }
         }
         i = i + 1;
     }
     let alg = match alg_id {
-        Some(id) => match alg_from_id(id) {
-            Some(a) => a,
-            None    => return Err(CoseError.UnsupportedAlgorithm(id)),
+        Maybe.Some(id) => match alg_from_id(id) {
+            Maybe.Some(a) => a,
+            Maybe.None    => return Result.Err(CoseError.UnsupportedAlgorithm(id)),
         },
-        None => return Err(CoseError.MalformedStructure),
+        Maybe.None => return Result.Err(CoseError.MalformedStructure),
     };
-    Ok(CoseHeaders { alg: alg, kid: kid })
+    Result.Ok(CoseHeaders { alg: alg, kid: kid })
 }
 
 // =============================================================================

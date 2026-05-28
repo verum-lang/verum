@@ -187,10 +187,10 @@ public fn encode(input: &[Byte]) -> List<Byte> {
 // =============================================================================
 
 public fn decode(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
-    if input.len() == 0 { return Ok([]); }
+    if input.len() == 0 { return Result.Ok([]); }
     // O(N²) decoder — refuse hostile-sized inputs at the bridge.
     if input.len() > MAX_BASE58_INPUT_BYTES {
-        return Err(Base58Error.InputTooLong { len: input.len(), limit: MAX_BASE58_INPUT_BYTES });
+        return Result.Err(Base58Error.InputTooLong { len: input.len(), limit: MAX_BASE58_INPUT_BYTES });
     }
 
     // Count leading '1's → leading zero bytes in output.
@@ -229,16 +229,16 @@ public fn decode(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
     // Reverse the accumulated bytes.
     let mut k: Int = out_rev.len() - 1;
     while k >= 0 { out.push(out_rev[k]); k = k - 1; }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn decode_digit(b: Byte) -> Result<Int, Base58Error> {
     let mut i: Int = 0;
     while i < 58 {
-        if BASE58_ALPHABET[i] == b { return Ok(i); }
+        if BASE58_ALPHABET[i] == b { return Result.Ok(i); }
         i = i + 1;
     }
-    Err(Base58Error.InvalidCharacter(b))
+    Result.Err(Base58Error.InvalidCharacter(b))
 }
 
 // =============================================================================
@@ -270,7 +270,7 @@ public fn encode_check(payload: &[Byte]) -> List<Byte> {
 public fn decode_check(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
     let decoded = decode(input)?;
     if decoded.len() < 4 {
-        return Err(Base58Error.TruncatedChecksum);
+        return Result.Err(Base58Error.TruncatedChecksum);
     }
     let payload_len = decoded.len() - 4;
     let mut payload: List<Byte> = List.with_capacity(payload_len);
@@ -279,11 +279,11 @@ public fn decode_check(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
     let mut j: Int = 0;
     while j < 4 {
         if decoded[payload_len + j] != expected[j] {
-            return Err(Base58Error.ChecksumMismatch);
+            return Result.Err(Base58Error.ChecksumMismatch);
         }
         j = j + 1;
     }
-    Ok(payload)
+    Result.Ok(payload)
 }
 
 fn compute_checksum(payload: &[Byte]) -> [Byte; 4] {

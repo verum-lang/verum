@@ -98,8 +98,8 @@ implement AnalyzeEngine {
     }
 
     public fn current_table(&self) -> Maybe<Text> {
-        if self.table_idx >= self.plan.tables.len() { return None; }
-        Some(self.plan.tables[self.table_idx].clone())
+        if self.table_idx >= self.plan.tables.len() { return Maybe.None; }
+        Maybe.Some(self.plan.tables[self.table_idx].clone())
     }
 
     /// Step the state machine. Caller drives execution by feeding back

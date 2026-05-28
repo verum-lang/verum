@@ -313,36 +313,36 @@ public fn init() -> Result<(), InitError> {
     @cfg(runtime = "full")
     {
         match FullRuntime.init() {
-            Ok(runtime) => return install_runtime(runtime),
-            Err(e) => return Err(e),
+            Result.Ok(runtime) => return install_runtime(runtime),
+            Result.Err(e) => return Result.Err(e),
         }
     }
 
     @cfg(runtime = "single_thread")
     {
         match SingleThreadRuntime.init() {
-            Ok(runtime) => return install_runtime(runtime),
-            Err(e) => return Err(e),
+            Result.Ok(runtime) => return install_runtime(runtime),
+            Result.Err(e) => return Result.Err(e),
         }
     }
 
     @cfg(runtime = "no_async")
     {
         match SyncRuntime.init() {
-            Ok(runtime) => return install_runtime(runtime),
-            Err(e) => return Err(e),
+            Result.Ok(runtime) => return install_runtime(runtime),
+            Result.Err(e) => return Result.Err(e),
         }
     }
 
     @cfg(any(runtime = "no_heap", runtime = "embedded"))
     {
         match EmbeddedRuntime.init() {
-            Ok(runtime) => return install_runtime(runtime),
-            Err(e) => return Err(e),
+            Result.Ok(runtime) => return install_runtime(runtime),
+            Result.Err(e) => return Result.Err(e),
         }
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 /// Initialize the runtime with a custom configuration.
@@ -425,7 +425,7 @@ fn install_runtime<R: RuntimeConfig>(runtime: R) -> Result<(), InitError> {
     let env = ExecutionEnv {
         id: next_env_id(),
         created_at: monotonic_ns(),
-        parent_id: None,
+        parent_id: Maybe.None,
         flags: EnvFlags.default(),
         memory: MemoryContext {
             cbgr_tier: detect_cbgr_tier(),
@@ -452,7 +452,7 @@ fn install_runtime<R: RuntimeConfig>(runtime: R) -> Result<(), InitError> {
     // Store in thread-local context slot
     ctx_set(EXEC_ENV_SLOT, &env as &unsafe Byte);
 
-    Ok(())
+    Result.Ok(())
 }
 
 /// Detect optimal CBGR tier based on platform capabilities

@@ -421,7 +421,7 @@ public type VerifiedRegister<T: Copy, MODE> is {
 implement<T: Copy> VerifiedRegister<T, WriteOnly> {
     /// Verified write - proves no read occurred.
     @ensures(self.write_count == old(self.write_count) + 1)
-    @ensures(self.last_write == Some(value))
+    @ensures(self.last_write == Maybe.Some(value))
     public fn write(&mut self, value: T) {
         self.reg.write(value);
     }

@@ -34,11 +34,11 @@ public type QpackStaticEntry is {
 
 public const STATIC_TABLE_SIZE: Int = 99;
 
-/// Look up a static-table entry by its index. Returns None for
+/// Look up a static-table entry by its index. Returns Maybe.None for
 /// indices outside [0, 98].
 public fn get(index: Int) -> Maybe<QpackStaticEntry> {
-    if index < 0 || index >= STATIC_TABLE_SIZE { return None; }
-    Some(entry(index))
+    if index < 0 || index >= STATIC_TABLE_SIZE { return Maybe.None; }
+    Maybe.Some(entry(index))
 }
 
 /// Find the static-table index of an exact (name, value) match.
@@ -49,23 +49,23 @@ public fn find(name: &Text, value: &Text) -> Maybe<Int> {
     while i < STATIC_TABLE_SIZE {
         let e = entry(i);
         if text_eq(&e.name, name) && text_eq(&e.value, value) {
-            return Some(i);
+            return Maybe.Some(i);
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 /// Find any static-table index with a matching name (for name-
-/// reference encoding). Returns the smallest matching index or None.
+/// reference encoding). Returns the smallest matching index or Maybe.None.
 public fn find_name(name: &Text) -> Maybe<Int> {
     let mut i: Int = 0;
     while i < STATIC_TABLE_SIZE {
         let e = entry(i);
-        if text_eq(&e.name, name) { return Some(i); }
+        if text_eq(&e.name, name) { return Maybe.Some(i); }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn text_eq(a: &Text, b: &Text) -> Bool {

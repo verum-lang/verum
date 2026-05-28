@@ -108,33 +108,33 @@ implement VtabRTree {
     public fn delete(&mut self, rowid: Int64) -> Bool {
         let leaf = self.find_leaf_with(self.root_id, rowid);
         match leaf {
-            Some(idx) => {
+            Maybe.Some(idx) => {
                 self.remove_from_leaf(idx, rowid);
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
     fn find_leaf_with(&self, node_idx: Int, rowid: Int64) -> Maybe<Int> {
-        if node_idx >= self.nodes.len() { return None; }
+        if node_idx >= self.nodes.len() { return Maybe.None; }
         match &self.nodes[node_idx] {
             Leaf(c) => {
                 let mut i: Int = 0;
                 while i < c.entries.len() {
-                    if c.entries[i].rowid == rowid { return Some(node_idx); }
+                    if c.entries[i].rowid == rowid { return Maybe.Some(node_idx); }
                     i = i + 1;
                 }
-                None
+                Maybe.None
             }
             Internal(c) => {
                 let mut i: Int = 0;
                 while i < c.entries.len() {
                     let r = self.find_leaf_with(c.entries[i].child_node_id, rowid);
-                    match r { Some(_) => { return r; }, None => {} }
+                    match r { Maybe.Some(_) => { return r; }, Maybe.None => {} }
                     i = i + 1;
                 }
-                None
+                Maybe.None
             }
         }
     }

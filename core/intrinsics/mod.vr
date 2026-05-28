@@ -2,7 +2,7 @@
 // core/intrinsics/mod.vr - Unified Intrinsics Module
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (intrinsics are compiler-provided)
+// Dependencies: Maybe.None (intrinsics are compiler-provided)
 //
 
 // This module provides a unified, modular organization of all Verum intrinsics.

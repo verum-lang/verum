@@ -96,8 +96,8 @@ mount .stream.*;
 
 /// 1. Created: Generator function called, thread spawned but paused
 /// 2. Running: `next()` resumes the generator body
-/// 3. Yielded: `yield value` pauses and returns `Some(value)`
-/// 4. Completed: Generator body returns, `next()` returns `None`
+/// 3. Yielded: `yield value` pauses and returns `Maybe.Some(value)`
+/// 4. Completed: Generator body returns, `next()` returns `Maybe.None`
 ///
 
 /// # Memory Management
@@ -160,7 +160,7 @@ implement<T> Generator<T> {
     /// Close the generator early, releasing all resources.
     ///
 
-    /// After closing, `next()` will always return `None`.
+    /// After closing, `next()` will always return `Maybe.None`.
     /// This is called automatically when the generator is dropped.
     public fn close(&mut self) {
         if self.handle != 0 && !self.done {
@@ -198,23 +198,23 @@ implement<T> Iterator for Generator<T> {
 
     fn next(&mut self) -> Maybe<T> {
         if self.done {
-            return None;
+            return Maybe.None;
         }
         if __gen_has_next_raw(self.handle) == 0 {
             self.done = true;
-            return None;
+            return Maybe.None;
         }
         let value = __gen_next_raw(self.handle);
         // Check if generator completed during this call
         if __gen_has_next_raw(self.handle) == 0 {
             self.done = true;
         }
-        Some(value as T)
+        Maybe.Some(value as T)
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         // Generators have unknown length
-        (0, None)
+        (0, Maybe.None)
     }
 }
 
@@ -289,22 +289,22 @@ implement<T> Stream for AsyncGenerator<T> {
 
     fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<T>> {
         if self.done {
-            return Poll.Ready(None);
+            return Poll.Ready(Maybe.None);
         }
         if __gen_has_next_raw(self.handle) == 0 {
             self.done = true;
-            return Poll.Ready(None);
+            return Poll.Ready(Maybe.None);
         }
         // For thread-based generators, next() is blocking so always Ready
         let value = __gen_next_raw(self.handle);
         if __gen_has_next_raw(self.handle) == 0 {
             self.done = true;
         }
-        Poll.Ready(Some(value as T))
+        Poll.Ready(Maybe.Some(value as T))
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (0, None)
+        (0, Maybe.None)
     }
 }
 
@@ -322,8 +322,8 @@ implement<T> Drop for AsyncGenerator<T> {
 /// Create a generator from a function that produces Maybe<T>.
 ///
 
-/// The function is called repeatedly. Each `Some(value)` becomes
-/// a yielded value. `None` terminates the generator.
+/// The function is called repeatedly. Each `Maybe.Some(value)` becomes
+/// a yielded value. `Maybe.None` terminates the generator.
 ///
 
 /// # Example
@@ -333,7 +333,7 @@ implement<T> Drop for AsyncGenerator<T> {
 /// let mut count = 0;
 /// let gen = generator_from_fn(|| {
 ///  count = count + 1;
-///  if count <= 5 { Some(count) } else { None }
+///  if count <= 5 { Maybe.Some(count) } else { Maybe.None }
 /// });
 ///
 
@@ -356,13 +356,13 @@ implement<T, F: fn() -> Maybe<T>> Iterator for FnGenerator<T, F> {
 
     fn next(&mut self) -> Maybe<T> {
         if self.done {
-            return None;
+            return Maybe.None;
         }
         match (self.f)() {
-            Some(value) => Some(value),
-            None => {
+            Maybe.Some(value) => Maybe.Some(value),
+            Maybe.None => {
                 self.done = true;
-                None
+                Maybe.None
             }
         }
     }
@@ -395,7 +395,7 @@ public fn generator_unfold<T, St, F: fn(St) -> (T, St)>(
     f: F
 ) -> UnfoldGenerator<T, St, F> {
     UnfoldGenerator {
-        state: Some(initial),
+        state: Maybe.Some(initial),
         f,
     }
 }
@@ -411,12 +411,12 @@ implement<T, St, F: fn(St) -> (T, St)> Iterator for UnfoldGenerator<T, St, F> {
 
     fn next(&mut self) -> Maybe<T> {
         match self.state.take() {
-            Some(state) => {
+            Maybe.Some(state) => {
                 let (value, next_state) = (self.f)(state);
-                self.state = Some(next_state);
-                Some(value)
+                self.state = Maybe.Some(next_state);
+                Maybe.Some(value)
             }
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 }
@@ -449,9 +449,9 @@ implement Iterator for RangeGenerator {
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -461,7 +461,7 @@ implement Iterator for RangeGenerator {
         } else {
             0
         };
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
@@ -489,11 +489,11 @@ implement<T: Clone> Iterator for RepeatGenerator<T> {
     type Item = T;
 
     fn next(&mut self) -> Maybe<T> {
-        Some(self.value.clone())
+        Maybe.Some(self.value.clone())
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (Int.MAX, None)
+        (Int.MAX, Maybe.None)
     }
 }
 
@@ -523,7 +523,7 @@ public fn generator_successors<T: Clone, F: fn(&T) -> T>(
     succ: F
 ) -> SuccessorGenerator<T, F> {
     SuccessorGenerator {
-        current: Some(first),
+        current: Maybe.Some(first),
         succ,
     }
 }
@@ -539,12 +539,12 @@ implement<T: Clone, F: fn(&T) -> T> Iterator for SuccessorGenerator<T, F> {
 
     fn next(&mut self) -> Maybe<T> {
         match self.current.take() {
-            Some(val) => {
+            Maybe.Some(val) => {
                 let next_val = (self.succ)(&val);
-                self.current = Some(next_val);
-                Some(val)
+                self.current = Maybe.Some(next_val);
+                Maybe.Some(val)
             }
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 }
@@ -573,25 +573,25 @@ fn test_fn_generator() {
     let mut count = 0;
     let mut gen = generator_from_fn(|| {
         count = count + 1;
-        if count <= 3 { Some(count) } else { None }
+        if count <= 3 { Maybe.Some(count) } else { Maybe.None }
     });
 
-    assert_eq(gen.next(), Some(1));
-    assert_eq(gen.next(), Some(2));
-    assert_eq(gen.next(), Some(3));
-    assert_eq(gen.next(), None);
+    assert_eq(gen.next(), Maybe.Some(1));
+    assert_eq(gen.next(), Maybe.Some(2));
+    assert_eq(gen.next(), Maybe.Some(3));
+    assert_eq(gen.next(), Maybe.None);
 }
 
 @test
 fn test_range_generator() {
     let mut gen = generator_range(0, 5);
 
-    assert_eq(gen.next(), Some(0));
-    assert_eq(gen.next(), Some(1));
-    assert_eq(gen.next(), Some(2));
-    assert_eq(gen.next(), Some(3));
-    assert_eq(gen.next(), Some(4));
-    assert_eq(gen.next(), None);
+    assert_eq(gen.next(), Maybe.Some(0));
+    assert_eq(gen.next(), Maybe.Some(1));
+    assert_eq(gen.next(), Maybe.Some(2));
+    assert_eq(gen.next(), Maybe.Some(3));
+    assert_eq(gen.next(), Maybe.Some(4));
+    assert_eq(gen.next(), Maybe.None);
 }
 
 @test
@@ -599,7 +599,7 @@ fn test_range_generator_size_hint() {
     let gen = generator_range(0, 10);
     let (lo, hi) = gen.size_hint();
     assert_eq(lo, 10);
-    assert_eq(hi, Some(10));
+    assert_eq(hi, Maybe.Some(10));
 }
 
 @test
@@ -610,29 +610,29 @@ fn test_unfold_generator() {
         (a, (b, a + b))
     });
 
-    assert_eq(gen.next(), Some(0));
-    assert_eq(gen.next(), Some(1));
-    assert_eq(gen.next(), Some(1));
-    assert_eq(gen.next(), Some(2));
-    assert_eq(gen.next(), Some(3));
-    assert_eq(gen.next(), Some(5));
+    assert_eq(gen.next(), Maybe.Some(0));
+    assert_eq(gen.next(), Maybe.Some(1));
+    assert_eq(gen.next(), Maybe.Some(1));
+    assert_eq(gen.next(), Maybe.Some(2));
+    assert_eq(gen.next(), Maybe.Some(3));
+    assert_eq(gen.next(), Maybe.Some(5));
 }
 
 @test
 fn test_repeat_generator() {
     let mut gen = generator_repeat(7);
-    assert_eq(gen.next(), Some(7));
-    assert_eq(gen.next(), Some(7));
-    assert_eq(gen.next(), Some(7));
+    assert_eq(gen.next(), Maybe.Some(7));
+    assert_eq(gen.next(), Maybe.Some(7));
+    assert_eq(gen.next(), Maybe.Some(7));
 }
 
 @test
 fn test_successor_generator() {
     let mut gen = generator_successors(1, |x| x * 2);
-    assert_eq(gen.next(), Some(1));
-    assert_eq(gen.next(), Some(2));
-    assert_eq(gen.next(), Some(4));
-    assert_eq(gen.next(), Some(8));
+    assert_eq(gen.next(), Maybe.Some(1));
+    assert_eq(gen.next(), Maybe.Some(2));
+    assert_eq(gen.next(), Maybe.Some(4));
+    assert_eq(gen.next(), Maybe.Some(8));
 }
 
 @test

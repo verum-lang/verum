@@ -12,7 +12,7 @@
 module core.database.mysql.error;
 
 mount core.*;
-mount base.{Text, Maybe, None, Some};
+mount base.{Text, Maybe, Maybe.None, Some};
 mount core.database.common.error.{
     DbError, AdapterId, AdapterSpecific, SqlState,
     ConnectionErrorKind, AuthErrorKind, TimeoutPhase,
@@ -54,13 +54,13 @@ public fn dberr_from_mysql(err: ErrPacket) -> DbError {
         infer_state_from_code(err.code)
     };
     let state = match SqlState.parse(&state_text) {
-        Some(s) => s,
-        None    => SqlState.parse(&"XX000".clone()).unwrap(),
+        Maybe.Some(s) => s,
+        Maybe.None    => SqlState.parse(&"XX000".clone()).unwrap(),
     };
     DbError.QueryFailed {
         sql_state: state,
         message: err.message,
-        position: None,
+        position: Maybe.None,
     }
 }
 

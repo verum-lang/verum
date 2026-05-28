@@ -79,13 +79,13 @@ public fn execute(
     fn_arg: Maybe<Text>,
 ) -> PragmaResult {
     let kind = match pragma_from_name(name) {
-        Some(k) => k,
-        None    => { return PrError(unknown_pragma_msg(name)); }
+        Maybe.Some(k) => k,
+        Maybe.None    => { return PrError(unknown_pragma_msg(name)); }
     };
     let _ = fn_arg;
     match write_value {
-        Some(v) => execute_write(cfg, &kind, v),
-        None    => execute_read(cfg, &kind),
+        Maybe.Some(v) => execute_write(cfg, &kind, v),
+        Maybe.None    => execute_read(cfg, &kind),
     }
 }
 
@@ -164,17 +164,17 @@ fn execute_write(cfg: &mut PragmaConfig, k: &PragmaKind, v: Register) -> PragmaR
         PPageSize          => { cfg.page_size = int_or(&v, cfg.page_size); PrEmpty }
         PJournalMode       => match &v {
             RText(s) => match journal_mode_from_text(s) {
-                Some(m) => { cfg.journal_mode = m; single_text(journal_mode_name(&cfg.journal_mode)) }
-                None    => PrError("invalid journal_mode".clone()),
+                Maybe.Some(m) => { cfg.journal_mode = m; single_text(journal_mode_name(&cfg.journal_mode)) }
+                Maybe.None    => PrError("invalid journal_mode".clone()),
             },
             _ => PrError("expected text journal_mode".clone()),
         },
         PSynchronous       => match int_opt(&v) {
-            Some(n) => match synchronous_from_int(n) {
-                Some(sy) => { cfg.synchronous = sy; PrEmpty }
-                None     => PrError("invalid synchronous level".clone()),
+            Maybe.Some(n) => match synchronous_from_int(n) {
+                Maybe.Some(sy) => { cfg.synchronous = sy; PrEmpty }
+                Maybe.None     => PrError("invalid synchronous level".clone()),
             },
-            None => PrError("expected integer".clone()),
+            Maybe.None => PrError("expected integer".clone()),
         },
         PForeignKeys       => { cfg.foreign_keys = bool_or(&v, cfg.foreign_keys); PrEmpty }
         PRecursiveTriggers => { cfg.recursive_triggers = bool_or(&v, cfg.recursive_triggers); PrEmpty }
@@ -268,7 +268,7 @@ fn pragma_list_rows() -> PragmaResult {
 fn int_or(v: &Register, fallback: Int) -> Int {
     match v {
         RInt(x)  => x as Int,
-        RText(s) => match parse_signed_int(s) { Some(x) => x as Int, None => fallback },
+        RText(s) => match parse_signed_int(s) { Maybe.Some(x) => x as Int, Maybe.None => fallback },
         _        => fallback,
     }
 }
@@ -276,16 +276,16 @@ fn int_or(v: &Register, fallback: Int) -> Int {
 fn int64_or(v: &Register, fallback: Int64) -> Int64 {
     match v {
         RInt(x)  => x,
-        RText(s) => match parse_signed_int(s) { Some(x) => x, None => fallback },
+        RText(s) => match parse_signed_int(s) { Maybe.Some(x) => x, Maybe.None => fallback },
         _        => fallback,
     }
 }
 
 fn int_opt(v: &Register) -> Maybe<Int> {
     match v {
-        RInt(x)  => Some(x as Int),
-        RText(s) => match parse_signed_int(s) { Some(x) => Some(x as Int), None => None },
-        _        => None,
+        RInt(x)  => Maybe.Some(x as Int),
+        RText(s) => match parse_signed_int(s) { Maybe.Some(x) => Maybe.Some(x as Int), Maybe.None => Maybe.None },
+        _        => Maybe.None,
     }
 }
 
@@ -308,25 +308,25 @@ fn bool_or(v: &Register, fallback: Bool) -> Bool {
 
 fn parse_signed_int(s: &Text) -> Maybe<Int64> {
     let bs = s.as_bytes();
-    if bs.len() == 0 { return None; }
+    if bs.len() == 0 { return Maybe.None; }
     let mut sign: Int64 = 1 as Int64;
     let mut i: Int = 0;
     if bs[0] == (45 as Byte) { sign = -1 as Int64; i = 1; }
     else if bs[0] == (43 as Byte) { i = 1; }
-    if i >= bs.len() { return None; }
+    if i >= bs.len() { return Maybe.None; }
     // PRAGMA argument values arrive from user SQL — apply 3-layer
     // overflow defense per the recipe codified in #70-#74.
-    if (bs.len() - i) > 19 { return None; }
+    if (bs.len() - i) > 19 { return Maybe.None; }
     let mut acc: Int64 = 0 as Int64;
     while i < bs.len() {
         let b = bs[i];
-        if b < (48 as Byte) || b > (57 as Byte) { return None; }
-        if acc > 922_337_203_685_477_580_i64 { return None; }
+        if b < (48 as Byte) || b > (57 as Byte) { return Maybe.None; }
+        if acc > 922_337_203_685_477_580_i64 { return Maybe.None; }
         acc = acc * 10_i64 + ((b as Int64) - 48_i64);
-        if acc < 0_i64 { return None; }
+        if acc < 0_i64 { return Maybe.None; }
         i = i + 1;
     }
-    Some(acc * sign)
+    Maybe.Some(acc * sign)
 }
 
 fn ascii_lower(s: &Text) -> Text {

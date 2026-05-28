@@ -113,7 +113,7 @@ public type WtConnectRequest is {
 
 implement WtConnectRequest {
     /// Extract a typed CONNECT request from a raw H3 header block.
-    /// Returns None when:
+    /// Returns Maybe.None when:
     ///  * :method is not CONNECT, OR
     ///  * :protocol is not "webtransport", OR
     ///  * :authority / :path are missing.
@@ -142,11 +142,11 @@ implement WtConnectRequest {
             }
             i = i + 1;
         }
-        if method != f"CONNECT"     { return None; }
-        if protocol != f"webtransport" { return None; }
-        if authority.len() == 0     { return None; }
-        if path.len() == 0          { return None; }
-        Some(WtConnectRequest {
+        if method != f"CONNECT"     { return Maybe.None; }
+        if protocol != f"webtransport" { return Maybe.None; }
+        if authority.len() == 0     { return Maybe.None; }
+        if path.len() == 0          { return Maybe.None; }
+        Maybe.Some(WtConnectRequest {
             authority: authority,
             path:      path,
             scheme:    scheme,
@@ -209,11 +209,11 @@ implement WtSession {
     /// Idempotent.
     pub async fn close(&self, code: Int, _reason: &Text) -> Result<(), H3Error> {
         if self.closed.swap(true, MemoryOrdering.AcqRel) {
-            return Ok(());
+            return Result.Ok(());
         }
         self.close_code.store(code, MemoryOrdering.Release);
         self.cancel.cancel();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Open a new bidirectional stream associated with this session.
@@ -221,9 +221,9 @@ implement WtSession {
     /// client-side handle. The first 1-2 bytes the wire carries
     /// are a varint of the session-id.
     pub async fn open_bidi(&self) -> Result<WtBidirectional, H3Error> {
-        if self.is_closed() { return Err(H3Error.ConnectionClosed); }
+        if self.is_closed() { return Result.Err(H3Error.ConnectionClosed); }
         self.streams_opened.fetch_add(1, MemoryOrdering.AcqRel);
-        Ok(WtBidirectional {
+        Result.Ok(WtBidirectional {
             session_id: self.id.clone(),
             cancel:     self.cancel.clone(),
             send_buf:   Shared.new([]),
@@ -235,9 +235,9 @@ implement WtSession {
 
     /// Open a new unidirectional (send-only) stream.
     pub async fn open_uni(&self) -> Result<WtUnidirectional, H3Error> {
-        if self.is_closed() { return Err(H3Error.ConnectionClosed); }
+        if self.is_closed() { return Result.Err(H3Error.ConnectionClosed); }
         self.streams_opened.fetch_add(1, MemoryOrdering.AcqRel);
-        Ok(WtUnidirectional {
+        Result.Ok(WtUnidirectional {
             session_id: self.id.clone(),
             cancel:     self.cancel.clone(),
             send_buf:   Shared.new([]),
@@ -249,10 +249,10 @@ implement WtSession {
     /// path loss. Each datagram on the wire is `varint(session_id) ||
     /// payload`; the QUIC layer wraps it in a DATAGRAM frame.
     pub async fn send_datagram(&self, payload: &[Byte]) -> Result<(), H3Error> {
-        if self.is_closed() { return Err(H3Error.ConnectionClosed); }
+        if self.is_closed() { return Result.Err(H3Error.ConnectionClosed); }
         let _ = payload;
         self.datagrams_sent.fetch_add(1, MemoryOrdering.AcqRel);
-        Ok(())
+        Result.Ok(())
     }
 
     public fn streams_opened_count(&self) -> Int {
@@ -294,33 +294,33 @@ public type WtBidirectional is {
 implement WtBidirectional {
     pub async fn write(&self, bytes: &[Byte]) -> Result<(), H3Error> {
         if self.cancel.is_cancelled() {
-            return Err(H3Error.StreamCancelled);
+            return Result.Err(H3Error.StreamCancelled);
         }
         if self.fin_sent.load(MemoryOrdering.Acquire) {
-            return Err(H3Error.WriteAfterFinish);
+            return Result.Err(H3Error.WriteAfterFinish);
         }
         let mut b = self.send_buf.lock();
         b.extend_from_slice(bytes);
-        Ok(())
+        Result.Ok(())
     }
 
     pub async fn read(&self, into: &mut List<Byte>) -> Result<Int, H3Error> {
         if self.cancel.is_cancelled() {
-            return Err(H3Error.StreamCancelled);
+            return Result.Err(H3Error.StreamCancelled);
         }
         let mut b = self.recv_buf.lock();
         let n = b.len();
         let mut i: Int = 0;
         while i < n { into.push(b[i]); i = i + 1; }
         b.clear();
-        Ok(n)
+        Result.Ok(n)
     }
 
     pub async fn finish(&self) -> Result<(), H3Error> {
         if self.fin_sent.swap(true, MemoryOrdering.AcqRel) {
-            return Ok(());
+            return Result.Ok(());
         }
-        Ok(())
+        Result.Ok(())
     }
 
     public fn is_fin_sent(&self) -> Bool {
@@ -358,21 +358,21 @@ public type WtUnidirectional is {
 implement WtUnidirectional {
     pub async fn write(&self, bytes: &[Byte]) -> Result<(), H3Error> {
         if self.cancel.is_cancelled() {
-            return Err(H3Error.StreamCancelled);
+            return Result.Err(H3Error.StreamCancelled);
         }
         if self.fin_sent.load(MemoryOrdering.Acquire) {
-            return Err(H3Error.WriteAfterFinish);
+            return Result.Err(H3Error.WriteAfterFinish);
         }
         let mut b = self.send_buf.lock();
         b.extend_from_slice(bytes);
-        Ok(())
+        Result.Ok(())
     }
 
     pub async fn finish(&self) -> Result<(), H3Error> {
         if self.fin_sent.swap(true, MemoryOrdering.AcqRel) {
-            return Ok(());
+            return Result.Ok(());
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 

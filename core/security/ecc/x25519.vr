@@ -78,7 +78,7 @@
 // # Contributory property
 //
 
-// `diffie_hellman` returns `Err(AllZeroOutput)` if the computed
+// `diffie_hellman` returns `Result.Err(AllZeroOutput)` if the computed
 // shared secret is all-zeros. This happens only when the peer sent a
 // low-order point (the 12 curve points of small order on Curve25519
 // reduce to all-zeros). RFC 7748 §6.1 recommends either rejecting or
@@ -185,9 +185,9 @@ implement X25519 {
         let mut out: [Byte; 32] = [0; 32];
         scalar_mult(sk, peer_pk, &mut out);
         if is_all_zero(&out) {
-            Err(X25519Error.AllZeroOutput)
+            Result.Err(X25519Error.AllZeroOutput)
         } else {
-            Ok(out)
+            Result.Ok(out)
         }
     }
 

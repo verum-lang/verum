@@ -88,9 +88,9 @@ implement XdsNode {
         XdsNode {
             id: id,
             cluster: cluster,
-            locality_region: None,
-            locality_zone: None,
-            locality_subzone: None,
+            locality_region: Maybe.None,
+            locality_zone: Maybe.None,
+            locality_subzone: Maybe.None,
             user_agent_name: "verum-xds".into(),
             user_agent_version: "0.1".into(),
             metadata_json: "{}".into(),
@@ -103,8 +103,8 @@ implement XdsNode {
         zone: Text,
         subzone: Maybe<Text>,
     ) -> XdsNode {
-        self.locality_region = Some(region);
-        self.locality_zone = Some(zone);
+        self.locality_region = Maybe.Some(region);
+        self.locality_zone = Maybe.Some(zone);
         self.locality_subzone = subzone;
         self
     }
@@ -126,7 +126,7 @@ implement XdsNode {
 
 public type AdsAuth is
     /// Raw gRPC, no auth (test / local).
-    | None
+    | Maybe.None
     /// mTLS — cert chain + private key. Compatible with SPIFFE SVIDs.
     | MutualTls { cert_chain_pem: Text, private_key_pem: Text, ca_bundle_pem: Text }
     /// JWT bearer token (Istio JWT-SVIDs, Asset-Credentials).

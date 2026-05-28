@@ -137,9 +137,9 @@ implement PageCache {
     // Lookup / insert
     // =========================================================================
 
-    /// Probe the cache. Returns `Some(frame_clone)` on a hit at the
+    /// Probe the cache. Returns `Maybe.Some(frame_clone)` on a hit at the
     /// current generation. Misses — either "not present" or "present
-    /// but stale" — both return `None` so the caller can fetch from
+    /// but stale" — both return `Maybe.None` so the caller can fetch from
     /// the backing store. `Some`-return increments the hit counter.
     ///
 
@@ -150,7 +150,7 @@ implement PageCache {
     public fn get(&mut self, page_no: Int) -> Maybe<CachedFrame> {
         if !self.frames.contains_key(page_no) {
             self.misses = self.misses + 1;
-            return None;
+            return Maybe.None;
         }
         let existing = self.frames.get(page_no);
         if existing.generation != self.current_gen {
@@ -158,7 +158,7 @@ implement PageCache {
             let _ = self.frames.remove(page_no);
             self.remove_page_no(page_no);
             self.misses = self.misses + 1;
-            return None;
+            return Maybe.None;
         }
         // Refresh access-tick. `existing` is already an owned copy
         // so we move its `data` into the new frame instead of
@@ -175,7 +175,7 @@ implement PageCache {
         };
         let _ = self.frames.insert(page_no, updated);
         self.hits = self.hits + 1;
-        Some(self.frames.get(page_no))
+        Maybe.Some(self.frames.get(page_no))
     }
 
     /// Insert / replace a frame at `page_no`. Tags with current

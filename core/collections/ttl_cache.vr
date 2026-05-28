@@ -126,7 +126,7 @@ implement<K: Hash + Eq, V> TtlCache<K, V> {
         self.touch(&key);
     }
 
-    /// Look up by key. Returns `None` if absent or expired. On
+    /// Look up by key. Returns `Maybe.None` if absent or expired. On
     /// expiry, removes the entry as a side-effect.
     public fn get(&mut self, key: &K) -> Maybe<&V> {
         let now = Instant.now();

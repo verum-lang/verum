@@ -87,11 +87,11 @@ implement LossDetection {
                 PnSpace.new(PnSpaceKind.Handshake),
                 PnSpace.new(PnSpaceKind.Application),
             ],
-            loss_detection_timer: None,
+            loss_detection_timer: Maybe.None,
             pto_count: 0_u32,
-            time_of_last_ack_eliciting_packet: [None, None, None],
+            time_of_last_ack_eliciting_packet: [Maybe.None, Maybe.None, Maybe.None],
             max_ack_delay: Duration.from_millis(25),
-            pto_armed_for_space: None,
+            pto_armed_for_space: Maybe.None,
         }
     }
 
@@ -111,7 +111,7 @@ implement LossDetection {
         cc: &mut dyn CongestionCtrl,
     ) {
         if info.ack_eliciting {
-            self.time_of_last_ack_eliciting_packet[kind.as_index()] = Some(info.time_sent);
+            self.time_of_last_ack_eliciting_packet[kind.as_index()] = Maybe.Some(info.time_sent);
         }
         if info.in_flight {
             cc.on_packet_sent(info.size_bytes);
@@ -136,7 +136,7 @@ implement LossDetection {
 
         // Feed RTT estimator: if any newly acked packet is the largest
         // in this call's `largest_acked`, sample its RTT.
-        let mut maybe_latest_rtt_us: Maybe<UInt64> = None;
+        let mut maybe_latest_rtt_us: Maybe<UInt64> = Maybe.None;
         let mut acked_bytes: UInt32 = 0_u32;
         let mut j: Int = 0;
         while j < acked.len() {
@@ -146,13 +146,13 @@ implement LossDetection {
                 let rtt_us = now.duration_since(info.time_sent)
                     .unwrap_or_else(|| Duration.from_micros(0))
                     .as_micros() as UInt64;
-                maybe_latest_rtt_us = Some(rtt_us);
+                maybe_latest_rtt_us = Maybe.Some(rtt_us);
             }
             j = j + 1;
         }
         match maybe_latest_rtt_us {
-            Some(us) => self.rtt.on_rtt_sample(us, ack_delay_us),
-            None => {},
+            Maybe.Some(us) => self.rtt.on_rtt_sample(us, ack_delay_us),
+            Maybe.None => {},
         }
 
         // Threshold-based loss detection on remaining in-flight packets.
@@ -241,7 +241,7 @@ implement LossDetection {
         // time across non-discarded spaces, add PTO, use as timer.
         let pto_us = self.compute_pto_us();
 
-        let mut earliest: Maybe<(Instant, PnSpaceKind)> = None;
+        let mut earliest: Maybe<(Instant, PnSpaceKind)> = Maybe.None;
         let mut idx: Int = 0;
         while idx < 3 {
             let t_opt = self.time_of_last_ack_eliciting_packet[idx];
@@ -259,7 +259,7 @@ implement LossDetection {
             };
             if has_inflight {
                 match t_opt {
-                    Some(t) => {
+                    Maybe.Some(t) => {
                         let fire = t.checked_add(Duration.from_micros(pto_us as Int))
                             .unwrap_or_else(|| t);
                         let kind = match idx {
@@ -268,26 +268,26 @@ implement LossDetection {
                             _ => PnSpaceKind.Application,
                         };
                         match earliest {
-                            Some((existing, _)) => {
-                                if fire < existing { earliest = Some((fire, kind)); }
+                            Maybe.Some((existing, _)) => {
+                                if fire < existing { earliest = Maybe.Some((fire, kind)); }
                             },
-                            None => { earliest = Some((fire, kind)); }
+                            Maybe.None => { earliest = Maybe.Some((fire, kind)); }
                         }
                     },
-                    None => {},
+                    Maybe.None => {},
                 }
             }
             idx = idx + 1;
         }
 
         match earliest {
-            Some((fire, kind)) => {
-                self.loss_detection_timer = Some(fire);
-                self.pto_armed_for_space = Some(kind);
+            Maybe.Some((fire, kind)) => {
+                self.loss_detection_timer = Maybe.Some(fire);
+                self.pto_armed_for_space = Maybe.Some(kind);
             },
-            None => {
-                self.loss_detection_timer = None;
-                self.pto_armed_for_space = None;
+            Maybe.None => {
+                self.loss_detection_timer = Maybe.None;
+                self.pto_armed_for_space = Maybe.None;
             },
         }
     }
@@ -303,8 +303,8 @@ implement LossDetection {
         base * ((1_u64) << (self.pto_count as UInt64))
     }
 
-    /// Timer fire hook. Returns `Some(kind)` indicating the PN space
-    /// that must emit a PROBE packet. `None` if the timer was armed for
+    /// Timer fire hook. Returns `Maybe.Some(kind)` indicating the PN space
+    /// that must emit a PROBE packet. `Maybe.None` if the timer was armed for
     /// loss-only detection and lost packets have already been handled.
     public fn on_timer(&mut self, now: Instant, cc: &mut dyn CongestionCtrl) -> Maybe<PnSpaceKind> {
         // If we have in-flight packets in any space, a timer fire is
@@ -320,7 +320,7 @@ implement LossDetection {
     /// Hook called when Initial or Handshake keys are discarded.
     public fn on_keys_discarded(&mut self, kind: PnSpaceKind) {
         self.space_mut(kind).discard();
-        self.time_of_last_ack_eliciting_packet[kind.as_index()] = None;
+        self.time_of_last_ack_eliciting_packet[kind.as_index()] = Maybe.None;
         self.set_loss_detection_timer();
     }
 

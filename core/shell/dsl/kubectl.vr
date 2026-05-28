@@ -93,8 +93,8 @@ public type KubeName is (Text);
 implement KubeName {
     public fn parse(s: Text) -> Result<KubeName, ShellError> {
         let r = Regex.new("""^[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?$""").unwrap();
-        if r.is_match(&s) { Ok(KubeName(s)) }
-        else { Err(ShellError.SpawnFailed {
+        if r.is_match(&s) { Result.Ok(KubeName(s)) }
+        else { Result.Err(ShellError.SpawnFailed {
             command: "<KubeName::parse>".into(),
             reason:  f"invalid kubernetes name: {s}",
         }) }
@@ -106,8 +106,8 @@ public type KubeNamespace is (Text);
 implement KubeNamespace {
     public fn parse(s: Text) -> Result<KubeNamespace, ShellError> {
         let r = Regex.new("""^[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?$""").unwrap();
-        if r.is_match(&s) { Ok(KubeNamespace(s)) }
-        else { Err(ShellError.SpawnFailed {
+        if r.is_match(&s) { Result.Ok(KubeNamespace(s)) }
+        else { Result.Err(ShellError.SpawnFailed {
             command: "<KubeNamespace::parse>".into(),
             reason:  f"invalid namespace: {s}",
         }) }
@@ -167,7 +167,7 @@ implement<R: KubeResource> KubectlCmd<R> {
             }
             Get { name, namespace, output, all_namespaces } => {
                 let mut args: List<Text> = ["kubectl".into(), "get".into(), resource.clone()];
-                if let Some(n) = name { args.push(n.as_text().clone()); }
+                if let Maybe.Some(n) = name { args.push(n.as_text().clone()); }
                 if *all_namespaces { args.push("--all-namespaces".into()); } else { ns_flag(&mut args, namespace); }
                 args.push("-o".into()); args.push(output.render());
                 quote_join(&args, flav)
@@ -180,7 +180,7 @@ implement<R: KubeResource> KubectlCmd<R> {
             Delete { name, namespace, grace_period, force } => {
                 let mut args: List<Text> = ["kubectl".into(), "delete".into(), resource.clone(), name.as_text().clone()];
                 ns_flag(&mut args, namespace);
-                if let Some(g) = grace_period { args.push(f"--grace-period={g}"); }
+                if let Maybe.Some(g) = grace_period { args.push(f"--grace-period={g}"); }
                 if *force { args.push("--force".into()); }
                 quote_join(&args, flav)
             }
@@ -190,10 +190,10 @@ implement<R: KubeResource> KubectlCmd<R> {
                 }
                 let mut args: List<Text> = ["kubectl".into(), "logs".into(), pod.as_text().clone()];
                 ns_flag(&mut args, namespace);
-                if let Some(c) = container { args.push("-c".into()); args.push(c.clone()); }
+                if let Maybe.Some(c) = container { args.push("-c".into()); args.push(c.clone()); }
                 if *follow { args.push("-f".into()); }
-                if let Some(t) = tail  { args.push(f"--tail={t}"); }
-                if let Some(s) = since { args.push(f"--since={s}"); }
+                if let Maybe.Some(t) = tail  { args.push(f"--tail={t}"); }
+                if let Maybe.Some(s) = since { args.push(f"--since={s}"); }
                 quote_join(&args, flav)
             }
             Exec { pod, namespace, container, cmd, tty } => {
@@ -202,7 +202,7 @@ implement<R: KubeResource> KubectlCmd<R> {
                 }
                 let mut args: List<Text> = ["kubectl".into(), "exec".into(), pod.as_text().clone()];
                 ns_flag(&mut args, namespace);
-                if let Some(c) = container { args.push("-c".into()); args.push(c.clone()); }
+                if let Maybe.Some(c) = container { args.push("-c".into()); args.push(c.clone()); }
                 if *tty { args.push("-t".into()); args.push("-i".into()); }
                 args.push("--".into());
                 for c in cmd.iter() { args.push(c.clone()); }
@@ -211,7 +211,7 @@ implement<R: KubeResource> KubectlCmd<R> {
             RolloutStatus { name, namespace, timeout_secs } => {
                 let mut args: List<Text> = ["kubectl".into(), "rollout".into(), "status".into(), f"{resource}/{name.as_text()}"];
                 ns_flag(&mut args, namespace);
-                if let Some(t) = timeout_secs { args.push(f"--timeout={t}s"); }
+                if let Maybe.Some(t) = timeout_secs { args.push(f"--timeout={t}s"); }
                 quote_join(&args, flav)
             }
             PortForward { name, namespace, local_port, remote_port } => {
@@ -226,7 +226,7 @@ implement<R: KubeResource> KubectlCmd<R> {
 }
 
 fn ns_flag(args: &mut List<Text>, namespace: &Maybe<KubeNamespace>) {
-    if let Some(n) = namespace {
+    if let Maybe.Some(n) = namespace {
         args.push("-n".into());
         args.push(n.as_text().clone());
     }

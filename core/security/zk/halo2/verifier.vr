@@ -5,7 +5,7 @@
 
 // `verify(vk, proof, public_inputs) → Bool`. The verifier is fast (a
 // few ms on commodity hardware) regardless of the prover's circuit
-// size — succinctness of Halo2 + KZG10. Returns `Ok(())` for valid;
+// size — succinctness of Halo2 + KZG10. Returns `Result.Ok(())` for valid;
 // any failure is a typed `VerifierError`.
 //
 // Batch verification (`verify_batch`) amortises pairing equation
@@ -83,13 +83,13 @@ public fn verify(
         "verum.crypto.halo2_verify",
         vk, public_inputs, proof, srs
     ) {
-        VerifyResult.Accepted              => Ok(()),
-        VerifyResult.Rejected              => Err(VerificationFailed),
-        VerifyResult.PublicInputArity(e, g) => Err(PublicInputArity { expected: e, got: g }),
-        VerifyResult.MalformedProof(why)   => Err(MalformedProof(why)),
-        VerifyResult.MalformedInput(idx)   => Err(MalformedPublicInput(idx)),
-        VerifyResult.SrsMismatch           => Err(SrsMismatch),
-        VerifyResult.Backend(why)          => Err(BackendError(why)),
+        VerifyResult.Accepted              => Result.Ok(()),
+        VerifyResult.Rejected              => Result.Err(VerificationFailed),
+        VerifyResult.PublicInputArity(e, g) => Result.Err(PublicInputArity { expected: e, got: g }),
+        VerifyResult.MalformedProof(why)   => Result.Err(MalformedProof(why)),
+        VerifyResult.MalformedInput(idx)   => Result.Err(MalformedPublicInput(idx)),
+        VerifyResult.SrsMismatch           => Result.Err(SrsMismatch),
+        VerifyResult.Backend(why)          => Result.Err(BackendError(why)),
     }
 }
 
@@ -102,19 +102,19 @@ public fn verify_batch(
     srs:                &UniversalSrs,
 ) -> Result<(), VerifierError> {
     if proofs_with_inputs.is_empty() {
-        return Ok(());
+        return Result.Ok(());
     }
     match @intrinsic(
         "verum.crypto.halo2_verify_batch",
         vk, proofs_with_inputs, srs
     ) {
-        VerifyResult.Accepted              => Ok(()),
-        VerifyResult.Rejected              => Err(VerificationFailed),
-        VerifyResult.PublicInputArity(e, g) => Err(PublicInputArity { expected: e, got: g }),
-        VerifyResult.MalformedProof(why)   => Err(MalformedProof(why)),
-        VerifyResult.MalformedInput(idx)   => Err(MalformedPublicInput(idx)),
-        VerifyResult.SrsMismatch           => Err(SrsMismatch),
-        VerifyResult.Backend(why)          => Err(BackendError(why)),
+        VerifyResult.Accepted              => Result.Ok(()),
+        VerifyResult.Rejected              => Result.Err(VerificationFailed),
+        VerifyResult.PublicInputArity(e, g) => Result.Err(PublicInputArity { expected: e, got: g }),
+        VerifyResult.MalformedProof(why)   => Result.Err(MalformedProof(why)),
+        VerifyResult.MalformedInput(idx)   => Result.Err(MalformedPublicInput(idx)),
+        VerifyResult.SrsMismatch           => Result.Err(SrsMismatch),
+        VerifyResult.Backend(why)          => Result.Err(BackendError(why)),
     }
 }
 

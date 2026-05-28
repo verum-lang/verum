@@ -49,22 +49,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "low-level Redis client + connection pool — multi-purpose data store entry".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.redis.client;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map};
 mount sync.semaphore.Semaphore;
 mount sync.rwlock.RwLock;
@@ -138,8 +138,8 @@ public type RedisConfig is {
 pub fn redis_config_default() -> RedisConfig {
     RedisConfig {
         address:           "127.0.0.1:6379".to_text(),
-        username:          None,
-        password:          None,
+        username:          Maybe.None,
+        password:          Maybe.None,
         db:                0,
         pool_size:         16,
         command_timeout_ms: 5_000,
@@ -147,7 +147,7 @@ pub fn redis_config_default() -> RedisConfig {
         tls:               false,
         cluster_mode:      false,
         max_redirects:     6,
-        client_name:       None,
+        client_name:       Maybe.None,
     }
 }
 
@@ -197,7 +197,7 @@ pub async fn connect(config: RedisConfig) -> Result<RedisClient, RedisError>
         let mut idle = client.idle.write().await;
         idle.push(conn);
     }
-    Ok(client)
+    Result.Ok(client)
 }
 
 pub async fn connect_url(url: &Text) -> Result<RedisClient, RedisError>
@@ -228,12 +228,12 @@ pub async fn exec_bytes(
     let mut conn = acquire(client).await?;
     let frame = encode_command(args);
     let result = match conn.stream.write_all(&frame).await {
-        Ok(()) => read_one_frame(&mut conn).await,
-        Err(e) => Err(RedisError.Network(f"write: {e}")),
+        Result.Ok(()) => read_one_frame(&mut conn).await,
+        Result.Err(e) => Result.Err(RedisError.Network(f"write: {e}")),
     };
     match &result {
-        Ok(_) => release(client, conn).await,
-        Err(_) => discard(client, conn).await,
+        Result.Ok(_) => release(client, conn).await,
+        Result.Err(_) => discard(client, conn).await,
     }
     result
 }
@@ -245,7 +245,7 @@ pub async fn exec_pipeline(
     client:   &RedisClient,
     commands: &List<List<Text>>,
 ) -> Result<List<RespValue>, RedisError> {
-    if commands.is_empty() { return Ok(List.new()); }
+    if commands.is_empty() { return Result.Ok(List.new()); }
     let mut conn = acquire(client).await?;
     let mut frames: List<Byte> = List.new();
     let mut i: Int = 0;
@@ -260,23 +260,23 @@ pub async fn exec_pipeline(
     }
     let mut results: List<RespValue> = List.with_capacity(commands.len());
     let outcome = match conn.stream.write_all(&frames).await {
-        Ok(()) => {
+        Result.Ok(()) => {
             let mut k: Int = 0;
-            let mut ok = Ok(());
+            let mut ok = Result.Ok(());
             while k < commands.len() {
                 match read_one_frame(&mut conn).await {
-                    Ok(v) => results.push(v),
-                    Err(e) => { ok = Err(e); break; }
+                    Result.Ok(v) => results.push(v),
+                    Result.Err(e) => { ok = Result.Err(e); break; }
                 }
                 k = k + 1;
             }
             ok
         }
-        Err(e) => Err(RedisError.Network(f"write: {e}")),
+        Result.Err(e) => Result.Err(RedisError.Network(f"write: {e}")),
     };
     match &outcome {
-        Ok(()) => release(client, conn).await,
-        Err(_) => discard(client, conn).await,
+        Result.Ok(()) => release(client, conn).await,
+        Result.Err(_) => discard(client, conn).await,
     }
     outcome.map(|_| results)
 }
@@ -291,17 +291,17 @@ async fn exec_with_redirects(
     hop:    Int,
 ) -> Result<RespValue, RedisError> {
     if hop > client.config.max_redirects {
-        return Err(RedisError.RedirectLoop { hops: hop });
+        return Result.Err(RedisError.RedirectLoop { hops: hop });
     }
     let mut conn = acquire(client).await?;
     let frame = encode_command_text(args);
     let result = match conn.stream.write_all(&frame).await {
-        Ok(()) => read_one_frame(&mut conn).await,
-        Err(e) => Err(RedisError.Network(f"write: {e}")),
+        Result.Ok(()) => read_one_frame(&mut conn).await,
+        Result.Err(e) => Result.Err(RedisError.Network(f"write: {e}")),
     };
     match &result {
-        Ok(_) => release(client, conn).await,
-        Err(_) => discard(client, conn).await,
+        Result.Ok(_) => release(client, conn).await,
+        Result.Err(_) => discard(client, conn).await,
     }
     let v = result?;
 
@@ -315,18 +315,18 @@ async fn exec_with_redirects(
                 // typed error and let the caller decide.  Full
                 // cluster mode lands as a follow-up; the hook is
                 // wired so single-node behaviour is unchanged.
-                return Err(RedisError.Backend(msg.clone()));
+                return Result.Err(RedisError.Backend(msg.clone()));
             }
         }
     }
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn redirect_target(msg: &Text) -> Maybe<Text> {
     // "MOVED <slot> <ip:port>" → "<ip:port>"
     let parts: List<Text> = msg.split(" ").collect();
-    if parts.len() != 3 { return None; }
-    Some(parts[2].clone())
+    if parts.len() != 3 { return Maybe.None; }
+    Maybe.Some(parts[2].clone())
 }
 
 // =============================================================================
@@ -338,14 +338,14 @@ async fn acquire(client: &RedisClient) -> Result<RedisConnection, RedisError> {
     {
         let mut idle = client.idle.write().await;
         if !idle.is_empty() {
-            return Ok(idle.pop().unwrap());
+            return Result.Ok(idle.pop().unwrap());
         }
     }
     match open_connection(&client.config).await {
-        Ok(c) => Ok(c),
-        Err(e) => {
+        Result.Ok(c) => Result.Ok(c),
+        Result.Err(e) => {
             client.permits.release();
-            Err(e)
+            Result.Err(e)
         }
     }
 }
@@ -378,19 +378,19 @@ async fn open_connection(config: &RedisConfig) -> Result<RedisConnection, RedisE
         client_id:      -1,
     };
     handshake(&mut conn, config).await?;
-    Ok(conn)
+    Result.Ok(conn)
 }
 
 async fn handshake(conn: &mut RedisConnection, cfg: &RedisConfig) -> Result<(), RedisError> {
     let mut args: List<Text> = List.new();
     args.push("HELLO".to_text());
     args.push("3".to_text());
-    if let Some(pw) = &cfg.password {
+    if let Maybe.Some(pw) = &cfg.password {
         args.push("AUTH".to_text());
         args.push(cfg.username.clone().unwrap_or_else(|| "default".to_text()));
         args.push(pw.clone());
     }
-    if let Some(name) = &cfg.client_name {
+    if let Maybe.Some(name) = &cfg.client_name {
         args.push("SETNAME".to_text());
         args.push(name.clone());
     }
@@ -408,22 +408,22 @@ async fn handshake(conn: &mut RedisConnection, cfg: &RedisConfig) -> Result<(), 
             // explicit AUTH/SELECT.
             if msg.starts_with("ERR unknown command") || msg.contains("HELLO") {
                 conn.resp3_enabled = false;
-                if let Some(pw) = &cfg.password {
+                if let Maybe.Some(pw) = &cfg.password {
                     let mut auth: List<Text> = List.new();
                     auth.push("AUTH".to_text());
-                    if let Some(u) = &cfg.username {
+                    if let Maybe.Some(u) = &cfg.username {
                         auth.push(u.clone());
                     }
                     auth.push(pw.clone());
                     let _ = exec_on_connection(conn, auth.as_slice()).await?;
                 }
             } else if msg.starts_with("WRONGPASS") || msg.starts_with("NOAUTH") {
-                return Err(RedisError.Auth(msg));
+                return Result.Err(RedisError.Auth(msg));
             } else {
-                return Err(RedisError.Backend(f"HELLO: {msg}"));
+                return Result.Err(RedisError.Backend(f"HELLO: {msg}"));
             }
         }
-        other => return Err(RedisError.InvalidReply(f"unexpected HELLO reply: {other}")),
+        other => return Result.Err(RedisError.InvalidReply(f"unexpected HELLO reply: {other}")),
     }
     if cfg.db != 0 {
         let mut sel: List<Text> = List.new();
@@ -432,11 +432,11 @@ async fn handshake(conn: &mut RedisConnection, cfg: &RedisConfig) -> Result<(), 
         let r = exec_on_connection(conn, sel.as_slice()).await?;
         match r {
             RespValue.SimpleString(_) => {}
-            RespValue.Error_(m) => return Err(RedisError.Backend(f"SELECT: {m}")),
+            RespValue.Error_(m) => return Result.Err(RedisError.Backend(f"SELECT: {m}")),
             _ => {}
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn extract_server_info(pairs: &List<(RespValue, RespValue)>, conn: &mut RedisConnection) {
@@ -448,7 +448,7 @@ fn extract_server_info(pairs: &List<(RespValue, RespValue)>, conn: &mut RedisCon
                 "version" => {
                     if let RespValue.SimpleString(ver) = v { conn.server_version = ver.clone(); }
                     if let RespValue.BulkString(b) = v {
-                        if let Ok(t) = Text.from_utf8(b.as_slice()) { conn.server_version = t; }
+                        if let Result.Ok(t) = Text.from_utf8(b.as_slice()) { conn.server_version = t; }
                     }
                 }
                 "id" => {
@@ -476,7 +476,7 @@ async fn read_one_frame(conn: &mut RedisConnection) -> Result<RespValue, RedisEr
     loop {
         let cur = core.redis.protocol.cursor_new(conn.rx_buffer.clone());
         match decode(&cur) {
-            Ok((v, after)) => {
+            Result.Ok((v, after)) => {
                 let mut tail: List<Byte> = List.new();
                 let mut i: Int = after.offset;
                 while i < conn.rx_buffer.len() {
@@ -489,20 +489,20 @@ async fn read_one_frame(conn: &mut RedisConnection) -> Result<RespValue, RedisEr
                     // request/reply paths. (Pub/sub consumers use
                     // the dedicated pubsub.vr surface.)
                     RespValue.Push(_) => continue,
-                    other             => return Ok(other),
+                    other             => return Result.Ok(other),
                 }
             }
-            Err(RespError.UnexpectedEof) => {
+            Result.Err(RespError.UnexpectedEof) => {
                 let mut buf: [Byte; 4096] = [0_u8; 4096];
                 let n = conn.stream.read(&mut buf).await
                     .map_err(|e| RedisError.Network(f"read: {e}"))?;
                 if n == 0 {
-                    return Err(RedisError.Network("connection closed".to_text()));
+                    return Result.Err(RedisError.Network("connection closed".to_text()));
                 }
                 let mut k: Int = 0;
                 while k < n { conn.rx_buffer.push(buf[k]); k = k + 1; }
             }
-            Err(e) => return Err(RedisError.InvalidReply(f"resp decode: {e}")),
+            Result.Err(e) => return Result.Err(RedisError.InvalidReply(f"resp decode: {e}")),
         }
     }
 }
@@ -517,30 +517,30 @@ fn parse_redis_url(url: &Text) -> Result<RedisConfig, RedisError> {
     } else if url.starts_with("rediss://") {
         (url.byte_substring(9, url.len()), true)
     } else {
-        return Err(RedisError.Backend(f"redis url must start with redis:// or rediss://: {url}"));
+        return Result.Err(RedisError.Backend(f"redis url must start with redis:// or rediss://: {url}"));
     };
     let (auth_host, db_text) = match stripped.find_byte(b'/') {
-        Some(i) => (
+        Maybe.Some(i) => (
             stripped.byte_substring(0, i),
             stripped.byte_substring(i + 1, stripped.len()),
         ),
-        None => (stripped.clone(), "0".to_text()),
+        Maybe.None => (stripped.clone(), "0".to_text()),
     };
     let db = Int.parse(&db_text).unwrap_or(0);
     let (user, password, host) = match auth_host.find_byte(b'@') {
-        Some(i) => {
+        Maybe.Some(i) => {
             let auth = auth_host.byte_substring(0, i);
             let h    = auth_host.byte_substring(i + 1, auth_host.len());
             match auth.find_byte(b':') {
-                Some(j) => (
-                    Some(auth.byte_substring(0, j)),
-                    Some(auth.byte_substring(j + 1, auth.len())),
+                Maybe.Some(j) => (
+                    Maybe.Some(auth.byte_substring(0, j)),
+                    Maybe.Some(auth.byte_substring(j + 1, auth.len())),
                     h,
                 ),
-                None => (Some(auth), None, h),
+                Maybe.None => (Maybe.Some(auth), Maybe.None, h),
             }
         }
-        None => (None, None, auth_host.clone()),
+        Maybe.None => (Maybe.None, Maybe.None, auth_host.clone()),
     };
     let mut cfg = redis_config_default();
     cfg.address  = host;
@@ -548,5 +548,5 @@ fn parse_redis_url(url: &Text) -> Result<RedisConfig, RedisError> {
     cfg.password = password;
     cfg.db       = db;
     cfg.tls      = tls;
-    Ok(cfg)
+    Result.Ok(cfg)
 }

@@ -85,7 +85,7 @@ public fn derive_initial_secrets(dcid: &[Byte]) -> Result<InitialSecrets, HkdfEr
     let server = hkdf_expand_label(
         HashKind.Sha256, prk.as_slice(), &LABEL_SERVER_IN, &[], 32,
     )?;
-    Ok(InitialSecrets { client: client, server: server })
+    Result.Ok(InitialSecrets { client: client, server: server })
 }
 
 /// Derive (key, iv, hp) for one direction from that direction's
@@ -106,5 +106,5 @@ public fn derive_initial_keys(role_secret: &[Byte]) -> Result<InitialKeys, HkdfE
     let mut i: Int = 0;
     while i < 12 { iv[i] = iv_vec[i]; i = i + 1; }
 
-    Ok(InitialKeys { key: key, iv: iv, hp: hp })
+    Result.Ok(InitialKeys { key: key, iv: iv, hp: hp })
 }

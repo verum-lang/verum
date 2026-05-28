@@ -4,7 +4,7 @@ module sys.linux.errno;
 // errno.vr - Linux error number constants
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None
+// Dependencies: Maybe.None
 // Platform: Linux
 // =============================================================================
 //

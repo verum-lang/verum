@@ -136,13 +136,13 @@ implement Complex<Float> {
     /// Get the reciprocal (1/z).
     ///
 
-    /// Returns None if z is zero.
+    /// Returns Maybe.None if z is zero.
     public fn recip(&self) -> Maybe<Complex<Float>> {
         let denom = self.abs_sq();
         if denom == 0.0 {
-            None
+            Maybe.None
         } else {
-            Some(Complex {
+            Maybe.Some(Complex {
                 re: self.re / denom,
                 im: -self.im / denom,
             })
@@ -217,13 +217,13 @@ implement Complex<Float> {
     /// Normalize to unit magnitude (z / |z|).
     ///
 
-    /// Returns None if z is zero.
+    /// Returns Maybe.None if z is zero.
     public fn normalize(&self) -> Maybe<Complex<Float>> {
         let mag = self.abs();
         if mag == 0.0 {
-            None
+            Maybe.None
         } else {
-            Some(Complex {
+            Maybe.Some(Complex {
                 re: self.re / mag,
                 im: self.im / mag,
             })
@@ -275,8 +275,8 @@ implement Complex<Float> {
         let s = self.csin();
         let c = self.ccos();
         match c.recip() {
-            Some(c_inv) => s * c_inv,
-            None        => Complex { re: NAN, im: NAN },
+            Maybe.Some(c_inv) => s * c_inv,
+            Maybe.None        => Complex { re: NAN, im: NAN },
         }
     }
 
@@ -306,8 +306,8 @@ implement Complex<Float> {
         let s = self.csinh();
         let c = self.ccosh();
         match c.recip() {
-            Some(c_inv) => s * c_inv,
-            None        => Complex { re: NAN, im: NAN },
+            Maybe.Some(c_inv) => s * c_inv,
+            Maybe.None        => Complex { re: NAN, im: NAN },
         }
     }
 }

@@ -142,7 +142,7 @@ public fn report_zero() -> ApplyReport {
         skipped: 0,
         replaced: 0,
         aborted: false,
-        abort_reason: None,
+        abort_reason: Maybe.None,
     }
 }
 
@@ -171,8 +171,8 @@ public fn apply_engine() -> ApplyEngine { ApplyEngine { unit: true } }
 ///
 
 ///  * `target_check(change) -> Maybe<Conflict>` — returns
-///  `Some(conflict)` when the change diverges from the
-///  target's current state; `None` to indicate "apply cleanly".
+///  `Maybe.Some(conflict)` when the change diverges from the
+///  target's current state; `Maybe.None` to indicate "apply cleanly".
 ///  * `target_apply(change) -> Bool` — actually persists the
 ///  change. Returns `true` on success, `false` on a
 ///  storage-level rejection (the engine then surfaces this as
@@ -207,7 +207,7 @@ public fn apply(
         let cur = clone_change_local(&changes[i]);
         let conflict = (target_check)(&cur);
         match conflict {
-            None => {
+            Maybe.None => {
                 if (target_apply)(&cur) {
                     report.applied = report.applied + 1;
                     decisions.push(AdApplied(cur));
@@ -227,7 +227,7 @@ public fn apply(
                                 decisions.push(AdReplaced(cur));
                             } else {
                                 report.aborted = true;
-                                report.abort_reason = Some(clone_conflict(&k));
+                                report.abort_reason = Maybe.Some(clone_conflict(&k));
                                 decisions.push(AdAborted(cur, k));
                                 break;
                             }
@@ -235,14 +235,14 @@ public fn apply(
                         CrOmit  => { decisions.push(AdOmitted(cur, k)); }
                         CrAbort => {
                             report.aborted = true;
-                            report.abort_reason = Some(clone_conflict(&k));
+                            report.abort_reason = Maybe.Some(clone_conflict(&k));
                             decisions.push(AdAborted(cur, k));
                             break;
                         }
                     }
                 }
             }
-            Some(k) => {
+            Maybe.Some(k) => {
                 let resolution = (&mut **resolver).resolve(&cur, clone_conflict(&k));
                 match resolution {
                     CrSkip => {
@@ -259,7 +259,7 @@ public fn apply(
                             // the changeset semantics consistent.
                             let kf = CfReplaceFailed;
                             report.aborted = true;
-                            report.abort_reason = Some(clone_conflict(&kf));
+                            report.abort_reason = Maybe.Some(clone_conflict(&kf));
                             decisions.push(AdAborted(cur, kf));
                             break;
                         }
@@ -269,7 +269,7 @@ public fn apply(
                     }
                     CrAbort => {
                         report.aborted = true;
-                        report.abort_reason = Some(clone_conflict(&k));
+                        report.abort_reason = Maybe.Some(clone_conflict(&k));
                         decisions.push(AdAborted(cur, k));
                         break;
                     }

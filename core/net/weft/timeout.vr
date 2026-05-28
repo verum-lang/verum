@@ -93,8 +93,8 @@ public type TimeoutHandler<H> is {
 implement<H: Handler> Handler for TimeoutHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         match core.async.select.timeout(self.duration, self.inner.handle(req)).await {
-            Ok(r)  => r,
-            Err(_) => Err(WeftError.Timeout),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(WeftError.Timeout),
         }
     }
 }

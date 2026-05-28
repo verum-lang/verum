@@ -73,9 +73,9 @@ implement VdbeExplainTable {
     public fn find_opcode(&self, want: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.rows.len() {
-            if self.rows[i].opcode == *want { return Some(i); }
+            if self.rows[i].opcode == *want { return Maybe.Some(i); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 }

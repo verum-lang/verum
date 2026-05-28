@@ -20,7 +20,7 @@ mount core.database.sqlite.native.table_metadata.column_info.{
 public type TableColumnQuery is {
     schema: Text,          // "main" / "temp" / ATTACH-ed
     table: Text,
-    /// None => "does the table exist?" query.
+    /// Maybe.None => "does the table exist?" query.
     column: Maybe<Text>,
 }
 

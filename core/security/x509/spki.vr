@@ -115,7 +115,7 @@ public fn parse_spki(r: &mut DerReader) -> Result<Spki, DerError> {
     let alg = parse_public_key_alg(&mut seq)?;
     let bitstr = seq.read_bit_string()?;
     if bitstr.unused_bits != 0_u8 {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.InvalidBitString,
             position: 0,
             message: "SPKI public key BIT STRING has unused bits",
@@ -125,7 +125,7 @@ public fn parse_spki(r: &mut DerReader) -> Result<Spki, DerError> {
 
     let key = decode_public_key(&alg, &bitstr.bytes)?;
 
-    Ok(Spki {
+    Result.Ok(Spki {
         algorithm:  alg,
         public_key: key,
         raw_der:    raw,
@@ -144,27 +144,27 @@ fn decode_public_key(alg: &PublicKeyAlg, bytes: &List<Byte>) -> Result<SubjectPu
             EcNamedCurve.P256 => decode_ec_uncompressed(bytes, 32).map(|k| SubjectPublicKey.EcP256(k)),
             EcNamedCurve.P384 => decode_ec_uncompressed(bytes, 48).map(|k| SubjectPublicKey.EcP384(k)),
             EcNamedCurve.P521 => decode_ec_uncompressed(bytes, 66).map(|k| SubjectPublicKey.EcP521(k)),
-            EcNamedCurve.UnknownCurve(_) => Ok(SubjectPublicKey.Unsupported),
+            EcNamedCurve.UnknownCurve(_) => Result.Ok(SubjectPublicKey.Unsupported),
         },
 
         PublicKeyAlg.Ed25519Key => {
             let arr = copy_fixed_32(bytes)?;
-            Ok(SubjectPublicKey.Ed25519(Ed25519PublicKeyBytes { bytes: arr }))
+            Result.Ok(SubjectPublicKey.Ed25519(Ed25519PublicKeyBytes { bytes: arr }))
         },
         PublicKeyAlg.Ed448Key => {
             let arr = copy_fixed_57(bytes)?;
-            Ok(SubjectPublicKey.Ed448(Ed448PublicKeyBytes { bytes: arr }))
+            Result.Ok(SubjectPublicKey.Ed448(Ed448PublicKeyBytes { bytes: arr }))
         },
         PublicKeyAlg.X25519Key => {
             let arr = copy_fixed_32(bytes)?;
-            Ok(SubjectPublicKey.X25519(X25519PublicKeyBytes { bytes: arr }))
+            Result.Ok(SubjectPublicKey.X25519(X25519PublicKeyBytes { bytes: arr }))
         },
         PublicKeyAlg.X448Key => {
             let arr = copy_fixed_56(bytes)?;
-            Ok(SubjectPublicKey.X448(X448PublicKeyBytes { bytes: arr }))
+            Result.Ok(SubjectPublicKey.X448(X448PublicKeyBytes { bytes: arr }))
         },
 
-        PublicKeyAlg.UnknownPubKey(_) => Ok(SubjectPublicKey.Unsupported),
+        PublicKeyAlg.UnknownPubKey(_) => Result.Ok(SubjectPublicKey.Unsupported),
     }
 }
 
@@ -185,14 +185,14 @@ fn decode_rsa(bytes: &List<Byte>) -> Result<SubjectPublicKey, DerError> {
     // are rejected downstream per WebPKI Baseline but pass the
     // structural parser.
     if modulus.len() < 1 {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.MalformedDer,
             position: 0,
             message: "RSA modulus empty",
         });
     }
 
-    Ok(SubjectPublicKey.Rsa(SpkiRsaPublicKey {
+    Result.Ok(SubjectPublicKey.Rsa(SpkiRsaPublicKey {
         modulus:  modulus,
         exponent: exponent,
     }))
@@ -201,14 +201,14 @@ fn decode_rsa(bytes: &List<Byte>) -> Result<SubjectPublicKey, DerError> {
 fn decode_ec_uncompressed(bytes: &List<Byte>, coord_size: Int) -> Result<EcPublicKeyBytes, DerError> {
     let expected = 1 + 2 * coord_size;
     if bytes.len() != expected {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.MalformedDer,
             position: 0,
             message: "EC point length mismatch",
         });
     }
     if bytes[0] != 0x04_u8 {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.MalformedDer,
             position: 0,
             message: "EC point not uncompressed (leading byte ≠ 0x04)",
@@ -220,7 +220,7 @@ fn decode_ec_uncompressed(bytes: &List<Byte>, coord_size: Int) -> Result<EcPubli
         out.push(bytes[i]);
         i = i + 1;
     }
-    Ok(EcPublicKeyBytes { bytes: out })
+    Result.Ok(EcPublicKeyBytes { bytes: out })
 }
 
 // =============================================================================
@@ -239,7 +239,7 @@ fn strip_leading_zero(bytes: &List<Byte>) -> List<Byte> {
 
 fn copy_fixed_32(bytes: &List<Byte>) -> Result<[Byte; 32], DerError> {
     if bytes.len() != 32 {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.MalformedDer,
             position: 0,
             message: "expected 32-byte key",
@@ -248,12 +248,12 @@ fn copy_fixed_32(bytes: &List<Byte>) -> Result<[Byte; 32], DerError> {
     let mut out: [Byte; 32] = [0_u8; 32];
     let mut i: Int = 0;
     while i < 32 { out[i] = bytes[i]; i = i + 1; }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn copy_fixed_56(bytes: &List<Byte>) -> Result<[Byte; 56], DerError> {
     if bytes.len() != 56 {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.MalformedDer,
             position: 0,
             message: "expected 56-byte key",
@@ -262,12 +262,12 @@ fn copy_fixed_56(bytes: &List<Byte>) -> Result<[Byte; 56], DerError> {
     let mut out: [Byte; 56] = [0_u8; 56];
     let mut i: Int = 0;
     while i < 56 { out[i] = bytes[i]; i = i + 1; }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn copy_fixed_57(bytes: &List<Byte>) -> Result<[Byte; 57], DerError> {
     if bytes.len() != 57 {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.MalformedDer,
             position: 0,
             message: "expected 57-byte key",
@@ -276,5 +276,5 @@ fn copy_fixed_57(bytes: &List<Byte>) -> Result<[Byte; 57], DerError> {
     let mut out: [Byte; 57] = [0_u8; 57];
     let mut i: Int = 0;
     while i < 57 { out[i] = bytes[i]; i = i + 1; }
-    Ok(out)
+    Result.Ok(out)
 }

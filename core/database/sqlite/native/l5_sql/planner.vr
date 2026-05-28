@@ -170,21 +170,21 @@ public fn plan_statement(stmt: &Statement) -> Result<PlanNode, PlanError> {
         SInsert(ins)        => plan_insert(ins),
         SUpdate(upd)        => plan_update(upd),
         SDelete(del)        => plan_delete(del),
-        SCreateTable(ct)    => Ok(PnCreateTable(clone_create_table(ct))),
-        SCreateIndex(_)     => Ok(PnNoop),
-        SCreateView(_)      => Ok(PnNoop),
-        SDropTable(f, t)    => Ok(PnDrop(DpkTable, f, clone_table_ref(t))),
-        SDropIndex(f, t)    => Ok(PnDrop(DpkIndex, f, clone_table_ref(t))),
-        SDropView(f, t)     => Ok(PnDrop(DpkView, f, clone_table_ref(t))),
-        SDropTrigger(f, t)  => Ok(PnDrop(DpkTrigger, f, clone_table_ref(t))),
-        SBeginTransaction   => Ok(PnTransaction(TxBegin)),
-        SCommit             => Ok(PnTransaction(TxCommit)),
-        SRollback(sp)       => Ok(PnTransaction(TxRollback(clone_opt_text(sp)))),
-        SSavepoint(n)       => Ok(PnTransaction(TxSavepoint(n.clone()))),
-        SRelease(n)         => Ok(PnTransaction(TxRelease(n.clone()))),
-        SPragma(name, val)  => Ok(PnPragma(name.clone(), clone_opt_expr(val))),
-        SExplain(_, _)      => Err(plan_error("EXPLAIN planning not supported yet".clone())),
-        _                   => Err(plan_error("statement kind not supported by v1 planner".clone())),
+        SCreateTable(ct)    => Result.Ok(PnCreateTable(clone_create_table(ct))),
+        SCreateIndex(_)     => Result.Ok(PnNoop),
+        SCreateView(_)      => Result.Ok(PnNoop),
+        SDropTable(f, t)    => Result.Ok(PnDrop(DpkTable, f, clone_table_ref(t))),
+        SDropIndex(f, t)    => Result.Ok(PnDrop(DpkIndex, f, clone_table_ref(t))),
+        SDropView(f, t)     => Result.Ok(PnDrop(DpkView, f, clone_table_ref(t))),
+        SDropTrigger(f, t)  => Result.Ok(PnDrop(DpkTrigger, f, clone_table_ref(t))),
+        SBeginTransaction   => Result.Ok(PnTransaction(TxBegin)),
+        SCommit             => Result.Ok(PnTransaction(TxCommit)),
+        SRollback(sp)       => Result.Ok(PnTransaction(TxRollback(clone_opt_text(sp)))),
+        SSavepoint(n)       => Result.Ok(PnTransaction(TxSavepoint(n.clone()))),
+        SRelease(n)         => Result.Ok(PnTransaction(TxRelease(n.clone()))),
+        SPragma(name, val)  => Result.Ok(PnPragma(name.clone(), clone_opt_expr(val))),
+        SExplain(_, _)      => Result.Err(plan_error("EXPLAIN planning not supported yet".clone())),
+        _                   => Result.Err(plan_error("statement kind not supported by v1 planner".clone())),
     }
 }
 
@@ -213,23 +213,23 @@ fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
                 compound = PnSort(Heap(compound), clone_order_terms(&sel.order_by));
             }
             match sel.limit {
-                Some(ref lc) => {
+                Maybe.Some(ref lc) => {
                     let off: Maybe<Expr> = match lc.offset {
-                        Some(ref e) => Some(clone_expr(e)),
-                        None => None,
+                        Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
+                        Maybe.None => Maybe.None,
                     };
                     compound = PnLimit(Heap(compound), clone_expr(&lc.limit), off);
                 }
-                None => {}
+                Maybe.None => {}
             }
-            return Ok(compound);
+            return Result.Ok(compound);
         }
     };
 
     // Source: either FROM clause or VALUES-like bare SELECT (no FROM).
     let mut node: PlanNode = match simple.from {
-        Some(ref fi) => plan_from_item(fi, 0)?,
-        None => {
+        Maybe.Some(ref fi) => plan_from_item(fi, 0)?,
+        Maybe.None => {
             // SELECT without FROM produces one row of constants — model
             // as PnValues with a single row of the result exprs.
             let mut row: List<Expr> = List.new();
@@ -238,7 +238,7 @@ fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
                 match simple.result_columns[i] {
                     RcExpr(ref e, _) => row.push(clone_expr(e)),
                     RcStar | RcTableStar(_) => {
-                        return Err(plan_error("SELECT * with no FROM is invalid".clone()));
+                        return Result.Err(plan_error("SELECT * with no FROM is invalid".clone()));
                     }
                 }
                 i = i + 1;
@@ -252,8 +252,8 @@ fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
 
     // WHERE.
     match simple.where_clause {
-        Some(ref w) => { node = PnFilter(Heap(node), clone_expr(w)); }
-        None => {}
+        Maybe.Some(ref w) => { node = PnFilter(Heap(node), clone_expr(w)); }
+        Maybe.None => {}
     }
 
     // Projection (always attach — keeps codegen uniform). Skip when
@@ -290,24 +290,24 @@ fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
 
     // LIMIT / OFFSET.
     match sel.limit {
-        Some(ref lc) => {
+        Maybe.Some(ref lc) => {
             let off: Maybe<Expr> = match lc.offset {
-                Some(ref e) => Some(clone_expr(e)),
-                None => None,
+                Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
+                Maybe.None => Maybe.None,
             };
             node = PnLimit(Heap(node), clone_expr(&lc.limit), off);
         }
-        None => {}
+        Maybe.None => {}
     }
 
-    Ok(node)
+    Result.Ok(node)
 }
 
 fn plan_from_item(fi: &FromItem, cursor_id: Int) -> Result<PlanNode, PlanError> {
     match fi {
-        FiTable(ref tref) => Ok(PnTableScan(clone_table_ref(tref), cursor_id, -1)),
-        FiSubquery(_, _)  => Err(plan_error("subquery FROM not supported in v1".clone())),
-        FiJoin(_, _)      => Err(plan_error("JOIN planning not supported in v1".clone())),
+        FiTable(ref tref) => Result.Ok(PnTableScan(clone_table_ref(tref), cursor_id, -1)),
+        FiSubquery(_, _)  => Result.Err(plan_error("subquery FROM not supported in v1".clone())),
+        FiJoin(_, _)      => Result.Err(plan_error("JOIN planning not supported in v1".clone())),
     }
 }
 
@@ -323,9 +323,9 @@ fn plan_insert(ins: &InsertStmt) -> Result<PlanNode, PlanError> {
             PnValues(cloned, col_count)
         }
         IsDefault => PnValues(List.new(), 0),
-        IsSelect(_) => { return Err(plan_error("INSERT ... SELECT not supported in v1".clone())); }
+        IsSelect(_) => { return Result.Err(plan_error("INSERT ... SELECT not supported in v1".clone())); }
     };
-    Ok(PnInsert(
+    Result.Ok(PnInsert(
         clone_table_ref(&ins.table),
         clone_text_list(&ins.columns),
         Heap(source),
@@ -336,10 +336,10 @@ fn plan_insert(ins: &InsertStmt) -> Result<PlanNode, PlanError> {
 fn plan_update(upd: &UpdateStmt) -> Result<PlanNode, PlanError> {
     let cursor_id = 0;
     let pred: Maybe<Expr> = match upd.where_clause {
-        Some(ref e) => Some(clone_expr(e)),
-        None => None,
+        Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
+        Maybe.None => Maybe.None,
     };
-    Ok(PnUpdate(
+    Result.Ok(PnUpdate(
         clone_table_ref(&upd.table),
         cursor_id,
         0,                               // n_cols unknown without schema
@@ -351,10 +351,10 @@ fn plan_update(upd: &UpdateStmt) -> Result<PlanNode, PlanError> {
 fn plan_delete(del: &DeleteStmt) -> Result<PlanNode, PlanError> {
     let cursor_id = 0;
     let pred: Maybe<Expr> = match del.where_clause {
-        Some(ref e) => Some(clone_expr(e)),
-        None => None,
+        Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
+        Maybe.None => Maybe.None,
     };
-    Ok(PnDelete(clone_table_ref(&del.table), cursor_id, pred))
+    Result.Ok(PnDelete(clone_table_ref(&del.table), cursor_id, pred))
 }
 
 // -----------------------------------------------------------------------------
@@ -371,15 +371,15 @@ public fn clone_table_ref(t: &TableRef) -> TableRef {
 
 fn clone_opt_text(o: &Maybe<Text>) -> Maybe<Text> {
     match o {
-        Some(ref s) => Some(s.clone()),
-        None => None,
+        Maybe.Some(ref s) => Maybe.Some(s.clone()),
+        Maybe.None => Maybe.None,
     }
 }
 
 fn clone_opt_on_conflict(o: &Maybe<SqlOnConflict>) -> Maybe<SqlOnConflict> {
     match o {
-        Some(ref c) => Some(c),
-        None => None,
+        Maybe.Some(ref c) => Maybe.Some(c),
+        Maybe.None => Maybe.None,
     }
 }
 
@@ -488,8 +488,8 @@ fn clone_order_terms(xs: &List<OrderTerm>) -> List<OrderTerm> {
 
 fn clone_opt_expr(o: &Maybe<Expr>) -> Maybe<Expr> {
     match o {
-        Some(ref e) => Some(clone_expr(e)),
-        None => None,
+        Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
+        Maybe.None => Maybe.None,
     }
 }
 
@@ -503,9 +503,9 @@ public fn clone_expr(e: &Expr) -> Expr {
         EBinary(op, ref a, ref b) => EBinary(op, Heap(clone_expr(a)), Heap(clone_expr(b))),
         EFunc(ref n, ref args, d) => EFunc(n.clone(), clone_expr_list(args), d),
         ECase(ref s, ref arms, ref el) => ECase(
-            match s { Some(ref x) => Some(Heap(clone_expr(x))), None => None },
+            match s { Maybe.Some(ref x) => Maybe.Some(Heap(clone_expr(x))), Maybe.None => Maybe.None },
             clone_case_arms(arms),
-            match el { Some(ref x) => Some(Heap(clone_expr(x))), None => None },
+            match el { Maybe.Some(ref x) => Maybe.Some(Heap(clone_expr(x))), Maybe.None => Maybe.None },
         ),
         EIn(ref e, ref xs, neg) => EIn(Heap(clone_expr(e)), clone_expr_list(xs), neg),
         // Subquery expressions are rejected by the resolver
@@ -524,7 +524,7 @@ public fn clone_expr(e: &Expr) -> Expr {
         ELike(ref e, ref p, ref esc, neg) => ELike(
             Heap(clone_expr(e)),
             Heap(clone_expr(p)),
-            match esc { Some(ref x) => Some(Heap(clone_expr(x))), None => None },
+            match esc { Maybe.Some(ref x) => Maybe.Some(Heap(clone_expr(x))), Maybe.None => Maybe.None },
             neg,
         ),
         ECast(ref x, ref t) => ECast(Heap(clone_expr(x)), t.clone()),
@@ -648,12 +648,12 @@ fn plan_insert_with_schema(
             // list (or table schema if no explicit column list) downstream
             // by the codegen.
             match plan_select_with_schema(sel, schema) {
-                Ok(p)  => p,
-                Err(e) => { return Err(e); }
+                Result.Ok(p)  => p,
+                Result.Err(e) => { return Result.Err(e); }
             }
         }
     };
-    Ok(PnInsert(
+    Result.Ok(PnInsert(
         clone_table_ref(&ins.table),
         clone_text_list(&ins.columns),
         Heap(source),
@@ -666,8 +666,8 @@ fn plan_update_with_schema(
     schema: &SchemaCache,
 ) -> Result<PlanNode, PlanError> {
     let meta = match schema.lookup_table(&upd.table.schema, &upd.table.name) {
-        Ok(m)  => m,
-        Err(_) => { return Err(plan_error("UPDATE on unknown table".clone())); }
+        Result.Ok(m)  => m,
+        Result.Err(_) => { return Result.Err(plan_error("UPDATE on unknown table".clone())); }
     };
 
     let cursor_id: Int = 0;
@@ -691,11 +691,11 @@ fn plan_update_with_schema(
             k = k + 1;
         }
         if col_idx < 0 {
-            return Err(plan_error("SET references unknown column".clone()));
+            return Result.Err(plan_error("SET references unknown column".clone()));
         }
         let value = match resolve_expr(&a.value, &scopes) {
-            Ok(e)  => e,
-            Err(_) => { return Err(plan_error("SET value resolution failed".clone())); }
+            Result.Ok(e)  => e,
+            Result.Err(_) => { return Result.Err(plan_error("SET value resolution failed".clone())); }
         };
         resolved.push(UpdateAssignment {
             column: a.column.clone(),
@@ -706,16 +706,16 @@ fn plan_update_with_schema(
     }
 
     let pred: Maybe<Expr> = match upd.where_clause {
-        Some(ref e) => {
+        Maybe.Some(ref e) => {
             match resolve_expr(e, &scopes) {
-                Ok(r)  => Some(r),
-                Err(_) => { return Err(plan_error("UPDATE WHERE resolve failed".clone())); }
+                Result.Ok(r)  => Maybe.Some(r),
+                Result.Err(_) => { return Result.Err(plan_error("UPDATE WHERE resolve failed".clone())); }
             }
         }
-        None => None,
+        Maybe.None => Maybe.None,
     };
 
-    Ok(PnUpdate(
+    Result.Ok(PnUpdate(
         clone_table_ref(&upd.table),
         cursor_id,
         meta.columns.len(),
@@ -729,8 +729,8 @@ fn plan_delete_with_schema(
     schema: &SchemaCache,
 ) -> Result<PlanNode, PlanError> {
     let meta = match schema.lookup_table(&del.table.schema, &del.table.name) {
-        Ok(m)  => m,
-        Err(_) => { return Err(plan_error("DELETE from unknown table".clone())); }
+        Result.Ok(m)  => m,
+        Result.Err(_) => { return Result.Err(plan_error("DELETE from unknown table".clone())); }
     };
     let cursor_id: Int = 0;
     let scope = scope_from_table_meta(cursor_id, del.table.alias.clone(), &meta);
@@ -738,16 +738,16 @@ fn plan_delete_with_schema(
     scopes.push(scope);
 
     let pred: Maybe<Expr> = match del.where_clause {
-        Some(ref e) => {
+        Maybe.Some(ref e) => {
             match resolve_expr(e, &scopes) {
-                Ok(r)  => Some(r),
-                Err(_) => { return Err(plan_error("DELETE WHERE resolve failed".clone())); }
+                Result.Ok(r)  => Maybe.Some(r),
+                Result.Err(_) => { return Result.Err(plan_error("DELETE WHERE resolve failed".clone())); }
             }
         }
-        None => None,
+        Maybe.None => Maybe.None,
     };
 
-    Ok(PnDelete(clone_table_ref(&del.table), cursor_id, pred))
+    Result.Ok(PnDelete(clone_table_ref(&del.table), cursor_id, pred))
 }
 
 /// Resolve the SELECT's FROM clause. Returns the pre-WHERE plan
@@ -765,23 +765,23 @@ fn plan_from_for_select(
     match fi {
         FiTable(ref t) => {
             let meta = match schema.lookup_table(&t.schema, &t.name) {
-                Ok(m)  => m,
-                Err(_) => { return Err(plan_error("unknown table".clone())); }
+                Result.Ok(m)  => m,
+                Result.Err(_) => { return Result.Err(plan_error("unknown table".clone())); }
             };
             let mut scopes: List<ColumnScope> = List.new();
             scopes.push(scope_from_table_meta(0, t.alias.clone(), &meta));
             let node = PnTableScan(clone_table_ref(t), 0, meta.columns.len());
-            Ok((node, scopes, meta, 0))
+            Result.Ok((node, scopes, meta, 0))
         }
         FiJoin(ref left_fi, ref jc) => {
             let lt_orig = match left_fi {
                 FiTable(ref x) => x,
-                _ => { return Err(plan_error("nested JOINs pending in v1".clone())); }
+                _ => { return Result.Err(plan_error("nested JOINs pending in v1".clone())); }
             };
             let rt_orig = match jc.right {
                 ref right_fi => match right_fi {
                     FiTable(ref x) => x,
-                    _ => { return Err(plan_error("JOIN right side must be a table in v1".clone())); }
+                    _ => { return Result.Err(plan_error("JOIN right side must be a table in v1".clone())); }
                 }
             };
             // RIGHT OUTER JOIN normalizes to LEFT OUTER with sides
@@ -791,12 +791,12 @@ fn plan_from_for_select(
             // below since it produces a non-PnNestedLoopJoin top node.
             if jc.kind == JFullOuter {
                 let lmeta_full = match schema.lookup_table(&lt_orig.schema, &lt_orig.name) {
-                    Ok(m)  => m,
-                    Err(_) => { return Err(plan_error("JOIN left table unknown".clone())); }
+                    Result.Ok(m)  => m,
+                    Result.Err(_) => { return Result.Err(plan_error("JOIN left table unknown".clone())); }
                 };
                 let rmeta_full = match schema.lookup_table(&rt_orig.schema, &rt_orig.name) {
-                    Ok(m)  => m,
-                    Err(_) => { return Err(plan_error("JOIN right table unknown".clone())); }
+                    Result.Ok(m)  => m,
+                    Result.Err(_) => { return Result.Err(plan_error("JOIN right table unknown".clone())); }
                 };
 
                 // Side 1: A LEFT JOIN B ON c — scopes [A@0, B@1].
@@ -804,11 +804,11 @@ fn plan_from_for_select(
                 scopes_l.push(scope_from_table_meta(0, lt_orig.alias.clone(), &lmeta_full));
                 scopes_l.push(scope_from_table_meta(1, rt_orig.alias.clone(), &rmeta_full));
                 let on_l: Maybe<Expr> = match jc.on {
-                    Some(ref e) => match resolve_expr(e, &scopes_l) {
-                        Ok(r)  => Some(r),
-                        Err(_) => { return Err(plan_error("FULL OUTER JOIN ON resolve (left side) failed".clone())); }
+                    Maybe.Some(ref e) => match resolve_expr(e, &scopes_l) {
+                        Result.Ok(r)  => Maybe.Some(r),
+                        Result.Err(_) => { return Result.Err(plan_error("FULL OUTER JOIN ON resolve (left side) failed".clone())); }
                     },
-                    None => None,
+                    Maybe.None => Maybe.None,
                 };
                 let left_join = PnNestedLoopJoin(
                     clone_table_ref(lt_orig), 0, lmeta_full.columns.len(),
@@ -821,11 +821,11 @@ fn plan_from_for_select(
                 scopes_r.push(scope_from_table_meta(0, rt_orig.alias.clone(), &rmeta_full));
                 scopes_r.push(scope_from_table_meta(1, lt_orig.alias.clone(), &lmeta_full));
                 let on_r: Maybe<Expr> = match jc.on {
-                    Some(ref e) => match resolve_expr(e, &scopes_r) {
-                        Ok(r)  => Some(r),
-                        Err(_) => { return Err(plan_error("FULL OUTER JOIN ON resolve (right side) failed".clone())); }
+                    Maybe.Some(ref e) => match resolve_expr(e, &scopes_r) {
+                        Result.Ok(r)  => Maybe.Some(r),
+                        Result.Err(_) => { return Result.Err(plan_error("FULL OUTER JOIN ON resolve (right side) failed".clone())); }
                     },
-                    None => None,
+                    Maybe.None => Maybe.None,
                 };
                 let swapped = PnNestedLoopJoin(
                     clone_table_ref(rt_orig), 0, rmeta_full.columns.len(),
@@ -838,7 +838,7 @@ fn plan_from_for_select(
                 // any one column suffices as the sentinel). A is at cursor
                 // 1 in the swapped scope.
                 if lmeta_full.columns.len() == 0 {
-                    return Err(plan_error("FULL OUTER JOIN with empty-column left table".clone()));
+                    return Result.Err(plan_error("FULL OUTER JOIN with empty-column left table".clone()));
                 }
                 let null_filter = EBinary(
                     BIs,
@@ -876,32 +876,32 @@ fn plan_from_for_select(
                 let mut scopes_out: List<ColumnScope> = List.new();
                 scopes_out.push(scope_from_table_meta(0, lt_orig.alias.clone(), &lmeta_full));
                 scopes_out.push(scope_from_table_meta(1, rt_orig.alias.clone(), &rmeta_full));
-                return Ok((union_node, scopes_out, lmeta_full, 0));
+                return Result.Ok((union_node, scopes_out, lmeta_full, 0));
             }
 
             let (lt, rt, is_left_outer) = match jc.kind {
                 JInner | JCross => (lt_orig, rt_orig, false),
                 JLeftOuter      => (lt_orig, rt_orig, true),
                 JRightOuter     => (rt_orig, lt_orig, true),
-                _ => { return Err(plan_error("unrecognised JOIN kind".clone())); }
+                _ => { return Result.Err(plan_error("unrecognised JOIN kind".clone())); }
             };
             let lmeta = match schema.lookup_table(&lt.schema, &lt.name) {
-                Ok(m)  => m,
-                Err(_) => { return Err(plan_error("JOIN left table unknown".clone())); }
+                Result.Ok(m)  => m,
+                Result.Err(_) => { return Result.Err(plan_error("JOIN left table unknown".clone())); }
             };
             let rmeta = match schema.lookup_table(&rt.schema, &rt.name) {
-                Ok(m)  => m,
-                Err(_) => { return Err(plan_error("JOIN right table unknown".clone())); }
+                Result.Ok(m)  => m,
+                Result.Err(_) => { return Result.Err(plan_error("JOIN right table unknown".clone())); }
             };
             let mut scopes: List<ColumnScope> = List.new();
             scopes.push(scope_from_table_meta(0, lt.alias.clone(), &lmeta));
             scopes.push(scope_from_table_meta(1, rt.alias.clone(), &rmeta));
             let on_resolved: Maybe<Expr> = match jc.on {
-                Some(ref e) => match resolve_expr(e, &scopes) {
-                    Ok(r)  => Some(r),
-                    Err(_) => { return Err(plan_error("JOIN ON resolve failed".clone())); }
+                Maybe.Some(ref e) => match resolve_expr(e, &scopes) {
+                    Result.Ok(r)  => Maybe.Some(r),
+                    Result.Err(_) => { return Result.Err(plan_error("JOIN ON resolve failed".clone())); }
                 },
-                None => None,
+                Maybe.None => Maybe.None,
             };
             let node = PnNestedLoopJoin(
                 clone_table_ref(lt), 0, lmeta.columns.len(),
@@ -909,9 +909,9 @@ fn plan_from_for_select(
                 on_resolved,
                 is_left_outer,
             );
-            Ok((node, scopes, lmeta, 0))
+            Result.Ok((node, scopes, lmeta, 0))
         }
-        _ => Err(plan_error("only FROM <table> or FROM a JOIN b supported in v1".clone())),
+        _ => Result.Err(plan_error("only FROM <table> or FROM a JOIN b supported in v1".clone())),
     }
 }
 
@@ -923,10 +923,10 @@ fn plan_select_with_schema(
         SkSimple(ref s) => s,
         SkCompound(op, ref lhs, ref rhs) => {
             let lp = match plan_select_with_schema(lhs, schema) {
-                Ok(p)  => p, Err(e) => { return Err(e); }
+                Result.Ok(p)  => p, Result.Err(e) => { return Result.Err(e); }
             };
             let rp = match plan_select_with_schema(rhs, schema) {
-                Ok(p)  => p, Err(e) => { return Err(e); }
+                Result.Ok(p)  => p, Result.Err(e) => { return Result.Err(e); }
             };
             // Determine projection width — when the lhs is a simple
             // SELECT with no `*`, we know it from result_columns; for
@@ -966,46 +966,46 @@ fn plan_select_with_schema(
                 compound = PnSort(Heap(compound), resolved_terms);
             }
             match sel.limit {
-                Some(ref lc) => {
+                Maybe.Some(ref lc) => {
                     let off: Maybe<Expr> = match lc.offset {
-                        Some(ref e) => Some(clone_expr(e)),
-                        None => None,
+                        Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
+                        Maybe.None => Maybe.None,
                     };
                     compound = PnLimit(Heap(compound), clone_expr(&lc.limit), off);
                 }
-                None => {}
+                Maybe.None => {}
             }
-            return Ok(compound);
+            return Result.Ok(compound);
         }
     };
 
     // No FROM → fall back to the schema-free planner.
     match simple.from {
-        None => { return plan_select(sel); }
+        Maybe.None => { return plan_select(sel); }
         _ => {}
     }
 
     // Resolve FROM — single table, or single nested-loop JOIN of two.
     let from_res = match simple.from {
-        Some(ref fi) => plan_from_for_select(fi, schema),
-        None => { return Err(plan_error("unreachable".clone())); }
+        Maybe.Some(ref fi) => plan_from_for_select(fi, schema),
+        Maybe.None => { return Result.Err(plan_error("unreachable".clone())); }
     };
     let (node_pre_where, scopes, meta, cursor_id) = match from_res {
-        Ok(v)  => v,
-        Err(e) => { return Err(e); }
+        Result.Ok(v)  => v,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let mut node: PlanNode = node_pre_where;
 
     // WHERE.
     match simple.where_clause {
-        Some(ref w) => {
+        Maybe.Some(ref w) => {
             let resolved = match resolve_expr(w, &scopes) {
-                Ok(e)  => e,
-                Err(_) => { return Err(plan_error("WHERE resolve failed".clone())); }
+                Result.Ok(e)  => e,
+                Result.Err(_) => { return Result.Err(plan_error("WHERE resolve failed".clone())); }
             };
             node = PnFilter(Heap(node), resolved);
         }
-        None => {}
+        Maybe.None => {}
     }
 
     // Projection — resolve every result column expression.
@@ -1015,8 +1015,8 @@ fn plan_select_with_schema(
         match simple.result_columns[i] {
             RcExpr(ref e, ref alias) => {
                 let resolved = match resolve_expr(e, &scopes) {
-                    Ok(r)  => r,
-                    Err(_) => { return Err(plan_error("SELECT-list resolve failed".clone())); }
+                    Result.Ok(r)  => r,
+                    Result.Err(_) => { return Result.Err(plan_error("SELECT-list resolve failed".clone())); }
                 };
                 plan_cols.push(PlanColumn { alias: alias.clone(), expr: resolved });
             }
@@ -1053,18 +1053,18 @@ fn plan_select_with_schema(
         let mut g: Int = 0;
         while g < simple.group_by.len() {
             let resolved = match resolve_expr(&simple.group_by[g], &scopes) {
-                Ok(e)  => e,
-                Err(_) => { return Err(plan_error("GROUP BY resolve failed".clone())); }
+                Result.Ok(e)  => e,
+                Result.Err(_) => { return Result.Err(plan_error("GROUP BY resolve failed".clone())); }
             };
             resolved_keys.push(resolved);
             g = g + 1;
         }
         let having: Maybe<Expr> = match simple.having {
-            Some(ref h) => match resolve_expr(h, &scopes) {
-                Ok(e)  => Some(e),
-                Err(_) => { return Err(plan_error("HAVING resolve failed".clone())); }
+            Maybe.Some(ref h) => match resolve_expr(h, &scopes) {
+                Result.Ok(e)  => Maybe.Some(e),
+                Result.Err(_) => { return Result.Err(plan_error("HAVING resolve failed".clone())); }
             },
-            None => None,
+            Maybe.None => Maybe.None,
         };
         node = PnGroupBy(Heap(node), resolved_keys, plan_cols, having);
     } else {
@@ -1083,8 +1083,8 @@ fn plan_select_with_schema(
         while t < sel.order_by.len() {
             let term = &sel.order_by[t];
             let r_expr = match resolve_expr(&term.expr, &scopes) {
-                Ok(e)  => e,
-                Err(_) => { return Err(plan_error("ORDER BY resolve failed".clone())); }
+                Result.Ok(e)  => e,
+                Result.Err(_) => { return Result.Err(plan_error("ORDER BY resolve failed".clone())); }
             };
             resolved_terms.push(OrderTerm {
                 expr: r_expr,
@@ -1098,15 +1098,15 @@ fn plan_select_with_schema(
 
     // LIMIT / OFFSET.
     match sel.limit {
-        Some(ref lc) => {
+        Maybe.Some(ref lc) => {
             let off: Maybe<Expr> = match lc.offset {
-                Some(ref e) => Some(clone_expr(e)),
-                None => None,
+                Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
+                Maybe.None => Maybe.None,
             };
             node = PnLimit(Heap(node), clone_expr(&lc.limit), off);
         }
-        None => {}
+        Maybe.None => {}
     }
 
-    Ok(node)
+    Result.Ok(node)
 }

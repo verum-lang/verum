@@ -100,8 +100,8 @@ public type UniversalSrs is {
 public fn setup(params: SrsParams) -> Result<UniversalSrs, SrsError> {
     let result = @intrinsic("verum.crypto.halo2_srs_setup", params);
     match result {
-        SrsSetupResult.Ok(srs) => Ok(srs),
-        SrsSetupResult.Err(why) => Err(SrsError.SetupFailed(why)),
+        SrsSetupResult.Ok(srs) => Result.Ok(srs),
+        SrsSetupResult.Err(why) => Result.Err(SrsError.SetupFailed(why)),
     }
 }
 
@@ -115,18 +115,18 @@ public fn setup_with_entropy(
     contributions: List<List<Byte>>,   // each entry: that participant's signed entropy
 ) -> Result<UniversalSrs, SrsError> {
     if contributions.is_empty() {
-        return Err(SrsError.SetupFailed("zero participants".into()));
+        return Result.Err(SrsError.SetupFailed("zero participants".into()));
     }
     if contributions.len() != params.participants.len() {
-        return Err(SrsError.SetupFailed(f"|contributions| ≠ |participants|"));
+        return Result.Err(SrsError.SetupFailed(f"|contributions| ≠ |participants|"));
     }
     let result = @intrinsic(
         "verum.crypto.halo2_srs_setup_mpc",
         params, contributions
     );
     match result {
-        SrsSetupResult.Ok(srs)   => Ok(srs),
-        SrsSetupResult.Err(why)  => Err(SrsError.SetupFailed(why)),
+        SrsSetupResult.Ok(srs)   => Result.Ok(srs),
+        SrsSetupResult.Err(why)  => Result.Err(SrsError.SetupFailed(why)),
     }
 }
 
@@ -137,8 +137,8 @@ implement UniversalSrs {
     /// genesis to authenticate the ceremony output.
     public fn verify(&self) -> Result<(), SrsError> {
         match @intrinsic("verum.crypto.halo2_srs_verify", self) {
-            true  => Ok(()),
-            false => Err(SrsError.IntegrityFailed),
+            true  => Result.Ok(()),
+            false => Result.Err(SrsError.IntegrityFailed),
         }
     }
 
@@ -147,8 +147,8 @@ implement UniversalSrs {
     /// `IntegrityFailed`.
     public fn load(bytes: &[Byte], params: SrsParams) -> Result<UniversalSrs, SrsError> {
         match @intrinsic("verum.crypto.halo2_srs_load", bytes, params) {
-            SrsLoadResult.Ok(srs)  => Ok(srs),
-            SrsLoadResult.Err(why) => Err(SrsError.LoadFailed(why)),
+            SrsLoadResult.Ok(srs)  => Result.Ok(srs),
+            SrsLoadResult.Err(why) => Result.Err(SrsError.LoadFailed(why)),
         }
     }
 
@@ -186,9 +186,9 @@ implement Display for SrsError {
 // =============================================================================
 
 type SrsSetupResult is
-    | Ok(UniversalSrs)
-    | Err(Text);
+    | Result.Ok(UniversalSrs)
+    | Result.Err(Text);
 
 type SrsLoadResult is
-    | Ok(UniversalSrs)
-    | Err(Text);
+    | Result.Ok(UniversalSrs)
+    | Result.Err(Text);

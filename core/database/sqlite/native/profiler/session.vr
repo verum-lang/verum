@@ -86,8 +86,8 @@ implement ProfileSession {
     }
 
     public fn current_node(&self) -> Maybe<Int> {
-        if self.node_stack.len() == 0 { None }
-        else { Some(self.node_stack[self.node_stack.len() - 1]) }
+        if self.node_stack.len() == 0 { Maybe.None }
+        else { Maybe.Some(self.node_stack[self.node_stack.len() - 1]) }
     }
 
     /// Called by the interpreter after each opcode dispatch with the
@@ -96,15 +96,15 @@ implement ProfileSession {
     public fn observe_op(&mut self, opcode: &Text, ns: Int64) {
         self.ops.record(opcode, ns);
         match self.current_node() {
-            Some(nid) => self.nodes.add_time(nid, ns),
-            None      => {}
+            Maybe.Some(nid) => self.nodes.add_time(nid, ns),
+            Maybe.None      => {}
         }
     }
 
     public fn observe_row(&mut self, when_ns: Int64) {
         match self.current_node() {
-            Some(nid) => self.nodes.record_row(nid, when_ns),
-            None      => {}
+            Maybe.Some(nid) => self.nodes.record_row(nid, when_ns),
+            Maybe.None      => {}
         }
     }
 

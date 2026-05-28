@@ -353,13 +353,13 @@ public fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int {
 }
 
 /// Modular multiplicative inverse via extended GCD.
-/// Returns None if gcd(a, m) != 1.
+/// Returns Maybe.None if gcd(a, m) != 1.
 public fn mod_inverse(a: Int, m: Int) -> Maybe<Int> {
     let (g, x, _) = extended_gcd(a, m);
     if g != 1 {
-        None
+        Maybe.None
     } else {
-        Some(((x % m) + m) % m)
+        Maybe.Some(((x % m) + m) % m)
     }
 }
 
@@ -492,9 +492,9 @@ implement Rational {
     /// Division of rationals (by nonzero).
     public fn div(&self, other: &Rational) -> Maybe<Rational> {
         if other.numerator == 0 {
-            None
+            Maybe.None
         } else {
-            Some(Rational.new(
+            Maybe.Some(Rational.new(
                 self.numerator * other.denominator,
                 self.denominator * other.numerator,
             ))
@@ -509,9 +509,9 @@ implement Rational {
     /// Reciprocal for nonzero rationals.
     public fn reciprocal(&self) -> Maybe<Rational> {
         if self.numerator == 0 {
-            None
+            Maybe.None
         } else {
-            Some(Rational.new(self.denominator, self.numerator))
+            Maybe.Some(Rational.new(self.denominator, self.numerator))
         }
     }
 
@@ -534,7 +534,7 @@ implement Rational {
 /// Chinese Remainder Theorem solver: find x with x = a_i (mod m_i).
 public fn solve_crt(moduli: &List<Int>, remainders: &List<Int>) -> Maybe<Int> {
     if moduli.len() != remainders.len() || moduli.len() == 0 {
-        return None;
+        return Maybe.None;
     }
     let mut result = remainders[0];
     let mut mod_product = moduli[0];
@@ -544,8 +544,8 @@ public fn solve_crt(moduli: &List<Int>, remainders: &List<Int>) -> Maybe<Int> {
         let ai = remainders[i];
         let inv = mod_inverse(mod_product, mi);
         match inv {
-            None => { return None; },
-            Some(inv_val) => {
+            Maybe.None => { return Maybe.None; },
+            Maybe.Some(inv_val) => {
                 result = result + mod_product * ((ai - result) * inv_val % mi + mi) % mi;
                 mod_product = mod_product * mi;
                 result = result % mod_product;
@@ -553,7 +553,7 @@ public fn solve_crt(moduli: &List<Int>, remainders: &List<Int>) -> Maybe<Int> {
         }
         i = i + 1;
     }
-    Some(result)
+    Maybe.Some(result)
 }
 
 // =============================================================================

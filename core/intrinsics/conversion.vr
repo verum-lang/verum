@@ -2,7 +2,7 @@
 // core/intrinsics/conversion.vr - Type Conversion Intrinsics
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (compiler-provided)
+// Dependencies: Maybe.None (compiler-provided)
 //
 
 // This module provides type conversion intrinsics that map directly to

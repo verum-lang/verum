@@ -119,7 +119,7 @@ implement Eq for JcsError {
 public fn canonicalize_value(v: &JsonValue) -> Result<Text, JcsError> {
     let mut out: List<Byte> = [];
     emit(v, &mut out)?;
-    Ok(Text.from_utf8_unchecked(out.as_slice()))
+    Result.Ok(Text.from_utf8_unchecked(out.as_slice()))
 }
 
 /// Parse `input` as JSON then canonicalise — the "canonicalise a
@@ -135,19 +135,19 @@ public fn canonicalize_str(input: &Text) -> Result<Text, JcsError> {
 
 fn emit(v: &JsonValue, out: &mut List<Byte>) -> Result<(), JcsError> {
     match v {
-        JsonValue.JsonNull => { push_bytes(out, b"null"); Ok(()) },
+        JsonValue.JsonNull => { push_bytes(out, b"null"); Result.Ok(()) },
         JsonValue.JsonBool(b) => {
             push_bytes(out, if *b { b"true" } else { b"false" });
-            Ok(())
+            Result.Ok(())
         },
         JsonValue.JsonInt(n) => {
             emit_int(out, *n);
-            Ok(())
+            Result.Ok(())
         },
         JsonValue.JsonFloat(f) => emit_float(out, *f),
         JsonValue.JsonString(s) => {
             emit_string(out, s);
-            Ok(())
+            Result.Ok(())
         },
         JsonValue.JsonArray(arr) => {
             out.push('[' as Byte);
@@ -158,7 +158,7 @@ fn emit(v: &JsonValue, out: &mut List<Byte>) -> Result<(), JcsError> {
                 i = i + 1;
             }
             out.push(']' as Byte);
-            Ok(())
+            Result.Ok(())
         },
         JsonValue.JsonObject(m) => emit_object(m, out),
     }
@@ -170,8 +170,8 @@ fn emit_object(m: &Map<Text, JsonValue>, out: &mut List<Byte>) -> Result<(), Jcs
     let mut iter = m.keys();
     loop {
         match iter.next() {
-            Some(k) => keys.push(k.clone()),
-            None    => break,
+            Maybe.Some(k) => keys.push(k.clone()),
+            Maybe.None    => break,
         }
     }
     // Sort by UTF-16 code-unit order (§3.2.3). For ASCII-only keys
@@ -186,13 +186,13 @@ fn emit_object(m: &Map<Text, JsonValue>, out: &mut List<Byte>) -> Result<(), Jcs
         emit_string(out, &keys[i]);
         out.push(':' as Byte);
         match m.get(&keys[i]) {
-            Some(v) => emit(v, out)?,
-            None    => push_bytes(out, b"null"),
+            Maybe.Some(v) => emit(v, out)?,
+            Maybe.None    => push_bytes(out, b"null"),
         }
         i = i + 1;
     }
     out.push('}' as Byte);
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -232,19 +232,19 @@ fn emit_u64(out: &mut List<Byte>, n: UInt64) {
 fn emit_float(out: &mut List<Byte>, f: Float) -> Result<(), JcsError> {
     // Reject non-finite.
     if !f.is_finite() {
-        return Err(JcsError.UnsupportedValue(Text.from("NaN or Inf")));
+        return Result.Err(JcsError.UnsupportedValue(Text.from("NaN or Inf")));
     }
     // Integer-valued → emit without fractional part.
     let truncated = f.trunc();
     if truncated == f && f >= -9.007199254740992e15 && f <= 9.007199254740992e15 {
         emit_int(out, f as Int);
-        return Ok(());
+        return Result.Ok(());
     }
     // General case — delegate to the platform's Float.to_text which
     // already emits shortest-form.
     let s = f.to_text();
     push_bytes(out, s.as_bytes());
-    Ok(())
+    Result.Ok(())
 }
 
 /// RFC 8785 §3.2.1 string escape: only `"`, `\`, and control

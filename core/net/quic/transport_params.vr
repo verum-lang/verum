@@ -108,9 +108,9 @@ implement TransportParams {
     /// Default values per RFC 9000 §18.2.
     public fn defaults() -> TransportParams {
         TransportParams {
-            original_destination_connection_id:  None,
+            original_destination_connection_id:  Maybe.None,
             max_idle_timeout_ms:                  0_u64,
-            stateless_reset_token:                None,
+            stateless_reset_token:                Maybe.None,
             max_udp_payload_size:                 65527_u64,
             initial_max_data:                     0_u64,
             initial_max_stream_data_bidi_local:   0_u64,
@@ -121,11 +121,11 @@ implement TransportParams {
             ack_delay_exponent:                   3_u8,
             max_ack_delay_ms:                     25_u64,
             disable_active_migration:             false,
-            preferred_address:                    None,
+            preferred_address:                    Maybe.None,
             active_connection_id_limit:           2_u64,
-            initial_source_connection_id:         None,
-            retry_source_connection_id:           None,
-            max_datagram_frame_size:              None,
+            initial_source_connection_id:         Maybe.None,
+            retry_source_connection_id:           Maybe.None,
+            max_datagram_frame_size:              Maybe.None,
             grease_quic_bit:                      false,
         }
     }
@@ -199,7 +199,7 @@ implement Eq for TpError {
     }
 }
 
-fn vfail<T>(_: VarintError) -> Result<T, TpError> { Err(TpError.VarintFailure) }
+fn vfail<T>(_: VarintError) -> Result<T, TpError> { Result.Err(TpError.VarintFailure) }
 
 // =============================================================================
 // Encode
@@ -226,29 +226,29 @@ public fn encode(params: &TransportParams, out: &mut List<Byte>) {
     }
 
     match &params.original_destination_connection_id {
-        Some(cid) => encode_cid_param(out, PARAM_ORIGINAL_DCID, cid),
-        None => {},
+        Maybe.Some(cid) => encode_cid_param(out, PARAM_ORIGINAL_DCID, cid),
+        Maybe.None => {},
     }
     match &params.stateless_reset_token {
-        Some(token) => encode_fixed16_param(out, PARAM_STATELESS_RESET_TOKEN, token),
-        None => {},
+        Maybe.Some(token) => encode_fixed16_param(out, PARAM_STATELESS_RESET_TOKEN, token),
+        Maybe.None => {},
     }
     match &params.initial_source_connection_id {
-        Some(cid) => encode_cid_param(out, PARAM_INITIAL_SOURCE_CONNECTION_ID, cid),
-        None => {},
+        Maybe.Some(cid) => encode_cid_param(out, PARAM_INITIAL_SOURCE_CONNECTION_ID, cid),
+        Maybe.None => {},
     }
     match &params.retry_source_connection_id {
-        Some(cid) => encode_cid_param(out, PARAM_RETRY_SOURCE_CONNECTION_ID, cid),
-        None => {},
+        Maybe.Some(cid) => encode_cid_param(out, PARAM_RETRY_SOURCE_CONNECTION_ID, cid),
+        Maybe.None => {},
     }
     match &params.max_datagram_frame_size {
-        Some(size) => encode_u64_param(out, PARAM_MAX_DATAGRAM_FRAME_SIZE, *size),
-        None => {},
+        Maybe.Some(size) => encode_u64_param(out, PARAM_MAX_DATAGRAM_FRAME_SIZE, *size),
+        Maybe.None => {},
     }
     // Preferred address — serialised in full per RFC 9000 §18.2
     match &params.preferred_address {
-        Some(pa) => encode_preferred_address(out, pa),
-        None => {},
+        Maybe.Some(pa) => encode_preferred_address(out, pa),
+        Maybe.None => {},
     }
 }
 
@@ -310,13 +310,13 @@ public fn decode(buf: &[Byte]) -> Result<TransportParams, TpError> {
         let (id,  p1) = quic_decode(buf, pos).or_else(vfail)?;
         let (len, p2) = quic_decode(buf, p1).or_else(vfail)?;
         let value_end = p2 + (len as Int);
-        if value_end > buf.len() { return Err(TpError.Truncated); }
+        if value_end > buf.len() { return Result.Err(TpError.Truncated); }
         // Slice containing just this parameter's value.
         let value = slice_of(buf, p2, value_end);
         apply_param(&mut out, id, value.as_slice())?;
         pos = value_end;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn apply_param(p: &mut TransportParams, id: UInt64, value: &[Byte]) -> Result<(), TpError> {
@@ -335,65 +335,65 @@ fn apply_param(p: &mut TransportParams, id: UInt64, value: &[Byte]) -> Result<()
 
         PARAM_DISABLE_ACTIVE_MIGRATION            => {
             if value.len() != 0 {
-                return Err(TpError.InvalidLength(Text.from_str("disable_active_migration expects zero length")));
+                return Result.Err(TpError.InvalidLength(Text.from_str("disable_active_migration expects zero length")));
             }
             p.disable_active_migration = true;
         },
         PARAM_GREASE_QUIC_BIT                     => {
             if value.len() != 0 {
-                return Err(TpError.InvalidLength(Text.from_str("grease_quic_bit expects zero length")));
+                return Result.Err(TpError.InvalidLength(Text.from_str("grease_quic_bit expects zero length")));
             }
             p.grease_quic_bit = true;
         },
 
         PARAM_ORIGINAL_DCID => {
-            p.original_destination_connection_id = Some(cid_from(value)?);
+            p.original_destination_connection_id = Maybe.Some(cid_from(value)?);
         },
         PARAM_INITIAL_SOURCE_CONNECTION_ID => {
-            p.initial_source_connection_id = Some(cid_from(value)?);
+            p.initial_source_connection_id = Maybe.Some(cid_from(value)?);
         },
         PARAM_RETRY_SOURCE_CONNECTION_ID => {
-            p.retry_source_connection_id = Some(cid_from(value)?);
+            p.retry_source_connection_id = Maybe.Some(cid_from(value)?);
         },
         PARAM_STATELESS_RESET_TOKEN => {
             if value.len() != 16 {
-                return Err(TpError.InvalidLength(Text.from_str("stateless_reset_token must be 16 bytes")));
+                return Result.Err(TpError.InvalidLength(Text.from_str("stateless_reset_token must be 16 bytes")));
             }
             let mut tok: [Byte; 16] = [0_u8; 16];
             let mut i: Int = 0;
             while i < 16 { tok[i] = value[i]; i = i + 1; }
-            p.stateless_reset_token = Some(tok);
+            p.stateless_reset_token = Maybe.Some(tok);
         },
         PARAM_MAX_DATAGRAM_FRAME_SIZE => {
-            p.max_datagram_frame_size = Some(read_varint_all(value)?);
+            p.max_datagram_frame_size = Maybe.Some(read_varint_all(value)?);
         },
         PARAM_PREFERRED_ADDRESS => {
             // For full fidelity see RFC 9000 §18.2. We parse into a
             // PreferredAddress struct below; malformed ⇒ error.
-            p.preferred_address = Some(decode_preferred_address(value)?);
+            p.preferred_address = Maybe.Some(decode_preferred_address(value)?);
         },
 
         // Unknown (including all 0x1f * 31 + 27 greasing slots) — ignore.
         _ => {},
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn read_varint_all(buf: &[Byte]) -> Result<UInt64, TpError> {
     let (v, next) = quic_decode(buf, 0).or_else(vfail)?;
     if next != buf.len() {
-        return Err(TpError.InvalidLength(Text.from_str("varint param has trailing bytes")));
+        return Result.Err(TpError.InvalidLength(Text.from_str("varint param has trailing bytes")));
     }
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn cid_from(value: &[Byte]) -> Result<ConnectionId, TpError> {
     if value.len() > MAX_CID_LEN {
-        return Err(TpError.InvalidLength(Text.from_str("CID param exceeds 20 bytes")));
+        return Result.Err(TpError.InvalidLength(Text.from_str("CID param exceeds 20 bytes")));
     }
     match ConnectionId.from_bytes(value) {
-        Ok(c)  => Ok(c),
-        Err(_) => Err(TpError.InvalidValue(Text.from_str("CID construction failed"))),
+        Result.Ok(c)  => Result.Ok(c),
+        Result.Err(_) => Result.Err(TpError.InvalidValue(Text.from_str("CID construction failed"))),
     }
 }
 
@@ -405,7 +405,7 @@ fn slice_of(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
 
 fn decode_preferred_address(buf: &[Byte]) -> Result<PreferredAddress, TpError> {
     if buf.len() < 4 + 2 + 16 + 2 + 1 + 16 {
-        return Err(TpError.Truncated);
+        return Result.Err(TpError.Truncated);
     }
     let mut ipv4: [Byte; 4] = [0_u8; 4];
     let mut i: Int = 0;
@@ -417,18 +417,18 @@ fn decode_preferred_address(buf: &[Byte]) -> Result<PreferredAddress, TpError> {
     let ipv6_port: UInt16 = ((buf[22] as UInt16) << 8) | (buf[23] as UInt16);
     let cid_len = buf[24] as Int;
     if cid_len > MAX_CID_LEN {
-        return Err(TpError.InvalidLength(Text.from_str("PA cid length > 20")));
+        return Result.Err(TpError.InvalidLength(Text.from_str("PA cid length > 20")));
     }
     let cid_end = 25 + cid_len;
     let token_end = cid_end + 16;
-    if token_end > buf.len() { return Err(TpError.Truncated); }
+    if token_end > buf.len() { return Result.Err(TpError.Truncated); }
     let mut cid_bytes: List<Byte> = List.with_capacity(cid_len);
     cid_bytes.extend_from_slice(&buf[25..cid_end]);
     let cid = cid_from(cid_bytes.as_slice())?;
     let mut token: [Byte; 16] = [0_u8; 16];
     let mut m: Int = 0;
     while m < 16 { token[m] = buf[cid_end + m]; m = m + 1; }
-    Ok(PreferredAddress {
+    Result.Ok(PreferredAddress {
         ipv4_addr: ipv4, ipv4_port: ipv4_port,
         ipv6_addr: ipv6, ipv6_port: ipv6_port,
         connection_id: cid,

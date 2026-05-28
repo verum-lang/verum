@@ -69,7 +69,7 @@
 module core.database.postgres.typed_database;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount base.memory.Shared;
 
@@ -108,13 +108,13 @@ implement<C: CanRead> Database<PgPool, C> {
     /// one (matches the spec's drop-on-fault discipline).
     public fn query_simple(&self, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().simple_query(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(format_err_reason(e)),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(format_err_reason(e)),
         }
         result
     }
@@ -123,22 +123,22 @@ implement<C: CanRead> Database<PgPool, C> {
     /// and command_tag). Most read-paths want this.
     public fn query_rows(&self, sql: &Text) -> Result<List<List<WireValue>>, DbError> {
         match self.query_simple(sql) {
-            Ok(r)  => Ok(r.rows),
-            Err(e) => Err(e),
+            Result.Ok(r)  => Result.Ok(r.rows),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
-    /// Convenience — first row or None.
+    /// Convenience — first row or Maybe.None.
     public fn query_first(&self, sql: &Text) -> Result<Maybe<List<WireValue>>, DbError> {
         match self.query_simple(sql) {
-            Ok(r) => {
+            Result.Ok(r) => {
                 if (r.rows.len() as Int) == 0 {
-                    Ok(None)
+                    Result.Ok(Maybe.None)
                 } else {
-                    Ok(Some(r.rows[0].clone()))
+                    Result.Ok(Maybe.Some(r.rows[0].clone()))
                 }
             }
-            Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
         }
     }
 }
@@ -158,13 +158,13 @@ implement<C: CanWrite> Database<PgPool, C> {
     /// shapes.
     public fn execute_simple(&self, sql: &Text) -> Result<Text, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().execute(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(format_err_reason(e)),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(format_err_reason(e)),
         }
         result
     }
@@ -188,17 +188,17 @@ implement<C: CanTx> Database<PgPool, C> {
     /// This mirrors the spec §5.5 affine `Tx` semantics.
     public fn begin(&self) -> Result<TxScope<PgPool>, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         // begin_tx delegates to PgConnection.begin which sends
         // BEGIN on the wire and returns a PgTransaction handle
         // bound to the connection's lifetime.
         match begin_tx(handle.conn_mut()) {
-            Ok(tx) => Ok(TxScope { tx: tx, handle: handle }),
-            Err(e) => {
+            Result.Ok(tx) => Result.Ok(TxScope { tx: tx, handle: handle }),
+            Result.Err(e) => {
                 handle.release_discard(format_err_reason(&e));
-                Err(e)
+                Result.Err(e)
             }
         }
     }
@@ -243,8 +243,8 @@ implement TxScope<PgPool> {
         // it. On commit failure the connection is in an ambiguous
         // state — discard it.
         match &result {
-            Ok(_)  => self.handle.release_healthy(),
-            Err(e) => self.handle.release_discard(format_err_reason(e)),
+            Result.Ok(_)  => self.handle.release_healthy(),
+            Result.Err(e) => self.handle.release_discard(format_err_reason(e)),
         }
         result
     }
@@ -253,8 +253,8 @@ implement TxScope<PgPool> {
     public fn rollback(mut self) -> Result<(), DbError> {
         let result = core.database.postgres.transaction.rollback_tx(self.tx);
         match &result {
-            Ok(_)  => self.handle.release_healthy(),
-            Err(e) => self.handle.release_discard(format_err_reason(e)),
+            Result.Ok(_)  => self.handle.release_healthy(),
+            Result.Err(e) => self.handle.release_discard(format_err_reason(e)),
         }
         result
     }
@@ -275,13 +275,13 @@ implement<C: CanDdl> Database<PgPool, C> {
     /// the simple-query path. The bound is the load-bearing piece.
     public fn execute_ddl(&self, sql: &Text) -> Result<Text, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().execute(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(format_err_reason(e)),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(format_err_reason(e)),
         }
         result
     }
@@ -300,13 +300,13 @@ implement<C: CanNotify> Database<PgPool, C> {
     /// tx, fires immediately on the connection's auto-commit.
     public fn notify(&self, channel: &Text, payload: &Text) -> Result<(), DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().notify(channel, payload);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(format_err_reason(e)),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(format_err_reason(e)),
         }
         result
     }
@@ -323,13 +323,13 @@ implement<C: CanNotify> Database<PgPool, C> {
     /// uses the dispatcher's fan-out to broadcast to subscribers.
     public fn listen(&self, channel: &Text) -> Result<(), DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().listen(channel);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(format_err_reason(e)),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(format_err_reason(e)),
         }
         result
     }
@@ -337,13 +337,13 @@ implement<C: CanNotify> Database<PgPool, C> {
     /// Send UNLISTEN on `channel` (or "*" to drop all subscriptions).
     public fn unlisten(&self, channel: &Text) -> Result<(), DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().unlisten(channel);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(format_err_reason(e)),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(format_err_reason(e)),
         }
         result
     }
@@ -365,8 +365,8 @@ implement<C: CanNotify> Database<PgPool, C> {
         // Send LISTEN — idempotent on the server (LISTEN on an
         // already-listened channel is a no-op).
         match self.listen(&channel) {
-            Ok(_)  => Ok(dispatcher.subscribe(channel)),
-            Err(e) => Err(e),
+            Result.Ok(_)  => Result.Ok(dispatcher.subscribe(channel)),
+            Result.Err(e) => Result.Err(e),
         }
     }
 }
@@ -390,13 +390,13 @@ implement<C: CanCopy> Database<PgPool, C> {
         rows: &List<List<Byte>>,
     ) -> Result<Int, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().copy_in_bytes(sql, rows);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(format_err_reason(e)),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(format_err_reason(e)),
         }
         result
     }
@@ -423,13 +423,13 @@ implement<C: CanUnsafe> Database<PgPool, C> {
     /// instead.
     public fn execute_raw_unsafe(&self, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().simple_query(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(format_err_reason(e)),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(format_err_reason(e)),
         }
         result
     }

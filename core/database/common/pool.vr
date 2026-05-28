@@ -24,7 +24,7 @@
 module core.database.common.pool;
 
 mount core.*;
-mount base.{Result, Text, Maybe, None, Some};
+mount base.{Result, Text, Maybe, Maybe.None, Some};
 mount async.duration.Duration;
 mount core.database.common.error.{DbError, AdapterId};
 mount core.database.common.protocol.Connection;

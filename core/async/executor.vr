@@ -331,7 +331,7 @@ implement<F: Future> TaskState<F> {
             future: future,
             task_id: task_id,
             completed: false,
-            result: None,
+            result: Maybe.None,
         }
     }
 
@@ -339,8 +339,8 @@ implement<F: Future> TaskState<F> {
     /// Panics if res is not available.
     fn take_result(&mut self) -> F.Output {
         match self.result.take() {
-            Some(r) => r,
-            None => panic("TaskState.take_result called before completion"),
+            Maybe.Some(r) => r,
+            Maybe.None => panic("TaskState.take_result called before completion"),
         }
     }
 }
@@ -412,7 +412,7 @@ const CHASE_LEV_MASK: Int = 255;
 ///     only when the deque has exactly one element (the
 ///     boundary race with stealers).
 ///   * `try_steal() -> Maybe<task>` — any thread. Always one
-///     CAS; returns None on empty OR race-lost.
+///     CAS; returns Maybe.None on empty OR race-lost.
 ///
 /// **Memory ordering** (load-bearing fences from Lê et al §3.1):
 ///   * `push_local`: Release fence between slot-store and
@@ -463,8 +463,8 @@ implement ChaseLevDeque {
         }
     }
 
-    /// Owner-only push. Returns `Ok(())` on success and
-    /// `Err(task)` on capacity overflow — the caller
+    /// Owner-only push. Returns `Result.Ok(())` on success and
+    /// `Result.Err(task)` on capacity overflow — the caller
     /// (`AsyncRuntime.spawn`) re-routes the returned task to the
     /// global injector path so no task is lost.
     ///
@@ -484,13 +484,13 @@ implement ChaseLevDeque {
         // Reserve one extra slot so the empty/full disambiguation
         // (b == t means empty by convention) stays unambiguous.
         if b - t >= CHASE_LEV_CAPACITY - 1 {
-            return Err(task);
+            return Result.Err(task);
         }
         let raw = Heap.into_raw(task) as Int;
         self.slots.index(b & CHASE_LEV_MASK).store(raw, MemoryOrdering.Relaxed);
         atomic_fence(MemoryOrder.Release);
         self.bottom.store(b + 1, MemoryOrdering.Relaxed);
-        Ok(())
+        Result.Ok(())
     }
 
     /// Owner-only pop (LIFO). Pops the most-recently pushed
@@ -525,13 +525,13 @@ implement ChaseLevDeque {
             MemoryOrdering.SeqCst,
             MemoryOrdering.Relaxed,
         ) {
-            Ok(_) => {
+            Result.Ok(_) => {
                 // Owner won.
                 self.bottom.store(b + 1, MemoryOrdering.Relaxed);
                 let raw_ptr = raw_int as &unsafe Byte;
                 Maybe.Some(unsafe { Heap.from_raw(raw_ptr as &mut TaskEntry) })
             }
-            Err(_) => {
+            Result.Err(_) => {
                 // Stealer won — empty deque, restore bottom.
                 self.bottom.store(b + 1, MemoryOrdering.Relaxed);
                 Maybe.None
@@ -539,7 +539,7 @@ implement ChaseLevDeque {
         }
     }
 
-    /// Stealer-side pop (FIFO). Non-blocking — returns None
+    /// Stealer-side pop (FIFO). Non-blocking — returns Maybe.None
     /// on empty OR race-lost. Concurrent stealers race via the
     /// CAS; one wins per stolen task.
     public fn try_steal(&self) -> Maybe<Heap<TaskEntry>> {
@@ -557,11 +557,11 @@ implement ChaseLevDeque {
             MemoryOrdering.SeqCst,
             MemoryOrdering.Relaxed,
         ) {
-            Ok(_) => {
+            Result.Ok(_) => {
                 let raw_ptr = raw_int as &unsafe Byte;
                 Maybe.Some(unsafe { Heap.from_raw(raw_ptr as &mut TaskEntry) })
             }
-            Err(_) => Maybe.None, // race lost
+            Result.Err(_) => Maybe.None, // race lost
         }
     }
 
@@ -654,14 +654,14 @@ implement WorkerSlot {
         self.local_deque.push_local(task)
     }
 
-    /// Owner-side pop (LIFO, cache-hot). Returns None when the
+    /// Owner-side pop (LIFO, cache-hot). Returns Maybe.None when the
     /// local deque is empty; caller falls through to the global
     /// injector or steal path.
     public fn pop_local(&self) -> Maybe<Heap<TaskEntry>> {
         self.local_deque.pop_local()
     }
 
-    /// Stealer-side pop (FIFO). Non-blocking — returns None on
+    /// Stealer-side pop (FIFO). Non-blocking — returns Maybe.None on
     /// empty OR race-lost (concurrent stealer won the CAS).
     /// FIFO end is preferred to minimise cache-line ping-pong
     /// with the owner's LIFO-end activity.
@@ -831,7 +831,7 @@ implement WorkerPool {
     /// Phase 2 (#278): pick a steal victim. Round-robins through
     /// peer workers starting from the caller's `steal_hint`. The
     /// caller's own slot is skipped. Returns the first victim
-    /// whose `try_steal()` succeeded; otherwise None.
+    /// whose `try_steal()` succeeded; otherwise Maybe.None.
     ///
     /// **Strategy**: deterministic round-robin keyed by
     /// `steal_hint` is cheaper than a true random victim and
@@ -1044,7 +1044,7 @@ implement AsyncRuntime {
             total_completions: AtomicInt.new(0),
             // Phase 1A foundation (#271): worker pool is `Maybe.None`
             // until `start_worker_pool` is called. Default
-            // `async_worker_threads = 0` keeps it None forever —
+            // `async_worker_threads = 0` keeps it Maybe.None forever —
             // zero-overhead single-threaded path is bit-identical
             // to pre-#271 behaviour.
             worker_pool: Mutex.new(Maybe.None),
@@ -1124,11 +1124,11 @@ implement AsyncRuntime {
                     worker_main(runtime_addr, worker_id);
                 });
             match result {
-                Ok(handle) => {
+                Result.Ok(handle) => {
                     pool.handles.push(handle);
                     spawned = spawned + 1;
                 }
-                Err(_) => {
+                Result.Err(_) => {
                     spawn_failed = true;
                     break;
                 }
@@ -1312,10 +1312,10 @@ implement AsyncRuntime {
 
         // Create or reuse waker for this task.
         let waker = match &entry.waker {
-            Some(w) => w.clone(),
-            None => {
+            Maybe.Some(w) => w.clone(),
+            Maybe.None => {
                 let w = create_runtime_waker(entry.id, self);
-                entry.waker = Some(w.clone());
+                entry.waker = Maybe.Some(w.clone());
                 w
             }
         };
@@ -1556,7 +1556,7 @@ implement AsyncRuntime {
         let task = Shared.new(Task {
             id: TaskId.new(),
             state: AtomicInt.new(0),  // Pending
-            result: Mutex.new(None),
+            result: Mutex.new(Maybe.None),
         });
 
         let task_id = self.next_task_id.fetch_add(1, MemoryOrdering.Relaxed);
@@ -1574,7 +1574,7 @@ implement AsyncRuntime {
 
             match state.future.poll(cx) {
                 Poll.Ready(res) => {
-                    state.result = Some(res);
+                    state.result = Maybe.Some(res);
                     state.completed = true;
                     return Poll.Ready(());
                 }
@@ -1598,7 +1598,7 @@ implement AsyncRuntime {
             future_ptr: state_ptr,
             poll_fn: poll_fn,
             drop_fn: drop_fn,
-            waker: None,
+            waker: Maybe.None,
             completed: false,
         });
 
@@ -1626,14 +1626,14 @@ implement AsyncRuntime {
                     if let Maybe.Some(slot) = pool.slot(wid) {
                         // Phase 4 (#280): `push_local` returns
                         // `Result<(), Heap<TaskEntry>>`. On capacity
-                        // overflow it returns `Err(task)` — re-store
+                        // overflow it returns `Result.Err(task)` — re-store
                         // the task in `entry_slot` so the fall-through
                         // pushes it to the global injector. No task
                         // lost; no future-state leaked.
                         if let Maybe.Some(e) = entry_slot.take() {
                             match slot.push_local(e) {
-                                Ok(()) => {},
-                                Err(returned_task) => {
+                                Result.Ok(()) => {},
+                                Result.Err(returned_task) => {
                                     // Capacity overflow — graceful
                                     // re-route to global injector.
                                     entry_slot = Maybe.Some(returned_task);
@@ -1705,7 +1705,7 @@ implement AsyncRuntime {
         // Create IOEngine for this event loop if I/O is enabled
         if self.config.enable_io {
             match create_io_engine(self.config.io_sq_entries) {
-                Ok(engine) => {
+                Result.Ok(engine) => {
                     // Store IOEngine pointer both in AsyncRuntime (for wait_for_events)
                     // and in context slot (for async operations to submit I/O)
                     let engine_ptr = Heap.new(engine);
@@ -1713,7 +1713,7 @@ implement AsyncRuntime {
                     self.io_engine_ptr = raw_ptr as Int;
                     ctx_set(SLOT_IO_ENGINE, raw_ptr as &unsafe Byte);
                 }
-                Err(_) => {
+                Result.Err(_) => {
                     // IOEngine creation failed — fall back to poll-based
                 }
             }
@@ -1746,7 +1746,7 @@ implement AsyncRuntime {
             // Poll the main future
             match state.future.poll(&mut cx) {
                 Poll.Ready(res) => {
-                    state.result = Some(res);
+                    state.result = Maybe.Some(res);
                     state.completed = true;
                     break;
                 }
@@ -1816,7 +1816,7 @@ implement AsyncRuntime {
         {
             let mut ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
             while !ready.is_empty() && tasks_to_poll.len() < budget {
-                if let Some(task) = ready.pop() {
+                if let Maybe.Some(task) = ready.pop() {
                     tasks_to_poll.push(task);
                 }
             }
@@ -1826,7 +1826,7 @@ implement AsyncRuntime {
         {
             let mut pending = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
             while !pending.is_empty() && tasks_to_poll.len() < budget {
-                if let Some(task) = pending.pop() {
+                if let Maybe.Some(task) = pending.pop() {
                     tasks_to_poll.push(task);
                 }
             }
@@ -1840,10 +1840,10 @@ implement AsyncRuntime {
 
             // Create or reuse waker for this task
             let waker = match &entry.waker {
-                Some(w) => w.clone(),
-                None => {
+                Maybe.Some(w) => w.clone(),
+                Maybe.None => {
                     let w = create_runtime_waker(entry.id, self);
-                    entry.waker = Some(w.clone());
+                    entry.waker = Maybe.Some(w.clone());
                     w
                 }
             };
@@ -1887,7 +1887,7 @@ implement AsyncRuntime {
         {
             let mut ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
             while !ready.is_empty() {
-                if let Some(entry) = ready.pop() {
+                if let Maybe.Some(entry) = ready.pop() {
                     if !entry.completed {
                         (entry.drop_fn)(entry.future_ptr);
                     }
@@ -1899,7 +1899,7 @@ implement AsyncRuntime {
         {
             let mut pending = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
             while !pending.is_empty() {
-                if let Some(entry) = pending.pop() {
+                if let Maybe.Some(entry) = pending.pop() {
                     if !entry.completed {
                         (entry.drop_fn)(entry.future_ptr);
                     }
@@ -1989,7 +1989,7 @@ implement AsyncRuntime {
             // patched over with `cx.waker().wake_by_ref()`.
             let now_ns = time_now_ns();
             let timeout = match self.next_timer_deadline() {
-                Some(deadline_ns) if deadline_ns > now_ns => {
+                Maybe.Some(deadline_ns) if deadline_ns > now_ns => {
                     let remaining_ns = deadline_ns - now_ns;
                     // Cap at 1ms — keeps responsiveness for newly
                     // arriving I/O events when timers are far out.
@@ -1999,18 +1999,18 @@ implement AsyncRuntime {
                     } else {
                         one_ms_ns
                     };
-                    Some(IoDuration.from_micros((waitable_ns / 1_000) as Int))
+                    Maybe.Some(IoDuration.from_micros((waitable_ns / 1_000) as Int))
                 }
-                Some(_) => {
+                Maybe.Some(_) => {
                     // Timer already expired — return immediately so
                     // the caller can drain it on the next iteration.
-                    Some(IoDuration.from_millis(0))
+                    Maybe.Some(IoDuration.from_millis(0))
                 }
-                None => Some(IoDuration.from_millis(1)),
+                Maybe.None => Maybe.Some(IoDuration.from_millis(1)),
             };
 
             match engine_wait_active(self.io_engine_ptr, &mut results, timeout) {
-                Ok(count) => {
+                Result.Ok(count) => {
                     // Process completions — wake tasks whose I/O completed.
                     // Compare in UInt64 space — WAKE_TOKEN is
                     // UInt64 0xFFFF_FFFF_FFFF_FFFF (2^64-1) which
@@ -2025,7 +2025,7 @@ implement AsyncRuntime {
                         i = i + 1;
                     }
                 }
-                Err(_) => {
+                Result.Err(_) => {
                     // IOEngine error — fall back to brief sleep.
                     self.brief_sleep();
                 }
@@ -2076,7 +2076,7 @@ implement AsyncRuntime {
         let mut idx = queue.len();
         while idx > 0 {
             match queue.get(idx - 1) {
-                Some(prev_entry) if prev_entry.deadline_ns > deadline_ns => {
+                Maybe.Some(prev_entry) if prev_entry.deadline_ns > deadline_ns => {
                     idx -= 1;
                 }
                 _ => break,
@@ -2092,14 +2092,14 @@ implement AsyncRuntime {
     ///
 
     /// Used by the event loop to size the IOEngine wait timeout —
-    /// returns `Some(deadline_ns)` when at least one timer is
-    /// queued, `None` otherwise (in which case the loop falls back
+    /// returns `Maybe.Some(deadline_ns)` when at least one timer is
+    /// queued, `Maybe.None` otherwise (in which case the loop falls back
     /// to the default `enable_io ? 1ms : brief_sleep_100us`).
     public fn next_timer_deadline(&self) -> Maybe<UInt64> {
         let queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
         match queue.get(0) {
-            Some(entry) => Some(entry.deadline_ns),
-            None => None,
+            Maybe.Some(entry) => Maybe.Some(entry.deadline_ns),
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -2118,8 +2118,8 @@ implement AsyncRuntime {
             // Pop from the front while the head is expired.
             while !queue.is_empty() {
                 match queue.get(0) {
-                    Some(head_entry) if head_entry.deadline_ns <= now_ns => {
-                        if let Some(popped) = queue.remove(0) {
+                    Maybe.Some(head_entry) if head_entry.deadline_ns <= now_ns => {
+                        if let Maybe.Some(popped) = queue.remove(0) {
                             expired.push(popped);
                         }
                     }
@@ -2136,21 +2136,21 @@ implement AsyncRuntime {
 
     /// Wake a task by ID (called by waker).
     fn wake_task(&self, task_id: Int) {
-        let mut task_to_wake: Maybe<Heap<TaskEntry>> = None;
+        let mut task_to_wake: Maybe<Heap<TaskEntry>> = Maybe.None;
 
         // Find and remove task from pending queue
         {
             let mut queue = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
             for i in range(0, queue.len()) {
                 if queue.get(i).map(|e| e.id == task_id).unwrap_or(false) {
-                    task_to_wake = Some(queue.remove(i));
+                    task_to_wake = Maybe.Some(queue.remove(i));
                     break;
                 }
             }
         }
 
         // Move to ready queue
-        if let Some(task) = task_to_wake {
+        if let Maybe.Some(task) = task_to_wake {
             let mut ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
             ready.push(task);
         }
@@ -2347,7 +2347,7 @@ implement LocalExecutor {
 
             match state.future.poll(cx) {
                 Poll.Ready(res) => {
-                    state.result = Some(res);
+                    state.result = Maybe.Some(res);
                     state.completed = true;
                     return Poll.Ready(());
                 }
@@ -2366,7 +2366,7 @@ implement LocalExecutor {
             future_ptr: state_ptr,
             poll_fn: poll_fn,
             drop_fn: drop_fn,
-            waker: None,
+            waker: Maybe.None,
             completed: false,
         });
 
@@ -2385,7 +2385,7 @@ implement LocalExecutor {
         // Take the ready list -- tasks woken during polling go back
         let mut to_poll = List.new();
         while !self.ready.is_empty() {
-            if let Some(task) = self.ready.pop() {
+            if let Maybe.Some(task) = self.ready.pop() {
                 to_poll.push(task);
             }
         }
@@ -2441,7 +2441,7 @@ implement LocalExecutor {
             //  For the local executor, we re-poll all pending tasks since
             //  there is no external event source to wake them.)
             while !self.pending.is_empty() {
-                if let Some(task) = self.pending.pop() {
+                if let Maybe.Some(task) = self.pending.pop() {
                     self.ready.push(task);
                 }
             }
@@ -2599,7 +2599,7 @@ fn worker_main(runtime_ptr: &unsafe Byte, worker_id: Int) {
         //   1. Local deque LIFO (cache-hot for recursive spawn)
         //   2. Global injector / ready queues (existing path)
         //   3. Steal from a peer's deque FRONT
-        // First non-None task is polled. When all three return
+        // First non-Maybe.None task is polled. When all three return
         // empty, the worker proceeds to `try_park`.
         let mut polled_any = false;
 
@@ -2750,12 +2750,12 @@ implement<F: Future> Future for ExecutorTimeout<F> {
         // Check if deadline has passed
         let now = time_now_ns();
         if now >= self.deadline_ns {
-            return Poll.Ready(Err(ExecutorTimeoutError));
+            return Poll.Ready(Result.Err(ExecutorTimeoutError));
         }
 
         // Try to poll the inner future
         match self.future.poll(cx) {
-            Poll.Ready(res) => Poll.Ready(Ok(res)),
+            Poll.Ready(res) => Poll.Ready(Result.Ok(res)),
             Poll.Pending => {
                 // Park until the deadline so the runtime re-polls
                 // exactly once when the timeout window closes — the
@@ -2766,10 +2766,10 @@ implement<F: Future> Future for ExecutorTimeout<F> {
                 // or use timer wheel" but neither was wired, so the
                 // outer event loop just brief_slept and re-polled.
                 match current_runtime() {
-                    Some(rt) => {
+                    Maybe.Some(rt) => {
                         rt.register_timer(self.deadline_ns, cx.waker().clone());
                     }
-                    None => {
+                    Maybe.None => {
                         // No runtime in scope — fall back to
                         // historical Pending without registration;
                         // depends on outer waker activity to advance.
@@ -2793,8 +2793,8 @@ implement<F: Future> Future for ExecutorTimeout<F> {
 /// ```verum
 /// let res = timeout_ms_raw(fetch_data(), 5000).await;
 /// match result {
-///  Ok(data) => print(f"Got: {data}"),
-///  Err(ExecutorTimeoutError) => print("Request timed out"),
+///  Result.Ok(data) => print(f"Got: {data}"),
+///  Result.Err(ExecutorTimeoutError) => print("Request timed out"),
 /// }
 /// ```
 public fn timeout_ms_raw<F: Future>(future: F, timeout_ms: UInt64) -> ExecutorTimeout<F> {
@@ -2921,7 +2921,7 @@ const RUNTIME_WAKER_VTABLE: RawWakerVTable = RawWakerVTable {
 /// Get the current `AsyncRuntime` from the TLS context slot.
 ///
 
-/// Returns `None` outside an active `block_on` window — async
+/// Returns `Maybe.None` outside an active `block_on` window — async
 /// constructs that use this helper must already be running on a
 /// runtime, so callers can typically `unwrap_or_else(|| panic!(…))`.
 ///
@@ -2931,8 +2931,8 @@ const RUNTIME_WAKER_VTABLE: RawWakerVTable = RawWakerVTable {
 /// at a precise deadline:
 /// ```verum
 /// match current_runtime() {
-///  Some(rt) => rt.register_timer(deadline_ns, cx.waker().clone()),
-///  None => cx.waker().wake_by_ref(), // fallback: busy-spin
+///  Maybe.Some(rt) => rt.register_timer(deadline_ns, cx.waker().clone()),
+///  Maybe.None => cx.waker().wake_by_ref(), // fallback: busy-spin
 /// }
 /// ```
 ///
@@ -2944,8 +2944,8 @@ const RUNTIME_WAKER_VTABLE: RawWakerVTable = RawWakerVTable {
 /// lifetime is tied to the on-stack runtime in `block_on`.
 public fn current_runtime() -> Maybe<&AsyncRuntime> {
     match ctx_get(SLOT_RUNTIME) {
-        Some(ptr) => Some(unsafe { &*(ptr as &AsyncRuntime) }),
-        None => None,
+        Maybe.Some(ptr) => Maybe.Some(unsafe { &*(ptr as &AsyncRuntime) }),
+        Maybe.None => Maybe.None,
     }
 }
 
@@ -2961,8 +2961,8 @@ public fn current_runtime() -> Maybe<&AsyncRuntime> {
 public fn with_forked_env<T, F: fn() -> T>(f: F) -> T {
     // Push new context frame (inherits from parent)
     match ctx_push_frame() {
-        Ok(_) => {}
-        Err(_) => {
+        Result.Ok(_) => {}
+        Result.Err(_) => {
             // No context to fork, just run
             return f();
         }

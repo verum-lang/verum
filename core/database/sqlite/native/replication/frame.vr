@@ -109,8 +109,8 @@ implement FrameBatch {
     }
 
     public fn last_position(&self) -> Maybe<Int64> {
-        if self.frames.len() == 0 { return None; }
+        if self.frames.len() == 0 { return Maybe.None; }
         let last = self.frames.len() - 1;
-        Some(frame_position(&self.frames[last]))
+        Maybe.Some(frame_position(&self.frames[last]))
     }
 }

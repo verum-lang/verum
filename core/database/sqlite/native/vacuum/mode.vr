@@ -32,10 +32,10 @@ public fn auto_vacuum_code(m: &AutoVacuumMode) -> Int {
 }
 
 public fn auto_vacuum_from_code(c: Int) -> Maybe<AutoVacuumMode> {
-    if c == 0 { return Some(AvNone); }
-    if c == 1 { return Some(AvFull); }
-    if c == 2 { return Some(AvIncremental); }
-    None
+    if c == 0 { return Maybe.Some(AvNone); }
+    if c == 1 { return Maybe.Some(AvFull); }
+    if c == 2 { return Maybe.Some(AvIncremental); }
+    Maybe.None
 }
 
 public fn auto_vacuum_name(m: &AutoVacuumMode) -> Text {

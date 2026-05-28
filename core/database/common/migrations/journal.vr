@@ -36,16 +36,16 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "vendor-neutral applied-migration journal + drift detection",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.database.common.migrations.journal;
@@ -139,20 +139,20 @@ implement MigrationJournal {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].version == version {
-                return Some(clone_entry(&self.entries[i]));
+                return Maybe.Some(clone_entry(&self.entries[i]));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn is_applied(&self, version: Int) -> Bool {
         match self.lookup(version) {
-            Some(e) => match e.status {
+            Maybe.Some(e) => match e.status {
                 MsApplied(_) => true,
                 _            => false,
             },
-            None => false,
+            Maybe.None => false,
         }
     }
 
@@ -174,8 +174,8 @@ implement MigrationJournal {
     public fn drift_detected(&self, m: &Migration) -> Bool {
         let now = checksum_for_sql(&m.up_sql);
         match self.lookup(m.version) {
-            Some(e) => e.checksum != now,
-            None    => false,
+            Maybe.Some(e) => e.checksum != now,
+            Maybe.None    => false,
         }
     }
 

@@ -34,7 +34,7 @@ public type CorpusEntry is {
     /// Stable id assigned by the corpus on insertion.
     id: Int,
     bytes: List<Byte>,
-    /// What mutation produced this entry (None for genesis / loaded seeds).
+    /// What mutation produced this entry (Maybe.None for genesis / loaded seeds).
     origin: Maybe<MutationKind>,
     /// New basic-blocks the entry exercised when first added.
     new_coverage_count: Int,
@@ -134,9 +134,9 @@ implement Corpus {
     }
 
     public fn pick(&self, idx: Int) -> Maybe<CorpusEntry> {
-        if idx < 0 || idx >= self.entries.len() { return None; }
+        if idx < 0 || idx >= self.entries.len() { return Maybe.None; }
         let e = &self.entries[idx];
-        Some(CorpusEntry {
+        Maybe.Some(CorpusEntry {
             id: e.id,
             bytes: clone_bytes(&e.bytes),
             origin: clone_origin(&e.origin),
@@ -156,8 +156,8 @@ fn clone_bytes(b: &List<Byte>) -> List<Byte> {
 
 fn clone_origin(o: &Maybe<MutationKind>) -> Maybe<MutationKind> {
     match o {
-        Some(k) => Some(clone_kind(k)),
-        None    => None,
+        Maybe.Some(k) => Maybe.Some(clone_kind(k)),
+        Maybe.None    => Maybe.None,
     }
 }
 

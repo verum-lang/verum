@@ -35,8 +35,8 @@
 
 // // Look up canonical pagination links.
 // match find_rel(&links, "next") {
-//  Some(entry) => crawl(&entry.uri),
-//  None => stop,
+//  Maybe.Some(entry) => crawl(&entry.uri),
+//  Maybe.None => stop,
 // }
 //
 
@@ -137,7 +137,7 @@ public fn parse(value: &Text) -> Result<List<LinkEntry>, LinkHeaderError> {
         // peer ships thousands of entries before per-entry URI+param
         // parsing escalates the cost.
         if out.len() >= MAX_LINK_ENTRIES {
-            return Err(LinkHeaderError.TooManyEntries {
+            return Result.Err(LinkHeaderError.TooManyEntries {
                 declared: out.len() + 1, limit: MAX_LINK_ENTRIES,
             });
         }
@@ -147,19 +147,19 @@ public fn parse(value: &Text) -> Result<List<LinkEntry>, LinkHeaderError> {
         i = skip_ws(b, i);
         if i < b.len() && b[i] == (',' as Byte) { i = i + 1; }
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn parse_entry(b: &[Byte], from: Int) -> Result<(LinkEntry, Int), LinkHeaderError> {
     let mut i = skip_ws(b, from);
     if i >= b.len() || b[i] != ('<' as Byte) {
-        return Err(LinkHeaderError.Malformed(Text.from("expected '<'")));
+        return Result.Err(LinkHeaderError.Malformed(Text.from("expected '<'")));
     }
     i = i + 1;
     let uri_start = i;
     while i < b.len() && b[i] != ('>' as Byte) { i = i + 1; }
     if i >= b.len() {
-        return Err(LinkHeaderError.Malformed(Text.from("missing '>'")));
+        return Result.Err(LinkHeaderError.Malformed(Text.from("missing '>'")));
     }
     let uri = slice_text(b, uri_start, i);
     i = i + 1;  // skip '>'
@@ -170,7 +170,7 @@ fn parse_entry(b: &[Byte], from: Int) -> Result<(LinkEntry, Int), LinkHeaderErro
         if i >= b.len() { break; }
         if b[i] == (',' as Byte) { break; }
         if b[i] != (';' as Byte) {
-            return Err(LinkHeaderError.Malformed(Text.from("expected ';' or ','")));
+            return Result.Err(LinkHeaderError.Malformed(Text.from("expected ';' or ','")));
         }
         i = i + 1;
         i = skip_ws(b, i);
@@ -191,7 +191,7 @@ fn parse_entry(b: &[Byte], from: Int) -> Result<(LinkEntry, Int), LinkHeaderErro
         params.push((name, value));
     }
 
-    Ok((LinkEntry { uri: uri, params: params }, i))
+    Result.Ok((LinkEntry { uri: uri, params: params }, i))
 }
 
 fn parse_param_value(b: &[Byte], from: Int) -> Result<(Text, Int), LinkHeaderError> {
@@ -209,14 +209,14 @@ fn parse_param_value(b: &[Byte], from: Int) -> Result<(Text, Int), LinkHeaderErr
             }
         }
         if i >= b.len() {
-            return Err(LinkHeaderError.Malformed(Text.from("unclosed quote")));
+            return Result.Err(LinkHeaderError.Malformed(Text.from("unclosed quote")));
         }
         i = i + 1;  // skip closing '"'
-        Ok((Text.from_utf8_unchecked(out.as_slice()), i))
+        Result.Ok((Text.from_utf8_unchecked(out.as_slice()), i))
     } else {
         let start = i;
         while i < b.len() && !is_param_delim(b[i]) { i = i + 1; }
-        Ok((slice_text(b, start, i), i))
+        Result.Ok((slice_text(b, start, i), i))
     }
 }
 

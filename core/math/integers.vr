@@ -210,13 +210,13 @@ public fn gcd(a: Int, b: Int) -> Int{>= 0} {
     a
 }
 
-/// Fallible counterpart to `gcd`. Returns `None` if either input
+/// Fallible counterpart to `gcd`. Returns `Maybe.None` if either input
 /// is `Int.MIN` (its absolute value is unrepresentable in Int64).
 public fn try_gcd(a: Int, b: Int) -> Maybe<Int> {
     if a == Int.MIN || b == Int.MIN {
-        return None;
+        return Maybe.None;
     }
-    Some(gcd(a, b))
+    Maybe.Some(gcd(a, b))
 }
 
 // Binary GCD (Stein's algorithm) - more efficient for large integers
@@ -263,13 +263,13 @@ public fn lcm(a: Int, b: Int) -> Int{>= 0} {
     (abs_a / g) * abs_b  // Divide first to avoid overflow
 }
 
-/// Fallible counterpart to `lcm`. Returns `None` if either input
+/// Fallible counterpart to `lcm`. Returns `Maybe.None` if either input
 /// is `Int.MIN`.
 public fn try_lcm(a: Int, b: Int) -> Maybe<Int> {
     if a == Int.MIN || b == Int.MIN {
-        return None;
+        return Maybe.None;
     }
-    Some(lcm(a, b))
+    Maybe.Some(lcm(a, b))
 }
 
 // Extended Euclidean algorithm
@@ -319,13 +319,13 @@ public fn gcd_extended(a: Int, b: Int) -> (Int, Int, Int) {
     }
 }
 
-/// Fallible counterpart to `gcd_extended`. Returns `None` if either
+/// Fallible counterpart to `gcd_extended`. Returns `Maybe.None` if either
 /// input is `Int.MIN`.
 public fn try_gcd_extended(a: Int, b: Int) -> Maybe<(Int, Int, Int)> {
     if a == Int.MIN || b == Int.MIN {
-        return None;
+        return Maybe.None;
     }
-    Some(gcd_extended(a, b))
+    Maybe.Some(gcd_extended(a, b))
 }
 
 // Modular multiplicative inverse
@@ -601,19 +601,19 @@ public fn euler_phi(n: Int{>= 1}) -> Int{>= 1} {
     result
 }
 
-/// Largest prime ≤ n. Returns `None` if no such prime exists
+/// Largest prime ≤ n. Returns `Maybe.None` if no such prime exists
 /// (i.e. n < 2). Mirrors `next_prime` (smallest prime ≥ n).
 public fn prev_prime(n: Int) -> Maybe<Int> {
-    if n < 2 { return None; }
-    if n == 2 { return Some(2); }
+    if n < 2 { return Maybe.None; }
+    if n == 2 { return Maybe.Some(2); }
     let mut candidate = if n % 2 == 0 { n - 1 } else { n };
     while candidate >= 3 {
         if is_prime_miller_rabin(candidate) {
-            return Some(candidate);
+            return Maybe.Some(candidate);
         }
         candidate = candidate - 2;
     }
-    Some(2)
+    Maybe.Some(2)
 }
 
 /// Ascending list of all positive divisors of n. For n = 12 returns

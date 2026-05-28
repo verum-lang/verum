@@ -207,20 +207,20 @@ async fn run_worker(
     let mut batch: List<SpanData> = List.with_capacity(config.max_export_batch_size);
     loop {
         match receiver.recv().await {
-            Some(BatchMessage.BatchSpan(s)) => {
+            Maybe.Some(BatchMessage.BatchSpan(s)) => {
                 batch.push(s);
                 if batch.len() >= config.max_export_batch_size {
                     flush_batch(&exporter, &mut batch, config.max_export_batch_size);
                 }
             }
-            Some(BatchMessage.BatchFlush) => {
+            Maybe.Some(BatchMessage.BatchFlush) => {
                 flush_batch(&exporter, &mut batch, config.max_export_batch_size);
             }
-            Some(BatchMessage.BatchShutdown) => {
+            Maybe.Some(BatchMessage.BatchShutdown) => {
                 flush_batch(&exporter, &mut batch, config.max_export_batch_size);
                 return;
             }
-            None => {
+            Maybe.None => {
                 // Channel closed — sender side gone, no more spans.
                 flush_batch(&exporter, &mut batch, config.max_export_batch_size);
                 return;

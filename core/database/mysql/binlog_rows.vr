@@ -91,7 +91,7 @@
 module core.database.mysql.binlog_rows;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
@@ -212,33 +212,33 @@ public fn decode_table_map_body(buf: &[Byte]) -> Result<TableMapEvent, DbError> 
     // stripped the 19-byte event header.
     let table_id = read_u48_le(buf, 0)?;
     let flags = match read_u16_le(buf, 6) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_rows("TABLE_MAP.flags")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_rows("TABLE_MAP.flags")); }
     };
     let mut off: Int = 8;
 
     // Schema (1 byte length + bytes + 1 byte NUL terminator).
-    let schema_len = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+    let schema_len = match read_u8(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
     off = off + 1;
     let schema_bytes = match read_bytes(buf, off, schema_len) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_rows("TABLE_MAP.schema")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_rows("TABLE_MAP.schema")); }
     };
     off = off + schema_len + 1;       // skip NUL
 
     // Table name (1 byte length + bytes + 1 byte NUL).
-    let name_len = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+    let name_len = match read_u8(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
     off = off + 1;
     let name_bytes = match read_bytes(buf, off, name_len) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_rows("TABLE_MAP.name")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_rows("TABLE_MAP.name")); }
     };
     off = off + name_len + 1;         // skip NUL
 
     // column_count (lenenc).
     let (col_count, _, lei_n) = match decode_lei(buf, off) {
-        Ok(t)  => t,
-        Err(_) => { return Err(bad_rows("TABLE_MAP.column_count")); }
+        Result.Ok(t)  => t,
+        Result.Err(_) => { return Result.Err(bad_rows("TABLE_MAP.column_count")); }
     };
     off = off + lei_n;
 
@@ -253,23 +253,23 @@ public fn decode_table_map_body(buf: &[Byte]) -> Result<TableMapEvent, DbError> 
 
     // metadata_length (lenenc).
     let (meta_len, _, mlei_n) = match decode_lei(buf, off) {
-        Ok(t)  => t,
-        Err(_) => { return Err(bad_rows("TABLE_MAP.metadata_length")); }
+        Result.Ok(t)  => t,
+        Result.Err(_) => { return Result.Err(bad_rows("TABLE_MAP.metadata_length")); }
     };
     off = off + mlei_n;
 
     // Per-column metadata block.
     let meta_block = match read_bytes(buf, off, meta_len) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_rows("TABLE_MAP.metadata_block")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_rows("TABLE_MAP.metadata_block")); }
     };
     off = off + meta_len;
 
     // null_bitmap.
     let bitmap_bytes = (col_count + 7) / 8;
     let null_bitmap = match read_bytes(buf, off, bitmap_bytes) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_rows("TABLE_MAP.null_bitmap")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_rows("TABLE_MAP.null_bitmap")); }
     };
 
     // Walk meta_block per type to extract per-column metadata.
@@ -303,16 +303,16 @@ public fn decode_table_map_body(buf: &[Byte]) -> Result<TableMapEvent, DbError> 
 
     let mut opt_off: Int = bm_end;
     while opt_off < (buf.len() as Int) {
-        let tag = match read_u8(buf, opt_off) { Ok(v) => v, Err(_) => break };
+        let tag = match read_u8(buf, opt_off) { Result.Ok(v) => v, Result.Err(_) => break };
         opt_off = opt_off + 1;
         let (data_len, _, dlen_n) = match decode_lei(buf, opt_off) {
-            Ok(t)  => t,
-            Err(_) => break,
+            Result.Ok(t)  => t,
+            Result.Err(_) => break,
         };
         opt_off = opt_off + dlen_n;
         let data = match read_bytes(buf, opt_off, data_len) {
-            Ok(b)  => b,
-            Err(_) => break,
+            Result.Ok(b)  => b,
+            Result.Err(_) => break,
         };
         opt_off = opt_off + data_len;
 
@@ -348,7 +348,7 @@ public fn decode_table_map_body(buf: &[Byte]) -> Result<TableMapEvent, DbError> 
         col_idx = col_idx + 1;
     }
 
-    Ok(TableMapEvent {
+    Result.Ok(TableMapEvent {
         table_id: table_id,
         flags: flags,
         schema: bytes_to_text(&schema_bytes),
@@ -433,13 +433,13 @@ fn parse_column_names(data: &List<Byte>, col_count: Int) -> List<Text> {
             out.push("".clone());
         } else {
             let (len, _, lei_n) = match decode_lei(data.as_slice(), off) {
-                Ok(t)  => t,
-                Err(_) => { out.push("".clone()); i = i + 1; continue; }
+                Result.Ok(t)  => t,
+                Result.Err(_) => { out.push("".clone()); i = i + 1; continue; }
             };
             off = off + lei_n;
             let bytes = match read_bytes(data.as_slice(), off, len) {
-                Ok(b)  => b,
-                Err(_) => { out.push("".clone()); i = i + 1; continue; }
+                Result.Ok(b)  => b,
+                Result.Err(_) => { out.push("".clone()); i = i + 1; continue; }
             };
             off = off + len;
             out.push(bytes_to_text(&bytes));
@@ -467,21 +467,21 @@ fn parse_str_value_table(
     while col < (columns.len() as Int) {
         if columns[col].column_type == target_type && off < n {
             let (count, _, lei_n) = match decode_lei(data.as_slice(), off) {
-                Ok(t)  => t,
-                Err(_) => break,
+                Result.Ok(t)  => t,
+                Result.Err(_) => break,
             };
             off = off + lei_n;
             let mut values: List<Text> = List.with_capacity(count);
             let mut i: Int = 0;
             while i < count && off < n {
                 let (vlen, _, vlen_n) = match decode_lei(data.as_slice(), off) {
-                    Ok(t)  => t,
-                    Err(_) => break,
+                    Result.Ok(t)  => t,
+                    Result.Err(_) => break,
                 };
                 off = off + vlen_n;
                 let vbytes = match read_bytes(data.as_slice(), off, vlen) {
-                    Ok(b)  => b,
-                    Err(_) => break,
+                    Result.Ok(b)  => b,
+                    Result.Err(_) => break,
                 };
                 off = off + vlen;
                 values.push(bytes_to_text(&vbytes));
@@ -590,8 +590,8 @@ public type JsonDiff is {
 public fn decode_json_diff(buf: &[Byte]) -> Result<List<JsonDiff>, DbError> {
     let mut off: Int = 0;
     let (diff_count, _, lei_n) = match decode_lei(buf, off) {
-        Ok(t)  => t,
-        Err(_) => { return Err(bad_diff("diff_count")); }
+        Result.Ok(t)  => t,
+        Result.Err(_) => { return Result.Err(bad_diff("diff_count")); }
     };
     off = off + lei_n;
 
@@ -600,24 +600,24 @@ public fn decode_json_diff(buf: &[Byte]) -> Result<List<JsonDiff>, DbError> {
     while i < diff_count {
         // path: lenenc string
         let (path_len, _, p_lei_n) = match decode_lei(buf, off) {
-            Ok(t)  => t,
-            Err(_) => { return Err(bad_diff("path_len")); }
+            Result.Ok(t)  => t,
+            Result.Err(_) => { return Result.Err(bad_diff("path_len")); }
         };
         off = off + p_lei_n;
         let path_bytes = match read_bytes(buf, off, path_len) {
-            Ok(b)  => b,
-            Err(_) => { return Err(bad_diff("path_bytes")); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(bad_diff("path_bytes")); }
         };
         off = off + path_len;
         let path_text = match Text.from_bytes(&path_bytes) {
-            Some(t) => t,
-            None    => { return Err(bad_diff("path utf-8")); }
+            Maybe.Some(t) => t,
+            Maybe.None    => { return Result.Err(bad_diff("path utf-8")); }
         };
 
         // op: u8
         let op_byte = match read_u8(buf, off) {
-            Ok(v)  => v,
-            Err(_) => { return Err(bad_diff("op_byte")); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(bad_diff("op_byte")); }
         };
         off = off + 1;
         let op = match op_byte {
@@ -625,32 +625,32 @@ public fn decode_json_diff(buf: &[Byte]) -> Result<List<JsonDiff>, DbError> {
             1 => JdoInsert,
             2 => JdoRemove,
             other => {
-                return Err(bad_diff(&f"unknown op {other}".clone()));
+                return Result.Err(bad_diff(&f"unknown op {other}".clone()));
             }
         };
 
         // value (only for non-Remove)
         let value = match op {
-            JdoRemove => None,
+            JdoRemove => Maybe.None,
             _ => {
                 let (val_len, _, v_lei_n) = match decode_lei(buf, off) {
-                    Ok(t)  => t,
-                    Err(_) => { return Err(bad_diff("value_len")); }
+                    Result.Ok(t)  => t,
+                    Result.Err(_) => { return Result.Err(bad_diff("value_len")); }
                 };
                 off = off + v_lei_n;
                 let val_bytes = match read_bytes(buf, off, val_len) {
-                    Ok(b)  => b,
-                    Err(_) => { return Err(bad_diff("value_bytes")); }
+                    Result.Ok(b)  => b,
+                    Result.Err(_) => { return Result.Err(bad_diff("value_bytes")); }
                 };
                 off = off + val_len;
-                Some(val_bytes)
+                Maybe.Some(val_bytes)
             }
         };
 
         out.push(JsonDiff { path: path_text, op: op, value: value });
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn bad_diff(what: &str) -> DbError {
@@ -684,31 +684,31 @@ public fn decode_rows_event_body(buf: &[Byte], kind: RowEventKind)
 {
     let table_id = read_u48_le(buf, 0)?;
     let flags = match read_u16_le(buf, 6) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_rows("ROWS.flags")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_rows("ROWS.flags")); }
     };
     // V2 has 2-byte extra_data_length right after flags.
     let extra_len = match read_u16_le(buf, 8) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_rows("ROWS.extra_data_length")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_rows("ROWS.extra_data_length")); }
     };
     let extra_data = match read_bytes(buf, 10, extra_len) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_rows("ROWS.extra_data")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_rows("ROWS.extra_data")); }
     };
     let mut off: Int = 10 + extra_len;
 
     // num_columns (lenenc).
     let (col_count, _, lei_n) = match decode_lei(buf, off) {
-        Ok(t)  => t,
-        Err(_) => { return Err(bad_rows("ROWS.num_columns")); }
+        Result.Ok(t)  => t,
+        Result.Err(_) => { return Result.Err(bad_rows("ROWS.num_columns")); }
     };
     off = off + lei_n;
 
     let bitmap_bytes = (col_count + 7) / 8;
     let cols_before = match read_bytes(buf, off, bitmap_bytes) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_rows("ROWS.cols_present_before")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_rows("ROWS.cols_present_before")); }
     };
     off = off + bitmap_bytes;
 
@@ -720,8 +720,8 @@ public fn decode_rows_event_body(buf: &[Byte], kind: RowEventKind)
         // shape).
         RkUpdate | RkPartialUpdate => {
             let cb = match read_bytes(buf, off, bitmap_bytes) {
-                Ok(b)  => b,
-                Err(_) => { return Err(bad_rows("ROWS.cols_present_after")); }
+                Result.Ok(b)  => b,
+                Result.Err(_) => { return Result.Err(bad_rows("ROWS.cols_present_after")); }
             };
             off = off + bitmap_bytes;
             cb
@@ -733,11 +733,11 @@ public fn decode_rows_event_body(buf: &[Byte], kind: RowEventKind)
     // to RowsRecord.decode_with_table once the consumer pairs the
     // event with its TABLE_MAP entry.
     let rows_payload = match read_bytes(buf, off, (buf.len() as Int) - off) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_rows("ROWS.rows_payload")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_rows("ROWS.rows_payload")); }
     };
 
-    Ok(RowsEvent {
+    Result.Ok(RowsEvent {
         table_id: table_id,
         flags: flags,
         extra_data: extra_data,
@@ -793,7 +793,7 @@ public fn decode_with_table_map(rev: &RowsEvent, tm: &TableMapEvent)
     -> Result<DecodedRows, DbError>
 {
     if tm.table_id != rev.table_id {
-        return Err(bad_rows("decode_with_table_map: table_id mismatch"));
+        return Result.Err(bad_rows("decode_with_table_map: table_id mismatch"));
     }
     let buf = rev.rows_payload.as_slice();
     let mut off: Int = 0;
@@ -822,7 +822,7 @@ public fn decode_with_table_map(rev: &RowsEvent, tm: &TableMapEvent)
                 off = off + advance_a;
                 pairs.push((before, after));
             }
-            Ok(DrPairs(pairs))
+            Result.Ok(DrPairs(pairs))
         }
         _ => {
             let bitmap = match rev.kind {
@@ -836,7 +836,7 @@ public fn decode_with_table_map(rev: &RowsEvent, tm: &TableMapEvent)
                 off = off + advance;
                 rows.push(row);
             }
-            Ok(DrSimple(rows))
+            Result.Ok(DrSimple(rows))
         }
     }
 }
@@ -858,8 +858,8 @@ fn decode_one_tuple(
     // null_bitmap — one bit per *present* column.
     let null_bm_len = (present_count + 7) / 8;
     let null_bm = match read_bytes(buf, start, null_bm_len) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_rows("tuple.null_bitmap")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_rows("tuple.null_bitmap")); }
     };
     let mut off: Int = start + null_bm_len;
 
@@ -886,7 +886,7 @@ fn decode_one_tuple(
         col_idx = col_idx + 1;
     }
 
-    Ok((DecodedRow { columns: values }, off - start))
+    Result.Ok((DecodedRow { columns: values }, off - start))
 }
 
 /// Per-column-type MySQL binary-protocol decoder. Used by the
@@ -902,50 +902,50 @@ public fn decode_value_for_type(
 
     // Integers — fixed width, sign-extended where appropriate.
     if t == COL_TYPE_TINY {
-        let v = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+        let v = match read_u8(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
         // sign-extend from 8 bits.
         let signed = if (v & 0x80) != 0 { v | (-1 ^ 0xFF) } else { v };
-        return Ok((RvInt(signed), 1));
+        return Result.Ok((RvInt(signed), 1));
     }
     if t == COL_TYPE_SHORT {
-        let v = match read_u16_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        let v = match read_u16_le(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
         let signed = if (v & 0x8000) != 0 { v | (-1 ^ 0xFFFF) } else { v };
-        return Ok((RvInt(signed), 2));
+        return Result.Ok((RvInt(signed), 2));
     }
     if t == COL_TYPE_INT24 {
-        if (buf.len() as Int) < off + 3 { return Err(bad_rows("INT24 truncated")); }
+        if (buf.len() as Int) < off + 3 { return Result.Err(bad_rows("INT24 truncated")); }
         let v = ((buf[off] as Int) & 0xFF)
               | (((buf[off + 1] as Int) & 0xFF) << 8)
               | (((buf[off + 2] as Int) & 0xFF) << 16);
         let signed = if (v & 0x800000) != 0 { v | (-1 ^ 0xFFFFFF) } else { v };
-        return Ok((RvInt(signed), 3));
+        return Result.Ok((RvInt(signed), 3));
     }
     if t == COL_TYPE_LONG {
-        let v = match read_u32_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        let v = match read_u32_le(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
         let signed = if (v & 0x80000000) != 0 { v | (-1 ^ 0xFFFFFFFF) } else { v };
-        return Ok((RvInt(signed), 4));
+        return Result.Ok((RvInt(signed), 4));
     }
     if t == COL_TYPE_LONGLONG {
-        let v = match read_u64_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        let v = match read_u64_le(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
         // Verum Int is 64-bit two's-complement — u64 LE bit-pattern
         // re-interprets directly.
-        return Ok((RvInt(v), 8));
+        return Result.Ok((RvInt(v), 8));
     }
     if t == COL_TYPE_YEAR {
-        let v = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+        let v = match read_u8(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
         let year = if v == 0 { 0 } else { v + 1900 };
-        return Ok((RvInt(year), 1));
+        return Result.Ok((RvInt(year), 1));
     }
 
     // Floats — IEEE 754 LE; surface as Float (impl-detail
     // bit-cast is via the runtime helpers used by other decoders).
     if t == COL_TYPE_FLOAT {
-        let bits = match read_u32_le(buf, off) { Ok(v) => v, Err(_) => 0 };
-        return Ok((RvFloat(bits_to_f32(bits) as Float), 4));
+        let bits = match read_u32_le(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
+        return Result.Ok((RvFloat(bits_to_f32(bits) as Float), 4));
     }
     if t == COL_TYPE_DOUBLE {
-        let bits = match read_u64_le(buf, off) { Ok(v) => v, Err(_) => 0 };
-        return Ok((RvFloat(bits_to_f64(bits)), 8));
+        let bits = match read_u64_le(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
+        return Result.Ok((RvFloat(bits_to_f64(bits)), 8));
     }
 
     // Strings / blobs — length-prefixed; prefix width depends on
@@ -955,21 +955,21 @@ public fn decode_value_for_type(
         let prefix = if max_len >= 256 { 2 } else { 1 };
         let (len, p) = read_var_length(buf, off, prefix)?;
         let bytes = match read_bytes(buf, off + p, len) {
-            Ok(b)  => b,
-            Err(_) => { return Err(bad_rows("VARCHAR.bytes")); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(bad_rows("VARCHAR.bytes")); }
         };
-        return Ok((bytes_to_row_value(bytes), p + len));
+        return Result.Ok((bytes_to_row_value(bytes), p + len));
     }
     if t == COL_TYPE_STRING {
         // String metadata encodes [real_type:1][max_len:1] in a
         // 2-byte tightly-packed form. For V0 treat as 1-byte
         // length-prefixed string.
-        let len = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+        let len = match read_u8(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
         let bytes = match read_bytes(buf, off + 1, len) {
-            Ok(b)  => b,
-            Err(_) => { return Err(bad_rows("STRING.bytes")); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(bad_rows("STRING.bytes")); }
         };
-        return Ok((bytes_to_row_value(bytes), 1 + len));
+        return Result.Ok((bytes_to_row_value(bytes), 1 + len));
     }
     if t == COL_TYPE_BLOB || t == COL_TYPE_TINY_BLOB
        || t == COL_TYPE_MEDIUM_BLOB || t == COL_TYPE_LONG_BLOB
@@ -977,54 +977,54 @@ public fn decode_value_for_type(
         let prefix = if meta.metadata > 0 && meta.metadata <= 4 { meta.metadata } else { 2 };
         let (len, p) = read_var_length(buf, off, prefix)?;
         let bytes = match read_bytes(buf, off + p, len) {
-            Ok(b)  => b,
-            Err(_) => { return Err(bad_rows("BLOB.bytes")); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(bad_rows("BLOB.bytes")); }
         };
-        return Ok((RvBytes(bytes), p + len));
+        return Result.Ok((RvBytes(bytes), p + len));
     }
 
     // Date / time / timestamp — V0 extracts the raw packed values
     // and surfaces structured tuples; downstream calendars own
     // any timezone math.
     if t == COL_TYPE_TIMESTAMP {
-        let secs = match read_u32_le(buf, off) { Ok(v) => v, Err(_) => 0 };
-        return Ok((RvDateTime { packed: secs, fractional_us: 0 }, 4));
+        let secs = match read_u32_le(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
+        return Result.Ok((RvDateTime { packed: secs, fractional_us: 0 }, 4));
     }
     if t == COL_TYPE_TIMESTAMP2 {
         let secs = match read_u32_be(buf, off) {
-            Ok(v)  => v,
-            Err(_) => { return Err(bad_rows("TIMESTAMP2.seconds")); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(bad_rows("TIMESTAMP2.seconds")); }
         };
         let frac_bytes = (meta.metadata + 1) / 2;
         let frac = read_fractional_be(buf, off + 4, frac_bytes, meta.metadata);
-        return Ok((RvDateTime { packed: secs, fractional_us: frac }, 4 + frac_bytes));
+        return Result.Ok((RvDateTime { packed: secs, fractional_us: frac }, 4 + frac_bytes));
     }
     if t == COL_TYPE_DATE {
-        if (buf.len() as Int) < off + 3 { return Err(bad_rows("DATE truncated")); }
+        if (buf.len() as Int) < off + 3 { return Result.Err(bad_rows("DATE truncated")); }
         let v = ((buf[off] as Int) & 0xFF)
               | (((buf[off + 1] as Int) & 0xFF) << 8)
               | (((buf[off + 2] as Int) & 0xFF) << 16);
         let year  = (v >> 9) & 0x7FFF;
         let month = (v >> 5) & 0x0F;
         let day   = v & 0x1F;
-        return Ok((RvDate { year: year, month: month, day: day }, 3));
+        return Result.Ok((RvDate { year: year, month: month, day: day }, 3));
     }
     if t == COL_TYPE_TIME {
-        if (buf.len() as Int) < off + 3 { return Err(bad_rows("TIME truncated")); }
+        if (buf.len() as Int) < off + 3 { return Result.Err(bad_rows("TIME truncated")); }
         let v = ((buf[off] as Int) & 0xFF)
               | (((buf[off + 1] as Int) & 0xFF) << 8)
               | (((buf[off + 2] as Int) & 0xFF) << 16);
         let hours   = v / 10000;
         let minutes = (v / 100) % 100;
         let seconds = v % 100;
-        return Ok((RvTime {
+        return Result.Ok((RvTime {
             hours: hours, minutes: minutes,
             seconds: seconds, fractional_us: 0,
         }, 3));
     }
     if t == COL_TYPE_TIME2 {
         // 24-bit BE packed + fractional.
-        if (buf.len() as Int) < off + 3 { return Err(bad_rows("TIME2 truncated")); }
+        if (buf.len() as Int) < off + 3 { return Result.Err(bad_rows("TIME2 truncated")); }
         let packed = (((buf[off] as Int) & 0xFF) << 16)
                    | (((buf[off + 1] as Int) & 0xFF) << 8)
                    | ((buf[off + 2] as Int) & 0xFF);
@@ -1033,18 +1033,18 @@ public fn decode_value_for_type(
         let hours   = (packed >> 12) & 0x3FF;
         let minutes = (packed >> 6) & 0x3F;
         let seconds = packed & 0x3F;
-        return Ok((RvTime {
+        return Result.Ok((RvTime {
             hours: hours, minutes: minutes,
             seconds: seconds, fractional_us: frac,
         }, 3 + frac_bytes));
     }
     if t == COL_TYPE_DATETIME {
-        let v = match read_u64_le(buf, off) { Ok(v) => v, Err(_) => 0 };
-        return Ok((RvDateTime { packed: v, fractional_us: 0 }, 8));
+        let v = match read_u64_le(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
+        return Result.Ok((RvDateTime { packed: v, fractional_us: 0 }, 8));
     }
     if t == COL_TYPE_DATETIME2 {
         // 5-byte BE packed + fractional.
-        if (buf.len() as Int) < off + 5 { return Err(bad_rows("DATETIME2 truncated")); }
+        if (buf.len() as Int) < off + 5 { return Result.Err(bad_rows("DATETIME2 truncated")); }
         let mut packed: Int = 0;
         let mut k: Int = 0;
         while k < 5 {
@@ -1053,7 +1053,7 @@ public fn decode_value_for_type(
         }
         let frac_bytes = (meta.metadata + 1) / 2;
         let frac = read_fractional_be(buf, off + 5, frac_bytes, meta.metadata);
-        return Ok((RvDateTime { packed: packed, fractional_us: frac }, 5 + frac_bytes));
+        return Result.Ok((RvDateTime { packed: packed, fractional_us: frac }, 5 + frac_bytes));
     }
 
     if t == COL_TYPE_NEWDECIMAL {
@@ -1062,18 +1062,18 @@ public fn decode_value_for_type(
         let scale = meta.metadata & 0xFF;
         let len = newdecimal_byte_length(precision, scale);
         let bytes = match read_bytes(buf, off, len) {
-            Ok(b)  => b,
-            Err(_) => { return Err(bad_rows("NEWDECIMAL truncated")); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(bad_rows("NEWDECIMAL truncated")); }
         };
         let text = decode_newdecimal_to_text(bytes.as_slice(), precision, scale);
-        return Ok((RvText(text), len));
+        return Result.Ok((RvText(text), len));
     }
     if t == COL_TYPE_JSON {
         let prefix = if meta.metadata > 0 && meta.metadata <= 4 { meta.metadata } else { 4 };
         let (len, p) = read_var_length(buf, off, prefix)?;
         let bytes = match read_bytes(buf, off + p, len) {
-            Ok(b)  => b,
-            Err(_) => { return Err(bad_rows("JSON truncated")); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(bad_rows("JSON truncated")); }
         };
         // Decode the MySQL binary-JSON wire into the canonical
         // JsonValue ADT, then re-serialise to compact JSON text
@@ -1081,17 +1081,17 @@ public fn decode_value_for_type(
         // surfaces above as RvNull; this path only fires for
         // a present JSON column).
         if (bytes.len() as Int) == 0 {
-            return Ok((RvText("null".clone()), p + len));
+            return Result.Ok((RvText("null".clone()), p + len));
         }
         let jv = match core.database.mysql.json_binary.decode_json_binary(bytes) {
-            Ok(v)  => v,
-            Err(e) => { return Err(e); }
+            Result.Ok(v)  => v,
+            Result.Err(e) => { return Result.Err(e); }
         };
         let text = core.encoding.json.stringify(&jv);
-        return Ok((RvText(text), p + len));
+        return Result.Ok((RvText(text), p + len));
     }
     if t == COL_TYPE_NULL {
-        return Ok((RvNull, 0));
+        return Result.Ok((RvNull, 0));
     }
 
     if t == COL_TYPE_GEOMETRY {
@@ -1100,19 +1100,19 @@ public fn decode_value_for_type(
         let prefix = if meta.metadata > 0 && meta.metadata <= 4 { meta.metadata } else { 4 };
         let (len, p) = read_var_length(buf, off, prefix)?;
         let bytes = match read_bytes(buf, off + p, len) {
-            Ok(b)  => b,
-            Err(_) => { return Err(bad_rows("GEOMETRY truncated")); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(bad_rows("GEOMETRY truncated")); }
         };
         if (bytes.len() as Int) == 0 {
             // Empty geometry — surface as JSON null.
-            return Ok((RvText("null".clone()), p + len));
+            return Result.Ok((RvText("null".clone()), p + len));
         }
         let geom = match core.database.mysql.wkb_decoder.decode_geometry_with_srid(bytes) {
-            Ok(v)  => v,
-            Err(e) => { return Err(e); }
+            Result.Ok(v)  => v,
+            Result.Err(e) => { return Result.Err(e); }
         };
         let text = core.encoding.json.stringify(&geom);
-        return Ok((RvText(text), p + len));
+        return Result.Ok((RvText(text), p + len));
     }
 
     if t == COL_TYPE_ENUM {
@@ -1120,17 +1120,17 @@ public fn decode_value_for_type(
         // Wire: 1 or 2 byte LE index, 1-based; 0 = empty/invalid.
         let width = if (meta.metadata & 0xFF) == 2 { 2 } else { 1 };
         let idx = if width == 2 {
-            match read_u16_le(buf, off) { Ok(v) => v, Err(_) => 0 }
+            match read_u16_le(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 }
         } else {
-            match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 }
+            match read_u8(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 }
         };
         // Look up via enum_values (1-based — idx 1 is first
         // declared value). Fall back to RvInt(idx) when the
         // server hasn't shipped optional metadata.
         if idx > 0 && (idx as Int) <= (meta.string_values.len() as Int) {
-            return Ok((RvText(meta.string_values[idx - 1].clone()), width));
+            return Result.Ok((RvText(meta.string_values[idx - 1].clone()), width));
         }
-        return Ok((RvInt(idx), width));
+        return Result.Ok((RvInt(idx), width));
     }
 
     if t == COL_TYPE_SET {
@@ -1141,7 +1141,7 @@ public fn decode_value_for_type(
         let mut bm: Int = 0;
         let mut k: Int = 0;
         while k < actual_width {
-            let b = match read_u8(buf, off + k) { Ok(v) => v, Err(_) => 0 };
+            let b = match read_u8(buf, off + k) { Result.Ok(v) => v, Result.Err(_) => 0 };
             bm = bm | (b << (k * 8));
             k = k + 1;
         }
@@ -1155,21 +1155,21 @@ public fn decode_value_for_type(
                 }
                 bit = bit + 1;
             }
-            return Ok((RvText(join_with_comma(&parts)), actual_width));
+            return Result.Ok((RvText(join_with_comma(&parts)), actual_width));
         }
         // No optional metadata — surface the raw bitmap.
-        return Ok((RvInt(bm), actual_width));
+        return Result.Ok((RvInt(bm), actual_width));
     }
 
     // Catch-all: BIT / GEOMETRY / DECIMAL fringes — surface raw
     // bytes the consumer can dispatch on. Conservative 1-byte
     // length read (matches BIT in the common case).
-    let len_guess = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+    let len_guess = match read_u8(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
     let bytes = match read_bytes(buf, off + 1, len_guess) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_rows("unknown-type fallback")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_rows("unknown-type fallback")); }
     };
-    Ok((RvRaw(bytes), 1 + len_guess))
+    Result.Ok((RvRaw(bytes), 1 + len_guess))
 }
 
 fn join_with_comma(parts: &List<Text>) -> Text {
@@ -1189,7 +1189,7 @@ fn join_with_comma(parts: &List<Text>) -> Text {
 
 fn read_u48_le(buf: &[Byte], off: Int) -> Result<Int, DbError> {
     if (buf.len() as Int) < off + 6 {
-        return Err(bad_rows("u48 truncated"));
+        return Result.Err(bad_rows("u48 truncated"));
     }
     let v = ((buf[off] as Int) & 0xFF)
           | (((buf[off + 1] as Int) & 0xFF) << 8)
@@ -1197,41 +1197,41 @@ fn read_u48_le(buf: &[Byte], off: Int) -> Result<Int, DbError> {
           | (((buf[off + 3] as Int) & 0xFF) << 24)
           | (((buf[off + 4] as Int) & 0xFF) << 32)
           | (((buf[off + 5] as Int) & 0xFF) << 40);
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn read_u32_be(buf: &[Byte], off: Int) -> Result<Int, DbError> {
     if (buf.len() as Int) < off + 4 {
-        return Err(bad_rows("u32_be truncated"));
+        return Result.Err(bad_rows("u32_be truncated"));
     }
     let v = (((buf[off] as Int) & 0xFF) << 24)
           | (((buf[off + 1] as Int) & 0xFF) << 16)
           | (((buf[off + 2] as Int) & 0xFF) << 8)
           | ((buf[off + 3] as Int) & 0xFF);
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn read_var_length(buf: &[Byte], off: Int, prefix_bytes: Int)
     -> Result<(Int, Int), DbError>
 {
     if prefix_bytes == 1 {
-        let v = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
-        return Ok((v, 1));
+        let v = match read_u8(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
+        return Result.Ok((v, 1));
     }
     if prefix_bytes == 2 {
-        let v = match read_u16_le(buf, off) { Ok(v) => v, Err(_) => 0 };
-        return Ok((v, 2));
+        let v = match read_u16_le(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
+        return Result.Ok((v, 2));
     }
     if prefix_bytes == 3 {
-        if (buf.len() as Int) < off + 3 { return Err(bad_rows("len3 truncated")); }
+        if (buf.len() as Int) < off + 3 { return Result.Err(bad_rows("len3 truncated")); }
         let v = ((buf[off] as Int) & 0xFF)
               | (((buf[off + 1] as Int) & 0xFF) << 8)
               | (((buf[off + 2] as Int) & 0xFF) << 16);
-        return Ok((v, 3));
+        return Result.Ok((v, 3));
     }
     // 4-byte
-    let v = match read_u32_le(buf, off) { Ok(v) => v, Err(_) => 0 };
-    Ok((v, 4))
+    let v = match read_u32_le(buf, off) { Result.Ok(v) => v, Result.Err(_) => 0 };
+    Result.Ok((v, 4))
 }
 
 fn read_fractional_be(buf: &[Byte], off: Int, frac_bytes: Int, fsp: Int) -> Int {
@@ -1447,15 +1447,15 @@ fn bitmap_bit(buf: &[Byte], idx: Int) -> Bool {
 
 fn bytes_to_text(b: &List<Byte>) -> Text {
     match Text.from_utf8(b.as_slice()) {
-        Ok(s)  => s,
-        Err(_) => "".clone(),
+        Result.Ok(s)  => s,
+        Result.Err(_) => "".clone(),
     }
 }
 
 fn bytes_to_row_value(bytes: List<Byte>) -> RowValue {
     match Text.from_utf8(bytes.as_slice()) {
-        Ok(s)  => RvText(s),
-        Err(_) => RvBytes(bytes),
+        Result.Ok(s)  => RvText(s),
+        Result.Err(_) => RvBytes(bytes),
     }
 }
 
@@ -1502,10 +1502,10 @@ implement TableMapCache {
         let mut i: Int = 0;
         while i < self.entries.len() as Int {
             let (tid, m) = &self.entries[i];
-            if *tid == table_id { return Some(m); }
+            if *tid == table_id { return Maybe.Some(m); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn len(&self) -> Int { self.entries.len() as Int }

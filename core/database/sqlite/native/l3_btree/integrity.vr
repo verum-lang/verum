@@ -91,8 +91,8 @@ public fn check_page(
     let mut out: List<Violation> = List.new();
 
     let header = match parse_page_header(page_bytes, page_start) {
-        Ok(h) => h,
-        Err(e) => {
+        Result.Ok(h) => h,
+        Result.Err(e) => {
             // Translate the layout error into a violation tag.
             match e {
                 ShortBuffer => out.push(ShortPage(page_no)),
@@ -105,7 +105,7 @@ public fn check_page(
 
     // Cell-pointer sanity — pointers must fit in the page.
     match parse_cell_pointer_array(page_bytes, page_start, &header) {
-        Ok(arr) => {
+        Result.Ok(arr) => {
             // Array entries should be strictly decreasing (SQLite lays
             // cell content from the page bottom upward; the pointer
             // array mirrors this). This is not strictly required by
@@ -125,7 +125,7 @@ public fn check_page(
                 i = i + 1;
             }
         }
-        Err(_) => out.push(ShortPage(page_no)),
+        Result.Err(_) => out.push(ShortPage(page_no)),
     }
 
     out

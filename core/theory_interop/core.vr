@@ -131,10 +131,10 @@ public fn load_theory(
 public fn find_theory(registry: &TheoryRegistry, name: &Text) -> Maybe<&LoadedTheory> {
     for t in registry.theories.iter() {
         if t.theory.name == *name {
-            return Some(t);
+            return Maybe.Some(t);
         }
     }
-    None
+    Maybe.None
 }
 
 /// List all loaded theories.
@@ -295,12 +295,12 @@ public fn translate_with_oracle<C, D: InfinityCategory>(
     while i < source.claim_count {
         let ctx = source_claim_context(source, i);
         match sample_above(oracle, &ctx, confidence) {
-            Some(proposal_name) => {
+            Maybe.Some(proposal_name) => {
                 match find_claim_index(target, &proposal_name) {
-                    Some(j) => {
+                    Maybe.Some(j) => {
                         partial_map.push((i, j));
                     },
-                    None => {
+                    Maybe.None => {
                         // Out-of-vocab: oracle proposed a functor
                         // name that doesn't correspond to any
                         // target claim id. Skip — partial_map
@@ -309,7 +309,7 @@ public fn translate_with_oracle<C, D: InfinityCategory>(
                     },
                 }
             },
-            None => {
+            Maybe.None => {
                 // No proposal cleared the confidence threshold.
                 // Skip this source claim (Lan/Ran will handle the
                 // missing entry as an obstruction).
@@ -332,16 +332,16 @@ public fn translate_with_oracle<C, D: InfinityCategory>(
 /// content depends on the source claim".
 fn source_claim_context(source: &LoadedTheory, claim_idx: Int) -> ContextEmbedding {
     let claim_id = match source.theory.statements.get(claim_idx) {
-        Some(id) => id,
-        None => Text.from(""),
+        Maybe.Some(id) => id,
+        Maybe.None => Text.from(""),
     };
     let mut values: List<Float> = List.new();
     let n = claim_id.len();
     let mut k = 0;
     while k < n {
         match claim_id.byte_at(k) {
-            Some(b) => values.push((b as Float) / 255.0),
-            None => {},
+            Maybe.Some(b) => values.push((b as Float) / 255.0),
+            Maybe.None => {},
         }
         k += 1;
     }
@@ -356,17 +356,17 @@ fn source_claim_context(source: &LoadedTheory, claim_idx: Int) -> ContextEmbeddi
 }
 
 /// Find the index of a claim id within `target.theory.statements`.
-/// Returns `None` when the name is not present (out-of-vocab from
+/// Returns `Maybe.None` when the name is not present (out-of-vocab from
 /// the oracle's point of view).
 fn find_claim_index(target: &LoadedTheory, name: &Text) -> Maybe<Int> {
     let mut idx = 0;
     for stmt in target.theory.statements.iter() {
         if stmt == name {
-            return Some(idx);
+            return Maybe.Some(idx);
         }
         idx += 1;
     }
-    None
+    Maybe.None
 }
 
 // =============================================================================
@@ -404,7 +404,7 @@ public fn check_coherence(
         let tgt_theory = find_theory(registry, tgt_name);
 
         match (src_theory, tgt_theory) {
-            (Some(s), Some(t)) => {
+            (Maybe.Some(s), Maybe.Some(t)) => {
                 // Find the stored translation result
                 let mut dev = 0.0;
                 let mut claim_map = List.new();

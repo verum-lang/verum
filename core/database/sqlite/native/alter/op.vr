@@ -43,14 +43,14 @@ public fn column_def(name: Text, type_affinity: Text) -> AlterColumnDef {
         name: name,
         type_affinity: type_affinity,
         not_null: false,
-        default_expr: None,
+        default_expr: Maybe.None,
         is_unique: false,
     }
 }
 
 implement AlterColumnDef {
     public fn require_not_null(mut self) -> AlterColumnDef { self.not_null = true; self }
-    public fn with_default(mut self, expr: Text) -> AlterColumnDef { self.default_expr = Some(expr); self }
+    public fn with_default(mut self, expr: Text) -> AlterColumnDef { self.default_expr = Maybe.Some(expr); self }
     public fn unique(mut self) -> AlterColumnDef { self.is_unique = true; self }
 }
 

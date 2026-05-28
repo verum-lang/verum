@@ -53,7 +53,7 @@ implement PluginManifest {
         PluginManifest {
             name: name,
             version: version,
-            requires: None,
+            requires: Maybe.None,
             commands: List.new(),
         }
     }
@@ -99,15 +99,15 @@ implement PluginRegistry {
 // =============================================================================
 
 /// Resolve `$PATH` for a binary named `<app>-<subcmd>`. Returns the
-/// absolute path on hit, or None if no such binary is on PATH.
+/// absolute path on hit, or Maybe.None if no such binary is on PATH.
 public fn resolve_external(app_name: &Text, subcmd: &Text) -> Maybe<Text> {
     let mut bin = app_name.clone();
     bin.push_str("-");
     bin.push_str(subcmd);
 
     let path_var = match env.path() {
-        Some(p) => p,
-        None => return None,
+        Maybe.Some(p) => p,
+        Maybe.None => return Maybe.None,
     };
 
     let sep = path_separator();
@@ -122,11 +122,11 @@ public fn resolve_external(app_name: &Text, subcmd: &Text) -> Maybe<Text> {
         // core.io.fs.exists / metadata; placeholder here returns the
         // first textual candidate so callers can proceed deterministically.
         if !full.is_empty() {
-            return Some(full);
+            return Maybe.Some(full);
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 @cfg(target_os = "windows")

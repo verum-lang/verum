@@ -38,7 +38,7 @@
 //
 
 // Absence of a feature flag → the corresponding functions return
-// `Err(CompressError.UnsupportedAlgorithm)` at runtime. Core algorithm
+// `Result.Err(CompressError.UnsupportedAlgorithm)` at runtime. Core algorithm
 // surface is declared unconditionally so user code can branch on
 // `Algorithm` values without `@cfg`-guarded call sites.
 //
@@ -106,20 +106,20 @@ implement Algorithm {
         }
     }
 
-    /// Parse an HTTP Content-Encoding token. Returns None for unknown.
+    /// Parse an HTTP Content-Encoding token. Returns Maybe.None for unknown.
     /// Allocation-free: uses ASCII-fast eq_ignore_case (#88) on the
     /// borrowed token instead of materialising a fresh lowercase Text.
     /// Called once per HTTP response decode — common-case is "gzip"
     /// or "br" so the early-match short-circuit also skips the rest
     /// of the table.
     public fn from_content_encoding(token: &Text) -> Maybe<Algorithm> {
-        if token.eq_ignore_case(&"gzip") { return Some(Algorithm.Gzip); }
-        if token.eq_ignore_case(&"deflate") { return Some(Algorithm.Deflate); }
-        if token.eq_ignore_case(&"br") { return Some(Algorithm.Brotli); }
-        if token.eq_ignore_case(&"zstd") { return Some(Algorithm.Zstd); }
-        if token.eq_ignore_case(&"lz4") { return Some(Algorithm.Lz4); }
-        if token.eq_ignore_case(&"identity") { return Some(Algorithm.Identity); }
-        None
+        if token.eq_ignore_case(&"gzip") { return Maybe.Some(Algorithm.Gzip); }
+        if token.eq_ignore_case(&"deflate") { return Maybe.Some(Algorithm.Deflate); }
+        if token.eq_ignore_case(&"br") { return Maybe.Some(Algorithm.Brotli); }
+        if token.eq_ignore_case(&"zstd") { return Maybe.Some(Algorithm.Zstd); }
+        if token.eq_ignore_case(&"lz4") { return Maybe.Some(Algorithm.Lz4); }
+        if token.eq_ignore_case(&"identity") { return Maybe.Some(Algorithm.Identity); }
+        Maybe.None
     }
 }
 
@@ -260,7 +260,7 @@ public fn encode(algo: Algorithm, input: &[Byte], level: Int, out: &mut List<Byt
         Lz4     => mod_lz4.Lz4.encode(input, level, out),
         Identity => {
             for b in input { out.push(*b); }
-            Ok(input.len())
+            Result.Ok(input.len())
         }
     }
 }
@@ -278,7 +278,7 @@ public fn decode(algo: Algorithm, input: &[Byte], max_output_bytes: Int, out: &m
     // Reject explicitly so the contract is enforced uniformly across
     // every backend.
     if max_output_bytes <= 0 {
-        return Err(CompressError.OutputTooLarge { limit: max_output_bytes });
+        return Result.Err(CompressError.OutputTooLarge { limit: max_output_bytes });
     }
 
     match algo {
@@ -290,10 +290,10 @@ public fn decode(algo: Algorithm, input: &[Byte], max_output_bytes: Int, out: &m
         Lz4     => mod_lz4.Lz4.decode(input, max_output_bytes, out),
         Identity => {
             if input.len() > max_output_bytes {
-                return Err(CompressError.OutputTooLarge { limit: max_output_bytes });
+                return Result.Err(CompressError.OutputTooLarge { limit: max_output_bytes });
             }
             for b in input { out.push(*b); }
-            Ok(input.len())
+            Result.Ok(input.len())
         }
     }
 }

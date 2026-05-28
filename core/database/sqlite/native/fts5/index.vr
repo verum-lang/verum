@@ -122,10 +122,10 @@ implement InvertedIndex {
         let mut s: Int = 0;
         while s < self.segments.len() {
             match self.segments[s].lookup(term) {
-                Some(idx) => {
+                Maybe.Some(idx) => {
                     copy_postings(&self.segments[s].entries[idx].postings, &mut out);
                 }
-                None => {}
+                Maybe.None => {}
             }
             s = s + 1;
         }

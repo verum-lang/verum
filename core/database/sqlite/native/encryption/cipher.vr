@@ -160,10 +160,10 @@ implement PageCipher for NullCipher {
     fn name(&self) -> Text { "null".clone() }
     fn overhead_bytes(&self) -> Int { 0 }
     fn encrypt(&self, _pgno: Int, plaintext: &List<Byte>) -> Result<List<Byte>, CipherError> {
-        Ok(clone_bytes(plaintext))
+        Result.Ok(clone_bytes(plaintext))
     }
     fn decrypt(&self, _pgno: Int, ciphertext: &List<Byte>) -> Result<List<Byte>, CipherError> {
-        Ok(clone_bytes(ciphertext))
+        Result.Ok(clone_bytes(ciphertext))
     }
 }
 
@@ -183,12 +183,12 @@ public type AesGcmCipher is {
 
 public fn aes_gcm_cipher(key: List<Byte>) -> Result<AesGcmCipher, CipherError> {
     if key.len() != AES_KEY_BYTES {
-        return Err(CeUnsupported("AES-256-GCM requires 32-byte key".clone()));
+        return Result.Err(CeUnsupported("AES-256-GCM requires 32-byte key".clone()));
     }
     let mut k: AesKey256 = [0; 32];
     let mut i: Int = 0;
     while i < AES_KEY_BYTES { k[i] = key[i]; i = i + 1; }
-    Ok(AesGcmCipher { key: k })
+    Result.Ok(AesGcmCipher { key: k })
 }
 
 implement PageCipher for AesGcmCipher {
@@ -210,12 +210,12 @@ implement PageCipher for AesGcmCipher {
         out.extend_from_slice(&nonce[..]);
         out.extend_from_slice(ciphertext.as_slice());
         out.extend_from_slice(&tag[..]);
-        Ok(out)
+        Result.Ok(out)
     }
 
     fn decrypt(&self, _page_no: Int, ciphertext: &List<Byte>) -> Result<List<Byte>, CipherError> {
         if ciphertext.len() < AES_GCM_NONCE_BYTES + AES_GCM_TAG_BYTES {
-            return Err(CeMalformedPage);
+            return Result.Err(CeMalformedPage);
         }
         let payload_len = ciphertext.len() - AES_GCM_NONCE_BYTES - AES_GCM_TAG_BYTES;
 
@@ -239,10 +239,10 @@ implement PageCipher for AesGcmCipher {
         let aad: [Byte; 0] = [];
         let mut plaintext: List<Byte> = List.with_capacity(payload_len);
         match cipher.decrypt(&nonce, &aad, body_view, &tag, &mut plaintext) {
-            Ok(()) => Ok(plaintext),
-            Err(GcmError.TagMismatch) => Err(CeAuthFailure),
-            Err(GcmError.InvalidInput { reason: _ }) => Err(CeMalformedPage),
-            Err(GcmError.InputTooLarge { limit_bytes: _ }) => Err(CeMalformedPage),
+            Result.Ok(()) => Result.Ok(plaintext),
+            Result.Err(GcmError.TagMismatch) => Result.Err(CeAuthFailure),
+            Result.Err(GcmError.InvalidInput { reason: _ }) => Result.Err(CeMalformedPage),
+            Result.Err(GcmError.InputTooLarge { limit_bytes: _ }) => Result.Err(CeMalformedPage),
         }
     }
 }
@@ -258,12 +258,12 @@ public type Chacha20Cipher is { key: ChaChaKey }
 
 public fn chacha20_cipher(key: List<Byte>) -> Result<Chacha20Cipher, CipherError> {
     if key.len() != AES_KEY_BYTES {
-        return Err(CeUnsupported("ChaCha20-Poly1305 requires 32-byte key".clone()));
+        return Result.Err(CeUnsupported("ChaCha20-Poly1305 requires 32-byte key".clone()));
     }
     let mut k: ChaChaKey = [0; 32];
     let mut i: Int = 0;
     while i < AES_KEY_BYTES { k[i] = key[i]; i = i + 1; }
-    Ok(Chacha20Cipher { key: k })
+    Result.Ok(Chacha20Cipher { key: k })
 }
 
 implement PageCipher for Chacha20Cipher {
@@ -284,12 +284,12 @@ implement PageCipher for Chacha20Cipher {
         out.extend_from_slice(&nonce[..]);
         out.extend_from_slice(ciphertext.as_slice());
         out.extend_from_slice(&tag[..]);
-        Ok(out)
+        Result.Ok(out)
     }
 
     fn decrypt(&self, _pgno: Int, ciphertext: &List<Byte>) -> Result<List<Byte>, CipherError> {
         if ciphertext.len() < CHACHA_NONCE_BYTES + CHACHA_TAG_BYTES {
-            return Err(CeMalformedPage);
+            return Result.Err(CeMalformedPage);
         }
         let payload_len = ciphertext.len() - CHACHA_NONCE_BYTES - CHACHA_TAG_BYTES;
 
@@ -309,10 +309,10 @@ implement PageCipher for Chacha20Cipher {
         let aad: [Byte; 0] = [];
         let mut plaintext: List<Byte> = List.with_capacity(payload_len);
         match cipher.decrypt(&nonce, &aad, body_view, &tag, &mut plaintext) {
-            Ok(()) => Ok(plaintext),
-            Err(AeadError.TagMismatch) => Err(CeAuthFailure),
-            Err(AeadError.InvalidInput { reason: _ }) => Err(CeMalformedPage),
-            Err(AeadError.InputTooLarge { limit_bytes: _ }) => Err(CeMalformedPage),
+            Result.Ok(()) => Result.Ok(plaintext),
+            Result.Err(AeadError.TagMismatch) => Result.Err(CeAuthFailure),
+            Result.Err(AeadError.InvalidInput { reason: _ }) => Result.Err(CeMalformedPage),
+            Result.Err(AeadError.InputTooLarge { limit_bytes: _ }) => Result.Err(CeMalformedPage),
         }
     }
 }

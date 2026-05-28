@@ -51,24 +51,24 @@ public fn parse(value: &[Byte]) -> Result<BasicConstraints, DerError> {
         }
     }
 
-    let mut path_len: Maybe<Int> = None;
+    let mut path_len: Maybe<Int> = Maybe.None;
     if !seq.is_at_end() {
         let t = seq.peek_tag()?;
         let is_int = match t.class_ { TagClass.Universal => t.number == 2_u32, _ => false };
         if is_int {
             let v = seq.read_int64()?;
             if v < 0_i64 {
-                return Err(DerError {
+                return Result.Err(DerError {
                     kind: DerErrorKind.MalformedDer,
                     position: 0,
                     message: "pathLenConstraint must be non-negative",
                 });
             }
-            path_len = Some(v as Int);
+            path_len = Maybe.Some(v as Int);
         }
     }
 
     seq.expect_end()?;
     r.expect_end()?;
-    Ok(BasicConstraints { is_ca: is_ca, path_len_constraint: path_len })
+    Result.Ok(BasicConstraints { is_ca: is_ca, path_len_constraint: path_len })
 }

@@ -135,7 +135,7 @@ public fn tokenise(line: &Text) -> List<Text> {
 
     while i < line.len() {
         match line.byte_at(i) {
-            Some(b) => {
+            Maybe.Some(b) => {
                 if b == b'"' {
                     in_quotes = !in_quotes;
                 } else if (b == b' ' || b == b'\t') && !in_quotes {
@@ -147,7 +147,7 @@ public fn tokenise(line: &Text) -> List<Text> {
                     buf.push_byte(b);
                 }
             },
-            None => break,
+            Maybe.None => break,
         }
         i = i + 1;
     }
@@ -170,8 +170,8 @@ public fn run(app: &App, cfg: ReplConfig) -> ExitCode {
     loop {
         stdio.print(&state.config.prompt);
         let line = match stdio.read_line() {
-            Ok(l) => l,
-            Err(_) => break,    // EOF / I/O error
+            Result.Ok(l) => l,
+            Result.Err(_) => break,    // EOF / I/O error
         };
 
         match classify(&line) {
@@ -201,8 +201,8 @@ public fn run(app: &App, cfg: ReplConfig) -> ExitCode {
                 }
 
                 match app.try_run(argv) {
-                    Ok(code) => { last_code = code; },
-                    Err(e) => {
+                    Result.Ok(code) => { last_code = code; },
+                    Result.Err(e) => {
                         let mut msg = Text.from("error: ");
                         msg.push_str(&e.message);
                         stdio.eprintln(&msg);

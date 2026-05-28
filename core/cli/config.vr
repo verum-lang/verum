@@ -171,7 +171,7 @@ implement ConfigResolver {
             i = i + 1;
         }
 
-        Ok(ResolvedConfig { values: values })
+        Result.Ok(ResolvedConfig { values: values })
     }
 }
 
@@ -288,15 +288,15 @@ fn try_source(
             // Concrete implementation arrives once the file-format detection
             // helper from core.io.fs lands. Until then, file sources are
             // looked up but no-op.
-            None
+            Maybe.None
         },
         ConfigSource.DefaultSource => {
             match &f.default_text {
-                Some(d) => Some(ResolvedValue {
+                Maybe.Some(d) => Maybe.Some(ResolvedValue {
                     value: d.clone(),
                     source: SourceTag.FromDefault,
                 }),
-                None => None,
+                Maybe.None => Maybe.None,
             }
         },
     }

@@ -391,30 +391,30 @@ implement<Fut1: Future, Fut2: Future, Fut3: Future> Future for Join3<Fut1, Fut2,
     fn poll(&mut self, cx: &mut Context) -> Poll<(Fut1.Output, Fut2.Output, Fut3.Output)> {
         // Poll first future if !done
         if self.result1.is_none() {
-            if let Some(ref mut fut) = self.fut1 {
+            if let Maybe.Some(ref mut fut) = self.fut1 {
                 if let Poll.Ready(v) = fut.poll(cx) {
-                    self.result1 = Some(v);
-                    self.fut1 = None;
+                    self.result1 = Maybe.Some(v);
+                    self.fut1 = Maybe.None;
                 }
             }
         }
 
         // Poll second future if !done
         if self.result2.is_none() {
-            if let Some(ref mut fut) = self.fut2 {
+            if let Maybe.Some(ref mut fut) = self.fut2 {
                 if let Poll.Ready(v) = fut.poll(cx) {
-                    self.result2 = Some(v);
-                    self.fut2 = None;
+                    self.result2 = Maybe.Some(v);
+                    self.fut2 = Maybe.None;
                 }
             }
         }
 
         // Poll third future if !done
         if self.result3.is_none() {
-            if let Some(ref mut fut) = self.fut3 {
+            if let Maybe.Some(ref mut fut) = self.fut3 {
                 if let Poll.Ready(v) = fut.poll(cx) {
-                    self.result3 = Some(v);
-                    self.fut3 = None;
+                    self.result3 = Maybe.Some(v);
+                    self.fut3 = Maybe.None;
                 }
             }
         }
@@ -441,11 +441,11 @@ public fn join3<Fut1: Future, Fut2: Future, Fut3: Future>(
     fut3: Fut3
 ) -> Join3<Fut1, Fut2, Fut3> {
     Join3 {
-        fut1: Some(fut1),
-        fut2: Some(fut2),
-        fut3: Some(fut3),
-        result1: None,
-        result2: None,
-        result3: None,
+        fut1: Maybe.Some(fut1),
+        fut2: Maybe.Some(fut2),
+        fut3: Maybe.Some(fut3),
+        result1: Maybe.None,
+        result2: Maybe.None,
+        result3: Maybe.None,
     }
 }

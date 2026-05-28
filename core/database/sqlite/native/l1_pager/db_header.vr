@@ -85,11 +85,11 @@ public fn file_format_to_u8(f: FileFormat) -> Byte {
 
 public fn file_format_from_u8(b: Byte) -> Result<FileFormat, Text> {
     if b == (1 as Byte) {
-        Ok(LegacyJournal)
+        Result.Ok(LegacyJournal)
     } else if b == (2 as Byte) {
-        Ok(Wal)
+        Result.Ok(Wal)
     } else {
-        Err("file format must be 1 (legacy) or 2 (WAL)".clone())
+        Result.Err("file format must be 1 (legacy) or 2 (WAL)".clone())
     }
 }
 
@@ -105,13 +105,13 @@ public fn encoding_to_u32(e: DbHeaderTextEncoding) -> UInt32 {
 
 public fn encoding_from_u32(v: UInt32) -> Result<DbHeaderTextEncoding, Text> {
     if v == DB_ENCODING_UTF8 {
-        Ok(Utf8)
+        Result.Ok(Utf8)
     } else if v == DB_ENCODING_UTF16_LE {
-        Ok(Utf16Le)
+        Result.Ok(Utf16Le)
     } else if v == DB_ENCODING_UTF16_BE {
-        Ok(Utf16Be)
+        Result.Ok(Utf16Be)
     } else {
-        Err("text encoding must be 1, 2, or 3".clone())
+        Result.Err("text encoding must be 1, 2, or 3".clone())
     }
 }
 
@@ -168,32 +168,32 @@ fn write_u32_be(buf: &mut List<Byte>, v: UInt32) {
 /// Validate a page_size byte pair, returning the canonical Int size.
 fn canon_page_size(raw: UInt16) -> Result<Int, Text> {
     if raw == 1_u16 {
-        return Ok(DB_PAGE_SIZE_SENTINEL);
+        return Result.Ok(DB_PAGE_SIZE_SENTINEL);
     }
     let v = raw as Int;
     if v < DB_PAGE_SIZE_MIN || v > DB_PAGE_SIZE_MAX {
-        return Err("page size out of range".clone());
+        return Result.Err("page size out of range".clone());
     }
     // Power-of-two check without bit tricks (interpreter-friendly).
     let mut s = DB_PAGE_SIZE_MIN;
     while s <= DB_PAGE_SIZE_MAX {
-        if s == v { return Ok(v); }
+        if s == v { return Result.Ok(v); }
         s = s * 2;
     }
-    Err("page size must be power of two in [512, 32768]".clone())
+    Result.Err("page size must be power of two in [512, 32768]".clone())
 }
 
 fn encode_page_size(n: Int) -> Result<UInt16, Text> {
-    if n == DB_PAGE_SIZE_SENTINEL { return Ok(1_u16); }
+    if n == DB_PAGE_SIZE_SENTINEL { return Result.Ok(1_u16); }
     if n < DB_PAGE_SIZE_MIN || n > DB_PAGE_SIZE_MAX {
-        return Err("page size out of range for header".clone());
+        return Result.Err("page size out of range for header".clone());
     }
     let mut s = DB_PAGE_SIZE_MIN;
     while s <= DB_PAGE_SIZE_MAX {
-        if s == n { return Ok(n as UInt16); }
+        if s == n { return Result.Ok(n as UInt16); }
         s = s * 2;
     }
-    Err("page size must be power of two in [512, 32768]".clone())
+    Result.Err("page size must be power of two in [512, 32768]".clone())
 }
 
 // -----------------------------------------------------------------------------
@@ -208,7 +208,7 @@ fn encode_page_size(n: Int) -> Result<UInt16, Text> {
 /// surface; production code paths can use either form.
 public fn parse_header_from_list(buf: &List<Byte>) -> Result<DatabaseHeader, Text> {
     if buf.len() < DB_HEADER_SIZE {
-        return Err("db_header: short buffer".clone());
+        return Result.Err("db_header: short buffer".clone());
     }
     // Magic check — bytes 0..15 must match exactly.
     let expected = "SQLite format 3\0";
@@ -216,25 +216,25 @@ public fn parse_header_from_list(buf: &List<Byte>) -> Result<DatabaseHeader, Tex
     let mut i: Int = 0;
     while i < 16 {
         if buf[i] != magic_bytes[i] {
-            return Err("db_header: bad magic".clone());
+            return Result.Err("db_header: bad magic".clone());
         }
         i = i + 1;
     }
     let ps_raw = (((buf[16] as UInt16) << 8) | (buf[17] as UInt16));
     let page_size = match canon_page_size(ps_raw) {
-        Ok(n)  => n,
-        Err(e) => { return Err(e); }
+        Result.Ok(n)  => n,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let fw = match file_format_from_u8(buf[18]) {
-        Ok(f)  => f, Err(e) => { return Err(e); }
+        Result.Ok(f)  => f, Result.Err(e) => { return Result.Err(e); }
     };
     let fr = match file_format_from_u8(buf[19]) {
-        Ok(f)  => f, Err(e) => { return Err(e); }
+        Result.Ok(f)  => f, Result.Err(e) => { return Result.Err(e); }
     };
     let reserved = buf[20];
-    if buf[21] != (64 as Byte) { return Err("db_header: max_embedded_payload must be 64".clone()); }
-    if buf[22] != (32 as Byte) { return Err("db_header: min_embedded_payload must be 32".clone()); }
-    if buf[23] != (32 as Byte) { return Err("db_header: leaf_payload must be 32".clone()); }
+    if buf[21] != (64 as Byte) { return Result.Err("db_header: max_embedded_payload must be 64".clone()); }
+    if buf[22] != (32 as Byte) { return Result.Err("db_header: min_embedded_payload must be 32".clone()); }
+    if buf[23] != (32 as Byte) { return Result.Err("db_header: leaf_payload must be 32".clone()); }
     let change_counter = read_u32_be_list(buf, 24);
     let size_pages     = read_u32_be_list(buf, 28);
     let first_free     = read_u32_be_list(buf, 32);
@@ -242,7 +242,7 @@ public fn parse_header_from_list(buf: &List<Byte>) -> Result<DatabaseHeader, Tex
     let cookie         = read_u32_be_list(buf, 40);
     let schema_fmt     = read_u32_be_list(buf, 44);
     if schema_fmt < 1_u32 || schema_fmt > 4_u32 {
-        return Err("db_header: schema_format must be in [1, 4]".clone());
+        return Result.Err("db_header: schema_format must be in [1, 4]".clone());
     }
     let cache_size_raw = read_u32_be_list(buf, 48);
     let largest_root   = read_u32_be_list(buf, 52);
@@ -252,14 +252,14 @@ public fn parse_header_from_list(buf: &List<Byte>) -> Result<DatabaseHeader, Tex
     // `parse_header_from_list`. The actual symbol is
     // `encoding_from_u32` (defined at line 98 of this file).
     let text_encoding  = match encoding_from_u32(text_enc_raw) {
-        Ok(t)  => t, Err(e) => { return Err(e); }
+        Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
     };
     let user_version           = read_u32_be_list(buf, 60);
     let incremental_vacuum     = read_u32_be_list(buf, 64);
     let application_id         = read_u32_be_list(buf, 68);
     let version_valid_for      = read_u32_be_list(buf, 92);
     let sqlite_version_number  = read_u32_be_list(buf, 96);
-    Ok(DatabaseHeader {
+    Result.Ok(DatabaseHeader {
         page_size:               page_size,
         file_format_write:       fw,
         file_format_read:        fr,
@@ -293,7 +293,7 @@ fn read_u32_be_list(buf: &List<Byte>, off: Int) -> UInt32 {
 /// on the returned `DatabaseHeader` is known-valid.
 public fn parse_header(buf: &[Byte]) -> Result<DatabaseHeader, Text> {
     if buf.len() < DB_HEADER_SIZE {
-        return Err("db_header: short buffer".clone());
+        return Result.Err("db_header: short buffer".clone());
     }
     // Magic check — bytes 0..15 must match exactly.
     let expected = "SQLite format 3\0";
@@ -301,37 +301,37 @@ public fn parse_header(buf: &[Byte]) -> Result<DatabaseHeader, Text> {
     let mut i: Int = 0;
     while i < 16 {
         if buf[i] != magic_bytes[i] {
-            return Err("db_header: bad magic".clone());
+            return Result.Err("db_header: bad magic".clone());
         }
         i = i + 1;
     }
 
     let ps_raw = read_u16_be(buf, 16);
     let page_size = match canon_page_size(ps_raw) {
-        Ok(n)  => n,
-        Err(e) => { return Err(e); }
+        Result.Ok(n)  => n,
+        Result.Err(e) => { return Result.Err(e); }
     };
 
     let fw = match file_format_from_u8(buf[18]) {
-        Ok(f)  => f,
-        Err(e) => { return Err(e); }
+        Result.Ok(f)  => f,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let fr = match file_format_from_u8(buf[19]) {
-        Ok(f)  => f,
-        Err(e) => { return Err(e); }
+        Result.Ok(f)  => f,
+        Result.Err(e) => { return Result.Err(e); }
     };
 
     let reserved = buf[20];
 
     // Bytes 21/22/23 must match the spec-fixed constants.
     if buf[21] != (64 as Byte) {
-        return Err("db_header: max_embedded_payload must be 64".clone());
+        return Result.Err("db_header: max_embedded_payload must be 64".clone());
     }
     if buf[22] != (32 as Byte) {
-        return Err("db_header: min_embedded_payload must be 32".clone());
+        return Result.Err("db_header: min_embedded_payload must be 32".clone());
     }
     if buf[23] != (32 as Byte) {
-        return Err("db_header: leaf_payload must be 32".clone());
+        return Result.Err("db_header: leaf_payload must be 32".clone());
     }
 
     let change_counter = read_u32_be(buf, 24);
@@ -341,14 +341,14 @@ public fn parse_header(buf: &[Byte]) -> Result<DatabaseHeader, Text> {
     let cookie         = read_u32_be(buf, 40);
     let schema_fmt     = read_u32_be(buf, 44);
     if schema_fmt < 1_u32 || schema_fmt > 4_u32 {
-        return Err("db_header: schema_format must be in [1, 4]".clone());
+        return Result.Err("db_header: schema_format must be in [1, 4]".clone());
     }
     let default_cache  = read_u32_be(buf, 48);
     let largest_root   = read_u32_be(buf, 52);
     let enc_u32        = read_u32_be(buf, 56);
     let enc = match encoding_from_u32(enc_u32) {
-        Ok(e)  => e,
-        Err(m) => { return Err(m); }
+        Result.Ok(e)  => e,
+        Result.Err(m) => { return Result.Err(m); }
     };
     let user_ver       = read_u32_be(buf, 60);
     let incr_vacuum    = read_u32_be(buf, 64);
@@ -358,7 +358,7 @@ public fn parse_header(buf: &[Byte]) -> Result<DatabaseHeader, Text> {
     let mut j: Int = 72;
     while j < 92 {
         if buf[j] != (0 as Byte) {
-            return Err("db_header: reserved_for_expansion must be zero".clone());
+            return Result.Err("db_header: reserved_for_expansion must be zero".clone());
         }
         j = j + 1;
     }
@@ -366,7 +366,7 @@ public fn parse_header(buf: &[Byte]) -> Result<DatabaseHeader, Text> {
     let valid_for = read_u32_be(buf, 92);
     let version   = read_u32_be(buf, 96);
 
-    Ok(DatabaseHeader {
+    Result.Ok(DatabaseHeader {
         page_size: page_size,
         file_format_write: fw,
         file_format_read: fr,
@@ -402,8 +402,8 @@ public fn serialize_header(h: &DatabaseHeader) -> Result<List<Byte>, Text> {
     }
 
     let ps_raw = match encode_page_size(h.page_size) {
-        Ok(v)  => v,
-        Err(m) => { return Err(m); }
+        Result.Ok(v)  => v,
+        Result.Err(m) => { return Result.Err(m); }
     };
     write_u16_be(&mut out, ps_raw);
 
@@ -437,7 +437,7 @@ public fn serialize_header(h: &DatabaseHeader) -> Result<List<Byte>, Text> {
     write_u32_be(&mut out, h.version_valid_for);
     write_u32_be(&mut out, h.sqlite_version_number);
 
-    Ok(out)
+    Result.Ok(out)
 }
 
 /// Build a sensible default header for a fresh WAL-mode DB at the

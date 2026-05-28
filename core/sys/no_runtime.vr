@@ -4,7 +4,7 @@ module sys.no_runtime;
 // sys/no_runtime.vr - No-runtime mode declarations
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None
+// Dependencies: Maybe.None
 // Activated by: @cfg(runtime = "none") or @cfg(runtime = "embedded")
 // =============================================================================
 //
@@ -67,14 +67,14 @@ implement SyncChannel {
         }
     }
 
-    /// Receive the value. Returns the value wrapped in Some, or None if empty.
+    /// Receive the value. Returns the value wrapped in Some, or Maybe.None if empty.
     public fn recv(&mut self) -> Maybe<T> {
         match self {
-            Empty => None,
+            Empty => Maybe.None,
             Full(v) => {
                 let result = v;
                 *self = Empty;
-                Some(result)
+                Maybe.Some(result)
             }
         }
     }

@@ -174,35 +174,35 @@ implement Eq for TlsError {
 
 implement TlsError {
     /// Translate this error into the AlertDescription we'd send to
-    /// the peer. `None` for errors that don't yield an outgoing alert
+    /// the peer. `Maybe.None` for errors that don't yield an outgoing alert
     /// (e.g. we already received `close_notify`).
     public fn to_alert(&self) -> Maybe<AlertDescription> {
         match self {
-            TlsError.ProtocolVersion         => Some(AlertDescription.ProtocolVersion),
-            TlsError.HandshakeFailure        => Some(AlertDescription.HandshakeFailure),
-            TlsError.UnexpectedMessage       => Some(AlertDescription.UnexpectedMessage),
-            TlsError.IllegalParameter        => Some(AlertDescription.IllegalParameter),
-            TlsError.MissingExtension        => Some(AlertDescription.MissingExtension),
-            TlsError.UnsupportedExtension    => Some(AlertDescription.UnsupportedExtension),
-            TlsError.UnrecognizedName        => Some(AlertDescription.UnrecognizedName),
-            TlsError.NoApplicationProtocol   => Some(AlertDescription.NoApplicationProtocol),
-            TlsError.InappropriateFallback   => Some(AlertDescription.InappropriateFallback),
-            TlsError.InsufficientSecurity    => Some(AlertDescription.InsufficientSecurity),
-            TlsError.BadCertificate          => Some(AlertDescription.BadCertificate),
-            TlsError.UnsupportedCertificate  => Some(AlertDescription.UnsupportedCertificate),
-            TlsError.CertificateRevoked      => Some(AlertDescription.CertificateRevoked),
-            TlsError.CertificateExpired      => Some(AlertDescription.CertificateExpired),
-            TlsError.CertificateUnknown      => Some(AlertDescription.CertificateUnknown),
-            TlsError.UnknownCa               => Some(AlertDescription.UnknownCa),
-            TlsError.BadCertificateStatusResponse => Some(AlertDescription.BadCertificateStatusResponse),
-            TlsError.BadRecordMac            => Some(AlertDescription.BadRecordMac),
-            TlsError.DecryptError            => Some(AlertDescription.DecryptError),
-            TlsError.RecordOverflow          => Some(AlertDescription.RecordOverflow),
-            TlsError.DecodeError             => Some(AlertDescription.DecodeError),
-            TlsError.UnknownPskIdentity      => Some(AlertDescription.UnknownPskIdentity),
-            TlsError.InternalError(_)        => Some(AlertDescription.InternalError),
-            TlsError.RemoteAlert(_)          => None,
-            TlsError.IoError(_)              => None,
+            TlsError.ProtocolVersion         => Maybe.Some(AlertDescription.ProtocolVersion),
+            TlsError.HandshakeFailure        => Maybe.Some(AlertDescription.HandshakeFailure),
+            TlsError.UnexpectedMessage       => Maybe.Some(AlertDescription.UnexpectedMessage),
+            TlsError.IllegalParameter        => Maybe.Some(AlertDescription.IllegalParameter),
+            TlsError.MissingExtension        => Maybe.Some(AlertDescription.MissingExtension),
+            TlsError.UnsupportedExtension    => Maybe.Some(AlertDescription.UnsupportedExtension),
+            TlsError.UnrecognizedName        => Maybe.Some(AlertDescription.UnrecognizedName),
+            TlsError.NoApplicationProtocol   => Maybe.Some(AlertDescription.NoApplicationProtocol),
+            TlsError.InappropriateFallback   => Maybe.Some(AlertDescription.InappropriateFallback),
+            TlsError.InsufficientSecurity    => Maybe.Some(AlertDescription.InsufficientSecurity),
+            TlsError.BadCertificate          => Maybe.Some(AlertDescription.BadCertificate),
+            TlsError.UnsupportedCertificate  => Maybe.Some(AlertDescription.UnsupportedCertificate),
+            TlsError.CertificateRevoked      => Maybe.Some(AlertDescription.CertificateRevoked),
+            TlsError.CertificateExpired      => Maybe.Some(AlertDescription.CertificateExpired),
+            TlsError.CertificateUnknown      => Maybe.Some(AlertDescription.CertificateUnknown),
+            TlsError.UnknownCa               => Maybe.Some(AlertDescription.UnknownCa),
+            TlsError.BadCertificateStatusResponse => Maybe.Some(AlertDescription.BadCertificateStatusResponse),
+            TlsError.BadRecordMac            => Maybe.Some(AlertDescription.BadRecordMac),
+            TlsError.DecryptError            => Maybe.Some(AlertDescription.DecryptError),
+            TlsError.RecordOverflow          => Maybe.Some(AlertDescription.RecordOverflow),
+            TlsError.DecodeError             => Maybe.Some(AlertDescription.DecodeError),
+            TlsError.UnknownPskIdentity      => Maybe.Some(AlertDescription.UnknownPskIdentity),
+            TlsError.InternalError(_)        => Maybe.Some(AlertDescription.InternalError),
+            TlsError.RemoteAlert(_)          => Maybe.None,
+            TlsError.IoError(_)              => Maybe.None,
         }
     }
 }

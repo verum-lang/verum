@@ -100,14 +100,14 @@ public fn subprogram_new(
         register_window: register_window,
         source_name: source_name,
         source_event: source_event,
-        source_table: None,
+        source_table: Maybe.None,
         can_abort: false,
     }
 }
 
 implement SubProgram {
     public fn attach_to_table(&mut self, table: Text) {
-        self.source_table = Some(table);
+        self.source_table = Maybe.Some(table);
     }
 
     public fn mark_can_abort(&mut self) {
@@ -116,8 +116,8 @@ implement SubProgram {
 
     public fn is_attached_to(&self, table: &Text) -> Bool {
         match &self.source_table {
-            Some(t) => t == table,
-            None    => false,
+            Maybe.Some(t) => t == table,
+            Maybe.None    => false,
         }
     }
 }

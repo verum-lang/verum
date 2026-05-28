@@ -195,8 +195,8 @@ public type Database is {
 /// Open an in-memory database with the given capability.
 public fn open_memory_db(mode: ConnectionMode) -> Result<Database, SqliteApiDbError> {
     match open_memory(mode) {
-        Ok(c)  => Ok(Database { conn: c }),
-        Err(e) => Err(db_error_from_conn(e)),
+        Result.Ok(c)  => Result.Ok(Database { conn: c }),
+        Result.Err(e) => Result.Err(db_error_from_conn(e)),
     }
 }
 
@@ -209,22 +209,22 @@ public fn open_memory_db(mode: ConnectionMode) -> Result<Database, SqliteApiDbEr
 // match is the only price.
 public fn open_readonly() -> Result<Database, SqliteApiDbError> {
     match open_memory(CmRead) {
-        Ok(c)  => Ok(Database { conn: c }),
-        Err(e) => Err(db_error_from_conn(e)),
+        Result.Ok(c)  => Result.Ok(Database { conn: c }),
+        Result.Err(e) => Result.Err(db_error_from_conn(e)),
     }
 }
 
 public fn open_readwrite() -> Result<Database, SqliteApiDbError> {
     match open_memory(CmWrite) {
-        Ok(c)  => Ok(Database { conn: c }),
-        Err(e) => Err(db_error_from_conn(e)),
+        Result.Ok(c)  => Result.Ok(Database { conn: c }),
+        Result.Err(e) => Result.Err(db_error_from_conn(e)),
     }
 }
 
 public fn open_admin() -> Result<Database, SqliteApiDbError> {
     match open_memory(CmAdmin) {
-        Ok(c)  => Ok(Database { conn: c }),
-        Err(e) => Err(db_error_from_conn(e)),
+        Result.Ok(c)  => Result.Ok(Database { conn: c }),
+        Result.Err(e) => Result.Err(db_error_from_conn(e)),
     }
 }
 
@@ -235,8 +235,8 @@ public fn open_admin() -> Result<Database, SqliteApiDbError> {
 /// separate `core.database.sqlite.native.uri` task).
 public fn open_path(path: &Text, mode: ConnectionMode) -> Result<Database, SqliteApiDbError> {
     match open_file(path, mode) {
-        Ok(c)  => Ok(Database { conn: c }),
-        Err(e) => Err(db_error_from_conn(e)),
+        Result.Ok(c)  => Result.Ok(Database { conn: c }),
+        Result.Err(e) => Result.Err(db_error_from_conn(e)),
     }
 }
 
@@ -305,11 +305,11 @@ implement Database {
     /// don't need writeback.
     public fn prepare(&self, sql: &Text) -> Result<PreparedStatement, SqliteApiDbError> {
         match prepare_with_schema(sql, self.conn.schema()) {
-            Ok(mut p) => {
+            Result.Ok(mut p) => {
                 seed_cursors_from_connection(&mut p, &self.conn);
-                Ok(p)
+                Result.Ok(p)
             }
-            Err(e) => Err(DbStmtError(e)),
+            Result.Err(e) => Result.Err(DbStmtError(e)),
         }
     }
 
@@ -329,16 +329,16 @@ implement Database {
     public fn execute(&mut self, sql: &Text) -> Result<(), SqliteApiDbError> {
         // Parse once up front for the schema side-effect hook.
         let stmt_ast = match parse_one(sql) {
-            Ok(s)  => s,
-            Err(e) => {
+            Result.Ok(s)  => s,
+            Result.Err(e) => {
                 // Let the regular prepare path surface the parse error
                 // with the richer CompileError wrapping.
                 let _ = e;
                 let mut stmt = match self.prepare(sql) {
-                    Ok(s)  => s, Err(err) => { return Err(err); }
+                    Result.Ok(s)  => s, Result.Err(err) => { return Result.Err(err); }
                 };
                 let _ = stmt;
-                return Err(DbMisuse("unreachable — parse failed after re-parse succeeded".clone()));
+                return Result.Err(DbMisuse("unreachable — parse failed after re-parse succeeded".clone()));
             }
         };
 
@@ -347,8 +347,8 @@ implement Database {
         match stmt_ast {
             SCreateTable(ref ct) => {
                 match self.conn.ensure_admin() {
-                    Ok(_)  => {},
-                    Err(e) => { return Err(db_error_from_conn(e)); }
+                    Result.Ok(_)  => {},
+                    Result.Err(e) => { return Result.Err(db_error_from_conn(e)); }
                 }
                 let root = self.conn.allocate_root_page();
                 let meta = table_meta_from_create(ct, root, sql.clone());
@@ -357,7 +357,7 @@ implement Database {
                     if ct.if_not_exists {
                         // IF NOT EXISTS is non-failure
                     } else {
-                        return Err(DbConstraint("table already exists".clone()));
+                        return Result.Err(DbConstraint("table already exists".clone()));
                     }
                 } else {
                     let _ = self.conn.schema_mut().register_table(meta);
@@ -365,13 +365,13 @@ implement Database {
             }
             SDropTable(if_exists, ref tref) => {
                 match self.conn.ensure_admin() {
-                    Ok(_)  => {},
-                    Err(e) => { return Err(db_error_from_conn(e)); }
+                    Result.Ok(_)  => {},
+                    Result.Err(e) => { return Result.Err(db_error_from_conn(e)); }
                 }
                 let has = self.conn.schema().has_table(&tref.schema, &tref.name);
                 if !has {
                     if !if_exists {
-                        return Err(DbGeneric("table does not exist".clone()));
+                        return Result.Err(DbGeneric("table does not exist".clone()));
                     }
                 } else {
                     let _ = self.conn.schema_mut().drop_table(&tref.schema, &tref.name);
@@ -379,8 +379,8 @@ implement Database {
             }
             SCreateIndex(ref ci) => {
                 match self.conn.ensure_admin() {
-                    Ok(_)  => {},
-                    Err(e) => { return Err(db_error_from_conn(e)); }
+                    Result.Ok(_)  => {},
+                    Result.Err(e) => { return Result.Err(db_error_from_conn(e)); }
                 }
                 let root = self.conn.allocate_root_page();
                 let mut col_names: List<Text> = List.new();
@@ -401,10 +401,10 @@ implement Database {
                     unique: ci.unique,
                 };
                 match self.conn.schema_mut().register_index(meta) {
-                    Ok(_)  => {}
-                    Err(_) => {
+                    Result.Ok(_)  => {}
+                    Result.Err(_) => {
                         if !ci.if_not_exists {
-                            return Err(DbConstraint("index already exists".clone()));
+                            return Result.Err(DbConstraint("index already exists".clone()));
                         }
                     }
                 }
@@ -418,19 +418,19 @@ implement Database {
         }
 
         let mut stmt = match self.prepare(sql) {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
         seed_cursors_from_connection(&mut stmt, &self.conn);
-        let mut err_result: Maybe<SqliteApiDbError> = None;
+        let mut err_result: Maybe<SqliteApiDbError> = Maybe.None;
         loop {
             match stmt.step() {
                 Done => { break; }
                 Row(_, _) => {
-                    err_result = Some(DbMisuse("execute() called on a row-producing query".clone()));
+                    err_result = Maybe.Some(DbMisuse("execute() called on a row-producing query".clone()));
                     break;
                 }
                 ExecError(c, m) => {
-                    err_result = Some(DbStmtError(StmtExec(c, m)));
+                    err_result = Maybe.Some(DbStmtError(StmtExec(c, m)));
                     break;
                 }
                 Yield => {
@@ -441,8 +441,8 @@ implement Database {
         }
         writeback_cursors_to_connection(&stmt, &mut self.conn);
         match err_result {
-            Some(e) => Err(e),
-            None    => Ok(()),
+            Maybe.Some(e) => Result.Err(e),
+            Maybe.None    => Result.Ok(()),
         }
     }
 
@@ -451,7 +451,7 @@ implement Database {
     /// multi-row consumers call `prepare` + loop directly.
     public fn query_first_row(&mut self, sql: &Text) -> Result<List<Register>, SqliteApiDbError> {
         let mut stmt = match self.prepare(sql) {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
         seed_cursors_from_connection(&mut stmt, &self.conn);
         let result = match stmt.step() {
@@ -462,11 +462,11 @@ implement Database {
                     out.push(stmt.column(i));
                     i = i + 1;
                 }
-                Ok(out)
+                Result.Ok(out)
             }
-            Done => Ok(List.new()),   // no rows
-            ExecError(c, m) => Err(DbStmtError(StmtExec(c, m))),
-            Yield => Err(DbMisuse("yield outside run_until_row".clone())),
+            Done => Result.Ok(List.new()),   // no rows
+            ExecError(c, m) => Result.Err(DbStmtError(StmtExec(c, m))),
+            Yield => Result.Err(DbMisuse("yield outside run_until_row".clone())),
         };
         writeback_cursors_to_connection(&stmt, &mut self.conn);
         result
@@ -478,11 +478,11 @@ implement Database {
     /// loop + the bridge helpers.
     public fn query_all(&mut self, sql: &Text) -> Result<List<List<Register>>, SqliteApiDbError> {
         let mut stmt = match self.prepare(sql) {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
         seed_cursors_from_connection(&mut stmt, &self.conn);
         let mut out: List<List<Register>> = List.new();
-        let mut err_result: Maybe<SqliteApiDbError> = None;
+        let mut err_result: Maybe<SqliteApiDbError> = Maybe.None;
         loop {
             match stmt.step() {
                 Row(_, cols) => {
@@ -496,7 +496,7 @@ implement Database {
                 }
                 Done => { break; }
                 ExecError(c, m) => {
-                    err_result = Some(DbStmtError(StmtExec(c, m)));
+                    err_result = Maybe.Some(DbStmtError(StmtExec(c, m)));
                     break;
                 }
                 Yield => {}
@@ -504,8 +504,8 @@ implement Database {
         }
         writeback_cursors_to_connection(&stmt, &mut self.conn);
         match err_result {
-            Some(e) => Err(e),
-            None    => Ok(out),
+            Maybe.Some(e) => Result.Err(e),
+            Maybe.None    => Result.Ok(out),
         }
     }
 
@@ -529,8 +529,8 @@ implement Database {
     public fn begin_tx(&mut self) -> Result<Transaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmDeferred) {
-            Ok(_)  => Ok(tx_make(depth, TkDeferred)),
-            Err(e) => Err(db_error_from_conn(e)),
+            Result.Ok(_)  => Result.Ok(tx_make(depth, TkDeferred)),
+            Result.Err(e) => Result.Err(db_error_from_conn(e)),
         }
     }
 
@@ -538,8 +538,8 @@ implement Database {
     public fn begin_tx_immediate(&mut self) -> Result<Transaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmImmediate) {
-            Ok(_)  => Ok(tx_make(depth, TkImmediate)),
-            Err(e) => Err(db_error_from_conn(e)),
+            Result.Ok(_)  => Result.Ok(tx_make(depth, TkImmediate)),
+            Result.Err(e) => Result.Err(db_error_from_conn(e)),
         }
     }
 
@@ -547,8 +547,8 @@ implement Database {
     public fn begin_tx_exclusive(&mut self) -> Result<Transaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmExclusive) {
-            Ok(_)  => Ok(tx_make(depth, TkExclusive)),
-            Err(e) => Err(db_error_from_conn(e)),
+            Result.Ok(_)  => Result.Ok(tx_make(depth, TkExclusive)),
+            Result.Err(e) => Result.Err(db_error_from_conn(e)),
         }
     }
 
@@ -562,14 +562,14 @@ implement Database {
         if now != started + 1 {
             // The user opened a savepoint and forgot to release it before
             // committing the outer tx. We refuse and let them clean up.
-            return Err(DbMisuse(
+            return Result.Err(DbMisuse(
                 "commit_tx called with stale tx-depth — release nested savepoints first"
                     .clone(),
             ));
         }
         match self.conn.commit_tx() {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(db_error_from_conn(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(db_error_from_conn(e)),
         }
     }
 
@@ -579,8 +579,8 @@ implement Database {
     public fn rollback_tx(&mut self, tx: Transaction) -> Result<(), SqliteApiDbError> {
         let _ = tx;
         match self.conn.rollback_tx() {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(db_error_from_conn(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(db_error_from_conn(e)),
         }
     }
 
@@ -597,21 +597,21 @@ implement Database {
         body: fn(&mut Database) -> Result<R, SqliteApiDbError>,
     ) -> Result<R, SqliteApiDbError> {
         let tx = match self.begin_tx() {
-            Ok(t)  => t,
-            Err(e) => { return Err(e); }
+            Result.Ok(t)  => t,
+            Result.Err(e) => { return Result.Err(e); }
         };
         let body_result = body(self);
         match body_result {
-            Ok(r) => {
+            Result.Ok(r) => {
                 match self.commit_tx(tx) {
-                    Ok(_)  => Ok(r),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(r),
+                    Result.Err(e) => Result.Err(e),
                 }
             }
-            Err(body_err) => {
+            Result.Err(body_err) => {
                 // Best-effort rollback — the original body error wins.
                 let _ = self.rollback_tx(tx);
-                Err(body_err)
+                Result.Err(body_err)
             }
         }
     }
@@ -623,20 +623,20 @@ implement Database {
         body: fn(&mut Database) -> Result<R, SqliteApiDbError>,
     ) -> Result<R, SqliteApiDbError> {
         let tx = match self.begin_tx_immediate() {
-            Ok(t)  => t,
-            Err(e) => { return Err(e); }
+            Result.Ok(t)  => t,
+            Result.Err(e) => { return Result.Err(e); }
         };
         let body_result = body(self);
         match body_result {
-            Ok(r) => {
+            Result.Ok(r) => {
                 match self.commit_tx(tx) {
-                    Ok(_)  => Ok(r),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(r),
+                    Result.Err(e) => Result.Err(e),
                 }
             }
-            Err(body_err) => {
+            Result.Err(body_err) => {
                 let _ = self.rollback_tx(tx);
-                Err(body_err)
+                Result.Err(body_err)
             }
         }
     }

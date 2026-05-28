@@ -164,15 +164,15 @@ implement Value {
     public fn map(v: List<(Text, Value)>) -> Value { VMap(v) }
     public fn timestamp_ms(ms: Int) -> Value  { VTimestamp(ms) }
 
-    /// Build a UUID Value. Returns `None` when the input is not
+    /// Build a UUID Value. Returns `Maybe.None` when the input is not
     /// exactly 16 bytes.
     public fn uuid(b: List<Byte>) -> Maybe<Value> {
-        if (b.len() as Int) != 16 { None } else { Some(VUuid(b)) }
+        if (b.len() as Int) != 16 { Maybe.None } else { Maybe.Some(VUuid(b)) }
     }
 
-    /// Build a Decimal128 Value. Returns `None` when not 16 bytes.
+    /// Build a Decimal128 Value. Returns `Maybe.None` when not 16 bytes.
     public fn decimal128(b: List<Byte>) -> Maybe<Value> {
-        if (b.len() as Int) != 16 { None } else { Some(VDecimal(b)) }
+        if (b.len() as Int) != 16 { Maybe.None } else { Maybe.Some(VDecimal(b)) }
     }
 
     public fn extension(tag: Int, payload: List<Byte>) -> Value {
@@ -299,8 +299,8 @@ public fn from_json(v: &JsonValue) -> Value {
             while i < keys.len() as Int {
                 let k = keys[i].clone();
                 match m.get(&k) {
-                    Some(jv) => out.push((k, from_json(jv))),
-                    None     => {}        // shouldn't happen — Map.keys is consistent
+                    Maybe.Some(jv) => out.push((k, from_json(jv))),
+                    Maybe.None     => {}        // shouldn't happen — Map.keys is consistent
                 }
                 i = i + 1;
             }
@@ -317,11 +317,11 @@ public fn from_json(v: &JsonValue) -> Value {
 /// want the lossy projection invoke `to_json_lossy` instead.
 public fn to_json(v: &Value) -> Result<JsonValue, ConvertError> {
     match v {
-        VNull         => Ok(JsonNull),
-        VBool(b)      => Ok(JsonBool(*b)),
-        VInt(n)       => Ok(JsonInt(*n)),
-        VFloat(f)     => Ok(JsonFloat(*f)),
-        VText(s)      => Ok(JsonString(s.clone())),
+        VNull         => Result.Ok(JsonNull),
+        VBool(b)      => Result.Ok(JsonBool(*b)),
+        VInt(n)       => Result.Ok(JsonInt(*n)),
+        VFloat(f)     => Result.Ok(JsonFloat(*f)),
+        VText(s)      => Result.Ok(JsonString(s.clone())),
         VArray(a)     => {
             let mut out: List<JsonValue> = List.with_capacity(a.len() as Int);
             let mut i: Int = 0;
@@ -329,7 +329,7 @@ public fn to_json(v: &Value) -> Result<JsonValue, ConvertError> {
                 out.push(to_json(&a[i])?);
                 i = i + 1;
             }
-            Ok(JsonArray(out))
+            Result.Ok(JsonArray(out))
         }
         VMap(m)       => {
             let mut obj: Map<Text, JsonValue> = Map.new();
@@ -339,13 +339,13 @@ public fn to_json(v: &Value) -> Result<JsonValue, ConvertError> {
                 obj.insert(pair.0.clone(), to_json(&pair.1)?);
                 i = i + 1;
             }
-            Ok(JsonObject(obj))
+            Result.Ok(JsonObject(obj))
         }
-        VTimestamp(_) => Err(CeUnsupportedVariant("Timestamp".clone())),
-        VUuid(_)      => Err(CeUnsupportedVariant("Uuid".clone())),
-        VDecimal(_)   => Err(CeUnsupportedVariant("Decimal".clone())),
-        VBytes(_)     => Err(CeUnsupportedVariant("Bytes".clone())),
-        VExtension { tag, .. } => Err(CeExtensionUnsupported(*tag)),
+        VTimestamp(_) => Result.Err(CeUnsupportedVariant("Timestamp".clone())),
+        VUuid(_)      => Result.Err(CeUnsupportedVariant("Uuid".clone())),
+        VDecimal(_)   => Result.Err(CeUnsupportedVariant("Decimal".clone())),
+        VBytes(_)     => Result.Err(CeUnsupportedVariant("Bytes".clone())),
+        VExtension { tag, .. } => Result.Err(CeExtensionUnsupported(*tag)),
     }
 }
 

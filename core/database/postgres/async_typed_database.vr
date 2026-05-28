@@ -43,7 +43,7 @@
 module core.database.postgres.async_typed_database;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{DbError, AdapterId, AdPostgres};
 mount core.database.common.db_handle.Database;
@@ -114,10 +114,10 @@ implement<C: CanTx> Database<AsyncPgPool, C> {
         let guard = self.pool.acquire().await?;
         let conn = guard.conn();
         let tx = begin_tx_with_async(&conn, opts.clone()).await?;
-        Ok(AsyncPgTxScope {
-            guard: Some(guard),
-            conn: Some(conn),
-            tx: Some(tx),
+        Result.Ok(AsyncPgTxScope {
+            guard: Maybe.Some(guard),
+            conn: Maybe.Some(conn),
+            tx: Maybe.Some(tx),
         })
     }
 }
@@ -141,19 +141,19 @@ implement AsyncPgTxScope {
     /// actor handle.
     public fn conn_ref(&self) -> &AsyncPgConnection {
         match &self.conn {
-            Some(c) => c,
-            None    => panic("AsyncPgTxScope: connection already taken"),
+            Maybe.Some(c) => c,
+            Maybe.None    => panic("AsyncPgTxScope: connection already taken"),
         }
     }
 
     public async fn commit(mut self) -> Result<(), DbError> {
         let conn = match self.conn.take() {
-            Some(c) => c,
-            None    => { return Err(scope_used("commit")); }
+            Maybe.Some(c) => c,
+            Maybe.None    => { return Result.Err(scope_used("commit")); }
         };
         let tx = match self.tx.take() {
-            Some(t) => t,
-            None    => { return Err(scope_used("commit-no-tx")); }
+            Maybe.Some(t) => t,
+            Maybe.None    => { return Result.Err(scope_used("commit-no-tx")); }
         };
         let r = commit_tx_async(&conn, tx).await;
         // Drop the guard — connection returns to the pool.
@@ -163,12 +163,12 @@ implement AsyncPgTxScope {
 
     public async fn rollback(mut self) -> Result<(), DbError> {
         let conn = match self.conn.take() {
-            Some(c) => c,
-            None    => { return Err(scope_used("rollback")); }
+            Maybe.Some(c) => c,
+            Maybe.None    => { return Result.Err(scope_used("rollback")); }
         };
         let tx = match self.tx.take() {
-            Some(t) => t,
-            None    => { return Err(scope_used("rollback-no-tx")); }
+            Maybe.Some(t) => t,
+            Maybe.None    => { return Result.Err(scope_used("rollback-no-tx")); }
         };
         let r = rollback_tx_async(&conn, tx).await;
         let _ = self.guard.take();

@@ -42,22 +42,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "TUF repository abstraction + bounded fetch + consistent-snapshot URL composition",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.tuf.repository;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount io.path.{Path, PathBuf};
@@ -124,9 +124,9 @@ implement Debug for RepoError {
 
 /// Abstract repository.
 public type TufRepository is protocol {
-    /// Fetch a role's metadata file. When `version` is `Some(n)` and
+    /// Fetch a role's metadata file. When `version` is `Maybe.Some(n)` and
     /// the repository is in consistent-snapshot mode, the implementor
-    /// SHOULD compose `<n>.<role>.json`. When `version` is `None`,
+    /// SHOULD compose `<n>.<role>.json`. When `version` is `Maybe.None`,
     /// fetch `<role>.json` (latest, for the timestamp role typically).
     async fn fetch_metadata(
         &self,
@@ -189,7 +189,7 @@ implement<C: HttpClient> TufRepository for HttpRepository<C> {
             self.consistent_snapshot,
         );
         let bytes = http_get(&self.client, &url, max_bytes_for_role(role), &role_name_to_text(role)).await?;
-        Ok(bytes)
+        Result.Ok(bytes)
     }
 
     async fn fetch_target(
@@ -204,7 +204,7 @@ implement<C: HttpClient> TufRepository for HttpRepository<C> {
             self.consistent_snapshot,
         );
         let bytes = http_get(&self.client, &url, MAX_TARGET_FILE_BYTES, "target").await?;
-        Ok(bytes)
+        Result.Ok(bytes)
     }
 }
 
@@ -225,18 +225,18 @@ async fn http_get<C: HttpClient>(
     let resp = client.send(&req).await
         .map_err(|e| NetworkError(e))?;
     if resp.status.is_404() {
-        return Err(NotFound {
+        return Result.Err(NotFound {
             role: RoleName.Delegated(f"@url={url}"),
-            version: None,
+            version: Maybe.None,
         });
     }
     if !resp.status.is_success() {
-        return Err(InvalidStatus(resp.status));
+        return Result.Err(InvalidStatus(resp.status));
     }
     if resp.body.len() > max_size {
-        return Err(TooLarge { role: label.to_text(), size: resp.body.len(), limit: max_size });
+        return Result.Err(TooLarge { role: label.to_text(), size: resp.body.len(), limit: max_size });
     }
-    Ok(resp.body)
+    Result.Ok(resp.body)
 }
 
 // =============================================================================
@@ -245,8 +245,8 @@ async fn http_get<C: HttpClient>(
 
 /// Compose the metadata URL.
 ///
-///   consistent_snapshot=true,  version=Some(N)  → `<base>/N.<role>.json`
-///   consistent_snapshot=true,  version=None     → `<base>/<role>.json`
+///   consistent_snapshot=true,  version=Maybe.Some(N)  → `<base>/N.<role>.json`
+///   consistent_snapshot=true,  version=Maybe.None     → `<base>/<role>.json`
 ///   consistent_snapshot=false                   → `<base>/<role>.json`
 public fn compose_metadata_url(
     base: &Text,
@@ -257,8 +257,8 @@ public fn compose_metadata_url(
     let role_text = role_name_to_text(role);
     let prefix = if consistent_snapshot {
         match version {
-            Some(v) => f"{v}.",
-            None    => "".to_text(),
+            Maybe.Some(v) => f"{v}.",
+            Maybe.None    => "".to_text(),
         }
     } else { "".to_text() };
     let separator = if base.ends_with("/") { "".to_text() } else { "/".to_text() };
@@ -280,7 +280,7 @@ public fn compose_target_url(
         return f"{base}{separator}{path}";
     }
     match hash_prefix {
-        Some(h) => {
+        Maybe.Some(h) => {
             // Insert <h>. before the last path component's basename.
             let last_slash = path.rfind_byte(b'/').unwrap_or_else(|| -1);
             if last_slash < 0 {
@@ -291,7 +291,7 @@ public fn compose_target_url(
                 f"{base}{separator}{dir}{h}.{basename}"
             }
         }
-        None => f"{base}{separator}{path}",
+        Maybe.None => f"{base}{separator}{path}",
     }
 }
 
@@ -321,23 +321,23 @@ implement TufRepository for LocalRepository {
         let role_text = role_name_to_text(role);
         let filename = if self.consistent_snapshot {
             match version {
-                Some(v) => f"{v}.{role_text}.json",
-                None    => f"{role_text}.json",
+                Maybe.Some(v) => f"{v}.{role_text}.json",
+                Maybe.None    => f"{role_text}.json",
             }
         } else {
             f"{role_text}.json"
         };
         let path = self.root.join("metadata").join(&filename);
         match Filesystem.read_file_bytes(&path).await {
-            Ok(bytes) => {
+            Result.Ok(bytes) => {
                 let limit = max_bytes_for_role(role);
                 if bytes.len() > limit {
-                    Err(TooLarge { role: role_text, size: bytes.len(), limit })
+                    Result.Err(TooLarge { role: role_text, size: bytes.len(), limit })
                 } else {
-                    Ok(bytes)
+                    Result.Ok(bytes)
                 }
             }
-            Err(_) => Err(NotFound { role: role.clone(), version }),
+            Result.Err(_) => Result.Err(NotFound { role: role.clone(), version }),
         }
     }
 
@@ -351,14 +351,14 @@ implement TufRepository for LocalRepository {
         let _ = hash_prefix; // local mode optionally honours, omitted for v0.1
         let target_path = self.root.join("targets").join(path);
         match Filesystem.read_file_bytes(&target_path).await {
-            Ok(bytes) => {
+            Result.Ok(bytes) => {
                 if bytes.len() > MAX_TARGET_FILE_BYTES {
-                    Err(TooLarge { role: "target".to_text(), size: bytes.len(), limit: MAX_TARGET_FILE_BYTES })
+                    Result.Err(TooLarge { role: "target".to_text(), size: bytes.len(), limit: MAX_TARGET_FILE_BYTES })
                 } else {
-                    Ok(bytes)
+                    Result.Ok(bytes)
                 }
             }
-            Err(_) => Err(TargetNotFound(path.clone())),
+            Result.Err(_) => Result.Err(TargetNotFound(path.clone())),
         }
     }
 }
@@ -387,12 +387,12 @@ public async fn repo_cache_lookup(cache: &RepoCache, key: &Text) -> Maybe<List<B
     let now = epoch_seconds();
     let read = cache.inner.read().await;
     match read.get(key) {
-        Some(entry) => {
+        Maybe.Some(entry) => {
             if now - entry.fetched_at <= cache.ttl_seconds {
-                Some(entry.bytes.clone())
-            } else { None }
+                Maybe.Some(entry.bytes.clone())
+            } else { Maybe.None }
         }
-        None => None,
+        Maybe.None => Maybe.None,
     }
 }
 

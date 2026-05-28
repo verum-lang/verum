@@ -45,23 +45,23 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "universal entry-point for the configuration subsystem",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.configuration;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 
 // Re-export the universal types so callers `mount core.configuration.*`
 // and have everything in scope.
@@ -148,8 +148,8 @@ public fn builtin_registry() -> &'static FormatRegistry {
 /// the text is malformed.
 public fn load_text(text: &Text, format_id: &FormatId) -> Result<ConfigValue, ConfigError> {
     match get_format(builtin_registry(), format_id) {
-        Some(fmt) => fmt.parse(text),
-        None      => Err(config_err(
+        Maybe.Some(fmt) => fmt.parse(text),
+        Maybe.None      => Result.Err(config_err(
             format_id.clone(),
             ConfigErrorKind.IoOther,
             0, 0, 0,
@@ -161,8 +161,8 @@ public fn load_text(text: &Text, format_id: &FormatId) -> Result<ConfigValue, Co
 /// Parse `text` and auto-detect format from `filename` extension.
 public fn load_text_for_path(text: &Text, filename: &Text) -> Result<ConfigValue, ConfigError> {
     match detect_by_path(builtin_registry(), filename) {
-        Some(fmt) => fmt.parse(text),
-        None      => Err(config_err(
+        Maybe.Some(fmt) => fmt.parse(text),
+        Maybe.None      => Result.Err(config_err(
             "unknown".to_text(),
             ConfigErrorKind.IoOther,
             0, 0, 0,
@@ -174,8 +174,8 @@ public fn load_text_for_path(text: &Text, filename: &Text) -> Result<ConfigValue
 /// Serialise a `ConfigValue` as the format identified by `format_id`.
 public fn dump_text(value: &ConfigValue, format_id: &FormatId) -> Result<Text, ConfigError> {
     match get_format(builtin_registry(), format_id) {
-        Some(fmt) => fmt.stringify(value),
-        None      => Err(config_err(
+        Maybe.Some(fmt) => fmt.stringify(value),
+        Maybe.None      => Result.Err(config_err(
             format_id.clone(),
             ConfigErrorKind.IoOther,
             0, 0, 0,
@@ -194,15 +194,15 @@ public fn convert(
 ) -> Result<ConvertedDocument, ConfigError> {
     let reg = builtin_registry();
     let src = match get_format(reg, src_id) {
-        Some(f) => f,
-        None    => return Err(config_err(
+        Maybe.Some(f) => f,
+        Maybe.None    => return Result.Err(config_err(
             src_id.clone(), ConfigErrorKind.IoOther, 0, 0, 0,
             "src format not registered".to_text(),
         )),
     };
     let dst = match get_format(reg, dst_id) {
-        Some(f) => f,
-        None    => return Err(config_err(
+        Maybe.Some(f) => f,
+        Maybe.None    => return Result.Err(config_err(
             dst_id.clone(), ConfigErrorKind.IoOther, 0, 0, 0,
             "dst format not registered".to_text(),
         )),

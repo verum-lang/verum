@@ -101,10 +101,10 @@ public fn derive_space_keys(
         while j < 32 { k[j] = hp_vec[j]; j = j + 1; }
         if use_chacha { HpKey.ChaCha20Block(k) } else { HpKey.AesEcb256(k) }
     } else {
-        return Err(QuicKeyError.BadKeyLength(aead_key_len));
+        return Result.Err(QuicKeyError.BadKeyLength(aead_key_len));
     };
 
-    Ok(QuicSpaceKeys {
+    Result.Ok(QuicSpaceKeys {
         aead_key: aead_key,
         aead_iv:  iv,
         hp_key:   hp_key,
@@ -120,7 +120,7 @@ public fn rotate_space_keys(
 ) -> Result<(TrafficSecret, QuicSpaceKeys), QuicKeyError> {
     let next = secret.next_generation().map_err(|_| QuicKeyError.HkdfFailure)?;
     let keys = derive_space_keys(&next, aead_key_len, use_chacha)?;
-    Ok((next, keys))
+    Result.Ok((next, keys))
 }
 
 /// Pick the AEAD key length given a negotiated AeadKind.

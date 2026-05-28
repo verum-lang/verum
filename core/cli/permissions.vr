@@ -123,7 +123,7 @@ public fn check_command(
     let mut i: Int = 0;
     while i < required.len() {
         if !policy.allows(&required[i]) {
-            return Err(ParseError.bare(
+            return Result.Err(ParseError.bare(
                 ParseErrorKind.NotATty, // closest match in current taxonomy
                 Text.from(
                     f"command '{cmd.name}' requires permission '{required[i].name()}' \
@@ -133,5 +133,5 @@ public fn check_command(
         }
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }

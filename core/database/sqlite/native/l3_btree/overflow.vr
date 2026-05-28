@@ -118,14 +118,14 @@ public fn compute_chain_layout(
     usable_size: Int,
 ) -> Result<ChainLayout, OverflowError> {
     if payload_len < 0 || local_max < 1 || usable_size <= 4 {
-        return Err(InvalidBudget);
+        return Result.Err(InvalidBudget);
     }
     let local_bytes: Int = if payload_len <= local_max { payload_len } else { local_max };
     let remainder: Int = payload_len - local_bytes;
     let per_page: Int = usable_size - 4;
 
     if remainder == 0 {
-        return Ok(ChainLayout {
+        return Result.Ok(ChainLayout {
             local_bytes: local_bytes,
             per_page_bytes: per_page,
             overflow_page_count: 0,
@@ -139,7 +139,7 @@ public fn compute_chain_layout(
         page_count = page_count + 1;
     }
     let tail = remainder - (page_count - 1) * per_page;
-    Ok(ChainLayout {
+    Result.Ok(ChainLayout {
         local_bytes: local_bytes,
         per_page_bytes: per_page,
         overflow_page_count: page_count,
@@ -160,7 +160,7 @@ public fn split_payload(
     layout: &ChainLayout,
 ) -> Result<(List<Byte>, List<List<Byte>>), OverflowError> {
     if payload.len() != (layout.local_bytes + remainder_of(layout)) {
-        return Err(InvalidPayload);
+        return Result.Err(InvalidPayload);
     }
 
     // Local slice.
@@ -191,7 +191,7 @@ public fn split_payload(
         pos = pos + take;
         page_idx = page_idx + 1;
     }
-    Ok((local, out))
+    Result.Ok((local, out))
 }
 
 fn remainder_of(layout: &ChainLayout) -> Int {
@@ -210,9 +210,9 @@ public fn make_write_plan(
     pages: List<Int>,
 ) -> Result<ChainWritePlan, OverflowError> {
     if pages.len() != layout.overflow_page_count {
-        return Err(TooManyPages(pages.len()));
+        return Result.Err(TooManyPages(pages.len()));
     }
-    Ok(ChainWritePlan { layout: layout, pages: pages })
+    Result.Ok(ChainWritePlan { layout: layout, pages: pages })
 }
 
 /// Follow the `next_page` links in an already-written chain, returning
@@ -227,7 +227,7 @@ public fn read_chain(
 ) -> Result<List<Byte>, OverflowError> {
     let _ = first_overflow;
     if pages.len() != layout.overflow_page_count {
-        return Err(TooManyPages(pages.len()));
+        return Result.Err(TooManyPages(pages.len()));
     }
     let mut out: List<Byte> = List.new();
     let mut i: Int = 0;
@@ -251,5 +251,5 @@ public fn read_chain(
         }
         p = p + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }

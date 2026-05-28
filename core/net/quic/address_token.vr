@@ -197,7 +197,7 @@ public fn issue(
     out.push(kind_byte(&plain.kind));
     out.extend_from_slice(&nonce[..]);
     out.extend_from_slice(sealed.as_slice());
-    Ok(out)
+    Result.Ok(out)
 }
 
 // =============================================================================
@@ -209,7 +209,7 @@ public type QuicTokenVerifyOptions is {
     /// (now_unix - max_age_sec) are rejected with `Expired`.
     max_age_sec:      UInt64,
     /// Require the client IP to match `expected_client_ip`. When
-    /// None, the IP check is skipped (useful when NAT rebinding
+    /// Maybe.None, the IP check is skipped (useful when NAT rebinding
     /// makes strict binding counter-productive; not recommended for
     /// Retry tokens).
     expected_client_ip: Maybe<List<Byte>>,
@@ -222,8 +222,8 @@ implement QuicTokenVerifyOptions {
     public fn defaults() -> QuicTokenVerifyOptions {
         QuicTokenVerifyOptions {
             max_age_sec:        86_400_u64,           // 24 h
-            expected_client_ip: None,
-            required_kind:      None,
+            expected_client_ip: Maybe.None,
+            required_kind:      Maybe.None,
         }
     }
 }
@@ -235,29 +235,29 @@ public fn verify(
     opts:       &QuicTokenVerifyOptions,
 ) -> Result<TokenPlaintext, TokenError> {
     if wire.len() < 8 + 1 + 1 + 12 + 16 {
-        return Err(TokenError.Malformed);
+        return Result.Err(TokenError.Malformed);
     }
     // Key ID match.
     let mut i: Int = 0;
     while i < 8 {
         if wire[i] != key.key_id[i] {
-            return Err(TokenError.WrongKeyId);
+            return Result.Err(TokenError.WrongKeyId);
         }
         i = i + 1;
     }
-    if wire[8] != WIRE_VERSION { return Err(TokenError.Malformed); }
+    if wire[8] != WIRE_VERSION { return Result.Err(TokenError.Malformed); }
     let kind = match wire[9] {
         0_u8 => QuicTokenKind.Retry,
         1_u8 => QuicTokenKind.NewToken,
-        _    => return Err(TokenError.Malformed),
+        _    => return Result.Err(TokenError.Malformed),
     };
     match &opts.required_kind {
-        Some(required) => {
+        Maybe.Some(required) => {
             if !kind_eq(&kind, required) {
-                return Err(TokenError.WrongKind);
+                return Result.Err(TokenError.WrongKind);
             }
         },
-        None => {},
+        Maybe.None => {},
     }
 
     let mut nonce: [Byte; 12] = [0_u8; 12];
@@ -284,18 +284,18 @@ public fn verify(
 
     // Age check.
     if now_unix > decoded.issued_unix + opts.max_age_sec {
-        return Err(TokenError.Expired);
+        return Result.Err(TokenError.Expired);
     }
     // Client-IP bind check.
     match &opts.expected_client_ip {
-        Some(expected) => {
+        Maybe.Some(expected) => {
             if !ip_eq(&decoded.client_ip, expected) {
-                return Err(TokenError.ClientIpMismatch);
+                return Result.Err(TokenError.ClientIpMismatch);
             }
         },
-        None => {},
+        Maybe.None => {},
     }
-    Ok(decoded)
+    Result.Ok(decoded)
 }
 
 // =============================================================================
@@ -335,13 +335,13 @@ fn encode_plaintext(p: &TokenPlaintext) -> List<Byte> {
 }
 
 fn decode_plaintext(buf: &[Byte], kind_hint: QuicTokenKind) -> Result<TokenPlaintext, TokenError> {
-    if buf.len() < 1 + 8 + 1 { return Err(TokenError.Malformed); }
+    if buf.len() < 1 + 8 + 1 { return Result.Err(TokenError.Malformed); }
     let kind = match buf[0] {
         0_u8 => QuicTokenKind.Retry,
         1_u8 => QuicTokenKind.NewToken,
-        _    => return Err(TokenError.Malformed),
+        _    => return Result.Err(TokenError.Malformed),
     };
-    if !kind_eq(&kind, &kind_hint) { return Err(TokenError.Malformed); }
+    if !kind_eq(&kind, &kind_hint) { return Result.Err(TokenError.Malformed); }
     let t: UInt64 =
           ((buf[1] as UInt64) << 56)
         | ((buf[2] as UInt64) << 48)
@@ -353,18 +353,18 @@ fn decode_plaintext(buf: &[Byte], kind_hint: QuicTokenKind) -> Result<TokenPlain
         |  (buf[8] as UInt64);
     let ip_len = buf[9] as Int;
     if ip_len > 16 || 10 + ip_len + 1 > buf.len() {
-        return Err(TokenError.Malformed);
+        return Result.Err(TokenError.Malformed);
     }
     let mut ip: List<Byte> = List.with_capacity(ip_len);
     ip.extend_from_slice(&buf[10..10 + ip_len]);
     let dcid_off = 10 + ip_len;
     let dcid_len = buf[dcid_off] as Int;
     if dcid_off + 1 + dcid_len > buf.len() {
-        return Err(TokenError.Malformed);
+        return Result.Err(TokenError.Malformed);
     }
     let mut dcid: List<Byte> = List.with_capacity(dcid_len);
     dcid.extend_from_slice(&buf[dcid_off + 1..dcid_off + 1 + dcid_len]);
-    Ok(TokenPlaintext {
+    Result.Ok(TokenPlaintext {
         kind: kind, issued_unix: t, client_ip: ip, orig_dcid: dcid,
     })
 }

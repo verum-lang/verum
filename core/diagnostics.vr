@@ -183,8 +183,8 @@ implement PanicReport {
     public fn from_info(info: PanicInfo) -> PanicReport {
         PanicReport {
             info: info,
-            task: None,
-            header: None,
+            task: Maybe.None,
+            header: Maybe.None,
             call_stack: List.new(),
             thread_name: Text.new(),
         }
@@ -201,7 +201,7 @@ implement PanicReport {
     /// Builder: attach an async task snapshot. The hook should call
     /// this when the panic occurred inside an executor-driven task.
     public fn with_task(mut self, task: TaskInfo) -> PanicReport {
-        self.task = Some(task);
+        self.task = Maybe.Some(task);
         self
     }
 
@@ -211,7 +211,7 @@ implement PanicReport {
     /// (e.g. through the failing `try_revoke` / `increment_ref_count`
     /// codepath in `core/mem`).
     public fn with_header(mut self, header: MemHeaderView) -> PanicReport {
-        self.header = Some(header);
+        self.header = Maybe.Some(header);
         self
     }
 
@@ -260,27 +260,27 @@ implement PanicReport {
         let mut out: Text = "PanicReport at panic site:\n".clone();
         out = out + f"  panic: {self.info.message}";
         match self.info.location() {
-            Some(loc) => {
+            Maybe.Some(loc) => {
                 out = out + f"\n  at: {loc.file}:{loc.line}:{loc.column}";
             }
-            None => {}
+            Maybe.None => {}
         }
         if self.has_thread_name() {
             out = out + f"\n  thread: {self.thread_name}";
         }
         match &self.task {
-            Some(t) => {
+            Maybe.Some(t) => {
                 out = out + "\n";
                 out = out + &t.format_panic_context();
             }
-            None => {}
+            Maybe.None => {}
         }
         match &self.header {
-            Some(h) => {
+            Maybe.Some(h) => {
                 out = out + "\n";
                 out = out + &h.format_panic_context();
             }
-            None => {}
+            Maybe.None => {}
         }
         if self.has_call_stack() {
             out = out + "\n  call stack:";
@@ -305,16 +305,16 @@ implement Display for PanicReport {
             f.write_str(f",thread={self.thread_name}")?;
         }
         match &self.task {
-            Some(t) => {
+            Maybe.Some(t) => {
                 f.write_str(f",task={t.id.id}")?;
             }
-            None => {}
+            Maybe.None => {}
         }
         match &self.header {
-            Some(h) => {
+            Maybe.Some(h) => {
                 f.write_str(f",alloc_gen={h.generation}")?;
             }
-            None => {}
+            Maybe.None => {}
         }
         f.write_str("]")
     }
@@ -333,20 +333,20 @@ implement Debug for PanicReport {
             f.write_str(f"  thread_name: {self.thread_name}\n")?;
         }
         match &self.task {
-            Some(t) => {
+            Maybe.Some(t) => {
                 f.write_str("  task: ")?;
                 t.fmt_debug(f)?;
                 f.write_str("\n")?;
             }
-            None => {}
+            Maybe.None => {}
         }
         match &self.header {
-            Some(h) => {
+            Maybe.Some(h) => {
                 f.write_str("  header: ")?;
                 h.fmt_debug(f)?;
                 f.write_str("\n")?;
             }
-            None => {}
+            Maybe.None => {}
         }
         f.write_str("}")
     }

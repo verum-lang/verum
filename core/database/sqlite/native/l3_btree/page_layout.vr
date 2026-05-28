@@ -98,11 +98,11 @@ public const PAGE_HEADER_SIZE_INTERIOR: Int = 12;
 public type PageKind is TableLeaf | TableInterior | IndexLeaf | IndexInterior;
 
 public fn page_kind_from_byte(b: Byte) -> Result<PageKind, Text> {
-    if b == PAGE_TYPE_TABLE_LEAF       { Ok(TableLeaf) }
-    else if b == PAGE_TYPE_TABLE_INTERIOR { Ok(TableInterior) }
-    else if b == PAGE_TYPE_INDEX_LEAF     { Ok(IndexLeaf) }
-    else if b == PAGE_TYPE_INDEX_INTERIOR { Ok(IndexInterior) }
-    else { Err("page_layout: unknown page flag".clone()) }
+    if b == PAGE_TYPE_TABLE_LEAF       { Result.Ok(TableLeaf) }
+    else if b == PAGE_TYPE_TABLE_INTERIOR { Result.Ok(TableInterior) }
+    else if b == PAGE_TYPE_INDEX_LEAF     { Result.Ok(IndexLeaf) }
+    else if b == PAGE_TYPE_INDEX_INTERIOR { Result.Ok(IndexInterior) }
+    else { Result.Err("page_layout: unknown page flag".clone()) }
 }
 
 public fn page_kind_to_byte(k: PageKind) -> Byte {
@@ -217,15 +217,15 @@ public fn parse_page_header(buf: &[Byte], start: Int)
     -> Result<PageHeader, PageLayoutError>
 {
     if buf.len() - start < PAGE_HEADER_SIZE_LEAF {
-        return Err(ShortBuffer);
+        return Result.Err(ShortBuffer);
     }
     let kind = match page_kind_from_byte(buf[start]) {
-        Ok(k)  => k,
-        Err(_) => { return Err(BadKind(buf[start])); }
+        Result.Ok(k)  => k,
+        Result.Err(_) => { return Result.Err(BadKind(buf[start])); }
     };
     let interior = page_kind_is_interior(kind);
     if interior && (buf.len() - start < PAGE_HEADER_SIZE_INTERIOR) {
-        return Err(ShortBuffer);
+        return Result.Err(ShortBuffer);
     }
 
     let first_fb   = read_u16_be(buf, start + 1);
@@ -241,7 +241,7 @@ public fn parse_page_header(buf: &[Byte], start: Int)
     // SQLite: a cell_content_start of 0 is interpreted as 65536.
     let ccs_canon: Int = if ccs_raw == 0_u16 { 65536 } else { ccs_raw as Int };
 
-    Ok(PageHeader {
+    Result.Ok(PageHeader {
         kind: kind,
         first_freeblock: first_fb,
         cell_count: cell_cnt,
@@ -295,7 +295,7 @@ public fn parse_cell_pointer_array(
     let arr_start = page_start + hdr_size;
     let n = header.cell_count as Int;
     if arr_start + n * 2 > buf.len() {
-        return Err(ShortBuffer);
+        return Result.Err(ShortBuffer);
     }
     let mut out: List<Int> = List.new();
     let mut i: Int = 0;
@@ -304,7 +304,7 @@ public fn parse_cell_pointer_array(
         out.push(off_in_page);
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // -----------------------------------------------------------------------------
@@ -334,16 +334,16 @@ public fn parse_cell(
     local_max: Int,
 ) -> Result<CellParts, PageLayoutError> {
     if cell_off >= buf.len() {
-        return Err(ShortBuffer);
+        return Result.Err(ShortBuffer);
     }
 
     match kind {
         TableLeaf => {
             let (payload_len, a) = match varint.decode(buf, cell_off) {
-                Ok(r)  => r, Err(_) => { return Err(ShortBuffer); }
+                Result.Ok(r)  => r, Result.Err(_) => { return Result.Err(ShortBuffer); }
             };
             let (rowid, b) = match varint.decode(buf, cell_off + a) {
-                Ok(r)  => r, Err(_) => { return Err(ShortBuffer); }
+                Result.Ok(r)  => r, Result.Err(_) => { return Result.Err(ShortBuffer); }
             };
             let local_bytes: Int = if (payload_len as Int) <= local_max {
                 payload_len as Int
@@ -354,27 +354,27 @@ public fn parse_cell(
             let local_end = payload_start + local_bytes;
             let overflow: UInt32 = if (payload_len as Int) > local_max {
                 if local_end + 4 > buf.len() {
-                    return Err(ShortBuffer);
+                    return Result.Err(ShortBuffer);
                 }
                 read_u32_be(buf, local_end)
             } else {
                 0 as UInt32
             };
-            Ok(TableLeafCell(payload_len, rowid, local_end, overflow))
+            Result.Ok(TableLeafCell(payload_len, rowid, local_end, overflow))
         }
         TableInterior => {
             if cell_off + 4 > buf.len() {
-                return Err(ShortBuffer);
+                return Result.Err(ShortBuffer);
             }
             let left_child = read_u32_be(buf, cell_off);
             let (rowid, _) = match varint.decode(buf, cell_off + 4) {
-                Ok(r)  => r, Err(_) => { return Err(ShortBuffer); }
+                Result.Ok(r)  => r, Result.Err(_) => { return Result.Err(ShortBuffer); }
             };
-            Ok(TableInteriorCell(left_child, rowid))
+            Result.Ok(TableInteriorCell(left_child, rowid))
         }
         IndexLeaf => {
             let (payload_len, a) = match varint.decode(buf, cell_off) {
-                Ok(r)  => r, Err(_) => { return Err(ShortBuffer); }
+                Result.Ok(r)  => r, Result.Err(_) => { return Result.Err(ShortBuffer); }
             };
             let local_bytes: Int = if (payload_len as Int) <= local_max {
                 payload_len as Int
@@ -385,21 +385,21 @@ public fn parse_cell(
             let local_end = payload_start + local_bytes;
             let overflow: UInt32 = if (payload_len as Int) > local_max {
                 if local_end + 4 > buf.len() {
-                    return Err(ShortBuffer);
+                    return Result.Err(ShortBuffer);
                 }
                 read_u32_be(buf, local_end)
             } else {
                 0 as UInt32
             };
-            Ok(IndexLeafCell(payload_len, local_end, overflow))
+            Result.Ok(IndexLeafCell(payload_len, local_end, overflow))
         }
         IndexInterior => {
             if cell_off + 4 > buf.len() {
-                return Err(ShortBuffer);
+                return Result.Err(ShortBuffer);
             }
             let left_child = read_u32_be(buf, cell_off);
             let (payload_len, a) = match varint.decode(buf, cell_off + 4) {
-                Ok(r)  => r, Err(_) => { return Err(ShortBuffer); }
+                Result.Ok(r)  => r, Result.Err(_) => { return Result.Err(ShortBuffer); }
             };
             let local_bytes: Int = if (payload_len as Int) <= local_max {
                 payload_len as Int
@@ -410,13 +410,13 @@ public fn parse_cell(
             let local_end = payload_start + local_bytes;
             let overflow: UInt32 = if (payload_len as Int) > local_max {
                 if local_end + 4 > buf.len() {
-                    return Err(ShortBuffer);
+                    return Result.Err(ShortBuffer);
                 }
                 read_u32_be(buf, local_end)
             } else {
                 0 as UInt32
             };
-            Ok(IndexInteriorCell(left_child, payload_len, local_end, overflow))
+            Result.Ok(IndexInteriorCell(left_child, payload_len, local_end, overflow))
         }
     }
 }

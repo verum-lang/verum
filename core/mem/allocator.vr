@@ -244,20 +244,20 @@ implement Layout {
     }
 
     /// Fallible counterpart to [`from_size_align`]. Returns
-    /// `Err(AllocError.InvalidAlignment { alignment })` when the
+    /// `Result.Err(AllocError.InvalidAlignment { alignment })` when the
     /// alignment is non-positive or not a power of two, and
-    /// `Err(AllocError.InvalidSize { size })` when the size is
+    /// `Result.Err(AllocError.InvalidSize { size })` when the size is
     /// negative. Use this from any path that takes the alignment
     /// from external input (FFI, configuration, deserialised
     /// data) — panic is the wrong failure mode at trust boundaries.
     public fn try_from_size_align(size: Int, align: Int) -> Result<Layout, AllocError> {
         if size < 0 {
-            return Err(AllocError.InvalidSize { size: size });
+            return Result.Err(AllocError.InvalidSize { size: size });
         }
         if align <= 0 || (align & (align - 1)) != 0 {
-            return Err(AllocError.InvalidAlignment { alignment: align });
+            return Result.Err(AllocError.InvalidAlignment { alignment: align });
         }
-        Ok(Layout { size_: size, align_: align })
+        Result.Ok(Layout { size_: size, align_: align })
     }
 
     /// Create a layout from size with natural alignment.
@@ -293,7 +293,7 @@ implement Layout {
     /// ## Panics
     /// Panics on `n < 0` and on `self.size_ * n` overflow. For
     /// untrusted `n` (deserialized config, peer-supplied count) use
-    /// [`try_repeat`] which returns `Err(AllocError)` instead.
+    /// [`try_repeat`] which returns `Result.Err(AllocError)` instead.
     ///
 
     /// Without these checks, a peer-controlled `n` of 2^60 against
@@ -316,16 +316,16 @@ implement Layout {
     }
 
     /// Fallible counterpart to [`repeat`]. Returns
-    /// `Err(AllocError.InvalidSize)` for `n < 0` or for the
+    /// `Result.Err(AllocError.InvalidSize)` for `n < 0` or for the
     /// `size_ * n` overflow case. Use at trust boundaries.
     public fn try_repeat(&self, n: Int) -> Result<Layout, AllocError> {
         if n < 0 {
-            return Err(AllocError.InvalidSize { size: n });
+            return Result.Err(AllocError.InvalidSize { size: n });
         }
         if n > 0 && self.size_ > 0 && self.size_ > Int.MAX / n {
-            return Err(AllocError.InvalidSize { size: -1 });   // -1 sentinel: unrepresentable
+            return Result.Err(AllocError.InvalidSize { size: -1 });   // -1 sentinel: unrepresentable
         }
-        Ok(Layout {
+        Result.Ok(Layout {
             size_: self.size_ * n,
             align_: self.align_,
         })
@@ -359,17 +359,17 @@ implement Layout {
     }
 
     /// Fallible counterpart to [`extend`]. Returns
-    /// `Err(AllocError.InvalidSize)` on either overflow path.
+    /// `Result.Err(AllocError.InvalidSize)` on either overflow path.
     public fn try_extend(&self, other: Layout) -> Result<Layout, AllocError> {
         let align = other.align_;
         if self.size_ > Int.MAX - (align - 1) {
-            return Err(AllocError.InvalidSize { size: -1 });
+            return Result.Err(AllocError.InvalidSize { size: -1 });
         }
         let padded_size = align_up(self.size_, align);
         if padded_size > Int.MAX - other.size_ {
-            return Err(AllocError.InvalidSize { size: -1 });
+            return Result.Err(AllocError.InvalidSize { size: -1 });
         }
-        Ok(Layout {
+        Result.Ok(Layout {
             size_: padded_size + other.size_,
             align_: if self.align_ > other.align_ { self.align_ } else { other.align_ },
         })
@@ -414,22 +414,22 @@ public type Alloc is protocol {
 // =============================================================================
 
 /// Get size class index for an allocation size.
-/// Returns None for large allocations (> LARGE_THRESHOLD).
+/// Returns Maybe.None for large allocations (> LARGE_THRESHOLD).
 @inline
 public fn size_class_index(size: Int) -> Maybe<Int> {
     // Unrolled for performance
-    if size <= 16 { return Some(0); }
-    if size <= 32 { return Some(1); }
-    if size <= 48 { return Some(2); }
-    if size <= 64 { return Some(3); }
-    if size <= 80 { return Some(4); }
-    if size <= 96 { return Some(5); }
-    if size <= 128 { return Some(6); }
-    if size <= 256 { return Some(7); }
-    if size <= 512 { return Some(8); }
-    if size <= 1024 { return Some(9); }
-    if size <= 2048 { return Some(10); }
-    None
+    if size <= 16 { return Maybe.Some(0); }
+    if size <= 32 { return Maybe.Some(1); }
+    if size <= 48 { return Maybe.Some(2); }
+    if size <= 64 { return Maybe.Some(3); }
+    if size <= 80 { return Maybe.Some(4); }
+    if size <= 96 { return Maybe.Some(5); }
+    if size <= 128 { return Maybe.Some(6); }
+    if size <= 256 { return Maybe.Some(7); }
+    if size <= 512 { return Maybe.Some(8); }
+    if size <= 1024 { return Maybe.Some(9); }
+    if size <= 2048 { return Maybe.Some(10); }
+    Maybe.None
 }
 
 /// Get actual allocation size for a size class.
@@ -632,11 +632,11 @@ implement AllocPageHeader {
     }
 
     /// Allocate a slot from this page.
-    /// Returns (slot_index, generation) or None if page is full.
+    /// Returns (slot_index, generation) or Maybe.None if page is full.
     @inline
     public fn alloc_slot(&mut self) -> Maybe<(Int, UInt32)> {
         if self.free_list_head < 0 {
-            return None;
+            return Maybe.None;
         }
 
         let index = self.free_list_head as Int;
@@ -653,7 +653,7 @@ implement AllocPageHeader {
         let slot_delta = metadata[index] as UInt32;
         let full_gen = page_gen + slot_delta;
 
-        Some((index, full_gen))
+        Maybe.Some((index, full_gen))
     }
 
     /// Deallocate a slot in this page.
@@ -804,19 +804,19 @@ implement AllocatorLocalHeap {
     public fn alloc(&mut self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
         // Check for large allocation
         let class_idx = match size_class_index(size) {
-            Some(idx) => idx,
-            None => return self.alloc_large(size, align),
+            Maybe.Some(idx) => idx,
+            Maybe.None => return self.alloc_large(size, align),
         };
 
         // Try to allocate from current page
         let page = self.pages[class_idx];
         if (page as Int) != 0 {
-            if let Some((slot_idx, gen)) = page.alloc_slot() {
+            if let Maybe.Some((slot_idx, gen)) = page.alloc_slot() {
                 let ptr = page.slot_ptr(slot_idx);
                 let epoch = page.epoch;
                 self.alloc_count = self.alloc_count + 1;
                 self.bytes_allocated = self.bytes_allocated + SIZE_CLASSES[class_idx] as UInt64;
-                return Ok((ptr, gen, epoch));
+                return Result.Ok((ptr, gen, epoch));
             }
         }
 
@@ -839,7 +839,7 @@ implement AllocatorLocalHeap {
         self.alloc_count = self.alloc_count + 1;
         self.bytes_allocated = self.bytes_allocated + SIZE_CLASSES[class_idx] as UInt64;
 
-        Ok((ptr, gen, epoch))
+        Result.Ok((ptr, gen, epoch))
     }
 
     /// Large allocation via direct mmap.
@@ -873,7 +873,7 @@ implement AllocatorLocalHeap {
         self.large_alloc_count = self.large_alloc_count + 1;
         self.bytes_allocated = self.bytes_allocated + aligned_size as UInt64;
 
-        Ok((user_ptr, gen, epoch))
+        Result.Ok((user_ptr, gen, epoch))
     }
 
     /// Deallocate memory by pointer.
@@ -905,7 +905,7 @@ implement AllocatorLocalHeap {
         }
 
         self.dealloc_count = self.dealloc_count + 1;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Deallocate large object.
@@ -921,7 +921,7 @@ implement AllocatorLocalHeap {
         os_munmap(header_ptr, header.mapped_size)?;
 
         self.dealloc_count = self.dealloc_count + 1;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Process remote frees for all pages.
@@ -1010,7 +1010,7 @@ fn request_new_page(class_idx: Int, thread_id: UInt32) -> Result<&mut AllocPageH
 
     unlock_page_manager();
 
-    Ok(page)
+    Result.Ok(page)
 }
 
 /// Return a page to the global pool
@@ -1055,7 +1055,7 @@ fn os_mmap(size: Int) -> Result<&unsafe Byte, AllocError> {
         );
 
         if (result as Int) != -1 {
-            return Ok(result);
+            return Result.Ok(result);
         }
 
         // Fall back to regular pages
@@ -1069,13 +1069,13 @@ fn os_mmap(size: Int) -> Result<&unsafe Byte, AllocError> {
         );
 
         if (result as Int) == -1 {
-            return Err(AllocError.MmapFailed { code: sys.linux.errno.get_errno() });
+            return Result.Err(AllocError.MmapFailed { code: sys.linux.errno.get_errno() });
         }
 
         // Advise kernel about huge pages
         madvise(result, size, MADV_HUGEPAGE);
 
-        return Ok(result);
+        return Result.Ok(result);
     }
 
     @cfg(target_os = "macos") {
@@ -1089,10 +1089,10 @@ fn os_mmap(size: Int) -> Result<&unsafe Byte, AllocError> {
         );
 
         if (result as Int) == -1 {
-            return Err(AllocError.MmapFailed { code: sys.darwin.libsystem.errno() });
+            return Result.Err(AllocError.MmapFailed { code: sys.darwin.libsystem.errno() });
         }
 
-        return Ok(result);
+        return Result.Ok(result);
     }
 
     @cfg(target_os = "windows") {
@@ -1104,10 +1104,10 @@ fn os_mmap(size: Int) -> Result<&unsafe Byte, AllocError> {
         );
 
         if (result as Int) == 0 {
-            return Err(AllocError.MmapFailed { code: sys.windows.kernel32.GetLastError() as Int });
+            return Result.Err(AllocError.MmapFailed { code: sys.windows.kernel32.GetLastError() as Int });
         }
 
-        return Ok(result);
+        return Result.Ok(result);
     }
 
     // No @cfg block matched: this build targets an OS we don't have
@@ -1115,7 +1115,7 @@ fn os_mmap(size: Int) -> Result<&unsafe Byte, AllocError> {
     // caller can fall back to a different allocator strategy or
     // refuse the operation explicitly — better than panicking from
     // inside the allocator hot path.
-    Err(AllocError.UnsupportedOs { op: "mmap" })
+    Result.Err(AllocError.UnsupportedOs { op: "mmap" })
 }
 
 /// Deallocate memory via munmap/VirtualFree
@@ -1123,30 +1123,30 @@ fn os_munmap(ptr: &unsafe Byte, size: Int) -> Result<(), AllocError> {
     @cfg(target_os = "linux") {
         let result = munmap(ptr, size);
         if result != 0 {
-            return Err(AllocError.MunmapFailed { code: sys.linux.errno.get_errno() });
+            return Result.Err(AllocError.MunmapFailed { code: sys.linux.errno.get_errno() });
         }
-        return Ok(());
+        return Result.Ok(());
     }
 
     @cfg(target_os = "macos") {
         let result = munmap(ptr, size);
         if result != 0 {
-            return Err(AllocError.MunmapFailed { code: sys.darwin.libsystem.errno() });
+            return Result.Err(AllocError.MunmapFailed { code: sys.darwin.libsystem.errno() });
         }
-        return Ok(());
+        return Result.Ok(());
     }
 
     @cfg(target_os = "windows") {
         let result = VirtualFree(ptr, 0, MEM_RELEASE);
         if !result {
-            return Err(AllocError.MunmapFailed { code: sys.windows.kernel32.GetLastError() as Int });
+            return Result.Err(AllocError.MunmapFailed { code: sys.windows.kernel32.GetLastError() as Int });
         }
-        return Ok(());
+        return Result.Ok(());
     }
 
     // See [`os_mmap`] above — typed error rather than `unreachable()`
     // for forward compatibility with new target OSes.
-    Err(AllocError.UnsupportedOs { op: "munmap" })
+    Result.Err(AllocError.UnsupportedOs { op: "munmap" })
 }
 
 // =============================================================================
@@ -1155,18 +1155,18 @@ fn os_munmap(ptr: &unsafe Byte, size: Int) -> Result<(), AllocError> {
 
 /// Thread-local heap storage
 @thread_local
-static mut LOCAL_HEAP: Maybe<AllocatorLocalHeap> = None;
+static mut LOCAL_HEAP: Maybe<AllocatorLocalHeap> = Maybe.None;
 
 /// Get or create the thread-local heap
 @inline
 fn get_local_heap() -> &mut AllocatorLocalHeap {
     unsafe {
         match LOCAL_HEAP {
-            Some(ref mut heap) => heap,
-            None => {
+            Maybe.Some(ref mut heap) => heap,
+            Maybe.None => {
                 // Get thread ID from TLS
                 let tid = get_thread_id();
-                LOCAL_HEAP = Some(AllocatorLocalHeap.new(tid));
+                LOCAL_HEAP = Maybe.Some(AllocatorLocalHeap.new(tid));
                 LOCAL_HEAP.as_mut().unwrap()
             }
         }
@@ -1209,16 +1209,16 @@ fn get_thread_id() -> UInt32 {
 @inline
 public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
     if size <= 0 {
-        return Err(AllocError.InvalidSize { size: size });
+        return Result.Err(AllocError.InvalidSize { size: size });
     }
     if align <= 0 || (align & (align - 1)) != 0 {
-        return Err(AllocError.InvalidAlignment { alignment: align });
+        return Result.Err(AllocError.InvalidAlignment { alignment: align });
     }
 
     let heap = get_local_heap();
     match heap.alloc(size, align) {
-        Ok(result) => Ok(result),
-        Err(e) => Err(AllocError.OutOfMemory { requested: size }),
+        Result.Ok(result) => Result.Ok(result),
+        Result.Err(e) => Result.Err(AllocError.OutOfMemory { requested: size }),
     }
 }
 
@@ -1240,11 +1240,11 @@ public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UIn
 @inline
 public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
     match cbgr_alloc(size, align) {
-        Ok(result) => {
+        Result.Ok(result) => {
             memset(result.0, 0, size);
-            Ok(result)
+            Result.Ok(result)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -1253,7 +1253,7 @@ public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt
 
 /// Forwards the underlying heap-side error verbatim instead
 /// of collapsing every failure to `InvalidPointer`. The
-/// previous `Err(e) => Err(AllocError.InvalidPointer)` arm
+/// previous `Result.Err(e) => Result.Err(AllocError.InvalidPointer)` arm
 /// silently lost the actual root cause (could have been
 /// `OutOfMemory` from a return-page-to-OS munmap, an
 /// allocator-state corruption signal, etc.) — a debuggability
@@ -1261,7 +1261,7 @@ public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt
 @inline
 public fn cbgr_dealloc(ptr: &unsafe Byte) -> Result<(), AllocError> {
     if (ptr as Int) == 0 {
-        return Err(AllocError.InvalidPointer);
+        return Result.Err(AllocError.InvalidPointer);
     }
 
     let heap = get_local_heap();
@@ -1300,15 +1300,15 @@ public fn cbgr_realloc(
     align: Int,
 ) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
     match cbgr_alloc(new_size, align) {
-        Ok(new_result) => {
+        Result.Ok(new_result) => {
             let new_ptr = new_result.0;
             let copy_size = if old_size < new_size { old_size } else { new_size };
             // Bulk copy via memcpy — see function-level doc.
             memcpy(new_ptr, ptr, copy_size);
 
             match cbgr_dealloc(ptr) {
-                Ok(()) => Ok(new_result),
-                Err(e) => {
+                Result.Ok(()) => Result.Ok(new_result),
+                Result.Err(e) => {
                     // Strong guarantee: the original allocation
                     // is still live (dealloc failed) AND we
                     // just allocated a new block. Release the
@@ -1317,11 +1317,11 @@ public fn cbgr_realloc(
                     // allocation. The original `ptr` remains
                     // owned by the caller.
                     let _ = cbgr_dealloc(new_ptr);
-                    Err(e)
+                    Result.Err(e)
                 }
             }
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -1447,8 +1447,8 @@ static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 public fn get_allocator() -> &dyn Allocator {
     // Try to get allocator from context
     match sys.common.ctx_get(CONTEXT_SLOT_ALLOCATOR) {
-        Some(ptr) => unsafe { ptr as &dyn Allocator },
-        None => &GLOBAL_ALLOCATOR as &dyn Allocator,
+        Maybe.Some(ptr) => unsafe { ptr as &dyn Allocator },
+        Maybe.None => &GLOBAL_ALLOCATOR as &dyn Allocator,
     }
 }
 
@@ -1602,7 +1602,7 @@ implement TieredAllocator {
     /// The underlying AllocatorLocalHeap and page infrastructure is initialized
     /// lazily on first allocation per thread.
     public fn init() -> Result<TieredAllocator, AllocError> {
-        Ok(TieredAllocator())
+        Result.Ok(TieredAllocator())
     }
 
     /// Shutdown the allocator and release thread-local caches.
@@ -1665,7 +1665,7 @@ public type SimpleAllocator is {
 implement SimpleAllocator {
     /// Initialize the simple allocator.
     public fn init() -> Result<SimpleAllocator, AllocError> {
-        Ok(SimpleAllocator {
+        Result.Ok(SimpleAllocator {
             active_allocs: 0,
             total_bytes: 0,
         })
@@ -1697,7 +1697,7 @@ implement Allocator for SimpleAllocator {
     fn alloc(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
         let result = cbgr_alloc(size, align);
         match &result {
-            Ok(_) => {
+            Result.Ok(_) => {
                 // Track allocation (safe to cast away const for internal tracking)
                 unsafe {
                     let self_mut = &mut *(self as &unsafe SimpleAllocator);
@@ -1705,7 +1705,7 @@ implement Allocator for SimpleAllocator {
                     self_mut.total_bytes = self_mut.total_bytes + size;
                 }
             }
-            Err(_) => {}
+            Result.Err(_) => {}
         }
         result
     }
@@ -1713,14 +1713,14 @@ implement Allocator for SimpleAllocator {
     fn alloc_zeroed(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
         let result = cbgr_alloc_zeroed(size, align);
         match &result {
-            Ok(_) => {
+            Result.Ok(_) => {
                 unsafe {
                     let self_mut = &mut *(self as &unsafe SimpleAllocator);
                     self_mut.active_allocs = self_mut.active_allocs + 1;
                     self_mut.total_bytes = self_mut.total_bytes + size;
                 }
             }
-            Err(_) => {}
+            Result.Err(_) => {}
         }
         result
     }
@@ -1728,13 +1728,13 @@ implement Allocator for SimpleAllocator {
     fn dealloc(&self, ptr: &unsafe Byte) -> Result<(), AllocError> {
         let result = cbgr_dealloc(ptr);
         match &result {
-            Ok(()) => {
+            Result.Ok(()) => {
                 unsafe {
                     let self_mut = &mut *(self as &unsafe SimpleAllocator);
                     self_mut.active_allocs = self_mut.active_allocs - 1;
                 }
             }
-            Err(_) => {}
+            Result.Err(_) => {}
         }
         result
     }
@@ -1748,13 +1748,13 @@ implement Allocator for SimpleAllocator {
     ) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
         let result = cbgr_realloc(ptr, old_size, new_size, align);
         match &result {
-            Ok(_) => {
+            Result.Ok(_) => {
                 unsafe {
                     let self_mut = &mut *(self as &unsafe SimpleAllocator);
                     self_mut.total_bytes = self_mut.total_bytes + (new_size - old_size);
                 }
             }
-            Err(_) => {}
+            Result.Err(_) => {}
         }
         result
     }
@@ -1819,12 +1819,12 @@ implement MemStackAllocator {
     /// Panics if the backing memory cannot be allocated.
     public fn init(capacity: Int) -> Result<MemStackAllocator, AllocError> {
         if capacity <= 0 {
-            return Err(AllocError.InvalidSize { size: capacity });
+            return Result.Err(AllocError.InvalidSize { size: capacity });
         }
         let result = cbgr_alloc(capacity, 16);
         match result {
-            Ok((ptr, _gen, _caps)) => {
-                Ok(MemStackAllocator {
+            Result.Ok((ptr, _gen, _caps)) => {
+                Result.Ok(MemStackAllocator {
                     base: ptr,
                     offset: 0,
                     capacity: capacity,
@@ -1832,7 +1832,7 @@ implement MemStackAllocator {
                     alloc_count: 0,
                 })
             }
-            Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -1893,7 +1893,7 @@ implement Allocator for MemStackAllocator {
         let new_offset = aligned_offset + size;
 
         if new_offset > self.capacity {
-            return Err(AllocError.OutOfMemory { requested: size });
+            return Result.Err(AllocError.OutOfMemory { requested: size });
         }
 
         let ptr = unsafe { self.base.offset(aligned_offset) };
@@ -1909,26 +1909,26 @@ implement Allocator for MemStackAllocator {
         }
 
         // Return with dummy generation/caps (arena-managed, not individually tracked)
-        Ok((ptr, 0 as UInt32, 0 as UInt16))
+        Result.Ok((ptr, 0 as UInt32, 0 as UInt16))
     }
 
     fn alloc_zeroed(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
         let result = self.alloc(size, align);
         match result {
-            Ok((ptr, gen, caps)) => {
+            Result.Ok((ptr, gen, caps)) => {
                 unsafe {
                     memset(ptr, 0, size);
                 }
-                Ok((ptr, gen, caps))
+                Result.Ok((ptr, gen, caps))
             }
-            Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
     fn dealloc(&self, _ptr: &unsafe Byte) -> Result<(), AllocError> {
         // Bump allocator: individual deallocation is a no-op.
         // All memory is released on reset() or shutdown().
-        Ok(())
+        Result.Ok(())
     }
 
     fn realloc(
@@ -1942,14 +1942,14 @@ implement Allocator for MemStackAllocator {
         // The old space is "leaked" (reclaimed on reset).
         let result = self.alloc(new_size, align);
         match result {
-            Ok((new_ptr, gen, caps)) => {
+            Result.Ok((new_ptr, gen, caps)) => {
                 let copy_size = if old_size < new_size { old_size } else { new_size };
                 unsafe {
                     memcpy(new_ptr, ptr, copy_size);
                 }
-                Ok((new_ptr, gen, caps))
+                Result.Ok((new_ptr, gen, caps))
             }
-            Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
         }
     }
 }

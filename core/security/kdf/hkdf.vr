@@ -138,12 +138,12 @@ public fn hkdf_expand_sha256(
     out: &mut List<Byte>,
 ) -> Result<(), HkdfError> {
     if prk.len() < core.security.hash.sha256.OUTPUT_SIZE {
-        return Err(HkdfError.InvalidPrk { len: prk.len() });
+        return Result.Err(HkdfError.InvalidPrk { len: prk.len() });
     }
     if length > MAX_EXPAND_OUTPUT_256 {
-        return Err(HkdfError.OutputTooLong { requested: length, limit: MAX_EXPAND_OUTPUT_256 });
+        return Result.Err(HkdfError.OutputTooLong { requested: length, limit: MAX_EXPAND_OUTPUT_256 });
     }
-    if length <= 0 { return Ok(()); }
+    if length <= 0 { return Result.Ok(()); }
 
     let n_blocks = (length + core.security.hash.sha256.OUTPUT_SIZE - 1) / core.security.hash.sha256.OUTPUT_SIZE;
     let mut t_prev: [Byte; 32] = [0; 32];
@@ -166,7 +166,7 @@ public fn hkdf_expand_sha256(
         while k < core.security.hash.sha256.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 /// Combined HKDF-SHA-256 — extract + expand in one call.
@@ -203,12 +203,12 @@ public fn hkdf_expand_sha384(
     out: &mut List<Byte>,
 ) -> Result<(), HkdfError> {
     if prk.len() < core.security.hash.sha384.OUTPUT_SIZE {
-        return Err(HkdfError.InvalidPrk { len: prk.len() });
+        return Result.Err(HkdfError.InvalidPrk { len: prk.len() });
     }
     if length > MAX_EXPAND_OUTPUT_384 {
-        return Err(HkdfError.OutputTooLong { requested: length, limit: MAX_EXPAND_OUTPUT_384 });
+        return Result.Err(HkdfError.OutputTooLong { requested: length, limit: MAX_EXPAND_OUTPUT_384 });
     }
-    if length <= 0 { return Ok(()); }
+    if length <= 0 { return Result.Ok(()); }
 
     let n_blocks = (length + core.security.hash.sha384.OUTPUT_SIZE - 1) / core.security.hash.sha384.OUTPUT_SIZE;
     let mut t_prev: [Byte; 48] = [0; 48];
@@ -231,7 +231,7 @@ public fn hkdf_expand_sha384(
         while k < core.security.hash.sha384.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 public fn hkdf_sha384(
@@ -267,12 +267,12 @@ public fn hkdf_expand_sha512(
     out: &mut List<Byte>,
 ) -> Result<(), HkdfError> {
     if prk.len() < core.security.hash.sha512.OUTPUT_SIZE {
-        return Err(HkdfError.InvalidPrk { len: prk.len() });
+        return Result.Err(HkdfError.InvalidPrk { len: prk.len() });
     }
     if length > MAX_EXPAND_OUTPUT_512 {
-        return Err(HkdfError.OutputTooLong { requested: length, limit: MAX_EXPAND_OUTPUT_512 });
+        return Result.Err(HkdfError.OutputTooLong { requested: length, limit: MAX_EXPAND_OUTPUT_512 });
     }
-    if length <= 0 { return Ok(()); }
+    if length <= 0 { return Result.Ok(()); }
 
     let n_blocks = (length + core.security.hash.sha512.OUTPUT_SIZE - 1) / core.security.hash.sha512.OUTPUT_SIZE;
     let mut t_prev: [Byte; 64] = [0; 64];
@@ -295,7 +295,7 @@ public fn hkdf_expand_sha512(
         while k < core.security.hash.sha512.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 public fn hkdf_sha512(

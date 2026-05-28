@@ -30,7 +30,7 @@
 module core.database.sqlite.pool;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount core.database.common.error.{DbError, AdapterId};
 mount core.database.common.pool_impl.{
     ConnectionPool, PoolConfig, PooledConnection, PoolStatsSnapshot,
@@ -60,8 +60,8 @@ implement SqlitePool {
             SqliteAdapter.connect(&cfg_for_factory)
         };
         match ConnectionPool.launch(pool_cfg, factory) {
-            Ok(p)  => Ok(SqlitePool { inner: p, config: sqlite_cfg }),
-            Err(e) => Err(e),
+            Result.Ok(p)  => Result.Ok(SqlitePool { inner: p, config: sqlite_cfg }),
+            Result.Err(e) => Result.Err(e),
         }
     }
 

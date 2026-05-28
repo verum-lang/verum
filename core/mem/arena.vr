@@ -84,11 +84,11 @@
 
 // | Language | Arena Pattern | Mass Invalidation | Safety |
 // |----------------|------------------------|-------------------|-----------|
-// | C | Custom arena | Manual (unsafe) | None |
-// | C++ | pmr.monotonic_buffer | Manual reset | None |
+// | C | Custom arena | Manual (unsafe) | Maybe.None |
+// | C++ | pmr.monotonic_buffer | Manual reset | Maybe.None |
 // | Rust | bumpalo | Lifetime-based | Compile |
 // | Go | sync.Pool | GC-based | Runtime |
-// | Zig | ArenaAllocator | Manual deinit | None |
+// | Zig | ArenaAllocator | Manual deinit | Maybe.None |
 // | **Verum** | **GenerationalArena** | **O(1) gen bump** | **CBGR** |
 //
 

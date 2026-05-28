@@ -36,7 +36,7 @@
 module core.database.common.copy_metrics;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount core.time.SystemClock;
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};
 

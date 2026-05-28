@@ -400,7 +400,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Fallible counterpart to `with_capacity`.
     ///
 
-    /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
+    /// Returns `Result.Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request. Use at trust
     /// boundaries (FFI, untrusted-size config, large allocations
     /// where OOM is recoverable).
@@ -408,8 +408,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
         let cap = capacity.next_power_of_two().max(INITIAL_CAPACITY);
         let mut map = Map.new();
         match map.try_resize(cap) {
-            Ok(()) => Ok(map),
-            Err(e) => Err(e),
+            Result.Ok(()) => Result.Ok(map),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -456,7 +456,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Get value by key.
     ///
-    /// Returns `Some(value)` when `key` is present, `None` otherwise —
+    /// Returns `Maybe.Some(value)` when `key` is present, `Maybe.None` otherwise —
     /// industry-standard semantics matching Rust `HashMap::get`,
     /// Java `Map.get` (with `Optional` wrapping), Scala `Map.get`.
     ///
@@ -476,8 +476,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// # Example
     /// ```verum
     /// let m = map([(1, 10), (2, 20)]);
-    /// assert_eq(m.get(1), Some(10));
-    /// assert_eq(m.get(99), None);
+    /// assert_eq(m.get(1), Maybe.Some(10));
+    /// assert_eq(m.get(99), Maybe.None);
     /// assert_eq(m.get(99).unwrap_or(0), 0);   // explicit fallback
     /// ```
     public fn get(&self, key: K) -> Maybe<V> {
@@ -510,8 +510,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
         }
     }
 
-    /// Mutable counterpart of [`get`].  Returns `Some(&mut V)` for an
-    /// existing key, `None` otherwise.  Used by mutator chains that
+    /// Mutable counterpart of [`get`].  Returns `Maybe.Some(&mut V)` for an
+    /// existing key, `Maybe.None` otherwise.  Used by mutator chains that
     /// walk through a Map<K, Heap<…>> without taking ownership
     /// (e.g. trie descent, btree-like child traversal).
     ///
@@ -583,15 +583,15 @@ implement<K: Hash + Eq, V> Map<K, V> {
     ///
 
     /// Returns references to the key and value stored in the map,
-    /// or None if the key is not present. Used internally by Set.get.
+    /// or Maybe.None if the key is not present. Used internally by Set.get.
     ///
 
     /// # Example
     /// ```verum
     /// let m = map([("hello", 1), ("world", 2)]);
     /// match m.get_key_value("hello") {
-    ///  Some(pair) => assert_eq(*pair.1, 1),
-    ///  None => panic("key not found"),
+    ///  Maybe.Some(pair) => assert_eq(*pair.1, 1),
+    ///  Maybe.None => panic("key not found"),
     /// }
     /// ```
     public fn get_key_value(&self, key: &K) -> Maybe<(&K, &V)> {
@@ -682,13 +682,13 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Fallible counterpart to `insert`.
     ///
 
-    /// Returns `Err(AllocError.OutOfMemory)` if the table needs to
+    /// Returns `Result.Err(AllocError.OutOfMemory)` if the table needs to
     /// grow and the allocator cannot satisfy the request. On Ok the
     /// inner `Maybe<V>` is the previous value for `key` (if any).
     public fn try_insert(&mut self, key: K, value: V) -> Result<Maybe<V>, AllocError> {
         self.try_ensure_capacity()?;
         let hash = self.make_hash_val(key);
-        Ok(self.insert_internal(key, value, hash))
+        Result.Ok(self.insert_internal(key, value, hash))
     }
 
     /// Get an entry for in-place manipulation.
@@ -758,8 +758,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Remove by key.
     ///
-    /// Returns `Some(prior_value)` when `key` was present (and the
-    /// entry has been deleted), `None` when the key was absent.
+    /// Returns `Maybe.Some(prior_value)` when `key` was present (and the
+    /// entry has been deleted), `Maybe.None` when the key was absent.
     /// Industry-standard semantics matching Rust `HashMap::remove`,
     /// Java `Map.remove` (returns the prior value).
     ///
@@ -907,7 +907,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Fallible counterpart to `reserve`.
     ///
 
-    /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
+    /// Returns `Result.Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request. The map is
     /// unchanged on failure.
     public fn try_reserve(&mut self, additional: Int) -> Result<Unit, AllocError> {
@@ -920,7 +920,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
             }
             return self.try_resize(new_cap);
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Shrinks the capacity as much as possible while maintaining the load factor.
@@ -1141,10 +1141,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
     public fn try_insert(&mut self, key: K, value: V) -> Result<&mut V, V> {
         match self.entry(key) {
             Occupied(entry) => {
-                Err(value)
+                Result.Err(value)
             }
             Vacant(entry) => {
-                Ok(entry.insert(value))
+                Result.Ok(entry.insert(value))
             }
         }
     }
@@ -1334,7 +1334,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// ```verum
     /// let m = map([(1, 10), (2, 20), (3, 30)]);
-    /// let filtered = m.filter_map(|k, v| if *v > 15 { Some(*v * 2) } else { None });
+    /// let filtered = m.filter_map(|k, v| if *v > 15 { Maybe.Some(*v * 2) } else { Maybe.None });
     /// // filtered = {2: 40, 3: 60}
     /// ```
     /// Return a new Map containing only entries matching the predicate.
@@ -1462,8 +1462,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// let mut m = map([(1, "a"), (2, "b")]);
     /// let other = map([(2, "x"), (3, "y")]);
     /// m.update(&other);
-    /// assert_eq(m.get(&2), Some(&"x"));
-    /// assert_eq(m.get(&3), Some(&"y"));
+    /// assert_eq(m.get(&2), Maybe.Some(&"x"));
+    /// assert_eq(m.get(&3), Maybe.Some(&"y"));
     /// ```
     public fn update(&mut self, other: &Map<K, V>)
     where K: Clone, V: Clone
@@ -1479,7 +1479,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Remove and return an arbitrary key-value pair from the map.
     ///
 
-    /// Returns `None` if the map is empty.
+    /// Returns `Maybe.None` if the map is empty.
     /// Useful for iteratively draining entries one at a time.
     ///
 
@@ -1499,7 +1499,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
             let mut i = 0;
             while i < self.cap {
                 let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
-                if (entry.hash > 0) && result is None {
+                if (entry.hash > 0) && result is Maybe.None {
                     let key = entry.key;
                     let value = entry.value;
                     let slot: &mut Slot<K, V> = unsafe { &mut *self.entries.offset(i) };
@@ -1617,7 +1617,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     /// Find the first entry matching a predicate.
-    /// Returns the key-value pair, or None if no match.
+    /// Returns the key-value pair, or Maybe.None if no match.
     /// Note: order is implementation-defined (hash table order).
     ///
 
@@ -1860,7 +1860,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     // Internal: fallible counterpart to `ensure_capacity`. Returns
-    // Err(AllocError.OutOfMemory) on alloc failure rather than
+    // Result.Err(AllocError.OutOfMemory) on alloc failure rather than
     // panicking. Used by every try_<op> method that may grow.
     fn try_ensure_capacity(&mut self) -> Result<Unit, AllocError> {
         if self.cap == 0 {
@@ -1876,7 +1876,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
             };
             return self.try_resize(new_cap);
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // Insert with known hash.
@@ -1898,14 +1898,14 @@ implement<K: Hash + Eq, V> Map<K, V> {
                 entry.hash = hash;
                 entry.psl = psl;
                 self.len = self.len + 1;
-                return None;
+                return Maybe.None;
             }
 
             if entry.hash == hash && entry.key == key {
                 // Key exists - replace value
                 let old = entry.value;
                 entry.value = value;
-                return Some(old);
+                return Maybe.Some(old);
             }
 
             // Robin Hood: swap if our PSL is greater
@@ -1935,7 +1935,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     //
 
     // Panics with descriptive message on allocation failure. For a
-    // fallible counterpart that returns Err(AllocError.OutOfMemory)
+    // fallible counterpart that returns Result.Err(AllocError.OutOfMemory)
     // instead of panicking, see `try_resize`.
     fn resize(&mut self, new_cap: Int) {
         let size = new_cap * SLOT_SIZE;
@@ -1949,7 +1949,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     // Internal: fallible counterpart to `resize`. Returns
-    // `Err(AllocError)` on alloc failure rather than panicking.
+    // `Result.Err(AllocError)` on alloc failure rather than panicking.
     // Load-bearing primitive for every try_<op> method.
     fn try_resize(&mut self, new_cap: Int) -> Result<Unit, AllocError> {
         let size = new_cap * SLOT_SIZE;
@@ -1958,10 +1958,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
         let raw = try_alloc_zeroed(size, SLOT_ALIGN)?;
         let new_entries = raw as &unsafe Slot<K, V>;
         if new_entries.is_null() {
-            return Err(AllocError.OutOfMemory { requested: size });
+            return Result.Err(AllocError.OutOfMemory { requested: size });
         }
         self.swap_in_table(new_entries, new_cap);
-        Ok(())
+        Result.Ok(())
     }
 
     // Internal: install `new_entries` as the live table, rehashing the
@@ -2063,8 +2063,8 @@ implement<K: Hash + Eq, V> Index<K> for Map<K, V> {
     @inline(always)
     fn index(&self, key: K) -> &V {
         match self.get_key_value(&key) {
-            Some(pair) => pair.1,
-            None => panic("Key not found in Map"),
+            Maybe.Some(pair) => pair.1,
+            Maybe.None => panic("Key not found in Map"),
         }
     }
 }
@@ -2086,13 +2086,13 @@ implement<K: Hash + Eq + Debug, V: Eq + Debug> Eq for Map<K, V> {
                 let key: &K = &entry.key;
                 let value: &V = &entry.value;
                 match other.get(key) {
-                    Some(other_v) => {
+                    Maybe.Some(other_v) => {
                         // Use == operator which resolves to Eq.eq
                         if !(*value == *other_v) {
                             return false;
                         }
                     }
-                    None => return false,
+                    Maybe.None => return false,
                 }
             }
         }
@@ -2111,12 +2111,12 @@ implement<K: Hash + Eq + Debug, V: Eq + Debug> Eq for Map<K, V> {
                 let key: &K = &entry.key;
                 let value: &V = &entry.value;
                 match other.get(key) {
-                    Some(other_v) => {
+                    Maybe.Some(other_v) => {
                         if !(*value == *other_v) {
                             return true;
                         }
                     }
-                    None => return true,
+                    Maybe.None => return true,
                 }
             }
         }
@@ -2256,14 +2256,14 @@ implement<K, V> Iterator for MapIter<K, V> {
 
             if (entry.hash > 0) {
                 self.remaining = self.remaining - 1;
-                return Some((entry.key, entry.value));
+                return Maybe.Some((entry.key, entry.value));
             }
         }
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.remaining, Some(self.remaining))
+        (self.remaining, Maybe.Some(self.remaining))
     }
 }
 
@@ -2281,8 +2281,8 @@ implement<K, V> Iterator for MapKeys<K, V> {
 
     fn next(&mut self) -> Maybe<K> {
         match self.iter.next() {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 
@@ -2301,8 +2301,8 @@ implement<K, V> Iterator for MapValues<K, V> {
 
     fn next(&mut self) -> Maybe<V> {
         match self.iter.next() {
-            None => None,
-            Some(pair) => Some(pair.1),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.1),
         }
     }
 
@@ -2337,14 +2337,14 @@ implement<K, V> Iterator for MapValuesMut<K, V> {
 
             if (entry.hash > 0) {
                 self.remaining = self.remaining - 1;
-                return Some(&mut entry.value);
+                return Maybe.Some(&mut entry.value);
             }
         }
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.remaining, Some(self.remaining))
+        (self.remaining, Maybe.Some(self.remaining))
     }
 }
 
@@ -2370,14 +2370,14 @@ implement<K, V> Iterator for MapIterMut<K, V> {
 
             if (entry.hash > 0) {
                 self.remaining = self.remaining - 1;
-                return Some((&entry.key, &mut entry.value));
+                return Maybe.Some((&entry.key, &mut entry.value));
             }
         }
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.remaining, Some(self.remaining))
+        (self.remaining, Maybe.Some(self.remaining))
     }
 }
 
@@ -2460,14 +2460,14 @@ implement<K: Hash + Eq, V> Iterator for MapDrain<K, V> {
                 entry.hash = EMPTY;
                 entry.psl = 0;
                 self.map.len = self.map.len - 1;
-                return Some((key, value));
+                return Maybe.Some((key, value));
             }
         }
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.map.len, Some(self.map.len))
+        (self.map.len, Maybe.Some(self.map.len))
     }
 }
 
@@ -2523,14 +2523,14 @@ implement<K: Hash + Eq, V> Iterator for MapIntoIter<K, V> {
                 self.map.len = self.map.len - 1;
                 let key = entry.key;
                 let value = entry.value;
-                return Some((key, value));
+                return Maybe.Some((key, value));
             }
         }
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.map.len, Some(self.map.len))
+        (self.map.len, Maybe.Some(self.map.len))
     }
 }
 

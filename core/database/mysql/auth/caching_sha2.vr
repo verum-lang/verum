@@ -31,7 +31,7 @@
 module core.database.mysql.auth.caching_sha2;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.security.hash.sha256.Sha256;
 mount core.encoding.pem.{PemBlock, PemError};
@@ -229,20 +229,20 @@ implement Display for FullAuthError {
 /// protocol violation.
 public fn parse_server_pubkey(pem_text: &Text) -> Result<RsaPublicKey, FullAuthError> {
     let block: PemBlock = match core.encoding.pem.decode_one(pem_text) {
-        Ok(b)  => b,
-        Err(e) => return Err(FaePemDecode(e)),
+        Result.Ok(b)  => b,
+        Result.Err(e) => return Result.Err(FaePemDecode(e)),
     };
     let mut reader = DerReader.from_bytes(block.contents);
     let spki: Spki = match parse_spki(&mut reader) {
-        Ok(s)  => s,
-        Err(_) => return Err(FaeDerDecode),
+        Result.Ok(s)  => s,
+        Result.Err(_) => return Result.Err(FaeDerDecode),
     };
     match spki.public_key {
-        Rsa(rsa_spki) => Ok(RsaPublicKey {
+        Rsa(rsa_spki) => Result.Ok(RsaPublicKey {
             n: rsa_spki.modulus.clone(),
             e: rsa_spki.exponent.clone(),
         }),
-        _ => Err(FaeNotRsaKey),
+        _ => Result.Err(FaeNotRsaKey),
     }
 }
 
@@ -276,8 +276,8 @@ public fn build_full_auth_response(
     // Step 2: RSA-OAEP-SHA1 encrypt with empty label.
     let empty_label: List<Byte> = List.new();
     match encrypt_oaep_sha1(pubkey, xored.as_slice(), empty_label.as_slice()) {
-        Ok(ct) => Ok(ct),
-        Err(e) => Err(FaeOaep(e)),
+        Result.Ok(ct) => Result.Ok(ct),
+        Result.Err(e) => Result.Err(FaeOaep(e)),
     }
 }
 
@@ -315,14 +315,14 @@ implement ServerPubkeyCache {
         let mut i: Int = 0;
         while i < self.entries.len() as Int {
             if self.entries[i].server_host == *server_host {
-                return Some(RsaPublicKey {
+                return Maybe.Some(RsaPublicKey {
                     n: self.entries[i].pubkey.n.clone(),
                     e: self.entries[i].pubkey.e.clone(),
                 });
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Insert (or replace) the entry for `server_host`. Replace

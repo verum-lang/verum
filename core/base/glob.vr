@@ -162,7 +162,7 @@ public fn compile_with(pattern: &Text, case_sensitive: Bool) -> Result<GlobPatte
         }
         if c == ('\\' as Byte) {
             if i + 1 >= b.len() {
-                return Err(GlobError.TrailingEscape);
+                return Result.Err(GlobError.TrailingEscape);
             }
             let ch = b[i + 1];
             parts.push(GlobPart.Literal(normalise(ch, case_sensitive)));
@@ -178,7 +178,7 @@ public fn compile_with(pattern: &Text, case_sensitive: Bool) -> Result<GlobPatte
         parts.push(GlobPart.Literal(normalise(c, case_sensitive)));
         i = i + 1;
     }
-    Ok(GlobPattern { parts: parts, case_sensitive: case_sensitive })
+    Result.Ok(GlobPattern { parts: parts, case_sensitive: case_sensitive })
 }
 
 fn parse_class(b: &[Byte], from: Int, case_sensitive: Bool) -> Result<(GlobPart, Int), GlobError> {
@@ -193,15 +193,15 @@ fn parse_class(b: &[Byte], from: Int, case_sensitive: Bool) -> Result<(GlobPart,
     let start_of_class = i;
     loop {
         if i >= b.len() {
-            return Err(GlobError.UnclosedClass);
+            return Result.Err(GlobError.UnclosedClass);
         }
         let c = b[i];
         // `]` as the first char is literal per POSIX.
         if c == (']' as Byte) && i > start_of_class {
             if chars.len() == 0 && ranges.len() == 0 {
-                return Err(GlobError.EmptyClass);
+                return Result.Err(GlobError.EmptyClass);
             }
-            return Ok((GlobPart.Class {
+            return Result.Ok((GlobPart.Class {
                 negated: negated, chars: chars, ranges: ranges,
             }, i + 1));
         }
@@ -225,8 +225,8 @@ fn parse_class(b: &[Byte], from: Int, case_sensitive: Bool) -> Result<(GlobPart,
 /// One-shot convenience — compile + match.
 public fn matches(pattern: &Text, path: &Text) -> Bool {
     match compile(pattern) {
-        Ok(p) => p.matches_path(path),
-        Err(_) => false,
+        Result.Ok(p) => p.matches_path(path),
+        Result.Err(_) => false,
     }
 }
 

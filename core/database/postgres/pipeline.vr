@@ -37,7 +37,7 @@
 //   4. **Pipeline abort semantics.** On the first `ErrorResponse`
 //      within a batch, every subsequent pending entry up to the
 //      next `ReadyForQuery` resolves as
-//      `Err(DbError.Adapter("PIPELINE_ABORTED"))`. The server
+//      `Result.Err(DbError.Adapter("PIPELINE_ABORTED"))`. The server
 //      ignores them on the wire — Spindle MUST NOT pretend they
 //      ran.
 //
@@ -68,7 +68,7 @@
 module core.database.postgres.pipeline;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount sync.mutex.Mutex;
 mount sync.condvar.Condvar;
@@ -171,10 +171,10 @@ implement PipelineConfig {
 ///   PsActive    — accepts new submissions, drives normally
 ///   PsAborting  — last batch hit ErrorResponse; head + every
 ///                 subsequent entry up to the next ReadyForQuery
-///                 resolves as `Err(PipelineAborted)`. Returns to
+///                 resolves as `Result.Err(PipelineAborted)`. Returns to
 ///                 `PsActive` after ReadyForQuery.
 ///   PsClosed    — connection went away; every pending sink
-///                 resolves as `Err(ConnectionGone)`; no more
+///                 resolves as `Result.Err(ConnectionGone)`; no more
 ///                 submissions accepted.
 public type PipelineState is
       PsActive
@@ -220,9 +220,9 @@ implement PipelineResultSink {
         PipelineResultSink {
             inner: Mutex.new(SinkInner {
                 rows: List.new(),
-                row_desc: None,
+                row_desc: Maybe.None,
                 command_tag: "".clone(),
-                completion: None,
+                completion: Maybe.None,
             }),
             notify: Condvar.new(),
         }
@@ -233,36 +233,36 @@ implement PipelineResultSink {
     /// terminal DbError.
     public fn await_completion(&self) -> Result<ExtendedQueryResult, DbError> {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return Err(poisoned_err("sink mutex poisoned".clone())),
+            Result.Ok(g)  => g,
+            Result.Err(_) => return Result.Err(poisoned_err("sink mutex poisoned".clone())),
         };
         loop {
             match &guard.completion {
-                Some(_) => {
+                Maybe.Some(_) => {
                     // Pull out the variant via take — destructive
                     // read so a second await fails cleanly.
                     let result = guard.completion.take();
                     return match result {
-                        Some(r) => r,
-                        None    => Err(poisoned_err("sink completion vanished".clone())),
+                        Maybe.Some(r) => r,
+                        Maybe.None    => Result.Err(poisoned_err("sink completion vanished".clone())),
                     };
                 }
-                None => {
+                Maybe.None => {
                     guard = match self.notify.wait(guard) {
-                        Ok(g)  => g,
-                        Err(_) => return Err(poisoned_err("sink wait poisoned".clone())),
+                        Result.Ok(g)  => g,
+                        Result.Err(_) => return Result.Err(poisoned_err("sink wait poisoned".clone())),
                     };
                 }
             }
         }
     }
 
-    /// Try to read completion without blocking. Returns `None` if
+    /// Try to read completion without blocking. Returns `Maybe.None` if
     /// the reader hasn't terminated this query yet.
     public fn try_completion(&self) -> Maybe<Result<ExtendedQueryResult, DbError>> {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return None,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return Maybe.None,
         };
         guard.completion.take()
     }
@@ -271,24 +271,24 @@ implement PipelineResultSink {
 
     fn record_row_desc(&self, rd: RowDescription) {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return,
         };
-        guard.row_desc = Some(rd);
+        guard.row_desc = Maybe.Some(rd);
     }
 
     fn record_data_row(&self, values: List<WireValue>) {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return,
         };
         guard.rows.push(values);
     }
 
     fn record_command_complete(&self, tag: Text) {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return,
         };
         if guard.command_tag.len() == 0 {
             guard.command_tag = tag;
@@ -301,8 +301,8 @@ implement PipelineResultSink {
     fn finalise_ok(&self) {
         {
             let mut guard = match self.inner.lock() {
-                Ok(g)  => g,
-                Err(_) => return,
+                Result.Ok(g)  => g,
+                Result.Err(_) => return,
             };
             // Move the per-row state into the result; subsequent
             // record_* calls (shouldn't happen; defensive) become
@@ -319,7 +319,7 @@ implement PipelineResultSink {
             let _ = tmp;
             let row_desc = guard.row_desc.clone();
             let tag      = guard.command_tag.clone();
-            guard.completion = Some(Ok(ExtendedQueryResult {
+            guard.completion = Maybe.Some(Result.Ok(ExtendedQueryResult {
                 command_tag: tag,
                 row_description: row_desc,
                 rows: rows,
@@ -333,10 +333,10 @@ implement PipelineResultSink {
     fn finalise_err(&self, err: DbError) {
         {
             let mut guard = match self.inner.lock() {
-                Ok(g)  => g,
-                Err(_) => return,
+                Result.Ok(g)  => g,
+                Result.Err(_) => return,
             };
-            guard.completion = Some(Err(err));
+            guard.completion = Maybe.Some(Result.Err(err));
         }
         self.notify.notify_one();
     }
@@ -384,8 +384,8 @@ implement PipelineHandle {
     /// type error).
     public fn await(self) -> Result<ExtendedQueryResult, DbError> {
         let s = match self.sink {
-            Some(s) => s,
-            None    => return Err(poisoned_err("pipeline handle without sink".clone())),
+            Maybe.Some(s) => s,
+            Maybe.None    => return Result.Err(poisoned_err("pipeline handle without sink".clone())),
         };
         s.await_completion()
     }
@@ -518,7 +518,7 @@ implement PgPipeline {
                 rtt: RttSampler.new(),
                 next_id: 1,
                 current_batch_size: initial_batch,
-                last_flush_at: None,
+                last_flush_at: Maybe.None,
                 metrics: PipelineMetrics {
                     current_batch_size: initial_batch,
                     .. PipelineMetrics.empty()
@@ -544,12 +544,12 @@ implement PgPipeline {
         expects_rows: Bool,
     ) -> Result<PipelineHandle, DbError> {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return Err(poisoned_err("pipeline mutex poisoned".clone())),
+            Result.Ok(g)  => g,
+            Result.Err(_) => return Result.Err(poisoned_err("pipeline mutex poisoned".clone())),
         };
         loop {
             if guard.state.equals(&PsClosed) {
-                return Err(closed_err());
+                return Result.Err(closed_err());
             }
             let live = (guard.pending.len() as Int) - guard.head_idx;
             if live < self.config.max_inflight {
@@ -567,13 +567,13 @@ implement PgPipeline {
                     expects_rows: expects_rows,
                 });
                 guard.metrics.total_submitted = guard.metrics.total_submitted + 1;
-                return Ok(PipelineHandle { id: id, sink: Some(sink_clone) });
+                return Result.Ok(PipelineHandle { id: id, sink: Maybe.Some(sink_clone) });
             }
             // Queue full — park on the condvar.
             guard.metrics.total_park_full = guard.metrics.total_park_full + 1;
             guard = match self.cond_space.wait(guard) {
-                Ok(g)  => g,
-                Err(_) => return Err(poisoned_err("submit wait poisoned".clone())),
+                Result.Ok(g)  => g,
+                Result.Err(_) => return Result.Err(poisoned_err("submit wait poisoned".clone())),
             };
         }
     }
@@ -586,8 +586,8 @@ implement PgPipeline {
     /// the connection's stream in one syscall.
     public fn flush_into(&self, out: &mut List<Byte>) -> Int {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return 0,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return 0,
         };
         if guard.state.equals(&PsClosed) {
             return 0;
@@ -608,7 +608,7 @@ implement PgPipeline {
         }
         let sync = send_sync();
         append_all(out, sync.as_slice());
-        guard.last_flush_at = Some(Instant.now());
+        guard.last_flush_at = Maybe.Some(Instant.now());
         written
     }
 
@@ -621,8 +621,8 @@ implement PgPipeline {
     /// fully drained a Sync round (caller is free to flush again).
     public fn consume_message(&self, msg: BackendMessage) -> Bool {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return false,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return false,
         };
         match msg {
             BmParseComplete | BmBindComplete | BmCloseComplete | BmNoData |
@@ -632,13 +632,13 @@ implement PgPipeline {
                 false
             }
             BmRowDescription(rd) => {
-                if let Some(head) = head_entry(&guard) {
+                if let Maybe.Some(head) = head_entry(&guard) {
                     head.sink.record_row_desc(rd);
                 }
                 false
             }
             BmDataRow(dr) => {
-                if let Some(head) = head_entry(&guard) {
+                if let Maybe.Some(head) = head_entry(&guard) {
                     head.sink.record_data_row(dr.values);
                 }
                 false
@@ -675,7 +675,7 @@ implement PgPipeline {
                 }
                 // RTT sample.
                 match &guard.last_flush_at {
-                    Some(when) => {
+                    Maybe.Some(when) => {
                         let elapsed_ns = when.elapsed().as_nanos();
                         guard.rtt.push(elapsed_ns);
                         guard.metrics.latest_rtt_ns = elapsed_ns;
@@ -691,9 +691,9 @@ implement PgPipeline {
                         }
                         guard.current_batch_size = sz;
                         guard.metrics.current_batch_size = sz;
-                        guard.last_flush_at = None;
+                        guard.last_flush_at = Maybe.None;
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
                 // Compact the queue periodically — we never
                 // back-fill, so head_idx drifting toward len()
@@ -708,13 +708,13 @@ implement PgPipeline {
 
     // ---- Lifecycle ---------------------------------------------------------
 
-    /// Mark every pending entry as `Err(ConnectionGone)` and refuse
+    /// Mark every pending entry as `Result.Err(ConnectionGone)` and refuse
     /// future submissions. Called by the connection driver when it
     /// observes the underlying socket close.
     public fn close(&self, reason: DbError) {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return,
         };
         guard.state = PsClosed;
         let n = guard.pending.len() as Int;
@@ -732,8 +732,8 @@ implement PgPipeline {
     /// Snapshot for metrics emission.
     public fn metrics(&self) -> PipelineMetrics {
         let guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return PipelineMetrics.empty(),
+            Result.Ok(g)  => g,
+            Result.Err(_) => return PipelineMetrics.empty(),
         };
         guard.metrics.clone()
     }
@@ -741,8 +741,8 @@ implement PgPipeline {
     /// Number of entries still awaiting completion.
     public fn live_count(&self) -> Int {
         let guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return 0,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return 0,
         };
         (guard.pending.len() as Int) - guard.head_idx
     }
@@ -758,9 +758,9 @@ type TerminationKind is
 
 fn head_entry(guard: &PipelineInner) -> Maybe<&PendingQuery> {
     if guard.head_idx < (guard.pending.len() as Int) {
-        Some(&guard.pending[guard.head_idx])
+        Maybe.Some(&guard.pending[guard.head_idx])
     } else {
-        None
+        Maybe.None
     }
 }
 

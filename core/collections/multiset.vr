@@ -120,8 +120,8 @@ implement<T: Hash + Eq> Multiset<T> {
     /// Fallible counterpart to `with_capacity`.
     public fn try_with_capacity(capacity: Int) -> Result<Multiset<T>, AllocError> {
         match Map.try_with_capacity(capacity) {
-            Ok(inner) => Ok(Multiset { inner, cardinality: 0 }),
-            Err(e)    => Err(e),
+            Result.Ok(inner) => Result.Ok(Multiset { inner, cardinality: 0 }),
+            Result.Err(e)    => Result.Err(e),
         }
     }
 
@@ -229,17 +229,17 @@ implement<T: Hash + Eq> Multiset<T> {
     }
 
     public fn try_insert_n(&mut self, value: T, n: Int) -> Result<Int, AllocError> {
-        if n <= 0 { return Ok(self.count(&value)); }
+        if n <= 0 { return Result.Ok(self.count(&value)); }
         let next = match self.inner.get(&value) {
             Maybe.None    => n,
             Maybe.Some(k) => *k + n,
         };
         match self.inner.try_insert(value, next) {
-            Ok(_)  => {
+            Result.Ok(_)  => {
                 self.cardinality = self.cardinality + n;
-                Ok(next)
+                Result.Ok(next)
             }
-            Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -461,7 +461,7 @@ implement<T: Hash + Eq> Multiset<T> {
     // ─── Most-common analytics (stat-style) ──────────────────────────────
 
     /// Return the element with the largest multiplicity, ties broken
-    /// arbitrarily. None when the multiset is empty.
+    /// arbitrarily. Maybe.None when the multiset is empty.
     public fn mode(&self) -> Maybe<&T> {
         let mut best: Maybe<(&T, Int)> = Maybe.None;
         let mut iter = self.iter();

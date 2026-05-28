@@ -19,7 +19,7 @@
 module core.database.mysql.wire.backend;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.database.mysql.wire.frame.{
     MyFrameError, FeShort, FeBadLength, FeInvalidUtf8,
@@ -53,7 +53,7 @@ public fn parse_initial_handshake(payload: &[Byte]) -> Result<InitialHandshake, 
     let proto = read_u8(payload, off)?;
     off = off + 1;
     if proto != 10 {
-        return Err(FeBadLength { len: proto });
+        return Result.Err(FeBadLength { len: proto });
     }
     let (server_ver, used) = read_cstr(payload, off)?;
     off = off + used;
@@ -104,7 +104,7 @@ public fn parse_initial_handshake(payload: &[Byte]) -> Result<InitialHandshake, 
         plugin_name = s;
     }
 
-    Ok(InitialHandshake {
+    Result.Ok(InitialHandshake {
         protocol_version: proto,
         server_version: server_ver,
         connection_id: conn_id,
@@ -130,10 +130,10 @@ public type OkPacket is {
 
 public fn parse_ok(payload: &[Byte], capabilities: Int) -> Result<OkPacket, MyFrameError> {
     if (payload.len() as Int) < 1 {
-        return Err(FeShort { wanted: 1, available: 0 });
+        return Result.Err(FeShort { wanted: 1, available: 0 });
     }
     if payload[0] != PKT_OK {
-        return Err(FeBadLength { len: payload[0] as Int });
+        return Result.Err(FeBadLength { len: payload[0] as Int });
     }
     let mut off: Int = 1;
     let (affected, _, used) = decode_lei(payload, off)?;
@@ -155,10 +155,10 @@ public fn parse_ok(payload: &[Byte], capabilities: Int) -> Result<OkPacket, MyFr
         i = i + 1;
     }
     let info = match Text.from_bytes(&info_bytes) {
-        Ok(t)  => t,
-        Err(_) => "".clone(),
+        Result.Ok(t)  => t,
+        Result.Err(_) => "".clone(),
     };
-    Ok(OkPacket {
+    Result.Ok(OkPacket {
         affected_rows: affected,
         last_insert_id: last_id,
         status_flags: status,
@@ -179,10 +179,10 @@ public type ErrPacket is {
 
 public fn parse_err(payload: &[Byte], capabilities: Int) -> Result<ErrPacket, MyFrameError> {
     if (payload.len() as Int) < 3 {
-        return Err(FeShort { wanted: 3, available: payload.len() as Int });
+        return Result.Err(FeShort { wanted: 3, available: payload.len() as Int });
     }
     if payload[0] != PKT_ERROR {
-        return Err(FeBadLength { len: payload[0] as Int });
+        return Result.Err(FeBadLength { len: payload[0] as Int });
     }
     let code = read_u16_le(payload, 1)?;
     let mut off: Int = 3;
@@ -191,8 +191,8 @@ public fn parse_err(payload: &[Byte], capabilities: Int) -> Result<ErrPacket, My
         off = off + 1;     // '#' marker
         let bytes = read_bytes(payload, off, 5)?;
         match Text.from_bytes(&bytes) {
-            Ok(t)  => { sql_state = t; }
-            Err(_) => {}
+            Result.Ok(t)  => { sql_state = t; }
+            Result.Err(_) => {}
         }
         off = off + 5;
     }
@@ -203,10 +203,10 @@ public fn parse_err(payload: &[Byte], capabilities: Int) -> Result<ErrPacket, My
         i = i + 1;
     }
     let message = match Text.from_bytes(&msg_bytes) {
-        Ok(t)  => t,
-        Err(_) => "".clone(),
+        Result.Ok(t)  => t,
+        Result.Err(_) => "".clone(),
     };
-    Ok(ErrPacket { code: code, sql_state: sql_state, message: message })
+    Result.Ok(ErrPacket { code: code, sql_state: sql_state, message: message })
 }
 
 // -----------------------------------------------------------------------------
@@ -220,7 +220,7 @@ public type AuthSwitch is {
 
 public fn parse_auth_switch(payload: &[Byte]) -> Result<AuthSwitch, MyFrameError> {
     if (payload.len() as Int) < 1 || payload[0] != PKT_AUTH_SW {
-        return Err(FeBadLength { len: 0 });
+        return Result.Err(FeBadLength { len: 0 });
     }
     let (name, used) = read_cstr(payload, 1)?;
     let mut data: List<Byte> = List.new();
@@ -232,14 +232,14 @@ public fn parse_auth_switch(payload: &[Byte]) -> Result<AuthSwitch, MyFrameError
     if data.len() > 0 && data[(data.len() as Int) - 1] == 0 {
         let _ = data.pop();
     }
-    Ok(AuthSwitch { plugin_name: name, auth_data: data })
+    Result.Ok(AuthSwitch { plugin_name: name, auth_data: data })
 }
 
 public type AuthMore is { data: List<Byte> };
 
 public fn parse_auth_more(payload: &[Byte]) -> Result<AuthMore, MyFrameError> {
     if (payload.len() as Int) < 1 || payload[0] != PKT_AUTH_MORE {
-        return Err(FeBadLength { len: 0 });
+        return Result.Err(FeBadLength { len: 0 });
     }
     let mut data: List<Byte> = List.new();
     let mut i = 1;
@@ -247,7 +247,7 @@ public fn parse_auth_more(payload: &[Byte]) -> Result<AuthMore, MyFrameError> {
         data.push(payload[i]);
         i = i + 1;
     }
-    Ok(AuthMore { data: data })
+    Result.Ok(AuthMore { data: data })
 }
 
 // -----------------------------------------------------------------------------
@@ -284,7 +284,7 @@ public fn parse_column_def(payload: &[Byte]) -> Result<MyColumnDef, MyFrameError
     let flags = read_u16_le(payload, off)?;              off = off + 2;
     let dec = read_u8(payload, off)?;                    off = off + 1;
 
-    Ok(MyColumnDef {
+    Result.Ok(MyColumnDef {
         schema:    bytes_to_text(&schema_b),
         table:     bytes_to_text(&table_b),
         org_table: bytes_to_text(&otable_b),
@@ -300,8 +300,8 @@ public fn parse_column_def(payload: &[Byte]) -> Result<MyColumnDef, MyFrameError
 
 fn bytes_to_text(o: &Maybe<List<Byte>>) -> Text {
     match o {
-        None    => "".clone(),
-        Some(v) => match Text.from_bytes(v) { Ok(t) => t, Err(_) => "".clone() },
+        Maybe.None    => "".clone(),
+        Maybe.Some(v) => match Text.from_bytes(v) { Result.Ok(t) => t, Result.Err(_) => "".clone() },
     }
 }
 
@@ -342,7 +342,7 @@ public fn parse_stmt_prepare_ok(payload: &[Byte])
     // Status byte must be 0x00 — caller has already routed via classify().
     let status = read_u8(payload, off)?; off = off + 1;
     if status != 0 {
-        return Err(MyFrameError.PayloadTooShort {
+        return Result.Err(MyFrameError.PayloadTooShort {
             wanted: 1, available: 0,
         });
     }
@@ -351,7 +351,7 @@ public fn parse_stmt_prepare_ok(payload: &[Byte])
     let n_params = read_u16_le(payload, off)?;    off = off + 2;
     let _reserved = read_u8(payload, off)?;       off = off + 1;
     let warnings = read_u16_le(payload, off)?;    off = off + 2;
-    Ok(StmtPrepareOk {
+    Result.Ok(StmtPrepareOk {
         statement_id: stmt_id,
         num_columns: n_cols,
         num_params: n_params,
@@ -371,8 +371,8 @@ public fn parse_stmt_prepare_ok(payload: &[Byte])
 //  [for each non-NULL column: type-specific payload]
 //
 
-// v0.1 returns each row as a List<Maybe<List<Byte>>> — None for NULL,
-// Some(bytes) for the column's type-encoded value. Higher layers
+// v0.1 returns each row as a List<Maybe<List<Byte>>> — Maybe.None for NULL,
+// Maybe.Some(bytes) for the column's type-encoded value. Higher layers
 // translate to typed columns via `core.database.common.types.WireRow`.
 
 public fn parse_binary_row(
@@ -383,7 +383,7 @@ public fn parse_binary_row(
     let mut off: Int = 0;
     let header = read_u8(payload, off)?; off = off + 1;
     if header != 0 {
-        return Err(MyFrameError.PayloadTooShort { wanted: 1, available: 0 });
+        return Result.Err(MyFrameError.PayloadTooShort { wanted: 1, available: 0 });
     }
 
     let bitmap_len = (n + 7 + 2) / 8;
@@ -404,16 +404,16 @@ public fn parse_binary_row(
     let mut k: Int = 0;
     while k < n {
         if nulls[k] {
-            row.push(None);
+            row.push(Maybe.None);
         } else {
             let ty = column_types[k];
             let (bytes, consumed) = decode_binary_value(payload, off, ty)?;
             off = off + consumed;
-            row.push(Some(bytes));
+            row.push(Maybe.Some(bytes));
         }
         k = k + 1;
     }
-    Ok(row)
+    Result.Ok(row)
 }
 
 /// Decode one column value at `off` in `payload`, returning the raw
@@ -428,46 +428,46 @@ fn decode_binary_value(
     // Fixed-width integers + floats.
     if column_type == 0x01 {           // TINY
         let v = read_u8(payload, off)?;
-        let mut b = List.new(); b.push(v as Byte); return Ok((b, 1));
+        let mut b = List.new(); b.push(v as Byte); return Result.Ok((b, 1));
     }
     if column_type == 0x02 {           // SHORT
         let mut b = List.with_capacity(2);
         b.push(read_u8(payload, off)? as Byte);
         b.push(read_u8(payload, off + 1)? as Byte);
-        return Ok((b, 2));
+        return Result.Ok((b, 2));
     }
     if column_type == 0x03 || column_type == 0x09 {   // LONG / INT24
         let mut b = List.with_capacity(4);
         let mut j: Int = 0;
         while j < 4 { b.push(read_u8(payload, off + j)? as Byte); j = j + 1; }
-        return Ok((b, 4));
+        return Result.Ok((b, 4));
     }
     if column_type == 0x08 {           // LONGLONG
         let mut b = List.with_capacity(8);
         let mut j: Int = 0;
         while j < 8 { b.push(read_u8(payload, off + j)? as Byte); j = j + 1; }
-        return Ok((b, 8));
+        return Result.Ok((b, 8));
     }
     if column_type == 0x04 {           // FLOAT
         let mut b = List.with_capacity(4);
         let mut j: Int = 0;
         while j < 4 { b.push(read_u8(payload, off + j)? as Byte); j = j + 1; }
-        return Ok((b, 4));
+        return Result.Ok((b, 4));
     }
     if column_type == 0x05 {           // DOUBLE
         let mut b = List.with_capacity(8);
         let mut j: Int = 0;
         while j < 8 { b.push(read_u8(payload, off + j)? as Byte); j = j + 1; }
-        return Ok((b, 8));
+        return Result.Ok((b, 8));
     }
     // VARCHAR / VAR_STRING / STRING / BLOB / DECIMAL / NEWDECIMAL —
     // length-encoded.
     let (opt, consumed) = read_lenenc_string(payload, off)?;
     let bytes = match opt {
-        Some(v) => v,
-        None    => List.new(),
+        Maybe.Some(v) => v,
+        Maybe.None    => List.new(),
     };
-    Ok((bytes, consumed))
+    Result.Ok((bytes, consumed))
 }
 
 // -----------------------------------------------------------------------------

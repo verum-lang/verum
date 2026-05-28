@@ -39,7 +39,7 @@
 module core.database.postgres.pg_prepared_session;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -102,15 +102,15 @@ implement PgPreparedSession {
     ) -> Result<PgPreparedStatement, DbError> {
         let fp = compute_fingerprint(sql);
         match self.cache.lookup(fp) {
-            Some(stmt) => Ok(stmt),
-            None => {
+            Maybe.Some(stmt) => Result.Ok(stmt),
+            Maybe.None => {
                 let stmt = conn.prepare(sql)?;
                 let evicted = self.cache.insert(fp, clone_stmt(&stmt));
                 match evicted {
-                    Some(old) => { let _ = conn.close_prepared(&old); }
-                    None      => {}
+                    Maybe.Some(old) => { let _ = conn.close_prepared(&old); }
+                    Maybe.None      => {}
                 }
-                Ok(stmt)
+                Result.Ok(stmt)
             }
         }
     }
@@ -126,14 +126,14 @@ implement PgPreparedSession {
         let fp = compute_fingerprint(sql);
         let stmt = self.prepare_cached(conn, sql)?;
         match conn.execute_prepared_typed(&stmt, typed_params) {
-            Ok(r)  => Ok(r),
-            Err(e) => {
+            Result.Ok(r)  => Result.Ok(r),
+            Result.Err(e) => {
                 if is_invalid_stmt_name(&e) {
                     let _ = self.cache.invalidate(fp);
                     let fresh = self.prepare_cached(conn, sql)?;
                     conn.execute_prepared_typed(&fresh, typed_params)
                 } else {
-                    Err(e)
+                    Result.Err(e)
                 }
             }
         }
@@ -152,14 +152,14 @@ implement PgPreparedSession {
         let fp = compute_fingerprint(sql);
         let stmt = self.prepare_cached(conn, sql)?;
         match conn.execute_prepared(&stmt, params) {
-            Ok(r)  => Ok(r),
-            Err(e) => {
+            Result.Ok(r)  => Result.Ok(r),
+            Result.Err(e) => {
                 if is_invalid_stmt_name(&e) {
                     let _ = self.cache.invalidate(fp);
                     let fresh = self.prepare_cached(conn, sql)?;
                     conn.execute_prepared(&fresh, params)
                 } else {
-                    Err(e)
+                    Result.Err(e)
                 }
             }
         }
@@ -241,18 +241,18 @@ implement AsyncPgPreparedSession {
     ) -> Result<AsyncPgPreparedStatement, DbError> {
         let fp = compute_fingerprint(sql);
         match self.cache.lookup(fp) {
-            Some(stmt) => Ok(AsyncPgPreparedStatement { inner: stmt }),
-            None => {
+            Maybe.Some(stmt) => Result.Ok(AsyncPgPreparedStatement { inner: stmt }),
+            Maybe.None => {
                 let astmt = conn.prepare(sql).await?;
                 let evicted = self.cache.insert(fp, clone_stmt(astmt.inner()));
                 match evicted {
-                    Some(old) => {
+                    Maybe.Some(old) => {
                         let evicted_handle = AsyncPgPreparedStatement { inner: old };
                         let _ = conn.close_prepared(evicted_handle).await;
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
-                Ok(astmt)
+                Result.Ok(astmt)
             }
         }
     }
@@ -267,14 +267,14 @@ implement AsyncPgPreparedSession {
         let stmt = self.prepare_cached(conn, sql).await?;
         let typed_clone = typed_params.clone();
         match conn.execute_prepared_typed(&stmt, typed_params).await {
-            Ok(r)  => Ok(r),
-            Err(e) => {
+            Result.Ok(r)  => Result.Ok(r),
+            Result.Err(e) => {
                 if is_invalid_stmt_name(&e) {
                     let _ = self.cache.invalidate(fp);
                     let fresh = self.prepare_cached(conn, sql).await?;
                     conn.execute_prepared_typed(&fresh, typed_clone).await
                 } else {
-                    Err(e)
+                    Result.Err(e)
                 }
             }
         }

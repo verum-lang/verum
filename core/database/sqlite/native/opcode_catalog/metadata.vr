@@ -387,11 +387,11 @@ public fn opcode_from_name(name: &Text) -> Maybe<OpcodeKind> {
     let mut i: Int = 0;
     while i < all.len() {
         if opcode_name(&all[i]) == name {
-            return Some(clone_opcode(&all[i]));
+            return Maybe.Some(clone_opcode(&all[i]));
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 public fn opcode_count() -> Int { list_all().len() }

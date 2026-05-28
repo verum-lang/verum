@@ -136,18 +136,18 @@ implement PermissionScope {
         }
     }
 
-    /// Inverse of `to_wire_tag`. Returns `None` for any tag the
+    /// Inverse of `to_wire_tag`. Returns `Maybe.None` for any tag the
     /// router did not produce.
     public fn from_wire_tag(tag: UInt32) -> Maybe<PermissionScope> {
         match tag {
-            0_u32 => Some(PermissionScope.Syscall),
-            1_u32 => Some(PermissionScope.FileSystem),
-            2_u32 => Some(PermissionScope.Network),
-            3_u32 => Some(PermissionScope.Process),
-            4_u32 => Some(PermissionScope.Memory),
-            5_u32 => Some(PermissionScope.Cryptography),
-            6_u32 => Some(PermissionScope.Time),
-            _     => None,
+            0_u32 => Maybe.Some(PermissionScope.Syscall),
+            1_u32 => Maybe.Some(PermissionScope.FileSystem),
+            2_u32 => Maybe.Some(PermissionScope.Network),
+            3_u32 => Maybe.Some(PermissionScope.Process),
+            4_u32 => Maybe.Some(PermissionScope.Memory),
+            5_u32 => Maybe.Some(PermissionScope.Cryptography),
+            6_u32 => Maybe.Some(PermissionScope.Time),
+            _     => Maybe.None,
         }
     }
 }
@@ -188,7 +188,7 @@ implement PermissionDecision {
 
 /// Carries enough structured context for diagnostics, audit
 /// logging, and policy rule attribution. The `policy` field is
-/// `None` when the default allow-all router is in force (which
+/// `Maybe.None` when the default allow-all router is in force (which
 /// in turn means a `Deny` can only originate from explicit
 /// embedder configuration).
 public type PermissionDenied is {
@@ -206,7 +206,7 @@ implement PermissionDenied {
     /// policy attribution. Used by the canonical router on
     /// embedder-configured deny-all paths.
     public fn new(scope: PermissionScope, target_id: UInt64) -> PermissionDenied {
-        PermissionDenied { scope, target_id, policy: None }
+        PermissionDenied { scope, target_id, policy: Maybe.None }
     }
 
     /// Construct a denial that attributes the decision to a
@@ -218,14 +218,14 @@ implement PermissionDenied {
         target_id: UInt64,
         policy: Text,
     ) -> PermissionDenied {
-        PermissionDenied { scope, target_id, policy: Some(policy) }
+        PermissionDenied { scope, target_id, policy: Maybe.Some(policy) }
     }
 
     /// Format as a single-line diagnostic.
     public fn message(self) -> Text {
         match self.policy {
-            Some(rule) => f"permission denied: {self.scope.name()}({self.target_id}) — rule `{rule}`",
-            None       => f"permission denied: {self.scope.name()}({self.target_id})",
+            Maybe.Some(rule) => f"permission denied: {self.scope.name()}({self.target_id}) — rule `{rule}`",
+            Maybe.None       => f"permission denied: {self.scope.name()}({self.target_id})",
         }
     }
 }
@@ -251,8 +251,8 @@ public fn permission_check_wire(scope_tag: UInt32, target_id: UInt64) -> UInt32;
 /// Route a single permission check.
 ///
 
-/// Returns `Ok(())` when the router permits the gated operation
-/// and `Err(PermissionDenied)` when it does not. Designed to
+/// Returns `Result.Ok(())` when the router permits the gated operation
+/// and `Result.Err(PermissionDenied)` when it does not. Designed to
 /// chain with the `?` operator at gated call sites.
 public fn check_permission(
     scope: PermissionScope,
@@ -260,9 +260,9 @@ public fn check_permission(
 ) -> Result<(), PermissionDenied> {
     let decision_tag = permission_check_wire(scope.to_wire_tag(), target_id);
     if decision_tag == 0_u32 {
-        Ok(())
+        Result.Ok(())
     } else {
-        Err(PermissionDenied.new(scope, target_id))
+        Result.Err(PermissionDenied.new(scope, target_id))
     }
 }
 

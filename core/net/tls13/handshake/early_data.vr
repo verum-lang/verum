@@ -101,7 +101,7 @@ public fn derive(
     let client_early = early.client_early_traffic(ch_transcript_hash)?;
     // early_exporter_master_secret = Derive-Secret(early, "e exp master", CH)
     let early_exporter = derive_early_exporter(early, ch_transcript_hash)?;
-    Ok(EarlyKeys {
+    Result.Ok(EarlyKeys {
         suite:          suite,
         client_early:   client_early,
         early_exporter: early_exporter,
@@ -115,7 +115,7 @@ fn derive_early_exporter(
     let hash = early.hash.clone();
     let out = derive_secret(hash, early.secret.as_slice(),
                             &LABEL_EARLY_EXPORTER_MASTER, ch_transcript_hash)?;
-    Ok(SecretBytes.from(out))
+    Result.Ok(SecretBytes.from(out))
 }
 
 // =============================================================================

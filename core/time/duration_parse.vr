@@ -130,12 +130,12 @@ public const MAX_DURATION_INPUT_BYTES: Int = 256;
 public fn parse(text: &Text) -> Result<Duration, DurationParseError> {
     let b = text.as_bytes();
     if b.len() > MAX_DURATION_INPUT_BYTES {
-        return Err(DurationParseError.InputTooLong {
+        return Result.Err(DurationParseError.InputTooLong {
             limit_bytes: MAX_DURATION_INPUT_BYTES,
         });
     }
     let trimmed = trim(b);
-    if trimmed.len() == 0 { return Err(DurationParseError.Empty); }
+    if trimmed.len() == 0 { return Result.Err(DurationParseError.Empty); }
 
     // ISO 8601 "P..." form.
     if trimmed[0] == ('P' as Byte) || trimmed[0] == ('p' as Byte) {
@@ -156,7 +156,7 @@ fn parse_compact(b: &[Byte]) -> Result<Duration, DurationParseError> {
     else if i < b.len() && b[i] == ('+' as Byte) { i = i + 1; }
 
     if i >= b.len() {
-        return Err(DurationParseError.Malformed(Text.from("no digits")));
+        return Result.Err(DurationParseError.Malformed(Text.from("no digits")));
     }
 
     let mut total_ns: Int = 0;
@@ -172,7 +172,7 @@ fn parse_compact(b: &[Byte]) -> Result<Duration, DurationParseError> {
         while i < b.len() && is_digit(b[i]) { i = i + 1; }
         let int_end = i;
         if int_start == int_end {
-            return Err(DurationParseError.Malformed(Text.from("expected digits")));
+            return Result.Err(DurationParseError.Malformed(Text.from("expected digits")));
         }
 
         // Optional fractional part.
@@ -194,8 +194,8 @@ fn parse_compact(b: &[Byte]) -> Result<Duration, DurationParseError> {
 
         let int_part = parse_int_bytes(b, int_start, int_end)?;
         let unit_ns = match unit_nanoseconds(b, unit_start, unit_end) {
-            Ok(n) => n,
-            Err(e) => return Err(e),
+            Result.Ok(n) => n,
+            Result.Err(e) => return Result.Err(e),
         };
 
         let int_contribution = int_part.checked_mul(unit_ns)
@@ -217,11 +217,11 @@ fn parse_compact(b: &[Byte]) -> Result<Duration, DurationParseError> {
         progressed = true;
     }
     if !progressed {
-        return Err(DurationParseError.Malformed(Text.from("no components")));
+        return Result.Err(DurationParseError.Malformed(Text.from("no components")));
     }
 
     if negative { total_ns = -total_ns; }
-    Ok(Duration.from_nanos(total_ns))
+    Result.Ok(Duration.from_nanos(total_ns))
 }
 
 // =============================================================================
@@ -259,7 +259,7 @@ fn parse_iso8601(b: &[Byte]) -> Result<Duration, DurationParseError> {
             frac_end = i;
         }
         if i >= b.len() {
-            return Err(DurationParseError.Malformed(Text.from("ISO: missing designator")));
+            return Result.Err(DurationParseError.Malformed(Text.from("ISO: missing designator")));
         }
         let desig = b[i];
         i = i + 1;
@@ -270,13 +270,13 @@ fn parse_iso8601(b: &[Byte]) -> Result<Duration, DurationParseError> {
                 0x48_u8 /* H */ | 0x68_u8 /* h */ => NANOS_PER_HOUR,
                 0x4D_u8 /* M */ | 0x6D_u8 /* m */ => NANOS_PER_MIN,
                 0x53_u8 /* S */ | 0x73_u8 /* s */ => NANOS_PER_SEC,
-                _ => return Err(DurationParseError.UnknownUnit(Text.from("iso time"))),
+                _ => return Result.Err(DurationParseError.UnknownUnit(Text.from("iso time"))),
             }
         } else {
             match desig {
                 0x44_u8 /* D */ | 0x64_u8 /* d */ => NANOS_PER_DAY,
                 0x57_u8 /* W */ | 0x77_u8 /* w */ => NANOS_PER_WEEK,
-                _ => return Err(DurationParseError.UnknownUnit(Text.from("iso date"))),
+                _ => return Result.Err(DurationParseError.UnknownUnit(Text.from("iso date"))),
             }
         };
 
@@ -293,7 +293,7 @@ fn parse_iso8601(b: &[Byte]) -> Result<Duration, DurationParseError> {
                 .ok_or(DurationParseError.Overflow)?;
         }
     }
-    Ok(Duration.from_nanos(total_ns))
+    Result.Ok(Duration.from_nanos(total_ns))
 }
 
 // =============================================================================
@@ -303,30 +303,30 @@ fn parse_iso8601(b: &[Byte]) -> Result<Duration, DurationParseError> {
 fn unit_nanoseconds(b: &[Byte], start: Int, end: Int) -> Result<Int, DurationParseError> {
     let len = end - start;
     if len == 0 {
-        return Err(DurationParseError.Malformed(Text.from("missing unit")));
+        return Result.Err(DurationParseError.Malformed(Text.from("missing unit")));
     }
     // Single-char units.
     if len == 1 {
         match b[start] {
-            0x73_u8 /* s */ => return Ok(NANOS_PER_SEC),
-            0x6D_u8 /* m */ => return Ok(NANOS_PER_MIN),
-            0x68_u8 /* h */ => return Ok(NANOS_PER_HOUR),
-            0x64_u8 /* d */ => return Ok(NANOS_PER_DAY),
-            0x77_u8 /* w */ => return Ok(NANOS_PER_WEEK),
+            0x73_u8 /* s */ => return Result.Ok(NANOS_PER_SEC),
+            0x6D_u8 /* m */ => return Result.Ok(NANOS_PER_MIN),
+            0x68_u8 /* h */ => return Result.Ok(NANOS_PER_HOUR),
+            0x64_u8 /* d */ => return Result.Ok(NANOS_PER_DAY),
+            0x77_u8 /* w */ => return Result.Ok(NANOS_PER_WEEK),
             _ => {},
         }
     }
     // Two-char.
     if len == 2 {
-        if b[start] == ('n' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(1); }
-        if b[start] == ('u' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(NANOS_PER_MICRO); }
-        if b[start] == ('m' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(NANOS_PER_MILLI); }
+        if b[start] == ('n' as Byte) && b[start + 1] == ('s' as Byte) { return Result.Ok(1); }
+        if b[start] == ('u' as Byte) && b[start + 1] == ('s' as Byte) { return Result.Ok(NANOS_PER_MICRO); }
+        if b[start] == ('m' as Byte) && b[start + 1] == ('s' as Byte) { return Result.Ok(NANOS_PER_MILLI); }
     }
     // µs — 3 bytes in UTF-8 (0xC2 0xB5 0x73 = "µs").
     if len == 3 && b[start] == 0xC2_u8 && b[start + 1] == 0xB5_u8 && b[start + 2] == ('s' as Byte) {
-        return Ok(NANOS_PER_MICRO);
+        return Result.Ok(NANOS_PER_MICRO);
     }
-    Err(DurationParseError.UnknownUnit(slice_text(b, start, end)))
+    Result.Err(DurationParseError.UnknownUnit(slice_text(b, start, end)))
 }
 
 // =============================================================================
@@ -343,7 +343,7 @@ fn is_ws(c: Byte) -> Bool {
 }
 
 /// Parse a digit slice into Int with explicit overflow detection.
-/// Returns `Err(Overflow)` if the digit sequence would exceed
+/// Returns `Result.Err(Overflow)` if the digit sequence would exceed
 /// Int.MAX; the parent parser's `checked_mul` chain assumes the
 /// returned value is ≤ Int.MAX, so we MUST surface overflow here
 /// rather than silently wrap. Pre-multiply guard `v > Int.MAX/10`
@@ -353,15 +353,15 @@ fn parse_int_bytes(b: &[Byte], start: Int, end: Int) -> Result<Int, DurationPars
     let mut i: Int = start;
     while i < end {
         if v > 922_337_203_685_477_580 {           // Int.MAX / 10
-            return Err(DurationParseError.Overflow);
+            return Result.Err(DurationParseError.Overflow);
         }
         v = v * 10 + ((b[i] - ('0' as Byte)) as Int);
         if v < 0 {                                  // wrap-around defence
-            return Err(DurationParseError.Overflow);
+            return Result.Err(DurationParseError.Overflow);
         }
         i = i + 1;
     }
-    Ok(v)
+    Result.Ok(v)
 }
 
 /// 10^n with overflow detection. Caller (fractional path) supplies
@@ -370,11 +370,11 @@ fn parse_int_bytes(b: &[Byte], start: Int, end: Int) -> Result<Int, DurationPars
 /// 18 (largest 10^n that fits in Int) — anything beyond is rejected
 /// upstream as an unrepresentable fractional precision.
 fn pow10(n: Int) -> Result<Int, DurationParseError> {
-    if n < 0 || n > 18 { return Err(DurationParseError.Overflow); }
+    if n < 0 || n > 18 { return Result.Err(DurationParseError.Overflow); }
     let mut p: Int = 1;
     let mut i: Int = 0;
     while i < n { p = p * 10; i = i + 1; }
-    Ok(p)
+    Result.Ok(p)
 }
 
 fn trim(b: &[Byte]) -> List<Byte> {
@@ -405,18 +405,18 @@ implement Int {
         // [-9.2e18, 9.2e18]. For duration nanoseconds, the max
         // meaningful product is ~584 years in ns (5.8e18), well
         // within range — we just flag egregious overflow.
-        if *self == 0 || rhs == 0 { return Some(0); }
+        if *self == 0 || rhs == 0 { return Maybe.Some(0); }
         let result = *self * rhs;
-        if rhs != 0 && result / rhs != *self { return None; }
-        Some(result)
+        if rhs != 0 && result / rhs != *self { return Maybe.None; }
+        Maybe.Some(result)
     }
 
     fn checked_add(&self, rhs: Int) -> Maybe<Int> {
         let result = *self + rhs;
         // Sign change when both inputs same sign → overflow.
         if (*self > 0 && rhs > 0 && result < 0) || (*self < 0 && rhs < 0 && result > 0) {
-            return None;
+            return Maybe.None;
         }
-        Some(result)
+        Maybe.Some(result)
     }
 }

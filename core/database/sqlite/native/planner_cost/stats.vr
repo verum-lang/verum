@@ -152,11 +152,11 @@ implement StatsRegistry {
         let mut i: Int = 0;
         while i < self.tables.len() {
             if self.tables[i].table_name == name {
-                return Some(clone_table(&self.tables[i]));
+                return Maybe.Some(clone_table(&self.tables[i]));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn indexes_on(&self, table: &Text) -> List<IndexStats> {

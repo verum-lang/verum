@@ -173,8 +173,8 @@ implement ThreadJoinHandle<T> {
 
         // Extract result
         match self.result.take() {
-            Some(value) => Ok(value),
-            None => Err(ThreadError.Panicked),
+            Maybe.Some(value) => Result.Ok(value),
+            Maybe.None => Result.Err(ThreadError.Panicked),
         }
     }
 
@@ -222,14 +222,14 @@ implement ThreadBuilder {
     /// Create a new thread builder with default settings.
     public fn new() -> ThreadBuilder {
         ThreadBuilder {
-            name: None,
-            stack_size: None,
+            name: Maybe.None,
+            stack_size: Maybe.None,
         }
     }
 
     /// Set the name of the thread.
     public fn name(self, name: Text) -> ThreadBuilder {
-        ThreadBuilder { name: Some(name), ..self }
+        ThreadBuilder { name: Maybe.Some(name), ..self }
     }
 
     /// Set the stack size in bytes.
@@ -237,12 +237,12 @@ implement ThreadBuilder {
 
     /// Default is platform-dependent (typically 8 MB on Linux, 512 KB on macOS).
     public fn stack_size(self, size: Int) -> ThreadBuilder {
-        ThreadBuilder { stack_size: Some(size), ..self }
+        ThreadBuilder { stack_size: Maybe.Some(size), ..self }
     }
 
     /// Spawn a thread with this configuration.
     public fn spawn<T: Send>(self, f: fn() -> T) -> Result<ThreadJoinHandle<T>, ThreadError> {
-        let result_storage = Shared.new(None);
+        let result_storage = Shared.new(Maybe.None);
         let result_ref = result_storage.clone();
         // Pre-publish a tid cell that the spawned thread fills in
         // with its own kernel TID before running the user function.
@@ -254,13 +254,13 @@ implement ThreadBuilder {
         let wrapper = fn() {
             *tid_ref.get_mut() = sys.get_thread_id();
             let value = f();
-            *result_ref.get_mut() = Some(value);
+            *result_ref.get_mut() = Maybe.Some(value);
         };
 
         let platform_thread = platform_spawn(wrapper)
             .map_err(|_| ThreadError.SpawnFailed)?;
 
-        Ok(ThreadJoinHandle {
+        Result.Ok(ThreadJoinHandle {
             platform: platform_thread,
             result: result_storage,
             tid: tid_storage,
@@ -356,7 +356,7 @@ implement Thread {
     public fn park() {
         @cfg(target_os = "linux")
         {
-            sys.linux.syscall.futex_wait(&PARK_FLAG, 0, None);
+            sys.linux.syscall.futex_wait(&PARK_FLAG, 0, Maybe.None);
         }
 
         @cfg(target_os = "macos")
@@ -469,10 +469,10 @@ implement ThreadStackFrame {
     public fn from_ip(ip: UInt64) -> ThreadStackFrame {
         ThreadStackFrame {
             ip: ip,
-            symbol: None,
-            file: None,
-            line: None,
-            column: None,
+            symbol: Maybe.None,
+            file: Maybe.None,
+            line: Maybe.None,
+            column: Maybe.None,
         }
     }
 }
@@ -480,20 +480,20 @@ implement ThreadStackFrame {
 implement Debug for ThreadStackFrame {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(f"  at 0x{self.ip:016x}")?;
-        if let Some(sym) = &self.symbol {
+        if let Maybe.Some(sym) = &self.symbol {
             f.write_str(f" in {sym}")?;
         }
-        if let Some(file) = &self.file {
+        if let Maybe.Some(file) = &self.file {
             f.write_str(f" ({file}")?;
-            if let Some(line) = self.line {
+            if let Maybe.Some(line) = self.line {
                 f.write_str(f":{line}")?;
-                if let Some(col) = self.column {
+                if let Maybe.Some(col) = self.column {
                     f.write_str(f":{col}")?;
                 }
             }
             f.write_str(")")?;
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -589,7 +589,7 @@ implement Debug for StackTrace {
             self.frames[i].fmt_debug(f)?;
             f.write_str("\n")?;
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 

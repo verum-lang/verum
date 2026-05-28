@@ -70,9 +70,9 @@ implement FlexItem {
             basis: FlexBasis.Auto,
             grow: 0.0,
             shrink: 1.0,
-            min_size: None,
-            max_size: None,
-            align_self: None,
+            min_size: Maybe.None,
+            max_size: Maybe.None,
+            align_self: Maybe.None,
         }
     }
 
@@ -98,17 +98,17 @@ implement FlexItem {
 
     /// Set minimum size constraint.
     public fn min(self, size: Int) -> FlexItem {
-        FlexItem { min_size: Some(size), ..self }
+        FlexItem { min_size: Maybe.Some(size), ..self }
     }
 
     /// Set maximum size constraint.
     public fn max(self, size: Int) -> FlexItem {
-        FlexItem { max_size: Some(size), ..self }
+        FlexItem { max_size: Maybe.Some(size), ..self }
     }
 
     /// Override alignment for this item.
     public fn align(self, alignment: AlignItems) -> FlexItem {
-        FlexItem { align_self: Some(alignment), ..self }
+        FlexItem { align_self: Maybe.Some(alignment), ..self }
     }
 }
 
@@ -523,8 +523,8 @@ implement FlexLayout {
 
                 // Determine cross-axis alignment for this item
                 let align = match items[item_idx].align_self {
-                    Some(a) => a,
-                    None => self.align_items,
+                    Maybe.Some(a) => a,
+                    Maybe.None => self.align_items,
                 };
 
                 // Compute cross position and size based on alignment
@@ -568,12 +568,12 @@ implement FlexLayout {
 fn clamp_size(value: Int, min_size: Maybe<Int>, max_size: Maybe<Int>) -> Int {
     let mut result = value;
     match min_size {
-        Some(m) => { if result < m { result = m; } }
-        None => {}
+        Maybe.Some(m) => { if result < m { result = m; } }
+        Maybe.None => {}
     }
     match max_size {
-        Some(m) => { if result > m { result = m; } }
-        None => {}
+        Maybe.Some(m) => { if result > m { result = m; } }
+        Maybe.None => {}
     }
     result.max(0)
 }

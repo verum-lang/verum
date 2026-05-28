@@ -139,7 +139,7 @@ implement Instant {
         let now = Instant.now();
         // BUG fix: previous implementation was `self.duration_since(now)`
         // which computes `self - now` — always negative for a past
-        // instant — and `duration_since` returns None for negative,
+        // instant — and `duration_since` returns Maybe.None for negative,
         // so `elapsed()` ALWAYS returned zero. The correct direction
         // is `now - self`, i.e. `now.duration_since(*self)`.
         now.duration_since(*self).unwrap_or(Duration.zero())
@@ -148,7 +148,7 @@ implement Instant {
     /// Get the duration from this instant to another.
     ///
 
-    /// Returns None if `earlier` is actually later than `self`.
+    /// Returns Maybe.None if `earlier` is actually later than `self`.
     ///
 
     /// # Example
@@ -204,7 +204,7 @@ implement Instant {
     /// Subtract a duration from this instant.
     ///
 
-    /// Returns None if the result would be before the epoch.
+    /// Returns Maybe.None if the result would be before the epoch.
     public fn checked_sub(&self, duration: Duration) -> Maybe<Instant> {
         let dur_nanos = duration.as_nanos();
         if dur_nanos > self.nanos {

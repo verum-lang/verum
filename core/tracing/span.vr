@@ -329,7 +329,7 @@ implement Span {
 
     /// Finalise. After this call, further mutations are silently dropped.
     /// Returns the frozen SpanData (which processors consume).
-    /// Idempotent — second call returns None.
+    /// Idempotent — second call returns Maybe.None.
     public fn end(&self) -> Maybe<SpanData> {
         // Fast-path idempotency: if already ended, skip the lock.
         if self.ended_flag.load(MemoryOrdering.Acquire) { return Maybe.None; }

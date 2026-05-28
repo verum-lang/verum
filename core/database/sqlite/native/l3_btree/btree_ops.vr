@@ -162,7 +162,7 @@ public fn btree_insert_at_cursor(
     cell_bytes: &List<Byte>,
 ) -> Result<RebalanceLog, BtreeError> {
     if !cursor_is_valid(cursor) && !cursor_is_at_end(cursor) {
-        return Err(InvalidCursor("insert: cursor not positioned".clone()));
+        return Result.Err(InvalidCursor("insert: cursor not positioned".clone()));
     }
     let mut log = empty_log();
     let mut current_page = cursor_current_page(cursor);
@@ -172,8 +172,8 @@ public fn btree_insert_at_cursor(
     // Pull current page bytes; in production this is read_page.
     let mut buf_in: List<PageBuf> = List.new();
     match pages.fetch(current_page) {
-        Some(b) => buf_in.push(page_buf(current_page, b)),
-        None    => return Err(PageNotFound(current_page)),
+        Maybe.Some(b) => buf_in.push(page_buf(current_page, b)),
+        Maybe.None    => return Result.Err(PageNotFound(current_page)),
     };
 
     // Check if the leaf has room.  If yes, no rebalance needed.
@@ -194,16 +194,16 @@ public fn btree_insert_at_cursor(
         -1, 0,
         cell_size,
     ) {
-        Ok(p)  => p,
-        Err(e) => return Err(BalancePlanFailed(format_balance_error(&e))),
+        Result.Ok(p)  => p,
+        Result.Err(e) => return Result.Err(BalancePlanFailed(format_balance_error(&e))),
     };
 
     // Apply the decision.  NoChange means: just splice the cell;
     // the foundation skips the byte-splice (mechanical follow-up)
     // and records the ripple step for diagnostics.
     let outcome = match apply_balance_decision(&plan, &buf_in, ctx) {
-        Ok(o)  => o,
-        Err(e) => return Err(BalanceApplyFailed(format_balance_error(&e))),
+        Result.Ok(o)  => o,
+        Result.Err(e) => return Result.Err(BalanceApplyFailed(format_balance_error(&e))),
     };
     log.steps.push(RebalanceStep {
         page_no: current_page,
@@ -220,8 +220,8 @@ public fn btree_insert_at_cursor(
     let mut depth_guard: Int = 0;
     while depth_guard < 64 {
         let hint = match ripple {
-            Some(h) => h,
-            None    => break,
+            Maybe.Some(h) => h,
+            Maybe.None    => break,
         };
         cursor.ascend();
         if !cursor_is_valid(cursor) {
@@ -235,12 +235,12 @@ public fn btree_insert_at_cursor(
             decision: NoChange,         // foundation placeholder
         });
         let _ = hint;
-        ripple = None;
+        ripple = Maybe.None;
         depth_guard = depth_guard + 1;
     }
 
     let _ = current_cell;
-    Ok(log)
+    Result.Ok(log)
 }
 
 // -----------------------------------------------------------------------------
@@ -257,14 +257,14 @@ public fn btree_delete_at_cursor(
     ctx: &BalanceContext,
 ) -> Result<RebalanceLog, BtreeError> {
     if !cursor_is_valid(cursor) {
-        return Err(InvalidCursor("delete: cursor not positioned".clone()));
+        return Result.Err(InvalidCursor("delete: cursor not positioned".clone()));
     }
     let mut log = empty_log();
     let current_page = cursor_current_page(cursor);
     let mut buf_in: List<PageBuf> = List.new();
     match pages.fetch(current_page) {
-        Some(b) => buf_in.push(page_buf(current_page, b)),
-        None    => return Err(PageNotFound(current_page)),
+        Maybe.Some(b) => buf_in.push(page_buf(current_page, b)),
+        Maybe.None    => return Result.Err(PageNotFound(current_page)),
     };
 
     let stats = PageStats {
@@ -275,12 +275,12 @@ public fn btree_delete_at_cursor(
         parent_cell_idx: -1,
     };
     let plan = match plan_underflow(ctx, &stats, -1, 0, -1, 0) {
-        Ok(p)  => p,
-        Err(e) => return Err(BalancePlanFailed(format_balance_error(&e))),
+        Result.Ok(p)  => p,
+        Result.Err(e) => return Result.Err(BalancePlanFailed(format_balance_error(&e))),
     };
     let outcome = match apply_balance_decision(&plan, &buf_in, ctx) {
-        Ok(o)  => o,
-        Err(e) => return Err(BalanceApplyFailed(format_balance_error(&e))),
+        Result.Ok(o)  => o,
+        Result.Err(e) => return Result.Err(BalanceApplyFailed(format_balance_error(&e))),
     };
     log.steps.push(RebalanceStep {
         page_no: current_page,
@@ -288,7 +288,7 @@ public fn btree_delete_at_cursor(
     });
     write_back(pages, &outcome.updated_pages);
     free_pages(pages, &outcome.freed_pages);
-    Ok(log)
+    Result.Ok(log)
 }
 
 // -----------------------------------------------------------------------------

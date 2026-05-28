@@ -85,7 +85,7 @@ implement Index {
             let mut s: Int = 0;
             while s < self.levels[l].segments.len() {
                 match segment_lookup(&self.levels[l].segments[s], term) {
-                    Some(pl) => {
+                    Maybe.Some(pl) => {
                         let mut k: Int = 0;
                         let postings = pl.iter();
                         while k < postings.len() {
@@ -97,7 +97,7 @@ implement Index {
                             k = k + 1;
                         }
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
                 s = s + 1;
             }

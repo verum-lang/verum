@@ -44,7 +44,7 @@
 //
 
 // Cancellation: if the peer sends `STOP_SENDING` or the connection
-// closes, `H3DataSink.write` returns `Err(H3Error.StreamCancelled)`.
+// closes, `H3DataSink.write` returns `Result.Err(H3Error.StreamCancelled)`.
 // The user's writer MUST propagate that — RAII + structured
 // concurrency guarantee no orphan emit task survives the cancel.
 //
@@ -128,17 +128,17 @@ implement H3DataSink {
     /// connection's tx pump). Returns:
     ///
 
-    ///  * `Ok(())` — chunk accepted (may still be in flight).
-    ///  * `Err(H3Error.StreamCancelled)` — peer reset the stream
+    ///  * `Result.Ok(())` — chunk accepted (may still be in flight).
+    ///  * `Result.Err(H3Error.StreamCancelled)` — peer reset the stream
     ///  or the surrounding nursery was cancelled.
-    ///  * `Err(H3Error.SendBufferFull)` — connection-level
+    ///  * `Result.Err(H3Error.SendBufferFull)` — connection-level
     ///  buffer cap exceeded; caller should slow producer.
     pub async fn write(&mut self, bytes: &[Byte]) -> Result<(), H3Error> {
         if self.cancelled.load(MemoryOrdering.Acquire) {
-            return Err(H3Error.StreamCancelled);
+            return Result.Err(H3Error.StreamCancelled);
         }
         if self.finished.load(MemoryOrdering.Acquire) {
-            return Err(H3Error.WriteAfterFinish);
+            return Result.Err(H3Error.WriteAfterFinish);
         }
         let need = bytes.len();
         // Flow-control credit gate. The integration layer's tx pump
@@ -147,10 +147,10 @@ implement H3DataSink {
         // available. The await is cancel-safe via the token.
         loop {
             if self.cancel_token.is_cancelled() {
-                return Err(H3Error.StreamCancelled);
+                return Result.Err(H3Error.StreamCancelled);
             }
             if self.cancelled.load(MemoryOrdering.Acquire) {
-                return Err(H3Error.StreamCancelled);
+                return Result.Err(H3Error.StreamCancelled);
             }
             let avail = self.credit.load(MemoryOrdering.Acquire);
             if avail >= need { break; }
@@ -165,7 +165,7 @@ implement H3DataSink {
         let mut i: Int = 0;
         while i < bytes.len() { p.push(bytes[i]); i = i + 1; }
         let _ = self.bytes_written.fetch_add(need, MemoryOrdering.AcqRel);
-        Ok(())
+        Result.Ok(())
     }
 
     /// Convenience: emit a Text chunk as UTF-8 bytes.
@@ -178,12 +178,12 @@ implement H3DataSink {
     /// then emits an empty FIN-tagged DATA frame.
     pub async fn finish(self) -> Result<(), H3Error> {
         if self.finished.swap(true, MemoryOrdering.AcqRel) {
-            return Ok(());
+            return Result.Ok(());
         }
         if self.cancelled.load(MemoryOrdering.Acquire) {
-            return Err(H3Error.StreamCancelled);
+            return Result.Err(H3Error.StreamCancelled);
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Snapshot of bytes successfully accepted so far.
@@ -348,23 +348,23 @@ implement H3StreamWriter for BytesWriter {
         if self.consumed { return sink.finish().await; }
         sink.write(self.bytes.as_slice()).await?;
         self.consumed = true;
-        Ok(())
+        Result.Ok(())
     }
 }
 
 /// Adapter: produce chunks from an iterator-shaped callback.
-/// `next_chunk()` returns `Some(chunk)` while there's more data,
-/// `None` when complete. Useful for transducers / generators.
+/// `next_chunk()` returns `Maybe.Some(chunk)` while there's more data,
+/// `Maybe.None` when complete. Useful for transducers / generators.
 public type CallbackWriter<F> is { next_chunk: F };
 
 implement<F: fn() -> Maybe<List<Byte>> + Send> H3StreamWriter for CallbackWriter<F> {
     async fn write_to(&mut self, sink: &mut H3DataSink) -> Result<(), H3Error> {
         loop {
             match (self.next_chunk)() {
-                Some(chunk) => sink.write(chunk.as_slice()).await?,
-                None        => break,
+                Maybe.Some(chunk) => sink.write(chunk.as_slice()).await?,
+                Maybe.None        => break,
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 }

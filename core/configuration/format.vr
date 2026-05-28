@@ -27,23 +27,23 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "format protocol + open registry for all configuration languages",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.configuration.format;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 mount configuration.value.{ConfigValue};
 mount configuration.error.{ConfigError, FormatId};
 
@@ -184,10 +184,10 @@ public fn register_format(
     let id = fmt.format_id();
     let mut guard = reg.formats.write();
     if guard.contains_key(&id) {
-        return Err("format already registered: ".to_text().concat(&id));
+        return Result.Err("format already registered: ".to_text().concat(&id));
     }
     guard.insert(id, fmt);
-    Ok(())
+    Result.Ok(())
 }
 
 /// Look up a format by id.
@@ -197,8 +197,8 @@ public fn get_format(
 ) -> Maybe<Heap<dyn ConfigFormat>> {
     let guard = reg.formats.read();
     match guard.get(id) {
-        Some(f) => Some(f.clone()),
-        None    => None,
+        Maybe.Some(f) => Maybe.Some(f.clone()),
+        Maybe.None    => Maybe.None,
     }
 }
 
@@ -218,13 +218,13 @@ public fn detect_by_extension(
         let mut j = 0;
         while j < exts.len() {
             if exts.get(j).unwrap().to_lowercase() == ext_lower {
-                return Some(f.clone());
+                return Maybe.Some(f.clone());
             }
             j = j + 1;
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 /// Detect format by file path (uses extension).
@@ -240,7 +240,7 @@ public fn detect_by_path(
         else if bs[i] == 0x2F_u8 || bs[i] == 0x5C_u8 { last_dot = -1; } // reset on /\
         i = i + 1;
     }
-    if last_dot < 0 || last_dot >= bs.len() - 1 { return None; }
+    if last_dot < 0 || last_dot >= bs.len() - 1 { return Maybe.None; }
     let mut ext = Text.new();
     let mut j = last_dot + 1;
     while j < bs.len() { ext.push_byte(bs[j]); j = j + 1; }
@@ -262,13 +262,13 @@ public fn detect_by_mime(
         let mut j = 0;
         while j < mimes.len() {
             if mimes.get(j).unwrap().to_lowercase() == mime_lower {
-                return Some(f.clone());
+                return Maybe.Some(f.clone());
             }
             j = j + 1;
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 /// List all registered format ids.

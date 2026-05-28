@@ -80,14 +80,14 @@ implement Rgb {
 
     /// Parse a hex color string into Rgb.
     /// Accepts "#FF8800" or "FF8800" formats.
-    /// Returns None for invalid input.
+    /// Returns Maybe.None for invalid input.
     public fn from_hex(hex: &Text) -> Maybe<Rgb> {
         let s = if hex.starts_with("#") { hex.slice(1, hex.len()) } else { hex.clone() };
-        if s.len() != 6 { return None; }
+        if s.len() != 6 { return Maybe.None; }
         let r = parse_hex_pair(&s.slice(0, 2))?;
         let g = parse_hex_pair(&s.slice(2, 4))?;
         let b = parse_hex_pair(&s.slice(4, 6))?;
-        Some(Rgb { r: r, g: g, b: b })
+        Maybe.Some(Rgb { r: r, g: g, b: b })
     }
 
     /// Convert to CIELAB color space for perceptual comparison.

@@ -79,12 +79,12 @@ implement PageStore {
         self.pages.insert(page_no, bytes);
     }
 
-    /// Fetch page bytes.  Returns `None` if the page is absent —
+    /// Fetch page bytes.  Returns `Maybe.None` if the page is absent —
     /// caller surfaces this as `BtreeError::PageNotFound`.
     public fn fetch(&self, page_no: Int) -> Maybe<List<Byte>> {
         match self.pages.get(&page_no) {
-            Some(bs) => Some(clone_bytes(bs)),
-            None => None,
+            Maybe.Some(bs) => Maybe.Some(clone_bytes(bs)),
+            Maybe.None => Maybe.None,
         }
     }
 }
@@ -151,16 +151,16 @@ public fn cursor_seek(
     // Empty-tree fast path: if the root has zero cells, return SoEmpty.
     let root_page = c.root_page;
     let root_bytes = match pages.fetch(root_page) {
-        Some(b) => b,
-        None    => return Err(InvalidRootPage(root_page)),
+        Maybe.Some(b) => b,
+        Maybe.None    => return Result.Err(InvalidRootPage(root_page)),
     };
     let (root_hdr, _) = match parse_page_header(&root_bytes, header_offset_for_root(root_page)) {
-        Ok(p)  => p,
-        Err(_) => return Err(CorruptPage(root_page)),
+        Result.Ok(p)  => p,
+        Result.Err(_) => return Result.Err(CorruptPage(root_page)),
     };
     if root_hdr.cell_count == 0 {
         c.mark_at_end();
-        return Ok(SoEmpty);
+        return Result.Ok(SoEmpty);
     }
 
     // Descent loop.  Each iteration either descends into a child
@@ -171,19 +171,19 @@ public fn cursor_seek(
     while depth < max_depth {
         let cur_page = cursor_current_page(c);
         let bytes = match pages.fetch(cur_page) {
-            Some(b) => b,
-            None    => return Err(PageNotFound(cur_page)),
+            Maybe.Some(b) => b,
+            Maybe.None    => return Result.Err(PageNotFound(cur_page)),
         };
         let hdr_off = header_offset_for_root_or_zero(cur_page, c.root_page);
         let (hdr, _) = match parse_page_header(&bytes, hdr_off) {
-            Ok(p)  => p,
-            Err(_) => return Err(CorruptPage(cur_page)),
+            Result.Ok(p)  => p,
+            Result.Err(_) => return Result.Err(CorruptPage(cur_page)),
         };
 
         // Binary-search cells at this level.
         let bsr = match binary_search_with_layout(&bytes, &hdr, target) {
-            Ok(r)  => r,
-            Err(_) => return Err(CorruptPage(cur_page)),
+            Result.Ok(r)  => r,
+            Result.Err(_) => return Result.Err(CorruptPage(cur_page)),
         };
 
         if page_kind_is_interior(hdr.kind) {
@@ -203,9 +203,9 @@ public fn cursor_seek(
 
         // LEAF — finalise position per op.
         finalise_leaf_position(c, &hdr, &bsr, op);
-        return Ok(seek_outcome_from_bsr(&bsr, op));
+        return Result.Ok(seek_outcome_from_bsr(&bsr, op));
     }
-    Err(MaxDepthExceeded(max_depth))
+    Result.Err(MaxDepthExceeded(max_depth))
 }
 
 // -----------------------------------------------------------------------------
@@ -233,8 +233,8 @@ fn binary_search_with_layout(
     // Parse cell-pointer array once; reuse it for each `cell_at`
     // call inside the binary search.
     let pointers = match parse_cell_pointer_array(bytes, &hdr.cell_pointer_offset, hdr.cell_count) {
-        Ok(p)  => p,
-        Err(_) => return Err("cell pointer array parse failed".clone()),
+        Result.Ok(p)  => p,
+        Result.Err(_) => return Result.Err("cell pointer array parse failed".clone()),
     };
     let kind_local = hdr.kind.clone();
     let bytes_local = clone_bytes(bytes);
@@ -257,7 +257,7 @@ fn extract_key_at(
     local_max: Int,
 ) -> CellKey {
     match parse_cell(bytes, cell_off, kind.clone(), local_max) {
-        Ok(parts) => match parts {
+        Result.Ok(parts) => match parts {
             TableLeafCell(_, rowid, _, _)         => CkRowId(rowid),
             TableInteriorCell(_, rowid)            => CkRowId(rowid),
             IndexLeafCell(_, local_end, _)         => {
@@ -270,7 +270,7 @@ fn extract_key_at(
                 CkRecord(slice_bytes(bytes, cell_off, local_end))
             }
         }
-        Err(_) => CkRowId(0_i64),   // defensive — caller treats as last
+        Result.Err(_) => CkRowId(0_i64),   // defensive — caller treats as last
     }
 }
 
@@ -296,14 +296,14 @@ fn pick_interior_child(
         return hdr.right_child as Int;
     }
     let pointers = match parse_cell_pointer_array(bytes, &hdr.cell_pointer_offset, hdr.cell_count) {
-        Ok(p)  => p,
-        Err(_) => return hdr.right_child as Int,
+        Result.Ok(p)  => p,
+        Result.Err(_) => return hdr.right_child as Int,
     };
     let cell_off = pointers[bsr.index];
     let local_max: Int = 100;
     match parse_cell(bytes, cell_off, hdr.kind.clone(), local_max) {
-        Ok(TableInteriorCell(left, _))                  => left as Int,
-        Ok(IndexInteriorCell(left, _, _, _))           => left as Int,
+        Result.Ok(TableInteriorCell(left, _))                  => left as Int,
+        Result.Ok(IndexInteriorCell(left, _, _, _))           => left as Int,
         _ => hdr.right_child as Int,
     }
 }
@@ -361,30 +361,30 @@ fn seek_outcome_from_bsr(bsr: &BinarySearchResult, op: SeekOp) -> SeekOutcome {
 // next / prev — single-cell advance with page-boundary crossing
 // -----------------------------------------------------------------------------
 
-/// Advance to the next cell in in-order traversal.  Returns `Ok(true)`
-/// if a fresh cell is now under the cursor; `Ok(false)` if we've
+/// Advance to the next cell in in-order traversal.  Returns `Result.Ok(true)`
+/// if a fresh cell is now under the cursor; `Result.Ok(false)` if we've
 /// fallen off the right end (cursor is now `at_end`).
 public fn cursor_next(
     c: &mut BtreeCursor,
     pages: &PageStore,
 ) -> Result<Bool, BtreeError> {
-    if cursor_is_at_end(c) { return Ok(false); }
-    if !cursor_is_valid(c) { return Ok(false); }
+    if cursor_is_at_end(c) { return Result.Ok(false); }
+    if !cursor_is_valid(c) { return Result.Ok(false); }
 
     // Bump within the current leaf.
     c.bump_cell(1);
     let cur_page = cursor_current_page(c);
     let bytes = match pages.fetch(cur_page) {
-        Some(b) => b,
-        None    => return Err(PageNotFound(cur_page)),
+        Maybe.Some(b) => b,
+        Maybe.None    => return Result.Err(PageNotFound(cur_page)),
     };
     let (hdr, _) = match parse_page_header(&bytes, header_offset_for_root_or_zero(cur_page, c.root_page)) {
-        Ok(p)  => p,
-        Err(_) => return Err(CorruptPage(cur_page)),
+        Result.Ok(p)  => p,
+        Result.Err(_) => return Result.Err(CorruptPage(cur_page)),
     };
 
     if cursor_current_cell(c) < hdr.cell_count {
-        return Ok(true);
+        return Result.Ok(true);
     }
 
     // Off the right end of this leaf — ascend until we find an
@@ -395,7 +395,7 @@ public fn cursor_next(
     c.ascend();
     if !cursor_is_valid(c) {
         c.mark_at_end();
-        return Ok(false);
+        return Result.Ok(false);
     }
     c.bump_cell(1);
     // Descend leftmost through the new subtree until we hit a leaf.
@@ -403,18 +403,18 @@ public fn cursor_next(
     while guard < 64 {
         let cp = cursor_current_page(c);
         let pb = match pages.fetch(cp) {
-            Some(b) => b,
-            None    => return Err(PageNotFound(cp)),
+            Maybe.Some(b) => b,
+            Maybe.None    => return Result.Err(PageNotFound(cp)),
         };
         let (h, _) = match parse_page_header(&pb, header_offset_for_root_or_zero(cp, c.root_page)) {
-            Ok(p)  => p,
-            Err(_) => return Err(CorruptPage(cp)),
+            Result.Ok(p)  => p,
+            Result.Err(_) => return Result.Err(CorruptPage(cp)),
         };
         if !page_kind_is_interior(h.kind) { break; }
         // Pick the leftmost child = first cell's left_child.
         let pointers = match parse_cell_pointer_array(&pb, &h.cell_pointer_offset, h.cell_count) {
-            Ok(p)  => p,
-            Err(_) => return Err(CorruptPage(cp)),
+            Result.Ok(p)  => p,
+            Result.Err(_) => return Result.Err(CorruptPage(cp)),
         };
         if h.cell_count == 0 {
             // Empty interior — descend via right_child as fallback.
@@ -422,15 +422,15 @@ public fn cursor_next(
         } else {
             let cell_off = pointers[0];
             let child = match parse_cell(&pb, cell_off, h.kind.clone(), 100) {
-                Ok(TableInteriorCell(l, _))               => l as Int,
-                Ok(IndexInteriorCell(l, _, _, _))         => l as Int,
+                Result.Ok(TableInteriorCell(l, _))               => l as Int,
+                Result.Ok(IndexInteriorCell(l, _, _, _))         => l as Int,
                 _ => h.right_child as Int,
             };
             c.descend(child);
         }
         guard = guard + 1;
     }
-    Ok(true)
+    Result.Ok(true)
 }
 
 /// Symmetric backward step.  Foundation implements one-cell decrement
@@ -440,7 +440,7 @@ public fn cursor_prev(
     c: &mut BtreeCursor,
     pages: &PageStore,
 ) -> Result<Bool, BtreeError> {
-    if !cursor_is_valid(c) && !cursor_is_at_end(c) { return Ok(false); }
+    if !cursor_is_valid(c) && !cursor_is_at_end(c) { return Result.Ok(false); }
     if cursor_is_at_end(c) {
         // Re-position to the last cell of the rightmost leaf.
         c.invalidate();
@@ -448,13 +448,13 @@ public fn cursor_prev(
         return descend_rightmost(c, pages);
     }
     c.bump_cell(-1);
-    if cursor_current_cell(c) >= 0 { return Ok(true); }
+    if cursor_current_cell(c) >= 0 { return Result.Ok(true); }
 
     // Off the left end — ascend, decrement parent cell.
     c.ascend();
     if !cursor_is_valid(c) {
         c.invalidate();
-        return Ok(false);
+        return Result.Ok(false);
     }
     c.bump_cell(-1);
     descend_rightmost(c, pages)
@@ -465,26 +465,26 @@ fn descend_rightmost(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, Btr
     while guard < 64 {
         let cp = cursor_current_page(c);
         let pb = match pages.fetch(cp) {
-            Some(b) => b,
-            None    => return Err(PageNotFound(cp)),
+            Maybe.Some(b) => b,
+            Maybe.None    => return Result.Err(PageNotFound(cp)),
         };
         let (h, _) = match parse_page_header(&pb, header_offset_for_root_or_zero(cp, c.root_page)) {
-            Ok(p)  => p,
-            Err(_) => return Err(CorruptPage(cp)),
+            Result.Ok(p)  => p,
+            Result.Err(_) => return Result.Err(CorruptPage(cp)),
         };
         if !page_kind_is_interior(h.kind) {
             // Position at the last cell of this leaf.
             if h.cell_count > 0 {
                 c.bump_cell((h.cell_count - 1) - cursor_current_cell(c));
-                return Ok(true);
+                return Result.Ok(true);
             }
             c.mark_at_end();
-            return Ok(false);
+            return Result.Ok(false);
         }
         c.descend(h.right_child as Int);
         guard = guard + 1;
     }
-    Err(MaxDepthExceeded(64))
+    Result.Err(MaxDepthExceeded(64))
 }
 
 /// Position cursor at the FIRST cell of the leftmost leaf.
@@ -498,37 +498,37 @@ public fn cursor_first(
     while guard < 64 {
         let cp = cursor_current_page(c);
         let pb = match pages.fetch(cp) {
-            Some(b) => b,
-            None    => return Err(PageNotFound(cp)),
+            Maybe.Some(b) => b,
+            Maybe.None    => return Result.Err(PageNotFound(cp)),
         };
         let (h, _) = match parse_page_header(&pb, header_offset_for_root_or_zero(cp, c.root_page)) {
-            Ok(p)  => p,
-            Err(_) => return Err(CorruptPage(cp)),
+            Result.Ok(p)  => p,
+            Result.Err(_) => return Result.Err(CorruptPage(cp)),
         };
         if !page_kind_is_interior(h.kind) {
             if h.cell_count == 0 {
                 c.mark_at_end();
-                return Ok(false);
+                return Result.Ok(false);
             }
-            return Ok(true);
+            return Result.Ok(true);
         }
         let pointers = match parse_cell_pointer_array(&pb, &h.cell_pointer_offset, h.cell_count) {
-            Ok(p)  => p,
-            Err(_) => return Err(CorruptPage(cp)),
+            Result.Ok(p)  => p,
+            Result.Err(_) => return Result.Err(CorruptPage(cp)),
         };
         let child = if h.cell_count == 0 {
             h.right_child as Int
         } else {
             match parse_cell(&pb, pointers[0], h.kind.clone(), 100) {
-                Ok(TableInteriorCell(l, _))               => l as Int,
-                Ok(IndexInteriorCell(l, _, _, _))         => l as Int,
+                Result.Ok(TableInteriorCell(l, _))               => l as Int,
+                Result.Ok(IndexInteriorCell(l, _, _, _))         => l as Int,
                 _ => h.right_child as Int,
             }
         };
         c.descend(child);
         guard = guard + 1;
     }
-    Err(MaxDepthExceeded(64))
+    Result.Err(MaxDepthExceeded(64))
 }
 
 /// Position cursor at the LAST cell of the rightmost leaf.

@@ -69,12 +69,12 @@ public pure fn universe_is_prop(u: UniverseLevel) -> Bool {
     }
 }
 
-/// Project: extract a concrete level if this is `Concrete(n)`, else None.
+/// Project: extract a concrete level if this is `Concrete(n)`, else Maybe.None.
 /// Used by the kernel's universe-stratification check (K-Univ).
 public pure fn universe_concrete_level(u: UniverseLevel) -> Maybe<Int> {
     match u {
-        UniverseLevel.Concrete { level } => Some(level),
-        _ => None,
+        UniverseLevel.Concrete { level } => Maybe.Some(level),
+        _ => Maybe.None,
     }
 }
 

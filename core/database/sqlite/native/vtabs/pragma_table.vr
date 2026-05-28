@@ -78,12 +78,12 @@ implement TableInfoCursor {
         _args: &List<Register>,
     ) -> Result<(), VtabError> {
         self.pos = 0;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn next_row(&mut self) -> Result<(), VtabError> {
         self.pos = self.pos + 1;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn eof(&self) -> Bool { self.pos >= self.rows.len() }
@@ -97,8 +97,8 @@ implement TableInfoCursor {
             2 => RText(r.type_name.clone()),
             3 => RInt(if r.notnull { 1 as Int64 } else { 0 as Int64 }),
             4 => match &r.default_value {
-                Some(s) => RText(s.clone()),
-                None    => RNull,
+                Maybe.Some(s) => RText(s.clone()),
+                Maybe.None    => RNull,
             },
             5 => RInt(r.pk_position as Int64),
             _ => RNull,

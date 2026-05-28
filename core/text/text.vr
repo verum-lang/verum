@@ -328,7 +328,7 @@ implement Text {
     /// Fallible counterpart to `with_capacity`.
     ///
 
-    /// Returns `Err(AllocError)` on allocation failure rather than
+    /// Returns `Result.Err(AllocError)` on allocation failure rather than
     /// panicking. Routes through `try_alloc` so all allocator-side
     /// errors (OutOfMemory, InvalidSize, InvalidAlignment, etc.)
     /// propagate as typed variants.
@@ -635,7 +635,7 @@ implement Text {
     /// Get character at byte index.
     ///
 
-    /// Returns `None` if the byte index is out of range OR points
+    /// Returns `Maybe.None` if the byte index is out of range OR points
     /// into the middle of a multi-byte UTF-8 sequence (continuation
     /// byte). Without the boundary check, `char_at(1)` on `"é"`
     /// (bytes `[0xC3, 0xA9]`) would decode a UTF-8 continuation byte
@@ -1521,7 +1521,7 @@ implement Text {
     }
 
     /// Get byte index of the nth character (0-indexed).
-    /// Returns None if n >= char_count().
+    /// Returns Maybe.None if n >= char_count().
     public fn byte_index_of_char(&self, n: Int) -> Maybe<Int> {
         let bytes = self.as_bytes();
         let mut char_idx = 0;
@@ -1864,9 +1864,9 @@ implement Text {
     ///
 
     /// ```verum
-    /// assert_eq("FF".parse_int_radix(16), Ok(255));
-    /// assert_eq("1010".parse_int_radix(2), Ok(10));
-    /// assert_eq("777".parse_int_radix(8), Ok(511));
+    /// assert_eq("FF".parse_int_radix(16), Result.Ok(255));
+    /// assert_eq("1010".parse_int_radix(2), Result.Ok(10));
+    /// assert_eq("777".parse_int_radix(8), Result.Ok(511));
     /// ```
     public fn parse_int_radix(&self, radix: Int) -> Result<Int, ParseError> {
         if radix < 2 || radix > 36 {
@@ -2237,7 +2237,7 @@ implement Text {
     // Production-Grade Methods
     // =========================================================================
 
-    /// Remove prefix and return remainder, or None if prefix doesn't match.
+    /// Remove prefix and return remainder, or Maybe.None if prefix doesn't match.
     public fn strip_prefix(&self, prefix: &Text) -> Maybe<Text> {
         if self.starts_with(prefix) {
             Maybe.Some(self.slice(prefix.len(), self.len()))
@@ -2246,7 +2246,7 @@ implement Text {
         }
     }
 
-    /// Remove suffix and return remainder, or None if suffix doesn't match.
+    /// Remove suffix and return remainder, or Maybe.None if suffix doesn't match.
     public fn strip_suffix(&self, suffix: &Text) -> Maybe<Text> {
         if self.ends_with(suffix) {
             Maybe.Some(self.slice(0, self.len() - suffix.len()))
@@ -2274,7 +2274,7 @@ implement Text {
     }
 
     /// Split on the first occurrence of separator.
-    /// Returns (before, after) or None if separator not found.
+    /// Returns (before, after) or Maybe.None if separator not found.
     public fn split_once(&self, sep: &Text) -> Maybe<(Text, Text)> {
         match self.find(sep) {
             Maybe.Some(idx) => Maybe.Some((self.slice(0, idx), self.slice(idx + sep.len(), self.len()))),
@@ -2283,7 +2283,7 @@ implement Text {
     }
 
     /// Split on the last occurrence of separator.
-    /// Returns (before, after) or None if separator not found.
+    /// Returns (before, after) or Maybe.None if separator not found.
     public fn rsplit_once(&self, sep: &Text) -> Maybe<(Text, Text)> {
         match self.rfind(sep) {
             Maybe.Some(idx) => Maybe.Some((self.slice(0, idx), self.slice(idx + sep.len(), self.len()))),
@@ -2379,8 +2379,8 @@ implement Text {
     /// # Example
     /// ```verum
     /// let s = "hello world";
-    /// assert_eq(s.index_of("world"), Some(6));
-    /// assert_eq(s.index_of("xyz"), None);
+    /// assert_eq(s.index_of("world"), Maybe.Some(6));
+    /// assert_eq(s.index_of("xyz"), Maybe.None);
     /// ```
     public fn index_of(&self, needle: &Text) -> Maybe<Int> {
         self.find(needle)
@@ -2398,11 +2398,11 @@ implement Text {
         self.count_matches(needle)
     }
 
-    /// Try to parse as Int, returning None on failure.
+    /// Try to parse as Int, returning Maybe.None on failure.
     ///
 
     /// Mirrors `to_int` for digit / sign / whitespace handling but
-    /// surfaces failure as `None`. Accumulates magnitude in
+    /// surfaces failure as `Maybe.None`. Accumulates magnitude in
     /// `UInt64` so `Int.MIN`'s magnitude (2^63 = `Int.MAX + 1`)
     /// round-trips — pre-fix, the signed accumulator rejected
     /// `"-9223372036854775808"` as an apparent wrap-around even
@@ -2411,8 +2411,8 @@ implement Text {
 
     /// # Example
     /// ```verum
-    /// assert_eq("42".try_to_int(), Some(42));
-    /// assert_eq("abc".try_to_int(), None);
+    /// assert_eq("42".try_to_int(), Maybe.Some(42));
+    /// assert_eq("abc".try_to_int(), Maybe.None);
     /// ```
     public fn try_to_int(&self) -> Maybe<Int> {
         let bytes = self.as_bytes();
@@ -2428,7 +2428,7 @@ implement Text {
             }
         }
         if i >= blen {
-            return None;
+            return Maybe.None;
         }
         let mut neg = false;
         if bytes[i] == 45 {
@@ -2438,7 +2438,7 @@ implement Text {
             i = i + 1;
         }
         if i >= blen || bytes[i] < 48 || bytes[i] > 57 {
-            return None;
+            return Maybe.None;
         }
         let mut mag: UInt64 = 0_u64;
         let mut has_digits = false;
@@ -2449,11 +2449,11 @@ implement Text {
         while i < blen {
             let b = bytes[i];
             if b >= 48 && b <= 57 {
-                if consumed >= 20 { return None; }
+                if consumed >= 20 { return Maybe.None; }
                 let digit: UInt64 = (b as Int - 48) as UInt64;
-                if mag > 1_844_674_407_370_955_161_u64 { return None; }   // UInt64.MAX/10
+                if mag > 1_844_674_407_370_955_161_u64 { return Maybe.None; }   // UInt64.MAX/10
                 let next = mag * 10_u64 + digit;
-                if next < mag { return None; }                              // wrap (defensive)
+                if next < mag { return Maybe.None; }                              // wrap (defensive)
                 mag = next;
                 has_digits = true;
                 consumed = consumed + 1;
@@ -2468,33 +2468,33 @@ implement Text {
             if b == 32 || b == 9 || b == 10 || b == 13 || b == 12 {
                 i = i + 1;
             } else {
-                return None;
+                return Maybe.None;
             }
         }
         if !has_digits {
-            return None;
+            return Maybe.None;
         }
         // Range-check before signed cast — sign-aware thresholds.
         if neg {
-            if mag > 9_223_372_036_854_775_808_u64 { return None; }
+            if mag > 9_223_372_036_854_775_808_u64 { return Maybe.None; }
             if mag == 9_223_372_036_854_775_808_u64 {
-                Some(-9_223_372_036_854_775_808)                              // Int.MIN
+                Maybe.Some(-9_223_372_036_854_775_808)                              // Int.MIN
             } else {
-                Some(0 - (mag as Int))
+                Maybe.Some(0 - (mag as Int))
             }
         } else {
-            if mag > 9_223_372_036_854_775_807_u64 { return None; }
-            Some(mag as Int)
+            if mag > 9_223_372_036_854_775_807_u64 { return Maybe.None; }
+            Maybe.Some(mag as Int)
         }
     }
 
-    /// Try to parse as Float, returning None on failure.
+    /// Try to parse as Float, returning Maybe.None on failure.
     ///
 
     /// # Example
     /// ```verum
-    /// assert_eq("3.14".try_to_float(), Some(3.14));
-    /// assert_eq("abc".try_to_float(), None);
+    /// assert_eq("3.14".try_to_float(), Maybe.Some(3.14));
+    /// assert_eq("abc".try_to_float(), Maybe.None);
     /// ```
     public fn try_to_float(&self) -> Maybe<Float> {
         let bytes = self.as_bytes();
@@ -2510,13 +2510,13 @@ implement Text {
             }
         }
         if i >= blen {
-            return None;
+            return Maybe.None;
         }
         let mut sign = 1.0;
         if bytes[i] == 45 { sign = -1.0; i = i + 1; }
         else if bytes[i] == 43 { i = i + 1; }
         if i >= blen || (bytes[i] < 48 || bytes[i] > 57) && bytes[i] != 46 {
-            return None;
+            return Maybe.None;
         }
         let mut integer_part = 0.0;
         let mut has_digits = false;
@@ -2537,7 +2537,7 @@ implement Text {
             }
         }
         if !has_digits {
-            return None;
+            return Maybe.None;
         }
         let mut val = sign * (integer_part + frac_part);
         // Handle exponent. Cap digit count at 4 — Float64 saturates
@@ -2580,10 +2580,10 @@ implement Text {
             if b == 32 || b == 9 || b == 10 || b == 13 || b == 12 {
                 i = i + 1;
             } else {
-                return None;
+                return Maybe.None;
             }
         }
-        Some(val)
+        Maybe.Some(val)
     }
 
     /// Check if all bytes are ASCII (< 128).
@@ -2650,18 +2650,18 @@ implement Text {
         while i < bytes.len() {
             let ch_len = utf8_char_len(bytes[i]);
             match self.char_at(i) {
-                Some(ch) => {
+                Maybe.Some(ch) => {
                     for target in chars.iter() {
                         if ch == *target {
-                            return Some(i);
+                            return Maybe.Some(i);
                         }
                     }
                 }
-                None => {}
+                Maybe.None => {}
             }
             i = i + ch_len;
         }
-        None
+        Maybe.None
     }
 
     /// Check if byte index is a UTF-8 character boundary.
@@ -2710,10 +2710,10 @@ implement Text {
         self.truncate(0);
     }
 
-    /// Remove and return the last character, or None if empty.
+    /// Remove and return the last character, or Maybe.None if empty.
     public fn pop(&mut self) -> Maybe<Char> {
         if self.is_empty() {
-            return None;
+            return Maybe.None;
         }
         let bytes = self.as_bytes();
         // Find the start of the last character by walking backwards
@@ -2795,8 +2795,8 @@ implement Text {
         assert(self.is_char_boundary(idx), "remove position must be a UTF-8 character boundary");
 
         let ch = match self.char_at(idx) {
-            Some(c) => c,
-            None => panic("invalid UTF-8 at remove index"),
+            Maybe.Some(c) => c,
+            Maybe.None => panic("invalid UTF-8 at remove index"),
         };
         let ch_len = ch.len_utf8();
 
@@ -3007,7 +3007,7 @@ implement Text {
         let mut result: List<Int> = [];
         let mut buf: [Int; 2] = [0, 0];
         let mut iter = self.chars();
-        while let Some(ch) = iter.next() {
+        while let Maybe.Some(ch) = iter.next() {
             let count = ch.encode_utf16(&mut buf);
             result.push(buf[0]);
             if count == 2 {
@@ -3138,12 +3138,12 @@ implement Text {
                 let remaining = self.slice(start, bytes.len());
                 let found = remaining.find(sep);
                 match found {
-                    Some(offset) => {
+                    Maybe.Some(offset) => {
                         let end = start + offset + sep_len;
                         result.push(self.slice(start, end));
                         start = end;
                     }
-                    None => {
+                    Maybe.None => {
                         result.push(self.slice(start, bytes.len()));
                         start = bytes.len();
                     }
@@ -3190,7 +3190,7 @@ implement Text {
                     let ch_len = utf8_char_len(bytes[i]);
                     let ch_result = self.char_at(i);
                     match ch_result {
-                        Some(ch) => {
+                        Maybe.Some(ch) => {
                             if !ch.is_whitespace() {
                                 all_ws = false;
                                 i = len;  // break
@@ -3198,7 +3198,7 @@ implement Text {
                                 i = i + ch_len;
                             }
                         },
-                        None => {
+                        Maybe.None => {
                             all_ws = false;
                             i = len;  // break
                         },
@@ -3232,7 +3232,7 @@ implement Text {
         } else {
             let first_opt = self.char_at(0);
             match first_opt {
-                Some(first_ch) => {
+                Maybe.Some(first_ch) => {
                     let first_len = first_ch.len_utf8();
                     let upper = first_ch.to_uppercase();
                     let mut result = Text.new();
@@ -3244,7 +3244,7 @@ implement Text {
                     }
                     result
                 },
-                None => "".clone(),
+                Maybe.None => "".clone(),
             }
         }
     }
@@ -3271,7 +3271,7 @@ implement Text {
             while i < len {
                 let ch_opt = self.char_at(i);
                 match ch_opt {
-                    Some(ch) => {
+                    Maybe.Some(ch) => {
                         let ch_len = ch.len_utf8();
                         if ch.is_whitespace() {
                             result.push(ch);
@@ -3284,7 +3284,7 @@ implement Text {
                         }
                         i = i + ch_len;
                     },
-                    None => {
+                    Maybe.None => {
                         i = i + 1;
                     },
                 }
@@ -3308,7 +3308,7 @@ implement Text {
         while i < len {
             let ch_opt = self.char_at(i);
             match ch_opt {
-                Some(ch) => {
+                Maybe.Some(ch) => {
                     let ch_len = ch.len_utf8();
                     if ch.is_uppercase() {
                         result.push(ch.to_lowercase());
@@ -3319,7 +3319,7 @@ implement Text {
                     }
                     i = i + ch_len;
                 },
-                None => {
+                Maybe.None => {
                     i = i + 1;
                 },
             }
@@ -3343,7 +3343,7 @@ implement Text {
             while i < len {
                 let ch_opt = self.char_at(i);
                 match ch_opt {
-                    Some(ch) => {
+                    Maybe.Some(ch) => {
                         let ch_len = ch.len_utf8();
                         if ch.is_uppercase() {
                             has_cased = true;
@@ -3353,7 +3353,7 @@ implement Text {
                         }
                         i = i + ch_len;
                     },
-                    None => {
+                    Maybe.None => {
                         i = i + 1;
                     },
                 }
@@ -3378,7 +3378,7 @@ implement Text {
             while i < len {
                 let ch_opt = self.char_at(i);
                 match ch_opt {
-                    Some(ch) => {
+                    Maybe.Some(ch) => {
                         let ch_len = ch.len_utf8();
                         if ch.is_lowercase() {
                             has_cased = true;
@@ -3388,7 +3388,7 @@ implement Text {
                         }
                         i = i + ch_len;
                     },
-                    None => {
+                    Maybe.None => {
                         i = i + 1;
                     },
                 }
@@ -3414,7 +3414,7 @@ implement Text {
             while i < len {
                 let ch_opt = self.char_at(i);
                 match ch_opt {
-                    Some(ch) => {
+                    Maybe.Some(ch) => {
                         let ch_len = ch.len_utf8();
                         if ch == '\t' {
                             let spaces = tab_size - (col % tab_size);
@@ -3431,7 +3431,7 @@ implement Text {
                         }
                         i = i + ch_len;
                     },
-                    None => {
+                    Maybe.None => {
                         i = i + 1;
                     },
                 }
@@ -3456,7 +3456,7 @@ implement Text {
             if !self.is_empty() {
                 let first_opt = self.char_at(0);
                 match first_opt {
-                    Some(first_ch) => {
+                    Maybe.Some(first_ch) => {
                         if first_ch == '+' || first_ch == '-' {
                             result.push(first_ch);
                             for _ in range(0, pad_count) {
@@ -3473,7 +3473,7 @@ implement Text {
                             result.push_str(self);
                         }
                     },
-                    None => {
+                    Maybe.None => {
                         for _ in range(0, pad_count) {
                             result.push('0');
                         }
@@ -3514,16 +3514,16 @@ implement Iterator for TextMatches {
 
     fn next(&mut self) -> Maybe<Text> {
         if self.pos > self.haystack.len() {
-            return None;
+            return Maybe.None;
         }
         let remaining = self.haystack.slice(self.pos, self.haystack.len());
         match remaining.find(&self.pattern) {
-            Some(offset) => {
+            Maybe.Some(offset) => {
                 let match_start = self.pos + offset;
                 self.pos = match_start + self.pattern.len();
-                Some(self.pattern.clone())
+                Maybe.Some(self.pattern.clone())
             }
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 }
@@ -3549,16 +3549,16 @@ implement Iterator for TextMatchIndices {
 
     fn next(&mut self) -> Maybe<(Int, Text)> {
         if self.pos > self.haystack.len() {
-            return None;
+            return Maybe.None;
         }
         let remaining = self.haystack.slice(self.pos, self.haystack.len());
         match remaining.find(&self.pattern) {
-            Some(offset) => {
+            Maybe.Some(offset) => {
                 let match_start = self.pos + offset;
                 self.pos = match_start + self.pattern.len();
-                Some((match_start, self.pattern.clone()))
+                Maybe.Some((match_start, self.pattern.clone()))
             }
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 }
@@ -3789,12 +3789,12 @@ implement FromStr for Int8 {
     fn from_str(s: &Text) -> Result<Int8, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
             Result.Ok(val) => {
                 let converted = Int8.try_from(val);
                 match converted {
-                    Result.Ok(v) => Ok(v),
-                    Result.Err(_) => Err(ParseError.new(&"value out of range for Int8")),
+                    Result.Ok(v) => Result.Ok(v),
+                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for Int8")),
                 }
             },
         }
@@ -3807,12 +3807,12 @@ implement FromStr for Int16 {
     fn from_str(s: &Text) -> Result<Int16, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
             Result.Ok(val) => {
                 let converted = Int16.try_from(val);
                 match converted {
-                    Result.Ok(v) => Ok(v),
-                    Result.Err(_) => Err(ParseError.new(&"value out of range for Int16")),
+                    Result.Ok(v) => Result.Ok(v),
+                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for Int16")),
                 }
             },
         }
@@ -3825,12 +3825,12 @@ implement FromStr for Int32 {
     fn from_str(s: &Text) -> Result<Int32, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
             Result.Ok(val) => {
                 let converted = Int32.try_from(val);
                 match converted {
-                    Result.Ok(v) => Ok(v),
-                    Result.Err(_) => Err(ParseError.new(&"value out of range for Int32")),
+                    Result.Ok(v) => Result.Ok(v),
+                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for Int32")),
                 }
             },
         }
@@ -3843,12 +3843,12 @@ implement FromStr for UInt8 {
     fn from_str(s: &Text) -> Result<UInt8, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
             Result.Ok(val) => {
                 let converted = UInt8.try_from(val);
                 match converted {
-                    Result.Ok(v) => Ok(v),
-                    Result.Err(_) => Err(ParseError.new(&"value out of range for UInt8")),
+                    Result.Ok(v) => Result.Ok(v),
+                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for UInt8")),
                 }
             },
         }
@@ -3861,12 +3861,12 @@ implement FromStr for UInt16 {
     fn from_str(s: &Text) -> Result<UInt16, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
             Result.Ok(val) => {
                 let converted = UInt16.try_from(val);
                 match converted {
-                    Result.Ok(v) => Ok(v),
-                    Result.Err(_) => Err(ParseError.new(&"value out of range for UInt16")),
+                    Result.Ok(v) => Result.Ok(v),
+                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for UInt16")),
                 }
             },
         }
@@ -3879,12 +3879,12 @@ implement FromStr for UInt32 {
     fn from_str(s: &Text) -> Result<UInt32, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
             Result.Ok(val) => {
                 let converted = UInt32.try_from(val);
                 match converted {
-                    Result.Ok(v) => Ok(v),
-                    Result.Err(_) => Err(ParseError.new(&"value out of range for UInt32")),
+                    Result.Ok(v) => Result.Ok(v),
+                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for UInt32")),
                 }
             },
         }
@@ -3897,12 +3897,12 @@ implement FromStr for UInt64 {
     fn from_str(s: &Text) -> Result<UInt64, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
             Result.Ok(val) => {
                 let converted = UInt64.try_from(val);
                 match converted {
-                    Result.Ok(v) => Ok(v),
-                    Result.Err(_) => Err(ParseError.new(&"value out of range for UInt64")),
+                    Result.Ok(v) => Result.Ok(v),
+                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for UInt64")),
                 }
             },
         }
@@ -3915,8 +3915,8 @@ implement FromStr for Int64 {
     fn from_str(s: &Text) -> Result<Int64, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
-            Result.Ok(val) => Ok(val as Int64),
+            Result.Err(e) => Result.Err(e),
+            Result.Ok(val) => Result.Ok(val as Int64),
         }
     }
 }
@@ -3927,8 +3927,8 @@ implement FromStr for Int128 {
     fn from_str(s: &Text) -> Result<Int128, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
-            Result.Ok(val) => Ok(val as Int128),
+            Result.Err(e) => Result.Err(e),
+            Result.Ok(val) => Result.Ok(val as Int128),
         }
     }
 }
@@ -3939,7 +3939,7 @@ implement FromStr for UInt128 {
     fn from_str(s: &Text) -> Result<UInt128, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
             Result.Ok(val) => {
                 if val < 0 {
                     Result.Err(ParseError.new(&"value out of range for UInt128"))
@@ -3957,8 +3957,8 @@ implement FromStr for ISize {
     fn from_str(s: &Text) -> Result<ISize, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
-            Result.Ok(val) => Ok(val as ISize),
+            Result.Err(e) => Result.Err(e),
+            Result.Ok(val) => Result.Ok(val as ISize),
         }
     }
 }
@@ -3969,7 +3969,7 @@ implement FromStr for USize {
     fn from_str(s: &Text) -> Result<USize, ParseError> {
         let n = s.parse_int();
         match n {
-            Result.Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
             Result.Ok(val) => {
                 if val < 0 {
                     Result.Err(ParseError.new(&"value out of range for USize"))
@@ -3987,8 +3987,8 @@ implement FromStr for Float32 {
     fn from_str(s: &Text) -> Result<Float32, ParseError> {
         let f = s.parse_float();
         match f {
-            Result.Err(e) => Err(e),
-            Result.Ok(val) => Ok(val as Float32),
+            Result.Err(e) => Result.Err(e),
+            Result.Ok(val) => Result.Ok(val as Float32),
         }
     }
 }
@@ -3999,8 +3999,8 @@ implement FromStr for Float64 {
     fn from_str(s: &Text) -> Result<Float64, ParseError> {
         let f = s.parse_float();
         match f {
-            Result.Err(e) => Err(e),
-            Result.Ok(val) => Ok(val as Float64),
+            Result.Err(e) => Result.Err(e),
+            Result.Ok(val) => Result.Ok(val as Float64),
         }
     }
 }
@@ -4010,8 +4010,8 @@ implement FromIterator<Char> for Text {
         let mut t = Text.new();
         loop {
             match iter.next() {
-                None => break,
-                Some(ch) => {
+                Maybe.None => break,
+                Maybe.Some(ch) => {
                     t.push(ch);
                 }
             }
@@ -4051,19 +4051,19 @@ implement Iterator for Chars {
 
     fn next(&mut self) -> Maybe<Char> {
         if self.pos >= self.bytes.len() {
-            return None;
+            return Maybe.None;
         }
 
         let (ch, len) = utf8_decode_char_len(self.bytes, self.pos);
         self.pos = self.pos + len;
-        Some(ch)
+        Maybe.Some(ch)
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.bytes.len() - self.pos;
         // At least remaining/4 chars (4 bytes max per char)
         // At most remaining chars (1 byte min per char)
-        ((remaining + 3) / 4, Some(remaining))
+        ((remaining + 3) / 4, Maybe.Some(remaining))
     }
 }
 
@@ -4078,16 +4078,16 @@ implement Iterator for ByteIter {
 
     fn next(&mut self) -> Maybe<Byte> {
         if self.pos >= self.bytes.len() {
-            return None;
+            return Maybe.None;
         }
         let b = self.bytes[self.pos];
         self.pos = self.pos + 1;
-        Some(b)
+        Maybe.Some(b)
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.bytes.len() - self.pos;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
@@ -4102,13 +4102,13 @@ implement Iterator for CharIndices {
 
     fn next(&mut self) -> Maybe<(Int, Char)> {
         if self.pos >= self.bytes.len() {
-            return None;
+            return Maybe.None;
         }
 
         let start = self.pos;
         let (ch, len) = utf8_decode_char_len(self.bytes, self.pos);
         self.pos = self.pos + len;
-        Some((start, ch))
+        Maybe.Some((start, ch))
     }
 }
 
@@ -4124,7 +4124,7 @@ implement Iterator for Lines {
     fn next(&mut self) -> Maybe<Text> {
         let bytes = self.text.as_bytes();
         if self.pos >= bytes.len() {
-            return None;
+            return Maybe.None;
         }
 
         let start = self.pos;
@@ -4145,7 +4145,7 @@ implement Iterator for Lines {
         // Move past newline
         self.pos = if end < bytes.len() { end + 1 } else { end };
 
-        Some(self.text.slice(start, line_end))
+        Maybe.Some(self.text.slice(start, line_end))
     }
 }
 

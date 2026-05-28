@@ -46,23 +46,23 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "SemVer 2.0 version constraint parser and matcher",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.base.semver_constraint;
 
 mount core.*;
 mount collections.List;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 mount base.semver.{SemVer, SemVerError, parse as parse_version, cmp as cmp_versions, format_semver};
 
 // =============================================================================
@@ -260,7 +260,7 @@ public fn or(a: SemVerConstraint, b: SemVerConstraint) -> SemVerConstraint {
 
 fn matches_impl(c: &SemVerConstraint, v: &SemVer, opts: &MatchOptions) -> Bool {
     match c {
-        SemVerConstraint.Any   => allow_prerelease_check(v, opts, &None),
+        SemVerConstraint.Any   => allow_prerelease_check(v, opts, &Maybe.None),
         SemVerConstraint.Empty => false,
         SemVerConstraint.Eq(target) => {
             // Eq with a pre-release operand always allows pre-release input
@@ -270,19 +270,19 @@ fn matches_impl(c: &SemVerConstraint, v: &SemVer, opts: &MatchOptions) -> Bool {
         }
         SemVerConstraint.Gt(target) => {
             cmp_versions(v, target) is Greater
-                && allow_prerelease_check(v, opts, &Some(target.clone()))
+                && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
         }
         SemVerConstraint.Gte(target) => {
             !(cmp_versions(v, target) is Less)
-                && allow_prerelease_check(v, opts, &Some(target.clone()))
+                && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
         }
         SemVerConstraint.Lt(target) => {
             cmp_versions(v, target) is Less
-                && allow_prerelease_check(v, opts, &Some(target.clone()))
+                && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
         }
         SemVerConstraint.Lte(target) => {
             !(cmp_versions(v, target) is Greater)
-                && allow_prerelease_check(v, opts, &Some(target.clone()))
+                && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
         }
         SemVerConstraint.And(a, b) => {
             matches_impl(&**a, v, opts) && matches_impl(&**b, v, opts)
@@ -304,7 +304,7 @@ fn allow_prerelease_check(
     if v.pre_release.is_empty() { return true; }
     if opts.allow_prerelease { return true; }
     match operand {
-        Some(op) => {
+        Maybe.Some(op) => {
             // The input is a pre-release; allow only when the operand
             // itself is a pre-release of the same (major, minor, patch)
             // triple.
@@ -313,7 +313,7 @@ fn allow_prerelease_check(
                 && op.minor == v.minor
                 && op.patch == v.patch
         }
-        None => false,
+        Maybe.None => false,
     }
 }
 
@@ -335,7 +335,7 @@ fn allow_prerelease_check(
 fn parse_or(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
     let parts = split_by_or(s);
     if parts.is_empty() {
-        return Err(SemVerConstraintError.InvalidConstraint("empty constraint".to_text()));
+        return Result.Err(SemVerConstraintError.InvalidConstraint("empty constraint".to_text()));
     }
     let mut acc = parse_and(parts.get(0).unwrap())?;
     let mut i = 1;
@@ -343,7 +343,7 @@ fn parse_or(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
         acc = or(acc, parse_and(parts.get(i).unwrap())?);
         i = i + 1;
     }
-    Ok(acc)
+    Result.Ok(acc)
 }
 
 fn split_by_or(s: &Text) -> List<Text> {
@@ -368,7 +368,7 @@ fn parse_and(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
     // Split on commas + whitespace; both delimit AND-clauses.
     let atoms = tokenise_atoms(s);
     if atoms.is_empty() {
-        return Err(SemVerConstraintError.InvalidConstraint("empty AND-clause".to_text()));
+        return Result.Err(SemVerConstraintError.InvalidConstraint("empty AND-clause".to_text()));
     }
     let mut acc = parse_atom(atoms.get(0).unwrap())?;
     let mut i = 1;
@@ -376,7 +376,7 @@ fn parse_and(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
         acc = and(acc, parse_atom(atoms.get(i).unwrap())?);
         i = i + 1;
     }
-    Ok(acc)
+    Result.Ok(acc)
 }
 
 fn tokenise_atoms(s: &Text) -> List<Text> {
@@ -400,12 +400,12 @@ fn tokenise_atoms(s: &Text) -> List<Text> {
 fn parse_atom(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
     let trimmed = trim_text(s);
     if trimmed.is_empty() {
-        return Err(SemVerConstraintError.InvalidConstraint("empty atom".to_text()));
+        return Result.Err(SemVerConstraintError.InvalidConstraint("empty atom".to_text()));
     }
     let bs = trimmed.as_bytes();
     // '*' is the wildcard.
     if bs.len() == 1 && bs[0] == 0x2A_u8 {
-        return Ok(SemVerConstraint.Any);
+        return Result.Ok(SemVerConstraint.Any);
     }
     // Determine operator prefix.
     let (op, rest_off) = if bs.len() >= 2 && bs[0] == 0x3E_u8 && bs[1] == 0x3D_u8 {
@@ -436,27 +436,27 @@ fn parse_atom_with_op(op: &Text, rest: &Text) -> Result<SemVerConstraint, SemVer
     let x_ranged = is_x_ranged(rest);
     if x_ranged {
         let pv = parse_partial_version(rest)?;
-        return Ok(partial_to_x_range(&pv));
+        return Result.Ok(partial_to_x_range(&pv));
     }
     let pv = parse_partial_version(rest)?;
     let v = partial_to_semver(&pv);
-    if      op == "eq"     { Ok(SemVerConstraint.Eq(v)) }
-    else if op == "gt"     { Ok(SemVerConstraint.Gt(v)) }
-    else if op == "gte"    { Ok(SemVerConstraint.Gte(v)) }
-    else if op == "lt"     { Ok(SemVerConstraint.Lt(v)) }
-    else if op == "lte"    { Ok(SemVerConstraint.Lte(v)) }
-    else if op == "caret"  { Ok(caret(v)) }
+    if      op == "eq"     { Result.Ok(SemVerConstraint.Eq(v)) }
+    else if op == "gt"     { Result.Ok(SemVerConstraint.Gt(v)) }
+    else if op == "gte"    { Result.Ok(SemVerConstraint.Gte(v)) }
+    else if op == "lt"     { Result.Ok(SemVerConstraint.Lt(v)) }
+    else if op == "lte"    { Result.Ok(SemVerConstraint.Lte(v)) }
+    else if op == "caret"  { Result.Ok(caret(v)) }
     else if op == "tilde"  {
         match (pv.minor_present, pv.patch_present) {
-            (true, true)  => Ok(tilde(v)),
-            (true, false) => Ok(tilde_minor(v.major, v.minor)),
-            _             => Ok(tilde_major(v.major)),
+            (true, true)  => Result.Ok(tilde(v)),
+            (true, false) => Result.Ok(tilde_minor(v.major, v.minor)),
+            _             => Result.Ok(tilde_major(v.major)),
         }
     }
     else { // default
         // Cargo: bare version = caret. npm: bare version = exact. We follow
         // Cargo (since this is a Verum cog registry, Cargo-aligned).
-        Ok(caret(v))
+        Result.Ok(caret(v))
     }
 }
 
@@ -493,7 +493,7 @@ fn is_x_ranged(s: &Text) -> Bool {
 fn parse_partial_version(s: &Text) -> Result<PartialVersion, SemVerConstraintError> {
     let trimmed = trim_text(s);
     if trimmed.is_empty() {
-        return Err(SemVerConstraintError.InvalidConstraint("missing version".to_text()));
+        return Result.Err(SemVerConstraintError.InvalidConstraint("missing version".to_text()));
     }
     // Split out `+build` first.
     let (pre_part, build_part) = split_at_byte(&trimmed, 0x2B_u8);
@@ -505,21 +505,21 @@ fn parse_partial_version(s: &Text) -> Result<PartialVersion, SemVerConstraintErr
     let minor_text = if dots.len() >= 1 {
         let m_start = dots.get(0).unwrap() + 1;
         let m_end = if dots.len() >= 2 { dots.get(1).unwrap() } else { core_bytes.len() };
-        Some(slice_text(core_bytes, m_start, m_end))
-    } else { None };
+        Maybe.Some(slice_text(core_bytes, m_start, m_end))
+    } else { Maybe.None };
     let patch_text = if dots.len() >= 2 {
         let p_start = dots.get(1).unwrap() + 1;
-        Some(slice_text(core_bytes, p_start, core_bytes.len()))
-    } else { None };
+        Maybe.Some(slice_text(core_bytes, p_start, core_bytes.len()))
+    } else { Maybe.None };
 
     let (major, _major_x) = parse_uint_or_x(&major_text)?;
     let (minor, minor_x) = match &minor_text {
-        Some(t) => parse_uint_or_x(t)?,
-        None    => (0_u64, false),
+        Maybe.Some(t) => parse_uint_or_x(t)?,
+        Maybe.None    => (0_u64, false),
     };
     let (patch, patch_x) = match &patch_text {
-        Some(t) => parse_uint_or_x(t)?,
-        None    => (0_u64, false),
+        Maybe.Some(t) => parse_uint_or_x(t)?,
+        Maybe.None    => (0_u64, false),
     };
     let pre_release = match pre_part2.is_empty() {
         true  => List.new(),
@@ -529,7 +529,7 @@ fn parse_partial_version(s: &Text) -> Result<PartialVersion, SemVerConstraintErr
         true  => List.new(),
         false => split_dot(&build_part),
     };
-    Ok(PartialVersion {
+    Result.Ok(PartialVersion {
         major: major, minor: minor, patch: patch,
         minor_present: minor_text.is_some(),
         patch_present: patch_text.is_some(),
@@ -542,25 +542,25 @@ fn parse_partial_version(s: &Text) -> Result<PartialVersion, SemVerConstraintErr
 
 fn parse_uint_or_x(s: &Text) -> Result<(UInt64, Bool), SemVerConstraintError> {
     if s.is_empty() {
-        return Err(SemVerConstraintError.InvalidConstraint("empty version component".to_text()));
+        return Result.Err(SemVerConstraintError.InvalidConstraint("empty version component".to_text()));
     }
     let bs = s.as_bytes();
     if bs.len() == 1 && (bs[0] == 0x78_u8 || bs[0] == 0x58_u8 || bs[0] == 0x2A_u8) {
-        return Ok((0_u64, true));
+        return Result.Ok((0_u64, true));
     }
     let mut acc: UInt64 = 0;
     let mut i = 0;
     while i < bs.len() {
         let b = bs[i];
         if b < 0x30_u8 || b > 0x39_u8 {
-            return Err(SemVerConstraintError.InvalidConstraint(
+            return Result.Err(SemVerConstraintError.InvalidConstraint(
                 "non-digit in version component: ".to_text().concat(s)
             ));
         }
         acc = acc * 10 + ((b - 0x30_u8) as UInt64);
         i = i + 1;
     }
-    Ok((acc, false))
+    Result.Ok((acc, false))
 }
 
 fn partial_to_semver(p: &PartialVersion) -> SemVer {

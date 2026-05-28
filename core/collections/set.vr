@@ -73,12 +73,12 @@ implement<T: Hash + Eq> Set<T> {
     /// Fallible counterpart to `with_capacity`.
     ///
 
-    /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
+    /// Returns `Result.Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request.
     public fn try_with_capacity(capacity: Int) -> Result<Set<T>, AllocError> {
         match Map.try_with_capacity(capacity) {
-            Ok(inner) => Ok(Set { inner: inner }),
-            Err(e) => Err(e),
+            Result.Ok(inner) => Result.Ok(Set { inner: inner }),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -119,14 +119,14 @@ implement<T: Hash + Eq> Set<T> {
     /// Fallible counterpart to `insert`.
     ///
 
-    /// Returns `Err(AllocError.OutOfMemory)` if the underlying
+    /// Returns `Result.Err(AllocError.OutOfMemory)` if the underlying
     /// table needs to grow and the allocator cannot satisfy the
     /// request. On Ok the inner `Bool` is `true` iff the value was
     /// not already present.
     public fn try_insert(&mut self, value: T) -> Result<Bool, AllocError> {
         match self.inner.try_insert(value, ()) {
-            Ok(prev) => Ok(prev.is_none()),
-            Err(e) => Err(e),
+            Result.Ok(prev) => Result.Ok(prev.is_none()),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -161,7 +161,7 @@ implement<T: Hash + Eq> Set<T> {
     /// Fallible counterpart to `reserve`.
     ///
 
-    /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
+    /// Returns `Result.Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request. The set is
     /// unchanged on failure.
     public fn try_reserve(&mut self, additional: Int) -> Result<Unit, AllocError> {
@@ -512,7 +512,7 @@ implement<T: Hash + Eq> Set<T> {
     /// Remove and return an arbitrary element from the set.
     ///
 
-    /// Returns `None` if the set is empty.
+    /// Returns `Maybe.None` if the set is empty.
     ///
 
     /// # Example
@@ -594,7 +594,7 @@ implement<T: Hash + Eq> Set<T> {
         count
     }
 
-    /// Applies a function to each element and collects results, filtering out None.
+    /// Applies a function to each element and collects results, filtering out Maybe.None.
     public fn filter_map<U: Hash + Eq, F: fn(&T) -> Maybe<U>>(&self, f: F) -> Set<U> {
         let mut result = Set.new();
         for v in self.iter() {
@@ -761,8 +761,8 @@ implement<T: Hash + Eq + Debug> Debug for Set<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     if !first {
                         f.write_str(", ")?;
                     }
@@ -783,8 +783,8 @@ implement<T: Hash + Eq + Display> Display for Set<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     if !first {
                         f.write_str(", ")?;
                     }
@@ -806,8 +806,8 @@ implement<T: Hash + Eq> Eq for Set<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     let item: &T = v;
                     if !other.contains(item) {
                         return false;
@@ -826,8 +826,8 @@ implement<T: Hash + Eq> Eq for Set<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     let item: &T = v;
                     if !other.contains(item) {
                         return true;

@@ -37,7 +37,7 @@ module core.database.sqlite.native.l5_sql.codegen;
 //  pragma registry lookup lands in L6
 //
 
-// Unsupported nodes produce `Err(CodegenError.Unsupported)` so the
+// Unsupported nodes produce `Result.Err(CodegenError.Unsupported)` so the
 // caller knows the compile pipeline hit a gap rather than silently
 // emitting a broken program.
 // =============================================================================
@@ -215,8 +215,8 @@ fn cg_finalize(mut st: CgState) -> VdbeProgram {
     let mut i: Int = 0;
     while i < st.program.instruction_count() {
         match st.program.get_opcode(i) {
-            Some(op) => { let _ = out.emit(op); }
-            None     => {}
+            Maybe.Some(op) => { let _ = out.emit(op); }
+            Maybe.None     => {}
         }
         i = i + 1;
     }
@@ -230,12 +230,12 @@ fn cg_finalize(mut st: CgState) -> VdbeProgram {
 public fn codegen(plan: &PlanNode, sql: Text) -> Result<VdbeProgram, CodegenError> {
     let mut st = cg_state_new(sql);
     match emit_plan(&mut st, plan) {
-        Ok(_)  => {},
-        Err(e) => { return Err(e); }
+        Result.Ok(_)  => {},
+        Result.Err(e) => { return Result.Err(e); }
     }
     // Always terminate the program with a clean Halt.
     let _ = st.program.emit(Halt(0, 0));
-    Ok(cg_finalize(st))
+    Result.Ok(cg_finalize(st))
 }
 
 // -----------------------------------------------------------------------------
@@ -253,7 +253,7 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnGroupBy(ref source, ref group_exprs, ref projection, ref having) =>
             emit_group_by(st, source, group_exprs, projection, having),
         PnNestedLoopJoin(_, _, _, _, _, _, _, _) =>
-            Err(unsupported("bare nested-loop join needs a Project wrapper in v1".clone())),
+            Result.Err(unsupported("bare nested-loop join needs a Project wrapper in v1".clone())),
         PnUnionAll(ref lhs, ref rhs) => emit_union_all(st, lhs, rhs),
         PnUnion(ref lhs, ref rhs, n_proj) => emit_union(st, lhs, rhs, n_proj),
         PnIntersect(ref lhs, ref rhs, n_proj) => emit_intersect(st, lhs, rhs, n_proj),
@@ -267,7 +267,7 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnDrop(ref kind, if_exists, ref target) => emit_drop(st, kind, if_exists, target),
         PnTransaction(ref action) => emit_transaction(st, action),
         PnPragma(ref name, ref val) => emit_pragma(st, name, val),
-        PnNoop => Ok(()),
+        PnNoop => Result.Ok(()),
     }
 }
 
@@ -278,7 +278,7 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
 fn emit_values(st: &mut CgState, rows: &List<List<Expr>>, col_count: Int) -> Result<(), CodegenError> {
     if rows.len() == 0 {
         // No rows — emit nothing. Caller's Halt is enough.
-        return Ok(());
+        return Result.Ok(());
     }
     // Each row lowers into contiguous registers then ResultRow.
     let mut i: Int = 0;
@@ -288,7 +288,7 @@ fn emit_values(st: &mut CgState, rows: &List<List<Expr>>, col_count: Int) -> Res
         let mut j: Int = 0;
         while j < row.len() {
             match emit_expr(st, &row[j], start + j) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
             j = j + 1;
         }
@@ -301,7 +301,7 @@ fn emit_values(st: &mut CgState, rows: &List<List<Expr>>, col_count: Int) -> Res
     // so control falls through cleanly.
     emit_limit_finalize_patches(st, st.program.instruction_count());
     let _ = col_count;
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -367,7 +367,7 @@ fn emit_project(
         _ => {}
     }
     let _ = cols;
-    Err(unsupported("Project over this plan-node is pending".clone()))
+    Result.Err(unsupported("Project over this plan-node is pending".clone()))
 }
 
 // -----------------------------------------------------------------------------
@@ -394,7 +394,7 @@ fn emit_table_scan(
     let after = st.program.instruction_count();
     st.program.replace(rewind_idx, Rewind(cursor_id, after));
     let _ = st.program.emit(Close(cursor_id));
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -430,7 +430,7 @@ fn emit_scan_with_project(
     let mut i: Int = 0;
     while i < project_cols.len() {
         match emit_expr(st, &project_cols[i].expr, proj_start + i) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         i = i + 1;
     }
@@ -444,7 +444,7 @@ fn emit_scan_with_project(
     // Patch LIMIT early-exits to jump over Next, straight at Close.
     emit_limit_finalize_patches(st, after);
     let _ = st.program.emit(Close(cursor_id));
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_scan_with_filter_project(
@@ -466,7 +466,7 @@ fn emit_scan_with_filter_project(
     // Evaluate predicate.
     let pred_reg = st.regs.alloc();
     match emit_expr(st, predicate, pred_reg) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
     let skip_idx = st.program.emit(IfNot(pred_reg, 0));
 
@@ -475,7 +475,7 @@ fn emit_scan_with_filter_project(
     let mut i: Int = 0;
     while i < project_cols.len() {
         match emit_expr(st, &project_cols[i].expr, proj_start + i) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         i = i + 1;
     }
@@ -491,7 +491,7 @@ fn emit_scan_with_filter_project(
     st.program.replace(rewind_idx, Rewind(cursor_id, after));
     emit_limit_finalize_patches(st, after);
     let _ = st.program.emit(Close(cursor_id));
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -506,7 +506,7 @@ fn emit_union_all(
     rhs: &PlanNode,
 ) -> Result<(), CodegenError> {
     match emit_plan(st, lhs) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
     emit_plan(st, rhs)
 }
@@ -579,7 +579,7 @@ fn emit_union(
     n_proj: Int,
 ) -> Result<(), CodegenError> {
     if n_proj <= 0 {
-        return Err(unsupported(
+        return Result.Err(unsupported(
             "UNION requires both sides to project at least one column".clone()
         ));
     }
@@ -589,16 +589,16 @@ fn emit_union(
     let _ = st.program.emit(OpenEphemeral(sid, n_proj));
 
     match emit_subplan_to_capture(st, lhs, sid) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
     match emit_subplan_to_capture(st, rhs, sid) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
 
     let _ = st.program.emit(SortRowStore(sid, n_proj, 0));
     let _ = st.program.emit(DedupRowStore(sid, n_proj));
     emit_ephemeral_drain(st, sid, n_proj);
-    Ok(())
+    Result.Ok(())
 }
 
 // Removed: emit_b_membership_scan / _v2 prototypes. The inlined
@@ -618,7 +618,7 @@ fn emit_set_compound_materialize(
     let a_cid = st.program.declare_cursor(CkTable, 0, n_proj);
     let _ = st.program.emit(OpenEphemeral(a_cid, n_proj));
     match emit_subplan_to_capture(st, lhs, a_cid) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
     let _ = st.program.emit(SortRowStore(a_cid, n_proj, 0));
     let _ = st.program.emit(DedupRowStore(a_cid, n_proj));
@@ -626,9 +626,9 @@ fn emit_set_compound_materialize(
     let b_cid = st.program.declare_cursor(CkTable, 0, n_proj);
     let _ = st.program.emit(OpenEphemeral(b_cid, n_proj));
     match emit_subplan_to_capture(st, rhs, b_cid) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
-    Ok((a_cid, b_cid))
+    Result.Ok((a_cid, b_cid))
 }
 
 fn emit_intersect(
@@ -638,12 +638,12 @@ fn emit_intersect(
     n_proj: Int,
 ) -> Result<(), CodegenError> {
     if n_proj <= 0 {
-        return Err(unsupported(
+        return Result.Err(unsupported(
             "INTERSECT requires both sides to project at least one column".clone()
         ));
     }
     let (a_cid, b_cid) = match emit_set_compound_materialize(st, lhs, rhs, n_proj) {
-        Ok(p)  => p, Err(e) => { return Err(e); }
+        Result.Ok(p)  => p, Result.Err(e) => { return Result.Err(e); }
     };
 
     // Outer loop A: for each row a, scan B for membership; emit a if
@@ -712,7 +712,7 @@ fn emit_intersect(
     emit_limit_finalize_patches(st, end_label);
     let _ = st.program.emit(Close(a_cid));
     let _ = st.program.emit(Close(b_cid));
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_except(
@@ -722,12 +722,12 @@ fn emit_except(
     n_proj: Int,
 ) -> Result<(), CodegenError> {
     if n_proj <= 0 {
-        return Err(unsupported(
+        return Result.Err(unsupported(
             "EXCEPT requires both sides to project at least one column".clone()
         ));
     }
     let (a_cid, b_cid) = match emit_set_compound_materialize(st, lhs, rhs, n_proj) {
-        Ok(p)  => p, Err(e) => { return Err(e); }
+        Result.Ok(p)  => p, Result.Err(e) => { return Result.Err(e); }
     };
 
     // Outer loop A: for each row a, scan B; SKIP a if a found in B,
@@ -792,7 +792,7 @@ fn emit_except(
     emit_limit_finalize_patches(st, end_label);
     let _ = st.program.emit(Close(a_cid));
     let _ = st.program.emit(Close(b_cid));
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -861,15 +861,15 @@ fn emit_join_with_project(
     let mut on_skip_patch: Int = -1;
     let mut on_skip_reg: Int = -1;
     match on_pred {
-        Some(ref e) => {
+        Maybe.Some(ref e) => {
             let pr = st.regs.alloc();
             match emit_expr(st, e, pr) {
-                Ok(_)  => {}, Err(err) => { return Err(err); }
+                Result.Ok(_)  => {}, Result.Err(err) => { return Result.Err(err); }
             }
             on_skip_patch = st.program.emit(IfNot(pr, 0));
             on_skip_reg = pr;
         }
-        None => {}
+        Maybe.None => {}
     }
     // Optional outer WHERE predicate.
     let mut where_skip_patch: Int = -1;
@@ -877,7 +877,7 @@ fn emit_join_with_project(
     if has_where {
         let pr = st.regs.alloc();
         match emit_expr(st, where_pred, pr) {
-            Ok(_)  => {}, Err(err) => { return Err(err); }
+            Result.Ok(_)  => {}, Result.Err(err) => { return Result.Err(err); }
         }
         where_skip_patch = st.program.emit(IfNot(pr, 0));
         where_skip_reg = pr;
@@ -892,7 +892,7 @@ fn emit_join_with_project(
     let mut i: Int = 0;
     while i < n_proj {
         match emit_expr(st, &project_cols[i].expr, proj_start + i) {
-            Ok(_)  => {}, Err(err) => { return Err(err); }
+            Result.Ok(_)  => {}, Result.Err(err) => { return Result.Err(err); }
         }
         i = i + 1;
     }
@@ -927,7 +927,7 @@ fn emit_join_with_project(
         let mut k: Int = 0;
         while k < n_proj {
             match emit_expr(st, &project_cols[k].expr, nproj_start2 + k) {
-                Ok(_)  => {}, Err(err) => { return Err(err); }
+                Result.Ok(_)  => {}, Result.Err(err) => { return Result.Err(err); }
             }
             k = k + 1;
         }
@@ -943,7 +943,7 @@ fn emit_join_with_project(
     emit_limit_finalize_patches(st, end_idx);
     let _ = st.program.emit(Close(right_cid));
     let _ = st.program.emit(Close(left_cid));
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -1075,7 +1075,7 @@ fn emit_aggregate_scan(
     if has_filter {
         let pr = st.regs.alloc();
         match emit_expr(st, filter_pred, pr) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         skip_patch = st.program.emit(IfNot(pr, 0));
         skip_pred_reg = pr;
@@ -1092,14 +1092,14 @@ fn emit_aggregate_scan(
                 } else {
                     let r = st.regs.alloc();
                     match emit_expr(st, &args[0], r) {
-                        Ok(_)  => {}, Err(e) => { return Err(e); }
+                        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
                     }
                     (kind_v, args.len(), r)
                 }
             }
             _ => (-1, 0, -1),
         };
-        if kind < 0 { return Err(unsupported("unknown aggregate in pipeline".clone())); }
+        if kind < 0 { return Result.Err(unsupported("unknown aggregate in pipeline".clone())); }
         let first = if arg_reg < 0 { 0 } else { arg_reg };
         if kind == 4 {
             let count_reg = avg_count_regs[k];
@@ -1138,7 +1138,7 @@ fn emit_aggregate_scan(
 
     // Emit exactly one result row.
     emit_result_row(st, acc_start, n_proj);
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -1211,7 +1211,7 @@ fn emit_having_expr(
         EUnary(op, ref inner) => {
             let src = st.regs.alloc();
             match emit_having_expr(st, inner, src, group_exprs, prev_key_start, projection, agg_kind_for_slot, acc_start) {
-                Ok(_)  => {}, Err(er) => { return Err(er); }
+                Result.Ok(_)  => {}, Result.Err(er) => { return Result.Err(er); }
             }
             match op {
                 UNot => {
@@ -1223,21 +1223,21 @@ fn emit_having_expr(
                     let one_reg = st.regs.alloc();
                     let _ = st.program.emit(Integer(1, one_reg));
                     let _ = st.program.emit(Subtract(one_reg, src, dst));
-                    Ok(())
+                    Result.Ok(())
                 }
                 UNeg => {
                     let zero_reg = st.regs.alloc();
                     let _ = st.program.emit(Integer(0, zero_reg));
                     let _ = st.program.emit(Subtract(zero_reg, src, dst));
-                    Ok(())
+                    Result.Ok(())
                 }
                 UPlus => {
                     let _ = st.program.emit(SCopy(src, dst));
-                    Ok(())
+                    Result.Ok(())
                 }
                 UBitNot => {
                     let _ = st.program.emit(BitNot(src, dst));
-                    Ok(())
+                    Result.Ok(())
                 }
             }
         }
@@ -1245,21 +1245,21 @@ fn emit_having_expr(
             let ra = st.regs.alloc();
             let rb = st.regs.alloc();
             match emit_having_expr(st, a, ra, group_exprs, prev_key_start, projection, agg_kind_for_slot, acc_start) {
-                Ok(_)  => {}, Err(er) => { return Err(er); }
+                Result.Ok(_)  => {}, Result.Err(er) => { return Result.Err(er); }
             }
             match emit_having_expr(st, b, rb, group_exprs, prev_key_start, projection, agg_kind_for_slot, acc_start) {
-                Ok(_)  => {}, Err(er) => { return Err(er); }
+                Result.Ok(_)  => {}, Result.Err(er) => { return Result.Err(er); }
             }
             match op {
-                BAdd    => { let _ = st.program.emit(Add(ra, rb, dst));        Ok(()) }
-                BSub    => { let _ = st.program.emit(Subtract(ra, rb, dst));   Ok(()) }
-                BMul    => { let _ = st.program.emit(Multiply(ra, rb, dst));   Ok(()) }
-                BDiv    => { let _ = st.program.emit(Divide(ra, rb, dst));     Ok(()) }
-                BMod    => { let _ = st.program.emit(Remainder(ra, rb, dst));  Ok(()) }
-                BBitAnd => { let _ = st.program.emit(BitAnd(ra, rb, dst));     Ok(()) }
-                BBitOr  => { let _ = st.program.emit(BitOr(ra, rb, dst));      Ok(()) }
-                BShl    => { let _ = st.program.emit(ShiftLeft(ra, rb, dst));  Ok(()) }
-                BShr    => { let _ = st.program.emit(ShiftRight(ra, rb, dst)); Ok(()) }
+                BAdd    => { let _ = st.program.emit(Add(ra, rb, dst));        Result.Ok(()) }
+                BSub    => { let _ = st.program.emit(Subtract(ra, rb, dst));   Result.Ok(()) }
+                BMul    => { let _ = st.program.emit(Multiply(ra, rb, dst));   Result.Ok(()) }
+                BDiv    => { let _ = st.program.emit(Divide(ra, rb, dst));     Result.Ok(()) }
+                BMod    => { let _ = st.program.emit(Remainder(ra, rb, dst));  Result.Ok(()) }
+                BBitAnd => { let _ = st.program.emit(BitAnd(ra, rb, dst));     Result.Ok(()) }
+                BBitOr  => { let _ = st.program.emit(BitOr(ra, rb, dst));      Result.Ok(()) }
+                BShl    => { let _ = st.program.emit(ShiftLeft(ra, rb, dst));  Result.Ok(()) }
+                BShr    => { let _ = st.program.emit(ShiftRight(ra, rb, dst)); Result.Ok(()) }
                 BAnd | BOr => {
                     // Logical AND/OR: result is the truth value of both
                     // operands ANDed/ORed. Both ra/rb are already 0 or 1
@@ -1271,7 +1271,7 @@ fn emit_having_expr(
                         BOr  => { let _ = st.program.emit(BitOr(ra, rb, dst));  }
                         _    => {}
                     }
-                    Ok(())
+                    Result.Ok(())
                 }
                 BEq | BNe | BLt | BLe | BGt | BGe => {
                     // Use the same Eq-builder pattern as regular emit_binary.
@@ -1299,14 +1299,14 @@ fn emit_having_expr(
                         _   => st.program.replace(op_idx, Eq(ra, rb, set_true)),
                     }
                     st.program.replace(goto_idx, Goto(after));
-                    Ok(())
+                    Result.Ok(())
                 }
                 BConcat => {
                     // SQL `||` string concat — codegen emits ScalarFn id 12
                     // taking 2 args at consecutive registers. Same shape
                     // as the regular emit_binary BConcat path.
                     let _ = st.program.emit(ScalarFn(12, 2, ra, dst));
-                    Ok(())
+                    Result.Ok(())
                 }
                 BIs | BIsNot => {
                     // NULL-safe equality — same shape as the general
@@ -1334,7 +1334,7 @@ fn emit_having_expr(
                         let _ = st.program.emit(Integer(1, one_reg));
                         let _ = st.program.emit(Subtract(one_reg, dst, dst));
                     }
-                    Ok(())
+                    Result.Ok(())
                 }
             }
         }
@@ -1349,10 +1349,10 @@ fn emit_having_expr(
                 i = i + 1;
             }
             if found < 0 {
-                return Err(unsupported("HAVING references non-grouped column".clone()));
+                return Result.Err(unsupported("HAVING references non-grouped column".clone()));
             }
             let _ = st.program.emit(SCopy(prev_key_start + found, dst));
-            Ok(())
+            Result.Ok(())
         }
         EFunc(_, _, _) => {
             // Lookup matching aggregate slot in projection.
@@ -1366,12 +1366,12 @@ fn emit_having_expr(
                 i = i + 1;
             }
             if found < 0 {
-                return Err(unsupported("HAVING aggregate not found in projection".clone()));
+                return Result.Err(unsupported("HAVING aggregate not found in projection".clone()));
             }
             let _ = st.program.emit(SCopy(acc_start + found, dst));
-            Ok(())
+            Result.Ok(())
         }
-        _ => Err(unsupported("HAVING expression form pending".clone())),
+        _ => Result.Err(unsupported("HAVING expression form pending".clone())),
     }
 }
 
@@ -1409,14 +1409,14 @@ fn emit_group_by(
                 has_filter = true;
                 filter_pred_clone = clone_expr_local(pred);
             }
-            _ => { return Err(unsupported("GROUP BY source must be a TableScan".clone())); }
+            _ => { return Result.Err(unsupported("GROUP BY source must be a TableScan".clone())); }
         },
-        _ => { return Err(unsupported("GROUP BY source must be a TableScan".clone())); }
+        _ => { return Result.Err(unsupported("GROUP BY source must be a TableScan".clone())); }
     }
 
     let n_keys = group_exprs.len();
     if n_keys == 0 {
-        return Err(unsupported("GROUP BY with zero keys".clone()));
+        return Result.Err(unsupported("GROUP BY with zero keys".clone()));
     }
 
     // Classify projection: proj_kind[k] = -1 for aggregate, else group-key index.
@@ -1433,7 +1433,7 @@ fn emit_group_by(
             EFunc(ref name, ref args, _) => {
                 let kv = agg_kind_for_name(name);
                 if kv < 0 {
-                    return Err(unsupported("GROUP BY projection: unknown aggregate".clone()));
+                    return Result.Err(unsupported("GROUP BY projection: unknown aggregate".clone()));
                 }
                 proj_kind.push(-1);
                 agg_kind_for_slot.push(kv);
@@ -1448,7 +1448,7 @@ fn emit_group_by(
             _ => {
                 let gk = find_group_key_index(&projection[i].expr, group_exprs);
                 if gk < 0 {
-                    return Err(unsupported("GROUP BY: non-aggregate projection must be in GROUP BY".clone()));
+                    return Result.Err(unsupported("GROUP BY: non-aggregate projection must be in GROUP BY".clone()));
                 }
                 proj_kind.push(gk);
                 agg_kind_for_slot.push(-1);
@@ -1474,7 +1474,7 @@ fn emit_group_by(
     if has_filter {
         let pr = st.regs.alloc();
         match emit_expr(st, &filter_pred_clone, pr) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         scan_skip_patch = st.program.emit(IfNot(pr, 0));
         scan_skip_reg = pr;
@@ -1483,14 +1483,14 @@ fn emit_group_by(
     let mut gk: Int = 0;
     while gk < n_keys {
         match emit_expr(st, &group_exprs[gk], scratch + gk) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         gk = gk + 1;
     }
     let mut ap: Int = 0;
     while ap < arg_exprs.len() {
         match emit_expr(st, &arg_exprs[ap], scratch + n_keys + ap) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         ap = ap + 1;
     }
@@ -1560,15 +1560,15 @@ fn emit_group_by(
     let mut having_skip_patch: Int = -1;
     let mut having_skip_reg: Int = -1;
     match having {
-        Some(ref h) => {
+        Maybe.Some(ref h) => {
             let pr = st.regs.alloc();
             match emit_having_expr(st, h, pr, group_exprs, prev_key_start, projection, &agg_kind_for_slot, acc_start) {
-                Ok(_)  => {}, Err(er) => { return Err(er); }
+                Result.Ok(_)  => {}, Result.Err(er) => { return Result.Err(er); }
             }
             having_skip_patch = st.program.emit(IfNot(pr, 0));
             having_skip_reg = pr;
         }
-        None => {}
+        Maybe.None => {}
     }
     // Project out_start from prev_group_keys + acc_start (finalized).
     emit_group_project(st, out_start, n_proj, &proj_kind, &agg_kind_for_slot, prev_key_start, acc_start);
@@ -1629,15 +1629,15 @@ fn emit_group_by(
     let mut final_having_skip: Int = -1;
     let mut final_having_reg: Int = -1;
     match having {
-        Some(ref h) => {
+        Maybe.Some(ref h) => {
             let pr = st.regs.alloc();
             match emit_having_expr(st, h, pr, group_exprs, prev_key_start, projection, &agg_kind_for_slot, acc_start) {
-                Ok(_)  => {}, Err(er) => { return Err(er); }
+                Result.Ok(_)  => {}, Result.Err(er) => { return Result.Err(er); }
             }
             final_having_skip = st.program.emit(IfNot(pr, 0));
             final_having_reg = pr;
         }
-        None => {}
+        Maybe.None => {}
     }
     emit_group_project(st, out_start, n_proj, &proj_kind, &agg_kind_for_slot, prev_key_start, acc_start);
     let gp_final = emit_limit_body_prefix(st);
@@ -1651,7 +1651,7 @@ fn emit_group_by(
     st.program.replace(final_flush_skip, IfNot(flag_reg, after_final));
     emit_limit_finalize_patches(st, after_final);
     let _ = st.program.emit(Close(sid));
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_group_seed(
@@ -1806,14 +1806,14 @@ fn emit_distinct(
                 PnFilter(ref gg, ref pred) => match gg {
                     PnTableScan(ref _t, cid, n) =>
                         emit_distinct_pipeline(st, cid, n, proj_cols, true, pred),
-                    _ => Err(unsupported("DISTINCT over non-TableScan child pending".clone())),
+                    _ => Result.Err(unsupported("DISTINCT over non-TableScan child pending".clone())),
                 },
-                _ => Err(unsupported("DISTINCT over non-TableScan child pending".clone())),
+                _ => Result.Err(unsupported("DISTINCT over non-TableScan child pending".clone())),
             }
         }
         _ => {
             let _ = n_proj;
-            Err(unsupported("DISTINCT must wrap a Project/TableScan pipeline".clone()))
+            Result.Err(unsupported("DISTINCT must wrap a Project/TableScan pipeline".clone()))
         }
     }
 }
@@ -1844,7 +1844,7 @@ fn emit_distinct_pipeline(
     if has_filter {
         let pr = st.regs.alloc();
         match emit_expr(st, filter_pred, pr) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         skip_patch = st.program.emit(IfNot(pr, 0));
         skip_pred_reg = pr;
@@ -1854,7 +1854,7 @@ fn emit_distinct_pipeline(
     let mut p: Int = 0;
     while p < n_proj {
         match emit_expr(st, &proj_cols[p].expr, scratch + p) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         p = p + 1;
     }
@@ -1894,7 +1894,7 @@ fn emit_distinct_pipeline(
     st.program.replace(emit_rewind_idx, Rewind(sid, after_emit));
     emit_limit_finalize_patches(st, after_emit);
     let _ = st.program.emit(Close(sid));
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -1941,12 +1941,12 @@ fn emit_sort(
                 PnFilter(ref gg, ref pred) => match gg {
                     PnTableScan(ref _t, cid, n) =>
                         emit_sort_pipeline(st, cid, n, proj_cols, terms, true, pred),
-                    _ => Err(unsupported("ORDER BY over non-TableScan child pending".clone())),
+                    _ => Result.Err(unsupported("ORDER BY over non-TableScan child pending".clone())),
                 },
-                _ => Err(unsupported("ORDER BY over non-TableScan child pending".clone())),
+                _ => Result.Err(unsupported("ORDER BY over non-TableScan child pending".clone())),
             }
         }
-        _ => Err(unsupported("ORDER BY must wrap a Project/TableScan pipeline".clone())),
+        _ => Result.Err(unsupported("ORDER BY must wrap a Project/TableScan pipeline".clone())),
     }
 }
 
@@ -1981,7 +1981,7 @@ fn emit_sort_pipeline(
     if has_filter {
         let pr = st.regs.alloc();
         match emit_expr(st, filter_pred, pr) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         skip_patch = st.program.emit(IfNot(pr, 0));
         skip_pred_reg = pr;
@@ -1992,14 +1992,14 @@ fn emit_sort_pipeline(
     let mut k: Int = 0;
     while k < n_keys {
         match emit_expr(st, &terms[k].expr, scratch_start + k) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         k = k + 1;
     }
     let mut p: Int = 0;
     while p < n_proj {
         match emit_expr(st, &proj_cols[p].expr, scratch_start + n_keys + p) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         p = p + 1;
     }
@@ -2039,7 +2039,7 @@ fn emit_sort_pipeline(
     // Let any enclosing LIMIT patches land just before Close.
     emit_limit_finalize_patches(st, after_emit);
     let _ = st.program.emit(Close(sid));
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -2062,13 +2062,13 @@ fn emit_filter(
                 let mut j: Int = 0;
                 while j < row.len() {
                     match emit_expr(st, &row[j], start + j) {
-                        Ok(_)  => {}, Err(e) => { return Err(e); }
+                        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
                     }
                     j = j + 1;
                 }
                 let pred_reg = st.regs.alloc();
                 match emit_expr(st, predicate, pred_reg) {
-                    Ok(_)  => {}, Err(e) => { return Err(e); }
+                    Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
                 }
                 let skip_idx = st.program.emit(IfNot(pred_reg, 0));
                 let gp = emit_limit_body_prefix(st);
@@ -2079,11 +2079,11 @@ fn emit_filter(
                 i = i + 1;
             }
             emit_limit_finalize_patches(st, st.program.instruction_count());
-            return Ok(());
+            return Result.Ok(());
         }
         _ => {}
     }
-    Err(unsupported("Filter over non-Values child pending L3 cursor I/O".clone()))
+    Result.Err(unsupported("Filter over non-Values child pending L3 cursor I/O".clone()))
 }
 
 // -----------------------------------------------------------------------------
@@ -2091,7 +2091,7 @@ fn emit_filter(
 //
 
 // Strategy: set up a counter register, delegate to the child emitter via
-// `st.limit = Some(ctx)`. The inner emitters consult `st.limit`, and
+// `st.limit = Maybe.Some(ctx)`. The inner emitters consult `st.limit`, and
 // after each ResultRow they emit:
 //  Add(count, one, count)
 //  Ge(count, limit, <patch>) // patched to end-of-scan
@@ -2114,35 +2114,35 @@ fn emit_filter(
 /// LIMIT / OFFSET lowering — real SQL pagination commonly writes
 /// `LIMIT -1`, `LIMIT 50 + 50`, `OFFSET (page-1) * page_size` with
 /// constant folds. Anything that requires a parameter binding or a
-/// column reference returns `None` so the caller can route to a
+/// column reference returns `Maybe.None` so the caller can route to a
 /// dynamic-evaluation path.
 fn eval_int_const(e: &Expr) -> Maybe<Int> {
     match e {
         ELit(ref lit) => match lit {
-            LInt(i) => Some(i as Int),
-            _ => None,
+            LInt(i) => Maybe.Some(i as Int),
+            _ => Maybe.None,
         },
         EUnary(op, ref inner) => match eval_int_const(inner) {
-            Some(v) => match op {
-                UNeg    => Some(0 - v),
-                UPlus   => Some(v),
-                UBitNot => Some(!v),
-                UNot    => None,        // logical negation is bool, not int
+            Maybe.Some(v) => match op {
+                UNeg    => Maybe.Some(0 - v),
+                UPlus   => Maybe.Some(v),
+                UBitNot => Maybe.Some(!v),
+                UNot    => Maybe.None,        // logical negation is bool, not int
             },
-            None => None,
+            Maybe.None => Maybe.None,
         },
         EBinary(op, ref a, ref b) => match (eval_int_const(a), eval_int_const(b)) {
-            (Some(x), Some(y)) => match op {
-                BAdd => Some(x + y),
-                BSub => Some(x - y),
-                BMul => Some(x * y),
-                BDiv => if y == 0 { None } else { Some(x / y) },
-                BMod => if y == 0 { None } else { Some(x % y) },
-                _    => None,
+            (Maybe.Some(x), Maybe.Some(y)) => match op {
+                BAdd => Maybe.Some(x + y),
+                BSub => Maybe.Some(x - y),
+                BMul => Maybe.Some(x * y),
+                BDiv => if y == 0 { Maybe.None } else { Maybe.Some(x / y) },
+                BMod => if y == 0 { Maybe.None } else { Maybe.Some(x % y) },
+                _    => Maybe.None,
             },
-            _ => None,
+            _ => Maybe.None,
         },
-        _ => None,
+        _ => Maybe.None,
     }
 }
 
@@ -2153,20 +2153,20 @@ fn emit_limit(
     off: &Maybe<Expr>,
 ) -> Result<(), CodegenError> {
     let lim_val: Int = match eval_int_const(lim) {
-        Some(x) => x,
-        None => { return Err(unsupported("LIMIT with non-constant value pending".clone())); }
+        Maybe.Some(x) => x,
+        Maybe.None => { return Result.Err(unsupported("LIMIT with non-constant value pending".clone())); }
     };
     let off_val: Int = match off {
-        Some(ref e) => match eval_int_const(e) {
-            Some(x) => if x < 0 { 0 } else { x },
-            None => { return Err(unsupported("OFFSET with non-constant value pending".clone())); }
+        Maybe.Some(ref e) => match eval_int_const(e) {
+            Maybe.Some(x) => if x < 0 { 0 } else { x },
+            Maybe.None => { return Result.Err(unsupported("OFFSET with non-constant value pending".clone())); }
         }
-        None => 0,
+        Maybe.None => 0,
     };
     // SQLite convention: LIMIT 0 emits no rows; LIMIT < 0 means unlimited
     // (used by e.g. `LIMIT -1 OFFSET N` to skip rows but not cap).
     if lim_val == 0 {
-        return Ok(());
+        return Result.Ok(());
     }
     // For LIMIT < 0 (unlimited) without OFFSET, skip the limit machinery
     // entirely. With OFFSET, use a sentinel limit large enough that the
@@ -2221,8 +2221,8 @@ fn emit_limit(
     st.limit_patches = List.new();
 
     match r {
-        Ok(_)  => Ok(()),
-        Err(e) => Err(e),
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -2306,7 +2306,7 @@ fn emit_insert(
                 let mut j: Int = 0;
                 while j < row.len() {
                     match emit_expr(st, &row[j], data_start + j) {
-                        Ok(_)  => {}, Err(e) => { return Err(e); }
+                        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
                     }
                     j = j + 1;
                 }
@@ -2318,11 +2318,11 @@ fn emit_insert(
                 i = i + 1;
             }
         }
-        _ => { return Err(unsupported("INSERT source not PnValues".clone())); }
+        _ => { return Result.Err(unsupported("INSERT source not PnValues".clone())); }
     }
     let _ = st.program.emit(Close(cursor_id));
     let _ = table;
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -2343,17 +2343,17 @@ fn emit_delete(
     let loop_top = st.program.instruction_count();
 
     match predicate {
-        Some(ref pred) => {
+        Maybe.Some(ref pred) => {
             let pred_reg = st.regs.alloc();
             match emit_expr(st, pred, pred_reg) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
             let skip_idx = st.program.emit(IfNot(pred_reg, 0));
             let _ = st.program.emit(Delete(cursor_id));
             let skip_target = st.program.instruction_count();
             st.program.replace(skip_idx, IfNot(pred_reg, skip_target));
         }
-        None => {
+        Maybe.None => {
             let _ = st.program.emit(Delete(cursor_id));
         }
     }
@@ -2361,7 +2361,7 @@ fn emit_delete(
     let after_loop = st.program.instruction_count();
     st.program.replace(rewind_idx, Rewind(cursor_id, after_loop));
     let _ = st.program.emit(Close(cursor_id));
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -2392,14 +2392,14 @@ fn emit_update(
 ) -> Result<(), CodegenError> {
     let _ = table;
     if n_cols <= 0 {
-        return Err(unsupported("UPDATE needs schema-resolved column count".clone()));
+        return Result.Err(unsupported("UPDATE needs schema-resolved column count".clone()));
     }
     // Validate that every assignment has a resolved col_idx in range.
     let mut v: Int = 0;
     while v < assignments.len() {
         let ci = assignments[v].col_idx;
         if ci < 0 || ci >= n_cols {
-            return Err(unsupported(
+            return Result.Err(unsupported(
                 "UPDATE assignment with unresolved col_idx — run the resolver".clone()
             ));
         }
@@ -2416,15 +2416,15 @@ fn emit_update(
     let mut skip_patch: Int = -1;
     let mut skip_pred_reg: Int = -1;
     match predicate {
-        Some(ref pred) => {
+        Maybe.Some(ref pred) => {
             let pr = st.regs.alloc();
             match emit_expr(st, pred, pr) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
             skip_patch = st.program.emit(IfNot(pr, 0));
             skip_pred_reg = pr;
         }
-        None => {}
+        Maybe.None => {}
     }
 
     // Snapshot current row into data_start..data_start+n_cols.
@@ -2440,7 +2440,7 @@ fn emit_update(
     while a < assignments.len() {
         let ci = assignments[a].col_idx;
         match emit_expr(st, &assignments[a].value, data_start + ci) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         a = a + 1;
     }
@@ -2457,7 +2457,7 @@ fn emit_update(
     let after_loop = st.program.instruction_count();
     st.program.replace(rewind_idx, Rewind(cursor_id, after_loop));
     let _ = st.program.emit(Close(cursor_id));
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -2468,7 +2468,7 @@ fn emit_create_table(st: &mut CgState, _ct: &CreateTableStmt) -> Result<(), Code
     // CREATE TABLE codegen requires interaction with the schema table;
     // that path lands with L6. For v1 we emit an empty program.
     let _ = st;
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_drop(
@@ -2479,27 +2479,27 @@ fn emit_drop(
 ) -> Result<(), CodegenError> {
     // Same story as CREATE.
     let _ = st;
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_transaction(st: &mut CgState, action: &TxAction) -> Result<(), CodegenError> {
     match action {
-        TxBegin => { let _ = st.program.emit(Transaction(0)); Ok(()) }
-        TxCommit => { let _ = st.program.emit(Commit); Ok(()) }
+        TxBegin => { let _ = st.program.emit(Transaction(0)); Result.Ok(()) }
+        TxCommit => { let _ = st.program.emit(Commit); Result.Ok(()) }
         TxRollback(ref sp) => {
             match sp {
-                Some(ref _name) => {
+                Maybe.Some(ref _name) => {
                     // Rollback to savepoint — opcode takes a constant
                     // pool index; v1 emits plain RollbackOp(0) until
                     // string-const placeholders are wired in codegen.
                     let _ = st.program.emit(RollbackOp(0));
                 }
-                None => { let _ = st.program.emit(RollbackOp(0)); }
+                Maybe.None => { let _ = st.program.emit(RollbackOp(0)); }
             }
-            Ok(())
+            Result.Ok(())
         }
-        TxSavepoint(_) => { let _ = st.program.emit(SavepointOp(0)); Ok(()) }
-        TxRelease(_)   => { let _ = st.program.emit(SavepointOp(0)); Ok(()) }
+        TxSavepoint(_) => { let _ = st.program.emit(SavepointOp(0)); Result.Ok(()) }
+        TxRelease(_)   => { let _ = st.program.emit(SavepointOp(0)); Result.Ok(()) }
     }
 }
 
@@ -2508,7 +2508,7 @@ fn emit_pragma(st: &mut CgState, _name: &Text, _value: &Maybe<Expr>) -> Result<(
     // for a PRAGMA is typically a single `Halt(0)` plus a side-effect
     // registered on the Connection. Emit the empty program.
     let _ = st;
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -2526,18 +2526,18 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
             // name into the constant pool, emit `VariableNamed`.
             let idx = st.program.constants.add(KText(name.clone()));
             let _ = st.program.emit(VariableNamed(dst, idx));
-            Ok(())
+            Result.Ok(())
         }
         EPositional(n) => {
             // Positional parameter `?N` (1-based per SQLite). L4
             // interpreter reads slot `n` from `ParamBindings.positional`.
             let _ = st.program.emit(Variable(dst, n));
-            Ok(())
+            Result.Ok(())
         }
-        EColumn(_, _)  => Err(unsupported("EColumn reached codegen — run the resolver first".clone())),
+        EColumn(_, _)  => Result.Err(unsupported("EColumn reached codegen — run the resolver first".clone())),
         EColumnRef(cid, idx) => {
             let _ = st.program.emit(Column(cid, idx, dst));
-            Ok(())
+            Result.Ok(())
         }
         EFunc(ref name, ref args, _) => emit_scalar_call(st, name, args, dst),
         ECase(ref scrut_opt, ref arms, ref else_opt) =>
@@ -2549,43 +2549,43 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
             let ar = st.regs.alloc();
             let br = st.regs.alloc();
             match emit_expr(st, a, ar) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
             match emit_expr(st, b, br) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
             let _ = st.program.emit(ScalarFn(6, 2, ar, dst));
-            Ok(())
+            Result.Ok(())
         }
         ECoalesce(ref xs) => {
             if xs.len() == 0 {
                 let _ = st.program.emit(Null(dst, dst));
-                return Ok(());
+                return Result.Ok(());
             }
             let start = st.regs.alloc_n(xs.len());
             let mut i: Int = 0;
             while i < xs.len() {
                 match emit_expr(st, &xs[i], start + i) {
-                    Ok(_)  => {}, Err(e) => { return Err(e); }
+                    Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
                 }
                 i = i + 1;
             }
             let _ = st.program.emit(ScalarFn(4, xs.len(), start, dst));
-            Ok(())
+            Result.Ok(())
         }
         ECast(ref inner, ref target_ty) => {
             let src = st.regs.alloc();
             match emit_expr(st, inner, src) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
             let kind = cast_target_kind(target_ty);
             if kind < 0 {
-                return Err(unsupported("CAST target type unrecognized".clone()));
+                return Result.Err(unsupported("CAST target type unrecognized".clone()));
             }
             let _ = st.program.emit(CastVal(src, kind, dst));
-            Ok(())
+            Result.Ok(())
         }
-        _ => Err(unsupported("expression kind not supported by v1 codegen".clone())),
+        _ => Result.Err(unsupported("expression kind not supported by v1 codegen".clone())),
     }
 }
 
@@ -2602,14 +2602,14 @@ fn emit_case(
     // For a simple CASE, evaluate the scrutinee once upfront.
     let mut scrut_reg: Int = -1;
     match scrut {
-        Some(ref s) => {
+        Maybe.Some(ref s) => {
             let r = st.regs.alloc();
             match emit_expr(st, s, r) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
             scrut_reg = r;
         }
-        None => {}
+        Maybe.None => {}
     }
 
     // Track "after" patches — each arm branches to `after` on body
@@ -2624,7 +2624,7 @@ fn emit_case(
             // Simple CASE: compare scrutinee with arm's WHEN value.
             let when_reg = st.regs.alloc();
             match emit_expr(st, &pair.0, when_reg) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
             // Boolean-compare scrut_reg == when_reg → pred_reg.
             let _ = st.program.emit(Integer(0, pred_reg));
@@ -2638,14 +2638,14 @@ fn emit_case(
         } else {
             // Searched CASE: the WHEN expression IS the predicate.
             match emit_expr(st, &pair.0, pred_reg) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
         }
         // If predicate is false, skip to next arm.
         let skip_patch = st.program.emit(IfNot(pred_reg, 0));
         // Body: evaluate THEN into dst, then Goto after_end.
         match emit_expr(st, &pair.1, dst) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         let after_patch = st.program.emit(Goto(0));
         after_patches.push(after_patch);
@@ -2656,12 +2656,12 @@ fn emit_case(
 
     // ELSE path (only reached if no arm fired).
     match else_ {
-        Some(ref e) => {
+        Maybe.Some(ref e) => {
             match emit_expr(st, e, dst) {
-                Ok(_)  => {}, Err(er) => { return Err(er); }
+                Result.Ok(_)  => {}, Result.Err(er) => { return Result.Err(er); }
             }
         }
-        None => {}
+        Maybe.None => {}
     }
 
     // Patch every arm's "goto after end" to the current instruction.
@@ -2671,7 +2671,7 @@ fn emit_case(
         st.program.replace(after_patches[p], Goto(after_end));
         p = p + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_in_list(
@@ -2683,7 +2683,7 @@ fn emit_in_list(
 ) -> Result<(), CodegenError> {
     let x_reg = st.regs.alloc();
     match emit_expr(st, x, x_reg) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
     // Seed dst to "no match" (false for IN, true for NOT IN).
     let seed = if negated { 1 } else { 0 };
@@ -2695,7 +2695,7 @@ fn emit_in_list(
     while i < xs.len() {
         let y_reg = st.regs.alloc();
         match emit_expr(st, &xs[i], y_reg) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         let jp = st.program.emit(Eq(x_reg, y_reg, 0));
         match_jumps.push(jp);
@@ -2715,18 +2715,18 @@ fn emit_in_list(
         // get_opcode and re-emitting. Simpler: just replace with a
         // re-emission — Eq's a/b are already stored in the program.
         match st.program.get_opcode(match_jumps[j]) {
-            Some(ref op) => match op {
+            Maybe.Some(ref op) => match op {
                 Eq(ra, rb, _) => {
                     st.program.replace(match_jumps[j], Eq(ra, rb, match_label));
                 }
                 _ => {}
             }
-            None => {}
+            Maybe.None => {}
         }
         j = j + 1;
     }
     st.program.replace(goto_end_idx, Goto(end_label));
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_between(
@@ -2740,9 +2740,9 @@ fn emit_between(
     let xr = st.regs.alloc();
     let lr = st.regs.alloc();
     let hr = st.regs.alloc();
-    match emit_expr(st, x, xr) { Ok(_) => {}, Err(e) => { return Err(e); } }
-    match emit_expr(st, lo, lr) { Ok(_) => {}, Err(e) => { return Err(e); } }
-    match emit_expr(st, hi, hr) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match emit_expr(st, x, xr) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+    match emit_expr(st, lo, lr) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+    match emit_expr(st, hi, hr) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     // dst = (x >= lo) AND (x <= hi); flip for NOT BETWEEN.
     let false_v = if negated { 1 } else { 0 };
     let true_v  = if negated { 0 } else { 1 };
@@ -2756,7 +2756,7 @@ fn emit_between(
     let end_label = st.program.instruction_count();
     st.program.replace(lt_patch, Lt(xr, lr, end_label));
     st.program.replace(gt_patch, Gt(xr, hr, end_label));
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_like(
@@ -2769,12 +2769,12 @@ fn emit_like(
 ) -> Result<(), CodegenError> {
     let xr = st.regs.alloc();
     let pr = st.regs.alloc();
-    match emit_expr(st, x, xr) { Ok(_) => {}, Err(e) => { return Err(e); } }
-    match emit_expr(st, pat, pr) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match emit_expr(st, x, xr) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+    match emit_expr(st, pat, pr) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     // Kind 10 = LIKE in ScalarFn dispatch (not yet wired — extend).
     let n = if negated { 1 } else { 0 };
     let _ = st.program.emit(ScalarFn(10 + n, 2, xr, dst));
-    Ok(())
+    Result.Ok(())
 }
 
 fn cast_target_kind(ty: &Text) -> Int {
@@ -2831,11 +2831,11 @@ fn emit_scalar_call(
     let lname = ascii_lower(name);
     let is_minmax = lname == "min".clone() || lname == "max".clone();
     if akind >= 0 && !(is_minmax && args.len() >= 2) {
-        return Err(unsupported("aggregate call in non-aggregate context".clone()));
+        return Result.Err(unsupported("aggregate call in non-aggregate context".clone()));
     }
     let kind = scalar_fn_kind(name);
     if kind < 0 {
-        return Err(unsupported("scalar function not in builtin registry".clone()));
+        return Result.Err(unsupported("scalar function not in builtin registry".clone()));
     }
     let n_args = args.len();
     // Evaluate every arg into a contiguous register window.
@@ -2843,17 +2843,17 @@ fn emit_scalar_call(
     let mut i: Int = 0;
     while i < n_args {
         match emit_expr(st, &args[i], first_arg + i) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         i = i + 1;
     }
     let _ = st.program.emit(ScalarFn(kind, n_args, first_arg, dst));
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_literal(st: &mut CgState, lit: &SqlLiteral, dst: Int) -> Result<(), CodegenError> {
     match lit {
-        LNull  => { let _ = st.program.emit(Null(dst, dst)); Ok(()) }
+        LNull  => { let _ = st.program.emit(Null(dst, dst)); Result.Ok(()) }
         LInt(i) => {
             // Fits in i32? use Integer opcode; else Int64 via constant.
             if i >= -2147483648_i64 && i <= 2147483647_i64 {
@@ -2862,17 +2862,17 @@ fn emit_literal(st: &mut CgState, lit: &SqlLiteral, dst: Int) -> Result<(), Code
                 let idx = st.program.constants.add(KInt(i));
                 let _ = st.program.emit(Int64(idx, dst));
             }
-            Ok(())
+            Result.Ok(())
         }
         LReal(x) => {
             let idx = st.program.constants.add(KReal(x));
             let _ = st.program.emit(Real(idx, dst));
-            Ok(())
+            Result.Ok(())
         }
         LText(ref s) => {
             let idx = st.program.constants.add(KText(s.clone()));
             let _ = st.program.emit(String8(idx, dst));
-            Ok(())
+            Result.Ok(())
         }
         LBlob(ref b) => {
             let mut out: List<Byte> = List.new();
@@ -2880,11 +2880,11 @@ fn emit_literal(st: &mut CgState, lit: &SqlLiteral, dst: Int) -> Result<(), Code
             while i < b.len() { out.push(b[i]); i = i + 1; }
             let idx = st.program.constants.add(KBlob(out));
             let _ = st.program.emit(BlobLit(idx, dst));
-            Ok(())
+            Result.Ok(())
         }
-        LTrue  => { let _ = st.program.emit(Integer(1, dst)); Ok(()) }
-        LFalse => { let _ = st.program.emit(Integer(0, dst)); Ok(()) }
-        _ => Err(unsupported("CURRENT_* / LStar literal".clone())),
+        LTrue  => { let _ = st.program.emit(Integer(1, dst)); Result.Ok(()) }
+        LFalse => { let _ = st.program.emit(Integer(0, dst)); Result.Ok(()) }
+        _ => Result.Err(unsupported("CURRENT_* / LStar literal".clone())),
     }
 }
 
@@ -2897,7 +2897,7 @@ fn emit_unary(
     // Evaluate inner into a fresh register.
     let src = st.regs.alloc();
     match emit_expr(st, inner, src) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
     match op {
         UNot => {
@@ -2926,23 +2926,23 @@ fn emit_unary(
             let after_target = st.program.instruction_count();
             st.program.replace(if_not_jmp, IfNot(src, set_true_target));
             st.program.replace(goto_after, Goto(after_target));
-            Ok(())
+            Result.Ok(())
         }
         UNeg => {
             // dst = 0 - src
             let zero_reg = st.regs.alloc();
             let _ = st.program.emit(Integer(0, zero_reg));
             let _ = st.program.emit(Subtract(zero_reg, src, dst));
-            Ok(())
+            Result.Ok(())
         }
         UPlus => {
             // dst = src (SCopy)
             let _ = st.program.emit(SCopy(src, dst));
-            Ok(())
+            Result.Ok(())
         }
         UBitNot => {
             let _ = st.program.emit(BitNot(src, dst));
-            Ok(())
+            Result.Ok(())
         }
     }
 }
@@ -2957,22 +2957,22 @@ fn emit_binary(
     let ra = st.regs.alloc();
     let rb = st.regs.alloc();
     match emit_expr(st, a, ra) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
     match emit_expr(st, b, rb) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
     match op {
-        BAdd => { let _ = st.program.emit(Add(ra, rb, dst)); Ok(()) }
-        BSub => { let _ = st.program.emit(Subtract(ra, rb, dst)); Ok(()) }
-        BMul => { let _ = st.program.emit(Multiply(ra, rb, dst)); Ok(()) }
-        BDiv => { let _ = st.program.emit(Divide(ra, rb, dst)); Ok(()) }
-        BMod => { let _ = st.program.emit(Remainder(ra, rb, dst)); Ok(()) }
-        BBitAnd => { let _ = st.program.emit(BitAnd(ra, rb, dst)); Ok(()) }
-        BBitOr  => { let _ = st.program.emit(BitOr(ra, rb, dst)); Ok(()) }
-        BShl    => { let _ = st.program.emit(ShiftLeft(ra, rb, dst)); Ok(()) }
-        BShr    => { let _ = st.program.emit(ShiftRight(ra, rb, dst)); Ok(()) }
-        BConcat => { let _ = st.program.emit(ScalarFn(12, 2, ra, dst)); Ok(()) }
+        BAdd => { let _ = st.program.emit(Add(ra, rb, dst)); Result.Ok(()) }
+        BSub => { let _ = st.program.emit(Subtract(ra, rb, dst)); Result.Ok(()) }
+        BMul => { let _ = st.program.emit(Multiply(ra, rb, dst)); Result.Ok(()) }
+        BDiv => { let _ = st.program.emit(Divide(ra, rb, dst)); Result.Ok(()) }
+        BMod => { let _ = st.program.emit(Remainder(ra, rb, dst)); Result.Ok(()) }
+        BBitAnd => { let _ = st.program.emit(BitAnd(ra, rb, dst)); Result.Ok(()) }
+        BBitOr  => { let _ = st.program.emit(BitOr(ra, rb, dst)); Result.Ok(()) }
+        BShl    => { let _ = st.program.emit(ShiftLeft(ra, rb, dst)); Result.Ok(()) }
+        BShr    => { let _ = st.program.emit(ShiftRight(ra, rb, dst)); Result.Ok(()) }
+        BConcat => { let _ = st.program.emit(ScalarFn(12, 2, ra, dst)); Result.Ok(()) }
         BEq => {
             // Materialise as boolean via `Eq` + Integer.
             let _ = st.program.emit(Integer(0, dst));
@@ -2983,7 +2983,7 @@ fn emit_binary(
             let after = st.program.instruction_count();
             st.program.replace(jump_idx, Eq(ra, rb, set_true));
             st.program.replace(jump_idx + 1, Goto(after));
-            Ok(())
+            Result.Ok(())
         }
         BNe | BLt | BLe | BGt | BGe => {
             let _ = st.program.emit(Integer(0, dst));
@@ -3008,7 +3008,7 @@ fn emit_binary(
                 _   => st.program.replace(jump_idx, Eq(ra, rb, set_true)),
             }
             st.program.replace(goto_idx, Goto(after));
-            Ok(())
+            Result.Ok(())
         }
         BAnd => {
             // Logical AND — truthy path: dst = 1 iff both non-zero.
@@ -3019,7 +3019,7 @@ fn emit_binary(
             let after = st.program.instruction_count();
             st.program.replace(a_false, IfNot(ra, after));
             st.program.replace(b_false, IfNot(rb, after));
-            Ok(())
+            Result.Ok(())
         }
         BOr => {
             let _ = st.program.emit(Integer(1, dst));
@@ -3029,7 +3029,7 @@ fn emit_binary(
             let after = st.program.instruction_count();
             st.program.replace(a_true, If(ra, after));
             st.program.replace(b_true, If(rb, after));
-            Ok(())
+            Result.Ok(())
         }
         BIs | BIsNot => {
             // NULL-safe equality. `x IS y` is true iff (a==b) treating
@@ -3079,9 +3079,9 @@ fn emit_binary(
                 let _ = st.program.emit(Integer(1, one_reg));
                 let _ = st.program.emit(Subtract(one_reg, dst, dst));
             }
-            Ok(())
+            Result.Ok(())
         }
-        _ => Err(unsupported("binop codegen pending".clone())),
+        _ => Result.Err(unsupported("binop codegen pending".clone())),
     }
 }
 
@@ -3094,7 +3094,7 @@ fn emit_binary(
 // annotator chose a non-FullScan access method.  When so, it emits a
 // specialised opcode sequence (rowid lookup, index seek, range scan,
 // covering scan) instead of the historical OpenRead+Rewind+Next
-// loop.  When the seek_plan is None or AmFullScan, the historical
+// loop.  When the seek_plan is Maybe.None or AmFullScan, the historical
 // `emit_plan` path runs unchanged — full backwards compatibility.
 //
 // This module ships the foundation of the dispatch surface.  The
@@ -3137,11 +3137,11 @@ public fn codegen_annotated(
 ) -> Result<VdbeProgram, CodegenError> {
     let mut st = cg_state_new(sql);
     match emit_annotated(&mut st, annotated) {
-        Ok(_)  => {},
-        Err(e) => { return Err(e); }
+        Result.Ok(_)  => {},
+        Result.Err(e) => { return Result.Err(e); }
     }
     let _ = st.program.emit(Halt(0, 0));
-    Ok(cg_finalize(st))
+    Result.Ok(cg_finalize(st))
 }
 
 /// Recursive emitter over the annotated tree.  At each node:
@@ -3168,12 +3168,12 @@ fn emit_annotated(st: &mut CgState, ann: &CostAnnotatedPlan) -> Result<(), Codeg
                 match inner_node {
                     PnFilter(_, _) => {
                         match &inner.seek_plan {
-                            Some(ref pref) => {
+                            Maybe.Some(ref pref) => {
                                 if access_method_is_actionable(&pref.method) {
                                     return emit_annotated_project_seek(st, inner_node, cols, pref);
                                 }
                             }
-                            None => {},
+                            Maybe.None => {},
                         }
                     }
                     _ => {},
@@ -3184,12 +3184,12 @@ fn emit_annotated(st: &mut CgState, ann: &CostAnnotatedPlan) -> Result<(), Codeg
         // bare-filter shape (rare in practice but supported).
         PnFilter(_, _) => {
             match &ann.seek_plan {
-                Some(ref pref) => {
+                Maybe.Some(ref pref) => {
                     if access_method_is_actionable(&pref.method) {
                         return emit_annotated_filter_seek(st, outer_node, pref);
                     }
                 }
-                None => {},
+                Maybe.None => {},
             }
         }
         _ => {},
@@ -3255,7 +3255,7 @@ fn emit_annotated_project_seek(
         }
         _ => {},
     }
-    Err(unsupported("annotated project-seek expected Filter(TableScan, _)".clone()))
+    Result.Err(unsupported("annotated project-seek expected Filter(TableScan, _)".clone()))
 }
 
 /// Lower a bare `PnFilter(PnTableScan, pred)`.  Same dispatch
@@ -3291,7 +3291,7 @@ fn emit_annotated_filter_seek(
         }
         _ => {},
     }
-    Err(unsupported("annotated filter-seek expected Filter(TableScan, _)".clone()))
+    Result.Err(unsupported("annotated filter-seek expected Filter(TableScan, _)".clone()))
 }
 
 /// Common rowid-lookup prologue: cursor open + key materialisation +
@@ -3307,7 +3307,7 @@ fn emit_rowid_seek_prologue(
 ) -> Result<(Int, Int, Int, Int, Int), CodegenError> {
     if p.seek_keys.len() != 1 {
         let n = p.seek_keys.len();
-        return Err(InvalidPlan(f"rowid lookup expected 1 seek key, got {n}".as_str().to_owned()));
+        return Result.Err(InvalidPlan(f"rowid lookup expected 1 seek key, got {n}".as_str().to_owned()));
     }
     if cursor_id >= st.program.cursor_count() {
         let _ = st.program.declare_cursor(CkTable, 0, n_cols);
@@ -3316,7 +3316,7 @@ fn emit_rowid_seek_prologue(
 
     let key_reg = st.regs.alloc();
     match emit_expr(st, &p.seek_keys[0], key_reg) {
-        Ok(_)  => {}, Err(e) => { return Err(e); }
+        Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
     }
 
     let seek_idx = st.program.emit(SeekGE(cursor_id, key_reg, 1, 0));
@@ -3327,16 +3327,16 @@ fn emit_rowid_seek_prologue(
     // Optional residual predicate.
     let mut residual_skip_idx: Int = -1;
     match &p.residual_predicate {
-        Some(ref residual) => {
+        Maybe.Some(ref residual) => {
             let pr = st.regs.alloc();
             match emit_expr(st, residual, pr) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
             residual_skip_idx = st.program.emit(IfNot(pr, 0));
         }
-        None => {},
+        Maybe.None => {},
     }
-    Ok((seek_idx, ne_idx, rid_reg, key_reg, residual_skip_idx))
+    Result.Ok((seek_idx, ne_idx, rid_reg, key_reg, residual_skip_idx))
 }
 
 /// Patch the jump targets and emit the closing Close opcode.  Each
@@ -3375,11 +3375,11 @@ fn emit_rowid_seek_epilogue(
 /// here keeps the affine analyser happy in the caller.
 fn read_ifnot_reg(st: &CgState, at: Int) -> Int {
     match st.program.get_opcode(at) {
-        Some(op) => match op {
+        Maybe.Some(op) => match op {
             IfNot(reg, _) => reg,
             _ => -1,
         },
-        None => -1,
+        Maybe.None => -1,
     }
 }
 
@@ -3393,15 +3393,15 @@ fn emit_rowid_lookup_projected(
     cols: &List<PlanColumn>,
 ) -> Result<(), CodegenError> {
     let prologue = match emit_rowid_seek_prologue(st, cursor_id, n_cols, p) {
-        Ok(t)  => t,
-        Err(e) => { return Err(e); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(e); }
     };
 
     let proj_start = st.regs.alloc_n(cols.len());
     let mut i: Int = 0;
     while i < cols.len() {
         match emit_expr(st, &cols[i].expr, proj_start + i) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         i = i + 1;
     }
@@ -3413,7 +3413,7 @@ fn emit_rowid_lookup_projected(
         st, cursor_id,
         prologue.0, prologue.1, prologue.2, prologue.3, prologue.4,
     );
-    Ok(())
+    Result.Ok(())
 }
 
 /// Rowid-lookup with no explicit projection — emits every column of
@@ -3425,8 +3425,8 @@ fn emit_rowid_lookup_bare(
     p: &AccessPlan,
 ) -> Result<(), CodegenError> {
     let prologue = match emit_rowid_seek_prologue(st, cursor_id, n_cols, p) {
-        Ok(t)  => t,
-        Err(e) => { return Err(e); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(e); }
     };
 
     let row_start = st.regs.alloc_n(n_cols);
@@ -3443,7 +3443,7 @@ fn emit_rowid_lookup_bare(
         st, cursor_id,
         prologue.0, prologue.1, prologue.2, prologue.3, prologue.4,
     );
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -3485,15 +3485,15 @@ fn emit_index_seek_projected(
     cols: &List<PlanColumn>,
 ) -> Result<(), CodegenError> {
     let prologue = match emit_index_seek_prologue(st, cursor_id, n_cols, p) {
-        Ok(t)  => t,
-        Err(e) => { return Err(e); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(e); }
     };
 
     let proj_start = st.regs.alloc_n(cols.len());
     let mut i: Int = 0;
     while i < cols.len() {
         match emit_expr(st, &cols[i].expr, proj_start + i) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         i = i + 1;
     }
@@ -3502,7 +3502,7 @@ fn emit_index_seek_projected(
     emit_limit_body_counter(st, gp);
 
     emit_index_seek_epilogue(st, prologue);
-    Ok(())
+    Result.Ok(())
 }
 
 /// AmIndexSeek without explicit projection (bare Filter-over-TableScan).
@@ -3513,8 +3513,8 @@ fn emit_index_seek_bare(
     p: &AccessPlan,
 ) -> Result<(), CodegenError> {
     let prologue = match emit_index_seek_prologue(st, cursor_id, n_cols, p) {
-        Ok(t)  => t,
-        Err(e) => { return Err(e); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(e); }
     };
 
     let row_start = st.regs.alloc_n(n_cols);
@@ -3528,7 +3528,7 @@ fn emit_index_seek_bare(
     emit_limit_body_counter(st, gp);
 
     emit_index_seek_epilogue(st, prologue);
-    Ok(())
+    Result.Ok(())
 }
 
 /// AmIndexSeek prologue snapshot — captures the patch points the
@@ -3561,7 +3561,7 @@ fn emit_index_seek_prologue(
 ) -> Result<IndexSeekPrologue, CodegenError> {
     let n_keys = p.seek_keys.len();
     if n_keys < 1 {
-        return Err(InvalidPlan("AmIndexSeek expected ≥1 seek key".clone()));
+        return Result.Err(InvalidPlan("AmIndexSeek expected ≥1 seek key".clone()));
     }
 
     let t_cur = cursor_id;
@@ -3584,7 +3584,7 @@ fn emit_index_seek_prologue(
     let mut k: Int = 0;
     while k < n_keys {
         match emit_expr(st, &p.seek_keys[k], key_reg + k) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         k = k + 1;
     }
@@ -3600,7 +3600,7 @@ fn emit_index_seek_prologue(
     // Seek to base table by rowid; on miss skip the body + advance.
     let table_seek_idx = st.program.emit(SeekGE(t_cur, rid_reg, 1, 0));
 
-    Ok(IndexSeekPrologue {
+    Result.Ok(IndexSeekPrologue {
         t_cur: t_cur,
         idx_cur: idx_cur,
         key_reg: key_reg,
@@ -3703,14 +3703,14 @@ fn emit_index_range_scan_projected(
     cols: &List<PlanColumn>,
 ) -> Result<(), CodegenError> {
     let prologue = match emit_range_scan_prologue(st, cursor_id, n_cols, p) {
-        Ok(t)  => t,
-        Err(e) => { return Err(e); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let proj_start = st.regs.alloc_n(cols.len());
     let mut i: Int = 0;
     while i < cols.len() {
         match emit_expr(st, &cols[i].expr, proj_start + i) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         i = i + 1;
     }
@@ -3718,7 +3718,7 @@ fn emit_index_range_scan_projected(
     emit_result_row(st, proj_start, cols.len());
     emit_limit_body_counter(st, gp);
     emit_range_scan_epilogue(st, prologue);
-    Ok(())
+    Result.Ok(())
 }
 
 /// AmIndexRangeScan without explicit projection (bare Filter shape).
@@ -3729,8 +3729,8 @@ fn emit_index_range_scan_bare(
     p: &AccessPlan,
 ) -> Result<(), CodegenError> {
     let prologue = match emit_range_scan_prologue(st, cursor_id, n_cols, p) {
-        Ok(t)  => t,
-        Err(e) => { return Err(e); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let row_start = st.regs.alloc_n(n_cols);
     let mut i: Int = 0;
@@ -3742,7 +3742,7 @@ fn emit_index_range_scan_bare(
     emit_result_row(st, row_start, n_cols);
     emit_limit_body_counter(st, gp);
     emit_range_scan_epilogue(st, prologue);
-    Ok(())
+    Result.Ok(())
 }
 
 /// Common prologue for AmIndexRangeScan: open both cursors, emit
@@ -3772,7 +3772,7 @@ fn emit_range_scan_prologue(
     let n_eq = p.seek_keys.len();
     if n_eq >= 1 {
         match emit_expr(st, &p.seek_keys[0], start_reg) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
     } else {
         // No equality prefix — emit the range's lower bound as
@@ -3788,10 +3788,10 @@ fn emit_range_scan_prologue(
     let mut end_check_idx: Int = -1;
     let mut end_op: RangeOp = RoLt;  // sentinel when no bound; epilogue gates on end_check_idx
     match &p.range_upper {
-        Some(bound) => {
+        Maybe.Some(bound) => {
             let er = st.regs.alloc();
             match emit_expr(st, &**(&bound.value), er) {
-                Ok(_)  => {}, Err(e) => { return Err(e); }
+                Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
             }
             end_reg = er;
             // Pick the right end-bound opcode based on the range
@@ -3811,7 +3811,7 @@ fn emit_range_scan_prologue(
             end_check_idx = op_idx;
             end_op = *(&bound.op);
         }
-        None => {},
+        Maybe.None => {},
     }
 
     // Read rowid + seek base table.
@@ -3819,7 +3819,7 @@ fn emit_range_scan_prologue(
     let _ = st.program.emit(IdxRowid(idx_cur, rid_reg));
     let table_seek_idx = st.program.emit(SeekGE(t_cur, rid_reg, 1, 0));
 
-    Ok(IndexRangeScanPrologue {
+    Result.Ok(IndexRangeScanPrologue {
         t_cur: t_cur,
         idx_cur: idx_cur,
         start_reg: start_reg,
@@ -3911,8 +3911,8 @@ fn emit_covering_index_scan_projected(
     cols: &List<PlanColumn>,
 ) -> Result<(), CodegenError> {
     let prologue = match emit_covering_prologue(st, cursor_id, p) {
-        Ok(t)  => t,
-        Err(e) => { return Err(e); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(e); }
     };
 
     // Foundation: project via Column(idx_cur, i, dst+i).  For the
@@ -3929,7 +3929,7 @@ fn emit_covering_index_scan_projected(
     emit_result_row(st, proj_start, cols.len());
     emit_limit_body_counter(st, gp);
     emit_covering_epilogue(st, prologue);
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_covering_index_scan_bare(
@@ -3939,8 +3939,8 @@ fn emit_covering_index_scan_bare(
     p: &AccessPlan,
 ) -> Result<(), CodegenError> {
     let prologue = match emit_covering_prologue(st, cursor_id, p) {
-        Ok(t)  => t,
-        Err(e) => { return Err(e); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let row_start = st.regs.alloc_n(n_cols);
     let mut i: Int = 0;
@@ -3952,7 +3952,7 @@ fn emit_covering_index_scan_bare(
     emit_result_row(st, row_start, n_cols);
     emit_limit_body_counter(st, gp);
     emit_covering_epilogue(st, prologue);
-    Ok(())
+    Result.Ok(())
 }
 
 fn emit_covering_prologue(
@@ -3962,7 +3962,7 @@ fn emit_covering_prologue(
 ) -> Result<CoveringScanPrologue, CodegenError> {
     let n_keys = p.seek_keys.len();
     if n_keys < 1 {
-        return Err(InvalidPlan("AmCoveringIndexScan expected ≥1 seek key".clone()));
+        return Result.Err(InvalidPlan("AmCoveringIndexScan expected ≥1 seek key".clone()));
     }
     // Foundation: covering scan reuses the table-cursor slot for
     // the index cursor (the table cursor is unused since we never
@@ -3979,7 +3979,7 @@ fn emit_covering_prologue(
     let mut k: Int = 0;
     while k < n_keys {
         match emit_expr(st, &p.seek_keys[k], key_reg + k) {
-            Ok(_)  => {}, Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}, Result.Err(e) => { return Result.Err(e); }
         }
         k = k + 1;
     }
@@ -3987,7 +3987,7 @@ fn emit_covering_prologue(
     let loop_top = st.program.instruction_count();
     let not_found_idx = st.program.emit(NotFound(idx_cur, 0, key_reg, n_keys));
 
-    Ok(CoveringScanPrologue {
+    Result.Ok(CoveringScanPrologue {
         idx_cur: idx_cur,
         key_reg: key_reg,
         n_keys: n_keys,

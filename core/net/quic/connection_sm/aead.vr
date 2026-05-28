@@ -122,16 +122,16 @@ public fn build_nonce(iv: &[Byte; 12], packet_number: UInt64) -> [Byte; 12] {
 fn classify(keys: &QuicSpaceKeys) -> Result<AeadKind, QuicAeadError> {
     match &keys.hp_key {
         HpKey.AesEcb128(_) => {
-            if keys.aead_key.len() != 16 { return Err(QuicAeadError.BadKeyLength(keys.aead_key.len())); }
-            Ok(AeadKind.Aes128Gcm)
+            if keys.aead_key.len() != 16 { return Result.Err(QuicAeadError.BadKeyLength(keys.aead_key.len())); }
+            Result.Ok(AeadKind.Aes128Gcm)
         },
         HpKey.AesEcb256(_) => {
-            if keys.aead_key.len() != 32 { return Err(QuicAeadError.BadKeyLength(keys.aead_key.len())); }
-            Ok(AeadKind.Aes256Gcm)
+            if keys.aead_key.len() != 32 { return Result.Err(QuicAeadError.BadKeyLength(keys.aead_key.len())); }
+            Result.Ok(AeadKind.Aes256Gcm)
         },
         HpKey.ChaCha20Block(_) => {
-            if keys.aead_key.len() != 32 { return Err(QuicAeadError.BadKeyLength(keys.aead_key.len())); }
-            Ok(AeadKind.ChaCha20Poly1305)
+            if keys.aead_key.len() != 32 { return Result.Err(QuicAeadError.BadKeyLength(keys.aead_key.len())); }
+            Result.Ok(AeadKind.ChaCha20Poly1305)
         },
     }
 }
@@ -159,8 +159,8 @@ public fn seal(
         AeadKind.ChaCha20Poly1305 => chacha20_poly1305_seal(keys.aead_key.as_slice(), &nonce, aad, plaintext, &mut out),
     };
     match result {
-        Ok(()) => Ok(out),
-        Err(_) => Err(QuicAeadError.AeadFailure),
+        Result.Ok(()) => Result.Ok(out),
+        Result.Err(_) => Result.Err(QuicAeadError.AeadFailure),
     }
 }
 
@@ -182,7 +182,7 @@ public fn open(
         AeadKind.ChaCha20Poly1305 => chacha20_poly1305_open(keys.aead_key.as_slice(), &nonce, aad, ciphertext, &mut out),
     };
     match result {
-        Ok(()) => Ok(out),
-        Err(_) => Err(QuicAeadError.AeadFailure),
+        Result.Ok(()) => Result.Ok(out),
+        Result.Err(_) => Result.Err(QuicAeadError.AeadFailure),
     }
 }

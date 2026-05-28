@@ -108,8 +108,8 @@ public type BatchTransport is protocol {
     async fn enable_gro(&self) -> Result<(), TransportError>;
 
     /// Per-datagram ECN codepoint read/write requires IP_PKTINFO +
-    /// IP_TOS / IPV6_TCLASS cmsg plumbing. Returns Ok(()) on support
-    /// detection; Err(Io) when kernel refuses.
+    /// IP_TOS / IPV6_TCLASS cmsg plumbing. Returns Result.Ok(()) on support
+    /// detection; Result.Err(Io) when kernel refuses.
     async fn enable_ecn(&self) -> Result<(), TransportError>;
 
     /// Learn the socket's current kernel-advertised capabilities.
@@ -163,7 +163,7 @@ implement RealBatchUdp {
         let local = socket.local_addr()
             .map_err(|_| TransportError.Io(Text.from_str("local_addr")))?;
         let caps = probe_kernel_capabilities(&socket).await;
-        Ok(RealBatchUdp {
+        Result.Ok(RealBatchUdp {
             socket:      socket,
             local_addr:  local,
             caps:        caps,
@@ -180,15 +180,15 @@ implement UdpTransport for RealBatchUdp {
         let mut i: Int = 0;
         while i < 2048 { buf.push(0_u8); i = i + 1; }
         match self.socket.recv_from(buf.as_mut_slice()).await {
-            Ok((n, peer)) => {
+            Result.Ok((n, peer)) => {
                 let mut data: List<Byte> = [];
                 let mut j: Int = 0;
                 while j < n { data.push(buf[j]); j = j + 1; }
-                Ok(InboundDatagram {
+                Result.Ok(InboundDatagram {
                     data: data, peer_addr: peer, ecn: EcnCodepoint.NotEct,
                 })
             },
-            Err(_) => Err(TransportError.Io(Text.from_str("recv_from"))),
+            Result.Err(_) => Result.Err(TransportError.Io(Text.from_str("recv_from"))),
         }
     }
 
@@ -205,7 +205,7 @@ implement UdpTransport for RealBatchUdp {
     fn max_datagram_size(&self) -> Int { 1472 }
     async fn close(&self) -> Result<(), TransportError> {
         let _ = self.socket.close();
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -224,14 +224,14 @@ implement BatchTransport for RealBatchUdp {
         while i < batch.len() {
             let dg = &batch[i];
             match self.socket.send_to(dg.bytes.as_slice(), &dg.peer).await {
-                Ok(_) => sent = sent + 1,
-                Err(_) => return if sent > 0 { Ok(sent) } else {
-                    Err(TransportError.Io(Text.from_str("send_to")))
+                Result.Ok(_) => sent = sent + 1,
+                Result.Err(_) => return if sent > 0 { Result.Ok(sent) } else {
+                    Result.Err(TransportError.Io(Text.from_str("send_to")))
                 },
             }
             i = i + 1;
         }
-        Ok(sent)
+        Result.Ok(sent)
     }
 
     async fn recv_batch(&self, max_count: Int)
@@ -243,8 +243,8 @@ implement BatchTransport for RealBatchUdp {
         // Portable fallback — single recv per call.
         let mut out: List<InboundDatagram> = [];
         match self.recv().await {
-            Ok(dg) => { out.push(dg); Ok(out) },
-            Err(e) => Err(e),
+            Result.Ok(dg) => { out.push(dg); Result.Ok(out) },
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -252,21 +252,21 @@ implement BatchTransport for RealBatchUdp {
         -> Result<(), TransportError>
     {
         if !self.caps.gso_supported {
-            return Err(TransportError.Io(Text.from_str("GSO unsupported")));
+            return Result.Err(TransportError.Io(Text.from_str("GSO unsupported")));
         }
         set_udp_segment(&self.socket, segment_size).await
     }
 
     async fn enable_gro(&self) -> Result<(), TransportError> {
         if !self.caps.gro_supported {
-            return Err(TransportError.Io(Text.from_str("GRO unsupported")));
+            return Result.Err(TransportError.Io(Text.from_str("GRO unsupported")));
         }
         set_udp_gro(&self.socket, true).await
     }
 
     async fn enable_ecn(&self) -> Result<(), TransportError> {
         if !self.caps.ecn_supported {
-            return Err(TransportError.Io(Text.from_str("ECN unsupported")));
+            return Result.Err(TransportError.Io(Text.from_str("ECN unsupported")));
         }
         set_ip_tos(&self.socket).await
     }
@@ -312,30 +312,30 @@ async fn syscall_send_batch(
     // Production Linux binding: @intrinsic("verum.udp.sendmmsg", ...)
     // with iovec/cmsg marshalling. Pure-Verum path is the per-datagram
     // loop above.
-    Err(TransportError.Io(Text.from_str("sendmmsg not wired")))
+    Result.Err(TransportError.Io(Text.from_str("sendmmsg not wired")))
 }
 
 async fn syscall_recv_batch(
     _sock: &core.net.udp.UdpSocket,
     _max_count: Int,
 ) -> Result<List<InboundDatagram>, TransportError> {
-    Err(TransportError.Io(Text.from_str("recvmmsg not wired")))
+    Result.Err(TransportError.Io(Text.from_str("recvmmsg not wired")))
 }
 
 async fn set_udp_segment(_sock: &core.net.udp.UdpSocket, _segment_size: UInt16)
     -> Result<(), TransportError>
 {
-    Err(TransportError.Io(Text.from_str("UDP_SEGMENT not wired")))
+    Result.Err(TransportError.Io(Text.from_str("UDP_SEGMENT not wired")))
 }
 
 async fn set_udp_gro(_sock: &core.net.udp.UdpSocket, _enable: Bool)
     -> Result<(), TransportError>
 {
-    Err(TransportError.Io(Text.from_str("UDP_GRO not wired")))
+    Result.Err(TransportError.Io(Text.from_str("UDP_GRO not wired")))
 }
 
 async fn set_ip_tos(_sock: &core.net.udp.UdpSocket)
     -> Result<(), TransportError>
 {
-    Err(TransportError.Io(Text.from_str("IP_TOS not wired")))
+    Result.Err(TransportError.Io(Text.from_str("IP_TOS not wired")))
 }

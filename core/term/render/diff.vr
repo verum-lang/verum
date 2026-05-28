@@ -85,8 +85,8 @@ public fn flush_diff(
             // Write the grapheme
             let grapheme_bytes = cell.grapheme.as_bytes();
             match writer.write(grapheme_bytes) {
-                Ok(_) => {}
-                Err(e) => return Err(e),
+                Result.Ok(_) => {}
+                Result.Err(e) => return Result.Err(e),
             };
             cursor_x = x + cell.width();
             cursor_y = y;
@@ -128,8 +128,8 @@ public fn write_style_diff(
     // Foreground
     if from.fg != to.fg || need_reset {
         match to.fg {
-            Some(fg) => write_color(writer, &adapt_color(fg, profile), true)?,
-            None => {
+            Maybe.Some(fg) => write_color(writer, &adapt_color(fg, profile), true)?,
+            Maybe.None => {
                 if !need_reset {
                     writer.write_csi(&[39], 'm' as Byte)?;  // Default fg
                 }
@@ -140,8 +140,8 @@ public fn write_style_diff(
     // Background
     if from.bg != to.bg || need_reset {
         match to.bg {
-            Some(bg) => write_color(writer, &adapt_color(bg, profile), false)?,
-            None => {
+            Maybe.Some(bg) => write_color(writer, &adapt_color(bg, profile), false)?,
+            Maybe.None => {
                 if !need_reset {
                     writer.write_csi(&[49], 'm' as Byte)?;  // Default bg
                 }
@@ -152,11 +152,11 @@ public fn write_style_diff(
     // Underline color
     if from.underline_color != to.underline_color || need_reset {
         match to.underline_color {
-            Some(Color.TrueColor(rgb)) => {
+            Maybe.Some(Color.TrueColor(rgb)) => {
                 writer.write_csi(&[58, 2, 0, rgb.r as Int, rgb.g as Int, rgb.b as Int], 'm' as Byte)?;
             }
-            Some(_) => {}  // Non-RGB underline colors not widely supported
-            None => {
+            Maybe.Some(_) => {}  // Non-RGB underline colors not widely supported
+            Maybe.None => {
                 if !need_reset {
                     writer.write_csi(&[59], 'm' as Byte)?;  // Default underline color
                 }
@@ -170,7 +170,7 @@ public fn write_style_diff(
         write_modifiers(writer, to.add_modifier)?;
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 /// Write ANSI color code (fg or bg).
@@ -220,5 +220,5 @@ public fn write_modifiers(writer: &mut (dyn EscapeWriter), mods: Modifier) -> Io
     if mods.contains(Modifier.OVERLINED) { writer.write_csi(&[53], 'm' as Byte)?; }
     if mods.contains(Modifier.DOUBLE_UNDERLINED) { writer.write_csi(&[21], 'm' as Byte)?; }
     if mods.contains(Modifier.CURLY_UNDERLINED) { writer.write_csi(&[4, 3], 'm' as Byte)?; }
-    Ok(())
+    Result.Ok(())
 }

@@ -16,8 +16,8 @@ mount super.color.{Color, Rgb};
 /// Accepts "#FF8800" or "FF8800" formats.
 public fn hex(h: Text) -> Color {
     match Rgb.from_hex(&h) {
-        Some(rgb) => Color.TrueColor(rgb),
-        None => Color.White,
+        Maybe.Some(rgb) => Color.TrueColor(rgb),
+        Maybe.None => Color.White,
     }
 }
 
@@ -35,12 +35,12 @@ public fn gray(brightness: Int) -> Color {
 /// Generate a list of Colors forming a gradient between two hex colors.
 public fn hex_gradient(from_hex: Text, to_hex: Text, steps: Int) -> List<Color> {
     let from = match Rgb.from_hex(&from_hex) {
-        Some(rgb) => rgb,
-        None => Rgb.new(255, 255, 255),
+        Maybe.Some(rgb) => rgb,
+        Maybe.None => Rgb.new(255, 255, 255),
     };
     let to = match Rgb.from_hex(&to_hex) {
-        Some(rgb) => rgb,
-        None => Rgb.new(255, 255, 255),
+        Maybe.Some(rgb) => rgb,
+        Maybe.None => Rgb.new(255, 255, 255),
     };
     let rgbs = Rgb.gradient(from, to, steps);
     let mut colors = List.with_capacity(steps);

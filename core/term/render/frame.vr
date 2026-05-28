@@ -28,7 +28,7 @@ implement Frame {
 
     /// Set cursor position (for text input fields).
     public fn set_cursor(&mut self, x: Int, y: Int) {
-        self.cursor_position = Some((x, y));
+        self.cursor_position = Maybe.Some((x, y));
     }
 
     /// Return the total available area.
@@ -68,7 +68,7 @@ implement Terminal {
         let w = size.columns;
         let h = size.rows;
 
-        Ok(Terminal {
+        Result.Ok(Terminal {
             backend: Heap(backend),
             front_buffer: Buffer.new(w, h),
             back_buffer: Buffer.new(w, h),
@@ -83,7 +83,7 @@ implement Terminal {
         self.backend.enable_raw_mode()?;
         self.backend.enter_alternate_screen()?;
         self.backend.set_cursor_visible(false)?;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Draw one frame. Calls `draw_fn` with a Frame, then flushes the diff.
@@ -102,7 +102,7 @@ implement Terminal {
         let mut frame = Frame {
             buffer: &mut self.back_buffer,
             area: area,
-            cursor_position: None,
+            cursor_position: Maybe.None,
         };
         draw_fn(&mut frame);
 
@@ -116,11 +116,11 @@ implement Terminal {
 
         // Handle cursor
         match frame.cursor_position {
-            Some((x, y)) => {
+            Maybe.Some((x, y)) => {
                 self.backend.move_to(x, y)?;
                 self.backend.set_cursor_visible(true)?;
             }
-            None => {
+            Maybe.None => {
                 self.backend.set_cursor_visible(false)?;
             }
         }
@@ -130,7 +130,7 @@ implement Terminal {
         self.front_buffer = self.back_buffer;
         self.back_buffer = temp;
 
-        Ok(())
+        Result.Ok(())
     }
 
     /// Restore terminal to original state.

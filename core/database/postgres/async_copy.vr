@@ -54,7 +54,7 @@
 module core.database.postgres.async_copy;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -99,37 +99,37 @@ implement AsyncCopyInWriter {
         // Cancellation gate — short-circuit if the caller
         // flipped the token.
         match &self.token {
-            Some(t) => {
+            Maybe.Some(t) => {
                 if t.is_cancelled() {
                     self.metrics.record_cancellation();
                     let _ = self.chunk_tx.send_async(CicCancel {
                         reason: "cancellation token fired".clone(),
                         reply: oneshot<Result<(), DbError>>().0,
                     }).await;
-                    return Err(cancelled_err("copy_in.write"));
+                    return Result.Err(cancelled_err("copy_in.write"));
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
         let n = bytes.len() as Int;
         match self.chunk_tx.send_async(CicBytes(bytes)).await {
-            Ok(())  => {
+            Result.Ok(())  => {
                 self.metrics.record_chunk(n);
-                Ok(())
+                Result.Ok(())
             }
-            Err(_)  => Err(actor_dropped("copy_in.write")),
+            Result.Err(_)  => Result.Err(actor_dropped("copy_in.write")),
         }
     }
 
     public async fn finish(self) -> Result<Int, DbError> {
         let (rs, rr) = oneshot();
         match self.chunk_tx.send_async(CicDone(rs)).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("copy_in.finish send")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("copy_in.finish send")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("copy_in.finish reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("copy_in.finish reply")),
         }
     }
 
@@ -137,18 +137,18 @@ implement AsyncCopyInWriter {
         self.metrics.record_cancellation();
         let (rs, rr) = oneshot();
         match self.chunk_tx.send_async(CicCancel { reason: reason.clone(), reply: rs }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("copy_in.cancel send")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("copy_in.cancel send")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("copy_in.cancel reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("copy_in.cancel reply")),
         }
     }
 }
 
 /// Affine reader for COPY TO. Pull chunks via `read_chunk`; once
-/// `Ok(None)` is observed, call `finish` to consume the stream
+/// `Result.Ok(Maybe.None)` is observed, call `finish` to consume the stream
 /// completion and surface the COPY row count.
 public type affine AsyncCopyOutReader is {
     chunk_rx: Receiver<CopyOutEvent>,
@@ -173,49 +173,49 @@ implement AsyncCopyOutReader {
         self.metrics.snapshot()
     }
 
-    /// `Ok(Some(bytes))` for each CopyData frame; `Ok(None)`
+    /// `Result.Ok(Maybe.Some(bytes))` for each CopyData frame; `Result.Ok(Maybe.None)`
     /// exactly once when the stream ends. Subsequent calls also
-    /// return `Ok(None)`.
+    /// return `Result.Ok(Maybe.None)`.
     public async fn read_chunk(&mut self) -> Result<Maybe<List<Byte>>, DbError> {
         match self.completion {
-            Some(_) => { return Ok(None); }
-            None    => {}
+            Maybe.Some(_) => { return Result.Ok(Maybe.None); }
+            Maybe.None    => {}
         }
         match self.chunk_rx.recv_fut().await {
-            Some(CoeBytes(b)) => {
+            Maybe.Some(CoeBytes(b)) => {
                 self.metrics.record_chunk(b.len() as Int);
-                Ok(Some(b))
+                Result.Ok(Maybe.Some(b))
             }
-            Some(CoeDone(r)) => {
-                self.completion = Some(r);
-                Ok(None)
+            Maybe.Some(CoeDone(r)) => {
+                self.completion = Maybe.Some(r);
+                Result.Ok(Maybe.None)
             }
-            None => {
+            Maybe.None => {
                 // Channel closed without a CoeDone — actor died.
                 let e = actor_dropped("copy_out.read_chunk");
-                self.completion = Some(Err(e.clone()));
-                Err(e)
+                self.completion = Maybe.Some(Result.Err(e.clone()));
+                Result.Err(e)
             }
         }
     }
 
-    /// After `Ok(None)` from `read_chunk`, drain the completion
+    /// After `Result.Ok(Maybe.None)` from `read_chunk`, drain the completion
     /// signal and return the row count or the terminal error.
     public async fn finish(mut self) -> Result<Int, DbError> {
         match self.completion {
-            Some(r) => r,
-            None    => {
+            Maybe.Some(r) => r,
+            Maybe.None    => {
                 // Caller forgot to drain; do it now.
                 loop {
                     match self.read_chunk().await {
-                        Ok(Some(_)) => {}
-                        Ok(None) => {
+                        Result.Ok(Maybe.Some(_)) => {}
+                        Result.Ok(Maybe.None) => {
                             match self.completion {
-                                Some(r) => { return r; }
-                                None    => { return Err(actor_dropped("copy_out.finish")); }
+                                Maybe.Some(r) => { return r; }
+                                Maybe.None    => { return Result.Err(actor_dropped("copy_out.finish")); }
                             }
                         }
-                        Err(e) => { return Err(e); }
+                        Result.Err(e) => { return Result.Err(e); }
                     }
                 }
             }
@@ -238,7 +238,7 @@ public async fn copy_in_async(
     copy_sql: &Text,
     chunk_capacity: Int,
 ) -> Result<AsyncCopyInWriter, DbError> {
-    copy_in_async_with_token(conn, copy_sql, chunk_capacity, None).await
+    copy_in_async_with_token(conn, copy_sql, chunk_capacity, Maybe.None).await
 }
 
 /// Sibling of `copy_in_async` that wires a caller-side
@@ -260,15 +260,15 @@ public async fn copy_in_async_with_token(
         chunk_rx: chunk_rx,
         ack: open_tx,
     }).await {
-        Ok(())  => {}
-        Err(_)  => { return Err(actor_dropped("copy_in_async send")); }
+        Result.Ok(())  => {}
+        Result.Err(_)  => { return Result.Err(actor_dropped("copy_in_async send")); }
     }
     match open_rx.await {
-        Ok(Ok(()))  => {}
-        Ok(Err(e))  => { return Err(e); }
-        Err(_)      => { return Err(actor_dropped("copy_in_async ack")); }
+        Result.Ok(Result.Ok(()))  => {}
+        Result.Ok(Result.Err(e))  => { return Result.Err(e); }
+        Result.Err(_)      => { return Result.Err(actor_dropped("copy_in_async ack")); }
     }
-    Ok(AsyncCopyInWriter {
+    Result.Ok(AsyncCopyInWriter {
         chunk_tx: chunk_tx,
         metrics: core.database.common.copy_metrics.CopyMetrics.new(),
         token: token,
@@ -292,17 +292,17 @@ public async fn copy_out_async(
         chunk_tx: chunk_tx,
         ack: open_tx,
     }).await {
-        Ok(())  => {}
-        Err(_)  => { return Err(actor_dropped("copy_out_async send")); }
+        Result.Ok(())  => {}
+        Result.Err(_)  => { return Result.Err(actor_dropped("copy_out_async send")); }
     }
     match open_rx.await {
-        Ok(Ok(()))  => {}
-        Ok(Err(e))  => { return Err(e); }
-        Err(_)      => { return Err(actor_dropped("copy_out_async ack")); }
+        Result.Ok(Result.Ok(()))  => {}
+        Result.Ok(Result.Err(e))  => { return Result.Err(e); }
+        Result.Err(_)      => { return Result.Err(actor_dropped("copy_out_async ack")); }
     }
-    Ok(AsyncCopyOutReader {
+    Result.Ok(AsyncCopyOutReader {
         chunk_rx: chunk_rx,
-        completion: None,
+        completion: Maybe.None,
         metrics: core.database.common.copy_metrics.CopyMetrics.new(),
     })
 }

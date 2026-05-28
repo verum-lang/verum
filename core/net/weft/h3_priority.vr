@@ -77,12 +77,12 @@ implement PrioritySlot {
 
     public fn from_header_value(value: &[Byte]) -> PrioritySlot {
         match parse_header(value) {
-            Ok(p) => PrioritySlot {
+            Result.Ok(p) => PrioritySlot {
                 urgency:     p.urgency,
                 incremental: p.incremental,
                 explicit:    true,
             },
-            Err(_) => PrioritySlot.default(),
+            Result.Err(_) => PrioritySlot.default(),
         }
     }
 
@@ -114,11 +114,11 @@ implement PrioritySlot {
 /// malformed.
 public fn extract(req: &WeftRequest) -> PrioritySlot {
     match req.headers.get(&"priority") {
-        Some(text) => {
+        Maybe.Some(text) => {
             let bytes = text.as_bytes();
             PrioritySlot.from_header_value(bytes)
         },
-        None => PrioritySlot.default(),
+        Maybe.None => PrioritySlot.default(),
     }
 }
 
@@ -127,7 +127,7 @@ public fn extract(req: &WeftRequest) -> PrioritySlot {
 /// for telemetry / debug logging.
 public fn header_is_valid(req: &WeftRequest) -> Bool {
     match req.headers.get(&"priority") {
-        Some(text) => parse_header(text.as_bytes()).is_ok(),
-        None => false,
+        Maybe.Some(text) => parse_header(text.as_bytes()).is_ok(),
+        Maybe.None => false,
     }
 }

@@ -18,21 +18,21 @@ public type ListState is {
 
 implement ListState {
     public fn new() -> ListState {
-        ListState { selected: None, offset: 0 }
+        ListState { selected: Maybe.None, offset: 0 }
     }
 
     public fn with_selected(idx: Int) -> ListState {
-        ListState { selected: Some(idx), offset: 0 }
+        ListState { selected: Maybe.Some(idx), offset: 0 }
     }
 
     /// Move selection up by one.
     public fn previous(&mut self, total: Int) {
         match self.selected {
-            Some(i) => {
-                self.selected = Some(if i > 0 { i - 1 } else { total - 1 });
+            Maybe.Some(i) => {
+                self.selected = Maybe.Some(if i > 0 { i - 1 } else { total - 1 });
             }
-            None => {
-                if total > 0 { self.selected = Some(0); }
+            Maybe.None => {
+                if total > 0 { self.selected = Maybe.Some(0); }
             }
         }
     }
@@ -40,18 +40,18 @@ implement ListState {
     /// Move selection down by one.
     public fn next(&mut self, total: Int) {
         match self.selected {
-            Some(i) => {
-                self.selected = Some(if i < total - 1 { i + 1 } else { 0 });
+            Maybe.Some(i) => {
+                self.selected = Maybe.Some(if i < total - 1 { i + 1 } else { 0 });
             }
-            None => {
-                if total > 0 { self.selected = Some(0); }
+            Maybe.None => {
+                if total > 0 { self.selected = Maybe.Some(0); }
             }
         }
     }
 
     /// Unselect.
     public fn unselect(&mut self) {
-        self.selected = None;
+        self.selected = Maybe.None;
     }
 }
 
@@ -69,7 +69,7 @@ implement SelectableList {
     public fn new(items: List<Line>) -> SelectableList {
         SelectableList {
             items: items,
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             highlight_style: Style.DEFAULT,
             highlight_symbol: ">> ",
@@ -79,7 +79,7 @@ implement SelectableList {
 
     // Builder API
     public fn block(self, block: Block) -> SelectableList {
-        SelectableList { block: Some(block), ..self }
+        SelectableList { block: Maybe.Some(block), ..self }
     }
 
     public fn highlight_style(self, style: Style) -> SelectableList {
@@ -103,12 +103,12 @@ implement StatefulWidget for SelectableList {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
         // Render block
         let list_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if list_area.width < 1 || list_area.height < 1 { return; }
@@ -120,7 +120,7 @@ implement StatefulWidget for SelectableList {
 
         // Adjust scroll offset to keep selection visible
         match state.selected {
-            Some(selected) => {
+            Maybe.Some(selected) => {
                 if selected < state.offset {
                     state.offset = selected;
                 }
@@ -128,7 +128,7 @@ implement StatefulWidget for SelectableList {
                     state.offset = selected - list_area.height + 1;
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
 
         // Render visible items
@@ -138,7 +138,7 @@ implement StatefulWidget for SelectableList {
             if item_idx >= total { break; }
 
             let y = list_area.y + i;
-            let is_selected = state.selected == Some(item_idx);
+            let is_selected = state.selected == Maybe.Some(item_idx);
 
             // Draw highlight symbol
             let content_x = if is_selected {

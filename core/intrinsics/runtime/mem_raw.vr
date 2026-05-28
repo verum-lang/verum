@@ -2,7 +2,7 @@
 // core/intrinsics/runtime/mem_raw.vr — Raw Memory Operations
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None
+// Dependencies: Maybe.None
 //
 // Migrated from `core/mem/raw_ops.vr` (#64 Phase 1.4) per the
 // architectural invariant that ALL `@intrinsic` declarations live

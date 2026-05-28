@@ -38,7 +38,7 @@ mount core.database.sqlite.native.session.change.{
 };
 
 // -----------------------------------------------------------------------------
-// PatchCell — Some(value) means "set", None means "unchanged"
+// PatchCell — Maybe.Some(value) means "set", Maybe.None means "unchanged"
 // -----------------------------------------------------------------------------
 
 public type PatchCell is { value: Maybe<Register> };
@@ -53,7 +53,7 @@ public type SessionPatch is {
     pk_columns: List<Bool>,
     /// PK column values (used to locate the target row).
     pk_values: List<Register>,
-    /// New value per column; None for cells unchanged from OLD.
+    /// New value per column; Maybe.None for cells unchanged from OLD.
     new_cells: List<PatchCell>,
 }
 
@@ -108,21 +108,21 @@ fn patch_from_change(c: &Change) -> SessionPatch {
             // Every cell present.
             let mut i: Int = 0;
             while i < c.new_row.len() {
-                new_cells.push(PatchCell { value: Some(clone_register(&c.new_row[i])) });
+                new_cells.push(PatchCell { value: Maybe.Some(clone_register(&c.new_row[i])) });
                 i = i + 1;
             }
         }
         OpUpdate => {
-            // None for cells that didn't change.
+            // Maybe.None for cells that didn't change.
             let mut i: Int = 0;
             while i < c.new_row.len() {
                 let unchanged: Bool = if i < c.old_row.len() {
                     registers_equal(&c.old_row[i], &c.new_row[i])
                 } else { false };
                 if unchanged {
-                    new_cells.push(PatchCell { value: None });
+                    new_cells.push(PatchCell { value: Maybe.None });
                 } else {
-                    new_cells.push(PatchCell { value: Some(clone_register(&c.new_row[i])) });
+                    new_cells.push(PatchCell { value: Maybe.Some(clone_register(&c.new_row[i])) });
                 }
                 i = i + 1;
             }

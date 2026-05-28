@@ -115,7 +115,7 @@ implement Spinner {
     public fn new(frames: SpinnerFrames) -> Spinner {
         Spinner {
             frames: frames,
-            label: None,
+            label: Maybe.None,
             style: Style.DEFAULT,
         }
     }
@@ -152,12 +152,12 @@ implement Spinner {
 
     /// Set the label as a styled Span displayed after the spinner character.
     public fn label(self, label: Span) -> Spinner {
-        Spinner { label: Some(label), ..self }
+        Spinner { label: Maybe.Some(label), ..self }
     }
 
     /// Set a plain text label.
     public fn label_text(self, text: Text) -> Spinner {
-        Spinner { label: Some(Span.raw(text)), ..self }
+        Spinner { label: Maybe.Some(Span.raw(text)), ..self }
     }
 
     /// Set the spinner style.
@@ -197,12 +197,12 @@ implement StatefulWidget for Spinner {
 
         // Render label if present
         match self.label {
-            Some(ref label) => {
+            Maybe.Some(ref label) => {
                 if x < area.right() {
                     x = buf.set_string(x + 1, area.y, &label.content, label.style);
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
     }
 }

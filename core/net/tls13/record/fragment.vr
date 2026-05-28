@@ -79,7 +79,7 @@ public fn seal_all(
     }
     // Empty payload case — emit no record at all; caller can still emit
     // an explicit 0-byte one by calling aead.seal directly if desired.
-    Ok(out)
+    Result.Ok(out)
 }
 
 // =============================================================================
@@ -124,7 +124,7 @@ implement HandshakeReassembler {
 
     /// If a full handshake message (header + body) is available,
     /// remove + return its wire bytes (header included). Otherwise
-    /// returns None and leaves the buffer intact.
+    /// returns Maybe.None and leaves the buffer intact.
     public fn take_next(&mut self) -> Maybe<List<Byte>> {
         if self.buf.len() < 4 { return Maybe.None; }
         // Header: type(1) + length(3 big-endian).

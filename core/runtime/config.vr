@@ -12,7 +12,7 @@
 /// | FullRuntime | ✓ | ✓ | ✓ | Completion| Desktop/Server |
 /// | SingleThreadRuntime| ✓ | ✓ | ✗ | Poll | WASM, Single-core embedded |
 /// | SyncRuntime | ✗ | ✓ | ✓ | Blocking | Legacy, Simple utilities |
-/// | EmbeddedRuntime | ✗ | ✗ | ✗ | None | Microcontrollers (Cortex-M)|
+/// | EmbeddedRuntime | ✗ | ✗ | ✗ | Maybe.None | Microcontrollers (Cortex-M)|
 ///
 
 /// ## Zero-Overhead Principle
@@ -380,11 +380,11 @@ public type NoopDriver is ();
 
 implement RuntimeIoDriver for NoopDriver {
     fn submit(&self, op: IoOp) -> Result<IoHandle, RuntimeIoError> {
-        Err(RuntimeIoError.Other(-1))
+        Result.Err(RuntimeIoError.Other(-1))
     }
 
     fn wait(&self, handle: IoHandle) -> Result<IoResult, RuntimeIoError> {
-        Err(RuntimeIoError.Other(-1))
+        Result.Err(RuntimeIoError.Other(-1))
     }
 
     fn poll(&self, completions: &mut [IoCompletion]) -> Int {
@@ -456,7 +456,7 @@ implement RuntimeConfig for FullRuntime {
         let executor = WorkStealingExecutor.init(worker_count, &io_driver)
             .map_err(|e| RuntimeInitError.ExecutorInitFailed(e))?;
 
-        Ok(Self {
+        Result.Ok(Self {
             allocator,
             executor,
             io_driver,
@@ -541,7 +541,7 @@ implement RuntimeConfig for SingleThreadRuntime {
         let executor = SingleThreadExecutor.init(&io_driver)
             .map_err(|e| RuntimeInitError.ExecutorInitFailed(e))?;
 
-        Ok(Self {
+        Result.Ok(Self {
             allocator,
             executor,
             io_driver,
@@ -615,7 +615,7 @@ implement RuntimeConfig for SyncRuntime {
         let thread_pool = RuntimeConfigThreadPool.init(num_cpus())
             .map_err(|e| RuntimeInitError.ExecutorInitFailed(f"RuntimeConfigThreadPool: {e}"))?;
 
-        Ok(Self {
+        Result.Ok(Self {
             allocator,
             thread_pool,
         })
@@ -680,7 +680,7 @@ implement RuntimeConfig for EmbeddedRuntime {
         let allocator = StackAllocator.init()
             .map_err(|e| RuntimeInitError.AllocatorInitFailed(e))?;
 
-        Ok(Self { allocator })
+        Result.Ok(Self { allocator })
     }
 
     fn shutdown(&mut self) {
@@ -792,7 +792,7 @@ implement WorkStealingExecutor {
         let workers = allocate_workers(worker_count)?;
         let global_queue = TaskQueue.new();
 
-        Ok(Self {
+        Result.Ok(Self {
             workers: workers,
             global_queue: &global_queue,
             io_driver: io_driver,
@@ -920,7 +920,7 @@ implement RuntimeConfigThreadPool {
         let job_queue = &JobQueue.new();
         let workers = allocate_thread_pool(worker_count, job_queue)?;
 
-        Ok(Self {
+        Result.Ok(Self {
             workers,
             job_queue,
             shutdown: RuntimeAtomicBool.new(false),
@@ -1016,11 +1016,11 @@ implement TaskQueue {
         let head = self.head.load(MemoryOrdering.Acquire) as Int;
         let tail = self.tail.load(MemoryOrdering.Acquire) as Int;
         if head >= tail {
-            return None;
+            return Maybe.None;
         }
         let idx = head % self.capacity;
         self.head.fetch_add(1, MemoryOrdering.Release);
-        Some(self.buffer[idx])
+        Maybe.Some(self.buffer[idx])
     }
 
     fn len(&self) -> Int {

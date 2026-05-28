@@ -54,22 +54,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "Fulcio keyless signing CA client: OIDC + CSR/proof-of-possession + ephemeral cert chain",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.sigstore.fulcio;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.json.{
     JsonValue, JsonObject, json_object, json_string, decode,
@@ -231,7 +231,7 @@ public async fn request_signing_cert<C: HttpClient>(
     key:           &FulcioKey,
     oidc_sub:      &Text,
 ) -> Result<FulcioCertResponse, FulcioError> {
-    if oidc_id_token.is_empty() { return Err(OidcTokenMissing); }
+    if oidc_id_token.is_empty() { return Result.Err(OidcTokenMissing); }
 
     let pub_bytes = fulcio_key_public_bytes(key);
     let pop_bytes = fulcio_proof_of_possession(key, oidc_sub);
@@ -253,17 +253,17 @@ public async fn request_signing_cert<C: HttpClient>(
     let resp = client.send(&req).await
         .map_err(|e| NetworkError(e))?;
     if !resp.status.is_success() {
-        return Err(HttpStatus {
+        return Result.Err(HttpStatus {
             status: resp.status,
             body: text_of_body_lossy(&resp.body),
         });
     }
     if resp.body.len() > MAX_FULCIO_RESPONSE_BYTES {
-        return Err(TooLarge { size: resp.body.len(), limit: MAX_FULCIO_RESPONSE_BYTES });
+        return Result.Err(TooLarge { size: resp.body.len(), limit: MAX_FULCIO_RESPONSE_BYTES });
     }
     let parsed = parse_signing_cert_response(&resp.body)?;
     enforce_lifetime_cap(&parsed, config)?;
-    Ok(parsed)
+    Result.Ok(parsed)
 }
 
 fn build_request_body(
@@ -327,38 +327,38 @@ fn parse_signing_cert_response(bytes: &List<Byte>) -> Result<FulcioCertResponse,
             j = j + 1;
         }
         if !pushed {
-            return Err(InvalidPem(f"chain.certificates[{i}] no CERTIFICATE block".to_text()));
+            return Result.Err(InvalidPem(f"chain.certificates[{i}] no CERTIFICATE block".to_text()));
         }
         i = i + 1;
     }
 
-    if der_chain.is_empty() { return Err(NoCertChain); }
+    if der_chain.is_empty() { return Result.Err(NoCertChain); }
 
     // SCTs as a top-level field (some Fulcio versions); leave the
     // embedded-in-cert SCTs to downstream verification.
     let scts_raw = obj.get("signedCertificateTimestamps").and_then(|v| v.as_string())
         .and_then(|s| b64_decode(&s).ok());
 
-    Ok(FulcioCertResponse { cert_chain: der_chain, scts_raw })
+    Result.Ok(FulcioCertResponse { cert_chain: der_chain, scts_raw })
 }
 
 fn enforce_lifetime_cap(
     response: &FulcioCertResponse,
     config:   &FulcioClientConfig,
 ) -> Result<(), FulcioError> {
-    if response.cert_chain.is_empty() { return Err(NoCertChain); }
+    if response.cert_chain.is_empty() { return Result.Err(NoCertChain); }
     let leaf = parse_certificate(response.cert_chain[0].as_slice())
         .map_err(|e| InvalidCertificate(f"{e}"))?;
     let nb = security.x509.time.time_to_unix(&leaf.tbs.validity.not_before);
     let na = security.x509.time.time_to_unix(&leaf.tbs.validity.not_after);
     let lifetime = na - nb;
     if lifetime > config.max_lifetime_seconds {
-        return Err(LifetimeExceedsCap {
+        return Result.Err(LifetimeExceedsCap {
             cert_lifetime_s: lifetime,
             cap_s: config.max_lifetime_seconds,
         });
     }
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================

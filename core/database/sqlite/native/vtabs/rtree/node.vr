@@ -59,7 +59,7 @@ public type InternalContent is {
 public fn leaf_new(node_id: Int) -> RTreeNode {
     Leaf(LeafContent {
         node_id: node_id,
-        parent: None,
+        parent: Maybe.None,
         entries: List.new(),
     })
 }
@@ -67,7 +67,7 @@ public fn leaf_new(node_id: Int) -> RTreeNode {
 public fn internal_new(node_id: Int) -> RTreeNode {
     Internal(InternalContent {
         node_id: node_id,
-        parent: None,
+        parent: Maybe.None,
         entries: List.new(),
     })
 }
@@ -103,25 +103,25 @@ public fn node_mbb(n: &RTreeNode) -> Maybe<BBox> {
 }
 
 fn leaf_mbb(c: &LeafContent) -> Maybe<BBox> {
-    if c.entries.len() == 0 { return None; }
+    if c.entries.len() == 0 { return Maybe.None; }
     let mut acc = clone_bbox(&c.entries[0].bbox);
     let mut i: Int = 1;
     while i < c.entries.len() {
         acc = acc.union(&c.entries[i].bbox);
         i = i + 1;
     }
-    Some(acc)
+    Maybe.Some(acc)
 }
 
 fn internal_mbb(c: &InternalContent) -> Maybe<BBox> {
-    if c.entries.len() == 0 { return None; }
+    if c.entries.len() == 0 { return Maybe.None; }
     let mut acc = clone_bbox(&c.entries[0].bbox);
     let mut i: Int = 1;
     while i < c.entries.len() {
         acc = acc.union(&c.entries[i].bbox);
         i = i + 1;
     }
-    Some(acc)
+    Maybe.Some(acc)
 }
 
 fn clone_bbox(b: &BBox) -> BBox {

@@ -48,7 +48,7 @@
 
 // // Read connection preface
 // let preface = read_exact(&mut stream, 24).await?;
-// if preface != PREFACE { return Err(Http2Error.BadClientPreface); }
+// if preface != PREFACE { return Result.Err(Http2Error.BadClientPreface); }
 //
 
 // // Frame loop

@@ -164,8 +164,8 @@ implement<T> Heap<T> {
         let align = T.alignment;
 
         let (ptr, gen, epoch) = match cbgr_alloc(size, align) {
-            Ok(result) => result,
-            Err(e) => panic(f"Out of memory: {e.message()}"),
+            Result.Ok(result) => result,
+            Result.Err(e) => panic(f"Out of memory: {e.message()}"),
         };
 
         let typed_ptr = ptr as &unsafe T;
@@ -211,8 +211,8 @@ implement<T> Heap<T> {
         let align = T.alignment;
 
         let (ptr, gen, epoch) = match cbgr_alloc_zeroed(size, align) {
-            Ok(result) => result,
-            Err(e) => panic(f"Out of memory: {e.message()}"),
+            Result.Ok(result) => result,
+            Result.Err(e) => panic(f"Out of memory: {e.message()}"),
         };
 
         Heap {
@@ -237,7 +237,7 @@ implement<T> Heap<T> {
             ptr_write(typed_ptr, value);
         }
 
-        Ok(Heap {
+        Result.Ok(Heap {
             ptr: typed_ptr,
             generation: gen,
             epoch: epoch,
@@ -300,8 +300,8 @@ implement<T> Heap<T> {
 
         // Deallocate the memory (increments generation for CBGR)
         match cbgr_dealloc(self.ptr as &unsafe Byte) {
-            Ok(()) => {}
-            Err(e) => panic(f"Deallocation failed: {e.message()}"),
+            Result.Ok(()) => {}
+            Result.Err(e) => panic(f"Deallocation failed: {e.message()}"),
         }
 
         // Prevent Heap's drop from running
@@ -474,8 +474,8 @@ implement<T> Drop for Heap<T> {
             drop_in_place(&mut *self.ptr);
             // Free the memory (increments generation for CBGR invalidation)
             match cbgr_dealloc(self.ptr as &unsafe Byte) {
-                Ok(()) => {}
-                Err(_) => {
+                Result.Ok(()) => {}
+                Result.Err(_) => {
                     // Deallocation failure in drop is problematic
                     // In production, we might log this but not panic
                 }
@@ -621,8 +621,8 @@ implement<T> Shared<T> {
         let align = SharedInner<T>.alignment;
 
         let (ptr, gen, epoch) = match cbgr_alloc(size, align) {
-            Ok(result) => result,
-            Err(e) => panic(f"Out of memory: {e.message()}"),
+            Result.Ok(result) => result,
+            Result.Err(e) => panic(f"Out of memory: {e.message()}"),
         };
 
         let typed_ptr = ptr as &unsafe SharedInner<T>;
@@ -656,7 +656,7 @@ implement<T> Shared<T> {
             ptr_write(typed_ptr, inner);
         }
 
-        Ok(Shared {
+        Result.Ok(Shared {
             ptr: typed_ptr,
             generation: gen,
             epoch: epoch,
@@ -744,18 +744,18 @@ implement<T> Shared<T> {
                     // If no weak references, free memory
                     if atomic_load_u32(&(*self.ptr).weak_count as *const UInt32, ORDERING_ACQUIRE) == 0 {
                         match cbgr_dealloc(self.ptr as &unsafe Byte) {
-                            Ok(()) => {}
-                            Err(_) => {}
+                            Result.Ok(()) => {}
+                            Result.Err(_) => {}
                         }
                     }
 
                     forget(self);
-                    return Ok(value);
+                    return Result.Ok(value);
                 }
             }
         }
 
-        Err(self)
+        Result.Err(self)
     }
 
     /// Create a weak reference.
@@ -843,8 +843,8 @@ implement<T> Drop for Shared<T> {
                 // If no weak references, free memory
                 if atomic_load_u32(&(*self.ptr).weak_count as *const UInt32, ORDERING_RELAXED) == 0 {
                     match cbgr_dealloc(self.ptr as &unsafe Byte) {
-                        Ok(()) => {}
-                        Err(_) => {}
+                        Result.Ok(()) => {}
+                        Result.Err(_) => {}
                     }
                 }
             }
@@ -944,7 +944,7 @@ implement<T> Weak<T> {
     /// Try to upgrade to a strong reference.
     ///
 
-    /// Returns Some if the value is still alive, None otherwise.
+    /// Returns Some if the value is still alive, Maybe.None otherwise.
     public fn upgrade(&self) -> Maybe<Shared<T>> {
         unsafe {
             loop {
@@ -1029,8 +1029,8 @@ implement<T> Drop for Weak<T> {
                 let strong = atomic_load_u32(&(*self.ptr).strong_count as *const UInt32, ORDERING_ACQUIRE);
                 if strong == 0 {
                     match cbgr_dealloc(self.ptr as &unsafe Byte) {
-                        Ok(()) => {}
-                        Err(_) => {}
+                        Result.Ok(()) => {}
+                        Result.Err(_) => {}
                     }
                 }
             }
@@ -1149,7 +1149,7 @@ public fn zero<T>(ptr: &mut T, count: Int) {
 /// in managed-reference form throughout — the codegen does not need to
 /// fabricate a raw `&unsafe T` from a `&mut T`, which would mis-cast a
 /// boxed value to a pointer and surface at runtime as
-/// `Expected pointer, got Some(N)`. Mirrors `core.intrinsics.memory.swap`
+/// `Expected pointer, got Maybe.Some(N)`. Mirrors `core.intrinsics.memory.swap`
 /// so the two definitions are functionally equivalent under the
 /// stdlib-loading first-wins gate (#163 history).
 @inline(always)
@@ -1699,21 +1699,21 @@ implement<T: Display> Display for Pin<T> {
 /// Use for collections that manage their own CBGR tracking.
 ///
 
-/// For a fallible counterpart that returns `Err(AllocError)` instead of
+/// For a fallible counterpart that returns `Result.Err(AllocError)` instead of
 /// panicking, see `try_alloc`. Collections building atop this primitive
 /// should prefer `try_alloc` at trust boundaries (FFI, untrusted-size
 /// config, large allocations).
 public fn alloc(size: Int, align: Int) -> &unsafe Byte {
     match cbgr_alloc(size, align) {
-        Ok((ptr, _, _)) => ptr,
-        Err(e) => panic(f"alloc failed: {e.message()}"),
+        Result.Ok((ptr, _, _)) => ptr,
+        Result.Err(e) => panic(f"alloc failed: {e.message()}"),
     }
 }
 
 /// Fallible counterpart to `alloc`.
 ///
 
-/// Returns `Err(AllocError)` on allocation failure rather than
+/// Returns `Result.Err(AllocError)` on allocation failure rather than
 /// panicking. The error variant carries enough detail
 /// (`AllocError.OutOfMemory { requested }`, `InvalidSize`,
 /// `InvalidAlignment`, etc.) for callers to distinguish recoverable
@@ -1727,8 +1727,8 @@ public fn alloc(size: Int, align: Int) -> &unsafe Byte {
 /// null pointer.
 public fn try_alloc(size: Int, align: Int) -> Result<&unsafe Byte, AllocError> {
     match cbgr_alloc(size, align) {
-        Ok((ptr, _, _)) => Ok(ptr),
-        Err(e) => Err(e),
+        Result.Ok((ptr, _, _)) => Result.Ok(ptr),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -1741,20 +1741,20 @@ public fn try_alloc(size: Int, align: Int) -> Result<&unsafe Byte, AllocError> {
 /// For a fallible counterpart see `try_alloc_zeroed`.
 public fn alloc_zeroed(size: Int, align: Int) -> &unsafe Byte {
     match cbgr_alloc_zeroed(size, align) {
-        Ok((ptr, _, _)) => ptr,
-        Err(e) => panic(f"alloc_zeroed failed: {e.message()}"),
+        Result.Ok((ptr, _, _)) => ptr,
+        Result.Err(e) => panic(f"alloc_zeroed failed: {e.message()}"),
     }
 }
 
 /// Fallible counterpart to `alloc_zeroed`.
 ///
 
-/// Returns `Err(AllocError)` on allocation failure rather than
+/// Returns `Result.Err(AllocError)` on allocation failure rather than
 /// panicking. See `try_alloc` for rationale.
 public fn try_alloc_zeroed(size: Int, align: Int) -> Result<&unsafe Byte, AllocError> {
     match cbgr_alloc_zeroed(size, align) {
-        Ok((ptr, _, _)) => Ok(ptr),
-        Err(e) => Err(e),
+        Result.Ok((ptr, _, _)) => Result.Ok(ptr),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -1767,8 +1767,8 @@ public fn try_alloc_zeroed(size: Int, align: Int) -> Result<&unsafe Byte, AllocE
 /// The pointer must have been allocated by alloc/alloc_zeroed.
 public fn dealloc(ptr: &unsafe Byte, _size: Int, _align: Int) {
     match cbgr_dealloc(ptr) {
-        Ok(()) => {}
-        Err(_) => {
+        Result.Ok(()) => {}
+        Result.Err(_) => {
             // Deallocation failure - log but don't panic
         }
     }
@@ -1791,8 +1791,8 @@ public fn realloc(ptr: &unsafe Byte, old_size: Int, new_size: Int, align: Int) -
     // Use CBGR-aware realloc which preserves generation tracking
     // and invalidates the old allocation's generation counter.
     match cbgr_realloc(ptr, old_size, new_size, align) {
-        Ok((new_ptr, _, _)) => new_ptr,
-        Err(_) => {
+        Result.Ok((new_ptr, _, _)) => new_ptr,
+        Result.Err(_) => {
             // Fallback: alloc + copy + dealloc
             let new_ptr = alloc(new_size, align);
             if !is_null(ptr) && old_size > 0 {
@@ -1810,7 +1810,7 @@ public fn realloc(ptr: &unsafe Byte, old_size: Int, new_size: Int, align: Int) -
 /// Fallible counterpart to `realloc`.
 ///
 
-/// Returns `Err(AllocError)` on allocation failure rather than
+/// Returns `Result.Err(AllocError)` on allocation failure rather than
 /// panicking. The original allocation at `ptr` is left UNTOUCHED on
 /// failure — the caller still owns it and is responsible for its
 /// eventual deallocation. This is the strong-guarantee semantics:
@@ -1818,7 +1818,7 @@ public fn realloc(ptr: &unsafe Byte, old_size: Int, new_size: Int, align: Int) -
 /// you get an error and the old pointer is still valid.
 ///
 
-/// `new_size == 0` is treated as deallocation: returns `Ok(null)` and
+/// `new_size == 0` is treated as deallocation: returns `Result.Ok(null)` and
 /// frees the old buffer (matching the behaviour of `realloc`).
 public fn try_realloc(
     ptr: &unsafe Byte,
@@ -1828,18 +1828,18 @@ public fn try_realloc(
 ) -> Result<&unsafe Byte, AllocError> {
     if new_size == 0 {
         dealloc(ptr, old_size, align);
-        return Ok(null_ptr<Byte>());
+        return Result.Ok(null_ptr<Byte>());
     }
 
     // Try CBGR-aware realloc first — preserves generation tracking.
     match cbgr_realloc(ptr, old_size, new_size, align) {
-        Ok((new_ptr, _, _)) => Ok(new_ptr),
-        Err(_) => {
+        Result.Ok((new_ptr, _, _)) => Result.Ok(new_ptr),
+        Result.Err(_) => {
             // Fallback: alloc + copy + dealloc, but propagate the
             // alloc error rather than panicking. On failure, the old
             // buffer is left intact for the caller to free.
             match cbgr_alloc(new_size, align) {
-                Ok((new_ptr_tuple, _, _)) => {
+                Result.Ok((new_ptr_tuple, _, _)) => {
                     let new_ptr = new_ptr_tuple;
                     if !is_null(ptr) && old_size > 0 {
                         let copy_size = if old_size < new_size { old_size } else { new_size };
@@ -1848,9 +1848,9 @@ public fn try_realloc(
                         }
                         dealloc(ptr, old_size, align);
                     }
-                    Ok(new_ptr)
+                    Result.Ok(new_ptr)
                 }
-                Err(e) => Err(e),
+                Result.Err(e) => Result.Err(e),
             }
         }
     }

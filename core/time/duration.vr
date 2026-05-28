@@ -293,7 +293,7 @@ implement Duration {
     // Arithmetic
     // =========================================================================
 
-    /// Checked addition.  Returns None on Int64 overflow.
+    /// Checked addition.  Returns Maybe.None on Int64 overflow.
     ///
 
     /// Detects signed-overflow via sign-flip: if both operands have the
@@ -327,7 +327,7 @@ implement Duration {
         }
     }
 
-    /// Checked subtraction.  Returns None on Int64 underflow.
+    /// Checked subtraction.  Returns Maybe.None on Int64 underflow.
     ///
 
     /// Detects signed-underflow via sign-flip rule for `a - b == a + (-b)`.
@@ -366,7 +366,7 @@ implement Duration {
         }
     }
 
-    /// Checked multiplication.  Returns None on Int64 overflow.
+    /// Checked multiplication.  Returns Maybe.None on Int64 overflow.
     ///
 
     /// Allows negative scalar (Duration is signed); detects overflow
@@ -400,7 +400,7 @@ implement Duration {
         }
     }
 
-    /// Checked division.  Returns None if rhs is zero.
+    /// Checked division.  Returns Maybe.None if rhs is zero.
     public fn checked_div(&self, rhs: Int) -> Maybe<Duration> {
         if rhs == 0 {
             Maybe.None
@@ -497,7 +497,7 @@ implement Ord for Duration {
 
 implement PartialOrd for Duration {
     fn partial_cmp(&self, other: &Duration) -> Maybe<Ordering> {
-        Some(self.cmp(other))
+        Maybe.Some(self.cmp(other))
     }
 }
 

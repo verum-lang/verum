@@ -88,7 +88,7 @@ public fn verify_retry_integrity_tag(pseudo: &[Byte], wire_tag: &[Byte; 16]) -> 
         wire_tag,
         &mut plaintext,
     ) {
-        Ok(()) => plaintext.len() == 0,
-        Err(_) => false,
+        Result.Ok(()) => plaintext.len() == 0,
+        Result.Err(_) => false,
     }
 }

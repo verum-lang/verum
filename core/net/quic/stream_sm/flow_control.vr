@@ -107,10 +107,10 @@ implement ConnFlowControl {
     public fn on_bytes_recv(&mut self, n: UInt64) -> Result<(), ()> {
         let new_total = self.bytes_recv + n;
         if new_total > self.max_data_local {
-            return Err(());
+            return Result.Err(());
         }
         self.bytes_recv = new_total;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Peer raised MAX_DATA.
@@ -145,19 +145,19 @@ implement ConnFlowControl {
     /// the raw stream_id with the correct initiator/direction bits set.
     /// RFC 9000 §2.1: stream_id bit 0 = server, bit 1 = uni.
     public fn alloc_stream_bidi(&mut self, is_server: Bool) -> Maybe<UInt64> {
-        if !self.can_open_bidi() { return None; }
+        if !self.can_open_bidi() { return Maybe.None; }
         let low_bits: UInt64 = if is_server { 0x01_u64 } else { 0x00_u64 };
         let sid = (self.next_stream_bidi_local << 2) | low_bits;
         self.next_stream_bidi_local = self.next_stream_bidi_local + 1_u64;
-        Some(sid)
+        Maybe.Some(sid)
     }
 
     public fn alloc_stream_uni(&mut self, is_server: Bool) -> Maybe<UInt64> {
-        if !self.can_open_uni() { return None; }
+        if !self.can_open_uni() { return Maybe.None; }
         let low_bits: UInt64 = if is_server { 0x03_u64 } else { 0x02_u64 };
         let sid = (self.next_stream_uni_local << 2) | low_bits;
         self.next_stream_uni_local = self.next_stream_uni_local + 1_u64;
-        Some(sid)
+        Maybe.Some(sid)
     }
 
     public fn on_peer_max_streams_bidi(&mut self, new_limit: UInt64) {

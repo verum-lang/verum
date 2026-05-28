@@ -89,7 +89,7 @@ public type ConcurrencyLimitHandler<H> is {
 implement<H: Handler> Handler for ConcurrencyLimitHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         if !self.permits.try_acquire() {
-            return Err(WeftError.Overloaded);
+            return Result.Err(WeftError.Overloaded);
         }
         let result = self.inner.handle(req).await;
         self.permits.release();
@@ -188,7 +188,7 @@ public type RateLimitHandler<H> is {
 implement<H: Handler> Handler for RateLimitHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         if !self.layer.try_consume() {
-            return Err(WeftError.Overloaded);
+            return Result.Err(WeftError.Overloaded);
         }
         self.inner.handle(req).await
     }
@@ -241,15 +241,15 @@ implement<H: Handler> Handler for LoadShedHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         let retry = f"{self.retry_after_seconds}";
         match self.inner.handle(req).await {
-            Err(WeftError.Overloaded) => Err(WeftError.Overloaded),
-            Err(e) => Err(e),
-            Ok(r) => {
+            Result.Err(WeftError.Overloaded) => Result.Err(WeftError.Overloaded),
+            Result.Err(e) => Result.Err(e),
+            Result.Ok(r) => {
                 if r.status.code() == 503 {
-                    Ok(core.net.weft.response_ext.resp_with_header(
+                    Result.Ok(core.net.weft.response_ext.resp_with_header(
                         r, &"retry-after", &retry,
                     ))
                 } else {
-                    Ok(r)
+                    Result.Ok(r)
                 }
             }
         }
@@ -379,20 +379,20 @@ implement<H: Handler> Layer<H> for CoDelLayer {
 implement<H: Handler> Handler for CoDelHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         let sojourn_ms = match req.headers.get(&"x-weft-submitted-at") {
-            Some(t) => {
+            Maybe.Some(t) => {
                 let now = monotonic_ms();
                 match t.parse_int() {
-                    Ok(submitted) => {
+                    Result.Ok(submitted) => {
                         let s = now - submitted;
                         if s < 0 { 0 } else { s }
                     },
-                    Err(_) => 0,
+                    Result.Err(_) => 0,
                 }
             },
-            None => 0,
+            Maybe.None => 0,
         };
         if self.layer.should_drop(sojourn_ms) {
-            return Err(WeftError.Overloaded);
+            return Result.Err(WeftError.Overloaded);
         }
         self.inner.handle(req).await
     }
@@ -448,14 +448,14 @@ implement WfqLayer {
         let s = &*self.state;
         let mut tenants = s.tenants.lock();
         match tenants.get(&name) {
-            Some(slot) => {
+            Maybe.Some(slot) => {
                 let preserved = slot.deficit_us.clone();
                 tenants.insert(name, TenantSlot {
                     weight:     weight,
                     deficit_us: preserved,
                 });
             },
-            None => {
+            Maybe.None => {
                 tenants.insert(name, TenantSlot {
                     weight:     weight,
                     deficit_us: Shared.new(AtomicInt.new(0)),
@@ -469,10 +469,10 @@ implement WfqLayer {
         let s = &*self.state;
         let tenants = s.tenants.lock();
         let slot = match tenants.get(tenant) {
-            Some(t) => t,
-            None => match tenants.get(&"_default") {
-                Some(d) => d,
-                None    => return true,    // no policy → allow
+            Maybe.Some(t) => t,
+            Maybe.None => match tenants.get(&"_default") {
+                Maybe.Some(d) => d,
+                Maybe.None    => return true,    // no policy → allow
             }
         };
         let credits = self.quantum_us * slot.weight;
@@ -508,18 +508,18 @@ implement<H: Handler> Layer<H> for WfqLayer {
 implement<H: Handler> Handler for WfqHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         let tenant = match req.headers.get(&"x-weft-tenant") {
-            Some(t) => t.clone(),
-            None    => Text.from_str("_default"),
+            Maybe.Some(t) => t.clone(),
+            Maybe.None    => Text.from_str("_default"),
         };
         let cost_us = match req.headers.get(&"x-weft-cost-us") {
-            Some(t) => match t.parse_int() {
-                Ok(n)  => n,
-                Err(_) => self.layer.quantum_us,
+            Maybe.Some(t) => match t.parse_int() {
+                Result.Ok(n)  => n,
+                Result.Err(_) => self.layer.quantum_us,
             },
-            None => self.layer.quantum_us,
+            Maybe.None => self.layer.quantum_us,
         };
         if !self.layer.admit(&tenant, cost_us) {
-            return Err(WeftError.Overloaded);
+            return Result.Err(WeftError.Overloaded);
         }
         self.inner.handle(req).await
     }

@@ -36,13 +36,13 @@ public fn mode_text(m: &JournalMode) -> Text {
 /// Parse the SQLite spelling (case-insensitive) → JournalMode.
 public fn parse_mode(text: &Text) -> Maybe<JournalMode> {
     let lower = lower(text);
-    if lower == "delete".clone()    { return Some(JmDelete); }
-    if lower == "truncate".clone()  { return Some(JmTruncate); }
-    if lower == "persist".clone()   { return Some(JmPersist); }
-    if lower == "memory".clone()    { return Some(JmMemory); }
-    if lower == "wal".clone()       { return Some(JmWal); }
-    if lower == "off".clone()       { return Some(JmOff); }
-    None
+    if lower == "delete".clone()    { return Maybe.Some(JmDelete); }
+    if lower == "truncate".clone()  { return Maybe.Some(JmTruncate); }
+    if lower == "persist".clone()   { return Maybe.Some(JmPersist); }
+    if lower == "memory".clone()    { return Maybe.Some(JmMemory); }
+    if lower == "wal".clone()       { return Maybe.Some(JmWal); }
+    if lower == "off".clone()       { return Maybe.Some(JmOff); }
+    Maybe.None
 }
 
 fn lower(t: &Text) -> Text {

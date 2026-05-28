@@ -50,16 +50,16 @@
     stratum:    MsfsStratum.LFnd,
     lifecycle:  Lifecycle.Theorem("v1.0"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "Argon2id password hashing — OWASP-tuned PHC string round-trip",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate: Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.kdf.argon2;
@@ -168,31 +168,31 @@ public fn params_from_profile(profile: &Argon2idProfile) -> Argon2idParams {
 /// every fresh hash call.
 public fn validate_params(p: &Argon2idParams) -> Result<(), PasswordHashError> {
     if p.memory_kib < ARGON2_OWASP_MIN_MEMORY_KIB {
-        return Err(PasswordHashError.WeakParameters(
+        return Result.Err(PasswordHashError.WeakParameters(
             f"argon2id: memory {p.memory_kib} KiB below OWASP floor {ARGON2_OWASP_MIN_MEMORY_KIB} KiB"));
     }
     if p.memory_kib > ARGON2_MAX_MEMORY_KIB {
-        return Err(PasswordHashError.WeakParameters(
+        return Result.Err(PasswordHashError.WeakParameters(
             f"argon2id: memory {p.memory_kib} KiB above operational cap {ARGON2_MAX_MEMORY_KIB} KiB"));
     }
     if p.iterations < ARGON2_OWASP_MIN_TIME {
-        return Err(PasswordHashError.WeakParameters(
+        return Result.Err(PasswordHashError.WeakParameters(
             f"argon2id: iterations {p.iterations} below OWASP floor {ARGON2_OWASP_MIN_TIME}"));
     }
     if p.iterations > ARGON2_MAX_TIME {
-        return Err(PasswordHashError.WeakParameters(
+        return Result.Err(PasswordHashError.WeakParameters(
             f"argon2id: iterations {p.iterations} above cap {ARGON2_MAX_TIME}"));
     }
     if p.parallelism < ARGON2_MIN_PARALLELISM || p.parallelism > ARGON2_MAX_PARALLELISM {
-        return Err(PasswordHashError.WeakParameters(
+        return Result.Err(PasswordHashError.WeakParameters(
             f"argon2id: parallelism {p.parallelism} outside [{ARGON2_MIN_PARALLELISM}, {ARGON2_MAX_PARALLELISM}]"));
     }
     // RFC 9106 §3: m >= 8 * p
     if p.memory_kib < 8 * p.parallelism {
-        return Err(PasswordHashError.WeakParameters(
+        return Result.Err(PasswordHashError.WeakParameters(
             f"argon2id: memory {p.memory_kib} < 8*parallelism={8 * p.parallelism}"));
     }
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -212,7 +212,7 @@ implement Argon2idHasher {
     public fn from_profile(profile: Argon2idProfile) -> Result<Argon2idHasher, PasswordHashError> {
         let params = params_from_profile(&profile);
         validate_params(&params)?;
-        Ok(Argon2idHasher {
+        Result.Ok(Argon2idHasher {
             profile,
             salt_bytes: ARGON2_MIN_SALT_BYTES, // 16
             tag_bytes:  32,                    // 256-bit tag
@@ -238,7 +238,7 @@ implement PasswordHasher for Argon2idHasher {
         let tag = argon2id_derive(password, salt.as_slice(), &params, self.tag_bytes)?;
 
         // Encode as PHC string.
-        Ok(encode_phc(&params, salt.as_slice(), tag.as_slice()))
+        Result.Ok(encode_phc(&params, salt.as_slice(), tag.as_slice()))
     }
 
     fn verify(&self, password: &[Byte], phc_hash: &Text) -> Result<Bool, PasswordHashError> {
@@ -251,7 +251,7 @@ implement PasswordHasher for Argon2idHasher {
             parsed.tag.len(),
         )?;
         // Constant-time compare.
-        Ok(ct_eq_bytes(computed_tag.as_slice(), parsed.tag.as_slice()))
+        Result.Ok(ct_eq_bytes(computed_tag.as_slice(), parsed.tag.as_slice()))
     }
 }
 
@@ -276,16 +276,16 @@ fn encode_phc(params: &Argon2idParams, salt: &[Byte], tag: &[Byte]) -> Text {
 
 fn parse_phc(phc: &Text) -> Result<ParsedPhc, PasswordHashError> {
     let parts: List<Text> = phc.split_char('$').filter(|s| !s.is_empty()).collect();
-    if parts.len() != 5 { return Err(PasswordHashError.MalformedHash); }
+    if parts.len() != 5 { return Result.Err(PasswordHashError.MalformedHash); }
     if parts[0].as_str() != "argon2id" {
-        return Err(PasswordHashError.UnsupportedBackend(parts[0].clone()));
+        return Result.Err(PasswordHashError.UnsupportedBackend(parts[0].clone()));
     }
     // Version segment.
     let v_seg = parts[1].clone();
-    if !v_seg.starts_with("v=") { return Err(PasswordHashError.MalformedHash); }
+    if !v_seg.starts_with("v=") { return Result.Err(PasswordHashError.MalformedHash); }
     let v_val: Int = v_seg.byte_substring(2, v_seg.len()).parse_int()
         .map_err(|_| PasswordHashError.MalformedHash)?;
-    if v_val != ARGON2_VERSION { return Err(PasswordHashError.MalformedHash); }
+    if v_val != ARGON2_VERSION { return Result.Err(PasswordHashError.MalformedHash); }
 
     // Parameters segment: m=...,t=...,p=...
     let mut memory_kib: Int = 0;
@@ -294,7 +294,7 @@ fn parse_phc(phc: &Text) -> Result<ParsedPhc, PasswordHashError> {
     for kv in parts[2].split_char(',') {
         let kv_bytes = kv.as_bytes();
         if kv_bytes.len() < 3 || kv_bytes[1] != b'=' {
-            return Err(PasswordHashError.MalformedHash);
+            return Result.Err(PasswordHashError.MalformedHash);
         }
         let key  = kv.byte_substring(0, 1);
         let v_text = kv.byte_substring(2, kv.len());
@@ -303,7 +303,7 @@ fn parse_phc(phc: &Text) -> Result<ParsedPhc, PasswordHashError> {
             "m" => memory_kib  = v_int,
             "t" => iterations  = v_int,
             "p" => parallelism = v_int,
-            _   => return Err(PasswordHashError.MalformedHash),
+            _   => return Result.Err(PasswordHashError.MalformedHash),
         }
     }
     let params = Argon2idParams { memory_kib, iterations, parallelism };
@@ -311,12 +311,12 @@ fn parse_phc(phc: &Text) -> Result<ParsedPhc, PasswordHashError> {
     let salt = base64.decode_url_no_pad(&parts[3]).map_err(|_| PasswordHashError.EncodingError)?;
     let tag  = base64.decode_url_no_pad(&parts[4]).map_err(|_| PasswordHashError.EncodingError)?;
     if salt.len() < ARGON2_MIN_SALT_BYTES || salt.len() > ARGON2_MAX_SALT_BYTES {
-        return Err(PasswordHashError.MalformedHash);
+        return Result.Err(PasswordHashError.MalformedHash);
     }
     if tag.len() < ARGON2_MIN_TAG_BYTES || tag.len() > ARGON2_MAX_TAG_BYTES {
-        return Err(PasswordHashError.MalformedHash);
+        return Result.Err(PasswordHashError.MalformedHash);
     }
-    Ok(ParsedPhc { params, salt, tag })
+    Result.Ok(ParsedPhc { params, salt, tag })
 }
 
 // =============================================================================
@@ -325,7 +325,7 @@ fn parse_phc(phc: &Text) -> Result<ParsedPhc, PasswordHashError> {
 
 fn generate_salt(n: Int) -> Result<List<Byte>, PasswordHashError> {
     if n < ARGON2_MIN_SALT_BYTES || n > ARGON2_MAX_SALT_BYTES {
-        return Err(PasswordHashError.WeakParameters(
+        return Result.Err(PasswordHashError.WeakParameters(
             f"argon2id: salt {n} bytes outside [{ARGON2_MIN_SALT_BYTES}, {ARGON2_MAX_SALT_BYTES}]"));
     }
     @intrinsic("verum.crypto.random_bytes", n)
@@ -373,7 +373,7 @@ fn argon2id_derive(
     tag_len:  Int,
 ) -> Result<List<Byte>, PasswordHashError> {
     if tag_len < ARGON2_MIN_TAG_BYTES || tag_len > ARGON2_MAX_TAG_BYTES {
-        return Err(PasswordHashError.WeakParameters(
+        return Result.Err(PasswordHashError.WeakParameters(
             f"argon2id: tag {tag_len} outside [{ARGON2_MIN_TAG_BYTES}, {ARGON2_MAX_TAG_BYTES}]"));
     }
     @intrinsic(

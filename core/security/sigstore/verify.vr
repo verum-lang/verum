@@ -49,22 +49,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "Sigstore keyless verification: bundle + trust-root + identity → ValidationResult",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.sigstore.verify;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Set};
 mount encoding.json.{JsonValue, JsonObject, decode as json_decode};
 mount encoding.base64.{decode_standard as b64_decode};
@@ -222,7 +222,7 @@ public async fn verify_bundle<C: HttpClient>(
 ) -> Result<ValidationResult, SigstoreVerifyError> {
     // Step 1: parse cert chain.
     let cert_chain = parse_pem_chain(&bundle.cert_chain_pem)?;
-    if cert_chain.is_empty() { return Err(NoCertsInBundle); }
+    if cert_chain.is_empty() { return Result.Err(NoCertsInBundle); }
     let ee = cert_chain[0].clone();
     let mut intermediates: List<X509Certificate> = List.new();
     let mut k: Int = 1;
@@ -230,7 +230,7 @@ public async fn verify_bundle<C: HttpClient>(
 
     // Step 2: ensure tlog entries exist + pick the first one as the
     // anchor for cert-validity time.
-    if bundle.tlog_entries.is_empty() { return Err(NoTlogEntries); }
+    if bundle.tlog_entries.is_empty() { return Result.Err(NoTlogEntries); }
     let anchor_entry = &bundle.tlog_entries[0];
     let integrated_time = time.rfc3339.to_epoch(&anchor_entry.integrated_time);
 
@@ -238,14 +238,14 @@ public async fn verify_bundle<C: HttpClient>(
     let nb = security.x509.time.time_to_unix(&ee.tbs.validity.not_before);
     let na = security.x509.time.time_to_unix(&ee.tbs.validity.not_after);
     if integrated_time < nb || integrated_time > na {
-        return Err(InvalidValidityWindow {
+        return Result.Err(InvalidValidityWindow {
             cert_not_before: nb,
             cert_not_after:  na,
             integrated_time,
         });
     }
     let mut x509_config = security.x509.verifier.verifier_config_for_code_signing();
-    x509_config.now_override = Some(integrated_time);
+    x509_config.now_override = Maybe.Some(integrated_time);
     // Fulcio EE certs are short-lived; revocation checks waste budget.
     x509_config.revocation = RevocationPolicy.NoCheck;
     // Fully-qualified path — `mount verify_parsed as verify_x509_parsed`
@@ -268,10 +268,10 @@ public async fn verify_bundle<C: HttpClient>(
     let oidc_issuer = extract_oidc_issuer(&ee).ok_or_else(|| IssuerExtMissing)?;
     let oidc_subjects = extract_oidc_subjects(&ee);
     if oidc_issuer != expected.issuer {
-        return Err(IdentityMismatch {
+        return Result.Err(IdentityMismatch {
             want_issuer: expected.issuer.clone(),
             want_subject: identity_matcher_text(&expected.subject_matcher),
-            found_issuer: Some(oidc_issuer),
+            found_issuer: Maybe.Some(oidc_issuer),
             found_subjects: oidc_subjects,
         });
     }
@@ -279,11 +279,11 @@ public async fn verify_bundle<C: HttpClient>(
         .ok_or_else(|| IdentityMismatch {
             want_issuer: expected.issuer.clone(),
             want_subject: identity_matcher_text(&expected.subject_matcher),
-            found_issuer: Some(expected.issuer.clone()),
+            found_issuer: Maybe.Some(expected.issuer.clone()),
             found_subjects: oidc_subjects.clone(),
         })?;
 
-    Ok(ValidationResult {
+    Result.Ok(ValidationResult {
         ee_cert:           ee,
         oidc_issuer:       expected.issuer.clone(),
         oidc_subject:      matched_subject,
@@ -314,10 +314,10 @@ fn parse_pem_chain(pems: &List<Text>) -> Result<List<X509Certificate>, SigstoreV
             }
             j = j + 1;
         }
-        if !found { return Err(InvalidPem(f"chain[{i}] has no CERTIFICATE block".to_text())); }
+        if !found { return Result.Err(InvalidPem(f"chain[{i}] has no CERTIFICATE block".to_text())); }
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // =============================================================================
@@ -349,14 +349,14 @@ fn verify_tlog_entries(
             j = j + 1;
         }
         if !matched {
-            return Err(RekorSetFailed(RekorError.LogIdMismatch {
+            return Result.Err(RekorSetFailed(RekorError.LogIdMismatch {
                 expected: "<any trusted>".to_text(),
                 found:    entry.log_id_hex.clone(),
             }));
         }
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn log_entry_from_provenance(p: &core.security.provenance.TlogEntry) -> LogEntry {
@@ -390,7 +390,7 @@ fn verify_envelope_against_cert(
     ee: &X509Certificate,
 ) -> Result<(), SigstoreVerifyError> {
     if envelope.signatures.is_empty() {
-        return Err(DsseSignatureFailed(DsseVerifyError.InvalidSignature));
+        return Result.Err(DsseSignatureFailed(DsseVerifyError.InvalidSignature));
     }
     // Extract the EE cert's SPKI raw public key bytes.
     let spki_bytes = extract_spki_pubkey_bits(ee);
@@ -415,21 +415,21 @@ fn verify_envelope_against_cert(
                 let mut k: Int = 0;
                 while k < 64 { sig64[k] = sig_bytes[k]; k = k + 1; }
                 if security.ecc.ed25519.verify(&ed.bytes, pae.as_slice(), &sig64).is_ok() {
-                    return Ok(());
+                    return Result.Ok(());
                 }
             }
             security.x509.spki.SubjectPublicKey.EcP256(ec) => {
                 let pk = match P256PublicKey.from_uncompressed(ec.bytes.as_slice()) {
-                    Ok(p)  => p,
-                    Err(_) => { i = i + 1; continue; }
+                    Result.Ok(p)  => p,
+                    Result.Err(_) => { i = i + 1; continue; }
                 };
                 let p_sig = match P256Signature.from_der(sig_bytes.as_slice()) {
-                    Ok(s)  => s,
-                    Err(_) => { i = i + 1; continue; }
+                    Result.Ok(s)  => s,
+                    Result.Err(_) => { i = i + 1; continue; }
                 };
                 let digest = Sha256.digest(pae.as_slice());
                 if P256.verify_prehashed(&pk, &digest, &p_sig).is_ok() {
-                    return Ok(());
+                    return Result.Ok(());
                 }
             }
             _ => {
@@ -438,7 +438,7 @@ fn verify_envelope_against_cert(
         }
         i = i + 1;
     }
-    Err(DsseSignatureFailed(DsseVerifyError.InvalidSignature))
+    Result.Err(DsseSignatureFailed(DsseVerifyError.InvalidSignature))
 }
 
 fn extract_spki_pubkey_bits(cert: &X509Certificate) -> List<Byte> {
@@ -479,19 +479,19 @@ fn verify_envelope_in_log(
         let entry = &entries[i];
         // Decode the entry's canonicalised body (base64) → JSON.
         let body_bytes = match b64_decode(&entry.canonicalized_body_b64) {
-            Ok(b)  => b,
-            Err(_) => { i = i + 1; continue; }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { i = i + 1; continue; }
         };
         let body_value = match json_decode(body_bytes.as_slice()) {
-            Ok(v)  => v,
-            Err(_) => { i = i + 1; continue; }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { i = i + 1; continue; }
         };
         if body_contains_envelope_hash(&body_value, &envelope_hash_hex) {
-            return Ok(());
+            return Result.Ok(());
         }
         i = i + 1;
     }
-    Err(EnvelopeNotInLog { computed_hash: envelope_hash_hex })
+    Result.Err(EnvelopeNotInLog { computed_hash: envelope_hash_hex })
 }
 
 fn body_contains_envelope_hash(body: &JsonValue, want_hex: &Text) -> Bool {
@@ -500,7 +500,7 @@ fn body_contains_envelope_hash(body: &JsonValue, want_hex: &Text) -> Bool {
     match body {
         JsonValue.Object(obj) => {
             // Direct match
-            if let (Some(alg), Some(val)) = (
+            if let (Maybe.Some(alg), Maybe.Some(val)) = (
                 obj.get(&"algorithm".to_text()).and_then(|v| v.as_string()),
                 obj.get(&"value".to_text()).and_then(|v| v.as_string()),
             ) {
@@ -540,18 +540,18 @@ public fn extract_oidc_issuer(cert: &X509Certificate) -> Maybe<Text> {
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn decode_issuer_extension(der: &[Byte]) -> Maybe<Text> {
     // Legacy form: raw bytes carry the issuer URL directly (UTF-8).
     // Current form: DER UTF8String.
-    if der.is_empty() { return None; }
+    if der.is_empty() { return Maybe.None; }
     if der[0] == 0x0C {
         // UTF8String: tag 0x0C, length, bytes.
-        if der.len() < 2 { return None; }
+        if der.len() < 2 { return Maybe.None; }
         let len = der[1] as Int;
-        if 2 + len > der.len() { return None; }
+        if 2 + len > der.len() { return Maybe.None; }
         let mut out: List<Byte> = List.with_capacity(len);
         let mut i: Int = 0;
         while i < len { out.push(der[2 + i]); i = i + 1; }
@@ -569,7 +569,7 @@ fn decode_issuer_extension(der: &[Byte]) -> Maybe<Text> {
 /// strings. The matcher filters down to the expected one.
 public fn extract_oidc_subjects(cert: &X509Certificate) -> List<Text> {
     let mut out: List<Text> = List.new();
-    if let Some((_, san)) = &cert.tbs.extensions.subject_alt_name {
+    if let Maybe.Some((_, san)) = &cert.tbs.extensions.subject_alt_name {
         let mut i: Int = 0;
         while i < san.names.len() {
             match &san.names[i] {
@@ -591,11 +591,11 @@ fn match_subject(subjects: &List<Text>, matcher: &IdentityMatcher) -> Maybe<Text
     let mut i: Int = 0;
     while i < subjects.len() {
         if subject_matches(&subjects[i], matcher) {
-            return Some(subjects[i].clone());
+            return Maybe.Some(subjects[i].clone());
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn subject_matches(subject: &Text, matcher: &IdentityMatcher) -> Bool {
@@ -605,7 +605,7 @@ fn subject_matches(subject: &Text, matcher: &IdentityMatcher) -> Bool {
         IdentityMatcher.Domain(want) => {
             // For email-like subjects: match part after '@'
             // For URI: match host portion
-            if let Some(at) = subject.find_byte(b'@') {
+            if let Maybe.Some(at) = subject.find_byte(b'@') {
                 let domain = subject.byte_substring(at + 1, subject.len());
                 domain == *want
             } else if subject.starts_with("https://") || subject.starts_with("http://") {

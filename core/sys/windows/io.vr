@@ -338,10 +338,10 @@ implement IocpDriver {
         );
 
         if !iocp.is_valid() {
-            return Err(WindowsIoDriverError.from_error_code(GetLastError()));
+            return Result.Err(WindowsIoDriverError.from_error_code(GetLastError()));
         }
 
-        Ok(IocpDriver {
+        Result.Ok(IocpDriver {
             iocp: iocp,
             open: true,
             pending: 0,
@@ -353,7 +353,7 @@ implement IocpDriver {
     /// Close the IOCP driver.
     public fn close(&mut self) -> Result<(), WindowsIoDriverError> {
         if !self.open {
-            return Ok(());
+            return Result.Ok(());
         }
 
         let result = CloseHandle(self.iocp);
@@ -361,9 +361,9 @@ implement IocpDriver {
         self.iocp = Handle.INVALID;
 
         if !result {
-            Err(WindowsIoDriverError.from_error_code(GetLastError()))
+            Result.Err(WindowsIoDriverError.from_error_code(GetLastError()))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -387,7 +387,7 @@ implement IocpDriver {
     /// After association, async I/O on the handle will complete via this IOCP.
     public fn associate(&mut self, file_handle: Handle, completion_key: Int) -> Result<(), WindowsIoDriverError> {
         if !self.open {
-            return Err(Closed);
+            return Result.Err(Closed);
         }
 
         let result = CreateIoCompletionPort(
@@ -398,9 +398,9 @@ implement IocpDriver {
         );
 
         if !result.is_valid() {
-            Err(WindowsIoDriverError.from_error_code(GetLastError()))
+            Result.Err(WindowsIoDriverError.from_error_code(GetLastError()))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -419,7 +419,7 @@ implement IocpDriver {
         overlapped: &Overlapped,
     ) -> Result<(), WindowsIoDriverError> {
         if !self.open {
-            return Err(Closed);
+            return Result.Err(Closed);
         }
 
         let result = PostQueuedCompletionStatus(
@@ -430,10 +430,10 @@ implement IocpDriver {
         );
 
         if !result {
-            Err(WindowsIoDriverError.from_error_code(GetLastError()))
+            Result.Err(WindowsIoDriverError.from_error_code(GetLastError()))
         } else {
             self.pending += 1;
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -459,7 +459,7 @@ implement IocpDriver {
     /// Number of completions ready
     public fn poll(&mut self, timeout_ms: UInt32) -> Result<Int, WindowsIoDriverError> {
         if !self.open {
-            return Err(Closed);
+            return Result.Err(Closed);
         }
 
         let mut num_entries: UInt32 = 0;
@@ -477,9 +477,9 @@ implement IocpDriver {
             let error = GetLastError();
             if error == ERROR_TIMEOUT {
                 self.num_entries = 0;
-                return Ok(0);
+                return Result.Ok(0);
             }
-            return Err(WindowsIoDriverError.from_error_code(error));
+            return Result.Err(WindowsIoDriverError.from_error_code(error));
         }
 
         self.num_entries = num_entries as Int;
@@ -488,7 +488,7 @@ implement IocpDriver {
             self.pending = 0;
         }
 
-        Ok(self.num_entries)
+        Result.Ok(self.num_entries)
     }
 
     /// Poll without waiting.
@@ -503,7 +503,7 @@ implement IocpDriver {
     /// where n is the return value.
     public fn get_entry(&self, index: Int) -> Maybe<WindowsIoCqe> {
         if index < 0 || index >= self.num_entries || index >= MAX_EVENTS {
-            return None;
+            return Maybe.None;
         }
 
         let entry = &self.entries[index];
@@ -521,7 +521,7 @@ implement IocpDriver {
             entry.number_of_bytes_transferred as Int
         };
 
-        Some(WindowsIoCqe {
+        Maybe.Some(WindowsIoCqe {
             token: WindowsIoToken(entry.completion_key as UInt64),
             result: error,
             flags: 0,
@@ -544,7 +544,7 @@ implement IocpDriver {
     /// Wait for a single completion with timeout.
     public fn wait_one(&mut self, timeout_ms: UInt32) -> Result<Maybe<WindowsIoCqe>, WindowsIoDriverError> {
         if !self.open {
-            return Err(Closed);
+            return Result.Err(Closed);
         }
 
         let mut bytes_transferred: UInt32 = 0;
@@ -562,17 +562,17 @@ implement IocpDriver {
         if !result {
             let error = GetLastError();
             if error == ERROR_TIMEOUT || (overlapped as Int == 0 && error == WAIT_TIMEOUT) {
-                return Ok(None);
+                return Result.Ok(Maybe.None);
             }
             // Error with valid overlapped - return the error via CQE
             if overlapped as Int != 0 {
-                return Ok(Some(WindowsIoCqe {
+                return Result.Ok(Maybe.Some(WindowsIoCqe {
                     token: WindowsIoToken(completion_key as UInt64),
                     result: -(error as Int),
                     flags: 0,
                 }));
             }
-            return Err(WindowsIoDriverError.from_error_code(error));
+            return Result.Err(WindowsIoDriverError.from_error_code(error));
         }
 
         self.pending -= 1;
@@ -580,7 +580,7 @@ implement IocpDriver {
             self.pending = 0;
         }
 
-        Ok(Some(WindowsIoCqe {
+        Result.Ok(Maybe.Some(WindowsIoCqe {
             token: WindowsIoToken(completion_key as UInt64),
             result: bytes_transferred as Int,
             flags: 0,
@@ -607,7 +607,7 @@ public type IocpEventIter is {
 implement IocpEventIter {
     public fn next(&mut self) -> Maybe<WindowsIoCqe> {
         if self.index >= self.count {
-            None
+            Maybe.None
         } else {
             let event = self.driver.get_entry(self.index);
             self.index += 1;
@@ -641,7 +641,7 @@ implement WindowsIoDriver {
 /// On Windows, this always returns an IOCP-based driver.
 public fn create_io_driver() -> Result<WindowsIoDriver, WindowsIoDriverError> {
     let iocp = IocpDriver.new()?;
-    Ok(WindowsIoDriver { iocp: iocp })
+    Result.Ok(WindowsIoDriver { iocp: iocp })
 }
 
 /// Check if IOCP is available.
@@ -679,15 +679,15 @@ public fn async_read(
     if !result {
         let error = GetLastError();
         if error == ERROR_IO_PENDING {
-            return Ok(());  // Async operation started successfully
+            return Result.Ok(());  // Async operation started successfully
         }
-        return Err(WindowsIoDriverError.from_error_code(error));
+        return Result.Err(WindowsIoDriverError.from_error_code(error));
     }
 
     // Completed synchronously
     overlapped.completed = true;
     overlapped.bytes_transferred = bytes_read;
-    Ok(())
+    Result.Ok(())
 }
 
 /// Start an async write operation.
@@ -713,15 +713,15 @@ public fn async_write(
     if !result {
         let error = GetLastError();
         if error == ERROR_IO_PENDING {
-            return Ok(());  // Async operation started successfully
+            return Result.Ok(());  // Async operation started successfully
         }
-        return Err(WindowsIoDriverError.from_error_code(error));
+        return Result.Err(WindowsIoDriverError.from_error_code(error));
     }
 
     // Completed synchronously
     overlapped.completed = true;
     overlapped.bytes_transferred = bytes_written;
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -744,7 +744,7 @@ implement IOEngine for IocpDriver {
     @must_use
     fn submit(&mut self, ops: &[(CompletionOp, UInt64)]) -> Result<Int{>= 0}, EngineIoError> {
         if !self.open {
-            return Err(EngineIoError.Closed);
+            return Result.Err(EngineIoError.Closed);
         }
 
         let mut submitted: Int = 0;
@@ -849,7 +849,7 @@ implement IOEngine for IocpDriver {
             }
         }
 
-        Ok(submitted)
+        Result.Ok(submitted)
     }
 
     /// Wait for completions with timeout.
@@ -864,12 +864,12 @@ implement IOEngine for IocpDriver {
         timeout: Maybe<Duration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         if !self.open {
-            return Err(EngineIoError.Closed);
+            return Result.Err(EngineIoError.Closed);
         }
 
         // Convert timeout to milliseconds
         let timeout_ms = match timeout {
-            Some(d) => {
+            Maybe.Some(d) => {
                 let ms = d.as_millis();
                 if ms > INFINITE as UInt64 {
                     INFINITE
@@ -877,7 +877,7 @@ implement IOEngine for IocpDriver {
                     ms as UInt32
                 }
             }
-            None => INFINITE,
+            Maybe.None => INFINITE,
         };
 
         let max_entries = results.len().min(MAX_EVENTS) as UInt32;
@@ -898,11 +898,11 @@ implement IOEngine for IocpDriver {
             if error == ERROR_TIMEOUT || error == WAIT_TIMEOUT {
                 // Timeout is not an error if min_complete is 0
                 if min_complete == 0 {
-                    return Ok(0);
+                    return Result.Ok(0);
                 }
-                return Err(EngineIoError.TimedOut);
+                return Result.Err(EngineIoError.TimedOut);
             }
-            return Err(EngineIoError.from_win32(error));
+            return Result.Err(EngineIoError.from_win32(error));
         }
 
         // Convert overlapped entries to CompletionResult
@@ -936,7 +936,7 @@ implement IOEngine for IocpDriver {
             self.pending = 0;
         }
 
-        Ok(count)
+        Result.Ok(count)
     }
 
     /// Wake up a blocked wait() from another thread.
@@ -945,7 +945,7 @@ implement IOEngine for IocpDriver {
     /// Posts a synthetic completion with WAKE_TOKEN user_data.
     fn wake(&self) -> Result<(), EngineIoError> {
         if !self.open {
-            return Err(EngineIoError.Closed);
+            return Result.Err(EngineIoError.Closed);
         }
 
         // Post a wake completion
@@ -957,9 +957,9 @@ implement IOEngine for IocpDriver {
         );
 
         if !result {
-            Err(EngineIoError.from_win32(GetLastError()))
+            Result.Err(EngineIoError.from_win32(GetLastError()))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -978,15 +978,15 @@ implement IOEngine for IocpDriver {
     /// IOCP doesn't batch submissions like io_uring, so this is a no-op.
     fn flush(&mut self) -> Result<(), EngineIoError> {
         if !self.open {
-            return Err(EngineIoError.Closed);
+            return Result.Err(EngineIoError.Closed);
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Shutdown the engine.
     fn shutdown(&mut self) -> Result<(), EngineIoError> {
         if !self.open {
-            return Ok(());
+            return Result.Ok(());
         }
 
         // Close the completion port handle
@@ -995,9 +995,9 @@ implement IOEngine for IocpDriver {
         self.iocp = Handle.INVALID;
 
         if !result {
-            Err(EngineIoError.from_win32(GetLastError()))
+            Result.Err(EngineIoError.from_win32(GetLastError()))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 

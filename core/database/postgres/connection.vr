@@ -40,7 +40,7 @@
 module core.database.postgres.connection;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount base.memory.Shared;
 mount collections.List;
 mount core.net.tcp.TcpStream;
@@ -148,13 +148,13 @@ public type PgConnection is {
     /// warning). When `Some`, `read_message` routes
     /// `NotificationResponse` frames through `dispatcher.dispatch(&n)`
     /// AND still appends to the legacy buffer for backwards
-    /// compatibility. When `None`, only the legacy buffer is
+    /// compatibility. When `Maybe.None`, only the legacy buffer is
     /// populated. Caller registers via `attach_dispatcher` /
     /// `detach_dispatcher`. Spec database.md §6.1 (LISTEN/NOTIFY).
     dispatcher: Maybe<Shared<NotifyDispatcher>>,
     /// Optional bounded pipeline. When `Some`, callers can submit
     /// extended-protocol queries through `submit_pipelined` and
-    /// drive completion via `pump_pipeline`. When `None`, only the
+    /// drive completion via `pump_pipeline`. When `Maybe.None`, only the
     /// non-pipelined simple_query / extended-query paths are
     /// available. Caller registers via `attach_pipeline` /
     /// `detach_pipeline`. Spec database.md §6.1.5.
@@ -170,7 +170,7 @@ public type PgConnection is {
     arena: SpindleArena,
     /// Single-slot push-back used by streaming replication
     /// (`PgReplicationConnection.start_logical` may peel a
-    /// CopyData while waiting for CopyOutResponse). `None` on
+    /// CopyData while waiting for CopyOutResponse). `Maybe.None` on
     /// every non-replication connection.
     replication_stash: Maybe<BackendMessage>,
     /// Monotonic counter for prepared-statement name generation
@@ -208,7 +208,7 @@ public type PgConnection is {
 /// `TLS_HANDSHAKE_PENDING` so callers know exactly what's
 /// supported.
 public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
-    connect_with_optional_replication(config, None)
+    connect_with_optional_replication(config, Maybe.None)
 }
 
 /// Same wire dance as `connect`, but the StartupMessage carries
@@ -219,7 +219,7 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
 public fn connect_with_replication(config: &PgConfig, mode: &Text)
     -> Result<PgConnection, DbError>
 {
-    connect_with_optional_replication(config, Some(mode.clone()))
+    connect_with_optional_replication(config, Maybe.Some(mode.clone()))
 }
 
 fn connect_with_optional_replication(
@@ -228,9 +228,9 @@ fn connect_with_optional_replication(
 ) -> Result<PgConnection, DbError> {
     let target = format_host_port(&config.host, config.port);
     let mut tcp = match TcpStream.connect(target.as_str()) {
-        Ok(s)  => s,
-        Err(_) => {
-            return Err(DbError.ConnectionFailed {
+        Result.Ok(s)  => s,
+        Result.Err(_) => {
+            return Result.Err(DbError.ConnectionFailed {
                 source: core.database.common.error.ConnectionErrorKind.CekConnectRefused,
                 adapter: AdPostgres,
             });
@@ -249,7 +249,7 @@ fn connect_with_optional_replication(
         _ => {
             let req = ssl_request();
             if write_all_tcp(&mut tcp, req.as_slice()).is_err() {
-                return Err(DbError.ConnectionFailed {
+                return Result.Err(DbError.ConnectionFailed {
                     source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                     adapter: AdPostgres,
                 });
@@ -259,9 +259,9 @@ fn connect_with_optional_replication(
             let mut one_byte: List<Byte> = List.new();
             one_byte.push(0 as Byte);
             let verdict = match tcp.read(one_byte.as_mut_slice()) {
-                Ok(n) if n == 1 => one_byte[0],
+                Result.Ok(n) if n == 1 => one_byte[0],
                 _ => {
-                    return Err(DbError.ConnectionFailed {
+                    return Result.Err(DbError.ConnectionFailed {
                         source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                         adapter: AdPostgres,
                     });
@@ -278,9 +278,9 @@ fn connect_with_optional_replication(
                 // variants.
                 let tls_config = build_tls_config(config);
                 match upgrade_to_tls(tcp, &config.host, &tls_config) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        return Err(DbError.Adapter(AdapterSpecific {
+                    Result.Ok(s) => s,
+                    Result.Err(e) => {
+                        return Result.Err(DbError.Adapter(AdapterSpecific {
                             adapter: AdPostgres,
                             code: "TLS_HANDSHAKE_FAILED".clone(),
                             message: f"TLS handshake failed: {e}",
@@ -291,7 +291,7 @@ fn connect_with_optional_replication(
             } else if v == 0x4E {
                 // 'N' — server declined TLS. Per the mode:
                 if !config.tls_mode.permits_plaintext_fallback() {
-                    return Err(DbError.Adapter(AdapterSpecific {
+                    return Result.Err(DbError.Adapter(AdapterSpecific {
                         adapter: AdPostgres,
                         code: "TLS_REJECTED_BY_SERVER".clone(),
                         message: f"server declined TLS (mode {config.tls_mode.name()} requires encryption)",
@@ -302,7 +302,7 @@ fn connect_with_optional_replication(
                 // with the same TCP socket.
                 PsPlain(tcp)
             } else {
-                return Err(DbError.Adapter(AdapterSpecific {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdPostgres,
                     code: "SSLREQUEST_PROTOCOL_VIOLATION".clone(),
                     message: f"server replied 0x{v:x} to SSLRequest (expected 'S' or 'N')",
@@ -317,14 +317,14 @@ fn connect_with_optional_replication(
         state: PcsConnecting,
         recv: List.new(),
         parameters: List.new(),
-        backend_key: None,
+        backend_key: Maybe.None,
         tx_status: TxIdle,
         last_formats: List.new(),
         notifications: List.new(),
-        dispatcher: None,
-        pipeline: None,
+        dispatcher: Maybe.None,
+        pipeline: Maybe.None,
         arena: SpindleArena.new_connection(0),
-        replication_stash: None,
+        replication_stash: Maybe.None,
         prepared_counter: 0,
     };
 
@@ -335,15 +335,15 @@ fn connect_with_optional_replication(
         .with_database(config.database.clone())
         .with_application_name(config.application_name.clone());
     match &replication {
-        Some(mode) => { params = params.with_replication(mode.clone()); }
-        None       => {}
+        Maybe.Some(mode) => { params = params.with_replication(mode.clone()); }
+        Maybe.None       => {}
     }
     let payload = startup(&params);
     write_all(&mut conn.stream, payload.as_slice())?;
 
     conn.state = PcsAuthenticating;
     drive_until_ready(&mut conn, config)?;
-    Ok(conn)
+    Result.Ok(conn)
 }
 
 implement PgConnection {
@@ -357,10 +357,10 @@ implement PgConnection {
         let mut i = 0;
         while i < self.parameters.len() as Int {
             let (ref k, ref v) = self.parameters[i];
-            if *k == *name { return Some(v.clone()); }
+            if *k == *name { return Maybe.Some(v.clone()); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Issue a simple-query (single SQL string, server may stream
@@ -371,7 +371,7 @@ implement PgConnection {
     public fn simple_query(&mut self, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "BAD_STATE".clone(),
                 message: "simple_query requires Ready state".clone(),
@@ -384,15 +384,15 @@ implement PgConnection {
 
         let mut rows: List<List<WireValue>> = List.new();
         let mut command_tag: Text = "".clone();
-        let mut row_desc: Maybe<RowDescription> = None;
-        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut row_desc: Maybe<RowDescription> = Maybe.None;
+        let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
 
         loop {
             let msg = read_message(self)?;
             match msg {
                 BmRowDescription(rd) => {
                     self.last_formats = collect_formats(&rd);
-                    row_desc = Some(rd);
+                    row_desc = Maybe.Some(rd);
                 }
                 BmDataRow(dr) => {
                     if rows.len() == 0 || command_tag.len() == 0 {
@@ -409,7 +409,7 @@ implement PgConnection {
                 BmEmptyQueryResponse => {
                     if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
                 }
-                BmError(d) => { diagnostic = Some(d); }
+                BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}     // log ignored in v0.1
                 BmParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -424,8 +424,8 @@ implement PgConnection {
         }
 
         match diagnostic {
-            Some(d) => Err(dberr_from_pg(d)),
-            None    => Ok(PgSimpleQueryResult {
+            Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
+            Maybe.None    => Result.Ok(PgSimpleQueryResult {
                 command_tag: command_tag,
                 row_description: row_desc,
                 rows: rows,
@@ -453,7 +453,7 @@ implement PgConnection {
     public fn simple_query_arena(&mut self, sql: &Text) -> Result<PgSimpleQueryArenaResult, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "BAD_STATE".clone(),
                 message: "simple_query_arena requires Ready state".clone(),
@@ -466,15 +466,15 @@ implement PgConnection {
 
         let mut rows: List<ArenaWireRow> = List.new();
         let mut command_tag: Text = "".clone();
-        let mut row_desc: Maybe<RowDescription> = None;
-        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut row_desc: Maybe<RowDescription> = Maybe.None;
+        let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
 
         loop {
             let msg = read_message_arena(self)?;
             match msg {
                 BmaRowDescription(rd) => {
                     self.last_formats = collect_formats(&rd);
-                    row_desc = Some(rd);
+                    row_desc = Maybe.Some(rd);
                 }
                 BmaDataRow(arow) => {
                     if command_tag.len() == 0 {
@@ -491,7 +491,7 @@ implement PgConnection {
                 BmaEmptyQueryResponse => {
                     if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
                 }
-                BmaError(d) => { diagnostic = Some(d); }
+                BmaError(d) => { diagnostic = Maybe.Some(d); }
                 BmaNotice(_) => {}
                 BmaParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -506,8 +506,8 @@ implement PgConnection {
         }
 
         match diagnostic {
-            Some(d) => Err(dberr_from_pg(d)),
-            None    => Ok(PgSimpleQueryArenaResult {
+            Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
+            Maybe.None    => Result.Ok(PgSimpleQueryArenaResult {
                 command_tag: command_tag,
                 row_description: row_desc,
                 rows: rows,
@@ -523,8 +523,8 @@ implement PgConnection {
     /// `DELETE N`, etc.).
     public fn execute(&mut self, sql: &Text) -> Result<Text, DbError> {
         match self.simple_query(sql) {
-            Ok(result) => Ok(result.command_tag),
-            Err(e)     => Err(e),
+            Result.Ok(result) => Result.Ok(result.command_tag),
+            Result.Err(e)     => Result.Err(e),
         }
     }
 
@@ -533,29 +533,29 @@ implement PgConnection {
     /// `simple_query` directly).
     public fn query_all(&mut self, sql: &Text) -> Result<List<List<WireValue>>, DbError> {
         match self.simple_query(sql) {
-            Ok(result) => Ok(result.rows),
-            Err(e)     => Err(e),
+            Result.Ok(result) => Result.Ok(result.rows),
+            Result.Err(e)     => Result.Err(e),
         }
     }
 
     /// Convenience — run a SELECT and return only the first row.
-    /// `Ok(None)` when the query completes with no rows.
+    /// `Result.Ok(Maybe.None)` when the query completes with no rows.
     public fn query_first(&mut self, sql: &Text) -> Result<Maybe<List<WireValue>>, DbError> {
         match self.simple_query(sql) {
-            Ok(result) => {
+            Result.Ok(result) => {
                 if (result.rows.len() as Int) == 0 {
-                    Ok(None)
+                    Result.Ok(Maybe.None)
                 } else {
-                    Ok(Some(result.rows[0].clone()))
+                    Result.Ok(Maybe.Some(result.rows[0].clone()))
                 }
             }
-            Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
     /// Read the (process_id, secret_key) pair captured at startup.
     /// Used by `cancel_running_query` and any external CancelRequest
-    /// driver. Returns `None` if the connection never reached Ready
+    /// driver. Returns `Maybe.None` if the connection never reached Ready
     /// (server didn't emit BackendKeyData yet).
     public fn backend_key_view(&self) -> Maybe<(Int, Int)> { self.backend_key }
 
@@ -579,7 +579,7 @@ implement PgConnection {
     ) -> Result<Int, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "BAD_STATE".clone(),
                 message: "copy_in requires Ready state".clone(),
@@ -603,11 +603,11 @@ implement PgConnection {
                 BmError(d) => {
                     // Drain to ReadyForQuery before surfacing error.
                     let _ = drain_to_ready(self);
-                    return Err(dberr_from_pg(d));
+                    return Result.Err(dberr_from_pg(d));
                 }
                 _ => {
                     let _ = drain_to_ready(self);
-                    return Err(DbError.Adapter(AdapterSpecific {
+                    return Result.Err(DbError.Adapter(AdapterSpecific {
                         adapter: AdPostgres,
                         code: "COPY_PROTOCOL_VIOLATION".clone(),
                         message: "expected CopyInResponse".clone(),
@@ -631,7 +631,7 @@ implement PgConnection {
         // Drive to CommandComplete + ReadyForQuery, capture row count.
         let mut row_count: Int = 0;
         let mut command_tag: Text = "".clone();
-        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
         loop {
             let msg = read_message(self)?;
             match msg {
@@ -639,7 +639,7 @@ implement PgConnection {
                     command_tag = cc.tag;
                     row_count = parse_copy_command_count(&command_tag);
                 }
-                BmError(d) => { diagnostic = Some(d); }
+                BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -653,8 +653,8 @@ implement PgConnection {
             }
         }
         match diagnostic {
-            Some(d) => Err(dberr_from_pg(d)),
-            None    => Ok(row_count),
+            Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
+            Maybe.None    => Result.Ok(row_count),
         }
     }
 
@@ -692,7 +692,7 @@ implement PgConnection {
         let frame = copy_fail(reason);
         write_all(&mut self.stream, frame.as_slice())?;
         let _ = drain_to_ready(self);
-        Ok(())
+        Result.Ok(())
     }
 
     // -------------------------------------------------------------------------
@@ -707,14 +707,14 @@ implement PgConnection {
 
     /// Issue `sql` (must be `COPY … FROM STDIN`) and drive the
     /// wire until `CopyInResponse` arrives. After this returns
-    /// `Ok(())` the connection is mid-COPY: subsequent
+    /// `Result.Ok(())` the connection is mid-COPY: subsequent
     /// `write_copy_in_chunk` writes feed the server, and either
     /// `finish_copy_in_session` or `cancel_copy_in_session`
     /// terminates.
     public fn start_copy_in_session(&mut self, sql: &Text) -> Result<(), DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "BAD_STATE".clone(),
                 message: "start_copy_in_session requires Ready state".clone(),
@@ -728,9 +728,9 @@ implement PgConnection {
         loop {
             let msg = read_message(self)?;
             match msg {
-                BmCopyInResponse(_)  => { return Ok(()); }
+                BmCopyInResponse(_)  => { return Result.Ok(()); }
                 BmCopyOutResponse(_) => {
-                    return Err(DbError.Adapter(AdapterSpecific {
+                    return Result.Err(DbError.Adapter(AdapterSpecific {
                         adapter: AdPostgres,
                         code: "COPY_DIRECTION".clone(),
                         message: "expected CopyInResponse, got CopyOutResponse".clone(),
@@ -739,12 +739,12 @@ implement PgConnection {
                 }
                 BmError(d) => {
                     let _ = drain_to_ready(self);
-                    return Err(dberr_from_pg(d));
+                    return Result.Err(dberr_from_pg(d));
                 }
                 BmNotice(_) | BmParameterStatus(_) => {}
                 BmReadyForQuery(_) => {
                     self.state = PcsReady;
-                    return Err(DbError.Adapter(AdapterSpecific {
+                    return Result.Err(DbError.Adapter(AdapterSpecific {
                         adapter: AdPostgres,
                         code: "COPY_NO_RESPONSE".clone(),
                         message: "COPY command returned RFQ without CopyInResponse".clone(),
@@ -770,14 +770,14 @@ implement PgConnection {
         write_all(&mut self.stream, done.as_slice())?;
 
         let mut row_count: Int = 0;
-        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
         loop {
             let msg = read_message(self)?;
             match msg {
                 BmCommandComplete(cc) => {
                     row_count = parse_copy_command_count(&cc.tag);
                 }
-                BmError(d) => { diagnostic = Some(d); }
+                BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -791,8 +791,8 @@ implement PgConnection {
             }
         }
         match diagnostic {
-            Some(d) => Err(dberr_from_pg(d)),
-            None    => Ok(row_count),
+            Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
+            Maybe.None    => Result.Ok(row_count),
         }
     }
 
@@ -809,7 +809,7 @@ implement PgConnection {
     public fn start_copy_out_session(&mut self, sql: &Text) -> Result<(), DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "BAD_STATE".clone(),
                 message: "start_copy_out_session requires Ready state".clone(),
@@ -823,9 +823,9 @@ implement PgConnection {
         loop {
             let msg = read_message(self)?;
             match msg {
-                BmCopyOutResponse(_) => { return Ok(()); }
+                BmCopyOutResponse(_) => { return Result.Ok(()); }
                 BmCopyInResponse(_) => {
-                    return Err(DbError.Adapter(AdapterSpecific {
+                    return Result.Err(DbError.Adapter(AdapterSpecific {
                         adapter: AdPostgres,
                         code: "COPY_DIRECTION".clone(),
                         message: "expected CopyOutResponse, got CopyInResponse".clone(),
@@ -834,12 +834,12 @@ implement PgConnection {
                 }
                 BmError(d) => {
                     let _ = drain_to_ready(self);
-                    return Err(dberr_from_pg(d));
+                    return Result.Err(dberr_from_pg(d));
                 }
                 BmNotice(_) | BmParameterStatus(_) => {}
                 BmReadyForQuery(_) => {
                     self.state = PcsReady;
-                    return Err(DbError.Adapter(AdapterSpecific {
+                    return Result.Err(DbError.Adapter(AdapterSpecific {
                         adapter: AdPostgres,
                         code: "COPY_NO_RESPONSE".clone(),
                         message: "COPY command returned RFQ without CopyOutResponse".clone(),
@@ -852,18 +852,18 @@ implement PgConnection {
     }
 
     /// Read the next CopyData frame mid-COPY. Returns
-    /// `Ok(Some(bytes))` for each CopyData; `Ok(None)` once
+    /// `Result.Ok(Maybe.Some(bytes))` for each CopyData; `Result.Ok(Maybe.None)` once
     /// CopyDone arrives — caller must then call
     /// `finish_copy_out_session` to drain to ReadyForQuery.
     public fn read_copy_out_chunk(&mut self) -> Result<Maybe<List<Byte>>, DbError> {
         loop {
             let msg = read_message(self)?;
             match msg {
-                BmCopyData { bytes } => { return Ok(Some(bytes)); }
-                BmCopyDone => { return Ok(None); }
+                BmCopyData { bytes } => { return Result.Ok(Maybe.Some(bytes)); }
+                BmCopyDone => { return Result.Ok(Maybe.None); }
                 BmError(d) => {
                     let _ = drain_to_ready(self);
-                    return Err(dberr_from_pg(d));
+                    return Result.Err(dberr_from_pg(d));
                 }
                 BmNotice(_) | BmParameterStatus(_) => {}
                 _ => {}
@@ -871,19 +871,19 @@ implement PgConnection {
         }
     }
 
-    /// After `read_copy_out_chunk` returns `Ok(None)`, drain to
+    /// After `read_copy_out_chunk` returns `Result.Ok(Maybe.None)`, drain to
     /// ReadyForQuery (consumes the trailing CommandComplete) and
     /// surface the row count.
     public fn finish_copy_out_session(&mut self) -> Result<Int, DbError> {
         let mut row_count: Int = 0;
-        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
         loop {
             let msg = read_message(self)?;
             match msg {
                 BmCommandComplete(cc) => {
                     row_count = parse_copy_command_count(&cc.tag);
                 }
-                BmError(d) => { diagnostic = Some(d); }
+                BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -897,8 +897,8 @@ implement PgConnection {
             }
         }
         match diagnostic {
-            Some(d) => Err(dberr_from_pg(d)),
-            None    => Ok(row_count),
+            Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
+            Maybe.None    => Result.Ok(row_count),
         }
     }
 
@@ -912,7 +912,7 @@ implement PgConnection {
     ) -> Result<List<List<Byte>>, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "BAD_STATE".clone(),
                 message: "copy_out requires Ready state".clone(),
@@ -924,7 +924,7 @@ implement PgConnection {
         write_all(&mut self.stream, payload.as_slice())?;
 
         let mut chunks: List<List<Byte>> = List.new();
-        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
         let mut started: Bool = false;
         let mut completed: Bool = false;
 
@@ -935,7 +935,7 @@ implement PgConnection {
                 BmCopyData { bytes } => { chunks.push(bytes); }
                 BmCopyDone => { completed = true; }
                 BmCommandComplete(_) => {}
-                BmError(d) => { diagnostic = Some(d); }
+                BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -951,8 +951,8 @@ implement PgConnection {
         let _ = started;
         let _ = completed;
         match diagnostic {
-            Some(d) => Err(dberr_from_pg(d)),
-            None    => Ok(chunks),
+            Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
+            Maybe.None    => Result.Ok(chunks),
         }
     }
 
@@ -975,7 +975,7 @@ implement PgConnection {
     public fn prepare(&mut self, sql: &Text) -> Result<PgPreparedStatement, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "BAD_STATE".clone(),
                 message: "prepare requires Ready state".clone(),
@@ -998,16 +998,16 @@ implement PgConnection {
         write_all(&mut self.stream, payload.as_slice())?;
 
         let mut param_oids: List<Int> = List.new();
-        let mut row_desc: Maybe<RowDescription> = None;
-        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut row_desc: Maybe<RowDescription> = Maybe.None;
+        let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
         loop {
             let msg = read_message(self)?;
             match msg {
                 BmParseComplete => {}
                 BmParameterDescription(pd) => { param_oids = pd.type_oids; }
-                BmRowDescription(rd) => { row_desc = Some(rd); }
-                BmNoData => { row_desc = None; }
-                BmError(d) => { diagnostic = Some(d); }
+                BmRowDescription(rd) => { row_desc = Maybe.Some(rd); }
+                BmNoData => { row_desc = Maybe.None; }
+                BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -1021,8 +1021,8 @@ implement PgConnection {
             }
         }
         match diagnostic {
-            Some(d) => Err(dberr_from_pg(d)),
-            None => Ok(PgPreparedStatement {
+            Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
+            Maybe.None => Result.Ok(PgPreparedStatement {
                 name: name,
                 sql: sql.clone(),
                 param_oids: param_oids,
@@ -1032,8 +1032,8 @@ implement PgConnection {
     }
 
     /// Bind + Execute + Sync the named prepared statement. `params`
-    /// is one entry per `$N` placeholder — `None` for SQL NULL,
-    /// `Some(bytes)` for the wire-formatted value matching the
+    /// is one entry per `$N` placeholder — `Maybe.None` for SQL NULL,
+    /// `Maybe.Some(bytes)` for the wire-formatted value matching the
     /// param's OID + format. V0 forces text format for both
     /// params and results; binary format is reserved for V1
     /// (callers wanting binary today drop down to extended.vr).
@@ -1044,7 +1044,7 @@ implement PgConnection {
     ) -> Result<PgSimpleQueryResult, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "BAD_STATE".clone(),
                 message: "execute_prepared requires Ready state".clone(),
@@ -1069,13 +1069,13 @@ implement PgConnection {
         // Update last_formats from the prepared row description so
         // BmDataRow decoders pick the right per-column format.
         match &stmt.row_description {
-            Some(rd) => { self.last_formats = collect_formats(rd); }
-            None    => {}
+            Maybe.Some(rd) => { self.last_formats = collect_formats(rd); }
+            Maybe.None    => {}
         }
 
         let mut rows: List<List<WireValue>> = List.new();
         let mut command_tag: Text = "".clone();
-        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
         loop {
             let msg = read_message(self)?;
             match msg {
@@ -1088,7 +1088,7 @@ implement PgConnection {
                 BmEmptyQueryResponse => {
                     if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
                 }
-                BmError(d) => { diagnostic = Some(d); }
+                BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -1102,8 +1102,8 @@ implement PgConnection {
             }
         }
         match diagnostic {
-            Some(d) => Err(dberr_from_pg(d)),
-            None => Ok(PgSimpleQueryResult {
+            Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
+            Maybe.None => Result.Ok(PgSimpleQueryResult {
                 command_tag: command_tag,
                 row_description: stmt.row_description.clone(),
                 rows: rows,
@@ -1114,8 +1114,8 @@ implement PgConnection {
     /// Typed sibling of `execute_prepared` — uses the binary wire
     /// format for both params and results. Spec: §6.1.4.
     ///
-    /// `typed_params` is one entry per `$N` placeholder. `None`
-    /// for SQL NULL; `Some(typed_value)` for a typed value whose
+    /// `typed_params` is one entry per `$N` placeholder. `Maybe.None`
+    /// for SQL NULL; `Maybe.Some(typed_value)` for a typed value whose
     /// variant matches the prepared statement's declared OID
     /// (mismatch surfaces as `EncodeFailed`).
     ///
@@ -1136,7 +1136,7 @@ implement PgConnection {
     ) -> Result<PgTypedQueryResult, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "BAD_STATE".clone(),
                 message: "execute_prepared_typed requires Ready state".clone(),
@@ -1155,8 +1155,8 @@ implement PgConnection {
         // All-binary param_formats, all-binary result_formats.
         let param_formats: List<Int> = vec_repeat_int(1, oids.len() as Int);
         let result_formats: List<Int> = match &stmt.row_description {
-            Some(rd) => vec_repeat_int(1, rd.columns.len() as Int),
-            None     => List.new(),
+            Maybe.Some(rd) => vec_repeat_int(1, rd.columns.len() as Int),
+            Maybe.None     => List.new(),
         };
         let portal = "".clone();
 
@@ -1175,17 +1175,17 @@ implement PgConnection {
         // Update last_formats so the heap parse_data_row understands
         // the binary column wire format.
         match &stmt.row_description {
-            Some(rd) => {
+            Maybe.Some(rd) => {
                 self.last_formats = result_formats.clone();
                 let _ = rd;
             }
-            None => {}
+            Maybe.None => {}
         }
 
         // Build the column-OID vector from the prepared statement
         // for typed decode dispatch.
         let column_oids: List<Int> = match &stmt.row_description {
-            Some(rd) => {
+            Maybe.Some(rd) => {
                 let mut oids: List<Int> = List.with_capacity(rd.columns.len());
                 let mut i: Int = 0;
                 while i < (rd.columns.len() as Int) {
@@ -1194,12 +1194,12 @@ implement PgConnection {
                 }
                 oids
             }
-            None => List.new(),
+            Maybe.None => List.new(),
         };
 
         let mut rows: List<List<TypedValue>> = List.new();
         let mut command_tag: Text = "".clone();
-        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
         loop {
             let msg = read_message(self)?;
             match msg {
@@ -1218,8 +1218,8 @@ implement PgConnection {
                             WvNull => { typed_row.push(TvNull); }
                             WvPresent { bytes, .. } => {
                                 match decode_typed_from_bytes(oid, bytes.as_slice(), &mut self.arena) {
-                                    Ok(v)  => typed_row.push(v),
-                                    Err(e) => { return Err(e); }
+                                    Result.Ok(v)  => typed_row.push(v),
+                                    Result.Err(e) => { return Result.Err(e); }
                                 }
                             }
                         }
@@ -1231,7 +1231,7 @@ implement PgConnection {
                 BmEmptyQueryResponse => {
                     if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
                 }
-                BmError(d) => { diagnostic = Some(d); }
+                BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -1245,8 +1245,8 @@ implement PgConnection {
             }
         }
         match diagnostic {
-            Some(d) => Err(dberr_from_pg(d)),
-            None => Ok(PgTypedQueryResult {
+            Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
+            Maybe.None => Result.Ok(PgTypedQueryResult {
                 command_tag: command_tag,
                 row_description: stmt.row_description.clone(),
                 rows: rows,
@@ -1261,7 +1261,7 @@ implement PgConnection {
     {
         match self.state {
             PcsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "BAD_STATE".clone(),
                 message: "close_prepared requires Ready state".clone(),
@@ -1276,12 +1276,12 @@ implement PgConnection {
         self.state = PcsBusy;
         write_all(&mut self.stream, payload.as_slice())?;
 
-        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
         loop {
             let msg = read_message(self)?;
             match msg {
                 BmCloseComplete => {}
-                BmError(d) => { diagnostic = Some(d); }
+                BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -1295,8 +1295,8 @@ implement PgConnection {
             }
         }
         match diagnostic {
-            Some(d) => Err(dberr_from_pg(d)),
-            None    => Ok(()),
+            Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
+            Maybe.None    => Result.Ok(()),
         }
     }
 
@@ -1331,7 +1331,7 @@ implement PgConnection {
     /// by the dispatcher (channel-keyed broadcast). Calling twice
     /// replaces the previous dispatcher.
     public fn attach_dispatcher(&mut self, dispatcher: Shared<NotifyDispatcher>) {
-        self.dispatcher = Some(dispatcher);
+        self.dispatcher = Maybe.Some(dispatcher);
     }
 
     /// Drop the dispatcher registration. Notifications fall back to
@@ -1340,14 +1340,14 @@ implement PgConnection {
     /// alive elsewhere — this only severs the routing FROM this
     /// connection.
     public fn detach_dispatcher(&mut self) {
-        self.dispatcher = None;
+        self.dispatcher = Maybe.None;
     }
 
     /// Whether a high-level dispatcher is currently attached.
     public fn has_dispatcher(&self) -> Bool {
         match &self.dispatcher {
-            Some(_) => true,
-            None    => false,
+            Maybe.Some(_) => true,
+            Maybe.None    => false,
         }
     }
 
@@ -1383,19 +1383,19 @@ implement PgConnection {
     /// (any in-flight queries on the old pipeline are abandoned —
     /// their handles will block on `await` until the timeout).
     public fn attach_pipeline(&mut self, pipeline: PgPipeline) {
-        self.pipeline = Some(pipeline);
+        self.pipeline = Maybe.Some(pipeline);
     }
 
     /// Drop the pipeline registration.
     public fn detach_pipeline(&mut self) {
-        self.pipeline = None;
+        self.pipeline = Maybe.None;
     }
 
     /// Whether a pipeline is attached.
     public fn has_pipeline(&self) -> Bool {
         match &self.pipeline {
-            Some(_) => true,
-            None    => false,
+            Maybe.Some(_) => true,
+            Maybe.None    => false,
         }
     }
 
@@ -1465,15 +1465,15 @@ implement PgConnection {
         // typically observes nothing (the server emits
         // CopyOutResponse cleanly), so the stash is rarely used.
         match self.replication_stash {
-            Some(_) => Err(DbError.Adapter(AdapterSpecific {
+            Maybe.Some(_) => Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "REPL_STASH_FULL".clone(),
                 message: "replication push_back stash already occupied".clone(),
                 retryable: false,
             })),
-            None => {
-                self.replication_stash = Some(msg);
-                Ok(())
+            Maybe.None => {
+                self.replication_stash = Maybe.Some(msg);
+                Result.Ok(())
             }
         }
     }
@@ -1488,14 +1488,14 @@ implement PgConnection {
     /// Set the underlying TCP recv timeout. Used by the async
     /// replication wrapper so its single actor can alternate
     /// between reads and pending standby-status writes without
-    /// blocking forever on a quiet wire. `None` restores the
+    /// blocking forever on a quiet wire. `Maybe.None` restores the
     /// default (no timeout = block until data).
     public fn set_recv_timeout_ms(&mut self, timeout_ms: Maybe<Int>)
         -> Result<(), DbError>
     {
         match self.stream.tcp_mut().set_read_timeout(timeout_ms) {
-            Ok(())  => Ok(()),
-            Err(_)  => Err(DbError.Adapter(AdapterSpecific {
+            Result.Ok(())  => Result.Ok(()),
+            Result.Err(_)  => Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "TIMEOUT_SET".clone(),
                 message: "failed to set TCP recv timeout".clone(),
@@ -1506,44 +1506,44 @@ implement PgConnection {
 
     /// Timeout-bounded variant of `read_replication_message`.
     /// Returns:
-    ///   * `Ok(Some(msg))` — message arrived. Notifications are
+    ///   * `Result.Ok(Maybe.Some(msg))` — message arrived. Notifications are
     ///     demuxed inline; the returned message is non-Notification.
-    ///   * `Ok(None)` — TCP read timed out (server is quiet).
+    ///   * `Result.Ok(Maybe.None)` — TCP read timed out (server is quiet).
     ///     Caller can issue queued writes and retry.
-    ///   * `Err(_)` — wire failure / protocol violation.
+    ///   * `Result.Err(_)` — wire failure / protocol violation.
     ///
-    /// Caller is responsible for `set_recv_timeout_ms(Some(ms))`
+    /// Caller is responsible for `set_recv_timeout_ms(Maybe.Some(ms))`
     /// before the first call. The timeout setting persists; reset
-    /// to `None` before returning the connection to a regular
+    /// to `Maybe.None` before returning the connection to a regular
     /// (non-replication) consumer.
     public fn try_read_replication_message(&mut self)
         -> Result<Maybe<BackendMessage>, DbError>
     {
         match self.replication_stash.take() {
-            Some(m) => { return Ok(Some(m)); }
-            None    => {}
+            Maybe.Some(m) => { return Result.Ok(Maybe.Some(m)); }
+            Maybe.None    => {}
         }
         loop {
             match try_parse_tagged(self.recv.as_slice()) {
-                Ok(Some(outcome)) => {
+                Result.Ok(Maybe.Some(outcome)) => {
                     let consumed = outcome.bytes_consumed;
                     drop_front(&mut self.recv, consumed);
                     let msg = decode_one(outcome.frame, &self.last_formats)?;
                     match msg {
                         BmNotification(n) => {
                             match &self.dispatcher {
-                                Some(d) => { d.dispatch(&n); }
-                                None    => {}
+                                Maybe.Some(d) => { d.dispatch(&n); }
+                                Maybe.None    => {}
                             }
                             self.notifications.push(n);
                             continue;
                         }
-                        _ => { return Ok(Some(msg)); }
+                        _ => { return Result.Ok(Maybe.Some(msg)); }
                     }
                 }
-                Ok(None) => {}
-                Err(_) => {
-                    return Err(DbError.Adapter(AdapterSpecific {
+                Result.Ok(Maybe.None) => {}
+                Result.Err(_) => {
+                    return Result.Err(DbError.Adapter(AdapterSpecific {
                         adapter: AdPostgres,
                         code: "BAD_FRAME".clone(),
                         message: "wire protocol violation".clone(),
@@ -1556,9 +1556,9 @@ implement PgConnection {
             let mut i = 0;
             while i < 4096 { tmp.push(0 as Byte); i = i + 1; }
             match self.stream.read(tmp.as_mut_slice()) {
-                Ok(n) => {
+                Result.Ok(n) => {
                     if n <= 0 {
-                        return Err(DbError.ConnectionFailed {
+                        return Result.Err(DbError.ConnectionFailed {
                             source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                             adapter: AdPostgres,
                         });
@@ -1569,15 +1569,15 @@ implement PgConnection {
                         k = k + 1;
                     }
                 }
-                Err(e) => {
+                Result.Err(e) => {
                     let kind = e.kind();
                     match kind {
                         core.io.protocols.IoErrorKind.WouldBlock
                             | core.io.protocols.IoErrorKind.TimedOut => {
-                            return Ok(None);
+                            return Result.Ok(Maybe.None);
                         }
                         _ => {
-                            return Err(DbError.ConnectionFailed {
+                            return Result.Err(DbError.ConnectionFailed {
                                 source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                                 adapter: AdPostgres,
                             });
@@ -1613,13 +1613,13 @@ implement PgConnection {
         expects_rows: Bool,
     ) -> Result<PipelineHandle, DbError> {
         match &self.pipeline {
-            None => Err(DbError.Adapter(AdapterSpecific {
+            Maybe.None => Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "PIPELINE_NOT_ATTACHED".clone(),
                 message: "submit_pipelined called without attach_pipeline".clone(),
                 retryable: false,
             })),
-            Some(p) => p.submit(parse_bytes, bind_bytes, execute_bytes, expects_rows),
+            Maybe.Some(p) => p.submit(parse_bytes, bind_bytes, execute_bytes, expects_rows),
         }
     }
 
@@ -1639,67 +1639,67 @@ implement PgConnection {
         // Snapshot the live count to avoid holding any borrow on
         // the pipeline across the read/write loops below.
         let mut remaining: Int = match &self.pipeline {
-            None    => return Err(DbError.Adapter(AdapterSpecific {
+            Maybe.None    => return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "PIPELINE_NOT_ATTACHED".clone(),
                 message: "pump_pipeline called without attach_pipeline".clone(),
                 retryable: false,
             })),
-            Some(p) => p.live_count(),
+            Maybe.Some(p) => p.live_count(),
         };
         if remaining == 0 {
-            return Ok(());
+            return Result.Ok(());
         }
         loop {
             // Flush a batch.
             let mut buf: List<Byte> = List.new();
             let written: Int = match &self.pipeline {
-                Some(p) => p.flush_into(&mut buf),
-                None    => return Ok(()),
+                Maybe.Some(p) => p.flush_into(&mut buf),
+                Maybe.None    => return Result.Ok(()),
             };
             if written == 0 {
                 // Nothing to flush — pipeline drained or only
                 // already-in-flight entries remain. Read until end-
                 // of-Sync to clean up.
-                if remaining == 0 { return Ok(()); }
+                if remaining == 0 { return Result.Ok(()); }
             } else {
                 match write_all(&mut self.stream, buf.as_slice()) {
-                    Ok(_)  => {}
-                    Err(e) => {
+                    Result.Ok(_)  => {}
+                    Result.Err(e) => {
                         // Notify every parked handle that the wire
                         // is dead.
                         match &self.pipeline {
-                            Some(p) => p.close(connection_gone_err()),
-                            None    => {}
+                            Maybe.Some(p) => p.close(connection_gone_err()),
+                            Maybe.None    => {}
                         }
-                        return Err(e);
+                        return Result.Err(e);
                     }
                 }
             }
             // Consume reply frames until end-of-Sync.
             loop {
                 let msg = match read_message(self) {
-                    Ok(m)  => m,
-                    Err(e) => {
+                    Result.Ok(m)  => m,
+                    Result.Err(e) => {
                         match &self.pipeline {
-                            Some(p) => p.close(connection_gone_err()),
-                            None    => {}
+                            Maybe.Some(p) => p.close(connection_gone_err()),
+                            Maybe.None    => {}
                         }
-                        return Err(e);
+                        return Result.Err(e);
                     }
                 };
                 let end_of_sync: Bool = match &self.pipeline {
-                    Some(p) => p.consume_message(msg),
-                    None    => true,    // shouldn't happen — pipeline detached mid-pump
+                    Maybe.Some(p) => p.consume_message(msg),
+                    Maybe.None    => true,    // shouldn't happen — pipeline detached mid-pump
                 };
                 if end_of_sync { break; }
             }
             // Refresh remaining count.
             remaining = match &self.pipeline {
-                Some(p) => p.live_count(),
-                None    => 0,
+                Maybe.Some(p) => p.live_count(),
+                Maybe.None    => 0,
             };
-            if remaining == 0 { return Ok(()); }
+            if remaining == 0 { return Result.Ok(()); }
         }
     }
 
@@ -1711,8 +1711,8 @@ implement PgConnection {
         let mut sql: Text = "LISTEN ".clone();
         sql.push_str(channel);
         match self.execute(&sql) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(e),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -1721,8 +1721,8 @@ implement PgConnection {
         let mut sql: Text = "UNLISTEN ".clone();
         sql.push_str(channel);
         match self.execute(&sql) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(e),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -1744,8 +1744,8 @@ implement PgConnection {
             sql.push_str(&"'".clone());
         }
         match self.execute(&sql) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(e),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -1773,14 +1773,14 @@ implement PgConnection {
     /// need to poll the underlying socket; v1 keeps this simple.
     public fn wait_for_notification(&mut self) -> Result<List<NotificationResponse>, DbError> {
         if self.has_notifications() {
-            return Ok(self.take_notifications());
+            return Result.Ok(self.take_notifications());
         }
         // No-op probe — flushes any pending async frames into the
         // response stream. Discard the (empty) result; notifications
         // arrived alongside it and are now in the buffer.
         match self.execute(&"SELECT 1".clone()) {
-            Ok(_)  => Ok(self.take_notifications()),
-            Err(e) => Err(e),
+            Result.Ok(_)  => Result.Ok(self.take_notifications()),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -1812,9 +1812,9 @@ implement PgConnection {
         -> Result<(), DbError>
     {
         let key = match self.backend_key {
-            Some(k) => k,
-            None    => {
-                return Err(DbError.Adapter(AdapterSpecific {
+            Maybe.Some(k) => k,
+            Maybe.None    => {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdPostgres,
                     code: "NO_BACKEND_KEY".clone(),
                     message: "cancel_running_query: BackendKeyData was never received".clone(),
@@ -1828,8 +1828,8 @@ implement PgConnection {
         // connection, satisfying the server-side source-IP gate
         // that secondary-protects the 32-bit secret_key.
         let bind_local = match self.stream.local_addr() {
-            Ok(addr) => Some(addr),
-            Err(_)   => None,
+            Result.Ok(addr) => Maybe.Some(addr),
+            Result.Err(_)   => Maybe.None,
         };
         cancel_running_query_at(host, port, key.0, key.1, bind_local)
     }
@@ -1839,13 +1839,13 @@ implement PgConnection {
     /// a compile error.
     public fn close(mut self) -> Result<(), DbError> {
         match self.state {
-            PcsClosed => return Ok(()),
+            PcsClosed => return Result.Ok(()),
             _ => {}
         }
         let payload = terminate();
         let _ = write_all(&mut self.stream, payload.as_slice());
         self.state = PcsClosed;
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1874,14 +1874,14 @@ implement PgConnection {
 /// passes.
 ///
 /// `bind_local`:
-///   * `Some(addr)` — the cancel socket is created via
+///   * `Maybe.Some(addr)` — the cancel socket is created via
 ///     `TcpStream.connect_from(addr, peer)`, which composes
 ///     socket() + setsockopt(SO_REUSEADDR) + bind(addr) +
 ///     connect(peer) at the syscall level. The server-side
 ///     source-IP check sees the same source IP as the original
 ///     connection, satisfying the secondary gate that
 ///     secret_key alone cannot guarantee.
-///   * `None` — the kernel picks the source address. Use only
+///   * `Maybe.None` — the kernel picks the source address. Use only
 ///     when the caller has no way to know the original
 ///     connection's local addr (cross-process / cross-host
 ///     cancel coordination). Documented as `@audit("cross-host
@@ -1889,7 +1889,7 @@ implement PgConnection {
 ///
 /// Production callers reach `cancel_running_query_at` through
 /// `PgConnection.cancel_running_query`, which automatically
-/// supplies `Some(self.stream.local_addr())` so the security
+/// supplies `Maybe.Some(self.stream.local_addr())` so the security
 /// gate is in place by default.
 public fn cancel_running_query_at(
     host: &Text,
@@ -1903,35 +1903,35 @@ public fn cancel_running_query_at(
     // pre-bind via the syscall-composed connect_from path; otherwise
     // fall back to the kernel-picks-source path.
     let sock_result = match bind_local {
-        Some(local_addr) => {
+        Maybe.Some(local_addr) => {
             // Resolve the target string to a SocketAddr. We reuse
             // the same DNS / parser path TcpStream.connect uses,
             // then iterate addresses (IPv4 / IPv6 / multiple A
             // records) until one connects from the bound source.
             match target.as_str().to_socket_addrs() {
-                Ok(peer_iter) => {
+                Result.Ok(peer_iter) => {
                     let mut last_err = IoError.Other("cancel: no addresses resolved");
-                    let mut connected: Maybe<TcpStream> = None;
+                    let mut connected: Maybe<TcpStream> = Maybe.None;
                     for peer_addr in peer_iter {
                         match TcpStream.connect_from(local_addr, peer_addr) {
-                            Ok(s)  => { connected = Some(s); break; }
-                            Err(e) => { last_err = e; }
+                            Result.Ok(s)  => { connected = Maybe.Some(s); break; }
+                            Result.Err(e) => { last_err = e; }
                         }
                     }
                     match connected {
-                        Some(s) => Ok(s),
-                        None    => Err(last_err),
+                        Maybe.Some(s) => Result.Ok(s),
+                        Maybe.None    => Result.Err(last_err),
                     }
                 }
-                Err(e) => Err(e),
+                Result.Err(e) => Result.Err(e),
             }
         }
-        None => TcpStream.connect(target.as_str()),
+        Maybe.None => TcpStream.connect(target.as_str()),
     };
     let mut sock = match sock_result {
-        Ok(s)  => s,
-        Err(_) => {
-            return Err(DbError.ConnectionFailed {
+        Result.Ok(s)  => s,
+        Result.Err(_) => {
+            return Result.Err(DbError.ConnectionFailed {
                 source: core.database.common.error.ConnectionErrorKind.CekConnectRefused,
                 adapter: AdPostgres,
             });
@@ -1940,7 +1940,7 @@ public fn cancel_running_query_at(
     let payload = cancel_request(process_id, secret_key);
     let _ = write_all(&mut sock, payload.as_slice());
     // Close the cancel socket — server doesn't reply on CancelRequest.
-    Ok(())
+    Result.Ok(())
 }
 
 public type PgSimpleQueryResult is {
@@ -1973,7 +1973,7 @@ fn vec_repeat_int(value: Int, n: Int) -> List<Int> {
 /// Server-side prepared statement — handle returned by
 /// `PgConnection.prepare`. The `name` is allocated by Spindle
 /// (auto-generated `s0`, `s1`, …); `param_oids` come from the
-/// server's `ParameterDescription`; `row_description` is `None`
+/// server's `ParameterDescription`; `row_description` is `Maybe.None`
 /// for non-SELECT statements.
 ///
 /// V0 — handle is plain (not affine). Caller is responsible for
@@ -2027,7 +2027,7 @@ public type PgSimpleQueryArenaResult is {
 // -----------------------------------------------------------------------------
 
 fn drive_until_ready(conn: &mut PgConnection, config: &PgConfig) -> Result<(), DbError> {
-    let mut scram: Maybe<ScramClient> = None;
+    let mut scram: Maybe<ScramClient> = Maybe.None;
     loop {
         let msg = read_message(conn)?;
         match msg {
@@ -2037,14 +2037,14 @@ fn drive_until_ready(conn: &mut PgConnection, config: &PgConfig) -> Result<(), D
                         // Auth done — keep looping for ParameterStatus etc.
                     }
                     AuthCleartextPassword => {
-                        return Err(DbError.AuthFailed {
+                        return Result.Err(DbError.AuthFailed {
                             kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
                                 "Spindle rejects cleartext-password auth (use SCRAM-SHA-256)".clone(),
                             ),
                         });
                     }
                     AuthMd5Password { .. } => {
-                        return Err(DbError.AuthFailed {
+                        return Result.Err(DbError.AuthFailed {
                             kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
                                 "Spindle rejects md5 auth (use SCRAM-SHA-256)".clone(),
                             ),
@@ -2066,7 +2066,7 @@ fn drive_until_ready(conn: &mut PgConnection, config: &PgConfig) -> Result<(), D
                             // `pick_scram_mechanism`. Pull the
                             // peer cert hash from the TLS session.
                             match conn.stream.peer_cert_hash_sha256() {
-                                Some(arr) => {
+                                Maybe.Some(arr) => {
                                     let mut v: List<Byte> = List.with_capacity(32);
                                     let mut i: Int = 0;
                                     while i < 32 {
@@ -2075,14 +2075,14 @@ fn drive_until_ready(conn: &mut PgConnection, config: &PgConfig) -> Result<(), D
                                     }
                                     CbTlsServerEndPoint(v)
                                 }
-                                None => {
+                                Maybe.None => {
                                     // TLS active but cert hash
                                     // unavailable — fail closed
                                     // rather than silently
                                     // demoting to CbNone (which
                                     // would let an active MITM
                                     // pass).
-                                    return Err(DbError.AuthFailed {
+                                    return Result.Err(DbError.AuthFailed {
                                         kind: core.database.common.error.AuthErrorKind.AekScramFailed(
                                             "SCRAM-SHA-256-PLUS chosen but TLS layer did not expose peer_cert_hash_sha256()".clone(),
                                         ),
@@ -2102,20 +2102,20 @@ fn drive_until_ready(conn: &mut PgConnection, config: &PgConfig) -> Result<(), D
                         let initial = client.client_first_message();
                         let frame_bytes = sasl_initial_response(&chose, initial.as_slice());
                         write_all(&mut conn.stream, frame_bytes.as_slice())?;
-                        scram = Some(client);
+                        scram = Maybe.Some(client);
                     }
                     AuthSaslContinue { server_data } => {
-                        let mut c = match scram { Some(x) => x, None => {
-                            return Err(DbError.AuthFailed {
+                        let mut c = match scram { Maybe.Some(x) => x, Maybe.None => {
+                            return Result.Err(DbError.AuthFailed {
                                 kind: core.database.common.error.AuthErrorKind.AekScramFailed(
                                     "AuthSaslContinue without SASL initial".clone(),
                                 ),
                             });
                         } };
                         let resp = match c.server_first_to_client_final(server_data.as_slice()) {
-                            Ok(r)  => r,
-                            Err(_) => {
-                                return Err(DbError.AuthFailed {
+                            Result.Ok(r)  => r,
+                            Result.Err(_) => {
+                                return Result.Err(DbError.AuthFailed {
                                     kind: core.database.common.error.AuthErrorKind.AekScramFailed(
                                         "scram server-first parse / proof build failed".clone(),
                                     ),
@@ -2124,40 +2124,40 @@ fn drive_until_ready(conn: &mut PgConnection, config: &PgConfig) -> Result<(), D
                         };
                         let frame_bytes = sasl_response(resp.as_slice());
                         write_all(&mut conn.stream, frame_bytes.as_slice())?;
-                        scram = Some(c);
+                        scram = Maybe.Some(c);
                     }
                     AuthSaslFinal { server_data } => {
-                        let mut c = match scram { Some(x) => x, None => {
-                            return Err(DbError.AuthFailed {
+                        let mut c = match scram { Maybe.Some(x) => x, Maybe.None => {
+                            return Result.Err(DbError.AuthFailed {
                                 kind: core.database.common.error.AuthErrorKind.AekScramFailed(
                                     "AuthSaslFinal without prior SASL".clone(),
                                 ),
                             });
                         } };
                         match c.verify_server_final(server_data.as_slice()) {
-                            Ok(_) => {}
-                            Err(_) => {
-                                return Err(DbError.AuthFailed {
+                            Result.Ok(_) => {}
+                            Result.Err(_) => {
+                                return Result.Err(DbError.AuthFailed {
                                     kind: core.database.common.error.AuthErrorKind.AekScramFailed(
                                         "server signature mismatch".clone(),
                                     ),
                                 });
                             }
                         }
-                        scram = Some(c);
+                        scram = Maybe.Some(c);
                     }
                 }
             }
             BmParameterStatus(ps) => { conn.parameters.push((ps.name, ps.value)); }
-            BmBackendKeyData(k)  => { conn.backend_key = Some((k.process_id, k.secret_key)); }
+            BmBackendKeyData(k)  => { conn.backend_key = Maybe.Some((k.process_id, k.secret_key)); }
             BmReadyForQuery(s)   => {
                 conn.tx_status = s;
                 conn.state = PcsReady;
-                return Ok(());
+                return Result.Ok(());
             }
             BmError(d) => {
                 conn.state = PcsFailed;
-                return Err(dberr_from_pg(d));
+                return Result.Err(dberr_from_pg(d));
             }
             BmNotice(_) => {}
             _ => {}
@@ -2187,12 +2187,12 @@ fn pick_scram_mechanism(mechs: &List<Text>, tls_active: Bool) -> Result<Text, Db
         i = i + 1;
     }
     if tls_active && has_plus {
-        return Ok("SCRAM-SHA-256-PLUS".clone());
+        return Result.Ok("SCRAM-SHA-256-PLUS".clone());
     }
     if has_plain {
-        return Ok("SCRAM-SHA-256".clone());
+        return Result.Ok("SCRAM-SHA-256".clone());
     }
-    Err(DbError.AuthFailed {
+    Result.Err(DbError.AuthFailed {
         kind: core.database.common.error.AuthErrorKind.AekScramFailed(
             f"server offered no acceptable SCRAM mechanism (tls_active={tls_active})",
         ),
@@ -2216,13 +2216,13 @@ fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
     // `push_back_replication`). At most one slot — used to peel a
     // CopyData out of order during START_REPLICATION.
     match conn.replication_stash.take() {
-        Some(m) => { return Ok(m); }
-        None    => {}
+        Maybe.Some(m) => { return Result.Ok(m); }
+        Maybe.None    => {}
     }
     loop {
         // Try to parse one frame from the buffer.
         match try_parse_tagged(conn.recv.as_slice()) {
-            Ok(Some(outcome)) => {
+            Result.Ok(Maybe.Some(outcome)) => {
                 let consumed = outcome.bytes_consumed;
                 drop_front(&mut conn.recv, consumed);
                 let msg = decode_one(outcome.frame, &conn.last_formats)?;
@@ -2242,31 +2242,31 @@ fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
                         // `take_notifications` still see the event;
                         // both paths are non-blocking and cheap.
                         match &conn.dispatcher {
-                            Some(d) => { d.dispatch(&n); }
-                            None    => {}
+                            Maybe.Some(d) => { d.dispatch(&n); }
+                            Maybe.None    => {}
                         }
                         conn.notifications.push(n);
                         continue;
                     }
-                    _ => { return Ok(msg); }
+                    _ => { return Result.Ok(msg); }
                 }
             }
-            Ok(None) => {
+            Result.Ok(Maybe.None) => {
                 // Need more bytes.
                 let mut tmp: List<Byte> = List.new();
                 let mut i = 0;
                 while i < 4096 { tmp.push(0 as Byte); i = i + 1; }
                 let n = match conn.stream.read(tmp.as_mut_slice()) {
-                    Ok(v)  => v,
-                    Err(_) => {
-                        return Err(DbError.ConnectionFailed {
+                    Result.Ok(v)  => v,
+                    Result.Err(_) => {
+                        return Result.Err(DbError.ConnectionFailed {
                             source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                             adapter: AdPostgres,
                         });
                     }
                 };
                 if n <= 0 {
-                    return Err(DbError.ConnectionFailed {
+                    return Result.Err(DbError.ConnectionFailed {
                         source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                         adapter: AdPostgres,
                     });
@@ -2277,8 +2277,8 @@ fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
                     k = k + 1;
                 }
             }
-            Err(_) => {
-                return Err(DbError.Adapter(AdapterSpecific {
+            Result.Err(_) => {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdPostgres,
                     code: "BAD_FRAME".clone(),
                     message: "wire protocol violation".clone(),
@@ -2291,8 +2291,8 @@ fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
 
 fn decode_one(frame: PgFrame, formats: &List<Int>) -> Result<BackendMessage, DbError> {
     match parse_backend(frame, formats) {
-        Ok(m)  => Ok(m),
-        Err(_) => Err(DbError.Adapter(AdapterSpecific {
+        Result.Ok(m)  => Result.Ok(m),
+        Result.Err(_) => Result.Err(DbError.Adapter(AdapterSpecific {
             adapter: AdPostgres,
             code: "BAD_DECODE".clone(),
             message: "backend message decode failed".clone(),
@@ -2310,7 +2310,7 @@ fn decode_one(frame: PgFrame, formats: &List<Int>) -> Result<BackendMessage, DbE
 fn read_message_arena(conn: &mut PgConnection) -> Result<BackendMessageArena, DbError> {
     loop {
         match try_parse_tagged(conn.recv.as_slice()) {
-            Ok(Some(outcome)) => {
+            Result.Ok(Maybe.Some(outcome)) => {
                 let consumed = outcome.bytes_consumed;
                 drop_front(&mut conn.recv, consumed);
                 let msg = match parse_backend_arena(
@@ -2318,9 +2318,9 @@ fn read_message_arena(conn: &mut PgConnection) -> Result<BackendMessageArena, Db
                     &conn.last_formats,
                     &mut conn.arena,
                 ) {
-                    Ok(m)  => m,
-                    Err(_) => {
-                        return Err(DbError.Adapter(AdapterSpecific {
+                    Result.Ok(m)  => m,
+                    Result.Err(_) => {
+                        return Result.Err(DbError.Adapter(AdapterSpecific {
                             adapter: AdPostgres,
                             code: "BAD_DECODE".clone(),
                             message: "arena decode failed".clone(),
@@ -2331,30 +2331,30 @@ fn read_message_arena(conn: &mut PgConnection) -> Result<BackendMessageArena, Db
                 match msg {
                     BmaNotification(n) => {
                         match &conn.dispatcher {
-                            Some(d) => { d.dispatch(&n); }
-                            None    => {}
+                            Maybe.Some(d) => { d.dispatch(&n); }
+                            Maybe.None    => {}
                         }
                         conn.notifications.push(n);
                         continue;
                     }
-                    _ => { return Ok(msg); }
+                    _ => { return Result.Ok(msg); }
                 }
             }
-            Ok(None) => {
+            Result.Ok(Maybe.None) => {
                 let mut tmp: List<Byte> = List.new();
                 let mut i = 0;
                 while i < 4096 { tmp.push(0 as Byte); i = i + 1; }
                 let n = match conn.stream.read(tmp.as_mut_slice()) {
-                    Ok(v)  => v,
-                    Err(_) => {
-                        return Err(DbError.ConnectionFailed {
+                    Result.Ok(v)  => v,
+                    Result.Err(_) => {
+                        return Result.Err(DbError.ConnectionFailed {
                             source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                             adapter: AdPostgres,
                         });
                     }
                 };
                 if n <= 0 {
-                    return Err(DbError.ConnectionFailed {
+                    return Result.Err(DbError.ConnectionFailed {
                         source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                         adapter: AdPostgres,
                     });
@@ -2365,8 +2365,8 @@ fn read_message_arena(conn: &mut PgConnection) -> Result<BackendMessageArena, Db
                     k = k + 1;
                 }
             }
-            Err(_) => {
-                return Err(DbError.Adapter(AdapterSpecific {
+            Result.Err(_) => {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdPostgres,
                     code: "BAD_FRAME".clone(),
                     message: "wire protocol violation".clone(),
@@ -2386,24 +2386,24 @@ fn write_all_tcp(stream: &mut TcpStream, buf: &[Byte]) -> Result<(), DbError> {
     while written < buf.len() as Int {
         let chunk = sub_slice(buf, written, buf.len() as Int);
         match stream.write(chunk.as_slice()) {
-            Ok(n) => {
+            Result.Ok(n) => {
                 if n <= 0 {
-                    return Err(DbError.ConnectionFailed {
+                    return Result.Err(DbError.ConnectionFailed {
                         source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                         adapter: AdPostgres,
                     });
                 }
                 written = written + n;
             }
-            Err(_) => {
-                return Err(DbError.ConnectionFailed {
+            Result.Err(_) => {
+                return Result.Err(DbError.ConnectionFailed {
                     source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                     adapter: AdPostgres,
                 });
             }
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn write_all(stream: &mut PgStream, buf: &[Byte]) -> Result<(), DbError> {
@@ -2411,24 +2411,24 @@ fn write_all(stream: &mut PgStream, buf: &[Byte]) -> Result<(), DbError> {
     while written < buf.len() as Int {
         let chunk = sub_slice(buf, written, buf.len() as Int);
         match stream.write(chunk.as_slice()) {
-            Ok(n) => {
+            Result.Ok(n) => {
                 if n <= 0 {
-                    return Err(DbError.ConnectionFailed {
+                    return Result.Err(DbError.ConnectionFailed {
                         source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                         adapter: AdPostgres,
                     });
                 }
                 written = written + n;
             }
-            Err(_) => {
-                return Err(DbError.ConnectionFailed {
+            Result.Err(_) => {
+                return Result.Err(DbError.ConnectionFailed {
                     source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                     adapter: AdPostgres,
                 });
             }
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 /// Convert `PgConfig.tls_mode` to a `TlsConfig` for the underlying
@@ -2526,7 +2526,7 @@ fn drain_to_ready(conn: &mut PgConnection) -> Result<(), DbError> {
             BmReadyForQuery(s) => {
                 conn.tx_status = s;
                 conn.state = PcsReady;
-                return Ok(());
+                return Result.Ok(());
             }
             BmParameterStatus(ps) => {
                 conn.parameters.push((ps.name, ps.value));

@@ -67,46 +67,46 @@ implement Settings {
     public fn apply(&mut self, id: UInt16, value: UInt32) -> Result<(), Http2Error> {
         if id == SettingId.HEADER_TABLE_SIZE {
             self.header_table_size = value;
-            return Ok(());
+            return Result.Ok(());
         }
         if id == SettingId.ENABLE_PUSH {
             if value > 1 {
-                return Err(connection_error(
+                return Result.Err(connection_error(
                     ErrorCode.PROTOCOL_ERROR, &"ENABLE_PUSH must be 0 or 1".into(),
                 ));
             }
             self.enable_push = value == 1;
-            return Ok(());
+            return Result.Ok(());
         }
         if id == SettingId.MAX_CONCURRENT_STREAMS {
             self.max_concurrent_streams = value;
-            return Ok(());
+            return Result.Ok(());
         }
         if id == SettingId.INITIAL_WINDOW_SIZE {
             if value > MAX_INITIAL_WINDOW_SIZE {
-                return Err(connection_error(
+                return Result.Err(connection_error(
                     ErrorCode.FLOW_CONTROL_ERROR,
                     &"INITIAL_WINDOW_SIZE exceeds 2^31-1".into(),
                 ));
             }
             self.initial_window_size = value;
-            return Ok(());
+            return Result.Ok(());
         }
         if id == SettingId.MAX_FRAME_SIZE {
             if value < MIN_MAX_FRAME_SIZE || value > MAX_MAX_FRAME_SIZE {
-                return Err(connection_error(
+                return Result.Err(connection_error(
                     ErrorCode.PROTOCOL_ERROR,
                     &"MAX_FRAME_SIZE out of range [2^14, 2^24-1]".into(),
                 ));
             }
             self.max_frame_size = value;
-            return Ok(());
+            return Result.Ok(());
         }
         if id == SettingId.MAX_HEADER_LIST_SIZE {
             self.max_header_list_size = value;
-            return Ok(());
+            return Result.Ok(());
         }
         // Unknown setting: MUST be ignored (§6.5.2).
-        Ok(())
+        Result.Ok(())
     }
 }

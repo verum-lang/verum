@@ -167,8 +167,8 @@ public fn snapshot_sees_at_least(a: &SnapshotView, b: &SnapshotView) -> Bool {
 /// has fallen behind the current watermark.
 public fn ensure_fresh(snap: &SnapshotView, current_wm: Int) -> Result<(), SnapshotError> {
     if snap.wal_watermark == current_wm {
-        Ok(())
+        Result.Ok(())
     } else {
-        Err(Stale(current_wm, snap.wal_watermark))
+        Result.Err(Stale(current_wm, snap.wal_watermark))
     }
 }

@@ -76,9 +76,9 @@ implement ColumnSpecList {
     public fn add(&mut self, s: ColumnSpec) { self.specs.push(s); }
 
     public fn lookup(&self, idx: Int) -> Maybe<ColumnSpec> {
-        if idx < 0 || idx >= self.specs.len() { return None; }
+        if idx < 0 || idx >= self.specs.len() { return Maybe.None; }
         let s = &self.specs[idx];
-        Some(column_spec(
+        Maybe.Some(column_spec(
             s.name.clone(),
             s.decltype.clone(),
             s.database_name.clone(),
@@ -92,9 +92,9 @@ implement ColumnSpecList {
     public fn find_by_name(&self, want: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.specs.len() {
-            if self.specs[i].name == *want { return Some(i); }
+            if self.specs[i].name == *want { return Maybe.Some(i); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 }

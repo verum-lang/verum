@@ -30,8 +30,8 @@
 // ```
 // let offers: List<Text> = ["application/json", "text/html"];
 // match select_best_media(&prefs, &offers) {
-//  Some(pick) => respond_with(pick),
-//  None => respond_406_not_acceptable(),
+//  Maybe.Some(pick) => respond_with(pick),
+//  Maybe.None => respond_406_not_acceptable(),
 // }
 // ```
 //
@@ -183,7 +183,7 @@ fn parse_q_value(buf: &List<Byte>, offset: Int) -> Float {
 // =============================================================================
 
 /// Pick the best of `offers` given the client's parsed `Accept`
-/// preferences. Returns the chosen offer or `None` when none match
+/// preferences. Returns the chosen offer or `Maybe.None` when none match
 /// (caller responds with 406 Not Acceptable).
 ///
 

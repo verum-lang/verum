@@ -30,7 +30,7 @@
 module core.database.sqlite.error;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount core.database.common.error.{
     DbError,
     AdapterId, AdapterSpecific, SqlState,
@@ -71,14 +71,14 @@ const SQLSTATE_INTERRUPTED: Text = "57014";    // query_canceled
 
 fn make_sqlstate(s: &Text) -> SqlState {
     match SqlState.parse(s) {
-        Some(state) => state,
+        Maybe.Some(state) => state,
         // Constants above are all 5-char ASCII so this branch is
         // unreachable in practice; we still avoid panicking and fall
         // back to XX000 (generic).
-        None => match SqlState.parse(&SQLSTATE_GENERIC) {
-            Some(s2) => s2,
+        Maybe.None => match SqlState.parse(&SQLSTATE_GENERIC) {
+            Maybe.Some(s2) => s2,
             // Truly unreachable — XX000 is a known-valid 5-char ASCII.
-            None => SqlState.parse(&"XX000".clone())
+            Maybe.None => SqlState.parse(&"XX000".clone())
                 .expect("make_sqlstate: \"XX000\" is a known-valid 5-char SQLSTATE — parse must succeed (defensive double-fallback)"),
         }
     }
@@ -116,7 +116,7 @@ public fn dberr_from_loom(e: core.database.sqlite.native.l7_api.DbError) -> DbEr
         DbReadonly     => DbError.QueryFailed {
             sql_state: make_sqlstate(&SQLSTATE_READONLY),
             message: "attempt to write a read-only database".clone(),
-            position: None,
+            position: Maybe.None,
         },
         DbInterrupted  => DbError.Cancelled,
         DbIoError(msg) => DbError.ConnectionFailed {
@@ -126,12 +126,12 @@ public fn dberr_from_loom(e: core.database.sqlite.native.l7_api.DbError) -> DbEr
         DbCorrupt(msg) => DbError.QueryFailed {
             sql_state: make_sqlstate(&SQLSTATE_CORRUPT),
             message: msg,
-            position: None,
+            position: Maybe.None,
         },
         DbFull         => DbError.QueryFailed {
             sql_state: make_sqlstate(&SQLSTATE_FULL),
             message: "database or disk is full".clone(),
-            position: None,
+            position: Maybe.None,
         },
         DbCannotOpen(msg) => DbError.ConnectionFailed {
             source: ConnectionErrorKind.CekConnectRefused,
@@ -140,17 +140,17 @@ public fn dberr_from_loom(e: core.database.sqlite.native.l7_api.DbError) -> DbEr
         DbConstraint(msg) => DbError.QueryFailed {
             sql_state: make_sqlstate(&SQLSTATE_CONSTRAINT),
             message: msg,
-            position: None,
+            position: Maybe.None,
         },
         DbDataTypeMismatch => DbError.QueryFailed {
             sql_state: make_sqlstate(&SQLSTATE_DATATYPE),
             message: "datatype mismatch".clone(),
-            position: None,
+            position: Maybe.None,
         },
         DbMisuse(msg) => DbError.QueryFailed {
             sql_state: make_sqlstate(&SQLSTATE_MISUSE),
             message: msg,
-            position: None,
+            position: Maybe.None,
         },
         DbAuthDenied => DbError.AuthFailed {
             kind: AuthErrorKind.AekRoleNotPermitted("operation".clone()),
@@ -161,7 +161,7 @@ public fn dberr_from_loom(e: core.database.sqlite.native.l7_api.DbError) -> DbEr
         DbNotADatabase => DbError.QueryFailed {
             sql_state: make_sqlstate(&SQLSTATE_NOT_DB),
             message: "file is not a database".clone(),
-            position: None,
+            position: Maybe.None,
         },
         DbCompileError(c)    => adapter_err("COMPILE".clone(),  f"{c}", false),
         DbConnectionError(c) => adapter_err("CONN".clone(),     f"{c}", false),

@@ -101,9 +101,9 @@ public type ScalarFn is protocol {
 // -----------------------------------------------------------------------------
 
 public fn check_arity(declared: Int, actual: Int) -> Result<(), ScalarFnError> {
-    if declared < 0 { return Ok(()); }   // varargs
-    if declared == actual { return Ok(()); }
-    Err(ArityMismatch("arity mismatch".clone()))
+    if declared < 0 { return Result.Ok(()); }   // varargs
+    if declared == actual { return Result.Ok(()); }
+    Result.Err(ArityMismatch("arity mismatch".clone()))
 }
 
 // -----------------------------------------------------------------------------
@@ -138,8 +138,8 @@ implement ScalarFn for ClosureScalar {
     fn flags(&self) -> FnFlags { self.fl.clone() }
     fn eval(&self, args: &List<Register>) -> Result<Register, ScalarFnError> {
         match check_arity(self.ar, args.len()) {
-            Ok(_)  => (self.body)(args),
-            Err(e) => Err(e),
+            Result.Ok(_)  => (self.body)(args),
+            Result.Err(e) => Result.Err(e),
         }
     }
 }

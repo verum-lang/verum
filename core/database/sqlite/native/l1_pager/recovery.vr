@@ -128,15 +128,15 @@ public fn wal_scan(
     page_size: Int,
 ) -> Result<RecoveryPlan, RecoveryError> {
     if page_size <= 0 {
-        return Err(ZeroPageSize);
+        return Result.Err(ZeroPageSize);
     }
     if wal_bytes.len() < WAL_HEADER_SIZE {
-        return Err(ShortFile(wal_bytes.len()));
+        return Result.Err(ShortFile(wal_bytes.len()));
     }
 
     let header = match wal_header_parse(wal_bytes) {
-        Ok(h)  => h,
-        Err(_) => { return Err(BadMagic); }
+        Result.Ok(h)  => h,
+        Result.Err(_) => { return Result.Err(BadMagic); }
     };
 
     // Seed the running checksum over the header's pre-checksum bytes
@@ -162,7 +162,7 @@ public fn wal_scan(
     // comparison and could allow an attacker to swap salts to bypass
     // the torn-tail invariant).
     if running.s1 != header.checksum_1 || running.s2 != header.checksum_2 {
-        return Err(BadMagic);
+        return Result.Err(BadMagic);
     }
 
     let frame_stride = WAL_FRAME_HEADER_SIZE + page_size;
@@ -185,8 +185,8 @@ public fn wal_scan(
             j = j + 1;
         }
         let fh = match wal_frame_header_parse(&fh_slice) {
-            Ok(h)  => h,
-            Err(_) => break,
+            Result.Ok(h)  => h,
+            Result.Err(_) => break,
         };
 
         // Salt mismatch → invalid; every subsequent frame is also invalid.
@@ -252,7 +252,7 @@ public fn wal_scan(
         out
     };
 
-    Ok(RecoveryPlan {
+    Result.Ok(RecoveryPlan {
         valid_frame_count: valid_count,
         last_commit_index: last_commit_idx,
         db_size_after: db_size_after,

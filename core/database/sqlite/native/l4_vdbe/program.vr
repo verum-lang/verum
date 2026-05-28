@@ -156,12 +156,12 @@ implement VdbeProgram {
     public fn register_count(&self) -> Int { self.num_registers }
     public fn cursor_count(&self) -> Int { self.cursors.len() }
 
-    /// Look up a cursor declaration by cursor_id. Returns None when
+    /// Look up a cursor declaration by cursor_id. Returns Maybe.None when
     /// out of range; used by L6 bridge to seed row-stores.
     public fn get_cursor_decl(&self, i: Int) -> Maybe<CursorDecl> {
-        if i < 0 || i >= self.cursors.len() { return None; }
+        if i < 0 || i >= self.cursors.len() { return Maybe.None; }
         let d = &self.cursors[i];
-        Some(CursorDecl {
+        Maybe.Some(CursorDecl {
             cursor_id: d.cursor_id,
             kind: d.kind,
             root_page: d.root_page,
@@ -218,10 +218,10 @@ implement VdbeProgram {
 
     public fn get_opcode(&self, idx: Int) -> Maybe<Opcode> {
         if idx < 0 || idx >= self.instructions.len() {
-            return None;
+            return Maybe.None;
         }
         // Return a copy via match on the variant.
-        Some(clone_opcode(&self.instructions[idx]))
+        Maybe.Some(clone_opcode(&self.instructions[idx]))
     }
 }
 

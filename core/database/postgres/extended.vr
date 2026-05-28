@@ -29,7 +29,7 @@
 module core.database.postgres.extended;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
 mount core.database.common.types.{WireValue, WvNull, WvPresent};
@@ -188,9 +188,9 @@ implement ExtendedResultBuilder {
     public fn new() -> ExtendedResultBuilder {
         ExtendedResultBuilder {
             rows: List.new(),
-            row_desc: None,
+            row_desc: Maybe.None,
             command_tag: "".clone(),
-            diagnostic: None,
+            diagnostic: Maybe.None,
             finished: false,
         }
     }
@@ -209,7 +209,7 @@ implement ExtendedResultBuilder {
                 // current set as a partial result.
                 self.command_tag = "PORTAL_SUSPEND".clone();
             }
-            BmRowDescription(rd) => { self.row_desc = Some(rd); }
+            BmRowDescription(rd) => { self.row_desc = Maybe.Some(rd); }
             BmDataRow(dr)        => { self.rows.push(dr.values); }
             BmCommandComplete(cc) => {
                 if self.command_tag.len() == 0 { self.command_tag = cc.tag; }
@@ -217,7 +217,7 @@ implement ExtendedResultBuilder {
             BmEmptyQueryResponse => {
                 if self.command_tag.len() == 0 { self.command_tag = "EMPTY".clone(); }
             }
-            BmError(d) => { self.diagnostic = Some(d); }
+            BmError(d) => { self.diagnostic = Maybe.Some(d); }
             BmNotice(_) => {}
             BmReadyForQuery(_) => { self.finished = true; }
             BmParameterStatus(_) => {}
@@ -228,14 +228,14 @@ implement ExtendedResultBuilder {
         self.finished
     }
 
-    /// Finalise. Returns Err(DbError) when the round contained an
+    /// Finalise. Returns Result.Err(DbError) when the round contained an
     /// ErrorResponse; otherwise the populated result.
     public fn finish(self, error_translator: fn(Diagnostic) -> DbError)
         -> Result<ExtendedQueryResult, DbError>
     {
         match self.diagnostic {
-            Some(d) => Err(error_translator(d)),
-            None    => Ok(ExtendedQueryResult {
+            Maybe.Some(d) => Result.Err(error_translator(d)),
+            Maybe.None    => Result.Ok(ExtendedQueryResult {
                 command_tag: self.command_tag,
                 row_description: self.row_desc,
                 rows: self.rows,
@@ -272,9 +272,9 @@ implement ExtendedResultArenaBuilder {
     public fn new() -> ExtendedResultArenaBuilder {
         ExtendedResultArenaBuilder {
             rows: List.new(),
-            row_desc: None,
+            row_desc: Maybe.None,
             command_tag: "".clone(),
-            diagnostic: None,
+            diagnostic: Maybe.None,
             finished: false,
         }
     }
@@ -290,7 +290,7 @@ implement ExtendedResultArenaBuilder {
             BmaPortalSuspend    => {
                 self.command_tag = "PORTAL_SUSPEND".clone();
             }
-            BmaRowDescription(rd) => { self.row_desc = Some(rd); }
+            BmaRowDescription(rd) => { self.row_desc = Maybe.Some(rd); }
             BmaDataRow(arow)      => { self.rows.push(arow); }
             BmaCommandComplete(cc) => {
                 if self.command_tag.len() == 0 { self.command_tag = cc.tag; }
@@ -298,7 +298,7 @@ implement ExtendedResultArenaBuilder {
             BmaEmptyQueryResponse => {
                 if self.command_tag.len() == 0 { self.command_tag = "EMPTY".clone(); }
             }
-            BmaError(d) => { self.diagnostic = Some(d); }
+            BmaError(d) => { self.diagnostic = Maybe.Some(d); }
             BmaNotice(_) => {}
             BmaReadyForQuery(_) => { self.finished = true; }
             BmaParameterStatus(_) => {}
@@ -313,8 +313,8 @@ implement ExtendedResultArenaBuilder {
         -> Result<ExtendedQueryArenaResult, DbError>
     {
         match self.diagnostic {
-            Some(d) => Err(error_translator(d)),
-            None    => Ok(ExtendedQueryArenaResult {
+            Maybe.Some(d) => Result.Err(error_translator(d)),
+            Maybe.None    => Result.Ok(ExtendedQueryArenaResult {
                 command_tag: self.command_tag,
                 row_description: self.row_desc,
                 rows: self.rows,
@@ -374,7 +374,7 @@ public fn build_bind_typed(
         v.push(1);
         v
     };
-    Ok(core.database.postgres.wire.frontend.bind(
+    Result.Ok(core.database.postgres.wire.frontend.bind(
         portal,
         stmt_name,
         param_formats.as_slice(),
@@ -386,7 +386,7 @@ public fn build_bind_typed(
 /// Decode a single `DataRow` payload (List<WireValue>) into typed
 /// values using the column OIDs from the most-recent RowDescription.
 /// Each non-NULL column flows through `decode_typed_from_bytes`;
-/// NULL columns produce `None`.
+/// NULL columns produce `Maybe.None`.
 ///
 /// `column_oids[i]` MUST correspond positionally to `row[i]`. The
 /// arena is borrowed for staging — decoders that allocate (text /
@@ -399,7 +399,7 @@ public fn decode_typed_row(
     let n_cols = column_oids.len() as Int;
     let n_vals = row.len() as Int;
     if n_cols != n_vals {
-        return Err(DbError.DecodeFailed {
+        return Result.Err(DbError.DecodeFailed {
             fault: core.database.common.error.DecodeFault {
                 column_index: -1,
                 column_name: "".clone(),
@@ -413,15 +413,15 @@ public fn decode_typed_row(
     let mut i: Int = 0;
     while i < n_cols {
         match &row[i] {
-            WvNull => out.push(None),
+            WvNull => out.push(Maybe.None),
             WvPresent { bytes, .. } => {
                 let value = decode_typed_from_bytes(column_oids[i], bytes.as_slice(), arena)?;
-                out.push(Some(value));
+                out.push(Maybe.Some(value));
             }
         }
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 /// Convenience — decode every row in an `ExtendedQueryResult`'s
@@ -434,8 +434,8 @@ public fn decode_typed_result(
     arena: &mut SpindleArena,
 ) -> Result<List<List<Maybe<TypedValue>>>, DbError> {
     let oids: List<Int> = match &result.row_description {
-        None => List.new(),
-        Some(rd) => {
+        Maybe.None => List.new(),
+        Maybe.Some(rd) => {
             let mut v: List<Int> = List.with_capacity(rd.fields.len() as Int);
             let mut i: Int = 0;
             while i < rd.fields.len() as Int {
@@ -452,5 +452,5 @@ public fn decode_typed_result(
         out.push(typed_row);
         k = k + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }

@@ -82,10 +82,10 @@ public fn checksum_chain_continuous(
 public fn last_commit_index(frames: &List<FrameRecord>) -> Maybe<Int> {
     let mut i: Int = frames.len() - 1;
     while i >= 0 {
-        if frames[i].db_size_after > 0 { return Some(i); }
+        if frames[i].db_size_after > 0 { return Maybe.Some(i); }
         i = i - 1;
     }
-    None
+    Maybe.None
 }
 
 public fn no_split_commit(frames: &List<FrameRecord>) -> Bool {
@@ -149,10 +149,10 @@ public fn recovery_truncates_to_last_commit(
 ) -> Maybe<Int> {
     let mut i: Int = frames_seen_at_crash - 1;
     while i >= 0 {
-        if frames[i].db_size_after > 0 { return Some(i + 1); }
+        if frames[i].db_size_after > 0 { return Maybe.Some(i + 1); }
         i = i - 1;
     }
-    None
+    Maybe.None
 }
 
 public fn recovery_preserves_commits(
@@ -162,13 +162,13 @@ public fn recovery_preserves_commits(
     let truncated = recovery_truncates_to_last_commit(crash_after, frames);
     let full      = last_commit_index(frames);
     match truncated {
-        Some(t) => match full {
-            Some(f) => t <= f + 1,
-            None    => true,   // crash after no commits at all is fine
+        Maybe.Some(t) => match full {
+            Maybe.Some(f) => t <= f + 1,
+            Maybe.None    => true,   // crash after no commits at all is fine
         },
-        None => match full {
-            Some(_) => false,  // truncation lost a commit
-            None    => true,
+        Maybe.None => match full {
+            Maybe.Some(_) => false,  // truncation lost a commit
+            Maybe.None    => true,
         },
     }
 }

@@ -45,10 +45,10 @@
 //   * `tablespaces() -> &List<BackupTablespace>` — read after start.
 //   * `next_tablespace_data() -> Result<Maybe<List<Byte>>, DbError>`
 //     reads the next CopyData chunk of the current tablespace; on
-//     `Ok(None)` the tablespace's CopyDone arrived, advance state.
+//     `Result.Ok(Maybe.None)` the tablespace's CopyDone arrived, advance state.
 //   * `manifest_bytes() -> Result<Maybe<List<Byte>>, DbError>` —
 //     once tablespaces are drained, this drains the manifest
-//     stream chunk-by-chunk; `Ok(None)` after CopyDone.
+//     stream chunk-by-chunk; `Result.Ok(Maybe.None)` after CopyDone.
 //   * `finish() -> Result<(), DbError>` — drain to ReadyForQuery.
 //
 // Out of V0:
@@ -69,7 +69,7 @@
 module core.database.postgres.base_backup;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -154,31 +154,31 @@ fn render_options(o: &BaseBackupOptions) -> Text {
         first = false;
         out.push_str(&k);
         match v {
-            Some(s) => { out.push_str(" "); out.push_str(&s); }
-            None    => {}
+            Maybe.Some(s) => { out.push_str(" "); out.push_str(&s); }
+            Maybe.None    => {}
         }
     };
 
-    push("LABEL".clone(), Some(f"'{o.label}'"));
-    if o.progress     { push("PROGRESS".clone(), None); }
-    if o.fast         { push("FAST".clone(), None); }
-    if o.include_wal  { push("WAL".clone(), None); }
-    if o.no_wait      { push("NOWAIT".clone(), None); }
+    push("LABEL".clone(), Maybe.Some(f"'{o.label}'"));
+    if o.progress     { push("PROGRESS".clone(), Maybe.None); }
+    if o.fast         { push("FAST".clone(), Maybe.None); }
+    if o.include_wal  { push("WAL".clone(), Maybe.None); }
+    if o.no_wait      { push("NOWAIT".clone(), Maybe.None); }
     if o.max_rate_bytes_per_sec > 0 {
-        push("MAX_RATE".clone(), Some(f"{o.max_rate_bytes_per_sec}"));
+        push("MAX_RATE".clone(), Maybe.Some(f"{o.max_rate_bytes_per_sec}"));
     }
-    if o.tablespace_map { push("TABLESPACE_MAP".clone(), None); }
+    if o.tablespace_map { push("TABLESPACE_MAP".clone(), Maybe.None); }
     match o.manifest {
-        BbmYes         => { push("MANIFEST".clone(), Some("'yes'".clone())); }
-        BbmNo          => { push("MANIFEST".clone(), Some("'no'".clone())); }
-        BbmForceEncode => { push("MANIFEST".clone(), Some("'force-encode'".clone())); }
+        BbmYes         => { push("MANIFEST".clone(), Maybe.Some("'yes'".clone())); }
+        BbmNo          => { push("MANIFEST".clone(), Maybe.Some("'no'".clone())); }
+        BbmForceEncode => { push("MANIFEST".clone(), Maybe.Some("'force-encode'".clone())); }
     }
     if o.manifest_checksums.len() > 0 && !is_no_manifest(&o.manifest) {
-        push("MANIFEST_CHECKSUMS".clone(), Some(f"'{o.manifest_checksums}'"));
+        push("MANIFEST_CHECKSUMS".clone(), Maybe.Some(f"'{o.manifest_checksums}'"));
     }
     match o.target {
         BbtClient    => {}                     // server default
-        BbtBlackhole => { push("TARGET".clone(), Some("'blackhole'".clone())); }
+        BbtBlackhole => { push("TARGET".clone(), Maybe.Some("'blackhole'".clone())); }
     }
 
     out.push_str(")");
@@ -248,11 +248,11 @@ public fn start(
     match repl_conn.mode() {
         RmPhysical => {}
         _ => {
-            return Err(must_be_physical("base_backup"));
+            return Result.Err(must_be_physical("base_backup"));
         }
     }
     if repl_conn.is_streaming() {
-        return Err(bad_state("base_backup after START_REPLICATION"));
+        return Result.Err(bad_state("base_backup after START_REPLICATION"));
     }
 
     let conn_inner = repl_conn.conn_mut();
@@ -297,7 +297,7 @@ public fn start(
                 conn_inner.push_back_replication(msg)?;
                 break;
             }
-            BmError(d) => { return Err(dberr_from_pg(d)); }
+            BmError(d) => { return Result.Err(dberr_from_pg(d)); }
             BmNotice(_) | BmParameterStatus(_) => {}
             BmReadyForQuery(_) => {
                 // No tablespaces / immediate completion (e.g.
@@ -309,13 +309,13 @@ public fn start(
                     state: BbsDone,
                     has_manifest: !is_no_manifest(&opts.manifest),
                 };
-                return Ok(s);
+                return Result.Ok(s);
             }
             _ => {}
         }
     }
 
-    Ok(BaseBackupSession {
+    Result.Ok(BaseBackupSession {
         conn: repl_conn,
         tablespaces: tablespaces,
         current_idx: 0,
@@ -332,10 +332,10 @@ implement BaseBackupSession {
     }
 
     /// Read the next CopyData chunk for the *current* tablespace.
-    /// `Ok(Some(bytes))` until CopyDone; `Ok(None)` exactly once
+    /// `Result.Ok(Maybe.Some(bytes))` until CopyDone; `Result.Ok(Maybe.None)` exactly once
     /// per tablespace then the session advances `current_idx`.
     /// Subsequent calls move to the next tablespace's CopyOut +
-    /// CopyData chain. Returns `Ok(None)` again once every
+    /// CopyData chain. Returns `Result.Ok(Maybe.None)` again once every
     /// tablespace has been drained — at that point either call
     /// `manifest_bytes()` (if MANIFEST was requested) or
     /// `finish()`.
@@ -355,30 +355,30 @@ implement BaseBackupSession {
                         _ => {
                             // Mid-tablespace and we got a fresh
                             // CopyOut — protocol violation.
-                            return Err(bad_state("unexpected CopyOutResponse mid-tablespace"));
+                            return Result.Err(bad_state("unexpected CopyOutResponse mid-tablespace"));
                         }
                     }
                 }
                 BmCopyData { bytes } => {
-                    return Ok(Some(bytes));
+                    return Result.Ok(Maybe.Some(bytes));
                 }
                 BmCopyDone => {
                     // Tablespace stream end.
                     self.current_idx = self.current_idx + 1;
                     self.state = BbsBetweenTablespaces;
-                    return Ok(None);
+                    return Result.Ok(Maybe.None);
                 }
                 BmRowDescription(_) => {
                     // Manifest result-set header — re-stash; the
                     // caller should now switch to manifest_bytes().
                     conn_inner.push_back_replication(msg)?;
-                    return Ok(None);
+                    return Result.Ok(Maybe.None);
                 }
-                BmError(d) => { return Err(dberr_from_pg(d)); }
+                BmError(d) => { return Result.Err(dberr_from_pg(d)); }
                 BmNotice(_) | BmParameterStatus(_) => {}
                 BmReadyForQuery(_) => {
                     self.state = BbsDone;
-                    return Ok(None);
+                    return Result.Ok(Maybe.None);
                 }
                 _ => {}
             }
@@ -387,12 +387,12 @@ implement BaseBackupSession {
 
     /// Drain the manifest stream chunk-by-chunk. Caller must have
     /// already drained every tablespace via `next_tablespace_data`
-    /// (i.e. seen `Ok(None)` after the last tablespace's
-    /// CopyDone). Returns `Ok(Some(bytes))` for each manifest
-    /// CopyData; `Ok(None)` once after CopyDone.
+    /// (i.e. seen `Result.Ok(Maybe.None)` after the last tablespace's
+    /// CopyDone). Returns `Result.Ok(Maybe.Some(bytes))` for each manifest
+    /// CopyData; `Result.Ok(Maybe.None)` once after CopyDone.
     public fn manifest_bytes(&mut self) -> Result<Maybe<List<Byte>>, DbError> {
         if !self.has_manifest {
-            return Ok(None);
+            return Result.Ok(Maybe.None);
         }
         let conn_inner = self.conn.conn_mut();
         loop {
@@ -410,16 +410,16 @@ implement BaseBackupSession {
                     self.state = BbsInManifestData;
                 }
                 BmCopyData { bytes } => {
-                    return Ok(Some(bytes));
+                    return Result.Ok(Maybe.Some(bytes));
                 }
                 BmCopyDone => {
-                    return Ok(None);
+                    return Result.Ok(Maybe.None);
                 }
-                BmError(d) => { return Err(dberr_from_pg(d)); }
+                BmError(d) => { return Result.Err(dberr_from_pg(d)); }
                 BmNotice(_) | BmParameterStatus(_) => {}
                 BmReadyForQuery(_) => {
                     self.state = BbsDone;
-                    return Ok(None);
+                    return Result.Ok(Maybe.None);
                 }
                 _ => {}
             }
@@ -434,17 +434,17 @@ implement BaseBackupSession {
         let conn_inner = self.conn.conn_mut();
         loop {
             match self.state {
-                BbsDone => { return Ok(()); }
+                BbsDone => { return Result.Ok(()); }
                 _ => {}
             }
             let msg = conn_inner.read_replication_message()?;
             match msg {
                 BmReadyForQuery(_) => {
                     self.state = BbsDone;
-                    return Ok(());
+                    return Result.Ok(());
                 }
                 BmCommandComplete(_) => {}
-                BmError(d) => { return Err(dberr_from_pg(d)); }
+                BmError(d) => { return Result.Err(dberr_from_pg(d)); }
                 BmCopyData { .. } | BmCopyDone | BmCopyOutResponse(_) => {
                     // Caller short-circuited mid-stream — drain
                     // and discard.
@@ -484,8 +484,8 @@ fn wire_text_or_empty(v: &WireValue) -> Text {
         WvNull => "".clone(),
         WvPresent { bytes, .. } => {
             match Text.from_utf8(bytes.as_slice()) {
-                Ok(s)  => s,
-                Err(_) => "".clone(),
+                Result.Ok(s)  => s,
+                Result.Err(_) => "".clone(),
             }
         }
     }

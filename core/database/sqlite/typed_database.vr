@@ -71,7 +71,7 @@
 module core.database.sqlite.typed_database;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount base.memory.Shared;
 
@@ -100,38 +100,38 @@ implement<C: CanRead> Database<SqlitePool, C> {
     /// acquire dominates.
     public fn query_rows(&self, sql: &Text) -> Result<List<List<SqliteValue>>, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().query_all(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(e.message()),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(e.message()),
         }
         result
     }
 
-    /// First-row-only convenience. Returns `Ok(None)` when the
+    /// First-row-only convenience. Returns `Result.Ok(Maybe.None)` when the
     /// query produced no rows.
     public fn query_first(&self, sql: &Text) -> Result<Maybe<List<SqliteValue>>, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().query_first(sql);
         match &result {
-            Ok(row) => {
+            Result.Ok(row) => {
                 handle.release_healthy();
                 if (row.len() as Int) == 0 {
-                    Ok(None)
+                    Result.Ok(Maybe.None)
                 } else {
-                    Ok(Some(row.clone()))
+                    Result.Ok(Maybe.Some(row.clone()))
                 }
             }
-            Err(e) => {
+            Result.Err(e) => {
                 let msg = e.message();
                 handle.release_discard(msg);
-                Err(e.clone())
+                Result.Err(e.clone())
             }
         }
     }
@@ -149,13 +149,13 @@ implement<C: CanWrite> Database<SqlitePool, C> {
     /// `SqliteConnection.inner_mut`).
     public fn execute_simple(&self, sql: &Text) -> Result<(), DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().execute(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(e.message()),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(e.message()),
         }
         result
     }
@@ -183,14 +183,14 @@ implement<C: CanTx> Database<SqlitePool, C> {
     /// write.
     public fn begin(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         match handle.conn_mut().begin_tx() {
-            Ok(tx) => Ok(SqliteTxScope { tx: Some(tx), handle: handle }),
-            Err(e) => {
+            Result.Ok(tx) => Result.Ok(SqliteTxScope { tx: Maybe.Some(tx), handle: handle }),
+            Result.Err(e) => {
                 handle.release_discard(e.message());
-                Err(e)
+                Result.Err(e)
             }
         }
     }
@@ -200,14 +200,14 @@ implement<C: CanTx> Database<SqlitePool, C> {
     /// timeout kicks in at BEGIN, not mid-statement.
     public fn begin_immediate(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         match handle.conn_mut().begin_tx_immediate() {
-            Ok(tx) => Ok(SqliteTxScope { tx: Some(tx), handle: handle }),
-            Err(e) => {
+            Result.Ok(tx) => Result.Ok(SqliteTxScope { tx: Maybe.Some(tx), handle: handle }),
+            Result.Err(e) => {
                 handle.release_discard(e.message());
-                Err(e)
+                Result.Err(e)
             }
         }
     }
@@ -217,14 +217,14 @@ implement<C: CanTx> Database<SqlitePool, C> {
     /// that absolutely cannot tolerate concurrent writers.
     public fn begin_exclusive(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         match handle.conn_mut().begin_tx_exclusive() {
-            Ok(tx) => Ok(SqliteTxScope { tx: Some(tx), handle: handle }),
-            Err(e) => {
+            Result.Ok(tx) => Result.Ok(SqliteTxScope { tx: Maybe.Some(tx), handle: handle }),
+            Result.Err(e) => {
                 handle.release_discard(e.message());
-                Err(e)
+                Result.Err(e)
             }
         }
     }
@@ -246,9 +246,9 @@ implement<C: CanTx> Database<SqlitePool, C> {
 /// Internal note on the `Maybe<Transaction>` shape: SQLite's
 /// `commit_tx` consumes the Transaction value. We hold it in a
 /// `Maybe` so the affine consume can `take()` it before passing
-/// to `commit_tx`. After `take`, the inner is None — but the
+/// to `commit_tx`. After `take`, the inner is Maybe.None — but the
 /// affine wrapper itself is consumed in the same expression, so
-/// no observation of `None` is possible from outside.
+/// no observation of `Maybe.None` is possible from outside.
 public type affine SqliteTxScope<P> is {
     tx: Maybe<Transaction>,
     handle: PooledConnection<SqliteConnection>,
@@ -268,13 +268,13 @@ implement SqliteTxScope<SqlitePool> {
     /// state may be ambiguous).
     public fn commit(mut self) -> Result<(), DbError> {
         let tx = match self.tx.take() {
-            Some(t) => t,
-            None    => return Err(tx_already_consumed()),
+            Maybe.Some(t) => t,
+            Maybe.None    => return Result.Err(tx_already_consumed()),
         };
         let result = self.handle.conn_mut().commit_tx(tx);
         match &result {
-            Ok(_)  => self.handle.release_healthy(),
-            Err(e) => self.handle.release_discard(e.message()),
+            Result.Ok(_)  => self.handle.release_healthy(),
+            Result.Err(e) => self.handle.release_discard(e.message()),
         }
         result
     }
@@ -282,13 +282,13 @@ implement SqliteTxScope<SqlitePool> {
     /// ROLLBACK and release. Symmetric to `commit`.
     public fn rollback(mut self) -> Result<(), DbError> {
         let tx = match self.tx.take() {
-            Some(t) => t,
-            None    => return Err(tx_already_consumed()),
+            Maybe.Some(t) => t,
+            Maybe.None    => return Result.Err(tx_already_consumed()),
         };
         let result = self.handle.conn_mut().rollback_tx(tx);
         match &result {
-            Ok(_)  => self.handle.release_healthy(),
-            Err(e) => self.handle.release_discard(e.message()),
+            Result.Ok(_)  => self.handle.release_healthy(),
+            Result.Err(e) => self.handle.release_discard(e.message()),
         }
         result
     }
@@ -315,13 +315,13 @@ implement<C: CanDdl> Database<SqlitePool, C> {
     /// scope on it.
     public fn execute_ddl(&self, sql: &Text) -> Result<(), DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().execute(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(e.message()),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(e.message()),
         }
         result
     }
@@ -338,13 +338,13 @@ implement<C: CanUnsafe> Database<SqlitePool, C> {
     /// requires at the call site, every invocation is auditable.
     public fn execute_raw_unsafe(&self, sql: &Text) -> Result<(), DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().execute(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(e.message()),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(e.message()),
         }
         result
     }

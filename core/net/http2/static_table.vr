@@ -22,11 +22,11 @@ public type HpackStaticEntry is {
     value: &'static Text,
 }
 
-/// Entry lookup — 1-indexed per RFC 7541 §2.3.3. Returns None for
+/// Entry lookup — 1-indexed per RFC 7541 §2.3.3. Returns Maybe.None for
 /// index 0 or > STATIC_TABLE_SIZE.
 public fn entry(index: Int) -> Maybe<HpackStaticEntry> {
-    if index < 1 || index > STATIC_TABLE_SIZE { return None; }
-    Some(ENTRIES[index - 1])
+    if index < 1 || index > STATIC_TABLE_SIZE { return Maybe.None; }
+    Maybe.Some(ENTRIES[index - 1])
 }
 
 public const ENTRIES: [HpackStaticEntry; 61] = [

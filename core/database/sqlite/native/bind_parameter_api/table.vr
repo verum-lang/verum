@@ -31,7 +31,7 @@ implement ParamTable {
 
     public fn sqlite3_bind_parameter_count(&self) -> Int { self.params.len() }
 
-    /// 1-based index → name or None.
+    /// 1-based index → name or Maybe.None.
     public fn sqlite3_bind_parameter_name(&self, index: Int) -> Maybe<Text> {
         if index <= 0 || index > self.params.len() { return Maybe.None; }
         spec_name(self.params.get(index - 1))

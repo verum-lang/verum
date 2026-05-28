@@ -86,11 +86,11 @@ implement TraceState {
         let mut i = 0;
         while i < self.entries.len() {
             if self.entries[i].0 == *key {
-                return Some(&self.entries[i].1);
+                return Maybe.Some(&self.entries[i].1);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Insert / update a key. New keys prepend per W3C §3.3.1.1.

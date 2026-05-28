@@ -2,7 +2,7 @@
 // panic.vr - Panic, assert, and control flow functions
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None (self-contained)
+// Dependencies: Maybe.None (self-contained)
 //
 
 // This module is self-contained to avoid circular dependencies.
@@ -189,8 +189,8 @@ public fn assert_some<T>(value: Maybe<T>, msg: Text = "assertion failed: expecte
     }
 }
 
-/// Assert that a value is None.
-public fn assert_none<T>(value: Maybe<T>, msg: Text = "assertion failed: expected None") {
+/// Assert that a value is Maybe.None.
+public fn assert_none<T>(value: Maybe<T>, msg: Text = "assertion failed: expected Maybe.None") {
     match value {
         Maybe.Some(_) => panic(msg),
         Maybe.None => {},
@@ -477,7 +477,7 @@ public fn default_panic_hook(info: &PanicInfo) {
 public type CatchResult<T> is Result<T, PanicInfo>;
 
 /// Attempt to run a function, catching any panic.
-/// Returns Ok(res) if successful, Err(panic_info) if a panic occurred.
+/// Returns Result.Ok(res) if successful, Result.Err(panic_info) if a panic occurred.
 @intrinsic("catch_unwind")
 public fn catch_unwind<T, F: fn() -> T>(f: F) -> Result<T, PanicInfo> {
     @vbc(CATCH_UNWIND, f)

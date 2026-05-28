@@ -115,21 +115,21 @@ public type Executor is {
 implement Executor {
     public fn new() -> Executor {
         Executor {
-            timeout:      None,
-            retry:        None,
-            cancel_token: None,
+            timeout:      Maybe.None,
+            retry:        Maybe.None,
+            cancel_token: Maybe.None,
             grace:        Duration.from_millis(5000),
         }
     }
 
     public fn with_timeout(mut self, t: Duration) -> Executor {
-        self.timeout = Some(t); self
+        self.timeout = Maybe.Some(t); self
     }
     public fn with_retry(mut self, p: RetryPolicy) -> Executor {
-        self.retry = Some(p); self
+        self.retry = Maybe.Some(p); self
     }
     public fn with_cancel(mut self, t: CancellationToken) -> Executor {
-        self.cancel_token = Some(t); self
+        self.cancel_token = Maybe.Some(t); self
     }
     public fn with_grace(mut self, g: Duration) -> Executor {
         self.grace = g; self
@@ -145,18 +145,18 @@ implement Executor {
         // Inline retry loop — generic dispatch closure can't be expressed
         // as an `async fn` trait bound in current grammar.
         let mut outcome = sh_with_cancel(cmd_text, &token, self.grace).await;
-        if let Some(policy) = &self.retry {
+        if let Maybe.Some(policy) = &self.retry {
             let mut backoff = policy.backoff.clone();
             let mut attempt = 1;
             loop {
                 match &outcome {
-                    Ok(_)  => return outcome,
-                    Err(e) => {
+                    Result.Ok(_)  => return outcome,
+                    Result.Err(e) => {
                         if attempt >= policy.max_attempts { return outcome; }
                         if !(policy.retry_on)(e)          { return outcome; }
                         match backoff.next_delay() {
-                            None    => return outcome,
-                            Some(d) => sleep_then(&d, &self.cancel_token).await,
+                            Maybe.None    => return outcome,
+                            Maybe.Some(d) => sleep_then(&d, &self.cancel_token).await,
                         }
                         attempt = attempt + 1;
                         outcome = sh_with_cancel(cmd_text, &token, self.grace).await;
@@ -175,18 +175,18 @@ implement Executor {
     {
         let token = self.acquire_token();
         let mut outcome = run_with_cancel(program, args.clone(), &token, self.grace).await;
-        if let Some(policy) = &self.retry {
+        if let Maybe.Some(policy) = &self.retry {
             let mut backoff = policy.backoff.clone();
             let mut attempt = 1;
             loop {
                 match &outcome {
-                    Ok(_)  => return outcome,
-                    Err(e) => {
+                    Result.Ok(_)  => return outcome,
+                    Result.Err(e) => {
                         if attempt >= policy.max_attempts { return outcome; }
                         if !(policy.retry_on)(e)          { return outcome; }
                         match backoff.next_delay() {
-                            None    => return outcome,
-                            Some(d) => sleep_then(&d, &self.cancel_token).await,
+                            Maybe.None    => return outcome,
+                            Maybe.Some(d) => sleep_then(&d, &self.cancel_token).await,
                         }
                         attempt = attempt + 1;
                         outcome = run_with_cancel(program, args.clone(), &token, self.grace).await;
@@ -217,10 +217,10 @@ implement Executor {
     /// (if any) with a timeout-derived token (if any).
     fn acquire_token(&self) -> CancellationToken {
         match (&self.cancel_token, &self.timeout) {
-            (None,    None)    => CancellationToken.new(),  // never fires
-            (Some(t), None)    => t.clone(),
-            (None,    Some(d)) => CancellationToken.with_timeout(*d),
-            (Some(t), Some(d)) => CancellationToken.combine(&[
+            (Maybe.None,    Maybe.None)    => CancellationToken.new(),  // never fires
+            (Maybe.Some(t), Maybe.None)    => t.clone(),
+            (Maybe.None,    Maybe.Some(d)) => CancellationToken.with_timeout(*d),
+            (Maybe.Some(t), Maybe.Some(d)) => CancellationToken.combine(&[
                 t.clone(),
                 CancellationToken.with_timeout(*d),
             ]),
@@ -230,8 +230,8 @@ implement Executor {
 
 async fn sleep_then(d: &Duration, token: &Maybe<CancellationToken>) {
     match token {
-        None => time_sleep(*d).await,
-        Some(t) => {
+        Maybe.None => time_sleep(*d).await,
+        Maybe.Some(t) => {
             // If cancellation fires during the sleep, wake immediately.
             select {
                 _ = time_sleep(*d).await => {},

@@ -116,26 +116,26 @@ implement Eq for CompileError {
 public fn compile(sql: &Text) -> Result<VdbeProgram, CompileError> {
     // Parse (which internally lexes).
     let stmt = match parse_one(sql) {
-        Ok(s)  => s,
-        Err(e) => { return Err(CeParse(e)); }
+        Result.Ok(s)  => s,
+        Result.Err(e) => { return Result.Err(CeParse(e)); }
     };
 
     // Plan.
     let plan = match plan_statement(&stmt) {
-        Ok(p)  => p,
-        Err(e) => { return Err(CePlan(e)); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(CePlan(e)); }
     };
 
     // Codegen.
     let mut program = match codegen(&plan, sql.clone()) {
-        Ok(p)  => p,
-        Err(e) => { return Err(CeCodegen(e)); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(CeCodegen(e)); }
     };
 
     // Optimise in-place.
     let _ = optimize(&mut program);
 
-    Ok(program)
+    Result.Ok(program)
 }
 
 // -----------------------------------------------------------------------------
@@ -204,7 +204,7 @@ public fn compile_options_ssa_canonical() -> CompileOptions {
 /// EXPLAIN trace harvested from the cost annotator.
 public type CompileOutput is {
     program: VdbeProgram,
-    /// `Some(text)` when `use_cost_annotation = true`; the multi-line
+    /// `Maybe.Some(text)` when `use_cost_annotation = true`; the multi-line
     /// EXPLAIN-style render of the cost-annotated plan tree.  Empty
     /// otherwise.
     explain_trace: Maybe<Text>,
@@ -227,12 +227,12 @@ public fn compile_with_options(
     opts: &CompileOptions,
 ) -> Result<CompileOutput, CompileError> {
     let stmt = match parse_one(sql) {
-        Ok(s)  => s,
-        Err(e) => { return Err(CeParse(e)); }
+        Result.Ok(s)  => s,
+        Result.Err(e) => { return Result.Err(CeParse(e)); }
     };
     let raw_plan = match plan_statement_with_schema(&stmt, schema) {
-        Ok(p)  => p,
-        Err(e) => { return Err(CePlan(e)); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(CePlan(e)); }
     };
 
     // Plan-level rewrite passes (§13.5): flatten Project chains,
@@ -258,8 +258,8 @@ public fn compile_with_options(
         let annotated = annotate_with_cost_schema(&plan, &stats, schema);
         let explain = explain_annotated(&annotated);
         let prog = match codegen_annotated(&annotated, sql.clone()) {
-            Ok(p)  => p,
-            Err(e) => { return Err(CeCodegen(e)); }
+            Result.Ok(p)  => p,
+            Result.Err(e) => { return Result.Err(CeCodegen(e)); }
         };
         // Stash the explain trace into the closure-local for output
         // assembly below.  Verum's affine analyzer prefers the
@@ -268,8 +268,8 @@ public fn compile_with_options(
         prog
     } else {
         match codegen(&plan, sql.clone()) {
-            Ok(p)  => p,
-            Err(e) => { return Err(CeCodegen(e)); }
+            Result.Ok(p)  => p,
+            Result.Err(e) => { return Result.Err(CeCodegen(e)); }
         }
     };
     let explain_trace = if opts.use_cost_annotation {
@@ -279,9 +279,9 @@ public fn compile_with_options(
         // CostAnnotatedPlan through both paths above (Verum's
         // affine borrow analyzer is happier with this shape).
         let annotated2 = annotate_with_cost_schema(&plan, &stats, schema);
-        Some(explain_annotated(&annotated2))
+        Maybe.Some(explain_annotated(&annotated2))
     } else {
-        None
+        Maybe.None
     };
 
     // SSA-canonical pipeline: lift → resolve phis → optimize_ssa
@@ -302,23 +302,23 @@ public fn compile_with_options(
     if opts.run_optimizer {
         let _ = optimize(&mut program);
     }
-    Ok(CompileOutput { program: program, explain_trace: explain_trace })
+    Result.Ok(CompileOutput { program: program, explain_trace: explain_trace })
 }
 
 /// Same as `compile` but skips the optimiser pass — useful for
 /// EXPLAIN output that wants to show the raw codegen.
 public fn compile_raw(sql: &Text) -> Result<VdbeProgram, CompileError> {
     let stmt = match parse_one(sql) {
-        Ok(s)  => s,
-        Err(e) => { return Err(CeParse(e)); }
+        Result.Ok(s)  => s,
+        Result.Err(e) => { return Result.Err(CeParse(e)); }
     };
     let plan = match plan_statement(&stmt) {
-        Ok(p)  => p,
-        Err(e) => { return Err(CePlan(e)); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(CePlan(e)); }
     };
     match codegen(&plan, sql.clone()) {
-        Ok(p)  => Ok(p),
-        Err(e) => Err(CeCodegen(e)),
+        Result.Ok(p)  => Result.Ok(p),
+        Result.Err(e) => Result.Err(CeCodegen(e)),
     }
 }
 
@@ -332,17 +332,17 @@ public fn compile_with_schema(
     schema: &SchemaCache,
 ) -> Result<VdbeProgram, CompileError> {
     let stmt = match parse_one(sql) {
-        Ok(s)  => s,
-        Err(e) => { return Err(CeParse(e)); }
+        Result.Ok(s)  => s,
+        Result.Err(e) => { return Result.Err(CeParse(e)); }
     };
     let plan = match plan_statement_with_schema(&stmt, schema) {
-        Ok(p)  => p,
-        Err(e) => { return Err(CePlan(e)); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(CePlan(e)); }
     };
     let mut program = match codegen(&plan, sql.clone()) {
-        Ok(p)  => p,
-        Err(e) => { return Err(CeCodegen(e)); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(CeCodegen(e)); }
     };
     let _ = optimize(&mut program);
-    Ok(program)
+    Result.Ok(program)
 }

@@ -58,7 +58,7 @@ implement TraceId {
     }
 
     /// Decode from a 32-character lowercase hex string. Case-insensitive
-    /// for the hex digits; returns None if length is wrong or any byte
+    /// for the hex digits; returns Maybe.None if length is wrong or any byte
     /// is non-hex.
     public fn from_hex(hex: &[Byte]) -> Maybe<TraceId> {
         if hex.len() != 32 { return Maybe.None; }

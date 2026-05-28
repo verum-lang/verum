@@ -53,7 +53,7 @@ implement ViewDef {
     public fn set_schema(&mut self, s: Text) { self.schema_name = s; }
 
     public fn arity_or_none(&self) -> Maybe<Int> {
-        if self.column_aliases.len() == 0 { None }
-        else { Some(self.column_aliases.len()) }
+        if self.column_aliases.len() == 0 { Maybe.None }
+        else { Maybe.Some(self.column_aliases.len()) }
     }
 }

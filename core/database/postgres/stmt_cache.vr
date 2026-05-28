@@ -32,7 +32,7 @@
 module core.database.postgres.stmt_cache;
 
 mount core.*;
-mount base.{Text, Maybe, None, Some};
+mount base.{Text, Maybe, Maybe.None, Some};
 mount collections.List;
 
 public type CacheEntry is {
@@ -67,11 +67,11 @@ implement StmtCache {
         while i < self.entries.len() as Int {
             if self.entries[i].fingerprint == fingerprint {
                 self.entries[i].last_seen = self.clock;
-                return Some(self.entries[i].server_name.clone());
+                return Maybe.Some(self.entries[i].server_name.clone());
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Insert a new entry, evicting the least-recently-used one if
@@ -79,7 +79,7 @@ implement StmtCache {
     /// so the caller can emit `Close 'S'` to release the server slot.
     public fn insert(&mut self, fingerprint: Int, server_name: Text) -> Maybe<Text> {
         self.clock = self.clock + 1;
-        let mut evicted: Maybe<Text> = None;
+        let mut evicted: Maybe<Text> = Maybe.None;
         if self.entries.len() as Int >= self.cap {
             // Find the oldest entry by `last_seen`.
             let mut victim: Int = 0;
@@ -92,7 +92,7 @@ implement StmtCache {
                 }
                 i = i + 1;
             }
-            evicted = Some(self.entries[victim].server_name.clone());
+            evicted = Maybe.Some(self.entries[victim].server_name.clone());
             // O(n) remove — fine at cap=256.
             let mut new_entries: List<CacheEntry> = List.new();
             let mut k: Int = 0;

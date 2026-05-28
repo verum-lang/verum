@@ -131,7 +131,7 @@ fn check_unique_long_names(cmd: &CommandSpec, path: &Text, r: &mut VerificationR
     let mut i: Int = 0;
     while i < cmd.flags.len() {
         match &cmd.flags[i].long {
-            Some(l) => {
+            Maybe.Some(l) => {
                 if seen.contains(l.clone()) {
                     r.findings.push(Finding {
                         severity: Severity.Error,
@@ -142,7 +142,7 @@ fn check_unique_long_names(cmd: &CommandSpec, path: &Text, r: &mut VerificationR
                     seen.insert(l.clone());
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
         i = i + 1;
     }
@@ -153,7 +153,7 @@ fn check_unique_short_letters(cmd: &CommandSpec, path: &Text, r: &mut Verificati
     let mut i: Int = 0;
     while i < cmd.flags.len() {
         match cmd.flags[i].short {
-            Some(c) => {
+            Maybe.Some(c) => {
                 if seen.contains(c) {
                     r.findings.push(Finding {
                         severity: Severity.Error,
@@ -164,7 +164,7 @@ fn check_unique_short_letters(cmd: &CommandSpec, path: &Text, r: &mut Verificati
                     seen.insert(c);
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
         i = i + 1;
     }
@@ -182,8 +182,8 @@ fn check_groups_reference_real_flags(
         while m < group.members.len() {
             let member = &group.members[m];
             match cmd.find_flag_long(member) {
-                Some(_) => {},
-                None => {
+                Maybe.Some(_) => {},
+                Maybe.None => {
                     r.findings.push(Finding {
                         severity: Severity.Error,
                         where_: path.clone(),
@@ -214,10 +214,10 @@ fn check_required_not_conflicting(
             // required — otherwise the grammar admits no valid invocation.
             let other = &f.conflicts_with[k];
             match cmd.find_flag_long(other) {
-                Some(of) => if of.arity.is_required() {
+                Maybe.Some(of) => if of.arity.is_required() {
                     let key = match &f.long {
-                        Some(l) => l.clone(),
-                        None => "(this flag)".to_text(),
+                        Maybe.Some(l) => l.clone(),
+                        Maybe.None => "(this flag)".to_text(),
                     };
                     r.findings.push(Finding {
                         severity: Severity.Error,
@@ -227,7 +227,7 @@ fn check_required_not_conflicting(
                         ),
                     });
                 },
-                None => {},
+                Maybe.None => {},
             }
             k = k + 1;
         }

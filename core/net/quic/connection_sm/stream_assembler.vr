@@ -118,11 +118,11 @@ public fn assemble_stream_frames(
             let room = remaining - STREAM_FRAME_OVERHEAD_MAX;
             if room > 0 {
                 match emit_one_stream_frame(*sid, stream, flow, room) {
-                    Some((frame, consumed)) => {
+                    Maybe.Some((frame, consumed)) => {
                         frames.push(frame);
                         remaining = remaining - consumed;
                     },
-                    None => {},
+                    Maybe.None => {},
                 }
             }
         }
@@ -147,7 +147,7 @@ fn is_ready_to_emit(stream: &SendStream) -> Bool {
 }
 
 /// Emit one STREAM frame carrying as many bytes as fit in `room`.
-/// Returns `Some((frame, total_wire_bytes))` on success, `None` when
+/// Returns `Maybe.Some((frame, total_wire_bytes))` on success, `Maybe.None` when
 /// the stream is flow-control-blocked at zero headroom.
 fn emit_one_stream_frame(
     stream_id: UInt64,
@@ -156,11 +156,11 @@ fn emit_one_stream_frame(
     room:      Int,
 ) -> Maybe<(Frame, Int)> {
     let buf_len = stream.send_buf.len();
-    if buf_len == 0 { return None; }
+    if buf_len == 0 { return Maybe.None; }
 
     // Cap by conn-level FC + packet room.
     let take = if buf_len < room { buf_len } else { room };
-    if take <= 0 { return None; }
+    if take <= 0 { return Maybe.None; }
 
     // Drain bytes from the stream buffer.
     let mut data: List<Byte> = [];
@@ -182,8 +182,8 @@ fn emit_one_stream_frame(
     stream.max_written = new_max;
 
     let is_fin = match stream.final_size {
-        Some(fs) => new_max >= fs,
-        None     => false,
+        Maybe.Some(fs) => new_max >= fs,
+        Maybe.None     => false,
     };
 
     // Transition Send → DataSent once FIN lands on the wire.
@@ -203,7 +203,7 @@ fn emit_one_stream_frame(
 
     // Wire-bytes cost = header overhead + data length (worst case).
     let wire = STREAM_FRAME_OVERHEAD_MAX + take;
-    Some((frame, wire))
+    Maybe.Some((frame, wire))
 }
 
 // =============================================================================

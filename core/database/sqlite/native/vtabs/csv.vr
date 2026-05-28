@@ -160,23 +160,23 @@ public fn parse_row_at(buf: &List<Byte>, start: Int, opts: &CsvOptions) -> Resul
         }
         if b == (10 as Byte) {
             push_cell(&mut cells, cur, opts);
-            return Ok((CsvRow { cells: cells }, i + 1));
+            return Result.Ok((CsvRow { cells: cells }, i + 1));
         }
         if b == (13 as Byte) {
             // CR — peek for LF
             push_cell(&mut cells, cur, opts);
             let mut nxt = i + 1;
             if nxt < buf.len() && buf[nxt] == (10 as Byte) { nxt = nxt + 1; }
-            return Ok((CsvRow { cells: cells }, nxt));
+            return Result.Ok((CsvRow { cells: cells }, nxt));
         }
         cur.push_byte(b);
         i = i + 1;
     }
-    if in_quote { return Err(CeUnclosedQuote(start)); }
+    if in_quote { return Result.Err(CeUnclosedQuote(start)); }
     if cur.len() > 0 || cells.len() > 0 {
         push_cell(&mut cells, cur, opts);
     }
-    Ok((CsvRow { cells: cells }, i))
+    Result.Ok((CsvRow { cells: cells }, i))
 }
 
 fn push_cell(cells: &mut List<Text>, cell: Text, opts: &CsvOptions) {
@@ -219,15 +219,15 @@ public fn parse_all(buf: &List<Byte>, opts: &CsvOptions) -> Result<List<CsvRow>,
             continue;
         }
         match parse_row_at(buf, pos, opts) {
-            Ok(pair) => {
+            Result.Ok(pair) => {
                 out.push(pair.0);
                 pos = pair.1;
                 row_idx = row_idx + 1;
             }
-            Err(e) => { return Err(e); }
+            Result.Err(e) => { return Result.Err(e); }
         }
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // -----------------------------------------------------------------------------
@@ -320,12 +320,12 @@ implement CsvCursor {
     public fn filter(&mut self, _index_num: Int, _index_str: &Text, _args: &List<Register>) -> Result<(), VtabError> {
         let start_pos: Int = if self.skip_first && self.rows.len() > 0 { 1 } else { 0 };
         self.pos = start_pos;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn next_row(&mut self) -> Result<(), VtabError> {
         self.pos = self.pos + 1;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn eof(&self) -> Bool { self.pos >= self.rows.len() }

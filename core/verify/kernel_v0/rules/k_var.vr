@@ -57,8 +57,8 @@ mount super.super.judgment.{Derivation};
 /// Construct a T-Var derivation when the context lookup succeeds.
 ///
 
-/// Returns `Maybe::Some(derivation)` when `Γ.lookup(i)` is `Some(T)`,
-/// `Maybe::None` when the index is out of bounds (free variable —
+/// Returns `Maybe::Maybe.Some(derivation)` when `Γ.lookup(i)` is `Maybe.Some(T)`,
+/// `Maybe::Maybe.None` when the index is out of bounds (free variable —
 /// the elaborator rejects).
 ///
 
@@ -89,8 +89,8 @@ public fn introduce_var(
 /// **Soundness lemma — STRUCTURALLY PROVED.**
 ///
 
-/// `∀ ctx i T. ctx.lookup(i) = Some(T)
-///  → introduce_var(ctx, i) = Some(d)
+/// `∀ ctx i T. ctx.lookup(i) = Maybe.Some(T)
+///  → introduce_var(ctx, i) = Maybe.Some(d)
 ///  → d denotes a value of type T in the categorical model.`
 ///
 

@@ -61,8 +61,8 @@ implement JobHandle {
     /// Awaits the job to completion. Returns the typed result or error.
     public async fn wait(self) -> Result<ShellResult, ShellError> {
         match self.inner.join().await {
-            Ok(r)  => r,
-            Err(e) => Err(ShellError.SpawnFailed {
+            Result.Ok(r)  => r,
+            Result.Err(e) => Result.Err(ShellError.SpawnFailed {
                 command: self.command,
                 reason:  match e {
                     JoinError.Panic(msg)   => f"task panicked: {msg}",
@@ -74,7 +74,7 @@ implement JobHandle {
     }
 
     /// Sends SIGTERM, waits up to `grace` for clean exit, then SIGKILL.
-    /// Returns the eventual result (typically `Err(Cancelled)`).
+    /// Returns the eventual result (typically `Result.Err(Cancelled)`).
     public async fn kill(self) -> Result<ShellResult, ShellError> {
         self.cancel.cancel_with(CancelReason.Cancelled);
         self.wait().await
@@ -180,8 +180,8 @@ public async fn parallel_bounded(cmds: List<Text>, max_in_flight: Int)
 
 /// Runs commands in parallel; on the first failure, cancels the remaining
 /// jobs (SIGTERM → grace → SIGKILL). Returns:
-///  * `Ok(List<ShellResult>)` if every command succeeds
-///  * `Err(ShellError)` otherwise (the first error encountered)
+///  * `Result.Ok(List<ShellResult>)` if every command succeeds
+///  * `Result.Err(ShellError)` otherwise (the first error encountered)
 public async fn fail_fast(cmds: List<Text>)
     -> Result<List<ShellResult>, ShellError>
 
@@ -190,27 +190,27 @@ public async fn fail_fast(cmds: List<Text>)
     for cmd in cmds.iter() { jobs.push(background(cmd)); }
     // Watch every job; on first error, cancel the rest.
     let mut results: List<Result<ShellResult, ShellError>> = [];
-    for j in jobs.iter() { results.push(Ok(ShellResult.from_error(
+    for j in jobs.iter() { results.push(Result.Ok(ShellResult.from_error(
         ShellError.SpawnFailed { command: j.command.clone(), reason: "pending".into() }
     ))); }
-    let mut error: Maybe<ShellError> = None;
+    let mut error: Maybe<ShellError> = Maybe.None;
     for (i, job) in jobs.into_iter().enumerate() {
         match job.wait().await {
-            Ok(r)  => { results[i] = Ok(r); },
-            Err(e) => {
-                if error.is_none() { error = Some(e.clone()); }
-                results[i] = Err(e);
+            Result.Ok(r)  => { results[i] = Result.Ok(r); },
+            Result.Err(e) => {
+                if error.is_none() { error = Maybe.Some(e.clone()); }
+                results[i] = Result.Err(e);
             }
         }
     }
     match error {
-        Some(e) => Err(e),
-        None    => {
+        Maybe.Some(e) => Result.Err(e),
+        Maybe.None    => {
             let mut ok: List<ShellResult> = [];
             for r in results.into_iter() {
-                match r { Ok(v) => ok.push(v), Err(_) => {} }
+                match r { Result.Ok(v) => ok.push(v), Result.Err(_) => {} }
             }
-            Ok(ok)
+            Result.Ok(ok)
         }
     }
 }
@@ -235,20 +235,20 @@ public async fn fanout(
         handles
     }).await;
     match outcome {
-        Ok(handles) => {
+        Result.Ok(handles) => {
             let mut out: List<Result<ShellResult, ShellError>> = [];
             for h in handles.into_iter() {
                 match h.join().await {
-                    Ok(r)  => out.push(r),
-                    Err(_) => out.push(Err(ShellError.SpawnFailed {
+                    Result.Ok(r)  => out.push(r),
+                    Result.Err(_) => out.push(Result.Err(ShellError.SpawnFailed {
                         command: "<nursery task>".into(),
                         reason:  "task aborted by nursery".into(),
                     })),
                 }
             }
-            Ok(out)
+            Result.Ok(out)
         }
-        Err(_) => Err(ShellError.SpawnFailed {
+        Result.Err(_) => Result.Err(ShellError.SpawnFailed {
             command: "<nursery>".into(),
             reason:  "nursery exited with error".into(),
         }),

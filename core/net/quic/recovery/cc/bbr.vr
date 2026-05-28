@@ -269,7 +269,7 @@ implement Bbr {
             inflight_hi:      0xFFFFFFFF_u32,    // unbounded until first loss
             delivered_bytes:  0_u64,
             delivered_time:   Instant.now(),
-            recovery_start:   None,
+            recovery_start:   Maybe.None,
         }
     }
 
@@ -477,7 +477,7 @@ implement CongestionCtrl for Bbr {
             self.bytes_in_flight = 0_u32;
         }
         // Transition to recovery bookkeeping marker.
-        self.recovery_start = Some(now);
+        self.recovery_start = Maybe.Some(now);
     }
 
     fn on_pto(&mut self, now: Instant) {
@@ -495,12 +495,12 @@ implement CongestionCtrl for Bbr {
 implement Bbr {
     public fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
         match self.recovery_start {
-            Some(rs) => {
+            Maybe.Some(rs) => {
                 if acked_time_sent >= rs {
-                    self.recovery_start = None;
+                    self.recovery_start = Maybe.None;
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
     }
 

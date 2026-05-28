@@ -78,8 +78,8 @@ public const ZERO_RTT_MARKER_HEADER: &str = "x-weft-via-0rtt";
 /// (header value `"1"` or any non-empty truthy value).
 public fn was_via_0rtt(req: &WeftRequest) -> Bool {
     match req.headers.get(&"x-weft-via-0rtt") {
-        Some(t) => t.len() > 0 && t.as_bytes()[0] != ('0' as Byte),
-        None    => false,
+        Maybe.Some(t) => t.len() > 0 && t.as_bytes()[0] != ('0' as Byte),
+        Maybe.None    => false,
     }
 }
 
@@ -193,7 +193,7 @@ implement<H: Handler> Handler for ZeroRttGateHandler<H> {
         // fresh post-handshake connection.
         let mut h = Headers.new();
         h.append(f"connection", f"close");
-        Ok(Response {
+        Result.Ok(Response {
             status:  StatusCode { code: self.layer.reject_status as Int },
             version: Version.Http11,
             headers: h,

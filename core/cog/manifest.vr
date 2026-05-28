@@ -35,23 +35,23 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "first-class Verum-side cog manifest reading + writing",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.cog.manifest;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 mount base.semver.{SemVer, parse as parse_semver, format_semver};
 mount base.semver_constraint.{
     SemVerConstraint, parse as parse_constraint,
@@ -106,7 +106,7 @@ public type DependencySource is
     | Workspace;
 
 public type DependencySpec is {
-    /// Version constraint. `None` for non-registry sources where the
+    /// Version constraint. `Maybe.None` for non-registry sources where the
     /// version is implicit (path, git, workspace).
     constraint: Maybe<SemVerConstraint>,
     /// Where to fetch this dependency from.
@@ -204,8 +204,8 @@ implement Debug for ManifestError {
 /// Parse a TOML manifest source into a typed `CogManifest`.
 public fn parse_text(source: &Text) -> Result<CogManifest, ManifestError> {
     let cv = match toml_format.parse(source) {
-        Ok(t) => t,
-        Err(e) => return Err(ManifestError.InvalidToml(f"{e}")),
+        Result.Ok(t) => t,
+        Result.Err(e) => return Result.Err(ManifestError.InvalidToml(f"{e}")),
     };
     parse_value(&cv)
 }
@@ -215,7 +215,7 @@ public fn parse_text(source: &Text) -> Result<CogManifest, ManifestError> {
 public fn parse_value(value: &ConfigValue) -> Result<CogManifest, ManifestError> {
     let root = match value {
         ConfigValue.ConfigTable(t) => t,
-        _ => return Err(ManifestError.TypeMismatch {
+        _ => return Result.Err(ManifestError.TypeMismatch {
             field: "<root>".to_text(),
             expected: "table".to_text(),
             found: configuration.value.type_name(value),
@@ -231,7 +231,7 @@ public fn parse_value(value: &ConfigValue) -> Result<CogManifest, ManifestError>
         ConfigValue.ConfigTable(Map.new()),
         |v| v.clone(),
     );
-    Ok(CogManifest {
+    Result.Ok(CogManifest {
         cog: cog,
         language: language,
         dependencies: dependencies,
@@ -247,8 +247,8 @@ public fn parse_value(value: &ConfigValue) -> Result<CogManifest, ManifestError>
 public fn format_text(m: &CogManifest) -> Result<Text, ManifestError> {
     let cv = format_value(m);
     match toml_format.stringify_pretty_value(&cv) {
-        Ok(t)  => Ok(t),
-        Err(e) => Err(ManifestError.InvalidToml(f"{e}")),
+        Result.Ok(t)  => Result.Ok(t),
+        Result.Err(e) => Result.Err(ManifestError.InvalidToml(f"{e}")),
     }
 }
 
@@ -312,12 +312,12 @@ public fn format_value(m: &CogManifest) -> ConfigValue {
 
 fn parse_cog_identity(root: &Map<Text, ConfigValue>) -> Result<CogIdentity, ManifestError> {
     let cog_v = match root.get(&"cog".to_text()) {
-        Some(v) => v,
-        None    => return Err(ManifestError.MissingField("cog".to_text())),
+        Maybe.Some(v) => v,
+        Maybe.None    => return Result.Err(ManifestError.MissingField("cog".to_text())),
     };
     let cog_t = match cog_v {
         ConfigValue.ConfigTable(t) => t,
-        _ => return Err(ManifestError.TypeMismatch {
+        _ => return Result.Err(ManifestError.TypeMismatch {
             field: "cog".to_text(),
             expected: "table".to_text(),
             found: configuration.value.type_name(cog_v),
@@ -327,12 +327,12 @@ fn parse_cog_identity(root: &Map<Text, ConfigValue>) -> Result<CogIdentity, Mani
     // CogName refinement is enforced at construction time.
     let version_text = require_string(cog_t, &"cog.version".to_text(), &"version".to_text())?;
     let version = match parse_semver(&version_text) {
-        Ok(v)  => v,
-        Err(e) => return Err(ManifestError.InvalidVersion(f"{e}")),
+        Result.Ok(v)  => v,
+        Result.Err(e) => return Result.Err(ManifestError.InvalidVersion(f"{e}")),
     };
     let edition = optional_string(cog_t, &"edition".to_text())
         .unwrap_or_else(|| "2025".to_text());
-    Ok(CogIdentity {
+    Result.Ok(CogIdentity {
         name:          name_text,    // refinement check delegated to user code at use site
         version:       version,
         authors:       optional_string_list(cog_t, &"authors".to_text()),
@@ -350,9 +350,9 @@ fn parse_cog_identity(root: &Map<Text, ConfigValue>) -> Result<CogIdentity, Mani
 fn parse_language_config(root: &Map<Text, ConfigValue>) -> LanguageConfig {
     let lang_v = root.get(&"language".to_text());
     let profile = match lang_v {
-        Some(ConfigValue.ConfigTable(t)) => {
+        Maybe.Some(ConfigValue.ConfigTable(t)) => {
             match t.get(&"profile".to_text()) {
-                Some(ConfigValue.ConfigString(s)) =>
+                Maybe.Some(ConfigValue.ConfigString(s)) =>
                     parse_language_profile(s).unwrap_or(LanguageProfile.Application),
                 _ => LanguageProfile.Application,
             }
@@ -367,12 +367,12 @@ fn parse_dependencies(
     section: &Text,
 ) -> Result<Map<Text, DependencySpec>, ManifestError> {
     let v = match root.get(section) {
-        Some(v) => v,
-        None    => return Ok(Map.new()),
+        Maybe.Some(v) => v,
+        Maybe.None    => return Result.Ok(Map.new()),
     };
     let t = match v {
         ConfigValue.ConfigTable(t) => t,
-        _ => return Err(ManifestError.TypeMismatch {
+        _ => return Result.Err(ManifestError.TypeMismatch {
             field: section.clone(),
             expected: "table".to_text(),
             found: configuration.value.type_name(v),
@@ -388,7 +388,7 @@ fn parse_dependencies(
         deps.insert(k.clone(), spec);
         i = i + 1;
     }
-    Ok(deps)
+    Result.Ok(deps)
 }
 
 fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, ManifestError> {
@@ -396,10 +396,10 @@ fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, Ma
         // Simple form: "1.0.0" or "^1.0"
         ConfigValue.ConfigString(s) => {
             let c = match parse_constraint(s) {
-                Ok(c)  => c,
-                Err(e) => return Err(ManifestError.InvalidConstraint(f"{dep_name}: {e}")),
+                Result.Ok(c)  => c,
+                Result.Err(e) => return Result.Err(ManifestError.InvalidConstraint(f"{dep_name}: {e}")),
             };
-            Ok(DependencySpec {
+            Result.Ok(DependencySpec {
                 constraint: Maybe.Some(c),
                 source: DependencySource.Registry { registry_url: Maybe.None },
                 features: List.new(),
@@ -411,10 +411,10 @@ fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, Ma
         ConfigValue.ConfigTable(t) => {
             let constraint = match t.get(&"version".to_text()) {
                 Maybe.Some(ConfigValue.ConfigString(s)) => match parse_constraint(s) {
-                    Ok(c)  => Maybe.Some(c),
-                    Err(e) => return Err(ManifestError.InvalidConstraint(f"{dep_name}: {e}")),
+                    Result.Ok(c)  => Maybe.Some(c),
+                    Result.Err(e) => return Result.Err(ManifestError.InvalidConstraint(f"{dep_name}: {e}")),
                 },
-                Maybe.Some(_) => return Err(ManifestError.TypeMismatch {
+                Maybe.Some(_) => return Result.Err(ManifestError.TypeMismatch {
                     field: dep_name.clone().concat(&".version".to_text()),
                     expected: "string".to_text(),
                     found: "non-string".to_text(),
@@ -453,10 +453,10 @@ fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, Ma
                 _ => false,
             };
             let default_features = match t.get(&"default-features".to_text()) {
-                Some(ConfigValue.ConfigBool(b)) => *b,
+                Maybe.Some(ConfigValue.ConfigBool(b)) => *b,
                 _ => true,
             };
-            Ok(DependencySpec {
+            Result.Ok(DependencySpec {
                 constraint: constraint,
                 source: source,
                 features: features,
@@ -464,7 +464,7 @@ fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, Ma
                 default_features: default_features,
             })
         }
-        _ => Err(ManifestError.TypeMismatch {
+        _ => Result.Err(ManifestError.TypeMismatch {
             field: dep_name.clone(),
             expected: "string or table".to_text(),
             found: configuration.value.type_name(v),
@@ -475,7 +475,7 @@ fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, Ma
 fn parse_features(root: &Map<Text, ConfigValue>) -> (Map<Text, List<Text>>, List<Text>) {
     let mut feats: Map<Text, List<Text>> = Map.new();
     let mut defaults: List<Text> = List.new();
-    if let Some(ConfigValue.ConfigTable(t)) = root.get(&"features".to_text()) {
+    if let Maybe.Some(ConfigValue.ConfigTable(t)) = root.get(&"features".to_text()) {
         let keys = t.keys();
         let mut i = 0;
         while i < keys.len() {
@@ -502,11 +502,11 @@ fn format_cog_identity(c: &CogIdentity) -> ConfigValue {
     t.insert("version".to_text(), ConfigValue.ConfigString(format_semver(&c.version)));
     t.insert("edition".to_text(), ConfigValue.ConfigString(c.edition.clone()));
     if !c.authors.is_empty()  { t.insert("authors".to_text(),  string_list_to_array(&c.authors)); }
-    if let Some(d) = &c.description { t.insert("description".to_text(), ConfigValue.ConfigString(d.clone())); }
-    if let Some(l) = &c.license     { t.insert("license".to_text(),     ConfigValue.ConfigString(l.clone())); }
-    if let Some(r) = &c.repository  { t.insert("repository".to_text(),  ConfigValue.ConfigString(r.clone())); }
-    if let Some(h) = &c.homepage    { t.insert("homepage".to_text(),    ConfigValue.ConfigString(h.clone())); }
-    if let Some(d) = &c.documentation { t.insert("documentation".to_text(), ConfigValue.ConfigString(d.clone())); }
+    if let Maybe.Some(d) = &c.description { t.insert("description".to_text(), ConfigValue.ConfigString(d.clone())); }
+    if let Maybe.Some(l) = &c.license     { t.insert("license".to_text(),     ConfigValue.ConfigString(l.clone())); }
+    if let Maybe.Some(r) = &c.repository  { t.insert("repository".to_text(),  ConfigValue.ConfigString(r.clone())); }
+    if let Maybe.Some(h) = &c.homepage    { t.insert("homepage".to_text(),    ConfigValue.ConfigString(h.clone())); }
+    if let Maybe.Some(d) = &c.documentation { t.insert("documentation".to_text(), ConfigValue.ConfigString(d.clone())); }
     if !c.keywords.is_empty()   { t.insert("keywords".to_text(),    string_list_to_array(&c.keywords)); }
     if !c.categories.is_empty() { t.insert("categories".to_text(),  string_list_to_array(&c.categories)); }
     ConfigValue.ConfigTable(t)
@@ -529,19 +529,19 @@ fn format_dep_spec(s: &DependencySpec) -> ConfigValue {
     // Use simple-string form when the spec is the canonical defaults
     // (registry, no features, not optional, default-features on).
     let is_simple = match &s.source {
-        DependencySource.Registry { registry_url: None } => {
+        DependencySource.Registry { registry_url: Maybe.None } => {
             s.features.is_empty() && !s.optional && s.default_features && s.constraint.is_some()
         }
         _ => false,
     };
     if is_simple {
-        if let Some(c) = &s.constraint {
+        if let Maybe.Some(c) = &s.constraint {
             return ConfigValue.ConfigString(format_constraint(c));
         }
     }
     // Detailed form.
     let mut t: Map<Text, ConfigValue> = Map.new();
-    if let Some(c) = &s.constraint {
+    if let Maybe.Some(c) = &s.constraint {
         t.insert("version".to_text(), ConfigValue.ConfigString(format_constraint(c)));
     }
     match &s.source {
@@ -560,7 +560,7 @@ fn format_dep_spec(s: &DependencySpec) -> ConfigValue {
             t.insert("workspace".to_text(), ConfigValue.ConfigBool(true));
         }
         DependencySource.Registry { registry_url } => {
-            if let Some(u) = registry_url {
+            if let Maybe.Some(u) = registry_url {
                 t.insert("registry".to_text(), ConfigValue.ConfigString(u.clone()));
             }
         }
@@ -583,26 +583,26 @@ fn format_dep_spec(s: &DependencySpec) -> ConfigValue {
 
 fn require_string(t: &Map<Text, ConfigValue>, full_name: &Text, key: &Text) -> Result<Text, ManifestError> {
     match t.get(key) {
-        Some(ConfigValue.ConfigString(s)) => Ok(s.clone()),
-        Some(other) => Err(ManifestError.TypeMismatch {
+        Maybe.Some(ConfigValue.ConfigString(s)) => Result.Ok(s.clone()),
+        Maybe.Some(other) => Result.Err(ManifestError.TypeMismatch {
             field: full_name.clone(),
             expected: "string".to_text(),
             found: configuration.value.type_name(other),
         }),
-        None => Err(ManifestError.MissingField(full_name.clone())),
+        Maybe.None => Result.Err(ManifestError.MissingField(full_name.clone())),
     }
 }
 
 fn optional_string(t: &Map<Text, ConfigValue>, key: &Text) -> Maybe<Text> {
     match t.get(key) {
-        Some(ConfigValue.ConfigString(s)) => Some(s.clone()),
-        _ => None,
+        Maybe.Some(ConfigValue.ConfigString(s)) => Maybe.Some(s.clone()),
+        _ => Maybe.None,
     }
 }
 
 fn optional_string_list(t: &Map<Text, ConfigValue>, key: &Text) -> List<Text> {
     match t.get(key) {
-        Some(ConfigValue.ConfigArray(a)) => string_array(a),
+        Maybe.Some(ConfigValue.ConfigArray(a)) => string_array(a),
         _ => List.new(),
     }
 }

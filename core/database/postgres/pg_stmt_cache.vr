@@ -34,7 +34,7 @@
 module core.database.postgres.pg_stmt_cache;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.postgres.connection.{PgPreparedStatement};
 
@@ -73,8 +73,8 @@ fn canonicalise(sql: &Text) -> Text {
         out = trimmed;
     }
     match Text.from_utf8(out) {
-        Ok(t)  => t,
-        Err(_) => sql.clone(),
+        Result.Ok(t)  => t,
+        Result.Err(_) => sql.clone(),
     }
 }
 
@@ -154,7 +154,7 @@ implement PgStmtCache {
     public fn cap(&self) -> Int { self.cap }
 
     /// Look up by fingerprint. Updates LRU recency. Returns a
-    /// clone of the cached statement on hit; `None` on miss.
+    /// clone of the cached statement on hit; `Maybe.None` on miss.
     public fn lookup(&mut self, fingerprint: Int) -> Maybe<PgPreparedStatement> {
         self.clock = self.clock + 1;
         let mut i: Int = 0;
@@ -162,16 +162,16 @@ implement PgStmtCache {
             if self.entries[i].fingerprint == fingerprint {
                 self.entries[i].last_seen = self.clock;
                 self.total_hits = self.total_hits + 1;
-                return Some(clone_stmt(&self.entries[i].stmt));
+                return Maybe.Some(clone_stmt(&self.entries[i].stmt));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Insert a freshly-prepared statement under `fingerprint`.
     /// Returns the evicted statement (if cap exceeded) so the
-    /// caller can issue Close(S, name) for it. Returns `None`
+    /// caller can issue Close(S, name) for it. Returns `Maybe.None`
     /// when no eviction was necessary.
     ///
     /// Eviction MUST be visible to the caller — silently dropping
@@ -184,7 +184,7 @@ implement PgStmtCache {
     ) -> Maybe<PgPreparedStatement> {
         self.clock = self.clock + 1;
         self.total_inserts = self.total_inserts + 1;
-        let mut evicted: Maybe<PgPreparedStatement> = None;
+        let mut evicted: Maybe<PgPreparedStatement> = Maybe.None;
         if self.entries.len() as Int >= self.cap {
             evicted = self.evict_one_internal();
         }
@@ -212,7 +212,7 @@ implement PgStmtCache {
             i = i + 1;
         }
         if victim < 0 {
-            return None;
+            return Maybe.None;
         }
         self.total_invalidations = self.total_invalidations + 1;
         self.remove_at(victim)
@@ -248,7 +248,7 @@ implement PgStmtCache {
 
     fn evict_one_internal(&mut self) -> Maybe<PgPreparedStatement> {
         if (self.entries.len() as Int) == 0 {
-            return None;
+            return Maybe.None;
         }
         let mut victim: Int = 0;
         let mut oldest: Int = self.entries[0].last_seen;
@@ -267,7 +267,7 @@ implement PgStmtCache {
     fn remove_at(&mut self, idx: Int) -> Maybe<PgPreparedStatement> {
         let n = self.entries.len() as Int;
         if idx < 0 || idx >= n {
-            return None;
+            return Maybe.None;
         }
         let evicted = clone_stmt(&self.entries[idx].stmt);
         let mut new_entries: List<PgCacheEntry> = List.with_capacity(n - 1);
@@ -283,7 +283,7 @@ implement PgStmtCache {
             k = k + 1;
         }
         self.entries = new_entries;
-        Some(evicted)
+        Maybe.Some(evicted)
     }
 }
 

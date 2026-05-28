@@ -303,9 +303,9 @@ implement G1Point {
             G1DecodeResult.Ok(b) => {
                 let mut out: [Byte; 48] = [0; 48];
                 let mut i: Int = 0; while i < 48 { out[i] = b[i]; i = i + 1; }
-                Ok(G1Point { bytes: out })
+                Result.Ok(G1Point { bytes: out })
             }
-            G1DecodeResult.Err(why) => Err(InvalidPoint(why)),
+            G1DecodeResult.Err(why) => Result.Err(InvalidPoint(why)),
         }
     }
 
@@ -386,9 +386,9 @@ implement G2Point {
             G2DecodeResult.Ok(b) => {
                 let mut out: [Byte; 96] = [0; 96];
                 let mut i: Int = 0; while i < 96 { out[i] = b[i]; i = i + 1; }
-                Ok(G2Point { bytes: out })
+                Result.Ok(G2Point { bytes: out })
             }
-            G2DecodeResult.Err(why) => Err(InvalidPoint(why)),
+            G2DecodeResult.Err(why) => Result.Err(InvalidPoint(why)),
         }
     }
 
@@ -486,9 +486,9 @@ implement Scalar {
             ScalarDecodeResult.Ok(b) => {
                 let mut out: [Byte; 32] = [0; 32];
                 let mut i: Int = 0; while i < 32 { out[i] = b[i]; i = i + 1; }
-                Ok(Scalar { bytes: out })
+                Result.Ok(Scalar { bytes: out })
             }
-            ScalarDecodeResult.OutOfRange => Err(InvalidScalar),
+            ScalarDecodeResult.OutOfRange => Result.Err(InvalidScalar),
         }
     }
 
@@ -555,12 +555,12 @@ implement BlsSecretKey {
     /// material. `key_info` is an optional context-binding label.
     public fn key_gen(ikm: &[Byte], key_info: &[Byte]) -> Result<BlsSecretKey, BlsError> {
         if ikm.len() < 32 {
-            return Err(InvalidScalar);
+            return Result.Err(InvalidScalar);
         }
         let bytes = @intrinsic("verum.crypto.bls12_381_key_gen", ikm, key_info);
         let mut sk: [Byte; 32] = [0; 32];
         let mut i: Int = 0; while i < 32 { sk[i] = bytes[i]; i = i + 1; }
-        Ok(BlsSecretKey { bytes: sk })
+        Result.Ok(BlsSecretKey { bytes: sk })
     }
 
     /// Derive the matching public key. Direction depends on suite: for
@@ -590,8 +590,8 @@ implement BlsPublicKey {
     /// IETF draft §2.5 — KeyValidate(PK). Subgroup check + non-identity.
     public fn validate(&self) -> Result<(), BlsError> {
         match @intrinsic("verum.crypto.bls12_381_pk_validate", self) {
-            true  => Ok(()),
-            false => Err(InvalidPublicKey),
+            true  => Result.Ok(()),
+            false => Result.Err(InvalidPublicKey),
         }
     }
 
@@ -599,11 +599,11 @@ implement BlsPublicKey {
     /// IETF draft §3.3.3 — PopVerify(PK, proof) → bool.
     public fn verify_possession(&self, proof: &BlsProofOfPossession) -> Result<(), BlsError> {
         if proof.suite != self.suite {
-            return Err(AggregateMismatch("PoP suite mismatch".into()));
+            return Result.Err(AggregateMismatch("PoP suite mismatch".into()));
         }
         match @intrinsic("verum.crypto.bls12_381_pop_verify", self, proof) {
-            true  => Ok(()),
-            false => Err(VerificationFailed),
+            true  => Result.Ok(()),
+            false => Result.Err(VerificationFailed),
         }
     }
 }
@@ -616,11 +616,11 @@ implement BlsSignature {
         message: &[Byte],
     ) -> Result<(), BlsError> {
         if self.suite != public_key.suite {
-            return Err(AggregateMismatch("signature/pk suite mismatch".into()));
+            return Result.Err(AggregateMismatch("signature/pk suite mismatch".into()));
         }
         match @intrinsic("verum.crypto.bls12_381_verify", public_key, message, self) {
-            true  => Ok(()),
-            false => Err(VerificationFailed),
+            true  => Result.Ok(()),
+            false => Result.Err(VerificationFailed),
         }
     }
 }
@@ -638,16 +638,16 @@ public fn aggregate_signatures(
     signatures: &List<BlsSignature>,
 ) -> Result<BlsSignature, BlsError> {
     if signatures.is_empty() {
-        return Err(AggregateMismatch("empty signature list".into()));
+        return Result.Err(AggregateMismatch("empty signature list".into()));
     }
     let suite = signatures[0].suite;
     for s in signatures.iter() {
         if s.suite != suite {
-            return Err(AggregateMismatch("mixed-suite signatures".into()));
+            return Result.Err(AggregateMismatch("mixed-suite signatures".into()));
         }
     }
     let bytes = @intrinsic("verum.crypto.bls12_381_aggregate_sigs", signatures);
-    Ok(BlsSignature { suite, bytes })
+    Result.Ok(BlsSignature { suite, bytes })
 }
 
 /// Aggregate `public_keys` — multi-sig flow. Each pk MUST have a verified
@@ -657,16 +657,16 @@ public fn aggregate_public_keys(
     public_keys: &List<BlsPublicKey>,
 ) -> Result<BlsPublicKey, BlsError> {
     if public_keys.is_empty() {
-        return Err(AggregateMismatch("empty public-key list".into()));
+        return Result.Err(AggregateMismatch("empty public-key list".into()));
     }
     let suite = public_keys[0].suite;
     for pk in public_keys.iter() {
         if pk.suite != suite {
-            return Err(AggregateMismatch("mixed-suite public keys".into()));
+            return Result.Err(AggregateMismatch("mixed-suite public keys".into()));
         }
     }
     let bytes = @intrinsic("verum.crypto.bls12_381_aggregate_pks", public_keys);
-    Ok(BlsPublicKey { suite, bytes })
+    Result.Ok(BlsPublicKey { suite, bytes })
 }
 
 /// IETF draft §3.1.1 — AggregateVerify(PKs, msgs, sig). Each (pk_i, msg_i)
@@ -678,23 +678,23 @@ public fn aggregate_verify(
     signature:   &BlsSignature,
 ) -> Result<(), BlsError> {
     if public_keys.len() != messages.len() {
-        return Err(AggregateMismatch("|pks| ≠ |msgs|".into()));
+        return Result.Err(AggregateMismatch("|pks| ≠ |msgs|".into()));
     }
     if public_keys.is_empty() {
-        return Err(AggregateMismatch("empty pk list".into()));
+        return Result.Err(AggregateMismatch("empty pk list".into()));
     }
     let suite = signature.suite;
     for pk in public_keys.iter() {
         if pk.suite != suite {
-            return Err(AggregateMismatch("mixed-suite public keys".into()));
+            return Result.Err(AggregateMismatch("mixed-suite public keys".into()));
         }
     }
     match @intrinsic(
         "verum.crypto.bls12_381_aggregate_verify",
         public_keys, messages, signature
     ) {
-        true  => Ok(()),
-        false => Err(VerificationFailed),
+        true  => Result.Ok(()),
+        false => Result.Err(VerificationFailed),
     }
 }
 
@@ -708,20 +708,20 @@ public fn fast_aggregate_verify(
     signature:   &BlsSignature,
 ) -> Result<(), BlsError> {
     if public_keys.is_empty() {
-        return Err(AggregateMismatch("empty pk list".into()));
+        return Result.Err(AggregateMismatch("empty pk list".into()));
     }
     let suite = signature.suite;
     for pk in public_keys.iter() {
         if pk.suite != suite {
-            return Err(AggregateMismatch("mixed-suite public keys".into()));
+            return Result.Err(AggregateMismatch("mixed-suite public keys".into()));
         }
     }
     match @intrinsic(
         "verum.crypto.bls12_381_fast_aggregate_verify",
         public_keys, message, signature
     ) {
-        true  => Ok(()),
-        false => Err(VerificationFailed),
+        true  => Result.Ok(()),
+        false => Result.Err(VerificationFailed),
     }
 }
 
@@ -768,19 +768,19 @@ public fn threshold_combine(
     threshold: Int,
 ) -> Result<BlsSignature, BlsError> {
     if shares.len() < threshold {
-        return Err(ThresholdRebuildFailed(f"only {shares.len()} of ≥{threshold} shares"));
+        return Result.Err(ThresholdRebuildFailed(f"only {shares.len()} of ≥{threshold} shares"));
     }
     let suite = shares[0].suite;
     for s in shares.iter() {
         if s.suite != suite {
-            return Err(ThresholdRebuildFailed("mixed-suite shares".into()));
+            return Result.Err(ThresholdRebuildFailed("mixed-suite shares".into()));
         }
     }
     let bytes = @intrinsic(
         "verum.crypto.bls12_381_threshold_combine",
         shares, threshold
     );
-    Ok(BlsSignature { suite, bytes })
+    Result.Ok(BlsSignature { suite, bytes })
 }
 
 // =============================================================================
@@ -788,13 +788,13 @@ public fn threshold_combine(
 // =============================================================================
 
 type G1DecodeResult is
-    | Ok([Byte; 48])
-    | Err(Text);
+    | Result.Ok([Byte; 48])
+    | Result.Err(Text);
 
 type G2DecodeResult is
-    | Ok([Byte; 96])
-    | Err(Text);
+    | Result.Ok([Byte; 96])
+    | Result.Err(Text);
 
 type ScalarDecodeResult is
-    | Ok([Byte; 32])
+    | Result.Ok([Byte; 32])
     | OutOfRange;

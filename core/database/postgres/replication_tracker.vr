@@ -82,7 +82,7 @@
 module core.database.postgres.replication_tracker;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterSpecific, AdPostgres,
@@ -154,7 +154,7 @@ public type StoreOutcome is
 ///     `checkpoint()` call. The implementer decides whether to
 ///     debounce / batch.
 ///   * `load` is called once at startup to recover the last
-///     known position. None → start fresh from `Lsn.zero()`.
+///     known position. Maybe.None → start fresh from `Lsn.zero()`.
 ///
 /// Implementations MUST be thread-safe — `LsnTracker` clones
 /// the `Shared<dyn PositionStore>` across the watcher task and
@@ -174,7 +174,7 @@ public type MemoryPositionStore is {
 implement MemoryPositionStore {
     public fn new() -> MemoryPositionStore {
         MemoryPositionStore {
-            last: Shared.new(Mutex.new(None)),
+            last: Shared.new(Mutex.new(Maybe.None)),
         }
     }
 
@@ -186,15 +186,15 @@ implement MemoryPositionStore {
 implement PositionStore for MemoryPositionStore {
     fn save(&self, pos: &TrackedPosition) -> StoreOutcome {
         let mut g = self.last.lock().unwrap_or_else(|p| p.into_inner());
-        *g = Some(pos.clone());
+        *g = Maybe.Some(pos.clone());
         SoStored
     }
 
     fn load(&self) -> Maybe<TrackedPosition> {
         let g = self.last.lock().unwrap_or_else(|p| p.into_inner());
         match &*g {
-            Some(p) => Some(p.clone()),
-            None    => None,
+            Maybe.Some(p) => Maybe.Some(p.clone()),
+            Maybe.None    => Maybe.None,
         }
     }
 }
@@ -391,10 +391,10 @@ implement LsnTracker {
         let _ = self.shutdown_tx.send_async(()).await;
         let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
         match guard.take() {
-            Some(jh) => {
+            Maybe.Some(jh) => {
                 let _ = jh.join().await;
             }
-            None => {}
+            Maybe.None => {}
         }
         // Final flush — write the current tuple to the wire.
         let snap = self.snapshot();
@@ -403,7 +403,7 @@ implement LsnTracker {
             0,                  // client_time_us — server fills if needed
             false,
         ).await;
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -412,7 +412,7 @@ implement LsnTracker {
 // =============================================================================
 
 /// Wire a tracker around an open `AsyncPgReplicationConnection`.
-/// If `store.load()` returns `Some(pos)`, the tracker resumes
+/// If `store.load()` returns `Maybe.Some(pos)`, the tracker resumes
 /// from that tuple; otherwise it starts at `Lsn.zero()`.
 ///
 /// Spawns one watcher task that ticks every `config.interval_ms`
@@ -423,8 +423,8 @@ public fn attach_tracker(
     config: LsnTrackerConfig,
 ) -> LsnTracker {
     let initial = match store.load() {
-        Some(p) => p,
-        None    => TrackedPosition.zero(),
+        Maybe.Some(p) => p,
+        Maybe.None    => TrackedPosition.zero(),
     };
     let state = Shared.new(Mutex.new(initial));
     let metrics = Shared.new(Mutex.new(LsnTrackerMetrics.zero()));
@@ -448,7 +448,7 @@ public fn attach_tracker(
         repl: repl,
         config: config,
         shutdown_tx: shutdown_tx,
-        join: Shared.new(Mutex.new(Some(join))),
+        join: Shared.new(Mutex.new(Maybe.Some(join))),
         metrics: metrics,
     }
 }
@@ -458,8 +458,8 @@ public fn attach_tracker(
 /// otherwise. Pass directly to `start_logical(opts, start_lsn)`.
 public fn load_start_lsn(store: &Shared<dyn PositionStore>) -> Lsn {
     match store.load() {
-        Some(p) => Lsn { value: p.flush.value },
-        None    => Lsn.zero(),
+        Maybe.Some(p) => Lsn { value: p.flush.value },
+        Maybe.None    => Lsn.zero(),
     }
 }
 

@@ -202,17 +202,17 @@ static mut TLS_INDEX_INITIALIZED: Bool = false;
 public fn init_tls_index() -> Result<(), WindowsTlsError> {
     unsafe {
         if TLS_INDEX_INITIALIZED {
-            return Ok(());
+            return Result.Ok(());
         }
 
         let index = TlsAlloc();
         if index == TLS_OUT_OF_INDEXES {
-            return Err(TlsIndexExhausted);
+            return Result.Err(TlsIndexExhausted);
         }
 
         TLS_INDEX = index;
         TLS_INDEX_INITIALIZED = true;
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -227,7 +227,7 @@ public fn init_main_thread_tls() -> Result<&mut WindowsThreadControlBlock, Windo
     // Check if already initialized
     let existing = get_current_tcb_raw();
     if existing as Int != 0 {
-        return Err(AlreadyInitialized);
+        return Result.Err(AlreadyInitialized);
     }
 
     // Create TCB for main thread
@@ -256,7 +256,7 @@ public fn create_thread_tls() -> Result<&mut WindowsThreadControlBlock, WindowsT
     );
 
     if base as Int == 0 {
-        return Err(AllocationFailed { code: GetLastError(), size: 0 });
+        return Result.Err(AllocationFailed { code: GetLastError(), size: 0 });
     }
 
     // Make guard page inaccessible
@@ -270,7 +270,7 @@ public fn create_thread_tls() -> Result<&mut WindowsThreadControlBlock, WindowsT
 
     if !guard_result {
         VirtualFree(base, 0, MEM_RELEASE);
-        return Err(AllocationFailed { code: GetLastError(), size: 0 });
+        return Result.Err(AllocationFailed { code: GetLastError(), size: 0 });
     }
 
     // TCB is after the guard page
@@ -299,18 +299,18 @@ public fn create_thread_tls() -> Result<&mut WindowsThreadControlBlock, WindowsT
         let set_result = TlsSetValue(TLS_INDEX, tcb_addr as &unsafe Byte);
         if !set_result {
             VirtualFree(base, 0, MEM_RELEASE);
-            return Err(AllocationFailed { code: GetLastError(), size: 0 });
+            return Result.Err(AllocationFailed { code: GetLastError(), size: 0 });
         }
     }
 
-    Ok(tcb)
+    Result.Ok(tcb)
 }
 
 /// Clean up TLS for the current thread.
 public fn cleanup_thread_tls() -> Result<(), WindowsTlsError> {
     let tcb = get_current_tcb_raw();
     if tcb as Int == 0 {
-        return Ok(());  // Nothing to clean up
+        return Result.Ok(());  // Nothing to clean up
     }
 
     // Clear the TLS slot
@@ -325,7 +325,7 @@ public fn cleanup_thread_tls() -> Result<(), WindowsTlsError> {
     // Free the entire allocation
     VirtualFree(base_addr, 0, MEM_RELEASE);
 
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -345,34 +345,34 @@ fn get_current_tcb_raw() -> &mut WindowsThreadControlBlock {
 /// Get the current thread's TCB.
 ///
 
-/// Returns None if TLS is not initialized for this thread.
+/// Returns Maybe.None if TLS is not initialized for this thread.
 public fn get_current_tcb() -> Maybe<&mut WindowsThreadControlBlock> {
     let tcb = get_current_tcb_raw();
     if tcb as Int == 0 {
-        None
+        Maybe.None
     } else if tcb.magic != TCB_MAGIC {
-        None  // Corrupted TCB
+        Maybe.None  // Corrupted TCB
     } else {
-        Some(tcb)
+        Maybe.Some(tcb)
     }
 }
 
 /// Get context slots for the current thread.
 public fn get_context_slots() -> Maybe<&mut WindowsContextSlots> {
     match get_current_tcb() {
-        Some(tcb) => Some(&mut tcb.context_slots),
-        None => None,
+        Maybe.Some(tcb) => Maybe.Some(&mut tcb.context_slots),
+        Maybe.None => Maybe.None,
     }
 }
 
 /// Set context slots for the current thread.
 public fn set_context_slots(slots: WindowsContextSlots) -> Result<(), WindowsTlsError> {
     match get_current_tcb() {
-        Some(tcb) => {
+        Maybe.Some(tcb) => {
             tcb.context_slots = slots;
-            Ok(())
+            Result.Ok(())
         }
-        None => Err(NotInitialized),
+        Maybe.None => Result.Err(NotInitialized),
     }
 }
 
@@ -390,16 +390,16 @@ public fn set_errno(err: UInt32) {
 /// Get cached thread ID (fast path).
 public fn get_tid_fast() -> Maybe<UInt32> {
     match get_current_tcb() {
-        Some(tcb) => Some(tcb.tid),
-        None => None,
+        Maybe.Some(tcb) => Maybe.Some(tcb.tid),
+        Maybe.None => Maybe.None,
     }
 }
 
 /// Check if stack canary is intact.
 public fn check_stack_guard() -> Bool {
     match get_current_tcb() {
-        Some(tcb) => tcb.stack_canary != 0,  // Basic check
-        None => true,  // No TCB = no canary to check
+        Maybe.Some(tcb) => tcb.stack_canary != 0,  // Basic check
+        Maybe.None => true,  // No TCB = no canary to check
     }
 }
 
@@ -410,19 +410,19 @@ public fn check_stack_guard() -> Bool {
 /// Get a context value from a slot.
 public fn ctx_get(slot: Int) -> Maybe<&unsafe Byte> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return None;
+        return Maybe.None;
     }
 
     match get_context_slots() {
-        Some(slots) => {
+        Maybe.Some(slots) => {
             let entry = &slots.slots[slot];
             if entry.value as Int == 0 {
-                None
+                Maybe.None
             } else {
-                Some(entry.value)
+                Maybe.Some(entry.value)
             }
         }
-        None => None,
+        Maybe.None => Maybe.None,
     }
 }
 
@@ -438,15 +438,15 @@ public fn ctx_get_mut(slot: Int) -> Maybe<&unsafe Byte> {
 /// Set a context value in a slot.
 public fn ctx_set(slot: Int, value: &unsafe Byte) -> Result<(), WindowsTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return Err(InvalidSlot { slot: slot });
+        return Result.Err(InvalidSlot { slot: slot });
     }
 
     match get_context_slots() {
-        Some(slots) => {
+        Maybe.Some(slots) => {
             slots.slots[slot].value = value;
-            Ok(())
+            Result.Ok(())
         }
-        None => Err(NotInitialized),
+        Maybe.None => Result.Err(NotInitialized),
     }
 }
 
@@ -462,14 +462,14 @@ public fn ctx_clear<T>(slot: Int) -> Result<(), WindowsTlsError> {
 /// The previous value is saved and can be restored with ctx_pop.
 public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), WindowsTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return Err(InvalidSlot { slot: slot });
+        return Result.Err(InvalidSlot { slot: slot });
     }
 
     match get_context_slots() {
-        Some(slots) => {
+        Maybe.Some(slots) => {
             let entry = &mut slots.slots[slot];
             if entry.depth >= CONTEXT_STACK_DEPTH {
-                return Err(StackOverflow { slot: slot });
+                return Result.Err(StackOverflow { slot: slot });
             }
 
             // Save current value to stack
@@ -478,9 +478,9 @@ public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), WindowsTlsError
 
             // Set new value
             entry.value = value;
-            Ok(())
+            Result.Ok(())
         }
-        None => Err(NotInitialized),
+        Maybe.None => Result.Err(NotInitialized),
     }
 }
 
@@ -490,14 +490,14 @@ public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), WindowsTlsError
 /// Restores the previous value that was saved by ctx_push.
 public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, WindowsTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return Err(InvalidSlot { slot: slot });
+        return Result.Err(InvalidSlot { slot: slot });
     }
 
     match get_context_slots() {
-        Some(slots) => {
+        Maybe.Some(slots) => {
             let entry = &mut slots.slots[slot];
             if entry.depth == 0 {
-                return Err(StackUnderflow { slot: slot });
+                return Result.Err(StackUnderflow { slot: slot });
             }
 
             // Get popped value
@@ -508,21 +508,21 @@ public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, WindowsTlsError> {
             entry.value = entry.stack[entry.depth];
             entry.stack[entry.depth] = 0 as &unsafe Byte;
 
-            Ok(popped)
+            Result.Ok(popped)
         }
-        None => Err(NotInitialized),
+        Maybe.None => Result.Err(NotInitialized),
     }
 }
 
 /// Get the current stack depth for a context slot.
 public fn ctx_depth(slot: Int) -> Maybe<Int> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return None;
+        return Maybe.None;
     }
 
     match get_context_slots() {
-        Some(slots) => Some(slots.slots[slot].depth),
-        None => None,
+        Maybe.Some(slots) => Maybe.Some(slots.slots[slot].depth),
+        Maybe.None => Maybe.None,
     }
 }
 
@@ -551,26 +551,26 @@ fn generate_stack_canary() -> UInt64 {
 /// Check if TLS is initialized for the current thread.
 public fn is_tls_initialized() -> Bool {
     match get_current_tcb() {
-        Some(_) => true,
-        None => false,
+        Maybe.Some(_) => true,
+        Maybe.None => false,
     }
 }
 
 /// Get user data pointer from TCB.
 public fn get_user_data() -> Maybe<&unsafe Byte> {
     match get_current_tcb() {
-        Some(tcb) => Some(tcb.user_data),
-        None => None,
+        Maybe.Some(tcb) => Maybe.Some(tcb.user_data),
+        Maybe.None => Maybe.None,
     }
 }
 
 /// Set user data pointer in TCB.
 public fn set_user_data(data: &unsafe Byte) -> Result<(), WindowsTlsError> {
     match get_current_tcb() {
-        Some(tcb) => {
+        Maybe.Some(tcb) => {
             tcb.user_data = data;
-            Ok(())
+            Result.Ok(())
         }
-        None => Err(NotInitialized),
+        Maybe.None => Result.Err(NotInitialized),
     }
 }

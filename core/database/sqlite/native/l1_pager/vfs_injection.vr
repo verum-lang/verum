@@ -84,7 +84,7 @@ public fn pager_open_with_vfs(
             // a sum-type return signature that breaks every
             // existing caller.  See #154 + dst_wrapped_pager.vr
             // top-of-file for the architectural rationale.
-            Err(PagerError {
+            Result.Err(PagerError {
                 kind: IoError,
                 message: "ViDstWrapped: use dst_wrapped_pager_open(seed, total_ops, page_size) — wrapper exposes DstWrappedPager (not Pager) since interception is per-method",
             })

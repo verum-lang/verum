@@ -163,8 +163,8 @@ implement WeftMetricsRegistry {
     public fn counter(&self, name: &Text) -> Shared<WeftCounter> {
         let mut m = self.counters.lock();
         match m.get(name) {
-            Some(c) => c.clone(),
-            None => {
+            Maybe.Some(c) => c.clone(),
+            Maybe.None => {
                 let c = Shared.new(WeftCounter.new());
                 m.insert(name.clone(), c.clone());
                 c
@@ -176,8 +176,8 @@ implement WeftMetricsRegistry {
     public fn histogram(&self, name: &Text) -> Shared<WeftHistogram> {
         let mut m = self.histograms.lock();
         match m.get(name) {
-            Some(h) => h.clone(),
-            None => {
+            Maybe.Some(h) => h.clone(),
+            Maybe.None => {
                 let h = Shared.new(WeftHistogram.new());
                 m.insert(name.clone(), h.clone());
                 h
@@ -302,10 +302,10 @@ implement<H: Handler> Handler for MetricsHandler<H> {
         latency.observe_ms(dt);
 
         match &result {
-            Err(_) => self.registry.counter(&Text.from_str("http_requests_errors_total")).incr(),
-            Ok(r) if r.status.is_server_error() =>
+            Result.Err(_) => self.registry.counter(&Text.from_str("http_requests_errors_total")).incr(),
+            Result.Ok(r) if r.status.is_server_error() =>
                 self.registry.counter(&Text.from_str("http_requests_5xx_total")).incr(),
-            Ok(r) if r.status.is_client_error() =>
+            Result.Ok(r) if r.status.is_client_error() =>
                 self.registry.counter(&Text.from_str("http_requests_4xx_total")).incr(),
             _ => {}
         }

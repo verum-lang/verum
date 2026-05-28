@@ -142,14 +142,14 @@ implement Eq for CoalesceError {
 ///  * Whole-datagram PADDING to `plan.pad_to` when set.
 public fn assemble(plan: &CoalescePlan) -> Result<List<Byte>, CoalesceError> {
     // Validate short-header constraint.
-    let mut short_idx: Maybe<Int> = None;
+    let mut short_idx: Maybe<Int> = Maybe.None;
     let mut i: Int = 0;
     while i < plan.packets.len() {
         match &plan.packets[i] {
             CoalescedPacket.OneRttPkt {..} => {
                 match short_idx {
-                    Some(_) => return Err(CoalesceError.MultipleShortHeaders),
-                    None    => { short_idx = Some(i); },
+                    Maybe.Some(_) => return Result.Err(CoalesceError.MultipleShortHeaders),
+                    Maybe.None    => { short_idx = Maybe.Some(i); },
                 }
             },
             _ => {},
@@ -157,12 +157,12 @@ public fn assemble(plan: &CoalescePlan) -> Result<List<Byte>, CoalesceError> {
         i = i + 1;
     }
     match short_idx {
-        Some(j) => {
+        Maybe.Some(j) => {
             if j != plan.packets.len() - 1 {
-                return Err(CoalesceError.ShortHeaderNotLast);
+                return Result.Err(CoalesceError.ShortHeaderNotLast);
             }
         },
-        None => {},
+        Maybe.None => {},
     }
 
     // Build each packet in order.
@@ -198,7 +198,7 @@ public fn assemble(plan: &CoalescePlan) -> Result<List<Byte>, CoalesceError> {
     // calling `assemble`.
     while out.len() < plan.pad_to { out.push(0_u8); }
 
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn build_one(plan: &CoalescePlan, pkt: &CoalescedPacket) -> Result<List<Byte>, CoalesceError> {

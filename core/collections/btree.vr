@@ -98,7 +98,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// Create a new empty BTreeMap.
     public fn new() -> BTreeMap<K, V> {
         BTreeMap {
-            root: None,
+            root: Maybe.None,
             len: 0,
         }
     }
@@ -133,7 +133,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Clears the map, removing all elements.
     public fn clear(&mut self) {
-        self.root = None;
+        self.root = Maybe.None;
         self.len = 0;
     }
 
@@ -146,8 +146,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// map.insert(1, "a");
-    /// assert_eq(map.get(&1), Some(&"a"));
-    /// assert_eq(map.get(&2), None);
+    /// assert_eq(map.get(&1), Maybe.Some(&"a"));
+    /// assert_eq(map.get(&2), Maybe.None);
     /// ```
     public fn get(&self, key: &K) -> Maybe<V> {
         // FULLY INLINED — sidesteps the search_node call boundary
@@ -163,8 +163,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
         // accesses (task #16 — diagnostic at commit c2f74b263
         // localised receiver to type_id=512 List at pc=176).
         match &self.root {
-            None => None,
-            Some(node) => {
+            Maybe.None => Maybe.None,
+            Maybe.Some(node) => {
                 // Stabilise via explicit local bindings BEFORE the
                 // loop so the codegen doesn't reuse `node`'s reg.
                 let keys_ref = &node.keys;
@@ -181,14 +181,14 @@ implement<K: Ord, V> BTreeMap<K, V> {
                     let keys_ref2 = &node.keys;
                     if *key == keys_ref2[i] {
                         let values_ref = &node.values;
-                        return Some(values_ref[i]);
+                        return Maybe.Some(values_ref[i]);
                     }
                 }
                 // Children check: re-bind &node.children fresh to
                 // dodge stale register state.
                 let children_ref = &node.children;
                 if children_ref.len() == 0 {
-                    None
+                    Maybe.None
                 } else {
                     self.search_node(&children_ref[i], key)
                 }
@@ -200,8 +200,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
     public fn get_mut(&mut self, key: &K) -> Maybe<&mut V> {
         // See `get` for the match-extract rationale.
         match &mut self.root {
-            Some(node) => self.search_node_mut(node, key),
-            None       => None,
+            Maybe.Some(node) => self.search_node_mut(node, key),
+            Maybe.None       => Maybe.None,
         }
     }
 
@@ -213,7 +213,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// Inserts a key-value pair into the map.
     ///
 
-    /// If the map did not have this key present, None is returned.
+    /// If the map did not have this key present, Maybe.None is returned.
     /// If the map did have this key present, the value is updated,
     /// && the old value is returned.
     ///
@@ -223,8 +223,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// ```verum
     /// let mut map = BTreeMap.new();
-    /// assert_eq(map.insert(37, "a"), None);
-    /// assert_eq(map.insert(37, "b"), Some("a"));
+    /// assert_eq(map.insert(37, "a"), Maybe.None);
+    /// assert_eq(map.insert(37, "b"), Maybe.Some("a"));
     /// ```
     public fn insert(&mut self, key: K, value: V) -> Maybe<V>
     where K: Clone, V: Clone
@@ -234,9 +234,9 @@ implement<K: Ord, V> BTreeMap<K, V> {
             let mut node = BTreeNode.new_leaf();
             node.keys.push(key);
             node.values.push(value);
-            self.root = Some(Heap.new(node));
+            self.root = Maybe.Some(Heap.new(node));
             self.len = 1;
-            return None;
+            return Maybe.None;
         }
 
         // Check if key exists — replace value directly via SetE (no &mut references)
@@ -244,19 +244,19 @@ implement<K: Ord, V> BTreeMap<K, V> {
         // Match-extract used instead of `.as_mut().expect()` — see `get` for the
         // codegen type-inference root cause that makes the latter mis-resolve.
         let replace_outcome = match &mut self.root {
-            Some(root_ref) => self.replace_value_in_node(root_ref, key, value),
-            None           => None,
+            Maybe.Some(root_ref) => self.replace_value_in_node(root_ref, key, value),
+            Maybe.None           => Maybe.None,
         };
         match replace_outcome {
-            Some(old_val) => {
-                return Some(old_val);
+            Maybe.Some(old_val) => {
+                return Maybe.Some(old_val);
             },
-            None => {},
+            Maybe.None => {},
         }
 
         // Insert into tree — match-extract instead of `.as_mut().expect()`.
         match &mut self.root {
-            Some(root) => {
+            Maybe.Some(root) => {
                 // If root is full, split it
                 if root.keys.len() == MAX_KEYS {
                     let new_root = BTreeNode.new_internal();
@@ -266,10 +266,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
                 }
                 self.insert_non_full(root, key, value);
             },
-            None => {},
+            Maybe.None => {},
         }
         self.len = self.len + 1;
-        None
+        Maybe.None
     }
 
     /// Removes a key from the map, returning the value at the key if it existed.
@@ -281,28 +281,28 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// map.insert(1, "a");
-    /// assert_eq(map.remove(&1), Some("a"));
-    /// assert_eq(map.remove(&1), None);
+    /// assert_eq(map.remove(&1), Maybe.Some("a"));
+    /// assert_eq(map.remove(&1), Maybe.None);
     /// ```
     public fn remove(&mut self, key: &K) -> Maybe<V>
     where K: Clone, V: Clone
     {
         if self.root.is_none() {
-            return None;
+            return Maybe.None;
         }
 
         // Match-extract instead of `.as_mut().expect()` — see `get` for rationale.
         let res = match &mut self.root {
-            Some(root_ref) => self.remove_from_node(root_ref, key),
-            None           => None,
+            Maybe.Some(root_ref) => self.remove_from_node(root_ref, key),
+            Maybe.None           => Maybe.None,
         };
 
         // If root became empty && has a child, make child the new root
-        if let Some(ref mut root) = self.root {
+        if let Maybe.Some(ref mut root) = self.root {
             if root.keys.is_empty() && !root.children.is_empty() {
-                self.root = Some(root.children.remove(0));
+                self.root = Maybe.Some(root.children.remove(0));
             } else if root.keys.is_empty() {
-                self.root = None;
+                self.root = Maybe.None;
             }
         }
 
@@ -318,8 +318,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// The key is the minimum key in the map.
     public fn first_key_value(&self) -> Maybe<(&K, &V)> {
         match &self.root {
-            None => None,
-            Some(node) => self.find_min(node),
+            Maybe.None => Maybe.None,
+            Maybe.Some(node) => self.find_min(node),
         }
     }
 
@@ -329,8 +329,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// The key is the maximum key in the map.
     public fn last_key_value(&self) -> Maybe<(&K, &V)> {
         match &self.root {
-            None => None,
-            Some(node) => self.find_max(node),
+            Maybe.None => Maybe.None,
+            Maybe.Some(node) => self.find_max(node),
         }
     }
 
@@ -339,13 +339,13 @@ implement<K: Ord, V> BTreeMap<K, V> {
     where K: Clone
     {
         match self.first_key_value() {
-            None => None,
-            Some(pair) => {
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => {
                 let key = pair.0.clone();
                 let value = self.remove(&key);
                 match value {
-                    None => None,
-                    Some(v) => Some((key, v)),
+                    Maybe.None => Maybe.None,
+                    Maybe.Some(v) => Maybe.Some((key, v)),
                 }
             }
         }
@@ -356,13 +356,13 @@ implement<K: Ord, V> BTreeMap<K, V> {
     where K: Clone
     {
         match self.last_key_value() {
-            None => None,
-            Some(pair) => {
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => {
                 let key = pair.0.clone();
                 let value = self.remove(&key);
                 match value {
-                    None => None,
-                    Some(v) => Some((key, v)),
+                    Maybe.None => Maybe.None,
+                    Maybe.Some(v) => Maybe.Some((key, v)),
                 }
             }
         }
@@ -420,14 +420,14 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// map.insert(5, "five");
     ///
 
-    /// assert_eq(map.lower_bound(&3), Some((&3, &"three")));
-    /// assert_eq(map.lower_bound(&2), Some((&3, &"three")));
-    /// assert_eq(map.lower_bound(&6), None);
+    /// assert_eq(map.lower_bound(&3), Maybe.Some((&3, &"three")));
+    /// assert_eq(map.lower_bound(&2), Maybe.Some((&3, &"three")));
+    /// assert_eq(map.lower_bound(&6), Maybe.None);
     /// ```
     public fn lower_bound(&self, key: &K) -> Maybe<(&K, &V)> {
         match &self.root {
-            None => None,
-            Some(node) => self.find_lower_bound(node, key),
+            Maybe.None => Maybe.None,
+            Maybe.Some(node) => self.find_lower_bound(node, key),
         }
     }
 
@@ -447,13 +447,13 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// map.insert(5, "five");
     ///
 
-    /// assert_eq(map.upper_bound(&3), Some((&5, &"five")));
-    /// assert_eq(map.upper_bound(&5), None);
+    /// assert_eq(map.upper_bound(&3), Maybe.Some((&5, &"five")));
+    /// assert_eq(map.upper_bound(&5), Maybe.None);
     /// ```
     public fn upper_bound(&self, key: &K) -> Maybe<(&K, &V)> {
         match &self.root {
-            None => None,
-            Some(node) => self.find_upper_bound(node, key),
+            Maybe.None => Maybe.None,
+            Maybe.Some(node) => self.find_upper_bound(node, key),
         }
     }
 
@@ -464,8 +464,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// of the value, and you want to get the full stored key.
     public fn get_key_value(&self, key: &K) -> Maybe<(&K, &V)> {
         match &self.root {
-            None => None,
-            Some(node) => self.search_node_kv(node, key),
+            Maybe.None => Maybe.None,
+            Maybe.Some(node) => self.search_node_kv(node, key),
         }
     }
 
@@ -478,16 +478,16 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// map.insert(1, "one");
-    /// assert_eq(map.remove_entry(&1), Some((1, "one")));
-    /// assert_eq(map.remove_entry(&1), None);
+    /// assert_eq(map.remove_entry(&1), Maybe.Some((1, "one")));
+    /// assert_eq(map.remove_entry(&1), Maybe.None);
     /// ```
     public fn remove_entry(&mut self, key: &K) -> Maybe<(K, V)>
     where K: Clone, V: Clone
     {
         let key_clone = key.clone();
         match self.remove(key) {
-            None => None,
-            Some(v) => Some((key_clone, v)),
+            Maybe.None => Maybe.None,
+            Maybe.Some(v) => Maybe.Some((key_clone, v)),
         }
     }
 
@@ -585,8 +585,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
         // Move entries
         for k in to_move.iter() {
             match self.remove(k) {
-                Some(v) => { other.insert(k.clone(), v); }
-                None => {}
+                Maybe.Some(v) => { other.insert(k.clone(), v); }
+                Maybe.None => {}
             }
         }
         other
@@ -627,11 +627,11 @@ implement<K: Ord, V> BTreeMap<K, V> {
         }
 
         if i < node.keys.len() && *key == node.keys[i] {
-            return Some((&node.keys[i], &node.values[i]));
+            return Maybe.Some((&node.keys[i], &node.values[i]));
         }
 
         if node.is_leaf {
-            return None;
+            return Maybe.None;
         }
 
         self.search_node_kv(&node.children[i], key)
@@ -656,7 +656,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
         if i < klen {
             if *key == keys_ref[i] {
-                return Some(values_ref[i]);
+                return Maybe.Some(values_ref[i]);
             }
         }
 
@@ -667,7 +667,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
         // least keys.len()+1 children).
         let children_ref = &node.children;
         if children_ref.len() == 0 {
-            return None;
+            return Maybe.None;
         }
 
         self.search_node(&children_ref[i], key)
@@ -691,11 +691,11 @@ implement<K: Ord, V> BTreeMap<K, V> {
         };
 
         if found {
-            return Some(&mut node.values[i]);
+            return Maybe.Some(&mut node.values[i]);
         }
 
         if node.is_leaf {
-            return None;
+            return Maybe.None;
         }
 
         self.search_node_mut(&mut node.children[i], key)
@@ -721,11 +721,11 @@ implement<K: Ord, V> BTreeMap<K, V> {
         if i < keys_len && key == node.keys[i] {
             let old = node.values[i];
             node.values[i] = value;
-            return Some(old);
+            return Maybe.Some(old);
         }
 
         if node.is_leaf {
-            return None;
+            return Maybe.None;
         }
 
         self.replace_value_in_node(&mut node.children[i], key, value)
@@ -846,7 +846,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
             if is_leaf {
                 // Simple case: remove from leaf
                 node.keys.remove(i);
-                return Some(node.values.remove(i));
+                return Maybe.Some(node.values.remove(i));
             } else {
                 // Internal node: replace with predecessor || successor
                 return self.remove_from_internal(node, i);
@@ -855,7 +855,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
         // Key not in this node
         if is_leaf {
-            return None;
+            return Maybe.None;
         }
 
         // Ensure child has enough keys
@@ -884,7 +884,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
             node.keys[idx] = pred_key;
             let old_value = replace(&mut node.values[idx], pred_value);
             self.remove_from_node(&mut node.children[idx], &node.keys[idx]);
-            return Some(old_value);
+            return Maybe.Some(old_value);
         }
 
         // If successor child has enough keys, replace with successor
@@ -893,7 +893,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
             node.keys[idx] = succ_key;
             let old_value = replace(&mut node.values[idx], succ_value);
             self.remove_from_node(&mut node.children[idx + 1], &node.keys[idx]);
-            return Some(old_value);
+            return Maybe.Some(old_value);
         }
 
         // Merge children && delete from merged node
@@ -960,9 +960,9 @@ implement<K: Ord, V> BTreeMap<K, V> {
             let value = sibling.values.remove(last_key_idx);
             let child = if !sibling_is_leaf {
                 let last_child_idx = sibling.children.len() - 1;
-                Some(sibling.children.remove(last_child_idx))
+                Maybe.Some(sibling.children.remove(last_child_idx))
             } else {
-                None
+                Maybe.None
             };
             (key, value, child)
         };
@@ -976,7 +976,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
             let child = &mut node.children[idx];
             child.keys.insert(0, parent_key);
             child.values.insert(0, parent_value);
-            if let Some(c) = maybe_sibling_child {
+            if let Maybe.Some(c) = maybe_sibling_child {
                 child.children.insert(0, c);
             }
         }
@@ -996,9 +996,9 @@ implement<K: Ord, V> BTreeMap<K, V> {
             let key = sibling.keys.remove(0);
             let value = sibling.values.remove(0);
             let child = if !sibling_is_leaf {
-                Some(sibling.children.remove(0))
+                Maybe.Some(sibling.children.remove(0))
             } else {
-                None
+                Maybe.None
             };
             (key, value, child)
         };
@@ -1012,7 +1012,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
             let child = &mut node.children[idx];
             child.keys.push(parent_key);
             child.values.push(parent_value);
-            if let Some(c) = maybe_sibling_child {
+            if let Maybe.Some(c) = maybe_sibling_child {
                 child.children.push(c);
             }
         }
@@ -1050,9 +1050,9 @@ implement<K: Ord, V> BTreeMap<K, V> {
     fn find_min(&self, node: &Heap<BTreeNode<K, V>>) -> Maybe<(&K, &V)> {
         if node.is_leaf {
             if node.keys.is_empty() {
-                None
+                Maybe.None
             } else {
-                Some((&node.keys[0], &node.values[0]))
+                Maybe.Some((&node.keys[0], &node.values[0]))
             }
         } else {
             self.find_min(&node.children[0])
@@ -1062,10 +1062,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
     fn find_max(&self, node: &Heap<BTreeNode<K, V>>) -> Maybe<(&K, &V)> {
         if node.is_leaf {
             if node.keys.is_empty() {
-                None
+                Maybe.None
             } else {
                 let last = node.keys.len() - 1;
-                Some((&node.keys[last], &node.values[last]))
+                Maybe.Some((&node.keys[last], &node.values[last]))
             }
         } else {
             let last = node.children.len() - 1;
@@ -1075,12 +1075,12 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Find first key-value pair where key >= given key.
     fn find_lower_bound(&self, node: &Heap<BTreeNode<K, V>>, key: &K) -> Maybe<(&K, &V)> {
-        let mut best: Maybe<(&K, &V)> = None;
+        let mut best: Maybe<(&K, &V)> = Maybe.None;
 
         let mut i = 0;
         while i < node.keys.len() {
             if node.keys[i] >= *key {
-                best = Some((&node.keys[i], &node.values[i]));
+                best = Maybe.Some((&node.keys[i], &node.values[i]));
                 break;
             }
             i = i + 1;
@@ -1089,19 +1089,19 @@ implement<K: Ord, V> BTreeMap<K, V> {
         if !node.is_leaf {
             let child_result = self.find_lower_bound(&node.children[i], key);
             match child_result {
-                Some(pair) => {
+                Maybe.Some(pair) => {
                     match best {
-                        None => { return Some(pair); }
-                        Some(curr) => {
+                        Maybe.None => { return Maybe.Some(pair); }
+                        Maybe.Some(curr) => {
                             if *pair.0 < *curr.0 {
-                                return Some(pair);
+                                return Maybe.Some(pair);
                             } else {
-                                return Some(curr);
+                                return Maybe.Some(curr);
                             }
                         }
                     }
                 }
-                None => {}
+                Maybe.None => {}
             }
         }
 
@@ -1110,12 +1110,12 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Find first key-value pair where key > given key.
     fn find_upper_bound(&self, node: &Heap<BTreeNode<K, V>>, key: &K) -> Maybe<(&K, &V)> {
-        let mut best: Maybe<(&K, &V)> = None;
+        let mut best: Maybe<(&K, &V)> = Maybe.None;
 
         let mut i = 0;
         while i < node.keys.len() {
             if node.keys[i] > *key {
-                best = Some((&node.keys[i], &node.values[i]));
+                best = Maybe.Some((&node.keys[i], &node.values[i]));
                 break;
             }
             i = i + 1;
@@ -1124,19 +1124,19 @@ implement<K: Ord, V> BTreeMap<K, V> {
         if !node.is_leaf {
             let child_result = self.find_upper_bound(&node.children[i], key);
             match child_result {
-                Some(pair) => {
+                Maybe.Some(pair) => {
                     match best {
-                        None => { return Some(pair); }
-                        Some(curr) => {
+                        Maybe.None => { return Maybe.Some(pair); }
+                        Maybe.Some(curr) => {
                             if *pair.0 < *curr.0 {
-                                return Some(pair);
+                                return Maybe.Some(pair);
                             } else {
-                                return Some(curr);
+                                return Maybe.Some(curr);
                             }
                         }
                     }
                 }
-                None => {}
+                Maybe.None => {}
             }
         }
 
@@ -1182,7 +1182,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
     {
         let mut result: List<K> = List.with_capacity(self.len());
         let mut iter = self.keys();
-        while let Some(k) = iter.next() {
+        while let Maybe.Some(k) = iter.next() {
             result.push(k.clone());
         }
         result
@@ -1194,7 +1194,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
     {
         let mut result: List<V> = List.with_capacity(self.len());
         let mut iter = self.values();
-        while let Some(v) = iter.next() {
+        while let Maybe.Some(v) = iter.next() {
             result.push(v.clone());
         }
         result
@@ -1205,10 +1205,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
     where K: Clone
     {
         if self.contains_key(&key) {
-            Err(value)
+            Result.Err(value)
         } else {
             self.insert(key, value);
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -1268,8 +1268,8 @@ implement<K: Ord, V> BTreeMap<K, V> {
     where V: Clone
     {
         match self.get(key) {
-            Some(v) => v.clone(),
-            None => default,
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => default,
         }
     }
 
@@ -1298,10 +1298,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
     public fn find<F: fn(&K, &V) -> Bool>(&self, f: F) -> Maybe<(&K, &V)> {
         for (k, v) in self.iter() {
             if f(k, v) {
-                return Some((k, v));
+                return Maybe.Some((k, v));
             }
         }
-        None
+        Maybe.None
     }
 
     /// Transforms values while preserving keys and ordering.
@@ -1337,7 +1337,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
     {
         let mut result = BTreeMap.new();
         for (k, v) in self.iter() {
-            if let Some(new_v) = f(k, v) {
+            if let Maybe.Some(new_v) = f(k, v) {
                 result.insert(k.clone(), new_v);
             }
         }
@@ -1365,7 +1365,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// The resolve function receives (existing_value, new_value) and returns the merged value.
     public fn merge<F: fn(V, V) -> V>(&mut self, other: BTreeMap<K, V>, resolve: F) {
         for (k, v) in other.into_iter() {
-            if let Some(existing) = self.remove(&k) {
+            if let Maybe.Some(existing) = self.remove(&k) {
                 self.insert(k, resolve(existing, v));
             } else {
                 self.insert(k, v);
@@ -1502,8 +1502,8 @@ implement<K: Ord + Display, V: Display> Display for BTreeMap<K, V> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(pair) => {
+                Maybe.None => break,
+                Maybe.Some(pair) => {
                     if !first {
                         f.write_str(", ")?;
                     }
@@ -1527,8 +1527,8 @@ implement<K: Ord + Debug, V: Debug> Debug for BTreeMap<K, V> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(pair) => {
+                Maybe.None => break,
+                Maybe.Some(pair) => {
                     if !first {
                         f.write_str(", ")?;
                     }
@@ -1551,8 +1551,8 @@ implement<K: Ord + Clone, V: Clone> Clone for BTreeMap<K, V> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(pair) => {
+                Maybe.None => break,
+                Maybe.Some(pair) => {
                     let k: &K = pair.0;
                     let v: &V = pair.1;
                     new_map.insert(k.clone(), v.clone());
@@ -1639,8 +1639,8 @@ implement<K: Ord + Hash, V: Hash> Hash for BTreeMap<K, V> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(pair) => {
+                Maybe.None => break,
+                Maybe.Some(pair) => {
                     let k: &K = pair.0;
                     let v: &V = pair.1;
                     k.hash(hasher);
@@ -1657,8 +1657,8 @@ implement<T: Ord + Hash> Hash for BTreeSet<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(item) => {
+                Maybe.None => break,
+                Maybe.Some(item) => {
                     let val: &T = item;
                     val.hash(hasher);
                 }
@@ -1696,7 +1696,7 @@ implement<K: Ord, V> BTreeMapIter<K, V> {
             len: map.len,
         };
 
-        if let Some(ref root) = map.root {
+        if let Maybe.Some(ref root) = map.root {
             iter.push_left(root);
         }
 
@@ -1714,7 +1714,7 @@ implement<K: Ord, V> BTreeMapIter<K, V> {
             len: 0,
         };
 
-        if let Some(ref root) = map.root {
+        if let Maybe.Some(ref root) = map.root {
             iter.seek_to_key(root, start_key);
             // Estimate remaining length (upper bound is map.len)
             iter.len = map.len;
@@ -1732,7 +1732,7 @@ implement<K: Ord, V> BTreeMapIter<K, V> {
         let mut to_visit: List<&Heap<BTreeNode<K, V>>> = List.new();
         to_visit.push(node);
 
-        while let Some(current) = to_visit.pop() {
+        while let Maybe.Some(current) = to_visit.pop() {
             // Binary search for position in current node
             let pos = BTreeMapIter.find_key_position(current, target);
 
@@ -1778,7 +1778,7 @@ implement<K: Ord, V> BTreeMapIter<K, V> {
         let mut to_visit: List<&Heap<BTreeNode<K, V>>> = List.new();
         to_visit.push(start_node);
 
-        while let Some(node) = to_visit.pop() {
+        while let Maybe.Some(node) = to_visit.pop() {
             self.stack.push((node, 0));
             if !node.is_leaf {
                 let child: &Heap<BTreeNode<K, V>> = &node.children[0];
@@ -1792,7 +1792,7 @@ implement<K: Ord, V> Iterator for BTreeMapIter<K, V> {
     type Item = (&K, &V);
 
     fn next(&mut self) -> Maybe<(&K, &V)> {
-        while let Some((node, idx)) = self.stack.pop() {
+        while let Maybe.Some((node, idx)) = self.stack.pop() {
             if idx < node.keys.len() {
                 // Return current key/value
                 let res = (&node.keys[idx], &node.values[idx]);
@@ -1806,15 +1806,15 @@ implement<K: Ord, V> Iterator for BTreeMapIter<K, V> {
                 }
 
                 self.len = self.len - 1;
-                return Some(res);
+                return Maybe.Some(res);
             }
         }
 
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.len, Some(self.len))
+        (self.len, Maybe.Some(self.len))
     }
 }
 
@@ -1842,8 +1842,8 @@ implement<K: Ord, V> Iterator for BTreeMapKeys<K, V> {
 
     fn next(&mut self) -> Maybe<&K> {
         match self.inner.next() {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 }
@@ -1880,8 +1880,8 @@ implement<K: Ord, V> Iterator for BTreeMapValues<K, V> {
 
     fn next(&mut self) -> Maybe<&V> {
         match self.inner.next() {
-            None => None,
-            Some(pair) => Some(pair.1),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.1),
         }
     }
 }
@@ -1929,8 +1929,8 @@ implement<K: Ord, V> BTreeMapRange<K, V> {
 
         // Create iterator - seek to start if we have a start bound
         let iter = match start_bound {
-            Some(start_key) => BTreeMapIter.seek_from(map, start_key),
-            None => BTreeMapIter.new(map),
+            Maybe.Some(start_key) => BTreeMapIter.seek_from(map, start_key),
+            Maybe.None => BTreeMapIter.new(map),
         };
 
         BTreeMapRange {
@@ -1950,37 +1950,37 @@ implement<K: Ord, V> Iterator for BTreeMapRange<K, V> {
     fn next(&mut self) -> Maybe<(&K, &V)> {
         loop {
             match self.iter.next() {
-                None => return None,
-                Some((k, v)) => {
+                Maybe.None => return Maybe.None,
+                Maybe.Some((k, v)) => {
                     // Handle start bound (only relevant for exclusive start)
                     if !self.past_start {
                         match self.start {
-                            Some(start) => {
+                            Maybe.Some(start) => {
                                 // For exclusive start, skip equal elements
                                 if k == start {
                                     continue; // Skip this element
                                 }
                             }
-                            None => {}
+                            Maybe.None => {}
                         }
                         self.past_start = true;
                     }
 
                     // Handle end bound
                     match self.end {
-                        None => return Some((k, v)),
-                        Some(end) => {
+                        Maybe.None => return Maybe.Some((k, v)),
+                        Maybe.Some(end) => {
                             if self.end_inclusive {
                                 if k <= end {
-                                    return Some((k, v));
+                                    return Maybe.Some((k, v));
                                 } else {
-                                    return None;
+                                    return Maybe.None;
                                 }
                             } else {
                                 if k < end {
-                                    return Some((k, v));
+                                    return Maybe.Some((k, v));
                                 } else {
-                                    return None;
+                                    return Maybe.None;
                                 }
                             }
                         }
@@ -2086,16 +2086,16 @@ implement<T: Ord> BTreeSet<T> {
     /// Returns a reference to the first (minimum) element.
     public fn first(&self) -> Maybe<&T> {
         match self.map.first_key_value() {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 
     /// Returns a reference to the last (maximum) element.
     public fn last(&self) -> Maybe<&T> {
         match self.map.last_key_value() {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 
@@ -2198,11 +2198,11 @@ implement<T: Ord> BTreeSet<T> {
     where T: Clone
     {
         match self.first() {
-            None => None,
-            Some(val) => {
+            Maybe.None => Maybe.None,
+            Maybe.Some(val) => {
                 let v = val.clone();
                 self.remove(&v);
-                Some(v)
+                Maybe.Some(v)
             }
         }
     }
@@ -2212,11 +2212,11 @@ implement<T: Ord> BTreeSet<T> {
     where T: Clone
     {
         match self.last() {
-            None => None,
-            Some(val) => {
+            Maybe.None => Maybe.None,
+            Maybe.Some(val) => {
                 let v = val.clone();
                 self.remove(&v);
-                Some(v)
+                Maybe.Some(v)
             }
         }
     }
@@ -2309,8 +2309,8 @@ implement<T: Ord> BTreeSet<T> {
     /// Returns a reference to the stored value that is equal to the given value.
     public fn get(&self, value: &T) -> Maybe<&T> {
         match self.map.get_key_value(value) {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 
@@ -2321,24 +2321,24 @@ implement<T: Ord> BTreeSet<T> {
         if self.contains(value) {
             let v = value.clone();
             self.remove(value);
-            Some(v)
+            Maybe.Some(v)
         } else {
-            None
+            Maybe.None
         }
     }
 
     /// Replace the stored value with the given value, returning the old value if present.
-    /// If the value is not present, inserts it and returns None.
+    /// If the value is not present, inserts it and returns Maybe.None.
     public fn replace(&mut self, value: T) -> Maybe<T>
     where T: Clone
     {
         if self.contains(&value) {
             let old = value.clone();
             self.map.insert(value, ());
-            Some(old)
+            Maybe.Some(old)
         } else {
             self.map.insert(value, ());
-            None
+            Maybe.None
         }
     }
 
@@ -2380,14 +2380,14 @@ implement<T: Ord> BTreeSet<T> {
     /// ```verum
     /// let mut set = BTreeSet.new();
     /// set.insert(1); set.insert(3); set.insert(5);
-    /// assert_eq(set.lower_bound(&3), Some(&3));
-    /// assert_eq(set.lower_bound(&2), Some(&3));
-    /// assert_eq(set.lower_bound(&6), None);
+    /// assert_eq(set.lower_bound(&3), Maybe.Some(&3));
+    /// assert_eq(set.lower_bound(&2), Maybe.Some(&3));
+    /// assert_eq(set.lower_bound(&6), Maybe.None);
     /// ```
     public fn lower_bound(&self, value: &T) -> Maybe<&T> {
         match self.map.lower_bound(value) {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 
@@ -2399,13 +2399,13 @@ implement<T: Ord> BTreeSet<T> {
     /// ```verum
     /// let mut set = BTreeSet.new();
     /// set.insert(1); set.insert(3); set.insert(5);
-    /// assert_eq(set.upper_bound(&3), Some(&5));
-    /// assert_eq(set.upper_bound(&5), None);
+    /// assert_eq(set.upper_bound(&3), Maybe.Some(&5));
+    /// assert_eq(set.upper_bound(&5), Maybe.None);
     /// ```
     public fn upper_bound(&self, value: &T) -> Maybe<&T> {
         match self.map.upper_bound(value) {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 
@@ -2523,7 +2523,7 @@ implement<T: Ord> BTreeSet<T> {
     {
         let mut result: List<T> = List.with_capacity(self.len());
         let mut iter = self.iter();
-        while let Some(item) = iter.next() {
+        while let Maybe.Some(item) = iter.next() {
             result.push(item.clone());
         }
         result
@@ -2579,10 +2579,10 @@ implement<T: Ord> BTreeSet<T> {
     public fn find<F: fn(&T) -> Bool>(&self, f: F) -> Maybe<&T> {
         for x in self.iter() {
             if f(x) {
-                return Some(x);
+                return Maybe.Some(x);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Returns a new set containing only elements matching the predicate.
@@ -2638,7 +2638,7 @@ implement<T: Ord> BTreeSet<T> {
     public fn filter_map<U: Ord, F: fn(&T) -> Maybe<U>>(&self, f: F) -> BTreeSet<U> {
         let mut result = BTreeSet.new();
         for v in self.iter() {
-            if let Some(u) = f(v) {
+            if let Maybe.Some(u) = f(v) {
                 result.insert(u);
             }
         }
@@ -2675,8 +2675,8 @@ implement<T: Ord + Display> Display for BTreeSet<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     if !first {
                         f.write_str(", ")?;
                     }
@@ -2697,8 +2697,8 @@ implement<T: Ord + Debug> Debug for BTreeSet<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     if !first {
                         f.write_str(", ")?;
                     }
@@ -2763,8 +2763,8 @@ implement<T: Ord> Iterator for BTreeSetRange<T> {
 
     fn next(&mut self) -> Maybe<&T> {
         match self.inner.next() {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 }
@@ -2797,15 +2797,15 @@ implement<K: Ord, V> Iterator for BTreeMapDrain<K, V> {
         if self.idx < self.entries.len() {
             let i = self.idx;
             self.idx = self.idx + 1;
-            Some(self.entries[i].clone())
+            Maybe.Some(self.entries[i].clone())
         } else {
-            None
+            Maybe.None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.entries.len() - self.idx;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
@@ -2836,15 +2836,15 @@ implement<T: Ord> Iterator for BTreeSetDrain<T> {
         if self.idx < self.elements.len() {
             let i = self.idx;
             self.idx = self.idx + 1;
-            Some(self.elements[i].clone())
+            Maybe.Some(self.elements[i].clone())
         } else {
-            None
+            Maybe.None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.elements.len() - self.idx;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
@@ -2876,7 +2876,7 @@ implement<K: Ord, V> Iterator for BTreeMapValuesMut<K, V> {
 
     fn next(&mut self) -> Maybe<&mut V> {
         if self.idx >= self.keys.len() {
-            return None;
+            return Maybe.None;
         }
         let key = &self.keys[self.idx];
         self.idx = self.idx + 1;
@@ -2904,13 +2904,13 @@ implement<K: Ord, V> Iterator for BTreeMapIterMut<K, V> {
 
     fn next(&mut self) -> Maybe<(&K, &mut V)> {
         if self.idx >= self.keys.len() {
-            return None;
+            return Maybe.None;
         }
         let key = &self.keys[self.idx];
         self.idx = self.idx + 1;
         match self.map.get_mut(key) {
-            Some(val) => Some((key, val)),
-            None => None,
+            Maybe.Some(val) => Maybe.Some((key, val)),
+            Maybe.None => Maybe.None,
         }
     }
 }
@@ -2984,8 +2984,8 @@ implement<K: Ord, V> FromIterator<(K, V)> for BTreeMap<K, V> {
         let mut map = BTreeMap.new();
         loop {
             match iter.next() {
-                None => break,
-                Some(pair) => {
+                Maybe.None => break,
+                Maybe.Some(pair) => {
                     let tuple: (K, V) = pair;
                     map.insert(tuple.0, tuple.1);
                 }
@@ -3062,8 +3062,8 @@ implement<K: Ord + Eq, V: Eq> Eq for BTreeMap<K, V> {
         let mut it_other = other.iter();
         loop {
             match (it_self.next(), it_other.next()) {
-                (None, None) => { return true; }
-                (Some(a), Some(b)) => {
+                (Maybe.None, Maybe.None) => { return true; }
+                (Maybe.Some(a), Maybe.Some(b)) => {
                     if !(a.0 == b.0 && a.1 == b.1) {
                         return false;
                     }
@@ -3082,8 +3082,8 @@ implement<K: Ord + Eq, V: Eq> Eq for BTreeMap<K, V> {
         let mut it_other = other.iter();
         loop {
             match (it_self.next(), it_other.next()) {
-                (None, None) => { return false; }
-                (Some(a), Some(b)) => {
+                (Maybe.None, Maybe.None) => { return false; }
+                (Maybe.Some(a), Maybe.Some(b)) => {
                     if !(a.0 == b.0 && a.1 == b.1) {
                         return true;
                     }
@@ -3103,8 +3103,8 @@ implement<T: Ord + Eq> Eq for BTreeSet<T> {
         let mut it_other = other.iter();
         loop {
             match (it_self.next(), it_other.next()) {
-                (None, None) => { return true; }
-                (Some(a), Some(b)) => {
+                (Maybe.None, Maybe.None) => { return true; }
+                (Maybe.Some(a), Maybe.Some(b)) => {
                     if !(a == b) {
                         return false;
                     }
@@ -3123,8 +3123,8 @@ implement<T: Ord + Eq> Eq for BTreeSet<T> {
         let mut it_other = other.iter();
         loop {
             match (it_self.next(), it_other.next()) {
-                (None, None) => { return false; }
-                (Some(a), Some(b)) => {
+                (Maybe.None, Maybe.None) => { return false; }
+                (Maybe.Some(a), Maybe.Some(b)) => {
                     if !(a == b) {
                         return true;
                     }
@@ -3325,8 +3325,8 @@ implement<K: Ord, V> BTreeEntry<K, V> {
         match self {
             BTreeEntry.Occupied(entry) => {
                 match entry.map.get_mut(&entry.key) {
-                    Some(v) => f(v),
-                    None => {}
+                    Maybe.Some(v) => f(v),
+                    Maybe.None => {}
                 }
                 BTreeEntry.Occupied(entry)
             }
@@ -3399,9 +3399,9 @@ fn test_btreemap_basic() {
     map.insert(3, "three");
 
     assert_eq(map.len(), 3);
-    assert_eq(map.get(&1), Some(&"one"));
-    assert_eq(map.get(&2), Some(&"two"));
-    assert_eq(map.get(&4), None);
+    assert_eq(map.get(&1), Maybe.Some(&"one"));
+    assert_eq(map.get(&2), Maybe.Some(&"two"));
+    assert_eq(map.get(&4), Maybe.None);
 }
 
 @test
@@ -3423,9 +3423,9 @@ fn test_btreemap_remove() {
     map.insert(1, "one");
     map.insert(2, "two");
 
-    assert_eq(map.remove(&1), Some("one"));
+    assert_eq(map.remove(&1), Maybe.Some("one"));
     assert_eq(map.len(), 1);
-    assert_eq(map.get(&1), None);
+    assert_eq(map.get(&1), Maybe.None);
 }
 
 @test
@@ -3459,6 +3459,6 @@ fn test_btreemap_first_last() {
     map.insert(1, "one");
     map.insert(3, "three");
 
-    assert_eq(map.first_key_value(), Some((&1, &"one")));
-    assert_eq(map.last_key_value(), Some((&3, &"three")));
+    assert_eq(map.first_key_value(), Maybe.Some((&1, &"one")));
+    assert_eq(map.last_key_value(), Maybe.Some((&3, &"three")));
 }

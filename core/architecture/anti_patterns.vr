@@ -375,7 +375,7 @@ public type DiagnosticContext is {
 public fn diagnostic_context_default() -> DiagnosticContext {
     DiagnosticContext {
         cog_name: "<unknown>",
-        parent_module: None,
+        parent_module: Maybe.None,
     }
 }
 
@@ -634,7 +634,7 @@ public axiom kernel_arch_observer_impersonation_check() -> Bool
     ensures true;
 
 /// **AP-037 closure**: a strict-mode audit invocation against a
-/// `Shape` that has `declarations: None` or `declarations.purpose: None`.
+/// `Shape` that has `declarations: Maybe.None` or `declarations.purpose: Maybe.None`.
 /// Per spec §14.6, the audit terminates relative to a declared
 /// purpose; without one the audit has no halting criterion and
 /// degenerates into infinite polishing.  This discharge requires
@@ -652,8 +652,8 @@ public axiom kernel_arch_boundless_audit_check() -> Bool
 /// and does not masquerade as a universal neutral apparatus.  The
 /// default substrate (`AnalyticDecompositional`) MUST be either
 /// declared explicitly or accepted by the cog explicitly via
-/// `Shape.declarations = Some(_)` even with substrate omitted; a
-/// fully `None` declarations field on a strict `[T]` cog is the
+/// `Shape.declarations = Maybe.Some(_)` even with substrate omitted; a
+/// fully `Maybe.None` declarations field on a strict `[T]` cog is the
 /// implicit-substrate defect.
 @framework(ats_v, "ATS-V implicit-substrate closure (cve-architecture spec §1.5 cognitive substrate disclosure). A strict-mode `[T]` cog must declare its operational mode; absence is operationally indistinguishable from a vacuous claim of universality.")
 @kernel_discharge("kernel_arch_implicit_substrate_check")

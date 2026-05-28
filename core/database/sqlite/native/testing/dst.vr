@@ -133,7 +133,7 @@ public fn no_faults() -> NoFaults { NoFaults { unit: true } }
 
 implement FaultInjector for NoFaults {
     fn name(&self) -> Text { "no_faults".clone() }
-    fn next_fault(&mut self, _op_index: Int) -> Maybe<FaultKind> { None }
+    fn next_fault(&mut self, _op_index: Int) -> Maybe<FaultKind> { Maybe.None }
 }
 
 public type ScriptedFaults is {
@@ -148,14 +148,14 @@ public fn scripted_faults(schedule: List<DstTestingFault>) -> ScriptedFaults {
 implement FaultInjector for ScriptedFaults {
     fn name(&self) -> Text { "scripted".clone() }
     fn next_fault(&mut self, op_index: Int) -> Maybe<FaultKind> {
-        if self.cursor >= self.schedule.len() { return None; }
+        if self.cursor >= self.schedule.len() { return Maybe.None; }
         let f = &self.schedule[self.cursor];
         if f.at_op_index == op_index {
             let kind = clone_fault_kind(&f.kind);
             self.cursor = self.cursor + 1;
-            return Some(kind);
+            return Maybe.Some(kind);
         }
-        None
+        Maybe.None
     }
 }
 

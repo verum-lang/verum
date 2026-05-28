@@ -169,9 +169,9 @@ implement PosixTerminal {
         let mut state = TermiosState { data: [0; 60] };
         let result = tcgetattr(fd.0, &mut state.data);
         if result != 0 {
-            return Err(StreamError.from_errno());
+            return Result.Err(StreamError.from_errno());
         }
-        Ok(PosixTerminal {
+        Result.Ok(PosixTerminal {
             mode: TerminalMode {
                 original: state,
                 fd: fd,
@@ -187,9 +187,9 @@ implement PosixTerminal {
         let mut state = TermiosState { data: [0; 60] };
         let result = tcgetattr(fd.0, &mut state.data);
         if result != 0 {
-            return Err(StreamError.from_errno());
+            return Result.Err(StreamError.from_errno());
         }
-        Ok(PosixTerminal {
+        Result.Ok(PosixTerminal {
             mode: TerminalMode {
                 original: state,
                 fd: fd,
@@ -203,7 +203,7 @@ implement PosixTerminal {
     /// Flush the write buffer to the underlying fd.
     public fn flush(&mut self) -> IoResult<()> {
         if self.write_buf.len() == 0 {
-            return Ok(());
+            return Result.Ok(());
         }
         let total = self.write_buf.len();
         let mut written = 0;
@@ -214,12 +214,12 @@ implement PosixTerminal {
                 total - written,
             );
             if n < 0 {
-                return Err(StreamError.from_errno());
+                return Result.Err(StreamError.from_errno());
             }
             written = written + n;
         }
         self.write_buf.clear();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Write raw bytes to the write buffer.
@@ -227,7 +227,7 @@ implement PosixTerminal {
         for i in 0..data.len() {
             self.write_buf.push(data[i]);
         }
-        Ok(data.len())
+        Result.Ok(data.len())
     }
 
     /// Write a string as bytes to the write buffer.
@@ -236,7 +236,7 @@ implement PosixTerminal {
         for i in 0..bytes.len() {
             self.write_buf.push(bytes[i]);
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -250,19 +250,19 @@ implement RawTerminal for PosixTerminal {
         apply_raw_flags(&mut raw);
         let result = tcsetattr(self.mode.fd.0, TCSAFLUSH, &raw.data);
         if result != 0 {
-            return Err(StreamError.from_errno());
+            return Result.Err(StreamError.from_errno());
         }
         self.mode.is_raw = true;
-        Ok(())
+        Result.Ok(())
     }
 
     fn disable_raw_mode(&mut self) -> IoResult<()> {
         let result = tcsetattr(self.mode.fd.0, TCSAFLUSH, &self.mode.original.data);
         if result != 0 {
-            return Err(StreamError.from_errno());
+            return Result.Err(StreamError.from_errno());
         }
         self.mode.is_raw = false;
-        Ok(())
+        Result.Ok(())
     }
 
     fn enter_alternate_screen(&mut self) -> IoResult<()> {
@@ -270,7 +270,7 @@ implement RawTerminal for PosixTerminal {
         self.write_str("\x1b[?1049h")?;
         self.flush()?;
         self.mode.is_alternate = true;
-        Ok(())
+        Result.Ok(())
     }
 
     fn leave_alternate_screen(&mut self) -> IoResult<()> {
@@ -278,7 +278,7 @@ implement RawTerminal for PosixTerminal {
         self.write_str("\x1b[?1049l")?;
         self.flush()?;
         self.mode.is_alternate = false;
-        Ok(())
+        Result.Ok(())
     }
 
     fn size(&self) -> IoResult<TerminalSize> {
@@ -290,13 +290,13 @@ implement RawTerminal for PosixTerminal {
         };
         let result = ioctl(self.mode.fd.0, TIOCGWINSZ, &mut ws as &unsafe Byte);
         if result != 0 {
-            return Err(StreamError.from_errno());
+            return Result.Err(StreamError.from_errno());
         }
-        Ok(TerminalSize {
+        Result.Ok(TerminalSize {
             columns: ws.ws_col as Int,
             rows: ws.ws_row as Int,
-            pixel_width: if ws.ws_xpixel > 0 { Some(ws.ws_xpixel as Int) } else { None },
-            pixel_height: if ws.ws_ypixel > 0 { Some(ws.ws_ypixel as Int) } else { None },
+            pixel_width: if ws.ws_xpixel > 0 { Maybe.Some(ws.ws_xpixel as Int) } else { Maybe.None },
+            pixel_height: if ws.ws_ypixel > 0 { Maybe.Some(ws.ws_ypixel as Int) } else { Maybe.None },
         })
     }
 
@@ -379,7 +379,7 @@ implement EscapeWriter for PosixTerminal {
             }
         }
         self.write_buf.push(final_byte);
-        Ok(())
+        Result.Ok(())
     }
 
     fn write_osc(&mut self, code: Int, data: &Text) -> IoResult<()> {
@@ -387,7 +387,7 @@ implement EscapeWriter for PosixTerminal {
         self.write_str(f"\x1b]{code};")?;
         self.write_str(data)?;
         self.write_str("\x1b\\")?;
-        Ok(())
+        Result.Ok(())
     }
 
     fn write_dcs(&mut self, data: &Text) -> IoResult<()> {
@@ -395,13 +395,13 @@ implement EscapeWriter for PosixTerminal {
         self.write_str("\x1bP")?;
         self.write_str(data)?;
         self.write_str("\x1b\\")?;
-        Ok(())
+        Result.Ok(())
     }
 
     fn move_to(&mut self, col: Int, row: Int) -> IoResult<()> {
         // CSI row ; col H (1-indexed)
         self.write_str(f"\x1b[{row + 1};{col + 1}H")?;
-        Ok(())
+        Result.Ok(())
     }
 
     fn clear(&mut self, mode: ClearMode) -> IoResult<()> {
@@ -413,19 +413,19 @@ implement EscapeWriter for PosixTerminal {
             ClearMode.CurrentLine => self.write_str("\x1b[2K")?,
             ClearMode.UntilNewLine => self.write_str("\x1b[0K")?,
         }
-        Ok(())
+        Result.Ok(())
     }
 
     fn begin_sync(&mut self) -> IoResult<()> {
         // Mode 2026: synchronized output begin
         self.write_str("\x1b[?2026h")?;
-        Ok(())
+        Result.Ok(())
     }
 
     fn end_sync(&mut self) -> IoResult<()> {
         // Mode 2026: synchronized output end
         self.write_str("\x1b[?2026l")?;
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -437,9 +437,9 @@ implement Read for PosixTerminal {
     fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
         let n = read(self.mode.fd.0, buf as &unsafe mut Byte, buf.len());
         if n < 0 {
-            Err(StreamError.from_errno())
+            Result.Err(StreamError.from_errno())
         } else {
-            Ok(n)
+            Result.Ok(n)
         }
     }
 }

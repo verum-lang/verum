@@ -151,7 +151,7 @@ implement AeadKind {
 
 // A server walks its own preference list in order; for the first
 // entry that is (a) supported and (b) offered by the client, it
-// picks that suite. Returns None if no overlap exists — the server
+// picks that suite. Returns Maybe.None if no overlap exists — the server
 // then emits a `handshake_failure` alert.
 //
 
@@ -173,12 +173,12 @@ public fn select_server_suite(
             let mut j: Int = 0;
             while j < client_offers.len() {
                 if ours.to_u16() == client_offers[j].to_u16() {
-                    return Some(ours.clone());
+                    return Maybe.Some(ours.clone());
                 }
                 j = j + 1;
             }
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }

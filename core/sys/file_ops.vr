@@ -62,13 +62,13 @@ public fn read_file(path: Text) -> Maybe<Text> {
         // Check if file exists by trying to open
         let fd = __file_open_raw(path, 0, 0);
         if fd < 0 {
-            return None;
+            return Maybe.None;
         }
         __file_close_raw(fd);
         // File exists but is empty
-        return Some("");
+        return Maybe.Some("");
     }
-    Some(content)
+    Maybe.Some(content)
 }
 
 /// Write Text to file (create/truncate).

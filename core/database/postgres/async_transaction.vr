@@ -27,7 +27,7 @@
 module core.database.postgres.async_transaction;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
 };
@@ -89,9 +89,9 @@ public async fn begin_tx_with_async(
         reply: rs,
     }).await;
     match rr.await {
-        Ok(Ok(()))  => Ok(make_tx(opts)),
-        Ok(Err(e))  => Err(e),
-        Err(_)      => Err(actor_dropped("begin_tx")),
+        Result.Ok(Result.Ok(()))  => Result.Ok(make_tx(opts)),
+        Result.Ok(Result.Err(e))  => Result.Err(e),
+        Result.Err(_)      => Result.Err(actor_dropped("begin_tx")),
     }
 }
 
@@ -125,8 +125,8 @@ public async fn commit_tx_async(
     let (rs, rr) = oneshot();
     let _ = conn.tx_ref().send_async(ReqCommitTx { reply: rs }).await;
     match rr.await {
-        Ok(r)  => r,
-        Err(_) => Err(actor_dropped("commit_tx")),
+        Result.Ok(r)  => r,
+        Result.Err(_) => Result.Err(actor_dropped("commit_tx")),
     }
 }
 
@@ -138,8 +138,8 @@ public async fn rollback_tx_async(
     let (rs, rr) = oneshot();
     let _ = conn.tx_ref().send_async(ReqRollbackTx { reply: rs }).await;
     match rr.await {
-        Ok(r)  => r,
-        Err(_) => Err(actor_dropped("rollback_tx")),
+        Result.Ok(r)  => r,
+        Result.Err(_) => Result.Err(actor_dropped("rollback_tx")),
     }
 }
 
@@ -157,8 +157,8 @@ public async fn savepoint_async(
         reply: rs,
     }).await;
     match rr.await {
-        Ok(r)  => r,
-        Err(_) => Err(actor_dropped("savepoint")),
+        Result.Ok(r)  => r,
+        Result.Err(_) => Result.Err(actor_dropped("savepoint")),
     }
 }
 
@@ -172,8 +172,8 @@ public async fn release_savepoint_async(
         reply: rs,
     }).await;
     match rr.await {
-        Ok(r)  => r,
-        Err(_) => Err(actor_dropped("release_savepoint")),
+        Result.Ok(r)  => r,
+        Result.Err(_) => Result.Err(actor_dropped("release_savepoint")),
     }
 }
 
@@ -187,8 +187,8 @@ public async fn rollback_to_savepoint_async(
         reply: rs,
     }).await;
     match rr.await {
-        Ok(r)  => r,
-        Err(_) => Err(actor_dropped("rollback_to_savepoint")),
+        Result.Ok(r)  => r,
+        Result.Err(_) => Result.Err(actor_dropped("rollback_to_savepoint")),
     }
 }
 
@@ -212,20 +212,20 @@ public async fn with_transaction_async<R, F: fn(&AsyncPgConnection) -> Result<R,
     body: F,
 ) -> Result<R, DbError> {
     let tx = match begin_tx_with_async(conn, opts).await {
-        Ok(t)  => t,
-        Err(e) => { return Err(e); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(e); }
     };
     match body(conn) {
-        Ok(v) => {
+        Result.Ok(v) => {
             match commit_tx_async(conn, tx).await {
-                Ok(_)  => Ok(v),
-                Err(e) => Err(e),
+                Result.Ok(_)  => Result.Ok(v),
+                Result.Err(e) => Result.Err(e),
             }
         }
-        Err(body_err) => {
+        Result.Err(body_err) => {
             // Best-effort rollback — original body error wins.
             let _ = rollback_tx_async(conn, tx).await;
-            Err(body_err)
+            Result.Err(body_err)
         }
     }
 }

@@ -195,18 +195,18 @@ public fn encrypt_oaep_sha1(
 ) -> Result<List<Byte>, OaepError> {
     let k = pubkey.modulus_bytes();
     if k <= 2 * OAEP_SHA1_HLEN + 2 {
-        return Err(OeModulusTooSmall(k));
+        return Result.Err(OeModulusTooSmall(k));
     }
     if k > OAEP_MAX_MODULUS_BYTES {
-        return Err(OeModulusTooLarge(k));
+        return Result.Err(OeModulusTooLarge(k));
     }
     if pubkey.n.len() == 0 || pubkey.e.len() == 0 {
-        return Err(OeMalformedKey);
+        return Result.Err(OeMalformedKey);
     }
     let m_len = message.len() as Int;
     let max_len = k - 2 * OAEP_SHA1_HLEN - 2;
     if m_len > max_len {
-        return Err(OeMessageTooLong { msg_len: m_len, max_len: max_len });
+        return Result.Err(OeMessageTooLong { msg_len: m_len, max_len: max_len });
     }
 
     // Step 1: l_hash = SHA-1(label).
@@ -234,7 +234,7 @@ public fn encrypt_oaep_sha1(
     }
     // Sanity — db length should equal db_len exactly.
     if (db.len() as Int) != db_len {
-        return Err(OeArithmeticOverflow);
+        return Result.Err(OeArithmeticOverflow);
     }
 
     // Step 4: random seed — h_len bytes from CSPRNG. `fill_secure`
@@ -276,8 +276,8 @@ public fn encrypt_oaep_sha1(
 
     // Step 12: C = I2OSP(c, k).
     match c.to_bytes_be(k) {
-        Some(out) => Ok(out),
-        None      => Err(OeArithmeticOverflow),
+        Maybe.Some(out) => Result.Ok(out),
+        Maybe.None      => Result.Err(OeArithmeticOverflow),
     }
 }
 

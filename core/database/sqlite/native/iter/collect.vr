@@ -8,7 +8,7 @@
 //
 
 //  * `count_rows` — drive the cursor to completion + return row count
-//  * `take_first` — pull the first row id (or None if no rows)
+//  * `take_first` — pull the first row id (or Maybe.None if no rows)
 // =============================================================================
 
 @arch_module(

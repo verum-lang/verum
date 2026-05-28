@@ -96,13 +96,13 @@ implement SubProgramRegistry {
     /// `subprogram.id` field is overwritten. Returns the assigned id.
     public fn register(&mut self, mut sp: SubProgram) -> Result<SubProgramId, SubProgramError> {
         if sp.register_window > MAX_REGISTER_WINDOW {
-            return Err(SpRegisterWindowTooLarge);
+            return Result.Err(SpRegisterWindowTooLarge);
         }
         // Reject if name is already registered for the same event.
         let mut i: Int = 0;
         while i < self.programs.len() {
             if self.programs[i].source_name == sp.source_name {
-                return Err(SpDuplicateName);
+                return Result.Err(SpDuplicateName);
             }
             i = i + 1;
         }
@@ -110,7 +110,7 @@ implement SubProgramRegistry {
         self.next_id = id + 1;
         sp.id = SubProgramId { id: id };
         self.programs.push(sp);
-        Ok(SubProgramId { id: id })
+        Result.Ok(SubProgramId { id: id })
     }
 
     /// Look up a sub-program by id.
@@ -118,11 +118,11 @@ implement SubProgramRegistry {
         let mut i: Int = 0;
         while i < self.programs.len() {
             if self.programs[i].id.id == id.id {
-                return Some(clone_sp(&self.programs[i]));
+                return Maybe.Some(clone_sp(&self.programs[i]));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Look up by source name.
@@ -130,11 +130,11 @@ implement SubProgramRegistry {
         let mut i: Int = 0;
         while i < self.programs.len() {
             if self.programs[i].source_name == name {
-                return Some(clone_sp(&self.programs[i]));
+                return Maybe.Some(clone_sp(&self.programs[i]));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Drop sub-programs attached to a given table — used by DROP TABLE.
@@ -198,7 +198,7 @@ implement SubProgramRegistry {
 }
 
 fn clone_sp(s: &SubProgram) -> SubProgram {
-    let table = match &s.source_table { Some(t) => Some(t.clone()), None => None };
+    let table = match &s.source_table { Maybe.Some(t) => Maybe.Some(t.clone()), Maybe.None => Maybe.None };
     SubProgram {
         id: SubProgramId { id: s.id.id },
         register_window: s.register_window,

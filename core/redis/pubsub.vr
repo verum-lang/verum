@@ -14,7 +14,7 @@
 // (`news.*`, `events.????`) per Redis semantics.
 //
 // **Reconnect-on-disconnect.** If the underlying connection drops,
-// `next_message()` returns `Err(Network)`; callers wrap the
+// `next_message()` returns `Result.Err(Network)`; callers wrap the
 // subscriber in their own retry loop. We deliberately don't
 // auto-reconnect because subscribers are stateful (channel set)
 // and silent re-subscription can mask deployment errors.
@@ -25,22 +25,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "Redis pub/sub — channel + pattern subscriber".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate: Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.redis.pubsub;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.List;
 
 mount core.redis.client.{RedisClient, RedisError, exec};
@@ -78,9 +78,9 @@ pub async fn publish(
     a.push(channel.as_bytes().to_list());
     a.push(payload.to_list());
     match core.redis.client.exec_bytes(client, &a).await? {
-        RespValue.Integer(n) => Ok(n),
-        RespValue.Error_(m)  => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"PUBLISH unexpected: {other}")),
+        RespValue.Integer(n) => Result.Ok(n),
+        RespValue.Error_(m)  => Result.Err(RedisError.Backend(m)),
+        other => Result.Err(RedisError.InvalidReply(f"PUBLISH unexpected: {other}")),
     }
 }
 

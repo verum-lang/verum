@@ -117,26 +117,26 @@ fn hue_to_rgb(p: Float, q: Float, t_in: Float) -> Float {
 // =============================================================================
 
 /// Parse a two-character hex string (e.g. "FF") into a UInt8 value.
-/// Returns None if the string is not valid hex.
+/// Returns Maybe.None if the string is not valid hex.
 public fn parse_hex_pair(s: &Text) -> Maybe<UInt8> {
-    if s.len() != 2 { return None; }
+    if s.len() != 2 { return Maybe.None; }
     let b0 = match s.byte_at(0) {
-        Some(b) => b,
-        None => return None,
+        Maybe.Some(b) => b,
+        Maybe.None => return Maybe.None,
     };
     let b1 = match s.byte_at(1) {
-        Some(b) => b,
-        None => return None,
+        Maybe.Some(b) => b,
+        Maybe.None => return Maybe.None,
     };
     let high_opt = hex_digit(b0);
     let low_opt = hex_digit(b1);
     match (high_opt, low_opt) {
-        (Some(h), Some(l)) => {
+        (Maybe.Some(h), Maybe.Some(l)) => {
             let val = h * 16 + l;
             let byte_val = val as UInt8;
-            Some(byte_val)
+            Maybe.Some(byte_val)
         }
-        _ => None,
+        _ => Maybe.None,
     }
 }
 
@@ -145,14 +145,14 @@ public fn parse_hex_pair(s: &Text) -> Maybe<UInt8> {
 public fn hex_digit(c: Byte) -> Maybe<Int> {
     if c >= 0x30 && c <= 0x39 {
         // '0' .. '9'
-        Some((c - 0x30) as Int)
+        Maybe.Some((c - 0x30) as Int)
     } else if c >= 0x41 && c <= 0x46 {
         // 'A' .. 'F'
-        Some((c - 0x41 + 10) as Int)
+        Maybe.Some((c - 0x41 + 10) as Int)
     } else if c >= 0x61 && c <= 0x66 {
         // 'a' .. 'f'
-        Some((c - 0x61 + 10) as Int)
+        Maybe.Some((c - 0x61 + 10) as Int)
     } else {
-        None
+        Maybe.None
     }
 }

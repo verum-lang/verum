@@ -835,7 +835,7 @@ public module user_version_pragma;
 public module concat_ws_fn;
 // - string_agg_fn: string_agg(X, sep) aggregate (skip-NULL + first-row-sep-wins)
 public module string_agg_fn;
-// - txn_state_api: sqlite3_txn_state (None/Read/Write + connection-state upgrade fold)
+// - txn_state_api: sqlite3_txn_state (Maybe.None/Read/Write + connection-state upgrade fold)
 public module txn_state_api;
 // - error_offset_api: sqlite3_error_offset (At(n) / NoOffset + window_around)
 public module error_offset_api;

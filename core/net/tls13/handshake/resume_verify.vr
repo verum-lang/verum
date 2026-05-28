@@ -173,7 +173,7 @@ fn check_freshness(
     //  plaintext — defaulting to the 7-day cap here.
     let max_age_s: UInt64 = 7_u64 * 24_u64 * 60_u64 * 60_u64;
     if now_unix > plaintext.issued_at_unix + max_age_s {
-        return Err(ResumeVerifyError.TicketExpired);
+        return Result.Err(ResumeVerifyError.TicketExpired);
     }
 
     // 2. Obfuscated-age window: the client-sent age (after subtracting
@@ -184,7 +184,7 @@ fn check_freshness(
     let _ = identity.obfuscated_age;
     let _ = freshness_window_ms;
 
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -216,7 +216,7 @@ public fn verify_offered_psks(
     now_instant: Instant,
 ) -> Result<ResumedSession, ResumeVerifyError> {
     if offered.identities.len() != offered.binders.len() {
-        return Err(ResumeVerifyError.NoAcceptableIdentity);
+        return Result.Err(ResumeVerifyError.NoAcceptableIdentity);
     }
 
     let mut i: Int = 0;
@@ -228,32 +228,32 @@ public fn verify_offered_psks(
             stek, identity, binder, negotiated_suite.clone(),
             truncated_ch_hash, now_unix, now_instant.clone(),
         ) {
-            Ok(resumed) => {
+            Result.Ok(resumed) => {
                 let mut out = resumed;
                 out.selected_index = i;
-                return Ok(out);
+                return Result.Ok(out);
             },
-            Err(ResumeVerifyError.TicketDecryptFailure(_)) => {
+            Result.Err(ResumeVerifyError.TicketDecryptFailure(_)) => {
                 // Silent skip — identity may be from a rotated-out STEK.
             },
-            Err(ResumeVerifyError.TicketExpired) => {
+            Result.Err(ResumeVerifyError.TicketExpired) => {
                 // Skip expired ticket, continue scanning.
             },
-            Err(ResumeVerifyError.CipherSuiteMismatch) => {
+            Result.Err(ResumeVerifyError.CipherSuiteMismatch) => {
                 // Skip — ticket was issued with a different suite.
             },
-            Err(ResumeVerifyError.BinderMismatch) => {
+            Result.Err(ResumeVerifyError.BinderMismatch) => {
                 // Per RFC 8446 §4.2.11.2, a valid-decrypting ticket with
                 // a failing binder is a fatal error — reject the
                 // handshake rather than continuing. Return immediately.
-                return Err(ResumeVerifyError.BinderMismatch);
+                return Result.Err(ResumeVerifyError.BinderMismatch);
             },
-            Err(other) => return Err(other),
+            Result.Err(other) => return Result.Err(other),
         }
 
         i = i + 1;
     }
-    Err(ResumeVerifyError.NoAcceptableIdentity)
+    Result.Err(ResumeVerifyError.NoAcceptableIdentity)
 }
 
 fn try_verify_one(
@@ -271,7 +271,7 @@ fn try_verify_one(
 
     // 2. Cipher-suite consistency — RFC 8446 §4.2.11.
     if plaintext.cipher_suite.to_u16() != negotiated_suite.to_u16() {
-        return Err(ResumeVerifyError.CipherSuiteMismatch);
+        return Result.Err(ResumeVerifyError.CipherSuiteMismatch);
     }
     let hash = plaintext.cipher_suite.hash_kind();
 
@@ -300,10 +300,10 @@ fn try_verify_one(
     let expected = compute_binder(hash, &binder_key, truncated_ch_hash)
         .map_err(|e| ResumeVerifyError.KdfFailure(e))?;
     if !constant_time_eq(expected.as_slice(), binder.as_slice()) {
-        return Err(ResumeVerifyError.BinderMismatch);
+        return Result.Err(ResumeVerifyError.BinderMismatch);
     }
 
-    Ok(ResumedSession {
+    Result.Ok(ResumedSession {
         selected_index:      0,            // filled by caller
         cipher_suite:        plaintext.cipher_suite.clone(),
         psk:                 psk,

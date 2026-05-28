@@ -60,7 +60,7 @@
 module core.database.postgres.async_pgoutput_buffered;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -183,7 +183,7 @@ public type AsyncPgoutputBufferedConsumer is {
     /// long tx at a time). Linear scan is fine.
     buffers: Shared<sync.mutex.Mutex<List<(Int, BufferedTx)>>>,
     /// xid currently being filled (between StreamStart and
-    /// StreamStop). `None` outside a segment.
+    /// StreamStop). `Maybe.None` outside a segment.
     current_xid: Shared<sync.mutex.Mutex<Maybe<Int>>>,
     row_cap: Int,
     /// Per-tx soft cap on bytes_estimate. When a tx's estimate
@@ -218,46 +218,46 @@ implement AsyncPgoutputBufferedConsumer {
 
     /// Pull the next BufferedChange — drives the underlying
     /// AsyncPgoutputConsumer + maintains the per-xid buffer state
-    /// machine. Returns None only when the underlying stream
+    /// machine. Returns Maybe.None only when the underlying stream
     /// closes cleanly.
     public async fn next_buffered(&self) -> Maybe<BufferedChange> {
         loop {
             let raw = self.inner.next_change().await;
             match raw {
-                None              => { return None; }
-                Some(CdcTerminated(e)) => {
-                    return Some(BcTerminated(e));
+                Maybe.None              => { return Maybe.None; }
+                Maybe.Some(CdcTerminated(e)) => {
+                    return Maybe.Some(BcTerminated(e));
                 }
-                Some(CdcClosed)        => {
-                    return Some(BcClosed);
+                Maybe.Some(CdcClosed)        => {
+                    return Maybe.Some(BcClosed);
                 }
-                Some(CdcStreamStart(s)) => {
+                Maybe.Some(CdcStreamStart(s)) => {
                     self.handle_stream_start(&s);
                     // Don't surface the StreamStart itself —
                     // streaming-tx semantics absorb it.
                 }
-                Some(CdcStreamStop) => {
+                Maybe.Some(CdcStreamStop) => {
                     self.handle_stream_stop();
                     // Same — segment boundary, not a delivered
                     // event.
                 }
-                Some(CdcStreamCommit(c)) => {
+                Maybe.Some(CdcStreamCommit(c)) => {
                     let assembled = self.handle_stream_commit(&c);
-                    return Some(assembled);
+                    return Maybe.Some(assembled);
                 }
-                Some(CdcStreamAbort(a)) => {
+                Maybe.Some(CdcStreamAbort(a)) => {
                     self.handle_stream_abort(&a);
-                    return Some(BcStreamedAbort {
+                    return Maybe.Some(BcStreamedAbort {
                         xid: a.xid,
                         subtxn_xid: a.subtxn_xid,
                     });
                 }
-                Some(other) => {
+                Maybe.Some(other) => {
                     // Insert/Update/Delete: append to current xid
                     // if streaming, otherwise pass through.
                     let cur = self.read_current_xid();
                     match cur {
-                        Some(xid) => {
+                        Maybe.Some(xid) => {
                             if self.is_dml(&other) {
                                 let outcome = self.append_to_xid(xid, other);
                                 match outcome {
@@ -266,7 +266,7 @@ implement AsyncPgoutputBufferedConsumer {
                                         // by sink, or silently dropped).
                                     }
                                     AppendOverflow => {
-                                        return Some(BcTerminated(
+                                        return Maybe.Some(BcTerminated(
                                             DbError.Adapter(AdapterSpecific {
                                                 adapter: AdPostgres,
                                                 code: "PGOUTPUT_TX_BUFFER_OVERFLOW".clone(),
@@ -281,11 +281,11 @@ implement AsyncPgoutputBufferedConsumer {
                                 // segment (e.g. RelationOnly) —
                                 // pass through to the consumer
                                 // for schema awareness.
-                                return Some(BcRegular(other));
+                                return Maybe.Some(BcRegular(other));
                             }
                         }
-                        None => {
-                            return Some(BcRegular(other));
+                        Maybe.None => {
+                            return Maybe.Some(BcRegular(other));
                         }
                     }
                 }
@@ -337,13 +337,13 @@ implement AsyncPgoutputBufferedConsumer {
 
         // Mark this xid as the active one.
         let mut cur = self.current_xid.lock().unwrap_or_else(|p| p.into_inner());
-        *cur = Some(s.xid);
+        *cur = Maybe.Some(s.xid);
     }
 
     fn handle_stream_stop(&self) {
         // Segment boundary — clear current xid, keep buffer.
         let mut cur = self.current_xid.lock().unwrap_or_else(|p| p.into_inner());
-        *cur = None;
+        *cur = Maybe.None;
     }
 
     fn handle_stream_commit(&self, c: &StreamCommitMessage) -> BufferedChange {
@@ -386,7 +386,7 @@ implement AsyncPgoutputBufferedConsumer {
         // Clear current_xid if it matched.
         let mut cur = self.current_xid.lock().unwrap_or_else(|p| p.into_inner());
         match *cur {
-            Some(xid) if xid == a.xid => { *cur = None; }
+            Maybe.Some(xid) if xid == a.xid => { *cur = Maybe.None; }
             _ => {}
         }
     }
@@ -565,7 +565,7 @@ public fn buffered_with_caps_and_sink(
     AsyncPgoutputBufferedConsumer {
         inner: inner,
         buffers: Shared.new(sync.mutex.Mutex.new(List.new())),
-        current_xid: Shared.new(sync.mutex.Mutex.new(None)),
+        current_xid: Shared.new(sync.mutex.Mutex.new(Maybe.None)),
         row_cap: rcap,
         byte_cap: bcap,
         spill_sink: spill_sink,
@@ -646,10 +646,10 @@ fn estimate_change_bytes(change: &PgoutputChange) -> Int {
         }
         CdcUpdate { relation, old_tuple, new_tuple } => {
             let old_bytes = match old_tuple {
-                Some(o) => match o {
+                Maybe.Some(o) => match o {
                     OtvKey(t) | OtvOld(t) => estimate_tuple_bytes(t),
                 },
-                None => 0,
+                Maybe.None => 0,
             };
             estimate_relation_bytes(relation)
                 + old_bytes

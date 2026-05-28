@@ -136,20 +136,20 @@ public const PROTOCOL_VERSION: Int = 1;
 
 public fn validate_hello(hello: &Hello) -> Maybe<ProtocolErrorCode> {
     if hello.proto_version != PROTOCOL_VERSION {
-        return Some(PecVersionUnsupported);
+        return Maybe.Some(PecVersionUnsupported);
     }
     if hello.replica_id.len() == 0 {
-        return Some(PecAuthFailure);
+        return Maybe.Some(PecAuthFailure);
     }
     match hello.role_request {
-        RoleReplica => None,
-        RoleStandby => None,
-        _           => Some(PecRoleRefused),
+        RoleReplica => Maybe.None,
+        RoleStandby => Maybe.None,
+        _           => Maybe.Some(PecRoleRefused),
     }
 }
 
 public fn validate_request(req: &RequestFrames, primary_position: Int64) -> Maybe<ProtocolErrorCode> {
-    if req.since_position > primary_position { return Some(PecPositionAhead); }
-    if req.max_frames <= 0 { return Some(PecInternal); }
-    None
+    if req.since_position > primary_position { return Maybe.Some(PecPositionAhead); }
+    if req.max_frames <= 0 { return Maybe.Some(PecInternal); }
+    Maybe.None
 }

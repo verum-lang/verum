@@ -121,8 +121,8 @@ fn raise(sig: Int) -> Int {
     {
         let pid = super.linux.syscall.getpid();
         match super.linux.syscall.kill(pid, sig) {
-            Ok(()) => 0,
-            Err(_) => -1,
+            Result.Ok(()) => 0,
+            Result.Err(_) => -1,
         }
     }
     @cfg(target_os = "macos")
@@ -245,28 +245,28 @@ implement Signal {
         @cfg(any(target_os = "linux", target_os = "macos"))
         {
             match signum {
-                1  => Some(Signal.Hup),
-                2  => Some(Signal.Int),
-                3  => Some(Signal.Quit),
-                4  => Some(Signal.Ill),
-                6  => Some(Signal.Abort),
-                8  => Some(Signal.Fpe),
-                9  => Some(Signal.Kill),
-                11 => Some(Signal.Segv),
-                13 => Some(Signal.Pipe),
-                14 => Some(Signal.Alarm),
-                15 => Some(Signal.Term),
-                28 => Some(Signal.Winch),
-                _  => None,
+                1  => Maybe.Some(Signal.Hup),
+                2  => Maybe.Some(Signal.Int),
+                3  => Maybe.Some(Signal.Quit),
+                4  => Maybe.Some(Signal.Ill),
+                6  => Maybe.Some(Signal.Abort),
+                8  => Maybe.Some(Signal.Fpe),
+                9  => Maybe.Some(Signal.Kill),
+                11 => Maybe.Some(Signal.Segv),
+                13 => Maybe.Some(Signal.Pipe),
+                14 => Maybe.Some(Signal.Alarm),
+                15 => Maybe.Some(Signal.Term),
+                28 => Maybe.Some(Signal.Winch),
+                _  => Maybe.None,
             }
         }
 
         @cfg(target_os = "windows")
         {
             match signum {
-                0 => Some(Signal.Int),
-                2 => Some(Signal.Term),
-                _ => None,
+                0 => Maybe.Some(Signal.Int),
+                2 => Maybe.Some(Signal.Term),
+                _ => Maybe.None,
             }
         }
     }
@@ -380,12 +380,12 @@ static mut SIGNAL_HANDLERS: [Int; 64] = [0; 64];
 /// ```
 public fn on_signal(sig: Signal, handler: fn()) -> Result<(), SignalError> {
     if !sig.is_catchable() {
-        return Err(SignalError.Uncatchable(sig));
+        return Result.Err(SignalError.Uncatchable(sig));
     }
 
     let signum = sig.to_raw();
     if signum < 0 || signum >= MAX_SIGNALS {
-        return Err(SignalError.InvalidSignal(signum));
+        return Result.Err(SignalError.InvalidSignal(signum));
     }
 
     // Store handler in global table
@@ -404,14 +404,14 @@ public fn on_signal(sig: Signal, handler: fn()) -> Result<(), SignalError> {
         register_windows_handler()?;
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 /// Remove a previously registered signal handler, restoring default behavior.
 public fn reset_signal(sig: Signal) -> Result<(), SignalError> {
     let signum = sig.to_raw();
     if signum < 0 || signum >= MAX_SIGNALS {
-        return Err(SignalError.InvalidSignal(signum));
+        return Result.Err(SignalError.InvalidSignal(signum));
     }
 
     unsafe {
@@ -424,7 +424,7 @@ public fn reset_signal(sig: Signal) -> Result<(), SignalError> {
         signal(signum, 0 as fn(Int));
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 /// Ignore a signal.
@@ -440,7 +440,7 @@ public fn reset_signal(sig: Signal) -> Result<(), SignalError> {
 /// ```
 public fn ignore_signal(sig: Signal) -> Result<(), SignalError> {
     if !sig.is_catchable() {
-        return Err(SignalError.Uncatchable(sig));
+        return Result.Err(SignalError.Uncatchable(sig));
     }
 
     let signum = sig.to_raw();
@@ -451,7 +451,7 @@ public fn ignore_signal(sig: Signal) -> Result<(), SignalError> {
         signal(signum, 1 as fn(Int));
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 /// Send a signal to the current process.
@@ -462,11 +462,11 @@ public fn raise_signal(sig: Signal) -> Result<(), SignalError> {
     {
         let result = raise(signum);
         if result != 0 {
-            return Err(SignalError.RaiseFailed(sig));
+            return Result.Err(SignalError.RaiseFailed(sig));
         }
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -490,9 +490,9 @@ fn register_posix_handler(signum: Int) -> Result<(), SignalError> {
     let result = signal(signum, signal_trampoline);
     // SIG_ERR is typically -1 cast to function pointer
     if result as Int == -1 {
-        Err(SignalError.RegistrationFailed(signum))
+        Result.Err(SignalError.RegistrationFailed(signum))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -524,12 +524,12 @@ fn register_windows_handler() -> Result<(), SignalError> {
         if !WINDOWS_HANDLER_REGISTERED {
             let result = SetConsoleCtrlHandler(windows_ctrl_handler, 1);
             if result == 0 {
-                return Err(SignalError.RegistrationFailed(0));
+                return Result.Err(SignalError.RegistrationFailed(0));
             }
             WINDOWS_HANDLER_REGISTERED = true;
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================

@@ -21,7 +21,7 @@
 //
 
 //  async fn hello() -> Result<Response, WeftError> {
-//  Ok(Response.text(Text.from_str("Hello from Weft!")))
+//  Result.Ok(Response.text(Text.from_str("Hello from Weft!")))
 //  }
 //
 

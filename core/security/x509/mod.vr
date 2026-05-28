@@ -33,8 +33,8 @@
 //
 
 //  let now_secs = current_time_unix();
-//  let _ = validate_chain(&certs, &trust, Some(&hostname), now_secs)?;
-//  Ok(())
+//  let _ = validate_chain(&certs, &trust, Maybe.Some(&hostname), now_secs)?;
+//  Result.Ok(())
 // }
 // ```
 //

@@ -266,7 +266,7 @@ implement PagedKVCache {
         let num_blocks_needed = (num_tokens + self.block_size - 1) / self.block_size;
 
         if self.free_blocks.len() < num_blocks_needed {
-            return Err(Error.new("Not enough free blocks"));
+            return Result.Err(Error.new("Not enough free blocks"));
         }
 
         let allocated: List<_> = (0..num_blocks_needed)
@@ -274,7 +274,7 @@ implement PagedKVCache {
             .collect();
 
         self.block_tables.insert(request_id, allocated);
-        Ok(())
+        Result.Ok(())
     }
 
     // Free blocks for completed request
@@ -641,9 +641,9 @@ where
                 role: AgentRole.ToolResult,
                 content: format_value(&result),
             });
-            Ok(result)
+            Result.Ok(result)
         } else {
-            Err(Error.new(f"Unknown tool: {tool_name}"))
+            Result.Err(Error.new(f"Unknown tool: {tool_name}"))
         }
     }
 
@@ -702,17 +702,17 @@ where
                 let parts: List<_> = response.split("Final Answer:").collect();
                 if parts.len() > 1 {
                     let answer = parts[1].trim();
-                    return Ok(answer.to_text());
+                    return Result.Ok(answer.to_text());
                 }
             }
 
             // Extract and execute action
             if let Maybe.Some(action) = extract_action(&response) {
                 match self.llm_agent.act(&action) {
-                    Ok(result) => {
+                    Result.Ok(result) => {
                         observation = f"Observation: {format_value(&result)}";
                     }
-                    Err(e) => {
+                    Result.Err(e) => {
                         observation = f"Error: {e.message()}";
                     }
                 }
@@ -721,7 +721,7 @@ where
             }
         }
 
-        Err(Error.new("Max iterations reached without final answer"))
+        Result.Err(Error.new("Max iterations reached without final answer"))
     }
 }
 
@@ -1169,9 +1169,9 @@ implement<Params: ToMap + Default> PromptTemplate<Params> {
         }
 
         if missing.is_empty() {
-            Ok(())
+            Result.Ok(())
         } else {
-            Err(Error.new(f"Missing template parameters: {missing.join(\", \")}"))
+            Result.Err(Error.new(f"Missing template parameters: {missing.join(\", \")}"))
         }
     }
 }
@@ -1401,7 +1401,7 @@ fn extract_json(text: &Text) -> Result<Text, AgentParseError> {
     if let Maybe.Some(start) = text.find("```json") {
         let after_marker = text.slice_from(start + 7);
         if let Maybe.Some(end) = after_marker.find("```") {
-            return Ok(after_marker.slice_to(end).trim().to_text());
+            return Result.Ok(after_marker.slice_to(end).trim().to_text());
         }
     }
 
@@ -1415,7 +1415,7 @@ fn extract_json(text: &Text) -> Result<Text, AgentParseError> {
             after_marker
         };
         if let Maybe.Some(end) = content_start.find("```") {
-            return Ok(content_start.slice_to(end).trim().to_text());
+            return Result.Ok(content_start.slice_to(end).trim().to_text());
         }
     }
 
@@ -1423,10 +1423,10 @@ fn extract_json(text: &Text) -> Result<Text, AgentParseError> {
     let trimmed = text.trim();
     if (trimmed.starts_with("{") && trimmed.ends_with("}")) ||
        (trimmed.starts_with("[") && trimmed.ends_with("]")) {
-        return Ok(trimmed.to_text());
+        return Result.Ok(trimmed.to_text());
     }
 
-    Err(AgentParseError.new("Could not extract JSON from response"))
+    Result.Err(AgentParseError.new("Could not extract JSON from response"))
 }
 
 // =============================================================================
@@ -1602,19 +1602,19 @@ public type FunctionCallResult is {
 implement FunctionCallResult {
     // Create successful result
     public fn success(call_id: Text, value: Value) -> Self {
-        FunctionCallResult { call_id, output: Ok(value) }
+        FunctionCallResult { call_id, output: Result.Ok(value) }
     }
 
     // Create error result
     public fn error(call_id: Text, err: Error) -> Self {
-        FunctionCallResult { call_id, output: Err(err) }
+        FunctionCallResult { call_id, output: Result.Err(err) }
     }
 
     // Convert to message content
     public fn to_message_content(&self) -> MessageContent {
         let content = match &self.output {
-            Ok(v) => v.to_json(),
-            Err(e) => f"Error: {e.message()}",
+            Result.Ok(v) => v.to_json(),
+            Result.Err(e) => f"Error: {e.message()}",
         };
         MessageContent.FunctionResultContent {
             name: self.call_id.clone(),
@@ -1659,7 +1659,7 @@ implement<Params: JsonSchemaType + Deserialize, Output: Serialize> CallableTool<
     public fn execute(&self, arguments: Text) -> Result<Value, Error> {
         let params: Params = Params.from_json(&arguments)?;
         let output = (self.func)(params);
-        Ok(output.to_value())
+        Result.Ok(output.to_value())
     }
 }
 
@@ -1686,7 +1686,7 @@ public type FunctionCallingAgent<M, Tok> is {
 public type ToolChoice is
     | Auto           // Model decides whether to use tools
     | Required       // Model must use at least one tool
-    | None           // Tools disabled for this call
+    | Maybe.None           // Tools disabled for this call
     | Specific(Text); // Must use specific tool by name
 
 implement<M, Tok> FunctionCallingAgent<M, Tok>
@@ -1758,7 +1758,7 @@ where
                         let result = if let Maybe.Some(tool) = self.tools.get(&call.name) {
                             tool.execute(call.arguments.clone())
                         } else {
-                            Err(Error.new(f"Unknown tool: {call.name}"))
+                            Result.Err(Error.new(f"Unknown tool: {call.name}"))
                         };
 
                         // Add function result to conversation
@@ -1776,7 +1776,7 @@ where
                 }
                 _ => {
                     // No function calls or max reached - return final response
-                    return Ok(ChatMessage {
+                    return Result.Ok(ChatMessage {
                         role: AgentRole.Assistant,
                         content: MessageContent.TextContent(response),
                         name: Maybe.None,
@@ -1812,7 +1812,7 @@ where
             current_input = cat(&[&current_input, &tensor_u32(&[next_token]).unsqueeze(0)], -1);
         }
 
-        Ok(self.tokenizer.decode(&generated))
+        Result.Ok(self.tokenizer.decode(&generated))
     }
 }
 

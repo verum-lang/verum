@@ -172,7 +172,7 @@ public fn feature_lookup(name: &Text) -> Maybe<FeatureFlag> {
     let mut i: Int = 0;
     while i < cat.len() {
         if ascii_lower(&cat[i].name) == target {
-            return Some(FeatureFlag {
+            return Maybe.Some(FeatureFlag {
                 name: cat[i].name.clone(),
                 enabled: cat[i].enabled,
                 description: cat[i].description.clone(),
@@ -180,7 +180,7 @@ public fn feature_lookup(name: &Text) -> Maybe<FeatureFlag> {
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 public fn feature_count() -> Int { loom_features().len() }

@@ -30,21 +30,21 @@ implement Bar {
     public fn new(value: Float) -> Bar {
         Bar {
             value: value,
-            label: None,
+            label: Maybe.None,
             style: Style.new().fg(Color.Blue),
             value_style: Style.DEFAULT,
-            text_value: None,
+            text_value: Maybe.None,
         }
     }
 
     /// Set the bar label.
     public fn label(self, label: Text) -> Bar {
-        Bar { label: Some(Line.raw(label)), ..self }
+        Bar { label: Maybe.Some(Line.raw(label)), ..self }
     }
 
     /// Set the bar label from a Line.
     public fn label_line(self, label: Line) -> Bar {
-        Bar { label: Some(label), ..self }
+        Bar { label: Maybe.Some(label), ..self }
     }
 
     /// Set the bar fill style.
@@ -59,7 +59,7 @@ implement Bar {
 
     /// Set a custom text value to display instead of the numeric value.
     public fn text_value(self, text: Text) -> Bar {
-        Bar { text_value: Some(text), ..self }
+        Bar { text_value: Maybe.Some(text), ..self }
     }
 }
 
@@ -76,17 +76,17 @@ public type BarGroup is {
 implement BarGroup {
     /// Create a new bar group.
     public fn new(bars: List<Bar>) -> BarGroup {
-        BarGroup { label: None, bars: bars }
+        BarGroup { label: Maybe.None, bars: bars }
     }
 
     /// Create a bar group with a label.
     public fn labeled(label: Text, bars: List<Bar>) -> BarGroup {
-        BarGroup { label: Some(Line.raw(label)), bars: bars }
+        BarGroup { label: Maybe.Some(Line.raw(label)), bars: bars }
     }
 
     /// Set the group label.
     public fn label(self, label: Text) -> BarGroup {
-        BarGroup { label: Some(Line.raw(label)), ..self }
+        BarGroup { label: Maybe.Some(Line.raw(label)), ..self }
     }
 }
 
@@ -113,14 +113,14 @@ implement BarChart {
     public fn new(groups: List<BarGroup>) -> BarChart {
         BarChart {
             groups: groups,
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             bar_width: 3,
             bar_gap: 1,
             group_gap: 2,
-            max: None,
+            max: Maybe.None,
             direction: Direction.Vertical,
-            value_formatter: None,
+            value_formatter: Maybe.None,
         }
     }
 
@@ -128,20 +128,20 @@ implement BarChart {
     public fn empty() -> BarChart {
         BarChart {
             groups: List.new(),
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             bar_width: 3,
             bar_gap: 1,
             group_gap: 2,
-            max: None,
+            max: Maybe.None,
             direction: Direction.Vertical,
-            value_formatter: None,
+            value_formatter: Maybe.None,
         }
     }
 
     // Builder API
     public fn block(self, block: Block) -> BarChart {
-        BarChart { block: Some(block), ..self }
+        BarChart { block: Maybe.Some(block), ..self }
     }
 
     public fn style(self, style: Style) -> BarChart {
@@ -161,7 +161,7 @@ implement BarChart {
     }
 
     public fn max(self, m: Float) -> BarChart {
-        BarChart { max: Some(m), ..self }
+        BarChart { max: Maybe.Some(m), ..self }
     }
 
     public fn direction(self, d: Direction) -> BarChart {
@@ -169,19 +169,19 @@ implement BarChart {
     }
 
     public fn value_formatter(self, f: fn(Float) -> Text) -> BarChart {
-        BarChart { value_formatter: Some(f), ..self }
+        BarChart { value_formatter: Maybe.Some(f), ..self }
     }
 }
 
 implement Widget for BarChart {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let chart_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if chart_area.width < 1 || chart_area.height < 1 { return; }
@@ -198,8 +198,8 @@ implement Widget for BarChart {
         buf.set_style(chart_area, self.style);
 
         let data_max = match self.max {
-            Some(m) => m,
-            None => {
+            Maybe.Some(m) => m,
+            Maybe.None => {
                 let mut m = 0.0;
                 for bar in &all_bars {
                     if bar.value > m { m = bar.value; }
@@ -221,13 +221,13 @@ implement Widget for BarChart {
 fn format_value(chart: &BarChart, bar: &Bar) -> Text {
     // Use custom text_value if set
     match bar.text_value {
-        Some(ref t) => return t.clone(),
-        None => {}
+        Maybe.Some(ref t) => return t.clone(),
+        Maybe.None => {}
     }
     // Use custom formatter if set
     match chart.value_formatter {
-        Some(ref fmt) => return fmt(bar.value),
-        None => {}
+        Maybe.Some(ref fmt) => return fmt(bar.value),
+        Maybe.None => {}
     }
     // Default: integer if whole, else 1 decimal
     let int_val = bar.value as Int;
@@ -295,7 +295,7 @@ fn render_vertical(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: Flo
 
             // Bar label centered below bar
             match bar.label {
-                Some(ref label) => {
+                Maybe.Some(ref label) => {
                     let lbl_width = label.width();
                     let lbl_display = if lbl_width > chart.bar_width {
                         // Truncate to bar width
@@ -323,7 +323,7 @@ fn render_vertical(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: Flo
                         lx = buf.set_string(lx, label_y, &span.content, span.style);
                     }
                 }
-                None => {}
+                Maybe.None => {}
             }
 
             x = x + bar_stride;
@@ -344,11 +344,11 @@ fn render_horizontal(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: F
     for group in &chart.groups {
         for bar in &group.bars {
             match bar.label {
-                Some(ref label) => {
+                Maybe.Some(ref label) => {
                     let w = label.width();
                     if w > max_label_width { max_label_width = w; }
                 }
-                None => {}
+                Maybe.None => {}
             }
         }
     }
@@ -370,7 +370,7 @@ fn render_horizontal(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: F
 
             // Draw label right-aligned in label column
             match bar.label {
-                Some(ref label) => {
+                Maybe.Some(ref label) => {
                     let lbl_width = label.width();
                     let lbl_x = area.x + (label_col_width - 1 - lbl_width).max(0);
                     let mid_y = y + chart.bar_width / 2;
@@ -381,7 +381,7 @@ fn render_horizontal(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: F
                         }
                     }
                 }
-                None => {}
+                Maybe.None => {}
             }
 
             // Compute bar width

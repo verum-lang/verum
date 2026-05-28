@@ -605,20 +605,20 @@ implement WindowsDeadlineTimer {
     /// Get remaining time until deadline.
     ///
 
-    /// Returns None if no deadline or deadline has passed.
+    /// Returns Maybe.None if no deadline or deadline has passed.
     public fn remaining(&self) -> Maybe<WindowsDuration> {
         if !self.has_deadline {
-            return None;
+            return Maybe.None;
         }
 
         let now = WindowsInstant.now();
         if now.0 >= self.deadline {
-            None
+            Maybe.None
         } else {
             let freq = get_frequency();
             let ticks = self.deadline - now.0;
             let nanos = (ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
-            Some(WindowsDuration(nanos))
+            Maybe.Some(WindowsDuration(nanos))
         }
     }
 
@@ -630,9 +630,9 @@ implement WindowsDeadlineTimer {
     /// Get the deadline as an WindowsInstant.
     public fn deadline(&self) -> Maybe<WindowsInstant> {
         if self.has_deadline {
-            Some(WindowsInstant(self.deadline))
+            Maybe.Some(WindowsInstant(self.deadline))
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -645,7 +645,7 @@ implement WindowsDeadlineTimer {
             super.kernel32.INFINITE
         } else {
             match self.remaining() {
-                Some(d) => {
+                Maybe.Some(d) => {
                     let ms = d.as_millis();
                     if ms > 0xFFFFFFFE {
                         0xFFFFFFFE
@@ -653,7 +653,7 @@ implement WindowsDeadlineTimer {
                         ms as UInt32
                     }
                 }
-                None => 0,
+                Maybe.None => 0,
             }
         }
     }

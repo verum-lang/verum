@@ -21,7 +21,7 @@
 //     bytes per RFC 8017 §7.1).
 //   * `cmp` / `is_zero` / `bit_len` — comparison and metadata.
 //   * `add` / `sub_checked` / `mul` — basic arithmetic. `sub_checked`
-//     returns `None` on underflow (we are unsigned).
+//     returns `Maybe.None` on underflow (we are unsigned).
 //   * `rem` — modular reduction via long division. The hot path
 //     for RSA encryption only invokes this once after each
 //     `mul`, so the schoolbook O(n²) algorithm is sufficient at
@@ -142,16 +142,16 @@ implement BigUint {
 
     /// Encode to a big-endian byte slice of EXACTLY `target_len`
     /// bytes. Left-pads with zero bytes when the value is shorter
-    /// than `target_len`. Returns `None` if the value's magnitude
+    /// than `target_len`. Returns `Maybe.None` if the value's magnitude
     /// exceeds `target_len * 8` bits.
     public fn to_bytes_be(&self, target_len: Int) -> Maybe<List<Byte>> {
-        if target_len < 0 { return None; }
+        if target_len < 0 { return Maybe.None; }
         // Compute byte-length needed and reject if it's larger
         // than `target_len`.
         let bits = self.bit_len();
         let needed = (bits + 7) / 8;
         if needed > target_len {
-            return None;
+            return Maybe.None;
         }
         let mut out: List<Byte> = List.with_capacity(target_len);
         let mut i: Int = 0;
@@ -175,7 +175,7 @@ implement BigUint {
             }
             limb_idx = limb_idx + 1;
         }
-        Some(out)
+        Maybe.Some(out)
     }
 
     /// True iff the value is zero.
@@ -259,9 +259,9 @@ public fn add(a: &BigUint, b: &BigUint) -> BigUint {
     BigUint { limbs: out }.normalise()
 }
 
-/// `a - b`. Returns `None` on underflow (`a < b`).
+/// `a - b`. Returns `Maybe.None` on underflow (`a < b`).
 public fn sub_checked(a: &BigUint, b: &BigUint) -> Maybe<BigUint> {
-    if a.cmp(b) < 0 { return None; }
+    if a.cmp(b) < 0 { return Maybe.None; }
     let na = a.limbs.len() as Int;
     let nb = b.limbs.len() as Int;
     let mut out: List<UInt32> = List.with_capacity(na);
@@ -280,7 +280,7 @@ public fn sub_checked(a: &BigUint, b: &BigUint) -> Maybe<BigUint> {
         }
         i = i + 1;
     }
-    Some(BigUint { limbs: out }.normalise())
+    Maybe.Some(BigUint { limbs: out }.normalise())
 }
 
 /// `a * b` — schoolbook O(n*m) multiplication.
@@ -349,8 +349,8 @@ public fn rem(a: &BigUint, m: &BigUint) -> BigUint {
     loop {
         if r.cmp(&shifted) >= 0 {
             r = match sub_checked(&r, &shifted) {
-                Some(v) => v,
-                None    => return BigUint.zero(),    // unreachable
+                Maybe.Some(v) => v,
+                Maybe.None    => return BigUint.zero(),    // unreachable
             };
         }
         if bit == 0 { break; }

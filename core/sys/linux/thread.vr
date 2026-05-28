@@ -221,7 +221,7 @@ public fn spawn(entry: LinuxThreadFn, arg: &unsafe Byte, stack_size: USize) -> R
     };
 
     if stack_base < 0 && stack_base > -4096 {
-        return Err(LinuxThreadError.StackAllocationFailed { code: -stack_base as Int });
+        return Result.Err(LinuxThreadError.StackAllocationFailed { code: -stack_base as Int });
     }
 
     // Make guard page inaccessible
@@ -237,7 +237,7 @@ public fn spawn(entry: LinuxThreadFn, arg: &unsafe Byte, stack_size: USize) -> R
 
     if guard_result < 0 {
         unsafe { syscall_raw(SYS_MUNMAP, stack_base, total_size as Int, 0, 0, 0, 0) };
-        return Err(LinuxThreadError.StackAllocationFailed { code: -guard_result as Int });
+        return Result.Err(LinuxThreadError.StackAllocationFailed { code: -guard_result as Int });
     }
 
     // Stack grows down, so top is at base + total_size
@@ -245,10 +245,10 @@ public fn spawn(entry: LinuxThreadFn, arg: &unsafe Byte, stack_size: USize) -> R
 
     // Allocate TLS
     let tls = match create_thread_tls(actual_stack_size) {
-        Ok(tls) => tls,
-        Err(e) => {
+        Result.Ok(tls) => tls,
+        Result.Err(e) => {
             unsafe { syscall_raw(SYS_MUNMAP, stack_base, total_size as Int, 0, 0, 0, 0) };
-            return Err(LinuxThreadError.TlsAllocationFailed { code: 0 });
+            return Result.Err(LinuxThreadError.TlsAllocationFailed { code: 0 });
         }
     };
 
@@ -299,11 +299,11 @@ public fn spawn(entry: LinuxThreadFn, arg: &unsafe Byte, stack_size: USize) -> R
         if clone_result < 0 {
             cleanup_thread_tls();
             unsafe { syscall_raw(SYS_MUNMAP, stack_base, total_size as Int, 0, 0, 0, 0) };
-            return Err(LinuxThreadError.CloneFailed { code: -clone_result as Int });
+            return Result.Err(LinuxThreadError.CloneFailed { code: -clone_result as Int });
         }
     }
 
-    Ok(LinuxThread {
+    Result.Ok(LinuxThread {
         tid: if result >= 0 { result } else { parent_tid },
         stack_base: stack_base as &unsafe Byte,
         stack_size: total_size,
@@ -349,7 +349,7 @@ implement LinuxThread {
     /// Wait for thread to exit and get exit code.
     public fn join(&mut self) -> Result<Int, LinuxThreadError> {
         if self.joined {
-            return Err(LinuxThreadError.AlreadyJoined);
+            return Result.Err(LinuxThreadError.AlreadyJoined);
         }
 
         // Use futex to wait for thread exit
@@ -363,11 +363,11 @@ implement LinuxThread {
             }
 
             // Wait for TID to be cleared
-            let result = futex_wait(tid_ptr as &Int, tid as Int, None);
+            let result = futex_wait(tid_ptr as &Int, tid as Int, Maybe.None);
             match result {
-                Ok(_) => continue,
-                Err(OSError { code }) if code == EAGAIN => continue,
-                Err(e) => return Err(LinuxThreadError.CloneFailed { code: e.code }),
+                Result.Ok(_) => continue,
+                Result.Err(OSError { code }) if code == EAGAIN => continue,
+                Result.Err(e) => return Result.Err(LinuxThreadError.CloneFailed { code: e.code }),
             }
         }
 
@@ -378,7 +378,7 @@ implement LinuxThread {
             syscall_raw(SYS_MUNMAP, self.stack_base as Int, self.stack_size as Int, 0, 0, 0, 0);
         }
 
-        Ok(0)  // Return exit code would need storage
+        Result.Ok(0)  // Return exit code would need storage
     }
 
     /// Detach thread (no join needed).
@@ -432,23 +432,23 @@ public const FUTEX_BITSET_MATCH_ANY: UInt32 = 0xFFFFFFFF;
 /// # Arguments
 /// * `addr` - Address of futex word
 /// * `expected` - Expected value (wait only if *addr == expected)
-/// * `timeout_ns` - Timeout in nanoseconds (None = infinite)
+/// * `timeout_ns` - Timeout in nanoseconds (Maybe.None = infinite)
 ///
 
 /// # Returns
-/// * `Ok(())` - Woken normally
-/// * `Err(EAGAIN)` - Value changed before sleep
-/// * `Err(EINTR)` - Interrupted by signal
-/// * `Err(ETIMEDOUT)` - Timeout expired
+/// * `Result.Ok(())` - Woken normally
+/// * `Result.Err(EAGAIN)` - Value changed before sleep
+/// * `Result.Err(EINTR)` - Interrupted by signal
+/// * `Result.Err(ETIMEDOUT)` - Timeout expired
 public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Result<(), OSError> {
     let (timeout_ptr, ts) = match timeout_ns {
-        Some(ns) => {
+        Maybe.Some(ns) => {
             let sec = ns / 1_000_000_000;
             let nsec = ns % 1_000_000_000;
             let ts: [Int64; 2] = [sec as Int64, nsec as Int64];
             (&ts as Int, ts)
         }
-        None => (0, [0_i64, 0_i64]),
+        Maybe.None => (0, [0_i64, 0_i64]),
     };
 
     let result = unsafe {
@@ -463,9 +463,9 @@ public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Re
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -491,9 +491,9 @@ public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -524,9 +524,9 @@ public fn futex_requeue(
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -554,9 +554,9 @@ public fn futex_cmp_requeue(
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -568,13 +568,13 @@ public fn futex_wait_bitset(
     timeout_ns: Maybe<UInt64>
 ) -> Result<(), OSError> {
     let (timeout_ptr, ts) = match timeout_ns {
-        Some(ns) => {
+        Maybe.Some(ns) => {
             let sec = ns / 1_000_000_000;
             let nsec = ns % 1_000_000_000;
             let ts: [Int64; 2] = [sec as Int64, nsec as Int64];
             (&ts as Int, ts)
         }
-        None => (0, [0_i64, 0_i64]),
+        Maybe.None => (0, [0_i64, 0_i64]),
     };
 
     let result = unsafe {
@@ -590,9 +590,9 @@ public fn futex_wait_bitset(
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -611,9 +611,9 @@ public fn futex_wake_bitset(addr: &Int, count: Int, bitset: UInt32) -> Result<In
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -698,7 +698,7 @@ implement LinuxMutex {
             }
 
             // Sleep until woken
-            let _ = futex_wait(&self.state as &Int, 2 as Int, None);
+            let _ = futex_wait(&self.state as &Int, 2 as Int, Maybe.None);
         }
     }
 
@@ -729,18 +729,18 @@ implement LinuxCondvar {
     public fn wait(&mut self, mutex: &mut LinuxMutex) {
         let seq = self.seq;
         mutex.unlock();
-        let _ = futex_wait(&self.seq as &Int, seq as Int, None);
+        let _ = futex_wait(&self.seq as &Int, seq as Int, Maybe.None);
         mutex.lock();
     }
 
     public fn wait_timeout(&mut self, mutex: &mut LinuxMutex, timeout_ns: UInt64) -> Bool {
         let seq = self.seq;
         mutex.unlock();
-        let result = futex_wait(&self.seq as &Int, seq as Int, Some(timeout_ns));
+        let result = futex_wait(&self.seq as &Int, seq as Int, Maybe.Some(timeout_ns));
         mutex.lock();
 
         match result {
-            Err(e) if e.code == ETIMEDOUT => false,
+            Result.Err(e) if e.code == ETIMEDOUT => false,
             _ => true,
         }
     }

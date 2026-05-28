@@ -307,21 +307,21 @@ public fn check_binding(name: Text, declared: Quantity, observed: Int{>= 0}) -> 
     match normalized {
         Quantity.Zero => {
             if observed > 0 {
-                Some(QttViolation.ErasedUsedAtRuntime { binding: name })
-            } else { None }
+                Maybe.Some(QttViolation.ErasedUsedAtRuntime { binding: name })
+            } else { Maybe.None }
         },
         Quantity.One => {
             if observed == 0 {
-                Some(QttViolation.UnderUse { binding: name, declared: normalized })
+                Maybe.Some(QttViolation.UnderUse { binding: name, declared: normalized })
             } else if observed > 1 {
-                Some(QttViolation.OverUse { binding: name, observed, declared: normalized })
-            } else { None }
+                Maybe.Some(QttViolation.OverUse { binding: name, observed, declared: normalized })
+            } else { Maybe.None }
         },
-        Quantity.Many => None,
+        Quantity.Many => Maybe.None,
         Quantity.AtMost { n } => {
             if observed > n {
-                Some(QttViolation.OverUse { binding: name, observed, declared: normalized })
-            } else { None }
+                Maybe.Some(QttViolation.OverUse { binding: name, observed, declared: normalized })
+            } else { Maybe.None }
         },
     }
 }

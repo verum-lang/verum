@@ -166,12 +166,12 @@ implement<T> Future for JoinHandle<T> {
     fn poll(&mut self, _cx: &mut Context) -> Poll<Result<T, JoinError>> {
         if self.task.is_finished() {
             if self.task.is_cancelled() {
-                Poll.Ready(Err(JoinError.Cancelled))
+                Poll.Ready(Result.Err(JoinError.Cancelled))
             } else {
                 let mut guard = self.task.result.lock().unwrap_or_else(|p| p.into_inner());
                 match guard.take() {
-                    Some(res) => Poll.Ready(Ok(res)),
-                    None => Poll.Ready(Err(JoinError.Panicked)),
+                    Maybe.Some(res) => Poll.Ready(Result.Ok(res)),
+                    Maybe.None => Poll.Ready(Result.Err(JoinError.Panicked)),
                 }
             }
         } else {
@@ -234,7 +234,7 @@ where F.Output: Send
     let task = Shared.new(Task {
         id: TaskId.new(),
         state: AtomicInt.new(0),  // Pending
-        result: Mutex.new(None),
+        result: Mutex.new(Maybe.None),
     });
 
     JoinHandle { task: task }
@@ -308,8 +308,8 @@ implement<T: Send> Future for BlockingFuture<T> {
             // result slot, so a poisoned/Ok lock is operationally
             // identical here.
             let mut g = match self.state.result.lock() {
-                Ok(g)  => g,
-                Err(p) => p.into_inner(),
+                Result.Ok(g)  => g,
+                Result.Err(p) => p.into_inner(),
             };
             match g.take() {
                 Maybe.Some(v) => Poll.Ready(v),
@@ -371,8 +371,8 @@ public fn spawn_blocking<F: fn() -> T + Send, T: Send>(f: F) -> JoinHandle<T> {
         let result = (boxed.f)();
         // Acquire mutex, write result, release.
         let mut g = match boxed.state.result.lock() {
-            Ok(g)  => g,
-            Err(p) => p.into_inner(),
+            Result.Ok(g)  => g,
+            Result.Err(p) => p.into_inner(),
         };
         *g = Maybe.Some(result);
         // Release-ordered store so the polling Future sees the

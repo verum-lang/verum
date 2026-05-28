@@ -206,7 +206,7 @@ public fn run_checkpoint(
     match mode {
         Passive => {
             if writer_waiting {
-                return Ok(stats);
+                return Result.Ok(stats);
             }
         }
         _ => {}
@@ -232,19 +232,19 @@ public fn run_checkpoint(
             if mode_truncates_file(mode) {
                 stats.bytes_truncated = wal_file_bytes;
             }
-            Ok(stats)
+            Result.Ok(stats)
         }
         Failed(err, _tok) => {
             // Translate PagerError → checkpoint Text error. The
             // actor's `Checkpoint` arm fails when `pager_commit`
             // fails, so this preserves the durability error chain.
             let _ = err;
-            Err("checkpoint failed: pager_commit returned error".clone())
+            Result.Err("checkpoint failed: pager_commit returned error".clone())
         }
         _ => {
             // Other reply shapes (ReadOk / WriteOk / CommitOk) are
             // impossible for a Checkpoint request — actor invariant.
-            Err("checkpoint protocol violation: unexpected reply shape".clone())
+            Result.Err("checkpoint protocol violation: unexpected reply shape".clone())
         }
     }
 }

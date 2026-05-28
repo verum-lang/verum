@@ -101,7 +101,7 @@ implement FrontmatterError {
 // =============================================================================
 
 /// Parse a `.vr` script source and extract the frontmatter block, if
-/// present. Returns `Err(NoFrontmatter)` if no opening marker exists.
+/// present. Returns `Result.Err(NoFrontmatter)` if no opening marker exists.
 public fn parse(source: &Text) -> Result<Frontmatter, FrontmatterError> {
     let lines = split_lines(source);
     let mut state = State.Searching;
@@ -127,15 +127,15 @@ public fn parse(source: &Text) -> Result<Frontmatter, FrontmatterError> {
                     continue;
                 }
                 // First non-blank, non-shebang, non-marker line — no frontmatter.
-                return Err(FrontmatterError.NoFrontmatter);
+                return Result.Err(FrontmatterError.NoFrontmatter);
             },
             State.Inside => {
                 if line == &open_marker {
-                    return Ok(fm);
+                    return Result.Ok(fm);
                 }
                 let prefix = Text.from("//!");
                 if !line.starts_with(&prefix) {
-                    return Err(FrontmatterError.InvalidLine(line_no, line.clone()));
+                    return Result.Err(FrontmatterError.InvalidLine(line_no, line.clone()));
                 }
                 let body = line.slice(3, line.len()).trim();
                 if body.is_empty() {
@@ -149,8 +149,8 @@ public fn parse(source: &Text) -> Result<Frontmatter, FrontmatterError> {
     }
 
     match state {
-        State.Inside => Err(FrontmatterError.MissingClosing),
-        State.Searching => Err(FrontmatterError.NoFrontmatter),
+        State.Inside => Result.Err(FrontmatterError.MissingClosing),
+        State.Searching => Result.Err(FrontmatterError.NoFrontmatter),
     }
 }
 
@@ -191,42 +191,42 @@ fn apply_kv_line(body: &Text, fm: &mut Frontmatter) -> Result<Unit, FrontmatterE
     let eq = Text.from("=");
     let eq_idx = match body.find(&eq) {
         Maybe.Some(n) => n,
-        Maybe.None => return Err(FrontmatterError.InvalidLine(0, body.clone())),
+        Maybe.None => return Result.Err(FrontmatterError.InvalidLine(0, body.clone())),
     };
     let key = body.slice(0, eq_idx).trim();
     let value_raw = body.slice(eq_idx + 1, body.len()).trim();
 
     // Resolve known keys.
     if &key == &Text.from("name") {
-        match &fm.name { Some(_) => return Err(FrontmatterError.DuplicateKey(key.clone())), None => {} }
-        fm.name = Some(unquote(&value_raw));
-        return Ok(());
+        match &fm.name { Maybe.Some(_) => return Result.Err(FrontmatterError.DuplicateKey(key.clone())), Maybe.None => {} }
+        fm.name = Maybe.Some(unquote(&value_raw));
+        return Result.Ok(());
     }
     if &key == &Text.from("version") {
-        match &fm.version { Some(_) => return Err(FrontmatterError.DuplicateKey(key.clone())), None => {} }
-        fm.version = Some(unquote(&value_raw));
-        return Ok(());
+        match &fm.version { Maybe.Some(_) => return Result.Err(FrontmatterError.DuplicateKey(key.clone())), Maybe.None => {} }
+        fm.version = Maybe.Some(unquote(&value_raw));
+        return Result.Ok(());
     }
     if &key == &Text.from("description") {
-        match &fm.description { Some(_) => return Err(FrontmatterError.DuplicateKey(key.clone())), None => {} }
-        fm.description = Some(unquote(&value_raw));
-        return Ok(());
+        match &fm.description { Maybe.Some(_) => return Result.Err(FrontmatterError.DuplicateKey(key.clone())), Maybe.None => {} }
+        fm.description = Maybe.Some(unquote(&value_raw));
+        return Result.Ok(());
     }
     if &key == &Text.from("requires-verum") {
-        match &fm.requires_verum { Some(_) => return Err(FrontmatterError.DuplicateKey(key.clone())), None => {} }
-        fm.requires_verum = Some(unquote(&value_raw));
-        return Ok(());
+        match &fm.requires_verum { Maybe.Some(_) => return Result.Err(FrontmatterError.DuplicateKey(key.clone())), Maybe.None => {} }
+        fm.requires_verum = Maybe.Some(unquote(&value_raw));
+        return Result.Ok(());
     }
     if &key == &Text.from("requires-cogs") {
         if fm.requires_cogs.len() > 0 {
-            return Err(FrontmatterError.DuplicateKey(key.clone()));
+            return Result.Err(FrontmatterError.DuplicateKey(key.clone()));
         }
         fm.requires_cogs = parse_string_array(&value_raw)?;
-        return Ok(());
+        return Result.Ok(());
     }
     // Unknown key → keep in extras.
     fm.extras.insert(key, unquote(&value_raw));
-    Ok(())
+    Result.Ok(())
 }
 
 /// Strip surrounding `"..."` from a string literal. No escape handling
@@ -246,12 +246,12 @@ fn parse_string_array(s: &Text) -> Result<List<Text>, FrontmatterError> {
     let lb = Text.from("[");
     let rb = Text.from("]");
     if !trimmed.starts_with(&lb) || !trimmed.ends_with(&rb) {
-        return Err(FrontmatterError.InvalidLine(0, s.clone()));
+        return Result.Err(FrontmatterError.InvalidLine(0, s.clone()));
     }
     let inner = trimmed.slice(1, trimmed.len() - 1);
     let mut out = List.new();
     if inner.trim().is_empty() {
-        return Ok(out);
+        return Result.Ok(out);
     }
 
     // Split on commas at top level (no nested arrays here).
@@ -260,7 +260,7 @@ fn parse_string_array(s: &Text) -> Result<List<Text>, FrontmatterError> {
     let mut in_quotes: Bool = false;
     while i < inner.len() {
         match inner.byte_at(i) {
-            Some(b) => {
+            Maybe.Some(b) => {
                 if b == b'"' { in_quotes = !in_quotes; }
                 else if b == b',' && !in_quotes {
                     let part = inner.slice(start, i).trim();
@@ -268,7 +268,7 @@ fn parse_string_array(s: &Text) -> Result<List<Text>, FrontmatterError> {
                     start = i + 1;
                 }
             },
-            None => break,
+            Maybe.None => break,
         }
         i = i + 1;
     }
@@ -276,5 +276,5 @@ fn parse_string_array(s: &Text) -> Result<List<Text>, FrontmatterError> {
     if !last.is_empty() {
         out.push(unquote(&last));
     }
-    Ok(out)
+    Result.Ok(out)
 }

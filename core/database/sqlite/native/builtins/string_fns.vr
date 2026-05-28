@@ -362,8 +362,8 @@ public fn hex(v: &Register) -> Register {
 public fn unhex(v: &Register) -> Register {
     match v {
         RText(s) => match hex_decode(s) {
-            Some(b) => RBlob(b),
-            None    => RNull,
+            Maybe.Some(b) => RBlob(b),
+            Maybe.None    => RNull,
         },
         RNull => RNull,
         _ => RNull,
@@ -395,30 +395,30 @@ fn hex_encode_text(s: &Text) -> Text {
 }
 
 fn nibble_value(b: Byte) -> Maybe<Byte> {
-    if b >= (48 as Byte) && b <= (57 as Byte) { return Some(b - (48 as Byte)); }
-    if b >= (65 as Byte) && b <= (70 as Byte) { return Some(b - (65 as Byte) + (10 as Byte)); }
-    if b >= (97 as Byte) && b <= (102 as Byte) { return Some(b - (97 as Byte) + (10 as Byte)); }
-    None
+    if b >= (48 as Byte) && b <= (57 as Byte) { return Maybe.Some(b - (48 as Byte)); }
+    if b >= (65 as Byte) && b <= (70 as Byte) { return Maybe.Some(b - (65 as Byte) + (10 as Byte)); }
+    if b >= (97 as Byte) && b <= (102 as Byte) { return Maybe.Some(b - (97 as Byte) + (10 as Byte)); }
+    Maybe.None
 }
 
 fn hex_decode(s: &Text) -> Maybe<List<Byte>> {
     let bs = s.as_bytes();
-    if bs.len() % 2 != 0 { return None; }
+    if bs.len() % 2 != 0 { return Maybe.None; }
     let mut out: List<Byte> = List.new();
     let mut i: Int = 0;
     while i < bs.len() {
         let hi = nibble_value(bs[i]);
         let lo = nibble_value(bs[i + 1]);
         match hi {
-            Some(h) => match lo {
-                Some(l) => out.push((h << (4 as Byte)) | l),
-                None => { return None; }
+            Maybe.Some(h) => match lo {
+                Maybe.Some(l) => out.push((h << (4 as Byte)) | l),
+                Maybe.None => { return Maybe.None; }
             },
-            None => { return None; }
+            Maybe.None => { return Maybe.None; }
         }
         i = i + 2;
     }
-    Some(out)
+    Maybe.Some(out)
 }
 
 // -----------------------------------------------------------------------------
@@ -623,9 +623,9 @@ public fn like(target: &Register, pattern: &Register, escape: &Register) -> Regi
                 let esc: Maybe<Byte> = match escape {
                     RText(e) => {
                         let eb = e.as_bytes();
-                        if eb.len() >= 1 { Some(eb[0]) } else { None }
+                        if eb.len() >= 1 { Maybe.Some(eb[0]) } else { Maybe.None }
                     }
-                    _ => None,
+                    _ => Maybe.None,
                 };
                 if like_match(t, p, esc) {
                     RInt(1_i64)
@@ -680,8 +680,8 @@ fn like_rec(tb: &List<Byte>, ti: Int, pb: &List<Byte>, pi: Int, esc: Maybe<Byte>
     let pc = pb[pi];
     // ESCAPE handling: literal-match the next pattern byte.
     let esc_match: Bool = match esc {
-        Some(e) => pc == e,
-        None    => false,
+        Maybe.Some(e) => pc == e,
+        Maybe.None    => false,
     };
     if esc_match {
         if pi + 1 >= pb.len() { return false; }

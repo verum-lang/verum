@@ -96,7 +96,7 @@ public fn is_safe_uri_for_osc(uri: &Text) -> Bool {
 /// then closes with OSC 8 ;; ST.
 ///
 
-/// Returns `Err(IoError.InvalidInput(...))` if `uri` contains a
+/// Returns `Result.Err(IoError.InvalidInput(...))` if `uri` contains a
 /// control character that would close the OSC sequence early — see
 /// `is_safe_uri_for_osc` for the threat model. Without this check a
 /// caller-controlled URI could inject arbitrary escape sequences
@@ -108,7 +108,7 @@ public fn write_hyperlink(
     text: &Text,
 ) -> IoResult<()> {
     if !is_safe_uri_for_osc(uri) {
-        return Err(IoError.InvalidInput {
+        return Result.Err(IoError.InvalidInput {
             reason: "hyperlink URI contains control character; refusing to emit OSC 8 escape (would let URI close the sequence early and inject terminal commands)".into(),
         });
     }

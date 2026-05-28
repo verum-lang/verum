@@ -111,7 +111,7 @@ implement PagerSavepointStack {
         -> Result<(), SavepointError>
     {
         if name.len() == 0 {
-            return Err(BadName("empty savepoint name".clone()));
+            return Result.Err(BadName("empty savepoint name".clone()));
         }
         let sp = Savepoint {
             name: name.clone(),
@@ -119,11 +119,11 @@ implement PagerSavepointStack {
             depth: self.entries.len(),
         };
         self.entries.push(sp);
-        Ok(())
+        Result.Ok(())
     }
 
     /// Find the innermost savepoint matching `name`. Returns its index
-    /// into `entries` (0-based from the bottom), or None.
+    /// into `entries` (0-based from the bottom), or Maybe.None.
     public fn find(&self, name: &Text) -> Int {
         let n = self.entries.len();
         let mut i: Int = n - 1;
@@ -141,14 +141,14 @@ implement PagerSavepointStack {
     public fn release(&mut self, name: &Text) -> Result<Int, SavepointError> {
         let idx = self.find(name);
         if idx < 0 {
-            return Err(NotFound(name.clone()));
+            return Result.Err(NotFound(name.clone()));
         }
         let mut popped: Int = 0;
         while self.entries.len() > idx {
             let _ = self.entries.pop();
             popped = popped + 1;
         }
-        Ok(popped)
+        Result.Ok(popped)
     }
 
     /// ROLLBACK TO "name" — remove everything above "name" but keep
@@ -157,12 +157,12 @@ implement PagerSavepointStack {
     public fn rollback_to(&mut self, name: &Text) -> Result<Int, SavepointError> {
         let idx = self.find(name);
         if idx < 0 {
-            return Err(NotFound(name.clone()));
+            return Result.Err(NotFound(name.clone()));
         }
         while self.entries.len() > idx + 1 {
             let _ = self.entries.pop();
         }
-        Ok(self.entries[idx].wal_frame_idx)
+        Result.Ok(self.entries[idx].wal_frame_idx)
     }
 
     /// Drop every savepoint. Called on COMMIT / ROLLBACK of the outer tx.
@@ -173,9 +173,9 @@ implement PagerSavepointStack {
     /// Peek at the top savepoint without popping.
     public fn top(&self) -> Result<Savepoint, SavepointError> {
         if self.entries.len() == 0 {
-            return Err(Empty);
+            return Result.Err(Empty);
         }
-        Ok(self.entries[self.entries.len() - 1].clone())
+        Result.Ok(self.entries[self.entries.len() - 1].clone())
     }
 }
 

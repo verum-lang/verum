@@ -130,8 +130,8 @@ implement MetricFamily {
         while i < entries.len() {
             if entries[i].labels.equals(labels) {
                 match &entries[i].counter {
-                    Some(c) => return c.clone(),
-                    None => {}
+                    Maybe.Some(c) => return c.clone(),
+                    Maybe.None => {}
                 }
             }
             i = i + 1;
@@ -140,10 +140,10 @@ implement MetricFamily {
         if entries.len() < MAX_LABEL_CARDINALITY_PER_FAMILY {
             entries.push(MetricEntry {
                 labels: labels.clone(),
-                counter: Some(c.clone()),
-                up_down: None,
-                gauge: None,
-                histogram: None,
+                counter: Maybe.Some(c.clone()),
+                up_down: Maybe.None,
+                gauge: Maybe.None,
+                histogram: Maybe.None,
             });
         }
         // Else: cardinality cap hit. Returned instrument is NOT
@@ -160,8 +160,8 @@ implement MetricFamily {
         while i < entries.len() {
             if entries[i].labels.equals(labels) {
                 match &entries[i].up_down {
-                    Some(c) => return c.clone(),
-                    None => {}
+                    Maybe.Some(c) => return c.clone(),
+                    Maybe.None => {}
                 }
             }
             i = i + 1;
@@ -170,10 +170,10 @@ implement MetricFamily {
         if entries.len() < MAX_LABEL_CARDINALITY_PER_FAMILY {
             entries.push(MetricEntry {
                 labels: labels.clone(),
-                counter: None,
-                up_down: Some(c.clone()),
-                gauge: None,
-                histogram: None,
+                counter: Maybe.None,
+                up_down: Maybe.Some(c.clone()),
+                gauge: Maybe.None,
+                histogram: Maybe.None,
             });
         }
         c
@@ -186,8 +186,8 @@ implement MetricFamily {
         while i < entries.len() {
             if entries[i].labels.equals(labels) {
                 match &entries[i].gauge {
-                    Some(c) => return c.clone(),
-                    None => {}
+                    Maybe.Some(c) => return c.clone(),
+                    Maybe.None => {}
                 }
             }
             i = i + 1;
@@ -196,10 +196,10 @@ implement MetricFamily {
         if entries.len() < MAX_LABEL_CARDINALITY_PER_FAMILY {
             entries.push(MetricEntry {
                 labels: labels.clone(),
-                counter: None,
-                up_down: None,
-                gauge: Some(c.clone()),
-                histogram: None,
+                counter: Maybe.None,
+                up_down: Maybe.None,
+                gauge: Maybe.Some(c.clone()),
+                histogram: Maybe.None,
             });
         }
         c
@@ -212,8 +212,8 @@ implement MetricFamily {
         while i < entries.len() {
             if entries[i].labels.equals(labels) {
                 match &entries[i].histogram {
-                    Some(c) => return c.clone(),
-                    None => {}
+                    Maybe.Some(c) => return c.clone(),
+                    Maybe.None => {}
                 }
             }
             i = i + 1;
@@ -222,10 +222,10 @@ implement MetricFamily {
         if entries.len() < MAX_LABEL_CARDINALITY_PER_FAMILY {
             entries.push(MetricEntry {
                 labels: labels.clone(),
-                counter: None,
-                up_down: None,
-                gauge: None,
-                histogram: Some(h.clone()),
+                counter: Maybe.None,
+                up_down: Maybe.None,
+                gauge: Maybe.None,
+                histogram: Maybe.Some(h.clone()),
             });
         }
         h
@@ -395,10 +395,10 @@ fn clone_entries(xs: &List<MetricEntry>) -> List<MetricEntry> {
     while i < xs.len() {
         out.push(MetricEntry {
             labels: xs[i].labels.clone(),
-            counter: match &xs[i].counter { Some(c) => Some(c.clone()), None => None },
-            up_down: match &xs[i].up_down { Some(c) => Some(c.clone()), None => None },
-            gauge: match &xs[i].gauge { Some(c) => Some(c.clone()), None => None },
-            histogram: match &xs[i].histogram { Some(c) => Some(c.clone()), None => None },
+            counter: match &xs[i].counter { Maybe.Some(c) => Maybe.Some(c.clone()), Maybe.None => Maybe.None },
+            up_down: match &xs[i].up_down { Maybe.Some(c) => Maybe.Some(c.clone()), Maybe.None => Maybe.None },
+            gauge: match &xs[i].gauge { Maybe.Some(c) => Maybe.Some(c.clone()), Maybe.None => Maybe.None },
+            histogram: match &xs[i].histogram { Maybe.Some(c) => Maybe.Some(c.clone()), Maybe.None => Maybe.None },
         });
         i = i + 1;
     }

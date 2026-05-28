@@ -114,14 +114,14 @@ public type TableState is {
 
 implement TableState {
     public fn new() -> TableState {
-        TableState { selected: None, offset: 0 }
+        TableState { selected: Maybe.None, offset: 0 }
     }
 
     public fn with_selected(idx: Int) -> TableState {
-        TableState { selected: Some(idx), offset: 0 }
+        TableState { selected: Maybe.Some(idx), offset: 0 }
     }
 
-    /// Set the selected index (or None to deselect).
+    /// Set the selected index (or Maybe.None to deselect).
     public fn select(&mut self, index: Maybe<Int>) {
         self.selected = index;
     }
@@ -129,27 +129,27 @@ implement TableState {
     /// Move selection to the next row, wrapping at bottom.
     public fn next(&mut self, total: Int) {
         self.selected = match self.selected {
-            Some(i) => Some((i + 1).min(total - 1)),
-            None => if total > 0 { Some(0) } else { None },
+            Maybe.Some(i) => Maybe.Some((i + 1).min(total - 1)),
+            Maybe.None => if total > 0 { Maybe.Some(0) } else { Maybe.None },
         };
     }
 
     /// Move selection to the previous row, clamping at top.
     public fn previous(&mut self) {
         self.selected = match self.selected {
-            Some(i) => Some((i - 1).max(0)),
-            None => None,
+            Maybe.Some(i) => Maybe.Some((i - 1).max(0)),
+            Maybe.None => Maybe.None,
         };
     }
 
     /// Jump to the first row.
     public fn first(&mut self) {
-        self.selected = Some(0);
+        self.selected = Maybe.Some(0);
     }
 
     /// Jump to the last row.
     public fn last(&mut self, total: Int) {
-        self.selected = Some((total - 1).max(0));
+        self.selected = Maybe.Some((total - 1).max(0));
     }
 }
 
@@ -175,29 +175,29 @@ implement Table {
     public fn new(rows: List<TableRow>, widths: List<Constraint>) -> Table {
         Table {
             rows: rows,
-            header: None,
-            footer: None,
+            header: Maybe.None,
+            footer: Maybe.None,
             widths: widths,
             column_spacing: 1,
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             highlight_style: Style.new().reversed(),
-            highlight_symbol: Some(">> "),
+            highlight_symbol: Maybe.Some(">> "),
             highlight_spacing: HighlightSpacing.WhenSelected,
         }
     }
 
     // Builder chain
     public fn header(self, row: TableRow) -> Table {
-        Table { header: Some(row), ..self }
+        Table { header: Maybe.Some(row), ..self }
     }
 
     public fn footer(self, row: TableRow) -> Table {
-        Table { footer: Some(row), ..self }
+        Table { footer: Maybe.Some(row), ..self }
     }
 
     public fn block(self, block: Block) -> Table {
-        Table { block: Some(block), ..self }
+        Table { block: Maybe.Some(block), ..self }
     }
 
     public fn style(self, style: Style) -> Table {
@@ -209,7 +209,7 @@ implement Table {
     }
 
     public fn highlight_symbol(self, sym: Text) -> Table {
-        Table { highlight_symbol: Some(sym), ..self }
+        Table { highlight_symbol: Maybe.Some(sym), ..self }
     }
 
     public fn column_spacing(self, spacing: Int) -> Table {
@@ -227,12 +227,12 @@ implement StatefulWidget for Table {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut TableState) {
         // 1. Draw block border
         let table_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if table_area.width < 1 || table_area.height < 1 { return; }
@@ -248,26 +248,26 @@ implement StatefulWidget for Table {
         // 3. Draw header
         let mut y = table_area.y;
         match self.header {
-            Some(header) => {
+            Maybe.Some(header) => {
                 if y < table_area.bottom() {
                     render_row(buf, &header, &col_widths, y, table_area.width);
                     y = y + header.height + header.bottom_margin;
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
 
         // 4. Calculate visible rows, reserving space for footer
         let footer_height = match self.footer {
-            Some(ref f) => f.height + 1,
-            None => 0,
+            Maybe.Some(ref f) => f.height + 1,
+            Maybe.None => 0,
         };
         let available_height = table_area.bottom() - y;
         let rows_height = available_height - footer_height;
 
         // Auto-scroll: ensure selected row is in viewport
         match state.selected {
-            Some(sel) => {
+            Maybe.Some(sel) => {
                 if sel < state.offset {
                     state.offset = sel;
                 }
@@ -275,7 +275,7 @@ implement StatefulWidget for Table {
                     state.offset = sel - rows_height + 1;
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
 
         // 5. Render visible rows
@@ -283,7 +283,7 @@ implement StatefulWidget for Table {
         let mut row_idx = state.offset;
         while row_idx < total && y < table_area.bottom() - footer_height {
             let row = &self.rows[row_idx];
-            let is_selected = state.selected == Some(row_idx);
+            let is_selected = state.selected == Maybe.Some(row_idx);
 
             let row_style = if is_selected {
                 row.style.patch(self.highlight_style)
@@ -294,10 +294,10 @@ implement StatefulWidget for Table {
             // Draw highlight symbol
             if is_selected {
                 match self.highlight_symbol {
-                    Some(ref sym) => {
+                    Maybe.Some(ref sym) => {
                         buf.set_string(table_area.x, y, sym, self.highlight_style);
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
             }
 
@@ -316,13 +316,13 @@ implement StatefulWidget for Table {
 
         // 6. Render footer at bottom of table area
         match self.footer {
-            Some(ref footer) => {
+            Maybe.Some(ref footer) => {
                 let footer_y = table_area.bottom() - footer.height;
                 if footer_y >= y {
                     render_row(buf, footer, &col_widths, footer_y, table_area.width);
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
     }
 }

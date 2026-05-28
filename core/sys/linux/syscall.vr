@@ -206,9 +206,9 @@ public fn read(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
         syscall_raw(SYS_READ, fd.as_raw(), buf.as_ptr() as Int, buf.len(), 0, 0, 0)
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -218,9 +218,9 @@ public fn write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
         syscall_raw(SYS_WRITE, fd.as_raw(), buf.as_ptr() as Int, buf.len(), 0, 0, 0)
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -245,9 +245,9 @@ public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSEr
         )
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -267,16 +267,16 @@ public fn pread_raw(fd: FileDesc, buf: &unsafe Byte, count: Int, offset: Int) ->
         )
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
 /// Atomic positional write — writes up to `buf.len()` bytes from `buf`
 /// to `fd` at `offset` without changing the file position. Maps to
 /// `pwrite64(2)` (SYS_PWRITE64). See `pread` for the atomicity contract.
-/// Partial writes return `Ok(n)` with `n < buf.len()`; callers requiring
+/// Partial writes return `Result.Ok(n)` with `n < buf.len()`; callers requiring
 /// all-or-nothing must loop. The kernel does NOT extend partial writes
 /// past EOF differently than `write(2)` does.
 public fn pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError> {
@@ -292,9 +292,9 @@ public fn pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError
         )
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -304,9 +304,9 @@ public fn close(fd: FileDesc) -> Result<(), OSError> {
         syscall_raw(SYS_CLOSE, fd.as_raw(), 0, 0, 0, 0, 0)
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -335,13 +335,13 @@ public fn fork() -> Result<Int, OSError> {
     @cfg(target_arch = "x86_64")
     {
         let r = unsafe { syscall_raw(SYS_FORK, 0, 0, 0, 0, 0, 0) };
-        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+        if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
     }
     @cfg(target_arch = "aarch64")
     {
         // aarch64 has no SYS_FORK; use clone(SIGCHLD).
         let r = unsafe { syscall_raw(SYS_CLONE, FORK_FLAGS, 0, 0, 0, 0, 0) };
-        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+        if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
     }
 }
 
@@ -351,20 +351,20 @@ public fn pipe(fds: &mut [Int32; 2]) -> Result<(), OSError> {
     @cfg(target_arch = "x86_64")
     {
         let r = unsafe { syscall_raw(SYS_PIPE, fds.as_ptr() as Int, 0, 0, 0, 0, 0) };
-        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(()) }
+        if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(()) }
     }
     @cfg(target_arch = "aarch64")
     {
         // aarch64 has no SYS_PIPE; use pipe2(flags=0).
         let r = unsafe { syscall_raw(SYS_PIPE2, fds.as_ptr() as Int, 0, 0, 0, 0, 0) };
-        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(()) }
+        if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(()) }
     }
 }
 
 /// pipe2(2): like pipe but with optional O_CLOEXEC / O_NONBLOCK flags.
 public fn pipe2(fds: &mut [Int32; 2], flags: Int) -> Result<(), OSError> {
     let r = unsafe { syscall_raw(SYS_PIPE2, fds.as_ptr() as Int, flags, 0, 0, 0, 0) };
-    if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(()) }
+    if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(()) }
 }
 
 /// dup2(oldfd, newfd): duplicate a file descriptor. Closes newfd first
@@ -375,7 +375,7 @@ public fn dup2(oldfd: FileDesc, newfd: FileDesc) -> Result<Int, OSError> {
         let r = unsafe {
             syscall_raw(SYS_DUP2, oldfd.as_raw(), newfd.as_raw(), 0, 0, 0, 0)
         };
-        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+        if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
     }
     @cfg(target_arch = "aarch64")
     {
@@ -383,7 +383,7 @@ public fn dup2(oldfd: FileDesc, newfd: FileDesc) -> Result<Int, OSError> {
         let r = unsafe {
             syscall_raw(SYS_DUP3, oldfd.as_raw(), newfd.as_raw(), 0, 0, 0, 0)
         };
-        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+        if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
     }
 }
 
@@ -392,7 +392,7 @@ public fn dup3(oldfd: FileDesc, newfd: FileDesc, flags: Int) -> Result<Int, OSEr
     let r = unsafe {
         syscall_raw(SYS_DUP3, oldfd.as_raw(), newfd.as_raw(), flags, 0, 0, 0)
     };
-    if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+    if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
 }
 
 /// execve(path, argv, envp): replace the current process image.
@@ -403,7 +403,7 @@ public fn execve(path: &Byte, argv: Int, envp: Int) -> Result<!, OSError> {
         syscall_raw(SYS_EXECVE, path as Int, argv, envp, 0, 0, 0)
     };
     // Only reached on error.
-    Err(OSError.from_code(-r as Int))
+    Result.Err(OSError.from_code(-r as Int))
 }
 
 /// wait4(pid, status, options, rusage): wait for a child to change state.
@@ -413,21 +413,21 @@ public fn wait4(pid: Int, status: &mut Int32, options: Int) -> Result<Int, OSErr
     let r = unsafe {
         syscall_raw(SYS_WAIT4, pid, status as Int, options, 0, 0, 0)
     };
-    if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+    if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
 }
 
 /// kill(pid, sig): send a signal. pid > 0 — to that process; pid == 0 —
 /// to the process group of the caller; pid == -1 — broadcast.
 public fn kill(pid: Int, sig: Int) -> Result<(), OSError> {
     let r = unsafe { syscall_raw(SYS_KILL, pid, sig, 0, 0, 0, 0) };
-    if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(()) }
+    if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(()) }
 }
 
 /// fcntl(fd, cmd, arg): file-descriptor control. Used to set FD_CLOEXEC
 /// or O_NONBLOCK on pipe ends after creation.
 public fn fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
     let r = unsafe { syscall_raw(SYS_FCNTL, fd.as_raw(), cmd, arg, 0, 0, 0) };
-    if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+    if r < 0 { Result.Err(OSError.from_code(-r as Int)) } else { Result.Ok(r) }
 }
 
 // fcntl commands
@@ -465,9 +465,9 @@ public fn mmap(
     };
     // MAP_FAILED is typically -1, but syscall returns -errno
     if result < 0 && result > -4096 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result as &unsafe Byte)
+        Result.Ok(result as &unsafe Byte)
     }
 }
 
@@ -477,9 +477,9 @@ public fn munmap(addr: &unsafe Byte, len: Int) -> Result<(), OSError> {
         syscall_raw(SYS_MUNMAP, addr as Int, len, 0, 0, 0, 0)
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -518,9 +518,9 @@ public fn nanosleep(seconds: Int, nanoseconds: Int) -> Result<(Int, Int), OSErro
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok((rem[0], rem[1]))
+        Result.Ok((rem[0], rem[1]))
     }
 }
 
@@ -529,17 +529,17 @@ public fn nanosleep(seconds: Int, nanoseconds: Int) -> Result<(Int, Int), OSErro
 public fn nanosleep_ts(req: &Timespec, rem: Maybe<&mut Timespec>) -> Result<(), OSError> {
     let result = nanosleep(req.tv_sec, req.tv_nsec);
     match result {
-        Ok((rem_sec, rem_nsec)) => {
+        Result.Ok((rem_sec, rem_nsec)) => {
             match rem {
-                Some(r) => {
+                Maybe.Some(r) => {
                     r.tv_sec = rem_sec;
                     r.tv_nsec = rem_nsec;
                 },
-                None => {},
+                Maybe.None => {},
             };
-            Ok(())
+            Result.Ok(())
         },
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -552,9 +552,9 @@ public fn getrandom(buf: &mut [Byte], flags: UInt32) -> Result<Int, OSError> {
         syscall_raw(SYS_GETRANDOM, buf.as_ptr() as Int, buf.len(), flags as Int, 0, 0, 0)
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -570,9 +570,9 @@ public fn ioctl(fd: FileDesc, request: UInt64, arg: Int) -> Result<Int, OSError>
         syscall_raw(SYS_IOCTL, fd.as_raw(), request as Int, arg, 0, 0, 0)
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -599,13 +599,13 @@ public const FUTEX_WAKE_PRIVATE: Int = 129;
 /// Futex wait operation.
 public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<Int>) -> Result<(), OSError> {
     let (timeout_ptr, timeout_sec, timeout_nsec) = match timeout_ns {
-        Some(ns) => {
+        Maybe.Some(ns) => {
             let sec = ns / 1_000_000_000;
             let nsec = ns % 1_000_000_000;
             let ts: [Int; 2] = [sec, nsec];
             (&ts as Int, sec, nsec)
         }
-        None => (0, 0, 0),
+        Maybe.None => (0, 0, 0),
     };
 
     let result = unsafe {
@@ -613,9 +613,9 @@ public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<Int>) -> Resul
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -626,9 +626,9 @@ public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -651,9 +651,9 @@ public fn clock_gettime(clock_id: Int, ts: &mut Timespec) -> Result<(), OSError>
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -723,9 +723,9 @@ public fn open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(FileDesc.from_raw(result))
+        Result.Ok(FileDesc.from_raw(result))
     }
 }
 
@@ -756,9 +756,9 @@ public fn open_raw(path: &Byte, flags: Int, mode: Int) -> Result<FileDesc, OSErr
         syscall_raw(SYS_OPENAT, AT_FDCWD, path as Int, flags, mode, 0, 0)
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(FileDesc.from_raw(result))
+        Result.Ok(FileDesc.from_raw(result))
     }
 }
 
@@ -774,9 +774,9 @@ public fn openat(dirfd: FileDesc, path: &[Byte], flags: Int, mode: Int) -> Resul
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(FileDesc.from_raw(result))
+        Result.Ok(FileDesc.from_raw(result))
     }
 }
 
@@ -787,9 +787,9 @@ public fn lseek(fd: FileDesc, offset: Int, whence: Int) -> Result<Int, OSError> 
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -810,9 +810,9 @@ public fn fstat(fd: FileDesc, stat: &mut Stat) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -838,9 +838,9 @@ public fn stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -866,9 +866,9 @@ public fn lstat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -879,9 +879,9 @@ public fn fsync(fd: FileDesc) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -892,9 +892,9 @@ public fn fdatasync(fd: FileDesc) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -905,9 +905,9 @@ public fn ftruncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -921,8 +921,8 @@ public const R_OK: Int = 4;
 ///
 
 /// `mode` is a bitwise-OR of `F_OK | R_OK | W_OK | X_OK`. Returns
-/// `Ok(true)` on success, `Ok(false)` on EACCES/ENOENT/ENOTDIR/EROFS,
-/// `Err(...)` for everything else (EIO, EFAULT, ENAMETOOLONG, ELOOP).
+/// `Result.Ok(true)` on success, `Result.Ok(false)` on EACCES/ENOENT/ENOTDIR/EROFS,
+/// `Result.Err(...)` for everything else (EIO, EFAULT, ENAMETOOLONG, ELOOP).
 public fn faccessat(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
     let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
     let len = copy_path_nul(&mut path_buf, path);
@@ -935,15 +935,15 @@ public fn faccessat(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
     };
 
     if result == 0 {
-        return Ok(true);
+        return Result.Ok(true);
     }
     let code = -result as Int;
     // ENOENT=2, EACCES=13, ENOTDIR=20, EROFS=30 — all mean "no" for an
     // access probe. Anything else is a real error worth surfacing.
     if code == 2 || code == 13 || code == 20 || code == 30 {
-        Ok(false)
+        Result.Ok(false)
     } else {
-        Err(OSError.from_code(code))
+        Result.Err(OSError.from_code(code))
     }
 }
 
@@ -954,9 +954,9 @@ public fn dup(oldfd: FileDesc) -> Result<FileDesc, OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(FileDesc.from_raw(result))
+        Result.Ok(FileDesc.from_raw(result))
     }
 }
 
@@ -977,9 +977,9 @@ public fn mkdir(path: &[Byte], mode: Int) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -994,9 +994,9 @@ public fn rmdir(path: &[Byte]) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1011,9 +1011,9 @@ public fn unlink(path: &[Byte]) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1024,9 +1024,9 @@ public fn unlink_raw(path: &Byte) -> Result<(), OSError> {
         syscall_raw(SYS_UNLINKAT, AT_FDCWD, path as Int, 0, 0, 0, 0)
     };
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1049,9 +1049,9 @@ public fn rename(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1062,9 +1062,9 @@ public fn getcwd(buf: &mut [Byte]) -> Result<Int, OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -1078,9 +1078,9 @@ public fn chdir(path: &[Byte]) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1092,9 +1092,9 @@ public fn getdents64(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -1118,9 +1118,9 @@ public fn symlink(target: &[Byte], linkpath: &[Byte]) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1142,9 +1142,9 @@ public fn readlink(path: &[Byte], buf: &mut [Byte]) -> Result<Int, OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -1171,9 +1171,9 @@ public fn link(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1188,9 +1188,9 @@ public fn chmod(path: &[Byte], mode: Int) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1201,9 +1201,9 @@ public fn fchmod(fd: FileDesc, mode: Int) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1332,9 +1332,9 @@ public fn socket(domain: Int, sock_type: Int, protocol: Int) -> Result<FileDesc,
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(FileDesc.from_raw(result))
+        Result.Ok(FileDesc.from_raw(result))
     }
 }
 
@@ -1345,9 +1345,9 @@ public fn connect(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(),
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1363,9 +1363,9 @@ public fn bind(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(), OS
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1381,9 +1381,9 @@ public fn listen(fd: FileDesc, backlog: Int) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1402,9 +1402,9 @@ public fn accept(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32) -> 
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(FileDesc.from_raw(result))
+        Result.Ok(FileDesc.from_raw(result))
     }
 }
 
@@ -1423,9 +1423,9 @@ public fn accept4(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32, fl
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(FileDesc.from_raw(result))
+        Result.Ok(FileDesc.from_raw(result))
     }
 }
 
@@ -1450,9 +1450,9 @@ public fn sendto(
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -1483,9 +1483,9 @@ public fn recvfrom(
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -1517,9 +1517,9 @@ public fn setsockopt(
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1551,9 +1551,9 @@ public fn getsockopt(
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1567,7 +1567,7 @@ public fn getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
     // Convert from bytes (assuming little-endian)
     let error = (buf[0] as Int) | ((buf[1] as Int) << 8) |
                 ((buf[2] as Int) << 16) | ((buf[3] as Int) << 24);
-    Ok(error)
+    Result.Ok(error)
 }
 
 /// Shutdown a socket.
@@ -1577,9 +1577,9 @@ public fn shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1605,9 +1605,9 @@ public fn getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1625,9 +1625,9 @@ public fn getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -1646,7 +1646,7 @@ public fn set_nonblocking(fd: FileDesc, nonblocking: Bool) -> Result<(), OSError
         flags & !O_NONBLOCK
     };
     fcntl(fd, F_SETFL, new_flags)?;
-    Ok(())
+    Result.Ok(())
 }
 
 /// Set SO_REUSEADDR option.

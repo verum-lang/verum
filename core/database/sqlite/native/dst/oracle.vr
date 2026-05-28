@@ -136,10 +136,10 @@ implement Oracle {
     public fn lookup(&self, id: Int) -> Maybe<Text> {
         let mut i: Int = 0;
         while i < self.rows.len() {
-            if self.rows[i].id == id { return Some(self.rows[i].name.clone()); }
+            if self.rows[i].id == id { return Maybe.Some(self.rows[i].name.clone()); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// True iff `other` (e.g. the database state observed after recovery)
@@ -149,8 +149,8 @@ implement Oracle {
         let mut i: Int = 0;
         while i < self.rows.len() {
             match other.lookup(self.rows[i].id) {
-                Some(n) => if n != self.rows[i].name { return false; },
-                None    => return false,
+                Maybe.Some(n) => if n != self.rows[i].name { return false; },
+                Maybe.None    => return false,
             }
             i = i + 1;
         }

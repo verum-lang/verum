@@ -89,27 +89,27 @@ public fn wal_pager_apply(
     match req {
         Read(page, tok) => {
             match wal_pager_read(&mut actor.wal_pager, page) {
-                Ok(frame) => ReadOk(frame, tok),
-                Err(e)    => Failed(e, tok),
+                Result.Ok(frame) => ReadOk(frame, tok),
+                Result.Err(e)    => Failed(e, tok),
             }
         }
         Write(frame, tok) => {
             match wal_pager_write(&mut actor.wal_pager, &frame) {
-                Ok(_) => {
+                Result.Ok(_) => {
                     actor.pending_writes = actor.pending_writes + 1;
                     WriteOk(tok)
                 }
-                Err(e) => Failed(e, tok),
+                Result.Err(e) => Failed(e, tok),
             }
         }
         Commit(tok) => {
             match wal_pager_commit(&mut actor.wal_pager, sync_default()) {
-                Ok(frames) => {
+                Result.Ok(frames) => {
                     let _ = frames;
                     actor.pending_writes = 0;
                     CommitOk(tok)
                 }
-                Err(e) => Failed(e, tok),
+                Result.Err(e) => Failed(e, tok),
             }
         }
         Checkpoint(mode, tok) => {
@@ -121,8 +121,8 @@ public fn wal_pager_apply(
             let salt1: u32 = 0xCAFEBABE as u32;
             let salt2: u32 = 0xDEADBEEF as u32;
             match wal_pager_checkpoint(&mut actor.wal_pager, wal_mode, salt1, salt2) {
-                Ok(result) => CheckpointOk(result.frames_drained, tok),
-                Err(e)     => Failed(e, tok),
+                Result.Ok(result) => CheckpointOk(result.frames_drained, tok),
+                Result.Err(e)     => Failed(e, tok),
             }
         }
     }

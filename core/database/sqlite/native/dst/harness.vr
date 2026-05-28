@@ -95,21 +95,21 @@ implement DstHarness {
     public fn is_terminated(&self) -> Bool { self.terminated }
 
     public fn next_step(&self) -> Maybe<StepPlan> {
-        if self.terminated || self.op_idx >= self.stream.len() { return None; }
+        if self.terminated || self.op_idx >= self.stream.len() { return Maybe.None; }
         let op = clone_op(&self.stream.ops[self.op_idx]);
-        let mut fault: Maybe<Fault> = None;
+        let mut fault: Maybe<Fault> = Maybe.None;
         let mut terminate = false;
         match self.schedule.next_after(self.op_idx) {
-            Some(sched) => {
+            Maybe.Some(sched) => {
                 if sched.at_op == self.op_idx {
                     let f = clone_fault(&sched.fault);
                     if is_terminal(&f) { terminate = true; }
-                    fault = Some(f);
+                    fault = Maybe.Some(f);
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
-        Some(StepPlan {
+        Maybe.Some(StepPlan {
             op_idx: self.op_idx,
             op: op,
             fault: fault,
@@ -119,11 +119,11 @@ implement DstHarness {
 
     public fn advance(&mut self) {
         match self.next_step() {
-            Some(plan) => {
+            Maybe.Some(plan) => {
                 if plan.terminate { self.terminated = true; }
                 self.op_idx = self.op_idx + 1;
             }
-            None => { self.terminated = true; }
+            Maybe.None => { self.terminated = true; }
         }
     }
 

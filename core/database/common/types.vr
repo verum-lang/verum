@@ -28,7 +28,7 @@
 module core.database.common.types;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.intrinsics.runtime.mem_raw.{memcpy, store_byte, load_byte};
 mount core.database.common.error.{DbError, DecodeFault, EncodeFault, AdapterId};
@@ -155,24 +155,24 @@ implement RowSchema {
     }
 
     /// Linear scan — schemas are typically small (<32 columns) and this
-    /// stays cache-friendly. Returns `None` if the column is not
+    /// stays cache-friendly. Returns `Maybe.None` if the column is not
     /// present, never panics.
     public fn index_of(&self, name: &Text) -> Maybe<Int> {
         let mut i = 0;
         while i < self.columns.len() as Int {
             if self.columns[i].name == *name {
-                return Some(i);
+                return Maybe.Some(i);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn column(&self, i: Int) -> Maybe<&ColumnSchema> {
         if i < 0 || i >= self.columns.len() as Int {
-            None
+            Maybe.None
         } else {
-            Some(&self.columns[i])
+            Maybe.Some(&self.columns[i])
         }
     }
 }
@@ -203,15 +203,15 @@ implement WireRow {
         self.values.len() as Int
     }
 
-    /// `None` if column-index is out of range OR the value is SQL-NULL.
+    /// `Maybe.None` if column-index is out of range OR the value is SQL-NULL.
     /// Adapters call this and decode-on-demand.
     public fn bytes(&self, col: Int) -> Maybe<&List<Byte>> {
         if col < 0 || col >= self.values.len() as Int {
-            return None;
+            return Maybe.None;
         }
         match &self.values[col] {
-            WvNull              => None,
-            WvPresent { bytes, .. } => Some(bytes),
+            WvNull              => Maybe.None,
+            WvPresent { bytes, .. } => Maybe.Some(bytes),
         }
     }
 
@@ -227,11 +227,11 @@ implement WireRow {
 
     public fn format(&self, col: Int) -> Maybe<WireFormat> {
         if col < 0 || col >= self.values.len() as Int {
-            return None;
+            return Maybe.None;
         }
         match &self.values[col] {
-            WvNull                  => None,
-            WvPresent { format, .. } => Some(format.clone()),
+            WvNull                  => Maybe.None,
+            WvPresent { format, .. } => Maybe.Some(format.clone()),
         }
     }
 }
@@ -318,8 +318,8 @@ implement WireBuf {
     /// payload, with `-1` denoting SQL NULL.
     public fn put_lp_bytes(&mut self, payload: Maybe<&[Byte]>) {
         match payload {
-            None         => self.put_i32_be(-1),
-            Some(b)      => {
+            Maybe.None         => self.put_i32_be(-1),
+            Maybe.Some(b)      => {
                 self.put_i32_be(b.len() as Int);
                 self.put_bytes(b);
             }
@@ -393,9 +393,9 @@ implement WireReader {
 
     fn need(&self, n: Int) -> Result<(), WireReadError> {
         if self.remaining() < n {
-            Err(WrShortRead { wanted: n, available: self.remaining() })
+            Result.Err(WrShortRead { wanted: n, available: self.remaining() })
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -403,7 +403,7 @@ implement WireReader {
         self.need(1)?;
         let b = self.src[self.pos as Int] as Int;
         self.pos = self.pos + 1;
-        Ok(b & 0xFF)
+        Result.Ok(b & 0xFF)
     }
 
     public fn read_u16_be(&mut self) -> Result<Int, WireReadError> {
@@ -411,7 +411,7 @@ implement WireReader {
         let hi = self.src[self.pos as Int] as Int;
         let lo = self.src[(self.pos + 1) as Int] as Int;
         self.pos = self.pos + 2;
-        Ok(((hi & 0xFF) << 8) | (lo & 0xFF))
+        Result.Ok(((hi & 0xFF) << 8) | (lo & 0xFF))
     }
 
     public fn read_u32_be(&mut self) -> Result<Int, WireReadError> {
@@ -422,16 +422,16 @@ implement WireReader {
               | ((self.src[p + 2] as Int) & 0xFF) << 8
               | ((self.src[p + 3] as Int) & 0xFF);
         self.pos = self.pos + 4;
-        Ok(v)
+        Result.Ok(v)
     }
 
     public fn read_i32_be(&mut self) -> Result<Int, WireReadError> {
         let u = self.read_u32_be()?;
         // sign-extend from 32 bits.
         if (u & 0x8000_0000) != 0 {
-            Ok(u | (-1 ^ 0xFFFF_FFFF))
+            Result.Ok(u | (-1 ^ 0xFFFF_FFFF))
         } else {
-            Ok(u)
+            Result.Ok(u)
         }
     }
 
@@ -447,7 +447,7 @@ implement WireReader {
               | ((self.src[p + 6] as Int) & 0xFF) << 8
               | ((self.src[p + 7] as Int) & 0xFF);
         self.pos = self.pos + 8;
-        Ok(v)
+        Result.Ok(v)
     }
 
     /// On 64-bit Verum, `Int` is two's-complement 64-bit so the
@@ -466,7 +466,7 @@ implement WireReader {
             i = i + 1;
         }
         self.pos = self.pos + n;
-        Ok(out)
+        Result.Ok(out)
     }
 
     /// Drain everything past the cursor as a fresh `List<Byte>`.
@@ -483,14 +483,14 @@ implement WireReader {
         out
     }
 
-    /// 4-byte length-prefixed payload; `-1` decodes as `None` (SQL NULL).
+    /// 4-byte length-prefixed payload; `-1` decodes as `Maybe.None` (SQL NULL).
     public fn read_lp_bytes(&mut self) -> Result<Maybe<List<Byte>>, WireReadError> {
         let len = self.read_i32_be()?;
         if len < 0 {
-            Ok(None)
+            Result.Ok(Maybe.None)
         } else {
             let payload = self.read_bytes(len)?;
-            Ok(Some(payload))
+            Result.Ok(Maybe.Some(payload))
         }
     }
 
@@ -503,7 +503,7 @@ implement WireReader {
             i = i + 1;
         }
         if i >= n {
-            return Err(WrShortRead { wanted: 1, available: 0 });
+            return Result.Err(WrShortRead { wanted: 1, available: 0 });
         }
         let mut out: List<Byte> = [];
         let mut j = start;
@@ -513,8 +513,8 @@ implement WireReader {
         }
         self.pos = i + 1;     // skip the NUL
         match Text.from_utf8(out) {
-            Ok(s)  => Ok(s),
-            Err(_) => Err(WrInvalidUtf8),
+            Result.Ok(s)  => Result.Ok(s),
+            Result.Err(_) => Result.Err(WrInvalidUtf8),
         }
     }
 }
@@ -580,7 +580,7 @@ implement ArenaSlice {
     /// one allocation; subsequent reads do not touch the arena.
     public fn to_owned(&self, arena: &SpindleArena) -> Maybe<List<Byte>> {
         if self.is_stale(arena) {
-            return None;
+            return Maybe.None;
         }
         let mut out: List<Byte> = List.with_capacity(self.len);
         let mut i: Int = 0;
@@ -588,17 +588,17 @@ implement ArenaSlice {
             out.push(load_byte(self.ptr + i) as Byte);
             i = i + 1;
         }
-        Some(out)
+        Maybe.Some(out)
     }
 
-    /// Read a single byte at offset `off`. Returns `None` if `off` is
+    /// Read a single byte at offset `off`. Returns `Maybe.None` if `off` is
     /// out of range or the slice is stale. Used by codecs that peek a
     /// few bytes (sql-state class, type tag, etc).
     public fn byte_at(&self, off: Int, arena: &SpindleArena) -> Maybe<Int> {
         if self.is_stale(arena) || off < 0 || off >= self.len {
-            return None;
+            return Maybe.None;
         }
-        Some(load_byte(self.ptr + off) & 0xFF)
+        Maybe.Some(load_byte(self.ptr + off) & 0xFF)
     }
 
     public fn equals(&self, other: &ArenaSlice) -> Bool {
@@ -805,8 +805,8 @@ implement ArenaWireBuf {
     /// payload, with `-1` denoting SQL NULL.
     public fn put_lp_bytes(&mut self, arena: &mut SpindleArena, payload: Maybe<&[Byte]>) -> Bool {
         match payload {
-            None => self.put_i32_be(arena, -1),
-            Some(b) => {
+            Maybe.None => self.put_i32_be(arena, -1),
+            Maybe.Some(b) => {
                 if !self.put_i32_be(arena, b.len() as Int) { return false; }
                 self.put_bytes(arena, b)
             }
@@ -842,15 +842,15 @@ implement ArenaWireValue {
 
     public fn slice(&self) -> Maybe<ArenaSlice> {
         match self {
-            AvNull               => None,
-            AvPresent { slice, .. } => Some(slice.clone()),
+            AvNull               => Maybe.None,
+            AvPresent { slice, .. } => Maybe.Some(slice.clone()),
         }
     }
 
     public fn format(&self) -> Maybe<WireFormat> {
         match self {
-            AvNull                  => None,
-            AvPresent { format, .. } => Some(format.clone()),
+            AvNull                  => Maybe.None,
+            AvPresent { format, .. } => Maybe.Some(format.clone()),
         }
     }
 }
@@ -889,23 +889,23 @@ implement ArenaWireRow {
 
     public fn value(&self, col: Int) -> Maybe<&ArenaWireValue> {
         if col < 0 || col >= self.values.len() as Int {
-            None
+            Maybe.None
         } else {
-            Some(&self.values[col])
+            Maybe.Some(&self.values[col])
         }
     }
 
     public fn is_null(&self, col: Int) -> Bool {
         match self.value(col) {
-            None    => true,
-            Some(v) => v.is_null(),
+            Maybe.None    => true,
+            Maybe.Some(v) => v.is_null(),
         }
     }
 
     public fn slice(&self, col: Int) -> Maybe<ArenaSlice> {
         match self.value(col) {
-            None    => None,
-            Some(v) => v.slice(),
+            Maybe.None    => Maybe.None,
+            Maybe.Some(v) => v.slice(),
         }
     }
 }

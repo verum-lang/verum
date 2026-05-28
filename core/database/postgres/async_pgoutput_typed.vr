@@ -55,7 +55,7 @@
 module core.database.postgres.async_pgoutput_typed;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -114,7 +114,7 @@ public fn typed_tuple(
     let n = tuple.columns.len() as Int;
     let rel_n = relation.columns.len() as Int;
     if n != rel_n {
-        return Err(DbError.Adapter(AdapterSpecific {
+        return Result.Err(DbError.Adapter(AdapterSpecific {
             adapter: AdPostgres,
             code: "PGOUTPUT_TYPED_ARITY".clone(),
             message: f"typed_tuple: tuple has {n} columns, relation has {rel_n}",
@@ -135,7 +135,7 @@ public fn typed_tuple(
         }
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // =============================================================================
@@ -190,27 +190,27 @@ public fn lift_change(
     arena: &mut SpindleArena,
 ) -> Result<TypedPgoutputChange, DbError> {
     match change {
-        CdcBegin(b)         => Ok(TpcBegin(b)),
-        CdcCommit(c)        => Ok(TpcCommit(c)),
-        CdcRelationOnly(r)  => Ok(TpcRelationOnly(r)),
+        CdcBegin(b)         => Result.Ok(TpcBegin(b)),
+        CdcCommit(c)        => Result.Ok(TpcCommit(c)),
+        CdcRelationOnly(r)  => Result.Ok(TpcRelationOnly(r)),
         CdcInsert { relation, new_tuple } => {
             let lifted = typed_tuple(&new_tuple, &relation, arena)?;
-            Ok(TpcInsert { relation: relation, new_tuple: lifted })
+            Result.Ok(TpcInsert { relation: relation, new_tuple: lifted })
         }
         CdcUpdate { relation, old_tuple, new_tuple } => {
             let lifted_new = typed_tuple(&new_tuple, &relation, arena)?;
             let lifted_old = match old_tuple {
-                None => None,
-                Some(OtvKey(t)) => {
+                Maybe.None => Maybe.None,
+                Maybe.Some(OtvKey(t)) => {
                     let v = typed_tuple(&t, &relation, arena)?;
-                    Some(ToKey(v))
+                    Maybe.Some(ToKey(v))
                 }
-                Some(OtvOld(t)) => {
+                Maybe.Some(OtvOld(t)) => {
                     let v = typed_tuple(&t, &relation, arena)?;
-                    Some(ToOld(v))
+                    Maybe.Some(ToOld(v))
                 }
             };
-            Ok(TpcUpdate {
+            Result.Ok(TpcUpdate {
                 relation: relation,
                 old_tuple: lifted_old,
                 new_tuple: lifted_new,
@@ -218,18 +218,18 @@ public fn lift_change(
         }
         CdcDelete { relation, old_tuple_kind, old_tuple } => {
             let lifted = typed_tuple(&old_tuple, &relation, arena)?;
-            Ok(TpcDelete {
+            Result.Ok(TpcDelete {
                 relation: relation,
                 old_tuple_kind: old_tuple_kind,
                 old_tuple: lifted,
             })
         }
-        CdcStreamStart(s)   => Ok(TpcStreamStart(s)),
-        CdcStreamStop       => Ok(TpcStreamStop),
-        CdcStreamCommit(s)  => Ok(TpcStreamCommit(s)),
-        CdcStreamAbort(s)   => Ok(TpcStreamAbort(s)),
-        CdcRaw(m)           => Ok(TpcRaw(m)),
-        CdcTerminated(e)    => Ok(TpcTerminated(e)),
-        CdcClosed           => Ok(TpcClosed),
+        CdcStreamStart(s)   => Result.Ok(TpcStreamStart(s)),
+        CdcStreamStop       => Result.Ok(TpcStreamStop),
+        CdcStreamCommit(s)  => Result.Ok(TpcStreamCommit(s)),
+        CdcStreamAbort(s)   => Result.Ok(TpcStreamAbort(s)),
+        CdcRaw(m)           => Result.Ok(TpcRaw(m)),
+        CdcTerminated(e)    => Result.Ok(TpcTerminated(e)),
+        CdcClosed           => Result.Ok(TpcClosed),
     }
 }

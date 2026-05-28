@@ -56,7 +56,7 @@
 module core.database.mysql.prepared;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 
 mount core.database.common.error.{DbError, AdapterSpecific};
@@ -137,21 +137,21 @@ implement PreparedSession {
     ) -> Result<MysqlPreparedStatement, DbError> {
         let fp = fingerprint(sql);
         match self.cache.lookup(fp) {
-            Some(stmt) => Ok(stmt),
-            None => {
+            Maybe.Some(stmt) => Result.Ok(stmt),
+            Maybe.None => {
                 let stmt = conn.prepare(sql)?;
                 let evicted = self.cache.insert(fp, clone_stmt(&stmt));
                 match evicted {
-                    Some(victim) => {
+                    Maybe.Some(victim) => {
                         // Best-effort close — failure is logged via
                         // the returned error but does NOT propagate
                         // (the user's prepare succeeded, the slot
                         // we lose is not their concern).
                         let _ = conn.close_prepared(&victim);
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
-                Ok(stmt)
+                Result.Ok(stmt)
             }
         }
     }
@@ -177,8 +177,8 @@ implement PreparedSession {
         let fp = fingerprint(sql);
         let stmt = self.prepare_cached(conn, sql)?;
         match conn.execute_prepared(&stmt, params) {
-            Ok(r)  => Ok(r),
-            Err(e) => {
+            Result.Ok(r)  => Result.Ok(r),
+            Result.Err(e) => {
                 if is_unknown_stmt_handler(&e) {
                     // Server forgot the slot — drop our entry,
                     // re-prepare, retry once.
@@ -186,7 +186,7 @@ implement PreparedSession {
                     let fresh = self.prepare_cached(conn, sql)?;
                     conn.execute_prepared(&fresh, params)
                 } else {
-                    Err(e)
+                    Result.Err(e)
                 }
             }
         }
@@ -238,8 +238,8 @@ implement PreparedSession {
         let mut i: Int = 0;
         while i < stmts.len() as Int {
             match conn.close_prepared(&stmts[i]) {
-                Ok(_)  => { closed = closed + 1; }
-                Err(_) => {}      // best-effort — server will GC anyway
+                Result.Ok(_)  => { closed = closed + 1; }
+                Result.Err(_) => {}      // best-effort — server will GC anyway
             }
             i = i + 1;
         }
@@ -253,8 +253,8 @@ implement PreparedSession {
     public fn invalidate(&mut self, sql: &Text) -> Bool {
         let fp = fingerprint(sql);
         match self.cache.invalidate(fp) {
-            Some(_) => true,
-            None    => false,
+            Maybe.Some(_) => true,
+            Maybe.None    => false,
         }
     }
 

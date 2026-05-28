@@ -174,9 +174,9 @@ public context BuildAssets {
     ///
 
     /// # Returns
-    /// - `Ok(List<Byte>)`: File contents as raw bytes
-    /// - `Err(AssetNotFound)`: Path does not exist
-    /// - `Err(AssetReadError)`: I/O error reading file
+    /// - `Result.Ok(List<Byte>)`: File contents as raw bytes
+    /// - `Result.Err(AssetNotFound)`: Path does not exist
+    /// - `Result.Err(AssetReadError)`: I/O error reading file
     ///
 
     /// # Security
@@ -195,9 +195,9 @@ public context BuildAssets {
     ///
 
     /// # Returns
-    /// - `Ok(Text)`: File contents as UTF-8 text
-    /// - `Err(AssetNotFound)`: Path does not exist
-    /// - `Err(AssetReadError)`: I/O error or invalid UTF-8
+    /// - `Result.Ok(Text)`: File contents as UTF-8 text
+    /// - `Result.Err(AssetNotFound)`: Path does not exist
+    /// - `Result.Err(AssetReadError)`: I/O error or invalid UTF-8
     fn load_text(path: Text) -> MetaResult<Text>;
 
     /// Check if asset exists
@@ -219,9 +219,9 @@ public context BuildAssets {
     ///
 
     /// # Returns
-    /// - `Ok(List<Text>)`: List of file/directory names in the directory
-    /// - `Err(AssetNotFound)`: Directory does not exist
-    /// - `Err(AssetReadError)`: Not a directory or permission denied
+    /// - `Result.Ok(List<Text>)`: List of file/directory names in the directory
+    /// - `Result.Err(AssetNotFound)`: Directory does not exist
+    /// - `Result.Err(AssetReadError)`: Not a directory or permission denied
     fn list_dir(path: Text) -> MetaResult<List<Text>>;
 
     /// Get asset metadata
@@ -456,7 +456,7 @@ public context TypeInfo {
     ///
 
     /// # Returns
-    /// Method info with resolution details, or None if not found
+    /// Method info with resolution details, or Maybe.None if not found
     fn method_of<T>(name: Text) -> Maybe<MethodResolution>;
 
     /// Get all static functions of a type (no self parameter)
@@ -622,8 +622,8 @@ public context AstAccess {
     ///
 
     /// # Returns
-    /// - `Ok(MetaExpr)`: Parsed expression AST
-    /// - `Err(MetaParseError)`: Syntax error in tokens
+    /// - `Result.Ok(MetaExpr)`: Parsed expression AST
+    /// - `Result.Err(MetaParseError)`: Syntax error in tokens
     fn parse_expr(tokens: TokenStream) -> MetaResult<MetaExpr>;
 
     /// Parse token stream as type
@@ -634,8 +634,8 @@ public context AstAccess {
     ///
 
     /// # Returns
-    /// - `Ok(Type)`: Parsed type AST
-    /// - `Err(MetaParseError)`: Syntax error in tokens
+    /// - `Result.Ok(Type)`: Parsed type AST
+    /// - `Result.Err(MetaParseError)`: Syntax error in tokens
     fn parse_type(tokens: TokenStream) -> MetaResult<Type>;
 
     /// Parse token stream as item (function, type, etc.)
@@ -646,8 +646,8 @@ public context AstAccess {
     ///
 
     /// # Returns
-    /// - `Ok(Item)`: Parsed item AST
-    /// - `Err(MetaParseError)`: Syntax error in tokens
+    /// - `Result.Ok(Item)`: Parsed item AST
+    /// - `Result.Err(MetaParseError)`: Syntax error in tokens
     fn parse_item(tokens: TokenStream) -> MetaResult<Item>;
 
     /// Parse token stream as pattern
@@ -658,8 +658,8 @@ public context AstAccess {
     ///
 
     /// # Returns
-    /// - `Ok(Pattern)`: Parsed pattern AST
-    /// - `Err(MetaParseError)`: Syntax error in tokens
+    /// - `Result.Ok(Pattern)`: Parsed pattern AST
+    /// - `Result.Err(MetaParseError)`: Syntax error in tokens
     fn parse_pattern(tokens: TokenStream) -> MetaResult<Pattern>;
 
     /// Parse token stream as statement
@@ -777,7 +777,7 @@ public context AstAccess {
     ///  }
     ///
 
-    ///  if let Some(expr) = result.expr {
+    ///  if let Maybe.Some(expr) = result.expr {
     ///  AstAccess.emit(transform(expr))
     ///  } else {
     ///  input // Return unchanged on total failure
@@ -994,20 +994,20 @@ implement DiagnosticBuilder {
     /// Set severity to error
     public fn error(mut self, message: Text) -> Self {
         self.severity = DiagnosticSeverity.Error;
-        self.message = Some(message);
+        self.message = Maybe.Some(message);
         self
     }
 
     /// Set severity to warning
     public fn warning(mut self, message: Text) -> Self {
         self.severity = DiagnosticSeverity.Warning;
-        self.message = Some(message);
+        self.message = Maybe.Some(message);
         self
     }
 
     /// Set diagnostic code
     public fn code(mut self, code: Text) -> Self {
-        self.code = Some(code);
+        self.code = Maybe.Some(code);
         self
     }
 
@@ -1036,8 +1036,8 @@ implement DiagnosticBuilder {
         self.suggestions.push(Suggestion {
             kind: SuggestionKind.Note,
             message,
-            span: None,
-            replacement: None,
+            span: Maybe.None,
+            replacement: Maybe.None,
         });
         self
     }
@@ -1047,8 +1047,8 @@ implement DiagnosticBuilder {
         self.suggestions.push(Suggestion {
             kind: SuggestionKind.Help,
             message,
-            span: None,
-            replacement: None,
+            span: Maybe.None,
+            replacement: Maybe.None,
         });
         self
     }
@@ -1058,8 +1058,8 @@ implement DiagnosticBuilder {
         self.suggestions.push(Suggestion {
             kind: SuggestionKind.Fix,
             message,
-            span: Some(span),
-            replacement: Some(replacement),
+            span: Maybe.Some(span),
+            replacement: Maybe.Some(replacement),
         });
         self
     }
@@ -1205,7 +1205,7 @@ public context MetaRuntime {
     ///
 
     /// # Returns
-    /// Configuration value as text, or None if not present
+    /// Configuration value as text, or Maybe.None if not present
     fn config_get(key: Text) -> Maybe<Text>;
 
     /// Get configuration value as integer
@@ -1268,7 +1268,7 @@ public context MetaRuntime {
 ///  let cache_key = f"analyze:{TypeInfo.type_id<T>()}";
 ///
 
-///  if let Some(cached) = MacroState.cache_get<Analysis>(cache_key) {
+///  if let Maybe.Some(cached) = MacroState.cache_get<Analysis>(cache_key) {
 ///  return cached;
 ///  }
 ///
@@ -1307,7 +1307,7 @@ public context MacroState {
     ///
 
     /// # Returns
-    /// Cached value if present and still valid, None otherwise
+    /// Cached value if present and still valid, Maybe.None otherwise
     fn cache_get<T>(key: Text) -> Maybe<T>;
 
     /// Set cached value
@@ -1577,7 +1577,7 @@ public context CodeSearch {
     ///
 
     /// // Find all if-let-some patterns
-    /// let if_lets = CodeSearch.find_pattern("if let Some($x) = $expr { $body }");
+    /// let if_lets = CodeSearch.find_pattern("if let Maybe.Some($x) = $expr { $body }");
     /// ```
     fn find_pattern(pattern: Text) -> List<PatternMatch>;
 
@@ -1989,8 +1989,8 @@ public type SpanMapping is {
 ///
 
 ///  match Schema.validate(result, schema) {
-///  Ok(()) => result,
-///  Err(errors) => {
+///  Result.Ok(()) => result,
+///  Result.Err(errors) => {
 ///  for err in errors {
 ///  CompileDiag.emit_error(err.message, err.span);
 ///  }
@@ -2741,7 +2741,7 @@ public context StageInfo {
     ///
 
     /// Returns the stage level at which the named function is declared,
-    /// or None if the function is not found.
+    /// or Maybe.None if the function is not found.
     ///
 
     /// # Arguments
@@ -2752,7 +2752,7 @@ public context StageInfo {
     /// ```verum
     /// meta fn check_callee() using StageInfo {
     ///  match StageInfo.function_stage("my_module.helper") {
-    ///  Some(stage) => {
+    ///  Maybe.Some(stage) => {
     ///  if stage > StageInfo.current_stage() {
     ///  // Cannot call higher-stage function
     ///  CompileDiag.emit_error(
@@ -2761,7 +2761,7 @@ public context StageInfo {
     ///  );
     ///  }
     ///  }
-    ///  None => {
+    ///  Maybe.None => {
     ///  // Function not found
     ///  }
     ///  }
@@ -2953,7 +2953,7 @@ public context StageInfo {
     ///
 
     /// When executing inside generated code, returns the span of the
-    /// quote expression that generated this code. Returns None if
+    /// quote expression that generated this code. Returns Maybe.None if
     /// at the top-level of a meta function (not inside generated code).
     fn generation_origin() -> Maybe<Span>;
 
@@ -2961,7 +2961,7 @@ public context StageInfo {
     ///
 
     /// Returns the fully qualified name of the meta function that
-    /// generated the code we're currently executing in. Returns None
+    /// generated the code we're currently executing in. Returns Maybe.None
     /// if at the top-level.
     fn generation_source_function() -> Maybe<Text>;
 }
@@ -3553,7 +3553,7 @@ public type MetaBlock is ();
 
 /// Contains partial result along with any errors encountered.
 public type ParseResult<T> is {
-    /// Parsed value (None if parsing completely failed)
+    /// Parsed value (Maybe.None if parsing completely failed)
     value: Maybe<T>,
 
     /// List of parse errors encountered
@@ -3579,14 +3579,14 @@ implement<T> ParseResult<T> {
 
     /// Get value if successful
     public fn ok(self) -> Maybe<T> {
-        if self.success { self.value } else { None }
+        if self.success { self.value } else { Maybe.None }
     }
 
     /// Convert to Result, collecting errors
     public fn to_result(self) -> MetaResult<T> {
         match self.value {
-            Some(v) if self.success => Ok(v),
-            _ => Err(MetaError.ParseFailed(self.errors)),
+            Maybe.Some(v) if self.success => Result.Ok(v),
+            _ => Result.Err(MetaError.ParseFailed(self.errors)),
         }
     }
 }
@@ -3616,7 +3616,7 @@ implement MetaParseError {
         if !self.expected.is_empty() {
             msg = f"{msg}\nExpected: {self.expected.join(\", \")}";
         }
-        if let Some(found) = &self.found {
+        if let Maybe.Some(found) = &self.found {
             msg = f"{msg}\nFound: {found}";
         }
         msg

@@ -28,31 +28,31 @@ type Segment is
 fn parse_pattern(pattern: &Text) -> Result<List<Segment>, Text> {
     let mut out = List.new();
     if !pattern.starts_with("/") {
-        return Err(f"route pattern must start with '/': {pattern}");
+        return Result.Err(f"route pattern must start with '/': {pattern}");
     }
     let tail = pattern.slice(1, pattern.len());
     if tail.is_empty() {
-        return Ok(out);
+        return Result.Ok(out);
     }
     let parts = tail.split("/");
     let nparts = parts.len();
     for (i, part) in parts.iter().enumerate() {
         if part.is_empty() {
-            return Err(f"empty segment in pattern: {pattern}");
+            return Result.Err(f"empty segment in pattern: {pattern}");
         }
         let seg = if part.starts_with(":") {
             let name = part.slice(1, part.len());
             if name.is_empty() {
-                return Err(f"empty param name in pattern: {pattern}");
+                return Result.Err(f"empty param name in pattern: {pattern}");
             }
             Segment.Param(name)
         } else if part.starts_with("*") {
             if i != nparts - 1 {
-                return Err(f"wildcard must be the last segment: {pattern}");
+                return Result.Err(f"wildcard must be the last segment: {pattern}");
             }
             let name = part.slice(1, part.len());
             if name.is_empty() {
-                return Err(f"empty wildcard name in pattern: {pattern}");
+                return Result.Err(f"empty wildcard name in pattern: {pattern}");
             }
             Segment.Wildcard(name)
         } else {
@@ -60,7 +60,7 @@ fn parse_pattern(pattern: &Text) -> Result<List<Segment>, Text> {
         };
         out.push(seg);
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 type Node is {
@@ -85,8 +85,8 @@ implement Node {
         Node {
             handlers: Map.new(),
             static_children: Map.new(),
-            param_child: None,
-            wildcard_child: None,
+            param_child: Maybe.None,
+            wildcard_child: Maybe.None,
         }
     }
 }
@@ -111,7 +111,7 @@ implement Router {
     public fn new() -> Router {
         Router {
             root: Heap.new(Node.new()),
-            fallback: None,
+            fallback: Maybe.None,
             nested: List.new(),
         }
     }
@@ -123,8 +123,8 @@ implement Router {
         handler: H,
     ) -> Router {
         match parse_pattern(&pattern) {
-            Err(msg) => panic(f"Router.route: {msg}"),
-            Ok(segments) => {
+            Result.Err(msg) => panic(f"Router.route: {msg}"),
+            Result.Ok(segments) => {
                 insert_route(&mut self.root, &segments, 0, method, Heap.new(handler));
             }
         }
@@ -148,7 +148,7 @@ implement Router {
     }
 
     public fn fallback<H: Handler + 'static>(mut self, handler: H) -> Router {
-        self.fallback = Some(Heap.new(handler));
+        self.fallback = Maybe.Some(Heap.new(handler));
         self
     }
 
@@ -187,13 +187,13 @@ implement Router {
         let mut captured: Map<Text, Text> = Map.new();
         let found = match_node(&*self.root, &segments, 0, &method_key, &mut captured);
         match found {
-            Some(h) => {
+            Maybe.Some(h) => {
                 for (k, v) in captured.iter() {
                     req.path_params.insert(k.clone(), v.clone());
                 }
-                Some(h)
+                Maybe.Some(h)
             }
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -202,16 +202,16 @@ implement Router {
     {
         // 1. Main tree — exact radix match against the full request path.
         match self.match_request(&mut req) {
-            Some(handler) => return handler.handle(req).await,
-            None => {}
+            Maybe.Some(handler) => return handler.handle(req).await,
+            Maybe.None => {}
         }
 
         // 2. Nested sub-routers in registration order. The first
         //  prefix that matches wins; we strip the prefix and dispatch.
         for entry in self.nested.iter() {
             match strip_prefix(&req.path, &entry.prefix) {
-                None => continue,
-                Some(remainder) => {
+                Maybe.None => continue,
+                Maybe.Some(remainder) => {
                     let mut inner_req = WeftRequest { path: remainder, ..req };
                     return (&*entry.inner).dispatch(inner_req).await;
                 }
@@ -220,26 +220,26 @@ implement Router {
 
         // 3. Fallback.
         match &self.fallback {
-            Some(fb) => fb.handle(req).await,
-            None     => Err(WeftError.RouteNotFound),
+            Maybe.Some(fb) => fb.handle(req).await,
+            Maybe.None     => Result.Err(WeftError.RouteNotFound),
         }
     }
 }
 
-/// Return `Some(remainder)` iff `path` starts with `prefix + "/"` or
-/// equals `prefix` exactly; otherwise `None`. Yields "/" for an exact
+/// Return `Maybe.Some(remainder)` iff `path` starts with `prefix + "/"` or
+/// equals `prefix` exactly; otherwise `Maybe.None`. Yields "/" for an exact
 /// match so sub-router root handlers can be registered as `/`.
 fn strip_prefix(path: &Text, prefix: &Text) -> Maybe<Text> {
     if path == prefix {
-        return Some("/");
+        return Maybe.Some("/");
     }
     // Nested prefix must be followed by `/` to avoid false positives
     // (e.g. prefix "/api" should not match "/apix").
     let with_slash = f"{prefix}/";
     if path.starts_with(&with_slash) {
-        return Some(path.slice(prefix.len(), path.len()));
+        return Maybe.Some(path.slice(prefix.len(), path.len()));
     }
-    None
+    Maybe.None
 }
 
 fn split_path(path: &Text) -> List<Text> {
@@ -272,8 +272,8 @@ fn insert_route(
     match &segments[idx] {
         Segment.Static(lit) => {
             let child = match node.static_children.get_mut(lit) {
-                Some(n) => n,
-                None => {
+                Maybe.Some(n) => n,
+                Maybe.None => {
                     node.static_children.insert(lit.clone(), Heap.new(Node.new()));
                     node.static_children.get_mut(lit)
                         .expect("Router insert_route: just inserted lit above — get_mut is_some")
@@ -283,21 +283,21 @@ fn insert_route(
         }
         Segment.Param(name) => {
             let edge = match &mut node.param_child {
-                Some(e) => {
+                Maybe.Some(e) => {
                     if e.name != *name {
                         panic(f"Router.route: conflicting param names {e.name} vs {name}");
                     }
                     e
                 }
-                None => {
-                    node.param_child = Some(ParamEdge {
+                Maybe.None => {
+                    node.param_child = Maybe.Some(ParamEdge {
                         name: name.clone(),
                         node: Heap.new(Node.new()),
                     });
                     match &mut node.param_child {
-                        Some(e) => e,
-                        // Just stored Some(...) on the previous line.
-                        None => unreachable("Router insert_route: node.param_child must be Some immediately after assignment"),
+                        Maybe.Some(e) => e,
+                        // Just stored Maybe.Some(...) on the previous line.
+                        Maybe.None => unreachable("Router insert_route: node.param_child must be Some immediately after assignment"),
                     }
                 }
             };
@@ -305,16 +305,16 @@ fn insert_route(
         }
         Segment.Wildcard(name) => {
             let mut existing = match &node.wildcard_child {
-                Some(wc) => {
+                Maybe.Some(wc) => {
                     if wc.name != *name {
                         panic(f"Router.route: conflicting wildcard names {wc.name} vs {name}");
                     }
                     wc.handlers.clone()
                 }
-                None => Map.new(),
+                Maybe.None => Map.new(),
             };
             existing.insert(method.as_str(), handler);
-            node.wildcard_child = Some(WildcardEdge {
+            node.wildcard_child = Maybe.Some(WildcardEdge {
                 name: name.clone(),
                 handlers: existing,
             });
@@ -334,26 +334,26 @@ fn match_node<'a>(
     }
     let seg = &segments[idx];
 
-    if let Some(child) = node.static_children.get(seg) {
-        if let Some(h) = match_node(&**child, segments, idx + 1, method, captured) {
-            return Some(h);
+    if let Maybe.Some(child) = node.static_children.get(seg) {
+        if let Maybe.Some(h) = match_node(&**child, segments, idx + 1, method, captured) {
+            return Maybe.Some(h);
         }
     }
 
-    if let Some(edge) = &node.param_child {
+    if let Maybe.Some(edge) = &node.param_child {
         let name = edge.name.clone();
         let prev = captured.get(&name).cloned();
         captured.insert(name.clone(), seg.clone());
-        if let Some(h) = match_node(&*edge.node, segments, idx + 1, method, captured) {
-            return Some(h);
+        if let Maybe.Some(h) = match_node(&*edge.node, segments, idx + 1, method, captured) {
+            return Maybe.Some(h);
         }
         match prev {
-            Some(v) => { captured.insert(name, v); }
-            None    => { captured.remove(&name); }
+            Maybe.Some(v) => { captured.insert(name, v); }
+            Maybe.None    => { captured.remove(&name); }
         }
     }
 
-    if let Some(wc) = &node.wildcard_child {
+    if let Maybe.Some(wc) = &node.wildcard_child {
         let mut joined = TextBuilder.new();
         for (i, s) in segments.iter().enumerate() {
             if i < idx { continue; }
@@ -364,7 +364,7 @@ fn match_node<'a>(
         return wc.handlers.get(method);
     }
 
-    None
+    Maybe.None
 }
 
 implement Handler for Router {

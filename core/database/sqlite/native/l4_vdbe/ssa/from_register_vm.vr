@@ -103,7 +103,7 @@ mount core.database.sqlite.native.l4_vdbe.ssa.cfg_construction.{
 /// Per-register reaching-definition table for a single block.
 ///
 /// `reaching[reg_idx]` is the SSA value most recently written to
-/// register `reg_idx` within the current block.  `None` means the
+/// register `reg_idx` within the current block.  `Maybe.None` means the
 /// value flows in from a predecessor (and will be resolved by phi
 /// insertion in pass 2).
 type RegState = {
@@ -113,21 +113,21 @@ type RegState = {
 fn reg_state_new(num_regs: Int) -> RegState {
     let mut r: List<Maybe<SsaValue>> = List.new();
     let mut i: Int = 0;
-    while i < num_regs { r.push(None); i = i + 1; }
+    while i < num_regs { r.push(Maybe.None); i = i + 1; }
     RegState { reaching: r }
 }
 
 fn reg_state_read(rs: &RegState, idx: Int) -> Maybe<SsaValue> {
-    if idx < 0 || idx >= rs.reaching.len() { return None; }
+    if idx < 0 || idx >= rs.reaching.len() { return Maybe.None; }
     match &rs.reaching[idx] {
-        None => None,
-        Some(v) => Some(v.clone()),
+        Maybe.None => Maybe.None,
+        Maybe.Some(v) => Maybe.Some(v.clone()),
     }
 }
 
 fn reg_state_write(rs: &mut RegState, idx: Int, v: SsaValue) {
     if idx < 0 || idx >= rs.reaching.len() { return; }
-    rs.reaching[idx] = Some(v);
+    rs.reaching[idx] = Maybe.Some(v);
 }
 
 // -----------------------------------------------------------------------------
@@ -615,8 +615,8 @@ fn read_reg(
     pending: &mut List<PendingPhi>,
 ) -> SsaValue {
     match reg_state_read(rs, reg_idx) {
-        Some(v) => v,
-        None => {
+        Maybe.Some(v) => v,
+        Maybe.None => {
             // Cross-block read — record a placeholder for pass 2.
             let placeholder = mint(prog, SkAny);
             pending.push(PendingPhi {

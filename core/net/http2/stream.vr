@@ -240,32 +240,32 @@ implement StreamFsm {
 
             // Closed — any data is a PROTOCOL_ERROR (§5.1)
             (StreamState.Closed, _) => {
-                return Err(StreamTransitionError.InvalidTransition {
+                return Result.Err(StreamTransitionError.InvalidTransition {
                     state: self.state, event: "closed".into(),
                 });
             }
 
             // Anything else is invalid.
             (s, _) => {
-                return Err(StreamTransitionError.InvalidTransition {
+                return Result.Err(StreamTransitionError.InvalidTransition {
                     state: s, event: "invalid".into(),
                 });
             }
         };
         self.state = next;
-        Ok(next)
+        Result.Ok(next)
     }
 }
 
-/// Allocate the next client-side (odd) stream id. Returns None if we
+/// Allocate the next client-side (odd) stream id. Returns Maybe.None if we
 /// have exhausted the 31-bit id space (§5.1.1).
 public fn next_client_stream_id(current: UInt32) -> Maybe<UInt32> {
     let candidate = if current == 0 { 1 } else { current + 2 };
-    if candidate > 0x7FFFFFFF { None } else { Some(candidate) }
+    if candidate > 0x7FFFFFFF { Maybe.None } else { Maybe.Some(candidate) }
 }
 
 /// Allocate the next server-side (even) stream id for PUSH_PROMISE.
 public fn next_server_stream_id(current: UInt32) -> Maybe<UInt32> {
     let candidate = if current == 0 { 2 } else { current + 2 };
-    if candidate > 0x7FFFFFFF { None } else { Some(candidate) }
+    if candidate > 0x7FFFFFFF { Maybe.None } else { Maybe.Some(candidate) }
 }

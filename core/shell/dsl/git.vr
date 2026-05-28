@@ -47,9 +47,9 @@ implement GitUrl {
         // local paths starting with /.
         let r = Regex.new("""^((https?|git|ssh)://.+|git@[\\w.-]+:.+|/.+)$""").unwrap();
         if r.is_match(&s) {
-            Ok(GitUrl(s))
+            Result.Ok(GitUrl(s))
         } else {
-            Err(ShellError.SpawnFailed {
+            Result.Err(ShellError.SpawnFailed {
                 command: "<GitUrl::parse>".into(),
                 reason:  f"invalid git URL: {s}",
             })
@@ -71,9 +71,9 @@ implement GitRefspec {
     public fn parse(s: Text) -> Result<GitRefspec, ShellError> {
         let r = Regex.new("""^[+]?[a-zA-Z0-9_/.\\-]+(?::[a-zA-Z0-9_/.\\-]+)?$""").unwrap();
         if r.is_match(&s) {
-            Ok(GitRefspec(s))
+            Result.Ok(GitRefspec(s))
         } else {
-            Err(ShellError.SpawnFailed {
+            Result.Err(ShellError.SpawnFailed {
                 command: "<GitRefspec::parse>".into(),
                 reason:  f"invalid git refspec: {s}",
             })
@@ -95,9 +95,9 @@ implement GitBranch {
     public fn parse(s: Text) -> Result<GitBranch, ShellError> {
         let r = Regex.new("""^[a-zA-Z0-9_./\\-]+$""").unwrap();
         if r.is_match(&s) && !s.starts_with("-") {
-            Ok(GitBranch(s))
+            Result.Ok(GitBranch(s))
         } else {
-            Err(ShellError.SpawnFailed {
+            Result.Err(ShellError.SpawnFailed {
                 command: "<GitBranch::parse>".into(),
                 reason:  f"invalid git branch: {s}",
             })
@@ -214,11 +214,11 @@ fn render_clone(
     flav: core.shell.escape.ShellFlavour,
 ) -> Text {
     let mut args: List<Text> = ["git".into(), "clone".into()];
-    if let Some(d) = depth { args.push("--depth".into()); args.push(f"{d}"); }
-    if let Some(b) = branch { args.push("--branch".into()); args.push(b.as_text().clone()); }
+    if let Maybe.Some(d) = depth { args.push("--depth".into()); args.push(f"{d}"); }
+    if let Maybe.Some(b) = branch { args.push("--branch".into()); args.push(b.as_text().clone()); }
     if recurse_submodules { args.push("--recurse-submodules".into()); }
     args.push(url.as_text().clone());
-    if let Some(d) = dest { args.push(d.to_text()); }
+    if let Maybe.Some(d) = dest { args.push(d.to_text()); }
     quote_join(&args, flav)
 }
 
@@ -258,11 +258,11 @@ fn render_log(
         Custom(p)  => f"--format={p}",
     };
     args.push(format_text);
-    if let Some(n) = max_count { args.push(f"-{n}"); }
-    if let Some(a) = author { args.push(f"--author={a}"); }
-    if let Some(s) = since  { args.push(f"--since={s}"); }
-    if let Some(u) = until  { args.push(f"--until={u}"); }
-    if let Some(p) = path   { args.push("--".into()); args.push(p.to_text()); }
+    if let Maybe.Some(n) = max_count { args.push(f"-{n}"); }
+    if let Maybe.Some(a) = author { args.push(f"--author={a}"); }
+    if let Maybe.Some(s) = since  { args.push(f"--since={s}"); }
+    if let Maybe.Some(u) = until  { args.push(f"--until={u}"); }
+    if let Maybe.Some(p) = path   { args.push("--".into()); args.push(p.to_text()); }
     quote_join(&args, flav)
 }
 
@@ -275,9 +275,9 @@ fn render_push(
 ) -> Text {
     let mut args: List<Text> = ["git".into(), "push".into()];
     match force {
-        None                          => {}
-        Some(ForceMode.Force)         => args.push("--force".into()),
-        Some(ForceMode.ForceWithLease)=> args.push("--force-with-lease".into()),
+        Maybe.None                          => {}
+        Maybe.Some(ForceMode.Force)         => args.push("--force".into()),
+        Maybe.Some(ForceMode.ForceWithLease)=> args.push("--force-with-lease".into()),
     }
     if dry_run { args.push("--dry-run".into()); }
     args.push(remote.clone());
@@ -294,7 +294,7 @@ fn render_pull(
     let mut args: List<Text> = ["git".into(), "pull".into()];
     if rebase { args.push("--rebase".into()); }
     args.push(remote.clone());
-    if let Some(b) = branch { args.push(b.as_text().clone()); }
+    if let Maybe.Some(b) = branch { args.push(b.as_text().clone()); }
     quote_join(&args, flav)
 }
 
@@ -328,7 +328,7 @@ fn render_diff(
     let mut args: List<Text> = ["git".into(), "diff".into()];
     if cached    { args.push("--cached".into()); }
     if name_only { args.push("--name-only".into()); }
-    if let Some(t) = target { args.push(t.clone()); }
+    if let Maybe.Some(t) = target { args.push(t.clone()); }
     quote_join(&args, flav)
 }
 

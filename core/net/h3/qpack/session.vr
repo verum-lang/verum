@@ -162,7 +162,7 @@ implement QpackSession {
         self.encoder_table.set_capacity(cap)
             .map_err(|e| QpackSessionError.DynamicTable(e))?;
         encode_encoder(&EncoderInstruction.SetCapacity(cap), &mut self.encoder_out);
-        Ok(())
+        Result.Ok(())
     }
 
     // ==================== encoding a field section ====================
@@ -197,15 +197,15 @@ implement QpackSession {
             let h = &headers[i];
             // 1: static (n,v)
             match stat.find(&h.name, &h.value) {
-                Some(idx) => {
+                Maybe.Some(idx) => {
                     core.net.h3.qpack.integer.encode(&mut body, 6, 0xC0_u8, idx as UInt64);
                     i = i + 1; continue;
                 },
-                None => {},
+                Maybe.None => {},
             }
             // 2: dynamic (n,v) within peer's known table
             match self.encoder_table.find(&h.name, &h.value) {
-                Some(abs) => {
+                Maybe.Some(abs) => {
                     if abs < self.peer_insert_count {
                         // Indexed Field Line, dynamic — 1Txxxxxx with T=0 (dynamic),
                         // value = abs relative to base (base=0 → abs itself).
@@ -213,16 +213,16 @@ implement QpackSession {
                         i = i + 1; continue;
                     }
                 },
-                None => {},
+                Maybe.None => {},
             }
             // 3: static name match
             match stat.find_name(&h.name) {
-                Some(idx) => {
+                Maybe.Some(idx) => {
                     core.net.h3.qpack.integer.encode(&mut body, 4, 0x50_u8, idx as UInt64);
                     encode_string(&mut body, h.value.as_bytes());
                     i = i + 1; continue;
                 },
-                None => {},
+                Maybe.None => {},
             }
             // 5b: Literal Field Line with Literal Name.
             encode_literal_name(&mut body, h.name.as_bytes());
@@ -236,7 +236,7 @@ implement QpackSession {
         core.net.h3.qpack.integer.encode(&mut out, 8, 0_u8, 0_u64);
         core.net.h3.qpack.integer.encode(&mut out, 7, 0_u8, 0_u64);
         out.extend_from_slice(body.as_slice());
-        Ok(out)
+        Result.Ok(out)
     }
 
     // ==================== decoding a field section ====================
@@ -255,7 +255,7 @@ implement QpackSession {
 
         let (required_insert_count, p1) = core.net.h3.qpack.integer.decode(buf, 0, 8)
             .map_err(|_| QpackSessionError.IntegerError)?;
-        if p1 >= buf.len() { return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated)); }
+        if p1 >= buf.len() { return Result.Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated)); }
         let sign = (buf[p1] & 0x80_u8) != 0_u8;
         let _ = sign;
         let (delta_base, p2) = core.net.h3.qpack.integer.decode(buf, p1, 7)
@@ -266,7 +266,7 @@ implement QpackSession {
         // haven't all landed → caller must have buffered already. We
         // expose a `blocked` signal via return Err; v0.2 rejects.
         if required_insert_count > self.decoder_table.insert_count() {
-            return Err(QpackSessionError.InvalidState);
+            return Result.Err(QpackSessionError.InvalidState);
         }
 
         let mut headers: List<QpackHeaderField> = [];
@@ -280,14 +280,14 @@ implement QpackSession {
                     .map_err(|_| QpackSessionError.IntegerError)?;
                 let hit = if is_static {
                     match stat.get(idx as Int) {
-                        Some(e) => e,
-                        None    => return Err(QpackSessionError.FieldDecode(
+                        Maybe.Some(e) => e,
+                        Maybe.None    => return Result.Err(QpackSessionError.FieldDecode(
                             QpackDecodeError.InvalidIndex(idx))),
                     }
                 } else {
                     match self.decoder_table.get_by_absolute(idx) {
-                        Some(e) => stat.StaticEntry { name: e.name, value: e.value },
-                        None    => return Err(QpackSessionError.FieldDecode(
+                        Maybe.Some(e) => stat.StaticEntry { name: e.name, value: e.value },
+                        Maybe.None    => return Result.Err(QpackSessionError.FieldDecode(
                             QpackDecodeError.InvalidIndex(idx))),
                     }
                 };
@@ -300,14 +300,14 @@ implement QpackSession {
                     .map_err(|_| QpackSessionError.IntegerError)?;
                 let name = if is_static {
                     match stat.get(name_idx as Int) {
-                        Some(e) => e.name,
-                        None    => return Err(QpackSessionError.FieldDecode(
+                        Maybe.Some(e) => e.name,
+                        Maybe.None    => return Result.Err(QpackSessionError.FieldDecode(
                             QpackDecodeError.InvalidIndex(name_idx))),
                     }
                 } else {
                     match self.decoder_table.get_by_absolute(name_idx) {
-                        Some(e) => e.name,
-                        None    => return Err(QpackSessionError.FieldDecode(
+                        Maybe.Some(e) => e.name,
+                        Maybe.None    => return Result.Err(QpackSessionError.FieldDecode(
                             QpackDecodeError.InvalidIndex(name_idx))),
                     }
                 };
@@ -322,10 +322,10 @@ implement QpackSession {
                 cur = next;
             } else {
                 // Post-Base Index or Literal Post-Base Name Reference — v0.2 rejects.
-                return Err(QpackSessionError.InvalidState);
+                return Result.Err(QpackSessionError.InvalidState);
             }
         }
-        Ok(headers)
+        Result.Ok(headers)
     }
 
     // ==================== peer encoder-stream ingest ====================
@@ -351,7 +351,7 @@ implement QpackSession {
                 &mut self.decoder_out,
             );
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Consume a chunk of bytes from peer's decoder stream — SectionAck
@@ -377,7 +377,7 @@ implement QpackSession {
             }
             i = i + 1;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // ==================== drain ====================
@@ -417,23 +417,23 @@ fn apply_encoder_instr(
     match instr {
         EncoderInstruction.SetCapacity(cap) => {
             table.set_capacity(*cap)?;
-            Ok(false)
+            Result.Ok(false)
         },
         EncoderInstruction.InsertWithNameRef { is_static, name_index, value } => {
             let _ = table.insert_with_name_ref(*is_static, *name_index,
                 Text.from_utf8_lossy(value.as_slice()))?;
-            Ok(true)
+            Result.Ok(true)
         },
         EncoderInstruction.InsertWithLiteralName { name, value } => {
             let _ = table.insert(
                 Text.from_utf8_lossy(name.as_slice()),
                 Text.from_utf8_lossy(value.as_slice()),
             )?;
-            Ok(true)
+            Result.Ok(true)
         },
         EncoderInstruction.Duplicate(idx) => {
             let _ = table.duplicate(*idx)?;
-            Ok(true)
+            Result.Ok(true)
         },
     }
 }
@@ -466,14 +466,14 @@ fn encode_literal_name(out: &mut List<Byte>, s: &[Byte]) {
 
 fn read_string(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackSessionError> {
     if pos >= buf.len() {
-        return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
+        return Result.Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
     }
     let huffman = (buf[pos] & 0x80_u8) != 0_u8;
     let (length, p1) = core.net.h3.qpack.integer.decode(buf, pos, 7)
         .map_err(|_| QpackSessionError.IntegerError)?;
     let end = p1 + (length as Int);
     if end > buf.len() {
-        return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
+        return Result.Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
     }
     // Bytes copy is exactly end - p1 bytes.
     let mut bytes: List<Byte> = List.with_capacity(end - p1);
@@ -482,19 +482,19 @@ fn read_string(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackSessionError>
         huff.decode(bytes.as_slice())
             .map_err(|_| QpackSessionError.HuffmanError)?
     } else { bytes };
-    Ok((Text.from_utf8_lossy(plain.as_slice()), end))
+    Result.Ok((Text.from_utf8_lossy(plain.as_slice()), end))
 }
 
 fn read_name_literal(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackSessionError> {
     if pos >= buf.len() {
-        return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
+        return Result.Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
     }
     let huffman = (buf[pos] & 0x08_u8) != 0_u8;
     let (length, p1) = core.net.h3.qpack.integer.decode(buf, pos, 3)
         .map_err(|_| QpackSessionError.IntegerError)?;
     let end = p1 + (length as Int);
     if end > buf.len() {
-        return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
+        return Result.Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
     }
     // Bytes copy is exactly end - p1 bytes.
     let mut bytes: List<Byte> = List.with_capacity(end - p1);
@@ -503,5 +503,5 @@ fn read_name_literal(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackSession
         huff.decode(bytes.as_slice())
             .map_err(|_| QpackSessionError.HuffmanError)?
     } else { bytes };
-    Ok((Text.from_utf8_lossy(plain.as_slice()), end))
+    Result.Ok((Text.from_utf8_lossy(plain.as_slice()), end))
 }

@@ -145,10 +145,10 @@ implement SchemaCache {
     public fn register_table(&mut self, meta: TableMeta) -> Result<(), SessionSchemaError> {
         let key = qualify(&meta.schema, &meta.name);
         if self.tables.contains_key(key.clone()) {
-            return Err(AlreadyExists(key));
+            return Result.Err(AlreadyExists(key));
         }
         let _ = self.tables.insert(key, meta);
-        Ok(())
+        Result.Ok(())
     }
 
     /// Replace an existing table's metadata (ALTER TABLE path).
@@ -160,10 +160,10 @@ implement SchemaCache {
     public fn register_index(&mut self, idx: IndexMeta) -> Result<(), SessionSchemaError> {
         let key = qualify(&idx.schema, &idx.name);
         if self.indexes.contains_key(key.clone()) {
-            return Err(AlreadyExists(key));
+            return Result.Err(AlreadyExists(key));
         }
         let _ = self.indexes.insert(key, idx);
-        Ok(())
+        Result.Ok(())
     }
 
     // -------------------------------------------------------------------------
@@ -173,17 +173,17 @@ implement SchemaCache {
     public fn lookup_table(&self, schema: &Text, name: &Text) -> Result<TableMeta, SessionSchemaError> {
         let key = qualify(schema, name);
         if !self.tables.contains_key(key.clone()) {
-            return Err(NotFound(key));
+            return Result.Err(NotFound(key));
         }
-        Ok(clone_table_meta(&self.tables.get(key)))
+        Result.Ok(clone_table_meta(&self.tables.get(key)))
     }
 
     public fn lookup_index(&self, schema: &Text, name: &Text) -> Result<IndexMeta, SessionSchemaError> {
         let key = qualify(schema, name);
         if !self.indexes.contains_key(key.clone()) {
-            return Err(NotFound(key));
+            return Result.Err(NotFound(key));
         }
-        Ok(clone_index_meta(&self.indexes.get(key)))
+        Result.Ok(clone_index_meta(&self.indexes.get(key)))
     }
 
     public fn has_table(&self, schema: &Text, name: &Text) -> Bool {
@@ -201,18 +201,18 @@ implement SchemaCache {
     /// statement, so the O(N) cost is well below the cost of the
     /// underlying I/O.
     public fn lookup_table_by_root(&self, root_page: Int) -> Maybe<TableMeta> {
-        if root_page < 1 { return None; }
+        if root_page < 1 { return Maybe.None; }
         let keys = self.tables.keys();
         let mut i: Int = 0;
         while i < keys.len() {
             let k = keys[i].clone();
             let meta = &self.tables.get(k);
             if meta.root_page == root_page {
-                return Some(clone_table_meta(meta));
+                return Maybe.Some(clone_table_meta(meta));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Enumerate every index whose `table_name` matches the given
@@ -244,21 +244,21 @@ implement SchemaCache {
     public fn drop_table(&mut self, schema: &Text, name: &Text) -> Result<(), SessionSchemaError> {
         let key = qualify(schema, name);
         if !self.tables.contains_key(key.clone()) {
-            return Err(NotFound(key));
+            return Result.Err(NotFound(key));
         }
         let _ = self.tables.remove(key);
         self.schema_cookie = self.schema_cookie + 1;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn drop_index(&mut self, schema: &Text, name: &Text) -> Result<(), SessionSchemaError> {
         let key = qualify(schema, name);
         if !self.indexes.contains_key(key.clone()) {
-            return Err(NotFound(key));
+            return Result.Err(NotFound(key));
         }
         let _ = self.indexes.remove(key);
         self.schema_cookie = self.schema_cookie + 1;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Post-DDL signal — bumps cookie + generation. Callers that

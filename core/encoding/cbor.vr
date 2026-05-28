@@ -242,13 +242,13 @@ fn write_head(out: &mut List<Byte>, major: UInt8, len: UInt64) {
 public fn decode(bytes: &[Byte]) -> Result<CborValue, CborError> {
     let mut pos: Int = 0;
     let v = decode_item(bytes, &mut pos, 0)?;
-    if pos != bytes.len() { return Err(CborError.TrailingBytes(bytes.len() - pos)); }
-    Ok(v)
+    if pos != bytes.len() { return Result.Err(CborError.TrailingBytes(bytes.len() - pos)); }
+    Result.Ok(v)
 }
 
 fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, CborError> {
-    if depth > MAX_CBOR_NESTING { return Err(CborError.NestingTooDeep); }
-    if *pos >= bytes.len() { return Err(CborError.Truncated(*pos)); }
+    if depth > MAX_CBOR_NESTING { return Result.Err(CborError.NestingTooDeep); }
+    if *pos >= bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
 
     let first = bytes[*pos];
     let major = first >> 5_u8;
@@ -258,29 +258,29 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
     match major {
         0_u8 => {
             let len = read_arg(bytes, pos, minor)?;
-            Ok(CborValue.CborUint(len))
+            Result.Ok(CborValue.CborUint(len))
         },
         1_u8 => {
             let len = read_arg(bytes, pos, minor)?;
-            Ok(CborValue.CborNint(len))
+            Result.Ok(CborValue.CborNint(len))
         },
         2_u8 => {
             if minor == 31_u8 { return decode_indef_bytes(bytes, pos); }
             let len = read_arg(bytes, pos, minor)? as Int;
-            if *pos + len > bytes.len() { return Err(CborError.Truncated(*pos)); }
+            if *pos + len > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             let mut buf: List<Byte> = List.with_capacity(len);
             buf.extend_from_slice(&bytes[*pos..*pos + len]);
             *pos = *pos + len;
-            Ok(CborValue.CborBytes(buf))
+            Result.Ok(CborValue.CborBytes(buf))
         },
         3_u8 => {
             if minor == 31_u8 { return decode_indef_text(bytes, pos); }
             let len = read_arg(bytes, pos, minor)? as Int;
-            if *pos + len > bytes.len() { return Err(CborError.Truncated(*pos)); }
+            if *pos + len > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             let mut buf: List<Byte> = List.with_capacity(len);
             buf.extend_from_slice(&bytes[*pos..*pos + len]);
             *pos = *pos + len;
-            Ok(CborValue.CborText(Text.from_utf8_unchecked(buf.as_slice())))
+            Result.Ok(CborValue.CborText(Text.from_utf8_unchecked(buf.as_slice())))
         },
         4_u8 => {
             if minor == 31_u8 { return decode_indef_array(bytes, pos, depth); }
@@ -291,7 +291,7 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
             // cap, decode_item would be called billions of times and
             // OOM the process.
             if n < 0 || n > MAX_CBOR_ARRAY_ITEMS {
-                return Err(CborError.ArrayTooLarge);
+                return Result.Err(CborError.ArrayTooLarge);
             }
             let mut items: List<CborValue> = [];
             let mut i: Int = 0;
@@ -299,7 +299,7 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
                 items.push(decode_item(bytes, pos, depth + 1)?);
                 i = i + 1;
             }
-            Ok(CborValue.CborArray(items))
+            Result.Ok(CborValue.CborArray(items))
         },
         5_u8 => {
             if minor == 31_u8 { return decode_indef_map(bytes, pos, depth); }
@@ -307,7 +307,7 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
             // SOUNDNESS: cap attacker-supplied map size — same
             // rationale as the array cap above.
             if n < 0 || n > MAX_CBOR_MAP_ENTRIES {
-                return Err(CborError.MapTooLarge);
+                return Result.Err(CborError.MapTooLarge);
             }
             let mut entries: List<(CborValue, CborValue)> = [];
             let mut i: Int = 0;
@@ -317,42 +317,42 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
                 entries.push((k, v));
                 i = i + 1;
             }
-            Ok(CborValue.CborMap(entries))
+            Result.Ok(CborValue.CborMap(entries))
         },
         6_u8 => {
             let tag = read_arg(bytes, pos, minor)?;
             let inner = decode_item(bytes, pos, depth + 1)?;
-            Ok(CborValue.CborTag { tag: tag, value: Heap(inner) })
+            Result.Ok(CborValue.CborTag { tag: tag, value: Heap(inner) })
         },
         7_u8 => decode_simple_or_float(bytes, pos, minor),
-        _ => Err(CborError.InvalidHeader(first)),
+        _ => Result.Err(CborError.InvalidHeader(first)),
     }
 }
 
 fn decode_simple_or_float(bytes: &[Byte], pos: &mut Int, minor: UInt8) -> Result<CborValue, CborError> {
     match minor {
-        20_u8 => Ok(CborValue.CborBool(false)),
-        21_u8 => Ok(CborValue.CborBool(true)),
-        22_u8 => Ok(CborValue.CborNull),
-        23_u8 => Ok(CborValue.CborUndefined),
+        20_u8 => Result.Ok(CborValue.CborBool(false)),
+        21_u8 => Result.Ok(CborValue.CborBool(true)),
+        22_u8 => Result.Ok(CborValue.CborNull),
+        23_u8 => Result.Ok(CborValue.CborUndefined),
         24_u8 => {
-            if *pos >= bytes.len() { return Err(CborError.Truncated(*pos)); }
+            if *pos >= bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             // Simple value from one-byte arg; collapse to CborUint
             // for anything the caller might want to introspect.
             let v = bytes[*pos] as UInt64;
             *pos = *pos + 1;
-            Ok(CborValue.CborUint(v))
+            Result.Ok(CborValue.CborUint(v))
         },
         25_u8 => {
-            if *pos + 2 > bytes.len() { return Err(CborError.Truncated(*pos)); }
+            if *pos + 2 > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             // Half-precision float — widen to f64 via lossless conversion.
             let hi = bytes[*pos];
             let lo = bytes[*pos + 1];
             *pos = *pos + 2;
-            Ok(CborValue.CborF64(f16_to_f64(hi, lo)))
+            Result.Ok(CborValue.CborF64(f16_to_f64(hi, lo)))
         },
         26_u8 => {
-            if *pos + 4 > bytes.len() { return Err(CborError.Truncated(*pos)); }
+            if *pos + 4 > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             let mut bits: UInt32 = 0_u32;
             let mut i: Int = 0;
             while i < 4 {
@@ -361,10 +361,10 @@ fn decode_simple_or_float(bytes: &[Byte], pos: &mut Int, minor: UInt8) -> Result
             }
             *pos = *pos + 4;
             // Widen f32 → f64 losslessly.
-            Ok(CborValue.CborF64(f32_bits_to_f64(bits)))
+            Result.Ok(CborValue.CborF64(f32_bits_to_f64(bits)))
         },
         27_u8 => {
-            if *pos + 8 > bytes.len() { return Err(CborError.Truncated(*pos)); }
+            if *pos + 8 > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             let mut bits: UInt64 = 0_u64;
             let mut i: Int = 0;
             while i < 8 {
@@ -372,24 +372,24 @@ fn decode_simple_or_float(bytes: &[Byte], pos: &mut Int, minor: UInt8) -> Result
                 i = i + 1;
             }
             *pos = *pos + 8;
-            Ok(CborValue.CborF64(Float.from_bits(bits)))
+            Result.Ok(CborValue.CborF64(Float.from_bits(bits)))
         },
-        _ => Err(CborError.InvalidHeader((7_u8 << 5_u8) | minor)),
+        _ => Result.Err(CborError.InvalidHeader((7_u8 << 5_u8) | minor)),
     }
 }
 
 fn decode_indef_bytes(bytes: &[Byte], pos: &mut Int) -> Result<CborValue, CborError> {
     let mut acc: List<Byte> = [];
     loop {
-        if *pos >= bytes.len() { return Err(CborError.Truncated(*pos)); }
-        if bytes[*pos] == 0xFF_u8 { *pos = *pos + 1; return Ok(CborValue.CborBytes(acc)); }
+        if *pos >= bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
+        if bytes[*pos] == 0xFF_u8 { *pos = *pos + 1; return Result.Ok(CborValue.CborBytes(acc)); }
         // Each chunk must itself be a definite byte string.
         let chunk = decode_item(bytes, pos, 1)?;
         match chunk {
             CborValue.CborBytes(b) => {
                 acc.extend_from_slice(b.as_slice());
             },
-            _ => return Err(CborError.InvalidIndefinite),
+            _ => return Result.Err(CborError.InvalidIndefinite),
         }
     }
 }
@@ -397,14 +397,14 @@ fn decode_indef_bytes(bytes: &[Byte], pos: &mut Int) -> Result<CborValue, CborEr
 fn decode_indef_text(bytes: &[Byte], pos: &mut Int) -> Result<CborValue, CborError> {
     let mut acc: List<Byte> = [];
     loop {
-        if *pos >= bytes.len() { return Err(CborError.Truncated(*pos)); }
-        if bytes[*pos] == 0xFF_u8 { *pos = *pos + 1; return Ok(CborValue.CborText(Text.from_utf8_unchecked(acc.as_slice()))); }
+        if *pos >= bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
+        if bytes[*pos] == 0xFF_u8 { *pos = *pos + 1; return Result.Ok(CborValue.CborText(Text.from_utf8_unchecked(acc.as_slice()))); }
         let chunk = decode_item(bytes, pos, 1)?;
         match chunk {
             CborValue.CborText(t) => {
                 acc.extend_from_slice(t.as_bytes());
             },
-            _ => return Err(CborError.InvalidIndefinite),
+            _ => return Result.Err(CborError.InvalidIndefinite),
         }
     }
 }
@@ -412,15 +412,15 @@ fn decode_indef_text(bytes: &[Byte], pos: &mut Int) -> Result<CborValue, CborErr
 fn decode_indef_array(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, CborError> {
     let mut items: List<CborValue> = [];
     loop {
-        if *pos >= bytes.len() { return Err(CborError.Truncated(*pos)); }
-        if bytes[*pos] == 0xFF_u8 { *pos = *pos + 1; return Ok(CborValue.CborArray(items)); }
+        if *pos >= bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
+        if bytes[*pos] == 0xFF_u8 { *pos = *pos + 1; return Result.Ok(CborValue.CborArray(items)); }
         items.push(decode_item(bytes, pos, depth + 1)?);
         // SOUNDNESS: indefinite-length arrays bypass the explicit
         // length-arg cap above. Hostile inputs with millions of
         // tiny elements followed by 0xFF would still OOM the parser
         // without this post-push cap.
         if items.len() > MAX_CBOR_ARRAY_ITEMS {
-            return Err(CborError.ArrayTooLarge);
+            return Result.Err(CborError.ArrayTooLarge);
         }
     }
 }
@@ -428,50 +428,50 @@ fn decode_indef_array(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborV
 fn decode_indef_map(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, CborError> {
     let mut entries: List<(CborValue, CborValue)> = [];
     loop {
-        if *pos >= bytes.len() { return Err(CborError.Truncated(*pos)); }
-        if bytes[*pos] == 0xFF_u8 { *pos = *pos + 1; return Ok(CborValue.CborMap(entries)); }
+        if *pos >= bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
+        if bytes[*pos] == 0xFF_u8 { *pos = *pos + 1; return Result.Ok(CborValue.CborMap(entries)); }
         let k = decode_item(bytes, pos, depth + 1)?;
         let v = decode_item(bytes, pos, depth + 1)?;
         entries.push((k, v));
         // SOUNDNESS: same indefinite-length cap as decode_indef_array.
         if entries.len() > MAX_CBOR_MAP_ENTRIES {
-            return Err(CborError.MapTooLarge);
+            return Result.Err(CborError.MapTooLarge);
         }
     }
 }
 
 fn read_arg(bytes: &[Byte], pos: &mut Int, minor: UInt8) -> Result<UInt64, CborError> {
-    if minor < 24_u8 { return Ok(minor as UInt64); }
+    if minor < 24_u8 { return Result.Ok(minor as UInt64); }
     match minor {
         24_u8 => {
-            if *pos + 1 > bytes.len() { return Err(CborError.Truncated(*pos)); }
+            if *pos + 1 > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             let v = bytes[*pos] as UInt64;
             *pos = *pos + 1;
-            Ok(v)
+            Result.Ok(v)
         },
         25_u8 => {
-            if *pos + 2 > bytes.len() { return Err(CborError.Truncated(*pos)); }
+            if *pos + 2 > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             let v = ((bytes[*pos] as UInt64) << 8) | (bytes[*pos + 1] as UInt64);
             *pos = *pos + 2;
-            Ok(v)
+            Result.Ok(v)
         },
         26_u8 => {
-            if *pos + 4 > bytes.len() { return Err(CborError.Truncated(*pos)); }
+            if *pos + 4 > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             let mut v: UInt64 = 0_u64;
             let mut i: Int = 0;
             while i < 4 { v = (v << 8) | (bytes[*pos + i] as UInt64); i = i + 1; }
             *pos = *pos + 4;
-            Ok(v)
+            Result.Ok(v)
         },
         27_u8 => {
-            if *pos + 8 > bytes.len() { return Err(CborError.Truncated(*pos)); }
+            if *pos + 8 > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             let mut v: UInt64 = 0_u64;
             let mut i: Int = 0;
             while i < 8 { v = (v << 8) | (bytes[*pos + i] as UInt64); i = i + 1; }
             *pos = *pos + 8;
-            Ok(v)
+            Result.Ok(v)
         },
-        _ => Err(CborError.InvalidHeader(minor)),
+        _ => Result.Err(CborError.InvalidHeader(minor)),
     }
 }
 

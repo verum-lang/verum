@@ -58,7 +58,7 @@
 module core.database.mysql.async_binlog;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
@@ -120,11 +120,11 @@ implement AsyncMysqlBinlogStream {
     }
 
     /// Pull the next actor event. Returns:
-    ///   * Some(MbaEvent(ev)) — a decoded BinlogEvent.
-    ///   * Some(MbaTerminated(err)) — wire died; subsequent calls
-    ///     return None.
-    ///   * Some(MbaClosed) — clean shutdown observed.
-    ///   * None — channel closed unexpectedly.
+    ///   * Maybe.Some(MbaEvent(ev)) — a decoded BinlogEvent.
+    ///   * Maybe.Some(MbaTerminated(err)) — wire died; subsequent calls
+    ///     return Maybe.None.
+    ///   * Maybe.Some(MbaClosed) — clean shutdown observed.
+    ///   * Maybe.None — channel closed unexpectedly.
     public async fn next_event(&self) -> Maybe<MysqlBinlogActorEvent> {
         let mut g = self.event_rx.lock().unwrap_or_else(|p| p.into_inner());
         let fut = g.recv_fut();
@@ -132,14 +132,14 @@ implement AsyncMysqlBinlogStream {
         fut.await
     }
 
-    /// Convenience — flattens MbaEvent into Some(ev),
-    /// MbaTerminated into Err(e), MbaClosed / None into Ok(None).
+    /// Convenience — flattens MbaEvent into Maybe.Some(ev),
+    /// MbaTerminated into Result.Err(e), MbaClosed / Maybe.None into Result.Ok(Maybe.None).
     public async fn next_event_message(&self) -> Result<Maybe<BinlogEvent>, DbError> {
         match self.next_event().await {
-            Some(MbaEvent(ev))      => Ok(Some(ev)),
-            Some(MbaTerminated(e))  => Err(e),
-            Some(MbaClosed)         => Ok(None),
-            None                    => Ok(None),
+            Maybe.Some(MbaEvent(ev))      => Result.Ok(Maybe.Some(ev)),
+            Maybe.Some(MbaTerminated(e))  => Result.Err(e),
+            Maybe.Some(MbaClosed)         => Result.Ok(Maybe.None),
+            Maybe.None                    => Result.Ok(Maybe.None),
         }
     }
 
@@ -148,16 +148,16 @@ implement AsyncMysqlBinlogStream {
     public async fn close(&self) -> Result<(), DbError> {
         let (rs, rr) = oneshot();
         match self.cmd_tx.send_async(BcShutdown { ack: rs }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("close")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("close")); }
         }
         let _ = rr.await;
         let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
         match guard.take() {
-            Some(jh) => { let _ = jh.join().await; }
-            None     => {}
+            Maybe.Some(jh) => { let _ = jh.join().await; }
+            Maybe.None     => {}
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -186,8 +186,8 @@ public async fn connect_binlog_async(
         connect_binlog(&mysql_cfg_owned, binlog_cfg_owned)
     });
     let stream = match conn_jh.join().await {
-        Ok(r)  => r?,
-        Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
+        Result.Ok(r)  => r?,
+        Result.Err(_) => { return Result.Err(actor_dropped("connect: blocking-pool join")); }
     };
 
     let (cmd_tx, cmd_rx) = bounded_channel<BinlogActorCommand>(4);
@@ -197,10 +197,10 @@ public async fn connect_binlog_async(
         run_actor(stream, cmd_rx, event_tx);
     });
 
-    Ok(AsyncMysqlBinlogStream {
+    Result.Ok(AsyncMysqlBinlogStream {
         cmd_tx: cmd_tx,
         event_rx: Shared.new(sync.mutex.Mutex.new(event_rx)),
-        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        join: Shared.new(sync.mutex.Mutex.new(Maybe.Some(join))),
     })
 }
 
@@ -216,56 +216,56 @@ fn run_actor(
     // BinlogStream.close consumes self, so we wrap it in an Option
     // and take() at the exit branches. Between iterations we hold
     // it via &mut for next_event.
-    let mut slot: Maybe<BinlogStream> = Some(stream);
+    let mut slot: Maybe<BinlogStream> = Maybe.Some(stream);
 
     loop {
         // Drain any pending control commands first.
         match cmd_rx.try_recv() {
-            Ok(BcShutdown { ack }) => {
+            Result.Ok(BcShutdown { ack }) => {
                 let r = match slot.take() {
-                    Some(s) => s.close(),
-                    None    => Ok(()),
+                    Maybe.Some(s) => s.close(),
+                    Maybe.None    => Result.Ok(()),
                 };
                 let _ = ack.send(r);
                 let _ = event_tx.send(MbaClosed);
                 return;
             }
-            Err(_) => {}
+            Result.Err(_) => {}
         }
 
         // Borrow the stream mutably for the read.
         let next_outcome = match &mut slot {
-            Some(s) => s.next_event(),
-            None    => { return; }
+            Maybe.Some(s) => s.next_event(),
+            Maybe.None    => { return; }
         };
 
         match next_outcome {
-            Ok(Some(ev)) => {
+            Result.Ok(Maybe.Some(ev)) => {
                 match event_tx.send(MbaEvent(ev)) {
-                    Ok(())  => {}
-                    Err(_)  => {
+                    Result.Ok(())  => {}
+                    Result.Err(_)  => {
                         // Caller dropped the receiver — clean up.
                         match slot.take() {
-                            Some(s) => { let _ = s.close(); }
-                            None    => {}
+                            Maybe.Some(s) => { let _ = s.close(); }
+                            Maybe.None    => {}
                         }
                         return;
                     }
                 }
             }
-            Ok(None) => {
+            Result.Ok(Maybe.None) => {
                 // EOF — server closed the stream cleanly.
                 match slot.take() {
-                    Some(s) => { let _ = s.close(); }
-                    None    => {}
+                    Maybe.Some(s) => { let _ = s.close(); }
+                    Maybe.None    => {}
                 }
                 let _ = event_tx.send(MbaClosed);
                 return;
             }
-            Err(e) => {
+            Result.Err(e) => {
                 match slot.take() {
-                    Some(s) => { let _ = s.close(); }
-                    None    => {}
+                    Maybe.Some(s) => { let _ = s.close(); }
+                    Maybe.None    => {}
                 }
                 let _ = event_tx.send(MbaTerminated(e));
                 return;

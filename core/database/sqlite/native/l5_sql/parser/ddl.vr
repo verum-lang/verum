@@ -71,7 +71,7 @@ mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 // -----------------------------------------------------------------------------
 
 public fn parse_create(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwCreate) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwCreate) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
     let temporary = ts.accept_keyword(KwTemp) || ts.accept_keyword(KwTemporary);
     let unique = ts.accept_keyword(KwUnique);
@@ -79,33 +79,33 @@ public fn parse_create(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErr
 
     if ts.accept_keyword(KwTable) {
         let stmt = match parse_create_table_rest(ts, temporary) {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(SCreateTable(stmt));
+        return Result.Ok(SCreateTable(stmt));
     }
 
     if ts.accept_keyword(KwIndex) {
         let stmt = match parse_create_index_rest(ts, unique) {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(SCreateIndex(stmt));
+        return Result.Ok(SCreateIndex(stmt));
     }
 
     if ts.accept_keyword(KwView) {
         let stmt = match parse_create_view_rest(ts, temporary) {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(SCreateView(stmt));
+        return Result.Ok(SCreateView(stmt));
     }
 
     if ts.accept_keyword(KwTrigger) {
-        return Err(parse_error(
+        return Result.Err(parse_error(
             "CREATE TRIGGER not yet supported in L5.5 initial cut".clone(),
             ts.position(),
         ));
     }
 
-    Err(parse_error("expected TABLE / INDEX / VIEW / TRIGGER after CREATE".clone(), ts.position()))
+    Result.Err(parse_error("expected TABLE / INDEX / VIEW / TRIGGER after CREATE".clone(), ts.position()))
 }
 
 fn parse_create_table_rest(
@@ -113,18 +113,18 @@ fn parse_create_table_rest(
     temporary: Bool,
 ) -> Result<CreateTableStmt, ParseError> {
     let if_not_exists = if ts.accept_keyword(KwIf) {
-        match ts.expect_keyword(KwNot) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        match ts.expect_keyword(KwExists) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwNot) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        match ts.expect_keyword(KwExists) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         true
     } else {
         false
     };
 
     let table = match parse_qualified_name(ts) {
-        Ok(t)  => t, Err(e) => { return Err(e); }
+        Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
     };
 
-    match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
     let mut columns: List<ColumnDef> = List.new();
     let mut constraints: List<TableConstraint> = List.new();
@@ -139,25 +139,25 @@ fn parse_create_table_rest(
         // Table constraint vs column def — check the leading keyword.
         if is_table_constraint_start(ts) {
             let tc = match parse_table_constraint(ts) {
-                Ok(t)  => t, Err(e) => { return Err(e); }
+                Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
             };
             constraints.push(tc);
         } else {
             let col = match parse_column_def(ts) {
-                Ok(c)  => c, Err(e) => { return Err(e); }
+                Result.Ok(c)  => c, Result.Err(e) => { return Result.Err(e); }
             };
             columns.push(col);
         }
     }
 
-    match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
     // Table options: WITHOUT ROWID, STRICT.
     let mut without_rowid = false;
     let mut strict = false;
     loop {
         if ts.accept_keyword(KwWithout) {
-            match ts.expect_keyword(KwRowid) { Ok(_) => {}, Err(e) => { return Err(e); } }
+            match ts.expect_keyword(KwRowid) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
             without_rowid = true;
             // Comma-separated table options.
             if ts.accept_punct(PComma) { continue; }
@@ -180,7 +180,7 @@ fn parse_create_table_rest(
         }
     }
 
-    Ok(CreateTableStmt {
+    Result.Ok(CreateTableStmt {
         if_not_exists: if_not_exists,
         temporary: temporary,
         table: table,
@@ -197,7 +197,7 @@ fn parse_create_table_rest(
 
 fn parse_column_def(ts: &mut SqlTokenStream) -> Result<ColumnDef, ParseError> {
     let name = match ts.expect_ident() {
-        Ok(s)  => s, Err(e) => { return Err(e); }
+        Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
 
     let declared_type = parse_type_name(ts);
@@ -205,15 +205,15 @@ fn parse_column_def(ts: &mut SqlTokenStream) -> Result<ColumnDef, ParseError> {
     let mut constraints: List<ColumnConstraint> = List.new();
     loop {
         let cc_opt = match try_parse_column_constraint(ts) {
-            Ok(o)  => o, Err(e) => { return Err(e); }
+            Result.Ok(o)  => o, Result.Err(e) => { return Result.Err(e); }
         };
         match cc_opt {
-            Some(cc) => constraints.push(cc),
-            None     => break,
+            Maybe.Some(cc) => constraints.push(cc),
+            Maybe.None     => break,
         }
     }
 
-    Ok(ColumnDef {
+    Result.Ok(ColumnDef {
         name: name,
         declared_type: declared_type,
         constraints: constraints,
@@ -273,39 +273,39 @@ fn consume_through_rparen(ts: &mut SqlTokenStream) -> Bool {
 
 fn try_parse_column_constraint(ts: &mut SqlTokenStream) -> Result<Maybe<ColumnConstraint>, ParseError> {
     if ts.accept_keyword(KwPrimary) {
-        match ts.expect_keyword(KwKey) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwKey) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         // Optional ASC / DESC — ignored for v1.
         let _ = ts.accept_keyword(KwAsc);
         let _ = ts.accept_keyword(KwDesc);
         let on_conflict = match parse_optional_on_conflict(ts) {
-            Ok(o)  => o, Err(e) => { return Err(e); }
+            Result.Ok(o)  => o, Result.Err(e) => { return Result.Err(e); }
         };
         let autoincrement = ts.accept_keyword(KwAutoincrement);
-        return Ok(Some(CcPrimaryKey(on_conflict, autoincrement)));
+        return Result.Ok(Maybe.Some(CcPrimaryKey(on_conflict, autoincrement)));
     }
 
     if ts.accept_keyword(KwNot) {
-        match ts.expect_keyword(KwNull) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwNull) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         let on_conflict = match parse_optional_on_conflict(ts) {
-            Ok(o)  => o, Err(e) => { return Err(e); }
+            Result.Ok(o)  => o, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(Some(CcNotNull(on_conflict)));
+        return Result.Ok(Maybe.Some(CcNotNull(on_conflict)));
     }
 
     if ts.accept_keyword(KwUnique) {
         let on_conflict = match parse_optional_on_conflict(ts) {
-            Ok(o)  => o, Err(e) => { return Err(e); }
+            Result.Ok(o)  => o, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(Some(CcUnique(on_conflict)));
+        return Result.Ok(Maybe.Some(CcUnique(on_conflict)));
     }
 
     if ts.accept_keyword(KwCheck) {
-        match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         let e = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        return Ok(Some(CcCheck(e)));
+        match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        return Result.Ok(Maybe.Some(CcCheck(e)));
     }
 
     if ts.accept_keyword(KwDefault) {
@@ -314,43 +314,43 @@ fn try_parse_column_constraint(ts: &mut SqlTokenStream) -> Result<Maybe<ColumnCo
         if ts.check_punct(PLParen) {
             let _ = ts.advance();
             let e = match parse_expr(ts) {
-                Ok(x)  => x, Err(err) => { return Err(err); }
+                Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
             };
-            match ts.expect_punct(PRParen) { Ok(_) => {}, Err(err) => { return Err(err); } }
-            return Ok(Some(CcDefault(e)));
+            match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(err) => { return Result.Err(err); } }
+            return Result.Ok(Maybe.Some(CcDefault(e)));
         }
         let e = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        return Ok(Some(CcDefault(e)));
+        return Result.Ok(Maybe.Some(CcDefault(e)));
     }
 
     if ts.accept_keyword(KwCollate) {
         let n = match ts.expect_ident() {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(Some(CcCollate(n)));
+        return Result.Ok(Maybe.Some(CcCollate(n)));
     }
 
     if ts.accept_keyword(KwReferences) {
         let qn = match parse_qualified_name(ts) {
-            Ok(t)  => t, Err(e) => { return Err(e); }
+            Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
         };
         let mut cols: List<Text> = List.new();
         if ts.accept_punct(PLParen) {
             loop {
                 let col = match ts.expect_ident() {
-                    Ok(s)  => s, Err(e) => { return Err(e); }
+                    Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
                 };
                 cols.push(col);
                 if !ts.accept_punct(PComma) { break; }
             }
-            match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+            match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         }
-        return Ok(Some(CcForeignKey(qn, cols)));
+        return Result.Ok(Maybe.Some(CcForeignKey(qn, cols)));
     }
 
-    Ok(None)
+    Result.Ok(Maybe.None)
 }
 
 // -----------------------------------------------------------------------------
@@ -369,92 +369,92 @@ fn is_table_constraint_start(ts: &SqlTokenStream) -> Bool {
 
 fn parse_table_constraint(ts: &mut SqlTokenStream) -> Result<TableConstraint, ParseError> {
     if ts.accept_keyword(KwPrimary) {
-        match ts.expect_keyword(KwKey) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwKey) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         let mut cols: List<Text> = List.new();
         loop {
             let c = match ts.expect_ident() {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
             cols.push(c);
             if !ts.accept_punct(PComma) { break; }
         }
-        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         let on_conflict = match parse_optional_on_conflict(ts) {
-            Ok(o)  => o, Err(e) => { return Err(e); }
+            Result.Ok(o)  => o, Result.Err(e) => { return Result.Err(e); }
         };
         let autoincrement = ts.accept_keyword(KwAutoincrement);
-        return Ok(TcPrimaryKey(cols, on_conflict, autoincrement));
+        return Result.Ok(TcPrimaryKey(cols, on_conflict, autoincrement));
     }
 
     if ts.accept_keyword(KwUnique) {
-        match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         let mut cols: List<Text> = List.new();
         loop {
             let c = match ts.expect_ident() {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
             cols.push(c);
             if !ts.accept_punct(PComma) { break; }
         }
-        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         let on_conflict = match parse_optional_on_conflict(ts) {
-            Ok(o)  => o, Err(e) => { return Err(e); }
+            Result.Ok(o)  => o, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(TcUnique(cols, on_conflict));
+        return Result.Ok(TcUnique(cols, on_conflict));
     }
 
     if ts.accept_keyword(KwCheck) {
-        match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         let e = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        return Ok(TcCheck(e));
+        match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        return Result.Ok(TcCheck(e));
     }
 
     if ts.accept_keyword(KwForeign) {
-        match ts.expect_keyword(KwKey) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwKey) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         let mut local_cols: List<Text> = List.new();
         loop {
             let c = match ts.expect_ident() {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
             local_cols.push(c);
             if !ts.accept_punct(PComma) { break; }
         }
-        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        match ts.expect_keyword(KwReferences) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        match ts.expect_keyword(KwReferences) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         let target = match parse_qualified_name(ts) {
-            Ok(t)  => t, Err(e) => { return Err(e); }
+            Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
         };
         let mut fk_cols: List<Text> = List.new();
         if ts.accept_punct(PLParen) {
             loop {
                 let c = match ts.expect_ident() {
-                    Ok(s)  => s, Err(e) => { return Err(e); }
+                    Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
                 };
                 fk_cols.push(c);
                 if !ts.accept_punct(PComma) { break; }
             }
-            match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+            match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         }
-        return Ok(TcForeignKey(local_cols, target, fk_cols));
+        return Result.Ok(TcForeignKey(local_cols, target, fk_cols));
     }
 
-    Err(parse_error("expected table constraint".clone(), ts.position()))
+    Result.Err(parse_error("expected table constraint".clone(), ts.position()))
 }
 
 fn parse_optional_on_conflict(ts: &mut SqlTokenStream) -> Result<Maybe<SqlOnConflict>, ParseError> {
-    if !ts.accept_keyword(KwOn) { return Ok(None); }
-    match ts.expect_keyword(KwConflict) { Ok(_) => {}, Err(e) => { return Err(e); } }
-    if ts.accept_keyword(KwAbort)    { return Ok(Some(OcAbort)); }
-    if ts.accept_keyword(KwFail)     { return Ok(Some(OcFail)); }
-    if ts.accept_keyword(KwIgnore)   { return Ok(Some(OcIgnore)); }
-    if ts.accept_keyword(KwReplace)  { return Ok(Some(OcReplace)); }
-    if ts.accept_keyword(KwRollback) { return Ok(Some(OcRollback)); }
-    Err(parse_error("expected conflict action after ON CONFLICT".clone(), ts.position()))
+    if !ts.accept_keyword(KwOn) { return Result.Ok(Maybe.None); }
+    match ts.expect_keyword(KwConflict) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+    if ts.accept_keyword(KwAbort)    { return Result.Ok(Maybe.Some(OcAbort)); }
+    if ts.accept_keyword(KwFail)     { return Result.Ok(Maybe.Some(OcFail)); }
+    if ts.accept_keyword(KwIgnore)   { return Result.Ok(Maybe.Some(OcIgnore)); }
+    if ts.accept_keyword(KwReplace)  { return Result.Ok(Maybe.Some(OcReplace)); }
+    if ts.accept_keyword(KwRollback) { return Result.Ok(Maybe.Some(OcRollback)); }
+    Result.Err(parse_error("expected conflict action after ON CONFLICT".clone(), ts.position()))
 }
 
 // -----------------------------------------------------------------------------
@@ -462,7 +462,7 @@ fn parse_optional_on_conflict(ts: &mut SqlTokenStream) -> Result<Maybe<SqlOnConf
 // -----------------------------------------------------------------------------
 
 public fn parse_drop(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwDrop) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwDrop) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
     let kind_tag = if ts.accept_keyword(KwTable)   { 0 }
                    else if ts.accept_keyword(KwIndex)   { 1 }
@@ -470,25 +470,25 @@ public fn parse_drop(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError
                    else if ts.accept_keyword(KwTrigger) { 3 }
                    else { -1 };
     if kind_tag < 0 {
-        return Err(parse_error("expected TABLE / INDEX / VIEW / TRIGGER".clone(), ts.position()));
+        return Result.Err(parse_error("expected TABLE / INDEX / VIEW / TRIGGER".clone(), ts.position()));
     }
 
     let if_exists = if ts.accept_keyword(KwIf) {
-        match ts.expect_keyword(KwExists) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwExists) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         true
     } else {
         false
     };
 
     let qn = match parse_qualified_name(ts) {
-        Ok(t)  => t, Err(e) => { return Err(e); }
+        Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
     };
 
     match kind_tag {
-        0 => Ok(SDropTable(if_exists, qn)),
-        1 => Ok(SDropIndex(if_exists, qn)),
-        2 => Ok(SDropView(if_exists, qn)),
-        _ => Ok(SDropTrigger(if_exists, qn)),
+        0 => Result.Ok(SDropTable(if_exists, qn)),
+        1 => Result.Ok(SDropIndex(if_exists, qn)),
+        2 => Result.Ok(SDropView(if_exists, qn)),
+        _ => Result.Ok(SDropTrigger(if_exists, qn)),
     }
 }
 
@@ -501,29 +501,29 @@ fn parse_create_index_rest(
     unique: Bool,
 ) -> Result<CreateIndexStmt, ParseError> {
     let if_not_exists = if ts.accept_keyword(KwIf) {
-        match ts.expect_keyword(KwNot) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        match ts.expect_keyword(KwExists) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwNot) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        match ts.expect_keyword(KwExists) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         true
     } else { false };
 
     let index_name = match parse_qualified_name(ts) {
-        Ok(t)  => t, Err(e) => { return Err(e); }
+        Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
     };
-    match ts.expect_keyword(KwOn) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwOn) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let table = match parse_qualified_name(ts) {
-        Ok(t)  => t, Err(e) => { return Err(e); }
+        Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
     };
-    match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let mut cols: List<IndexedColumn> = List.new();
     loop {
         let name = match ts.expect_ident() {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
         let collation: Maybe<Text> = if ts.accept_keyword(KwCollate) {
             match ts.expect_ident() {
-                Ok(s)  => Some(s), Err(e) => { return Err(e); }
+                Result.Ok(s)  => Maybe.Some(s), Result.Err(e) => { return Result.Err(e); }
             }
-        } else { None };
+        } else { Maybe.None };
         let direction = if ts.accept_keyword(KwDesc) { OdDesc }
                         else { let _ = ts.accept_keyword(KwAsc); OdAsc };
         cols.push(IndexedColumn {
@@ -533,14 +533,14 @@ fn parse_create_index_rest(
         });
         if !ts.accept_punct(PComma) { break; }
     }
-    match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     // Optional WHERE clause (partial indexes).
     let where_clause: Maybe<Expr> = if ts.accept_keyword(KwWhere) {
         match parse_expr(ts) {
-            Ok(e)  => Some(e), Err(err) => { return Err(err); }
+            Result.Ok(e)  => Maybe.Some(e), Result.Err(err) => { return Result.Err(err); }
         }
-    } else { None };
-    Ok(CreateIndexStmt {
+    } else { Maybe.None };
+    Result.Ok(CreateIndexStmt {
         if_not_exists: if_not_exists,
         unique: unique,
         index: index_name,
@@ -555,29 +555,29 @@ fn parse_create_view_rest(
     temporary: Bool,
 ) -> Result<CreateViewStmt, ParseError> {
     let if_not_exists = if ts.accept_keyword(KwIf) {
-        match ts.expect_keyword(KwNot) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        match ts.expect_keyword(KwExists) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwNot) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        match ts.expect_keyword(KwExists) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         true
     } else { false };
     let view_name = match parse_qualified_name(ts) {
-        Ok(t)  => t, Err(e) => { return Err(e); }
+        Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
     };
     let mut cols: List<Text> = List.new();
     if ts.accept_punct(PLParen) {
         loop {
             let c = match ts.expect_ident() {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
             cols.push(c);
             if !ts.accept_punct(PComma) { break; }
         }
-        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     }
-    match ts.expect_keyword(KwAs) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwAs) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let query = match parse_select(ts) {
-        Ok(s)  => s, Err(e) => { return Err(e); }
+        Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
-    Ok(CreateViewStmt {
+    Result.Ok(CreateViewStmt {
         if_not_exists: if_not_exists,
         temporary: temporary,
         view: view_name,
@@ -588,15 +588,15 @@ fn parse_create_view_rest(
 
 fn parse_qualified_name(ts: &mut SqlTokenStream) -> Result<TableRef, ParseError> {
     let first = match ts.expect_ident() {
-        Ok(s)  => s, Err(e) => { return Err(e); }
+        Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
     if ts.accept_punct(PDot) {
         let second = match ts.expect_ident() {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(TableRef { schema: first, name: second, alias: "".clone() });
+        return Result.Ok(TableRef { schema: first, name: second, alias: "".clone() });
     }
-    Ok(TableRef { schema: "".clone(), name: first, alias: "".clone() })
+    Result.Ok(TableRef { schema: "".clone(), name: first, alias: "".clone() })
 }
 
 fn text_eq_ci(a: &Text, lit: &str) -> Bool {

@@ -117,9 +117,9 @@ implement ShellCommand {
     /// `grace` period (default 5s) SIGKILL (forced).
     ///
 
-    /// Returns `Ok(ShellResult)` on normal completion, `Err(Cancelled
+    /// Returns `Result.Ok(ShellResult)` on normal completion, `Result.Err(Cancelled
     /// { reason })` if the token fired before the child exited, or
-    /// `Err(SpawnFailed)` if the child couldn't even start. The
+    /// `Result.Err(SpawnFailed)` if the child couldn't even start. The
     /// returned signature matches `sh_with_cancel` 1:1 so the `?`
     /// operator threads cleanly:
     ///
@@ -170,8 +170,8 @@ implement ShellCommand {
     /// ```verum
     /// for await line in sh#"git log --oneline".stream_lines() {
     ///  match line {
-    ///  Ok(text) => print(&text),
-    ///  Err(e) => eprintln(f"stream error: {e}"),
+    ///  Result.Ok(text) => print(&text),
+    ///  Result.Err(e) => eprintln(f"stream error: {e}"),
     ///  }
     /// }
     /// ```

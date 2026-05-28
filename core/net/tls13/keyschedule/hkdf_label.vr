@@ -117,5 +117,5 @@ public fn hkdf_expand_label(
         HashKind.Sha256 => hkdf_expand_sha256(secret, info.as_slice(), length, &mut out)?,
         HashKind.Sha384 => hkdf_expand_sha384(secret, info.as_slice(), length, &mut out)?,
     }
-    Ok(out)
+    Result.Ok(out)
 }

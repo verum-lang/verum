@@ -143,7 +143,7 @@ public fn encode_compress_certificate(ext: &CompressCertificate, out: &mut List<
     // length MUST be in the range [2, 254] and be even.
     let byte_len: Int = ext.algorithms.len() * 2;
     if byte_len < 2 || byte_len > 254 || (byte_len % 2) != 0 {
-        return Err(CompressCertificateError.BadAlgorithmListLength);
+        return Result.Err(CompressCertificateError.BadAlgorithmListLength);
     }
     out.push(byte_len as Byte);
     let mut i: Int = 0;
@@ -153,19 +153,19 @@ public fn encode_compress_certificate(ext: &CompressCertificate, out: &mut List<
         out.push((v & 0xFF_u16) as Byte);
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 public fn decode_compress_certificate(buf: &[Byte])
     -> Result<CompressCertificate, CompressCertificateError>
 {
-    if buf.len() < 1 { return Err(CompressCertificateError.Truncated); }
+    if buf.len() < 1 { return Result.Err(CompressCertificateError.Truncated); }
     let total_len = buf[0] as Int;
     if total_len < 2 || total_len > 254 || (total_len % 2) != 0 {
-        return Err(CompressCertificateError.BadAlgorithmListLength);
+        return Result.Err(CompressCertificateError.BadAlgorithmListLength);
     }
     if 1 + total_len > buf.len() {
-        return Err(CompressCertificateError.Truncated);
+        return Result.Err(CompressCertificateError.Truncated);
     }
     let mut algos: List<CertCompressionAlgorithm> = [];
     let mut pos: Int = 1;
@@ -176,7 +176,7 @@ public fn decode_compress_certificate(buf: &[Byte])
         algos.push(CertCompressionAlgorithm.from_u16(code));
         pos = pos + 2;
     }
-    Ok(CompressCertificate { algorithms: algos })
+    Result.Ok(CompressCertificate { algorithms: algos })
 }
 
 // =============================================================================
@@ -224,7 +224,7 @@ public fn encode_compressed_certificate(
 public fn decode_compressed_certificate(buf: &[Byte])
     -> Result<CompressedCertificate, CompressCertificateError>
 {
-    if buf.len() < 2 + 3 + 3 { return Err(CompressCertificateError.Truncated); }
+    if buf.len() < 2 + 3 + 3 { return Result.Err(CompressCertificateError.Truncated); }
     let algo_u = ((buf[0] as UInt16) << 8_u32) | (buf[1] as UInt16);
     let algo = CertCompressionAlgorithm.from_u16(algo_u);
 
@@ -239,7 +239,7 @@ public fn decode_compressed_certificate(buf: &[Byte])
           (buf[7] as UInt32)) as Int;
 
     if 8 + compressed_len > buf.len() {
-        return Err(CompressCertificateError.Truncated);
+        return Result.Err(CompressCertificateError.Truncated);
     }
     let mut payload: List<Byte> = [];
     let mut i: Int = 8;
@@ -248,7 +248,7 @@ public fn decode_compressed_certificate(buf: &[Byte])
         i = i + 1;
     }
 
-    Ok(CompressedCertificate {
+    Result.Ok(CompressedCertificate {
         algorithm:           algo,
         uncompressed_length: uncompressed,
         compressed_message:  payload,

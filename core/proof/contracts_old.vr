@@ -97,8 +97,8 @@ public fn snapshot_record(s: ContractsSnapshot, loc: Text, value: Text) -> Contr
     ContractsSnapshot { entries: m }
 }
 
-/// Look up a snapshotted value. Returns `None` if `loc` was never
-/// recorded — distinct from `Some("")` which indicates a snapshot of
+/// Look up a snapshotted value. Returns `Maybe.None` if `loc` was never
+/// recorded — distinct from `Maybe.Some("")` which indicates a snapshot of
 /// the empty Text. The previous Text-returning variant collapsed
 /// these two cases, leaving callers unable to distinguish "location
 /// wasn't tracked" from "location had value `\"\"`" — soundness gap

@@ -197,7 +197,7 @@ implement SenderContext {
         pt:  &[Byte],
     ) -> Result<List<Byte>, HpkeError> {
         if self.seq == 0xFFFFFFFFFFFFFFFF_u64 {
-            return Err(HpkeError.SequenceOverflow);
+            return Result.Err(HpkeError.SequenceOverflow);
         }
         let nonce = compute_nonce(&self.base_nonce, self.seq);
         let aead = ChaCha20Poly1305.new(&self.key);
@@ -207,7 +207,7 @@ implement SenderContext {
         aead.encrypt(&nonce, aad, pt, &mut ct, &mut tag);
         ct.extend_from_slice(&tag[..]);
         self.seq = self.seq + 1_u64;
-        Ok(ct)
+        Result.Ok(ct)
     }
 
     public fn export(&self, context: &[Byte], length: Int) -> Result<List<Byte>, HpkeError> {
@@ -224,9 +224,9 @@ implement ReceiverContext {
         aad: &[Byte],
         ct:  &[Byte],
     ) -> Result<List<Byte>, HpkeError> {
-        if ct.len() < 16 { return Err(HpkeError.AeadFailure); }
+        if ct.len() < 16 { return Result.Err(HpkeError.AeadFailure); }
         if self.seq == 0xFFFFFFFFFFFFFFFF_u64 {
-            return Err(HpkeError.SequenceOverflow);
+            return Result.Err(HpkeError.SequenceOverflow);
         }
         let body_len = ct.len() - 16;
         let body = &ct[..body_len];
@@ -241,7 +241,7 @@ implement ReceiverContext {
         aead.decrypt(&nonce, aad, body, &tag, &mut pt)
             .map_err(|_| HpkeError.AeadFailure)?;
         self.seq = self.seq + 1_u64;
-        Ok(pt)
+        Result.Ok(pt)
     }
 
     public fn export(&self, context: &[Byte], length: Int) -> Result<List<Byte>, HpkeError> {
@@ -270,7 +270,7 @@ public fn setup_base_s(
     let shared = kem_extract_and_expand(&dh[..], &pk_e[..], &pk_r[..])?;
 
     let (key, base_nonce, exporter) = key_schedule_base(shared.as_slice(), info)?;
-    Ok((
+    Result.Ok((
         Encapsulation { bytes: pk_e },
         SenderContext {
             key: key, base_nonce: base_nonce, seq: 0_u64,
@@ -295,7 +295,7 @@ public fn setup_base_r(
     let shared = kem_extract_and_expand(&dh[..], &pk_e[..], &pk_r[..])?;
 
     let (key, base_nonce, exporter) = key_schedule_base(shared.as_slice(), info)?;
-    Ok(ReceiverContext {
+    Result.Ok(ReceiverContext {
         key: key, base_nonce: base_nonce, seq: 0_u64,
         exporter_secret: exporter,
     })
@@ -379,7 +379,7 @@ fn key_schedule_base(
     let mut m: Int = 0;
     while m < 32 { exporter[m] = exporter_bytes[m]; m = m + 1; }
 
-    Ok((key, base_nonce, exporter))
+    Result.Ok((key, base_nonce, exporter))
 }
 
 // =============================================================================
@@ -412,7 +412,7 @@ fn labeled_extract(
     push_bytes(&mut labeled_ikm, suite_id);
     push_bytes(&mut labeled_ikm, label);
     push_bytes(&mut labeled_ikm, ikm);
-    Ok(hkdf_extract_sha256(salt, labeled_ikm.as_slice()).to_list())
+    Result.Ok(hkdf_extract_sha256(salt, labeled_ikm.as_slice()).to_list())
 }
 
 /// RFC 9180 §4 LabeledExpand. Builds the HPKE-v1 labeled-info
@@ -426,7 +426,7 @@ fn labeled_extract(
 /// `(prk, info, length, out: &mut List<Byte>) -> Result<(), HkdfError>`.
 /// The arity mismatch was masked by the codegen lenient-SKIP class
 /// (#166): `labeled_expand` was emitted as a bug-class skip and every
-/// caller silently received `Ok(empty list)` at runtime — every
+/// caller silently received `Result.Ok(empty list)` at runtime — every
 /// HPKE export and every key-schedule derivation produced empty
 /// secrets, breaking the entire HPKE pipeline.
 ///
@@ -444,7 +444,7 @@ fn labeled_expand(
     suite_id: &[Byte],
 ) -> Result<List<Byte>, HpkeError> {
     if length < 0 || length > 0xFFFF {
-        return Err(HpkeError.KdfFailure);
+        return Result.Err(HpkeError.KdfFailure);
     }
     // labeled_info = I2OSP(L, 2) || "HPKE-v1" (7) || suite_id || label || info.
     let mut labeled_info: List<Byte> =
@@ -457,8 +457,8 @@ fn labeled_expand(
     push_bytes(&mut labeled_info, info);
     let mut out: List<Byte> = List.with_capacity(length);
     match hkdf_expand_sha256(prk, labeled_info.as_slice(), length, &mut out) {
-        Ok(()) => Ok(out),
-        Err(_) => Err(HpkeError.KdfFailure),
+        Result.Ok(()) => Result.Ok(out),
+        Result.Err(_) => Result.Err(HpkeError.KdfFailure),
     }
 }
 

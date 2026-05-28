@@ -52,9 +52,9 @@
 
 /// | Allocator | Alloc Time | Free Time | Fragmentation | Use Case |
 /// |------------------|------------|-----------|---------------|-------------------|
-/// | StackAllocator | O(1) ~5ns | O(1) ~2ns | None (LIFO) | Scratch buffers |
-/// | ArenaAllocator | O(1) ~8ns | O(1) ~1ns | None (bulk) | Request handling |
-/// | PoolAllocator | O(1) ~10ns | O(1) ~5ns | None (fixed) | Connection pools |
+/// | StackAllocator | O(1) ~5ns | O(1) ~2ns | Maybe.None (LIFO) | Scratch buffers |
+/// | ArenaAllocator | O(1) ~8ns | O(1) ~1ns | Maybe.None (bulk) | Request handling |
+/// | PoolAllocator | O(1) ~10ns | O(1) ~5ns | Maybe.None (fixed) | Connection pools |
 ///
 
 /// ## Safety Guarantees
@@ -218,8 +218,8 @@ implement<const SIZE: Int> StackAllocator<SIZE> {
     ///
 
     /// ## Returns
-    /// - Ok(ptr): Pointer to allocated memory
-    /// - Err(AllocError): Not enough space
+    /// - Result.Ok(ptr): Pointer to allocated memory
+    /// - Result.Err(AllocError): Not enough space
     public fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError> {
         // Calculate aligned position
         let align = layout.align();
@@ -228,7 +228,7 @@ implement<const SIZE: Int> StackAllocator<SIZE> {
         // Check if we have space
         let new_top = aligned_top + layout.size();
         if new_top > SIZE {
-            return Err(AllocError.OutOfMemory {
+            return Result.Err(AllocError.OutOfMemory {
                 requested: layout.size(),
                 available: SIZE - aligned_top,
             });
@@ -245,7 +245,7 @@ implement<const SIZE: Int> StackAllocator<SIZE> {
 
         // Return pointer to allocated region
         let ptr = &mut self.buffer[aligned_top] as *mut Byte;
-        Ok(ptr)
+        Result.Ok(ptr)
     }
 
     /// Deallocate memory (LIFO only)
@@ -340,7 +340,7 @@ implement<const SIZE: Int> Alloc for StackAllocator<SIZE> {
                 if self.top > self.watermark {
                     self.watermark = self.top;
                 }
-                return Ok(ptr);
+                return Result.Ok(ptr);
             }
         }
 
@@ -351,7 +351,7 @@ implement<const SIZE: Int> Alloc for StackAllocator<SIZE> {
         let copy_size = old_layout.size().min(new_layout.size());
         memcpy(new_ptr, ptr, copy_size);
 
-        Ok(new_ptr)
+        Result.Ok(new_ptr)
     }
 }
 
@@ -449,12 +449,12 @@ implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> ArenaAllocator<CHUNK_SIZ
             let ptr = &mut self.chunks[self.current_chunk][aligned_pos] as *mut Byte;
             self.chunk_pos = aligned_pos + size;
             self.total_allocated += size;
-            return Ok(ptr);
+            return Result.Ok(ptr);
         }
 
         // Need new chunk
         if self.current_chunk + 1 >= MAX_CHUNKS {
-            return Err(AllocError.OutOfMemory {
+            return Result.Err(AllocError.OutOfMemory {
                 requested: size,
                 available: self.remaining_in_chunk(),
             });
@@ -467,7 +467,7 @@ implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> ArenaAllocator<CHUNK_SIZ
         // Allocate from fresh chunk
         let aligned_pos = (align - 1) & !(align - 1); // Align from start
         if aligned_pos + size > CHUNK_SIZE {
-            return Err(AllocError.AllocationTooLarge {
+            return Result.Err(AllocError.AllocationTooLarge {
                 requested: size,
                 max_size: CHUNK_SIZE,
             });
@@ -476,7 +476,7 @@ implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> ArenaAllocator<CHUNK_SIZ
         let ptr = &mut self.chunks[self.current_chunk][aligned_pos] as *mut Byte;
         self.chunk_pos = aligned_pos + size;
         self.total_allocated += size;
-        Ok(ptr)
+        Result.Ok(ptr)
     }
 
     /// Reset arena (bulk deallocation)
@@ -541,7 +541,7 @@ implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> Alloc for ArenaAllocator
             memcpy(new_ptr, _ptr, copy_size);
         }
 
-        Ok(new_ptr)
+        Result.Ok(new_ptr)
     }
 }
 
@@ -647,11 +647,11 @@ implement<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> PoolAllocator<BLOCK_SIZ
     ///
 
     /// ## Returns
-    /// - Ok(ptr): Pointer to block
+    /// - Result.Ok(ptr): Pointer to block
     /// - Err: Pool exhausted
     public fn alloc_block(&mut self) -> Result<*mut Byte, AllocError> {
         if self.freelist_head >= BLOCK_COUNT {
-            return Err(AllocError.OutOfMemory {
+            return Result.Err(AllocError.OutOfMemory {
                 requested: BLOCK_SIZE,
                 available: 0,
             });
@@ -666,7 +666,7 @@ implement<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> PoolAllocator<BLOCK_SIZ
 
         // Return pointer to block
         let ptr = &mut self.blocks[block_index][0] as *mut Byte;
-        Ok(ptr)
+        Result.Ok(ptr)
     }
 
     /// Free a block
@@ -701,7 +701,7 @@ implement<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> PoolAllocator<BLOCK_SIZ
 implement<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> Alloc for PoolAllocator<BLOCK_SIZE, BLOCK_COUNT> {
     fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError> {
         if layout.size() > BLOCK_SIZE {
-            return Err(AllocError.AllocationTooLarge {
+            return Result.Err(AllocError.AllocationTooLarge {
                 requested: layout.size(),
                 max_size: BLOCK_SIZE,
             });
@@ -720,13 +720,13 @@ implement<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> Alloc for PoolAllocator
         new_layout: Layout,
     ) -> Result<*mut Byte, AllocError> {
         if new_layout.size() > BLOCK_SIZE {
-            return Err(AllocError.AllocationTooLarge {
+            return Result.Err(AllocError.AllocationTooLarge {
                 requested: new_layout.size(),
                 max_size: BLOCK_SIZE,
             });
         }
         // Pool blocks are fixed size, so realloc is a no-op if size fits
-        Ok(ptr)
+        Result.Ok(ptr)
     }
 }
 

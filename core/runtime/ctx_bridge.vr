@@ -45,8 +45,8 @@ public fn env_ctx_get(slot_id: Int) -> Int {
         return 0;
     }
     match ctx_get(slot_id as UInt8) {
-        Some(ptr) => ptr as Int,
-        None => 0,
+        Maybe.Some(ptr) => ptr as Int,
+        Maybe.None => 0,
     }
 }
 

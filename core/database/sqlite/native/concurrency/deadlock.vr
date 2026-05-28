@@ -87,8 +87,8 @@ implement WaitForGraph {
         false
     }
 
-    /// Detect a cycle starting from `start`. Returns `Some(cycle)`
-    /// containing the txn ids in cycle order, or `None` if no cycle.
+    /// Detect a cycle starting from `start`. Returns `Maybe.Some(cycle)`
+    /// containing the txn ids in cycle order, or `Maybe.None` if no cycle.
     /// Uses iterative DFS with a visiting-set to avoid recursion.
     public fn detect_cycle_from(&self, start: TxnId) -> Maybe<List<TxnId>> {
         let mut path: List<TxnId> = List.new();
@@ -100,11 +100,11 @@ implement WaitForGraph {
         while bound <= self.edges.len() {
             let next = self.next_holder(current);
             match next {
-                None => { return None; }
-                Some(n) => {
+                Maybe.None => { return Maybe.None; }
+                Maybe.Some(n) => {
                     if n == start {
                         path.push(n);
-                        return Some(path);
+                        return Maybe.Some(path);
                     }
                     if self.list_contains(&path, n) {
                         // Cycle that does NOT include `start` — record
@@ -118,7 +118,7 @@ implement WaitForGraph {
                             j = j + 1;
                         }
                         suffix.push(n);
-                        return Some(suffix);
+                        return Maybe.Some(suffix);
                     }
                     path.push(n);
                     current = n;
@@ -126,18 +126,18 @@ implement WaitForGraph {
                 }
             }
         }
-        None
+        Maybe.None
     }
 
     fn next_holder(&self, txn: TxnId) -> Maybe<TxnId> {
         let mut i: Int = 0;
         while i < self.edges.len() {
             if self.edges[i].from_txn == txn {
-                return Some(self.edges[i].to_txn);
+                return Maybe.Some(self.edges[i].to_txn);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     fn list_contains(&self, list: &List<TxnId>, t: TxnId) -> Bool {

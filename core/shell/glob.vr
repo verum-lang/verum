@@ -56,8 +56,8 @@ public fn glob_with_hidden(pattern: &Text, include_hidden: Bool)
 {
     let ctx = ShellContext.default();
     let base = match ctx.effective_cwd() {
-        Some(c) => PathBuf.from(c),
-        None    => PathBuf.from("."),
+        Maybe.Some(c) => PathBuf.from(c),
+        Maybe.None    => PathBuf.from("."),
     };
     glob_in(&base, pattern, include_hidden)
 }
@@ -73,7 +73,7 @@ public fn glob_in(base: &PathBuf, pattern: &Text, include_hidden: Bool)
     let mut results: List<PathBuf> = [];
     walk(base, base, &compiled, include_hidden, &mut results);
     sort_paths(&mut results);
-    Ok(results)
+    Result.Ok(results)
 }
 
 /// Glob filtered to files only.
@@ -82,8 +82,8 @@ public fn glob_files(pattern: &Text)
 
 {
     let all = glob(pattern)?;
-    Ok(filter_paths(all, |p| {
-        match fs_metadata(p.as_path()) { Ok(m) => m.is_file(), Err(_) => false }
+    Result.Ok(filter_paths(all, |p| {
+        match fs_metadata(p.as_path()) { Result.Ok(m) => m.is_file(), Result.Err(_) => false }
     }))
 }
 
@@ -93,8 +93,8 @@ public fn glob_dirs(pattern: &Text)
 
 {
     let all = glob(pattern)?;
-    Ok(filter_paths(all, |p| {
-        match fs_metadata(p.as_path()) { Ok(m) => m.is_dir(), Err(_) => false }
+    Result.Ok(filter_paths(all, |p| {
+        match fs_metadata(p.as_path()) { Result.Ok(m) => m.is_dir(), Result.Err(_) => false }
     }))
 }
 
@@ -110,11 +110,11 @@ fn walk(
     out:            &mut List<PathBuf>,
 ) {
     let entries = match fs_read_dir(dir.as_path()) {
-        Ok(e)  => e,
-        Err(_) => return,
+        Result.Ok(e)  => e,
+        Result.Err(_) => return,
     };
     for entry in entries {
-        let dent = match entry { Ok(d) => d, Err(_) => continue };
+        let dent = match entry { Result.Ok(d) => d, Result.Err(_) => continue };
         let name = dent.file_name();
         if !include_hidden && name.starts_with(".") { continue; }
         let full = dent.path();
@@ -125,13 +125,13 @@ fn walk(
         }
         // Recurse into subdirectories
         match fs_metadata(full.as_path()) {
-            Ok(m) if m.is_dir() => walk(base, &full, pattern, include_hidden, out),
+            Result.Ok(m) if m.is_dir() => walk(base, &full, pattern, include_hidden, out),
             _ => {},
         }
     }
 }
 
-/// Best-effort relative path. Returns None if `full` does not start with `base`.
+/// Best-effort relative path. Returns Maybe.None if `full` does not start with `base`.
 fn relative_to(full: &PathBuf, base: &PathBuf) -> Maybe<PathBuf> {
     let f = full.to_text();
     let b = base.to_text();
@@ -141,9 +141,9 @@ fn relative_to(full: &PathBuf, base: &PathBuf) -> Maybe<PathBuf> {
         while rest.starts_with("/") || rest.starts_with("\\") {
             rest = rest.slice(1, rest.len()).into();
         }
-        Some(PathBuf.from(rest))
+        Maybe.Some(PathBuf.from(rest))
     } else {
-        None
+        Maybe.None
     }
 }
 

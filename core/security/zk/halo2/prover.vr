@@ -104,11 +104,11 @@ public fn precompute(
     srs:     &UniversalSrs,
 ) -> Result<(ProvingKey, VerifyingKey), ProverError> {
     if circuit.k > srs.params.k {
-        return Err(InsufficientCapacity { circuit_k: circuit.k, srs_k: srs.params.k });
+        return Result.Err(InsufficientCapacity { circuit_k: circuit.k, srs_k: srs.params.k });
     }
     match @intrinsic("verum.crypto.halo2_precompute", circuit, srs) {
-        PrecomputeResult.Ok(pk, vk) => Ok((pk, vk)),
-        PrecomputeResult.Err(why)   => Err(BackendError(why)),
+        PrecomputeResult.Ok(pk, vk) => Result.Ok((pk, vk)),
+        PrecomputeResult.Err(why)   => Result.Err(BackendError(why)),
     }
 }
 
@@ -130,10 +130,10 @@ public fn prove<F: fn(&mut SynthesizeContext) -> Result<(), CircuitError>>(
         pk, public_inputs, synthesize
     );
     match result {
-        ProveResult.Ok(p)            => Ok(p),
-        ProveResult.WitnessFailed(why) => Err(WitnessAssignmentFailed(why)),
-        ProveResult.TranscriptFailed(why) => Err(TranscriptError(why)),
-        ProveResult.BackendFailed(why) => Err(BackendError(why)),
+        ProveResult.Ok(p)            => Result.Ok(p),
+        ProveResult.WitnessFailed(why) => Result.Err(WitnessAssignmentFailed(why)),
+        ProveResult.TranscriptFailed(why) => Result.Err(TranscriptError(why)),
+        ProveResult.BackendFailed(why) => Result.Err(BackendError(why)),
     }
 }
 
@@ -151,10 +151,10 @@ public fn prove_with_aux<F: fn(&mut SynthesizeContext) -> Result<(), CircuitErro
         pk, public_inputs, aux, synthesize
     );
     match result {
-        ProveResult.Ok(p)            => Ok(p),
-        ProveResult.WitnessFailed(why) => Err(WitnessAssignmentFailed(why)),
-        ProveResult.TranscriptFailed(why) => Err(TranscriptError(why)),
-        ProveResult.BackendFailed(why) => Err(BackendError(why)),
+        ProveResult.Ok(p)            => Result.Ok(p),
+        ProveResult.WitnessFailed(why) => Result.Err(WitnessAssignmentFailed(why)),
+        ProveResult.TranscriptFailed(why) => Result.Err(TranscriptError(why)),
+        ProveResult.BackendFailed(why) => Result.Err(BackendError(why)),
     }
 }
 
@@ -163,11 +163,11 @@ public fn prove_with_aux<F: fn(&mut SynthesizeContext) -> Result<(), CircuitErro
 // =============================================================================
 
 type PrecomputeResult is
-    | Ok(ProvingKey, VerifyingKey)
-    | Err(Text);
+    | Result.Ok(ProvingKey, VerifyingKey)
+    | Result.Err(Text);
 
 type ProveResult is
-    | Ok(Proof)
+    | Result.Ok(Proof)
     | WitnessFailed(Text)
     | TranscriptFailed(Text)
     | BackendFailed(Text);

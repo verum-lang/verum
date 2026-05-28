@@ -47,60 +47,60 @@ implement ResultRow {
     public fn column_count(&self) -> Int { self.values.len() }
 
     public fn lookup_value(&self, idx: Int) -> Maybe<ColumnValue> {
-        if idx < 0 || idx >= self.values.len() { return None; }
-        Some(clone_value(&self.values[idx]))
+        if idx < 0 || idx >= self.values.len() { return Maybe.None; }
+        Maybe.Some(clone_value(&self.values[idx]))
     }
 
     public fn lookup_spec(&self, idx: Int) -> Maybe<ColumnSpec> { self.specs.lookup(idx) }
 
     public fn type_at(&self, idx: Int) -> Int {
         match self.lookup_value(idx) {
-            Some(v) => type_code(&v),
-            None    => 5,    // SQLITE_NULL
+            Maybe.Some(v) => type_code(&v),
+            Maybe.None    => 5,    // SQLITE_NULL
         }
     }
 
     public fn name_at(&self, idx: Int) -> Text {
         match self.lookup_spec(idx) {
-            Some(s) => s.name,
-            None    => Text.new(),
+            Maybe.Some(s) => s.name,
+            Maybe.None    => Text.new(),
         }
     }
 
     /// Coerced int64 access (sqlite3_column_int64).
     public fn int64_at(&self, idx: Int) -> Int64 {
         match self.lookup_value(idx) {
-            Some(v) => to_int64(&v),
-            None    => 0 as Int64,
+            Maybe.Some(v) => to_int64(&v),
+            Maybe.None    => 0 as Int64,
         }
     }
 
     /// Coerced double access.
     public fn double_at(&self, idx: Int) -> Float64 {
         match self.lookup_value(idx) {
-            Some(v) => to_double(&v),
-            None    => 0.0 as Float64,
+            Maybe.Some(v) => to_double(&v),
+            Maybe.None    => 0.0 as Float64,
         }
     }
 
     public fn text_at(&self, idx: Int) -> Text {
         match self.lookup_value(idx) {
-            Some(v) => to_text(&v),
-            None    => Text.new(),
+            Maybe.Some(v) => to_text(&v),
+            Maybe.None    => Text.new(),
         }
     }
 
     public fn blob_at(&self, idx: Int) -> List<Byte> {
         match self.lookup_value(idx) {
-            Some(v) => to_blob(&v),
-            None    => List.new(),
+            Maybe.Some(v) => to_blob(&v),
+            Maybe.None    => List.new(),
         }
     }
 
     public fn bytes_at(&self, idx: Int) -> Int {
         match self.lookup_value(idx) {
-            Some(v) => byte_size(&v),
-            None    => 0,
+            Maybe.Some(v) => byte_size(&v),
+            Maybe.None    => 0,
         }
     }
 }

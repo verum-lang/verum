@@ -34,12 +34,12 @@ mount core.*;
 public fn validate_json(s: Text) -> Bool {
     if s.len() == 0 { return false; }
     let first: Int = match s.byte_at(0) {
-        Some(b) => b as Int,
-        None => return false,
+        Maybe.Some(b) => b as Int,
+        Maybe.None => return false,
     };
     let last: Int = match s.byte_at(s.len() - 1) {
-        Some(b) => b as Int,
-        None => return false,
+        Maybe.Some(b) => b as Int,
+        Maybe.None => return false,
     };
     // Must start with { or [ and end with matching bracket / quote.
     (first == 123 && last == 125) ||  // `{ }`

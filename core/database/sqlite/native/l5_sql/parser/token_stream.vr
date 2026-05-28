@@ -126,8 +126,8 @@ implement SqlTokenStream {
 
     /// Consume a specific keyword or raise a SqlParseError.
     public fn expect_keyword(&mut self, kw: SqlKeyword) -> Result<(), SqlParseError> {
-        if self.accept_keyword(kw) { return Ok(()); }
-        Err(parse_error("expected keyword".clone(), self.pos))
+        if self.accept_keyword(kw) { return Result.Ok(()); }
+        Result.Err(parse_error("expected keyword".clone(), self.pos))
     }
 
     /// True if the current token is `p` punctuation.
@@ -147,8 +147,8 @@ implement SqlTokenStream {
     }
 
     public fn expect_punct(&mut self, p: Punct) -> Result<(), SqlParseError> {
-        if self.accept_punct(p) { return Ok(()); }
-        Err(parse_error("expected punct".clone(), self.pos))
+        if self.accept_punct(p) { return Result.Ok(()); }
+        Result.Err(parse_error("expected punct".clone(), self.pos))
     }
 
     public fn check_op(&self, op: Operator) -> Bool {
@@ -171,9 +171,9 @@ implement SqlTokenStream {
         match self.peek() {
             TIdent(s) => {
                 let _ = self.advance();
-                Ok(s)
+                Result.Ok(s)
             }
-            _ => Err(parse_error("expected identifier".clone(), self.pos)),
+            _ => Result.Err(parse_error("expected identifier".clone(), self.pos)),
         }
     }
 
@@ -182,9 +182,9 @@ implement SqlTokenStream {
         match self.peek() {
             TIdent(s) => {
                 let _ = self.advance();
-                Some(s)
+                Maybe.Some(s)
             }
-            _ => None,
+            _ => Maybe.None,
         }
     }
 

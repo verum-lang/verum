@@ -153,14 +153,14 @@ fn render_zsh(cmd: &CommandSpec) -> Text {
     while i < cmd.flags.len() {
         let f = &cmd.flags[i];
         match &f.long {
-            Some(l) => {
+            Maybe.Some(l) => {
                 b.push("        '--");
                 b.push(l);
                 b.push("[");
                 b.push(&f.help);
                 b.push("]'\n");
             },
-            None => {},
+            Maybe.None => {},
         }
         i = i + 1;
     }
@@ -220,12 +220,12 @@ fn render_fish(cmd: &CommandSpec) -> Text {
         b.push("complete -c ");
         b.push(bin);
         match f.short {
-            Some(c) => { b.push(" -s "); b.push(&Text.from(f"{c}")); },
-            None => {},
+            Maybe.Some(c) => { b.push(" -s "); b.push(&Text.from(f"{c}")); },
+            Maybe.None => {},
         }
         match &f.long {
-            Some(l) => { b.push(" -l "); b.push(l); },
-            None => {},
+            Maybe.Some(l) => { b.push(" -l "); b.push(l); },
+            Maybe.None => {},
         }
         b.push(" -d '");
         b.push(&f.help);
@@ -314,14 +314,14 @@ fn render_nushell(cmd: &CommandSpec) -> Text {
     while i < cmd.flags.len() {
         let f = &cmd.flags[i];
         match &f.long {
-            Some(l) => {
+            Maybe.Some(l) => {
                 b.push("    --");
                 b.push(l);
                 b.push("\t# ");
                 b.push(&f.help);
                 b.push("\n");
             },
-            None => {},
+            Maybe.None => {},
         }
         i = i + 1;
     }

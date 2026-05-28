@@ -27,8 +27,8 @@ implement TermGauge {
     public fn new() -> TermGauge {
         TermGauge {
             ratio: 0.0,
-            label: None,
-            block: None,
+            label: Maybe.None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             gauge_style: Style.new().fg(Color.Green),
             use_unicode: true,
@@ -47,17 +47,17 @@ implement TermGauge {
 
     /// Set a styled label TextSpan.
     public fn label(self, label: TextSpan) -> TermGauge {
-        TermGauge { label: Some(label), ..self }
+        TermGauge { label: Maybe.Some(label), ..self }
     }
 
     /// Set a plain text label (creates an unstyled TextSpan).
     public fn label_text(self, text: Text) -> TermGauge {
-        TermGauge { label: Some(TextSpan.raw(text)), ..self }
+        TermGauge { label: Maybe.Some(TextSpan.raw(text)), ..self }
     }
 
     /// Set the block wrapper.
     public fn block(self, block: Block) -> TermGauge {
-        TermGauge { block: Some(block), ..self }
+        TermGauge { block: Maybe.Some(block), ..self }
     }
 
     /// Set the style of the filled portion.
@@ -79,12 +79,12 @@ implement TermGauge {
 implement Widget for TermGauge {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let gauge_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if gauge_area.width < 1 || gauge_area.height < 1 { return; }
@@ -117,16 +117,16 @@ implement Widget for TermGauge {
 
         // Determine label text
         let label_text = match self.label {
-            Some(ref l) => l.content.clone(),
-            None => {
+            Maybe.Some(ref l) => l.content.clone(),
+            Maybe.None => {
                 let pct = (self.ratio * 100.0) as Int;
                 f"{pct}%"
             }
         };
 
         let label_style = match self.label {
-            Some(ref l) => l.style,
-            None => self.style,
+            Maybe.Some(ref l) => l.style,
+            Maybe.None => self.style,
         };
 
         // Center label over the gauge

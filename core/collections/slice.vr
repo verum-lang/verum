@@ -325,7 +325,7 @@ implement<T> [T] {
     // =========================================================================
 
     /// Binary search for element in sorted slice.
-    /// Returns Ok(index) if found, Err(insertion_point) if !found.
+    /// Returns Result.Ok(index) if found, Result.Err(insertion_point) if !found.
     ///
 
     /// IMPLEMENTATION NOTE: delegates to `binary_search_by` to avoid
@@ -361,11 +361,11 @@ implement<T> [T] {
             match f(&self[mid]) {
                 Ordering.Less => left = mid + 1,
                 Ordering.Greater => right = mid,
-                Ordering.Equal => return Ok(mid),
+                Ordering.Equal => return Result.Ok(mid),
             }
         }
 
-        Err(left)
+        Result.Err(left)
     }
 
     /// Binary search by key.
@@ -572,7 +572,7 @@ implement<T> [T] {
     // =========================================================================
 
     /// Split off the first element, returning it and the rest.
-    /// Returns None if the slice is empty.
+    /// Returns Maybe.None if the slice is empty.
     public fn split_first(&self) -> Maybe<(&T, &[T])> {
         if self.is_empty() {
             Maybe.None
@@ -582,7 +582,7 @@ implement<T> [T] {
     }
 
     /// Split off the last element, returning it and the rest.
-    /// Returns None if the slice is empty.
+    /// Returns Maybe.None if the slice is empty.
     public fn split_last(&self) -> Maybe<(&T, &[T])> {
         if self.is_empty() {
             Maybe.None
@@ -1232,16 +1232,16 @@ implement<T> Iterator for SliceIter<T> {
 
     public fn next(&mut self) -> Maybe<&T> {
         if self.front >= self.back {
-            return None;
+            return Maybe.None;
         }
         let item = &self.slice[self.front];
         self.front = self.front + 1;
-        Some(item)
+        Maybe.Some(item)
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.back - self.front;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 
     public fn count(&mut self) -> Int {
@@ -1259,16 +1259,16 @@ implement<T> Iterator for SliceIter<T> {
 implement<T> DoubleEndedIterator for SliceIter<T> {
     public fn next_back(&mut self) -> Maybe<&T> {
         if self.front >= self.back {
-            return None;
+            return Maybe.None;
         }
         self.back = self.back - 1;
-        Some(&self.slice[self.back])
+        Maybe.Some(&self.slice[self.back])
     }
 
     public fn nth_back(&mut self, n: Int) -> Maybe<&T> {
         if n >= self.back - self.front {
             self.front = self.back;
-            return None;
+            return Maybe.None;
         }
         self.back = self.back - n;
         self.next_back()
@@ -1297,17 +1297,17 @@ implement<T> Iterator for SliceEnumerate<T> {
 
     public fn next(&mut self) -> Maybe<(Int, &T)> {
         if self.pos >= self.slice.len() {
-            return None;
+            return Maybe.None;
         }
         let idx = self.pos;
         let item = &self.slice[self.pos];
         self.pos = self.pos + 1;
-        Some((idx, item))
+        Maybe.Some((idx, item))
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.slice.len() - self.pos;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
@@ -1349,26 +1349,26 @@ implement<T> Iterator for SliceIterMut<T> {
 
     public fn next(&mut self) -> Maybe<&mut T> {
         if self.front >= self.back {
-            return None;
+            return Maybe.None;
         }
         let item = &mut self.slice[self.front];
         self.front = self.front + 1;
-        Some(item)
+        Maybe.Some(item)
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.back - self.front;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for SliceIterMut<T> {
     public fn next_back(&mut self) -> Maybe<&mut T> {
         if self.front >= self.back {
-            return None;
+            return Maybe.None;
         }
         self.back = self.back - 1;
-        Some(&mut self.slice[self.back])
+        Maybe.Some(&mut self.slice[self.back])
     }
 }
 
@@ -1402,18 +1402,18 @@ implement<T> Iterator for Chunks<T> {
 
     public fn next(&mut self) -> Maybe<&[T]> {
         if self.pos >= self.slice.len() {
-            return None;
+            return Maybe.None;
         }
         let end = (self.pos + self.size).min(self.slice.len());
         let chunk = self.slice.slice(self.pos, end);
         self.pos = end;
-        Some(chunk)
+        Maybe.Some(chunk)
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.slice.len() - self.pos;
         let count = (remaining + self.size - 1) / self.size;
-        (count, Some(count))
+        (count, Maybe.Some(count))
     }
 }
 
@@ -1439,16 +1439,16 @@ implement<T> Iterator for ChunksExact<T> {
 
     public fn next(&mut self) -> Maybe<&[T]> {
         if self.pos >= self.slice.len() {
-            return None;
+            return Maybe.None;
         }
         let chunk = self.slice.slice(self.pos, self.pos + self.size);
         self.pos = self.pos + self.size;
-        Some(chunk)
+        Maybe.Some(chunk)
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = (self.slice.len() - self.pos) / self.size;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
@@ -1480,19 +1480,19 @@ implement<T> Iterator for Windows<T> {
 
     public fn next(&mut self) -> Maybe<&[T]> {
         if self.pos + self.size > self.slice.len() {
-            return None;
+            return Maybe.None;
         }
         let window = self.slice.slice(self.pos, self.pos + self.size);
         self.pos = self.pos + 1;
-        Some(window)
+        Maybe.Some(window)
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.slice.len() < self.size {
-            return (0, Some(0));
+            return (0, Maybe.Some(0));
         }
         let count = self.slice.len() - self.size + 1 - self.pos;
-        (count.max(0), Some(count.max(0)))
+        (count.max(0), Maybe.Some(count.max(0)))
     }
 }
 
@@ -1525,7 +1525,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for Split<T, P> {
 
     public fn next(&mut self) -> Maybe<&[T]> {
         if self.finished {
-            return None;
+            return Maybe.None;
         }
 
         let start = self.pos;
@@ -1538,21 +1538,21 @@ implement<T, P: fn(&T) -> Bool> Iterator for Split<T, P> {
             if (self.predicate)(item) {
                 let result = self.slice.slice(start, i);
                 self.pos = i + 1;
-                return Some(result);
+                return Maybe.Some(result);
             }
             i = i + 1;
         }
 
         // No more matches — yield remainder
         self.finished = true;
-        Some(self.slice.slice(start, len))
+        Maybe.Some(self.slice.slice(start, len))
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.finished {
-            (0, Some(0))
+            (0, Maybe.Some(0))
         } else {
-            (1, Some(self.slice.len() - self.pos + 1))
+            (1, Maybe.Some(self.slice.len() - self.pos + 1))
         }
     }
 }
@@ -1582,7 +1582,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for SplitInclusive<T, P> {
 
     public fn next(&mut self) -> Maybe<&[T]> {
         if self.finished {
-            return None;
+            return Maybe.None;
         }
 
         let start = self.pos;
@@ -1590,7 +1590,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for SplitInclusive<T, P> {
 
         if start >= len {
             self.finished = true;
-            return None;
+            return Maybe.None;
         }
 
         // Search for next match
@@ -1600,21 +1600,21 @@ implement<T, P: fn(&T) -> Bool> Iterator for SplitInclusive<T, P> {
             if (self.predicate)(item) {
                 let result = self.slice.slice(start, i + 1);
                 self.pos = i + 1;
-                return Some(result);
+                return Maybe.Some(result);
             }
             i = i + 1;
         }
 
         // No more matches — yield remainder
         self.finished = true;
-        Some(self.slice.slice(start, len))
+        Maybe.Some(self.slice.slice(start, len))
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.finished {
-            (0, Some(0))
+            (0, Maybe.Some(0))
         } else {
-            (1, Some(self.slice.len() - self.pos + 1))
+            (1, Maybe.Some(self.slice.len() - self.pos + 1))
         }
     }
 }
@@ -1645,7 +1645,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for SplitN<T, P> {
 
     public fn next(&mut self) -> Maybe<&[T]> {
         if self.finished || self.remaining == 0 {
-            return None;
+            return Maybe.None;
         }
 
         let start = self.pos;
@@ -1655,7 +1655,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for SplitN<T, P> {
         if self.remaining == 1 {
             self.remaining = 0;
             self.finished = true;
-            return Some(self.slice.slice(start, len));
+            return Maybe.Some(self.slice.slice(start, len));
         }
 
         // Search for next match
@@ -1666,7 +1666,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for SplitN<T, P> {
                 let result = self.slice.slice(start, i);
                 self.pos = i + 1;
                 self.remaining = self.remaining - 1;
-                return Some(result);
+                return Maybe.Some(result);
             }
             i = i + 1;
         }
@@ -1674,14 +1674,14 @@ implement<T, P: fn(&T) -> Bool> Iterator for SplitN<T, P> {
         // No more matches — yield remainder
         self.finished = true;
         self.remaining = 0;
-        Some(self.slice.slice(start, len))
+        Maybe.Some(self.slice.slice(start, len))
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.finished || self.remaining == 0 {
-            (0, Some(0))
+            (0, Maybe.Some(0))
         } else {
-            (1, Some(self.remaining))
+            (1, Maybe.Some(self.remaining))
         }
     }
 }
@@ -1711,7 +1711,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for RSplit<T, P> {
 
     public fn next(&mut self) -> Maybe<&[T]> {
         if self.finished {
-            return None;
+            return Maybe.None;
         }
 
         let end = self.end;
@@ -1724,20 +1724,20 @@ implement<T, P: fn(&T) -> Bool> Iterator for RSplit<T, P> {
             if (self.predicate)(item) {
                 let result = self.slice.slice(i + 1, end);
                 self.end = i;
-                return Some(result);
+                return Maybe.Some(result);
             }
         }
 
         // No more matches — yield remainder (from beginning to current end)
         self.finished = true;
-        Some(self.slice.slice(0, end))
+        Maybe.Some(self.slice.slice(0, end))
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.finished {
-            (0, Some(0))
+            (0, Maybe.Some(0))
         } else {
-            (1, Some(self.end + 1))
+            (1, Maybe.Some(self.end + 1))
         }
     }
 }
@@ -1768,7 +1768,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for RSplitN<T, P> {
 
     public fn next(&mut self) -> Maybe<&[T]> {
         if self.finished || self.remaining == 0 {
-            return None;
+            return Maybe.None;
         }
 
         let end = self.end;
@@ -1777,7 +1777,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for RSplitN<T, P> {
         if self.remaining == 1 {
             self.remaining = 0;
             self.finished = true;
-            return Some(self.slice.slice(0, end));
+            return Maybe.Some(self.slice.slice(0, end));
         }
 
         // Search backwards for match
@@ -1789,21 +1789,21 @@ implement<T, P: fn(&T) -> Bool> Iterator for RSplitN<T, P> {
                 let result = self.slice.slice(i + 1, end);
                 self.end = i;
                 self.remaining = self.remaining - 1;
-                return Some(result);
+                return Maybe.Some(result);
             }
         }
 
         // No more matches — yield remainder
         self.finished = true;
         self.remaining = 0;
-        Some(self.slice.slice(0, end))
+        Maybe.Some(self.slice.slice(0, end))
     }
 
     public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.finished || self.remaining == 0 {
-            (0, Some(0))
+            (0, Maybe.Some(0))
         } else {
-            (1, Some(self.remaining))
+            (1, Maybe.Some(self.remaining))
         }
     }
 }

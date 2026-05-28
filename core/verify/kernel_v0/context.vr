@@ -98,7 +98,7 @@ implement Context {
     }
 
     /// Look up the type of de Bruijn index `i` in the context. Returns
-    /// `Maybe::None` if `i` is out of bounds (free variable rejected by
+    /// `Maybe::Maybe.None` if `i` is out of bounds (free variable rejected by
     /// the elaborator).
     ///
     /// **Crucially**: the returned type IS NOT yet shifted. Callers

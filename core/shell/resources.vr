@@ -140,8 +140,8 @@ implement TempFile {
         p.push(&PathBuf.from(f"verum-tmp-{suffix}"));
         let opts = OpenOptions.new().write(true).create_new(true).read(true);
         match opts.open(p.as_path()) {
-            Ok(file) => Ok(TempFile { path: p, file: Some(file), persisted: false }),
-            Err(io)  => Err(ShellError.SpawnFailed {
+            Result.Ok(file) => Result.Ok(TempFile { path: p, file: Maybe.Some(file), persisted: false }),
+            Result.Err(io)  => Result.Err(ShellError.SpawnFailed {
                 command: f"<temp file in {dir}>",
                 reason:  f"failed to create temp file: {io}",
             }),
@@ -165,7 +165,7 @@ implement Drop for TempFile {
     fn drop(&mut self) {
         // Close the file handle first so the unlink can succeed on Windows
         // (where open files cannot be deleted).
-        self.file = None;
+        self.file = Maybe.None;
         if !self.persisted {
             let _ = fs_remove_file(self.path.as_path());
         }
@@ -213,14 +213,14 @@ implement FileLock {
         FileLock.acquire(path, LockKind.Shared, true)
     }
 
-    /// Try to acquire a lock without blocking. Returns `Ok(None)` if
+    /// Try to acquire a lock without blocking. Returns `Result.Ok(Maybe.None)` if
     /// another holder has it.
     public fn try_lock_exclusive(path: &Path)
         -> Result<Maybe<FileLock>, ShellError>
     {
         match FileLock.acquire(path, LockKind.Exclusive, false) {
-            Ok(l)  => Ok(Some(l)),
-            Err(_) => Ok(None),
+            Result.Ok(l)  => Result.Ok(Maybe.Some(l)),
+            Result.Err(_) => Result.Ok(Maybe.None),
         }
     }
 
@@ -239,12 +239,12 @@ implement FileLock {
         };
         let r = __platform_flock(raw_fd, op);
         if r != 0 {
-            return Err(ShellError.SpawnFailed {
+            return Result.Err(ShellError.SpawnFailed {
                 command: f"<flock {path}>",
                 reason:  "flock failed".into(),
             });
         }
-        Ok(FileLock {
+        Result.Ok(FileLock {
             fd: Fd.from_raw(raw_fd),
             kind,
             released: false,

@@ -86,28 +86,28 @@ public fn modifier_kind_name(m: &DatetimeModifier) -> Text {
 // -----------------------------------------------------------------------------
 
 public fn parse(text: &Text) -> Maybe<DatetimeModifier> {
-    if *text == "now".clone() { return Some(MNow); }
-    if *text == "start of day".clone() { return Some(MStartOfDay); }
-    if *text == "start of month".clone() { return Some(MStartOfMonth); }
-    if *text == "start of year".clone() { return Some(MStartOfYear); }
-    if *text == "unixepoch".clone() { return Some(MUnixEpoch); }
-    if *text == "utc".clone() { return Some(MUtc); }
-    if *text == "localtime".clone() { return Some(MLocaltime); }
+    if *text == "now".clone() { return Maybe.Some(MNow); }
+    if *text == "start of day".clone() { return Maybe.Some(MStartOfDay); }
+    if *text == "start of month".clone() { return Maybe.Some(MStartOfMonth); }
+    if *text == "start of year".clone() { return Maybe.Some(MStartOfYear); }
+    if *text == "unixepoch".clone() { return Maybe.Some(MUnixEpoch); }
+    if *text == "utc".clone() { return Maybe.Some(MUtc); }
+    if *text == "localtime".clone() { return Maybe.Some(MLocaltime); }
 
     // weekday N
     if starts_with(text, &"weekday ".clone()) {
         let suffix = drop_prefix(text, 8);
         match parse_int_text(&suffix) {
-            Some(n) => if n >= 0 && n <= 6 { return Some(MWeekday(n)); }
-            None    => {}
+            Maybe.Some(n) => if n >= 0 && n <= 6 { return Maybe.Some(MWeekday(n)); }
+            Maybe.None    => {}
         }
     }
 
     // +N <unit> / -N <unit>
     let bs = text.as_bytes();
-    if bs.len() < 3 { return None; }
+    if bs.len() < 3 { return Maybe.None; }
     let signed = bs[0] == (43 as Byte) || bs[0] == (45 as Byte);
-    if !signed { return None; }
+    if !signed { return Maybe.None; }
     let neg = bs[0] == (45 as Byte);
 
     // Find the space separator.
@@ -117,35 +117,35 @@ public fn parse(text: &Text) -> Maybe<DatetimeModifier> {
         if bs[i] == (32 as Byte) { sep = i; break; }
         i = i + 1;
     }
-    if sep < 0 { return None; }
+    if sep < 0 { return Maybe.None; }
 
     let n_text = slice_text(text, 1, sep);
     let unit = slice_text(text, sep + 1, bs.len());
     let n_int = match parse_int_text(&n_text) {
-        Some(v) => v,
-        None    => return None,
+        Maybe.Some(v) => v,
+        Maybe.None    => return Maybe.None,
     };
     let signed_n = if neg { -n_int } else { n_int };
 
     if unit == "days".clone() || unit == "day".clone() {
-        return Some(MAddDays(signed_n as Int64));
+        return Maybe.Some(MAddDays(signed_n as Int64));
     }
     if unit == "hours".clone() || unit == "hour".clone() {
-        return Some(MAddHours(signed_n as Int64));
+        return Maybe.Some(MAddHours(signed_n as Int64));
     }
     if unit == "minutes".clone() || unit == "minute".clone() {
-        return Some(MAddMinutes(signed_n as Int64));
+        return Maybe.Some(MAddMinutes(signed_n as Int64));
     }
     if unit == "seconds".clone() || unit == "second".clone() {
-        return Some(MAddSeconds(signed_n as Int64));
+        return Maybe.Some(MAddSeconds(signed_n as Int64));
     }
     if unit == "months".clone() || unit == "month".clone() {
-        return Some(MAddMonths(signed_n));
+        return Maybe.Some(MAddMonths(signed_n));
     }
     if unit == "years".clone() || unit == "year".clone() {
-        return Some(MAddYears(signed_n));
+        return Maybe.Some(MAddYears(signed_n));
     }
-    None
+    Maybe.None
 }
 
 // -----------------------------------------------------------------------------
@@ -243,21 +243,21 @@ fn slice_text(t: &Text, lo: Int, hi: Int) -> Text {
 
 fn parse_int_text(t: &Text) -> Maybe<Int> {
     let bs = t.as_bytes();
-    if bs.len() == 0 { return None; }
+    if bs.len() == 0 { return Maybe.None; }
     // Three-layer overflow defense (matches the recipe codified in
     // #70-#74). Modifier arguments arrive from user-supplied SQL —
     // a long-digit input is either a typo or an attempt to wrap
     // `acc * 10 + d` past Int.MAX into a small-magnitude value that
     // slips past downstream range checks (e.g. month/day validators).
-    if bs.len() > 19 { return None; }
+    if bs.len() > 19 { return Maybe.None; }
     let mut i: Int = 0;
     let mut acc: Int = 0;
     while i < bs.len() {
-        if bs[i] < (48 as Byte) || bs[i] > (57 as Byte) { return None; }
-        if acc > 922_337_203_685_477_580 { return None; }   // Int.MAX / 10
+        if bs[i] < (48 as Byte) || bs[i] > (57 as Byte) { return Maybe.None; }
+        if acc > 922_337_203_685_477_580 { return Maybe.None; }   // Int.MAX / 10
         acc = acc * 10 + ((bs[i] - (48 as Byte)) as Int);
-        if acc < 0 { return None; }                          // wrap-around guard
+        if acc < 0 { return Maybe.None; }                          // wrap-around guard
         i = i + 1;
     }
-    Some(acc)
+    Maybe.Some(acc)
 }

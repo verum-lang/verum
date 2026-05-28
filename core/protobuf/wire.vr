@@ -51,13 +51,13 @@ implement WireType {
 
     public fn from_u8(b: UInt8) -> Result<WireType, ProtobufError> {
         match b {
-            0 => Ok(WireType.Varint),
-            1 => Ok(WireType.Fixed64),
-            2 => Ok(WireType.LengthDelim),
-            3 => Err(ProtobufError.UnsupportedGroup),
-            4 => Err(ProtobufError.UnsupportedGroup),
-            5 => Ok(WireType.Fixed32),
-            _ => Err(ProtobufError.InvalidWireType(b)),
+            0 => Result.Ok(WireType.Varint),
+            1 => Result.Ok(WireType.Fixed64),
+            2 => Result.Ok(WireType.LengthDelim),
+            3 => Result.Err(ProtobufError.UnsupportedGroup),
+            4 => Result.Err(ProtobufError.UnsupportedGroup),
+            5 => Result.Ok(WireType.Fixed32),
+            _ => Result.Err(ProtobufError.InvalidWireType(b)),
         }
     }
 }
@@ -108,22 +108,22 @@ public fn read_varint(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), ProtobufE
     let mut p = pos;
     let mut bytes_read = 0;
     while bytes_read < 10 {
-        if p >= buf.len() { return Err(ProtobufError.UnexpectedEof); }
+        if p >= buf.len() { return Result.Err(ProtobufError.UnexpectedEof); }
         let b = buf[p] as UInt64;
         if bytes_read == 9 && (b & 0x7F) > 1 {
             // Tenth byte must encode at most bit 63 of the result.
-            return Err(ProtobufError.VarintOverflow);
+            return Result.Err(ProtobufError.VarintOverflow);
         }
         v = v | ((b & 0x7F) << shift);
         p = p + 1;
         bytes_read = bytes_read + 1;
         if (b & 0x80) == 0 {
-            return Ok((v, p));
+            return Result.Ok((v, p));
         }
         shift = shift + 7;
     }
     // 10 bytes with MSB still set → overflow (u64 max fits in 10 varint bytes).
-    Err(ProtobufError.VarintOverflow)
+    Result.Err(ProtobufError.VarintOverflow)
 }
 
 // =============================================================================
@@ -160,12 +160,12 @@ public fn write_sint64(out: &mut List<Byte>, value: Int64) {
 
 public fn read_sint32(buf: &[Byte], pos: Int) -> Result<(Int32, Int), ProtobufError> {
     let (v, p) = read_varint(buf, pos)?;
-    Ok((decode_zigzag_32(v as UInt32), p))
+    Result.Ok((decode_zigzag_32(v as UInt32), p))
 }
 
 public fn read_sint64(buf: &[Byte], pos: Int) -> Result<(Int64, Int), ProtobufError> {
     let (v, p) = read_varint(buf, pos)?;
-    Ok((decode_zigzag_64(v), p))
+    Result.Ok((decode_zigzag_64(v), p))
 }
 
 // =============================================================================
@@ -188,23 +188,23 @@ public fn write_fixed64(out: &mut List<Byte>, value: UInt64) {
 }
 
 public fn read_fixed32(buf: &[Byte], pos: Int) -> Result<(UInt32, Int), ProtobufError> {
-    if pos + 4 > buf.len() { return Err(ProtobufError.UnexpectedEof); }
+    if pos + 4 > buf.len() { return Result.Err(ProtobufError.UnexpectedEof); }
     let v = (buf[pos] as UInt32)
         | ((buf[pos + 1] as UInt32) << 8)
         | ((buf[pos + 2] as UInt32) << 16)
         | ((buf[pos + 3] as UInt32) << 24);
-    Ok((v, pos + 4))
+    Result.Ok((v, pos + 4))
 }
 
 public fn read_fixed64(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), ProtobufError> {
-    if pos + 8 > buf.len() { return Err(ProtobufError.UnexpectedEof); }
+    if pos + 8 > buf.len() { return Result.Err(ProtobufError.UnexpectedEof); }
     let mut v: UInt64 = 0;
     let mut i = 0;
     while i < 8 {
         v = v | ((buf[pos + i] as UInt64) << (i * 8));
         i = i + 1;
     }
-    Ok((v, pos + 8))
+    Result.Ok((v, pos + 8))
 }
 
 public fn write_float32(out: &mut List<Byte>, value: Float) {
@@ -268,44 +268,44 @@ implement ProtobufCursor {
         let wire_type = WireType.from_u8((tag & 0x07) as UInt8)?;
         let field_number = (tag >> 3) as UInt32;
         if field_number == 0 {
-            return Err(ProtobufError.InvalidFieldNumber(field_number as UInt64));
+            return Result.Err(ProtobufError.InvalidFieldNumber(field_number as UInt64));
         }
-        Ok((field_number, wire_type))
+        Result.Ok((field_number, wire_type))
     }
 
     public fn read_varint(&mut self) -> Result<UInt64, ProtobufError> {
         let (v, p) = read_varint(&self.buf, self.pos)?;
         self.pos = p;
-        Ok(v)
+        Result.Ok(v)
     }
 
     public fn read_sint32(&mut self) -> Result<Int32, ProtobufError> {
         let (v, p) = read_sint32(&self.buf, self.pos)?;
         self.pos = p;
-        Ok(v)
+        Result.Ok(v)
     }
 
     public fn read_sint64(&mut self) -> Result<Int64, ProtobufError> {
         let (v, p) = read_sint64(&self.buf, self.pos)?;
         self.pos = p;
-        Ok(v)
+        Result.Ok(v)
     }
 
     public fn read_fixed32(&mut self) -> Result<UInt32, ProtobufError> {
         let (v, p) = read_fixed32(&self.buf, self.pos)?;
         self.pos = p;
-        Ok(v)
+        Result.Ok(v)
     }
 
     public fn read_fixed64(&mut self) -> Result<UInt64, ProtobufError> {
         let (v, p) = read_fixed64(&self.buf, self.pos)?;
         self.pos = p;
-        Ok(v)
+        Result.Ok(v)
     }
 
     public fn read_bool(&mut self) -> Result<Bool, ProtobufError> {
         let v = self.read_varint()?;
-        Ok(v != 0)
+        Result.Ok(v != 0)
     }
 
     /// Read a length-delimited slice. Returns (start, len) offsets into
@@ -329,7 +329,7 @@ implement ProtobufCursor {
         let len_u64 = self.read_varint()?;
         // Layer 1: reject sign-overflow on the UInt64 → Int cast.
         if len_u64 > (Int.MAX as UInt64) {
-            return Err(ProtobufError.LengthTooLarge {
+            return Result.Err(ProtobufError.LengthTooLarge {
                 declared: -1,            // unrepresentable in Int
                 limit: MAX_LENGTH_DELIM,
             });
@@ -337,7 +337,7 @@ implement ProtobufCursor {
         let len = len_u64 as Int;
         // Layer 2: enforce per-field cap.
         if len > MAX_LENGTH_DELIM {
-            return Err(ProtobufError.LengthTooLarge {
+            return Result.Err(ProtobufError.LengthTooLarge {
                 declared: len,
                 limit: MAX_LENGTH_DELIM,
             });
@@ -349,14 +349,14 @@ implement ProtobufCursor {
         // increases.
         let end = self.pos + len;
         if end < self.pos || end > self.buf.len() {
-            return Err(ProtobufError.InvalidLength {
+            return Result.Err(ProtobufError.InvalidLength {
                 declared: len,
                 available: self.buf.len() - self.pos,
             });
         }
         let start = self.pos;
         self.pos = end;
-        Ok((start, len))
+        Result.Ok((start, len))
     }
 
     /// Read a string (validates UTF-8).
@@ -365,8 +365,8 @@ implement ProtobufCursor {
         let mut copy = List.with_capacity(len);
         copy.extend_from_slice(&self.buf.as_slice()[start..start + len]);
         match Text.from_utf8(&copy) {
-            Ok(t) => Ok(t),
-            Err(_) => Err(ProtobufError.InvalidUtf8),
+            Result.Ok(t) => Result.Ok(t),
+            Result.Err(_) => Result.Err(ProtobufError.InvalidUtf8),
         }
     }
 
@@ -375,19 +375,19 @@ implement ProtobufCursor {
         let (start, len) = self.read_length_delim_view()?;
         let mut out = List.with_capacity(len);
         out.extend_from_slice(&self.buf.as_slice()[start..start + len]);
-        Ok(out)
+        Result.Ok(out)
     }
 
     /// Skip an entire field of the given wire type. Used for unknown
     /// fields that the receiver doesn't care about.
     public fn skip(&mut self, wire_type: WireType) -> Result<(), ProtobufError> {
         match wire_type {
-            WireType.Varint => { let _ = self.read_varint()?; Ok(()) }
-            WireType.Fixed64 => { let _ = self.read_fixed64()?; Ok(()) }
-            WireType.Fixed32 => { let _ = self.read_fixed32()?; Ok(()) }
+            WireType.Varint => { let _ = self.read_varint()?; Result.Ok(()) }
+            WireType.Fixed64 => { let _ = self.read_fixed64()?; Result.Ok(()) }
+            WireType.Fixed32 => { let _ = self.read_fixed32()?; Result.Ok(()) }
             WireType.LengthDelim => {
                 let _ = self.read_length_delim_view()?;
-                Ok(())
+                Result.Ok(())
             }
         }
     }

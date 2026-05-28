@@ -21,22 +21,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "Redis EVAL/EVALSHA/SCRIPT — server-side Lua scripting".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate: Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.redis.script;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.List;
 
 mount core.redis.client.{RedisClient, RedisError, exec, exec_bytes};
@@ -46,11 +46,11 @@ pub async fn script_load(client: &RedisClient, source: &Text) -> Result<Text, Re
     let mut a: List<Text> = List.new();
     a.push("SCRIPT".to_text()); a.push("LOAD".to_text()); a.push(source.clone());
     match exec(client, a.as_slice()).await? {
-        RespValue.SimpleString(s) => Ok(s),
+        RespValue.SimpleString(s) => Result.Ok(s),
         RespValue.BulkString(b)   => Text.from_utf8(b.as_slice())
             .map_err(|e| RedisError.InvalidReply(f"utf8: {e}")),
-        RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"SCRIPT LOAD unexpected: {other}")),
+        RespValue.Error_(m) => Result.Err(RedisError.Backend(m)),
+        other => Result.Err(RedisError.InvalidReply(f"SCRIPT LOAD unexpected: {other}")),
     }
 }
 
@@ -96,11 +96,11 @@ pub async fn script_exists(client: &RedisClient, sha: &Text) -> Result<Bool, Red
     a.push("SCRIPT".to_text()); a.push("EXISTS".to_text()); a.push(sha.clone());
     match exec(client, a.as_slice()).await? {
         RespValue.Array(arr) if !arr.is_empty() => match &arr[0] {
-            RespValue.Integer(n) => Ok(*n == 1),
-            _ => Err(RedisError.InvalidReply("SCRIPT EXISTS: bad inner".to_text())),
+            RespValue.Integer(n) => Result.Ok(*n == 1),
+            _ => Result.Err(RedisError.InvalidReply("SCRIPT EXISTS: bad inner".to_text())),
         },
-        RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"SCRIPT EXISTS unexpected: {other}")),
+        RespValue.Error_(m) => Result.Err(RedisError.Backend(m)),
+        other => Result.Err(RedisError.InvalidReply(f"SCRIPT EXISTS unexpected: {other}")),
     }
 }
 
@@ -108,8 +108,8 @@ pub async fn script_flush(client: &RedisClient) -> Result<(), RedisError> {
     let mut a: List<Text> = List.new();
     a.push("SCRIPT".to_text()); a.push("FLUSH".to_text());
     match exec(client, a.as_slice()).await? {
-        RespValue.SimpleString(_) => Ok(()),
-        RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"SCRIPT FLUSH unexpected: {other}")),
+        RespValue.SimpleString(_) => Result.Ok(()),
+        RespValue.Error_(m) => Result.Err(RedisError.Backend(m)),
+        other => Result.Err(RedisError.InvalidReply(f"SCRIPT FLUSH unexpected: {other}")),
     }
 }

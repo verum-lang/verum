@@ -56,7 +56,7 @@
 module core.database.mysql.typed_database;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount base.memory.Shared;
 
@@ -97,13 +97,13 @@ implement<C: CanRead> Database<MysqlPool, C> {
     /// last_insert_id in one shape.
     public fn query_simple(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().simple_query(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(e.message()),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(e.message()),
         }
         result
     }
@@ -124,13 +124,13 @@ implement<C: CanRead> Database<MysqlPool, C> {
         params: &List<StmtParam>,
     ) -> Result<MysqlPreparedResult, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = session.query_cached(handle.conn_mut(), sql, params);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(e.message()),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(e.message()),
         }
         result
     }
@@ -146,13 +146,13 @@ implement<C: CanWrite> Database<MysqlPool, C> {
     /// and `last_insert_id`.
     public fn execute_simple(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().simple_query(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(e.message()),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(e.message()),
         }
         result
     }
@@ -171,13 +171,13 @@ implement<C: CanWrite> Database<MysqlPool, C> {
         params: &List<StmtParam>,
     ) -> Result<MysqlPreparedResult, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = session.execute_cached(handle.conn_mut(), sql, params);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(e.message()),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(e.message()),
         }
         result
     }
@@ -194,14 +194,14 @@ implement<C: CanTx> Database<MysqlPool, C> {
     /// the duration of the tx; consumed by `commit` / `rollback`.
     public fn begin(&self) -> Result<MysqlTxScope<MysqlPool>, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         match begin_tx(handle.conn_mut()) {
-            Ok(tx) => Ok(MysqlTxScope { tx: tx, handle: handle }),
-            Err(e) => {
+            Result.Ok(tx) => Result.Ok(MysqlTxScope { tx: tx, handle: handle }),
+            Result.Err(e) => {
                 handle.release_discard(e.message());
-                Err(e)
+                Result.Err(e)
             }
         }
     }
@@ -211,14 +211,14 @@ implement<C: CanTx> Database<MysqlPool, C> {
     /// row invariants or READ ONLY for replica-bound analytics.
     public fn begin_with_opts(&self, opts: &MyTxOpts) -> Result<MysqlTxScope<MysqlPool>, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         match begin_tx_with(handle.conn_mut(), opts) {
-            Ok(tx) => Ok(MysqlTxScope { tx: tx, handle: handle }),
-            Err(e) => {
+            Result.Ok(tx) => Result.Ok(MysqlTxScope { tx: tx, handle: handle }),
+            Result.Err(e) => {
                 handle.release_discard(e.message());
-                Err(e)
+                Result.Err(e)
             }
         }
     }
@@ -276,8 +276,8 @@ implement MysqlTxScope<MysqlPool> {
     public fn commit(mut self) -> Result<(), DbError> {
         let result = commit_tx(self.tx);
         match &result {
-            Ok(_)  => self.handle.release_healthy(),
-            Err(e) => self.handle.release_discard(e.message()),
+            Result.Ok(_)  => self.handle.release_healthy(),
+            Result.Err(e) => self.handle.release_discard(e.message()),
         }
         result
     }
@@ -286,8 +286,8 @@ implement MysqlTxScope<MysqlPool> {
     public fn rollback(mut self) -> Result<(), DbError> {
         let result = rollback_tx(self.tx);
         match &result {
-            Ok(_)  => self.handle.release_healthy(),
-            Err(e) => self.handle.release_discard(e.message()),
+            Result.Ok(_)  => self.handle.release_healthy(),
+            Result.Err(e) => self.handle.release_discard(e.message()),
         }
         result
     }
@@ -305,13 +305,13 @@ implement<C: CanDdl> Database<MysqlPool, C> {
     /// on it. The bound is the load-bearing piece.
     public fn execute_ddl(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().simple_query(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(e.message()),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(e.message()),
         }
         result
     }
@@ -329,13 +329,13 @@ implement<C: CanUnsafe> Database<MysqlPool, C> {
     /// requires at the call site, every invocation is auditable.
     public fn execute_raw_unsafe(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
         let mut handle = match self.pool.acquire() {
-            Ok(h)  => h,
-            Err(e) => return Err(e),
+            Result.Ok(h)  => h,
+            Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().simple_query(sql);
         match &result {
-            Ok(_)  => handle.release_healthy(),
-            Err(e) => handle.release_discard(e.message()),
+            Result.Ok(_)  => handle.release_healthy(),
+            Result.Err(e) => handle.release_discard(e.message()),
         }
         result
     }

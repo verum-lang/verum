@@ -183,11 +183,11 @@ implement LagTracker {
                 let ns_behind = if now_ns > s.last_replica_ack_ns {
                     now_ns - s.last_replica_ack_ns
                 } else { 0 as Int64 };
-                return Some(classify(replica_id.clone(), frames_behind, ns_behind, &self.thresholds));
+                return Maybe.Some(classify(replica_id.clone(), frames_behind, ns_behind, &self.thresholds));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Snapshot every known replica's lag at `now_ns`.
@@ -197,8 +197,8 @@ implement LagTracker {
         while i < self.states.len() {
             let snap = self.snapshot(&self.states[i].replica_id, now_ns);
             match snap {
-                Some(s) => out.push(s),
-                None    => {}
+                Maybe.Some(s) => out.push(s),
+                Maybe.None    => {}
             }
             i = i + 1;
         }

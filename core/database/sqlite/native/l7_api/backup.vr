@@ -32,7 +32,7 @@ module core.database.sqlite.native.l7_api.backup;
 //  BoOk => { sleep_or_yield(); continue; }
 //  BoDone => break;
 //  BoBusy | BoLocked => { backoff(); continue; }
-//  BoFailed { code, reason } => return Err(...);
+//  BoFailed { code, reason } => return Result.Err(...);
 //  }
 //  }
 //  backup_finish(session);
@@ -119,8 +119,8 @@ fn read_total_pages(src: &Database) -> Int {
     let size_bytes: Int = match backend {
         BeMemory(ref f) => memdb_size(f),
         BeFile(ref f)   => match f.file_size() {
-            Ok(n)  => n,
-            Err(_) => 0,
+            Result.Ok(n)  => n,
+            Result.Err(_) => 0,
         },
     };
     if p.page_size_view() <= 0 { return 0; }
@@ -136,17 +136,17 @@ fn read_total_pages(src: &Database) -> Int {
 /// initialise an online-backup session that will copy from `src` to it.
 ///
 
-/// Returns `Err(DbCannotOpen)` if the destination cannot be opened,
-/// `Err(DbReadonly)` if the destination opens but isn't writable, or
-/// `Err(DbCorrupt)` if the source page-size disagrees with what the
+/// Returns `Result.Err(DbCannotOpen)` if the destination cannot be opened,
+/// `Result.Err(DbReadonly)` if the destination opens but isn't writable, or
+/// `Result.Err(DbCorrupt)` if the source page-size disagrees with what the
 /// destination would adopt.
 public fn backup_init_to_path(
     src: &Database,
     dst_path: &Text,
 ) -> Result<BackupSession, SqliteApiDbError> {
     let mut dst = match open_path_admin(dst_path) {
-        Ok(d)  => d,
-        Err(e) => { return Err(e); }
+        Result.Ok(d)  => d,
+        Result.Err(e) => { return Result.Err(e); }
     };
     backup_init_into(src, dst)
 }
@@ -161,12 +161,12 @@ public fn backup_init_into(
     let src_page_size = src.pager_view().page_size_view();
     let dst_page_size = dst.pager_view().page_size_view();
     if src_page_size != dst_page_size {
-        return Err(DbCorrupt(
+        return Result.Err(DbCorrupt(
             "backup_init: src and dst page sizes disagree".clone(),
         ));
     }
     if src_page_size <= 0 {
-        return Err(DbCorrupt("backup_init: invalid page size on src".clone()));
+        return Result.Err(DbCorrupt("backup_init: invalid page size on src".clone()));
     }
     let total = read_total_pages(src);
     let progress = core.database.sqlite.native.backup_api.handle.new_handle(
@@ -175,7 +175,7 @@ public fn backup_init_into(
         0 as Int64, "main".clone(),
         total,
     );
-    Ok(BackupSession {
+    Result.Ok(BackupSession {
         dst: dst,
         page_size: src_page_size,
         progress: progress,
@@ -229,8 +229,8 @@ public fn backup_step(
         }
 
         let frame = match pager_read(src.pager_mut(), src_page_no) {
-            Ok(f) => f,
-            Err(_) => {
+            Result.Ok(f) => f,
+            Result.Err(_) => {
                 return BoFailed {
                     code: ExtIoErrRead,
                     reason: f"backup: pager_read failed at page {src_page_no}".clone(),
@@ -245,8 +245,8 @@ public fn backup_step(
             dirty: false,
         };
         match pager_write(session.dst.pager_mut(), &dst_frame) {
-            Ok(_) => {}
-            Err(_) => {
+            Result.Ok(_) => {}
+            Result.Err(_) => {
                 return BoFailed {
                     code: ExtIoErrWrite,
                     reason: f"backup: pager_write failed at page {src_page_no}".clone(),
@@ -308,24 +308,24 @@ public fn backup_to_path_in_one_go(
     dst_path: &Text,
 ) -> Result<Database, SqliteApiDbError> {
     let session = match backup_init_to_path(src, dst_path) {
-        Ok(s)  => s,
-        Err(e) => { return Err(e); }
+        Result.Ok(s)  => s,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let mut sess = session;
     let req = from_n_pages(-1);   // BsrAll
     loop {
         let outcome = backup_step(&mut sess, src, req.clone());
         match outcome {
-            BoDone => { return Ok(backup_finish(sess)); }
+            BoDone => { return Result.Ok(backup_finish(sess)); }
             BoOk   => {}   // shouldn't happen with BsrAll, but loop safely
             BoBusy | BoLocked => {
                 // No real busy story for a same-process source; convert to error
                 let _ = sess;
-                return Err(DbIoError("backup: source unexpectedly busy".clone()));
+                return Result.Err(DbIoError("backup: source unexpectedly busy".clone()));
             }
             BoFailed { code: _code, reason } => {
                 let _ = sess;
-                return Err(DbIoError(reason));
+                return Result.Err(DbIoError(reason));
             }
         }
     }

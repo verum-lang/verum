@@ -11,7 +11,7 @@
 // `conflict.decision_for` to decide what to do next.
 //
 
-// `check_check_expr` returns `Ok(true)` for satisfied, `Ok(false)`
+// `check_check_expr` returns `Result.Ok(true)` for satisfied, `Result.Ok(false)`
 // for violated, `Err` for evaluation error. The CHECK expression
 // itself is evaluated by a separate VDBE sub-program — the helper
 // here only takes the boolean result + the spec.
@@ -60,13 +60,13 @@ public fn enforce_check(
     spec: &CheckConstraint,
     is_satisfied: Bool,
 ) -> Maybe<ViolationDecision> {
-    if is_satisfied { return None; }
+    if is_satisfied { return Maybe.None; }
     let detail = match &spec.name {
-        Some(n) => n.clone(),
-        None    => "<unnamed CHECK>".clone(),
+        Maybe.Some(n) => n.clone(),
+        Maybe.None    => "<unnamed CHECK>".clone(),
     };
     let msg = build_msg("CHECK constraint failed".clone(), table, &detail);
-    Some(decision_for(&spec.on_conflict, msg))
+    Maybe.Some(decision_for(&spec.on_conflict, msg))
 }
 
 // -----------------------------------------------------------------------------
@@ -79,9 +79,9 @@ public fn enforce_not_null(
     value: &Register,
 ) -> Maybe<ViolationDecision> {
     let is_null = match value { RNull => true, _ => false };
-    if !is_null { return None; }
+    if !is_null { return Maybe.None; }
     let msg = build_msg("NOT NULL constraint failed".clone(), table, &spec.column);
-    Some(decision_for(&spec.on_conflict, msg))
+    Maybe.Some(decision_for(&spec.on_conflict, msg))
 }
 
 // -----------------------------------------------------------------------------
@@ -93,13 +93,13 @@ public fn enforce_unique(
     spec: &UniqueConstraint,
     duplicate_found: Bool,
 ) -> Maybe<ViolationDecision> {
-    if !duplicate_found { return None; }
+    if !duplicate_found { return Maybe.None; }
     let detail = match &spec.name {
-        Some(n) => n.clone(),
-        None    => join_columns(&spec.columns),
+        Maybe.Some(n) => n.clone(),
+        Maybe.None    => join_columns(&spec.columns),
     };
     let msg = build_msg("UNIQUE constraint failed".clone(), table, &detail);
-    Some(decision_for(&spec.on_conflict, msg))
+    Maybe.Some(decision_for(&spec.on_conflict, msg))
 }
 
 // -----------------------------------------------------------------------------
@@ -111,10 +111,10 @@ public fn enforce_primary_key(
     spec: &PrimaryKeyConstraint,
     duplicate_found: Bool,
 ) -> Maybe<ViolationDecision> {
-    if !duplicate_found { return None; }
+    if !duplicate_found { return Maybe.None; }
     let detail = join_columns(&spec.columns);
     let msg = build_msg("PRIMARY KEY constraint failed".clone(), table, &detail);
-    Some(decision_for(&spec.on_conflict, msg))
+    Maybe.Some(decision_for(&spec.on_conflict, msg))
 }
 
 // -----------------------------------------------------------------------------
@@ -131,13 +131,13 @@ public fn enforce_foreign_key(
     spec: &ForeignKeyConstraint,
     target_row_exists: Bool,
 ) -> Maybe<ViolationDecision> {
-    if target_row_exists { return None; }
+    if target_row_exists { return Maybe.None; }
     let detail = match &spec.name {
-        Some(n) => n.clone(),
-        None    => spec.target_table.clone(),
+        Maybe.Some(n) => n.clone(),
+        Maybe.None    => spec.target_table.clone(),
     };
     let msg = build_msg("FOREIGN KEY constraint failed".clone(), table, &detail);
-    Some(decision_for(&core.database.sqlite.native.constraints.conflict.OcAbort, msg))
+    Maybe.Some(decision_for(&core.database.sqlite.native.constraints.conflict.OcAbort, msg))
 }
 
 // -----------------------------------------------------------------------------

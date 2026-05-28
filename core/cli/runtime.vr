@@ -69,7 +69,7 @@ public type HandlerContext is {
 };
 
 implement HandlerContext {
-    /// Lookup a flag by long-name. Returns `None` if absent.
+    /// Lookup a flag by long-name. Returns `Maybe.None` if absent.
     public fn flag(&self, long: &Text) -> Maybe<&CapturedFlag> {
         self.flags.get(long)
     }
@@ -82,7 +82,7 @@ implement HandlerContext {
         }
     }
 
-    /// Lookup a flag's first value. None if flag absent or has no values.
+    /// Lookup a flag's first value. Maybe.None if flag absent or has no values.
     public fn flag_value(&self, long: &Text) -> Maybe<Text> {
         match self.flags.get(long) {
             Maybe.Some(f) => if f.values.len() > 0 { Maybe.Some(f.values[0].clone()) } else { Maybe.None },
@@ -184,7 +184,7 @@ implement App {
             let target = self.find_at_path(&outcome.command_path);
             let txt = render_help(target, &self.style);
             stdio.println(&txt);
-            return Ok(ExitCode.ok());
+            return Result.Ok(ExitCode.ok());
         }
 
         // --version short-circuit.
@@ -195,7 +195,7 @@ implement App {
                 Maybe.None => "unknown".to_text(),
             };
             stdio.println(&Text.from(f"{target.name} {v}"));
-            return Ok(ExitCode.ok());
+            return Result.Ok(ExitCode.ok());
         }
 
         // Apply env-fallback for any flag declared with `env` and not
@@ -209,9 +209,9 @@ implement App {
                 if target.subcommands.len() > 0 {
                     let txt = render_help(target, &self.style);
                     stdio.println(&txt);
-                    return Ok(ExitCode.usage());
+                    return Result.Ok(ExitCode.usage());
                 }
-                Ok(ExitCode.ok())
+                Result.Ok(ExitCode.ok())
             },
             HandlerRef.NamedHandler(name) => {
                 match self.registry.lookup(name) {
@@ -223,9 +223,9 @@ implement App {
                             args: outcome.args.clone(),
                             trailing: outcome.trailing.clone(),
                         };
-                        Ok(h(&ctx))
+                        Result.Ok(h(&ctx))
                     },
-                    Maybe.None => Err(ParseError.bare(
+                    Maybe.None => Result.Err(ParseError.bare(
                         ParseErrorKind.InternalError,
                         Text.from(f"no handler registered: '{name}'"),
                     )),
@@ -239,8 +239,8 @@ implement App {
     public fn run_or_exit(&self) -> ! {
         let argv = env.args();
         match self.try_run(argv) {
-            Ok(code) => env.exit(code.code()),
-            Err(e) => {
+            Result.Ok(code) => env.exit(code.code()),
+            Result.Err(e) => {
                 let line = render_error(&e);
                 stdio.eprintln(&line);
                 env.exit(e.exit_code().code());
@@ -267,7 +267,7 @@ implement App {
 // env-fallback application
 // =============================================================================
 
-/// For each flag with `env_fallback = Some(...)` that wasn't captured,
+/// For each flag with `env_fallback = Maybe.Some(...)` that wasn't captured,
 /// pull the value from the process environment and synthesise a
 /// `CapturedFlag` entry.
 fn apply_env_fallbacks(spec: &CommandSpec, outcome: &ParseOutcome) -> ParseOutcome {

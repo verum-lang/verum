@@ -49,22 +49,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "TUF spec §4 metadata data model — Root/Timestamp/Snapshot/Targets + delegations",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.tuf.types;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map, Set};
 mount encoding.json.{JsonValue};
 mount time.rfc3339.{Rfc3339Time};
@@ -348,7 +348,7 @@ fn collect_missing_keys(
 /// `paths` takes precedence over `path_hash_prefixes`; if both
 /// fields are absent, the delegation matches nothing (per spec).
 public fn delegation_matches(d: &DelegatedRole, path: &Text) -> Bool {
-    if let Some(patterns) = &d.paths {
+    if let Maybe.Some(patterns) = &d.paths {
         let mut i: Int = 0;
         while i < patterns.len() {
             if path_pattern_matches(&patterns[i], path) { return true; }
@@ -356,7 +356,7 @@ public fn delegation_matches(d: &DelegatedRole, path: &Text) -> Bool {
         }
         return false;
     }
-    if let Some(prefixes) = &d.path_hash_prefixes {
+    if let Maybe.Some(prefixes) = &d.path_hash_prefixes {
         // SHA-256 of the path; check hex prefix match. The hashing
         // is the responsibility of the caller (delegations.vr) — we
         // surface the structural check here.

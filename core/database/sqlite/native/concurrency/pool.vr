@@ -143,34 +143,34 @@ implement DbConnectionPool {
     public fn in_use(&self) -> Int { self.capacity - self.free.len() }
     public fn is_closed(&self) -> Bool { self.closed }
 
-    /// Try to acquire a slot synchronously. Returns Err(Timeout) if
+    /// Try to acquire a slot synchronously. Returns Result.Err(Timeout) if
     /// the pool is empty (the caller layers retry/backoff on top).
     public fn try_acquire(&mut self) -> Result<Lease, PoolError> {
-        if self.closed { return Err(PoolClosed); }
-        if self.free.len() == 0 { return Err(Timeout); }
+        if self.closed { return Result.Err(PoolClosed); }
+        if self.free.len() == 0 { return Result.Err(Timeout); }
         let idx = self.free[self.free.len() - 1];
         let mut new_free: List<Int> = List.new();
         let mut k: Int = 0;
         while k + 1 < self.free.len() { new_free.push(self.free[k]); k = k + 1; }
         self.free = new_free;
         self.slots[idx].in_use = true;
-        Ok(Lease {
+        Result.Ok(Lease {
             slot: SlotId { id: idx },
             sequence: self.slots[idx].sequence,
         })
     }
 
-    /// Return a lease to the pool. Returns Err(InvalidLease) if the
+    /// Return a lease to the pool. Returns Result.Err(InvalidLease) if the
     /// lease was already released (via sequence mismatch).
     public fn release(&mut self, lease: Lease) -> Result<(), PoolError> {
         let idx = lease.slot.id;
-        if idx < 0 || idx >= self.capacity { return Err(InvalidLease); }
-        if !self.slots[idx].in_use { return Err(InvalidLease); }
-        if self.slots[idx].sequence != lease.sequence { return Err(InvalidLease); }
+        if idx < 0 || idx >= self.capacity { return Result.Err(InvalidLease); }
+        if !self.slots[idx].in_use { return Result.Err(InvalidLease); }
+        if self.slots[idx].sequence != lease.sequence { return Result.Err(InvalidLease); }
         self.slots[idx].sequence = self.slots[idx].sequence + 1_i64;
         self.slots[idx].in_use = false;
         self.free.push(idx);
-        Ok(())
+        Result.Ok(())
     }
 
     /// Close the pool — refuses further acquires, leaves outstanding

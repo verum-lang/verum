@@ -60,8 +60,8 @@ implement KeyCode {
     /// Extract the character, if this is a Char variant.
     public fn as_char(&self) -> Maybe<Char> {
         match self {
-            KeyCode.Char(ch) => Some(ch),
-            _ => None,
+            KeyCode.Char(ch) => Maybe.Some(ch),
+            _ => Maybe.None,
         }
     }
 
@@ -171,7 +171,7 @@ implement Modifiers {
         if self.contains(Modifiers.HYPER) { parts.push("Hyper"); }
         if self.contains(Modifiers.META)  { parts.push("Meta"); }
         if parts.len() == 0 {
-            "None"
+            "Maybe.None"
         } else {
             parts.join("+")
         }

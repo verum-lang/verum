@@ -151,7 +151,7 @@ public fn parse_crl(_der: &[Byte]) -> Result<CertificateList, CrlError> {
     // The wiring to DerReader + Name/Time/Extension helpers lands
     // in v1.1. Until then: surface the scaffold so consumer code
     // can match on `CertificateList` / `RevokedEntry` already.
-    Err(CrlError.BadStructure(Text.from_str("parse_crl scaffold — v1.1 deliverable")))
+    Result.Err(CrlError.BadStructure(Text.from_str("parse_crl scaffold — v1.1 deliverable")))
 }
 
 // =============================================================================
@@ -172,7 +172,7 @@ public fn serials_equal(a: &[Byte], b: &[Byte]) -> Bool {
     diff == 0_u8
 }
 
-/// Return Some(entry) if `serial` appears in the CRL, None otherwise.
+/// Return Maybe.Some(entry) if `serial` appears in the CRL, Maybe.None otherwise.
 public fn find_revoked<'a>(
     crl: &'a CertificateList,
     serial: &[Byte],
@@ -180,11 +180,11 @@ public fn find_revoked<'a>(
     let mut i: Int = 0;
     while i < crl.revoked.len() {
         if serials_equal(crl.revoked[i].serial_number.as_slice(), serial) {
-            return Some(&crl.revoked[i]);
+            return Maybe.Some(&crl.revoked[i]);
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 /// Decode the low-byte-integer CRL reason-code into the enum.

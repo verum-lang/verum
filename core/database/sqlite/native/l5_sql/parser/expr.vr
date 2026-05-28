@@ -63,17 +63,17 @@ public fn parse_expr(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
 fn parse_or(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let mut left = match parse_and(ts) {
-        Ok(e)  => e,
-        Err(e) => { return Err(e); }
+        Result.Ok(e)  => e,
+        Result.Err(e) => { return Result.Err(e); }
     };
     while ts.accept_keyword(KwOr) {
         let right = match parse_and(ts) {
-            Ok(e)  => e,
-            Err(e) => { return Err(e); }
+            Result.Ok(e)  => e,
+            Result.Err(e) => { return Result.Err(e); }
         };
         left = EBinary(BOr, Heap(left), Heap(right));
     }
-    Ok(left)
+    Result.Ok(left)
 }
 
 // -----------------------------------------------------------------------------
@@ -82,17 +82,17 @@ fn parse_or(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
 fn parse_and(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let mut left = match parse_not(ts) {
-        Ok(e)  => e,
-        Err(e) => { return Err(e); }
+        Result.Ok(e)  => e,
+        Result.Err(e) => { return Result.Err(e); }
     };
     while ts.accept_keyword(KwAnd) {
         let right = match parse_not(ts) {
-            Ok(e)  => e,
-            Err(e) => { return Err(e); }
+            Result.Ok(e)  => e,
+            Result.Err(e) => { return Result.Err(e); }
         };
         left = EBinary(BAnd, Heap(left), Heap(right));
     }
-    Ok(left)
+    Result.Ok(left)
 }
 
 // -----------------------------------------------------------------------------
@@ -102,10 +102,10 @@ fn parse_and(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 fn parse_not(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     if ts.accept_keyword(KwNot) {
         let inner = match parse_not(ts) {
-            Ok(e)  => e,
-            Err(e) => { return Err(e); }
+            Result.Ok(e)  => e,
+            Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(EUnary(UNot, Heap(inner)));
+        return Result.Ok(EUnary(UNot, Heap(inner)));
     }
     parse_equality(ts)
 }
@@ -116,31 +116,31 @@ fn parse_not(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
 fn parse_equality(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let mut left = match parse_comparison(ts) {
-        Ok(e)  => e,
-        Err(e) => { return Err(e); }
+        Result.Ok(e)  => e,
+        Result.Err(e) => { return Result.Err(e); }
     };
 
     loop {
         let op_opt = detect_equality_op(ts);
         match op_opt {
-            Some(op) => {
+            Maybe.Some(op) => {
                 let right = match parse_comparison(ts) {
-                    Ok(e)  => e,
-                    Err(e) => { return Err(e); }
+                    Result.Ok(e)  => e,
+                    Result.Err(e) => { return Result.Err(e); }
                 };
                 left = EBinary(op, Heap(left), Heap(right));
             }
-            None => {
+            Maybe.None => {
                 // Check for NOT-prefixed forms (NOT IN, NOT LIKE, etc.).
                 let negated = ts.accept_keyword(KwNot);
 
                 if ts.accept_keyword(KwBetween) {
                     let lo = match parse_comparison(ts) {
-                        Ok(e)  => e, Err(e) => { return Err(e); }
+                        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                     };
-                    match ts.expect_keyword(KwAnd) { Ok(_) => {}, Err(e) => { return Err(e); } }
+                    match ts.expect_keyword(KwAnd) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
                     let hi = match parse_comparison(ts) {
-                        Ok(e)  => e, Err(e) => { return Err(e); }
+                        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                     };
                     left = EBetween(Heap(left), Heap(lo), Heap(hi), negated);
                     continue;
@@ -148,13 +148,13 @@ fn parse_equality(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
                 if ts.accept_keyword(KwLike) {
                     let pattern = match parse_comparison(ts) {
-                        Ok(e)  => e, Err(e) => { return Err(e); }
+                        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                     };
                     let escape: Maybe<Heap<Expr>> = if ts.accept_keyword(KwCollate) {
                         // SQLite: no "ESCAPE" kw in our set; treat as absent.
-                        None
+                        Maybe.None
                     } else {
-                        None
+                        Maybe.None
                     };
                     left = ELike(Heap(left), Heap(pattern), escape, negated);
                     continue;
@@ -162,20 +162,20 @@ fn parse_equality(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
                 if ts.accept_keyword(KwIn) {
                     left = match parse_in_rhs(ts, left, negated) {
-                        Ok(e)  => e, Err(e) => { return Err(e); }
+                        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                     };
                     continue;
                 }
 
                 if negated {
-                    return Err(parse_error("expected BETWEEN/IN/LIKE after NOT".clone(), ts.position()));
+                    return Result.Err(parse_error("expected BETWEEN/IN/LIKE after NOT".clone(), ts.position()));
                 }
 
                 // IS / IS NOT
                 if ts.accept_keyword(KwIs) {
                     let is_not = ts.accept_keyword(KwNot);
                     let right = match parse_comparison(ts) {
-                        Ok(e)  => e, Err(e) => { return Err(e); }
+                        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                     };
                     let op: BinOp = if is_not { BIsNot } else { BIs };
                     left = EBinary(op, Heap(left), Heap(right));
@@ -186,13 +186,13 @@ fn parse_equality(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
             }
         }
     }
-    Ok(left)
+    Result.Ok(left)
 }
 
 fn detect_equality_op(ts: &mut SqlTokenStream) -> Maybe<BinOp> {
-    if ts.accept_op(OpEq)    { return Some(BEq); }
-    if ts.accept_op(OpNotEq) { return Some(BNeq); }
-    None
+    if ts.accept_op(OpEq)    { return Maybe.Some(BEq); }
+    if ts.accept_op(OpNotEq) { return Maybe.Some(BNeq); }
+    Maybe.None
 }
 
 fn parse_in_rhs(
@@ -200,19 +200,19 @@ fn parse_in_rhs(
     left: Expr,
     negated: Bool,
 ) -> Result<Expr, ParseError> {
-    match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let mut items: List<Expr> = List.new();
     if !ts.check_punct(PRParen) {
         loop {
             let e = match parse_expr(ts) {
-                Ok(x)  => x, Err(err) => { return Err(err); }
+                Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
             };
             items.push(e);
             if !ts.accept_punct(PComma) { break; }
         }
     }
-    match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
-    Ok(EIn(Heap(left), items, negated))
+    match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+    Result.Ok(EIn(Heap(left), items, negated))
 }
 
 // -----------------------------------------------------------------------------
@@ -221,25 +221,25 @@ fn parse_in_rhs(
 
 fn parse_comparison(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let mut left = match parse_bit(ts) {
-        Ok(e)  => e, Err(e) => { return Err(e); }
+        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
     };
     loop {
-        let op_opt = if ts.accept_op(OpLt)      { Some(BLt) }
-                     else if ts.accept_op(OpLe) { Some(BLe) }
-                     else if ts.accept_op(OpGt) { Some(BGt) }
-                     else if ts.accept_op(OpGe) { Some(BGe) }
-                     else                       { None };
+        let op_opt = if ts.accept_op(OpLt)      { Maybe.Some(BLt) }
+                     else if ts.accept_op(OpLe) { Maybe.Some(BLe) }
+                     else if ts.accept_op(OpGt) { Maybe.Some(BGt) }
+                     else if ts.accept_op(OpGe) { Maybe.Some(BGe) }
+                     else                       { Maybe.None };
         match op_opt {
-            Some(op) => {
+            Maybe.Some(op) => {
                 let right = match parse_bit(ts) {
-                    Ok(e)  => e, Err(e) => { return Err(e); }
+                    Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                 };
                 left = EBinary(op, Heap(left), Heap(right));
             }
-            None => break,
+            Maybe.None => break,
         }
     }
-    Ok(left)
+    Result.Ok(left)
 }
 
 // -----------------------------------------------------------------------------
@@ -248,25 +248,25 @@ fn parse_comparison(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
 fn parse_bit(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let mut left = match parse_add(ts) {
-        Ok(e)  => e, Err(e) => { return Err(e); }
+        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
     };
     loop {
-        let op_opt = if ts.accept_op(OpShl)         { Some(BShl) }
-                     else if ts.accept_op(OpShr)    { Some(BShr) }
-                     else if ts.accept_op(OpBitAnd) { Some(BBitAnd) }
-                     else if ts.accept_op(OpBitOr)  { Some(BBitOr) }
-                     else                           { None };
+        let op_opt = if ts.accept_op(OpShl)         { Maybe.Some(BShl) }
+                     else if ts.accept_op(OpShr)    { Maybe.Some(BShr) }
+                     else if ts.accept_op(OpBitAnd) { Maybe.Some(BBitAnd) }
+                     else if ts.accept_op(OpBitOr)  { Maybe.Some(BBitOr) }
+                     else                           { Maybe.None };
         match op_opt {
-            Some(op) => {
+            Maybe.Some(op) => {
                 let right = match parse_add(ts) {
-                    Ok(e)  => e, Err(e) => { return Err(e); }
+                    Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                 };
                 left = EBinary(op, Heap(left), Heap(right));
             }
-            None => break,
+            Maybe.None => break,
         }
     }
-    Ok(left)
+    Result.Ok(left)
 }
 
 // -----------------------------------------------------------------------------
@@ -275,23 +275,23 @@ fn parse_bit(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
 fn parse_add(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let mut left = match parse_mul(ts) {
-        Ok(e)  => e, Err(e) => { return Err(e); }
+        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
     };
     loop {
-        let op_opt = if ts.accept_op(OpPlus)       { Some(BAdd) }
-                     else if ts.accept_op(OpMinus) { Some(BSub) }
-                     else                          { None };
+        let op_opt = if ts.accept_op(OpPlus)       { Maybe.Some(BAdd) }
+                     else if ts.accept_op(OpMinus) { Maybe.Some(BSub) }
+                     else                          { Maybe.None };
         match op_opt {
-            Some(op) => {
+            Maybe.Some(op) => {
                 let right = match parse_mul(ts) {
-                    Ok(e)  => e, Err(e) => { return Err(e); }
+                    Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                 };
                 left = EBinary(op, Heap(left), Heap(right));
             }
-            None => break,
+            Maybe.None => break,
         }
     }
-    Ok(left)
+    Result.Ok(left)
 }
 
 // -----------------------------------------------------------------------------
@@ -300,30 +300,30 @@ fn parse_add(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
 fn parse_mul(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let mut left = match parse_concat(ts) {
-        Ok(e)  => e, Err(e) => { return Err(e); }
+        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
     };
     loop {
         // `*` in expression context is multiply; `SELECT *` is handled
         // in the select parser before expression parsing begins.
         let op_opt = if ts.check_punct(PStar) {
                          let _ = ts.advance();
-                         Some(BMul)
+                         Maybe.Some(BMul)
                      }
-                     else if ts.accept_op(OpStar)      { Some(BMul) }
-                     else if ts.accept_op(OpSlash)     { Some(BDiv) }
-                     else if ts.accept_op(OpPercent)   { Some(BMod) }
-                     else                              { None };
+                     else if ts.accept_op(OpStar)      { Maybe.Some(BMul) }
+                     else if ts.accept_op(OpSlash)     { Maybe.Some(BDiv) }
+                     else if ts.accept_op(OpPercent)   { Maybe.Some(BMod) }
+                     else                              { Maybe.None };
         match op_opt {
-            Some(op) => {
+            Maybe.Some(op) => {
                 let right = match parse_concat(ts) {
-                    Ok(e)  => e, Err(e) => { return Err(e); }
+                    Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
                 };
                 left = EBinary(op, Heap(left), Heap(right));
             }
-            None => break,
+            Maybe.None => break,
         }
     }
-    Ok(left)
+    Result.Ok(left)
 }
 
 // -----------------------------------------------------------------------------
@@ -332,15 +332,15 @@ fn parse_mul(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
 fn parse_concat(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let mut left = match parse_unary(ts) {
-        Ok(e)  => e, Err(e) => { return Err(e); }
+        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
     };
     while ts.accept_op(OpConcat) {
         let right = match parse_unary(ts) {
-            Ok(e)  => e, Err(e) => { return Err(e); }
+            Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
         };
         left = EBinary(BConcat, Heap(left), Heap(right));
     }
-    Ok(left)
+    Result.Ok(left)
 }
 
 // -----------------------------------------------------------------------------
@@ -350,21 +350,21 @@ fn parse_concat(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 fn parse_unary(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     if ts.accept_op(OpMinus) {
         let inner = match parse_unary(ts) {
-            Ok(e)  => e, Err(e) => { return Err(e); }
+            Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(EUnary(UNeg, Heap(inner)));
+        return Result.Ok(EUnary(UNeg, Heap(inner)));
     }
     if ts.accept_op(OpPlus) {
         let inner = match parse_unary(ts) {
-            Ok(e)  => e, Err(e) => { return Err(e); }
+            Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(EUnary(UPlus, Heap(inner)));
+        return Result.Ok(EUnary(UPlus, Heap(inner)));
     }
     if ts.accept_op(OpBitNot) {
         let inner = match parse_unary(ts) {
-            Ok(e)  => e, Err(e) => { return Err(e); }
+            Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(EUnary(UBitNot, Heap(inner)));
+        return Result.Ok(EUnary(UBitNot, Heap(inner)));
     }
     parse_collate(ts)
 }
@@ -375,15 +375,15 @@ fn parse_unary(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
 fn parse_collate(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let mut e = match parse_primary(ts) {
-        Ok(x)  => x, Err(err) => { return Err(err); }
+        Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
     };
     while ts.accept_keyword(KwCollate) {
         let coll = match ts.expect_ident() {
-            Ok(s)  => s, Err(err) => { return Err(err); }
+            Result.Ok(s)  => s, Result.Err(err) => { return Result.Err(err); }
         };
         e = ECollate(Heap(e), coll);
     }
-    Ok(e)
+    Result.Ok(e)
 }
 
 // -----------------------------------------------------------------------------
@@ -393,25 +393,25 @@ fn parse_collate(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 fn parse_primary(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let tok = ts.peek();
     match tok {
-        TKeyword(KwNull)  => { let _ = ts.advance(); Ok(ELit(LNull)) }
-        TKeyword(KwTrue)  => { let _ = ts.advance(); Ok(ELit(LTrue)) }
-        TKeyword(KwFalse) => { let _ = ts.advance(); Ok(ELit(LFalse)) }
+        TKeyword(KwNull)  => { let _ = ts.advance(); Result.Ok(ELit(LNull)) }
+        TKeyword(KwTrue)  => { let _ = ts.advance(); Result.Ok(ELit(LTrue)) }
+        TKeyword(KwFalse) => { let _ = ts.advance(); Result.Ok(ELit(LFalse)) }
         TKeyword(KwCase)  => parse_case(ts),
         TKeyword(KwCast)  => parse_cast(ts),
         TKeyword(KwExists) => parse_exists(ts, false),
         TKeyword(KwNot) => {
             // `NOT EXISTS (...)` is a primary.
             let _ = ts.advance();
-            match ts.expect_keyword(KwExists) { Ok(_) => {}, Err(e) => { return Err(e); } }
+            match ts.expect_keyword(KwExists) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
             parse_exists_body(ts, true)
         }
 
-        TIntLit(i)   => { let _ = ts.advance(); Ok(ELit(LInt(i))) }
-        TFloatLit(x) => { let _ = ts.advance(); Ok(ELit(LReal(x))) }
-        TStringLit(s) => { let _ = ts.advance(); Ok(ELit(LText(s))) }
-        TBlobLit(b)   => { let _ = ts.advance(); Ok(ELit(LBlob(b))) }
+        TIntLit(i)   => { let _ = ts.advance(); Result.Ok(ELit(LInt(i))) }
+        TFloatLit(x) => { let _ = ts.advance(); Result.Ok(ELit(LReal(x))) }
+        TStringLit(s) => { let _ = ts.advance(); Result.Ok(ELit(LText(s))) }
+        TBlobLit(b)   => { let _ = ts.advance(); Result.Ok(ELit(LBlob(b))) }
 
-        TVariable(v) => { let _ = ts.advance(); Ok(variable_to_expr(v)) }
+        TVariable(v) => { let _ = ts.advance(); Result.Ok(variable_to_expr(v)) }
 
         TPunct(PLParen) => {
             let _ = ts.advance();
@@ -421,21 +421,21 @@ fn parse_primary(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
                 // Subquery parsing is owned by the select module; we
                 // return a placeholder ESubquery that the select
                 // parser fills once it lands. For now, reject cleanly.
-                return Err(parse_error(
+                return Result.Err(parse_error(
                     "subquery expression not yet supported in L5.3 initial cut".clone(),
                     ts.position(),
                 ));
             }
             let e = match parse_expr(ts) {
-                Ok(x)  => x, Err(err) => { return Err(err); }
+                Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
             };
-            match ts.expect_punct(PRParen) { Ok(_) => {}, Err(err) => { return Err(err); } }
-            Ok(e)
+            match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(err) => { return Result.Err(err); } }
+            Result.Ok(e)
         }
 
         TIdent(_) => parse_ident_or_call(ts),
 
-        _ => Err(parse_error("expected expression".clone(), ts.position())),
+        _ => Result.Err(parse_error("expected expression".clone(), ts.position())),
     }
 }
 
@@ -451,25 +451,25 @@ fn variable_to_expr(v: VariableKind) -> Expr {
 
 fn parse_ident_or_call(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let name = match ts.expect_ident() {
-        Ok(n)  => n, Err(e) => { return Err(e); }
+        Result.Ok(n)  => n, Result.Err(e) => { return Result.Err(e); }
     };
 
     // `name.col` or `schema.name.col`.
     if ts.accept_punct(PDot) {
         let second = match ts.expect_ident() {
-            Ok(n)  => n, Err(e) => { return Err(e); }
+            Result.Ok(n)  => n, Result.Err(e) => { return Result.Err(e); }
         };
         if ts.accept_punct(PDot) {
             // schema.table.column.
             let third = match ts.expect_ident() {
-                Ok(n)  => n, Err(e) => { return Err(e); }
+                Result.Ok(n)  => n, Result.Err(e) => { return Result.Err(e); }
             };
-            return Ok(EColumn(
+            return Result.Ok(EColumn(
                 TableRef { schema: name, name: second, alias: "".clone() },
                 third,
             ));
         }
-        return Ok(EColumn(
+        return Result.Ok(EColumn(
             TableRef { schema: "".clone(), name: name, alias: "".clone() },
             second,
         ));
@@ -487,18 +487,18 @@ fn parse_ident_or_call(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
         } else if !ts.check_punct(PRParen) {
             loop {
                 let e = match parse_expr(ts) {
-                    Ok(x)  => x, Err(err) => { return Err(err); }
+                    Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
                 };
                 args.push(e);
                 if !ts.accept_punct(PComma) { break; }
             }
         }
-        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        return Ok(EFunc(name, args, distinct));
+        match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        return Result.Ok(EFunc(name, args, distinct));
     }
 
     // Bare column.
-    Ok(EColumn(
+    Result.Ok(EColumn(
         TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() },
         name,
     ))
@@ -509,52 +509,52 @@ fn parse_case(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
 
     // Optional scrutinee: `CASE expr WHEN ...`
     let scrutinee: Maybe<Heap<Expr>> = if ts.check_keyword(KwWhen) {
-        None
+        Maybe.None
     } else {
         let e = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        Some(Heap(e))
+        Maybe.Some(Heap(e))
     };
 
     let mut arms: List<(Expr, Expr)> = List.new();
     while ts.accept_keyword(KwWhen) {
         let cond = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        match ts.expect_keyword(KwThen) { Ok(_) => {}, Err(err) => { return Err(err); } }
+        match ts.expect_keyword(KwThen) { Result.Ok(_) => {}, Result.Err(err) => { return Result.Err(err); } }
         let body = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
         arms.push((cond, body));
     }
 
     let else_: Maybe<Heap<Expr>> = if ts.accept_keyword(KwElse) {
         let e = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        Some(Heap(e))
+        Maybe.Some(Heap(e))
     } else {
-        None
+        Maybe.None
     };
 
-    match ts.expect_keyword(KwEnd) { Ok(_) => {}, Err(err) => { return Err(err); } }
+    match ts.expect_keyword(KwEnd) { Result.Ok(_) => {}, Result.Err(err) => { return Result.Err(err); } }
 
-    Ok(ECase(scrutinee, arms, else_))
+    Result.Ok(ECase(scrutinee, arms, else_))
 }
 
 fn parse_cast(ts: &mut SqlTokenStream) -> Result<Expr, ParseError> {
     let _ = ts.advance();   // CAST
-    match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let inner = match parse_expr(ts) {
-        Ok(x)  => x, Err(err) => { return Err(err); }
+        Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
     };
-    match ts.expect_keyword(KwAs) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwAs) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let ty = match ts.expect_ident() {
-        Ok(s)  => s, Err(err) => { return Err(err); }
+        Result.Ok(s)  => s, Result.Err(err) => { return Result.Err(err); }
     };
-    match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
-    Ok(ECast(Heap(inner), ty))
+    match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+    Result.Ok(ECast(Heap(inner), ty))
 }
 
 fn parse_exists(ts: &mut SqlTokenStream, negated: Bool) -> Result<Expr, ParseError> {
@@ -565,7 +565,7 @@ fn parse_exists(ts: &mut SqlTokenStream, negated: Bool) -> Result<Expr, ParseErr
 fn parse_exists_body(ts: &mut SqlTokenStream, negated: Bool) -> Result<Expr, ParseError> {
     // `EXISTS (SELECT ...)` — subquery not yet landed; surface the gap.
     let _ = negated;
-    Err(parse_error(
+    Result.Err(parse_error(
         "EXISTS subquery not yet supported in L5.3 initial cut".clone(),
         ts.position(),
     ))

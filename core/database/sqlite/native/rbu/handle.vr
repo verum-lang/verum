@@ -24,7 +24,7 @@ public type Rbu is {
     id: Int64,
     target_db: Text,
     rbu_db: Text,
-    /// Optional state DB path; None → "embedded" state (stored in rbu_db).
+    /// Optional state DB path; Maybe.None → "embedded" state (stored in rbu_db).
     state_db: Maybe<Text>,
     stage: RbuStage,
     progress: BpProgress,

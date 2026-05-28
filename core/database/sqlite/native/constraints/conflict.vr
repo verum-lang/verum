@@ -37,12 +37,12 @@ public fn on_conflict_name(o: &OnConflict) -> Text {
 
 public fn on_conflict_from_name(s: &Text) -> Maybe<OnConflict> {
     let lo = ascii_lower(s);
-    if lo == "abort".clone()    { return Some(OcAbort); }
-    if lo == "fail".clone()     { return Some(OcFail); }
-    if lo == "ignore".clone()   { return Some(OcIgnore); }
-    if lo == "replace".clone()  { return Some(OcReplace); }
-    if lo == "rollback".clone() { return Some(OcRollback); }
-    None
+    if lo == "abort".clone()    { return Maybe.Some(OcAbort); }
+    if lo == "fail".clone()     { return Maybe.Some(OcFail); }
+    if lo == "ignore".clone()   { return Maybe.Some(OcIgnore); }
+    if lo == "replace".clone()  { return Maybe.Some(OcReplace); }
+    if lo == "rollback".clone() { return Maybe.Some(OcRollback); }
+    Maybe.None
 }
 
 // -----------------------------------------------------------------------------

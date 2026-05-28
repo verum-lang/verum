@@ -12,7 +12,7 @@ mount super.super.style.color.Color;
 
 /// Border line style.
 public type BorderType is
-    | None
+    | Maybe.None
     | Plain       // ─│┌┐└┘
     | Rounded     // ─│╭╮╰╯
     | Double      // ═║╔╗╚╝
@@ -70,7 +70,7 @@ public type Block is {
 implement Block {
     public fn new() -> Block {
         Block {
-            title: None,
+            title: Maybe.None,
             title_alignment: Alignment.Left,
             borders: Borders.NONE,
             border_type: BorderType.Rounded,
@@ -82,7 +82,7 @@ implement Block {
 
     // Builder API (by-value self, returns Block)
     public fn title(self, title: Text) -> Block {
-        Block { title: Some(title), ..self }
+        Block { title: Maybe.Some(title), ..self }
     }
 
     public fn title_alignment(self, align: Alignment) -> Block {
@@ -178,7 +178,7 @@ implement Widget for Block {
 
         // Draw title
         match self.title {
-            Some(title) => {
+            Maybe.Some(title) => {
                 if self.borders.has_top() && area.width > 2 {
                     let max_width = area.width - 2;
                     let display = if title.len() > max_width {
@@ -196,7 +196,7 @@ implement Widget for Block {
                     buf.set_string(title_x, area.top(), &display, self.border_style);
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
     }
 }
@@ -204,7 +204,7 @@ implement Widget for Block {
 /// Get the border characters for a given border type.
 fn get_border_chars(bt: &BorderType) -> BorderChars {
     match bt {
-        None => BorderChars {
+        Maybe.None => BorderChars {
             top: " ", bottom: " ", left: " ", right: " ",
             top_left: " ", top_right: " ", bottom_left: " ", bottom_right: " ",
         },

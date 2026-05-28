@@ -236,85 +236,85 @@ fn ascii_lower(s: &Text) -> Text {
 public fn kind_from_name(name: &Text) -> Maybe<ScalarKind> {
     let n = ascii_lower(name);
     // String
-    if n == "length".clone()    { return Some(KLength); }
-    if n == "lower".clone()     { return Some(KLower); }
-    if n == "upper".clone()     { return Some(KUpper); }
-    if n == "concat".clone()    { return Some(KConcat); }
-    if n == "concat_ws".clone() { return Some(KConcatWs); }
-    if n == "substr".clone() || n == "substring".clone() { return Some(KSubstr); }
-    if n == "trim".clone()      { return Some(KTrim); }
-    if n == "ltrim".clone()     { return Some(KLtrim); }
-    if n == "rtrim".clone()     { return Some(KRtrim); }
-    if n == "replace".clone()   { return Some(KReplace); }
-    if n == "instr".clone()     { return Some(KInstr); }
-    if n == "hex".clone()       { return Some(KHex); }
-    if n == "unhex".clone()     { return Some(KUnhex); }
-    if n == "unicode".clone()   { return Some(KUnicode); }
-    if n == "char".clone()      { return Some(KChar); }
-    if n == "quote".clone()     { return Some(KQuote); }
-    if n == "glob".clone()      { return Some(KGlob); }
-    if n == "like".clone()      { return Some(KLike); }
-    if n == "soundex".clone()   { return Some(KSoundex); }
+    if n == "length".clone()    { return Maybe.Some(KLength); }
+    if n == "lower".clone()     { return Maybe.Some(KLower); }
+    if n == "upper".clone()     { return Maybe.Some(KUpper); }
+    if n == "concat".clone()    { return Maybe.Some(KConcat); }
+    if n == "concat_ws".clone() { return Maybe.Some(KConcatWs); }
+    if n == "substr".clone() || n == "substring".clone() { return Maybe.Some(KSubstr); }
+    if n == "trim".clone()      { return Maybe.Some(KTrim); }
+    if n == "ltrim".clone()     { return Maybe.Some(KLtrim); }
+    if n == "rtrim".clone()     { return Maybe.Some(KRtrim); }
+    if n == "replace".clone()   { return Maybe.Some(KReplace); }
+    if n == "instr".clone()     { return Maybe.Some(KInstr); }
+    if n == "hex".clone()       { return Maybe.Some(KHex); }
+    if n == "unhex".clone()     { return Maybe.Some(KUnhex); }
+    if n == "unicode".clone()   { return Maybe.Some(KUnicode); }
+    if n == "char".clone()      { return Maybe.Some(KChar); }
+    if n == "quote".clone()     { return Maybe.Some(KQuote); }
+    if n == "glob".clone()      { return Maybe.Some(KGlob); }
+    if n == "like".clone()      { return Maybe.Some(KLike); }
+    if n == "soundex".clone()   { return Maybe.Some(KSoundex); }
     // Numeric / generic
-    if n == "abs".clone()       { return Some(KAbs); }
-    if n == "round".clone()     { return Some(KRound); }
-    if n == "coalesce".clone()  { return Some(KCoalesce); }
-    if n == "ifnull".clone()    { return Some(KIfnull); }
-    if n == "nullif".clone()    { return Some(KNullif); }
-    if n == "min".clone()       { return Some(KMin); }
-    if n == "max".clone()       { return Some(KMax); }
-    if n == "iif".clone()       { return Some(KIif); }
-    if n == "sign".clone()      { return Some(KSign); }
-    if n == "random".clone()    { return Some(KRandom); }
-    if n == "randomblob".clone() { return Some(KRandomBlob); }
-    if n == "zeroblob".clone()  { return Some(KZeroBlob); }
-    if n == "likely".clone()    { return Some(KLikely); }
-    if n == "unlikely".clone()  { return Some(KUnlikely); }
-    if n == "likelihood".clone() { return Some(KLikelihood); }
+    if n == "abs".clone()       { return Maybe.Some(KAbs); }
+    if n == "round".clone()     { return Maybe.Some(KRound); }
+    if n == "coalesce".clone()  { return Maybe.Some(KCoalesce); }
+    if n == "ifnull".clone()    { return Maybe.Some(KIfnull); }
+    if n == "nullif".clone()    { return Maybe.Some(KNullif); }
+    if n == "min".clone()       { return Maybe.Some(KMin); }
+    if n == "max".clone()       { return Maybe.Some(KMax); }
+    if n == "iif".clone()       { return Maybe.Some(KIif); }
+    if n == "sign".clone()      { return Maybe.Some(KSign); }
+    if n == "random".clone()    { return Maybe.Some(KRandom); }
+    if n == "randomblob".clone() { return Maybe.Some(KRandomBlob); }
+    if n == "zeroblob".clone()  { return Maybe.Some(KZeroBlob); }
+    if n == "likely".clone()    { return Maybe.Some(KLikely); }
+    if n == "unlikely".clone()  { return Maybe.Some(KUnlikely); }
+    if n == "likelihood".clone() { return Maybe.Some(KLikelihood); }
     // Math
-    if n == "pi".clone()        { return Some(KPi); }
-    if n == "sqrt".clone()      { return Some(KSqrt); }
-    if n == "pow".clone() || n == "power".clone() { return Some(KPow); }
-    if n == "mod".clone()       { return Some(KMod); }
-    if n == "ceil".clone() || n == "ceiling".clone() { return Some(KCeil); }
-    if n == "floor".clone()     { return Some(KFloor); }
-    if n == "exp".clone()       { return Some(KExp); }
-    if n == "ln".clone()        { return Some(KLn); }
-    if n == "log".clone()       { return Some(KLog); }
-    if n == "log2".clone()      { return Some(KLog2); }
-    if n == "log10".clone()     { return Some(KLog10); }
-    if n == "sin".clone()       { return Some(KSin); }
-    if n == "cos".clone()       { return Some(KCos); }
-    if n == "tan".clone()       { return Some(KTan); }
-    if n == "asin".clone()      { return Some(KAsin); }
-    if n == "acos".clone()      { return Some(KAcos); }
-    if n == "atan".clone()      { return Some(KAtan); }
-    if n == "atan2".clone()     { return Some(KAtan2); }
-    if n == "sinh".clone()      { return Some(KSinh); }
-    if n == "cosh".clone()      { return Some(KCosh); }
-    if n == "tanh".clone()      { return Some(KTanh); }
-    if n == "asinh".clone()     { return Some(KAsinh); }
-    if n == "acosh".clone()     { return Some(KAcosh); }
-    if n == "atanh".clone()     { return Some(KAtanh); }
-    if n == "degrees".clone()   { return Some(KDegrees); }
-    if n == "radians".clone()   { return Some(KRadians); }
-    if n == "trunc".clone()     { return Some(KTrunc); }
+    if n == "pi".clone()        { return Maybe.Some(KPi); }
+    if n == "sqrt".clone()      { return Maybe.Some(KSqrt); }
+    if n == "pow".clone() || n == "power".clone() { return Maybe.Some(KPow); }
+    if n == "mod".clone()       { return Maybe.Some(KMod); }
+    if n == "ceil".clone() || n == "ceiling".clone() { return Maybe.Some(KCeil); }
+    if n == "floor".clone()     { return Maybe.Some(KFloor); }
+    if n == "exp".clone()       { return Maybe.Some(KExp); }
+    if n == "ln".clone()        { return Maybe.Some(KLn); }
+    if n == "log".clone()       { return Maybe.Some(KLog); }
+    if n == "log2".clone()      { return Maybe.Some(KLog2); }
+    if n == "log10".clone()     { return Maybe.Some(KLog10); }
+    if n == "sin".clone()       { return Maybe.Some(KSin); }
+    if n == "cos".clone()       { return Maybe.Some(KCos); }
+    if n == "tan".clone()       { return Maybe.Some(KTan); }
+    if n == "asin".clone()      { return Maybe.Some(KAsin); }
+    if n == "acos".clone()      { return Maybe.Some(KAcos); }
+    if n == "atan".clone()      { return Maybe.Some(KAtan); }
+    if n == "atan2".clone()     { return Maybe.Some(KAtan2); }
+    if n == "sinh".clone()      { return Maybe.Some(KSinh); }
+    if n == "cosh".clone()      { return Maybe.Some(KCosh); }
+    if n == "tanh".clone()      { return Maybe.Some(KTanh); }
+    if n == "asinh".clone()     { return Maybe.Some(KAsinh); }
+    if n == "acosh".clone()     { return Maybe.Some(KAcosh); }
+    if n == "atanh".clone()     { return Maybe.Some(KAtanh); }
+    if n == "degrees".clone()   { return Maybe.Some(KDegrees); }
+    if n == "radians".clone()   { return Maybe.Some(KRadians); }
+    if n == "trunc".clone()     { return Maybe.Some(KTrunc); }
     // Metadata
-    if n == "typeof".clone()           { return Some(KTypeof); }
-    if n == "sqlite_version".clone()   { return Some(KSqliteVersion); }
-    if n == "sqlite_source_id".clone() { return Some(KSqliteSourceId); }
-    if n == "changes".clone()          { return Some(KChanges); }
-    if n == "total_changes".clone()    { return Some(KTotalChanges); }
-    if n == "last_insert_rowid".clone(){ return Some(KLastInsertRowid); }
+    if n == "typeof".clone()           { return Maybe.Some(KTypeof); }
+    if n == "sqlite_version".clone()   { return Maybe.Some(KSqliteVersion); }
+    if n == "sqlite_source_id".clone() { return Maybe.Some(KSqliteSourceId); }
+    if n == "changes".clone()          { return Maybe.Some(KChanges); }
+    if n == "total_changes".clone()    { return Maybe.Some(KTotalChanges); }
+    if n == "last_insert_rowid".clone(){ return Maybe.Some(KLastInsertRowid); }
     // Date/time
-    if n == "date".clone()      { return Some(KDate); }
-    if n == "time".clone()      { return Some(KTime); }
-    if n == "datetime".clone()  { return Some(KDatetime); }
-    if n == "julianday".clone() { return Some(KJulianday); }
-    if n == "unixepoch".clone() { return Some(KUnixepoch); }
-    if n == "strftime".clone()  { return Some(KStrftime); }
-    if n == "timediff".clone()  { return Some(KTimediff); }
-    None
+    if n == "date".clone()      { return Maybe.Some(KDate); }
+    if n == "time".clone()      { return Maybe.Some(KTime); }
+    if n == "datetime".clone()  { return Maybe.Some(KDatetime); }
+    if n == "julianday".clone() { return Maybe.Some(KJulianday); }
+    if n == "unixepoch".clone() { return Maybe.Some(KUnixepoch); }
+    if n == "strftime".clone()  { return Maybe.Some(KStrftime); }
+    if n == "timediff".clone()  { return Maybe.Some(KTimediff); }
+    Maybe.None
 }
 
 // -----------------------------------------------------------------------------
@@ -459,13 +459,13 @@ public fn agg_kind_code(k: &AggregateKind) -> Int {
 
 public fn agg_from_name(name: &Text) -> Maybe<AggregateKind> {
     let n = ascii_lower(name);
-    if n == "count".clone()        { return Some(AggCount); }
-    if n == "sum".clone()          { return Some(AggSum); }
-    if n == "avg".clone()          { return Some(AggAvg); }
-    if n == "min".clone()          { return Some(AggMin); }
-    if n == "max".clone()          { return Some(AggMax); }
-    if n == "total".clone()        { return Some(AggTotal); }
-    if n == "group_concat".clone() { return Some(AggGroupConcat); }
-    if n == "string_agg".clone()   { return Some(AggStringAgg); }
-    None
+    if n == "count".clone()        { return Maybe.Some(AggCount); }
+    if n == "sum".clone()          { return Maybe.Some(AggSum); }
+    if n == "avg".clone()          { return Maybe.Some(AggAvg); }
+    if n == "min".clone()          { return Maybe.Some(AggMin); }
+    if n == "max".clone()          { return Maybe.Some(AggMax); }
+    if n == "total".clone()        { return Maybe.Some(AggTotal); }
+    if n == "group_concat".clone() { return Maybe.Some(AggGroupConcat); }
+    if n == "string_agg".clone()   { return Maybe.Some(AggStringAgg); }
+    Maybe.None
 }

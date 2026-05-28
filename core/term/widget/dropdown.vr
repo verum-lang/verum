@@ -49,8 +49,8 @@ implement<T> Dropdown<T> {
             items: items,
             label_fn: label_fn,
             placeholder: "(select)",
-            closed_block: None,
-            open_block: Some(Block.new().borders(Borders.ALL).border_type(BorderType.Rounded)),
+            closed_block: Maybe.None,
+            open_block: Maybe.Some(Block.new().borders(Borders.ALL).border_type(BorderType.Rounded)),
             style: Style.DEFAULT,
             highlight_style: Style.new().bg(Color.Blue).fg(Color.White),
             chevron_style: Style.new().fg(Color.DarkGrey),
@@ -62,8 +62,8 @@ implement<T> Dropdown<T> {
     }
 
     public fn placeholder(self, t: Text) -> Dropdown<T> { Dropdown { placeholder: t, ..self } }
-    public fn closed_block(self, b: Block) -> Dropdown<T> { Dropdown { closed_block: Some(b), ..self } }
-    public fn open_block(self, b: Block) -> Dropdown<T> { Dropdown { open_block: Some(b), ..self } }
+    public fn closed_block(self, b: Block) -> Dropdown<T> { Dropdown { closed_block: Maybe.Some(b), ..self } }
+    public fn open_block(self, b: Block) -> Dropdown<T> { Dropdown { open_block: Maybe.Some(b), ..self } }
     public fn highlight_style(self, s: Style) -> Dropdown<T> { Dropdown { highlight_style: s, ..self } }
     public fn chevron_style(self, s: Style) -> Dropdown<T> { Dropdown { chevron_style: s, ..self } }
     public fn placeholder_style(self, s: Style) -> Dropdown<T> { Dropdown { placeholder_style: s, ..self } }
@@ -92,7 +92,7 @@ implement DropdownState {
     public fn new() -> DropdownState {
         DropdownState {
             open: false,
-            selected: None,
+            selected: Maybe.None,
             highlight: 0,
             scroll: 0,
             search: "",
@@ -102,7 +102,7 @@ implement DropdownState {
     public fn with_selected(idx: Int) -> DropdownState {
         DropdownState {
             open: false,
-            selected: Some(idx),
+            selected: Maybe.Some(idx),
             highlight: idx,
             scroll: 0,
             search: "",
@@ -121,7 +121,7 @@ implement DropdownState {
     /// Index of the visible item at `vi` (after search filter).
     fn item_index<T>(&self, d: &Dropdown<T>, vi: Int) -> Maybe<Int> {
         let filtered = filter_indices(d, &self.search);
-        if vi < 0 || vi >= filtered.len() { None } else { Some(filtered[vi]) }
+        if vi < 0 || vi >= filtered.len() { Maybe.None } else { Maybe.Some(filtered[vi]) }
     }
 
     /// Handle a key; returns `true` iff handled.
@@ -138,7 +138,7 @@ implement DropdownState {
                 KeyCode.Enter => {
                     let filtered = filter_indices(d, &self.search);
                     if self.highlight < filtered.len() {
-                        self.selected = Some(filtered[self.highlight]);
+                        self.selected = Maybe.Some(filtered[self.highlight]);
                     }
                     self.close();
                     true
@@ -217,7 +217,7 @@ implement<T> StatefulWidget for Dropdown<T> {
 
         // ---- closed header --------------------------------------------------
         let header_area = match self.closed_block {
-            Some(ref b) => {
+            Maybe.Some(ref b) => {
                 let inner = b.inner(area);
                 b.clone().render(
                     Rect.new(area.x, area.y, area.width, if state.open { area.height.min(3) } else { area.height }),
@@ -225,14 +225,14 @@ implement<T> StatefulWidget for Dropdown<T> {
                 );
                 inner
             }
-            None => Rect.new(area.x, area.y, area.width, 1),
+            Maybe.None => Rect.new(area.x, area.y, area.width, 1),
         };
 
         buf.set_style(header_area, self.style);
         let chevron = if state.open { "▴" } else { "▾" };
         let label_text = match state.selected {
-            Some(idx) => (self.label_fn)(&self.items[idx]),
-            None => self.placeholder.clone(),
+            Maybe.Some(idx) => (self.label_fn)(&self.items[idx]),
+            Maybe.None => self.placeholder.clone(),
         };
         let label_style = if state.selected.is_some() { self.style } else { self.placeholder_style };
         let label_max = header_area.width - 2;
@@ -251,12 +251,12 @@ implement<T> StatefulWidget for Dropdown<T> {
         let popup_area = Rect.new(area.x, popup_y, area.width, popup_height);
 
         let inner = match self.open_block {
-            Some(ref b) => {
+            Maybe.Some(ref b) => {
                 let inner = b.inner(popup_area);
                 b.clone().render(popup_area, buf);
                 inner
             }
-            None => popup_area,
+            Maybe.None => popup_area,
         };
 
         // Search row.

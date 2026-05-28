@@ -46,8 +46,8 @@ public fn execute_with_retry<T>(
     let mut last_error = "";
     while attempts < max_attempts {
         match f() {
-            Ok(val) => return Ok(val),
-            Err(e) => {
+            Result.Ok(val) => return Result.Ok(val),
+            Result.Err(e) => {
                 last_error = e;
                 attempts = attempts + 1;
                 if attempts < max_attempts {
@@ -56,7 +56,7 @@ public fn execute_with_retry<T>(
             }
         }
     }
-    Err(last_error)
+    Result.Err(last_error)
 }
 
 /// Execute with retry using a RetryConfig.
@@ -73,8 +73,8 @@ public fn execute_with_retry_config<T>(
     let mut last_error = "";
     while attempts < config.max_retries {
         match f() {
-            Ok(val) => return Ok(val),
-            Err(e) => {
+            Result.Ok(val) => return Result.Ok(val),
+            Result.Err(e) => {
                 last_error = e;
                 attempts = attempts + 1;
                 if attempts < config.max_retries {
@@ -87,7 +87,7 @@ public fn execute_with_retry_config<T>(
             }
         }
     }
-    Err(last_error)
+    Result.Err(last_error)
 }
 
 // =============================================================================

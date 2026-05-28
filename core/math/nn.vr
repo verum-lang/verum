@@ -116,7 +116,7 @@ public type Serializable is protocol {
 public type Parameter is {
     // Current parameter value
     data: DynTensor<Float>,
-    // Accumulated gradient (None if not computed)
+    // Accumulated gradient (Maybe.None if not computed)
     grad: Maybe<DynTensor<Float>>,
     // Whether this parameter requires gradients
     requires_grad: Bool,
@@ -1334,10 +1334,10 @@ public fn clip_grad_norm(params: &mut [Parameter], max_norm: Float) -> Float {
     while idx < len {
         let grad_opt = params[idx].grad.clone();
         match grad_opt {
-            Some(grad) => {
+            Maybe.Some(grad) => {
                 total_norm_sq = total_norm_sq + sum(&mul(&grad, &grad));
             }
-            None => {}
+            Maybe.None => {}
         }
         idx = idx + 1;
     }
@@ -1350,10 +1350,10 @@ public fn clip_grad_norm(params: &mut [Parameter], max_norm: Float) -> Float {
         while idx < len {
             let grad_opt = params[idx].grad.clone();
             match grad_opt {
-                Some(grad) => {
-                    params[idx].grad = Some(mul(&grad, &full_like(&grad, scale)));
+                Maybe.Some(grad) => {
+                    params[idx].grad = Maybe.Some(mul(&grad, &full_like(&grad, scale)));
                 }
-                None => {}
+                Maybe.None => {}
             }
             idx = idx + 1;
         }
@@ -1368,10 +1368,10 @@ public fn clip_grad_value(params: &mut [Parameter], clip_value: Float) {
     while idx < len {
         let grad_opt = params[idx].grad.clone();
         match grad_opt {
-            Some(grad) => {
-                params[idx].grad = Some(core.math.nn.clamp(&grad, -clip_value, clip_value));
+            Maybe.Some(grad) => {
+                params[idx].grad = Maybe.Some(core.math.nn.clamp(&grad, -clip_value, clip_value));
             }
-            None => {}
+            Maybe.None => {}
         }
         idx = idx + 1;
     }
@@ -1527,7 +1527,7 @@ fn reshape_for_broadcast(x: &DynTensor<Float>, target_shape: &[USize], axis: USi
 
 // Max along axis
 fn max_axis(x: &DynTensor<Float>, axis: ISize) -> DynTensor<Float> {
-    @vbc(TENSOR_REDUCE, x, ReduceOp.Max, Some(normalize_axis(axis, x.rank())))
+    @vbc(TENSOR_REDUCE, x, ReduceOp.Max, Maybe.Some(normalize_axis(axis, x.rank())))
 }
 
 // Gather values along axis
@@ -1587,7 +1587,7 @@ fn mean(x: &DynTensor<Float>) -> Float {
 
 // Sum of all elements
 fn sum(x: &DynTensor<Float>) -> Float {
-    @vbc(TENSOR_REDUCE, x, ReduceOp.Sum, None)
+    @vbc(TENSOR_REDUCE, x, ReduceOp.Sum, Maybe.None)
 }
 
 // 2D convolution operation

@@ -218,14 +218,14 @@ public fn validate_chain(
     now_secs: Int64,
 ) -> Result<VerifiedChain, ChainError> {
     if chain.len() == 0 {
-        return Err(ChainError.EmptyChain);
+        return Result.Err(ChainError.EmptyChain);
     }
     // Reject pathologically long chains BEFORE running per-cert
     // signature verification (each verify is ~ms-scale crypto). A
     // peer presenting a 10000-cert chain would otherwise burn many
     // CPU-seconds before failing on UnknownIssuer or budget exhaustion.
     if chain.len() > MAX_CHAIN_LENGTH {
-        return Err(ChainError.ChainTooLong {
+        return Result.Err(ChainError.ChainTooLong {
             length: chain.len(),
             limit: MAX_CHAIN_LENGTH,
         });
@@ -242,7 +242,7 @@ public fn validate_chain(
 
     // Collect applicable name constraints propagated from each CA.
     let mut active_constraints: List<NameConstraints> = [];
-    if let Some((_, nc)) = &root.tbs.extensions.name_constraints {
+    if let Maybe.Some((_, nc)) = &root.tbs.extensions.name_constraints {
         active_constraints.push(nc.clone());
     }
 
@@ -258,7 +258,7 @@ public fn validate_chain(
 
         // (a)(4) issuer equality
         if !cert.tbs.issuer.raw_eq(prev_subject) {
-            return Err(ChainError.IssuerSubjectMismatch(i));
+            return Result.Err(ChainError.IssuerSubjectMismatch(i));
         }
 
         // (a)(2) validity
@@ -266,9 +266,9 @@ public fn validate_chain(
             // Distinguish past-vs-future for diagnostics.
             let nb_secs = core.security.x509.time.time_to_unix(&cert.tbs.validity.not_before);
             if now_secs < nb_secs {
-                return Err(ChainError.NotYetValid(i));
+                return Result.Err(ChainError.NotYetValid(i));
             }
-            return Err(ChainError.Expired(i));
+            return Result.Err(ChainError.Expired(i));
         }
 
         // (a)(1) signature on cert
@@ -277,35 +277,35 @@ public fn validate_chain(
         // (c) + (d) CA-specific checks on intermediates
         if !is_ee {
             if !cert.is_ca() {
-                return Err(ChainError.NonCaIssuer(i));
+                return Result.Err(ChainError.NonCaIssuer(i));
             }
             match &cert.tbs.extensions.key_usage {
-                Some((_, ku)) => {
+                Maybe.Some((_, ku)) => {
                     if !ku.key_cert_sign {
-                        return Err(ChainError.NoKeyCertSign(i));
+                        return Result.Err(ChainError.NoKeyCertSign(i));
                     }
                 },
-                None => {}, // absent KU is permissive (not ideal but legal)
+                Maybe.None => {}, // absent KU is permissive (not ideal but legal)
             }
             // Path length: ensure that pathLenConstraint on `cert` allows
             // the remaining subordinate chain.
             match cert.path_len_constraint() {
-                Some(allowed) => {
+                Maybe.Some(allowed) => {
                     // Remaining certs below this point (excluding EE? include all).
                     // Per RFC 5280 §4.2.1.9: pathLen counts the number of
                     // intermediate CAs between this cert and the EE
                     // (exclusive of both).
                     let remaining_inters = i;  // i itself is the count below this cert-1
                     if remaining_inters > allowed {
-                        return Err(ChainError.PathLenExceeded);
+                        return Result.Err(ChainError.PathLenExceeded);
                     }
                 },
-                None => {},
+                Maybe.None => {},
             }
             // Propagate name constraints.
             match &cert.tbs.extensions.name_constraints {
-                Some((_, nc)) => { active_constraints.push(nc.clone()); },
-                None => {},
+                Maybe.Some((_, nc)) => { active_constraints.push(nc.clone()); },
+                Maybe.None => {},
             }
             seen_inters.push(cert.clone());
         }
@@ -314,23 +314,23 @@ public fn validate_chain(
         if is_ee {
             // EE-level EKU check
             if !cert.allows_server_auth() {
-                return Err(ChainError.EkuMismatch);
+                return Result.Err(ChainError.EkuMismatch);
             }
             match hostname {
-                Some(h) => {
+                Maybe.Some(h) => {
                     if !cert.matches_hostname(h) {
-                        return Err(ChainError.HostnameMismatch);
+                        return Result.Err(ChainError.HostnameMismatch);
                     }
                     // Check every active name constraint
                     let mut k: Int = 0;
                     while k < active_constraints.len() {
                         if !active_constraints[k].permits_dns(h) {
-                            return Err(ChainError.NameConstraintViolation);
+                            return Result.Err(ChainError.NameConstraintViolation);
                         }
                         k = k + 1;
                     }
                 },
-                None => {},
+                Maybe.None => {},
             }
         }
 
@@ -340,7 +340,7 @@ public fn validate_chain(
         i = i - 1;
     }
 
-    Ok(VerifiedChain {
+    Result.Ok(VerifiedChain {
         ee: chain_ee_to_last[0].clone(),
         inters: seen_inters,
         root: root,
@@ -368,17 +368,17 @@ fn resolve_root(
                 rest.push(chain[i].clone());
                 i = i + 1;
             }
-            return Ok((top.clone(), rest));
+            return Result.Ok((top.clone(), rest));
         }
     }
 
     // Case B: top's issuer DN matches a root in TrustStore.
     match trust.find_by_subject(&top.tbs.issuer) {
-        Some(root) => {
+        Maybe.Some(root) => {
             // All of chain applies (top still needs to be verified under root).
-            Ok((root, chain.clone()))
+            Result.Ok((root, chain.clone()))
         },
-        None => Err(ChainError.UnknownIssuer),
+        Maybe.None => Result.Err(ChainError.UnknownIssuer),
     }
 }
 
@@ -423,7 +423,7 @@ fn verify_signature(cert: &X509Certificate, issuer_spki: &Spki) -> Result<(), Ch
         ),
 
         // Unsupported / deprecated — fail closed.
-        _ => Err(ChainError.UnsupportedAlgorithm(-1)),
+        _ => Result.Err(ChainError.UnsupportedAlgorithm(-1)),
     }
 }
 
@@ -438,11 +438,11 @@ fn verify_rsa_pkcs1(
             let vk = RsaVerifyKey { n: rsa.modulus.clone(), e: rsa.exponent.clone() };
             let digest = hash_message(hash.clone(), message.as_slice());
             match verify_pkcs1_v15_prehashed(&vk, hash, &digest, signature.as_slice()) {
-                Ok(()) => Ok(()),
-                Err(_) => Err(ChainError.BadSignature(-1)),
+                Result.Ok(()) => Result.Ok(()),
+                Result.Err(_) => Result.Err(ChainError.BadSignature(-1)),
             }
         },
-        _ => Err(ChainError.UnsupportedAlgorithm(-1)),
+        _ => Result.Err(ChainError.UnsupportedAlgorithm(-1)),
     }
 }
 
@@ -463,11 +463,11 @@ fn verify_rsa_pss(
             };
             let _ = salt_len;  // verify_pss_prehashed picks salt_len from signature
             match verify_pss_prehashed(&vk, rsa_hash, &digest, signature.as_slice()) {
-                Ok(()) => Ok(()),
-                Err(_) => Err(ChainError.BadSignature(-1)),
+                Result.Ok(()) => Result.Ok(()),
+                Result.Err(_) => Result.Err(ChainError.BadSignature(-1)),
             }
         },
-        _ => Err(ChainError.UnsupportedAlgorithm(-1)),
+        _ => Result.Err(ChainError.UnsupportedAlgorithm(-1)),
     }
 }
 
@@ -486,11 +486,11 @@ fn verify_ecdsa_p256(
                 .map_err(|_| ChainError.BadSignature(-1))?;
             let digest = Sha256.digest(message.as_slice());
             match P256.verify_prehashed(&pk, &digest, &sig) {
-                Ok(()) => Ok(()),
-                Err(_) => Err(ChainError.BadSignature(-1)),
+                Result.Ok(()) => Result.Ok(()),
+                Result.Err(_) => Result.Err(ChainError.BadSignature(-1)),
             }
         },
-        _ => Err(ChainError.UnsupportedAlgorithm(-1)),
+        _ => Result.Err(ChainError.UnsupportedAlgorithm(-1)),
     }
 }
 
@@ -503,17 +503,17 @@ fn verify_ed25519_cert(
         SubjectPublicKey.Ed25519(ed) => {
             let pk: Ed25519PublicKey = ed.bytes;
             if signature.len() != 64 {
-                return Err(ChainError.BadSignature(-1));
+                return Result.Err(ChainError.BadSignature(-1));
             }
             let mut sig: Ed25519Signature = [0_u8; 64];
             let mut i: Int = 0;
             while i < 64 { sig[i] = signature[i]; i = i + 1; }
             match Ed25519.verify(&pk, message.as_slice(), &sig) {
-                Ok(()) => Ok(()),
-                Err(_) => Err(ChainError.BadSignature(-1)),
+                Result.Ok(()) => Result.Ok(()),
+                Result.Err(_) => Result.Err(ChainError.BadSignature(-1)),
             }
         },
-        _ => Err(ChainError.UnsupportedAlgorithm(-1)),
+        _ => Result.Err(ChainError.UnsupportedAlgorithm(-1)),
     }
 }
 

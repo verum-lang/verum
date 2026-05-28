@@ -44,7 +44,7 @@ mount core.base.protocols.{
     Debug, Display, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash, Hasher,
     Formatter, FormatError, Default,
 };
-mount core.maybe.{Maybe, Some, None};
+mount core.maybe.{Maybe, Some, Maybe.None};
 mount core.result.{Result, Ok, Err};
 mount core.ordering.{Ordering, Less, Equal, Greater};
 
@@ -247,9 +247,9 @@ implement LogRecord {
             level: level,
             message: message,
             fields: fields,
-            module_path: None,
-            file: None,
-            line: None,
+            module_path: Maybe.None,
+            file: Maybe.None,
+            line: Maybe.None,
         }
     }
 
@@ -260,9 +260,9 @@ implement LogRecord {
             level: level,
             message: message,
             fields: [],
-            module_path: None,
-            file: None,
-            line: None,
+            module_path: Maybe.None,
+            file: Maybe.None,
+            line: Maybe.None,
         }
     }
 
@@ -272,7 +272,7 @@ implement LogRecord {
             level: self.level,
             message: self.message,
             fields: self.fields,
-            module_path: Some(path),
+            module_path: Maybe.Some(path),
             file: self.file,
             line: self.line,
         }
@@ -285,7 +285,7 @@ implement LogRecord {
             message: self.message,
             fields: self.fields,
             module_path: self.module_path,
-            file: Some(file),
+            file: Maybe.Some(file),
             line: self.line,
         }
     }
@@ -298,7 +298,7 @@ implement LogRecord {
             fields: self.fields,
             module_path: self.module_path,
             file: self.file,
-            line: Some(line),
+            line: Maybe.Some(line),
         }
     }
 
@@ -357,9 +357,9 @@ implement LogRecordBuilder {
             rec_level: Info,
             rec_message: "",
             rec_fields: [],
-            rec_module_path: None,
-            rec_file: None,
-            rec_line: None,
+            rec_module_path: Maybe.None,
+            rec_file: Maybe.None,
+            rec_line: Maybe.None,
         }
     }
 
@@ -429,7 +429,7 @@ implement LogRecordBuilder {
             rec_level: lvl,
             rec_message: msg,
             rec_fields: flds,
-            rec_module_path: Some(path),
+            rec_module_path: Maybe.Some(path),
             rec_file: f,
             rec_line: ln,
         }
@@ -447,7 +447,7 @@ implement LogRecordBuilder {
             rec_message: msg,
             rec_fields: flds,
             rec_module_path: mod_path,
-            rec_file: Some(file),
+            rec_file: Maybe.Some(file),
             rec_line: ln,
         }
     }
@@ -465,7 +465,7 @@ implement LogRecordBuilder {
             rec_fields: flds,
             rec_module_path: mod_path,
             rec_file: f,
-            rec_line: Some(line),
+            rec_line: Maybe.Some(line),
         }
     }
 

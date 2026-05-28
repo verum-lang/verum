@@ -88,7 +88,7 @@ public type WatchFilter is {
     skip_initial: Bool,
     /// Coalesce events arriving within this window into a single Modified.
     debounce: Duration,
-    /// Only events for paths matching this glob (None = all).
+    /// Only events for paths matching this glob (Maybe.None = all).
     sub_pattern: Maybe<Text>,
 }
 
@@ -97,7 +97,7 @@ implement WatchFilter {
         WatchFilter {
             skip_initial: true,
             debounce: Duration.from_millis(100),
-            sub_pattern: None,
+            sub_pattern: Maybe.None,
         }
     }
 }
@@ -127,8 +127,8 @@ implement WatchHandle {
     pub async fn for_each(&mut self, f: fn(&WatchEvent) -> Bool) {
         loop {
             match self.receiver.recv().await {
-                None => return,
-                Some(ev) => if !f(&ev) { return; },
+                Maybe.None => return,
+                Maybe.Some(ev) => if !f(&ev) { return; },
             }
         }
     }
@@ -159,13 +159,13 @@ pub async fn watch_native(pattern: &Text)
     {
         let ctx = ShellContext.default();
         let base = match ctx.effective_cwd() {
-            Some(c) => PathBuf.from(c),
-            None    => PathBuf.from("."),
+            Maybe.Some(c) => PathBuf.from(c),
+            Maybe.None    => PathBuf.from("."),
         };
         // Resolve the glob once to enumerate the initial path set.
         let initial = match glob_in(&base, pattern, false) {
-            Ok(m)  => m,
-            Err(e) => return Err(e),
+            Result.Ok(m)  => m,
+            Result.Err(e) => return Result.Err(e),
         };
 
         let (tx, rx): (Sender<WatchEvent>, Receiver<WatchEvent>) = bounded(64);
@@ -175,8 +175,8 @@ pub async fn watch_native(pattern: &Text)
 
         let task = spawn(async move {
             let mut watcher = match FsWatcher.new() {
-                Ok(w)  => w,
-                Err(_) => return Ok(core.shell.result.ShellResult.from_error(
+                Result.Ok(w)  => w,
+                Result.Err(_) => return Result.Ok(core.shell.result.ShellResult.from_error(
                     core.shell.result.ShellError.SpawnFailed {
                         command: f"watch_native({pattern_owned})",
                         reason:  "FsWatcher::new failed".into(),
@@ -188,14 +188,14 @@ pub async fn watch_native(pattern: &Text)
             loop {
                 if token.is_cancelled() { break; }
                 match watcher.wait(500) {
-                    Ok(events) => for ev in events.iter() {
+                    Result.Ok(events) => for ev in events.iter() {
                         let mapped = map_native_event(ev);
                         let _ = tx.send_async(mapped).await;
                     },
-                    Err(_) => break,
+                    Result.Err(_) => break,
                 }
             }
-            Ok(core.shell.result.ShellResult.from_error(
+            Result.Ok(core.shell.result.ShellResult.from_error(
                 core.shell.result.ShellError.Cancelled {
                     command: f"watch_native({pattern_owned})",
                     reason:  "watcher stopped".into(),
@@ -203,7 +203,7 @@ pub async fn watch_native(pattern: &Text)
             ))
         });
 
-        return Ok(WatchHandle {
+        return Result.Ok(WatchHandle {
             receiver: rx,
             job: JobHandle {
                 inner:   task,
@@ -242,8 +242,8 @@ pub async fn watch_with(
 {
     let ctx = ShellContext.default();
     let base = match ctx.effective_cwd() {
-        Some(c) => PathBuf.from(c),
-        None    => PathBuf.from("."),
+        Maybe.Some(c) => PathBuf.from(c),
+        Maybe.None    => PathBuf.from("."),
     };
 
     let (tx, rx): (Sender<WatchEvent>, Receiver<WatchEvent>) = bounded(64);
@@ -276,7 +276,7 @@ pub async fn watch_with(
                 _ = token.cancelled().await => break,
             }
         }
-        Ok(core.shell.result.ShellResult.from_error(
+        Result.Ok(core.shell.result.ShellResult.from_error(
             core.shell.result.ShellError.Cancelled {
                 command: f"watch({pattern_owned})",
                 reason:  "watcher stopped".into(),
@@ -284,7 +284,7 @@ pub async fn watch_with(
         ))
     });
 
-    Ok(WatchHandle {
+    Result.Ok(WatchHandle {
         receiver: rx,
         job: JobHandle {
             inner:   task,
@@ -301,14 +301,14 @@ pub async fn watch_with(
 
 fn scan(base: &PathBuf, pattern: &Text) -> List<(PathBuf, Int)> {
     let matches = match glob_in(base, pattern, false) {
-        Ok(m)  => m,
-        Err(_) => return [],
+        Result.Ok(m)  => m,
+        Result.Err(_) => return [],
     };
     let mut out: List<(PathBuf, Int)> = [];
     for p in matches.into_iter() {
         match fs_metadata(p.as_path()) {
-            Ok(m)  => out.push((p, m.modified_unix_secs())),
-            Err(_) => {},  // file disappeared between glob and stat — skip
+            Result.Ok(m)  => out.push((p, m.modified_unix_secs())),
+            Result.Err(_) => {},  // file disappeared between glob and stat — skip
         }
     }
     out

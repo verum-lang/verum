@@ -164,19 +164,19 @@ public fn plan_overflow(
     overflow_cell_size: Int,
 ) -> Result<BalanceDecision, BalanceError> {
     if overflow_cell_size <= 0 {
-        return Err(InvalidInput("overflow_cell_size must be positive".clone()));
+        return Result.Err(InvalidInput("overflow_cell_size must be positive".clone()));
     }
     if page.cell_count < 0 {
-        return Err(InvalidInput("cell_count < 0".clone()));
+        return Result.Err(InvalidInput("cell_count < 0".clone()));
     }
 
     // Try rotate-right first (cheaper than split).
     if right_sibling > 0 && right_free_bytes >= overflow_cell_size {
-        return Ok(Rotate(page.page_no, right_sibling, 1, page.parent_cell_idx));
+        return Result.Ok(Rotate(page.page_no, right_sibling, 1, page.parent_cell_idx));
     }
     // Rotate-left.
     if left_sibling > 0 && left_free_bytes >= overflow_cell_size {
-        return Ok(Rotate(page.page_no, left_sibling, -1, page.parent_cell_idx));
+        return Result.Ok(Rotate(page.page_no, left_sibling, -1, page.parent_cell_idx));
     }
 
     // Split. Root with no sibling grows the tree; otherwise insert a
@@ -184,7 +184,7 @@ public fn plan_overflow(
     if page.is_root {
         // Grow — allocate a new child, demote the old root into it,
         // leave the separator to be filled on the recursive balance.
-        return Ok(GrowRoot(page.page_no, -1));
+        return Result.Ok(GrowRoot(page.page_no, -1));
     }
 
     // Standard split — distribute cells roughly in half.
@@ -192,7 +192,7 @@ public fn plan_overflow(
     let left_cells = total / 2;
     let right_cells = total - left_cells;
     let separator_cell = left_cells;   // the median becomes the parent key
-    Ok(Split(
+    Result.Ok(Split(
         page.page_no,
         left_cells, right_cells, separator_cell,
         page.parent_cell_idx,
@@ -211,34 +211,34 @@ public fn plan_underflow(
     right_cell_count: Int,
 ) -> Result<BalanceDecision, BalanceError> {
     if page.cell_count >= ctx.min_cells_per_page {
-        return Ok(NoChange);
+        return Result.Ok(NoChange);
     }
     if page.is_root {
         // Root with exactly one child — collapse.
         if page.cell_count == 0 {
-            return Ok(ShrinkRoot(page.page_no, -1));
+            return Result.Ok(ShrinkRoot(page.page_no, -1));
         }
         // Single cell is allowed for the root; no-op.
-        return Ok(NoChange);
+        return Result.Ok(NoChange);
     }
 
     // Prefer rotating from a sibling that has slack.
     if right_sibling > 0 && right_cell_count > ctx.min_cells_per_page {
-        return Ok(Rotate(right_sibling, page.page_no, -1, page.parent_cell_idx));
+        return Result.Ok(Rotate(right_sibling, page.page_no, -1, page.parent_cell_idx));
     }
     if left_sibling > 0 && left_cell_count > ctx.min_cells_per_page {
-        return Ok(Rotate(left_sibling, page.page_no, 1, page.parent_cell_idx));
+        return Result.Ok(Rotate(left_sibling, page.page_no, 1, page.parent_cell_idx));
     }
 
     // No slack anywhere — merge with a neighbour.
     if right_sibling > 0 {
-        return Ok(Merge(page.page_no, right_sibling, page.parent_cell_idx));
+        return Result.Ok(Merge(page.page_no, right_sibling, page.parent_cell_idx));
     }
     if left_sibling > 0 {
-        return Ok(Merge(left_sibling, page.page_no, page.parent_cell_idx - 1));
+        return Result.Ok(Merge(left_sibling, page.page_no, page.parent_cell_idx - 1));
     }
 
-    Err(UnderCapacity)
+    Result.Err(UnderCapacity)
 }
 
 // -----------------------------------------------------------------------------

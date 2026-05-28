@@ -108,13 +108,13 @@ public type ExtensionSet is {
 implement ExtensionSet {
     public fn empty() -> ExtensionSet {
         ExtensionSet {
-            basic_constraints: None,
-            key_usage:         None,
-            ext_key_usage:     None,
-            subject_alt_name:  None,
-            name_constraints:  None,
-            authority_key_id:  None,
-            subject_key_id:    None,
+            basic_constraints: Maybe.None,
+            key_usage:         Maybe.None,
+            ext_key_usage:     Maybe.None,
+            subject_alt_name:  Maybe.None,
+            name_constraints:  Maybe.None,
+            authority_key_id:  Maybe.None,
+            subject_key_id:    Maybe.None,
             others:            [],
         }
     }
@@ -135,7 +135,7 @@ public fn parse_extensions(r: &mut DerReader) -> Result<ExtensionSet, DerError> 
         dispatch(ext, &mut out)?;
     }
     seq.expect_end()?;
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn parse_one_extension(r: &mut DerReader) -> Result<RawExtension, DerError> {
@@ -157,35 +157,35 @@ fn parse_one_extension(r: &mut DerReader) -> Result<RawExtension, DerError> {
     let value = s.read_octet_string()?;
     s.expect_end()?;
 
-    Ok(RawExtension { oid: oid, critical: critical, value_der: value })
+    Result.Ok(RawExtension { oid: oid, critical: critical, value_der: value })
 }
 
 fn dispatch(ext: RawExtension, out: &mut ExtensionSet) -> Result<(), DerError> {
     if ext.oid.eq(&pkix_oid.ext_basic_constraints()) {
         let parsed = basic_constraints.parse(ext.value_der.as_slice())?;
-        out.basic_constraints = Some((ext.critical, parsed));
+        out.basic_constraints = Maybe.Some((ext.critical, parsed));
     } else if ext.oid.eq(&pkix_oid.ext_key_usage()) {
         let parsed = key_usage.parse(ext.value_der.as_slice())?;
-        out.key_usage = Some((ext.critical, parsed));
+        out.key_usage = Maybe.Some((ext.critical, parsed));
     } else if ext.oid.eq(&pkix_oid.ext_ext_key_usage()) {
         let parsed = ext_key_usage.parse(ext.value_der.as_slice())?;
-        out.ext_key_usage = Some((ext.critical, parsed));
+        out.ext_key_usage = Maybe.Some((ext.critical, parsed));
     } else if ext.oid.eq(&pkix_oid.ext_subject_alt_name()) {
         let parsed = subject_alt_name.parse(ext.value_der.as_slice())?;
-        out.subject_alt_name = Some((ext.critical, parsed));
+        out.subject_alt_name = Maybe.Some((ext.critical, parsed));
     } else if ext.oid.eq(&pkix_oid.ext_name_constraints()) {
         let parsed = name_constraints.parse(ext.value_der.as_slice())?;
-        out.name_constraints = Some((ext.critical, parsed));
+        out.name_constraints = Maybe.Some((ext.critical, parsed));
     } else if ext.oid.eq(&pkix_oid.ext_authority_key_identifier()) {
         let kid = parse_aki_key_id(ext.value_der.as_slice())?;
-        out.authority_key_id = Some((ext.critical, kid));
+        out.authority_key_id = Maybe.Some((ext.critical, kid));
     } else if ext.oid.eq(&pkix_oid.ext_subject_key_identifier()) {
         let kid = parse_ski(ext.value_der.as_slice())?;
-        out.subject_key_id = Some((ext.critical, kid));
+        out.subject_key_id = Maybe.Some((ext.critical, kid));
     } else {
         out.others.push(ext);
     }
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -201,7 +201,7 @@ fn dispatch(ext: RawExtension, out: &mut ExtensionSet) -> Result<(), DerError> {
 fn parse_aki_key_id(value: &[Byte]) -> Result<List<Byte>, DerError> {
     let mut r = DerReader.new(value);
     let mut seq = r.read_sequence()?;
-    if seq.is_at_end() { return Ok([]); }
+    if seq.is_at_end() { return Result.Ok([]); }
     // [0] keyIdentifier (IMPLICIT OCTET STRING). Tag = context-specific [0]
     // primitive, so we consume tag + length manually.
     let t = seq.peek_tag()?;
@@ -210,7 +210,7 @@ fn parse_aki_key_id(value: &[Byte]) -> Result<List<Byte>, DerError> {
         _ => false,
     };
     if !is_kid {
-        return Ok([]);
+        return Result.Ok([]);
     }
     let (_, len, _, _) = seq.peek_element_span()?;
     let _ = seq.read_tag_length()?;   // consume tag + length, cursor at value
@@ -218,12 +218,12 @@ fn parse_aki_key_id(value: &[Byte]) -> Result<List<Byte>, DerError> {
     // Skip rest of AKI.
     seq.skip_to_end();
     r.expect_end()?;
-    Ok(kid)
+    Result.Ok(kid)
 }
 
 fn parse_ski(value: &[Byte]) -> Result<List<Byte>, DerError> {
     let mut r = DerReader.new(value);
     let kid = r.read_octet_string()?;
     r.expect_end()?;
-    Ok(kid)
+    Result.Ok(kid)
 }

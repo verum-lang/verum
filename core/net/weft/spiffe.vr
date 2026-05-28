@@ -177,8 +177,8 @@ implement<P: TrustBundleProvider + Send + Sync + 'static, H: Handler> Handler
             AuthMode.Mtls => validate_mtls(&req, &*self.bundles),
         };
         match validation {
-            Err(e) => Ok(e.into_response()),
-            Ok(principal) => {
+            Result.Err(e) => Result.Ok(e.into_response()),
+            Result.Ok(principal) => {
                 // Principal-attached request lands via a stamped
                 // header (phase-6 scaffold). Handlers read this via
                 // `req.header(&"x-weft-spiffe-id")`; full
@@ -235,23 +235,23 @@ fn validate_jwt<P: TrustBundleProvider>(req: &WeftRequest, provider: &P)
     -> Result<Principal, AuthRejection>
 {
     let auth = match req.headers.get(&"authorization") {
-        None    => return Err(AuthRejection.MissingCredential),
-        Some(v) => v.clone(),
+        Maybe.None    => return Result.Err(AuthRejection.MissingCredential),
+        Maybe.Some(v) => v.clone(),
     };
     if !auth.starts_with("Bearer ") {
-        return Err(AuthRejection.InvalidCredential("not a Bearer token".into()));
+        return Result.Err(AuthRejection.InvalidCredential("not a Bearer token".into()));
     }
     let token = auth.slice(7, auth.len());
     let bundle = match provider.jwt_bundle() {
-        None    => return Err(AuthRejection.UntrustedSource),
-        Some(b) => b,
+        Maybe.None    => return Result.Err(AuthRejection.UntrustedSource),
+        Maybe.Some(b) => b,
     };
     // Runtime-level crypto check — implemented in the runtime crate
     // via `verum_security.spiffe.validate_jwt_svid`. Phase-6 skel:
     // returns InvalidCredential until the intrinsic hookup is done.
     match runtime_validate_jwt_svid(&token, &bundle) {
-        Err(e)        => Err(AuthRejection.InvalidCredential(e)),
-        Ok(principal) => Ok(principal),
+        Result.Err(e)        => Result.Err(AuthRejection.InvalidCredential(e)),
+        Result.Ok(principal) => Result.Ok(principal),
     }
 }
 
@@ -262,16 +262,16 @@ fn validate_mtls<P: TrustBundleProvider>(req: &WeftRequest, provider: &P)
     // onto the request by the TlsHttp1Runner (phase-3.5 follow-up).
     // For phase-6 skeleton we read a placeholder header.
     let cert_pem = match req.headers.get(&"x-weft-client-cert") {
-        None    => return Err(AuthRejection.MissingCredential),
-        Some(v) => v.clone(),
+        Maybe.None    => return Result.Err(AuthRejection.MissingCredential),
+        Maybe.Some(v) => v.clone(),
     };
     let bundle = match provider.x509_bundle() {
-        None    => return Err(AuthRejection.UntrustedSource),
-        Some(b) => b,
+        Maybe.None    => return Result.Err(AuthRejection.UntrustedSource),
+        Maybe.Some(b) => b,
     };
     match runtime_validate_x509_svid(&cert_pem, &bundle) {
-        Err(e)        => Err(AuthRejection.InvalidCredential(e)),
-        Ok(principal) => Ok(principal),
+        Result.Err(e)        => Result.Err(AuthRejection.InvalidCredential(e)),
+        Result.Ok(principal) => Result.Ok(principal),
     }
 }
 
@@ -284,11 +284,11 @@ fn validate_mtls<P: TrustBundleProvider>(req: &WeftRequest, provider: &P)
 fn runtime_validate_jwt_svid(_token: &Text, _bundle: &JwtBundle)
     -> Result<Principal, Text>
 {
-    Err("SPIFFE JWT validation intrinsic not yet wired".into())
+    Result.Err("SPIFFE JWT validation intrinsic not yet wired".into())
 }
 
 fn runtime_validate_x509_svid(_cert: &Text, _bundle: &X509Bundle)
     -> Result<Principal, Text>
 {
-    Err("SPIFFE X.509 validation intrinsic not yet wired".into())
+    Result.Err("SPIFFE X.509 validation intrinsic not yet wired".into())
 }

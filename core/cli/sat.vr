@@ -185,8 +185,8 @@ public fn evaluate(f: &BoolFormula, assignment: &Map<Text, Bool>) -> EvalResult 
         BoolFormula.True => EvalResult.Definite(true),
         BoolFormula.False => EvalResult.Definite(false),
         BoolFormula.Var(name) => match assignment.get(name.clone()) {
-            Some(b) => EvalResult.Definite(b),
-            None => EvalResult.Unknown,
+            Maybe.Some(b) => EvalResult.Definite(b),
+            Maybe.None => EvalResult.Unknown,
         },
         BoolFormula.Not(inner) => match evaluate(inner.as_ref(), assignment) {
             EvalResult.Definite(b) => EvalResult.Definite(!b),
@@ -258,12 +258,12 @@ public fn is_sat(f: &BoolFormula) -> Bool {
 @inline
 public fn is_unsat(f: &BoolFormula) -> Bool { !is_sat(f) }
 
-/// Try to find a model. Equivalent to `solve` returning `Some(model)` /
-/// `None`.
+/// Try to find a model. Equivalent to `solve` returning `Maybe.Some(model)` /
+/// `Maybe.None`.
 public fn find_model(f: &BoolFormula) -> Maybe<Map<Text, Bool>> {
     match solve(f) {
-        SatResult.Sat(m) => Some(m),
-        SatResult.Unsat => None,
+        SatResult.Sat(m) => Maybe.Some(m),
+        SatResult.Unsat => Maybe.None,
     }
 }
 
@@ -332,12 +332,12 @@ public fn render_assignment(assignment: &Map<Text, Bool>) -> Text {
         let k = &keys[i];
         if !first { out.push_str(", "); }
         match assignment.get(k.clone()) {
-            Some(true) => out.push_str(k),
-            Some(false) => {
+            Maybe.Some(true) => out.push_str(k),
+            Maybe.Some(false) => {
                 out.push_str("¬");
                 out.push_str(k);
             },
-            None => {},
+            Maybe.None => {},
         }
         first = false;
         i = i + 1;

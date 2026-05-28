@@ -234,7 +234,7 @@ implement PosixFile {
 implement SqliteFile for PosixFile {
     fn read(&self, buf: &mut List<Byte>, offset: Int) -> Result<(), VfsError> {
         if self.closed {
-            return Err(VfsError { kind: Closed, message: "read on closed file" });
+            return Result.Err(VfsError { kind: Closed, message: "read on closed file" });
         }
         // Same RUNTIME-3-DEEPER sidestep as PosixVfs.open / .delete:
         // hand a raw pointer + count rather than a `&mut [Byte]` slice
@@ -244,46 +244,46 @@ implement SqliteFile for PosixFile {
         // even from a `&mut` reference held inside a `&self` body.
         let n = buf.len();
         match pread_raw(self.fd, buf.as_ptr() as &unsafe Byte, n, offset) {
-            Ok(read_n) => {
+            Result.Ok(read_n) => {
                 if read_n < n {
-                    Err(VfsError { kind: ShortRead, message: "pread returned short" })
+                    Result.Err(VfsError { kind: ShortRead, message: "pread returned short" })
                 } else {
-                    Ok(())
+                    Result.Ok(())
                 }
             }
-            Err(e) => Err(to_vfs_err(e)),
+            Result.Err(e) => Result.Err(to_vfs_err(e)),
         }
     }
 
     fn write(&mut self, buf: &[Byte], offset: Int) -> Result<(), VfsError> {
         if self.closed {
-            return Err(VfsError { kind: Closed, message: "write on closed file" });
+            return Result.Err(VfsError { kind: Closed, message: "write on closed file" });
         }
         match pwrite(self.fd, buf, offset) {
-            Ok(n) => {
+            Result.Ok(n) => {
                 if n < buf.len() {
-                    Err(VfsError { kind: WriteFault, message: "pwrite returned short" })
+                    Result.Err(VfsError { kind: WriteFault, message: "pwrite returned short" })
                 } else {
-                    Ok(())
+                    Result.Ok(())
                 }
             }
-            Err(e) => Err(to_vfs_err(e)),
+            Result.Err(e) => Result.Err(to_vfs_err(e)),
         }
     }
 
     fn truncate(&mut self, size: Int) -> Result<(), VfsError> {
         if self.closed {
-            return Err(VfsError { kind: Closed, message: "truncate on closed file" });
+            return Result.Err(VfsError { kind: Closed, message: "truncate on closed file" });
         }
         match sys.common.truncate(self.fd, size) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(to_vfs_err(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(to_vfs_err(e)),
         }
     }
 
     fn sync(&self, flags: SyncFlags) -> Result<(), VfsError> {
         if self.closed {
-            return Err(VfsError { kind: Closed, message: "sync on closed file" });
+            return Result.Err(VfsError { kind: Closed, message: "sync on closed file" });
         }
         // **Sync mode dispatch** (post-fix):
         //
@@ -304,24 +304,24 @@ implement SqliteFile for PosixFile {
         // metadata separately from data.
         if flags.full {
             match durability.full_fsync(self.fd) {
-                Ok(_)  => Ok(()),
-                Err(e) => Err(to_vfs_err(e)),
+                Result.Ok(_)  => Result.Ok(()),
+                Result.Err(e) => Result.Err(to_vfs_err(e)),
             }
         } else {
             match durability.data_only_fsync(self.fd) {
-                Ok(_)  => Ok(()),
-                Err(e) => Err(to_vfs_err(e)),
+                Result.Ok(_)  => Result.Ok(()),
+                Result.Err(e) => Result.Err(to_vfs_err(e)),
             }
         }
     }
 
     fn file_size(&self) -> Result<Int, VfsError> {
         if self.closed {
-            return Err(VfsError { kind: Closed, message: "file_size on closed file" });
+            return Result.Err(VfsError { kind: Closed, message: "file_size on closed file" });
         }
         match sys.common.file_size(self.fd) {
-            Ok(n)  => Ok(n),
-            Err(e) => Err(to_vfs_err(e)),
+            Result.Ok(n)  => Result.Ok(n),
+            Result.Err(e) => Result.Err(to_vfs_err(e)),
         }
     }
 
@@ -342,14 +342,14 @@ implement SqliteFile for PosixFile {
             // keep the shared byte.
             Shared => {
                 if self.locks.state == Shared {
-                    Ok(())
+                    Result.Ok(())
                 } else {
                     // Drop the wider locks, re-acquire shared.
                     let _ = release_all(&mut self.locks);
                     acquire_shared(&mut self.locks)
                 }
             }
-            _ => Err(VfsError {
+            _ => Result.Err(VfsError {
                 kind: InvalidArgument,
                 message: "unlock target must be Unlocked or Shared",
             }),
@@ -376,17 +376,17 @@ implement SqliteFile for PosixFile {
 
     fn fetch(&self, _offset: Int, _len: Int) -> Result<Maybe<List<Byte>>, VfsError> {
         // mmap-based fetch deferred to L1 once the pager can exploit it.
-        Ok(None)
+        Result.Ok(Maybe.None)
     }
 
     fn unfetch(&self, _offset: Int, _buf: &[Byte]) -> Result<(), VfsError> {
-        Ok(())
+        Result.Ok(())
     }
 
     fn shm_map(&mut self, _region: Int, _size: Int, _extend: Bool)
         -> Result<List<Byte>, VfsError>
     {
-        Err(VfsError {
+        Result.Err(VfsError {
             kind: Unsupported,
             message: "shm_map pending WAL-index (L1) integration",
         })
@@ -395,7 +395,7 @@ implement SqliteFile for PosixFile {
     fn shm_lock(&mut self, _start: Int, _count: Int, _flags: ShmLockFlags)
         -> Result<(), VfsError>
     {
-        Err(VfsError {
+        Result.Err(VfsError {
             kind: Unsupported,
             message: "shm_lock pending WAL-index (L1) integration",
         })
@@ -406,7 +406,7 @@ implement SqliteFile for PosixFile {
 
     fn close(&mut self) -> Result<(), VfsError> {
         if self.closed {
-            return Ok(());
+            return Result.Ok(());
         }
         // Release all locks before close — otherwise the kernel cleans
         // up via fd close, which is also fine, but explicit is clearer.
@@ -420,8 +420,8 @@ implement SqliteFile for PosixFile {
         }
 
         match res {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(to_vfs_err(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(to_vfs_err(e)),
         }
     }
 }
@@ -453,8 +453,8 @@ implement VfsProtocol for PosixVfs {
         path_buf[n] = 0 as Byte;
 
         match sys_open_raw(path_buf.as_ptr() as &Byte, oflag, mode) {
-            Ok(fd) => {
-                Ok(PosixFile {
+            Result.Ok(fd) => {
+                Result.Ok(PosixFile {
                     fd: fd,
                     path: path.clone(),
                     locks: lock_manager_new(fd),
@@ -462,7 +462,7 @@ implement VfsProtocol for PosixVfs {
                     delete_on_close: flags.delete_on_close,
                 })
             }
-            Err(e) => Err(to_vfs_err(e)),
+            Result.Err(e) => Result.Err(to_vfs_err(e)),
         }
     }
 
@@ -477,20 +477,20 @@ implement VfsProtocol for PosixVfs {
         path_buf[n] = 0 as Byte;
 
         match sys_unlink_raw(path_buf.as_ptr() as &Byte) {
-            Ok(_)  => {
+            Result.Ok(_)  => {
                 if sync_dir {
                     // Best-effort directory sync on the parent.
                     let parent = parent_of(path);
                     let parent_cp = to_c_path(&parent);
                     let _ = durability.sync_directory(&parent_cp);
                 }
-                Ok(())
+                Result.Ok(())
             }
-            Err(e) => {
+            Result.Err(e) => {
                 if e.code == 2 {   // ENOENT
-                    Err(VfsError { kind: NotFound, message: e.message.clone() })
+                    Result.Err(VfsError { kind: NotFound, message: e.message.clone() })
                 } else {
-                    Err(to_vfs_err(e))
+                    Result.Err(to_vfs_err(e))
                 }
             }
         }
@@ -501,7 +501,7 @@ implement VfsProtocol for PosixVfs {
         //  Exists → F_OK (presence test only)
         //  CanRead → F_OK | R_OK
         //  CanReadWrite → F_OK | R_OK | W_OK
-        // sys.common.access returns Ok(false) for ENOENT/EACCES/EROFS —
+        // sys.common.access returns Result.Ok(false) for ENOENT/EACCES/EROFS —
         // exactly what SQLite wants — and Err for genuine I/O faults.
         let mode: Int = match kind {
             Exists       => ACCESS_F_OK,
@@ -510,8 +510,8 @@ implement VfsProtocol for PosixVfs {
         };
         let cp = to_c_path(path);
         match sys.common.access(&cp, mode) {
-            Ok(b)  => Ok(b),
-            Err(e) => Err(to_vfs_err(e)),
+            Result.Ok(b)  => Result.Ok(b),
+            Result.Err(e) => Result.Err(to_vfs_err(e)),
         }
     }
 
@@ -519,7 +519,7 @@ implement VfsProtocol for PosixVfs {
         // realpath() wrapper deferred; SQLite tolerates a relative path
         // passthrough for v1. PosixVfs callers are expected to canonicalise
         // via core.fs once it lands.
-        Ok(path.clone())
+        Result.Ok(path.clone())
     }
 
     fn random_bytes(&self, len: Int) -> Result<List<Byte>, VfsError> {
@@ -534,17 +534,17 @@ implement VfsProtocol for PosixVfs {
         // which callers (WAL salt generator) would silently use as
         // zero bytes — letting an attacker forge WAL frames with
         // predictable checksums. Now every entropy-fetch failure
-        // surfaces as `Err(VfsError::IoError)` so callers MUST
+        // surfaces as `Result.Err(VfsError::IoError)` so callers MUST
         // explicitly handle the no-entropy case.
         if len <= 0 {
-            return Ok(List.new());
+            return Result.Ok(List.new());
         }
         let mut out: List<Byte> = List.with_capacity(len);
         out.resize(len, 0 as Byte);
         let slice: &mut [Byte] = out.as_mut_slice();
         match core.sys.common.random_bytes(slice) {
-            Ok(_) => Ok(out),
-            Err(_) => Err(VfsError {
+            Result.Ok(_) => Result.Ok(out),
+            Result.Err(_) => Result.Err(VfsError {
                 kind: IoError,
                 message: "PosixVfs.random_bytes: kernel entropy fetch failed".clone(),
             }),
@@ -562,7 +562,7 @@ implement VfsProtocol for PosixVfs {
         }
     }
 
-    fn get_last_error(&self) -> Maybe<VfsError> { None }
+    fn get_last_error(&self) -> Maybe<VfsError> { Maybe.None }
 
     fn sleep_us(&self, _micros: Int) {
         // No-op; callers on PosixVfs already schedule via core.async.

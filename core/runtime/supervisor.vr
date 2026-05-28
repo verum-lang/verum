@@ -1042,7 +1042,7 @@ implement SupervisorHandle {
 
         // Check if shutting down
         if !inner.is_running.load(MemoryOrdering.Acquire) {
-            return Err(SupervisorError.ShuttingDown);
+            return Result.Err(SupervisorError.ShuttingDown);
         }
 
         // Generate child ID
@@ -1060,7 +1060,7 @@ implement SupervisorHandle {
         // Spawn the child task
         self.spawn_child(child_id).await?;
 
-        Ok(child_id)
+        Result.Ok(child_id)
     }
 
     /// Manually restart a child
@@ -1095,7 +1095,7 @@ implement SupervisorHandle {
         }.ok_or(SupervisorError.ChildNotFound(child_id))?;
 
         // Cancel the task
-        if let Some(handle) = child.take_handle() {
+        if let Maybe.Some(handle) = child.take_handle() {
             handle.cancel();
 
             // Wait for shutdown with timeout
@@ -1112,7 +1112,7 @@ implement SupervisorHandle {
         // Update status
         child.set_status(ChildStatus.Stopped);
 
-        Ok(())
+        Result.Ok(())
     }
 
     /// Shutdown supervisor and all children
@@ -1132,7 +1132,7 @@ implement SupervisorHandle {
 
         // Shutdown each child
         for child in children.iter() {
-            if let Some(handle) = child.take_handle() {
+            if let Maybe.Some(handle) = child.take_handle() {
                 handle.cancel();
 
                 let timeout_ms = child.get().spec.shutdown_timeout_ms;
@@ -1146,7 +1146,7 @@ implement SupervisorHandle {
             child.set_status(ChildStatus.Stopped);
         }
 
-        Ok(())
+        Result.Ok(())
     }
 
     /// Internal: Spawn or respawn a child task
@@ -1179,7 +1179,7 @@ implement SupervisorHandle {
         // Start monitoring task
         self.monitor_child(child_id);
 
-        Ok(())
+        Result.Ok(())
     }
 
     /// Internal: Monitor a child and handle failures
@@ -1205,12 +1205,12 @@ implement SupervisorHandle {
             };
 
             let child = match child {
-                Some(c) => c,
-                None => { return; } // Child removed, stop monitoring
+                Maybe.Some(c) => c,
+                Maybe.None => { return; } // Child removed, stop monitoring
             };
 
             // Wait for task completion
-            let result = if let Some(handle) = child.take_handle() {
+            let result = if let Maybe.Some(handle) = child.take_handle() {
                 handle.await
             } else {
                 return; // No handle, stop monitoring
@@ -1218,10 +1218,10 @@ implement SupervisorHandle {
 
             // Determine failure reason
             let reason = match result {
-                Ok(_) => FailureReason.NormalExit,
-                Err(e) if e.is_cancelled() => FailureReason.Cancelled,
-                Err(e) if e.is_panic() => FailureReason.Panic(e.panic_message()),
-                Err(e) => FailureReason.ErrorExit(e.to_string()),
+                Result.Ok(_) => FailureReason.NormalExit,
+                Result.Err(e) if e.is_cancelled() => FailureReason.Cancelled,
+                Result.Err(e) if e.is_panic() => FailureReason.Panic(e.panic_message()),
+                Result.Err(e) => FailureReason.ErrorExit(e.to_string()),
             };
 
             // Check if supervisor is still running
@@ -1250,7 +1250,7 @@ implement SupervisorHandle {
                     // Just restart this child; persist event.
                     let event = child.record_restart(&reason);
                     inner.append_restart_event(event);
-                    if let Err(e) = self.spawn_child(child_id).await {
+                    if let Result.Err(e) = self.spawn_child(child_id).await {
                         child.set_status(ChildStatus.Failed);
                         self.handle_escalation(child_id, &FailureReason.ErrorExit(e.description())).await;
                         return;
@@ -1297,7 +1297,7 @@ implement SupervisorHandle {
             }
             EscalationPolicy.EscalateToParent => {
                 // Notify parent (if any)
-                if let Some(parent) = &inner.parent {
+                if let Maybe.Some(parent) = &inner.parent {
                     parent.handle_child_escalation(self.id, escalation_reason).await;
                 } else {
                     // No parent - log and terminate
@@ -1328,7 +1328,7 @@ implement SupervisorHandle {
 
         // Stop all in reverse order
         for child in children.iter().rev() {
-            if let Some(handle) = child.take_handle() {
+            if let Maybe.Some(handle) = child.take_handle() {
                 handle.cancel();
                 let _ = handle.await;
             }
@@ -1339,7 +1339,7 @@ implement SupervisorHandle {
         for child in children.iter() {
             let event = child.record_restart(reason);
             inner.append_restart_event(event);
-            if let Err(_) = self.spawn_child(child.id).await {
+            if let Result.Err(_) = self.spawn_child(child.id).await {
                 child.set_status(ChildStatus.Failed);
             }
         }
@@ -1361,7 +1361,7 @@ implement SupervisorHandle {
 
         // Stop in reverse order
         for child in children_to_restart.iter().rev() {
-            if let Some(handle) = child.take_handle() {
+            if let Maybe.Some(handle) = child.take_handle() {
                 handle.cancel();
                 let _ = handle.await;
             }
@@ -1372,7 +1372,7 @@ implement SupervisorHandle {
         for child in children_to_restart.iter() {
             let event = child.record_restart(reason);
             inner.append_restart_event(event);
-            if let Err(_) = self.spawn_child(child.id).await {
+            if let Result.Err(_) = self.spawn_child(child.id).await {
                 child.set_status(ChildStatus.Failed);
             }
         }
@@ -1393,7 +1393,7 @@ implement SupervisorHandle {
                 )).await;
             }
             EscalationPolicy.EscalateToParent => {
-                if let Some(parent) = &self.inner.parent {
+                if let Maybe.Some(parent) = &self.inner.parent {
                     parent.handle_child_escalation(self.id, wrapped_reason).await;
                 } else {
                     supervisor_log_escalation(&wrapped_reason);
@@ -1464,7 +1464,7 @@ implement SupervisorInner {
             children: RwLock.new(List.new()),
             restart_history: RwLock.new(List.new()),
             is_running: AtomicBool.new(true),
-            parent: None,
+            parent: Maybe.None,
         }
     }
 
@@ -1548,8 +1548,8 @@ implement ChildState {
         Shared.new(Self {
             id: id,
             spec: spec,
-            handle: Mutex.new(None),
-            factory: Mutex.new(Some(wrapped_factory)),
+            handle: Mutex.new(Maybe.None),
+            factory: Mutex.new(Maybe.Some(wrapped_factory)),
             status: AtomicU8.new(ChildStatus.Starting.to_u8()),
             intensity: intensity,
             started_at_ms: AtomicU64.new(monotonic_millis()),
@@ -1579,7 +1579,7 @@ implement ChildState {
 
     /// Set task handle
     public fn set_handle(&self, handle: JoinHandle<()>) {
-        *self.handle.lock().unwrap_or_else(|p| p.into_inner()) = Some(handle);
+        *self.handle.lock().unwrap_or_else(|p| p.into_inner()) = Maybe.Some(handle);
     }
 
     /// Take factory (for respawning)

@@ -93,7 +93,7 @@ implement OpStatTable {
         while i < self.entries.len() {
             if self.entries[i].opcode == *opcode {
                 let e = &self.entries[i];
-                return Some(OpStat {
+                return Maybe.Some(OpStat {
                     opcode: e.opcode.clone(),
                     count: e.count,
                     total_ns: e.total_ns,
@@ -102,7 +102,7 @@ implement OpStatTable {
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn total_dispatches(&self) -> Int64 {

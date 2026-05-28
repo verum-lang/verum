@@ -359,7 +359,7 @@ implement Eq for TimeoutError {
 ///
 
 /// If the inner future does not complete within the timeout,
-/// returns `Err(TimeoutError)`.
+/// returns `Result.Err(TimeoutError)`.
 ///
 
 /// # Example
@@ -367,8 +367,8 @@ implement Eq for TimeoutError {
 
 /// ```verum
 /// match timeout(Duration.from_secs(5), fetch_data()).await {
-///  Ok(data) => process(data),
-///  Err(TimeoutError) => print("timed out!"),
+///  Result.Ok(data) => process(data),
+///  Result.Err(TimeoutError) => print("timed out!"),
 /// }
 /// ```
 public type Timeout<F: Future> is {
@@ -393,14 +393,14 @@ implement<F: Future> Future for Timeout<F> {
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<F.Output, TimeoutError>> {
         if self.completed {
-            return Poll.Ready(Err(TimeoutError));
+            return Poll.Ready(Result.Err(TimeoutError));
         }
 
         // Try the inner future first
         match self.future.poll(cx) {
             Poll.Ready(val) => {
                 self.completed = true;
-                return Poll.Ready(Ok(val));
+                return Poll.Ready(Result.Ok(val));
             }
             Poll.Pending => {}
         }
@@ -409,7 +409,7 @@ implement<F: Future> Future for Timeout<F> {
         match self.sleep.poll(cx) {
             Poll.Ready(()) => {
                 self.completed = true;
-                Poll.Ready(Err(TimeoutError))
+                Poll.Ready(Result.Err(TimeoutError))
             }
             Poll.Pending => Poll.Pending,
         }
@@ -447,13 +447,13 @@ implement Debounce {
     public fn new(delay: Duration) -> Debounce {
         Debounce {
             delay: delay,
-            deadline: None,
+            deadline: Maybe.None,
         }
     }
 
     /// Trigger the debounce (resets the timer).
     public fn trigger(&mut self) {
-        self.deadline = Some(Instant.now() + self.delay);
+        self.deadline = Maybe.Some(Instant.now() + self.delay);
     }
 
     /// Check if the debounce has settled (enough time passed since last trigger).
@@ -463,8 +463,8 @@ implement Debounce {
     /// since the last trigger.
     public fn is_settled(&self) -> Bool {
         match self.deadline {
-            None => true,
-            Some(d) => Instant.now() >= d,
+            Maybe.None => true,
+            Maybe.Some(d) => Instant.now() >= d,
         }
     }
 
@@ -474,14 +474,14 @@ implement Debounce {
     /// Returns immediately if no trigger has been called.
     public async fn settled(&self) {
         match self.deadline {
-            None => {}
-            Some(d) => sleep_until(d).await,
+            Maybe.None => {}
+            Maybe.Some(d) => sleep_until(d).await,
         }
     }
 
     /// Reset without triggering.
     public fn reset(&mut self) {
-        self.deadline = None;
+        self.deadline = Maybe.None;
     }
 }
 
@@ -504,7 +504,7 @@ implement Throttle {
     public fn new(interval: Duration) -> Throttle {
         Throttle {
             interval: interval,
-            last_allowed: None,
+            last_allowed: Maybe.None,
         }
     }
 
@@ -516,13 +516,13 @@ implement Throttle {
     public fn try_acquire(&mut self) -> Bool {
         let now = Instant.now();
         match self.last_allowed {
-            None => {
-                self.last_allowed = Some(now);
+            Maybe.None => {
+                self.last_allowed = Maybe.Some(now);
                 true
             }
-            Some(last) => {
+            Maybe.Some(last) => {
                 if now >= last + self.interval {
-                    self.last_allowed = Some(now);
+                    self.last_allowed = Maybe.Some(now);
                     true
                 } else {
                     false
@@ -534,21 +534,21 @@ implement Throttle {
     /// Wait until the throttle allows an operation.
     public async fn acquire(&mut self) {
         match self.last_allowed {
-            None => {
-                self.last_allowed = Some(Instant.now());
+            Maybe.None => {
+                self.last_allowed = Maybe.Some(Instant.now());
             }
-            Some(last) => {
+            Maybe.Some(last) => {
                 let next_allowed = last + self.interval;
                 if Instant.now() < next_allowed {
                     sleep_until(next_allowed).await;
                 }
-                self.last_allowed = Some(Instant.now());
+                self.last_allowed = Maybe.Some(Instant.now());
             }
         }
     }
 
     /// Reset the throttle state.
     public fn reset(&mut self) {
-        self.last_allowed = None;
+        self.last_allowed = Maybe.None;
     }
 }

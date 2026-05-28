@@ -1149,7 +1149,7 @@ public fn self_reference_witness_unspecified() -> SelfReferenceWitness {
 /// them explicitly; absent declarations default per the helpers
 /// `cognitive_substrate_default`, `formal_anchoring_default`,
 /// canonical `ExecutabilitySense.StructuralReadiness`,
-/// `purpose_default()`, and `self_reference == None` (no
+/// `purpose_default()`, and `self_reference == Maybe.None` (no
 /// self-reference). In strict mode, absence triggers the CVE-AH
 /// band anti-patterns (AP-037..AP-040).
 public type ShapeDeclarations is {
@@ -1164,11 +1164,11 @@ public type ShapeDeclarations is {
 /// architectural type-checker fills defaults at audit time.
 public fn shape_declarations_empty() -> ShapeDeclarations {
     ShapeDeclarations {
-        purpose: None,
-        substrate: None,
-        anchoring: None,
-        e_sense: None,
-        self_reference: None,
+        purpose: Maybe.None,
+        substrate: Maybe.None,
+        anchoring: Maybe.None,
+        e_sense: Maybe.None,
+        self_reference: Maybe.None,
     }
 }
 
@@ -1437,9 +1437,9 @@ public fn lifecycle_is_mature_corpus_forbidden(lc: Lifecycle) -> Bool {
 /// Number of CVE axes that discharge (0..=3).
 public fn cve_closure_degree(cve: CveClosure) -> Int {
     let mut n: Int = 0;
-    if cve.constructive is Some(_)         { n = n + 1; }
-    if cve.verifiable_strategy is Some(_)  { n = n + 1; }
-    if cve.executable is Some(_)           { n = n + 1; }
+    if cve.constructive is Maybe.Some(_)         { n = n + 1; }
+    if cve.verifiable_strategy is Maybe.Some(_)  { n = n + 1; }
+    if cve.executable is Maybe.Some(_)           { n = n + 1; }
     n
 }
 
@@ -1514,14 +1514,14 @@ public fn shape_default_for_unannotated() -> Shape {
         foundation: Foundation.ZfcTwoInacc,
         stratum: MsfsStratum.LFnd,
         cve_closure: CveClosure {
-            constructive: None,
-            verifiable_strategy: None,
-            executable: None,
+            constructive: Maybe.None,
+            verifiable_strategy: Maybe.None,
+            executable: Maybe.None,
         },
         lifecycle: Lifecycle.Plan("unspecified"),
         composes_with: [],
         strict: false,
-        declarations: None,
+        declarations: Maybe.None,
     }
 }
 
@@ -1537,7 +1537,7 @@ public fn lifecycle_rank_strict_order_holds() -> Bool {
     lifecycle_rank(Lifecycle.Theorem("v0.1")) > lifecycle_rank(Lifecycle.Conditional([])) &&
     lifecycle_rank(Lifecycle.Conditional([])) > lifecycle_rank(Lifecycle.Plan("x")) &&
     lifecycle_rank(Lifecycle.Plan("x")) > lifecycle_rank(Lifecycle.Hypothesis(ConfidenceLevel.Medium)) &&
-    lifecycle_rank(Lifecycle.Hypothesis(ConfidenceLevel.Medium)) > lifecycle_rank(Lifecycle.Obsolete("x", None))
+    lifecycle_rank(Lifecycle.Hypothesis(ConfidenceLevel.Medium)) > lifecycle_rank(Lifecycle.Obsolete("x", Maybe.None))
 }
 
 /// **Soundness pin**: AFN-T α boundary closure — `LAbs` is the

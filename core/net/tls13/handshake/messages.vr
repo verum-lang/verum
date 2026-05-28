@@ -196,13 +196,13 @@ public fn encode_handshake(msg: &HandshakeMessage, out: &mut List<Byte>) -> Resu
         HandshakeMessage.CertificateVerifyMsg(cv) =>
             encode_wrapped(HST_CERTIFICATE_VERIFY, out, |b| encode_certificate_verify(cv, b)),
         HandshakeMessage.FinishedMsg(fin) =>
-            encode_wrapped(HST_FINISHED, out, |b| { put_bytes(b, fin.verify_data.as_slice()); Ok(()) }),
+            encode_wrapped(HST_FINISHED, out, |b| { put_bytes(b, fin.verify_data.as_slice()); Result.Ok(()) }),
         HandshakeMessage.NewSessionTicketMsg(nst) =>
             encode_wrapped(HST_NEW_SESSION_TICKET, out, |b| encode_new_session_ticket(nst, b)),
         HandshakeMessage.KeyUpdateMsg(ku) =>
-            encode_wrapped(HST_KEY_UPDATE, out, |b| { put_u8(b, ku.request_update.to_u8()); Ok(()) }),
+            encode_wrapped(HST_KEY_UPDATE, out, |b| { put_u8(b, ku.request_update.to_u8()); Result.Ok(()) }),
         HandshakeMessage.EndOfEarlyDataMsg =>
-            encode_wrapped(HST_END_OF_EARLY_DATA, out, |b| { let _ = b; Ok(()) }),
+            encode_wrapped(HST_END_OF_EARLY_DATA, out, |b| { let _ = b; Result.Ok(()) }),
     }
 }
 
@@ -221,16 +221,16 @@ fn encode_client_hello(ch: &ClientHello, out: &mut List<Byte>) -> Result<(), Cod
     put_u16(out, ch.legacy_version.to_u16());
     let mut i: Int = 0;
     while i < 32 { out.push(ch.random[i]); i = i + 1; }
-    vec_u8(out, |b| { put_bytes(b, ch.legacy_session_id.as_slice()); Ok(()) })?;
+    vec_u8(out, |b| { put_bytes(b, ch.legacy_session_id.as_slice()); Result.Ok(()) })?;
     vec_u16(out, |b| {
         let mut j: Int = 0;
         while j < ch.cipher_suites.len() {
             put_u16(b, ch.cipher_suites[j].to_u16());
             j = j + 1;
         }
-        Ok(())
+        Result.Ok(())
     })?;
-    vec_u8(out, |b| { put_bytes(b, ch.legacy_compression_methods.as_slice()); Ok(()) })?;
+    vec_u8(out, |b| { put_bytes(b, ch.legacy_compression_methods.as_slice()); Result.Ok(()) })?;
     encode_extensions_block(&ch.extensions, out)
 }
 
@@ -238,41 +238,41 @@ fn encode_server_hello(sh: &ServerHello, out: &mut List<Byte>) -> Result<(), Cod
     put_u16(out, sh.legacy_version.to_u16());
     let mut i: Int = 0;
     while i < 32 { out.push(sh.random[i]); i = i + 1; }
-    vec_u8(out, |b| { put_bytes(b, sh.legacy_session_id_echo.as_slice()); Ok(()) })?;
+    vec_u8(out, |b| { put_bytes(b, sh.legacy_session_id_echo.as_slice()); Result.Ok(()) })?;
     put_u16(out, sh.cipher_suite.to_u16());
     put_u8(out, sh.legacy_compression_method);
     encode_extensions_block(&sh.extensions, out)
 }
 
 fn encode_certificate(cm: &CertificateMessage, out: &mut List<Byte>) -> Result<(), CodecError> {
-    vec_u8(out, |b| { put_bytes(b, cm.certificate_request_context.as_slice()); Ok(()) })?;
+    vec_u8(out, |b| { put_bytes(b, cm.certificate_request_context.as_slice()); Result.Ok(()) })?;
     vec_u24(out, |b| {
         let mut i: Int = 0;
         while i < cm.certificate_list.len() {
             let e = &cm.certificate_list[i];
-            vec_u24(b, |b2| { put_bytes(b2, e.cert_data.as_slice()); Ok(()) })?;
+            vec_u24(b, |b2| { put_bytes(b2, e.cert_data.as_slice()); Result.Ok(()) })?;
             encode_extensions_block(&e.extensions, b)?;
             i = i + 1;
         }
-        Ok(())
+        Result.Ok(())
     })
 }
 
 fn encode_certificate_request(cr: &CertificateRequest, out: &mut List<Byte>) -> Result<(), CodecError> {
-    vec_u8(out, |b| { put_bytes(b, cr.certificate_request_context.as_slice()); Ok(()) })?;
+    vec_u8(out, |b| { put_bytes(b, cr.certificate_request_context.as_slice()); Result.Ok(()) })?;
     encode_extensions_block(&cr.extensions, out)
 }
 
 fn encode_certificate_verify(cv: &CertificateVerify, out: &mut List<Byte>) -> Result<(), CodecError> {
     put_u16(out, cv.algorithm.to_u16());
-    vec_u16(out, |b| { put_bytes(b, cv.signature.as_slice()); Ok(()) })
+    vec_u16(out, |b| { put_bytes(b, cv.signature.as_slice()); Result.Ok(()) })
 }
 
 fn encode_new_session_ticket(nst: &NewSessionTicket, out: &mut List<Byte>) -> Result<(), CodecError> {
     put_u32(out, nst.ticket_lifetime);
     put_u32(out, nst.ticket_age_add);
-    vec_u8(out, |b| { put_bytes(b, nst.ticket_nonce.as_slice()); Ok(()) })?;
-    vec_u16(out, |b| { put_bytes(b, nst.ticket.as_slice()); Ok(()) })?;
+    vec_u8(out, |b| { put_bytes(b, nst.ticket_nonce.as_slice()); Result.Ok(()) })?;
+    vec_u16(out, |b| { put_bytes(b, nst.ticket.as_slice()); Result.Ok(()) })?;
     encode_extensions_block(&nst.extensions, out)
 }
 
@@ -310,9 +310,9 @@ public fn decode_handshake(r: &mut Tls13HandshakeReader) -> Result<HandshakeMess
             HandshakeMessage.KeyUpdateMsg(KeyUpdate { request_update: KeyUpdateRequest.from_u8(v) })
         },
         5_u8  /* HST_END_OF_EARLY_DATA */   => HandshakeMessage.EndOfEarlyDataMsg,
-        _ => return Err(CodecError.InvalidValue(Text.from_str("unknown HandshakeType"))),
+        _ => return Result.Err(CodecError.InvalidValue(Text.from_str("unknown HandshakeType"))),
     };
-    Ok(msg)
+    Result.Ok(msg)
 }
 
 fn decode_client_hello(r: &mut Tls13HandshakeReader) -> Result<ClientHello, CodecError> {
@@ -333,7 +333,7 @@ fn decode_client_hello(r: &mut Tls13HandshakeReader) -> Result<ClientHello, Code
 
     let extensions = decode_extensions_block(r, ExtensionContext.ClientHelloCtx)?;
 
-    Ok(ClientHello {
+    Result.Ok(ClientHello {
         legacy_version: legacy_version,
         random: random,
         legacy_session_id: legacy_session_id,
@@ -362,7 +362,7 @@ fn decode_server_hello(r: &mut Tls13HandshakeReader) -> Result<ServerHello, Code
     };
     let extensions = decode_extensions_block(r, ctx)?;
 
-    Ok(ServerHello {
+    Result.Ok(ServerHello {
         legacy_version: legacy_version,
         random: random,
         legacy_session_id_echo: legacy_session_id_echo,
@@ -381,19 +381,19 @@ fn decode_certificate(r: &mut Tls13HandshakeReader) -> Result<CertificateMessage
         let exts = decode_extensions_block(&mut sub, ExtensionContext.CertificateCtx)?;
         list.push(CertificateEntry { cert_data: cert_data, extensions: exts });
     }
-    Ok(CertificateMessage { certificate_request_context: context, certificate_list: list })
+    Result.Ok(CertificateMessage { certificate_request_context: context, certificate_list: list })
 }
 
 fn decode_certificate_request(r: &mut Tls13HandshakeReader) -> Result<CertificateRequest, CodecError> {
     let context = r.take_vec_u8()?;
     let exts = decode_extensions_block(r, ExtensionContext.CertificateRequestCtx)?;
-    Ok(CertificateRequest { certificate_request_context: context, extensions: exts })
+    Result.Ok(CertificateRequest { certificate_request_context: context, extensions: exts })
 }
 
 fn decode_certificate_verify(r: &mut Tls13HandshakeReader) -> Result<CertificateVerify, CodecError> {
     let alg = SignatureScheme.from_u16(r.take_u16()?);
     let sig = r.take_vec_u16()?;
-    Ok(CertificateVerify { algorithm: alg, signature: sig })
+    Result.Ok(CertificateVerify { algorithm: alg, signature: sig })
 }
 
 fn decode_new_session_ticket(r: &mut Tls13HandshakeReader) -> Result<NewSessionTicket, CodecError> {
@@ -402,7 +402,7 @@ fn decode_new_session_ticket(r: &mut Tls13HandshakeReader) -> Result<NewSessionT
     let nonce = r.take_vec_u8()?;
     let ticket = r.take_vec_u16()?;
     let exts = decode_extensions_block(r, ExtensionContext.NewSessionTicketCtx)?;
-    Ok(NewSessionTicket {
+    Result.Ok(NewSessionTicket {
         ticket_lifetime: lifetime,
         ticket_age_add:  age_add,
         ticket_nonce:    nonce,

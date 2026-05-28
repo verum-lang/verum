@@ -172,7 +172,7 @@ implement Spinner {
         Spinner {
             label,
             cancel: CancellationTokenSource.new(),
-            task: None,
+            task: Maybe.None,
             stopped: false,
         }
     }
@@ -202,14 +202,14 @@ implement Spinner {
                 idx = idx + 1;
             }
         });
-        self.task = Some(task);
+        self.task = Maybe.Some(task);
     }
 
     /// Stop, optionally print a final message in place of the spinner.
     public async fn stop(mut self, message: Text) {
         if self.stopped { return; }
         self.cancel.cancel_with(core.async.cancellation.CancelReason.Cancelled);
-        if let Some(t) = self.task.take() { let _ = t.join().await; }
+        if let Maybe.Some(t) = self.task.take() { let _ = t.join().await; }
         // Clear line and write final message
         print(&"\r\u{001b}[2K".into());
         if !message.is_empty() { println(&message); }

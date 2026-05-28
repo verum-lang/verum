@@ -60,10 +60,10 @@ implement IncrementalSession {
     }
 
     /// Pop the next freelist page and mark it as released. Returns
-    /// the page number (or `None` if the freelist is empty / quota
+    /// the page number (or `Maybe.None` if the freelist is empty / quota
     /// is met).
     public fn release_next(&mut self) -> Maybe<Int> {
-        if self.is_done() { return None; }
+        if self.is_done() { return Maybe.None; }
         let last = self.freelist.len() - 1;
         let page = self.freelist[last];
         let mut new_freelist: List<Int> = List.new();
@@ -71,7 +71,7 @@ implement IncrementalSession {
         while k < last { new_freelist.push(self.freelist[k]); k = k + 1; }
         self.freelist = new_freelist;
         self.released = self.released + 1;
-        Some(page)
+        Maybe.Some(page)
     }
 
     /// Drive the session to completion — returns the list of
@@ -80,8 +80,8 @@ implement IncrementalSession {
         let mut out: List<Int> = List.new();
         while !self.is_done() {
             match self.release_next() {
-                Some(p) => out.push(p),
-                None    => break,
+                Maybe.Some(p) => out.push(p),
+                Maybe.None    => break,
             }
         }
         out

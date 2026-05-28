@@ -52,7 +52,7 @@ public fn accepts_arity(f: &NullHandlerFn, n: Int) -> Bool {
     n <= m
 }
 
-// Nullable: one argument modeled as Maybe<Text>. None = NULL.
+// Nullable: one argument modeled as Maybe<Text>. Maybe.None = NULL.
 public fn nullif(x: &Maybe<Text>, y: &Maybe<Text>) -> Maybe<Text> {
     match x {
         Maybe.None => Maybe.None,

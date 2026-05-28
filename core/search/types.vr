@@ -21,22 +21,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "abstract search-index protocol — SearchIndex + SearchQuery + SearchResults".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.search.types;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.json.JsonValue;
 
@@ -129,7 +129,7 @@ public type SearchQuery is {
 pub fn search_query_match_all(limit: Int, offset: Int) -> SearchQuery {
     SearchQuery {
         q: "".to_text(),
-        filter: None,
+        filter: Maybe.None,
         sort: List.new(),
         facets: List.new(),
         limit,
@@ -213,7 +213,7 @@ pub fn index_config_default(primary_key: Text) -> IndexConfig {
         sortable_attributes:   List.new(),
         stop_words:            List.new(),
         synonyms:              List.new(),
-        distinct_attribute:    None,
+        distinct_attribute:    Maybe.None,
         ranking_rules:         ranking,
     }
 }

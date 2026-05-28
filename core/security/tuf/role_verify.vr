@@ -38,22 +38,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "TUF threshold signature verification + rollback/freeze detection",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.tuf.role_verify;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map, Set};
 mount encoding.json.{JsonValue};
 mount encoding.hex.{decode as hex_decode};
@@ -130,7 +130,7 @@ implement Debug for RoleVerifyError {
 ///   - `keys`           — global keyid → key map (typically from
 ///                        the trusted Root).
 ///
-/// Returns `Ok(())` iff at least `role_def.threshold` distinct
+/// Returns `Result.Ok(())` iff at least `role_def.threshold` distinct
 /// trusted signatures verify.
 public fn verify_role_signatures(
     signed_payload: &List<Byte>,
@@ -160,20 +160,20 @@ public fn verify_role_signatures(
             continue;
         }
         let key = match keys.get(&sig.keyid) {
-            Some(k) => k.clone(),
-            None    => { j = j + 1; continue; }
+            Maybe.Some(k) => k.clone(),
+            Maybe.None    => { j = j + 1; continue; }
         };
         match verify_one_signature(signed_payload, sig, &key) {
-            Ok(()) => { valid.insert(sig.keyid.clone()); }
-            Err(_) => {} // bad signature does NOT fail the whole verify; just doesn't count
+            Result.Ok(()) => { valid.insert(sig.keyid.clone()); }
+            Result.Err(_) => {} // bad signature does NOT fail the whole verify; just doesn't count
         }
         j = j + 1;
     }
 
     if valid.len() < role_def.threshold {
-        return Err(InsufficientSignatures { valid: valid.len(), threshold: role_def.threshold });
+        return Result.Err(InsufficientSignatures { valid: valid.len(), threshold: role_def.threshold });
     }
-    Ok(())
+    Result.Ok(())
 }
 
 /// Verify a single signature against a key. Public for callers that
@@ -190,7 +190,7 @@ public fn verify_one_signature(
         TufKeyScheme.EcdsaSha2NistP256   => verify_ecdsa_p256_sig(payload, &sig_bytes, key),
         TufKeyScheme.RsaPkcs1V15Sha256   => verify_rsa_pkcs1_sig(payload, &sig_bytes, key),
         TufKeyScheme.RsassaPssSha256     => verify_rsa_pss_sig(payload, &sig_bytes, key),
-        TufKeyScheme.Other(s)            => Err(UnsupportedScheme(s.clone())),
+        TufKeyScheme.Other(s)            => Result.Err(UnsupportedScheme(s.clone())),
     }
 }
 
@@ -204,13 +204,13 @@ fn verify_ed25519_sig(
     key: &TufKey,
 ) -> Result<(), RoleVerifyError> {
     if sig_bytes.len() != 64 {
-        return Err(MalformedSignature(f"ed25519: expected 64 bytes, got {sig_bytes.len()}"));
+        return Result.Err(MalformedSignature(f"ed25519: expected 64 bytes, got {sig_bytes.len()}"));
     }
     let pk_hex = extract_keyval_public_hex(key)?;
     let pk_bytes = hex_decode(&pk_hex)
         .map_err(|e| MalformedKey(f"ed25519 public hex: {e}"))?;
     if pk_bytes.len() != 32 {
-        return Err(MalformedKey(f"ed25519: expected 32-byte public key, got {pk_bytes.len()}"));
+        return Result.Err(MalformedKey(f"ed25519: expected 32-byte public key, got {pk_bytes.len()}"));
     }
     let mut pk: Ed25519PublicKey = [0_u8; 32];
     let mut i: Int = 0;
@@ -219,8 +219,8 @@ fn verify_ed25519_sig(
     let mut k: Int = 0;
     while k < 64 { sig[k] = sig_bytes[k]; k = k + 1; }
     match security.ecc.ed25519.verify(&pk, payload.as_slice(), &sig) {
-        Ok(())  => Ok(()),
-        Err(_)  => Err(MalformedSignature("ed25519: verification failed".to_text())),
+        Result.Ok(())  => Result.Ok(()),
+        Result.Err(_)  => Result.Err(MalformedSignature("ed25519: verification failed".to_text())),
     }
 }
 
@@ -240,8 +240,8 @@ fn verify_ecdsa_p256_sig(
         .map_err(|_| MalformedSignature("p256: invalid DER signature".to_text()))?;
     let digest = Sha256.digest(payload.as_slice());
     match P256.verify_prehashed(&pk, &digest, &sig) {
-        Ok(())  => Ok(()),
-        Err(_)  => Err(MalformedSignature("p256: verification failed".to_text())),
+        Result.Ok(())  => Result.Ok(()),
+        Result.Err(_)  => Result.Err(MalformedSignature("p256: verification failed".to_text())),
     }
 }
 
@@ -253,8 +253,8 @@ fn verify_rsa_pkcs1_sig(
     let vk = extract_rsa_public_key(key)?;
     let digest = Sha256.digest(payload.as_slice()).to_list();
     match verify_pkcs1_v15_prehashed(&vk, RsaHash.Sha256_, &digest, sig_bytes.as_slice()) {
-        Ok(())  => Ok(()),
-        Err(_)  => Err(MalformedSignature("rsa-pkcs1v15: verification failed".to_text())),
+        Result.Ok(())  => Result.Ok(()),
+        Result.Err(_)  => Result.Err(MalformedSignature("rsa-pkcs1v15: verification failed".to_text())),
     }
 }
 
@@ -266,8 +266,8 @@ fn verify_rsa_pss_sig(
     let vk = extract_rsa_public_key(key)?;
     let digest = Sha256.digest(payload.as_slice()).to_list();
     match verify_pss_prehashed(&vk, RsaHash.Sha256_, &digest, sig_bytes.as_slice()) {
-        Ok(())  => Ok(()),
-        Err(_)  => Err(MalformedSignature("rsa-pss: verification failed".to_text())),
+        Result.Ok(())  => Result.Ok(()),
+        Result.Err(_)  => Result.Err(MalformedSignature("rsa-pss: verification failed".to_text())),
     }
 }
 
@@ -291,7 +291,7 @@ fn extract_rsa_public_key(key: &TufKey) -> Result<RsaPublicKey, RoleVerifyError>
     // we delegate parsing to core.security.x509 helpers in a
     // follow-up; for now expose the failure cleanly.
     let _ = obj;
-    Err(MalformedKey("rsa key extraction: PEM PKCS#1 parser pending (delegate to x509.spki)".to_text()))
+    Result.Err(MalformedKey("rsa key extraction: PEM PKCS#1 parser pending (delegate to x509.spki)".to_text()))
 }
 
 // =============================================================================
@@ -300,45 +300,45 @@ fn extract_rsa_public_key(key: &TufKey) -> Result<RsaPublicKey, RoleVerifyError>
 
 public fn check_version_monotonic_root(prev: &RootMetadata, curr: &RootMetadata) -> Result<(), RoleVerifyError> {
     if curr.version < prev.version {
-        return Err(RollbackDetected {
+        return Result.Err(RollbackDetected {
             previous_version: prev.version,
             current_version:  curr.version,
         });
     }
-    Ok(())
+    Result.Ok(())
 }
 
 public fn check_version_monotonic_timestamp(prev: &TimestampMetadata, curr: &TimestampMetadata) -> Result<(), RoleVerifyError> {
     if curr.version < prev.version {
-        return Err(RollbackDetected {
+        return Result.Err(RollbackDetected {
             previous_version: prev.version,
             current_version:  curr.version,
         });
     }
-    Ok(())
+    Result.Ok(())
 }
 
 public fn check_version_monotonic_snapshot(prev: &SnapshotMetadata, curr: &SnapshotMetadata) -> Result<(), RoleVerifyError> {
     if curr.version < prev.version {
-        return Err(RollbackDetected {
+        return Result.Err(RollbackDetected {
             previous_version: prev.version,
             current_version:  curr.version,
         });
     }
-    Ok(())
+    Result.Ok(())
 }
 
 public fn check_version_monotonic_targets(prev: &TargetsMetadata, curr: &TargetsMetadata) -> Result<(), RoleVerifyError> {
     if curr.version < prev.version {
-        return Err(RollbackDetected {
+        return Result.Err(RollbackDetected {
             previous_version: prev.version,
             current_version:  curr.version,
         });
     }
-    Ok(())
+    Result.Ok(())
 }
 
-/// Check `expires` field against current time. Returns `Err(Expired)`
+/// Check `expires` field against current time. Returns `Result.Err(Expired)`
 /// when now ≥ expires.
 public fn check_not_expired_root(meta: &RootMetadata) -> Result<(), RoleVerifyError> {
     check_not_expired_at(&meta.expires, epoch_seconds())
@@ -359,9 +359,9 @@ public fn check_not_expired_targets(meta: &TargetsMetadata) -> Result<(), RoleVe
 fn check_not_expired_at(expires: &Rfc3339Time, now: Int) -> Result<(), RoleVerifyError> {
     let expires_unix = time.rfc3339.to_epoch(expires);
     if now >= expires_unix {
-        return Err(Expired { expires: expires.clone(), now });
+        return Result.Err(Expired { expires: expires.clone(), now });
     }
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================

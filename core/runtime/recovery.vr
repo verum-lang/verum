@@ -114,7 +114,7 @@ implement RecoveryRetryPolicy {
             config: config,
             current_attempt: 0,
             total_retries: 0,
-            last_error: None,
+            last_error: Maybe.None,
         }
     }
 
@@ -133,7 +133,7 @@ implement RecoveryRetryPolicy {
     public fn record_retry(&mut self, error_msg: &Text) {
         self.current_attempt += 1;
         self.total_retries += 1;
-        self.last_error = Some(error_msg.clone());
+        self.last_error = Maybe.Some(error_msg.clone());
     }
 
     /// Reset policy for new operation
@@ -160,14 +160,14 @@ where E: Display
 {
     loop {
         match operation().await {
-            Ok(value) => {
+            Result.Ok(value) => {
                 policy.reset();
-                return Ok(value);
+                return Result.Ok(value);
             }
-            Err(error) => {
+            Result.Err(error) => {
                 // Check if we should retry
                 if !policy.should_retry() {
-                    return Err(error);
+                    return Result.Err(error);
                 }
 
                 // Convert error to text for predicate matching
@@ -178,12 +178,12 @@ where E: Display
                     AllErrors => {},
                     TransientOnly => {
                         if !is_transient_error(&error_msg) {
-                            return Err(error);
+                            return Result.Err(error);
                         }
                     }
                     Custom(predicate) => {
                         if !predicate(&error_msg) {
-                            return Err(error);
+                            return Result.Err(error);
                         }
                     }
                 }
@@ -212,7 +212,7 @@ public type RecoveryBackoffStrategy is
     /// Exponentially increasing delay
     | Exponential { base_ms: UInt64, max_ms: UInt64, multiplier: Int }
     /// No delay (immediate retry)
-    | None;
+    | Maybe.None;
 
 implement RecoveryBackoffStrategy {
     /// Calculate delay for given attempt number
@@ -244,7 +244,7 @@ implement RecoveryBackoffStrategy {
                 delay
             }
 
-            None => 0,
+            Maybe.None => 0,
         }
     }
 
@@ -265,7 +265,7 @@ implement RecoveryBackoffStrategy {
 /// Jitter configuration for randomizing delays
 public type JitterConfig is
     /// No jitter (deterministic delays)
-    | None
+    | Maybe.None
     /// Proportional jitter (±percentage of delay)
     | Proportional(UInt8)  // percentage 0-100
     /// Fixed jitter (±fixed milliseconds)
@@ -282,7 +282,7 @@ implement JitterConfig {
     @inline
     public fn apply(&self, delay_ms: UInt64) -> UInt64 {
         match self {
-            None => delay_ms,
+            Maybe.None => delay_ms,
 
             Proportional(percent) => {
                 let jitter_range = delay_ms * (*percent as UInt64) / 100;
@@ -402,7 +402,7 @@ public type ErrorPredicate is
 /// Determines how errors are handled at the task level.
 public type RuntimeRecoveryStrategy is
     /// No automatic recovery (propagate errors immediately)
-    | None
+    | Maybe.None
     /// Retry with specified policy
     | Retry(RuntimeRetryConfig)
     /// Use circuit breaker for external service calls
@@ -591,8 +591,8 @@ implement RecoveryCircuitBreaker {
                 MemoryOrdering.AcqRel,
                 MemoryOrdering.Acquire,
             ) {
-                Ok(_) => break,
-                Err(_) => {
+                Result.Ok(_) => break,
+                Result.Err(_) => {
                     // CAS lost — another thread changed the state.
                     // Reload and retry; the early-return above
                     // catches the case where the new state matches.
@@ -671,16 +671,16 @@ where E: Display
 {
     // Check if request is allowed
     if !breaker.allow_request() {
-        return Err(CircuitBreakerError.Open);
+        return Result.Err(CircuitBreakerError.Open);
     }
 
     // Execute operation
     match operation().await {
-        Ok(value) => {
+        Result.Ok(value) => {
             breaker.record_success();
-            Ok(value)
+            Result.Ok(value)
         }
-        Err(error) => {
+        Result.Err(error) => {
             // Convert error to text for predicate matching
             let error_msg: Text = f"{error}";
 
@@ -695,7 +695,7 @@ where E: Display
                 breaker.record_failure();
             }
 
-            Err(CircuitBreakerError.Failed(error))
+            Result.Err(CircuitBreakerError.Failed(error))
         }
     }
 }
@@ -811,7 +811,7 @@ public type InlineRetryPolicy is {
     /// Current attempt
     current_attempt: UInt16,
 
-    /// Backoff strategy (0=Fixed, 1=Linear, 2=Exponential, 3=None)
+    /// Backoff strategy (0=Fixed, 1=Linear, 2=Exponential, 3=Maybe.None)
     backoff_type: UInt8,
 
     /// Backoff base delay (milliseconds, truncated to UInt16)
@@ -820,7 +820,7 @@ public type InlineRetryPolicy is {
     /// Backoff max delay (milliseconds, truncated to UInt16)
     backoff_max_ms: UInt16,
 
-    /// Jitter type (0=None, 1=Proportional, 2=Fixed, 3=Full)
+    /// Jitter type (0=Maybe.None, 1=Proportional, 2=Fixed, 3=Full)
     jitter_type: UInt8,
 
     /// Jitter value (percentage or fixed ms)
@@ -940,7 +940,7 @@ implement Clone for RecoveryBackoffStrategy {
             Exponential { base_ms, max_ms, multiplier } => RecoveryBackoffStrategy.Exponential {
                 base_ms: base_ms, max_ms: max_ms, multiplier: multiplier,
             },
-            None => RecoveryBackoffStrategy.None,
+            Maybe.None => RecoveryBackoffStrategy.None,
         }
     }
 }
@@ -948,7 +948,7 @@ implement Clone for RecoveryBackoffStrategy {
 implement Clone for JitterConfig {
     fn clone(&self) -> JitterConfig {
         match self {
-            None => JitterConfig.None,
+            Maybe.None => JitterConfig.None,
             Proportional(p) => JitterConfig.Proportional(*p),
             Fixed(f) => JitterConfig.Fixed(*f),
             Full => JitterConfig.Full,
@@ -1001,7 +1001,7 @@ implement Clone for RecoveryCircuitBreakerConfig {
 implement Clone for RuntimeRecoveryStrategy {
     fn clone(&self) -> RuntimeRecoveryStrategy {
         match self {
-            None => RuntimeRecoveryStrategy.None,
+            Maybe.None => RuntimeRecoveryStrategy.None,
             Retry(config) => RuntimeRecoveryStrategy.Retry(config.clone()),
             UseBreaker(config) => RuntimeRecoveryStrategy.UseBreaker(config.clone()),
             Supervision => RuntimeRecoveryStrategy.Supervision,
@@ -1044,7 +1044,7 @@ implement Debug for RecoveryBackoffStrategy {
             Fixed { delay_ms } => f.write_str(f"RecoveryBackoffStrategy.Fixed {{ delay_ms: {delay_ms} }}"),
             Linear { base_ms, increment_ms, max_ms } => f.write_str(f"RecoveryBackoffStrategy.Linear {{ base_ms: {base_ms}, increment_ms: {increment_ms}, max_ms: {max_ms} }}"),
             Exponential { base_ms, max_ms, multiplier } => f.write_str(f"RecoveryBackoffStrategy.Exponential {{ base_ms: {base_ms}, max_ms: {max_ms}, multiplier: {multiplier} }}"),
-            None => f.write_str("RecoveryBackoffStrategy.None"),
+            Maybe.None => f.write_str("RecoveryBackoffStrategy.None"),
         }
     }
 }
@@ -1052,7 +1052,7 @@ implement Debug for RecoveryBackoffStrategy {
 implement Debug for JitterConfig {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            None => f.write_str("JitterConfig.None"),
+            Maybe.None => f.write_str("JitterConfig.None"),
             Proportional(p) => f.write_str(f"JitterConfig.Proportional({p})"),
             Fixed(ms) => f.write_str(f"JitterConfig.Fixed({ms})"),
             Full => f.write_str("JitterConfig.Full"),
@@ -1073,7 +1073,7 @@ implement Debug for RetryPredicate {
 implement Debug for RuntimeRecoveryStrategy {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            None => f.write_str("RuntimeRecoveryStrategy.None"),
+            Maybe.None => f.write_str("RuntimeRecoveryStrategy.None"),
             Retry(_) => f.write_str("RuntimeRecoveryStrategy.Retry(...)"),
             UseBreaker(_) => f.write_str("RuntimeRecoveryStrategy.UseBreaker(...)"),
             Supervision => f.write_str("RuntimeRecoveryStrategy.Supervision"),

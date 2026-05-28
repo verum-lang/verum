@@ -70,7 +70,7 @@
 module core.database.common.check_codegen;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.database.common.error.{AdapterId, AdPostgres, AdMysql, AdSqlite};
 
@@ -221,7 +221,7 @@ public fn not_(p: RefinementPredicate) -> RefinementPredicate {
 // -----------------------------------------------------------------------------
 
 /// Render the predicate body as the inside of a CHECK clause for the
-/// given adapter and column. Returns `None` if the predicate
+/// given adapter and column. Returns `Maybe.None` if the predicate
 /// reduces to `RpTrue` (no CHECK necessary) — caller should skip
 /// emitting `CHECK ()` in that case.
 ///
@@ -235,8 +235,8 @@ public fn to_check_sql(
 ) -> Maybe<Text> {
     let normalised = normalise(pred);
     match &normalised {
-        RpTrue => None,
-        _      => Some(emit(&normalised, col, adapter)),
+        RpTrue => Maybe.None,
+        _      => Maybe.Some(emit(&normalised, col, adapter)),
     }
 }
 

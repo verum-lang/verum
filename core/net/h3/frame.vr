@@ -103,7 +103,7 @@ implement Eq for H3FrameError {
     }
 }
 
-fn vfail<T>(_: VarintError) -> Result<T, H3FrameError> { Err(H3FrameError.VarintFailure) }
+fn vfail<T>(_: VarintError) -> Result<T, H3FrameError> { Result.Err(H3FrameError.VarintFailure) }
 
 // =============================================================================
 // Frame-type IANA codes
@@ -175,14 +175,14 @@ public fn decode_frame(buf: &[Byte], pos: Int) -> Result<(H3Frame, Int), H3Frame
     let (frame_type, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let (length, p2) = quic_decode(buf, p1).or_else(vfail)?;
     let end = p2 + (length as Int);
-    if end > buf.len() { return Err(H3FrameError.Truncated); }
+    if end > buf.len() { return Result.Err(H3FrameError.Truncated); }
 
     let result = match frame_type {
         0_u64 /* DATA */     => H3Frame.DataFrame(take_bytes(buf, p2, end)),
         1_u64 /* HEADERS */  => H3Frame.HeadersFrame(take_bytes(buf, p2, end)),
         3_u64 /* CANCEL_PUSH */ => {
             let (id, p3) = quic_decode(buf, p2).or_else(vfail)?;
-            if p3 != end { return Err(H3FrameError.InvalidValue(Text.from_str("CANCEL_PUSH trailing bytes"))); }
+            if p3 != end { return Result.Err(H3FrameError.InvalidValue(Text.from_str("CANCEL_PUSH trailing bytes"))); }
             H3Frame.CancelPushFrame(id)
         },
         4_u64 /* SETTINGS */ => H3Frame.SettingsFrame(decode_settings(buf, p2, end)?),
@@ -195,12 +195,12 @@ public fn decode_frame(buf: &[Byte], pos: Int) -> Result<(H3Frame, Int), H3Frame
         },
         7_u64 /* GOAWAY */ => {
             let (id, p3) = quic_decode(buf, p2).or_else(vfail)?;
-            if p3 != end { return Err(H3FrameError.InvalidValue(Text.from_str("GOAWAY trailing bytes"))); }
+            if p3 != end { return Result.Err(H3FrameError.InvalidValue(Text.from_str("GOAWAY trailing bytes"))); }
             H3Frame.GoawayFrame(id)
         },
         13_u64 /* MAX_PUSH_ID */ => {
             let (id, p3) = quic_decode(buf, p2).or_else(vfail)?;
-            if p3 != end { return Err(H3FrameError.InvalidValue(Text.from_str("MAX_PUSH_ID trailing bytes"))); }
+            if p3 != end { return Result.Err(H3FrameError.InvalidValue(Text.from_str("MAX_PUSH_ID trailing bytes"))); }
             H3Frame.MaxPushIdFrame(id)
         },
         _ => H3Frame.ReservedFrame {
@@ -208,7 +208,7 @@ public fn decode_frame(buf: &[Byte], pos: Int) -> Result<(H3Frame, Int), H3Frame
             payload:    take_bytes(buf, p2, end),
         },
     };
-    Ok((result, end))
+    Result.Ok((result, end))
 }
 
 fn decode_settings(buf: &[Byte], start: Int, end: Int) -> Result<List<(UInt64, UInt64)>, H3FrameError> {
@@ -221,9 +221,9 @@ fn decode_settings(buf: &[Byte], start: Int, end: Int) -> Result<List<(UInt64, U
         cur = p2;
     }
     if cur != end {
-        return Err(H3FrameError.InvalidValue(Text.from_str("SETTINGS trailing bytes")));
+        return Result.Err(H3FrameError.InvalidValue(Text.from_str("SETTINGS trailing bytes")));
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn take_bytes(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
@@ -348,14 +348,14 @@ public type UniStreamType is
 public fn decode_stream_type(buf: &[Byte]) -> Result<(UniStreamType, Int), H3FrameError> {
     let (ty, p1) = quic_decode(buf, 0).or_else(vfail)?;
     match ty {
-        0_u64 => Ok((UniStreamType.ControlStream,        p1)),
-        2_u64 => Ok((UniStreamType.QpackEncoderStream,    p1)),
-        3_u64 => Ok((UniStreamType.QpackDecoderStream,    p1)),
+        0_u64 => Result.Ok((UniStreamType.ControlStream,        p1)),
+        2_u64 => Result.Ok((UniStreamType.QpackEncoderStream,    p1)),
+        3_u64 => Result.Ok((UniStreamType.QpackDecoderStream,    p1)),
         1_u64 => {
             let (pid, p2) = quic_decode(buf, p1).or_else(vfail)?;
-            Ok((UniStreamType.PushStream(pid), p2))
+            Result.Ok((UniStreamType.PushStream(pid), p2))
         },
-        _ => Ok((UniStreamType.ReservedStream(ty), p1)),
+        _ => Result.Ok((UniStreamType.ReservedStream(ty), p1)),
     }
 }
 

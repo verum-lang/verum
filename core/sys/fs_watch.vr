@@ -78,22 +78,22 @@ implement FsWatcher {
         @cfg(target_os = "macos")
         {
             match KqueueBackend.new() {
-                Ok(b)  => Ok(FsWatcher { inner: FsWatcherImpl.Kqueue(b) }),
-                Err(e) => Err(e),
+                Result.Ok(b)  => Result.Ok(FsWatcher { inner: FsWatcherImpl.Kqueue(b) }),
+                Result.Err(e) => Result.Err(e),
             }
         }
         @cfg(target_os = "linux")
         {
             match InotifyBackend.new() {
-                Ok(b)  => Ok(FsWatcher { inner: FsWatcherImpl.Inotify(b) }),
-                Err(e) => Err(e),
+                Result.Ok(b)  => Result.Ok(FsWatcher { inner: FsWatcherImpl.Inotify(b) }),
+                Result.Err(e) => Result.Err(e),
             }
         }
         @cfg(target_os = "windows")
         {
             match RdcwBackend.new() {
-                Ok(b)  => Ok(FsWatcher { inner: FsWatcherImpl.Rdcw(b) }),
-                Err(e) => Err(e),
+                Result.Ok(b)  => Result.Ok(FsWatcher { inner: FsWatcherImpl.Rdcw(b) }),
+                Result.Err(e) => Result.Err(e),
             }
         }
     }
@@ -177,8 +177,8 @@ public type KqueueBackend is {
 implement KqueueBackend {
     public fn new() -> Result<KqueueBackend, Text> {
         let fd = kqueue();
-        if fd < 0 { Err("kqueue() failed".into()) }
-        else      { Ok(KqueueBackend { kq_fd: fd, watches: [] }) }
+        if fd < 0 { Result.Err("kqueue() failed".into()) }
+        else      { Result.Ok(KqueueBackend { kq_fd: fd, watches: [] }) }
     }
 
     public fn add(&mut self, path: &Text) -> Result<(), Text> {
@@ -187,7 +187,7 @@ implement KqueueBackend {
         let path_c = nul_terminate(path);
         const O_EVTONLY: Int32 = 0x8000;
         let fd = open(&path_c[0] as &Byte, O_EVTONLY, 0 as UInt32);
-        if fd < 0 { return Err(f"open({path}) failed"); }
+        if fd < 0 { return Result.Err(f"open({path}) failed"); }
         // Register an EVFILT_VNODE filter with all the interesting fflags.
         let fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_ATTRIB | NOTE_RENAME;
         let mut ev = KEvent {
@@ -201,10 +201,10 @@ implement KqueueBackend {
         let r = kevent(self.kq_fd, &ev as &KEvent, 1 as Int32, 0 as &mut KEvent, 0 as Int32, 0 as &Byte);
         if r < 0 {
             sys_close(fd);
-            return Err("kevent register failed".into());
+            return Result.Err("kevent register failed".into());
         }
         self.watches.push((fd, path.clone()));
-        Ok(())
+        Result.Ok(())
     }
 
     public fn remove(&mut self, path: &Text) -> Result<(), Text> {
@@ -212,10 +212,10 @@ implement KqueueBackend {
         for (i, (_fd, p)) in self.watches.iter().enumerate() {
             if p == path { idx = i as Int; break; }
         }
-        if idx < 0 { return Ok(()); }
+        if idx < 0 { return Result.Ok(()); }
         let (fd, _) = self.watches.remove(idx as usize);
         sys_close(fd);
-        Ok(())
+        Result.Ok(())
     }
 
     public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
@@ -239,7 +239,7 @@ implement KqueueBackend {
             16 as Int32,
             if timeout_ms < 0 { 0 as &Byte } else { &timeout_ns as &Byte },
         );
-        if r < 0 { return Err("kevent wait failed".into()); }
+        if r < 0 { return Result.Err("kevent wait failed".into()); }
         let mut events: List<FsEvent> = [];
         let mut k = 0;
         while k < r as Int {
@@ -256,7 +256,7 @@ implement KqueueBackend {
             events.push(FsEvent { path, kind });
             k = k + 1;
         }
-        Ok(events)
+        Result.Ok(events)
     }
 }
 
@@ -320,8 +320,8 @@ implement InotifyBackend {
         // IN_CLOEXEC = 0x80000
         const IN_CLOEXEC: Int = 0x80000;
         let fd = unsafe { syscall_raw(SYS_INOTIFY_INIT1, IN_CLOEXEC, 0, 0, 0, 0, 0) };
-        if fd < 0 { return Err("inotify_init1 failed".into()); }
-        Ok(InotifyBackend { fd: fd as Int32, watches: [] })
+        if fd < 0 { return Result.Err("inotify_init1 failed".into()); }
+        Result.Ok(InotifyBackend { fd: fd as Int32, watches: [] })
     }
 
     public fn add(&mut self, path: &Text) -> Result<(), Text> {
@@ -335,9 +335,9 @@ implement InotifyBackend {
                 0, 0, 0,
             )
         };
-        if wd < 0 { return Err(f"inotify_add_watch({path}) failed"); }
+        if wd < 0 { return Result.Err(f"inotify_add_watch({path}) failed"); }
         self.watches.push((wd as Int32, path.clone()));
-        Ok(())
+        Result.Ok(())
     }
 
     public fn remove(&mut self, path: &Text) -> Result<(), Text> {
@@ -345,12 +345,12 @@ implement InotifyBackend {
         for (i, (_wd, p)) in self.watches.iter().enumerate() {
             if p == path { idx = i as Int; break; }
         }
-        if idx < 0 { return Ok(()); }
+        if idx < 0 { return Result.Ok(()); }
         let (wd, _) = self.watches.remove(idx as usize);
         let _ = unsafe {
             syscall_raw(SYS_INOTIFY_RM_WATCH, self.fd as Int, wd as Int, 0, 0, 0, 0)
         };
-        Ok(())
+        Result.Ok(())
     }
 
     public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
@@ -369,17 +369,17 @@ implement InotifyBackend {
                     0, 0, 0,
                 )
             };
-            if r == 0 { return Ok([]); }       // timeout
-            if r < 0  { return Err("poll failed".into()); }
+            if r == 0 { return Result.Ok([]); }       // timeout
+            if r < 0  { return Result.Err("poll failed".into()); }
         }
         let mut buf: List<Byte> = List.with_capacity(4096);
         let mut i = 0;
         while i < 4096 { buf.push(0); i = i + 1; }
         let n = match sys_read(FileDesc.from_raw(self.fd), &mut buf) {
-            Ok(v)  => v,
-            Err(_) => return Err("inotify read failed".into()),
+            Result.Ok(v)  => v,
+            Result.Err(_) => return Result.Err("inotify read failed".into()),
         };
-        if n == 0 { return Ok([]); }
+        if n == 0 { return Result.Ok([]); }
         // Parse inotify_event records out of `buf[0..n]`.
         // struct inotify_event { int wd; uint32 mask; uint32 cookie; uint32 len; char name[len]; };
         let mut events: List<FsEvent> = [];
@@ -403,7 +403,7 @@ implement InotifyBackend {
             events.push(FsEvent { path, kind });
             p = p + 16 + len as Int;
         }
-        Ok(events)
+        Result.Ok(events)
     }
 }
 
@@ -492,7 +492,7 @@ public type RdcwBackend is {
 @cfg(target_os = "windows")
 implement RdcwBackend {
     public fn new() -> Result<RdcwBackend, Text> {
-        Ok(RdcwBackend { watches: [] })
+        Result.Ok(RdcwBackend { watches: [] })
     }
 
     public fn add(&mut self, path: &Text) -> Result<(), Text> {
@@ -507,13 +507,13 @@ implement RdcwBackend {
             0 as Handle,
         );
         if h == (0 as Handle) {
-            return Err(f"CreateFileA({path}) failed (error {GetLastError()})");
+            return Result.Err(f"CreateFileA({path}) failed (error {GetLastError()})");
         }
         let mut buf: List<Byte> = List.with_capacity(4096);
         let mut i = 0;
         while i < 4096 { buf.push(0); i = i + 1; }
         self.watches.push(RdcwWatch { handle: h, path: path.clone(), buffer: buf });
-        Ok(())
+        Result.Ok(())
     }
 
     public fn remove(&mut self, path: &Text) -> Result<(), Text> {
@@ -521,10 +521,10 @@ implement RdcwBackend {
         for (i, w) in self.watches.iter().enumerate() {
             if &w.path == path { idx = i as Int; break; }
         }
-        if idx < 0 { return Ok(()); }
+        if idx < 0 { return Result.Ok(()); }
         let w = self.watches.remove(idx as usize);
         let _ = CloseHandle(w.handle);
-        Ok(())
+        Result.Ok(())
     }
 
     public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
@@ -564,7 +564,7 @@ implement RdcwBackend {
             // Parse the buffer into FILE_NOTIFY_INFORMATION records.
             parse_fni_buffer(&w.buffer, bytes_returned as Int, &w.path, &mut events);
         }
-        Ok(events)
+        Result.Ok(events)
     }
 }
 

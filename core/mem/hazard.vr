@@ -181,7 +181,7 @@ public static mut GLOBAL_HAZARD_DOMAIN: HazardDomain = HazardDomain {
 /// Each thread gets its own manager for O(1) local operations.
 @thread_local
 static mut THREAD_HAZARD_RECORD: ThreadHazardRecord = ThreadHazardRecord {
-    record: None,
+    record: Maybe.None,
     next_slot: 0,
     retired: List.new(),
 };
@@ -302,10 +302,10 @@ implement ThreadHazardRecord {
     /// Get or create the thread record.
     fn get_record(&mut self) -> &mut ThreadRecord {
         match self.record {
-            Some(record) => record,
-            None => {
+            Maybe.Some(record) => record,
+            Maybe.None => {
                 let record = unsafe { GLOBAL_HAZARD_DOMAIN.register_thread() };
-                self.record = Some(record);
+                self.record = Maybe.Some(record);
                 record
             }
         }
@@ -383,7 +383,7 @@ implement ThreadHazardRecord {
     /// release should structure them as nested scopes instead.
     fn release(&mut self, slot: Int) {
         match self.record {
-            Some(record) => {
+            Maybe.Some(record) => {
                 // Clear the slot — pointer goes to 0 so a
                 // concurrent scanner sees the slot as inactive.
                 atomic_store_ptr(
@@ -400,7 +400,7 @@ implement ThreadHazardRecord {
                     self.next_slot = slot;
                 }
             }
-            None => {}  // No record = nothing to release
+            Maybe.None => {}  // No record = nothing to release
         }
     }
 
@@ -631,10 +631,10 @@ public fn cleanup_thread_hazards() {
     unsafe {
         // Mark thread record as inactive
         match THREAD_HAZARD_RECORD.record {
-            Some(record) => {
+            Maybe.Some(record) => {
                 record.active = false;
             }
-            None => {}
+            Maybe.None => {}
         }
 
         // Reclaim any remaining retired nodes

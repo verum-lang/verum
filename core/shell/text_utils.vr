@@ -67,8 +67,8 @@ public fn grep_capture(rx: &Regex, lines: &List<Text>) -> List<Text> {
     let mut out: List<Text> = [];
     for line in lines.iter() {
         match rx.find(line) {
-            Some(m) => out.push(m.matched_text().into()),
-            None    => {},
+            Maybe.Some(m) => out.push(m.matched_text().into()),
+            Maybe.None    => {},
         }
     }
     out
@@ -160,13 +160,13 @@ public fn sort(lines: &List<Text>) -> List<Text> {
 /// Remove consecutive duplicates (mirrors POSIX `uniq`).
 public fn uniq(lines: &List<Text>) -> List<Text> {
     let mut out: List<Text> = [];
-    let mut prev: Maybe<Text> = None;
+    let mut prev: Maybe<Text> = Maybe.None;
     for line in lines.iter() {
         let dup = match &prev {
-            Some(p) => p == line,
-            None    => false,
+            Maybe.Some(p) => p == line,
+            Maybe.None    => false,
         };
-        if !dup { out.push(line.clone()); prev = Some(line.clone()); }
+        if !dup { out.push(line.clone()); prev = Maybe.Some(line.clone()); }
     }
     out
 }

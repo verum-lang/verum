@@ -67,15 +67,15 @@ public type Context is
         binder_ty: CoreTerm,
       };
 
-/// Project: lookup a variable's declared type. `Some(ty)` if `name`
-/// occurs in the context (innermost binding wins); `None` otherwise.
+/// Project: lookup a variable's declared type. `Maybe.Some(ty)` if `name`
+/// occurs in the context (innermost binding wins); `Maybe.None` otherwise.
 /// Used by K-Var soundness.
 public pure fn context_lookup(ctx: Context, name: Text) -> Maybe<CoreTerm> {
     match ctx {
-        Context.Empty => None,
+        Context.Empty => Maybe.None,
         Context.Cons { prefix, binder, binder_ty } => {
             if binder == name {
-                Some(binder_ty)
+                Maybe.Some(binder_ty)
             } else {
                 context_lookup(*prefix, name)
             }

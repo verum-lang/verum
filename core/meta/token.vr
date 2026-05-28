@@ -157,8 +157,8 @@ implement TokenStream {
     ///
 
     /// # Returns
-    /// - `Ok(TokenStream)`: Parsed tokens
-    /// - `Err(LexError)`: Lexer error
+    /// - `Result.Ok(TokenStream)`: Parsed tokens
+    /// - `Result.Err(LexError)`: Lexer error
     @compiler_intrinsic
     public fn from_str(source: Text) -> Result<Self, LexError>;
 
@@ -269,9 +269,9 @@ implement TokenStream {
         if index >= 0 && index < self.tokens.len() {
             let tree = self.tokens.remove(index);
             self.recalculate_span();
-            (self, Some(tree))
+            (self, Maybe.Some(tree))
         } else {
-            (self, None)
+            (self, Maybe.None)
         }
     }
 
@@ -391,7 +391,7 @@ implement Display for TokenStream {
         for tree in self.tokens.iter() {
             f.write_str(f"{tree}")?;
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -470,16 +470,16 @@ implement TokenTree {
     /// Get as token if this is a token
     public fn as_token(&self) -> Maybe<&Token> {
         match self {
-            Leaf(t) => Some(t),
-            Grouped(_) => None,
+            Leaf(t) => Maybe.Some(t),
+            Grouped(_) => Maybe.None,
         }
     }
 
     /// Get as group if this is a group
     public fn as_group(&self) -> Maybe<&Group> {
         match self {
-            Leaf(_) => None,
-            Grouped(g) => Some(g),
+            Leaf(_) => Maybe.None,
+            Grouped(g) => Maybe.Some(g),
         }
     }
 
@@ -565,8 +565,8 @@ implement Token {
     /// Get identifier name if this is an identifier
     public fn as_ident(&self) -> Maybe<Text> {
         match &self.kind {
-            TokenKind.Ident(name) => Some(name.clone()),
-            _ => None,
+            TokenKind.Ident(name) => Maybe.Some(name.clone()),
+            _ => Maybe.None,
         }
     }
 
@@ -597,8 +597,8 @@ implement Token {
     /// Get punctuation char if this is punctuation
     public fn as_punct(&self) -> Maybe<(Char, Spacing)> {
         match self.kind {
-            TokenKind.Punct(ch, sp) => Some((ch, sp)),
-            _ => None,
+            TokenKind.Punct(ch, sp) => Maybe.Some((ch, sp)),
+            _ => Maybe.None,
         }
     }
 
@@ -668,20 +668,20 @@ implement Delimiter {
     /// Get opening character
     public fn open(&self) -> Maybe<Char> {
         match self {
-            Parenthesis => Some('('),
-            Brace => Some('{'),
-            Bracket => Some('['),
-            Invisible => None,
+            Parenthesis => Maybe.Some('('),
+            Brace => Maybe.Some('{'),
+            Bracket => Maybe.Some('['),
+            Invisible => Maybe.None,
         }
     }
 
     /// Get closing character
     public fn close(&self) -> Maybe<Char> {
         match self {
-            Parenthesis => Some(')'),
-            Brace => Some('}'),
-            Bracket => Some(']'),
-            Invisible => None,
+            Parenthesis => Maybe.Some(')'),
+            Brace => Maybe.Some('}'),
+            Bracket => Maybe.Some(']'),
+            Invisible => Maybe.None,
         }
     }
 }
@@ -741,12 +741,12 @@ public type Literal is
 implement Literal {
     /// Create integer literal
     public fn int(value: Int) -> Self {
-        Literal.Int { value, suffix: None }
+        Literal.Int { value, suffix: Maybe.None }
     }
 
     /// Create float literal
     public fn float(value: Float64) -> Self {
-        Literal.Float { value, suffix: None }
+        Literal.Float { value, suffix: Maybe.None }
     }
 
     /// Create string literal

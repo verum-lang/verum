@@ -49,22 +49,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "Sigstore data model — Rekor entry types + Fulcio response + Sigstore Bundle",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.sigstore.types;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.json.{JsonValue};
 mount time.rfc3339.{Rfc3339Time};
@@ -419,15 +419,15 @@ public fn validate_digest(d: &Digest) -> Result<(), SigstoreTypeError> {
         "sha256" => 64,
         "sha384" => 96,
         "sha512" => 128,
-        _ => return Err(MalformedDigest(f"unknown algorithm '{d.algorithm}'")),
+        _ => return Result.Err(MalformedDigest(f"unknown algorithm '{d.algorithm}'")),
     };
     if d.hex.len() != expected_len {
-        return Err(MalformedDigest(f"{d.algorithm} digest must be {expected_len} hex chars, got {d.hex.len()}"));
+        return Result.Err(MalformedDigest(f"{d.algorithm} digest must be {expected_len} hex chars, got {d.hex.len()}"));
     }
     if !is_hex_lowercase(&d.hex) {
-        return Err(MalformedDigest("digest must be lowercase hex".to_text()));
+        return Result.Err(MalformedDigest("digest must be lowercase hex".to_text()));
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn is_hex_lowercase(s: &Text) -> Bool {

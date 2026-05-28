@@ -123,7 +123,7 @@ public fn arch_phase_report_annotated_count(r: ArchPhaseReport) -> Int {
     let mut count: Int = 0;
     let mut i: Int = 0;
     while i < r.modules.len() {
-        if r.modules[i].shape is Some(_) {
+        if r.modules[i].shape is Maybe.Some(_) {
             count = count + 1;
         }
         i = i + 1;

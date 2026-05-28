@@ -134,14 +134,14 @@ public fn wal_pager_read(
     // Pending in-txn write wins — the writer reads its own buffered
     // updates ("read-your-writes" within a transaction).
     match map_get_bytes(&p.pending_writes, page_no) {
-        Some(data) => {
-            return Ok(PageFrame {
+        Maybe.Some(data) => {
+            return Result.Ok(PageFrame {
                 page_no: page_no,
                 data: data,
                 dirty: true,
             });
         }
-        None => {}
+        Maybe.None => {}
     }
 
     // WalIndex fast path — O(1) hash lookup keyed by page_no,
@@ -151,17 +151,17 @@ public fn wal_pager_read(
     let n_bk = p.wal.n_backfill();
     let found = p.wal.index().find_frame(page_no, mx, n_bk);
     match found {
-        Some(frame_no) => {
+        Maybe.Some(frame_no) => {
             match read_frame(&mut p.wal, frame_no) {
-                Ok(read) => Ok(PageFrame {
+                Result.Ok(read) => Result.Ok(PageFrame {
                     page_no: page_no,
                     data: read.payload,
                     dirty: false,
                 }),
-                Err(e) => Err(e),
+                Result.Err(e) => Result.Err(e),
             }
         }
-        None => pager_read(&mut p.base, page_no),
+        Maybe.None => pager_read(&mut p.base, page_no),
     }
 }
 
@@ -175,17 +175,17 @@ public fn wal_pager_read_snapshot(
     page_no: Int,
 ) -> Result<PageFrame, PagerError> {
     match snap.newest_frame_for(page_no) {
-        Some(frame_no) => {
+        Maybe.Some(frame_no) => {
             match read_frame(&mut p.wal, frame_no) {
-                Ok(read) => Ok(PageFrame {
+                Result.Ok(read) => Result.Ok(PageFrame {
                     page_no: page_no,
                     data: read.payload,
                     dirty: false,
                 }),
-                Err(e) => Err(e),
+                Result.Err(e) => Result.Err(e),
             }
         }
-        None => pager_read(&mut p.base, page_no),
+        Maybe.None => pager_read(&mut p.base, page_no),
     }
 }
 
@@ -201,13 +201,13 @@ public fn wal_pager_write(
     frame: &PageFrame,
 ) -> Result<(), PagerError> {
     if frame.data.len() != p.wal.page_size() {
-        return Err(PagerError {
+        return Result.Err(PagerError {
             kind: InvalidPageSize,
             message: "WAL write: frame data length must equal page_size",
         });
     }
     p.pending_writes.insert(frame.page_no, clone_bytes(&frame.data));
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -230,7 +230,7 @@ public fn wal_pager_commit(
     let n = pages.len();
     if n == 0 {
         // Nothing to commit — empty txn is a no-op.
-        return Ok(0);
+        return Result.Ok(0);
     }
 
     // Determine the largest page_no so we can stamp the commit
@@ -258,27 +258,27 @@ public fn wal_pager_commit(
     while i < n {
         let page_no = pages[i];
         let data = match map_get_bytes(&p.pending_writes, page_no) {
-            Some(d) => d,
-            None    => { i = i + 1; continue; }
+            Maybe.Some(d) => d,
+            Maybe.None    => { i = i + 1; continue; }
         };
         let is_commit_frame = page_no == commit_db_size;
         let commit_size_arg = if is_commit_frame { commit_db_size } else { 0 };
         match wal_writer_append_frame(&mut p.wal, page_no, &data, commit_size_arg) {
-            Ok(_) => { frames_appended = frames_appended + 1; }
-            Err(e) => return Err(e),
+            Result.Ok(_) => { frames_appended = frames_appended + 1; }
+            Result.Err(e) => return Result.Err(e),
         }
         i = i + 1;
     }
 
     // fsync WAL file — durability point.
     match wal_writer_commit(&mut p.wal, sync_flags) {
-        Ok(_) => {}
-        Err(e) => return Err(e),
+        Result.Ok(_) => {}
+        Result.Err(e) => return Result.Err(e),
     }
 
     p.pending_writes = Map.new();
     p.frames_since_checkpoint = p.frames_since_checkpoint + frames_appended;
-    Ok(frames_appended)
+    Result.Ok(frames_appended)
 }
 
 // -----------------------------------------------------------------------------
@@ -308,7 +308,7 @@ public fn wal_pager_checkpoint(
     match mode {
         Passive => {
             if writer_pending {
-                return Ok(CheckpointResult {
+                return Result.Ok(CheckpointResult {
                     frames_drained: 0,
                     wal_reset: false,
                     bytes_truncated: 0,
@@ -325,7 +325,7 @@ public fn wal_pager_checkpoint(
     let mut frame_no: Int = nb + 1;
     while frame_no <= mx {
         match read_frame(&mut p.wal, frame_no) {
-            Ok(read) => {
+            Result.Ok(read) => {
                 let page_no = read.header.page_number as Int;
                 let frame = PageFrame {
                     page_no: page_no,
@@ -333,11 +333,11 @@ public fn wal_pager_checkpoint(
                     dirty: false,
                 };
                 match pager_write(&mut p.base, &frame) {
-                    Ok(_) => { drained = drained + 1; }
-                    Err(e) => return Err(e),
+                    Result.Ok(_) => { drained = drained + 1; }
+                    Result.Err(e) => return Result.Err(e),
                 }
             }
-            Err(e) => return Err(e),
+            Result.Err(e) => return Result.Err(e),
         }
         frame_no = frame_no + 1;
     }
@@ -345,8 +345,8 @@ public fn wal_pager_checkpoint(
     // Persist the drained writes durably to the main DB before
     // touching the WAL.
     match pager_commit(&mut p.base) {
-        Ok(_) => {}
-        Err(e) => return Err(e),
+        Result.Ok(_) => {}
+        Result.Err(e) => return Result.Err(e),
     }
 
     p.wal.state.advance_backfill(mx);
@@ -358,14 +358,14 @@ public fn wal_pager_checkpoint(
         Passive | Full => {}
         Restart => {
             match wal_writer_reset(&mut p.wal, new_salt1, new_salt2) {
-                Ok(_) => { wal_reset = true; }
-                Err(e) => return Err(e),
+                Result.Ok(_) => { wal_reset = true; }
+                Result.Err(e) => return Result.Err(e),
             }
         }
         Truncate => {
             match wal_writer_reset(&mut p.wal, new_salt1, new_salt2) {
-                Ok(_) => { wal_reset = true; }
-                Err(e) => return Err(e),
+                Result.Ok(_) => { wal_reset = true; }
+                Result.Err(e) => return Result.Err(e),
             }
             // Remember bytes about to be truncated for the
             // observability return value.  After reset, the
@@ -374,13 +374,13 @@ public fn wal_pager_checkpoint(
             let tail_bytes = (p.wal.mx_frame() * 0);   // post-reset mx is 0
             let _ = tail_bytes;
             match wal_writer_truncate(&mut p.wal) {
-                Ok(_) => { bytes_truncated = drained * (p.wal.page_size() + 24); }
-                Err(e) => return Err(e),
+                Result.Ok(_) => { bytes_truncated = drained * (p.wal.page_size() + 24); }
+                Result.Err(e) => return Result.Err(e),
             }
         }
     }
 
-    Ok(CheckpointResult {
+    Result.Ok(CheckpointResult {
         frames_drained: drained,
         wal_reset: wal_reset,
         bytes_truncated: bytes_truncated,
@@ -405,8 +405,8 @@ public fn wal_pager_recover(p: &mut WalPager) -> Result<RecoveryReport, PagerErr
 
 fn map_get_bytes(m: &Map<Int, List<Byte>>, k: Int) -> Maybe<List<Byte>> {
     match m.get(&k) {
-        Some(v) => Some(clone_bytes(v)),
-        None => None,
+        Maybe.Some(v) => Maybe.Some(clone_bytes(v)),
+        Maybe.None => Maybe.None,
     }
 }
 

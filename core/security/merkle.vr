@@ -151,9 +151,9 @@ implement MerkleTree {
     /// Produce an inclusion proof for leaf `index`. Returns the
     /// bottom-up sibling list the verifier replays.
     public fn inclusion_proof(&self, index: Int) -> Result<InclusionProof, MerkleError> {
-        if self.leaf_hashes.len() == 0 { return Err(MerkleError.EmptyTree); }
+        if self.leaf_hashes.len() == 0 { return Result.Err(MerkleError.EmptyTree); }
         if index < 0 || index >= self.leaf_hashes.len() {
-            return Err(MerkleError.IndexOutOfRange(index));
+            return Result.Err(MerkleError.IndexOutOfRange(index));
         }
         let mut level: List<[Byte; 32]> = clone_hash_list(&self.leaf_hashes);
         let mut path: List<[Byte; 32]> = [];
@@ -173,7 +173,7 @@ implement MerkleTree {
             level = combine_level(&level);
             idx = idx / 2;
         }
-        Ok(InclusionProof { siblings: path })
+        Result.Ok(InclusionProof { siblings: path })
     }
 }
 

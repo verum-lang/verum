@@ -632,7 +632,7 @@ implement<A: Agent> Agent for GuardedAgent<A> {
         match self.input_guardrails.check_input(action) {
             GuardrailResult.Pass => self.agent.act(action),
             GuardrailResult.Block { reason } => {
-                Err(Error.new(f"Action blocked: {reason}"))
+                Result.Err(Error.new(f"Action blocked: {reason}"))
             }
             GuardrailResult.Modify { modified, .. } => {
                 self.agent.act(&modified)
@@ -874,8 +874,8 @@ implement RateLimitGuardrail {
         // poisoned/Ok identically since the rate-limiter has no
         // panic-sensitive invariant beyond list ordering.
         let mut guard = match self.request_times.lock() {
-            Ok(g)  => g,
-            Err(p) => p.into_inner(),
+            Result.Ok(g)  => g,
+            Result.Err(p) => p.into_inner(),
         };
 
         // Remove old entries.

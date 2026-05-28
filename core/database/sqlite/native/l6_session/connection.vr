@@ -199,10 +199,10 @@ public type Connection is {
 /// work on `:memory:` — there's no file-permission layer to honour.
 public fn open_memory(mode: ConnectionMode) -> Result<Connection, ConnectionError> {
     let pager = match pager_open_memory() {
-        Ok(p)  => p,
-        Err(_) => { return Err(IoError("pager_open_memory failed".clone())); }
+        Result.Ok(p)  => p,
+        Result.Err(_) => { return Result.Err(IoError("pager_open_memory failed".clone())); }
     };
-    Ok(Connection {
+    Result.Ok(Connection {
         mode: mode,
         pager: pager,
         schema: schema_cache_new(),
@@ -233,15 +233,15 @@ public fn open_admin_memory() -> Result<Connection, ConnectionError> {
 public fn open_file(path: &Text, mode: ConnectionMode) -> Result<Connection, ConnectionError> {
     let pager = match mode {
         CmRead => match pager_open_file_ro(path) {
-            Ok(p)  => p,
-            Err(_) => { return Err(IoError("pager_open_file_ro failed".clone())); }
+            Result.Ok(p)  => p,
+            Result.Err(_) => { return Result.Err(IoError("pager_open_file_ro failed".clone())); }
         },
         CmWrite | CmAdmin => match pager_open_file_rwc(path) {
-            Ok(p)  => p,
-            Err(_) => { return Err(IoError("pager_open_file_rwc failed".clone())); }
+            Result.Ok(p)  => p,
+            Result.Err(_) => { return Result.Err(IoError("pager_open_file_rwc failed".clone())); }
         },
     };
-    Ok(Connection {
+    Result.Ok(Connection {
         mode: mode,
         pager: pager,
         schema: schema_cache_new(),
@@ -267,11 +267,11 @@ implement Connection {
     // -------------------------------------------------------------------------
 
     public fn ensure_writable(&self) -> Result<(), ConnectionError> {
-        if mode_can_write(self.mode) { Ok(()) } else { Err(NotWritable) }
+        if mode_can_write(self.mode) { Result.Ok(()) } else { Result.Err(NotWritable) }
     }
 
     public fn ensure_admin(&self) -> Result<(), ConnectionError> {
-        if mode_can_ddl(self.mode) { Ok(()) } else { Err(NotAdmin) }
+        if mode_can_ddl(self.mode) { Result.Ok(()) } else { Result.Err(NotAdmin) }
     }
 
     // -------------------------------------------------------------------------
@@ -279,56 +279,56 @@ implement Connection {
     // -------------------------------------------------------------------------
 
     public fn begin_tx(&mut self, mode: TxMode) -> Result<(), ConnectionError> {
-        match self.ensure_writable() { Ok(_) => {}, Err(e) => { return Err(e); } }
-        if self.tx.active { return Err(TxAlreadyActive); }
+        match self.ensure_writable() { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        if self.tx.active { return Result.Err(TxAlreadyActive); }
         self.tx = TxState { mode: mode, depth: 1, active: true };
-        Ok(())
+        Result.Ok(())
     }
 
     public fn commit_tx(&mut self) -> Result<(), ConnectionError> {
-        if !self.tx.active { return Err(TxNotActive); }
+        if !self.tx.active { return Result.Err(TxNotActive); }
         // Fire commit-hook BEFORE finalising tx. Hook may veto
         // (CdAbort) — in that case we treat it as a constraint
         // violation and force a rollback instead. Matches the SQLite
         // C API semantics for sqlite3_commit_hook.
         let veto: Maybe<Text> = match &mut self.registry.commit_hook {
-            None => None,
-            Some(h) => {
+            Maybe.None => Maybe.None,
+            Maybe.Some(h) => {
                 let hook_ref = &mut **h;
                 match hook_ref.on_commit() {
-                    CdAllow      => None,
-                    CdAbort(msg) => Some(msg),
+                    CdAllow      => Maybe.None,
+                    CdAbort(msg) => Maybe.Some(msg),
                 }
             }
         };
         match veto {
-            None => {
+            Maybe.None => {
                 self.tx = tx_state_autocommit();
-                Ok(())
+                Result.Ok(())
             }
-            Some(msg) => {
+            Maybe.Some(msg) => {
                 // Commit aborted by hook → rollback the tx and emit
                 // the hook's rejection reason via IoError until a
                 // dedicated "constraint by hook" error variant lands.
                 self.tx = tx_state_autocommit();
-                Err(IoError(msg))
+                Result.Err(IoError(msg))
             }
         }
     }
 
     public fn rollback_tx(&mut self) -> Result<(), ConnectionError> {
-        if !self.tx.active { return Err(TxNotActive); }
+        if !self.tx.active { return Result.Err(TxNotActive); }
         self.tx = tx_state_autocommit();
         // Notify rollback-hook AFTER state transitions so observers
         // see the post-rollback world. Notification only — no veto.
         match &mut self.registry.rollback_hook {
-            None => {}
-            Some(h) => {
+            Maybe.None => {}
+            Maybe.Some(h) => {
                 let hook_ref = &mut **h;
                 hook_ref.on_rollback();
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Borrow the hook + function registry. Used by the L7 façade to
@@ -358,13 +358,13 @@ implement Connection {
 
     public fn savepoint_pop(&mut self) -> Result<(), ConnectionError> {
         if !self.tx.active || self.tx.depth <= 0 {
-            return Err(TxNotActive);
+            return Result.Err(TxNotActive);
         }
         self.tx.depth = self.tx.depth - 1;
         if self.tx.depth == 0 {
             self.tx = tx_state_autocommit();
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // -------------------------------------------------------------------------

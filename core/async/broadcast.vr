@@ -145,7 +145,7 @@ type RecvSlot is {
 /// own `read_pos` and `waker` slot. Receiver drops mark themselves via
 /// `dropped` flag; senders periodically compact the receiver list.
 type BroadcastInner<T> is {
-    /// Ring buffer; each slot holds Some(value) when occupied, None when free.
+    /// Ring buffer; each slot holds Maybe.Some(value) when occupied, Maybe.None when free.
     buffer: Mutex<List<Maybe<T>>>,
     /// Capacity of the ring buffer (immutable).
     capacity: Int,
@@ -223,8 +223,8 @@ implement<T> BroadcastSender<T> {
     /// Broadcast `value` to all currently-subscribed receivers.
     ///
 
-    /// Returns `Ok(n)` where `n` is the number of active receivers that
-    /// will see this value, or `Err(BroadcastSendError)` if no receivers are active.
+    /// Returns `Result.Ok(n)` where `n` is the number of active receivers that
+    /// will see this value, or `Result.Err(BroadcastSendError)` if no receivers are active.
     ///
 
     /// If a receiver is slow enough that the write wraps past its read_pos,
@@ -232,12 +232,12 @@ implement<T> BroadcastSender<T> {
     /// `BroadcastRecvError.Lagged(skipped)` on its next recv).
     public fn send(&self, value: T) -> Result<Int, BroadcastSendError<T>> {
         if self.inner.closed.load(MemoryOrdering.Acquire) {
-            return Err(BroadcastSendError { value: value });
+            return Result.Err(BroadcastSendError { value: value });
         }
 
         let active = self.inner.receiver_count.load(MemoryOrdering.Acquire);
         if active == 0 {
-            return Err(BroadcastSendError { value: value });
+            return Result.Err(BroadcastSendError { value: value });
         }
 
         let capacity = self.inner.capacity;
@@ -256,7 +256,7 @@ implement<T> BroadcastSender<T> {
         // Fire all receiver wakers.
         wake_all_receivers(&self.inner);
 
-        Ok(active)
+        Result.Ok(active)
     }
 
     /// Create a new receiver that will receive all future messages.
@@ -297,7 +297,7 @@ implement<T> BroadcastSender<T> {
         self.inner.sender_count.load(MemoryOrdering.Acquire)
     }
 
-    /// Close the channel — subsequent recv returns `Err(Closed)`.
+    /// Close the channel — subsequent recv returns `Result.Err(Closed)`.
     public fn close(&self) {
         self.inner.closed.store(true, MemoryOrdering.Release);
         wake_all_receivers(&self.inner);
@@ -376,8 +376,8 @@ implement<T> BroadcastReceiver<T> {
         token: &CancellationToken,
     ) -> Result<Result<T, BroadcastRecvError>, CancellationError> {
         select {
-            r = self.recv().await => Ok(r),
-            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = self.recv().await => Result.Ok(r),
+            reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
         }
     }
 }
@@ -401,9 +401,9 @@ implement<T> Future for BroadcastReceiver<T> {
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, BroadcastRecvError>> {
         match poll_recv_inner(&self.inner, &self.slot, Maybe.Some(cx)) {
-            TryRecvResult.Value(v) => Poll.Ready(Ok(v)),
-            TryRecvResult.Lagged(n) => Poll.Ready(Err(BroadcastRecvError.Lagged(n))),
-            TryRecvResult.Closed => Poll.Ready(Err(BroadcastRecvError.Closed)),
+            TryRecvResult.Value(v) => Poll.Ready(Result.Ok(v)),
+            TryRecvResult.Lagged(n) => Poll.Ready(Result.Err(BroadcastRecvError.Lagged(n))),
+            TryRecvResult.Closed => Poll.Ready(Result.Err(BroadcastRecvError.Closed)),
             TryRecvResult.Empty => Poll.Pending,
         }
     }
@@ -415,8 +415,8 @@ implement<T> Stream for BroadcastReceiver<T> {
 
     fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<T, BroadcastRecvError>>> {
         match poll_recv_inner(&self.inner, &self.slot, Maybe.Some(cx)) {
-            TryRecvResult.Value(v) => Poll.Ready(Maybe.Some(Ok(v))),
-            TryRecvResult.Lagged(n) => Poll.Ready(Maybe.Some(Err(BroadcastRecvError.Lagged(n)))),
+            TryRecvResult.Value(v) => Poll.Ready(Maybe.Some(Result.Ok(v))),
+            TryRecvResult.Lagged(n) => Poll.Ready(Maybe.Some(Result.Err(BroadcastRecvError.Lagged(n)))),
             TryRecvResult.Closed => Poll.Ready(Maybe.None),
             TryRecvResult.Empty => Poll.Pending,
         }
@@ -448,9 +448,9 @@ implement<T> Future for BroadcastRecv<T> {
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, BroadcastRecvError>> {
         match poll_recv_inner(&self.inner, &self.slot, Maybe.Some(cx)) {
-            TryRecvResult.Value(v) => Poll.Ready(Ok(v)),
-            TryRecvResult.Lagged(n) => Poll.Ready(Err(BroadcastRecvError.Lagged(n))),
-            TryRecvResult.Closed => Poll.Ready(Err(BroadcastRecvError.Closed)),
+            TryRecvResult.Value(v) => Poll.Ready(Result.Ok(v)),
+            TryRecvResult.Lagged(n) => Poll.Ready(Result.Err(BroadcastRecvError.Lagged(n))),
+            TryRecvResult.Closed => Poll.Ready(Result.Err(BroadcastRecvError.Closed)),
             TryRecvResult.Empty => Poll.Pending,
         }
     }

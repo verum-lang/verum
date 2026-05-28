@@ -52,8 +52,8 @@ public fn delta_from(op: &AlterOp) -> SchemaDelta {
 
 fn clone_default(d: &Maybe<Text>) -> Maybe<Text> {
     match d {
-        Some(s) => Some(s.clone()),
-        None    => None,
+        Maybe.Some(s) => Maybe.Some(s.clone()),
+        Maybe.None    => Maybe.None,
     }
 }
 

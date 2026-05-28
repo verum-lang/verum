@@ -2,7 +2,7 @@
 // mem/capability.vr - Capability-Based Access Control
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None
+// Dependencies: Maybe.None
 // =============================================================================
 //
 
@@ -187,17 +187,17 @@ public fn can_execute(flags: UInt16) -> Bool {
 /// Delegate capabilities to a sub-reference.
 ///
 
-/// Returns `None` if delegation is not allowed or the
+/// Returns `Maybe.None` if delegation is not allowed or the
 /// requested capability set exceeds what the parent holds.
-/// Otherwise returns `Some(requested)`: the caller's request
+/// Otherwise returns `Maybe.Some(requested)`: the caller's request
 /// is the authoritative description of what the sub-reference
 /// should hold, and `has_all_capabilities` above already
 /// proved the parent dominates the request.
 ///
 
 /// Earlier revisions wrote the return value as
-///  `Some(requested & !CAP_DELEGATE | (requested & CAP_DELEGATE))`
-/// — algebraically equivalent to `Some(requested)` because
+///  `Maybe.Some(requested & !CAP_DELEGATE | (requested & CAP_DELEGATE))`
+/// — algebraically equivalent to `Maybe.Some(requested)` because
 /// `(x & !K) | (x & K) == x & (!K | K) == x`. The obfuscated
 /// form looked like it was filtering the Delegate bit but
 /// did nothing of the sort, hiding the actual semantics from
@@ -221,7 +221,7 @@ public fn delegate_capability(parent_caps: UInt16, requested: UInt16) -> Maybe<U
 }
 
 /// Revoke capabilities from a reference.
-/// Returns None if revocation is not allowed.
+/// Returns Maybe.None if revocation is not allowed.
 public fn revoke_capability(caps: UInt16, to_revoke: UInt16) -> Maybe<UInt16> {
     if !can_revoke(caps) {
         return Maybe.None;

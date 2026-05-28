@@ -228,7 +228,7 @@ public type Write is protocol {
     // Write a string.
     fn write_str(&mut self, s: &Text) -> Result<(), WriteError> {
         self.write(s.as_bytes())?;
-        Ok(())
+        Result.Ok(())
     }
 
     // Write a single character.
@@ -236,7 +236,7 @@ public type Write is protocol {
         let mut buf = [0_u8; 4];
         let len = c.encode_utf8(&mut buf);
         self.write(slice_from_raw_parts(&buf[0], len))?;
-        Ok(())
+        Result.Ok(())
     }
 
     // Flush output.
@@ -390,22 +390,22 @@ implement FormatSpec {
             fill: ' ',
             align: Left,
             sign: Minus,
-            width: None,
-            precision: None,
+            width: Maybe.None,
+            precision: Maybe.None,
             alternate: false,
-            format_type: None,
+            format_type: Maybe.None,
         }
     }
 
     // Set width.
     fn with_width(mut self, w: Int) -> FormatSpec {
-        self.width = Some(w);
+        self.width = Maybe.Some(w);
         self
     }
 
     // Set precision.
     fn with_precision(mut self, p: Int) -> FormatSpec {
-        self.precision = Some(p);
+        self.precision = Maybe.Some(p);
         self
     }
 
@@ -441,7 +441,7 @@ implement FormatSpec {
 
     // Set type specifier.
     fn with_type(mut self, t: Char) -> FormatSpec {
-        self.format_type = Some(t);
+        self.format_type = Maybe.Some(t);
         self
     }
 }
@@ -490,7 +490,7 @@ implement TextFormatter {
     public fn write_str(&mut self, s: &Text) -> Result<(), FormatError> {
         // Apply width/precision if specified
         let s = match self.spec.precision {
-            Some(p) if s.char_count() > p => {
+            Maybe.Some(p) if s.char_count() > p => {
                 // Truncate to precision characters
                 let mut res = Text.new();
                 let mut count = 0;
@@ -507,13 +507,13 @@ implement TextFormatter {
         };
 
         match self.spec.width {
-            Some(w) if s.char_count() < w => {
+            Maybe.Some(w) if s.char_count() < w => {
                 let padding = w - s.char_count();
                 self.write_padded(&s, padding)
             }
             _ => {
                 self.buffer.push_str(&s);
-                Ok(())
+                Result.Ok(())
             }
         }
     }
@@ -547,13 +547,13 @@ implement TextFormatter {
                 }
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // Write a single character.
     public fn write_char(&mut self, c: Char) -> Result<(), FormatError> {
         self.buffer.push(c);
-        Ok(())
+        Result.Ok(())
     }
 
     // Write formatted bytes.
@@ -572,7 +572,7 @@ implement TextFormatter {
             self.buffer.push(bytes[i] as Char);
             i = i + 1;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // =========================================================================
@@ -692,7 +692,7 @@ implement TextFormatter {
         let total_len = sign.len() + value.len();
 
         match self.spec.width {
-            Some(w) if total_len < w => {
+            Maybe.Some(w) if total_len < w => {
                 if self.spec.is_zero_padded() {
                     // Sign, then zeros, then value
                     self.buffer.push_str(sign);
@@ -700,7 +700,7 @@ implement TextFormatter {
                         self.buffer.push('0');
                     }
                     self.buffer.push_str(value);
-                    Ok(())
+                    Result.Ok(())
                 } else {
                     // Normal padding
                     let full = sign.concat(value);
@@ -710,7 +710,7 @@ implement TextFormatter {
             _ => {
                 self.buffer.push_str(sign);
                 self.buffer.push_str(value);
-                Ok(())
+                Result.Ok(())
             }
         }
     }

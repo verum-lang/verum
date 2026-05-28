@@ -37,8 +37,8 @@ mount core.cli.error.{ParseError, ParseDiagnostic, ParseErrorKind};
 // Predicate types
 // =============================================================================
 
-/// A runtime predicate keyed on the parsed `Text`. Returns `Ok(())` if
-/// the value satisfies the refinement, `Err(reason)` otherwise. Reason
+/// A runtime predicate keyed on the parsed `Text`. Returns `Result.Ok(())` if
+/// the value satisfies the refinement, `Result.Err(reason)` otherwise. Reason
 /// is rendered into the resulting `ParseError`.
 public type TextPredicate is fn(&Text) -> Result<Unit, Text>;
 
@@ -78,28 +78,28 @@ public fn validate_value(
     registry: &PredicateRegistry,
 ) -> Result<Unit, ParseError> {
     match refinement {
-        None => Ok(()),
-        Some(r) => {
+        Maybe.None => Result.Ok(()),
+        Maybe.Some(r) => {
             // The macro pass stores the predicate name in `r.expression`'s
             // first line if a runtime predicate was registered. For Phase 2
             // we look up by the same field_name as a fallback convention.
             match registry.lookup(field_name) {
-                Some(p) => match p(value) {
-                    Ok(()) => Ok(()),
-                    Err(_reason) => Err(ParseError.refinement_failed(
+                Maybe.Some(p) => match p(value) {
+                    Result.Ok(()) => Result.Ok(()),
+                    Result.Err(_reason) => Result.Err(ParseError.refinement_failed(
                         field_name.clone(),
                         value.clone(),
                         r.expression.clone(),
                     )),
                 },
-                None => {
+                Maybe.None => {
                     // No runtime predicate registered — the refinement
                     // has been declared but not desugared yet. The
                     // expression itself surfaces in help output, so
                     // there is no silent gap; we accept the value to
                     // avoid breaking applications that haven't migrated
                     // to the runtime-predicate model.
-                    Ok(())
+                    Result.Ok(())
                 },
             }
         },
@@ -119,32 +119,32 @@ public fn validate_value(
 /// Validate that `v` parses as an integer in `[lo, hi]`.
 public fn validate_int_range(v: &Text, lo: Int, hi: Int) -> Result<Unit, Text> {
     match v.parse_int() {
-        Ok(n) => {
+        Result.Ok(n) => {
             if n < lo {
-                Err(Text.from(f"value {n} is below minimum {lo}"))
+                Result.Err(Text.from(f"value {n} is below minimum {lo}"))
             } else if n > hi {
-                Err(Text.from(f"value {n} is above maximum {hi}"))
+                Result.Err(Text.from(f"value {n} is above maximum {hi}"))
             } else {
-                Ok(())
+                Result.Ok(())
             }
         },
-        Err(_) => Err(Text.from(f"value '{v}' is not a valid integer")),
+        Result.Err(_) => Result.Err(Text.from(f"value '{v}' is not a valid integer")),
     }
 }
 
 /// Validate that `v` parses as a float in `[lo, hi]`.
 public fn validate_float_range(v: &Text, lo: Float, hi: Float) -> Result<Unit, Text> {
     match v.parse_float() {
-        Ok(x) => {
+        Result.Ok(x) => {
             if x < lo {
-                Err(Text.from(f"value {x} is below minimum {lo}"))
+                Result.Err(Text.from(f"value {x} is below minimum {lo}"))
             } else if x > hi {
-                Err(Text.from(f"value {x} is above maximum {hi}"))
+                Result.Err(Text.from(f"value {x} is above maximum {hi}"))
             } else {
-                Ok(())
+                Result.Ok(())
             }
         },
-        Err(_) => Err(Text.from(f"value '{v}' is not a valid float")),
+        Result.Err(_) => Result.Err(Text.from(f"value '{v}' is not a valid float")),
     }
 }
 
@@ -152,11 +152,11 @@ public fn validate_float_range(v: &Text, lo: Float, hi: Float) -> Result<Unit, T
 public fn validate_text_length(v: &Text, min_len: Int, max_len: Int) -> Result<Unit, Text> {
     let n = v.len();
     if n < min_len {
-        Err(Text.from(f"length {n} is below minimum {min_len}"))
+        Result.Err(Text.from(f"length {n} is below minimum {min_len}"))
     } else if n > max_len {
-        Err(Text.from(f"length {n} exceeds maximum {max_len}"))
+        Result.Err(Text.from(f"length {n} exceeds maximum {max_len}"))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -164,7 +164,7 @@ public fn validate_text_length(v: &Text, min_len: Int, max_len: Int) -> Result<U
 public fn validate_one_of(v: &Text, values: &List<Text>) -> Result<Unit, Text> {
     let mut i: Int = 0;
     while i < values.len() {
-        if &values[i] == v { return Ok(()); }
+        if &values[i] == v { return Result.Ok(()); }
         i = i + 1;
     }
     let mut hint = Text.from("expected one of: ");
@@ -174,5 +174,5 @@ public fn validate_one_of(v: &Text, values: &List<Text>) -> Result<Unit, Text> {
         hint.push_str(&values[j]);
         j = j + 1;
     }
-    Err(hint)
+    Result.Err(hint)
 }

@@ -84,11 +84,11 @@ implement FaultSchedule {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].at_op >= op_idx {
-                return Some(scheduled(self.entries[i].at_op, clone_fault(&self.entries[i].fault)));
+                return Maybe.Some(scheduled(self.entries[i].at_op, clone_fault(&self.entries[i].fault)));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Op index at which the first terminal fault (PowerLoss) fires.

@@ -112,8 +112,8 @@ public fn empty_bundle(compiler: Text, source: Text) -> ProofBundle {
 public fn bundle_add(b: ProofBundle, h: GoalHash, c: ProofCertificate) -> ProofBundle {
     let mut certs = b.certificates;
     let prior_dur: Int = match certs.get(h.digest.clone()) {
-        Some(prior) => prior.duration_ms,
-        None        => 0,
+        Maybe.Some(prior) => prior.duration_ms,
+        Maybe.None        => 0,
     };
     let new_count = if prior_dur == 0 && !certs.contains_key(h.digest.clone()) {
         b.metadata.certificate_count + 1
@@ -155,8 +155,8 @@ public fn bundle_remove(b: ProofBundle, h: GoalHash) -> ProofBundle {
     let digest = h.digest;
     let mut certs = b.certificates;
     let prior_dur: Int = match certs.get(digest.clone()) {
-        Some(prior) => prior.duration_ms,
-        None        => return ProofBundle { certificates: certs, metadata: b.metadata },
+        Maybe.Some(prior) => prior.duration_ms,
+        Maybe.None        => return ProofBundle { certificates: certs, metadata: b.metadata },
     };
     certs.remove(digest);
     let new_count = b.metadata.certificate_count - 1;

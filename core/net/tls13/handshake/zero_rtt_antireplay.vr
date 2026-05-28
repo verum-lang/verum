@@ -263,7 +263,7 @@ implement ReplayCache {
     /// starting instant and feed later `now` values deterministically.
     public fn new_at(cfg: ReplayConfig, origin: Instant) -> ReplayCache {
         let active = new_bucket(&cfg, origin);
-        ReplayCache { cfg: cfg, active: active, retired: None }
+        ReplayCache { cfg: cfg, active: active, retired: Maybe.None }
     }
 
     /// Default-configuration cache — 2^20 entries, 0.1% FP, 10s window.
@@ -278,15 +278,15 @@ implement ReplayCache {
         if (age.as_millis() as Int) >= half_window_ms {
             // Retire the active bucket; start a fresh one.
             let old = core.mem.replace(&mut self.active, new_bucket(&self.cfg, now));
-            self.retired = Some(old);
+            self.retired = Maybe.Some(old);
         }
     }
 
     /// Attempt to admit a (psk_id, ch_hash) pair. Returns:
     ///
 
-    ///  * `Ok(true)` — admitted; caller may accept the 0-RTT flight.
-    ///  * `Ok(false)` — already present in either active or retired
+    ///  * `Result.Ok(true)` — admitted; caller may accept the 0-RTT flight.
+    ///  * `Result.Ok(false)` — already present in either active or retired
     ///  bucket: REJECT the 0-RTT flight (the client
     ///  may still complete a full 1-RTT handshake).
     ///
@@ -305,11 +305,11 @@ implement ReplayCache {
         // means we're in the overlap window and the pair was admitted
         // during the previous half-window.
         match &self.retired {
-            Some(r) => {
+            Maybe.Some(r) => {
                 let offsets = probe_offsets(r, psk_id, ch_hash);
                 if all_set(r, &offsets) { return false; }
             },
-            None => {},
+            Maybe.None => {},
         }
 
         // Active bucket. If all probe bits are set → likely replay.
@@ -330,7 +330,7 @@ implement ReplayCache {
     public fn stats(&self) -> ReplayStats {
         ReplayStats {
             active_admitted: self.active.admitted,
-            retired_present: match &self.retired { Some(_) => true, None => false },
+            retired_present: match &self.retired { Maybe.Some(_) => true, Maybe.None => false },
             bits_per_bucket: self.active.bit_len,
             k_hashes:        self.active.k,
         }

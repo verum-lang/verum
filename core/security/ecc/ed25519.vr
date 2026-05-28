@@ -214,17 +214,17 @@ implement Ed25519 {
     }
 
     /// Strict Ed25519 verification per RFC 8032 §5.1.7 + ZIP-215.
-    /// Returns `Ok(())` on valid, `Err(VerificationFailed)` on
-    /// clean rejection, `Err(Malformed(...))` on syntactically bad
+    /// Returns `Result.Ok(())` on valid, `Result.Err(VerificationFailed)` on
+    /// clean rejection, `Result.Err(Malformed(...))` on syntactically bad
     /// inputs.
     ///
 
     /// ```verum
     /// match Ed25519.verify(&peer_pk, message, &sig) {
-    ///  Ok(()) => /* valid — proceed */,
-    ///  Err(Ed25519Error.VerificationFailed) => return 401,
-    ///  Err(Ed25519Error.Malformed(_)) => return 400,
-    ///  Err(Ed25519Error.BackendNotReady) => panic("runtime misconfigured"),
+    ///  Result.Ok(()) => /* valid — proceed */,
+    ///  Result.Err(Ed25519Error.VerificationFailed) => return 401,
+    ///  Result.Err(Ed25519Error.Malformed(_)) => return 400,
+    ///  Result.Err(Ed25519Error.BackendNotReady) => panic("runtime misconfigured"),
     /// }
     /// ```
     public fn verify(

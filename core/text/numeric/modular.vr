@@ -46,7 +46,7 @@
 module core.text.numeric.modular;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount base.ordering.{Ordering, Less, Equal, Greater};
 mount collections.List;
 mount core.text.numeric.bigint.{BigInt, parse_bigint};
@@ -78,8 +78,8 @@ public fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
     let mut y = b.abs();
     while !y.is_zero() {
         let r = match x.rem(&y) {
-            Ok(v)  => v,
-            Err(_) => BigInt.zero(),  // unreachable — y != 0
+            Result.Ok(v)  => v,
+            Result.Err(_) => BigInt.zero(),  // unreachable — y != 0
         };
         x = y;
         y = r.abs();  // BigInt.rem returns sign(self); we want |r|
@@ -94,8 +94,8 @@ public fn lcm(a: &BigInt, b: &BigInt) -> BigInt {
     let g = gcd(a, b);
     let prod = a.abs().mul(&b.abs());
     match prod.div(&g) {
-        Ok(v)  => v,
-        Err(_) => BigInt.zero(),  // unreachable — g != 0 here
+        Result.Ok(v)  => v,
+        Result.Err(_) => BigInt.zero(),  // unreachable — g != 0 here
     }
 }
 
@@ -114,8 +114,8 @@ public fn ext_gcd(a: &BigInt, b: &BigInt) -> (BigInt, BigInt, BigInt) {
 
     while !r.is_zero() {
         let q = match old_r.div(&r) {
-            Ok(v)  => v,
-            Err(_) => BigInt.zero(),
+            Result.Ok(v)  => v,
+            Result.Err(_) => BigInt.zero(),
         };
         // (old_r, r) = (r, old_r - q*r)
         let new_r = old_r.sub(&q.mul(&r));
@@ -142,8 +142,8 @@ public fn ext_gcd(a: &BigInt, b: &BigInt) -> (BigInt, BigInt, BigInt) {
 /// by `BigInt.rem`).  Caller must pass `m > 0`.
 fn pos_mod(x: &BigInt, m: &BigInt) -> BigInt {
     let r = match x.rem(m) {
-        Ok(v)  => v,
-        Err(_) => BigInt.zero(),
+        Result.Ok(v)  => v,
+        Result.Err(_) => BigInt.zero(),
     };
     if r.is_negative() { r.add(m) } else { r }
 }
@@ -176,15 +176,15 @@ public fn mod_pow(
     exp: &BigInt,
     m: &BigInt,
 ) -> Result<BigInt, ModularError> {
-    if m.is_zero() { return Err(ModularError.ZeroModulus); }
+    if m.is_zero() { return Result.Err(ModularError.ZeroModulus); }
     if exp.is_negative() {
-        return Err(ModularError.NegativeExponent {
+        return Result.Err(ModularError.NegativeExponent {
             reason: "negative exponent requires explicit mod_inverse first".clone(),
         });
     }
 
     let one = BigInt.one();
-    if m.eq(&one) { return Ok(BigInt.zero()); }
+    if m.eq(&one) { return Result.Ok(BigInt.zero()); }
 
     let two = BigInt.from_int(2);
     let mut result = BigInt.one();
@@ -202,11 +202,11 @@ public fn mod_pow(
         base_acc = pos_mod(&sq, m);
         // e = e / 2  (effectively the bit-shift right step)
         e = match e.div(&two) {
-            Ok(v)  => v,
-            Err(_) => BigInt.zero(),
+            Result.Ok(v)  => v,
+            Result.Err(_) => BigInt.zero(),
         };
     }
-    Ok(result)
+    Result.Ok(result)
 }
 
 // =============================================================================
@@ -221,24 +221,24 @@ public fn mod_pow(
 ///   * `NoInverse` if `gcd(a, m) ≠ 1` — `a` and `m` must be
 ///     coprime for the inverse to exist.
 public fn mod_inverse(a: &BigInt, m: &BigInt) -> Result<BigInt, ModularError> {
-    if m.is_zero() { return Err(ModularError.ZeroModulus); }
+    if m.is_zero() { return Result.Err(ModularError.ZeroModulus); }
     let one = BigInt.one();
     if m.eq(&one) {
         // Every value is congruent to 0 mod 1, and the inverse of
         // anything is 0 (since 0*0 = 0 ≡ 1 mod 1).  Edge case but
         // mathematically defined.
-        return Ok(BigInt.zero());
+        return Result.Ok(BigInt.zero());
     }
 
     let a_reduced = pos_mod(a, m);
     let (g, s, _t) = ext_gcd(&a_reduced, m);
     if !g.eq(&one) {
-        return Err(ModularError.NoInverse {
+        return Result.Err(ModularError.NoInverse {
             reason: f"gcd({a_reduced.to_text()}, {m.to_text()}) = {g.to_text()} (must be 1)",
         });
     }
     // Normalise s into [0, m).
-    Ok(pos_mod(&s, m))
+    Result.Ok(pos_mod(&s, m))
 }
 
 // =============================================================================
@@ -280,8 +280,8 @@ public fn is_probable_prime(n: &BigInt, witnesses: &List<BigInt>) -> Bool {
     let mut r: Int = 0;
     while d.is_even() {
         d = match d.div(&two) {
-            Ok(v)  => v,
-            Err(_) => zero.clone_via_text(),
+            Result.Ok(v)  => v,
+            Result.Err(_) => zero.clone_via_text(),
         };
         r = r + 1;
     }
@@ -299,8 +299,8 @@ public fn is_probable_prime(n: &BigInt, witnesses: &List<BigInt>) -> Bool {
         }
         // x = a^d mod n
         let mut x = match mod_pow(a, &d, n) {
-            Ok(v)  => v,
-            Err(_) => return false,  // shouldn't happen — n > 1, d ≥ 0
+            Result.Ok(v)  => v,
+            Result.Err(_) => return false,  // shouldn't happen — n > 1, d ≥ 0
         };
         if x.eq(&one) || x.eq(&n_minus_one) {
             wi = wi + 1;
@@ -362,20 +362,20 @@ public fn crt(
     let n = residues.len() as Int;
     let nm = moduli.len() as Int;
     if n != nm {
-        return Err(ModularError.LengthMismatch {
+        return Result.Err(ModularError.LengthMismatch {
             residues_len: n,
             moduli_len: nm,
         });
     }
     if n == 0 {
-        return Err(ModularError.EmptyInput { what: "crt".clone() });
+        return Result.Err(ModularError.EmptyInput { what: "crt".clone() });
     }
 
     // Compute M = ∏ moduli; reject any zero modulus.
     let mut m_prod = BigInt.one();
     let mut k: Int = 0;
     while k < n {
-        if moduli[k].is_zero() { return Err(ModularError.ZeroModulus); }
+        if moduli[k].is_zero() { return Result.Err(ModularError.ZeroModulus); }
         m_prod = m_prod.mul(&moduli[k]);
         k = k + 1;
     }
@@ -386,16 +386,16 @@ public fn crt(
     let mut i: Int = 0;
     while i < n {
         let mi = match m_prod.div(&moduli[i]) {
-            Ok(v)  => v,
-            Err(_) => return Err(ModularError.ZeroModulus),  // unreachable
+            Result.Ok(v)  => v,
+            Result.Err(_) => return Result.Err(ModularError.ZeroModulus),  // unreachable
         };
         let yi = match mod_inverse(&mi, &moduli[i]) {
-            Ok(v)  => v,
-            Err(ModularError.NoInverse { reason: r }) =>
-                return Err(ModularError.NotCoprime {
+            Result.Ok(v)  => v,
+            Result.Err(ModularError.NoInverse { reason: r }) =>
+                return Result.Err(ModularError.NotCoprime {
                     reason: f"crt: moduli not pairwise coprime ({r})",
                 }),
-            Err(e) => return Err(e),
+            Result.Err(e) => return Result.Err(e),
         };
         // Reduce residues[i] into [0, moduli[i]) before combining
         // so the final pos_mod reduces a smaller magnitude.
@@ -404,7 +404,7 @@ public fn crt(
         acc = acc.add(&term);
         i = i + 1;
     }
-    Ok(pos_mod(&acc, &m_prod))
+    Result.Ok(pos_mod(&acc, &m_prod))
 }
 
 /// Two-modulus convenience wrapper.  Solves `x ≡ a1 (mod n1)` and
@@ -465,28 +465,28 @@ public fn mod_sqrt(a: &BigInt, p: &BigInt) -> Result<BigInt, ModularError> {
 
     // Structural prime checks (cheap).
     if p.lt(&BigInt.from_int(3)) {
-        return Err(ModularError.NotPrime {
+        return Result.Err(ModularError.NotPrime {
             reason: f"mod_sqrt requires p ≥ 3, got {p.to_text()}",
         });
     }
     if p.is_even() {
-        return Err(ModularError.NotPrime {
+        return Result.Err(ModularError.NotPrime {
             reason: f"mod_sqrt requires odd prime p, got even {p.to_text()}",
         });
     }
 
     let a_mod = pos_mod(a, p);
-    if a_mod.is_zero() { return Ok(BigInt.zero()); }
+    if a_mod.is_zero() { return Result.Ok(BigInt.zero()); }
 
     // Euler's criterion: a is a QR iff a^((p-1)/2) ≡ 1 (mod p).
     let p_minus_one = p.sub(&one);
     let half = match p_minus_one.div(&two) {
-        Ok(v)  => v,
-        Err(_) => return Err(ModularError.ZeroModulus),
+        Result.Ok(v)  => v,
+        Result.Err(_) => return Result.Err(ModularError.ZeroModulus),
     };
     let euler = mod_pow(&a_mod, &half, p)?;
     if !euler.eq(&one) {
-        return Err(ModularError.NotQuadraticResidue {
+        return Result.Err(ModularError.NotQuadraticResidue {
             reason: f"a={a_mod.to_text()} is not a quadratic residue mod p={p.to_text()}",
         });
     }
@@ -497,8 +497,8 @@ public fn mod_sqrt(a: &BigInt, p: &BigInt) -> Result<BigInt, ModularError> {
     if p_mod_4.eq(&BigInt.from_int(3)) {
         let p_plus_one = p.add(&one);
         let exp = match p_plus_one.div(&four) {
-            Ok(v)  => v,
-            Err(_) => return Err(ModularError.ZeroModulus),
+            Result.Ok(v)  => v,
+            Result.Err(_) => return Result.Err(ModularError.ZeroModulus),
         };
         return mod_pow(&a_mod, &exp, p);
     }
@@ -508,8 +508,8 @@ public fn mod_sqrt(a: &BigInt, p: &BigInt) -> Result<BigInt, ModularError> {
     let mut s: Int = 0;
     while q.is_even() {
         q = match q.div(&two) {
-            Ok(v)  => v,
-            Err(_) => return Err(ModularError.ZeroModulus),
+            Result.Ok(v)  => v,
+            Result.Err(_) => return Result.Err(ModularError.ZeroModulus),
         };
         s = s + 1;
     }
@@ -528,7 +528,7 @@ public fn mod_sqrt(a: &BigInt, p: &BigInt) -> Result<BigInt, ModularError> {
         z = z.add(&one);
     }
     if !found {
-        return Err(ModularError.NotPrime {
+        return Result.Err(ModularError.NotPrime {
             reason: f"mod_sqrt: failed to find quadratic non-residue mod {p.to_text()} within [2, 10000); p likely composite or pathologically large",
         });
     }
@@ -540,8 +540,8 @@ public fn mod_sqrt(a: &BigInt, p: &BigInt) -> Result<BigInt, ModularError> {
     let mut r = {
         let q_plus_1 = q.add(&one);
         let half_q = match q_plus_1.div(&two) {
-            Ok(v)  => v,
-            Err(_) => return Err(ModularError.ZeroModulus),
+            Result.Ok(v)  => v,
+            Result.Err(_) => return Result.Err(ModularError.ZeroModulus),
         };
         mod_pow(&a_mod, &half_q, p)?
     };
@@ -560,7 +560,7 @@ public fn mod_sqrt(a: &BigInt, p: &BigInt) -> Result<BigInt, ModularError> {
         }
         if i == m {
             // Should not happen for a true quadratic residue.
-            return Err(ModularError.NotQuadraticResidue {
+            return Result.Err(ModularError.NotQuadraticResidue {
                 reason: f"mod_sqrt: Tonelli-Shanks loop diverged for a={a_mod.to_text()}, p={p.to_text()}",
             });
         }
@@ -585,11 +585,11 @@ public fn mod_sqrt(a: &BigInt, p: &BigInt) -> Result<BigInt, ModularError> {
         iter_cap = iter_cap - 1;
     }
     if iter_cap <= 0 {
-        return Err(ModularError.NotQuadraticResidue {
+        return Result.Err(ModularError.NotQuadraticResidue {
             reason: f"mod_sqrt: Tonelli-Shanks iteration cap reached for a={a_mod.to_text()}, p={p.to_text()}",
         });
     }
-    Ok(r)
+    Result.Ok(r)
 }
 
 // =============================================================================
@@ -599,8 +599,8 @@ public fn mod_sqrt(a: &BigInt, p: &BigInt) -> Result<BigInt, ModularError> {
 fn clone_bigint(b: &BigInt) -> BigInt {
     let t = b.to_text();
     match parse_bigint(&t) {
-        Ok(c)  => c,
-        Err(_) => BigInt.zero(),
+        Result.Ok(c)  => c,
+        Result.Err(_) => BigInt.zero(),
     }
 }
 

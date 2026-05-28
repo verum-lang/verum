@@ -2,7 +2,7 @@
 // core/intrinsics/platform.vr - Platform Detection Intrinsics
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (compiler-provided)
+// Dependencies: Maybe.None (compiler-provided)
 //
 
 // This module provides platform detection intrinsics evaluated at compile time.

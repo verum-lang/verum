@@ -193,7 +193,7 @@ implement H3Server {
         // transport integration layer (wires through `core.net.quic.
         // connection.QuicListener` once the pure-Verum transport
         // fully lands). The server value is ready to `run`.
-        Ok(H3Server {
+        Result.Ok(H3Server {
             local_addr: addr,
             opts:       opts,
             active:     [],
@@ -242,7 +242,7 @@ implement H3Server {
             s.max_field_section_size = self.opts.max_field_section_size;
             s
         };
-        Ok(H3Connection.new_server(settings))
+        Result.Ok(H3Connection.new_server(settings))
     }
 
     async fn drive_connection<F>(
@@ -259,15 +259,15 @@ implement H3Server {
 
             // Pull a request if one became complete.
             match conn.take_request() {
-                Some((sid, req)) => {
+                Maybe.Some((sid, req)) => {
                     let resp = handler(req);
                     conn.send_response(sid, &resp)
                         .map_err(|e| H3ServerError.H3Layer(e))?;
                 },
-                None => {
+                Maybe.None => {
                     // Try to read from the transport.
                     let (bidi, uni, closed) = self.read_step(conn).await?;
-                    if closed { return Ok(()); }
+                    if closed { return Result.Ok(()); }
                     let mut i: Int = 0;
                     while i < bidi.len() {
                         let (sid, bytes, fin) = &bidi[i];
@@ -296,14 +296,14 @@ implement H3Server {
             let writes = conn.drain_outbound();
             self.flush_writes(writes).await?;
             match conn.take_request() {
-                Some((sid, req)) => {
+                Maybe.Some((sid, req)) => {
                     let resp = handler.serve(req).await;
                     conn.send_response(sid, &resp)
                         .map_err(|e| H3ServerError.H3Layer(e))?;
                 },
-                None => {
+                Maybe.None => {
                     let (bidi, uni, closed) = self.read_step(conn).await?;
-                    if closed { return Ok(()); }
+                    if closed { return Result.Ok(()); }
                     let mut i: Int = 0;
                     while i < bidi.len() {
                         let (sid, bytes, fin) = &bidi[i];
@@ -329,7 +329,7 @@ implement H3Server {
         // Forward to the QUIC SendStream for each stream_id in `writes`.
         // Full wire-up with connection_sm lands in a follow-up commit.
         let _ = writes;
-        Ok(())
+        Result.Ok(())
     }
 
     async fn read_step(&self, conn: &H3Connection)
@@ -338,7 +338,7 @@ implement H3Server {
                    Bool), H3ServerError>
     {
         let _ = conn;
-        Ok((List<(UInt64, List<Byte>, Bool)>.new(),
+        Result.Ok((List<(UInt64, List<Byte>, Bool)>.new(),
             List<(UInt64, List<Byte>)>.new(),
             false))
     }

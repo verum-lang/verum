@@ -2,7 +2,7 @@
 // core/intrinsics/atomic.vr - Atomic Operation Intrinsics
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (compiler-provided)
+// Dependencies: Maybe.None (compiler-provided)
 //
 
 // This module provides atomic operation intrinsics that map directly to

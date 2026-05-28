@@ -186,15 +186,15 @@ implement ConnectionLease {
     /// Borrow the underlying TcpStream mutably.
     public fn stream_mut(&mut self) -> &mut TcpStream {
         match &mut self.stream {
-            Some(s) => s,
-            None    => panic("ConnectionLease: connection already released"),
+            Maybe.Some(s) => s,
+            Maybe.None    => panic("ConnectionLease: connection already released"),
         }
     }
 
     /// Explicitly close instead of returning to pool. Useful when the
     /// caller detected a protocol error that makes reuse unsafe.
     public fn close(mut self) {
-        self.stream = None;
+        self.stream = Maybe.None;
     }
 }
 
@@ -233,14 +233,14 @@ implement UpstreamPool {
         let key = UpstreamKey.from_upstream(upstream);
         let reused = self.try_take_idle(&key);
         let stream = match reused {
-            Some(s) => s,
-            None => match TcpStream.connect(upstream.addr().as_str()) {
-                Ok(s)  => s,
-                Err(e) => return Err(f"connect to {upstream.name}: {e}"),
+            Maybe.Some(s) => s,
+            Maybe.None => match TcpStream.connect(upstream.addr().as_str()) {
+                Result.Ok(s)  => s,
+                Result.Err(e) => return Result.Err(f"connect to {upstream.name}: {e}"),
             },
         };
-        Ok(ConnectionLease {
-            stream: Some(stream),
+        Result.Ok(ConnectionLease {
+            stream: Maybe.Some(stream),
             upstream: key,
             pool: self.state.clone(),
         })
@@ -251,19 +251,19 @@ implement UpstreamPool {
     fn try_take_idle(&self, key: &UpstreamKey) -> Maybe<TcpStream> {
         let mut idle = self.state.idle.lock();
         let bucket = match idle.get_mut(key) {
-            Some(b) => b,
-            None => return None,
+            Maybe.Some(b) => b,
+            Maybe.None => return Maybe.None,
         };
         let now = Instant.now().duration_since_epoch().as_millis();
         let timeout = self.state.config.idle_timeout_ms;
         while !bucket.is_empty() {
             let c = bucket.pop().expect("upstream_pool: bucket non-empty by while-condition guard");
             if now - c.last_used_ms <= timeout {
-                return Some(c.stream);
+                return Maybe.Some(c.stream);
             }
             // else drop — too old.
         }
-        None
+        Maybe.None
     }
 
     /// Introspection: idle count per upstream key.
@@ -271,25 +271,25 @@ implement UpstreamPool {
         let key = UpstreamKey.from_upstream(upstream);
         let idle = self.state.idle.lock();
         match idle.get(&key) {
-            Some(b) => b.len(),
-            None    => 0,
+            Maybe.Some(b) => b.len(),
+            Maybe.None    => 0,
         }
     }
 }
 
 // Release-on-drop. If `stream` was closed via `ConnectionLease.close()`,
-// the Maybe is None and nothing returns to the pool.
+// the Maybe is Maybe.None and nothing returns to the pool.
 implement Drop for ConnectionLease {
     fn drop(&mut self) {
         let stream = match self.stream.take() {
-            Some(s) => s,
-            None    => return,
+            Maybe.Some(s) => s,
+            Maybe.None    => return,
         };
         let now = Instant.now().duration_since_epoch().as_millis();
         let mut idle = self.pool.idle.lock();
         let bucket = match idle.get_mut(&self.upstream) {
-            Some(b) => b,
-            None => {
+            Maybe.Some(b) => b,
+            Maybe.None => {
                 idle.insert(self.upstream.clone(), List.new());
                 idle.get_mut(&self.upstream)
                     .expect("upstream_pool: just inserted self.upstream above — get_mut is_some")

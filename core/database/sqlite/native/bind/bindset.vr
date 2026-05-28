@@ -66,17 +66,17 @@ implement BindSet {
 
     /// `idx` is 1-based.
     public fn bind(&mut self, idx: Int, value: TypedParam) -> Result<(), BindError> {
-        if self.step_in_progress { return Err(BeStmtBusy); }
-        if idx < 1 || idx > self.slots.len() { return Err(BeRange(idx)); }
+        if self.step_in_progress { return Result.Err(BeStmtBusy); }
+        if idx < 1 || idx > self.slots.len() { return Result.Err(BeRange(idx)); }
         let size = param_byte_size(&value);
-        if size > self.max_payload_bytes { return Err(BeTooLarge(size)); }
+        if size > self.max_payload_bytes { return Result.Err(BeTooLarge(size)); }
         self.slots[idx - 1] = value;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn lookup(&self, idx: Int) -> Maybe<TypedParam> {
-        if idx < 1 || idx > self.slots.len() { return None; }
-        Some(clone_param(&self.slots[idx - 1]))
+        if idx < 1 || idx > self.slots.len() { return Maybe.None; }
+        Maybe.Some(clone_param(&self.slots[idx - 1]))
     }
 
     /// sqlite3_clear_bindings — set every slot to NULL.

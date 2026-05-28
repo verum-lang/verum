@@ -46,7 +46,7 @@
 module core.database.postgres.wire.typed;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
 mount core.database.common.error.{DbError, DecodeFault, EncodeFault};
@@ -139,7 +139,7 @@ public type TypedArray is {
     element_oid: Int,
     /// Multi-dimensional layout flattened to row-major. A 1-D array
     /// has `dimensions = [N]` and `elements.len() = N`. NULL
-    /// elements are `None`.
+    /// elements are `Maybe.None`.
     dimensions: List<Int>,
     elements: List<Maybe<TypedValue>>,
 };
@@ -152,7 +152,7 @@ public type TypedInterval is {
 
 /// One field of a composite/record value. `type_oid` carries the
 /// per-field PG OID (the wire is self-describing); `value` is
-/// `None` for SQL NULL fields.
+/// `Maybe.None` for SQL NULL fields.
 public type TypedField is {
     type_oid: Int,
     value: Maybe<TypedValue>,
@@ -292,28 +292,28 @@ fn encode_interval(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, iv: &TypedI
 
 fn decode_bool(s: &ArenaSlice) -> Result<Bool, DbError> {
     if s.len < 1 {
-        return Err(decode_fault("bool: empty payload".clone()));
+        return Result.Err(decode_fault("bool: empty payload".clone()));
     }
-    Ok((load_byte(s.ptr) & 0x01) != 0)
+    Result.Ok((load_byte(s.ptr) & 0x01) != 0)
 }
 
 fn decode_int2(s: &ArenaSlice) -> Result<Int, DbError> {
     if s.len < 2 {
-        return Err(decode_fault("int2: short payload".clone()));
+        return Result.Err(decode_fault("int2: short payload".clone()));
     }
     let hi = load_byte(s.ptr)     & 0xFF;
     let lo = load_byte(s.ptr + 1) & 0xFF;
     let u = (hi << 8) | lo;
     if (u & 0x8000) != 0 {
-        Ok(u | (-1 ^ 0xFFFF))
+        Result.Ok(u | (-1 ^ 0xFFFF))
     } else {
-        Ok(u)
+        Result.Ok(u)
     }
 }
 
 fn decode_int4(s: &ArenaSlice) -> Result<Int, DbError> {
     if s.len < 4 {
-        return Err(decode_fault("int4: short payload".clone()));
+        return Result.Err(decode_fault("int4: short payload".clone()));
     }
     let b0 = (load_byte(s.ptr)     & 0xFF) << 24;
     let b1 = (load_byte(s.ptr + 1) & 0xFF) << 16;
@@ -321,15 +321,15 @@ fn decode_int4(s: &ArenaSlice) -> Result<Int, DbError> {
     let b3 = (load_byte(s.ptr + 3) & 0xFF);
     let u = b0 | b1 | b2 | b3;
     if (u & 0x8000_0000) != 0 {
-        Ok(u | (-1 ^ 0xFFFF_FFFF))
+        Result.Ok(u | (-1 ^ 0xFFFF_FFFF))
     } else {
-        Ok(u)
+        Result.Ok(u)
     }
 }
 
 fn decode_int8(s: &ArenaSlice) -> Result<Int, DbError> {
     if s.len < 8 {
-        return Err(decode_fault("int8: short payload".clone()));
+        return Result.Err(decode_fault("int8: short payload".clone()));
     }
     let mut v: Int = 0;
     let mut i: Int = 0;
@@ -337,53 +337,53 @@ fn decode_int8(s: &ArenaSlice) -> Result<Int, DbError> {
         v = (v << 8) | (load_byte(s.ptr + i) & 0xFF);
         i = i + 1;
     }
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn decode_float4(s: &ArenaSlice) -> Result<Float, DbError> {
     let bits = decode_int4(s)? & 0xFFFFFFFF;
     let f32_val = Float32.from_bits(bits as UInt32);
-    Ok(f32_val as Float)
+    Result.Ok(f32_val as Float)
 }
 
 fn decode_float8(s: &ArenaSlice) -> Result<Float, DbError> {
     let bits = decode_int8(s)?;
-    Ok(Float.from_bits(bits as UInt64))
+    Result.Ok(Float.from_bits(bits as UInt64))
 }
 
 fn decode_text(s: &ArenaSlice, arena: &SpindleArena) -> Result<Text, DbError> {
     match s.to_owned(arena) {
-        None       => Err(decode_fault("text: arena slice stale".clone())),
-        Some(b)    => match Text.from_utf8(b) {
-            Ok(t)  => Ok(t),
-            Err(_) => Err(decode_fault("text: invalid UTF-8".clone())),
+        Maybe.None       => Result.Err(decode_fault("text: arena slice stale".clone())),
+        Maybe.Some(b)    => match Text.from_utf8(b) {
+            Result.Ok(t)  => Result.Ok(t),
+            Result.Err(_) => Result.Err(decode_fault("text: invalid UTF-8".clone())),
         }
     }
 }
 
 fn decode_bytea(s: &ArenaSlice, arena: &SpindleArena) -> Result<List<Byte>, DbError> {
     match s.to_owned(arena) {
-        None    => Err(decode_fault("bytea: arena slice stale".clone())),
-        Some(b) => Ok(b),
+        Maybe.None    => Result.Err(decode_fault("bytea: arena slice stale".clone())),
+        Maybe.Some(b) => Result.Ok(b),
     }
 }
 
 fn decode_uuid(s: &ArenaSlice, arena: &SpindleArena) -> Result<List<Byte>, DbError> {
     if s.len != 16 {
-        return Err(decode_fault(f"uuid: expected 16 bytes, got {s.len}"));
+        return Result.Err(decode_fault(f"uuid: expected 16 bytes, got {s.len}"));
     }
     decode_bytea(s, arena)
 }
 
 fn decode_oid(s: &ArenaSlice) -> Result<Int, DbError> {
     if s.len < 4 {
-        return Err(decode_fault("oid: short payload".clone()));
+        return Result.Err(decode_fault("oid: short payload".clone()));
     }
     let b0 = (load_byte(s.ptr)     & 0xFF) << 24;
     let b1 = (load_byte(s.ptr + 1) & 0xFF) << 16;
     let b2 = (load_byte(s.ptr + 2) & 0xFF) << 8;
     let b3 = (load_byte(s.ptr + 3) & 0xFF);
-    Ok(b0 | b1 | b2 | b3)
+    Result.Ok(b0 | b1 | b2 | b3)
 }
 
 fn decode_date(s: &ArenaSlice) -> Result<Int, DbError> {
@@ -400,7 +400,7 @@ fn decode_timestamp(s: &ArenaSlice) -> Result<Int, DbError> {
 
 fn decode_interval(s: &ArenaSlice) -> Result<TypedInterval, DbError> {
     if s.len < 16 {
-        return Err(decode_fault("interval: short payload".clone()));
+        return Result.Err(decode_fault("interval: short payload".clone()));
     }
     let micros = decode_int8(s)?;
     let days = {
@@ -419,7 +419,7 @@ fn decode_interval(s: &ArenaSlice) -> Result<TypedInterval, DbError> {
         };
         decode_int4(&sub)?
     };
-    Ok(TypedInterval { months: months, days: days, microseconds: micros })
+    Result.Ok(TypedInterval { months: months, days: days, microseconds: micros })
 }
 
 // =============================================================================
@@ -443,7 +443,7 @@ public fn encode_typed(
 ) -> Result<(), DbError> {
     // Reject NULL — caller must short-circuit via the length prefix.
     match value {
-        TvNull => return Err(encode_fault("encode_typed called with TvNull".clone())),
+        TvNull => return Result.Err(encode_fault("encode_typed called with TvNull".clone())),
         _      => {}
     }
 
@@ -454,101 +454,101 @@ public fn encode_typed(
     let ok = if oid == PG_TYPE_BOOL {
         match value {
             TvBool(b) => encode_bool(buf, arena, *b),
-            _ => return Err(encode_fault(f"oid bool, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid bool, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_INT2 {
         match value {
             TvInt2(n) => encode_int2(buf, arena, *n),
-            _ => return Err(encode_fault(f"oid int2, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid int2, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_INT4 {
         match value {
             TvInt4(n) => encode_int4(buf, arena, *n),
-            _ => return Err(encode_fault(f"oid int4, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid int4, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_INT8 {
         match value {
             TvInt8(n) => encode_int8(buf, arena, *n),
-            _ => return Err(encode_fault(f"oid int8, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid int8, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_FLOAT4 {
         match value {
             TvFloat4(f) => encode_float4(buf, arena, *f),
-            _ => return Err(encode_fault(f"oid float4, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid float4, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_FLOAT8 {
         match value {
             TvFloat8(f) => encode_float8(buf, arena, *f),
-            _ => return Err(encode_fault(f"oid float8, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid float8, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_TEXT || oid == PG_TYPE_VARCHAR
            || oid == PG_TYPE_BPCHAR || oid == PG_TYPE_NAME {
         match value {
             TvText(s) => encode_text(buf, arena, s),
-            _ => return Err(encode_fault(f"oid text, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid text, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_BYTEA {
         match value {
             TvBytea(b) => encode_bytea(buf, arena, b.as_slice()),
-            _ => return Err(encode_fault(f"oid bytea, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid bytea, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_UUID {
         match value {
             TvUuid(b) => encode_uuid(buf, arena, b.as_slice()),
-            _ => return Err(encode_fault(f"oid uuid, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid uuid, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_OID {
         match value {
             TvOid(n) => encode_oid(buf, arena, *n),
-            _ => return Err(encode_fault(f"oid oid, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid oid, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_DATE {
         match value {
             TvDate(d) => encode_date(buf, arena, *d),
-            _ => return Err(encode_fault(f"oid date, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid date, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_TIME {
         match value {
             TvTime(t) => encode_time(buf, arena, *t),
-            _ => return Err(encode_fault(f"oid time, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid time, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_TIMESTAMP {
         match value {
             TvTimestamp(t) => encode_timestamp(buf, arena, *t),
-            _ => return Err(encode_fault(f"oid timestamp, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid timestamp, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_TIMESTAMPTZ {
         match value {
             TvTimestamptz(t) => encode_timestamp(buf, arena, *t),
-            _ => return Err(encode_fault(f"oid timestamptz, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid timestamptz, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_INTERVAL {
         match value {
             TvInterval(iv) => encode_interval(buf, arena, iv),
-            _ => return Err(encode_fault(f"oid interval, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid interval, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_JSON {
         match value {
             TvJson(s) => encode_text(buf, arena, s),
-            _ => return Err(encode_fault(f"oid json, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid json, got {value.type_name()}")),
         }
     } else if oid == PG_TYPE_JSONB {
         match value {
             TvJsonb(s) => encode_jsonb(buf, arena, s),
-            _ => return Err(encode_fault(f"oid jsonb, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid jsonb, got {value.type_name()}")),
         }
     } else if range_element_oid(oid).is_some() {
         let elem_oid = range_element_oid(oid).unwrap();
         match value {
             TvIntRange(r) => encode_int_range(buf, arena, elem_oid, r)?,
             TvTextRange(r) => encode_text_range(buf, arena, elem_oid, r)?,
-            _ => return Err(encode_fault(f"oid range, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid range, got {value.type_name()}")),
         }
     } else if element_oid_for_array(oid).is_some() {
         let elem_oid = element_oid_for_array(oid).unwrap();
         match value {
             TvArray(arr) => encode_typed_array(buf, arena, elem_oid, arr)?,
-            _ => return Err(encode_fault(f"oid array, got {value.type_name()}")),
+            _ => return Result.Err(encode_fault(f"oid array, got {value.type_name()}")),
         }
     } else {
         // Catch-all: composite / record / user-defined composite.
@@ -557,14 +557,14 @@ public fn encode_typed(
         // any OID dispatches to encode_composite.
         match value {
             TvComposite(c) => encode_composite(buf, arena, c)?,
-            _ => return Err(encode_fault(f"oid {oid}: no codec dispatch entry")),
+            _ => return Result.Err(encode_fault(f"oid {oid}: no codec dispatch entry")),
         }
     };
 
     if !ok {
-        return Err(encode_fault(f"oid {oid}: arena exhausted during encode"));
+        return Result.Err(encode_fault(f"oid {oid}: arena exhausted during encode"));
     }
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -583,29 +583,29 @@ fn encode_int_range(
     r: &TypedIntRange,
 ) -> Result<Bool, DbError> {
     if (r.flags & PG_RANGE_FLAG_EMPTY) != 0 {
-        let ok = encode_range(buf, arena, r.flags, None, None);
-        return Ok(ok);
+        let ok = encode_range(buf, arena, r.flags, Maybe.None, Maybe.None);
+        return Result.Ok(ok);
     }
     // Encode each bound into temporary owned bytes so encode_range
     // can splice them into the wire layout.
     let lower_bytes: Maybe<List<Byte>> = match r.lower {
-        Some(v) => Some(encode_int_to_bytes(elem_oid, v)?),
-        None    => None,
+        Maybe.Some(v) => Maybe.Some(encode_int_to_bytes(elem_oid, v)?),
+        Maybe.None    => Maybe.None,
     };
     let upper_bytes: Maybe<List<Byte>> = match r.upper {
-        Some(v) => Some(encode_int_to_bytes(elem_oid, v)?),
-        None    => None,
+        Maybe.Some(v) => Maybe.Some(encode_int_to_bytes(elem_oid, v)?),
+        Maybe.None    => Maybe.None,
     };
     let lower_ref: Maybe<&[Byte]> = match &lower_bytes {
-        Some(b) => Some(b.as_slice()),
-        None    => None,
+        Maybe.Some(b) => Maybe.Some(b.as_slice()),
+        Maybe.None    => Maybe.None,
     };
     let upper_ref: Maybe<&[Byte]> = match &upper_bytes {
-        Some(b) => Some(b.as_slice()),
-        None    => None,
+        Maybe.Some(b) => Maybe.Some(b.as_slice()),
+        Maybe.None    => Maybe.None,
     };
     let ok = encode_range(buf, arena, r.flags, lower_ref, upper_ref);
-    Ok(ok)
+    Result.Ok(ok)
 }
 
 fn encode_int_to_bytes(elem_oid: Int, v: Int) -> Result<List<Byte>, DbError> {
@@ -615,7 +615,7 @@ fn encode_int_to_bytes(elem_oid: Int, v: Int) -> Result<List<Byte>, DbError> {
         out.push(((v >> 16) & 0xFF) as Byte);
         out.push(((v >> 8)  & 0xFF) as Byte);
         out.push((v & 0xFF) as Byte);
-        Ok(out)
+        Result.Ok(out)
     } else if elem_oid == PG_TYPE_INT8 {
         out.push(((v >> 56) & 0xFF) as Byte);
         out.push(((v >> 48) & 0xFF) as Byte);
@@ -625,9 +625,9 @@ fn encode_int_to_bytes(elem_oid: Int, v: Int) -> Result<List<Byte>, DbError> {
         out.push(((v >> 16) & 0xFF) as Byte);
         out.push(((v >> 8)  & 0xFF) as Byte);
         out.push((v & 0xFF) as Byte);
-        Ok(out)
+        Result.Ok(out)
     } else {
-        Err(encode_fault(f"int_range: unsupported element oid {elem_oid}"))
+        Result.Err(encode_fault(f"int_range: unsupported element oid {elem_oid}"))
     }
 }
 
@@ -642,11 +642,11 @@ fn encode_text_range(
     r: &TypedTextRange,
 ) -> Result<Bool, DbError> {
     if (r.flags & PG_RANGE_FLAG_EMPTY) != 0 {
-        let ok = encode_range(buf, arena, r.flags, None, None);
-        return Ok(ok);
+        let ok = encode_range(buf, arena, r.flags, Maybe.None, Maybe.None);
+        return Result.Ok(ok);
     }
     let lower_bytes: Maybe<List<Byte>> = match &r.lower {
-        Some(t) => {
+        Maybe.Some(t) => {
             let raw = t.as_bytes();
             let mut owned: List<Byte> = List.with_capacity(raw.len() as Int);
             let mut i: Int = 0;
@@ -654,12 +654,12 @@ fn encode_text_range(
                 owned.push(raw[i]);
                 i = i + 1;
             }
-            Some(owned)
+            Maybe.Some(owned)
         }
-        None => None,
+        Maybe.None => Maybe.None,
     };
     let upper_bytes: Maybe<List<Byte>> = match &r.upper {
-        Some(t) => {
+        Maybe.Some(t) => {
             let raw = t.as_bytes();
             let mut owned: List<Byte> = List.with_capacity(raw.len() as Int);
             let mut i: Int = 0;
@@ -667,20 +667,20 @@ fn encode_text_range(
                 owned.push(raw[i]);
                 i = i + 1;
             }
-            Some(owned)
+            Maybe.Some(owned)
         }
-        None => None,
+        Maybe.None => Maybe.None,
     };
     let lower_ref: Maybe<&[Byte]> = match &lower_bytes {
-        Some(b) => Some(b.as_slice()),
-        None    => None,
+        Maybe.Some(b) => Maybe.Some(b.as_slice()),
+        Maybe.None    => Maybe.None,
     };
     let upper_ref: Maybe<&[Byte]> = match &upper_bytes {
-        Some(b) => Some(b.as_slice()),
-        None    => None,
+        Maybe.Some(b) => Maybe.Some(b.as_slice()),
+        Maybe.None    => Maybe.None,
     };
     let ok = encode_range(buf, arena, r.flags, lower_ref, upper_ref);
-    Ok(ok)
+    Result.Ok(ok)
 }
 
 // =============================================================================
@@ -699,7 +699,7 @@ fn encode_typed_array(
 ) -> Result<Bool, DbError> {
     // V0 — multi-dim arrays out of scope.
     if arr.dimensions.len() as Int > 1 {
-        return Err(encode_fault(
+        return Result.Err(encode_fault(
             f"array: V0 supports 1-D only; got {arr.dimensions.len() as Int} dims"
         ));
     }
@@ -709,8 +709,8 @@ fn encode_typed_array(
     let mut i: Int = 0;
     while i < n {
         match &arr.elements[i] {
-            None => { owned_payloads.push(None); }
-            Some(v) => {
+            Maybe.None => { owned_payloads.push(Maybe.None); }
+            Maybe.Some(v) => {
                 // Snapshot arena, encode element, copy bytes out,
                 // rewind. Same pattern as encode_params_for_bind.
                 let scope = core.database.common.arena.ArenaScope.begin(
@@ -719,7 +719,7 @@ fn encode_typed_array(
                 );
                 let mut sub = ArenaWireBuf.with_arena(arena, 32);
                 match encode_typed(elem_oid, v, &mut sub, arena) {
-                    Ok(_) => {
+                    Result.Ok(_) => {
                         let slice = sub.as_slice();
                         let mut owned: List<Byte> = List.with_capacity(slice.len);
                         let mut k: Int = 0;
@@ -728,11 +728,11 @@ fn encode_typed_array(
                             k = k + 1;
                         }
                         scope.discard(arena);
-                        owned_payloads.push(Some(owned));
+                        owned_payloads.push(Maybe.Some(owned));
                     }
-                    Err(e) => {
+                    Result.Err(e) => {
                         scope.discard(arena);
-                        return Err(e);
+                        return Result.Err(e);
                     }
                 }
             }
@@ -744,13 +744,13 @@ fn encode_typed_array(
     let mut j: Int = 0;
     while j < n {
         match &owned_payloads[j] {
-            None    => { refs.push(None); }
-            Some(b) => { refs.push(Some(b.as_slice())); }
+            Maybe.None    => { refs.push(Maybe.None); }
+            Maybe.Some(b) => { refs.push(Maybe.Some(b.as_slice())); }
         }
         j = j + 1;
     }
     let ok = encode_array_1d(buf, arena, elem_oid, &refs);
-    Ok(ok)
+    Result.Ok(ok)
 }
 
 /// Decode a column value according to its declared OID. Used by
@@ -767,43 +767,43 @@ public fn decode_typed(
     arena: &SpindleArena,
 ) -> Result<TypedValue, DbError> {
     if oid == PG_TYPE_BOOL {
-        Ok(TvBool(decode_bool(slice)?))
+        Result.Ok(TvBool(decode_bool(slice)?))
     } else if oid == PG_TYPE_INT2 {
-        Ok(TvInt2(decode_int2(slice)?))
+        Result.Ok(TvInt2(decode_int2(slice)?))
     } else if oid == PG_TYPE_INT4 {
-        Ok(TvInt4(decode_int4(slice)?))
+        Result.Ok(TvInt4(decode_int4(slice)?))
     } else if oid == PG_TYPE_INT8 {
-        Ok(TvInt8(decode_int8(slice)?))
+        Result.Ok(TvInt8(decode_int8(slice)?))
     } else if oid == PG_TYPE_FLOAT4 {
-        Ok(TvFloat4(decode_float4(slice)?))
+        Result.Ok(TvFloat4(decode_float4(slice)?))
     } else if oid == PG_TYPE_FLOAT8 {
-        Ok(TvFloat8(decode_float8(slice)?))
+        Result.Ok(TvFloat8(decode_float8(slice)?))
     } else if oid == PG_TYPE_TEXT || oid == PG_TYPE_VARCHAR
            || oid == PG_TYPE_BPCHAR || oid == PG_TYPE_NAME {
-        Ok(TvText(decode_text(slice, arena)?))
+        Result.Ok(TvText(decode_text(slice, arena)?))
     } else if oid == PG_TYPE_BYTEA {
-        Ok(TvBytea(decode_bytea(slice, arena)?))
+        Result.Ok(TvBytea(decode_bytea(slice, arena)?))
     } else if oid == PG_TYPE_UUID {
-        Ok(TvUuid(decode_uuid(slice, arena)?))
+        Result.Ok(TvUuid(decode_uuid(slice, arena)?))
     } else if oid == PG_TYPE_OID {
-        Ok(TvOid(decode_oid(slice)?))
+        Result.Ok(TvOid(decode_oid(slice)?))
     } else if oid == PG_TYPE_DATE {
-        Ok(TvDate(decode_date(slice)?))
+        Result.Ok(TvDate(decode_date(slice)?))
     } else if oid == PG_TYPE_TIME {
-        Ok(TvTime(decode_time(slice)?))
+        Result.Ok(TvTime(decode_time(slice)?))
     } else if oid == PG_TYPE_TIMESTAMP {
-        Ok(TvTimestamp(decode_timestamp(slice)?))
+        Result.Ok(TvTimestamp(decode_timestamp(slice)?))
     } else if oid == PG_TYPE_TIMESTAMPTZ {
-        Ok(TvTimestamptz(decode_timestamp(slice)?))
+        Result.Ok(TvTimestamptz(decode_timestamp(slice)?))
     } else if oid == PG_TYPE_INTERVAL {
-        Ok(TvInterval(decode_interval(slice)?))
+        Result.Ok(TvInterval(decode_interval(slice)?))
     } else if oid == PG_TYPE_JSON {
-        Ok(TvJson(decode_text(slice, arena)?))
+        Result.Ok(TvJson(decode_text(slice, arena)?))
     } else if oid == PG_TYPE_JSONB {
         let pgj = decode_jsonb(slice)?;
         match pgj.into_canonical(arena) {
-            Some(canonical) => Ok(TvJsonb(canonical.json_text)),
-            None            => Err(decode_fault("jsonb: arena slice stale".clone())),
+            Maybe.Some(canonical) => Result.Ok(TvJsonb(canonical.json_text)),
+            Maybe.None            => Result.Err(decode_fault("jsonb: arena slice stale".clone())),
         }
     } else if range_element_oid(oid).is_some() {
         let elem_oid = range_element_oid(oid).unwrap();
@@ -818,7 +818,7 @@ public fn decode_typed(
         // directly when they recognise their OID.
         decode_composite_at(slice, arena)
     } else {
-        Err(decode_fault(f"oid {oid}: no decoder registered"))
+        Result.Err(decode_fault(f"oid {oid}: no decoder registered"))
     }
 }
 
@@ -841,16 +841,16 @@ fn encode_composite(
     c: &TypedComposite,
 ) -> Result<Bool, DbError> {
     let n = c.fields.len() as Int;
-    if !buf.put_i32_be(arena, n) { return Ok(false); }
+    if !buf.put_i32_be(arena, n) { return Result.Ok(false); }
     let mut i: Int = 0;
     while i < n {
         let f = &c.fields[i];
-        if !buf.put_i32_be(arena, f.type_oid) { return Ok(false); }
+        if !buf.put_i32_be(arena, f.type_oid) { return Result.Ok(false); }
         match &f.value {
-            None => {
-                if !buf.put_i32_be(arena, -1) { return Ok(false); }
+            Maybe.None => {
+                if !buf.put_i32_be(arena, -1) { return Result.Ok(false); }
             }
-            Some(v) => {
+            Maybe.Some(v) => {
                 // Encode the field into a scratch arena buffer,
                 // copy bytes out + rewind. Same pattern as
                 // encode_typed_array / encode_params_for_bind.
@@ -860,34 +860,34 @@ fn encode_composite(
                 );
                 let mut sub = ArenaWireBuf.with_arena(arena, 32);
                 match encode_typed(f.type_oid, v, &mut sub, arena) {
-                    Ok(_) => {
+                    Result.Ok(_) => {
                         let slice = sub.as_slice();
                         // Write length prefix then bytes.
                         if !buf.put_i32_be(arena, slice.len) {
                             scope.discard(arena);
-                            return Ok(false);
+                            return Result.Ok(false);
                         }
                         let mut k: Int = 0;
                         while k < slice.len {
                             let b = (load_byte(slice.ptr + k) & 0xFF) as Int;
                             if !buf.put_u8(arena, b) {
                                 scope.discard(arena);
-                                return Ok(false);
+                                return Result.Ok(false);
                             }
                             k = k + 1;
                         }
                         scope.discard(arena);
                     }
-                    Err(e) => {
+                    Result.Err(e) => {
                         scope.discard(arena);
-                        return Err(e);
+                        return Result.Err(e);
                     }
                 }
             }
         }
         i = i + 1;
     }
-    Ok(true)
+    Result.Ok(true)
 }
 
 /// Decode a composite/record value from `slice`. Public so callers
@@ -908,23 +908,23 @@ public fn decode_composite_at(
     let raw = core.database.postgres.wire.codec.decode_composite(slice)?;
     let ncols = raw.field_count();
     if ncols > 4096 {
-        return Err(decode_fault(f"composite: ncolumns {ncols} out of range"));
+        return Result.Err(decode_fault(f"composite: ncolumns {ncols} out of range"));
     }
     let mut fields: List<TypedField> = List.with_capacity(ncols);
     let mut i: Int = 0;
     while i < ncols {
         let raw_field = &raw.fields[i];
         let typed_field = match &raw_field.value {
-            None => TypedField { type_oid: raw_field.type_oid, value: None },
-            Some(body) => {
+            Maybe.None => TypedField { type_oid: raw_field.type_oid, value: Maybe.None },
+            Maybe.Some(body) => {
                 let v = decode_typed(raw_field.type_oid, body, arena)?;
-                TypedField { type_oid: raw_field.type_oid, value: Some(v) }
+                TypedField { type_oid: raw_field.type_oid, value: Maybe.Some(v) }
             }
         };
         fields.push(typed_field);
         i = i + 1;
     }
-    Ok(TvComposite(TypedComposite { fields: fields }))
+    Result.Ok(TvComposite(TypedComposite { fields: fields }))
 }
 
 // `slice_i32_be_or_err` and `subslice_or_err` were the inline wire-
@@ -948,34 +948,34 @@ fn decode_range_typed(
     let r = decode_range(slice)?;
     if r.is_empty() {
         if elem_oid == PG_TYPE_INT4 || elem_oid == PG_TYPE_INT8 {
-            return Ok(TvIntRange(TypedIntRange {
+            return Result.Ok(TvIntRange(TypedIntRange {
                 flags: r.flags,
-                lower: None,
-                upper: None,
+                lower: Maybe.None,
+                upper: Maybe.None,
             }));
         }
-        return Ok(TvTextRange(TypedTextRange {
+        return Result.Ok(TvTextRange(TypedTextRange {
             flags: r.flags,
-            lower: None,
-            upper: None,
+            lower: Maybe.None,
+            upper: Maybe.None,
         }));
     }
     if elem_oid == PG_TYPE_INT4 || elem_oid == PG_TYPE_INT8 {
         let lower: Maybe<Int> = match &r.lower {
-            Some(b) => {
+            Maybe.Some(b) => {
                 let v = decode_typed(elem_oid, b, arena)?;
-                Some(int_value_or_err(&v)?)
+                Maybe.Some(int_value_or_err(&v)?)
             }
-            None => None,
+            Maybe.None => Maybe.None,
         };
         let upper: Maybe<Int> = match &r.upper {
-            Some(b) => {
+            Maybe.Some(b) => {
                 let v = decode_typed(elem_oid, b, arena)?;
-                Some(int_value_or_err(&v)?)
+                Maybe.Some(int_value_or_err(&v)?)
             }
-            None => None,
+            Maybe.None => Maybe.None,
         };
-        return Ok(TvIntRange(TypedIntRange {
+        return Result.Ok(TvIntRange(TypedIntRange {
             flags: r.flags,
             lower: lower,
             upper: upper,
@@ -983,20 +983,20 @@ fn decode_range_typed(
     }
     // Text-dominated ranges (numrange / tsrange / tstzrange / daterange).
     let lower: Maybe<Text> = match &r.lower {
-        Some(b) => {
+        Maybe.Some(b) => {
             let s = read_arena_slice_to_text(b);
-            Some(s)
+            Maybe.Some(s)
         }
-        None => None,
+        Maybe.None => Maybe.None,
     };
     let upper: Maybe<Text> = match &r.upper {
-        Some(b) => {
+        Maybe.Some(b) => {
             let s = read_arena_slice_to_text(b);
-            Some(s)
+            Maybe.Some(s)
         }
-        None => None,
+        Maybe.None => Maybe.None,
     };
-    Ok(TvTextRange(TypedTextRange {
+    Result.Ok(TvTextRange(TypedTextRange {
         flags: r.flags,
         lower: lower,
         upper: upper,
@@ -1005,8 +1005,8 @@ fn decode_range_typed(
 
 fn int_value_or_err(v: &TypedValue) -> Result<Int, DbError> {
     match v {
-        TvInt2(n) | TvInt4(n) | TvInt8(n) => Ok(*n),
-        _ => Err(decode_fault("range: expected integer element".clone())),
+        TvInt2(n) | TvInt4(n) | TvInt8(n) => Result.Ok(*n),
+        _ => Result.Err(decode_fault("range: expected integer element".clone())),
     }
 }
 
@@ -1032,7 +1032,7 @@ fn decode_array_typed(
 ) -> Result<TypedValue, DbError> {
     let (hdr, elements) = decode_array(slice)?;
     if hdr.ndim > 1 {
-        return Err(decode_fault(
+        return Result.Err(decode_fault(
             f"array: V0 supports 1-D only; got {hdr.ndim} dims"
         ));
     }
@@ -1046,15 +1046,15 @@ fn decode_array_typed(
     let mut i: Int = 0;
     while i < (elements.len() as Int) {
         match &elements[i] {
-            None    => { decoded.push(None); }
-            Some(s) => {
+            Maybe.None    => { decoded.push(Maybe.None); }
+            Maybe.Some(s) => {
                 let v = decode_typed(elem_oid, s, arena)?;
-                decoded.push(Some(v));
+                decoded.push(Maybe.Some(v));
             }
         }
         i = i + 1;
     }
-    Ok(TvArray(TypedArray {
+    Result.Ok(TvArray(TypedArray {
         element_oid: elem_oid,
         dimensions: dims,
         elements: decoded,
@@ -1106,7 +1106,7 @@ public fn decode_typed_from_bytes(
     // needed (we overwrite every byte).
     let dst = arena.alloc_bytes(n);
     if dst == 0 {
-        return Err(decode_fault("decode_typed_from_bytes: arena exhausted".clone()));
+        return Result.Err(decode_fault("decode_typed_from_bytes: arena exhausted".clone()));
     }
     let mut i: Int = 0;
     while i < n {
@@ -1125,8 +1125,8 @@ public fn decode_typed_from_bytes(
 /// `List<Maybe<List<Byte>>>` for direct consumption by
 /// `core.database.postgres.wire.frontend.bind`.
 ///
-/// `param_oids[i]` is the OID for `params[i]`; `params[i] = None`
-/// represents SQL NULL (preserved as `None` in the output so the
+/// `param_oids[i]` is the OID for `params[i]`; `params[i] = Maybe.None`
+/// represents SQL NULL (preserved as `Maybe.None` in the output so the
 /// bind builder's length-prefix-of-(-1) path fires).
 ///
 /// Ownership: a fresh `List<Byte>` per param so the result outlives
@@ -1141,7 +1141,7 @@ public fn encode_params_for_bind(
     let n_oids = param_oids.len() as Int;
     let n_params = params.len() as Int;
     if n_oids != n_params {
-        return Err(encode_fault(
+        return Result.Err(encode_fault(
             f"encode_params_for_bind: oids.len() = {n_oids}, params.len() = {n_params}"
         ));
     }
@@ -1149,8 +1149,8 @@ public fn encode_params_for_bind(
     let mut i: Int = 0;
     while i < n_params {
         match &params[i] {
-            None => out.push(None),
-            Some(value) => {
+            Maybe.None => out.push(Maybe.None),
+            Maybe.Some(value) => {
                 // Snapshot the arena before encoding — if encoding
                 // succeeds we copy the bytes out and rewind so the
                 // arena bump pointer doesn't grow per-call.
@@ -1160,7 +1160,7 @@ public fn encode_params_for_bind(
                 );
                 let mut buf = ArenaWireBuf.with_arena(arena, 32);
                 match encode_typed(param_oids[i], value, &mut buf, arena) {
-                    Ok(_) => {
+                    Result.Ok(_) => {
                         // Copy bytes out of the arena into a heap-
                         // owned List<Byte>.
                         let slice = buf.as_slice();
@@ -1171,18 +1171,18 @@ public fn encode_params_for_bind(
                             k = k + 1;
                         }
                         scope.discard(arena);    // rewind arena
-                        out.push(Some(owned));
+                        out.push(Maybe.Some(owned));
                     }
-                    Err(e) => {
+                    Result.Err(e) => {
                         scope.discard(arena);
-                        return Err(e);
+                        return Result.Err(e);
                     }
                 }
             }
         }
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // =============================================================================

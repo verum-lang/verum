@@ -157,7 +157,7 @@ implement MaterializedPage {
     }
 
     public fn remove_cell_at(&mut self, idx: Int) -> Maybe<MaterializedCell> {
-        if idx < 0 || idx >= self.cells.len() { return None; }
+        if idx < 0 || idx >= self.cells.len() { return Maybe.None; }
         let removed = clone_cell(&self.cells[idx]);
         let mut new_cells: List<MaterializedCell> = List.new();
         let mut i: Int = 0;
@@ -168,7 +168,7 @@ implement MaterializedPage {
             i = i + 1;
         }
         self.cells = new_cells;
-        Some(removed)
+        Maybe.Some(removed)
     }
 
     /// Set right_ptr (interior pages).  No-op for leaves but the
@@ -195,12 +195,12 @@ public fn materialize_page(
     db_header_offset: Int,
 ) -> Result<MaterializedPage, PageLayoutError> {
     let (hdr, _) = match parse_page_header(bytes, db_header_offset) {
-        Ok(p)  => p,
-        Err(e) => return Err(e),
+        Result.Ok(p)  => p,
+        Result.Err(e) => return Result.Err(e),
     };
     let pointers = match parse_cell_pointer_array(bytes, db_header_offset, &hdr) {
-        Ok(p)  => p,
-        Err(e) => return Err(e),
+        Result.Ok(p)  => p,
+        Result.Err(e) => return Result.Err(e),
     };
     let mut mp = materialized_page(hdr.kind.clone(), hdr.right_ptr, db_header_offset);
 
@@ -210,7 +210,7 @@ public fn materialize_page(
         let cell_off = pointers[i];
         let cell_size = compute_cell_size(bytes, cell_off, &hdr.kind, local_max);
         if cell_off + cell_size > bytes.len() {
-            return Err(ShortBuffer);
+            return Result.Err(ShortBuffer);
         }
         let mut cell_bytes: List<Byte> = List.new();
         let mut k: Int = 0;
@@ -221,7 +221,7 @@ public fn materialize_page(
         mp.append_cell(materialized_cell(cell_bytes));
         i = i + 1;
     }
-    Ok(mp)
+    Result.Ok(mp)
 }
 
 /// Compute the on-disk size of a cell starting at `cell_off`.
@@ -234,7 +234,7 @@ fn compute_cell_size(
     local_max: Int,
 ) -> Int {
     match parse_cell(bytes, cell_off, kind.clone(), local_max) {
-        Ok(parts) => match parts {
+        Result.Ok(parts) => match parts {
             TableLeafCell(_payload_len, _rowid, local_end, overflow) => {
                 let base = local_end - cell_off;
                 if overflow != (0 as UInt32) { base + 4 } else { base }
@@ -256,7 +256,7 @@ fn compute_cell_size(
                 if overflow != (0 as UInt32) { base + 4 } else { base }
             }
         }
-        Err(_) => 0,
+        Result.Err(_) => 0,
     }
 }
 
@@ -299,7 +299,7 @@ public fn serialize_page(
     // + cell_content) must fit within page_size.
     let needed = mp.db_header_offset + hdr_size + pointer_array_size + total_cell_bytes;
     if needed > page_size {
-        return Err(BadCellCount(n_cells as UInt16, page_size / 4));
+        return Result.Err(BadCellCount(n_cells as UInt16, page_size / 4));
     }
 
     // Allocate the output buffer at full page_size + zero-fill.
@@ -360,7 +360,7 @@ public fn serialize_page(
         p = p + 1;
     }
 
-    Ok(out)
+    Result.Ok(out)
 }
 
 // -----------------------------------------------------------------------------

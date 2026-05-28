@@ -248,7 +248,7 @@ implement VariantInfo {
     /// Get pattern for matching this variant
     ///
 
-    /// Returns pattern like "Some(x)" or "Point { x, y }"
+    /// Returns pattern like "Maybe.Some(x)" or "Point { x, y }"
     public fn pattern(&self) -> Text {
         match self.kind {
             VariantKind.Unit => self.name.clone(),
@@ -283,9 +283,9 @@ implement VariantInfo {
 /// Variant kind
 @repr(UInt8)
 public type VariantKind is
-    /// Unit variant: `None`
+    /// Unit variant: `Maybe.None`
     | Unit
-    /// Tuple variant: `Some(T)`
+    /// Tuple variant: `Maybe.Some(T)`
     | Tuple
     /// Struct variant: `Point { x: Int, y: Int }`
     | Struct;
@@ -339,7 +339,7 @@ implement GenericParam {
             decl = f"{decl}: {self.bounds.join(" + ")}";
         }
 
-        if let Some(def) = &self.default {
+        if let Maybe.Some(def) = &self.default {
             decl = f"{decl} = {def}";
         }
 
@@ -591,10 +591,10 @@ implement ParamInfo {
     public fn declaration(&self) -> Text {
         if self.is_self_param {
             match self.self_kind {
-                Some(SelfKind.Value) => "self",
-                Some(SelfKind.Ref) => "&self",
-                Some(SelfKind.RefMut) => "&mut self",
-                None => "self",
+                Maybe.Some(SelfKind.Value) => "self",
+                Maybe.Some(SelfKind.Ref) => "&self",
+                Maybe.Some(SelfKind.RefMut) => "&mut self",
+                Maybe.None => "self",
             }.to_string()
         } else {
             let mut decl = self.name.clone();
@@ -602,7 +602,7 @@ implement ParamInfo {
                 decl = f"mut {decl}";
             }
             decl = f"{decl}: {self.type_name}";
-            if let Some(def) = &self.default {
+            if let Maybe.Some(def) = &self.default {
                 decl = f"{decl} = {def}";
             }
             decl
@@ -647,11 +647,11 @@ implement Visibility {
     /// Get keyword for this visibility
     public fn keyword(&self) -> Maybe<Text> {
         match self {
-            Public => Some("public".to_string()),
-            Private => None,
-            Crate => Some("public(crate)".to_string()),
-            Super => Some("public(super)".to_string()),
-            In(path) => Some(f"public(in {path})"),
+            Public => Maybe.Some("public".to_string()),
+            Private => Maybe.None,
+            Crate => Maybe.Some("public(crate)".to_string()),
+            Super => Maybe.Some("public(super)".to_string()),
+            In(path) => Maybe.Some(f"public(in {path})"),
         }
     }
 }
@@ -965,13 +965,13 @@ implement OwnershipInfo {
     /// Get reason why type is not Copy
     public fn non_copy_reason(&self) -> Maybe<Text> {
         if self.is_copy {
-            None
+            Maybe.None
         } else if !self.blocking_fields.is_empty() {
-            Some(f"contains non-Copy field(s): {self.blocking_fields.join(", ")}")
+            Maybe.Some(f"contains non-Copy field(s): {self.blocking_fields.join(", ")}")
         } else if self.has_drop {
-            Some("has custom Drop implementation".to_string())
+            Maybe.Some("has custom Drop implementation".to_string())
         } else {
-            Some("unknown reason".to_string())
+            Maybe.Some("unknown reason".to_string())
         }
     }
 }

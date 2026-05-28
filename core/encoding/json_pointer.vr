@@ -40,7 +40,7 @@
 // let ptr: JsonPointer = parse(&Text.from("/users/0/name"))?;
 //
 
-// // Resolve — returns None if the path doesn't exist.
+// // Resolve — returns Maybe.None if the path doesn't exist.
 // let v: Maybe<&JsonValue> = resolve(&ptr, &document);
 //
 
@@ -126,18 +126,18 @@ public const MAX_JSON_POINTER_BYTES: Int = 64 * 1024;
 public fn parse(s: &Text) -> Result<JsonPointer, JsonPointerError> {
     let b = s.as_bytes();
     if b.len() == 0 {
-        return Ok(JsonPointer { tokens: [] });
+        return Result.Ok(JsonPointer { tokens: [] });
     }
     // SOUNDNESS: cap input length before the per-byte walk. Without
     // this, a hostile caller could pin the parser O(N) on multi-MB
     // pointer strings.
     if b.len() > MAX_JSON_POINTER_BYTES {
-        return Err(JsonPointerError.PointerTooLong {
+        return Result.Err(JsonPointerError.PointerTooLong {
             limit_bytes: MAX_JSON_POINTER_BYTES,
         });
     }
     if b[0] != ('/' as Byte) {
-        return Err(JsonPointerError.Malformed(Text.from("missing leading '/'")));
+        return Result.Err(JsonPointerError.Malformed(Text.from("missing leading '/'")));
     }
 
     let mut tokens: List<Text> = [];
@@ -153,7 +153,7 @@ public fn parse(s: &Text) -> Result<JsonPointer, JsonPointerError> {
         }
         if c == ('~' as Byte) {
             if i + 1 >= b.len() {
-                return Err(JsonPointerError.InvalidEscape(Text.from("trailing ~")));
+                return Result.Err(JsonPointerError.InvalidEscape(Text.from("trailing ~")));
             }
             let next = b[i + 1];
             if next == ('0' as Byte) {
@@ -161,7 +161,7 @@ public fn parse(s: &Text) -> Result<JsonPointer, JsonPointerError> {
             } else if next == ('1' as Byte) {
                 cur.push('/' as Byte);
             } else {
-                return Err(JsonPointerError.InvalidEscape(
+                return Result.Err(JsonPointerError.InvalidEscape(
                     Text.from("~ must be followed by 0 or 1")));
             }
             i = i + 2;
@@ -171,7 +171,7 @@ public fn parse(s: &Text) -> Result<JsonPointer, JsonPointerError> {
         i = i + 1;
     }
     tokens.push(Text.from_utf8_unchecked(cur.as_slice()));
-    Ok(JsonPointer { tokens: tokens })
+    Result.Ok(JsonPointer { tokens: tokens })
 }
 
 // =============================================================================
@@ -253,35 +253,35 @@ public fn resolve(p: &JsonPointer, doc: &JsonValue) -> Maybe<JsonValue> {
         cursor = match cursor {
             JsonValue.JsonObject(m) => {
                 match m.get(tok) {
-                    Some(v) => clone_value(v),
-                    None    => return None,
+                    Maybe.Some(v) => clone_value(v),
+                    Maybe.None    => return Maybe.None,
                 }
             },
             JsonValue.JsonArray(arr) => {
                 // Token is either a decimal index or "-" (append
                 // marker — unresolvable for read).
-                if tok.as_bytes() == b"-" { return None; }
+                if tok.as_bytes() == b"-" { return Maybe.None; }
                 let idx = parse_array_index(tok);
                 match idx {
-                    Some(n) => {
-                        if n < 0 || n >= arr.len() { return None; }
+                    Maybe.Some(n) => {
+                        if n < 0 || n >= arr.len() { return Maybe.None; }
                         clone_value(&arr[n])
                     },
-                    None => return None,
+                    Maybe.None => return Maybe.None,
                 }
             },
-            _ => return None,
+            _ => return Maybe.None,
         };
         i = i + 1;
     }
-    Some(cursor)
+    Maybe.Some(cursor)
 }
 
 fn parse_array_index(s: &Text) -> Maybe<Int> {
     let b = s.as_bytes();
-    if b.len() == 0 { return None; }
+    if b.len() == 0 { return Maybe.None; }
     // RFC 6901 §4: "leading zeros are not allowed" (except "0" itself).
-    if b.len() > 1 && b[0] == ('0' as Byte) { return None; }
+    if b.len() > 1 && b[0] == ('0' as Byte) { return Maybe.None; }
 
     // SOUNDNESS: Int.MAX (2^63 - 1) is 19 decimal digits wide. Any
     // longer digit run necessarily overflows the accumulator. The
@@ -290,23 +290,23 @@ fn parse_array_index(s: &Text) -> Maybe<Int> {
     // thousands of digits long ("/123…<65500 digits>") — hostile
     // input that drives the multiply past overflow. Reject before
     // the loop runs.
-    if b.len() > 19 { return None; }
+    if b.len() > 19 { return Maybe.None; }
 
     let mut v: Int = 0;
     let mut i: Int = 0;
     while i < b.len() {
         let c = b[i];
-        if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
+        if c < ('0' as Byte) || c > ('9' as Byte) { return Maybe.None; }
         // Belt-and-braces pre-multiply guard. With the b.len() ≤ 19
         // cap above this can only fire on a 19-digit value larger
         // than Int.MAX/10 — but the check keeps arithmetic well-
         // defined regardless of the backend's overflow semantics.
-        if v > 922_337_203_685_477_580 { return None; }   // Int.MAX / 10
+        if v > 922_337_203_685_477_580 { return Maybe.None; }   // Int.MAX / 10
         v = v * 10 + ((c - ('0' as Byte)) as Int);
-        if v < 0 { return None; }                          // wrap-around guard
+        if v < 0 { return Maybe.None; }                          // wrap-around guard
         i = i + 1;
     }
-    Some(v)
+    Maybe.Some(v)
 }
 
 // =============================================================================
@@ -335,13 +335,13 @@ fn clone_value(v: &JsonValue) -> JsonValue {
             let mut keys = iter;
             loop {
                 match keys.next() {
-                    Some(k) => {
+                    Maybe.Some(k) => {
                         match m.get(k) {
-                            Some(val) => { out.insert(k.clone(), clone_value(val)); },
-                            None => {},
+                            Maybe.Some(val) => { out.insert(k.clone(), clone_value(val)); },
+                            Maybe.None => {},
                         }
                     },
-                    None => break,
+                    Maybe.None => break,
                 }
             }
             JsonValue.JsonObject(out)

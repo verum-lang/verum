@@ -263,8 +263,8 @@ implement TracerProviderBuilder {
                 as Heap<dyn Sampler>;
         TracerProvider {
             sampler: match self.sampler {
-                Some(s) => s,
-                None => default_sampler,
+                Maybe.Some(s) => s,
+                Maybe.None => default_sampler,
             },
             processors: self.processors,
             resource: Shared.new(self.resource),
@@ -338,8 +338,8 @@ fn clone_span_data(s: &core.tracing.span.SpanData) -> core.tracing.span.SpanData
         status: core.tracing.span.SpanStatus {
             code: s.status().code(),
             description: match s.status().description() {
-                Some(d) => Some(d.clone()),
-                None => None,
+                Maybe.Some(d) => Maybe.Some(d.clone()),
+                Maybe.None => Maybe.None,
             }
         },
         resource: Shared.new(s.resource().clone()),
@@ -381,14 +381,14 @@ fn clone_links(src: &List<SpanLink>) -> List<SpanLink> {
 // the Shared which is a refcount bump — no lock acquired on get.
 
 static GLOBAL_PROVIDER: Shared<Mutex<Maybe<Shared<TracerProvider>>>> =
-    Shared.new(Mutex.new(None));
+    Shared.new(Mutex.new(Maybe.None));
 
 /// Install the global TracerProvider. Intended to be called once at
 /// startup. Replaces any previous provider (its processors are NOT
 /// flushed — the caller is responsible for orderly shutdown).
 public fn set_global_tracer_provider(provider: TracerProvider) {
     let mut guard = GLOBAL_PROVIDER.lock().unwrap_or_else(|p| p.into_inner());
-    *guard = Some(Shared.new(provider));
+    *guard = Maybe.Some(Shared.new(provider));
 }
 
 /// Return the installed provider, or a fresh NoopTracerProvider if none
@@ -396,8 +396,8 @@ public fn set_global_tracer_provider(provider: TracerProvider) {
 public fn global_tracer_provider() -> Shared<TracerProvider> {
     let guard = GLOBAL_PROVIDER.lock().unwrap_or_else(|p| p.into_inner());
     match &*guard {
-        Some(p) => p.clone(),
-        None => Shared.new(TracerProvider.noop()),
+        Maybe.Some(p) => p.clone(),
+        Maybe.None => Shared.new(TracerProvider.noop()),
     }
 }
 

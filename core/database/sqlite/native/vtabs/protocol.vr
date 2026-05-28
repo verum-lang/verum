@@ -147,12 +147,12 @@ public type VirtualTable is protocol {
     /// `args[0] != RNull, len > 2` → UPDATE
     fn update(&mut self, args: &List<Register>) -> Result<Int64, VtabError> {
         let _ = args;
-        Err(VtabUnsupported("vtab is read-only".clone()))
+        Result.Err(VtabUnsupported("vtab is read-only".clone()))
     }
 
     /// Drop a CREATE VIRTUAL TABLE backing.
     fn destroy(&mut self) -> Result<(), VtabError> {
-        Ok(())
+        Result.Ok(())
     }
 };
 

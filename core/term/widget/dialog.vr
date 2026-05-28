@@ -123,7 +123,7 @@ implement Dialog {
         let mut lines = List.new();
         lines.push(Line.raw(body));
         Dialog {
-            title: None,
+            title: Maybe.None,
             body: lines,
             buttons: default_buttons,
             style: Style.DEFAULT,
@@ -135,7 +135,7 @@ implement Dialog {
 
     /// Set the dialog title.
     public fn title(self, title: Text) -> Dialog {
-        Dialog { title: Some(title), ..self }
+        Dialog { title: Maybe.Some(title), ..self }
     }
 
     /// Set the body text as a list of lines.
@@ -201,7 +201,7 @@ implement StatefulWidget for Dialog {
 
         // Draw border with optional title
         let border_block = match self.title {
-            Some(ref t) => {
+            Maybe.Some(ref t) => {
                 Block.new()
                     .title(t.clone())
                     .title_alignment(Alignment.Center)
@@ -209,7 +209,7 @@ implement StatefulWidget for Dialog {
                     .border_type(self.border_type)
                     .style(self.style)
             }
-            None => {
+            Maybe.None => {
                 Block.new()
                     .borders(Borders.ALL)
                     .border_type(self.border_type)

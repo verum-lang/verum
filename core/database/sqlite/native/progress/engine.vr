@@ -7,7 +7,7 @@
 //  sqlite3_progress_handler(db, N, xProgress, pArg)
 //
 
-// `install(None)` clears the handler (N=0 or xProgress=NULL in C).
+// `install(Maybe.None)` clears the handler (N=0 or xProgress=NULL in C).
 // `consult(...)` asks the registered callback once the tick accumulator
 // says we are due.
 // =============================================================================

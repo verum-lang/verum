@@ -279,12 +279,12 @@ implement UdpSocket {
 
         for socket_addr in addrs {
             match UdpSocket.bind_addr(&socket_addr) {
-                Ok(socket) => return Ok(socket),
-                Err(e) => last_err = e,
+                Result.Ok(socket) => return Result.Ok(socket),
+                Result.Err(e) => last_err = e,
             }
         }
 
-        Err(last_err)
+        Result.Err(last_err)
     }
 
     /// Internal: bind to a specific address.
@@ -311,21 +311,21 @@ implement UdpSocket {
         let addr_bytes = serialize_socket_addr(addr);
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        if let Err(e) = bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
+        if let Result.Err(e) = bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
             let _ = close(fd);
-            return Err(IoError.from_os(e));
+            return Result.Err(IoError.from_os(e));
         }
 
         @cfg(target_os = "macos")
-        if let Err(e) = sys_bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
+        if let Result.Err(e) = sys_bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
             let _ = sys_close(fd);
-            return Err(IoError.from_os(e));
+            return Result.Err(IoError.from_os(e));
         }
 
-        Ok(UdpSocket {
+        Result.Ok(UdpSocket {
             fd: fd,
             local_addr: *addr,
-            peer_addr: None,
+            peer_addr: Maybe.None,
         })
     }
 
@@ -355,7 +355,7 @@ implement UdpSocket {
             .map_err(IoError.from_os)?;
 
         let src_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
-        Ok((n, src_addr))
+        Result.Ok((n, src_addr))
     }
 
     /// Send a datagram to the specified address.
@@ -415,7 +415,7 @@ implement UdpSocket {
         // NetworkUnreachable, HostUnreachable, etc. — all of
         // which the per-platform errno mapping already
         // classifies correctly.
-        let mut last_err: Maybe<IoError> = None;
+        let mut last_err: Maybe<IoError> = Maybe.None;
 
         for socket_addr in addrs {
             let addr_bytes = serialize_socket_addr(&socket_addr);
@@ -429,12 +429,12 @@ implement UdpSocket {
                                      addr_bytes.len() as Int);
 
             match result {
-                Ok(_) => {
-                    self.peer_addr = Some(socket_addr);
-                    return Ok(());
+                Result.Ok(_) => {
+                    self.peer_addr = Maybe.Some(socket_addr);
+                    return Result.Ok(());
                 }
-                Err(os_err) => {
-                    last_err = Some(IoError.from_raw_os_error(os_err.code));
+                Result.Err(os_err) => {
+                    last_err = Maybe.Some(IoError.from_raw_os_error(os_err.code));
                 }
             }
         }
@@ -444,10 +444,10 @@ implement UdpSocket {
         // empty (rare — `to_socket_addrs` would already have
         // failed with NotFound).
         match last_err {
-            Some(e) => Err(e),
-            None => Err(IoError {
+            Maybe.Some(e) => Result.Err(e),
+            Maybe.None => Result.Err(IoError {
                 kind: IoErrorKind.ConnectionRefused,
-                message: Some(Text.from("connect: no candidate addresses")),
+                message: Maybe.Some(Text.from("connect: no candidate addresses")),
             }),
         }
     }
@@ -459,7 +459,7 @@ implement UdpSocket {
     /// More efficient than send_to when sending multiple datagrams to same address.
     public fn send(&self, buf: &[Byte]) -> Result<Int, IoError> {
         if self.peer_addr.is_none() {
-            return Err(IoError.NotConnected);
+            return Result.Err(IoError.NotConnected);
         }
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
@@ -477,7 +477,7 @@ implement UdpSocket {
     /// Only receives datagrams from the connected address.
     public fn recv(&self, buf: &mut [Byte]) -> Result<Int, IoError> {
         if self.peer_addr.is_none() {
-            return Err(IoError.NotConnected);
+            return Result.Err(IoError.NotConnected);
         }
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
@@ -506,19 +506,19 @@ implement UdpSocket {
             .map_err(IoError.from_os)?;
 
         let src_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
-        Ok((n, src_addr))
+        Result.Ok((n, src_addr))
     }
 
     /// Get the local address this socket is bound to.
     public fn local_addr(&self) -> Result<SocketAddr, IoError> {
-        Ok(self.local_addr)
+        Result.Ok(self.local_addr)
     }
 
     /// Get the peer address this socket is connected to.
     public fn peer_addr(&self) -> Result<SocketAddr, IoError> {
         match self.peer_addr {
-            Some(addr) => Ok(addr),
-            None => Err(IoError.NotConnected),
+            Maybe.Some(addr) => Result.Ok(addr),
+            Maybe.None => Result.Err(IoError.NotConnected),
         }
     }
 
@@ -628,8 +628,8 @@ implement UdpSocket {
     /// Set the read timeout.
     ///
 
-    /// A value of None means reads will block indefinitely.
-    /// A value of Some(ms) sets the timeout in milliseconds.
+    /// A value of Maybe.None means reads will block indefinitely.
+    /// A value of Maybe.Some(ms) sets the timeout in milliseconds.
     public fn set_read_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
         let ms = timeout_ms.unwrap_or(0);
         @cfg(any(target_os = "linux", target_os = "windows")) {
@@ -643,8 +643,8 @@ implement UdpSocket {
     /// Set the write timeout.
     ///
 
-    /// A value of None means writes will block indefinitely.
-    /// A value of Some(ms) sets the timeout in milliseconds.
+    /// A value of Maybe.None means writes will block indefinitely.
+    /// A value of Maybe.Some(ms) sets the timeout in milliseconds.
     public fn set_write_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
         let ms = timeout_ms.unwrap_or(0);
         @cfg(any(target_os = "linux", target_os = "windows")) {
@@ -760,7 +760,7 @@ implement UdpSocket {
         @cfg(target_os = "macos")
         let new_fd = safe_fcntl(self.fd, F_DUPFD_CLOEXEC, 0).map_err(IoError.from_os)?;
 
-        Ok(UdpSocket {
+        Result.Ok(UdpSocket {
             fd: new_fd as FileDesc,
             local_addr: self.local_addr,
             peer_addr: self.peer_addr,
@@ -782,7 +782,7 @@ implement Drop for UdpSocket {
 implement Debug for UdpSocket {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(f"UdpSocket {{ fd: {self.fd}, local: {self.local_addr}")?;
-        if let Some(peer) = self.peer_addr {
+        if let Maybe.Some(peer) = self.peer_addr {
             f.write_str(f", peer: {peer}")?;
         }
         f.write_str(" }")
@@ -868,16 +868,16 @@ implement UdpSocket {
             let result = sys_recvfrom(self.fd, buf, 0, &mut addr_buf, &mut addr_len);
 
             match result {
-                Ok(n) => {
+                Result.Ok(n) => {
                     let src_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
-                    return Ok((n, src_addr));
+                    return Result.Ok((n, src_addr));
                 }
-                Err(e) if e.code == EAGAIN => {
+                Result.Err(e) if e.code == EAGAIN => {
                     UdpIoReady.readable(self.fd).await;
                     continue;
                 }
-                Err(e) => {
-                    return Err(IoError.from_os(e));
+                Result.Err(e) => {
+                    return Result.Err(IoError.from_os(e));
                 }
             }
         }
@@ -910,13 +910,13 @@ implement UdpSocket {
                                     addr_bytes.len() as Int);
 
             match result {
-                Ok(n) => return Ok(n),
-                Err(e) if e.code == EAGAIN => {
+                Result.Ok(n) => return Result.Ok(n),
+                Result.Err(e) if e.code == EAGAIN => {
                     UdpIoReady.writable(self.fd).await;
                     continue;
                 }
-                Err(e) => {
-                    return Err(IoError.from_os(e));
+                Result.Err(e) => {
+                    return Result.Err(IoError.from_os(e));
                 }
             }
         }
@@ -1015,23 +1015,23 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
 /// Deserialize a socket address from kernel sockaddr bytes.
 fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
     if buf.len() < 2 {
-        return Err(IoError.InvalidInput { reason: "Address buffer too small" });
+        return Result.Err(IoError.InvalidInput { reason: "Address buffer too small" });
     }
 
     let family = buf[0] as Int;
 
     if family == AF_INET {
         if buf.len() < 8 {
-            return Err(IoError.InvalidInput { reason: "Invalid IPv4 address buffer" });
+            return Result.Err(IoError.InvalidInput { reason: "Invalid IPv4 address buffer" });
         }
 
         let port = ((buf[2] as Int) << 8) | (buf[3] as Int);
         let ip = Ipv4Addr.new(buf[4], buf[5], buf[6], buf[7]);
 
-        Ok(SocketAddr.new_v4(ip, port))
+        Result.Ok(SocketAddr.new_v4(ip, port))
     } else if family == AF_INET6 {
         if buf.len() < 28 {
-            return Err(IoError.InvalidInput { reason: "Invalid IPv6 address buffer" });
+            return Result.Err(IoError.InvalidInput { reason: "Invalid IPv6 address buffer" });
         }
 
         let port = ((buf[2] as Int) << 8) | (buf[3] as Int);
@@ -1053,8 +1053,8 @@ fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
             | ((buf[26] as UInt32) << 16)
             | ((buf[27] as UInt32) << 24);
 
-        Ok(SocketAddr.V6(SocketAddrV6.new(ip, port, 0, scope_id)))
+        Result.Ok(SocketAddr.V6(SocketAddrV6.new(ip, port, 0, scope_id)))
     } else {
-        Err(IoError.InvalidInput { reason: f"Unsupported address family: {family}" })
+        Result.Err(IoError.InvalidInput { reason: f"Unsupported address family: {family}" })
     }
 }

@@ -45,7 +45,7 @@ implement QuicStream {
             let n = self.write(&buf[written..]).await?;
             written = written + n;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Read up to `buf.len()` bytes; returns 0 on FIN.

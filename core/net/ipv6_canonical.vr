@@ -137,15 +137,15 @@ public fn format_ipv6(addr: &Ipv6Addr) -> Text {
 /// the precompile-cascade SIGSEGV.
 public fn parse(text: &Text) -> Result<Ipv6Addr, Ipv6CanonicalError> {
     match Ipv6Addr.parse(text) {
-        Ok(addr) => Ok(addr),
-        Err(e)   => Err(Ipv6CanonicalError.ParseFailed(e)),
+        Result.Ok(addr) => Result.Ok(addr),
+        Result.Err(e)   => Result.Err(Ipv6CanonicalError.ParseFailed(e)),
     }
 }
 
 /// Parse + re-emit — the "normalise this text" one-call form.
 public fn canonicalize(text: &Text) -> Result<Text, Ipv6CanonicalError> {
     let addr = parse(text)?;
-    Ok(format_ipv6(&addr))
+    Result.Ok(format_ipv6(&addr))
 }
 
 /// Equality check modulo spelling — "are these two strings the
@@ -154,7 +154,7 @@ public fn equal_addresses(a: &Text, b: &Text) -> Bool {
     let canon_a = canonicalize(a);
     let canon_b = canonicalize(b);
     match (canon_a, canon_b) {
-        (Ok(ca), Ok(cb)) => ca.as_bytes() == cb.as_bytes(),
+        (Result.Ok(ca), Result.Ok(cb)) => ca.as_bytes() == cb.as_bytes(),
         _                => false,
     }
 }

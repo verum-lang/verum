@@ -186,8 +186,8 @@ fn thread_entry(data: &unsafe Byte) -> UInt32 {
 
     // Initialize TLS for this thread
     match create_thread_tls() {
-        Ok(_) => {}
-        Err(_) => {
+        Result.Ok(_) => {}
+        Result.Err(_) => {
             // TLS init failed - cannot proceed safely
             return 1;
         }
@@ -229,10 +229,10 @@ implement WindowsThread {
         );
 
         if !handle.is_valid() {
-            return Err(CreateFailed { code: GetLastError() });
+            return Result.Err(CreateFailed { code: GetLastError() });
         }
 
-        Ok(WindowsThread {
+        Result.Ok(WindowsThread {
             handle: handle,
             tid: tid,
             finished: false,
@@ -259,10 +259,10 @@ implement WindowsThread {
         );
 
         if !handle.is_valid() {
-            return Err(CreateFailed { code: GetLastError() });
+            return Result.Err(CreateFailed { code: GetLastError() });
         }
 
-        Ok(WindowsThread {
+        Result.Ok(WindowsThread {
             handle: handle,
             tid: tid,
             finished: false,
@@ -272,27 +272,27 @@ implement WindowsThread {
     /// Wait for thread to finish.
     public fn join(&mut self) -> Result<(), WindowsThreadError> {
         if self.finished {
-            return Err(AlreadyJoined);
+            return Result.Err(AlreadyJoined);
         }
 
         let result = WaitForSingleObject(self.handle, INFINITE);
 
         if result == WAIT_FAILED {
-            return Err(JoinFailed { code: GetLastError() });
+            return Result.Err(JoinFailed { code: GetLastError() });
         }
 
         CloseHandle(self.handle);
         self.finished = true;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Wait for thread with timeout (milliseconds).
     ///
 
-    /// Returns Ok(true) if thread finished, Ok(false) if timed out.
+    /// Returns Result.Ok(true) if thread finished, Result.Ok(false) if timed out.
     public fn join_timeout(&mut self, timeout_ms: UInt32) -> Result<Bool, WindowsThreadError> {
         if self.finished {
-            return Ok(true);
+            return Result.Ok(true);
         }
 
         let result = WaitForSingleObject(self.handle, timeout_ms);
@@ -301,24 +301,24 @@ implement WindowsThread {
             0 => {  // WAIT_OBJECT_0
                 CloseHandle(self.handle);
                 self.finished = true;
-                Ok(true)
+                Result.Ok(true)
             }
             258 => {  // WAIT_TIMEOUT
-                Ok(false)
+                Result.Ok(false)
             }
-            _ => Err(JoinFailed { code: GetLastError() }),
+            _ => Result.Err(JoinFailed { code: GetLastError() }),
         }
     }
 
     /// Detach thread (will be cleaned up automatically when done).
     public fn detach(&mut self) -> Result<(), WindowsThreadError> {
         if self.finished {
-            return Err(AlreadyDetached);
+            return Result.Err(AlreadyDetached);
         }
 
         CloseHandle(self.handle);
         self.finished = true;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Get the thread ID.
@@ -335,9 +335,9 @@ implement WindowsThread {
     public fn suspend(&self) -> Result<UInt32, WindowsThreadError> {
         let count = SuspendThread(self.handle);
         if count == 0xFFFFFFFF {
-            Err(SuspendFailed { code: GetLastError() })
+            Result.Err(SuspendFailed { code: GetLastError() })
         } else {
-            Ok(count)
+            Result.Ok(count)
         }
     }
 
@@ -345,9 +345,9 @@ implement WindowsThread {
     public fn resume(&self) -> Result<UInt32, WindowsThreadError> {
         let count = ResumeThread(self.handle);
         if count == 0xFFFFFFFF {
-            Err(ResumeFailed { code: GetLastError() })
+            Result.Err(ResumeFailed { code: GetLastError() })
         } else {
-            Ok(count)
+            Result.Ok(count)
         }
     }
 }
@@ -392,10 +392,10 @@ implement WindowsMutex {
         );
 
         if !handle.is_valid() {
-            return Err(MutexInitFailed { code: GetLastError() });
+            return Result.Err(MutexInitFailed { code: GetLastError() });
         }
 
-        Ok(WindowsMutex {
+        Result.Ok(WindowsMutex {
             handle: handle,
             initialized: true,
         })
@@ -406,9 +406,9 @@ implement WindowsMutex {
         let result = WaitForSingleObject(self.handle, INFINITE);
 
         match result {
-            0 => Ok(()),       // WAIT_OBJECT_0
-            128 => Ok(()),     // WAIT_ABANDONED - previous owner died, but we got it
-            _ => Err(MutexLockFailed { code: GetLastError() }),
+            0 => Result.Ok(()),       // WAIT_OBJECT_0
+            128 => Result.Ok(()),     // WAIT_ABANDONED - previous owner died, but we got it
+            _ => Result.Err(MutexLockFailed { code: GetLastError() }),
         }
     }
 
@@ -431,7 +431,7 @@ implement WindowsMutex {
         self.lock()?;
         let result = f();
         self.unlock();
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -466,10 +466,10 @@ implement WindowsCondvar {
         );
 
         if !event.is_valid() {
-            return Err(CondInitFailed { code: GetLastError() });
+            return Result.Err(CondInitFailed { code: GetLastError() });
         }
 
-        Ok(WindowsCondvar {
+        Result.Ok(WindowsCondvar {
             event: event,
             initialized: true,
             waiters: 0,
@@ -491,16 +491,16 @@ implement WindowsCondvar {
         self.waiters -= 1;
 
         if result == WAIT_FAILED {
-            Err(CondWaitFailed { code: GetLastError() })
+            Result.Err(CondWaitFailed { code: GetLastError() })
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
     /// Wait on the condition variable with timeout.
     ///
 
-    /// Returns Ok(true) if signaled, Ok(false) if timed out.
+    /// Returns Result.Ok(true) if signaled, Result.Ok(false) if timed out.
     public fn wait_timeout(&mut self, mutex: &mut WindowsMutex, timeout_ms: UInt32) -> Result<Bool, WindowsThreadError> {
         self.waiters += 1;
         mutex.unlock();
@@ -511,9 +511,9 @@ implement WindowsCondvar {
         self.waiters -= 1;
 
         match result {
-            0 => Ok(true),      // WAIT_OBJECT_0
-            258 => Ok(false),   // WAIT_TIMEOUT
-            _ => Err(CondWaitFailed { code: GetLastError() }),
+            0 => Result.Ok(true),      // WAIT_OBJECT_0
+            258 => Result.Ok(false),   // WAIT_TIMEOUT
+            _ => Result.Err(CondWaitFailed { code: GetLastError() }),
         }
     }
 
@@ -692,10 +692,10 @@ implement Win32Semaphore {
         );
 
         if !handle.is_valid() {
-            return Err(MutexInitFailed { code: GetLastError() });
+            return Result.Err(MutexInitFailed { code: GetLastError() });
         }
 
-        Ok(Win32Semaphore {
+        Result.Ok(Win32Semaphore {
             handle: handle,
             initialized: true,
         })
@@ -705,22 +705,22 @@ implement Win32Semaphore {
     public fn wait(&mut self) -> Result<(), WindowsThreadError> {
         let result = WaitForSingleObject(self.handle, INFINITE);
         if result == WAIT_FAILED {
-            Err(MutexLockFailed { code: GetLastError() })
+            Result.Err(MutexLockFailed { code: GetLastError() })
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
     /// Try to wait with timeout.
     ///
 
-    /// Returns Ok(true) if acquired, Ok(false) if timed out.
+    /// Returns Result.Ok(true) if acquired, Result.Ok(false) if timed out.
     public fn wait_timeout(&mut self, timeout_ms: UInt32) -> Result<Bool, WindowsThreadError> {
         let result = WaitForSingleObject(self.handle, timeout_ms);
         match result {
-            0 => Ok(true),      // WAIT_OBJECT_0
-            258 => Ok(false),   // WAIT_TIMEOUT
-            _ => Err(MutexLockFailed { code: GetLastError() }),
+            0 => Result.Ok(true),      // WAIT_OBJECT_0
+            258 => Result.Ok(false),   // WAIT_TIMEOUT
+            _ => Result.Err(MutexLockFailed { code: GetLastError() }),
         }
     }
 
@@ -728,9 +728,9 @@ implement Win32Semaphore {
     public fn signal(&mut self) -> Result<Int32, WindowsThreadError> {
         let mut previous: Int32 = 0;
         if ReleaseSemaphore(self.handle, 1, &mut previous) {
-            Ok(previous)
+            Result.Ok(previous)
         } else {
-            Err(MutexLockFailed { code: GetLastError() })
+            Result.Err(MutexLockFailed { code: GetLastError() })
         }
     }
 
@@ -738,9 +738,9 @@ implement Win32Semaphore {
     public fn signal_many(&mut self, count: Int32) -> Result<Int32, WindowsThreadError> {
         let mut previous: Int32 = 0;
         if ReleaseSemaphore(self.handle, count, &mut previous) {
-            Ok(previous)
+            Result.Ok(previous)
         } else {
-            Err(MutexLockFailed { code: GetLastError() })
+            Result.Err(MutexLockFailed { code: GetLastError() })
         }
     }
 }
@@ -780,11 +780,11 @@ implement Drop for Win32Semaphore {
 ///
 
 /// If *addr != expected at the time of the call, returns immediately (spurious-safe).
-/// If `timeout` is Some(ns), the wait expires after the given nanoseconds.
-/// If `timeout` is None, waits indefinitely.
+/// If `timeout` is Maybe.Some(ns), the wait expires after the given nanoseconds.
+/// If `timeout` is Maybe.None, waits indefinitely.
 ///
 
-/// Returns Ok(()) on wake (including spurious), Err(OSError) on timeout or failure.
+/// Returns Result.Ok(()) on wake (including spurious), Result.Err(OSError) on timeout or failure.
 ///
 
 /// This is the Windows equivalent of `futex(addr, FUTEX_WAIT, expected, timeout)`.
@@ -792,8 +792,8 @@ public fn futex_wait(addr: &Int, expected: Int, timeout: Maybe<UInt64>) -> Resul
     // Convert nanosecond timeout to milliseconds for WaitOnAddress.
     // Round up to avoid premature timeout (1ns → 1ms, not 0ms).
     let timeout_ms: UInt32 = match timeout {
-        None => INFINITE,
-        Some(ns) => {
+        Maybe.None => INFINITE,
+        Maybe.Some(ns) => {
             if ns == 0 {
                 0 as UInt32
             } else {
@@ -819,15 +819,15 @@ public fn futex_wait(addr: &Int, expected: Int, timeout: Maybe<UInt64>) -> Resul
     );
 
     if ok {
-        Ok(())
+        Result.Ok(())
     } else {
         let err = GetLastError();
         if err == 1460 {
             // ERROR_TIMEOUT (0x5B4) — wait expired
-            Err(OSError.Timeout)
+            Result.Err(OSError.Timeout)
         } else {
             // Treat as spurious wakeup — return Ok like Linux futex does
-            Ok(())
+            Result.Ok(())
         }
     }
 }
@@ -839,7 +839,7 @@ public fn futex_wait(addr: &Int, expected: Int, timeout: Maybe<UInt64>) -> Resul
 /// If count > 1, wakes all waiters (used by notify_all / broadcast).
 ///
 
-/// Returns Ok(n) where n is an estimate of woken threads (may be 0 if no waiters).
+/// Returns Result.Ok(n) where n is an estimate of woken threads (may be 0 if no waiters).
 ///
 
 /// This is the Windows equivalent of `futex(addr, FUTEX_WAKE, count)`.
@@ -851,5 +851,5 @@ public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
     }
     // WaitOnAddress wake functions are void — no error return.
     // Return 0 as we cannot know how many threads were actually woken.
-    Ok(0)
+    Result.Ok(0)
 }

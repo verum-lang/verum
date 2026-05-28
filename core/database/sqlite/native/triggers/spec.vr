@@ -89,7 +89,7 @@ public fn trigger_def_new(
         event: event,
         table_name: table_name,
         for_each_row: true,
-        when_clause: None,
+        when_clause: Maybe.None,
         body: List.new(),
         sub_program_id: 0,
     }
@@ -101,7 +101,7 @@ implement TriggerDef {
     }
 
     public fn set_when(&mut self, expr_sql: Text) {
-        self.when_clause = Some(expr_sql);
+        self.when_clause = Maybe.Some(expr_sql);
     }
 
     public fn set_schema(&mut self, schema: Text) {
