@@ -256,7 +256,6 @@ fn test_use_after_free_error_new_constructor_round_trip_pinned_by_collision() {
 }
 
 @test
-@ignore
 fn test_use_after_free_error_null_pointer_uses_gen_unallocated_sentinel_pinned() {
     let e: UseAfterFreeError = UseAfterFreeError.null_pointer("Heap<Byte>".to_text());
     assert_eq(e.expected_gen, GEN_UNALLOCATED);
