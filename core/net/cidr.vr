@@ -223,8 +223,13 @@ implement CidrSet {
     }
 
     public fn add_text(&mut self, text: &Text) -> Result<(), CidrError> {
+        // Inline the push instead of `self.add(c)` — CIDR-2 root cause:
+        // transitive `&mut self` propagation through method-to-method
+        // dispatch loses the mutation on self.blocks in the VBC codegen,
+        // so set.add_text() succeeds but set.blocks remains empty. Direct
+        // self.blocks.push() preserves the mutation.
         let c = parse(text)?;
-        self.add(c);
+        self.blocks.push(c);
         Result.Ok(())
     }
 
