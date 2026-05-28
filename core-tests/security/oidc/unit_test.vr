@@ -1,0 +1,96 @@
+// =============================================================================
+// core-tests/security/oidc/unit_test.vr
+// =============================================================================
+//
+// `core/security/oidc.vr` — OpenID Connect discovery + JWKS constants.
+// =============================================================================
+
+mount core.security.oidc.{
+    DISCOVERY_PATH, MAX_DISCOVERY_BYTES, MAX_JWKS_BYTES,
+    DEFAULT_JWKS_TTL_SECONDS, DEFAULT_LEEWAY_SECONDS,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: OIDC discovery + JWKS constants
+//
+//   Per OIDC Core 1.0 §4 + OAuth 2.0 RFC 6749.
+// =============================================================================
+
+@test
+fn test_oidc_discovery_path_canonical_value() {
+    // OIDC Core 1.0 §4 — well-known discovery URL suffix.
+    assert_eq(DISCOVERY_PATH, "/.well-known/openid-configuration");
+}
+
+@test
+fn test_oidc_max_discovery_bytes_canonical_value() {
+    // 256 KiB cap on the discovery JSON payload.
+    assert_eq(MAX_DISCOVERY_BYTES, 256 * 1024);
+}
+
+@test
+fn test_oidc_max_discovery_bytes_concrete_value() {
+    assert_eq(MAX_DISCOVERY_BYTES, 262_144);
+}
+
+@test
+fn test_oidc_max_jwks_bytes_canonical_value() {
+    // 1 MiB cap on the JWKS payload.
+    assert_eq(MAX_JWKS_BYTES, 1024 * 1024);
+}
+
+@test
+fn test_oidc_max_jwks_bytes_concrete_value() {
+    assert_eq(MAX_JWKS_BYTES, 1_048_576);
+}
+
+@test
+fn test_oidc_default_jwks_ttl_seconds_canonical_value() {
+    // 1-hour JWKS cache TTL — standard for rotating keys.
+    assert_eq(DEFAULT_JWKS_TTL_SECONDS, 3600);
+}
+
+@test
+fn test_oidc_default_leeway_seconds_canonical_value() {
+    // 60-second clock-skew leeway for token expiry comparison.
+    assert_eq(DEFAULT_LEEWAY_SECONDS, 60);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_oidc_max_jwks_larger_than_discovery() {
+    // JWKS payloads with many keys are larger than discovery JSON.
+    assert(MAX_JWKS_BYTES > MAX_DISCOVERY_BYTES);
+}
+
+@test
+fn test_oidc_max_jwks_is_4x_discovery() {
+    // 1 MiB = 4 × 256 KiB. Codifies the 4:1 ratio.
+    assert_eq(MAX_JWKS_BYTES, MAX_DISCOVERY_BYTES * 4);
+}
+
+@test
+fn test_oidc_jwks_ttl_much_larger_than_leeway() {
+    // TTL is 1 hour; leeway is 1 minute. 60× ratio.
+    assert(DEFAULT_JWKS_TTL_SECONDS > DEFAULT_LEEWAY_SECONDS);
+}
+
+@test
+fn test_oidc_jwks_ttl_is_60x_leeway() {
+    assert_eq(DEFAULT_JWKS_TTL_SECONDS, DEFAULT_LEEWAY_SECONDS * 60);
+}
+
+@test
+fn test_oidc_constants_positive() {
+    assert(MAX_DISCOVERY_BYTES > 0);
+    assert(MAX_JWKS_BYTES > 0);
+    assert(DEFAULT_JWKS_TTL_SECONDS > 0);
+    assert(DEFAULT_LEEWAY_SECONDS > 0);
+}
+
+fn main() {}
