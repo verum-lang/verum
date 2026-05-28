@@ -1,0 +1,112 @@
+// =============================================================================
+// core-tests/cli/config/unit_test.vr
+// =============================================================================
+//
+// `core/cli/config.vr` — CLI config-resolution source tracking.
+// =============================================================================
+
+mount core.cli.config.{SourceTag, ConfigSource};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: SourceTag 4-variant ADT
+// =============================================================================
+
+@test
+fn test_source_tag_from_cli_variant() {
+    let s: SourceTag = SourceTag.FromCli;
+    assert(s is SourceTag.FromCli);
+}
+
+@test
+fn test_source_tag_from_env_variant() {
+    let s: SourceTag = SourceTag.FromEnv("MYTOOL_HOST".to_text());
+    assert(s is SourceTag.FromEnv);
+}
+
+@test
+fn test_source_tag_from_file_variant() {
+    let s: SourceTag = SourceTag.FromFile("/etc/mytool.toml".to_text());
+    assert(s is SourceTag.FromFile);
+}
+
+@test
+fn test_source_tag_from_default_variant() {
+    let s: SourceTag = SourceTag.FromDefault;
+    assert(s is SourceTag.FromDefault);
+}
+
+// =============================================================================
+// Section 2: SourceTag pairwise disjointness
+// =============================================================================
+
+@test
+fn test_source_tag_from_cli_disjoint() {
+    let s: SourceTag = SourceTag.FromCli;
+    assert(!(s is SourceTag.FromEnv));
+    assert(!(s is SourceTag.FromFile));
+    assert(!(s is SourceTag.FromDefault));
+}
+
+@test
+fn test_source_tag_from_default_disjoint() {
+    let s: SourceTag = SourceTag.FromDefault;
+    assert(!(s is SourceTag.FromCli));
+    assert(!(s is SourceTag.FromEnv));
+    assert(!(s is SourceTag.FromFile));
+}
+
+// =============================================================================
+// Section 3: SourceTag.to_text() canonical labels
+// =============================================================================
+
+@test
+fn test_source_tag_from_cli_to_text() {
+    let s: SourceTag = SourceTag.FromCli;
+    assert_eq(s.to_text(), "CLI");
+}
+
+@test
+fn test_source_tag_from_default_to_text() {
+    let s: SourceTag = SourceTag.FromDefault;
+    assert_eq(s.to_text(), "default");
+}
+
+// =============================================================================
+// Section 4: ConfigSource 4-variant ADT
+// =============================================================================
+
+@test
+fn test_config_source_cli_source_variant() {
+    let c: ConfigSource = ConfigSource.CliSource;
+    assert(c is ConfigSource.CliSource);
+}
+
+@test
+fn test_config_source_env_source_variant() {
+    let c: ConfigSource = ConfigSource.EnvSource("MYTOOL_".to_text());
+    assert(c is ConfigSource.EnvSource);
+}
+
+@test
+fn test_config_source_default_source_variant() {
+    let c: ConfigSource = ConfigSource.DefaultSource;
+    assert(c is ConfigSource.DefaultSource);
+}
+
+@test
+fn test_config_source_cli_source_disjoint() {
+    let c: ConfigSource = ConfigSource.CliSource;
+    assert(!(c is ConfigSource.EnvSource));
+    assert(!(c is ConfigSource.DefaultSource));
+}
+
+@test
+fn test_config_source_default_source_disjoint() {
+    let c: ConfigSource = ConfigSource.DefaultSource;
+    assert(!(c is ConfigSource.CliSource));
+    assert(!(c is ConfigSource.EnvSource));
+}
+
+fn main() {}
