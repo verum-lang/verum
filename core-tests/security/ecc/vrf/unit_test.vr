@@ -1,0 +1,72 @@
+// =============================================================================
+// core-tests/security/ecc/vrf/unit_test.vr
+// =============================================================================
+//
+// `core/security/ecc/vrf.vr` — VRF (verifiable random function) constants.
+// =============================================================================
+
+mount core.security.ecc.vrf.{
+    VRF_SECRET_KEY_SIZE, VRF_PUBLIC_KEY_SIZE,
+    VRF_PROOF_SIZE, VRF_OUTPUT_SIZE,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: VRF canonical sizes (RFC 9381 / Ed25519-based VRF)
+// =============================================================================
+
+@test
+fn test_vrf_secret_key_size_canonical_value() {
+    // Ed25519-based VRF — 32-byte secret key.
+    assert_eq(VRF_SECRET_KEY_SIZE, 32);
+}
+
+@test
+fn test_vrf_public_key_size_canonical_value() {
+    // Ed25519-based VRF — 32-byte compressed public point.
+    assert_eq(VRF_PUBLIC_KEY_SIZE, 32);
+}
+
+@test
+fn test_vrf_proof_size_canonical_value() {
+    // RFC 9381 §3 — VRF proof is 80 bytes for Ed25519-SHA512-Elligator2.
+    assert_eq(VRF_PROOF_SIZE, 80);
+}
+
+@test
+fn test_vrf_output_size_canonical_value() {
+    // RFC 9381 §3 — VRF output is 64 bytes (SHA-512 digest).
+    assert_eq(VRF_OUTPUT_SIZE, 64);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_vrf_secret_key_equals_public_key_width() {
+    // Ed25519: secret + public both 32 bytes.
+    assert_eq(VRF_SECRET_KEY_SIZE, VRF_PUBLIC_KEY_SIZE);
+}
+
+@test
+fn test_vrf_proof_larger_than_output() {
+    assert(VRF_PROOF_SIZE > VRF_OUTPUT_SIZE);
+}
+
+@test
+fn test_vrf_output_is_twice_secret_key() {
+    // 64 == 2 * 32 — output (SHA-512) is twice the Ed25519 width.
+    assert_eq(VRF_OUTPUT_SIZE, VRF_SECRET_KEY_SIZE * 2);
+}
+
+@test
+fn test_vrf_constants_positive() {
+    assert(VRF_SECRET_KEY_SIZE > 0);
+    assert(VRF_PUBLIC_KEY_SIZE > 0);
+    assert(VRF_PROOF_SIZE > 0);
+    assert(VRF_OUTPUT_SIZE > 0);
+}
+
+fn main() {}

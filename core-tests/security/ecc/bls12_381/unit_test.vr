@@ -1,0 +1,117 @@
+// =============================================================================
+// core-tests/security/ecc/bls12_381/unit_test.vr
+// =============================================================================
+//
+// `core/security/ecc/bls12_381.vr` — BLS12-381 elliptic curve constants.
+// =============================================================================
+
+mount core.security.ecc.bls12_381.{
+    FP_SIZE, G1_COMPRESSED_SIZE, G1_UNCOMPRESSED_SIZE,
+    G2_COMPRESSED_SIZE, G2_UNCOMPRESSED_SIZE,
+    GT_SIZE, SCALAR_SIZE, SECRET_KEY_SIZE,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: BLS12-381 canonical sizes
+//
+//   IETF draft-irtf-cfrg-bls-signature §2.1 — sizes per group/field.
+// =============================================================================
+
+@test
+fn test_bls12_381_fp_size_canonical_value() {
+    // 381-bit field element packed in 48 bytes (rounded up).
+    assert_eq(FP_SIZE, 48);
+}
+
+@test
+fn test_bls12_381_g1_compressed_size_canonical_value() {
+    // G1 compressed point: 48 bytes (x coordinate + 3 metadata bits).
+    assert_eq(G1_COMPRESSED_SIZE, 48);
+}
+
+@test
+fn test_bls12_381_g1_uncompressed_size_canonical_value() {
+    // G1 uncompressed: x || y = 48 + 48 = 96 bytes.
+    assert_eq(G1_UNCOMPRESSED_SIZE, 96);
+}
+
+@test
+fn test_bls12_381_g2_compressed_size_canonical_value() {
+    // G2 compressed: 96 bytes (Fp2 element + 3 metadata bits).
+    assert_eq(G2_COMPRESSED_SIZE, 96);
+}
+
+@test
+fn test_bls12_381_g2_uncompressed_size_canonical_value() {
+    // G2 uncompressed: 192 bytes.
+    assert_eq(G2_UNCOMPRESSED_SIZE, 192);
+}
+
+@test
+fn test_bls12_381_gt_size_canonical_value() {
+    // GT element: Fp12 = 12 × 48 = 576 bytes.
+    assert_eq(GT_SIZE, 576);
+}
+
+@test
+fn test_bls12_381_scalar_size_canonical_value() {
+    // Scalar field is 255-bit, encoded in 32 bytes.
+    assert_eq(SCALAR_SIZE, 32);
+}
+
+@test
+fn test_bls12_381_secret_key_size_canonical_value() {
+    // Secret key is a scalar = 32 bytes.
+    assert_eq(SECRET_KEY_SIZE, 32);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_bls12_381_g1_uncompressed_is_twice_compressed() {
+    // Uncompressed adds the y coordinate.
+    assert_eq(G1_UNCOMPRESSED_SIZE, G1_COMPRESSED_SIZE * 2);
+}
+
+@test
+fn test_bls12_381_g2_uncompressed_is_twice_compressed() {
+    assert_eq(G2_UNCOMPRESSED_SIZE, G2_COMPRESSED_SIZE * 2);
+}
+
+@test
+fn test_bls12_381_g2_compressed_is_twice_g1_compressed() {
+    // G2 lives over Fp2 (twice the bit width of G1's Fp).
+    assert_eq(G2_COMPRESSED_SIZE, G1_COMPRESSED_SIZE * 2);
+}
+
+@test
+fn test_bls12_381_g1_compressed_equals_fp_size() {
+    // G1 compressed = Fp element width.
+    assert_eq(G1_COMPRESSED_SIZE, FP_SIZE);
+}
+
+@test
+fn test_bls12_381_gt_is_twelve_fp() {
+    // GT element is Fp12 = 12 × Fp.
+    assert_eq(GT_SIZE, FP_SIZE * 12);
+}
+
+@test
+fn test_bls12_381_scalar_equals_secret_key() {
+    // Secret key is just a scalar.
+    assert_eq(SCALAR_SIZE, SECRET_KEY_SIZE);
+}
+
+@test
+fn test_bls12_381_constants_positive() {
+    assert(FP_SIZE > 0);
+    assert(G1_COMPRESSED_SIZE > 0);
+    assert(GT_SIZE > 0);
+    assert(SCALAR_SIZE > 0);
+}
+
+fn main() {}
