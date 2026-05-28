@@ -1,0 +1,191 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/error/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios — BpfError funneled through Result<T, BpfError>
+// and List<BpfError> aggregation.  Mirrors how the bpf() wrappers
+// surface failures to userspace callers.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.error.BpfError;
+
+// =============================================================================
+// Scenario 1 — Result<Int, BpfError> funnel
+// =============================================================================
+
+fn fake_bpf_call(succeed: Bool) -> Result<Int, BpfError> {
+    if succeed {
+        Ok(42)
+    } else {
+        Err(BpfError.OsError { errno: 1 })
+    }
+}
+
+@test
+fn integration_result_ok_round_trip() {
+    let r = fake_bpf_call(true);
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 42);
+}
+
+@test
+fn integration_result_err_round_trip_preserves_payload() {
+    let r = fake_bpf_call(false);
+    assert(r.is_err());
+    match r {
+        Ok(_) => panic("expected Err"),
+        Err(e) => {
+            match e {
+                BpfError.OsError { errno } => assert_eq(errno, 1),
+                _ => panic("expected OsError"),
+            };
+        },
+    };
+}
+
+// =============================================================================
+// Scenario 2 — Aggregate errors from a batch of operations
+// =============================================================================
+
+fn count_verifier_rejections(errors: List<BpfError>) -> Int {
+    let mut n = 0;
+    let mut i = 0;
+    while i < errors.len() {
+        match errors[i] {
+            BpfError.VerifierRejected { log: _ } => n = n + 1,
+            _ => (),
+        };
+        i = i + 1;
+    }
+    n
+}
+
+@test
+fn integration_count_verifier_rejections_in_mixed_batch() {
+    let mut batch: List<BpfError> = List.new();
+    batch.push(BpfError.OsError { errno: 22 });
+    batch.push(BpfError.VerifierRejected { log: "boom".to_text() });
+    batch.push(BpfError.NotFound);
+    batch.push(BpfError.VerifierRejected { log: "kaboom".to_text() });
+    batch.push(BpfError.UnsupportedHelper(7_u32));
+    assert_eq(count_verifier_rejections(batch), 2);
+}
+
+@test
+fn integration_count_verifier_rejections_in_zero_batch() {
+    let mut batch: List<BpfError> = List.new();
+    batch.push(BpfError.OsError { errno: 22 });
+    batch.push(BpfError.NotFound);
+    assert_eq(count_verifier_rejections(batch), 0);
+}
+
+// =============================================================================
+// Scenario 3 — Error-class dispatch table
+// =============================================================================
+
+type BpfErrorClass is
+    | Permission
+    | Resource
+    | Verifier
+    | Compat
+    | NotFound
+    | Helper
+    | Other;
+
+fn classify_bpf_error(e: &BpfError) -> BpfErrorClass {
+    match e {
+        BpfError.OsError { errno } => {
+            // EPERM=1, EACCES=13 — permission-class
+            if *errno == 1 || *errno == 13 {
+                BpfErrorClass.Permission
+            } else if *errno == 12 || *errno == 24 {
+                // ENOMEM=12, EMFILE=24 — resource-class
+                BpfErrorClass.Resource
+            } else {
+                BpfErrorClass.Other
+            }
+        },
+        BpfError.VerifierRejected { log: _ } => BpfErrorClass.Verifier,
+        BpfError.InvalidAttachType { program: _, attach: _ } => BpfErrorClass.Compat,
+        BpfError.FeatureNotSupported(_) => BpfErrorClass.Compat,
+        BpfError.MapTypeMismatch { expected: _, actual: _ } => BpfErrorClass.Compat,
+        BpfError.SizeMismatch { expected: _, actual: _ } => BpfErrorClass.Compat,
+        BpfError.NotFound => BpfErrorClass.NotFound,
+        BpfError.UnsupportedHelper(_) => BpfErrorClass.Helper,
+    }
+}
+
+@test
+fn integration_classify_eperm_as_permission() {
+    let e = BpfError.OsError { errno: 1 };
+    let c = classify_bpf_error(&e);
+    assert(c is BpfErrorClass.Permission);
+}
+
+@test
+fn integration_classify_eacces_as_permission() {
+    let e = BpfError.OsError { errno: 13 };
+    let c = classify_bpf_error(&e);
+    assert(c is BpfErrorClass.Permission);
+}
+
+@test
+fn integration_classify_enomem_as_resource() {
+    let e = BpfError.OsError { errno: 12 };
+    let c = classify_bpf_error(&e);
+    assert(c is BpfErrorClass.Resource);
+}
+
+@test
+fn integration_classify_verifier_rejected_as_verifier() {
+    let e = BpfError.VerifierRejected { log: "x".to_text() };
+    let c = classify_bpf_error(&e);
+    assert(c is BpfErrorClass.Verifier);
+}
+
+@test
+fn integration_classify_invalid_attach_type_as_compat() {
+    let e = BpfError.InvalidAttachType {
+        program: "Xdp".to_text(),
+        attach: "TraceFentry".to_text(),
+    };
+    let c = classify_bpf_error(&e);
+    assert(c is BpfErrorClass.Compat);
+}
+
+@test
+fn integration_classify_feature_not_supported_as_compat() {
+    let e = BpfError.FeatureNotSupported("BTF".to_text());
+    let c = classify_bpf_error(&e);
+    assert(c is BpfErrorClass.Compat);
+}
+
+@test
+fn integration_classify_size_mismatch_as_compat() {
+    let e = BpfError.SizeMismatch { expected: 8, actual: 4 };
+    let c = classify_bpf_error(&e);
+    assert(c is BpfErrorClass.Compat);
+}
+
+@test
+fn integration_classify_not_found_as_not_found() {
+    let e = BpfError.NotFound;
+    let c = classify_bpf_error(&e);
+    assert(c is BpfErrorClass.NotFound);
+}
+
+@test
+fn integration_classify_unsupported_helper_as_helper() {
+    let e = BpfError.UnsupportedHelper(7_u32);
+    let c = classify_bpf_error(&e);
+    assert(c is BpfErrorClass.Helper);
+}
+
+@test
+fn integration_classify_unknown_errno_as_other() {
+    let e = BpfError.OsError { errno: 999 };
+    let c = classify_bpf_error(&e);
+    assert(c is BpfErrorClass.Other);
+}

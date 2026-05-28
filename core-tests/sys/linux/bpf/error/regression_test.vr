@@ -1,0 +1,23 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/error/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect.  Never delete.
+//
+// No defects pinned yet; this file is the placeholder that lets the
+// runner pick up regressions as they're identified.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.error.BpfError;
+
+// =============================================================================
+// Sentinel — the suite is wired up
+// =============================================================================
+
+@test
+fn regression_module_loads_and_constructs_not_found() {
+    let e = BpfError.NotFound;
+    assert(e is BpfError.NotFound);
+}

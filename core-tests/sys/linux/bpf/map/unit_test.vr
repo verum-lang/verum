@@ -1,0 +1,215 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/map/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.linux.bpf.map` — eBPF map type ADT + descriptor
+// shape.  The kernel-facing CRUD operations (`create_map` / `map_lookup` /
+// `map_update` / `map_delete` / `map_iterate`) cannot run on a non-Linux
+// host — they require the bpf() syscall.  The ADT + descriptor + config
+// surface IS portable and is what we pin here.
+//
+// API surface tested:
+//
+//   Type:    MapType ADT — 30 variants (Hash, Array, …, BloomFilter)
+//            MapConfig record (map_type / key_size / value_size /
+//                              max_entries / name / flags)
+//            MapDescriptor record (fd / map_type / key_size / value_size /
+//                                   max_entries)
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.map.{MapType, MapConfig, MapDescriptor};
+mount core.sys.common.FileDesc;
+
+// =============================================================================
+// Section 1 — MapType variant constructors
+// =============================================================================
+
+@test
+fn test_map_type_hash_constructs() {
+    let t = MapType.Hash;
+    assert(t is MapType.Hash);
+}
+
+@test
+fn test_map_type_array_constructs() {
+    let t = MapType.Array;
+    assert(t is MapType.Array);
+}
+
+@test
+fn test_map_type_lpm_trie_constructs() {
+    let t = MapType.LpmTrie;
+    assert(t is MapType.LpmTrie);
+}
+
+@test
+fn test_map_type_ring_buf_constructs() {
+    let t = MapType.RingBuf;
+    assert(t is MapType.RingBuf);
+}
+
+@test
+fn test_map_type_bloom_filter_constructs() {
+    let t = MapType.BloomFilter;
+    assert(t is MapType.BloomFilter);
+}
+
+@test
+fn test_map_type_devmap_constructs() {
+    let t = MapType.Devmap;
+    assert(t is MapType.Devmap);
+}
+
+@test
+fn test_map_type_sockmap_constructs() {
+    let t = MapType.Sockmap;
+    assert(t is MapType.Sockmap);
+}
+
+@test
+fn test_map_type_xskmap_constructs() {
+    let t = MapType.Xskmap;
+    assert(t is MapType.Xskmap);
+}
+
+@test
+fn test_map_type_queue_constructs() {
+    let t = MapType.Queue;
+    assert(t is MapType.Queue);
+}
+
+@test
+fn test_map_type_stack_constructs() {
+    let t = MapType.Stack;
+    assert(t is MapType.Stack);
+}
+
+@test
+fn test_map_type_perf_event_array_constructs() {
+    let t = MapType.PerfEventArray;
+    assert(t is MapType.PerfEventArray);
+}
+
+@test
+fn test_map_type_percpu_hash_constructs() {
+    let t = MapType.PercpuHash;
+    assert(t is MapType.PercpuHash);
+}
+
+@test
+fn test_map_type_lru_hash_constructs() {
+    let t = MapType.LruHash;
+    assert(t is MapType.LruHash);
+}
+
+@test
+fn test_map_type_array_of_maps_constructs() {
+    let t = MapType.ArrayOfMaps;
+    assert(t is MapType.ArrayOfMaps);
+}
+
+@test
+fn test_map_type_hash_of_maps_constructs() {
+    let t = MapType.HashOfMaps;
+    assert(t is MapType.HashOfMaps);
+}
+
+@test
+fn test_map_type_inode_storage_constructs() {
+    let t = MapType.InodeStorage;
+    assert(t is MapType.InodeStorage);
+}
+
+@test
+fn test_map_type_task_storage_constructs() {
+    let t = MapType.TaskStorage;
+    assert(t is MapType.TaskStorage);
+}
+
+// =============================================================================
+// Section 2 — MapConfig record construction + field round-trip
+// =============================================================================
+
+@test
+fn test_map_config_construction_field_round_trip() {
+    let cfg = MapConfig {
+        map_type: MapType.Hash,
+        key_size: 4_u32,
+        value_size: 8_u32,
+        max_entries: 1024_u32,
+        name: "test_map".to_text(),
+        flags: 0_u32,
+    };
+    assert(cfg.map_type is MapType.Hash);
+    assert_eq(cfg.key_size, 4_u32);
+    assert_eq(cfg.value_size, 8_u32);
+    assert_eq(cfg.max_entries, 1024_u32);
+    assert_eq(cfg.name, "test_map");
+    assert_eq(cfg.flags, 0_u32);
+}
+
+@test
+fn test_map_config_array_with_large_value_size() {
+    let cfg = MapConfig {
+        map_type: MapType.Array,
+        key_size: 4_u32,      // Array maps always use 4-byte index keys
+        value_size: 64_u32,
+        max_entries: 256_u32,
+        name: "perf_counters".to_text(),
+        flags: 0_u32,
+    };
+    assert(cfg.map_type is MapType.Array);
+    assert_eq(cfg.key_size, 4_u32);
+    assert_eq(cfg.value_size, 64_u32);
+}
+
+@test
+fn test_map_config_ring_buf_with_flags() {
+    // RingBuf maps use power-of-two max_entries for the ringbuffer size.
+    let cfg = MapConfig {
+        map_type: MapType.RingBuf,
+        key_size: 0_u32,
+        value_size: 0_u32,
+        max_entries: 4096_u32,
+        name: "events".to_text(),
+        flags: 0x4_u32,       // BPF_F_MMAPABLE
+    };
+    assert_eq(cfg.max_entries, 4096_u32);
+    assert_eq(cfg.flags, 0x4_u32);
+}
+
+// =============================================================================
+// Section 3 — MapDescriptor record construction + field round-trip
+// =============================================================================
+
+@test
+fn test_map_descriptor_construction_field_round_trip() {
+    let d = MapDescriptor {
+        fd: FileDesc(7),
+        map_type: MapType.LpmTrie,
+        key_size: 8_u32,
+        value_size: 4_u32,
+        max_entries: 1_000_000_u32,
+    };
+    assert_eq(d.fd.raw(), 7);
+    assert(d.map_type is MapType.LpmTrie);
+    assert_eq(d.key_size, 8_u32);
+    assert_eq(d.value_size, 4_u32);
+    assert_eq(d.max_entries, 1_000_000_u32);
+}
+
+@test
+fn test_map_descriptor_preserves_map_type_through_field_access() {
+    let d = MapDescriptor {
+        fd: FileDesc(0),
+        map_type: MapType.Sockmap,
+        key_size: 4_u32,
+        value_size: 4_u32,
+        max_entries: 64_u32,
+    };
+    match d.map_type {
+        MapType.Sockmap => (),
+        _ => panic("map_type field drifted through record construction"),
+    };
+}

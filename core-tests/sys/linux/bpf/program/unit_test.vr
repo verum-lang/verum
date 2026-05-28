@@ -1,0 +1,242 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/program/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.linux.bpf.program` — eBPF program loader API.
+// Pins ProgramType / AttachType ADT surfaces and the
+// ProgramBytecode / ProgramDescriptor / Link record shapes.
+//
+// The kernel-facing operations (`load_program`, `attach_*`) can only run
+// on a Linux host with the BPF subsystem; they're deferred.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.program.{
+    ProgramType, AttachType,
+    ProgramBytecode, ProgramDescriptor, Link,
+};
+mount core.sys.common.FileDesc;
+
+// =============================================================================
+// Section 1 — ProgramType variant constructors
+// =============================================================================
+
+@test
+fn test_program_type_unspec_constructs() {
+    let t = ProgramType.Unspec;
+    assert(t is ProgramType.Unspec);
+}
+
+@test
+fn test_program_type_socket_filter_constructs() {
+    let t = ProgramType.SocketFilter;
+    assert(t is ProgramType.SocketFilter);
+}
+
+@test
+fn test_program_type_kprobe_constructs() {
+    let t = ProgramType.Kprobe;
+    assert(t is ProgramType.Kprobe);
+}
+
+@test
+fn test_program_type_xdp_constructs() {
+    let t = ProgramType.Xdp;
+    assert(t is ProgramType.Xdp);
+}
+
+@test
+fn test_program_type_tracepoint_constructs() {
+    let t = ProgramType.Tracepoint;
+    assert(t is ProgramType.Tracepoint);
+}
+
+@test
+fn test_program_type_sched_cls_constructs() {
+    let t = ProgramType.SchedCls;
+    assert(t is ProgramType.SchedCls);
+}
+
+@test
+fn test_program_type_sched_act_constructs() {
+    let t = ProgramType.SchedAct;
+    assert(t is ProgramType.SchedAct);
+}
+
+@test
+fn test_program_type_cgroup_skb_constructs() {
+    let t = ProgramType.CgroupSkb;
+    assert(t is ProgramType.CgroupSkb);
+}
+
+@test
+fn test_program_type_raw_tracepoint_constructs() {
+    let t = ProgramType.RawTracepoint;
+    assert(t is ProgramType.RawTracepoint);
+}
+
+@test
+fn test_program_type_struct_ops_constructs() {
+    let t = ProgramType.StructOps;
+    assert(t is ProgramType.StructOps);
+}
+
+@test
+fn test_program_type_lsm_constructs() {
+    let t = ProgramType.Lsm;
+    assert(t is ProgramType.Lsm);
+}
+
+@test
+fn test_program_type_sk_lookup_constructs() {
+    let t = ProgramType.SkLookup;
+    assert(t is ProgramType.SkLookup);
+}
+
+@test
+fn test_program_type_syscall_constructs() {
+    let t = ProgramType.Syscall;
+    assert(t is ProgramType.Syscall);
+}
+
+// =============================================================================
+// Section 2 — AttachType variant constructors
+// =============================================================================
+
+@test
+fn test_attach_type_cgroup_inet_ingress_constructs() {
+    let t = AttachType.CgroupInetIngress;
+    assert(t is AttachType.CgroupInetIngress);
+}
+
+@test
+fn test_attach_type_cgroup_inet_egress_constructs() {
+    let t = AttachType.CgroupInetEgress;
+    assert(t is AttachType.CgroupInetEgress);
+}
+
+@test
+fn test_attach_type_trace_fentry_constructs() {
+    let t = AttachType.TraceFentry;
+    assert(t is AttachType.TraceFentry);
+}
+
+@test
+fn test_attach_type_trace_fexit_constructs() {
+    let t = AttachType.TraceFexit;
+    assert(t is AttachType.TraceFexit);
+}
+
+@test
+fn test_attach_type_xdp_devmap_constructs() {
+    let t = AttachType.XdpDevmap;
+    assert(t is AttachType.XdpDevmap);
+}
+
+@test
+fn test_attach_type_xdp_cpumap_constructs() {
+    let t = AttachType.XdpCpumap;
+    assert(t is AttachType.XdpCpumap);
+}
+
+@test
+fn test_attach_type_perf_event_constructs() {
+    let t = AttachType.PerfEvent;
+    assert(t is AttachType.PerfEvent);
+}
+
+@test
+fn test_attach_type_modify_return_constructs() {
+    let t = AttachType.ModifyReturn;
+    assert(t is AttachType.ModifyReturn);
+}
+
+@test
+fn test_attach_type_lsm_mac_constructs() {
+    let t = AttachType.LsmMac;
+    assert(t is AttachType.LsmMac);
+}
+
+// =============================================================================
+// Section 3 — ProgramBytecode record shape
+// =============================================================================
+
+@test
+fn test_program_bytecode_construction_field_round_trip() {
+    let mut insns: List<Byte> = List.new();
+    // BPF_MOV64_IMM(BPF_REG_0, 0) — minimal "return 0" program
+    // followed by BPF_EXIT_INSN. Each instruction is 8 bytes.
+    let mut i = 0;
+    while i < 16 {
+        insns.push(0_u8);
+        i = i + 1;
+    }
+    let bc = ProgramBytecode {
+        program_type: ProgramType.Xdp,
+        insns: insns,
+        license: "GPL".to_text(),
+        kernel_version: 0_u32,
+        name: "drop_all".to_text(),
+    };
+    assert(bc.program_type is ProgramType.Xdp);
+    assert_eq(bc.insns.len(), 16);
+    assert_eq(bc.license, "GPL");
+    assert_eq(bc.kernel_version, 0_u32);
+    assert_eq(bc.name, "drop_all");
+}
+
+@test
+fn test_program_bytecode_accepts_dual_license() {
+    let insns: List<Byte> = List.new();
+    let bc = ProgramBytecode {
+        program_type: ProgramType.SocketFilter,
+        insns: insns,
+        license: "dual BSD/GPL".to_text(),
+        kernel_version: 0_u32,
+        name: "filter".to_text(),
+    };
+    assert_eq(bc.license, "dual BSD/GPL");
+}
+
+// =============================================================================
+// Section 4 — ProgramDescriptor record shape
+// =============================================================================
+
+@test
+fn test_program_descriptor_construction_field_round_trip() {
+    let d = ProgramDescriptor {
+        fd: FileDesc(99),
+        program_type: ProgramType.Tracepoint,
+        name: "syscall_enter".to_text(),
+    };
+    assert_eq(d.fd.raw(), 99);
+    assert(d.program_type is ProgramType.Tracepoint);
+    assert_eq(d.name, "syscall_enter");
+}
+
+// =============================================================================
+// Section 5 — Link record shape (attached program handle)
+// =============================================================================
+
+@test
+fn test_link_construction_field_round_trip() {
+    let link = Link {
+        fd: FileDesc(101),
+        program_fd: FileDesc(99),
+        attach_type: AttachType.XdpDevmap,
+    };
+    assert_eq(link.fd.raw(), 101);
+    assert_eq(link.program_fd.raw(), 99);
+    assert(link.attach_type is AttachType.XdpDevmap);
+}
+
+@test
+fn test_link_distinguishes_link_fd_from_program_fd() {
+    let link = Link {
+        fd: FileDesc(7),
+        program_fd: FileDesc(13),
+        attach_type: AttachType.CgroupSockOps,
+    };
+    assert(link.fd.raw() != link.program_fd.raw());
+}

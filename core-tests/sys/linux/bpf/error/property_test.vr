@@ -1,0 +1,201 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/error/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core.sys.linux.bpf.error`.
+//
+// Properties exercised:
+//
+//   * Eq is reflexive — `e == e` for every variant.
+//   * Eq is symmetric — `a == b ⇒ b == a`.
+//   * Eq distinguishes payload — `OsError { errno: 1 } != OsError { errno: 2 }`
+//     across every payload-bearing variant.
+//   * Cross-variant inequality — every documented variant differs from
+//     every other documented variant (no two distinct variants compare
+//     equal regardless of payload).
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.error.BpfError;
+
+// =============================================================================
+// Property 1 — Eq reflexivity
+// =============================================================================
+
+@test
+fn prop_eq_reflexive_os_error() {
+    let e = BpfError.OsError { errno: 22 };
+    assert(e == e);
+}
+
+@test
+fn prop_eq_reflexive_verifier_rejected() {
+    let e = BpfError.VerifierRejected { log: "boom".to_text() };
+    assert(e == e);
+}
+
+@test
+fn prop_eq_reflexive_invalid_attach_type() {
+    let e = BpfError.InvalidAttachType {
+        program: "Xdp".to_text(),
+        attach: "TraceFentry".to_text(),
+    };
+    assert(e == e);
+}
+
+@test
+fn prop_eq_reflexive_feature_not_supported() {
+    let e = BpfError.FeatureNotSupported("BTF".to_text());
+    assert(e == e);
+}
+
+@test
+fn prop_eq_reflexive_map_type_mismatch() {
+    let e = BpfError.MapTypeMismatch {
+        expected: "Hash".to_text(),
+        actual: "Array".to_text(),
+    };
+    assert(e == e);
+}
+
+@test
+fn prop_eq_reflexive_size_mismatch() {
+    let e = BpfError.SizeMismatch { expected: 8, actual: 4 };
+    assert(e == e);
+}
+
+@test
+fn prop_eq_reflexive_not_found() {
+    let e = BpfError.NotFound;
+    assert(e == e);
+}
+
+@test
+fn prop_eq_reflexive_unsupported_helper() {
+    let e = BpfError.UnsupportedHelper(7_u32);
+    assert(e == e);
+}
+
+// =============================================================================
+// Property 2 — Eq symmetry
+// =============================================================================
+
+@test
+fn prop_eq_symmetric_os_error() {
+    let a = BpfError.OsError { errno: 13 };
+    let b = BpfError.OsError { errno: 13 };
+    assert(a == b);
+    assert(b == a);
+}
+
+@test
+fn prop_eq_symmetric_size_mismatch() {
+    let a = BpfError.SizeMismatch { expected: 8, actual: 4 };
+    let b = BpfError.SizeMismatch { expected: 8, actual: 4 };
+    assert(a == b);
+    assert(b == a);
+}
+
+@test
+fn prop_eq_symmetric_unsupported_helper() {
+    let a = BpfError.UnsupportedHelper(99_u32);
+    let b = BpfError.UnsupportedHelper(99_u32);
+    assert(a == b);
+    assert(b == a);
+}
+
+@test
+fn prop_eq_symmetric_not_found_against_self() {
+    let a = BpfError.NotFound;
+    let b = BpfError.NotFound;
+    assert(a == b);
+    assert(b == a);
+}
+
+// =============================================================================
+// Property 3 — Payload sensitivity
+// =============================================================================
+
+@test
+fn prop_os_error_distinguishes_different_errno() {
+    let a = BpfError.OsError { errno: 22 };
+    let b = BpfError.OsError { errno: 23 };
+    assert(a != b);
+}
+
+@test
+fn prop_unsupported_helper_distinguishes_different_id() {
+    let a = BpfError.UnsupportedHelper(1_u32);
+    let b = BpfError.UnsupportedHelper(2_u32);
+    assert(a != b);
+}
+
+@test
+fn prop_size_mismatch_distinguishes_either_field() {
+    let a = BpfError.SizeMismatch { expected: 8, actual: 4 };
+    let b = BpfError.SizeMismatch { expected: 16, actual: 4 };
+    let c = BpfError.SizeMismatch { expected: 8, actual: 5 };
+    assert(a != b);
+    assert(a != c);
+    assert(b != c);
+}
+
+@test
+fn prop_feature_not_supported_distinguishes_different_text() {
+    let a = BpfError.FeatureNotSupported("BTF".to_text());
+    let b = BpfError.FeatureNotSupported("BPF_F_INNER_MAP".to_text());
+    assert(a != b);
+}
+
+// =============================================================================
+// Property 4 — Cross-variant inequality
+// =============================================================================
+
+@test
+fn prop_os_error_inequal_to_not_found() {
+    let a = BpfError.OsError { errno: 1 };
+    let b = BpfError.NotFound;
+    assert(a != b);
+}
+
+@test
+fn prop_os_error_inequal_to_unsupported_helper() {
+    let a = BpfError.OsError { errno: 1 };
+    let b = BpfError.UnsupportedHelper(1_u32);
+    assert(a != b);
+}
+
+@test
+fn prop_os_error_inequal_to_size_mismatch() {
+    let a = BpfError.OsError { errno: 1 };
+    let b = BpfError.SizeMismatch { expected: 1, actual: 1 };
+    assert(a != b);
+}
+
+@test
+fn prop_verifier_rejected_inequal_to_feature_not_supported() {
+    let a = BpfError.VerifierRejected { log: "boom".to_text() };
+    let b = BpfError.FeatureNotSupported("boom".to_text());
+    assert(a != b);
+}
+
+@test
+fn prop_invalid_attach_type_inequal_to_map_type_mismatch() {
+    let a = BpfError.InvalidAttachType {
+        program: "p".to_text(),
+        attach: "a".to_text(),
+    };
+    let b = BpfError.MapTypeMismatch {
+        expected: "p".to_text(),
+        actual: "a".to_text(),
+    };
+    assert(a != b);
+}
+
+@test
+fn prop_not_found_inequal_to_unsupported_helper() {
+    let a = BpfError.NotFound;
+    let b = BpfError.UnsupportedHelper(0_u32);
+    assert(a != b);
+}
