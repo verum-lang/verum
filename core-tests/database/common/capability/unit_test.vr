@@ -1,0 +1,130 @@
+// =============================================================================
+// core-tests/database/common/capability/unit_test.vr
+// =============================================================================
+//
+// `core/database/common/capability.vr` — Spindle capability flags.
+// =============================================================================
+
+mount core.database.common.capability.{
+    CAP_READ, CAP_WRITE, CAP_TX, CAP_ADMIN,
+    CAP_REPL, CAP_NOTIFY, CAP_COPY, CAP_UNSAFE,
+    CapabilitySet,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CAP_* canonical bit-flag values
+//
+//   Single-bit flags arranged as a tight power-of-two pattern so that
+//   `mask = read|write|tx|admin|repl|notify|copy|unsafe` fits in 8 bits.
+// =============================================================================
+
+@test
+fn test_cap_read_canonical_value() {
+    assert_eq(CAP_READ, 0x0001);
+}
+
+@test
+fn test_cap_write_canonical_value() {
+    assert_eq(CAP_WRITE, 0x0002);
+}
+
+@test
+fn test_cap_tx_canonical_value() {
+    assert_eq(CAP_TX, 0x0004);
+}
+
+@test
+fn test_cap_admin_canonical_value() {
+    assert_eq(CAP_ADMIN, 0x0008);
+}
+
+@test
+fn test_cap_repl_canonical_value() {
+    assert_eq(CAP_REPL, 0x0010);
+}
+
+@test
+fn test_cap_notify_canonical_value() {
+    assert_eq(CAP_NOTIFY, 0x0020);
+}
+
+@test
+fn test_cap_copy_canonical_value() {
+    assert_eq(CAP_COPY, 0x0040);
+}
+
+@test
+fn test_cap_unsafe_canonical_value() {
+    assert_eq(CAP_UNSAFE, 0x0080);
+}
+
+// =============================================================================
+// Section 2: Bit-flag pairwise distinctness
+//
+//   No two capability bits share a value — overlap would silently merge
+//   distinct grants.
+// =============================================================================
+
+@test
+fn test_cap_bits_pairwise_distinct() {
+    assert(CAP_READ != CAP_WRITE);
+    assert(CAP_WRITE != CAP_TX);
+    assert(CAP_TX != CAP_ADMIN);
+    assert(CAP_ADMIN != CAP_REPL);
+    assert(CAP_REPL != CAP_NOTIFY);
+    assert(CAP_NOTIFY != CAP_COPY);
+    assert(CAP_COPY != CAP_UNSAFE);
+}
+
+@test
+fn test_cap_bits_no_overlap() {
+    // (a & b) == 0 for distinct single-bit values.
+    assert_eq(CAP_READ & CAP_WRITE, 0);
+    assert_eq(CAP_READ & CAP_TX, 0);
+    assert_eq(CAP_READ & CAP_ADMIN, 0);
+    assert_eq(CAP_WRITE & CAP_TX, 0);
+    assert_eq(CAP_REPL & CAP_NOTIFY, 0);
+}
+
+@test
+fn test_cap_full_mask_eq_all_or() {
+    // All 8 capabilities OR'd == 0xFF == 255.
+    let full = CAP_READ | CAP_WRITE | CAP_TX | CAP_ADMIN |
+               CAP_REPL | CAP_NOTIFY | CAP_COPY | CAP_UNSAFE;
+    assert_eq(full, 0xFF);
+}
+
+@test
+fn test_cap_widths_within_one_byte() {
+    // Highest bit is 0x80; full mask fits in one byte.
+    assert(CAP_UNSAFE <= 0xFF);
+    assert(CAP_READ > 0);
+}
+
+// =============================================================================
+// Section 3: CapabilitySet record direct construction
+// =============================================================================
+
+@test
+fn test_capability_set_empty_mask_zero() {
+    let s: CapabilitySet = CapabilitySet { mask: 0 };
+    assert_eq(s.mask, 0);
+}
+
+@test
+fn test_capability_set_read_only_mask() {
+    let s: CapabilitySet = CapabilitySet { mask: CAP_READ };
+    assert_eq(s.mask, CAP_READ);
+}
+
+@test
+fn test_capability_set_admin_compound_mask() {
+    let s: CapabilitySet = CapabilitySet {
+        mask: CAP_READ | CAP_WRITE | CAP_TX | CAP_ADMIN,
+    };
+    assert_eq(s.mask, 0x000F);   // 0001 + 0002 + 0004 + 0008
+}
+
+fn main() {}
