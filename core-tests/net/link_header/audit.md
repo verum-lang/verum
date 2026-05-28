@@ -27,6 +27,10 @@ None. Pure-Verum byte arithmetic.
 
 ## 3. Language-implementation gaps
 
+> **Defect-class catalogue**: LINKHDR-1 spans
+> [EXTSLICE-1](../../../internal/website/docs/stdlib/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv)
+> + [BSTRLIT-1](../../../internal/website/docs/stdlib/defect-class-catalogue.md#2-bliteral-byte-string-literal-sigsegv).
+
 ### §3.1 LINKHDR-1 — `parse` / `find_rel` / `format_link_header` SIGSEGV (CLOSED 2026-05-28)
 
 **Pre-fix trigger**: precompile-cascade SIGSEGV in LLVM SmallVector

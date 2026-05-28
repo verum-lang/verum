@@ -30,6 +30,13 @@ only used internally.
 
 ## 3. Language-implementation gaps
 
+> **Defect-class catalogue**: URL-1 / URL-7 was the
+> [Text.slice alias-via-raw-pointer](../../../internal/website/docs/stdlib/defect-class-catalogue.md)
+> defect — the stdlib-side rewrite (eager-copy walk) is its own pattern.
+> URL-8 is the
+> [QUALRESULT-1](../../../internal/website/docs/stdlib/defect-class-catalogue.md#4-qualified-resultokresulterr-match-arms)
+> qualified-arm class.
+
 ### §3.1 URL-1 / URL-7 — Text.slice alias-via-raw-pointer (CLOSED 2026-05-28)
 
 **Pre-fix trigger**: A `Text` value obtained via `Text.slice(start,
