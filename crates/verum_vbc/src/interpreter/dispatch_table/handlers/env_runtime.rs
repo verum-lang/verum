@@ -366,22 +366,24 @@ fn intercept_arg(
     };
     let argv: Vec<String> = std::env::args().collect();
     // `arg(idx) -> Maybe<Text>` per `core/base/env.vr:156` — out-of-bounds
-    // returns `Maybe.None`, in-bounds returns `Maybe.Some(text)`.  Pre-fix
-    // the interceptor returned a bare Text Value (empty string for OOB)
-    // which is structurally incompatible with `Maybe<Text>`.  Attempted
-    // fix via `make_none_value` / `make_some_value` broke previously-
-    // passing tests (`regression_arg_negative_index_is_none` /
-    // `regression_arg_large_index_is_none`) — those tests called
-    // `arg(-1).is_none()` and PASSED pre-fix, meaning the bare-Text
-    // return was being implicitly coerced or routed through the
-    // Verum body path that DOES return Maybe.  The full fix needs
-    // investigation of how the intercept's return value gets typed
-    // at the call site.  Keeping the pre-fix behaviour for now;
-    // re-pinned as audit § A regression for base/env.
+    // returns `Maybe.None`, in-bounds returns `Maybe.Some(text)`. The
+    // pre-fix interceptor returned a bare `Text` Value (empty string for
+    // OOB), which is structurally incompatible with `Maybe<Text>` and
+    // surfaced at every consumer site that asked `.is_none()` / `.unwrap()`
+    // on the result — `method 'Maybe.is_none' not found on receiver of
+    // runtime kind 'Text<small>'`. The architectural rule: every
+    // intercept whose Verum-side signature returns `Maybe<T>` MUST wrap
+    // its result in the Maybe variant (`tag=1` for Some, `tag=0` for None)
+    // — mirrors `intercept_var_opt` discipline above. Regression-pinned
+    // at `core-tests/base/env/regression_test.vr::
+    // regression_arg_negative_index_is_none` /
+    // `regression_arg_large_index_is_none`. CLOSED 2026-05-28 — replaces
+    // the bare-Text identity behaviour with proper Maybe-variant wrap.
     if idx < 0 || (idx as usize) >= argv.len() {
-        return Ok(Some(alloc_string_value(state, "")?));
+        return Ok(Some(wrap_in_variant(state, "Maybe", 0, &[])?));
     }
-    Ok(Some(alloc_string_value(state, &argv[idx as usize])?))
+    let text = alloc_string_value(state, &argv[idx as usize])?;
+    Ok(Some(wrap_in_variant(state, "Maybe", 1, &[text])?))
 }
 
 /// Allocate a `List<Text>` Verum value with the given Value entries
