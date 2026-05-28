@@ -192,7 +192,9 @@ implement BufRead for StdinLock {
             match sys_read(fd, &mut tmp) {
                 Result.Ok(n) => {
                     if n > 0 {
-                        self.buffer.extend_from_slice(&tmp[..n]);
+                        // EXTSLICE-1 discipline: byte-by-byte push.
+                        let mut __i = 0;
+                        while __i < n { self.buffer.push(tmp[__i]); __i = __i + 1; }
                     }
                 }
                 Result.Err(e) => return Result.Err(StreamError.from_raw_os_error(e.code)),

@@ -469,7 +469,9 @@ public type Read is protocol {
             if n == 0 {
                 break;
             }
-            buf.extend_from_slice(&tmp[..n]);
+            // EXTSLICE-1 discipline: byte-by-byte push.
+            let mut __i = 0;
+            while __i < n { buf.push(tmp[__i]); __i = __i + 1; }
             total = total + n;
         }
         Result.Ok(total)

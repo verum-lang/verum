@@ -749,7 +749,10 @@ fn read_all_from_fd(handle_raw: Int) -> List<Byte> {
             break;
         }
 
-        result.extend_from_slice(&buf[..(bytes_read as Int)]);
+        // EXTSLICE-1 discipline: byte-by-byte push.
+        let __n = bytes_read as Int;
+        let mut __i = 0;
+        while __i < __n { result.push(buf[__i]); __i = __i + 1; }
     }
 
     result

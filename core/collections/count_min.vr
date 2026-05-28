@@ -231,8 +231,10 @@ implement CountMinSketch {
         let mut out: List<Int> = [];
         let mut counter: UInt32 = 0_u32;
         while out.len() < self.depth {
+            // EXTSLICE-1 discipline: byte-by-byte push.
             let mut input: List<Byte> = List.with_capacity(item.len() + 4);
-            input.extend_from_slice(item);
+            let mut __i = 0;
+            while __i < item.len() { input.push(item[__i]); __i = __i + 1; }
             input.push(((counter >> 24_u32) & 0xFF_u32) as Byte);
             input.push(((counter >> 16_u32) & 0xFF_u32) as Byte);
             input.push(((counter >>  8_u32) & 0xFF_u32) as Byte);
