@@ -254,8 +254,8 @@ public fn range_intersect(a: &VersionRange, b: &VersionRange) -> VersionRange {
         let mut j: Int = 0;
         while j < b.intervals.len() {
             match interval_intersect(&a.intervals[i], &b.intervals[j]) {
-                Some(iv) => out.push(iv),
-                None => {}
+                Maybe.Some(iv) => out.push(iv),
+                Maybe.None => {}
             }
             j = j + 1;
         }
@@ -310,7 +310,7 @@ public fn range_subtract(a: &VersionRange, b: &VersionRange) -> VersionRange {
 fn interval_intersect(a: &Interval, b: &Interval) -> Maybe<Interval> {
     let lo = bound_lo_max(&a.lo, &b.lo);
     let hi = bound_hi_min(&a.hi, &b.hi);
-    if interval_is_degenerate(&lo, &hi) { None } else { Some(Interval { lo, hi }) }
+    if interval_is_degenerate(&lo, &hi) { Maybe.None } else { Maybe.Some(Interval { lo, hi }) }
 }
 
 fn bound_lo_max(a: &Bound, b: &Bound) -> Bound {
@@ -590,11 +590,11 @@ fn range_is_subset(a: &VersionRange, b: &VersionRange) -> Bool {
 
 /// Conjunction: a AND b. Returns `None` if a, b are over different packages.
 pub fn term_intersect(a: &Term, b: &Term) -> Maybe<Term> {
-    if a.package != b.package { return None; }
+    if a.package != b.package { return Maybe.None; }
     let a_set = if a.positive { a.range.clone() } else { range_complement(&a.range) };
     let b_set = if b.positive { b.range.clone() } else { range_complement(&b.range) };
     let intersection = range_intersect(&a_set, &b_set);
-    Some(Term { package: a.package.clone(), range: intersection, positive: true })
+    Maybe.Some(Term { package: a.package.clone(), range: intersection, positive: true })
 }
 
 /// Convert the term to a "covered set" view (the set of allowed versions).
@@ -714,22 +714,22 @@ public fn partial_solution_backtrack(sol: &mut PartialSolution, target_level: In
 /// derived/decided about it. Returns `None` if the package has no
 /// assignments yet.
 public fn partial_solution_term(sol: &PartialSolution, pkg: &PackageName) -> Maybe<Term> {
-    let mut acc: Maybe<Term> = None;
+    let mut acc: Maybe<Term> = Maybe.None;
     let mut i: Int = 0;
     while i < sol.assignments.len() {
         let t = match &sol.assignments[i] {
             Assignment.Decision { package, version, .. } => {
-                if package == pkg { Some(term_positive(package.clone(), range_exact(version.clone()))) } else { None }
+                if package == pkg { Maybe.Some(term_positive(package.clone(), range_exact(version.clone()))) } else { Maybe.None }
             }
             Assignment.Derivation { term, .. } => {
-                if &term.package == pkg { Some(term.clone()) } else { None }
+                if &term.package == pkg { Maybe.Some(term.clone()) } else { Maybe.None }
             }
         };
         match (acc, t) {
-            (Some(a), Some(b)) => acc = term_intersect(&a, &b),
-            (None, Some(b))    => acc = Some(b),
-            (Some(a), None)    => acc = Some(a),
-            (None, None)       => {}
+            (Maybe.Some(a), Maybe.Some(b)) => acc = term_intersect(&a, &b),
+            (Maybe.None, Maybe.Some(b))    => acc = Maybe.Some(b),
+            (Maybe.Some(a), Maybe.None)    => acc = Maybe.Some(a),
+            (Maybe.None, Maybe.None)       => {}
         }
         i = i + 1;
     }
@@ -738,8 +738,8 @@ public fn partial_solution_term(sol: &PartialSolution, pkg: &PackageName) -> May
 
 public fn partial_solution_satisfies(sol: &PartialSolution, t: &Term) -> Bool {
     match partial_solution_term(sol, &t.package) {
-        Some(acc) => term_satisfies(&acc, t),
-        None      => false,
+        Maybe.Some(acc) => term_satisfies(&acc, t),
+        Maybe.None      => false,
     }
 }
 
@@ -821,7 +821,7 @@ public type DependencyProvider is protocol {
     /// Optional version preference: given a sorted (descending) list
     /// of allowed versions, pick one to try. Default: highest.
     fn choose_version(&self, package: &PackageName, allowed: &List<SemVer>) -> Maybe<SemVer> {
-        if allowed.is_empty() { None } else { Some(allowed[0].clone()) }
+        if allowed.is_empty() { Maybe.None } else { Maybe.Some(allowed[0].clone()) }
     }
 };
 
@@ -901,10 +901,10 @@ public async fn resolve<P: DependencyProvider>(
             .map_err(|reason| ResolveError.NoSolution { explanation: reason })?;
 
         match choose_next_package(&mut solver, provider).await {
-            Ok(Some((pkg, term))) => {
+            Ok(Maybe.Some((pkg, term))) => {
                 match make_decision(&mut solver, provider, pkg.clone(), &term).await? {
-                    Some(_chosen) => { next_package = pkg; }
-                    None => {
+                    Maybe.Some(_chosen) => { next_package = pkg; }
+                    Maybe.None => {
                         // No version satisfies; an incompatibility was
                         // recorded — restart unit propagation with the
                         // same package.
@@ -912,7 +912,7 @@ public async fn resolve<P: DependencyProvider>(
                     }
                 }
             }
-            Ok(None) => {
+            Ok(Maybe.None) => {
                 // Done — every package has a decision.
                 return Ok(extract_lockfile(&solver));
             }
