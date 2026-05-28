@@ -126,15 +126,15 @@ public fn render_usage_line(cmd: &CommandSpec) -> Text {
 fn write_header(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
     style_bold(b, &cmd.name, style);
     match &cmd.version {
-        Some(v) => { b.push(" "); b.push(v); },
-        None => {},
+        Maybe.Some(v) => { b.push(" "); b.push(v); },
+        Maybe.None => {},
     }
     b.push("\n");
     b.push(&cmd.about);
     b.push("\n\n");
     match &cmd.long_about {
-        Some(la) => { b.push(la); b.push("\n\n"); },
-        None => {},
+        Maybe.Some(la) => { b.push(la); b.push("\n\n"); },
+        Maybe.None => {},
     }
 }
 
@@ -164,16 +164,16 @@ fn write_args(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
         b.push("  ");
         b.push(&a.help);
         match &a.refinement {
-            Some(r) => {
+            Maybe.Some(r) => {
                 b.push("  [");
                 b.push(&r.expression);
                 b.push("]");
             },
-            None => {},
+            Maybe.None => {},
         }
         match &a.env_fallback {
-            Some(env) => { b.push("  [env: "); b.push(env); b.push("]"); },
-            None => {},
+            Maybe.Some(env) => { b.push("  [env: "); b.push(env); b.push("]"); },
+            Maybe.None => {},
         }
         b.push("\n");
         i = i + 1;
@@ -201,24 +201,24 @@ fn write_flags(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
         b.push("  ");
         b.push(&f.help);
         match &f.refinement {
-            Some(r) => {
+            Maybe.Some(r) => {
                 b.push("  [");
                 b.push(&r.expression);
                 b.push("]");
             },
-            None => {},
+            Maybe.None => {},
         }
         match &f.env_fallback {
-            Some(env) => { b.push("  [env: "); b.push(env); b.push("]"); },
-            None => {},
+            Maybe.Some(env) => { b.push("  [env: "); b.push(env); b.push("]"); },
+            Maybe.None => {},
         }
         match &f.default_text {
-            Some(d) => {
+            Maybe.Some(d) => {
                 b.push("  [default: ");
                 b.push(d);
                 b.push("]");
             },
-            None => {},
+            Maybe.None => {},
         }
         b.push("\n");
         i = i + 1;
@@ -291,8 +291,8 @@ fn write_examples(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
 
 fn write_after_help(b: &mut TextBuilder, cmd: &CommandSpec, _style: &HelpStyle) {
     match &cmd.after_help {
-        Some(a) => { b.push(a); b.push("\n"); },
-        None => {},
+        Maybe.Some(a) => { b.push(a); b.push("\n"); },
+        Maybe.None => {},
     }
 }
 
@@ -302,8 +302,8 @@ fn write_after_help(b: &mut TextBuilder, cmd: &CommandSpec, _style: &HelpStyle) 
 
 fn format_arg_placeholder(a: &ArgSpec) -> Text {
     let p = match &a.placeholder {
-        Some(p) => p.clone(),
-        None => a.name.to_uppercase(),
+        Maybe.Some(p) => p.clone(),
+        Maybe.None => a.name.to_uppercase(),
     };
     match a.arity {
         Arity.Exactly(1) => Text.from(f"<{p}>"),
@@ -318,19 +318,19 @@ fn format_arg_placeholder(a: &ArgSpec) -> Text {
 fn format_flag_label(f: &FlagSpec) -> Text {
     let mut b = TextBuilder.new();
     match f.short {
-        Some(c) => { b.push("-"); b.push(&Text.from(f"{c}")); b.push(", "); },
-        None => { b.push("    "); },
+        Maybe.Some(c) => { b.push("-"); b.push(&Text.from(f"{c}")); b.push(", "); },
+        Maybe.None => { b.push("    "); },
     }
     match &f.long {
-        Some(l) => { b.push("--"); b.push(l); },
-        None => {},
+        Maybe.Some(l) => { b.push("--"); b.push(l); },
+        Maybe.None => {},
     }
     if !f.arity.is_switch() {
         let placeholder = match &f.placeholder {
-            Some(p) => p.clone(),
-            None => match &f.long {
-                Some(l) => l.to_uppercase(),
-                None => "VALUE".to_text(),
+            Maybe.Some(p) => p.clone(),
+            Maybe.None => match &f.long {
+                Maybe.Some(l) => l.to_uppercase(),
+                Maybe.None => "VALUE".to_text(),
             },
         };
         b.push(" <");
