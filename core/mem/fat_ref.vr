@@ -327,7 +327,7 @@ implement<T> FatRef<T> {
     @inline
     public fn validate(&self) -> Result<(), UseAfterFreeError> {
         if self.is_null() {
-            return Err(UseAfterFreeError.null_pointer("FatRef"));
+            return Result.Err(UseAfterFreeError.null_pointer("FatRef"));
         }
 
         // Get base pointer for validation
@@ -338,10 +338,10 @@ implement<T> FatRef<T> {
             let (actual_gen, actual_epoch) = header.load_generation_epoch_fast();
 
             if self.generation == actual_gen && self.epoch() == actual_epoch {
-                return Ok(());
+                return Result.Ok(());
             }
 
-            Err(UseAfterFreeError.new(
+            Result.Err(UseAfterFreeError.new(
                 self.generation,
                 actual_gen,
                 self.epoch(),
@@ -355,7 +355,7 @@ implement<T> FatRef<T> {
     @inline
     public unsafe fn validate_fast(&self) -> Result<(), UseAfterFreeError> {
         if self.is_null() {
-            return Err(UseAfterFreeError.null_pointer("FatRef"));
+            return Result.Err(UseAfterFreeError.null_pointer("FatRef"));
         }
 
         let base = self.base_ptr();
@@ -363,10 +363,10 @@ implement<T> FatRef<T> {
         let (actual_gen, actual_epoch) = header.load_generation_epoch_combined();
 
         if self.generation == actual_gen && self.epoch() == actual_epoch {
-            return Ok(());
+            return Result.Ok(());
         }
 
-        Err(UseAfterFreeError.new(
+        Result.Err(UseAfterFreeError.new(
             self.generation,
             actual_gen,
             self.epoch(),
@@ -390,9 +390,9 @@ implement<T> FatRef<T> {
             OptimizingJit => unsafe { self.validate_fast() },
             Aot => {
                 if self.is_null() {
-                    Err(UseAfterFreeError.null_pointer("FatRef"))
+                    Result.Err(UseAfterFreeError.null_pointer("FatRef"))
                 } else {
-                    Ok(())
+                    Result.Ok(())
                 }
             },
         }
@@ -418,12 +418,12 @@ implement<T> FatRef<T> {
 
         // Check read capability
         if !self.can_read() {
-            return Err(UseAfterFreeError.capability_violation("read", "FatRef"));
+            return Result.Err(UseAfterFreeError.capability_violation("read", "FatRef"));
         }
 
         // Bounds check
         if index < 0 || index >= self.metadata {
-            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef"));
+            return Result.Err(UseAfterFreeError.capability_violation("bounds", "FatRef"));
         }
 
         // Calculate element offset
@@ -432,7 +432,7 @@ implement<T> FatRef<T> {
 
         unsafe {
             let element_ptr = ptr_offset(self.ptr, offset) as &U;
-            Ok(element_ptr)
+            Result.Ok(element_ptr)
         }
     }
 
@@ -446,17 +446,17 @@ implement<T> FatRef<T> {
 
         // Check write capability
         if !self.has_capability(CAP_WRITE) {
-            return Err(UseAfterFreeError.capability_violation("write", "FatRef"));
+            return Result.Err(UseAfterFreeError.capability_violation("write", "FatRef"));
         }
 
         // Check mutable capability
         if !self.has_capability(CAP_MUTABLE) {
-            return Err(UseAfterFreeError.capability_violation("mutable", "FatRef"));
+            return Result.Err(UseAfterFreeError.capability_violation("mutable", "FatRef"));
         }
 
         // Bounds check
         if index < 0 || index >= self.metadata {
-            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef"));
+            return Result.Err(UseAfterFreeError.capability_violation("bounds", "FatRef"));
         }
 
         // Calculate element offset
@@ -465,7 +465,7 @@ implement<T> FatRef<T> {
 
         unsafe {
             let element_ptr = ptr_offset(self.ptr, offset) as &mut U;
-            Ok(element_ptr)
+            Result.Ok(element_ptr)
         }
     }
 
@@ -473,7 +473,7 @@ implement<T> FatRef<T> {
     @inline
     public fn first<U>(&self) -> Result<&U, UseAfterFreeError> {
         if self.is_empty() {
-            Err(UseAfterFreeError.capability_violation("bounds", "FatRef (empty)"))
+            Result.Err(UseAfterFreeError.capability_violation("bounds", "FatRef (empty)"))
         } else {
             self.get(0)
         }
@@ -483,7 +483,7 @@ implement<T> FatRef<T> {
     @inline
     public fn last<U>(&self) -> Result<&U, UseAfterFreeError> {
         if self.is_empty() {
-            Err(UseAfterFreeError.capability_violation("bounds", "FatRef (empty)"))
+            Result.Err(UseAfterFreeError.capability_violation("bounds", "FatRef (empty)"))
         } else {
             self.get(self.metadata - 1)
         }
@@ -527,10 +527,10 @@ implement<T> FatRef<T> {
         // length = 1` wraps to `Int.MIN`, slipping past the
         // comparison and yielding an out-of-bounds slice.
         if start < 0 || length < 0 || start > self.metadata {
-            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
+            return Result.Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
         }
         if length > self.metadata - start {
-            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
+            return Result.Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
         }
 
         // Calculate byte offset. `start * element_size` can
@@ -539,8 +539,8 @@ implement<T> FatRef<T> {
         // wraparound that derives an out-of-allocation pointer.
         let element_size = U.size as Int;
         let byte_offset = match start.checked_mul(element_size) {
-            Some(v) => v,
-            None    => return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view")),
+            Maybe.Some(v) => v,
+            Maybe.None    => return Result.Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view")),
         };
 
         // The new offset_from_base must fit in UInt32 (the field
@@ -550,13 +550,13 @@ implement<T> FatRef<T> {
         // header-relative pointer derivation.
         let new_offset_64 = (self.offset_from_base as Int) + byte_offset;
         if new_offset_64 < 0 || new_offset_64 > 0xFFFF_FFFF {
-            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
+            return Result.Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
         }
 
         let new_ptr = ptr_offset(self.ptr, byte_offset);
         let new_offset = new_offset_64 as UInt32;
 
-        Ok(FatRef {
+        Result.Ok(FatRef {
             ptr: new_ptr,
             generation: self.generation,
             epoch_and_caps: self.epoch_and_caps,
@@ -576,13 +576,13 @@ implement<T> FatRef<T> {
         self.validate_for_tier()?;
 
         if mid < 0 || mid > self.metadata {
-            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.split_at"));
+            return Result.Err(UseAfterFreeError.capability_violation("bounds", "FatRef.split_at"));
         }
 
         let left = self.slice_view<U>(0, mid)?;
         let right = self.slice_view<U>(mid, self.metadata - mid)?;
 
-        Ok((left, right))
+        Result.Ok((left, right))
     }
 
     // =========================================================================
@@ -647,7 +647,7 @@ implement<T> FatRef<T> {
     ///
 
     /// Two threads racing on `revoke()` for the same allocation see
-    /// exactly one `Ok(())` and one `Err(already_revoked)`. The
+    /// exactly one `Result.Ok(())` and one `Result.Err(already_revoked)`. The
     /// previous implementation used a verify-then-fetch_add pattern
     /// that allowed the late thread to spuriously double-bump the
     /// generation past a freshly-issued successor reference; the
@@ -656,11 +656,11 @@ implement<T> FatRef<T> {
     /// twin fix.
     public fn revoke(&self) -> Result<(), RevocationError> {
         if self.is_null() {
-            return Err(RevocationError.null_pointer("FatRef"));
+            return Result.Err(RevocationError.null_pointer("FatRef"));
         }
 
         if !self.can_revoke() {
-            return Err(RevocationError.capability_violation("FatRef"));
+            return Result.Err(RevocationError.capability_violation("FatRef"));
         }
 
         unsafe {
@@ -671,14 +671,14 @@ implement<T> FatRef<T> {
             // we've been retired).
             let actual_epoch = header.load_epoch();
             if self.epoch() != actual_epoch {
-                return Err(RevocationError.already_revoked("FatRef"));
+                return Result.Err(RevocationError.already_revoked("FatRef"));
             }
 
-            // Atomic verify-and-bump. None means another thread
+            // Atomic verify-and-bump. Maybe.None means another thread
             // already revoked.
             let new_gen = match header.try_revoke(self.generation) {
-                Some(g) => g,
-                None    => return Err(RevocationError.already_revoked("FatRef")),
+                Maybe.Some(g) => g,
+                Maybe.None    => return Result.Err(RevocationError.already_revoked("FatRef")),
             };
 
             // Notify epoch manager — read post-revoke epoch since
@@ -691,7 +691,7 @@ implement<T> FatRef<T> {
                 post_epoch,
             );
 
-            Ok(())
+            Result.Ok(())
         }
     }
 

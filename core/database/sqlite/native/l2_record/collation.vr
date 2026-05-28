@@ -163,13 +163,13 @@ implement CollationRegistry {
     }
 
     /// Look up the comparator fn for a user-defined collation.
-    /// Returns `None` for built-ins (which the caller should
+    /// Returns `Maybe.None` for built-ins (which the caller should
     /// dispatch through `CollationKind` directly).
     public fn user_fn_for(&self, name: &Text) -> Maybe<UserCollationFn> {
         if self.user_fns.contains_key(name.clone()) {
-            Some(self.user_fns.get(name.clone()))
+            Maybe.Some(self.user_fns.get(name.clone()))
         } else {
-            None
+            Maybe.None
         }
     }
 

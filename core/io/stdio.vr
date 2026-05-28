@@ -123,28 +123,28 @@ implement Stdin {
 
             let fd = FileDesc.from_raw(STDIN_FD);
             match sys_read(fd, &mut bytes[total..total+1]) {
-                Ok(0) => break,  // EOF
-                Ok(1) => {
+                Result.Ok(0) => break,  // EOF
+                Result.Ok(1) => {
                     total = total + 1;
                     if bytes[total - 1] == '\n' as Byte {
                         break;
                     }
                 }
-                Ok(_) => break,
-                Err(_) => return Err(StreamError.new(IoErrorKind.Other)),
+                Result.Ok(_) => break,
+                Result.Err(_) => return Result.Err(StreamError.new(IoErrorKind.Other)),
             }
         }
 
         if total == 0 {
-            return Ok(0);
+            return Result.Ok(0);
         }
 
         match Text.from_utf8(&bytes[..total]) {
-            Ok(s) => {
+            Result.Ok(s) => {
                 buf.push_str(&s);
-                Ok(total)
+                Result.Ok(total)
             }
-            Err(_) => Err(StreamError.new(IoErrorKind.InvalidData)),
+            Result.Err(_) => Result.Err(StreamError.new(IoErrorKind.InvalidData)),
         }
     }
 
@@ -158,8 +158,8 @@ implement Read for Stdin {
     fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
         let fd = FileDesc.from_raw(STDIN_FD);
         match sys_read(fd, buf) {
-            Ok(n) => Ok(n),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 }
@@ -174,8 +174,8 @@ implement Read for StdinLock {
     fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
         let fd = FileDesc.from_raw(STDIN_FD);
         match sys_read(fd, buf) {
-            Ok(n) => Ok(n),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 }
@@ -190,16 +190,16 @@ implement BufRead for StdinLock {
             let mut tmp = [0_u8; STDIN_BUFFER_SIZE];
             let fd = FileDesc.from_raw(STDIN_FD);
             match sys_read(fd, &mut tmp) {
-                Ok(n) => {
+                Result.Ok(n) => {
                     if n > 0 {
                         self.buffer.extend_from_slice(&tmp[..n]);
                     }
                 }
-                Err(e) => return Err(StreamError.from_raw_os_error(e.code)),
+                Result.Err(e) => return Result.Err(StreamError.from_raw_os_error(e.code)),
             }
         }
 
-        Ok(&self.buffer.as_slice()[self.buf_pos..])
+        Result.Ok(&self.buffer.as_slice()[self.buf_pos..])
     }
 
     fn consume(&mut self, amt: Int) {
@@ -218,8 +218,8 @@ implement Iterator for StdinLines {
     fn next(&mut self) -> Maybe<IoResult<Text>> {
         let mut line = Text.new();
         match self.stdin.read_line(&mut line) {
-            Ok(0) => Maybe.None,
-            Ok(_) => {
+            Result.Ok(0) => Maybe.None,
+            Result.Ok(_) => {
                 // Remove trailing newline
                 if line.ends_with("\n") {
                     line.pop();
@@ -227,9 +227,9 @@ implement Iterator for StdinLines {
                         line.pop();
                     }
                 }
-                Maybe.Some(Ok(line))
+                Maybe.Some(Result.Ok(line))
             }
-            Err(e) => Maybe.Some(Err(e)),
+            Result.Err(e) => Maybe.Some(Result.Err(e)),
         }
     }
 }
@@ -257,15 +257,15 @@ implement Write for Stdout {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
         let fd = FileDesc.from_raw(STDOUT_FD);
         match sys_write(fd, buf) {
-            Ok(n) => Ok(n),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
         // stdout is typically line-buffered or unbuffered at the kernel level
         // No explicit flush syscall needed for standard output
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -276,14 +276,14 @@ implement Write for StdoutLock {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
         let fd = FileDesc.from_raw(STDOUT_FD);
         match sys_write(fd, buf) {
-            Ok(n) => Ok(n),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
         // stdout is typically line-buffered or unbuffered at the kernel level
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -310,14 +310,14 @@ implement Write for Stderr {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
         let fd = FileDesc.from_raw(STDERR_FD);
         match sys_write(fd, buf) {
-            Ok(n) => Ok(n),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
         // stderr is typically unbuffered at the kernel level
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -328,14 +328,14 @@ implement Write for StderrLock {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
         let fd = FileDesc.from_raw(STDERR_FD);
         match sys_write(fd, buf) {
-            Ok(n) => Ok(n),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
         // stderr is typically unbuffered at the kernel level
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -415,15 +415,15 @@ public fn read_line() -> IoResult<Text> {
         }
     }
 
-    Ok(line)
+    Result.Ok(line)
 }
 
 // Read integer from stdin.
 public fn read_int() -> IoResult<Int> {
     let line = read_line()?;
     match line.trim().parse<Int>() {
-        Ok(n) => Ok(n),
-        Err(_) => Err(StreamError.new(IoErrorKind.InvalidData)),
+        Result.Ok(n) => Result.Ok(n),
+        Result.Err(_) => Result.Err(StreamError.new(IoErrorKind.InvalidData)),
     }
 }
 
@@ -431,7 +431,7 @@ public fn read_int() -> IoResult<Int> {
 public fn read_float() -> IoResult<Float> {
     let line = read_line()?;
     match line.trim().parse<Float>() {
-        Ok(f) => Ok(f),
-        Err(_) => Err(StreamError.new(IoErrorKind.InvalidData)),
+        Result.Ok(f) => Result.Ok(f),
+        Result.Err(_) => Result.Err(StreamError.new(IoErrorKind.InvalidData)),
     }
 }

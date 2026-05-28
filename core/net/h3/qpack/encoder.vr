@@ -72,17 +72,17 @@ public fn encode_field_section(headers: &List<QpackHeaderField>) -> List<Byte> {
 fn emit_header(h: &QpackHeaderField, out: &mut List<Byte>) {
     // Best case — exact (name, value) in the static table.
     match stat.find(&h.name, &h.value) {
-        Some(idx) => {
+        Maybe.Some(idx) => {
             // Indexed Field Line, static — opcode `11` in high bits
             // followed by a 6-bit-prefix integer.
             core.net.h3.qpack.integer.encode(out, 6, 0xC0_u8, idx as UInt64);
             return;
         },
-        None => {},
+        Maybe.None => {},
     }
     // Name-only match in the static table.
     match stat.find_name(&h.name) {
-        Some(idx) => {
+        Maybe.Some(idx) => {
             // Literal Field Line with Name Reference, static
             // — opcode `0101` high bits (never-indexed = 0, static = 1)
             // → byte prefix 0x50, 4-bit prefix for the index.
@@ -90,7 +90,7 @@ fn emit_header(h: &QpackHeaderField, out: &mut List<Byte>) {
             encode_string(out, h.value.as_bytes());
             return;
         },
-        None => {},
+        Maybe.None => {},
     }
     // Literal Field Line with Literal Name — opcode `0010` in high bits
     // (never-indexed = 0). The first byte has a 3-bit length prefix

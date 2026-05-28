@@ -263,13 +263,13 @@ fn one_congruence_round(eqs: &EquationSet, uf: &mut UnionFindInt) -> Bool {
         if !term_is_constant(t.clone()) {
             let sig: Text = term_signature(&t, &mut uf);
             match sig_table.get(sig.clone()) {
-                Some(existing_id) => {
+                Maybe.Some(existing_id) => {
                     if !uf.same_set(t.id, existing_id) {
                         uf.union(t.id, existing_id);
                         any_merge = true;
                     }
                 },
-                None => {
+                Maybe.None => {
                     sig_table.insert(sig, t.id);
                 },
             }

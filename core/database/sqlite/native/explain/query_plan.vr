@@ -77,12 +77,12 @@ implement QueryPlanTree {
         let mut current = id;
         while current != 0 {
             match self.find_by_id(current) {
-                Some(r) => {
+                Maybe.Some(r) => {
                     if r.parent == current { return depth; }
                     current = r.parent;
                     depth = depth + 1;
                 }
-                None => return depth,
+                Maybe.None => return depth,
             }
         }
         depth
@@ -92,7 +92,7 @@ implement QueryPlanTree {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].id == id {
-                return Some(query_plan_row(
+                return Maybe.Some(query_plan_row(
                     self.rows[i].id,
                     self.rows[i].parent,
                     self.rows[i].detail.clone(),
@@ -100,7 +100,7 @@ implement QueryPlanTree {
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn root_count(&self) -> Int {

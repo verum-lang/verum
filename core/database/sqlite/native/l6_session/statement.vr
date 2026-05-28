@@ -154,12 +154,12 @@ public type PreparedStatement is {
 /// starts at pc=0 with all registers null.
 public fn prepare(sql: &Text) -> Result<PreparedStatement, StmtError> {
     let program = match compile(sql) {
-        Ok(p)  => p,
-        Err(e) => { return Err(StmtCompile(e)); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(StmtCompile(e)); }
     };
     let state = vdbe_state_new(&program);
     let cursors = cursor_table_new(program.cursor_count(), 4096, 0);
-    Ok(PreparedStatement {
+    Result.Ok(PreparedStatement {
         program: program,
         state: state,
         cursors: cursors,
@@ -176,12 +176,12 @@ public fn prepare(sql: &Text) -> Result<PreparedStatement, StmtError> {
 /// statements take the same code path as `prepare`.
 public fn prepare_with_schema(sql: &Text, schema: &SchemaCache) -> Result<PreparedStatement, StmtError> {
     let program = match compile_with_schema(sql, schema) {
-        Ok(p)  => p,
-        Err(e) => { return Err(StmtCompile(e)); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(StmtCompile(e)); }
     };
     let state = vdbe_state_new(&program);
     let cursors = cursor_table_new(program.cursor_count(), 4096, 0);
-    Ok(PreparedStatement {
+    Result.Ok(PreparedStatement {
         program: program,
         state: state,
         cursors: cursors,

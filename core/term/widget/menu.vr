@@ -29,7 +29,7 @@ implement MenuItem {
     public fn new(label: Text) -> MenuItem {
         MenuItem {
             label: Line.raw(label),
-            shortcut: None,
+            shortcut: Maybe.None,
             enabled: true,
             children: List.new(),
             separator: false,
@@ -38,7 +38,7 @@ implement MenuItem {
 
     /// Set keyboard shortcut text (e.g. "Ctrl+S").
     public fn shortcut(self, shortcut: Text) -> MenuItem {
-        MenuItem { shortcut: Some(shortcut), ..self }
+        MenuItem { shortcut: Maybe.Some(shortcut), ..self }
     }
 
     /// Mark as disabled.
@@ -55,7 +55,7 @@ implement MenuItem {
     public fn separator() -> MenuItem {
         MenuItem {
             label: Line.raw(""),
-            shortcut: None,
+            shortcut: Maybe.None,
             enabled: false,
             children: List.new(),
             separator: true,
@@ -88,21 +88,21 @@ implement MenuState {
     public fn new() -> MenuState {
         MenuState {
             selected: 0,
-            submenu_open: None,
-            submenu_state: None,
+            submenu_open: Maybe.None,
+            submenu_state: Maybe.None,
         }
     }
 
     /// Open the submenu for the currently selected item.
     public fn open_submenu(&mut self) {
-        self.submenu_open = Some(self.selected);
-        self.submenu_state = Some(Heap(MenuState.new()));
+        self.submenu_open = Maybe.Some(self.selected);
+        self.submenu_state = Maybe.Some(Heap(MenuState.new()));
     }
 
     /// Close the currently open submenu.
     public fn close_submenu(&mut self) {
-        self.submenu_open = None;
-        self.submenu_state = None;
+        self.submenu_open = Maybe.None;
+        self.submenu_state = Maybe.None;
     }
 
     /// Check if a submenu is currently open.
@@ -132,7 +132,7 @@ implement Menu {
     public fn new(items: List<MenuItem>) -> Menu {
         Menu {
             items: items,
-            block: Some(Block.new().borders(Borders.ALL).border_type(BorderType.Rounded)),
+            block: Maybe.Some(Block.new().borders(Borders.ALL).border_type(BorderType.Rounded)),
             style: Style.DEFAULT,
             highlight_style: Style.new().bg(Color.Blue).fg(Color.White),
             disabled_style: Style.new().fg(Color.DarkGrey),
@@ -142,7 +142,7 @@ implement Menu {
     }
 
     // Builder API
-    public fn block(self, block: Block) -> Menu { Menu { block: Some(block), ..self } }
+    public fn block(self, block: Block) -> Menu { Menu { block: Maybe.Some(block), ..self } }
     public fn highlight_style(self, style: Style) -> Menu { Menu { highlight_style: style, ..self } }
     public fn disabled_style(self, style: Style) -> Menu { Menu { disabled_style: style, ..self } }
     public fn separator_style(self, style: Style) -> Menu { Menu { separator_style: style, ..self } }
@@ -187,12 +187,12 @@ implement StatefulWidget for Menu {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut MenuState) {
         let menu_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if menu_area.width < 1 || menu_area.height < 1 { return; }
@@ -240,7 +240,7 @@ implement StatefulWidget for Menu {
 
             // Draw shortcut right-aligned (if present)
             match item.shortcut {
-                Some(ref sc) => {
+                Maybe.Some(ref sc) => {
                     let sc_x = menu_area.right() - sc.len() - 1;
                     if sc_x > x + 1 {
                         let sc_style = if is_selected {
@@ -251,7 +251,7 @@ implement StatefulWidget for Menu {
                         buf.set_string(sc_x, y, sc, sc_style);
                     }
                 }
-                None => {}
+                Maybe.None => {}
             }
 
             // Draw submenu indicator if has children

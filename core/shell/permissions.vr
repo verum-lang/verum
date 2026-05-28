@@ -53,12 +53,12 @@ implement PermissionSet {
     /// `port` may be 0 to skip port matching.
     public fn check_net(&self, host: &Text, port: Int) -> Result<(), ShellError> {
         match &self.net {
-            None => Ok(()),
-            Some(allowed) => {
+            Maybe.None => Result.Ok(()),
+            Maybe.Some(allowed) => {
                 for pat in allowed.iter() {
-                    if host_matches(pat, host, port) { return Ok(()); }
+                    if host_matches(pat, host, port) { return Result.Ok(()); }
                 }
-                Err(ShellError.PermissionDenied {
+                Result.Err(ShellError.PermissionDenied {
                     command: f"net({host}:{port})",
                     kind:    "net".into(),
                 })
@@ -69,12 +69,12 @@ implement PermissionSet {
     /// Validate env-var read/write access by name.
     public fn check_env(&self, name: &Text) -> Result<(), ShellError> {
         match &self.env {
-            None => Ok(()),
-            Some(allowed) => {
+            Maybe.None => Result.Ok(()),
+            Maybe.Some(allowed) => {
                 for n in allowed.iter() {
-                    if n == name { return Ok(()); }
+                    if n == name { return Result.Ok(()); }
                 }
-                Err(ShellError.PermissionDenied {
+                Result.Err(ShellError.PermissionDenied {
                     command: f"env({name})",
                     kind:    "env".into(),
                 })
@@ -89,13 +89,13 @@ fn check_path(
     kind:    &str,
 ) -> Result<(), ShellError> {
     match allowed {
-        None => Ok(()),
-        Some(rules) => {
+        Maybe.None => Result.Ok(()),
+        Maybe.Some(rules) => {
             let canonical = canonicalise(path);
             for pat_str in rules.iter() {
-                if path_matches(pat_str, &canonical) { return Ok(()); }
+                if path_matches(pat_str, &canonical) { return Result.Ok(()); }
             }
-            Err(ShellError.PermissionDenied {
+            Result.Err(ShellError.PermissionDenied {
                 command: f"{kind}({path})",
                 kind:    kind.into(),
             })
@@ -111,8 +111,8 @@ fn canonicalise(path: &Path) -> Text {
         return p;
     }
     match fs_current_dir() {
-        Ok(cwd) => f"{cwd}/{p}",
-        Err(_)  => p,
+        Result.Ok(cwd) => f"{cwd}/{p}",
+        Result.Err(_)  => p,
     }
 }
 
@@ -121,8 +121,8 @@ fn path_matches(pattern: &Text, path: &Text) -> Bool {
     if path.starts_with(pattern) { return true; }
     // 2. Glob match (supports ** for recursive any-directory, * within component)
     match core.base.glob.compile(pattern.as_str()) {
-        Ok(g)  => g.matches_path(path.as_str()),
-        Err(_) => false,
+        Result.Ok(g)  => g.matches_path(path.as_str()),
+        Result.Err(_) => false,
     }
 }
 
@@ -148,23 +148,23 @@ fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
     if pattern.starts_with("[") {
         return bracketed_v6_matches(pattern, host, port);
     }
-    if let Some(slash_idx) = pattern.find('/') {
+    if let Maybe.Some(slash_idx) = pattern.find('/') {
         return cidr_host_matches(pattern, slash_idx, host, port);
     }
     if is_v6_literal(pattern) {
         return match (parse_ipv6(pattern), parse_ipv6(host)) {
-            (Some(p), Some(h)) => p.hi == h.hi && p.lo == h.lo,
+            (Maybe.Some(p), Maybe.Some(h)) => p.hi == h.hi && p.lo == h.lo,
             _                  => false,
         };
     }
     let (pat_host, pat_port): (Text, Int) = match pattern.find(':') {
-        Some(idx) => {
+        Maybe.Some(idx) => {
             let h: Text = pattern.slice(0, idx).into();
             let p_str: Text = pattern.slice(idx + 1, pattern.len()).into();
             let p: Int = p_str.parse_int().unwrap_or(0);
             (h, p)
         }
-        None => (pattern.clone(), 0),
+        Maybe.None => (pattern.clone(), 0),
     };
     if pat_port != 0 && port != 0 && pat_port != port { return false; }
     if pat_host.starts_with("*.") {
@@ -188,28 +188,28 @@ fn cidr_host_matches(pattern: &Text, slash_idx: Int, host: &Text, port: Int) -> 
     let addr_text: Text = pattern.slice(0, slash_idx).into();
     let rest:      Text = pattern.slice(slash_idx + 1, pattern.len()).into();
     let (prefix_text, pat_port): (Text, Int) = match rest.find(':') {
-        Some(idx) => {
+        Maybe.Some(idx) => {
             let pre: Text = rest.slice(0, idx).into();
             let p_str: Text = rest.slice(idx + 1, rest.len()).into();
             let p: Int = p_str.parse_int().unwrap_or(0);
             (pre, p)
         }
-        None => (rest, 0),
+        Maybe.None => (rest, 0),
     };
     if pat_port != 0 && port != 0 && pat_port != port { return false; }
     let prefix: Int = match prefix_text.parse_int() {
-        Ok(n)  => n,
-        Err(_) => return false,
+        Result.Ok(n)  => n,
+        Result.Err(_) => return false,
     };
     if is_v6_literal(&addr_text) {
         if prefix < 0 || prefix > 128 { return false; }
-        let pat_addr  = match parse_ipv6(&addr_text) { Some(a) => a, None => return false };
-        let host_addr = match parse_ipv6(host)       { Some(a) => a, None => return false };
+        let pat_addr  = match parse_ipv6(&addr_text) { Maybe.Some(a) => a, Maybe.None => return false };
+        let host_addr = match parse_ipv6(host)       { Maybe.Some(a) => a, Maybe.None => return false };
         cidr_v6_match(&pat_addr, &host_addr, prefix)
     } else {
         if prefix < 0 || prefix > 32 { return false; }
-        let pat_addr  = match parse_ipv4(&addr_text) { Some(a) => a, None => return false };
-        let host_addr = match parse_ipv4(host)       { Some(a) => a, None => return false };
+        let pat_addr  = match parse_ipv4(&addr_text) { Maybe.Some(a) => a, Maybe.None => return false };
+        let host_addr = match parse_ipv4(host)       { Maybe.Some(a) => a, Maybe.None => return false };
         // mask = top `prefix` bits of a 32-bit word. prefix == 0 → mask = 0
         // (matches everything); prefix == 32 → mask = 0xFFFFFFFF (exact).
         let mask: Int = if prefix == 0 {
@@ -226,13 +226,13 @@ fn cidr_host_matches(pattern: &Text, slash_idx: Int, host: &Text, port: Int) -> 
 //  "[v6]:port" — exact match, specific port
 //  "[v6]/prefix[:port]" — CIDR + optional port
 fn bracketed_v6_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
-    let close = match pattern.find(']') { Some(i) => i, None => return false };
+    let close = match pattern.find(']') { Maybe.Some(i) => i, Maybe.None => return false };
     if close < 1 { return false; }
     let addr_text: Text = pattern.slice(1, close).into();
     let after:     Text = pattern.slice(close + 1, pattern.len()).into();
     if after.is_empty() {
         return match (parse_ipv6(&addr_text), parse_ipv6(host)) {
-            (Some(p), Some(h)) => p.hi == h.hi && p.lo == h.lo,
+            (Maybe.Some(p), Maybe.Some(h)) => p.hi == h.hi && p.lo == h.lo,
             _                  => false,
         };
     }
@@ -250,7 +250,7 @@ fn bracketed_v6_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
         let pat_port: Int = p_str.parse_int().unwrap_or(0);
         if pat_port != 0 && port != 0 && pat_port != port { return false; }
         return match (parse_ipv6(&addr_text), parse_ipv6(host)) {
-            (Some(p), Some(h)) => p.hi == h.hi && p.lo == h.lo,
+            (Maybe.Some(p), Maybe.Some(h)) => p.hi == h.hi && p.lo == h.lo,
             _                  => false,
         };
     }
@@ -311,29 +311,29 @@ fn mask_top_bits_u64(bits: Int) -> Int {
 //  * IPv4-mapped tail: ::ffff:192.168.1.1 (last 32 bits = IPv4)
 //
 
-// Returns None on any malformed input: unrecognised characters,
+// Returns Maybe.None on any malformed input: unrecognised characters,
 // >4 hex chars per group, multiple `::` zones, total != 8 groups,
 // or invalid IPv4 tail.
 fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
-    if text.is_empty() { return None; }
+    if text.is_empty() { return Maybe.None; }
 
     // Reject inputs with more than one `::` zone — `split(":")` can't
     // distinguish "a:::b" (illegal) from "a::b" (legal) on its own
     // because both produce ≥3 consecutive empties. RFC 4291 §2.2
     // permits exactly one `::`, anywhere.
-    if let Some(first) = text.find("::") {
+    if let Maybe.Some(first) = text.find("::") {
         let after: Text = text.slice(first + 2, text.len()).into();
-        if after.find("::").is_some() { return None; }
+        if after.find("::").is_some() { return Maybe.None; }
     }
 
     let mut groups: List<Text> = text.split(":");
-    if groups.len() < 3 || groups.len() > 9 { return None; }
+    if groups.len() < 3 || groups.len() > 9 { return Maybe.None; }
 
     // IPv4-mapped tail: if the LAST group contains '.', parse it as
     // IPv4 and replace it in-place with TWO equivalent hex groups.
     let last_idx = groups.len() - 1;
     if groups[last_idx].find(".").is_some() {
-        let v4 = match parse_ipv4(&groups[last_idx]) { Some(a) => a, None => return None };
+        let v4 = match parse_ipv4(&groups[last_idx]) { Maybe.Some(a) => a, Maybe.None => return Maybe.None };
         let high: Int = bitand(shr(v4, 16), 0xFFFF);
         let low:  Int = bitand(v4, 0xFFFF);
         let mut rebuilt: List<Text> = List.new();
@@ -351,21 +351,21 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
     // appear at most ONE contiguous run, but the leading/trailing `::`
     // produces TWO adjacent empties (e.g. `::1` -> ["", "", "1"]).
     let n = groups.len();
-    let mut first_empty: Maybe<Int> = None;
-    let mut last_empty:  Maybe<Int> = None;
+    let mut first_empty: Maybe<Int> = Maybe.None;
+    let mut last_empty:  Maybe<Int> = Maybe.None;
     let mut empty_count: Int = 0;
     let mut idx: Int = 0;
     while idx < n {
         if groups[idx].is_empty() {
-            if first_empty.is_none() { first_empty = Some(idx); }
-            last_empty = Some(idx);
+            if first_empty.is_none() { first_empty = Maybe.Some(idx); }
+            last_empty = Maybe.Some(idx);
             empty_count = empty_count + 1;
         } else if last_empty.is_some() {
             // Non-empty AFTER the empty-zone closes — verify no further
             // empties follow (would indicate two separate `::`).
             let mut k: Int = idx + 1;
             while k < n {
-                if groups[k].is_empty() { return None; }
+                if groups[k].is_empty() { return Maybe.None; }
                 k = k + 1;
             }
             break;
@@ -375,25 +375,25 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
 
     let mut final_groups: List<Int> = List.new();
     if empty_count == 0 {
-        if n != 8 { return None; }
+        if n != 8 { return Maybe.None; }
         for g in groups.iter() {
             match parse_hex_group(g) {
-                Some(v) => final_groups.push(v),
-                None    => return None,
+                Maybe.Some(v) => final_groups.push(v),
+                Maybe.None    => return Maybe.None,
             }
         }
     } else {
         // `::` zone present. zeros_to_fill = 8 - non-empty groups.
         let real_groups = n - empty_count;
         let zeros_to_fill = 8 - real_groups;
-        if zeros_to_fill < 1 || zeros_to_fill > 8 { return None; }
+        if zeros_to_fill < 1 || zeros_to_fill > 8 { return Maybe.None; }
         let pre_end    = first_empty.unwrap_or(0);
         let post_start = last_empty.unwrap_or(0) + 1;
         let mut i: Int = 0;
         while i < pre_end {
             match parse_hex_group(&groups[i]) {
-                Some(v) => final_groups.push(v),
-                None    => return None,
+                Maybe.Some(v) => final_groups.push(v),
+                Maybe.None    => return Maybe.None,
             }
             i = i + 1;
         }
@@ -405,14 +405,14 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
         let mut j: Int = post_start;
         while j < n {
             match parse_hex_group(&groups[j]) {
-                Some(v) => final_groups.push(v),
-                None    => return None,
+                Maybe.Some(v) => final_groups.push(v),
+                Maybe.None    => return Maybe.None,
             }
             j = j + 1;
         }
     }
 
-    if final_groups.len() != 8 { return None; }
+    if final_groups.len() != 8 { return Maybe.None; }
 
     let hi: Int = bitor(
         bitor(shl(final_groups[0], 48), shl(final_groups[1], 32)),
@@ -422,14 +422,14 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
         bitor(shl(final_groups[4], 48), shl(final_groups[5], 32)),
         bitor(shl(final_groups[6], 16), final_groups[7]),
     );
-    Some(Ipv6Addr { hi: hi, lo: lo })
+    Maybe.Some(Ipv6Addr { hi: hi, lo: lo })
 }
 
 fn parse_hex_group(text: &Text) -> Maybe<Int> {
-    if text.is_empty() || text.len() > 4 { return None; }
+    if text.is_empty() || text.len() > 4 { return Maybe.None; }
     match text.parse_int_radix(16) {
-        Ok(n) if n >= 0 && n <= 0xFFFF => Some(n),
-        _                              => None,
+        Result.Ok(n) if n >= 0 && n <= 0xFFFF => Maybe.Some(n),
+        _                              => Maybe.None,
     }
 }
 
@@ -457,7 +457,7 @@ fn int_to_hex_text(n: Int) -> Text {
 }
 
 // Parse a dotted-decimal IPv4 address into its 32-bit big-endian
-// numeric form (low 32 bits of the returned Int). Returns None on
+// numeric form (low 32 bits of the returned Int). Returns Maybe.None on
 // any parse failure: wrong number of octets, non-numeric octets,
 // out-of-range octets (>255), leading-zero octets are accepted.
 fn parse_ipv4(text: &Text) -> Maybe<Int> {
@@ -469,8 +469,8 @@ fn parse_ipv4(text: &Text) -> Maybe<Int> {
         if text.byte_at(i) == ('.' as Byte) {
             let part: Text = text.slice(start, i).into();
             match part.parse_int() {
-                Ok(n) if n >= 0 && n <= 255 => octets.push(n),
-                _ => return None,
+                Result.Ok(n) if n >= 0 && n <= 255 => octets.push(n),
+                _ => return Maybe.None,
             }
             start = i + 1;
         }
@@ -478,11 +478,11 @@ fn parse_ipv4(text: &Text) -> Maybe<Int> {
     }
     let last: Text = text.slice(start, len).into();
     match last.parse_int() {
-        Ok(n) if n >= 0 && n <= 255 => octets.push(n),
-        _ => return None,
+        Result.Ok(n) if n >= 0 && n <= 255 => octets.push(n),
+        _ => return Maybe.None,
     }
-    if octets.len() != 4 { return None; }
-    Some(
+    if octets.len() != 4 { return Maybe.None; }
+    Maybe.Some(
         bitor(
             bitor(shl(octets[0], 24), shl(octets[1], 16)),
             bitor(shl(octets[2], 8),  octets[3]),
@@ -520,7 +520,7 @@ public fn parse_frontmatter(source: &Text) -> Result<PermissionSet, ShellError> 
         started = true;
         // Parse the body: !@permission(...)
         let inner = match (body.find('('), body.rfind(')')) {
-            (Some(l), Some(r)) if r > l => body.slice(l + 1, r),
+            (Maybe.Some(l), Maybe.Some(r)) if r > l => body.slice(l + 1, r),
             _ => continue,
         };
         let inner_text: Text = inner.into();
@@ -529,10 +529,10 @@ public fn parse_frontmatter(source: &Text) -> Result<PermissionSet, ShellError> 
 
     if started {
         // Frontmatter present — we keep deny-all baseline + explicit allows.
-        Ok(perms)
+        Result.Ok(perms)
     } else {
         // No frontmatter — leave permissions unrestricted (legacy mode).
-        Ok(PermissionSet.unrestricted())
+        Result.Ok(PermissionSet.unrestricted())
     }
 }
 
@@ -559,15 +559,15 @@ fn merge_directive(p: &mut PermissionSet, body: &Text) -> Result<(), ShellError>
         let key: &Text = &kv[0];
         let values: List<Text> = parse_string_list(&kv[1]);
         match key.as_str() {
-            "run"      => p.run      = Some(merge_lists(&p.run,      values)),
-            "fs_read"  => p.fs_read  = Some(merge_lists(&p.fs_read,  values)),
-            "fs_write" => p.fs_write = Some(merge_lists(&p.fs_write, values)),
-            "net"      => p.net      = Some(merge_lists(&p.net,      values)),
-            "env"      => p.env      = Some(merge_lists(&p.env,      values)),
+            "run"      => p.run      = Maybe.Some(merge_lists(&p.run,      values)),
+            "fs_read"  => p.fs_read  = Maybe.Some(merge_lists(&p.fs_read,  values)),
+            "fs_write" => p.fs_write = Maybe.Some(merge_lists(&p.fs_write, values)),
+            "net"      => p.net      = Maybe.Some(merge_lists(&p.net,      values)),
+            "env"      => p.env      = Maybe.Some(merge_lists(&p.env,      values)),
             _ => {},  // unknown key — ignored
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn parse_string_list(text: &Text) -> List<Text> {
@@ -584,8 +584,8 @@ fn parse_string_list(text: &Text) -> List<Text> {
 
 fn merge_lists(prev: &Maybe<List<Text>>, new: List<Text>) -> List<Text> {
     let mut out: List<Text> = match prev {
-        None => [],
-        Some(v) => v.clone(),
+        Maybe.None => [],
+        Maybe.Some(v) => v.clone(),
     };
     for x in new.into_iter() { out.push(x); }
     out

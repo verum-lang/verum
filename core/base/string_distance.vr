@@ -39,8 +39,8 @@
 
 // // "did you mean" with a distance cap.
 // match string_distance.closest(b"cmmit", &[b"commit", b"branch", b"checkout"], 2) {
-//  Some((hint, d)) => print(f"did you mean '{hint}'? ({d} edits)"),
-//  None => print("no close match"),
+//  Maybe.Some((hint, d)) => print(f"did you mean '{hint}'? ({d} edits)"),
+//  Maybe.None => print("no close match"),
 // }
 // ```
 //
@@ -100,8 +100,8 @@ public fn levenshtein(a: &[Byte], b: &[Byte]) -> Int {
     prev[sl]
 }
 
-/// Bounded Levenshtein — returns `None` the moment distance
-/// exceeds `max`, else `Some(distance)`. Useful for "did you
+/// Bounded Levenshtein — returns `Maybe.None` the moment distance
+/// exceeds `max`, else `Maybe.Some(distance)`. Useful for "did you
 /// mean" where we only care about near matches.
 public fn levenshtein_bounded(a: &[Byte], b: &[Byte], max: Int) -> Maybe<Int> {
     let m = a.len();
@@ -281,7 +281,7 @@ public fn jaro_winkler_text(a: &Text, b: &Text) -> Float {
 }
 
 /// `closest` for Text inputs — wraps the byte-slice version.
-/// Returns the best-match candidate Text or None if no candidate is
+/// Returns the best-match candidate Text or Maybe.None if no candidate is
 /// within `max_distance` Levenshtein distance.
 public fn closest_text(query: &Text, candidates: &List<Text>, max_distance: Int = 3) -> Maybe<Text> {
     let mut best_idx: Int = -1;

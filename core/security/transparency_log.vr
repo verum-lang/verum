@@ -47,23 +47,23 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "RFC 6962 + RFC 9162 transparency log on top of core/security/merkle",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.transparency_log;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 mount security.merkle.{
     MerkleTree, MerkleError, InclusionProof,
     leaf_hash, node_hash,
@@ -195,7 +195,7 @@ public fn sign_current_tree_head(log: &TransparencyLog, timestamp_ms: Int) -> Re
     let mut i = 0; while i < HASH_SIZE { root_bytes.push(root[i]); i = i + 1; }
     let msg = canonical_sth_message(log.leaves.len(), &root_bytes, timestamp_ms);
     let sig = security.ecc.ed25519.sign(&log.operator_seed, &msg);
-    Ok(SignedTreeHead {
+    Result.Ok(SignedTreeHead {
         tree_size: log.leaves.len(),
         root_hash: root_bytes,
         timestamp_ms: timestamp_ms,
@@ -208,12 +208,12 @@ public fn sign_current_tree_head(log: &TransparencyLog, timestamp_ms: Int) -> Re
 /// consistent (well-formed root_hash).
 public fn verify_sth(sth: &SignedTreeHead) -> Result<(), LogError> {
     if sth.root_hash.len() != HASH_SIZE {
-        return Err(LogError.TreeSizeMismatch { expected: HASH_SIZE, found: sth.root_hash.len() });
+        return Result.Err(LogError.TreeSizeMismatch { expected: HASH_SIZE, found: sth.root_hash.len() });
     }
     let msg = canonical_sth_message(sth.tree_size, &sth.root_hash, sth.timestamp_ms);
     match security.ecc.ed25519.verify(&sth.operator_pubkey, &msg, &sth.signature) {
-        Ok(_)  => Ok(()),
-        Err(e) => Err(LogError.SignatureFailed(e)),
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(e) => Result.Err(LogError.SignatureFailed(e)),
     }
 }
 
@@ -225,12 +225,12 @@ public fn verify_sth(sth: &SignedTreeHead) -> Result<(), LogError> {
 /// log state, anchored to the current tree size.
 public fn inclusion_proof(log: &TransparencyLog, index: Int) -> Result<InclusionProof, LogError> {
     if index < 0 || index >= log.leaves.len() {
-        return Err(LogError.InvalidIndex(index));
+        return Result.Err(LogError.InvalidIndex(index));
     }
     let tree = build_tree_for_leaves(&log.leaves)?;
     match tree.inclusion_proof(index) {
-        Ok(p)  => Ok(p),
-        Err(e) => Err(LogError.Merkle(e)),
+        Result.Ok(p)  => Result.Ok(p),
+        Result.Err(e) => Result.Err(LogError.Merkle(e)),
     }
 }
 
@@ -260,9 +260,9 @@ public fn consistency_proof(
     new_size: Int,
 ) -> Result<List<List<Byte>>, LogError> {
     if old_size < 0 || new_size < old_size || new_size > log.leaves.len() {
-        return Err(LogError.TreeSizeMismatch { expected: log.leaves.len(), found: new_size });
+        return Result.Err(LogError.TreeSizeMismatch { expected: log.leaves.len(), found: new_size });
     }
-    if old_size == 0 || old_size == new_size { return Ok(List.new()); }
+    if old_size == 0 || old_size == new_size { return Result.Ok(List.new()); }
     // Per RFC 6962 §2.1.2 — construct the consistency proof as a list
     // of node hashes that the verifier hashes alongside its own old root
     // to reconstruct both the old and new roots.
@@ -277,7 +277,7 @@ public fn consistency_proof(
         out.push(buf);
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // Recursive helper per RFC 6962 §2.1.2.
@@ -344,11 +344,11 @@ public fn verify_consistency(
     };
     let result = verify_consistency_walk(m, n, &proof_arrs, old_acc, new_acc);
     match result {
-        Some((computed_old, computed_new)) => {
+        Maybe.Some((computed_old, computed_new)) => {
             arr_eq(&computed_old, &bytes_to_arr(&old_sth.root_hash))
                 && arr_eq(&computed_new, &bytes_to_arr(&new_sth.root_hash))
         }
-        None => false,
+        Maybe.None => false,
     }
 }
 
@@ -373,7 +373,7 @@ fn verify_consistency_walk(
     let mut old_acc: [Byte; 32];
     let mut new_acc: [Byte; 32];
     if node > 0 {
-        if proof.len() == 0 { return None; }
+        if proof.len() == 0 { return Maybe.None; }
         old_acc = proof.get(idx).unwrap().clone();
         new_acc = old_acc.clone();
         idx = idx + 1;
@@ -383,19 +383,19 @@ fn verify_consistency_walk(
         // We use the placeholder convention: caller supplies old root via
         // STH. Here we treat old_acc as the STH-provided old root (set
         // outside; we don't have direct access, so this branch returns
-        // None to require explicit handling).
-        return None;
+        // Maybe.None to require explicit handling).
+        return Maybe.None;
     }
     while node > 0 {
         if node % 2 == 1 || node == last_node {
-            if idx >= proof.len() { return None; }
+            if idx >= proof.len() { return Maybe.None; }
             let p = proof.get(idx).unwrap().clone();
             old_acc = node_hash(&p, &old_acc);
             new_acc = node_hash(&p, &new_acc);
             while node % 2 == 0 { node = node / 2; last_node = last_node / 2; }
             idx = idx + 1;
         } else {
-            if idx >= proof.len() { return None; }
+            if idx >= proof.len() { return Maybe.None; }
             let p = proof.get(idx).unwrap().clone();
             new_acc = node_hash(&new_acc, &p);
             idx = idx + 1;
@@ -404,14 +404,14 @@ fn verify_consistency_walk(
         last_node = last_node / 2;
     }
     while last_node > 0 {
-        if idx >= proof.len() { return None; }
+        if idx >= proof.len() { return Maybe.None; }
         let p = proof.get(idx).unwrap().clone();
         new_acc = node_hash(&new_acc, &p);
         idx = idx + 1;
         last_node = last_node / 2;
     }
-    if idx != proof.len() { return None; }
-    Some((old_acc, new_acc))
+    if idx != proof.len() { return Maybe.None; }
+    Maybe.Some((old_acc, new_acc))
 }
 
 // =============================================================================
@@ -444,12 +444,12 @@ public fn tiles_for_inclusion(index: Int, tree_size: Int) -> List<TileCoord> {
 /// Read all leaves whose index falls into a single tile.
 public fn tile_at(log: &TransparencyLog, coord: TileCoord) -> Result<Tile, LogError> {
     if coord.level < 0 || coord.index < 0 {
-        return Err(LogError.InvalidTile(coord));
+        return Result.Err(LogError.InvalidTile(coord));
     }
     let start = coord.index * TILE_SIZE;
     if coord.level == 0 {
         let end_cap = log.leaves.len();
-        if start >= end_cap { return Err(LogError.InvalidTile(coord)); }
+        if start >= end_cap { return Result.Err(LogError.InvalidTile(coord)); }
         let end = if start + TILE_SIZE < end_cap { start + TILE_SIZE } else { end_cap };
         let mut hashes: List<List<Byte>> = List.new();
         let mut i = start;
@@ -460,14 +460,14 @@ public fn tile_at(log: &TransparencyLog, coord: TileCoord) -> Result<Tile, LogEr
             hashes.push(buf);
             i = i + 1;
         }
-        return Ok(Tile { coord: coord, hashes: hashes });
+        return Result.Ok(Tile { coord: coord, hashes: hashes });
     }
     // Higher-level tile: pair-hash from the level below.
     let lower = tile_at(log, TileCoord { level: coord.level - 1, index: coord.index * 2 })?;
     let lower2 = tile_at(log, TileCoord { level: coord.level - 1, index: coord.index * 2 + 1 });
     let mut combined: List<List<Byte>> = List.new();
     let n_lower = lower.hashes.len();
-    let n_lower2 = match &lower2 { Ok(t) => t.hashes.len(), Err(_) => 0 };
+    let n_lower2 = match &lower2 { Result.Ok(t) => t.hashes.len(), Result.Err(_) => 0 };
     let mut i = 0;
     while i + 1 < n_lower {
         let l = lower.hashes.get(i).unwrap();
@@ -481,7 +481,7 @@ public fn tile_at(log: &TransparencyLog, coord: TileCoord) -> Result<Tile, LogEr
         combined.push(lower.hashes.get(i).unwrap().clone());
     }
     let _ = n_lower2;
-    Ok(Tile { coord: coord, hashes: combined })
+    Result.Ok(Tile { coord: coord, hashes: combined })
 }
 
 // =============================================================================
@@ -516,7 +516,7 @@ fn push_be_int64(out: &mut List<Byte>, v: Int) {
 // =============================================================================
 
 fn build_tree_for_leaves(leaves: &List<LogLeaf>) -> Result<MerkleTree, LogError> {
-    if leaves.is_empty() { return Err(LogError.EmptyLog); }
+    if leaves.is_empty() { return Result.Err(LogError.EmptyLog); }
     let mut leaf_lists: List<List<Byte>> = List.new();
     let mut i = 0;
     while i < leaves.len() {
@@ -524,15 +524,15 @@ fn build_tree_for_leaves(leaves: &List<LogLeaf>) -> Result<MerkleTree, LogError>
         i = i + 1;
     }
     match MerkleTree.from_leaves(&leaf_lists) {
-        Ok(t)  => Ok(t),
-        Err(e) => Err(LogError.Merkle(e)),
+        Result.Ok(t)  => Result.Ok(t),
+        Result.Err(e) => Result.Err(LogError.Merkle(e)),
     }
 }
 
 fn merkle_tree_hash_for(leaves: &List<LogLeaf>) -> [Byte; 32] {
     match build_tree_for_leaves(leaves) {
-        Ok(t)  => t.root(),
-        Err(_) => [0_u8; 32],
+        Result.Ok(t)  => t.root(),
+        Result.Err(_) => [0_u8; 32],
     }
 }
 

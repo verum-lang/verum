@@ -115,29 +115,29 @@ public fn julian_to_cal(jd: Float64) -> Calendar {
 // -----------------------------------------------------------------------------
 
 fn parse_uint(bs: &List<Byte>, start: Int, len: Int) -> Maybe<Int> {
-    if start + len > bs.len() { return None; }
+    if start + len > bs.len() { return Maybe.None; }
     // Defence-in-depth: callers pass small `len` (4 for year, 2 for
     // month/day/etc.) but a buggy or hostile caller could pass a
     // length up to bs.len(), wrapping `n * 10 + d` past Int.MAX.
-    if len > 19 { return None; }
+    if len > 19 { return Maybe.None; }
     let mut n: Int = 0;
     let mut i: Int = 0;
     while i < len {
         let b = bs[start + i];
-        if b < (48 as Byte) || b > (57 as Byte) { return None; }
-        if n > 922_337_203_685_477_580 { return None; }
+        if b < (48 as Byte) || b > (57 as Byte) { return Maybe.None; }
+        if n > 922_337_203_685_477_580 { return Maybe.None; }
         n = n * 10 + ((b as Int) - 48);
-        if n < 0 { return None; }
+        if n < 0 { return Maybe.None; }
         i = i + 1;
     }
-    Some(n)
+    Maybe.Some(n)
 }
 
 public fn parse_iso(s: &Text) -> Maybe<Calendar> {
     let bs_t = s.as_bytes();
     let mut bs: List<Byte> = List.with_capacity(bs_t.len());
     bs.extend_from_slice(bs_t);
-    if bs.len() < 10 { return None; }
+    if bs.len() < 10 { return Maybe.None; }
     let y = parse_uint(&bs, 0, 4);
     let m = parse_uint(&bs, 5, 2);
     let d = parse_uint(&bs, 8, 2);
@@ -146,22 +146,22 @@ public fn parse_iso(s: &Text) -> Maybe<Calendar> {
     let mut ss: Int = 0;
     let mut ms: Int = 0;
     if bs.len() >= 16 {
-        match parse_uint(&bs, 11, 2) { Some(v) => { hh = v; }, None => {} }
-        match parse_uint(&bs, 14, 2) { Some(v) => { mm = v; }, None => {} }
+        match parse_uint(&bs, 11, 2) { Maybe.Some(v) => { hh = v; }, Maybe.None => {} }
+        match parse_uint(&bs, 14, 2) { Maybe.Some(v) => { mm = v; }, Maybe.None => {} }
     }
     if bs.len() >= 19 {
-        match parse_uint(&bs, 17, 2) { Some(v) => { ss = v; }, None => {} }
+        match parse_uint(&bs, 17, 2) { Maybe.Some(v) => { ss = v; }, Maybe.None => {} }
     }
     if bs.len() >= 23 {
-        match parse_uint(&bs, 20, 3) { Some(v) => { ms = v; }, None => {} }
+        match parse_uint(&bs, 20, 3) { Maybe.Some(v) => { ms = v; }, Maybe.None => {} }
     }
-    match y { Some(yv) => match m { Some(mv) => match d { Some(dv) => {
-        return Some(Calendar {
+    match y { Maybe.Some(yv) => match m { Maybe.Some(mv) => match d { Maybe.Some(dv) => {
+        return Maybe.Some(Calendar {
             year: yv, month: mv, day: dv,
             hour: hh, minute: mm, second: ss, millis: ms,
         });
-    }, None => {} }, None => {} }, None => {} }
-    None
+    }, Maybe.None => {} }, Maybe.None => {} }, Maybe.None => {} }
+    Maybe.None
 }
 
 // -----------------------------------------------------------------------------
@@ -185,36 +185,36 @@ public fn clock_at_julian(jd: Float64) -> DateTimeClock {
 
 public fn julianday(args: &List<Register>, clock: &DateTimeClock) -> Register {
     match resolve_julian(args, clock) {
-        Some(j) => RReal(j),
-        None    => RNull,
+        Maybe.Some(j) => RReal(j),
+        Maybe.None    => RNull,
     }
 }
 
 public fn unixepoch(args: &List<Register>, clock: &DateTimeClock) -> Register {
     match resolve_julian(args, clock) {
-        Some(j) => RInt(((j - 2440587.5) * 86400.0) as Int64),
-        None    => RNull,
+        Maybe.Some(j) => RInt(((j - 2440587.5) * 86400.0) as Int64),
+        Maybe.None    => RNull,
     }
 }
 
 public fn date_fn(args: &List<Register>, clock: &DateTimeClock) -> Register {
     match resolve_julian(args, clock) {
-        Some(j) => RText(format_date(&julian_to_cal(j))),
-        None    => RNull,
+        Maybe.Some(j) => RText(format_date(&julian_to_cal(j))),
+        Maybe.None    => RNull,
     }
 }
 
 public fn time_fn(args: &List<Register>, clock: &DateTimeClock) -> Register {
     match resolve_julian(args, clock) {
-        Some(j) => RText(format_time(&julian_to_cal(j))),
-        None    => RNull,
+        Maybe.Some(j) => RText(format_time(&julian_to_cal(j))),
+        Maybe.None    => RNull,
     }
 }
 
 public fn datetime_fn(args: &List<Register>, clock: &DateTimeClock) -> Register {
     match resolve_julian(args, clock) {
-        Some(j) => RText(format_datetime(&julian_to_cal(j))),
-        None    => RNull,
+        Maybe.Some(j) => RText(format_datetime(&julian_to_cal(j))),
+        Maybe.None    => RNull,
     }
 }
 
@@ -228,11 +228,11 @@ public fn strftime(args: &List<Register>, clock: &DateTimeClock) -> Register {
     let mut i: Int = 1;
     while i < args.len() { rest.push(clone_register(&args[i])); i = i + 1; }
     match resolve_julian(&rest, clock) {
-        Some(j) => {
+        Maybe.Some(j) => {
             let cal = julian_to_cal(j);
             RText(apply_strftime(&fmt, &cal, j))
         }
-        None => RNull,
+        Maybe.None => RNull,
     }
 }
 
@@ -241,8 +241,8 @@ public fn timediff(a: &Register, b: &Register, clock: &DateTimeClock) -> Registe
     sa.push(clone_register(a));
     let mut sb: List<Register> = List.new();
     sb.push(clone_register(b));
-    match resolve_julian(&sa, clock) { Some(ja) => {
-        match resolve_julian(&sb, clock) { Some(jb) => {
+    match resolve_julian(&sa, clock) { Maybe.Some(ja) => {
+        match resolve_julian(&sb, clock) { Maybe.Some(jb) => {
             let diff_days: Float64 = ja - jb;
             let total_secs: Int64 = (diff_days * 86400.0) as Int64;
             // Format as ±HH:MM:SS.SSS — minimal version.
@@ -260,8 +260,8 @@ public fn timediff(a: &Register, b: &Register, clock: &DateTimeClock) -> Registe
             out.push_byte(58 as Byte);
             push_pad(&mut out, secs, 2);
             return RText(out);
-        }, None => {} }
-    }, None => {} }
+        }, Maybe.None => {} }
+    }, Maybe.None => {} }
     RNull
 }
 
@@ -280,29 +280,29 @@ fn resolve_julian(args: &List<Register>, clock: &DateTimeClock) -> Maybe<Float64
                     start = 1;
                 } else {
                     match parse_iso(s) {
-                        Some(c) => { jd = cal_to_julian(&c); start = 1; }
-                        None    => { return None; }
+                        Maybe.Some(c) => { jd = cal_to_julian(&c); start = 1; }
+                        Maybe.None    => { return Maybe.None; }
                     }
                 }
             }
             RInt(x)   => { jd = 2440587.5 + ((x as Float64) / 86400.0); start = 1; }
             RReal(x)  => { jd = x; start = 1; }
-            RNull     => { return None; }
-            _         => { return None; }
+            RNull     => { return Maybe.None; }
+            _         => { return Maybe.None; }
         }
     }
     let mut i: Int = start;
     while i < args.len() {
         match &args[i] {
             RText(s) => match apply_modifier(jd, s) {
-                Some(j) => { jd = j; }
-                None    => { return None; }
+                Maybe.Some(j) => { jd = j; }
+                Maybe.None    => { return Maybe.None; }
             },
-            _ => { return None; }
+            _ => { return Maybe.None; }
         }
         i = i + 1;
     }
-    Some(jd)
+    Maybe.Some(jd)
 }
 
 // -----------------------------------------------------------------------------
@@ -312,24 +312,24 @@ fn resolve_julian(args: &List<Register>, clock: &DateTimeClock) -> Maybe<Float64
 fn apply_modifier(jd: Float64, m: &Text) -> Maybe<Float64> {
     let lo = lower_text(m);
     if text_eq(&lo, &"localtime".clone()) || text_eq(&lo, &"utc".clone()) {
-        return Some(jd);  // No timezone tracking in v0.1
+        return Maybe.Some(jd);  // No timezone tracking in v0.1
     }
     if text_eq(&lo, &"unixepoch".clone()) {
-        return Some(2440587.5 + jd / 86400.0);
+        return Maybe.Some(2440587.5 + jd / 86400.0);
     }
     if text_eq(&lo, &"start of day".clone()) {
         let frac_floor: Int64 = (jd + 0.5) as Int64;
-        return Some((frac_floor as Float64) - 0.5);
+        return Maybe.Some((frac_floor as Float64) - 0.5);
     }
     if text_eq(&lo, &"start of month".clone()) {
         let mut c = julian_to_cal(jd);
         c.day = 1; c.hour = 0; c.minute = 0; c.second = 0; c.millis = 0;
-        return Some(cal_to_julian(&c));
+        return Maybe.Some(cal_to_julian(&c));
     }
     if text_eq(&lo, &"start of year".clone()) {
         let mut c = julian_to_cal(jd);
         c.month = 1; c.day = 1; c.hour = 0; c.minute = 0; c.second = 0; c.millis = 0;
-        return Some(cal_to_julian(&c));
+        return Maybe.Some(cal_to_julian(&c));
     }
     // Pattern "±N <unit>"
     let bs = lo.as_bytes();
@@ -345,10 +345,10 @@ fn apply_modifier(jd: Float64, m: &Text) -> Maybe<Float64> {
         // datetime modifier (e.g. "+5 days"). Cap digit count at
         // 19 (Int.MAX) plus per-step + post-add overflow guards.
         while i < bs.len() && bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
-            if digit_count >= 19 { return None; }
-            if n > 922_337_203_685_477_580 { return None; }    // Int.MAX / 10
+            if digit_count >= 19 { return Maybe.None; }
+            if n > 922_337_203_685_477_580 { return Maybe.None; }    // Int.MAX / 10
             n = n * 10 + ((bs[i] as Int) - 48);
-            if n < 0 { return None; }                           // wrap-around
+            if n < 0 { return Maybe.None; }                           // wrap-around
             had_digit = true;
             digit_count = digit_count + 1;
             i = i + 1;
@@ -360,32 +360,32 @@ fn apply_modifier(jd: Float64, m: &Text) -> Maybe<Float64> {
             let unit = lower_text(&unit_text);
             let nf: Float64 = (n as Float64) * sign;
             if text_eq(&unit, &"day".clone()) || text_eq(&unit, &"days".clone()) {
-                return Some(jd + nf);
+                return Maybe.Some(jd + nf);
             }
             if text_eq(&unit, &"hour".clone()) || text_eq(&unit, &"hours".clone()) {
-                return Some(jd + nf / 24.0);
+                return Maybe.Some(jd + nf / 24.0);
             }
             if text_eq(&unit, &"minute".clone()) || text_eq(&unit, &"minutes".clone()) {
-                return Some(jd + nf / 1440.0);
+                return Maybe.Some(jd + nf / 1440.0);
             }
             if text_eq(&unit, &"second".clone()) || text_eq(&unit, &"seconds".clone()) {
-                return Some(jd + nf / 86400.0);
+                return Maybe.Some(jd + nf / 86400.0);
             }
             if text_eq(&unit, &"month".clone()) || text_eq(&unit, &"months".clone()) {
                 let mut c = julian_to_cal(jd);
                 c.month = c.month + (n as Int) * (sign as Int);
                 while c.month < 1 { c.year = c.year - 1; c.month = c.month + 12; }
                 while c.month > 12 { c.year = c.year + 1; c.month = c.month - 12; }
-                return Some(cal_to_julian(&c));
+                return Maybe.Some(cal_to_julian(&c));
             }
             if text_eq(&unit, &"year".clone()) || text_eq(&unit, &"years".clone()) {
                 let mut c = julian_to_cal(jd);
                 c.year = c.year + (n as Int) * (sign as Int);
-                return Some(cal_to_julian(&c));
+                return Maybe.Some(cal_to_julian(&c));
             }
         }
     }
-    None
+    Maybe.None
 }
 
 // -----------------------------------------------------------------------------

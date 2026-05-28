@@ -60,25 +60,25 @@ mount core.database.sqlite.native.l5_sql.parser.select.parse_select;
 
 public fn parse_insert(ts: &mut SqlTokenStream) -> Result<InsertStmt, ParseError> {
     let replacing_form = ts.accept_keyword(KwReplace);
-    let mut conflict: Maybe<SqlOnConflict> = None;
+    let mut conflict: Maybe<SqlOnConflict> = Maybe.None;
 
     if !replacing_form {
-        match ts.expect_keyword(KwInsert) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwInsert) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         // Optional `OR <conflict-action>`.
         if ts.accept_keyword(KwOr) {
             let c = match parse_conflict_action(ts) {
-                Ok(c)  => c, Err(e) => { return Err(e); }
+                Result.Ok(c)  => c, Result.Err(e) => { return Result.Err(e); }
             };
-            conflict = Some(c);
+            conflict = Maybe.Some(c);
         }
     } else {
-        conflict = Some(OcReplace);
+        conflict = Maybe.Some(OcReplace);
     }
 
-    match ts.expect_keyword(KwInto) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwInto) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
     let table = match parse_qualified_name(ts) {
-        Ok(t)  => t, Err(e) => { return Err(e); }
+        Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
     };
 
     // Optional column list: `(col1, col2, ...)`.
@@ -86,25 +86,25 @@ public fn parse_insert(ts: &mut SqlTokenStream) -> Result<InsertStmt, ParseError
     if ts.accept_punct(PLParen) {
         loop {
             let col = match ts.expect_ident() {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
             columns.push(col);
             if !ts.accept_punct(PComma) { break; }
         }
-        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     }
 
     // Source — VALUES / SELECT / DEFAULT VALUES.
     let source = match parse_insert_source(ts) {
-        Ok(s)  => s, Err(e) => { return Err(e); }
+        Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
 
     // Optional RETURNING.
     let returning = match parse_returning(ts) {
-        Ok(v)  => v, Err(e) => { return Err(e); }
+        Result.Ok(v)  => v, Result.Err(e) => { return Result.Err(e); }
     };
 
-    Ok(InsertStmt {
+    Result.Ok(InsertStmt {
         table: table,
         columns: columns,
         source: source,
@@ -115,41 +115,41 @@ public fn parse_insert(ts: &mut SqlTokenStream) -> Result<InsertStmt, ParseError
 
 fn parse_insert_source(ts: &mut SqlTokenStream) -> Result<InsertSource, ParseError> {
     if ts.accept_keyword(KwDefault) {
-        match ts.expect_keyword(KwValues) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        return Ok(IsDefault);
+        match ts.expect_keyword(KwValues) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        return Result.Ok(IsDefault);
     }
     if ts.accept_keyword(KwValues) {
         let mut rows: List<List<Expr>> = List.new();
         loop {
-            match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+            match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
             let mut row: List<Expr> = List.new();
             if !ts.check_punct(PRParen) {
                 loop {
                     let e = match parse_expr(ts) {
-                        Ok(x)  => x, Err(err) => { return Err(err); }
+                        Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
                     };
                     row.push(e);
                     if !ts.accept_punct(PComma) { break; }
                 }
             }
-            match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+            match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
             rows.push(row);
             if !ts.accept_punct(PComma) { break; }
         }
-        return Ok(IsValues(rows));
+        return Result.Ok(IsValues(rows));
     }
     // INSERT ... SELECT — delegates to parse_select. Wraps the parsed
     // SELECT statement in IsSelect(Heap.new(...)). Bulk-load idiom:
     //  INSERT INTO archive (id, payload) SELECT id, payload FROM live;
     if ts.check_keyword(KwSelect) {
         let sel = match parse_select(ts) {
-            Ok(s)  => s,
-            Err(e) => { return Err(e); }
+            Result.Ok(s)  => s,
+            Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(IsSelect(Heap.new(sel)));
+        return Result.Ok(IsSelect(Heap.new(sel)));
     }
 
-    Err(parse_error(
+    Result.Err(parse_error(
         "INSERT source: expected VALUES, DEFAULT VALUES, or SELECT".clone(),
         ts.position(),
     ))
@@ -160,53 +160,53 @@ fn parse_insert_source(ts: &mut SqlTokenStream) -> Result<InsertSource, ParseErr
 // -----------------------------------------------------------------------------
 
 public fn parse_update(ts: &mut SqlTokenStream) -> Result<UpdateStmt, ParseError> {
-    match ts.expect_keyword(KwUpdate) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwUpdate) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
-    let mut conflict: Maybe<SqlOnConflict> = None;
+    let mut conflict: Maybe<SqlOnConflict> = Maybe.None;
     if ts.accept_keyword(KwOr) {
         let c = match parse_conflict_action(ts) {
-            Ok(c)  => c, Err(e) => { return Err(e); }
+            Result.Ok(c)  => c, Result.Err(e) => { return Result.Err(e); }
         };
-        conflict = Some(c);
+        conflict = Maybe.Some(c);
     }
 
     let table = match parse_qualified_name(ts) {
-        Ok(t)  => t, Err(e) => { return Err(e); }
+        Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
     };
 
-    match ts.expect_keyword(KwSet) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwSet) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
     let mut assignments: List<UpdateAssignment> = List.new();
     loop {
         let col = match ts.expect_ident() {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
         if !ts.accept_op(OpEq) {
-            return Err(parse_error("expected '=' in SET".clone(), ts.position()));
+            return Result.Err(parse_error("expected '=' in SET".clone(), ts.position()));
         }
         let value = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
         assignments.push(UpdateAssignment { column: col, col_idx: -1, value: value });
         if !ts.accept_punct(PComma) { break; }
     }
 
-    let mut where_clause: Maybe<Expr> = None;
+    let mut where_clause: Maybe<Expr> = Maybe.None;
     if ts.accept_keyword(KwWhere) {
         let e = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        where_clause = Some(e);
+        where_clause = Maybe.Some(e);
     }
 
     let returning = match parse_returning(ts) {
-        Ok(v)  => v, Err(e) => { return Err(e); }
+        Result.Ok(v)  => v, Result.Err(e) => { return Result.Err(e); }
     };
 
-    Ok(UpdateStmt {
+    Result.Ok(UpdateStmt {
         table: table,
         assignments: assignments,
-        from: None,      // `UPDATE ... FROM ...` lands with subquery support
+        from: Maybe.None,      // `UPDATE ... FROM ...` lands with subquery support
         where_clause: where_clause,
         on_conflict: conflict,
         returning: returning,
@@ -218,26 +218,26 @@ public fn parse_update(ts: &mut SqlTokenStream) -> Result<UpdateStmt, ParseError
 // -----------------------------------------------------------------------------
 
 public fn parse_delete(ts: &mut SqlTokenStream) -> Result<DeleteStmt, ParseError> {
-    match ts.expect_keyword(KwDelete) { Ok(_) => {}, Err(e) => { return Err(e); } }
-    match ts.expect_keyword(KwFrom) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwDelete) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+    match ts.expect_keyword(KwFrom) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
     let table = match parse_qualified_name(ts) {
-        Ok(t)  => t, Err(e) => { return Err(e); }
+        Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
     };
 
-    let mut where_clause: Maybe<Expr> = None;
+    let mut where_clause: Maybe<Expr> = Maybe.None;
     if ts.accept_keyword(KwWhere) {
         let e = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        where_clause = Some(e);
+        where_clause = Maybe.Some(e);
     }
 
     let returning = match parse_returning(ts) {
-        Ok(v)  => v, Err(e) => { return Err(e); }
+        Result.Ok(v)  => v, Result.Err(e) => { return Result.Err(e); }
     };
 
-    Ok(DeleteStmt {
+    Result.Ok(DeleteStmt {
         table: table,
         where_clause: where_clause,
         returning: returning,
@@ -249,30 +249,30 @@ public fn parse_delete(ts: &mut SqlTokenStream) -> Result<DeleteStmt, ParseError
 // -----------------------------------------------------------------------------
 
 fn parse_conflict_action(ts: &mut SqlTokenStream) -> Result<SqlOnConflict, ParseError> {
-    if ts.accept_keyword(KwAbort)    { return Ok(OcAbort); }
-    if ts.accept_keyword(KwFail)     { return Ok(OcFail); }
-    if ts.accept_keyword(KwIgnore)   { return Ok(OcIgnore); }
-    if ts.accept_keyword(KwReplace)  { return Ok(OcReplace); }
-    if ts.accept_keyword(KwRollback) { return Ok(OcRollback); }
-    Err(parse_error("expected conflict action".clone(), ts.position()))
+    if ts.accept_keyword(KwAbort)    { return Result.Ok(OcAbort); }
+    if ts.accept_keyword(KwFail)     { return Result.Ok(OcFail); }
+    if ts.accept_keyword(KwIgnore)   { return Result.Ok(OcIgnore); }
+    if ts.accept_keyword(KwReplace)  { return Result.Ok(OcReplace); }
+    if ts.accept_keyword(KwRollback) { return Result.Ok(OcRollback); }
+    Result.Err(parse_error("expected conflict action".clone(), ts.position()))
 }
 
 fn parse_qualified_name(ts: &mut SqlTokenStream) -> Result<TableRef, ParseError> {
     let first = match ts.expect_ident() {
-        Ok(s)  => s, Err(e) => { return Err(e); }
+        Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
     if ts.accept_punct(PDot) {
         let second = match ts.expect_ident() {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(TableRef { schema: first, name: second, alias: "".clone() });
+        return Result.Ok(TableRef { schema: first, name: second, alias: "".clone() });
     }
-    Ok(TableRef { schema: "".clone(), name: first, alias: "".clone() })
+    Result.Ok(TableRef { schema: "".clone(), name: first, alias: "".clone() })
 }
 
 fn parse_returning(ts: &mut SqlTokenStream) -> Result<List<ResultColumnItem>, ParseError> {
     let mut out: List<ResultColumnItem> = List.new();
-    if !ts.accept_keyword(KwReturning) { return Ok(out); }
+    if !ts.accept_keyword(KwReturning) { return Result.Ok(out); }
     loop {
         // Reuse the RcExpr form — `RETURNING *` / `RETURNING t.*` are
         // handled as expressions by the parser at this point; the
@@ -281,11 +281,11 @@ fn parse_returning(ts: &mut SqlTokenStream) -> Result<List<ResultColumnItem>, Pa
             out.push(RcStar);
         } else {
             let e = match parse_expr(ts) {
-                Ok(x)  => x, Err(err) => { return Err(err); }
+                Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
             };
             let alias = if ts.accept_keyword(KwAs) {
                 match ts.expect_ident() {
-                    Ok(s)  => s, Err(err) => { return Err(err); }
+                    Result.Ok(s)  => s, Result.Err(err) => { return Result.Err(err); }
                 }
             } else {
                 "".clone()
@@ -294,5 +294,5 @@ fn parse_returning(ts: &mut SqlTokenStream) -> Result<List<ResultColumnItem>, Pa
         }
         if !ts.accept_punct(PComma) { break; }
     }
-    Ok(out)
+    Result.Ok(out)
 }

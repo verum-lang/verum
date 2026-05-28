@@ -2,7 +2,7 @@
 // core/intrinsics/gpu.vr - GPU Operation Intrinsics
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (compiler-provided)
+// Dependencies: Maybe.None (compiler-provided)
 //
 
 // This module provides GPU operations that map to VBC GPU opcodes.

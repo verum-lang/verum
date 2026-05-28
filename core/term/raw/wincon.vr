@@ -56,13 +56,13 @@ implement WindowsTerminal {
         let mut output_mode: UInt32 = 0;
 
         if !GetConsoleMode(input_handle, &mut input_mode) {
-            return Err(StreamError.new(IoErrorKind.Other));
+            return Result.Err(StreamError.new(IoErrorKind.Other));
         }
         if !GetConsoleMode(output_handle, &mut output_mode) {
-            return Err(StreamError.new(IoErrorKind.Other));
+            return Result.Err(StreamError.new(IoErrorKind.Other));
         }
 
-        Ok(WindowsTerminal {
+        Result.Ok(WindowsTerminal {
             mode: TerminalMode {
                 original: TermiosState {
                     input_mode: input_mode,
@@ -92,26 +92,26 @@ implement RawTerminal for WindowsTerminal {
             | DISABLE_NEWLINE_AUTO_RETURN;
 
         if !SetConsoleMode(self.input_handle, raw_input) {
-            return Err(StreamError.new(IoErrorKind.Other));
+            return Result.Err(StreamError.new(IoErrorKind.Other));
         }
         if !SetConsoleMode(self.output_handle, raw_output) {
             // Try to restore input mode on failure
             let _ = SetConsoleMode(self.input_handle, self.mode.original.input_mode);
-            return Err(StreamError.new(IoErrorKind.Other));
+            return Result.Err(StreamError.new(IoErrorKind.Other));
         }
 
         self.mode.is_raw = true;
-        Ok(())
+        Result.Ok(())
     }
 
     fn disable_raw_mode(&mut self) -> IoResult<()> {
         let ok_in = SetConsoleMode(self.input_handle, self.mode.original.input_mode);
         let ok_out = SetConsoleMode(self.output_handle, self.mode.original.output_mode);
         if !ok_in || !ok_out {
-            return Err(StreamError.new(IoErrorKind.Other));
+            return Result.Err(StreamError.new(IoErrorKind.Other));
         }
         self.mode.is_raw = false;
-        Ok(())
+        Result.Ok(())
     }
 
     fn enter_alternate_screen(&mut self) -> IoResult<()> {
@@ -119,14 +119,14 @@ implement RawTerminal for WindowsTerminal {
         self.write_str("\x1b[?1049h")?;
         self.flush()?;
         self.mode.is_alternate = true;
-        Ok(())
+        Result.Ok(())
     }
 
     fn leave_alternate_screen(&mut self) -> IoResult<()> {
         self.write_str("\x1b[?1049l")?;
         self.flush()?;
         self.mode.is_alternate = false;
-        Ok(())
+        Result.Ok(())
     }
 
     fn size(&self) -> IoResult<TerminalSize> {
@@ -138,13 +138,13 @@ implement RawTerminal for WindowsTerminal {
             maximum_window_size: Coord { x: 0, y: 0 },
         };
         if !GetConsoleScreenBufferInfo(self.output_handle, &mut info) {
-            return Err(StreamError.new(IoErrorKind.Other));
+            return Result.Err(StreamError.new(IoErrorKind.Other));
         }
-        Ok(TerminalSize {
+        Result.Ok(TerminalSize {
             columns: (info.window.right - info.window.left + 1) as Int,
             rows: (info.window.bottom - info.window.top + 1) as Int,
-            pixel_width: None,
-            pixel_height: None,
+            pixel_width: Maybe.None,
+            pixel_height: Maybe.None,
         })
     }
 
@@ -225,13 +225,13 @@ implement WindowsTerminal {
         for i in 0..bytes.len() {
             self.write_buf.push(bytes[i]);
         }
-        Ok(())
+        Result.Ok(())
     }
 
     fn flush(&mut self) -> IoResult<()> {
         // Write via VTP-enabled console output
         if self.write_buf.len() == 0 {
-            return Ok(());
+            return Result.Ok(());
         }
         let mut written: UInt32 = 0;
         let ok = kernel32.WriteFile(
@@ -244,9 +244,9 @@ implement WindowsTerminal {
         self.write_buf.clear();
         // Win32 BOOL: 0 = FALSE. T0.4.5 — extern returns Int32, not Bool.
         if ok == 0 {
-            Err(StreamError.new(IoErrorKind.Other))
+            Result.Err(StreamError.new(IoErrorKind.Other))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 }

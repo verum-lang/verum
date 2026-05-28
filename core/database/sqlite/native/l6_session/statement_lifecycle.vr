@@ -102,7 +102,7 @@ public fn bind_positional(
     value: Register,
 ) -> Result<(), LifecycleError> {
     if index <= 0 {
-        return Err(LeIndexOutOfRange(index));
+        return Result.Err(LeIndexOutOfRange(index));
     }
     // Grow the positional list to size `index` (1-based → array
     // length must be at least `index`).
@@ -113,7 +113,7 @@ public fn bind_positional(
         i = i + 1;
     }
     stmt.bindings.positional[index - 1] = value;
-    Ok(())
+    Result.Ok(())
 }
 
 /// Bind a parameter by name (e.g. `:user_id` or `@token`).  Reads
@@ -124,7 +124,7 @@ public fn bind_named(
     value: Register,
 ) -> Result<(), LifecycleError> {
     stmt.bindings.named.insert(name, value);
-    Ok(())
+    Result.Ok(())
 }
 
 /// Convenience: bind every parameter to NULL.  Used by reset()
@@ -193,7 +193,7 @@ public fn reset(stmt: &mut PreparedStatement, also_clear_bindings: Bool) -> Resu
     if also_clear_bindings {
         clear_bindings(stmt);
     }
-    Ok(())
+    Result.Ok(())
 }
 
 /// Finalize the statement — release all interpreter state.  After
@@ -208,7 +208,7 @@ public fn finalize(stmt: &mut PreparedStatement) -> Result<(), LifecycleError> {
     // Foundation marker — re-initialise to a known-empty state.
     stmt.state = vdbe_state_new(&stmt.program);
     clear_bindings(stmt);
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -376,7 +376,7 @@ public type ExecOutcome is {
 /// into a `List<List<Register>>`.  Convenience wrapper; produces
 /// the same observable behaviour as a manual step-loop.
 public fn execute_collect(stmt: &mut PreparedStatement) -> ExecOutcome {
-    let mut out = ExecOutcome { rows: List.new(), error: None };
+    let mut out = ExecOutcome { rows: List.new(), error: Maybe.None };
     let max_iter: Int = 1000000;
     let mut iter: Int = 0;
     while iter < max_iter {
@@ -398,12 +398,12 @@ public fn execute_collect(stmt: &mut PreparedStatement) -> ExecOutcome {
             }
             SoDone => return out,
             SoErrored(msg) => {
-                out.error = Some(msg);
+                out.error = Maybe.Some(msg);
                 return out;
             }
         }
         iter = iter + 1;
     }
-    out.error = Some("execute_collect: max_iter exceeded".clone());
+    out.error = Maybe.Some("execute_collect: max_iter exceeded".clone());
     out
 }

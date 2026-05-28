@@ -85,40 +85,40 @@ implement GsCursor {
             match &args[0] {
                 RInt(x) => { start = x; }
                 RReal(x) => { start = x as Int64; }
-                _ => { return Err(VtabConstraint("start must be integer".clone())); }
+                _ => { return Result.Err(VtabConstraint("start must be integer".clone())); }
             }
         }
         if args.len() >= 2 {
             match &args[1] {
                 RInt(x) => { stop = x; }
                 RReal(x) => { stop = x as Int64; }
-                _ => { return Err(VtabConstraint("stop must be integer".clone())); }
+                _ => { return Result.Err(VtabConstraint("stop must be integer".clone())); }
             }
         }
         if args.len() >= 3 {
             match &args[2] {
                 RInt(x) => {
                     if x == 0_i64 {
-                        return Err(VtabConstraint("step must be non-zero".clone()));
+                        return Result.Err(VtabConstraint("step must be non-zero".clone()));
                     }
                     step = x;
                 }
-                _ => { return Err(VtabConstraint("step must be integer".clone())); }
+                _ => { return Result.Err(VtabConstraint("step must be integer".clone())); }
             }
         }
         self.cur = start;
         self.stop = stop;
         self.step = step;
         self.is_eof = if step > 0_i64 { start > stop } else { start < stop };
-        Ok(())
+        Result.Ok(())
     }
 
     public fn next_row(&mut self) -> Result<(), VtabError> {
-        if self.is_eof { return Ok(()); }
+        if self.is_eof { return Result.Ok(()); }
         self.cur = self.cur + self.step;
         let done = if self.step > 0_i64 { self.cur > self.stop } else { self.cur < self.stop };
         if done { self.is_eof = true; }
-        Ok(())
+        Result.Ok(())
     }
 
     public fn eof(&self) -> Bool { self.is_eof }

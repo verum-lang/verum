@@ -87,21 +87,21 @@ public fn refined_path_int(
     refinement: &PathRefinement<Int>,
 ) -> Result<Int, ExtractRejection> {
     let raw = match req.path_params.get(&refinement.name) {
-        None    => return Err(ExtractRejection.MissingParam(refinement.name.clone())),
-        Some(v) => v.clone(),
+        Maybe.None    => return Result.Err(ExtractRejection.MissingParam(refinement.name.clone())),
+        Maybe.Some(v) => v.clone(),
     };
     let value = match raw.parse_int() {
-        Ok(n)  => n,
-        Err(_) => return Err(ExtractRejection.InvalidParam {
+        Result.Ok(n)  => n,
+        Result.Err(_) => return Result.Err(ExtractRejection.InvalidParam {
             name: refinement.name.clone(),
             value: raw,
             expected: refinement.expected.clone(),
         }),
     };
     if (refinement.check)(&value) {
-        Ok(value)
+        Result.Ok(value)
     } else {
-        Err(ExtractRejection.InvalidParam {
+        Result.Err(ExtractRejection.InvalidParam {
             name: refinement.name.clone(),
             value: f"{value}",
             expected: refinement.expected.clone(),
@@ -115,13 +115,13 @@ public fn refined_path_text(
     refinement: &PathRefinement<Text>,
 ) -> Result<Text, ExtractRejection> {
     let value = match req.path_params.get(&refinement.name) {
-        None    => return Err(ExtractRejection.MissingParam(refinement.name.clone())),
-        Some(v) => v.clone(),
+        Maybe.None    => return Result.Err(ExtractRejection.MissingParam(refinement.name.clone())),
+        Maybe.Some(v) => v.clone(),
     };
     if (refinement.check)(&value) {
-        Ok(value)
+        Result.Ok(value)
     } else {
-        Err(ExtractRejection.InvalidParam {
+        Result.Err(ExtractRejection.InvalidParam {
             name: refinement.name.clone(),
             value: value,
             expected: refinement.expected.clone(),

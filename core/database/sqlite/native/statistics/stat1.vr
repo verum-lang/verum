@@ -30,7 +30,7 @@ mount collections.List;
 
 public type Stat1Row is {
     table_name: Text,
-    /// `None` ⇒ statistics for the table's implicit rowid.
+    /// `Maybe.None` ⇒ statistics for the table's implicit rowid.
     index_name: Maybe<Text>,
     /// Total rows in the table.
     total_rows: Int64,
@@ -92,24 +92,24 @@ implement Stat1Table {
         while i < self.rows.len() {
             if self.rows[i].table_name == *table {
                 match &self.rows[i].index_name {
-                    None    => return Some(self.rows[i].total_rows),
-                    Some(_) => {}
+                    Maybe.None    => return Maybe.Some(self.rows[i].total_rows),
+                    Maybe.Some(_) => {}
                 }
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn lookup_index(&self, index: &Text) -> Maybe<Int64> {
         let mut i: Int = 0;
         while i < self.rows.len() {
             match &self.rows[i].index_name {
-                Some(n) => if n == index { return Some(self.rows[i].total_rows); },
-                None    => {}
+                Maybe.Some(n) => if n == index { return Maybe.Some(self.rows[i].total_rows); },
+                Maybe.None    => {}
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 }

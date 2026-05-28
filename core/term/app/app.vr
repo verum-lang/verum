@@ -75,9 +75,9 @@ public type Model is protocol {
     /// Render the UI into the current frame (immediate mode).
     fn view(&self, frame: &mut Frame);
 
-    /// Map a raw terminal event to a user Msg (or None to ignore).
+    /// Map a raw terminal event to a user Msg (or Maybe.None to ignore).
     fn handle_event(&self, event: Event) -> Maybe<Self.Msg> {
-        None
+        Maybe.None
     }
 
     /// External message sources: timers, streams, signals.
@@ -141,8 +141,8 @@ public async fn run_async<M: Model>(mut model: M) -> IoResult<()> {
     let loop_result: IoResult<()> = loop {
         // --- render ---------------------------------------------------------
         match terminal.draw(|frame| model.view(frame)) {
-            Ok(_) => {}
-            Err(e) => { break Err(e); }
+            Result.Ok(_) => {}
+            Result.Err(e) => { break Result.Err(e); }
         }
 
         // --- drain async-produced messages (non-blocking, capped per tick) --
@@ -151,7 +151,7 @@ public async fn run_async<M: Model>(mut model: M) -> IoResult<()> {
         let drain_cap = 64;
         while drained < drain_cap {
             match rx.try_recv() {
-                Ok(msg) => {
+                Result.Ok(msg) => {
                     let cmd = model.update(msg);
                     match cmd {
                         Command.Quit => { should_quit = true; break; }
@@ -159,35 +159,35 @@ public async fn run_async<M: Model>(mut model: M) -> IoResult<()> {
                     }
                     drained = drained + 1;
                 }
-                Err(_) => break,
+                Result.Err(_) => break,
             }
         }
-        if should_quit { break Ok(()); }
+        if should_quit { break Result.Ok(()); }
 
         // --- poll a single terminal event with frame budget -----------------
         match events.poll(frame_budget) {
-            Some(event) => {
+            Maybe.Some(event) => {
                 // Global hotkey: Ctrl+C always quits.
                 match &event {
                     Event.Key(ke) => {
-                        if ke.is_ctrl_c() { break Ok(()); }
+                        if ke.is_ctrl_c() { break Result.Ok(()); }
                     }
                     _ => {}
                 }
 
                 // User-defined event → Msg mapping.
                 match model.handle_event(event) {
-                    Some(msg) => {
+                    Maybe.Some(msg) => {
                         let cmd = model.update(msg);
                         match cmd {
-                            Command.Quit => { break Ok(()); }
+                            Command.Quit => { break Result.Ok(()); }
                             other => { dispatch_command(&other, &tx, &cancel); }
                         }
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
             }
-            None => { /* timeout: re-render for animation */ }
+            Maybe.None => { /* timeout: re-render for animation */ }
         }
     };
 
@@ -355,11 +355,11 @@ fn dispatch_subscription<Msg>(
             spawn_detached(async {
                 while !tok.is_cancelled() {
                     match s.next().await {
-                        Some(msg) => {
+                        Maybe.Some(msg) => {
                             if tok.is_cancelled() { return; }
                             let _ = tx2.try_send(msg);
                         }
-                        None => return,
+                        Maybe.None => return,
                     }
                 }
             });

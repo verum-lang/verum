@@ -114,7 +114,7 @@ implement DispatchOutcome {
             crypto_chunks:   [],
             datagrams:       [],
             handshake_done:  false,
-            close_signal:    None,
+            close_signal:    Maybe.None,
             to_retransmit:   [],
             new_cids:        [],
             retired_cid_seqs:[],
@@ -149,7 +149,7 @@ public fn dispatch_frames(
         i = i + 1;
     }
 
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn dispatch_one(
@@ -164,8 +164,8 @@ fn dispatch_one(
     out:           &mut DispatchOutcome,
 ) -> Result<(), QuicError> {
     match frame {
-        Frame.PaddingRun(_) => Ok(()),
-        Frame.PingFrame     => Ok(()),
+        Frame.PaddingRun(_) => Result.Ok(()),
+        Frame.PingFrame     => Result.Ok(()),
 
         Frame.AckFrame { largest_acked, ack_delay, ranges, ecn } => {
             let retransmit = loss.on_ack_received(
@@ -177,7 +177,7 @@ fn dispatch_one(
                 out.to_retransmit.push(retransmit[j].clone());
                 j = j + 1;
             }
-            Ok(())
+            Result.Ok(())
         },
 
         Frame.CryptoFrame { offset, data } => {
@@ -186,14 +186,14 @@ fn dispatch_one(
                 offset: *offset,
                 data: data.clone(),
             });
-            Ok(())
+            Result.Ok(())
         },
 
         Frame.StreamFrame { stream_id, offset, data, fin } => {
             // Find or lazily create the recv-side stream.
             let stream = find_or_create_recv(recv_streams, *stream_id, flow);
             match stream.on_stream_frame(*offset, data.as_slice(), *fin) {
-                Ok(()) => {
+                Result.Ok(()) => {
                     // Accept into connection-level FC too.
                     let delta = data.len() as UInt64;
                     flow.on_bytes_recv(delta)
@@ -202,20 +202,20 @@ fn dispatch_one(
                             frame_type: 8_u64,
                             reason: Text.from_str("STREAM frame exceeds conn FC"),
                         })?;
-                    Ok(())
+                    Result.Ok(())
                 },
-                Err(RecvError.FlowControlViolation) => Err(QuicError.TransportError {
+                Result.Err(RecvError.FlowControlViolation) => Result.Err(QuicError.TransportError {
                     code: TransportErrorCode.new(TransportErrorCode.FLOW_CONTROL_ERROR),
                     frame_type: 8_u64,
                     reason: Text.from_str("STREAM exceeds stream FC"),
                 }),
-                Err(RecvError.FinalSizeChanged) | Err(RecvError.ResetAfterFin) =>
-                    Err(QuicError.TransportError {
+                Result.Err(RecvError.FinalSizeChanged) | Result.Err(RecvError.ResetAfterFin) =>
+                    Result.Err(QuicError.TransportError {
                         code: TransportErrorCode.new(TransportErrorCode.FINAL_SIZE_ERROR),
                         frame_type: 8_u64,
                         reason: Text.from_str("final size changed"),
                     }),
-                Err(RecvError.ReceiveAfterReset) => Err(QuicError.TransportError {
+                Result.Err(RecvError.ReceiveAfterReset) => Result.Err(QuicError.TransportError {
                     code: TransportErrorCode.new(TransportErrorCode.STREAM_STATE_ERROR),
                     frame_type: 8_u64,
                     reason: Text.from_str("STREAM after RESET"),
@@ -236,38 +236,38 @@ fn dispatch_one(
         Frame.StopSending { stream_id, error_code } => {
             // Peer asked us to stop sending on this stream → emit
             // RESET_STREAM in response with their error_code.
-            if let Some(ss) = find_send(send_streams, *stream_id) {
+            if let Maybe.Some(ss) = find_send(send_streams, *stream_id) {
                 match ss.reset(*error_code) {
-                    Ok(final_size) => {
+                    Result.Ok(final_size) => {
                         out.outbound_frames.push(Frame.ResetStream {
                             stream_id: *stream_id,
                             error_code: *error_code,
                             final_size: final_size,
                         });
-                        Ok(())
+                        Result.Ok(())
                     },
-                    Err(_) => Ok(()),   // already reset/finished
+                    Result.Err(_) => Result.Ok(()),   // already reset/finished
                 }
-            } else { Ok(()) }
+            } else { Result.Ok(()) }
         },
 
         Frame.MaxData(limit) => {
             flow.on_peer_max_data(*limit);
-            Ok(())
+            Result.Ok(())
         },
         Frame.MaxStreamData { stream_id, limit } => {
-            if let Some(ss) = find_send(send_streams, *stream_id) {
+            if let Maybe.Some(ss) = find_send(send_streams, *stream_id) {
                 ss.on_max_stream_data(*limit);
             }
-            Ok(())
+            Result.Ok(())
         },
-        Frame.MaxStreamsBidi(n) => { flow.on_peer_max_streams_bidi(*n); Ok(()) },
-        Frame.MaxStreamsUni(n)  => { flow.on_peer_max_streams_uni(*n); Ok(()) },
+        Frame.MaxStreamsBidi(n) => { flow.on_peer_max_streams_bidi(*n); Result.Ok(()) },
+        Frame.MaxStreamsUni(n)  => { flow.on_peer_max_streams_uni(*n); Result.Ok(()) },
 
-        Frame.DataBlocked(_)         => Ok(()),   // diagnostic; could trigger MAX_DATA
-        Frame.StreamDataBlocked {..} => Ok(()),
-        Frame.StreamsBlockedBidi(_)  => Ok(()),
-        Frame.StreamsBlockedUni(_)   => Ok(()),
+        Frame.DataBlocked(_)         => Result.Ok(()),   // diagnostic; could trigger MAX_DATA
+        Frame.StreamDataBlocked {..} => Result.Ok(()),
+        Frame.StreamsBlockedBidi(_)  => Result.Ok(()),
+        Frame.StreamsBlockedUni(_)   => Result.Ok(()),
 
         Frame.NewConnectionId { sequence_number, retire_prior_to, connection_id, stateless_reset_token } => {
             let cid = ConnectionId.from_bytes(connection_id.as_slice())
@@ -282,39 +282,39 @@ fn dispatch_one(
                 connection_id:   cid,
                 stateless_reset_token: stateless_reset_token.clone(),
             });
-            Ok(())
+            Result.Ok(())
         },
         Frame.RetireConnectionId(seq) => {
             out.retired_cid_seqs.push(*seq);
-            Ok(())
+            Result.Ok(())
         },
 
         Frame.PathChallenge(data) => {
             // Echo back as PATH_RESPONSE for path validation.
             out.outbound_frames.push(Frame.PathResponse(data.clone()));
-            Ok(())
+            Result.Ok(())
         },
-        Frame.PathResponse(_) => Ok(()),   // recorded by path validator externally
+        Frame.PathResponse(_) => Result.Ok(()),   // recorded by path validator externally
 
         Frame.ConnectionCloseTransport { error_code, frame_type: _, reason } => {
-            out.close_signal = Some((*error_code, reason.clone(), false));
-            Ok(())
+            out.close_signal = Maybe.Some((*error_code, reason.clone(), false));
+            Result.Ok(())
         },
         Frame.ConnectionCloseApplication { error_code, reason } => {
-            out.close_signal = Some((*error_code, reason.clone(), true));
-            Ok(())
+            out.close_signal = Maybe.Some((*error_code, reason.clone(), true));
+            Result.Ok(())
         },
 
         Frame.HandshakeDone => {
             out.handshake_done = true;
-            Ok(())
+            Result.Ok(())
         },
 
-        Frame.NewToken(_) => Ok(()),   // caller stores externally (client-only frame)
+        Frame.NewToken(_) => Result.Ok(()),   // caller stores externally (client-only frame)
 
         Frame.Datagram { data, with_length: _ } => {
             out.datagrams.push(data.clone());
-            Ok(())
+            Result.Ok(())
         },
     }
 }
@@ -359,8 +359,8 @@ fn find_send<'a>(
 ) -> Maybe<&'a mut SendStream> {
     let mut i: Int = 0;
     while i < list.len() {
-        if list[i].0 == sid { return Some(&mut list[i].1); }
+        if list[i].0 == sid { return Maybe.Some(&mut list[i].1); }
         i = i + 1;
     }
-    None
+    Maybe.None
 }

@@ -21,7 +21,7 @@
 // with the consistent-hash machinery required for cache locality.
 //
 
-// Every policy returns `None` if zero upstreams are healthy; callers
+// Every policy returns `Maybe.None` if zero upstreams are healthy; callers
 // (typically `proxy_handler`) turn that into `WeftError.Overloaded`.
 //
 

@@ -146,7 +146,7 @@ implement AliasSampler {
     /// non-negative; a zero weight just means that index never
     /// samples.
     public fn from_weights(weights: &[Float]) -> Result<AliasSampler, AliasError> {
-        if weights.len() == 0 { return Err(AliasError.EmptyWeights); }
+        if weights.len() == 0 { return Result.Err(AliasError.EmptyWeights); }
         let n = weights.len();
 
         // Validate + sum.
@@ -154,12 +154,12 @@ implement AliasSampler {
         let mut i: Int = 0;
         while i < n {
             let w = weights[i];
-            if !w.is_finite() { return Err(AliasError.NonFiniteWeight(i)); }
-            if w < 0.0       { return Err(AliasError.NegativeWeight(i)); }
+            if !w.is_finite() { return Result.Err(AliasError.NonFiniteWeight(i)); }
+            if w < 0.0       { return Result.Err(AliasError.NegativeWeight(i)); }
             total = total + w;
             i = i + 1;
         }
-        if total <= 0.0 { return Err(AliasError.EmptyWeights); }
+        if total <= 0.0 { return Result.Err(AliasError.EmptyWeights); }
 
         // Scaled probabilities: p_i × n.
         let n_f = n as Float;
@@ -211,7 +211,7 @@ implement AliasSampler {
             alias[l] = l;
         }
 
-        Ok(AliasSampler {
+        Result.Ok(AliasSampler {
             n: n, probability: probability, alias: alias,
         })
     }

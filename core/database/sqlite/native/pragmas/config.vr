@@ -50,13 +50,13 @@ public fn journal_mode_name(m: &PragmaJournalMode) -> Text {
 
 public fn journal_mode_from_text(s: &Text) -> Maybe<PragmaJournalMode> {
     let lo = ascii_lower(s);
-    if lo == "delete".clone()   { return Some(JmDelete); }
-    if lo == "truncate".clone() { return Some(JmTruncate); }
-    if lo == "persist".clone()  { return Some(JmPersist); }
-    if lo == "memory".clone()   { return Some(JmMemory); }
-    if lo == "wal".clone()      { return Some(JmWal); }
-    if lo == "off".clone()      { return Some(JmOff); }
-    None
+    if lo == "delete".clone()   { return Maybe.Some(JmDelete); }
+    if lo == "truncate".clone() { return Maybe.Some(JmTruncate); }
+    if lo == "persist".clone()  { return Maybe.Some(JmPersist); }
+    if lo == "memory".clone()   { return Maybe.Some(JmMemory); }
+    if lo == "wal".clone()      { return Maybe.Some(JmWal); }
+    if lo == "off".clone()      { return Maybe.Some(JmOff); }
+    Maybe.None
 }
 
 public type Synchronous is
@@ -75,11 +75,11 @@ public fn synchronous_code(s: &Synchronous) -> Int {
 }
 
 public fn synchronous_from_int(n: Int) -> Maybe<Synchronous> {
-    if n == 0 { return Some(SyncOff); }
-    if n == 1 { return Some(SyncNormal); }
-    if n == 2 { return Some(SyncFull); }
-    if n == 3 { return Some(SyncExtra); }
-    None
+    if n == 0 { return Maybe.Some(SyncOff); }
+    if n == 1 { return Maybe.Some(SyncNormal); }
+    if n == 2 { return Maybe.Some(SyncFull); }
+    if n == 3 { return Maybe.Some(SyncExtra); }
+    Maybe.None
 }
 
 public type LockingMode is LmNormal | LmExclusive;

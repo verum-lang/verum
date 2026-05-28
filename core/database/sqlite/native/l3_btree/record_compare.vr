@@ -262,11 +262,11 @@ fn cmp_text(
             // back to BINARY — matches SQLite's safety net for the
             // "user dropped collation between prepare and step" race.
             match registry {
-                Some(r) => match r.user_fn_for(name) {
-                    Some(cmp) => cmp(&a_text, &b_text),
-                    None => binary_cmp(&a_text, &b_text),
+                Maybe.Some(r) => match r.user_fn_for(name) {
+                    Maybe.Some(cmp) => cmp(&a_text, &b_text),
+                    Maybe.None => binary_cmp(&a_text, &b_text),
                 },
-                None => binary_cmp(&a_text, &b_text),
+                Maybe.None => binary_cmp(&a_text, &b_text),
             }
         }
     };
@@ -359,7 +359,7 @@ public type RecordCompareError is
 ///
 /// `registry` is `Some` when the connection has registered named
 /// collations the schema may reference via `UserDefined(name)`.
-/// `None` is acceptable for paths that only use built-ins.
+/// `Maybe.None` is acceptable for paths that only use built-ins.
 public fn cmp_records_with_schema(
     a: &List<Byte>,
     b: &List<Byte>,
@@ -369,12 +369,12 @@ public fn cmp_records_with_schema(
     let a_buf = a.as_slice();
     let b_buf = b.as_slice();
     let (a_types, a_hdr_len) = match decode_record_header(a_buf, 0) {
-        Ok(r)  => r,
-        Err(e) => { return Err(RcRecord(e)); }
+        Result.Ok(r)  => r,
+        Result.Err(e) => { return Result.Err(RcRecord(e)); }
     };
     let (b_types, b_hdr_len) = match decode_record_header(b_buf, 0) {
-        Ok(r)  => r,
-        Err(e) => { return Err(RcRecord(e)); }
+        Result.Ok(r)  => r,
+        Result.Err(e) => { return Result.Err(RcRecord(e)); }
     };
 
     let n = if a_types.len() < b_types.len() { a_types.len() } else { b_types.len() };
@@ -387,10 +387,10 @@ public fn cmp_records_with_schema(
         let a_payload = serial_type_payload_size(a_st);
         let b_payload = serial_type_payload_size(b_st);
         if a_off + a_payload > a_buf.len() {
-            return Err(RcShortPayload("record a payload truncated".clone()));
+            return Result.Err(RcShortPayload("record a payload truncated".clone()));
         }
         if b_off + b_payload > b_buf.len() {
-            return Err(RcShortPayload("record b payload truncated".clone()));
+            return Result.Err(RcShortPayload("record b payload truncated".clone()));
         }
         // Schema column for this position — falls back to BINARY-asc.
         let col = if i < schema.columns.len() {
@@ -408,16 +408,16 @@ public fn cmp_records_with_schema(
         }
         match ord {
             Equal => {},
-            _ => { return Ok(ord); }
+            _ => { return Result.Ok(ord); }
         }
         a_off = a_off + a_payload;
         b_off = b_off + b_payload;
         i = i + 1;
     }
     // All shared columns equal — shorter record wins.
-    if a_types.len() < b_types.len() { Ok(Less) }
-    else if a_types.len() > b_types.len() { Ok(Greater) }
-    else { Ok(Equal) }
+    if a_types.len() < b_types.len() { Result.Ok(Less) }
+    else if a_types.len() > b_types.len() { Result.Ok(Greater) }
+    else { Result.Ok(Equal) }
 }
 
 /// Module-local default schema entry — BINARY ascending — used when
@@ -445,10 +445,10 @@ public fn cmp_byte_records(
     registry: Maybe<&CollationRegistry>,
 ) -> Ordering {
     match cmp_records_with_schema(a, b, schema, registry) {
-        Ok(o) => o,
+        Result.Ok(o) => o,
         // On corruption, fall back to the lex byte compare so the
         // B-tree never returns Err mid-seek.  Callers that need the
         // structured error use `cmp_records_with_schema` directly.
-        Err(_) => cmp_bytes(a, b),
+        Result.Err(_) => cmp_bytes(a, b),
     }
 }

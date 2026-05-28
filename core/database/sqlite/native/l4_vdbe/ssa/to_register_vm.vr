@@ -180,8 +180,8 @@ fn pre_assign_registers(st: &mut LowerState, ssa: &SsaProgram) {
         let mut p: Int = 0;
         while p < block.phi_nodes.len() {
             match inst_dst(&block.phi_nodes[p]) {
-                Some(d) => { let _ = assign_reg(st, &d.id); }
-                None => {}
+                Maybe.Some(d) => { let _ = assign_reg(st, &d.id); }
+                Maybe.None => {}
             }
             p = p + 1;
         }
@@ -189,8 +189,8 @@ fn pre_assign_registers(st: &mut LowerState, ssa: &SsaProgram) {
         let mut i: Int = 0;
         while i < block.insts.len() {
             match inst_dst(&block.insts[i]) {
-                Some(d) => { let _ = assign_reg(st, &d.id); }
-                None => {}
+                Maybe.Some(d) => { let _ = assign_reg(st, &d.id); }
+                Maybe.None => {}
             }
             i = i + 1;
         }

@@ -59,7 +59,7 @@ public type TextArea is {
 implement TextArea {
     public fn new() -> TextArea {
         TextArea {
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             cursor_style: Style.new().reversed(),
             selection_style: Style.new().reversed(),
@@ -70,7 +70,7 @@ implement TextArea {
         }
     }
 
-    public fn block(self, b: Block) -> TextArea { TextArea { block: Some(b), ..self } }
+    public fn block(self, b: Block) -> TextArea { TextArea { block: Maybe.Some(b), ..self } }
     public fn cursor_style(self, s: Style) -> TextArea { TextArea { cursor_style: s, ..self } }
     public fn selection_style(self, s: Style) -> TextArea { TextArea { selection_style: s, ..self } }
     public fn line_numbers(self, on: Bool) -> TextArea { TextArea { show_line_numbers: on, ..self } }
@@ -188,23 +188,23 @@ implement TextAreaState {
 
     public fn undo(&mut self) -> Bool {
         match self.undo.pop() {
-            Some((ls, c, a)) => {
+            Maybe.Some((ls, c, a)) => {
                 self.redo.push((self.lines.clone(), self.cursor, self.anchor));
                 self.lines = ls; self.cursor = c; self.anchor = a;
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
     public fn redo(&mut self) -> Bool {
         match self.redo.pop() {
-            Some((ls, c, a)) => {
+            Maybe.Some((ls, c, a)) => {
                 self.undo.push((self.lines.clone(), self.cursor, self.anchor));
                 self.lines = ls; self.cursor = c; self.anchor = a;
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
@@ -452,12 +452,12 @@ implement StatefulWidget for TextArea {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut TextAreaState) {
         let text_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
         if text_area.width < 1 || text_area.height < 1 { return; }
 

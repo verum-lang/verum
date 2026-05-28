@@ -97,7 +97,7 @@ public fn uri_error_name(e: &UriError) -> Text {
 public fn parse(text: &Text) -> Result<ParsedUri, UriError> {
     let bs = text.as_bytes();
     if bs.len() == 0 {
-        return Ok(ParsedUri {
+        return Result.Ok(ParsedUri {
             path: Text.new(),
             params: uri_params_default(),
             has_scheme: false,
@@ -106,7 +106,7 @@ public fn parse(text: &Text) -> Result<ParsedUri, UriError> {
 
     if !looks_like_file_scheme(bs) {
         // Raw filename — return verbatim with default params.
-        return Ok(ParsedUri {
+        return Result.Ok(ParsedUri {
             path: text.clone(),
             params: uri_params_default(),
             has_scheme: false,
@@ -135,12 +135,12 @@ public fn parse(text: &Text) -> Result<ParsedUri, UriError> {
         // Query
         i = i + 1;
         match parse_query(text, i, bs.len(), &mut params) {
-            Ok(_)  => {}
-            Err(e) => return Err(e),
+            Result.Ok(_)  => {}
+            Result.Err(e) => return Result.Err(e),
         }
     }
 
-    Ok(ParsedUri {
+    Result.Ok(ParsedUri {
         path: decoded_path,
         params: params,
         has_scheme: true,
@@ -159,12 +159,12 @@ fn parse_query(
         while i < end && bs[i] != (38 as Byte) { i = i + 1; }
         let pair_end = i;
         match parse_pair(text, pair_start, pair_end, params) {
-            Ok(_)  => {}
-            Err(e) => return Err(e),
+            Result.Ok(_)  => {}
+            Result.Err(e) => return Result.Err(e),
         }
         if i < end && bs[i] == (38 as Byte) { i = i + 1; }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn parse_pair(
@@ -172,7 +172,7 @@ fn parse_pair(
     start: Int, end: Int,
     params: &mut UriParams,
 ) -> Result<(), UriError> {
-    if start == end { return Ok(()); }
+    if start == end { return Result.Ok(()); }
     let bs = text.as_bytes();
     let mut sep: Int = -1;
     let mut i: Int = start;
@@ -190,7 +190,7 @@ fn parse_pair(
         let value = percent_decode(&slice_text(text, sep + 1, end));
         params.merge(&key, &value);
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn looks_like_file_scheme(bs: List<Byte>) -> Bool {

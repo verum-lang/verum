@@ -73,7 +73,7 @@ implement VfsApiRegistry {
         1
     }
 
-    /// Passing `None` requests the default VFS.
+    /// Passing `Maybe.None` requests the default VFS.
     public fn sqlite3_vfs_find(&self, name: &Maybe<Text>) -> Int64 {
         match name {
             Maybe.None => self.default_handle,

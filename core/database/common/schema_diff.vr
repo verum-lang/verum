@@ -34,22 +34,22 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "vendor-neutral SchemaSnapshot diff: drift detection + migration synthesis",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.database.common.schema_diff;
 
 mount core.*;
-mount base.{Text, Bool, Maybe, Some, None};
+mount base.{Text, Bool, Maybe, Some, Maybe.None};
 mount collections.List;
 mount core.database.common.schema.{
     SchemaSnapshot, TableSnap, ColumnSnap, IndexSnap, ForeignKeySnap,
@@ -187,12 +187,12 @@ public fn diff(before: &SchemaSnapshot, after: &SchemaSnapshot) -> List<SchemaDe
     while i < before.tables.len() {
         let bt = &before.tables[i];
         match find_table(&after.tables, &bt.schema, &bt.name) {
-            Some(at) => {
+            Maybe.Some(at) => {
                 diff_columns(bt, at, &mut deltas);
                 diff_indexes(bt, at, &mut deltas);
                 diff_foreign_keys(bt, at, &mut deltas);
             }
-            None => {} // table was dropped — already emitted above
+            Maybe.None => {} // table was dropped — already emitted above
         }
         i = i + 1;
     }
@@ -232,7 +232,7 @@ fn diff_columns(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
     while i < before.columns.len() {
         let bc = &before.columns[i];
         match find_column(&after.columns, &bc.name) {
-            Some(ac) => {
+            Maybe.Some(ac) => {
                 if bc.declared_type != ac.declared_type {
                     deltas.push(ColumnTypeChanged {
                         schema: after.schema.clone(),
@@ -270,7 +270,7 @@ fn diff_columns(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
                     });
                 }
             }
-            None => {} // dropped — emitted above
+            Maybe.None => {} // dropped — emitted above
         }
         i = i + 1;
     }
@@ -281,7 +281,7 @@ fn diff_indexes(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
     while i < after.indexes.len() {
         let a = &after.indexes[i];
         match find_index(&before.indexes, &a.name) {
-            Some(b) => {
+            Maybe.Some(b) => {
                 if !index_eq(b, a) {
                     deltas.push(IndexChanged {
                         schema: after.schema.clone(),
@@ -292,7 +292,7 @@ fn diff_indexes(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
                     });
                 }
             }
-            None => {
+            Maybe.None => {
                 deltas.push(IndexAdded {
                     schema: after.schema.clone(),
                     table: after.name.clone(),
@@ -321,7 +321,7 @@ fn diff_foreign_keys(before: &TableSnap, after: &TableSnap, deltas: &mut List<Sc
     while i < after.foreign_keys.len() {
         let a = &after.foreign_keys[i];
         match find_fk(&before.foreign_keys, a) {
-            Some(b) => {
+            Maybe.Some(b) => {
                 if !fk_eq(b, a) {
                     deltas.push(ForeignKeyChanged {
                         schema: after.schema.clone(),
@@ -331,7 +331,7 @@ fn diff_foreign_keys(before: &TableSnap, after: &TableSnap, deltas: &mut List<Sc
                     });
                 }
             }
-            None => {
+            Maybe.None => {
                 deltas.push(ForeignKeyAdded {
                     schema: after.schema.clone(),
                     table: after.name.clone(),
@@ -363,29 +363,29 @@ fn find_table<'a>(tables: &'a List<TableSnap>, schema: &Text, name: &Text) -> Ma
     let mut i: Int = 0;
     while i < tables.len() {
         if tables[i].schema == *schema && tables[i].name == *name {
-            return Some(&tables[i]);
+            return Maybe.Some(&tables[i]);
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn find_column<'a>(columns: &'a List<ColumnSnap>, name: &Text) -> Maybe<&'a ColumnSnap> {
     let mut i: Int = 0;
     while i < columns.len() {
-        if columns[i].name == *name { return Some(&columns[i]); }
+        if columns[i].name == *name { return Maybe.Some(&columns[i]); }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn find_index<'a>(indexes: &'a List<IndexSnap>, name: &Text) -> Maybe<&'a IndexSnap> {
     let mut i: Int = 0;
     while i < indexes.len() {
-        if indexes[i].name == *name { return Some(&indexes[i]); }
+        if indexes[i].name == *name { return Maybe.Some(&indexes[i]); }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 /// FKs are matched by their column-set + referenced-table + referenced-columns.
@@ -396,11 +396,11 @@ fn find_fk<'a>(fks: &'a List<ForeignKeySnap>, target: &ForeignKeySnap) -> Maybe<
            && fks[i].referenced_table == target.referenced_table
            && text_list_eq(&fks[i].referenced_columns, &target.referenced_columns)
         {
-            return Some(&fks[i]);
+            return Maybe.Some(&fks[i]);
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 // =============================================================================
@@ -409,14 +409,14 @@ fn find_fk<'a>(fks: &'a List<ForeignKeySnap>, target: &ForeignKeySnap) -> Maybe<
 
 fn maybe_text_eq(a: &Maybe<Text>, b: &Maybe<Text>) -> Bool {
     match (a, b) {
-        (Some(x), Some(y)) => x == y,
-        (None, None)       => true,
+        (Maybe.Some(x), Maybe.Some(y)) => x == y,
+        (Maybe.None, Maybe.None)       => true,
         _                  => false,
     }
 }
 
 fn clone_maybe_text(m: &Maybe<Text>) -> Maybe<Text> {
-    match m { Some(s) => Some(s.clone()), None => None }
+    match m { Maybe.Some(s) => Maybe.Some(s.clone()), Maybe.None => Maybe.None }
 }
 
 fn text_list_eq(a: &List<Text>, b: &List<Text>) -> Bool {

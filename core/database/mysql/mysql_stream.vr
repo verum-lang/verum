@@ -32,7 +32,7 @@
 module core.database.mysql.mysql_stream;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.net.tcp.TcpStream;
 mount core.net.tls.{TlsStream, TlsConfig, LegacyTlsError};
@@ -84,7 +84,7 @@ implement MysqlStream {
     /// with PG; concrete consumers land later.
     public fn peer_cert_hash_sha256(&self) -> Maybe<[Byte; 32]> {
         match self {
-            MsPlain(_)  => None,
+            MsPlain(_)  => Maybe.None,
             MsTls(tls)  => tls.peer_cert_hash_sha256(),
         }
     }
@@ -101,15 +101,15 @@ implement MysqlStream {
                 while i < buf.len() as Int { tmp.push(0_u8); i = i + 1; }
                 let result = block_on(tls.read(&mut tmp));
                 match result {
-                    Ok(n) => {
+                    Result.Ok(n) => {
                         let mut k: Int = 0;
                         while k < n {
                             buf[k] = tmp[k];
                             k = k + 1;
                         }
-                        Ok(n)
+                        Result.Ok(n)
                     }
-                    Err(e) => Err(IoError.Other(f"TLS read: {e}")),
+                    Result.Err(e) => Result.Err(IoError.Other(f"TLS read: {e}")),
                 }
             }
         }
@@ -123,8 +123,8 @@ implement MysqlStream {
             MsTls(tls) => {
                 let result = block_on(tls.write(data));
                 match result {
-                    Ok(n)  => Ok(n),
-                    Err(e) => Err(IoError.Other(f"TLS write: {e}")),
+                    Result.Ok(n)  => Result.Ok(n),
+                    Result.Err(e) => Result.Err(IoError.Other(f"TLS write: {e}")),
                 }
             }
         }
@@ -146,7 +146,7 @@ public fn upgrade_to_tls(
     config: &TlsConfig,
 ) -> Result<MysqlStream, LegacyTlsError> {
     match block_on(TlsStream.connect(tcp, server_name, config)) {
-        Ok(tls)  => Ok(MsTls(tls)),
-        Err(e)   => Err(e),
+        Result.Ok(tls)  => Result.Ok(MsTls(tls)),
+        Result.Err(e)   => Result.Err(e),
     }
 }

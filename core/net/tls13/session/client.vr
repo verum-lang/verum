@@ -120,7 +120,7 @@ implement TlsClient<Handshaking> {
             last_pho: Maybe.None,
             session: Maybe.None,
         };
-        Ok((c, wire))
+        Result.Ok((c, wire))
     }
 
     /// Feed one inbound handshake message to the state machine.
@@ -149,7 +149,7 @@ implement TlsClient<Handshaking> {
                     last_pho: Maybe.None,
                     session: Maybe.None,
                 };
-                Ok(Progress.Done(established))
+                Result.Ok(Progress.Done(established))
             },
             Maybe.None => {
                 let keep = TlsClient {
@@ -162,7 +162,7 @@ implement TlsClient<Handshaking> {
                     last_pho: Maybe.None,
                     session: Maybe.None,
                 };
-                Ok(Progress.Continue(keep))
+                Result.Ok(Progress.Continue(keep))
             },
         }
     }
@@ -200,16 +200,16 @@ implement TlsClient<Established> {
     /// higher layer.
     public fn write(&mut self, data: &[Byte]) -> Result<List<Byte>, TlsError> {
         if data.len() > MAX_PLAINTEXT_SIZE {
-            return Err(TlsError.InternalError(Text.from_str("record too large, fragment first")));
+            return Result.Err(TlsError.InternalError(Text.from_str("record too large, fragment first")));
         }
         match &mut self.outbound {
             Maybe.Some(aead) => {
                 match aead.seal(data, ContentType.ApplicationData, 0) {
-                    Ok(wire) => Ok(wire),
-                    Err(_) => Err(TlsError.InternalError(Text.from_str("aead seal failed"))),
+                    Result.Ok(wire) => Result.Ok(wire),
+                    Result.Err(_) => Result.Err(TlsError.InternalError(Text.from_str("aead seal failed"))),
                 }
             },
-            Maybe.None => Err(TlsError.InternalError(Text.from_str("outbound keys missing"))),
+            Maybe.None => Result.Err(TlsError.InternalError(Text.from_str("outbound keys missing"))),
         }
     }
 
@@ -220,7 +220,7 @@ implement TlsClient<Established> {
         match &mut self.inbound {
             Maybe.Some(aead) => {
                 match aead.open(wire) {
-                    Ok(pair) => {
+                    Result.Ok(pair) => {
                         let (ct, bytes) = pair;
                         // Post-handshake messages (NewSessionTicket,
                         // CertificateRequest, KeyUpdate) arrive as
@@ -230,18 +230,18 @@ implement TlsClient<Established> {
                             ContentType.Handshake => {
                                 let now = Instant.now();
                                 match self.sm.on_post_handshake(bytes.as_slice(), now) {
-                                    Ok(pho) => self.last_pho = Maybe.Some(pho.clone()),
-                                    Err(e) => return Err(e),
+                                    Result.Ok(pho) => self.last_pho = Maybe.Some(pho.clone()),
+                                    Result.Err(e) => return Result.Err(e),
                                 }
-                                Ok((ct, bytes))
+                                Result.Ok((ct, bytes))
                             },
-                            _ => Ok((ct, bytes)),
+                            _ => Result.Ok((ct, bytes)),
                         }
                     },
-                    Err(_) => Err(TlsError.InternalError(Text.from_str("aead open failed"))),
+                    Result.Err(_) => Result.Err(TlsError.InternalError(Text.from_str("aead open failed"))),
                 }
             },
-            Maybe.None => Err(TlsError.InternalError(Text.from_str("inbound keys missing"))),
+            Maybe.None => Result.Err(TlsError.InternalError(Text.from_str("inbound keys missing"))),
         }
     }
 
@@ -260,11 +260,11 @@ implement TlsClient<Established> {
         let wire = match &mut out.outbound {
             Maybe.Some(aead) => {
                 match aead.seal(alert.as_slice(), ContentType.Alert, 0) {
-                    Ok(w) => w,
-                    Err(_) => return Err(TlsError.InternalError(Text.from_str("close_notify seal failed"))),
+                    Result.Ok(w) => w,
+                    Result.Err(_) => return Result.Err(TlsError.InternalError(Text.from_str("close_notify seal failed"))),
                 }
             },
-            Maybe.None => return Err(TlsError.InternalError(Text.from_str("outbound keys missing"))),
+            Maybe.None => return Result.Err(TlsError.InternalError(Text.from_str("outbound keys missing"))),
         };
         let closed = TlsClient {
             _phase: (),
@@ -276,7 +276,7 @@ implement TlsClient<Established> {
             last_pho: out.last_pho,
             session: out.session,
         };
-        Ok((closed, wire))
+        Result.Ok((closed, wire))
     }
 }
 
@@ -312,7 +312,7 @@ fn derive_aead_pair(conn: &Connected) -> Result<(AeadState, AeadState), TlsError
         .map_err(|_| TlsError.InternalError(Text.from_str("server traffic derive")))?;
     let out_aead = AeadState.new(aead_kind.clone(), client_keys.key.clone(), client_keys.iv);
     let in_aead  = AeadState.new(aead_kind.clone(), server_keys.key.clone(), server_keys.iv);
-    Ok((out_aead, in_aead))
+    Result.Ok((out_aead, in_aead))
 }
 
 fn build_close_notify() -> List<Byte> {

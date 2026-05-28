@@ -122,30 +122,30 @@ implement DstGenerator {
         let mut acc = self.mix.insert_weight;
         if pick < acc + self.mix.update_weight {
             return match self.pick_live_key() {
-                Some(k) => OpUpdate(k, gen_name(&mut self.seed)),
-                None    => OpInsert(self.next_id_taken(), gen_name(&mut self.seed)),
+                Maybe.Some(k) => OpUpdate(k, gen_name(&mut self.seed)),
+                Maybe.None    => OpInsert(self.next_id_taken(), gen_name(&mut self.seed)),
             };
         }
         acc = acc + self.mix.update_weight;
         if pick < acc + self.mix.delete_weight {
             return match self.pick_live_key() {
-                Some(k) => {
+                Maybe.Some(k) => {
                     self.evict_key(k);
                     OpDelete(k)
                 }
-                None    => OpSelectById(0),
+                Maybe.None    => OpSelectById(0),
             };
         }
         match self.pick_live_key() {
-            Some(k) => OpSelectById(k),
-            None    => OpSelectById(0),
+            Maybe.Some(k) => OpSelectById(k),
+            Maybe.None    => OpSelectById(0),
         }
     }
 
     fn pick_live_key(&mut self) -> Maybe<Int> {
-        if self.live_keys.len() == 0 { return None; }
+        if self.live_keys.len() == 0 { return Maybe.None; }
         let idx = self.seed.next_below(self.live_keys.len());
-        Some(self.live_keys[idx])
+        Maybe.Some(self.live_keys[idx])
     }
 
     fn evict_key(&mut self, k: Int) {

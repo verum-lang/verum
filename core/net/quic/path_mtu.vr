@@ -140,8 +140,8 @@ implement PmtuTracker {
         // `now`, which here means "retry immediately on the next tick"
         // — the safest fail-mode for path-MTU raise scheduling.
         let raise_at = match now.checked_add(Duration.from_secs(RAISE_TIMER_SECS as UInt64)) {
-            Some(t) => t,
-            None    => now,
+            Maybe.Some(t) => t,
+            Maybe.None    => now,
         };
         self.state = PmtuState.SearchComplete { raise_after: raise_at };
     }
@@ -183,8 +183,8 @@ implement PmtuTracker {
     /// probe reaches the peer.
     public fn probe_in_flight(&self) -> Maybe<Int> {
         match &self.state {
-            PmtuState.Search { probed_size, probes_sent: _ } => Some(*probed_size),
-            _ => None,
+            PmtuState.Search { probed_size, probes_sent: _ } => Maybe.Some(*probed_size),
+            _ => Maybe.None,
         }
     }
 }

@@ -54,7 +54,7 @@
 module core.database.postgres.async_listener;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -128,12 +128,12 @@ implement AsyncPgListener {
             channel: channel.clone(),
             ack: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("listen")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("listen")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("listen reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("listen reply")),
         }
     }
 
@@ -143,12 +143,12 @@ implement AsyncPgListener {
             channel: channel.clone(),
             ack: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("unlisten")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("unlisten")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("unlisten reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("unlisten reply")),
         }
     }
 
@@ -173,24 +173,24 @@ implement AsyncPgListener {
             channel: channel.clone(),
             tx: tx,
         }).await {
-            Ok(()) => Ok(rx),
-            Err(_) => Err(actor_dropped("subscribe")),
+            Result.Ok(()) => Result.Ok(rx),
+            Result.Err(_) => Result.Err(actor_dropped("subscribe")),
         }
     }
 
     public async fn close(&self) -> Result<(), DbError> {
         let (rs, rr) = oneshot();
         match self.cmd_tx.send_async(LcShutdown { ack: rs }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("close")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("close")); }
         }
         let _ = rr.await;
         let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
         match guard.take() {
-            Some(jh) => { let _ = jh.join().await; }
-            None     => {}
+            Maybe.Some(jh) => { let _ = jh.join().await; }
+            Maybe.None     => {}
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -214,13 +214,13 @@ public async fn connect_listener_async(
         core.database.postgres.connection.connect(&cfg_owned)
     });
     let mut conn = match conn_jh.join().await {
-        Ok(r)  => r?,
-        Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
+        Result.Ok(r)  => r?,
+        Result.Err(_) => { return Result.Err(actor_dropped("connect: blocking-pool join")); }
     };
 
     // Set the recv timeout so the actor's read loop can poll for
     // control commands between wire reads.
-    let _ = conn.set_recv_timeout_ms(Some(DEFAULT_RECV_TIMEOUT_MS));
+    let _ = conn.set_recv_timeout_ms(Maybe.Some(DEFAULT_RECV_TIMEOUT_MS));
 
     let (cmd_tx, cmd_rx) = bounded_channel<ListenerCommand>(16);
 
@@ -228,9 +228,9 @@ public async fn connect_listener_async(
         run_actor(conn, cmd_rx);
     });
 
-    Ok(AsyncPgListener {
+    Result.Ok(AsyncPgListener {
         cmd_tx: cmd_tx,
-        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        join: Shared.new(sync.mutex.Mutex.new(Maybe.Some(join))),
     })
 }
 
@@ -292,37 +292,37 @@ fn run_actor(
         // Drain pending control commands.
         loop {
             match cmd_rx.try_recv() {
-                Ok(LcListen { channel, ack }) => {
+                Result.Ok(LcListen { channel, ack }) => {
                     let sql = format_listen_sql(&channel);
                     let r = match conn.execute(&sql) {
-                        Ok(_)  => Ok(()),
-                        Err(e) => Err(e),
+                        Result.Ok(_)  => Result.Ok(()),
+                        Result.Err(e) => Result.Err(e),
                     };
                     let _ = ack.send(r);
                 }
-                Ok(LcUnlisten { channel, ack }) => {
+                Result.Ok(LcUnlisten { channel, ack }) => {
                     let sql = format_unlisten_sql(&channel);
                     let r = match conn.execute(&sql) {
-                        Ok(_)  => Ok(()),
-                        Err(e) => Err(e),
+                        Result.Ok(_)  => Result.Ok(()),
+                        Result.Err(e) => Result.Err(e),
                     };
                     let _ = ack.send(r);
                 }
-                Ok(LcSubscribe { channel, tx }) => {
+                Result.Ok(LcSubscribe { channel, tx }) => {
                     subscribers.add(channel, tx);
                 }
-                Ok(LcShutdown { ack }) => {
+                Result.Ok(LcShutdown { ack }) => {
                     let r = conn.close();
                     let _ = ack.send(r);
                     return;
                 }
-                Err(_) => { break; }
+                Result.Err(_) => { break; }
             }
         }
 
         // Try to read one wire message within the recv timeout.
         match conn.try_read_replication_message() {
-            Ok(Some(msg)) => {
+            Result.Ok(Maybe.Some(msg)) => {
                 match msg {
                     BmNotification(n) => {
                         let notif = Notification.from_wire(&n);
@@ -336,10 +336,10 @@ fn run_actor(
                     }
                 }
             }
-            Ok(None) => {
+            Result.Ok(Maybe.None) => {
                 // Recv timeout — loop back to drain commands.
             }
-            Err(_) => {
+            Result.Err(_) => {
                 // Wire died — exit. Future calls fail with
                 // ACTOR_CLOSED via the dropped cmd_rx.
                 return;

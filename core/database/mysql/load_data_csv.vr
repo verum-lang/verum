@@ -25,7 +25,7 @@
 //   * `default_tsv()` — `\t` / no quote / `\n`. NULLs as `\\N`
 //     (the MySQL convention for tab-separated dumps).
 //   * `format_row(&self, cells: &List<Maybe<Text>>) -> List<Byte>`
-//     — formats one row with line terminator. `None` cell →
+//     — formats one row with line terminator. `Maybe.None` cell →
 //     `null_sentinel`.
 //   * `format_rows(&self, rows: &List<List<Maybe<Text>>>) -> List<Byte>`
 //     — concatenates many rows; useful for batch writes through
@@ -67,7 +67,7 @@
 module core.database.mysql.load_data_csv;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 
 // =============================================================================
@@ -132,8 +132,8 @@ implement LoadDataCsvConfig {
 // Row formatter
 // =============================================================================
 
-/// Format one row of cells into wire bytes. `None` cells emit the
-/// `null_sentinel`; non-None cells are quoted-or-not per the
+/// Format one row of cells into wire bytes. `Maybe.None` cells emit the
+/// `null_sentinel`; non-Maybe.None cells are quoted-or-not per the
 /// config's escape policy. Always appends `line_term`.
 public fn format_row(cfg: &LoadDataCsvConfig, cells: &List<Maybe<Text>>) -> List<Byte> {
     // Heuristic capacity — 16 bytes per cell as a starting point;
@@ -146,14 +146,14 @@ public fn format_row(cfg: &LoadDataCsvConfig, cells: &List<Maybe<Text>>) -> List
             out.push(cfg.delimiter);
         }
         match &cells[i] {
-            None => {
+            Maybe.None => {
                 let mut k: Int = 0;
                 while k < (cfg.null_sentinel.len() as Int) {
                     out.push(cfg.null_sentinel[k]);
                     k = k + 1;
                 }
             }
-            Some(t) => {
+            Maybe.Some(t) => {
                 emit_cell(cfg, &mut out, t);
             }
         }

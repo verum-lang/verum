@@ -58,16 +58,16 @@ implement ViewStore {
 
     public fn add(&mut self, def: ViewDef, if_not_exists: Bool) -> Result<(), ViewStoreError> {
         if self.lookup_idx(&def.name).is_some() {
-            if if_not_exists { return Ok(()); }
-            return Err(VseDuplicateName);
+            if if_not_exists { return Result.Ok(()); }
+            return Result.Err(VseDuplicateName);
         }
         self.views.push(clone_def(&def));
-        Ok(())
+        Result.Ok(())
     }
 
     public fn drop_named(&mut self, name: &Text) -> Bool {
         match self.lookup_idx(name) {
-            Some(i) => {
+            Maybe.Some(i) => {
                 let mut new_views: List<ViewDef> = List.new();
                 let mut k: Int = 0;
                 while k < self.views.len() {
@@ -77,24 +77,24 @@ implement ViewStore {
                 self.views = new_views;
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
     public fn lookup(&self, name: &Text) -> Maybe<ViewDef> {
         match self.lookup_idx(name) {
-            Some(i) => Some(clone_def(&self.views[i])),
-            None    => None,
+            Maybe.Some(i) => Maybe.Some(clone_def(&self.views[i])),
+            Maybe.None    => Maybe.None,
         }
     }
 
     fn lookup_idx(&self, name: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.views.len() {
-            if self.views[i].name == name { return Some(i); }
+            if self.views[i].name == name { return Maybe.Some(i); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn names(&self) -> List<Text> {

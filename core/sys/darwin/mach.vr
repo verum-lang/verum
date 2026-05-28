@@ -738,9 +738,9 @@ public fn safe_vm_allocate(size: VmSize, anywhere: Bool) -> Result<VmAddress, Ke
     let kr = unsafe { vm_allocate_ffi(mach_task_self(), &mut address, size, vm_flags) };
     let kr_val = kr as Int;
     if kr_val == 0 {
-        Ok(address)
+        Result.Ok(address)
     } else {
-        Err(kr)
+        Result.Err(kr)
     }
 }
 

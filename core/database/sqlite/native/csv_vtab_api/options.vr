@@ -26,9 +26,9 @@ public type CsvVtabOptions is {
     quote_byte: u8,
     /// True iff the first row is a header.
     header: Bool,
-    /// Explicit column count; None means "infer from first row".
+    /// Explicit column count; Maybe.None means "infer from first row".
     columns: Maybe<Int>,
-    /// Explicit schema SQL; None means "auto-generate with text columns".
+    /// Explicit schema SQL; Maybe.None means "auto-generate with text columns".
     schema: Maybe<Text>,
 }
 

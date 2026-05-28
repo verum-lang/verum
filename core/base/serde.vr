@@ -45,7 +45,7 @@ mount core.base.protocols.{
     Debug, Display, Clone, Eq, Describable, ErrorSource,
     Formatter, FormatError,
 };
-mount core.maybe.{Maybe, Some, None};
+mount core.maybe.{Maybe, Some, Maybe.None};
 mount core.result.{Result, Ok, Err};
 
 // =============================================================================
@@ -220,7 +220,7 @@ public type Serializer is protocol {
     /// Serialize a text value.
     fn serialize_text(&mut self, v: &Text) -> Result<Self.Ok, Self.Error>;
 
-    /// Serialize a None/null value.
+    /// Serialize a Maybe.None/null value.
     fn serialize_none(&mut self) -> Result<Self.Ok, Self.Error>;
 
     /// Serialize a Some value.
@@ -300,7 +300,7 @@ implement<S: Serializer> ListSerializer<S> {
     public fn serialize_element<T: Serialize>(&mut self, value: &T) -> Result<(), S.Error> {
         value.serialize(self.inner)?;
         self.remaining = self.remaining - 1;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Finish serializing the list.
@@ -322,14 +322,14 @@ implement<S: Serializer> MapSerializer<S> {
     /// Serialize the next key in the map.
     public fn serialize_key<K: Serialize>(&mut self, key: &K) -> Result<(), S.Error> {
         key.serialize(self.inner)?;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Serialize the next value in the map.
     public fn serialize_value<V: Serialize>(&mut self, value: &V) -> Result<(), S.Error> {
         value.serialize(self.inner)?;
         self.remaining = self.remaining - 1;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Finish serializing the map.
@@ -352,7 +352,7 @@ implement<S: Serializer> RecordSerializer<S> {
         self.inner.serialize_text(name)?;
         value.serialize(self.inner)?;
         self.remaining = self.remaining - 1;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Finish serializing the record.

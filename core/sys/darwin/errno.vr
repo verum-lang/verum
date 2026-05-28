@@ -4,7 +4,7 @@ module sys.darwin.errno;
 // sys/darwin/errno.vr - macOS/BSD error number constants
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None
+// Dependencies: Maybe.None
 // Platform: macOS (Darwin/XNU)
 // =============================================================================
 //

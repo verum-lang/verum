@@ -259,7 +259,7 @@ implement PathSet {
 
 public type MultipathScheduler is protocol {
     /// Returns the PathId of the path to send the next packet on,
-    /// or None when no path is currently sendable (all retired or
+    /// or Maybe.None when no path is currently sendable (all retired or
     /// all amplification-limited).
     fn next_path(&self, paths: &PathSet) -> Maybe<PathId>;
 };
@@ -282,7 +282,7 @@ implement MultipathScheduler for RoundRobinScheduler {
     fn next_path(&self, paths: &PathSet) -> Maybe<PathId> {
         let p = paths.paths.lock();
         let n = p.len();
-        if n == 0 { return None; }
+        if n == 0 { return Maybe.None; }
         // Scan up to n entries starting from cursor; first
         // non-retired wins. Wrap-around handles the case where the
         // cursor lands on a retired index.
@@ -291,11 +291,11 @@ implement MultipathScheduler for RoundRobinScheduler {
         while k < n {
             let i = (start + k) % n;
             if !p[i].is_retired() {
-                return Some(p[i].id.clone());
+                return Maybe.Some(p[i].id.clone());
             }
             k = k + 1;
         }
-        None
+        Maybe.None
     }
 }
 
@@ -322,7 +322,7 @@ implement MultipathScheduler for WeightedScheduler {
     fn next_path(&self, paths: &PathSet) -> Maybe<PathId> {
         let p = paths.paths.lock();
         let n = p.len();
-        if n == 0 { return None; }
+        if n == 0 { return Maybe.None; }
         let mut counts = self.pass_counts.lock();
         let mut best: Int = -1;
         let mut best_score: Float = 1.0e30;
@@ -331,8 +331,8 @@ implement MultipathScheduler for WeightedScheduler {
             if !p[i].is_retired() && p[i].scheduler_weight > 0 {
                 let id = p[i].id.raw();
                 let cnt = match counts.get(&id) {
-                    Some(c) => c.load(MemoryOrdering.Acquire),
-                    None    => 0,
+                    Maybe.Some(c) => c.load(MemoryOrdering.Acquire),
+                    Maybe.None    => 0,
                 };
                 let score = (cnt as Float) / (p[i].scheduler_weight as Float);
                 if score < best_score {
@@ -342,11 +342,11 @@ implement MultipathScheduler for WeightedScheduler {
             }
             i = i + 1;
         }
-        if best < 0 { return None; }
+        if best < 0 { return Maybe.None; }
         let id = p[best].id.raw();
         let cnt = match counts.get(&id) {
-            Some(c) => c,
-            None    => {
+            Maybe.Some(c) => c,
+            Maybe.None    => {
                 let c = AtomicInt.new(0);
                 counts.insert(id, c);
                 counts.get(&id)
@@ -354,7 +354,7 @@ implement MultipathScheduler for WeightedScheduler {
             }
         };
         cnt.fetch_add(1, MemoryOrdering.AcqRel);
-        Some(p[best].id.clone())
+        Maybe.Some(p[best].id.clone())
     }
 }
 
@@ -372,7 +372,7 @@ implement MultipathScheduler for LowestRttScheduler {
     fn next_path(&self, paths: &PathSet) -> Maybe<PathId> {
         let p = paths.paths.lock();
         let n = p.len();
-        if n == 0 { return None; }
+        if n == 0 { return Maybe.None; }
         let mut best: Int = -1;
         let mut best_rtt: Int = 0x7FFFFFFF;
         let mut i: Int = 0;
@@ -386,8 +386,8 @@ implement MultipathScheduler for LowestRttScheduler {
             }
             i = i + 1;
         }
-        if best < 0 { return None; }
-        Some(p[best].id.clone())
+        if best < 0 { return Maybe.None; }
+        Maybe.Some(p[best].id.clone())
     }
 }
 

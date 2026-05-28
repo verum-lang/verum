@@ -48,22 +48,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "Rekor v2 transparency log client: submit + fetch + SET verify + inclusion proof",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.sigstore.rekor;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.json.{
     JsonValue, JsonObject, json_object, json_string, json_number,
@@ -179,17 +179,17 @@ public async fn submit_entry<C: HttpClient>(
     let resp = client.send(&req).await
         .map_err(|e| NetworkError(e))?;
     if !resp.status.is_success() {
-        return Err(HttpStatus {
+        return Result.Err(HttpStatus {
             status: resp.status,
             body: text_of_body_lossy(&resp.body),
         });
     }
     if resp.body.len() > MAX_ENTRY_RESPONSE_BYTES {
-        return Err(TooLarge { size: resp.body.len(), limit: MAX_ENTRY_RESPONSE_BYTES });
+        return Result.Err(TooLarge { size: resp.body.len(), limit: MAX_ENTRY_RESPONSE_BYTES });
     }
     let entry = parse_log_entry_response(&resp.body)?;
     verify_entry_set(&entry, config)?;
-    Ok(entry)
+    Result.Ok(entry)
 }
 
 fn build_submit_body(kind: &EntryKind, api_ver: &ApiVersion, spec: &JsonValue) -> JsonValue {
@@ -242,17 +242,17 @@ async fn fetch_entry_at_url<C: HttpClient>(
     let resp = client.send(&req).await
         .map_err(|e| NetworkError(e))?;
     if !resp.status.is_success() {
-        return Err(HttpStatus {
+        return Result.Err(HttpStatus {
             status: resp.status,
             body: text_of_body_lossy(&resp.body),
         });
     }
     if resp.body.len() > MAX_ENTRY_RESPONSE_BYTES {
-        return Err(TooLarge { size: resp.body.len(), limit: MAX_ENTRY_RESPONSE_BYTES });
+        return Result.Err(TooLarge { size: resp.body.len(), limit: MAX_ENTRY_RESPONSE_BYTES });
     }
     let entry = parse_log_entry_response(&resp.body)?;
     verify_entry_set(&entry, config)?;
-    Ok(entry)
+    Result.Ok(entry)
 }
 
 // =============================================================================
@@ -271,7 +271,7 @@ public fn verify_entry_set(
     config: &RekorClientConfig,
 ) -> Result<(), RekorError> {
     if entry.log_id_hex != config.log_id_hex {
-        return Err(LogIdMismatch {
+        return Result.Err(LogIdMismatch {
             expected: config.log_id_hex.clone(),
             found:    entry.log_id_hex.clone(),
         });
@@ -285,8 +285,8 @@ public fn verify_entry_set(
     let sig = P256Signature.from_der(sig_bytes.as_slice())
         .map_err(|_| InvalidEntry("malformed SET ECDSA signature".to_text()))?;
     match P256.verify_prehashed(&config.log_public_key, &digest, &sig) {
-        Ok(())  => Ok(()),
-        Err(_)  => Err(SetSignatureFailed),
+        Result.Ok(())  => Result.Ok(()),
+        Result.Err(_)  => Result.Err(SetSignatureFailed),
     }
 }
 
@@ -307,13 +307,13 @@ fn build_set_payload(entry: &LogEntry) -> JsonValue {
 // node hash = SHA-256(0x01 || left || right). The inclusion proof
 // gives the audit hashes that recompute the root.
 
-/// Verify an inclusion proof for `entry`. Returns Ok(()) iff
+/// Verify an inclusion proof for `entry`. Returns Result.Ok(()) iff
 /// recomputing the root from (leaf hash, audit hashes, log_index,
 /// tree_size) matches `proof.root_hash`.
 public fn verify_inclusion_proof(entry: &LogEntry) -> Result<(), RekorError> {
     let proof = match &entry.inclusion_proof {
-        Some(p) => p,
-        None    => return Err(InvalidEntry("entry lacks inclusion proof".to_text())),
+        Maybe.Some(p) => p,
+        Maybe.None    => return Result.Err(InvalidEntry("entry lacks inclusion proof".to_text())),
     };
     let body_bytes = core.encoding.base64.decode_standard(&entry.body_b64)
         .map_err(|e| InvalidBase64(f"body: {e}"))?;
@@ -333,7 +333,7 @@ public fn verify_inclusion_proof(entry: &LogEntry) -> Result<(), RekorError> {
         let sibling = hex_decode(&proof.hashes_hex[i])
             .map_err(|_| InvalidEntry(f"audit-hash[{i}] not hex".to_text()))?;
         if sub_size == 0 {
-            return Err(InvalidEntry("inclusion-proof: sub_size underflow".to_text()));
+            return Result.Err(InvalidEntry("inclusion-proof: sub_size underflow".to_text()));
         }
         if sub_idx == sub_size - 1 && (sub_size & 1) == 1 {
             // Last-leaf-of-odd-tree: this hash skips the sibling step.
@@ -352,9 +352,9 @@ public fn verify_inclusion_proof(entry: &LogEntry) -> Result<(), RekorError> {
 
     let computed_root_hex = hex_encode(&node);
     if !ct_eq(&computed_root_hex, &proof.root_hash) {
-        return Err(InvalidEntry(f"inclusion-proof: root mismatch (expected {proof.root_hash}, computed {computed_root_hex})"));
+        return Result.Err(InvalidEntry(f"inclusion-proof: root mismatch (expected {proof.root_hash}, computed {computed_root_hex})"));
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn node_hash(left: &List<Byte>, right: &List<Byte>) -> List<Byte> {
@@ -392,8 +392,8 @@ fn parse_log_entry_response(bytes: &List<Byte>) -> Result<LogEntry, RekorError> 
     // Rekor returns `{ "<uuid>": { ... } }` — a single-entry map.
     let mut iter = obj.iter();
     let (uuid_text, entry_value) = match iter.next() {
-        Some(pair) => pair,
-        None       => return Err(InvalidJson("response empty".to_text())),
+        Maybe.Some(pair) => pair,
+        Maybe.None       => return Result.Err(InvalidJson("response empty".to_text())),
     };
     parse_log_entry(uuid_text.clone(), entry_value)
 }
@@ -414,8 +414,8 @@ fn parse_log_entry(uuid: Text, value: &JsonValue) -> Result<LogEntry, RekorError
     let set_b64 = verification.get("signedEntryTimestamp").and_then(|v| v.as_string())
         .ok_or_else(|| InvalidJson("verification.signedEntryTimestamp missing".to_text()))?;
     let inclusion_proof = match verification.get("inclusionProof") {
-        Some(ip) => Some(parse_inclusion_proof(ip)?),
-        None     => None,
+        Maybe.Some(ip) => Maybe.Some(parse_inclusion_proof(ip)?),
+        Maybe.None     => Maybe.None,
     };
 
     let body_bytes = core.encoding.base64.decode_standard(&body_b64)
@@ -424,7 +424,7 @@ fn parse_log_entry(uuid: Text, value: &JsonValue) -> Result<LogEntry, RekorError
         .map_err(|e| InvalidJson(f"body json: {e}"))?;
     let body = decode_entry_body(&body_value)?;
 
-    Ok(LogEntry {
+    Result.Ok(LogEntry {
         uuid,
         body_b64,
         body,
@@ -450,14 +450,14 @@ fn parse_inclusion_proof(value: &JsonValue) -> Result<InclusionProof, RekorError
     let mut hashes_hex: List<Text> = List.with_capacity(hashes_arr.len());
     let mut i: Int = 0;
     while i < hashes_arr.len() {
-        if let Some(s) = hashes_arr[i].as_string() {
+        if let Maybe.Some(s) = hashes_arr[i].as_string() {
             hashes_hex.push(s);
         }
         i = i + 1;
     }
     let checkpoint_b64 = obj.get("checkpoint").and_then(|v| v.as_string())
         .unwrap_or_else(|| "".to_text());
-    Ok(InclusionProof {
+    Result.Ok(InclusionProof {
         log_index, tree_size, root_hash, hashes_hex, checkpoint_b64,
     })
 }
@@ -470,10 +470,10 @@ fn decode_entry_body(value: &JsonValue) -> Result<EntryBody, RekorError> {
     let spec = obj.get("spec").cloned()
         .ok_or_else(|| InvalidJson("entry body spec missing".to_text()))?;
     match entry_kind_from_text(&kind) {
-        EntryKind.HashedRekord => Ok(EntryBody.HashedRekord_(decode_hashed_rekord(&spec)?)),
-        EntryKind.Intoto       => Ok(EntryBody.Intoto_(decode_intoto(&spec)?)),
-        EntryKind.Dsse         => Ok(EntryBody.Dsse_(decode_dsse(&spec)?)),
-        EntryKind.Other(_)     => Ok(EntryBody.Raw(value.clone())),
+        EntryKind.HashedRekord => Result.Ok(EntryBody.HashedRekord_(decode_hashed_rekord(&spec)?)),
+        EntryKind.Intoto       => Result.Ok(EntryBody.Intoto_(decode_intoto(&spec)?)),
+        EntryKind.Dsse         => Result.Ok(EntryBody.Dsse_(decode_dsse(&spec)?)),
+        EntryKind.Other(_)     => Result.Ok(EntryBody.Raw(value.clone())),
     }
 }
 
@@ -491,7 +491,7 @@ fn decode_hashed_rekord(spec: &JsonValue) -> Result<HashedRekordBody, RekorError
         .ok_or_else(|| InvalidEntry("hashedrekord.signature.publicKey missing".to_text()))?;
     let pk_b64 = pk.get("content").and_then(|v| v.as_string())
         .ok_or_else(|| InvalidEntry("hashedrekord.signature.publicKey.content missing".to_text()))?;
-    Ok(HashedRekordBody {
+    Result.Ok(HashedRekordBody {
         payload_hash:        hash,
         signature_b64:       sig_b64,
         public_key_pem_b64:  pk_b64,
@@ -505,7 +505,7 @@ fn decode_intoto(spec: &JsonValue) -> Result<IntotoBody, RekorError> {
     let _ = obj;
     // We surface a placeholder value — verify.vr re-decodes envelope
     // + extracts SLSA / SBOM predicate. Round-trip safe.
-    Ok(IntotoBody {
+    Result.Ok(IntotoBody {
         envelope: security.sigstore.types.IntotoEnvelopeRef {
             payload_b64: "".to_text(),
             payload_type: "".to_text(),
@@ -519,7 +519,7 @@ fn decode_intoto(spec: &JsonValue) -> Result<IntotoBody, RekorError> {
 
 fn decode_dsse(spec: &JsonValue) -> Result<DsseBody, RekorError> {
     let _ = spec;
-    Ok(DsseBody {
+    Result.Ok(DsseBody {
         envelope_hash: Digest { algorithm: "sha256".to_text(), hex: "".to_text() },
         signatures:    List.new(),
         payload_hash:  Digest { algorithm: "sha256".to_text(), hex: "".to_text() },
@@ -535,7 +535,7 @@ fn decode_digest(opt: Maybe<&JsonValue>) -> Result<Digest, RekorError> {
         .ok_or_else(|| InvalidEntry("digest.algorithm missing".to_text()))?;
     let hex = obj.get("value").and_then(|v| v.as_string())
         .ok_or_else(|| InvalidEntry("digest.value missing".to_text()))?;
-    Ok(Digest { algorithm: alg, hex })
+    Result.Ok(Digest { algorithm: alg, hex })
 }
 
 // =============================================================================

@@ -155,8 +155,8 @@ public fn occurs_in(term: &CoreTerm, target: Int{>= 0}) -> Bool {
 /// the strict-positivity check.
 ///
 
-/// Returns `Maybe::Some(derivation)` when all constructor types are
-/// strictly positive; `Maybe::None` when any constructor fails the
+/// Returns `Maybe::Maybe.Some(derivation)` when all constructor types are
+/// strictly positive; `Maybe::Maybe.None` when any constructor fails the
 /// check (rejected by the elaborator with a well-formedness error).
 ///
 
@@ -192,7 +192,7 @@ public fn introduce_pos(
 
 /// `∀ ctx i_name cs.
 ///  (∀ c ∈ cs. is_strictly_positive(c, i_name))
-///  → introduce_pos(ctx, i_name, cs, T) = Some(d)
+///  → introduce_pos(ctx, i_name, cs, T) = Maybe.Some(d)
 ///  → d denotes a polynomial-functor initial algebra of type T
 ///  in the categorical model.`
 ///

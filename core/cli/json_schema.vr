@@ -61,16 +61,16 @@ fn write_command(b: &mut TextBuilder, cmd: &CommandSpec, depth: Int) {
     write_str_field(b, "name", &cmd.name, depth + 1, false);
     write_str_field(b, "about", &cmd.about, depth + 1, false);
     match &cmd.version {
-        Some(v) => write_str_field(b, "version", v, depth + 1, false),
-        None => {},
+        Maybe.Some(v) => write_str_field(b, "version", v, depth + 1, false),
+        Maybe.None => {},
     }
     match &cmd.author {
-        Some(a) => write_str_field(b, "author", a, depth + 1, false),
-        None => {},
+        Maybe.Some(a) => write_str_field(b, "author", a, depth + 1, false),
+        Maybe.None => {},
     }
     match &cmd.long_about {
-        Some(la) => write_str_field(b, "long_about", la, depth + 1, false),
-        None => {},
+        Maybe.Some(la) => write_str_field(b, "long_about", la, depth + 1, false),
+        Maybe.None => {},
     }
 
     if cmd.aliases.len() > 0 {
@@ -105,16 +105,16 @@ fn write_args(b: &mut TextBuilder, args: &List<ArgSpec>, depth: Int) {
         b.push(", \"arity\": "); write_arity(b, &a.arity);
         b.push(", \"kind\": "); write_quoted(b, &a.kind_hint);
         match &a.placeholder {
-            Some(p) => { b.push(", \"placeholder\": "); write_quoted(b, p); },
-            None => {},
+            Maybe.Some(p) => { b.push(", \"placeholder\": "); write_quoted(b, p); },
+            Maybe.None => {},
         }
         match &a.refinement {
-            Some(r) => { b.push(", \"refinement\": "); write_quoted(b, &r.expression); },
-            None => {},
+            Maybe.Some(r) => { b.push(", \"refinement\": "); write_quoted(b, &r.expression); },
+            Maybe.None => {},
         }
         match &a.env_fallback {
-            Some(e) => { b.push(", \"env\": "); write_quoted(b, e); },
-            None => {},
+            Maybe.Some(e) => { b.push(", \"env\": "); write_quoted(b, e); },
+            Maybe.None => {},
         }
         b.push("}");
         if i + 1 < args.len() { b.push(","); }
@@ -139,16 +139,16 @@ fn write_flags(b: &mut TextBuilder, flags: &List<FlagSpec>, depth: Int) {
         indent(b, depth + 1);
         b.push("{");
         match &f.long {
-            Some(l) => { b.push("\"long\": "); write_quoted(b, l); },
-            None => { b.push("\"long\": null"); },
+            Maybe.Some(l) => { b.push("\"long\": "); write_quoted(b, l); },
+            Maybe.None => { b.push("\"long\": null"); },
         }
         match f.short {
-            Some(c) => {
+            Maybe.Some(c) => {
                 b.push(", \"short\": ");
                 let s = Text.from(f"{c}");
                 write_quoted(b, &s);
             },
-            None => {},
+            Maybe.None => {},
         }
         b.push(", \"help\": "); write_quoted(b, &f.help);
         b.push(", \"arity\": "); write_arity(b, &f.arity);
@@ -158,12 +158,12 @@ fn write_flags(b: &mut TextBuilder, flags: &List<FlagSpec>, depth: Int) {
         b.push(", \"repeated\": "); b.push(if f.repeated { "true" } else { "false" });
         b.push(", \"negatable\": "); b.push(if f.negatable { "true" } else { "false" });
         match &f.refinement {
-            Some(r) => { b.push(", \"refinement\": "); write_quoted(b, &r.expression); },
-            None => {},
+            Maybe.Some(r) => { b.push(", \"refinement\": "); write_quoted(b, &r.expression); },
+            Maybe.None => {},
         }
         match &f.env_fallback {
-            Some(e) => { b.push(", \"env\": "); write_quoted(b, e); },
-            None => {},
+            Maybe.Some(e) => { b.push(", \"env\": "); write_quoted(b, e); },
+            Maybe.None => {},
         }
         b.push("}");
         if i + 1 < flags.len() { b.push(","); }
@@ -236,8 +236,8 @@ fn write_command_compact(b: &mut TextBuilder, cmd: &CommandSpec) {
     b.push(",\"about\":");
     write_quoted(b, &cmd.about);
     match &cmd.version {
-        Some(v) => { b.push(",\"version\":"); write_quoted(b, v); },
-        None => {},
+        Maybe.Some(v) => { b.push(",\"version\":"); write_quoted(b, v); },
+        Maybe.None => {},
     }
     b.push(",\"flags_count\":");
     b.push(&Text.from(f"{cmd.flags.len()}"));
@@ -323,7 +323,7 @@ fn write_quoted(b: &mut TextBuilder, s: &Text) {
     let mut i: Int = 0;
     while i < s.len() {
         match s.byte_at(i) {
-            Some(c) => {
+            Maybe.Some(c) => {
                 if c == b'"' { b.push("\\\""); }
                 else if c == b'\\' { b.push("\\\\"); }
                 else if c == b'\n' { b.push("\\n"); }
@@ -332,7 +332,7 @@ fn write_quoted(b: &mut TextBuilder, s: &Text) {
                 else if c < 0x20 { b.push("?"); }
                 else { b.push_byte(c); }
             },
-            None => break,
+            Maybe.None => break,
         }
         i = i + 1;
     }

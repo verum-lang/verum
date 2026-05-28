@@ -111,12 +111,12 @@ implement DbstatCursor {
         _args: &List<Register>,
     ) -> Result<(), VtabError> {
         self.pos = 0;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn next_row(&mut self) -> Result<(), VtabError> {
         self.pos = self.pos + 1;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn eof(&self) -> Bool { self.pos >= self.rows.len() }

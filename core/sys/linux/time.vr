@@ -202,9 +202,9 @@ public fn clock_gettime(clock_id: Int32, ts: &mut LinuxTimeTimespec) -> Result<(
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -299,7 +299,7 @@ public const TIMER_ABSTIME: Int = 1;
 ///
 
 /// # Returns
-/// Remaining time if interrupted, None if completed.
+/// Remaining time if interrupted, Maybe.None if completed.
 public fn sleep(duration: LinuxDuration) -> Maybe<LinuxDuration> {
     let req = duration.to_timespec();
     let mut rem = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
@@ -314,9 +314,9 @@ public fn sleep(duration: LinuxDuration) -> Maybe<LinuxDuration> {
     };
 
     if result == 0 {
-        None
+        Maybe.None
     } else {
-        Some(LinuxDuration((rem.tv_sec as UInt64) * 1_000_000_000 + (rem.tv_nsec as UInt64)))
+        Maybe.Some(LinuxDuration((rem.tv_sec as UInt64) * 1_000_000_000 + (rem.tv_nsec as UInt64)))
     }
 }
 
@@ -335,8 +335,8 @@ public fn clock_nanosleep(
     rem: Maybe<&mut LinuxTimeTimespec>
 ) -> Result<(), OSError> {
     let rem_ptr = match rem {
-        Some(r) => r as Int,
-        None => 0,
+        Maybe.Some(r) => r as Int,
+        Maybe.None => 0,
     };
 
     let result = unsafe {
@@ -351,9 +351,9 @@ public fn clock_nanosleep(
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -367,7 +367,7 @@ public fn sleep_until(deadline_nanos: UInt64) -> Result<(), OSError> {
         tv_nsec: (deadline_nanos % 1_000_000_000) as Int64,
     };
 
-    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &req, None)
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &req, Maybe.None)
 }
 
 /// Sleep for milliseconds.

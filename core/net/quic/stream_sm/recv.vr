@@ -134,8 +134,8 @@ implement RecvStream {
             runs:          [],
             bytes_read:    0_u64,
             max_data_recv: initial_max_stream_data,
-            final_size:    None,
-            reset_code:    None,
+            final_size:    Maybe.None,
+            reset_code:    Maybe.None,
         }
     }
 
@@ -148,45 +148,45 @@ implement RecvStream {
         is_fin: Bool,
     ) -> Result<(), QuicRecvError> {
         match self.state {
-            RecvState.ResetRecvd | RecvState.ResetRead => return Err(QuicRecvError.ReceiveAfterReset),
+            RecvState.ResetRecvd | RecvState.ResetRead => return Result.Err(QuicRecvError.ReceiveAfterReset),
             _ => {},
         }
         // Flow control violation if the highest byte offset is past
         // our advertised limit.
         let high = offset + (data.len() as UInt64);
         if high > self.max_data_recv {
-            return Err(QuicRecvError.FlowControlViolation);
+            return Result.Err(QuicRecvError.FlowControlViolation);
         }
 
         // Final-size consistency if FIN.
         if is_fin {
             match self.final_size {
-                Some(existing) => {
-                    if existing != high { return Err(QuicRecvError.FinalSizeChanged); }
+                Maybe.Some(existing) => {
+                    if existing != high { return Result.Err(QuicRecvError.FinalSizeChanged); }
                 },
-                None => { self.final_size = Some(high); },
+                Maybe.None => { self.final_size = Maybe.Some(high); },
             }
         }
         // Also: no byte may land past final_size.
         match self.final_size {
-            Some(fs) => {
-                if high > fs { return Err(QuicRecvError.FinalSizeChanged); }
+            Maybe.Some(fs) => {
+                if high > fs { return Result.Err(QuicRecvError.FinalSizeChanged); }
             },
-            None => {},
+            Maybe.None => {},
         }
 
         self.insert_run(offset, data);
         self.maybe_transition_size_known();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Peer RESET_STREAM — transitions to ResetRecvd.
     public fn on_reset(&mut self, error_code: UInt64, final_size: UInt64) -> Result<(), QuicRecvError> {
         match self.state {
-            RecvState.DataRead => return Err(QuicRecvError.ResetAfterFin),
+            RecvState.DataRead => return Result.Err(QuicRecvError.ResetAfterFin),
             RecvState.ResetRecvd | RecvState.ResetRead => {
                 // Idempotent if arriving twice with same code — just ignore.
-                return Ok(());
+                return Result.Ok(());
             },
             _ => {},
         }
@@ -200,12 +200,12 @@ implement RecvStream {
             i = i + 1;
         }
         if final_size < max_obs {
-            return Err(QuicRecvError.FinalSizeChanged);
+            return Result.Err(QuicRecvError.FinalSizeChanged);
         }
         self.state = RecvState.ResetRecvd;
-        self.reset_code = Some(error_code);
-        self.final_size = Some(final_size);
-        Ok(())
+        self.reset_code = Maybe.Some(error_code);
+        self.final_size = Maybe.Some(final_size);
+        Result.Ok(())
     }
 
     /// Read the next contiguous chunk of received bytes. Returns
@@ -225,8 +225,8 @@ implement RecvStream {
             let _ = self.runs.remove(0);
         }
         let is_fin = match self.final_size {
-            Some(fs) => self.bytes_read >= fs,
-            None     => false,
+            Maybe.Some(fs) => self.bytes_read >= fs,
+            Maybe.None     => false,
         };
         if is_fin {
             match self.state {
@@ -273,13 +273,13 @@ implement RecvStream {
 
     fn maybe_transition_size_known(&mut self) {
         match self.final_size {
-            Some(_) => {
+            Maybe.Some(_) => {
                 match self.state {
                     RecvState.Recv => { self.state = RecvState.SizeKnown; },
                     _ => {},
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
     }
 

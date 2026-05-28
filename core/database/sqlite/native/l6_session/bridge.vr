@@ -44,7 +44,7 @@ public fn seed_cursors_from_connection(
     while i < n {
         let decl_opt = stmt.program_ref().get_cursor_decl(i);
         match decl_opt {
-            Some(decl) => {
+            Maybe.Some(decl) => {
                 let is_table = match decl.kind {
                     CkTable | CkIndex => true,
                     _ => false,
@@ -61,7 +61,7 @@ public fn seed_cursors_from_connection(
                     let _ = ct.install_rows(i, rows);
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
         i = i + 1;
     }
@@ -76,7 +76,7 @@ public fn writeback_cursors_to_connection(
     while i < n {
         let decl_opt = stmt.program_ref().get_cursor_decl(i);
         match decl_opt {
-            Some(decl) => {
+            Maybe.Some(decl) => {
                 let is_table = match decl.kind {
                     CkTable | CkIndex => true,
                     _ => false,
@@ -87,7 +87,7 @@ public fn writeback_cursors_to_connection(
                     conn.set_rows_at(decl.root_page, snapshot);
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
         i = i + 1;
     }
@@ -123,9 +123,9 @@ public fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut Connection) {
         let m = &mutations[i];
         let decl_opt = stmt.program_ref().get_cursor_decl(m.cursor_id);
         match decl_opt {
-            Some(decl) => {
+            Maybe.Some(decl) => {
                 match conn.schema().lookup_table_by_root(decl.root_page) {
-                    Some(meta) => {
+                    Maybe.Some(meta) => {
                         let op = match m.kind {
                             RmkInsert => UoInsert,
                             RmkUpdate => UoUpdate,
@@ -138,18 +138,18 @@ public fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut Connection) {
                         };
                         staged.push((op, schema_name, meta.name.clone(), m.rowid));
                     }
-                    None => {}   // ephemeral cursor — skip
+                    Maybe.None => {}   // ephemeral cursor — skip
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
         i = i + 1;
     }
 
     // Now invoke the hook with &mut access.
     match &mut conn.registry_mut().update_hook {
-        None => {}
-        Some(h) => {
+        Maybe.None => {}
+        Maybe.Some(h) => {
             let hook_ref = &mut **h;
             let mut k: Int = 0;
             while k < staged.len() {

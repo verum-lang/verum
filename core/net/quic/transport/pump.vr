@@ -184,7 +184,7 @@ public type ConnectionPump is {
     /// records the earliest instant it's allowed to send again and
     /// skips emission until wall-clock catches up.
     pacing_next_ok:   Maybe<Instant>,
-    /// RFC 9000 §10.1 idle-timeout tracker. `None` until the peer's
+    /// RFC 9000 §10.1 idle-timeout tracker. `Maybe.None` until the peer's
     /// `max_idle_timeout` transport parameter arrives; callers invoke
     /// `arm_idle_timer` once the local+peer values are known.
     idle:             Maybe<IdleTimeoutTracker>,
@@ -207,12 +207,12 @@ implement ConnectionPump {
             connection:      connection,
             handshake:       handshake,
             paths:           PathManager.new(path),
-            negotiated_hash: None,
-            negotiated_aead: None,
+            negotiated_hash: Maybe.None,
+            negotiated_aead: Maybe.None,
             phase_tag:       PumpPhase.PumpInitial,
             pacer:           Pacer.with_mss(1200_u64),
-            pacing_next_ok:  None,
-            idle:            None,
+            pacing_next_ok:  Maybe.None,
+            idle:            Maybe.None,
         }
     }
 
@@ -232,12 +232,12 @@ implement ConnectionPump {
             connection:      connection,
             handshake:       handshake,
             paths:           PathManager.new(path),
-            negotiated_hash: None,
-            negotiated_aead: None,
+            negotiated_hash: Maybe.None,
+            negotiated_aead: Maybe.None,
             phase_tag:       PumpPhase.PumpInitial,
             pacer:           Pacer.with_mss(1200_u64),
-            pacing_next_ok:  None,
-            idle:            None,
+            pacing_next_ok:  Maybe.None,
+            idle:            Maybe.None,
         }
     }
 
@@ -249,7 +249,7 @@ implement ConnectionPump {
     /// decodes the peer's transport-params extension. `now` is the
     /// initial activity reference (pump construction time is fine).
     public fn arm_idle_timer(&mut self, local_max_ms: UInt64, peer_max_ms: UInt64, now: Instant) {
-        self.idle = Some(IdleTimeoutTracker.new(local_max_ms, peer_max_ms, now));
+        self.idle = Maybe.Some(IdleTimeoutTracker.new(local_max_ms, peer_max_ms, now));
     }
 
     /// Run the pump until the connection closes or the cancellation
@@ -257,7 +257,7 @@ implement ConnectionPump {
     /// behaviour is already baked into the inner HandshakeDriver.
     pub async fn run(&mut self, cancel: &CancellationToken) -> Result<(), PumpError> {
         loop {
-            if cancel.is_cancelled() { return Err(PumpError.Cancelled); }
+            if cancel.is_cancelled() { return Result.Err(PumpError.Cancelled); }
 
             // 1. Drain inbound.
             self.drain_inbound_once().await?;
@@ -271,14 +271,14 @@ implement ConnectionPump {
             // move to Draining with a zero-duration drain expiry so
             // the outer loop terminates on the next iteration.
             match &self.idle {
-                Some(tracker) => match tracker.tick(now.clone()) {
+                Maybe.Some(tracker) => match tracker.tick(now.clone()) {
                     IdleTickResult.Expired => {
                         self.phase_tag = PumpPhase.PumpDraining;
-                        self.connection.drain_expiry = Some(now.clone());
+                        self.connection.drain_expiry = Maybe.Some(now.clone());
                     },
                     IdleTickResult.Active(_) => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
 
             // 3. Drain outbound (accumulate + send).
@@ -292,8 +292,8 @@ implement ConnectionPump {
             match self.phase_tag {
                 PumpPhase.PumpDraining => {
                     match self.connection.drain_expiry {
-                        Some(d) => if Instant.now() >= d { return Ok(()); },
-                        None    => return Ok(()),
+                        Maybe.Some(d) => if Instant.now() >= d { return Result.Ok(()); },
+                        Maybe.None    => return Result.Ok(()),
                     }
                 },
                 _ => {},
@@ -313,14 +313,14 @@ implement ConnectionPump {
         // fall back to a short-timeout recv that the SimUdpTransport
         // responds to immediately.
         match self.try_recv().await {
-            Some(Ok(dg)) => {
+            Maybe.Some(Result.Ok(dg)) => {
                 path_control.on_inbound_bytes(&mut self.paths, dg.data.len() as UInt64);
                 self.process_datagram(&dg).await?;
             },
-            Some(Err(e)) => return Err(PumpError.Transport(e)),
-            None => {},   // nothing to do
+            Maybe.Some(Result.Err(e)) => return Result.Err(PumpError.Transport(e)),
+            Maybe.None => {},   // nothing to do
         }
-        Ok(())
+        Result.Ok(())
     }
 
     async fn try_recv(&self) -> Maybe<Result<InboundDatagram, TransportError>> {
@@ -328,9 +328,9 @@ implement ConnectionPump {
         // timeout. In a full reactor this goes through
         // `transport.poll_recv`.
         match self.transport.recv().await {
-            Ok(dg) => Some(Ok(dg)),
-            Err(TransportError.WouldBlock) => None,
-            Err(e) => Some(Err(e)),
+            Result.Ok(dg) => Maybe.Some(Result.Ok(dg)),
+            Result.Err(TransportError.WouldBlock) => Maybe.None,
+            Result.Err(e) => Maybe.Some(Result.Err(e)),
         }
     }
 
@@ -345,8 +345,8 @@ implement ConnectionPump {
                 let type_bits = (rem[0] >> 4) & 0x03_u8;
                 let ptype = LongPacketType.from_bits(type_bits);
                 let keys_rx = match self.rx_keys_for_long(&ptype) {
-                    Some(k) => k,
-                    None    => {
+                    Maybe.Some(k) => k,
+                    Maybe.None    => {
                         // Keys not yet installed for that space — skip
                         // this packet; real impl buffers for later.
                         break;
@@ -354,46 +354,46 @@ implement ConnectionPump {
                 };
                 let largest_acked = self.largest_acked_for(self.pn_space_for_long(&ptype));
                 match parse_long_packet(rem, &keys_rx, largest_acked) {
-                    Ok(pkt) => {
+                    Result.Ok(pkt) => {
                         let consumed = self.handle_inbound_packet(pkt).await?;
                         offset = offset + consumed;
                     },
-                    Err(_) => break,   // drop malformed tail
+                    Result.Err(_) => break,   // drop malformed tail
                 }
             } else {
                 // Short header — 1-RTT app-data.
                 let keys_rx = match &self.connection.keys.app {
-                    Some((_, rx)) => rx.clone(),
-                    None          => break,
+                    Maybe.Some((_, rx)) => rx.clone(),
+                    Maybe.None          => break,
                 };
                 let largest_acked = self.largest_acked_for(PnSpaceKind.Application);
                 let dcid_len = self.connection.scid_local.len();
                 match parse_short_packet(rem, dcid_len, &keys_rx, largest_acked) {
-                    Ok(pkt) => {
+                    Result.Ok(pkt) => {
                         let consumed = self.handle_inbound_packet(pkt).await?;
                         offset = offset + consumed;
                     },
-                    Err(_) => break,
+                    Result.Err(_) => break,
                 }
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 
     fn rx_keys_for_long(&self, ptype: &LongPacketType) -> Maybe<QuicSpaceKeys> {
         match ptype {
             LongPacketType.Initial => {
                 match &self.connection.keys.initial {
-                    Some((_, rx)) => Some(rx.clone()), None => None,
+                    Maybe.Some((_, rx)) => Maybe.Some(rx.clone()), Maybe.None => Maybe.None,
                 }
             },
             LongPacketType.Handshake => {
                 match &self.connection.keys.handshake {
-                    Some((_, rx)) => Some(rx.clone()), None => None,
+                    Maybe.Some((_, rx)) => Maybe.Some(rx.clone()), Maybe.None => Maybe.None,
                 }
             },
-            LongPacketType.ZeroRtt   => None,     // 0-RTT not supported v1
-            LongPacketType.Retry     => None,     // retry goes through dedicated path
+            LongPacketType.ZeroRtt   => Maybe.None,     // 0-RTT not supported v1
+            LongPacketType.Retry     => Maybe.None,     // retry goes through dedicated path
         }
     }
 
@@ -416,7 +416,7 @@ implement ConnectionPump {
             InboundPacket.Short(sp) => self.handle_short_packet(sp).await,
             InboundPacket.VersionNegotiation { consumed, .. } => {
                 // Client receives VN — downgrade / retry. v1 only; reject.
-                Ok(consumed)
+                Result.Ok(consumed)
             },
         }
     }
@@ -438,10 +438,10 @@ implement ConnectionPump {
         ).map_err(|e| PumpError.Quic(e))?;
         self.absorb_dispatch(outcome)?;
         match &mut self.idle {
-            Some(t) => t.on_packet_received(Instant.now(), rx_ack_eliciting),
-            None => {},
+            Maybe.Some(t) => t.on_packet_received(Instant.now(), rx_ack_eliciting),
+            Maybe.None => {},
         }
-        Ok(lp.consumed)
+        Result.Ok(lp.consumed)
     }
 
     async fn handle_short_packet(&mut self, sp: InboundShortPacket) -> Result<Int, PumpError> {
@@ -457,10 +457,10 @@ implement ConnectionPump {
         ).map_err(|e| PumpError.Quic(e))?;
         self.absorb_dispatch(outcome)?;
         match &mut self.idle {
-            Some(t) => t.on_packet_received(Instant.now(), rx_ack_eliciting),
-            None => {},
+            Maybe.Some(t) => t.on_packet_received(Instant.now(), rx_ack_eliciting),
+            Maybe.None => {},
         }
-        Ok(sp.consumed)
+        Result.Ok(sp.consumed)
     }
 
     fn absorb_dispatch(&mut self, outcome: DispatchOutcome) -> Result<(), PumpError> {
@@ -475,14 +475,14 @@ implement ConnectionPump {
         // Queue retransmits + PATH_RESPONSE echoes + other frames.
         // For now accumulate onto pending outbound per space.
         let _ = outcome;
-        Ok(())
+        Result.Ok(())
     }
 
     // ==================== step 2: timers ====================
 
     fn check_timers(&mut self, now: Instant) -> Result<(), PumpError> {
         match self.connection.loss.timer_fires_at() {
-            Some(t) => {
+            Maybe.Some(t) => {
                 if now >= t {
                     let _ = self.connection.loss.on_timer(now, &mut self.connection.cc);
                     // on_timer may return a Some<PnSpaceKind> indicating
@@ -490,9 +490,9 @@ implement ConnectionPump {
                     // picks up the ack-eliciting marker.
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // ==================== step 3: outbound ====================
@@ -536,8 +536,8 @@ implement ConnectionPump {
                 _ => PnSpaceKind.Application,
             };
             match self.connection.loss.spaces[s].build_ack_frame(/* ack_delay_us */ 0_u64) {
-                Some(ack) => by_space[s].1.push(ack),
-                None => {},
+                Maybe.Some(ack) => by_space[s].1.push(ack),
+                Maybe.None => {},
             }
             s = s + 1;
         }
@@ -546,8 +546,8 @@ implement ConnectionPump {
         // skip emission entirely — RFC 9002 §7.7 mandates the sender
         // respect the pacing delay before the next packet goes out.
         match &self.pacing_next_ok {
-            Some(deadline) => if now < *deadline { return Ok(()); },
-            None => {},
+            Maybe.Some(deadline) => if now < *deadline { return Result.Ok(()); },
+            Maybe.None => {},
         }
 
         // Build + send per space (skip spaces with discarded keys).
@@ -561,12 +561,12 @@ implement ConnectionPump {
             // elapses. Coalescing (§12.2) will collapse these back to
             // one datagram in the optimisation commit.
             match &self.pacing_next_ok {
-                Some(deadline) => if now < *deadline { break; },
-                None => {},
+                Maybe.Some(deadline) => if now < *deadline { break; },
+                Maybe.None => {},
             }
             j = j + 1;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     fn collect_stream_frames(&mut self, out: &mut List<Frame>) {
@@ -590,16 +590,16 @@ implement ConnectionPump {
     ) -> Result<(), PumpError> {
         let keys_tx = match space {
             PnSpaceKind.Initial => match &self.connection.keys.initial {
-                Some((tx, _)) => tx.clone(),
-                None          => return Ok(()),     // keys discarded / not installed
+                Maybe.Some((tx, _)) => tx.clone(),
+                Maybe.None          => return Result.Ok(()),     // keys discarded / not installed
             },
             PnSpaceKind.Handshake => match &self.connection.keys.handshake {
-                Some((tx, _)) => tx.clone(),
-                None          => return Ok(()),
+                Maybe.Some((tx, _)) => tx.clone(),
+                Maybe.None          => return Result.Ok(()),
             },
             PnSpaceKind.Application => match &self.connection.keys.app {
-                Some((tx, _)) => tx.clone(),
-                None          => return Ok(()),
+                Maybe.Some((tx, _)) => tx.clone(),
+                Maybe.None          => return Result.Ok(()),
             },
         };
 
@@ -655,7 +655,7 @@ implement ConnectionPump {
         // Gate outbound against path anti-amplification.
         let active_path = self.paths.active();
         let gated = path_control.gate_outbound(active_path, wire.len() as UInt64);
-        if gated == 0_u64 { return Ok(()); }
+        if gated == 0_u64 { return Result.Ok(()); }
 
         // RFC 9002 §7.7 pacing admission. The Initial PN space is
         // exempted so the first handshake packet isn't held up by an
@@ -667,13 +667,13 @@ implement ConnectionPump {
                 PacerDecision.Send => true,
                 PacerDecision.NotYet(delay) => {
                     let next = now.clone().checked_add(delay).unwrap_or_else(|| now.clone());
-                    self.pacing_next_ok = Some(next);
+                    self.pacing_next_ok = Maybe.Some(next);
                     false
                 },
             },
         };
-        if !allow { return Ok(()); }
-        self.pacing_next_ok = None;
+        if !allow { return Result.Ok(()); }
+        self.pacing_next_ok = Maybe.None;
 
         // Track as in-flight for the recovery loop.
         let info = SentPacketInfo {
@@ -693,56 +693,56 @@ implement ConnectionPump {
         // send since the last activity; `on_packet_sent` on the
         // tracker enforces this with its `since_last_send` gate.
         match &mut self.idle {
-            Some(t) => t.on_packet_sent(now.clone(), tx_ack_eliciting),
-            None => {},
+            Maybe.Some(t) => t.on_packet_sent(now.clone(), tx_ack_eliciting),
+            Maybe.None => {},
         }
 
         // Finally — ship it.
         self.transport.send(wire.as_slice(), &self.peer_addr, EcnCodepoint.NotEct)
             .await.map_err(txerr)?;
-        Ok(())
+        Result.Ok(())
     }
 
     // ==================== step 4: phase promotion ====================
 
     fn check_handshake_progress(&mut self) {
         match self.handshake.completion() {
-            Some(HandshakeOutput.ClientHandshakeOutput(c)) => {
+            Maybe.Some(HandshakeOutput.ClientHandshakeOutput(c)) => {
                 // Cache negotiated hash/aead classification.
-                self.negotiated_hash = Some(c.hash.clone());
-                self.negotiated_aead = Some(c.suite.aead_kind());
+                self.negotiated_hash = Maybe.Some(c.hash.clone());
+                self.negotiated_aead = Maybe.Some(c.suite.aead_kind());
                 // Derive + install 1-RTT keys; mark Handshake keys for
                 // discard on first Application-space send.
                 let aead_len = aead_key_len_for(&c.suite.aead_kind());
                 let use_chacha = is_chacha_aead(&c.suite.aead_kind());
                 match derive_space_keys(&c.client_ap_traffic, aead_len, use_chacha) {
-                    Ok(ktx) => match derive_space_keys(&c.server_ap_traffic, aead_len, use_chacha) {
-                        Ok(krx) => {
-                            self.connection.keys.app = Some((ktx, krx));
+                    Result.Ok(ktx) => match derive_space_keys(&c.server_ap_traffic, aead_len, use_chacha) {
+                        Result.Ok(krx) => {
+                            self.connection.keys.app = Maybe.Some((ktx, krx));
                             self.phase_tag = PumpPhase.PumpOneRtt;
                         },
-                        Err(_) => {},
+                        Result.Err(_) => {},
                     },
-                    Err(_) => {},
+                    Result.Err(_) => {},
                 }
             },
-            Some(HandshakeOutput.ServerHandshakeOutput(c)) => {
-                self.negotiated_hash = Some(c.hash.clone());
-                self.negotiated_aead = Some(c.suite.aead_kind());
+            Maybe.Some(HandshakeOutput.ServerHandshakeOutput(c)) => {
+                self.negotiated_hash = Maybe.Some(c.hash.clone());
+                self.negotiated_aead = Maybe.Some(c.suite.aead_kind());
                 let aead_len = aead_key_len_for(&c.suite.aead_kind());
                 let use_chacha = is_chacha_aead(&c.suite.aead_kind());
                 match derive_space_keys(&c.server_ap_traffic, aead_len, use_chacha) {
-                    Ok(ktx) => match derive_space_keys(&c.client_ap_traffic, aead_len, use_chacha) {
-                        Ok(krx) => {
-                            self.connection.keys.app = Some((ktx, krx));
+                    Result.Ok(ktx) => match derive_space_keys(&c.client_ap_traffic, aead_len, use_chacha) {
+                        Result.Ok(krx) => {
+                            self.connection.keys.app = Maybe.Some((ktx, krx));
                             self.phase_tag = PumpPhase.PumpOneRtt;
                         },
-                        Err(_) => {},
+                        Result.Err(_) => {},
                     },
-                    Err(_) => {},
+                    Result.Err(_) => {},
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
     }
 

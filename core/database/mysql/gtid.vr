@@ -55,7 +55,7 @@
 module core.database.mysql.gtid;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount base.uuid.{Uuid, UuidError};
 mount collections.List;
 mount core.database.common.error.{
@@ -231,8 +231,8 @@ implement GtidSet {
 
     public fn contains(&self, uuid: &Uuid, gno: Int) -> Bool {
         match find_entry(self, uuid) {
-            Some(idx) => self.entries[idx].intervals.contains(gno),
-            None      => false,
+            Maybe.Some(idx) => self.entries[idx].intervals.contains(gno),
+            Maybe.None      => false,
         }
     }
 
@@ -243,10 +243,10 @@ implement GtidSet {
 
     public fn add_interval(&mut self, uuid: Uuid, iv: GnoInterval) {
         match find_entry(self, &uuid) {
-            Some(idx) => {
+            Maybe.Some(idx) => {
                 self.entries[idx].intervals.add(iv);
             }
-            None => {
+            Maybe.None => {
                 let mut s = GnoIntervalSet.new();
                 s.add(iv);
                 let pos = insert_position(self, &uuid);
@@ -287,7 +287,7 @@ implement GtidSet {
         while i < (self.entries.len() as Int) {
             let mine = &self.entries[i];
             match find_entry(other, &mine.uuid) {
-                Some(j) => {
+                Maybe.Some(j) => {
                     let theirs = &other.entries[j].intervals;
                     let common = intersect_intervals(&mine.intervals, theirs);
                     if !common.is_empty() {
@@ -297,7 +297,7 @@ implement GtidSet {
                         });
                     }
                 }
-                None => {}
+                Maybe.None => {}
             }
             i = i + 1;
         }
@@ -311,8 +311,8 @@ implement GtidSet {
         while i < (self.entries.len() as Int) {
             let mine = &self.entries[i];
             let result = match find_entry(other, &mine.uuid) {
-                Some(j) => subtract_intervals(&mine.intervals, &other.entries[j].intervals),
-                None    => mine.intervals.clone(),
+                Maybe.Some(j) => subtract_intervals(&mine.intervals, &other.entries[j].intervals),
+                Maybe.None    => mine.intervals.clone(),
             };
             if !result.is_empty() {
                 out.entries.push(GtidEntry {
@@ -395,16 +395,16 @@ public fn parse_gtid_set(s: &Text) -> Result<GtidSet, DbError> {
         if i >= n { break; }
         // Each entry begins with a 36-char UUID.
         if i + 36 > n {
-            return Err(gtid_error(
+            return Result.Err(gtid_error(
                 "GTID_PARSE_BAD_UUID".clone(),
                 f"truncated UUID at byte {i}",
             ));
         }
         let uuid_text = sub_text(s, i, i + 36);
         let uuid = match Uuid.parse(&uuid_text) {
-            Ok(u)  => u,
-            Err(e) => {
-                return Err(gtid_error(
+            Result.Ok(u)  => u,
+            Result.Err(e) => {
+                return Result.Err(gtid_error(
                     "GTID_PARSE_BAD_UUID".clone(),
                     f"bad UUID at byte {i}: {e.message}",
                 ));
@@ -452,7 +452,7 @@ public fn parse_gtid_set(s: &Text) -> Result<GtidSet, DbError> {
             break;
         }
         if !saw_colon {
-            return Err(gtid_error(
+            return Result.Err(gtid_error(
                 "GTID_PARSE_MISSING_COLON".clone(),
                 f"UUID at byte {i} not followed by ':interval'",
             ));
@@ -464,7 +464,7 @@ public fn parse_gtid_set(s: &Text) -> Result<GtidSet, DbError> {
             intervals: intervals,
         });
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn parse_interval(bytes: &[Byte], start_off: Int) -> Result<(GnoInterval, Int), DbError> {
@@ -474,7 +474,7 @@ fn parse_interval(bytes: &[Byte], start_off: Int) -> Result<(GnoInterval, Int), 
     let start_t = i;
     while i < n && byte_is_digit(bytes[i]) { i = i + 1; }
     if i == start_t {
-        return Err(gtid_error(
+        return Result.Err(gtid_error(
             "GTID_PARSE_BAD_INTERVAL".clone(),
             f"missing GNO start at byte {start_t}",
         ));
@@ -487,7 +487,7 @@ fn parse_interval(bytes: &[Byte], start_off: Int) -> Result<(GnoInterval, Int), 
         let end_t = i;
         while i < n && byte_is_digit(bytes[i]) { i = i + 1; }
         if i == end_t {
-            return Err(gtid_error(
+            return Result.Err(gtid_error(
                 "GTID_PARSE_BAD_INTERVAL".clone(),
                 f"missing GNO end after '-' at byte {after_start}",
             ));
@@ -495,12 +495,12 @@ fn parse_interval(bytes: &[Byte], start_off: Int) -> Result<(GnoInterval, Int), 
         end_v = parse_int_bytes(bytes, end_t, i)?;
     }
     if end_v < start_v {
-        return Err(gtid_error(
+        return Result.Err(gtid_error(
             "GTID_PARSE_EMPTY_INTERVAL".clone(),
             f"end {end_v} < start {start_v}",
         ));
     }
-    Ok((GnoInterval { start: start_v, end: end_v }, i))
+    Result.Ok((GnoInterval { start: start_v, end: end_v }, i))
 }
 
 // =============================================================================
@@ -552,7 +552,7 @@ public fn decode_wire(buf: &[Byte]) -> Result<GtidSet, DbError> {
     let mut i: Int = 0;
     while i < n_sids {
         if off + 16 > (buf.len() as Int) {
-            return Err(gtid_error(
+            return Result.Err(gtid_error(
                 "GTID_DECODE_TRUNCATED".clone(),
                 f"truncated SID at offset {off}",
             ));
@@ -575,7 +575,7 @@ public fn decode_wire(buf: &[Byte]) -> Result<GtidSet, DbError> {
             let e_excl = read_u64_le(buf, off)?;
             off = off + 8;
             if e_excl <= s {
-                return Err(gtid_error(
+                return Result.Err(gtid_error(
                     "GTID_DECODE_BAD_INTERVAL".clone(),
                     f"end_exclusive {e_excl} <= start {s}",
                 ));
@@ -593,12 +593,12 @@ public fn decode_wire(buf: &[Byte]) -> Result<GtidSet, DbError> {
         });
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn read_u64_le(buf: &[Byte], off: Int) -> Result<Int, DbError> {
     if off + 8 > (buf.len() as Int) {
-        return Err(gtid_error(
+        return Result.Err(gtid_error(
             "GTID_DECODE_TRUNCATED".clone(),
             f"truncated u64 at offset {off}",
         ));
@@ -609,7 +609,7 @@ fn read_u64_le(buf: &[Byte], off: Int) -> Result<Int, DbError> {
         v = v | ((buf[off + k] as Int) << (k * 8));
         k = k + 1;
     }
-    Ok(v)
+    Result.Ok(v)
 }
 
 // =============================================================================
@@ -623,10 +623,10 @@ fn find_entry(set: &GtidSet, uuid: &Uuid) -> Maybe<Int> {
     while lo < hi {
         let mid = (lo + hi) / 2;
         let cmp = compare_uuid(&set.entries[mid].uuid, uuid);
-        if cmp == 0 { return Some(mid); }
+        if cmp == 0 { return Maybe.Some(mid); }
         if cmp < 0 { lo = mid + 1; } else { hi = mid; }
     }
-    None
+    Maybe.None
 }
 
 fn insert_position(set: &GtidSet, uuid: &Uuid) -> Int {
@@ -743,7 +743,7 @@ fn parse_int_bytes(bytes: &[Byte], start: Int, end: Int) -> Result<Int, DbError>
     while i < end {
         let v = bytes[i] as Int;
         if v < ('0' as Int) || v > ('9' as Int) {
-            return Err(gtid_error(
+            return Result.Err(gtid_error(
                 "GTID_PARSE_BAD_INTERVAL".clone(),
                 f"non-digit at byte {i}",
             ));
@@ -751,7 +751,7 @@ fn parse_int_bytes(bytes: &[Byte], start: Int, end: Int) -> Result<Int, DbError>
         acc = acc * 10 + (v - ('0' as Int));
         i = i + 1;
     }
-    Ok(acc)
+    Result.Ok(acc)
 }
 
 fn int_to_text(n: Int) -> Text {

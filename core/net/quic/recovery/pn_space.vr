@@ -102,10 +102,10 @@ implement PnSpace {
         PnSpace {
             kind: kind,
             next_pn: 0_u64,
-            largest_acked_received: None,
+            largest_acked_received: Maybe.None,
             ack_ranges: AckRanges.empty(),
             ecn_ect0: 0_u64, ecn_ect1: 0_u64, ecn_ce: 0_u64,
-            largest_acked_sent: None,
+            largest_acked_sent: Maybe.None,
             sent_packets: [],
             discarded: false,
         }
@@ -135,8 +135,8 @@ implement PnSpace {
     /// the obligation symbolically + callers can assert empirically.
     public fn pn_monotonic_ok(&self) -> Bool {
         match self.largest_acked_sent {
-            Some(v) => self.next_pn > v,
-            None    => true,
+            Maybe.Some(v) => self.next_pn > v,
+            Maybe.None    => true,
         }
     }
 
@@ -165,10 +165,10 @@ implement PnSpace {
     public fn on_packet_received(&mut self, pn: UInt64) {
         // Update peer-PN high-watermark.
         let should_update = match self.largest_acked_received {
-            Some(v) => pn > v,
-            None    => true,
+            Maybe.Some(v) => pn > v,
+            Maybe.None    => true,
         };
-        if should_update { self.largest_acked_received = Some(pn); }
+        if should_update { self.largest_acked_received = Maybe.Some(pn); }
 
         // Invariant-preserving insert via AckRanges wrapper .
         let taken = self.ack_ranges.clone();
@@ -183,9 +183,9 @@ implement PnSpace {
         ranges: &List<AckRange>,
     ) -> List<SentPacketInfo> {
         // Track highest PN the peer has ever ACKed for us.
-        let prev = match self.largest_acked_sent { Some(v) => v, None => 0_u64 };
+        let prev = match self.largest_acked_sent { Maybe.Some(v) => v, Maybe.None => 0_u64 };
         if largest_acked > prev || self.largest_acked_sent.is_none() {
-            self.largest_acked_sent = Some(largest_acked);
+            self.largest_acked_sent = Maybe.Some(largest_acked);
         }
 
         // Linear scan: retain not-acked, collect acked.
@@ -206,22 +206,22 @@ implement PnSpace {
         acked
     }
 
-    /// Build an ACK frame ready to ship, or None if we have no
+    /// Build an ACK frame ready to ship, or Maybe.None if we have no
     /// outstanding received packets to acknowledge.
     public fn build_ack_frame(&self, ack_delay_us: UInt64) -> Maybe<Frame> {
-        let largest = match self.largest_acked_received { Some(v) => v, None => return None };
+        let largest = match self.largest_acked_received { Maybe.Some(v) => v, Maybe.None => return Maybe.None };
         // Emit ECN counts only if any counter is non-zero. Some peers
         // require explicit ECN counts to be absent when none are seen.
         let ecn = if self.ecn_ect0 == 0_u64 && self.ecn_ect1 == 0_u64 && self.ecn_ce == 0_u64 {
-            None
+            Maybe.None
         } else {
-            Some(crate_ecn_snapshot(self))
+            Maybe.Some(crate_ecn_snapshot(self))
         };
         // The AckFrame wire variant still carries a plain List<AckRange>
         // (codec-friendly); we convert from the invariant-carrying
         // wrapper at the emission boundary. The V3 invariant therefore
         // witnesses the wire list is well-formed on exit.
-        Some(Frame.AckFrame {
+        Maybe.Some(Frame.AckFrame {
             largest_acked: largest,
             ack_delay:     ack_delay_us,
             ranges:        self.ack_ranges.as_list().clone(),

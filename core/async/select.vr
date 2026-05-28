@@ -201,7 +201,7 @@ public type SelectAllResult<T> is {
 ///
 
 /// Returns the result along with the index && remaining futures.
-/// Returns `Err(SelectError.EmptyInput)` when the input list is empty
+/// Returns `Result.Err(SelectError.EmptyInput)` when the input list is empty
 /// (instead of panicking, which the previous implementation did).
 ///
 
@@ -236,7 +236,7 @@ implement<T, F: Future<Output>> Future for SelectAll<T, F> {
         // Empty input → synchronous error (do this first so the for-loop
         // bound check below is a pure "all-pending" signal).
         if self.futures.is_empty() {
-            return Poll.Ready(Err(SelectError.EmptyInput));
+            return Poll.Ready(Result.Err(SelectError.EmptyInput));
         }
 
         for i in 0..self.futures.len() {
@@ -246,7 +246,7 @@ implement<T, F: Future<Output>> Future for SelectAll<T, F> {
                     let completed = self.futures.remove(i);
                     let remaining = self.futures.clone();
 
-                    return Poll.Ready(Ok(SelectAllResult {
+                    return Poll.Ready(Result.Ok(SelectAllResult {
                         value: val,
                         index: i,
                         remaining: remaining,
@@ -417,11 +417,11 @@ public async fn try_join_all<T, E, F: Future<Output = Result<T, E>>>(
     let mut unwrapped: List<T> = List.new();
     for r in results.into_iter() {
         match r {
-            Ok(v) => unwrapped.push(v),
-            Err(e) => return Err(e),
+            Result.Ok(v) => unwrapped.push(v),
+            Result.Err(e) => return Result.Err(e),
         }
     }
-    Ok(unwrapped)
+    Result.Ok(unwrapped)
 }
 
 /// Join two fallible futures. Short-circuits on first Err.
@@ -433,7 +433,7 @@ public async fn try_join<A, B, E,
 ) -> Result<(A, B), E> {
     let a = fut_a.await?;
     let b = fut_b.await?;
-    Ok((a, b))
+    Result.Ok((a, b))
 }
 
 /// Join three fallible futures. Short-circuits on first Err.
@@ -448,20 +448,20 @@ public async fn try_join3<A, B, C, E,
     let a = fut_a.await?;
     let b = fut_b.await?;
     let c = fut_c.await?;
-    Ok((a, b, c))
+    Result.Ok((a, b, c))
 }
 
 /// Race a collection of futures — returns the first one to complete.
 /// Alias for `select_all` that drops the index and the remaining futures.
 ///
 
-/// Returns `Err(SelectError.EmptyInput)` when the input list is empty
+/// Returns `Result.Err(SelectError.EmptyInput)` when the input list is empty
 /// (propagated from `select_all`).
 public async fn race_all<T, F: Future<Output = T>>(
     futures: List<F>,
 ) -> Result<T, SelectError> {
     let r = select_all(futures).await?;
-    Ok(r.value)
+    Result.Ok(r.value)
 }
 
 /// Wait for all futures and return their results; does NOT short-circuit
@@ -494,7 +494,7 @@ public async fn join_all<T, F: Future<Output>>(
     futures: List<F>,
 ) -> List<T> {
     JoinAll {
-        futures: futures.iter().map(|f| Some(f)).collect(),
+        futures: futures.iter().map(|f| Maybe.Some(f)).collect(),
         results: List.with_capacity(futures.len()),
         completed: 0,
     }.await
@@ -512,17 +512,17 @@ implement<T, F: Future<Output>> Future for JoinAll<T, F> {
     fn poll(&mut self, cx: &mut Context) -> Poll<List<T>> {
         // Initialize results if needed
         while self.results.len() < self.futures.len() {
-            self.results.push(None);
+            self.results.push(Maybe.None);
         }
 
         // Poll all pending futures
         for i in 0..self.futures.len() {
             if self.results[i].is_none() {
-                if let Some(ref mut fut) = self.futures[i] {
+                if let Maybe.Some(ref mut fut) = self.futures[i] {
                     match fut.poll(cx) {
                         Poll.Ready(val) => {
-                            self.results[i] = Some(val);
-                            self.futures[i] = None;
+                            self.results[i] = Maybe.Some(val);
+                            self.futures[i] = Maybe.None;
                             self.completed = self.completed + 1;
                         }
                         Poll.Pending => {}
@@ -586,8 +586,8 @@ implement Eq for SelectTimeoutError {
 
 /// ```verum
 /// match timeout(Duration.from_secs(5), slow_operation()).await {
-///  Ok(res) => println(f"Got: {result}"),
-///  Err(_) => println("Operation timed out"),
+///  Result.Ok(res) => println(f"Got: {result}"),
+///  Result.Err(_) => println("Operation timed out"),
 /// }
 /// ```
 public async fn timeout<T, F: Future<Output>>(
@@ -597,7 +597,7 @@ public async fn timeout<T, F: Future<Output>>(
     let now = Instant.now();
     let deadline = now.checked_add(duration).unwrap_or(now);
     SelectTimeout {
-        future: Some(future),
+        future: Maybe.Some(future),
         deadline: deadline,
     }.await
 }
@@ -613,15 +613,15 @@ implement<T, F: Future<Output>> Future for SelectTimeout<T, F> {
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, SelectTimeoutError>> {
         // Check timeout first
         if Instant.now() >= self.deadline {
-            return Poll.Ready(Err(SelectTimeoutError()));
+            return Poll.Ready(Result.Err(SelectTimeoutError()));
         }
 
         // Poll the inner future
-        if let Some(ref mut fut) = self.future {
+        if let Maybe.Some(ref mut fut) = self.future {
             match fut.poll(cx) {
                 Poll.Ready(val) => {
-                    self.future = None;
-                    return Poll.Ready(Ok(val));
+                    self.future = Maybe.None;
+                    return Poll.Ready(Result.Ok(val));
                 }
                 Poll.Pending => {}
             }
@@ -644,10 +644,10 @@ implement<T, F: Future<Output>> Future for SelectTimeout<T, F> {
 ///
 
 /// Returns:
-/// - `Ok(value)` — first future that succeeded
-/// - `Err(LastError(e))` — every future errored; `e` is the last seen
+/// - `Result.Ok(value)` — first future that succeeded
+/// - `Result.Err(LastError(e))` — every future errored; `e` is the last seen
 ///  error (preserves the existing per-future error type `E`)
-/// - `Err(EmptyInput)` — input list was empty (previously panicked)
+/// - `Result.Err(EmptyInput)` — input list was empty (previously panicked)
 ///
 
 /// # Example
@@ -685,18 +685,18 @@ implement<T, E, F: Future<Output = Result<T, E>>> Future for TryFirst<T, E, F> {
         // Synchronous EmptyInput: covers both the initial-empty-list
         // case and the post-drain case (current ≥ len with len == 0).
         if self.futures.is_empty() {
-            return Poll.Ready(Err(TryFirstError.EmptyInput));
+            return Poll.Ready(Result.Err(TryFirstError.EmptyInput));
         }
 
         while self.current < self.futures.len() {
             match self.futures[self.current].poll(cx) {
-                Poll.Ready(Ok(val)) => {
-                    return Poll.Ready(Ok(val));
+                Poll.Ready(Result.Ok(val)) => {
+                    return Poll.Ready(Result.Ok(val));
                 }
-                Poll.Ready(Err(e)) => {
+                Poll.Ready(Result.Err(e)) => {
                     self.current = self.current + 1;
                     if self.current >= self.futures.len() {
-                        return Poll.Ready(Err(TryFirstError.LastError(e)));
+                        return Poll.Ready(Result.Err(TryFirstError.LastError(e)));
                     }
                     // Continue to next future
                 }
@@ -721,7 +721,7 @@ implement<T, E, F: Future<Output = Result<T, E>>> Future for TryFirst<T, E, F> {
         // here. Be defensive anyway with EmptyInput rather than a
         // panic — a hostile mutator that cleared `futures` mid-poll
         // is the only way to land here.
-        Poll.Ready(Err(TryFirstError.EmptyInput))
+        Poll.Ready(Result.Err(TryFirstError.EmptyInput))
     }
 }
 
@@ -809,7 +809,7 @@ implement<T> Future for NeverFuture<T> {
 /// assert_eq(fut.await, 42);
 /// ```
 public fn ready<T>(value: T) -> SelectReadyFuture<T> {
-    SelectReadyFuture { value: Some(value) }
+    SelectReadyFuture { value: Maybe.Some(value) }
 }
 
 public type SelectReadyFuture<T> is {
@@ -834,8 +834,8 @@ implement<T> Future for SelectReadyFuture<T> {
     /// detector can surface.
     fn poll(&mut self, _cx: &mut Context) -> Poll<T> {
         match self.value.take() {
-            Some(v) => Poll.Ready(v),
-            None => Poll.Pending,
+            Maybe.Some(v) => Poll.Ready(v),
+            Maybe.None => Poll.Pending,
         }
     }
 }

@@ -164,7 +164,7 @@ public fn transition(
 /// Idempotent if already held.
 public fn acquire_shared(manager: &mut SqliteLockManager) -> Result<(), VfsError> {
     match manager.state {
-        Shared | Reserved | Pending | Exclusive => Ok(()),
+        Shared | Reserved | Pending | Exclusive => Result.Ok(()),
         Unlocked => {
             // PENDING_BYTE must be clear first; take an exclusive lock
             // on it transiently to ensure no writer is pending, then
@@ -174,8 +174,8 @@ public fn acquire_shared(manager: &mut SqliteLockManager) -> Result<(), VfsError
             match try_lock_region(
                 manager.fd, Exclusive, PENDING_BYTE, 1,
             ) {
-                Ok(_) => {},
-                Err(e) => { return Err(to_vfs_error(e)); }
+                Result.Ok(_) => {},
+                Result.Err(e) => { return Result.Err(to_vfs_error(e)); }
             }
 
             // Now take the SHARED-byte lock.
@@ -188,11 +188,11 @@ public fn acquire_shared(manager: &mut SqliteLockManager) -> Result<(), VfsError
             let _ = unlock_region(manager.fd, PENDING_BYTE, 1);
 
             match shared_res {
-                Ok(_)  => {
+                Result.Ok(_)  => {
                     manager.state = Shared;
-                    Ok(())
+                    Result.Ok(())
                 }
-                Err(e) => Err(to_vfs_error(e)),
+                Result.Err(e) => Result.Err(to_vfs_error(e)),
             }
         }
     }
@@ -201,8 +201,8 @@ public fn acquire_shared(manager: &mut SqliteLockManager) -> Result<(), VfsError
 /// Shared → Reserved. Exclusive-locks RESERVED_BYTE.
 public fn acquire_reserved(manager: &mut SqliteLockManager) -> Result<(), VfsError> {
     match manager.state {
-        Reserved | Pending | Exclusive => Ok(()),
-        Unlocked => Err(VfsError {
+        Reserved | Pending | Exclusive => Result.Ok(()),
+        Unlocked => Result.Err(VfsError {
             kind: InvalidArgument,
             message: "Reserved requires Shared first",
         }),
@@ -210,11 +210,11 @@ public fn acquire_reserved(manager: &mut SqliteLockManager) -> Result<(), VfsErr
             match try_lock_region(
                 manager.fd, Exclusive, RESERVED_BYTE, 1,
             ) {
-                Ok(_)  => {
+                Result.Ok(_)  => {
                     manager.state = Reserved;
-                    Ok(())
+                    Result.Ok(())
                 }
-                Err(e) => Err(to_vfs_error(e)),
+                Result.Err(e) => Result.Err(to_vfs_error(e)),
             }
         }
     }
@@ -224,8 +224,8 @@ public fn acquire_reserved(manager: &mut SqliteLockManager) -> Result<(), VfsErr
 /// SHARED acquires). From PENDING the caller may escalate to EXCLUSIVE.
 public fn acquire_pending(manager: &mut SqliteLockManager) -> Result<(), VfsError> {
     match manager.state {
-        Pending | Exclusive => Ok(()),
-        Unlocked => Err(VfsError {
+        Pending | Exclusive => Result.Ok(()),
+        Unlocked => Result.Err(VfsError {
             kind: InvalidArgument,
             message: "Pending requires Shared first",
         }),
@@ -233,11 +233,11 @@ public fn acquire_pending(manager: &mut SqliteLockManager) -> Result<(), VfsErro
             match try_lock_region(
                 manager.fd, Exclusive, PENDING_BYTE, 1,
             ) {
-                Ok(_) => {
+                Result.Ok(_) => {
                     manager.state = Pending;
-                    Ok(())
+                    Result.Ok(())
                 }
-                Err(e) => Err(to_vfs_error(e)),
+                Result.Err(e) => Result.Err(to_vfs_error(e)),
             }
         }
     }
@@ -270,8 +270,8 @@ public fn acquire_pending(manager: &mut SqliteLockManager) -> Result<(), VfsErro
 /// risking double-write corruption.
 public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsError> {
     match manager.state {
-        Exclusive => Ok(()),
-        Unlocked | Shared => Err(VfsError {
+        Exclusive => Result.Ok(()),
+        Unlocked | Shared => Result.Err(VfsError {
             kind: InvalidArgument,
             message: "Exclusive requires at least Reserved or Pending",
         }),
@@ -283,11 +283,11 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
             match try_lock_region(
                 manager.fd, Exclusive, SHARED_FIRST, SHARED_SIZE,
             ) {
-                Ok(_) => {
+                Result.Ok(_) => {
                     manager.state = Exclusive;
-                    Ok(())
+                    Result.Ok(())
                 }
-                Err(e) => {
+                Result.Err(e) => {
                     // Roll back to the original state. The SHARED byte
                     // re-acquisition MUST succeed; if it doesn't, the
                     // kernel state has diverged from `manager.state`
@@ -295,13 +295,13 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
                     match try_lock_region(
                         manager.fd, Shared, manager.shared_byte, 1,
                     ) {
-                        Ok(_) => {
+                        Result.Ok(_) => {
                             // Kernel state matches our advertised state
                             // (still Reserved/Pending with SHARED held).
                             manager.state = original_state;
-                            Err(to_vfs_error(e))
+                            Result.Err(to_vfs_error(e))
                         }
-                        Err(_) => {
+                        Result.Err(_) => {
                             // CRITICAL: state divergence. We dropped
                             // SHARED, EXCLUSIVE failed, AND SHARED
                             // restore failed. The kernel now holds
@@ -314,7 +314,7 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
                             // false premise; surface a fatal IoError so
                             // the caller closes the file.
                             manager.state = Unlocked;
-                            Err(VfsError {
+                            Result.Err(VfsError {
                                 kind: IoError,
                                 message: "acquire_exclusive: SHARED rollback failed; lock state diverged — close file",
                             })
@@ -330,17 +330,17 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
 /// in any intermediate state.
 public fn release_all(manager: &mut SqliteLockManager) -> Result<(), VfsError> {
     if manager.state == Unlocked {
-        return Ok(());
+        return Result.Ok(());
     }
     // Release in opposite order of acquisition. Non-held bytes unlock
-    // to Ok(()) from the kernel perspective (F_UNLCK on an unheld
+    // to Result.Ok(()) from the kernel perspective (F_UNLCK on an unheld
     // region is benign).
     let _ = unlock_region(manager.fd, SHARED_FIRST, SHARED_SIZE);
     let _ = unlock_region(manager.fd, PENDING_BYTE,  1);
     let _ = unlock_region(manager.fd, RESERVED_BYTE, 1);
     let _ = unlock_region(manager.fd, manager.shared_byte, 1);
     manager.state = Unlocked;
-    Ok(())
+    Result.Ok(())
 }
 
 /// Lightweight probe — does some process currently hold RESERVED on
@@ -348,21 +348,21 @@ public fn release_all(manager: &mut SqliteLockManager) -> Result<(), VfsError> {
 public fn check_reserved(manager: &SqliteLockManager) -> Result<Bool, VfsError> {
     // We ourselves hold RESERVED (or higher).
     match manager.state {
-        Reserved | Pending | Exclusive => return Ok(true),
+        Reserved | Pending | Exclusive => return Result.Ok(true),
         _ => {},
     }
     // Someone else might — probe via try-lock + immediate release.
     match try_lock_region(manager.fd, Exclusive, RESERVED_BYTE, 1) {
-        Ok(_) => {
+        Result.Ok(_) => {
             // We got it — no one else held it. Release and report false.
             let _ = unlock_region(manager.fd, RESERVED_BYTE, 1);
-            Ok(false)
+            Result.Ok(false)
         }
-        Err(e) => {
+        Result.Err(e) => {
             if e.would_block() {
-                Ok(true)
+                Result.Ok(true)
             } else {
-                Err(to_vfs_error(e))
+                Result.Err(to_vfs_error(e))
             }
         }
     }

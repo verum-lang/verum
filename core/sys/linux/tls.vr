@@ -218,8 +218,8 @@ implement Eq for ThreadLocalError {
 ///
 
 /// # Returns
-/// * `Ok(())` - TLS initialized successfully
-/// * `Err(ThreadLocalError)` - Initialization failed
+/// * `Result.Ok(())` - TLS initialized successfully
+/// * `Result.Err(ThreadLocalError)` - Initialization failed
 public fn init_main_thread_tls() -> Result<(), ThreadLocalError> {
     init_thread_tls_with_size(DEFAULT_TLS_SIZE)
 }
@@ -253,7 +253,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), ThreadLocalEr
 
     // Check for mmap failure
     if mem < 0 && mem > -4096 {
-        return Err(ThreadLocalError.MmapFailed { code: -mem as Int });
+        return Result.Err(ThreadLocalError.MmapFailed { code: -mem as Int });
     }
 
     let base = mem as &unsafe Byte;
@@ -269,7 +269,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), ThreadLocalEr
     // Initialize context slots
     unsafe {
         (*ctx_ptr).slots = [null_ptr(); 256];
-        (*ctx_ptr).parent = None;
+        (*ctx_ptr).parent = Maybe.None;
         (*ctx_ptr).active = [0, 0, 0, 0];
     }
 
@@ -298,7 +298,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), ThreadLocalEr
         if result != 0 {
             // Clean up allocated memory on failure
             unsafe { syscall_raw(SYS_MUNMAP, mem, total_size as Int, 0, 0, 0, 0) };
-            return Err(ThreadLocalError.ArchPrctlFailed { code: -result as Int });
+            return Result.Err(ThreadLocalError.ArchPrctlFailed { code: -result as Int });
         }
     }
     @cfg(target_arch = "aarch64") {
@@ -315,7 +315,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), ThreadLocalEr
         );
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 /// Create TLS block for a new thread (called before clone).
@@ -340,7 +340,7 @@ public fn create_thread_tls(stack_size: USize) -> Result<&unsafe ThreadControlBl
 public fn get_current_tcb() -> Result<&unsafe ThreadControlBlock, ThreadLocalError> {
     // Read TCB pointer from fs:[0] using TLS intrinsic
     let tcb: &unsafe ThreadControlBlock = tls_read_ptr(0);
-    Ok(tcb)
+    Result.Ok(tcb)
 }
 
 /// Get the current thread's context slots.
@@ -405,7 +405,7 @@ public fn check_stack_guard() -> Bool {
 /// Get a value from a context slot.
 ///
 
-/// Returns None if slot is not active.
+/// Returns Maybe.None if slot is not active.
 @inline
 public fn ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
     let slots = get_context_slots();
@@ -413,12 +413,12 @@ public fn ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
     let bit = slot % 64;
 
     if (slots.active[word] & (1 << bit)) != 0 {
-        Some(slots.slots[slot])
-    } else if let Some(parent) = slots.parent {
+        Maybe.Some(slots.slots[slot])
+    } else if let Maybe.Some(parent) = slots.parent {
         // Walk up the hierarchy
         ctx_get_from(parent, slot)
     } else {
-        None
+        Maybe.None
     }
 }
 
@@ -427,11 +427,11 @@ fn ctx_get_from(slots: &RawContextSlots, slot: UInt8) -> Maybe<&unsafe Byte> {
     let bit = slot % 64;
 
     if (slots.active[word] & (1 << bit)) != 0 {
-        Some(slots.slots[slot])
-    } else if let Some(parent) = slots.parent {
+        Maybe.Some(slots.slots[slot])
+    } else if let Maybe.Some(parent) = slots.parent {
         ctx_get_from(parent, slot)
     } else {
-        None
+        Maybe.None
     }
 }
 
@@ -471,7 +471,7 @@ public fn ctx_clear(slot: UInt8) {
 public fn ctx_push(parent: &RawContextSlots) -> RawContextSlots {
     RawContextSlots {
         slots: [null_ptr(); 256],
-        parent: Some(parent),
+        parent: Maybe.Some(parent),
         active: [0, 0, 0, 0],
     }
 }
@@ -479,7 +479,7 @@ public fn ctx_push(parent: &RawContextSlots) -> RawContextSlots {
 /// Pop to parent context frame.
 public fn ctx_pop() {
     let current = get_context_slots();
-    if let Some(parent) = current.parent {
+    if let Maybe.Some(parent) = current.parent {
         set_context_slots(parent);
     }
 }
@@ -494,7 +494,7 @@ public fn ctx_pop() {
 /// Called during thread exit. Does NOT free main thread TLS.
 public fn cleanup_thread_tls() {
     match get_current_tcb() {
-        Ok(tcb) => {
+        Result.Ok(tcb) => {
             let total_size = tcb.tls_size + ThreadControlBlock.size + RawContextSlots.size;
             let base = unsafe { (tcb as &unsafe Byte).offset(-(tcb.tls_size as Int)) };
 
@@ -511,7 +511,7 @@ public fn cleanup_thread_tls() {
                 syscall_raw(SYS_MUNMAP, base as Int, total_size as Int, 0, 0, 0, 0);
             }
         }
-        Err(_) => {
+        Result.Err(_) => {
             // TLS not initialized, nothing to clean up
         }
     }

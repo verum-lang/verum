@@ -346,7 +346,7 @@ implement WalIndex {
 
     /// Lookup the newest frame number for `page_no` that's ≤ the
     /// snapshot's `mx_frame_clamp` AND > `n_backfill_clamp`.  Returns
-    /// `None` when no such frame exists (caller falls back to the
+    /// `Maybe.None` when no such frame exists (caller falls back to the
     /// main DB read path).  Walks every section's hash chain; cheap
     /// because chains are short (load factor ≤ 0.5 by construction).
     public fn find_frame(
@@ -384,7 +384,7 @@ implement WalIndex {
             }
             s = s - 1;
         }
-        if best > 0 { Some(best) } else { None }
+        if best > 0 { Maybe.Some(best) } else { Maybe.None }
     }
 
     /// Append a (page, frame) pair to the index.  Writers call this

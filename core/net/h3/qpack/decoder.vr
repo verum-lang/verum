@@ -116,7 +116,7 @@ public fn decode_field_section(buf: &[Byte]) -> Result<List<QpackHeaderField>, Q
         .map_err(|_| QpackDecodeError.IntegerError)?;
 
     // Delta Base: first byte top bit = sign, next 7 = magnitude.
-    if p1 >= buf.len() { return Err(QpackDecodeError.Truncated); }
+    if p1 >= buf.len() { return Result.Err(QpackDecodeError.Truncated); }
     let sign = (buf[p1] & 0x80_u8) != 0_u8;
     let _ = sign;
     let (delta_base, p2) = core.net.h3.qpack.integer.decode(buf, p1, 7)
@@ -124,7 +124,7 @@ public fn decode_field_section(buf: &[Byte]) -> Result<List<QpackHeaderField>, Q
 
     // v0.1: dynamic table disabled → both must be 0.
     if required_insert_count != 0_u64 || delta_base != 0_u64 {
-        return Err(QpackDecodeError.DynamicTableNotSupported);
+        return Result.Err(QpackDecodeError.DynamicTableNotSupported);
     }
 
     let mut headers: List<QpackHeaderField> = [];
@@ -134,7 +134,7 @@ public fn decode_field_section(buf: &[Byte]) -> Result<List<QpackHeaderField>, Q
         if (b0 & 0x80_u8) != 0_u8 {
             // Indexed Field Line — 1Txxxxxx where T selects static(1)/dynamic(0).
             let is_static = (b0 & 0x40_u8) != 0_u8;
-            if !is_static { return Err(QpackDecodeError.DynamicTableNotSupported); }
+            if !is_static { return Result.Err(QpackDecodeError.DynamicTableNotSupported); }
             let (index, next) = core.net.h3.qpack.integer.decode(buf, cur, 6)
                 .map_err(|_| QpackDecodeError.IntegerError)?;
             let entry = stat.get(index as Int)
@@ -143,8 +143,8 @@ public fn decode_field_section(buf: &[Byte]) -> Result<List<QpackHeaderField>, Q
                     return;
                 });
             let hit = match stat.get(index as Int) {
-                Some(e) => e,
-                None => return Err(QpackDecodeError.InvalidIndex(index)),
+                Maybe.Some(e) => e,
+                Maybe.None => return Result.Err(QpackDecodeError.InvalidIndex(index)),
             };
             headers.push(QpackHeaderField { name: hit.name, value: hit.value });
             cur = next;
@@ -153,12 +153,12 @@ public fn decode_field_section(buf: &[Byte]) -> Result<List<QpackHeaderField>, Q
             //  N: never-indexed bit (we ignore — v0.1 never inserts)
             //  T: static(1)/dynamic(0)
             let is_static = (b0 & 0x10_u8) != 0_u8;
-            if !is_static { return Err(QpackDecodeError.DynamicTableNotSupported); }
+            if !is_static { return Result.Err(QpackDecodeError.DynamicTableNotSupported); }
             let (name_index, p1) = core.net.h3.qpack.integer.decode(buf, cur, 4)
                 .map_err(|_| QpackDecodeError.IntegerError)?;
             let entry = match stat.get(name_index as Int) {
-                Some(e) => e,
-                None => return Err(QpackDecodeError.InvalidIndex(name_index)),
+                Maybe.Some(e) => e,
+                Maybe.None => return Result.Err(QpackDecodeError.InvalidIndex(name_index)),
             };
             let (value, next) = read_string(buf, p1)?;
             headers.push(QpackHeaderField { name: entry.name, value: value });
@@ -171,14 +171,14 @@ public fn decode_field_section(buf: &[Byte]) -> Result<List<QpackHeaderField>, Q
             cur = next;
         } else if (b0 & 0x10_u8) != 0_u8 {
             // Indexed Field Line with Post-Base Index — 0001xxxx
-            return Err(QpackDecodeError.DynamicTableNotSupported);
+            return Result.Err(QpackDecodeError.DynamicTableNotSupported);
         } else {
             // Literal Field Line with Post-Base Name Reference — 0000xxxx
-            return Err(QpackDecodeError.DynamicTableNotSupported);
+            return Result.Err(QpackDecodeError.DynamicTableNotSupported);
         }
     }
 
-    Ok(headers)
+    Result.Ok(headers)
 }
 
 // =============================================================================
@@ -192,12 +192,12 @@ public fn decode_field_section(buf: &[Byte]) -> Result<List<QpackHeaderField>, Q
 // =============================================================================
 
 fn read_string(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackDecodeError> {
-    if pos >= buf.len() { return Err(QpackDecodeError.Truncated); }
+    if pos >= buf.len() { return Result.Err(QpackDecodeError.Truncated); }
     let huffman = (buf[pos] & 0x80_u8) != 0_u8;
     let (length, p1) = core.net.h3.qpack.integer.decode(buf, pos, 7)
         .map_err(|_| QpackDecodeError.IntegerError)?;
     let end = p1 + (length as Int);
-    if end > buf.len() { return Err(QpackDecodeError.Truncated); }
+    if end > buf.len() { return Result.Err(QpackDecodeError.Truncated); }
 
     let bytes = slice_of(buf, p1, end);
     let plain: List<Byte> = if huffman {
@@ -206,18 +206,18 @@ fn read_string(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackDecodeError> 
     } else {
         bytes
     };
-    Ok((Text.from_utf8_lossy(plain.as_slice()), end))
+    Result.Ok((Text.from_utf8_lossy(plain.as_slice()), end))
 }
 
 /// Parse a literal-name field (first byte is `001NHxxx` — N = never-
 /// indexed flag, H = huffman flag, xxx = 3-bit prefix for length).
 fn read_name_literal(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackDecodeError> {
-    if pos >= buf.len() { return Err(QpackDecodeError.Truncated); }
+    if pos >= buf.len() { return Result.Err(QpackDecodeError.Truncated); }
     let huffman = (buf[pos] & 0x08_u8) != 0_u8;
     let (length, p1) = core.net.h3.qpack.integer.decode(buf, pos, 3)
         .map_err(|_| QpackDecodeError.IntegerError)?;
     let end = p1 + (length as Int);
-    if end > buf.len() { return Err(QpackDecodeError.Truncated); }
+    if end > buf.len() { return Result.Err(QpackDecodeError.Truncated); }
     let bytes = slice_of(buf, p1, end);
     let plain: List<Byte> = if huffman {
         huff.decode(bytes.as_slice())
@@ -225,7 +225,7 @@ fn read_name_literal(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackDecodeE
     } else {
         bytes
     };
-    Ok((Text.from_utf8_lossy(plain.as_slice()), end))
+    Result.Ok((Text.from_utf8_lossy(plain.as_slice()), end))
 }
 
 fn slice_of(buf: &[Byte], start: Int, end: Int) -> List<Byte> {

@@ -46,23 +46,23 @@ public type TextInput is {
 implement TextInput {
     public fn new() -> TextInput {
         TextInput {
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             cursor_style: Style.new().reversed(),
             selection_style: Style.new().reversed(),
-            placeholder: None,
+            placeholder: Maybe.None,
             placeholder_style: Style.new().dim(),
-            mask_char: None,
+            mask_char: Maybe.None,
         }
     }
 
     // -------- builder API ---------------------------------------------------
     public fn block(self, block: Block) -> TextInput {
-        TextInput { block: Some(block), ..self }
+        TextInput { block: Maybe.Some(block), ..self }
     }
 
     public fn placeholder(self, text: Text) -> TextInput {
-        TextInput { placeholder: Some(text), ..self }
+        TextInput { placeholder: Maybe.Some(text), ..self }
     }
 
     public fn placeholder_style(self, style: Style) -> TextInput {
@@ -78,7 +78,7 @@ implement TextInput {
     }
 
     public fn mask(self, ch: Char) -> TextInput {
-        TextInput { mask_char: Some(ch), ..self }
+        TextInput { mask_char: Maybe.Some(ch), ..self }
     }
 }
 
@@ -186,27 +186,27 @@ implement TextInputState {
 
     public fn undo(&mut self) -> Bool {
         match self.undo.pop() {
-            Some((v, c, a)) => {
+            Maybe.Some((v, c, a)) => {
                 self.redo.push((self.value.clone(), self.cursor, self.anchor));
                 self.value = v;
                 self.cursor = c;
                 self.anchor = a;
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
     public fn redo(&mut self) -> Bool {
         match self.redo.pop() {
-            Some((v, c, a)) => {
+            Maybe.Some((v, c, a)) => {
                 self.undo.push((self.value.clone(), self.cursor, self.anchor));
                 self.value = v;
                 self.cursor = c;
                 self.anchor = a;
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
@@ -463,12 +463,12 @@ implement StatefulWidget for TextInput {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut TextInputState) {
         let text_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if text_area.width < 1 || text_area.height < 1 { return; }
@@ -477,7 +477,7 @@ implement StatefulWidget for TextInput {
 
         // Derive displayable text (respecting mask_char).
         let display = match self.mask_char {
-            Some(ch) => {
+            Maybe.Some(ch) => {
                 let mut out = "";
                 let mut i = 0;
                 while i < state.value.len() {
@@ -487,7 +487,7 @@ implement StatefulWidget for TextInput {
                 }
                 out
             }
-            None => state.value.clone(),
+            Maybe.None => state.value.clone(),
         };
 
         // Clamp scroll so cursor is visible.
@@ -504,10 +504,10 @@ implement StatefulWidget for TextInput {
 
         if display.is_empty() {
             match self.placeholder {
-                Some(ph) => {
+                Maybe.Some(ph) => {
                     buf.set_string(text_area.x, text_area.y, &ph, self.placeholder_style);
                 }
-                None => {}
+                Maybe.None => {}
             }
         } else {
             // Render visible slice, one grapheme at a time — wide graphemes

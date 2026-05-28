@@ -132,7 +132,7 @@ implement<A, B> Pipeline<A, B> {
     {
         let ctx = ShellContext.default();
         if self.stages.is_empty() {
-            return Err(ShellError.SpawnFailed {
+            return Result.Err(ShellError.SpawnFailed {
                 command: "<empty pipeline>".into(),
                 reason:  "pipeline has no stages".into(),
             });
@@ -195,7 +195,7 @@ implement<A, B> Pipeline<A, B> {
             for b in line.clone().into_bytes().iter() { bytes.push(*b); }
         }
 
-        Ok(ShellResult.new(
+        Result.Ok(ShellResult.new(
             raw.status,
             bytes,
             raw.stderr_bytes.clone(),

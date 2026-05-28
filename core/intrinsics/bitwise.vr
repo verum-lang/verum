@@ -2,7 +2,7 @@
 // core/intrinsics/bitwise.vr - Bitwise Operation Intrinsics
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (compiler-provided)
+// Dependencies: Maybe.None (compiler-provided)
 //
 
 // This module provides bitwise operation intrinsics that map directly to

@@ -83,8 +83,8 @@ implement ClientOptions {
     public fn with_system_trust() -> ClientOptions {
         let mut opts = ClientOptions.default();
         match TrustStore.system() {
-            Ok(t) => { opts.trust = t; },
-            Err(_) => {},   // fallback → empty; handshake will fail cleanly
+            Result.Ok(t) => { opts.trust = t; },
+            Result.Err(_) => {},   // fallback → empty; handshake will fail cleanly
         }
         opts
     }
@@ -192,8 +192,8 @@ async fn resolve_host(url: &Url) -> Result<SocketAddr, H3ClientError> {
     let host = url.host();
     let port = url.port_or_default();
     match core.net.dns.resolve_first(&host).await {
-        Ok(addr) => Ok(SocketAddr.new(addr, port)),
-        Err(_)   => Err(H3ClientError.Resolve(host)),
+        Result.Ok(addr) => Result.Ok(SocketAddr.new(addr, port)),
+        Result.Err(_)   => Result.Err(H3ClientError.Resolve(host)),
     }
 }
 
@@ -217,7 +217,7 @@ implement H3Client {
         let url = Url.parse(url_text.as_slice())
             .map_err(|e| H3ClientError.UrlParse(e))?;
         if url.scheme() != Text.from_str("https") {
-            return Err(H3ClientError.UnsupportedScheme(url.scheme()));
+            return Result.Err(H3ClientError.UnsupportedScheme(url.scheme()));
         }
         let authority = url.authority();
         let peer_addr = resolve_host(&url).await?;
@@ -233,7 +233,7 @@ implement H3Client {
         // lands in the TLS record layer once connected.
         let selected = opts.alpn.get(0).unwrap_or_else(|| default_alpn());
 
-        Ok(H3Client {
+        Result.Ok(H3Client {
             authority:     authority,
             peer_addr:     peer_addr,
             selected_alpn: selected,
@@ -263,13 +263,13 @@ implement H3Client {
         early_data: &[Byte],
     ) -> Result<H3Client, H3ClientError> {
         if (early_data.len() as UInt32) > session.max_early_data_size {
-            return Err(H3ClientError.EarlyDataTooLarge(early_data.len()));
+            return Result.Err(H3ClientError.EarlyDataTooLarge(early_data.len()));
         }
 
         let url = Url.parse(url_text.as_slice())
             .map_err(|e| H3ClientError.UrlParse(e))?;
         if url.scheme() != Text.from_str("https") {
-            return Err(H3ClientError.UnsupportedScheme(url.scheme()));
+            return Result.Err(H3ClientError.UnsupportedScheme(url.scheme()));
         }
         let authority = url.authority();
         let peer_addr = resolve_host(&url).await?;
@@ -283,7 +283,7 @@ implement H3Client {
                                 // layer threads through once ClientSm.new_resumed lands.
         let _ = early_data;
 
-        Ok(H3Client {
+        Result.Ok(H3Client {
             authority:     authority,
             peer_addr:     peer_addr,
             selected_alpn: selected,
@@ -348,12 +348,12 @@ implement H3Client {
             }
 
             // Did the response complete?
-            if let Some(resp) = self.h3.take_response(sid) {
-                return Ok(resp);
+            if let Maybe.Some(resp) = self.h3.take_response(sid) {
+                return Result.Ok(resp);
             }
-            if closed { return Err(H3ClientError.Closed); }
+            if closed { return Result.Err(H3ClientError.Closed); }
             if core.time.instant.Instant.now() >= deadline {
-                return Err(H3ClientError.Timeout);
+                return Result.Err(H3ClientError.Timeout);
             }
         }
     }
@@ -363,7 +363,7 @@ implement H3Client {
         // the right stream_id. Until connection_sm end-to-end wire-up
         // lands, callers plug this through `core.net.quic.connection_sm`.
         let _ = writes;
-        Ok(())
+        Result.Ok(())
     }
 
     async fn read_transport_step(&mut self) -> Result<ReadBatch, H3ClientError> {
@@ -373,7 +373,7 @@ implement H3Client {
         //
 
         // Placeholder shape for the integration commit.
-        Ok((
+        Result.Ok((
             /* bidi */ List<(UInt64, List<Byte>, Bool)>.new(),
             /* uni */ List<(UInt64, List<Byte>)>.new(),
             /* closed */ false,

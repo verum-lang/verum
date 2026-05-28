@@ -29,22 +29,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "abstract cache protocol — CacheBackend + CacheValue + CacheError".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.cache.types;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map};
 
 // =============================================================================
@@ -116,7 +116,7 @@ implement Debug for CacheError {
 // supplied as default methods that compose against the primitives.
 
 public type CacheBackend is protocol {
-    /// Fetch a value by key. Returns `None` if the key is absent
+    /// Fetch a value by key. Returns `Maybe.None` if the key is absent
     /// or expired.
     async fn get(&self, key: &Text) -> Result<Maybe<CacheValue>, CacheError>;
 
@@ -142,7 +142,7 @@ public type CacheBackend is protocol {
     async fn delete(&self, key: &Text) -> Result<Int, CacheError>;
 
     /// Multi-get — atomic fetch of N keys. Returns one entry per
-    /// requested key in order; absent keys map to `None`.
+    /// requested key in order; absent keys map to `Maybe.None`.
     async fn mget(&self, keys: &List<Text>) -> Result<List<Maybe<CacheValue>>, CacheError>;
 
     /// Increment a counter atomically. Creates the counter at 0 if
@@ -165,24 +165,24 @@ public type CacheBackend is protocol {
 /// underlying value is not Text.
 pub async fn get_text<C: CacheBackend>(c: &C, key: &Text) -> Result<Maybe<Text>, CacheError> {
     match c.get(key).await? {
-        Some(CacheValue.TextValue(t)) => Ok(Some(t)),
-        Some(other) => Err(CacheError.TypeMismatch {
+        Maybe.Some(CacheValue.TextValue(t)) => Result.Ok(Maybe.Some(t)),
+        Maybe.Some(other) => Result.Err(CacheError.TypeMismatch {
             expected: "TextValue".to_text(),
             found:    cache_value_kind(&other),
         }),
-        None => Ok(None),
+        Maybe.None => Result.Ok(Maybe.None),
     }
 }
 
 /// Fetch a value, decoding it as Bytes.
 pub async fn get_bytes<C: CacheBackend>(c: &C, key: &Text) -> Result<Maybe<List<Byte>>, CacheError> {
     match c.get(key).await? {
-        Some(CacheValue.Bytes(b)) => Ok(Some(b)),
-        Some(other) => Err(CacheError.TypeMismatch {
+        Maybe.Some(CacheValue.Bytes(b)) => Result.Ok(Maybe.Some(b)),
+        Maybe.Some(other) => Result.Err(CacheError.TypeMismatch {
             expected: "Bytes".to_text(),
             found:    cache_value_kind(&other),
         }),
-        None => Ok(None),
+        Maybe.None => Result.Ok(Maybe.None),
     }
 }
 
@@ -200,7 +200,7 @@ pub async fn set_bytes<C: CacheBackend>(c: &C, key: &Text, value: List<Byte>, tt
 pub async fn get_and_delete<C: CacheBackend>(c: &C, key: &Text) -> Result<Maybe<CacheValue>, CacheError> {
     let v = c.get(key).await?;
     if v.is_some() { let _ = c.delete(key).await?; }
-    Ok(v)
+    Result.Ok(v)
 }
 
 // =============================================================================
@@ -218,16 +218,16 @@ pub fn cache_value_kind(v: &CacheValue) -> Text {
 
 pub fn ttl_to_seconds(t: &CacheTtl) -> Maybe<Int> {
     match t {
-        CacheTtl.Persistent => None,
-        CacheTtl.Seconds(s) => Some(*s),
-        CacheTtl.Millis(ms) => Some((ms + 999) / 1000),
+        CacheTtl.Persistent => Maybe.None,
+        CacheTtl.Seconds(s) => Maybe.Some(*s),
+        CacheTtl.Millis(ms) => Maybe.Some((ms + 999) / 1000),
     }
 }
 
 pub fn ttl_to_millis(t: &CacheTtl) -> Maybe<Int> {
     match t {
-        CacheTtl.Persistent => None,
-        CacheTtl.Seconds(s) => Some(s * 1000),
-        CacheTtl.Millis(ms) => Some(*ms),
+        CacheTtl.Persistent => Maybe.None,
+        CacheTtl.Seconds(s) => Maybe.Some(s * 1000),
+        CacheTtl.Millis(ms) => Maybe.Some(*ms),
     }
 }

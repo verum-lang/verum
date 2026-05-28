@@ -99,7 +99,7 @@ implement DifferentialOracle {
         while i < self.reports.len() {
             if !is_match(&self.reports[i].outcome) {
                 let r = &self.reports[i];
-                return Some(case_report(
+                return Maybe.Some(case_report(
                     r.case_name.clone(),
                     clone_outcome(&r.outcome),
                     r.loom_elapsed_ns,
@@ -108,7 +108,7 @@ implement DifferentialOracle {
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// One-line summary suitable for CI output.

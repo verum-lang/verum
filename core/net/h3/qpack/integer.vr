@@ -92,24 +92,24 @@ public fn encode(out: &mut List<Byte>, prefix_bits: Int, first_byte_opcode: Byte
 /// `prefix_bits` must match the encoder's choice. Returns the value
 /// plus the new cursor position.
 public fn decode(buf: &[Byte], pos: Int, prefix_bits: Int) -> Result<(UInt64, Int), IntError> {
-    if pos >= buf.len() { return Err(IntError.Truncated); }
+    if pos >= buf.len() { return Result.Err(IntError.Truncated); }
     let mask: UInt64 = (1_u64 << (prefix_bits as UInt64)) - 1_u64;
     let first = (buf[pos] as UInt64) & mask;
     if first < mask {
-        return Ok((first, pos + 1));
+        return Result.Ok((first, pos + 1));
     }
     let mut value: UInt64 = first;
     let mut shift: Int = 0;
     let mut cur = pos + 1;
     loop {
-        if cur >= buf.len() { return Err(IntError.Truncated); }
+        if cur >= buf.len() { return Result.Err(IntError.Truncated); }
         let b = buf[cur];
         cur = cur + 1;
         // Overflow check: max 63 useful bits before we'd wrap.
-        if shift >= 63 { return Err(IntError.Overflow); }
+        if shift >= 63 { return Result.Err(IntError.Overflow); }
         value = value + (((b as UInt64) & 0x7F_u64) << (shift as UInt64));
         shift = shift + 7;
         if (b & 0x80_u8) == 0_u8 { break; }
     }
-    Ok((value, cur))
+    Result.Ok((value, cur))
 }

@@ -24,22 +24,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "thin adapter exposing core.redis as core.cache.types::CacheBackend".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.cache.adapters.redis;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.List;
 
 mount core.cache.types.{
@@ -65,9 +65,9 @@ pub fn from_client(client: RedisClient) -> RedisCacheAdapter {
 implement CacheBackend for RedisCacheAdapter {
     async fn get(&self, key: &Text) -> Result<Maybe<CacheValue>, CacheError> {
         match cmd.get(&self.inner, key).await {
-            Ok(Some(b)) => Ok(Some(CacheValue.Bytes(b))),
-            Ok(None)    => Ok(None),
-            Err(e)      => Err(redis_to_cache(e)),
+            Result.Ok(Maybe.Some(b)) => Result.Ok(Maybe.Some(CacheValue.Bytes(b))),
+            Result.Ok(Maybe.None)    => Result.Ok(Maybe.None),
+            Result.Err(e)      => Result.Err(redis_to_cache(e)),
         }
     }
 
@@ -97,12 +97,12 @@ implement CacheBackend for RedisCacheAdapter {
             .map_err(redis_to_cache)?;
         if stored {
             // Apply TTL after successful NX-set when one was requested.
-            if let Some(ms) = ttl_to_millis(ttl) {
+            if let Maybe.Some(ms) = ttl_to_millis(ttl) {
                 let _ = cmd.pexpire(&self.inner, key, ms).await
                     .map_err(redis_to_cache)?;
             }
         }
-        Ok(stored)
+        Result.Ok(stored)
     }
 
     async fn delete(&self, key: &Text) -> Result<Int, CacheError> {
@@ -118,12 +118,12 @@ implement CacheBackend for RedisCacheAdapter {
         let mut i: Int = 0;
         while i < raw.len() {
             match &raw[i] {
-                Some(b) => out.push(Some(CacheValue.Bytes(b.clone()))),
-                None    => out.push(None),
+                Maybe.Some(b) => out.push(Maybe.Some(CacheValue.Bytes(b.clone()))),
+                Maybe.None    => out.push(Maybe.None),
             }
             i = i + 1;
         }
-        Ok(out)
+        Result.Ok(out)
     }
 
     async fn incr_by(&self, key: &Text, delta: Int) -> Result<Int, CacheError> {
@@ -152,7 +152,7 @@ pub async fn connect_url(url: &Text) -> Result<RedisCacheAdapter, CacheError>
 {
     let client = core.redis.connect_url(url).await
         .map_err(redis_to_cache)?;
-    Ok(RedisCacheAdapter { inner: client })
+    Result.Ok(RedisCacheAdapter { inner: client })
 }
 
 // =============================================================================
@@ -161,10 +161,10 @@ pub async fn connect_url(url: &Text) -> Result<RedisCacheAdapter, CacheError>
 
 fn value_to_bytes(v: &CacheValue) -> Result<List<Byte>, CacheError> {
     match v {
-        CacheValue.Bytes(b)     => Ok(b.clone()),
-        CacheValue.TextValue(t) => Ok(t.as_bytes().to_list()),
-        CacheValue.Counter(n)   => Ok(f"{n}".as_bytes().to_list()),
-        CacheValue.StringSet(_) => Err(CacheError.Encoding(
+        CacheValue.Bytes(b)     => Result.Ok(b.clone()),
+        CacheValue.TextValue(t) => Result.Ok(t.as_bytes().to_list()),
+        CacheValue.Counter(n)   => Result.Ok(f"{n}".as_bytes().to_list()),
+        CacheValue.StringSet(_) => Result.Err(CacheError.Encoding(
             "StringSet: use core.redis.commands.sadd directly for set values".to_text())),
     }
 }

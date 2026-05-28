@@ -144,7 +144,7 @@ public fn parse_range_header(value: &Text) -> Result<RangeSet, RangeError> {
     let b = value.as_bytes();
     let (unit, rest) = split_equals(b);
     if !bytes_eq_ci(unit.as_slice(), b"bytes") {
-        return Err(RangeError.Malformed(
+        return Result.Err(RangeError.Malformed(
             Text.from_utf8_unchecked(unit.as_slice())));
     }
     let mut specs: List<RangeSpec> = [];
@@ -156,7 +156,7 @@ public fn parse_range_header(value: &Text) -> Result<RangeSet, RangeError> {
     // attacker's input cost; rejecting at that fan-out level is
     // cheaper than letting them allocate parsed RangeSpec values.
     if parts.len() > MAX_RANGE_SPECS {
-        return Err(RangeError.TooManyRanges { declared: parts.len(), limit: MAX_RANGE_SPECS });
+        return Result.Err(RangeError.TooManyRanges { declared: parts.len(), limit: MAX_RANGE_SPECS });
     }
     let mut i: Int = 0;
     while i < parts.len() {
@@ -166,9 +166,9 @@ public fn parse_range_header(value: &Text) -> Result<RangeSet, RangeError> {
         i = i + 1;
     }
     if specs.len() == 0 {
-        return Err(RangeError.Malformed(Text.from("no ranges")));
+        return Result.Err(RangeError.Malformed(Text.from("no ranges")));
     }
-    Ok(RangeSet { specs: specs })
+    Result.Ok(RangeSet { specs: specs })
 }
 
 fn parse_one(seg: &List<Byte>) -> Result<RangeSpec, RangeError> {
@@ -181,32 +181,32 @@ fn parse_one(seg: &List<Byte>) -> Result<RangeSpec, RangeError> {
         i = i + 1;
     }
     if dash_pos < 0 {
-        return Err(RangeError.Malformed(
+        return Result.Err(RangeError.Malformed(
             Text.from_utf8_unchecked(seg.as_slice())));
     }
     let lhs = slice_range(seg.as_slice(), 0, dash_pos);
     let rhs = slice_range(seg.as_slice(), dash_pos + 1, seg.len());
 
     if lhs.len() == 0 && rhs.len() == 0 {
-        return Err(RangeError.Malformed(Text.from("empty")));
+        return Result.Err(RangeError.Malformed(Text.from("empty")));
     }
     if lhs.len() == 0 {
         // Suffix "-N"
         let n = parse_u64(&rhs)?;
-        return Ok(RangeSpec.Suffix { length: n });
+        return Result.Ok(RangeSpec.Suffix { length: n });
     }
     if rhs.len() == 0 {
         // Prefix "N-"
         let n = parse_u64(&lhs)?;
-        return Ok(RangeSpec.Prefix { start: n });
+        return Result.Ok(RangeSpec.Prefix { start: n });
     }
     // Closed "a-b"
     let a = parse_u64(&lhs)?;
     let bv = parse_u64(&rhs)?;
     if a > bv {
-        return Err(RangeError.Malformed(Text.from("start > end")));
+        return Result.Err(RangeError.Malformed(Text.from("start > end")));
     }
-    Ok(RangeSpec.Closed { start: a, end: bv })
+    Result.Ok(RangeSpec.Closed { start: a, end: bv })
 }
 
 // =============================================================================
@@ -223,7 +223,7 @@ public fn resolve_and_merge(
     total_length: UInt64,
 ) -> Result<List<ResolvedRange>, RangeError> {
     if total_length == 0_u64 {
-        return Err(RangeError.UnsatisfiableRange);
+        return Result.Err(RangeError.UnsatisfiableRange);
     }
     let mut resolved: List<ResolvedRange> = [];
     let mut i: Int = 0;
@@ -235,7 +235,7 @@ public fn resolve_and_merge(
         i = i + 1;
     }
     if resolved.len() == 0 {
-        return Err(RangeError.UnsatisfiableRange);
+        return Result.Err(RangeError.UnsatisfiableRange);
     }
 
     // Sort by start ascending (insertion sort — N is small in practice).
@@ -260,7 +260,7 @@ public fn resolve_and_merge(
         }
         j = j + 1;
     }
-    Ok(merged)
+    Result.Ok(merged)
 }
 
 fn resolve_one(spec: &RangeSpec, total: UInt64) -> Maybe<ResolvedRange> {
@@ -396,14 +396,14 @@ fn to_lower(b: Byte) -> Byte {
 
 fn parse_u64(src: &List<Byte>) -> Result<UInt64, RangeError> {
     if src.len() == 0 {
-        return Err(RangeError.Malformed(Text.from("empty number")));
+        return Result.Err(RangeError.Malformed(Text.from("empty number")));
     }
     // 3-layer overflow defense — Range headers arrive over the wire from
     // hostile clients. UInt64.MAX is exactly 20 decimal digits; reject
     // anything longer up front, per-step `v > MAX/10` guard, and a final
     // post-add wrap-around check.
     if src.len() > 20 {
-        return Err(RangeError.Malformed(
+        return Result.Err(RangeError.Malformed(
             Text.from_utf8_unchecked(src.as_slice())));
     }
     let mut v: UInt64 = 0_u64;
@@ -411,22 +411,22 @@ fn parse_u64(src: &List<Byte>) -> Result<UInt64, RangeError> {
     while i < src.len() {
         let c = src[i];
         if c < ('0' as Byte) || c > ('9' as Byte) {
-            return Err(RangeError.Malformed(
+            return Result.Err(RangeError.Malformed(
                 Text.from_utf8_unchecked(src.as_slice())));
         }
         if v > 1_844_674_407_370_955_161_u64 {        // UInt64.MAX / 10
-            return Err(RangeError.Malformed(
+            return Result.Err(RangeError.Malformed(
                 Text.from_utf8_unchecked(src.as_slice())));
         }
         let next = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
         if next < v {
-            return Err(RangeError.Malformed(
+            return Result.Err(RangeError.Malformed(
                 Text.from_utf8_unchecked(src.as_slice())));
         }
         v = next;
         i = i + 1;
     }
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {

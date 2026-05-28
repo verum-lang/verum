@@ -49,14 +49,14 @@ mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
 // -----------------------------------------------------------------------------
 
 public fn parse_pragma(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwPragma) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwPragma) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let name = match ts.expect_ident() {
-        Ok(s)  => s, Err(e) => { return Err(e); }
+        Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
     // Optional schema-qualified form: `PRAGMA main.user_version`.
     let _qualified_name = if ts.accept_punct(PDot) {
         let second = match ts.expect_ident() {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
         // We fold schema.name into the pragma-name field as
         // "schema.name" until the full PRAGMA AST variant accepts a
@@ -66,21 +66,21 @@ public fn parse_pragma(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErr
         name
     };
 
-    let mut value: Maybe<Expr> = None;
+    let mut value: Maybe<Expr> = Maybe.None;
     if ts.accept_op(OpEq) {
         let e = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        value = Some(e);
+        value = Maybe.Some(e);
     } else if ts.accept_punct(PLParen) {
         let e = match parse_expr(ts) {
-            Ok(x)  => x, Err(err) => { return Err(err); }
+            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
         };
-        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
-        value = Some(e);
+        match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        value = Maybe.Some(e);
     }
 
-    Ok(SPragma(_qualified_name, value))
+    Result.Ok(SPragma(_qualified_name, value))
 }
 
 // -----------------------------------------------------------------------------
@@ -91,17 +91,17 @@ public fn parse_explain(
     ts: &mut SqlTokenStream,
     inner: fn(&mut SqlTokenStream) -> Result<SqlStatement, ParseError>,
 ) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwExplain) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwExplain) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let query_plan = if ts.accept_keyword(KwQuery) {
-        match ts.expect_keyword(KwPlan) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwPlan) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         true
     } else {
         false
     };
     let body = match inner(ts) {
-        Ok(s)  => s, Err(e) => { return Err(e); }
+        Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
-    Ok(SExplain(Heap(body), query_plan))
+    Result.Ok(SExplain(Heap(body), query_plan))
 }
 
 // -----------------------------------------------------------------------------
@@ -109,7 +109,7 @@ public fn parse_explain(
 // -----------------------------------------------------------------------------
 
 public fn parse_begin(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwBegin) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwBegin) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     // Optional transaction mode: DEFERRED / IMMEDIATE / EXCLUSIVE.
     let _ = ts.accept_keyword(KwDeferred);
     let _ = ts.accept_keyword(KwImmediate);
@@ -124,50 +124,50 @@ public fn parse_begin(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErro
         _ => {}
     }
     let _ = ts.accept_keyword(KwTransaction);
-    Ok(SBeginTransaction)
+    Result.Ok(SBeginTransaction)
 }
 
 public fn parse_commit(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
     // `COMMIT [TRANSACTION]` or `END [TRANSACTION]`.
     if ts.accept_keyword(KwCommit) {
         let _ = ts.accept_keyword(KwTransaction);
-        return Ok(SCommit);
+        return Result.Ok(SCommit);
     }
     if ts.accept_keyword(KwEnd) {
         let _ = ts.accept_keyword(KwTransaction);
-        return Ok(SCommit);
+        return Result.Ok(SCommit);
     }
-    Err(parse_error("expected COMMIT / END".clone(), ts.position()))
+    Result.Err(parse_error("expected COMMIT / END".clone(), ts.position()))
 }
 
 public fn parse_rollback(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwRollback) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwRollback) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let _ = ts.accept_keyword(KwTransaction);
     if ts.accept_keyword(KwTo) {
         let _ = ts.accept_keyword(KwSavepoint);
         let name = match ts.expect_ident() {
-            Ok(s)  => s, Err(e) => { return Err(e); }
+            Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
-        return Ok(SRollback(Some(name)));
+        return Result.Ok(SRollback(Maybe.Some(name)));
     }
-    Ok(SRollback(None))
+    Result.Ok(SRollback(Maybe.None))
 }
 
 public fn parse_savepoint(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwSavepoint) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwSavepoint) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let name = match ts.expect_ident() {
-        Ok(s)  => s, Err(e) => { return Err(e); }
+        Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
-    Ok(SSavepoint(name))
+    Result.Ok(SSavepoint(name))
 }
 
 public fn parse_release(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwRelease) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwRelease) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let _ = ts.accept_keyword(KwSavepoint);
     let name = match ts.expect_ident() {
-        Ok(s)  => s, Err(e) => { return Err(e); }
+        Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
-    Ok(SRelease(name))
+    Result.Ok(SRelease(name))
 }
 
 // -----------------------------------------------------------------------------
@@ -175,91 +175,91 @@ public fn parse_release(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseEr
 // -----------------------------------------------------------------------------
 
 public fn parse_vacuum(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwVacuum) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwVacuum) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     // Optional schema name.
     let _schema: Maybe<Text> = match ts.peek() {
         TIdent(_) => {
             let s = match ts.expect_ident() {
-                Ok(s)  => s, Err(_) => { return Err(parse_error("ident".clone(), ts.position())); }
+                Result.Ok(s)  => s, Result.Err(_) => { return Result.Err(parse_error("ident".clone(), ts.position())); }
             };
-            Some(s)
+            Maybe.Some(s)
         }
-        _ => None,
+        _ => Maybe.None,
     };
     // Optional `INTO 'path'`.
     let into: Maybe<Text> = if ts.accept_keyword(KwInto) {
         match ts.peek() {
-            TStringLit(s) => { let _ = ts.advance(); Some(s) }
-            _ => { return Err(parse_error("expected string after INTO".clone(), ts.position())); }
+            TStringLit(s) => { let _ = ts.advance(); Maybe.Some(s) }
+            _ => { return Result.Err(parse_error("expected string after INTO".clone(), ts.position())); }
         }
     } else {
-        None
+        Maybe.None
     };
-    Ok(SVacuum(into))
+    Result.Ok(SVacuum(into))
 }
 
 public fn parse_reindex(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwReindex) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwReindex) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let target: Maybe<TableRef> = match ts.peek() {
         TIdent(_) => {
             let first = match ts.expect_ident() {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
             if ts.accept_punct(PDot) {
                 let second = match ts.expect_ident() {
-                    Ok(s)  => s, Err(e) => { return Err(e); }
+                    Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
                 };
-                Some(TableRef { schema: first, name: second, alias: "".clone() })
+                Maybe.Some(TableRef { schema: first, name: second, alias: "".clone() })
             } else {
-                Some(TableRef { schema: "".clone(), name: first, alias: "".clone() })
+                Maybe.Some(TableRef { schema: "".clone(), name: first, alias: "".clone() })
             }
         }
-        _ => None,
+        _ => Maybe.None,
     };
-    Ok(SReindex(target))
+    Result.Ok(SReindex(target))
 }
 
 public fn parse_attach(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwAttach) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwAttach) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let _ = ts.accept_keyword(KwDatabase);
     let path = match parse_expr(ts) {
-        Ok(x)  => x, Err(err) => { return Err(err); }
+        Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
     };
-    match ts.expect_keyword(KwAs) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwAs) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let name = match parse_expr(ts) {
-        Ok(x)  => x, Err(err) => { return Err(err); }
+        Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
     };
-    Ok(SAttach(path, name))
+    Result.Ok(SAttach(path, name))
 }
 
 public fn parse_detach(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwDetach) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwDetach) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let _ = ts.accept_keyword(KwDatabase);
     let name = match ts.expect_ident() {
-        Ok(s)  => s, Err(e) => { return Err(e); }
+        Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
-    Ok(SDetach(name))
+    Result.Ok(SDetach(name))
 }
 
 public fn parse_analyze(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError> {
-    match ts.expect_keyword(KwAnalyze) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match ts.expect_keyword(KwAnalyze) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let target: Maybe<TableRef> = match ts.peek() {
         TIdent(_) => {
             let first = match ts.expect_ident() {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
             if ts.accept_punct(PDot) {
                 let second = match ts.expect_ident() {
-                    Ok(s)  => s, Err(e) => { return Err(e); }
+                    Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
                 };
-                Some(TableRef { schema: first, name: second, alias: "".clone() })
+                Maybe.Some(TableRef { schema: first, name: second, alias: "".clone() })
             } else {
-                Some(TableRef { schema: "".clone(), name: first, alias: "".clone() })
+                Maybe.Some(TableRef { schema: "".clone(), name: first, alias: "".clone() })
             }
         }
-        _ => None,
+        _ => Maybe.None,
     };
-    Ok(SAnalyze(target))
+    Result.Ok(SAnalyze(target))
 }
 
 // -----------------------------------------------------------------------------

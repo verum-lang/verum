@@ -132,8 +132,8 @@ implement<T> StealResult<T> {
     @inline
     public fn into_option(self) -> Maybe<T> {
         match self {
-            Success(val) => Some(val),
-            _ => None,
+            Success(val) => Maybe.Some(val),
+            _ => Maybe.None,
         }
     }
 }
@@ -355,7 +355,7 @@ implement<T> Drop for DequeInner<T> {
 ///
 
 /// // Owner pops most recent (LIFO for locality)
-/// if let Some(task) = deque.pop() {
+/// if let Maybe.Some(task) = deque.pop() {
 ///  task.run();
 /// }
 ///
@@ -481,7 +481,7 @@ implement<T: Send> WorkDeque<T> {
     ///
 
     /// Only the owner should call this method.
-    /// Returns `None` if the deque is empty.
+    /// Returns `Maybe.None` if the deque is empty.
     ///
 
     /// ## Performance
@@ -503,7 +503,7 @@ implement<T: Send> WorkDeque<T> {
         if size < 0 {
             // Queue was empty, restore bottom
             inner.store_bottom(top, ORDERING_RELAXED);
-            return None;
+            return Maybe.None;
         }
 
         // Read value from buffer
@@ -511,7 +511,7 @@ implement<T: Send> WorkDeque<T> {
 
         if size > 0 {
             // More items remain, no contention possible
-            return Some(value);
+            return Maybe.Some(value);
         }
 
         // Last item - need to race with stealers
@@ -521,10 +521,10 @@ implement<T: Send> WorkDeque<T> {
         inner.store_bottom(top + 1, ORDERING_RELAXED);
 
         if success {
-            Some(value)
+            Maybe.Some(value)
         } else {
             // Lost race with stealer, item was stolen
-            None
+            Maybe.None
         }
     }
 
@@ -639,12 +639,12 @@ implement<T: Send> Stealer<T> {
     /// to reduce contention on failure.
     ///
 
-    /// Returns `None` only if the deque is truly empty.
+    /// Returns `Maybe.None` only if the deque is truly empty.
     public fn steal_retry(&self) -> Maybe<T> {
         loop {
             match self.steal() {
-                Success(val) => return Some(val),
-                Empty => return None,
+                Success(val) => return Maybe.Some(val),
+                Empty => return Maybe.None,
                 Retry => {
                     // Backoff to reduce contention
                     spin_loop_hint();
@@ -764,13 +764,13 @@ implement<T: Send> WorkStealingPool<T> {
     ///
 
     /// Attempts to steal from other workers' deques in round-robin order.
-    /// Returns `None` if all deques are empty.
+    /// Returns `Maybe.None` if all deques are empty.
     public fn try_steal(&self, worker_id: Int, start_index: &mut Int) -> Maybe<T> {
         let my_stealers = self.stealers_for(worker_id);
         let count = my_stealers.len();
 
         if count == 0 {
-            return None;
+            return Maybe.None;
         }
 
         // Try each stealer starting from start_index
@@ -782,7 +782,7 @@ implement<T: Send> WorkStealingPool<T> {
                 Success(val) => {
                     // Update start index for next steal attempt
                     *start_index = (idx + 1) % count;
-                    return Some(val);
+                    return Maybe.Some(val);
                 }
                 Empty => continue,
                 Retry => {
@@ -792,7 +792,7 @@ implement<T: Send> WorkStealingPool<T> {
             }
         }
 
-        None
+        Maybe.None
     }
 
     /// Get total tasks across all deques (approximate)
@@ -891,7 +891,7 @@ implement<T: Send> BoundedQueue<T> {
             unsafe {
                 let slot = slots.add(i);
                 (*slot).sequence = i as UInt64;
-                (*slot).value = None;
+                (*slot).value = Maybe.None;
             }
         }
 
@@ -918,7 +918,7 @@ implement<T: Send> BoundedQueue<T> {
     /// Try to enqueue a value
     ///
 
-    /// Returns `Err(value)` if the queue is full.
+    /// Returns `Result.Err(value)` if the queue is full.
     public fn try_push(&self, value: T) -> Result<(), T> {
         loop {
             let tail = atomic_load_u64(self.tail, ORDERING_RELAXED);
@@ -940,18 +940,18 @@ implement<T: Send> BoundedQueue<T> {
                 if success {
                     // Write value and update sequence
                     unsafe {
-                        (*slot).value = Some(value);
+                        (*slot).value = Maybe.Some(value);
                     }
                     atomic_store_u64(
                         &(*slot).sequence as &unsafe UInt64 as &unsafe mut UInt64,
                         tail + 1,
                         ORDERING_RELEASE,
                     );
-                    return Ok(());
+                    return Result.Ok(());
                 }
             } else if diff < 0 {
                 // Queue is full
-                return Err(value);
+                return Result.Err(value);
             }
 
             // Lost race, retry
@@ -962,7 +962,7 @@ implement<T: Send> BoundedQueue<T> {
     /// Try to dequeue a value
     ///
 
-    /// Returns `None` if the queue is empty.
+    /// Returns `Maybe.None` if the queue is empty.
     public fn try_pop(&self) -> Maybe<T> {
         loop {
             let head = atomic_load_u64(self.head, ORDERING_RELAXED);
@@ -993,7 +993,7 @@ implement<T: Send> BoundedQueue<T> {
                 }
             } else if diff < 0 {
                 // Queue is empty
-                return None;
+                return Maybe.None;
             }
 
             // Lost race, retry
@@ -1030,7 +1030,7 @@ implement<T: Send> BoundedQueue<T> {
 implement<T> Drop for BoundedQueue<T> {
     fn drop(&mut self) {
         // Drop any remaining values
-        while let Some(_) = self.try_pop() {}
+        while let Maybe.Some(_) = self.try_pop() {}
 
         // Free slots
         if !self.slots.is_null() {

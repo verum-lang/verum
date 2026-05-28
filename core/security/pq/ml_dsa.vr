@@ -111,7 +111,7 @@ public fn ml_dsa_sign(
 }
 
 /// Verify `signature` against `message` under `public_key`. Returns
-/// Ok(true) on valid, Ok(false) on clean-reject, or Err(…) on malformed
+/// Result.Ok(true) on valid, Result.Ok(false) on clean-reject, or Result.Err(…) on malformed
 /// inputs.
 public fn ml_dsa_verify(
     variant: MlDsaVariant,

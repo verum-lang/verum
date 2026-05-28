@@ -154,11 +154,11 @@ implement X509BundleSet {
         let mut i = 0;
         while i < self.bundles.len() {
             if self.bundles[i].trust_domain() == *trust_domain {
-                return Some(&self.bundles[i]);
+                return Maybe.Some(&self.bundles[i]);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn all(&self) -> &List<X509Bundle> { &self.bundles }
@@ -187,11 +187,11 @@ implement JwtBundleSet {
         let mut i = 0;
         while i < self.bundles.len() {
             if self.bundles[i].trust_domain() == *trust_domain {
-                return Some(&self.bundles[i]);
+                return Maybe.Some(&self.bundles[i]);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn all(&self) -> &List<JwtBundle> { &self.bundles }

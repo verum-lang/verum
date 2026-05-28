@@ -35,9 +35,9 @@ public type Style is {
 implement Style {
     /// Default style: no colors, no modifiers.
     public const DEFAULT: Style = Style {
-        fg: None,
-        bg: None,
-        underline_color: None,
+        fg: Maybe.None,
+        bg: Maybe.None,
+        underline_color: Maybe.None,
         add_modifier: Modifier.NONE,
         sub_modifier: Modifier.NONE,
     };
@@ -50,9 +50,9 @@ implement Style {
     /// Create a style that resets all attributes.
     public fn reset() -> Style {
         Style {
-            fg: Some(Color.Reset),
-            bg: Some(Color.Reset),
-            underline_color: Some(Color.Reset),
+            fg: Maybe.Some(Color.Reset),
+            bg: Maybe.Some(Color.Reset),
+            underline_color: Maybe.Some(Color.Reset),
             add_modifier: Modifier.NONE,
             sub_modifier: Modifier.NONE,
         }
@@ -64,17 +64,17 @@ implement Style {
 
     /// Set the foreground (text) color.
     public fn fg(self, color: Color) -> Style {
-        Style { fg: Some(color), ..self }
+        Style { fg: Maybe.Some(color), ..self }
     }
 
     /// Set the background color.
     public fn bg(self, color: Color) -> Style {
-        Style { bg: Some(color), ..self }
+        Style { bg: Maybe.Some(color), ..self }
     }
 
     /// Set the underline color (requires terminal support for colored underlines).
     public fn underline_color(self, color: Color) -> Style {
-        Style { underline_color: Some(color), ..self }
+        Style { underline_color: Maybe.Some(color), ..self }
     }
 
     // =========================================================================
@@ -182,16 +182,16 @@ implement Style {
     public fn patch(self, other: Style) -> Style {
         Style {
             fg: match other.fg {
-                Some(c) => Some(c),
-                None => self.fg,
+                Maybe.Some(c) => Maybe.Some(c),
+                Maybe.None => self.fg,
             },
             bg: match other.bg {
-                Some(c) => Some(c),
-                None => self.bg,
+                Maybe.Some(c) => Maybe.Some(c),
+                Maybe.None => self.bg,
             },
             underline_color: match other.underline_color {
-                Some(c) => Some(c),
-                None => self.underline_color,
+                Maybe.Some(c) => Maybe.Some(c),
+                Maybe.None => self.underline_color,
             },
             add_modifier: self.add_modifier
                 .difference(other.sub_modifier)
@@ -214,16 +214,16 @@ implement Style {
     /// Check whether this style has any foreground color set.
     public fn has_fg(&self) -> Bool {
         match self.fg {
-            Some(_) => true,
-            None => false,
+            Maybe.Some(_) => true,
+            Maybe.None => false,
         }
     }
 
     /// Check whether this style has any background color set.
     public fn has_bg(&self) -> Bool {
         match self.bg {
-            Some(_) => true,
-            None => false,
+            Maybe.Some(_) => true,
+            Maybe.None => false,
         }
     }
 }

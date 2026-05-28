@@ -287,7 +287,7 @@ public fn issue_ticket(
     out.extend_from_slice(&stek.key_id[..]);
     out.extend_from_slice(&nonce[..]);
     out.extend_from_slice(sealed.as_slice());
-    Ok(out)
+    Result.Ok(out)
 }
 
 public fn decrypt_ticket(
@@ -295,13 +295,13 @@ public fn decrypt_ticket(
     wire: &[Byte],
 ) -> Result<ServerTicketPlaintext, TicketError> {
     if wire.len() < 8 + 12 + 16 {
-        return Err(TicketError.MalformedTicket);
+        return Result.Err(TicketError.MalformedTicket);
     }
     // Check key_id matches.
     let mut i: Int = 0;
     while i < 8 {
         if wire[i] != stek.key_id[i] {
-            return Err(TicketError.WrongKeyId);
+            return Result.Err(TicketError.WrongKeyId);
         }
         i = i + 1;
     }
@@ -382,14 +382,14 @@ fn encode_plaintext(pt: &ServerTicketPlaintext) -> List<Byte> {
 fn decode_plaintext(buf: &[Byte]) -> Result<ServerTicketPlaintext, TicketError> {
     // v1: no ticket_nonce (legacy); v2: ticket_nonce as u8-prefixed blob.
     // Minimum v1 size = 1 ver + 2 suite + 2 rslen + 0 rs + 4 early + 8 unix + 1 alpn-len.
-    if buf.len() < 16 { return Err(TicketError.MalformedTicket); }
+    if buf.len() < 16 { return Result.Err(TicketError.MalformedTicket); }
     let version = buf[0];
-    if version != 1_u8 && version != 2_u8 { return Err(TicketError.MalformedTicket); }
+    if version != 1_u8 && version != 2_u8 { return Result.Err(TicketError.MalformedTicket); }
     let cs_u16: UInt16 = ((buf[1] as UInt16) << 8) | (buf[2] as UInt16);
     let cipher = CipherSuite.from_u16(cs_u16);
     let rs_len: Int = (((buf[3] as UInt16) << 8) | (buf[4] as UInt16)) as Int;
     let rs_end = 5 + rs_len;
-    if rs_end > buf.len() { return Err(TicketError.MalformedTicket); }
+    if rs_end > buf.len() { return Result.Err(TicketError.MalformedTicket); }
     let mut rs: List<Byte> = List.with_capacity(rs_len);
     rs.extend_from_slice(&buf[5..rs_end]);
 
@@ -397,16 +397,16 @@ fn decode_plaintext(buf: &[Byte]) -> Result<ServerTicketPlaintext, TicketError> 
     let mut ticket_nonce: List<Byte> = [];
     let mut post_nonce = rs_end;
     if version >= 2_u8 {
-        if rs_end >= buf.len() { return Err(TicketError.MalformedTicket); }
+        if rs_end >= buf.len() { return Result.Err(TicketError.MalformedTicket); }
         let n_len = buf[rs_end] as Int;
         let n_end = rs_end + 1 + n_len;
-        if n_end > buf.len() { return Err(TicketError.MalformedTicket); }
+        if n_end > buf.len() { return Result.Err(TicketError.MalformedTicket); }
         ticket_nonce = List.with_capacity(n_len);
         ticket_nonce.extend_from_slice(&buf[rs_end + 1..n_end]);
         post_nonce = n_end;
     }
 
-    if post_nonce + 4 + 8 + 1 > buf.len() { return Err(TicketError.MalformedTicket); }
+    if post_nonce + 4 + 8 + 1 > buf.len() { return Result.Err(TicketError.MalformedTicket); }
     let m: UInt32 =
           ((buf[post_nonce] as UInt32) << 24)
         | ((buf[post_nonce + 1] as UInt32) << 16)
@@ -425,11 +425,11 @@ fn decode_plaintext(buf: &[Byte]) -> Result<ServerTicketPlaintext, TicketError> 
     let alpn_base = t_base + 8;
     let alpn_len = buf[alpn_base] as Int;
     let alpn_end = alpn_base + 1 + alpn_len;
-    if alpn_end > buf.len() { return Err(TicketError.MalformedTicket); }
+    if alpn_end > buf.len() { return Result.Err(TicketError.MalformedTicket); }
     let mut alpn: List<Byte> = List.with_capacity(alpn_len);
     alpn.extend_from_slice(&buf[alpn_base + 1..alpn_end]);
 
-    Ok(ServerTicketPlaintext {
+    Result.Ok(ServerTicketPlaintext {
         cipher_suite:        cipher,
         resumption_secret:   rs,
         ticket_nonce:        ticket_nonce,
@@ -494,7 +494,7 @@ implement ClientSessionStore {
     }
 
     /// Consume one fresh session for the given authority (removes from
-    /// store). Returns None when no fresh match is present.
+    /// store). Returns Maybe.None when no fresh match is present.
     public fn take(&mut self, authority: &Text, now: Instant) -> Maybe<ClientSession> {
         let mut i: Int = 0;
         while i < self.entries.len() {
@@ -502,7 +502,7 @@ implement ClientSessionStore {
             if text_eq(auth, authority) {
                 if sess.is_fresh(now.clone()) {
                     let (_, s) = self.entries.remove(i);
-                    return Some(s);
+                    return Maybe.Some(s);
                 } else {
                     let _ = self.entries.remove(i);
                     continue;
@@ -510,7 +510,7 @@ implement ClientSessionStore {
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn len(&self) -> Int { self.entries.len() }

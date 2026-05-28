@@ -150,8 +150,8 @@ fn thread_entry(data: &unsafe Byte) -> &unsafe Byte {
 
     // Initialize TLS for this thread
     match create_thread_tls() {
-        Ok(_) => {}
-        Err(_) => {
+        Result.Ok(_) => {}
+        Result.Err(_) => {
             // TLS init failed - cannot proceed safely
             return 0 as &unsafe Byte;
         }
@@ -192,14 +192,14 @@ implement DarwinThread {
         };
 
         if result != 0 {
-            return Err(CreateFailed { code: result });
+            return Result.Err(CreateFailed { code: result });
         }
 
         // Get thread ID
         let mut tid: UInt64 = 0;
         unsafe { pthread_threadid_np(handle, &mut tid) };
 
-        Ok(DarwinThread {
+        Result.Ok(DarwinThread {
             handle: handle,
             tid: tid,
             finished: false,
@@ -209,34 +209,34 @@ implement DarwinThread {
     /// Wait for thread to finish and get its return value.
     public fn join(&mut self) -> Result<&unsafe Byte, DarwinThreadError> {
         if self.finished {
-            return Err(AlreadyJoined);
+            return Result.Err(AlreadyJoined);
         }
 
         let mut retval: &unsafe Byte = 0 as &unsafe Byte;
         let result = unsafe { pthread_join(self.handle, &mut retval) };
 
         if result != 0 {
-            return Err(JoinFailed { code: result });
+            return Result.Err(JoinFailed { code: result });
         }
 
         self.finished = true;
-        Ok(retval)
+        Result.Ok(retval)
     }
 
     /// Detach thread (will be cleaned up automatically when done).
     public fn detach(&mut self) -> Result<(), DarwinThreadError> {
         if self.finished {
-            return Err(AlreadyDetached);
+            return Result.Err(AlreadyDetached);
         }
 
         let result = unsafe { pthread_detach(self.handle) };
 
         if result != 0 {
-            return Err(DetachFailed { code: result });
+            return Result.Err(DetachFailed { code: result });
         }
 
         self.finished = true;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Get the thread ID.
@@ -289,20 +289,20 @@ implement DarwinMutex {
         let result = unsafe { pthread_mutex_init(&mut mutex.inner, &attr) };
 
         if result != 0 {
-            return Err(MutexInitFailed { code: result });
+            return Result.Err(MutexInitFailed { code: result });
         }
 
         mutex.initialized = true;
-        Ok(mutex)
+        Result.Ok(mutex)
     }
 
     /// Lock the mutex (blocking).
     public fn lock(&mut self) -> Result<(), DarwinThreadError> {
         let result = unsafe { pthread_mutex_lock(&mut self.inner) };
         if result != 0 {
-            Err(MutexLockFailed { code: result })
+            Result.Err(MutexLockFailed { code: result })
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -325,7 +325,7 @@ implement DarwinMutex {
         self.lock()?;
         let result = f();
         self.unlock();
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -360,11 +360,11 @@ implement DarwinCondvar {
         let result = unsafe { pthread_cond_init(&mut cond.inner, &attr) };
 
         if result != 0 {
-            return Err(CondInitFailed { code: result });
+            return Result.Err(CondInitFailed { code: result });
         }
 
         cond.initialized = true;
-        Ok(cond)
+        Result.Ok(cond)
     }
 
     /// Wait on the condition variable.
@@ -375,16 +375,16 @@ implement DarwinCondvar {
     public fn wait(&mut self, mutex: &mut DarwinMutex) -> Result<(), DarwinThreadError> {
         let result = unsafe { pthread_cond_wait(&mut self.inner, &mut mutex.inner) };
         if result != 0 {
-            Err(CondWaitFailed { code: result })
+            Result.Err(CondWaitFailed { code: result })
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
     /// Wait on the condition variable with timeout.
     ///
 
-    /// Returns Ok(true) if signaled, Ok(false) if timed out.
+    /// Returns Result.Ok(true) if signaled, Result.Ok(false) if timed out.
     public fn wait_timeout(&mut self, mutex: &mut DarwinMutex, timeout_ms: Int) -> Result<Bool, DarwinThreadError> {
         // Calculate absolute timeout
         let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
@@ -399,11 +399,11 @@ implement DarwinCondvar {
         let result = unsafe { pthread_cond_timedwait(&mut self.inner, &mut mutex.inner, &ts) };
 
         if result == 0 {
-            Ok(true)
+            Result.Ok(true)
         } else if result == 60 {  // ETIMEDOUT on macOS
-            Ok(false)
+            Result.Ok(false)
         } else {
-            Err(CondWaitFailed { code: result })
+            Result.Err(CondWaitFailed { code: result })
         }
     }
 
@@ -566,11 +566,11 @@ const ETIMEDOUT: Int = 60;
 /// Compatible with sys/linux/thread.futex_wait signature.
 public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Result<(), OSError> {
     let timeout_us: UInt32 = match timeout_ns {
-        Some(ns) => {
+        Maybe.Some(ns) => {
             let us = ns / 1000;
             if us > 0xFFFFFFFF { 0xFFFFFFFF } else { us as UInt32 }
         }
-        None => 0,  // 0 = infinite wait for __ulock_wait
+        Maybe.None => 0,  // 0 = infinite wait for __ulock_wait
     };
 
     let result = unsafe {
@@ -583,9 +583,9 @@ public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Re
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -610,11 +610,11 @@ public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
     if result < 0 {
         // -ENOENT means no waiters — not an error for wake
         if -result == 2 {  // ENOENT on macOS = 2
-            return Ok(0);
+            return Result.Ok(0);
         }
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(count)
+        Result.Ok(count)
     }
 }
 
@@ -646,7 +646,7 @@ implement FutexMutex {
                 return;
             }
             // Sleep until woken — uses __ulock_wait
-            let _ = futex_wait(&self.state as &Int, 2 as Int, None);
+            let _ = futex_wait(&self.state as &Int, 2 as Int, Maybe.None);
         }
     }
 
@@ -691,18 +691,18 @@ implement FutexCondvar {
     public fn wait(&mut self, mutex: &mut FutexMutex) {
         let seq = self.seq;
         mutex.unlock();
-        let _ = futex_wait(&self.seq as &Int, seq as Int, None);
+        let _ = futex_wait(&self.seq as &Int, seq as Int, Maybe.None);
         mutex.lock();
     }
 
     public fn wait_timeout(&mut self, mutex: &mut FutexMutex, timeout_ns: UInt64) -> Bool {
         let seq = self.seq;
         mutex.unlock();
-        let result = futex_wait(&self.seq as &Int, seq as Int, Some(timeout_ns));
+        let result = futex_wait(&self.seq as &Int, seq as Int, Maybe.Some(timeout_ns));
         mutex.lock();
 
         match result {
-            Err(e) if e.code == ETIMEDOUT => false,
+            Result.Err(e) if e.code == ETIMEDOUT => false,
             _ => true,
         }
     }

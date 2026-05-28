@@ -13,7 +13,7 @@ module core.database.sqlite.native.l1_pager.dst_wrapped_pager;
 //       sqlite-native.md §4.10 (VFS injection)
 //
 // Pre-fix: `pager_open_with_vfs(ViDstWrapped(...))` returned
-// `Err(PagerError { kind: IoError, "DST harness wiring tracked
+// `Result.Err(PagerError { kind: IoError, "DST harness wiring tracked
 // under #137 follow-up" })` — the DST harness existed but had no
 // path to actually inject faults into a live pager.  The bridge
 // in `dst/bridge.vr` ran in "execution-replay only" mode and
@@ -115,15 +115,15 @@ public fn dst_wrapped_pager_open(
     page_size: Int,
 ) -> Result<DstWrappedPager, PagerError> {
     let inner = match pager_open_memory_with_size(page_size) {
-        Ok(p)  => p,
-        Err(e) => { return Err(e); }
+        Result.Ok(p)  => p,
+        Result.Err(e) => { return Result.Err(e); }
     };
     // Derive a separate seed for the schedule so fault choices are
     // statistically independent of any op-stream draws done by the
     // higher-level harness.  Matches `dst::harness::harness_from_seed`.
     let mut sched_seed = seed_from_u64(seed + 1_i64);
     let schedule = generate_schedule(&mut sched_seed, total_ops, &default_density());
-    Ok(DstWrappedPager {
+    Result.Ok(DstWrappedPager {
         inner: inner,
         schedule: schedule,
         op_counter: 0,
@@ -169,18 +169,18 @@ implement DstWrappedPager {
 // -----------------------------------------------------------------------------
 
 /// Result of consulting the schedule for the current op_counter.
-/// `Some(fault)` means inject; `None` means delegate to the
+/// `Maybe.Some(fault)` means inject; `Maybe.None` means delegate to the
 /// inner pager normally.
 fn consult_schedule(p: &DstWrappedPager) -> Maybe<Fault> {
     match p.schedule.next_after(p.op_counter - 1) {
-        Some(sched) => {
+        Maybe.Some(sched) => {
             if sched.at_op == p.op_counter {
-                Some(clone_fault(&sched.fault))
+                Maybe.Some(clone_fault(&sched.fault))
             } else {
-                None
+                Maybe.None
             }
         }
-        None => None,
+        Maybe.None => Maybe.None,
     }
 }
 
@@ -262,58 +262,58 @@ fn crashed_error() -> PagerError {
 /// the schedule, either injects a fault OR delegates to
 /// `pager_read`.
 public fn dst_pager_read(p: &mut DstWrappedPager, page_no: Int) -> Result<PageFrame, PagerError> {
-    if p.crashed { return Err(crashed_error()); }
+    if p.crashed { return Result.Err(crashed_error()); }
     p.op_counter = p.op_counter + 1;
     match consult_schedule(p) {
-        Some(f) => {
+        Maybe.Some(f) => {
             let err = fault_to_pager_error(&f);
             record_fault(p, "read".clone(), page_no, &f);
-            Err(err)
+            Result.Err(err)
         }
-        None => pager_read(&mut p.inner, page_no),
+        Maybe.None => pager_read(&mut p.inner, page_no),
     }
 }
 
 /// Write a page through the wrapper.  Same fault-check semantics
 /// as `dst_pager_read`.
 public fn dst_pager_write(p: &mut DstWrappedPager, frame: &PageFrame) -> Result<(), PagerError> {
-    if p.crashed { return Err(crashed_error()); }
+    if p.crashed { return Result.Err(crashed_error()); }
     p.op_counter = p.op_counter + 1;
     match consult_schedule(p) {
-        Some(f) => {
+        Maybe.Some(f) => {
             let err = fault_to_pager_error(&f);
             record_fault(p, "write".clone(), frame.page_no, &f);
-            Err(err)
+            Result.Err(err)
         }
-        None => pager_write(&mut p.inner, frame),
+        Maybe.None => pager_write(&mut p.inner, frame),
     }
 }
 
 /// Flush dirty pages through the wrapper.
 public fn dst_pager_flush(p: &mut DstWrappedPager) -> Result<(), PagerError> {
-    if p.crashed { return Err(crashed_error()); }
+    if p.crashed { return Result.Err(crashed_error()); }
     p.op_counter = p.op_counter + 1;
     match consult_schedule(p) {
-        Some(f) => {
+        Maybe.Some(f) => {
             let err = fault_to_pager_error(&f);
             record_fault(p, "flush".clone(), -1, &f);
-            Err(err)
+            Result.Err(err)
         }
-        None => pager_flush(&mut p.inner),
+        Maybe.None => pager_flush(&mut p.inner),
     }
 }
 
 /// Commit through the wrapper.
 public fn dst_pager_commit(p: &mut DstWrappedPager) -> Result<(), PagerError> {
-    if p.crashed { return Err(crashed_error()); }
+    if p.crashed { return Result.Err(crashed_error()); }
     p.op_counter = p.op_counter + 1;
     match consult_schedule(p) {
-        Some(f) => {
+        Maybe.Some(f) => {
             let err = fault_to_pager_error(&f);
             record_fault(p, "commit".clone(), -1, &f);
-            Err(err)
+            Result.Err(err)
         }
-        None => pager_commit(&mut p.inner),
+        Maybe.None => pager_commit(&mut p.inner),
     }
 }
 
@@ -338,10 +338,10 @@ public fn dst_pager_close(p: &mut DstWrappedPager) -> Result<(), PagerError> {
 public fn dst_pager_reopen_after_crash(p: &mut DstWrappedPager, page_size: Int) -> Result<(), PagerError> {
     let _ = pager_close(&mut p.inner);
     let fresh = match pager_open_memory_with_size(page_size) {
-        Ok(np) => np,
-        Err(e) => { return Err(e); }
+        Result.Ok(np) => np,
+        Result.Err(e) => { return Result.Err(e); }
     };
     p.inner = fresh;
     p.crashed = false;  // post-recovery the wrapper accepts ops again
-    Ok(())
+    Result.Ok(())
 }

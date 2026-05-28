@@ -92,7 +92,7 @@ public fn verify(
     params:        &ProofParams,
 ) -> Result<(), VerifierError> {
     if public_inputs.len() != vk.air.public_input_arity {
-        return Err(PublicInputArity {
+        return Result.Err(PublicInputArity {
             expected: vk.air.public_input_arity,
             got: public_inputs.len(),
         });
@@ -101,11 +101,11 @@ public fn verify(
         "verum.crypto.stark_verify",
         vk, proof, public_inputs, params
     ) {
-        VerifyResult.Accepted        => Ok(()),
-        VerifyResult.Rejected        => Err(VerificationFailed),
-        VerifyResult.Malformed(why)  => Err(MalformedProof(why)),
-        VerifyResult.AirMismatch     => Err(AirVkMismatch),
-        VerifyResult.Backend(why)    => Err(BackendError(why)),
+        VerifyResult.Accepted        => Result.Ok(()),
+        VerifyResult.Rejected        => Result.Err(VerificationFailed),
+        VerifyResult.Malformed(why)  => Result.Err(MalformedProof(why)),
+        VerifyResult.AirMismatch     => Result.Err(AirVkMismatch),
+        VerifyResult.Backend(why)    => Result.Err(BackendError(why)),
     }
 }
 
@@ -118,17 +118,17 @@ public fn verify_batch(
     params:             &ProofParams,
 ) -> Result<(), VerifierError> {
     if proofs_with_inputs.is_empty() {
-        return Ok(());
+        return Result.Ok(());
     }
     match @intrinsic(
         "verum.crypto.stark_verify_batch",
         vk, proofs_with_inputs, params
     ) {
-        VerifyResult.Accepted        => Ok(()),
-        VerifyResult.Rejected        => Err(VerificationFailed),
-        VerifyResult.Malformed(why)  => Err(MalformedProof(why)),
-        VerifyResult.AirMismatch     => Err(AirVkMismatch),
-        VerifyResult.Backend(why)    => Err(BackendError(why)),
+        VerifyResult.Accepted        => Result.Ok(()),
+        VerifyResult.Rejected        => Result.Err(VerificationFailed),
+        VerifyResult.Malformed(why)  => Result.Err(MalformedProof(why)),
+        VerifyResult.AirMismatch     => Result.Err(AirVkMismatch),
+        VerifyResult.Backend(why)    => Result.Err(BackendError(why)),
     }
 }
 

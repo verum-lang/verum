@@ -48,22 +48,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "AWS Signature V4 canonical-request + signing-key derivation + signature".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.storage.s3.signing;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.hex.{encode as hex_encode};
 mount security.hash.sha256.{Sha256, digest};
@@ -77,7 +77,7 @@ mount security.mac.hmac.{hmac_sha256};
 public type AwsCredentials is {
     access_key_id:     Text,
     secret_access_key: Text,
-    /// IAM-role / STS session token. None for permanent IAM-user keys.
+    /// IAM-role / STS session token. Maybe.None for permanent IAM-user keys.
     session_token:     Maybe<Text>,
 };
 
@@ -132,7 +132,7 @@ pub fn sign_request(
     let mut signing_headers: Map<Text, Text> = req_headers.clone();
     signing_headers.insert("x-amz-date".to_text(), now_iso8601_basic.clone());
     signing_headers.insert("x-amz-content-sha256".to_text(), body_hash.clone());
-    if let Some(tok) = &creds.session_token {
+    if let Maybe.Some(tok) = &creds.session_token {
         signing_headers.insert("x-amz-security-token".to_text(), tok.clone());
     }
     let (canonical_headers, signed_headers) = canonical_headers_and_signed(&signing_headers);
@@ -158,10 +158,10 @@ pub fn sign_request(
     out.insert("authorization".to_text(),         authz);
     out.insert("x-amz-date".to_text(),            now_iso8601_basic.clone());
     out.insert("x-amz-content-sha256".to_text(),  body_hash);
-    if let Some(tok) = &creds.session_token {
+    if let Maybe.Some(tok) = &creds.session_token {
         out.insert("x-amz-security-token".to_text(), tok.clone());
     }
-    Ok(SignedHeaders { headers: out })
+    Result.Ok(SignedHeaders { headers: out })
 }
 
 // =============================================================================
@@ -183,7 +183,7 @@ pub fn presign(
     expires_seconds:   Int,
 ) -> Result<List<(Text, Text)>, Text> {
     if expires_seconds < 1 || expires_seconds > 604800 {
-        return Err(f"presign: expires_seconds {expires_seconds} out of range [1, 604800]");
+        return Result.Err(f"presign: expires_seconds {expires_seconds} out of range [1, 604800]");
     }
     let date_8 = now_iso8601_basic.byte_substring(0, 8);
     let credential_scope = f"{date_8}/{region}/{service}/aws4_request";
@@ -200,7 +200,7 @@ pub fn presign(
     q.push(("X-Amz-Date".to_text(), now_iso8601_basic.clone()));
     q.push(("X-Amz-Expires".to_text(), f"{expires_seconds}"));
     q.push(("X-Amz-SignedHeaders".to_text(), "host".to_text()));
-    if let Some(tok) = &creds.session_token {
+    if let Maybe.Some(tok) = &creds.session_token {
         q.push(("X-Amz-Security-Token".to_text(), tok.clone()));
     }
 
@@ -222,7 +222,7 @@ pub fn presign(
     let signature = hex_encode(&hmac_sha256(&signing_key, string_to_sign.as_bytes()));
 
     q.push(("X-Amz-Signature".to_text(), signature));
-    Ok(q)
+    Result.Ok(q)
 }
 
 // =============================================================================

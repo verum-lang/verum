@@ -32,7 +32,7 @@ public type TableInfoRow is {
     /// Declared type — empty string for typeless columns.
     declared_type: Text,
     not_null: Bool,
-    /// DEFAULT clause text; None ⇒ no default.
+    /// DEFAULT clause text; Maybe.None ⇒ no default.
     default_value: Maybe<Text>,
     /// 0 = not part of PK, 1+ = column position in composite PK.
     pk_position: Int,
@@ -94,7 +94,7 @@ implement TableInfoSet {
         while i < self.rows.len() {
             if self.rows[i].name == *name {
                 let r = &self.rows[i];
-                return Some(TableInfoRow {
+                return Maybe.Some(TableInfoRow {
                     cid: r.cid,
                     name: r.name.clone(),
                     declared_type: r.declared_type.clone(),
@@ -105,13 +105,13 @@ implement TableInfoSet {
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 }
 
 fn clone_default(d: &Maybe<Text>) -> Maybe<Text> {
     match d {
-        Some(t) => Some(t.clone()),
-        None    => None,
+        Maybe.Some(t) => Maybe.Some(t.clone()),
+        Maybe.None    => Maybe.None,
     }
 }

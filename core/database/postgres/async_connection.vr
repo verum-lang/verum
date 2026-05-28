@@ -60,7 +60,7 @@
 module core.database.postgres.async_connection;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -197,7 +197,7 @@ public type AsyncPgConnection is {
     cancel_host: Text,
     cancel_port: Int,
     /// (process_id, secret_key) from the server's BackendKeyData
-    /// frame during handshake. `None` if the server didn't send
+    /// frame during handshake. `Maybe.None` if the server didn't send
     /// it — cancel_running_query will refuse with an explicit
     /// error.
     backend_key: Maybe<(Int, Int)>,
@@ -248,7 +248,7 @@ implement AsyncPgConnection {
     /// Returns an error if BackendKeyData wasn't captured during
     /// handshake.
     public async fn cancel_running_query(&self) -> Result<(), DbError> {
-        self.cancel_running_query_with_local_bind(None).await
+        self.cancel_running_query_with_local_bind(Maybe.None).await
     }
 
     /// Sibling that pre-binds the cancel socket's source IP via
@@ -261,9 +261,9 @@ implement AsyncPgConnection {
         bind_local: Maybe<core.net.tcp.SocketAddr>,
     ) -> Result<(), DbError> {
         let key = match self.backend_key {
-            Some(k) => k,
-            None => {
-                return Err(DbError.Adapter(AdapterSpecific {
+            Maybe.Some(k) => k,
+            Maybe.None => {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdPostgres,
                     code: "CANCEL_NO_KEY".clone(),
                     message: "BackendKeyData not captured during handshake — cancel impossible".clone(),
@@ -281,8 +281,8 @@ implement AsyncPgConnection {
             )
         });
         match jh.join().await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("cancel: blocking-pool join")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("cancel: blocking-pool join")),
         }
     }
 
@@ -330,12 +330,12 @@ implement AsyncPgConnection {
             sql: sql.clone(),
             reply: rs,
         }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("simple_query")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("simple_query")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("simple_query reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("simple_query reply")),
         }
     }
 
@@ -347,12 +347,12 @@ implement AsyncPgConnection {
             sql: sql.clone(),
             reply: rs,
         }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("execute")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("execute")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("execute reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("execute reply")),
         }
     }
 
@@ -361,12 +361,12 @@ implement AsyncPgConnection {
     public async fn ping(&self) -> Result<(), DbError> {
         let (rs, rr) = oneshot();
         match self.tx.send_async(ReqPing { reply: rs }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("ping")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("ping")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("ping reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("ping reply")),
         }
     }
 
@@ -382,21 +382,21 @@ implement AsyncPgConnection {
             sql: sql.clone(),
             reply: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("prepare")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("prepare")); }
         }
         match rr.await {
-            Ok(Ok(stmt)) => Ok(AsyncPgPreparedStatement {
+            Result.Ok(Result.Ok(stmt)) => Result.Ok(AsyncPgPreparedStatement {
                 inner: stmt,
             }),
-            Ok(Err(e))   => Err(e),
-            Err(_)       => Err(actor_dropped("prepare reply")),
+            Result.Ok(Result.Err(e))   => Result.Err(e),
+            Result.Err(_)       => Result.Err(actor_dropped("prepare reply")),
         }
     }
 
     /// Execute a previously-prepared statement with bound params.
-    /// `params` is one entry per `$N` placeholder; `None` for
-    /// SQL NULL, `Some(bytes)` for the wire-formatted value.
+    /// `params` is one entry per `$N` placeholder; `Maybe.None` for
+    /// SQL NULL, `Maybe.Some(bytes)` for the wire-formatted value.
     public async fn execute_prepared(
         &self,
         stmt: &AsyncPgPreparedStatement,
@@ -408,12 +408,12 @@ implement AsyncPgConnection {
             params: params,
             reply: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("execute_prepared")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("execute_prepared")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("execute_prepared reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("execute_prepared reply")),
         }
     }
 
@@ -431,12 +431,12 @@ implement AsyncPgConnection {
             typed_params: typed_params,
             reply: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("execute_prepared_typed")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("execute_prepared_typed")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("execute_prepared_typed reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("execute_prepared_typed reply")),
         }
     }
 
@@ -449,12 +449,12 @@ implement AsyncPgConnection {
             stmt: stmt.inner,
             reply: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("close_prepared")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("close_prepared")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("close_prepared reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("close_prepared reply")),
         }
     }
 
@@ -465,18 +465,18 @@ implement AsyncPgConnection {
     public async fn close(&self) -> Result<(), DbError> {
         let (rs, rr) = oneshot();
         match self.tx.send_async(ReqShutdown { reply: rs }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("close")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("close")); }
         }
         let _ = rr.await;     // clean response
         // Take the JoinHandle and await it (best-effort — actor
         // may have already exited).
         let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
         match guard.take() {
-            Some(jh) => { let _ = jh.join().await; }
-            None     => {}
+            Maybe.Some(jh) => { let _ = jh.join().await; }
+            Maybe.None     => {}
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -502,8 +502,8 @@ public async fn connect(
         core.database.postgres.connection.connect(&cfg_owned)
     });
     let conn = match conn_jh.join().await {
-        Ok(r)  => r?,
-        Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
+        Result.Ok(r)  => r?,
+        Result.Err(_) => { return Result.Err(actor_dropped("connect: blocking-pool join")); }
     };
 
     // Snapshot connect endpoint + BackendKeyData BEFORE handing
@@ -520,9 +520,9 @@ public async fn connect(
         run_actor(conn, rx);
     });
 
-    Ok(AsyncPgConnection {
+    Result.Ok(AsyncPgConnection {
         tx: tx,
-        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        join: Shared.new(sync.mutex.Mutex.new(Maybe.Some(join))),
         cancel_host: cancel_host,
         cancel_port: cancel_port,
         backend_key: backend_key,
@@ -547,8 +547,8 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
     let mut cache = PgStmtCache.new();
     loop {
         let req = match rx.recv() {
-            Some(r) => r,
-            None    => {
+            Maybe.Some(r) => r,
+            Maybe.None    => {
                 // Every sender dropped — shut down. Best-effort
                 // drain of cached statements before disposing the
                 // socket, mirroring the explicit `ReqShutdown` path.
@@ -572,53 +572,53 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
             }
             ReqPing { reply } => {
                 let r = match conn.simple_query(&"SELECT 1".clone()) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             ReqBeginTx { begin_sql, reply } => {
                 let r = match conn.execute(&begin_sql) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             ReqCommitTx { reply } => {
                 let r = match conn.execute(&"COMMIT".clone()) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             ReqRollbackTx { reply } => {
                 let r = match conn.execute(&"ROLLBACK".clone()) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             ReqSavepoint { name, reply } => {
                 let sql = f"SAVEPOINT {name}";
                 let r = match conn.execute(&sql) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             ReqReleaseSavepoint { name, reply } => {
                 let sql = f"RELEASE SAVEPOINT {name}";
                 let r = match conn.execute(&sql) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             ReqRollbackToSavepoint { name, reply } => {
                 let sql = f"ROLLBACK TO SAVEPOINT {name}";
                 let r = match conn.execute(&sql) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
@@ -631,18 +631,18 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
             ReqPrepare { sql, reply } => {
                 let fp = core.database.postgres.pg_stmt_cache.fingerprint(&sql);
                 let r = match cache.lookup(fp) {
-                    Some(cached) => Ok(cached),
-                    None => {
+                    Maybe.Some(cached) => Result.Ok(cached),
+                    Maybe.None => {
                         match conn.prepare(&sql) {
-                            Ok(stmt) => {
+                            Result.Ok(stmt) => {
                                 let evicted = cache.insert(fp, clone_prepared(&stmt));
                                 match evicted {
-                                    Some(e) => { let _ = conn.close_prepared(&e); }
-                                    None    => {}
+                                    Maybe.Some(e) => { let _ = conn.close_prepared(&e); }
+                                    Maybe.None    => {}
                                 }
-                                Ok(stmt)
+                                Result.Ok(stmt)
                             }
-                            Err(e) => Err(e),
+                            Result.Err(e) => Result.Err(e),
                         }
                     }
                 };
@@ -696,17 +696,17 @@ fn run_copy_in_subloop(
     ack: OneshotSender<Result<(), DbError>>,
 ) {
     match conn.start_copy_in_session(sql) {
-        Ok(())  => { let _ = ack.send(Ok(())); }
-        Err(e)  => {
-            let _ = ack.send(Err(e));
+        Result.Ok(())  => { let _ = ack.send(Result.Ok(())); }
+        Result.Err(e)  => {
+            let _ = ack.send(Result.Err(e));
             return;
         }
     }
 
     loop {
         let chunk = match chunk_rx.recv() {
-            Some(c) => c,
-            None    => {
+            Maybe.Some(c) => c,
+            Maybe.None    => {
                 // Channel closed without an explicit Done/Cancel —
                 // writer dropped. Best-effort cancel on the wire.
                 let _ = conn.cancel_copy_in_session(&"writer dropped".clone());
@@ -716,8 +716,8 @@ fn run_copy_in_subloop(
         match chunk {
             CicBytes(b) => {
                 match conn.write_copy_in_chunk(b.as_slice()) {
-                    Ok(())  => {}
-                    Err(_)  => {
+                    Result.Ok(())  => {}
+                    Result.Err(_)  => {
                         // Wire failed mid-write — try to drain.
                         let _ = conn.cancel_copy_in_session(&"write failed".clone());
                         return;
@@ -749,21 +749,21 @@ fn run_copy_out_subloop(
     ack: OneshotSender<Result<(), DbError>>,
 ) {
     match conn.start_copy_out_session(sql) {
-        Ok(())  => { let _ = ack.send(Ok(())); }
-        Err(e)  => {
-            let _ = ack.send(Err(e));
+        Result.Ok(())  => { let _ = ack.send(Result.Ok(())); }
+        Result.Err(e)  => {
+            let _ = ack.send(Result.Err(e));
             return;
         }
     }
 
     loop {
         match conn.read_copy_out_chunk() {
-            Ok(Some(bytes)) => {
+            Result.Ok(Maybe.Some(bytes)) => {
                 let _ = chunk_tx.send(
                     core.database.postgres.async_copy.CoeBytes(bytes),
                 );
             }
-            Ok(None) => {
+            Result.Ok(Maybe.None) => {
                 // CopyDone observed — drain to RFQ for the row count.
                 let r = conn.finish_copy_out_session();
                 let _ = chunk_tx.send(
@@ -771,9 +771,9 @@ fn run_copy_out_subloop(
                 );
                 return;
             }
-            Err(e) => {
+            Result.Err(e) => {
                 let _ = chunk_tx.send(
-                    core.database.postgres.async_copy.CoeDone(Err(e)),
+                    core.database.postgres.async_copy.CoeDone(Result.Err(e)),
                 );
                 return;
             }

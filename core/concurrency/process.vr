@@ -386,8 +386,8 @@ fn name_eq_under_env(
     env_b: &Map<Text, Int>,
 ) -> Bool {
     match (env_a.get(a.clone()), env_b.get(b.clone())) {
-        (Some(la), Some(lb)) => la == lb,
-        (None, None)         => a == b,
+        (Maybe.Some(la), Maybe.Some(lb)) => la == lb,
+        (Maybe.None, Maybe.None)         => a == b,
         _                    => false,
     }
 }
@@ -401,8 +401,8 @@ fn clone_env(env: &Map<Text, Int>) -> Map<Text, Int> {
     let mut iter = env.iter();
     loop {
         match iter.next() {
-            Some((k, v)) => { let _ = out.insert(k.clone(), *v); },
-            None         => break,
+            Maybe.Some((k, v)) => { let _ = out.insert(k.clone(), *v); },
+            Maybe.None         => break,
         }
     }
     out

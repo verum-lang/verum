@@ -182,7 +182,7 @@ public fn encode_extensions_block(exts: &List<Extension>, out: &mut List<Byte>) 
             encode_extension(&exts[i], b)?;
             i = i + 1;
         }
-        Ok(())
+        Result.Ok(())
     })
 }
 
@@ -199,11 +199,11 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
                         let name_bytes = names[i].host_name.as_bytes();
                         vec_u16(b2, |b3| {
                             put_bytes(b3, name_bytes);
-                            Ok(())
+                            Result.Ok(())
                         })?;
                         i = i + 1;
                     }
-                    Ok(())
+                    Result.Ok(())
                 })
             })
         },
@@ -217,7 +217,7 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
                         put_u16(b2, groups[i].to_u16());
                         i = i + 1;
                     }
-                    Ok(())
+                    Result.Ok(())
                 })
             })
         },
@@ -234,10 +234,10 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
                 vec_u16(b, |b2| {
                     let mut i: Int = 0;
                     while i < protocols.len() {
-                        vec_u8(b2, |b3| { put_bytes(b3, protocols[i].as_slice()); Ok(()) })?;
+                        vec_u8(b2, |b3| { put_bytes(b3, protocols[i].as_slice()); Result.Ok(()) })?;
                         i = i + 1;
                     }
-                    Ok(())
+                    Result.Ok(())
                 })
             })
         },
@@ -251,7 +251,7 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
                         put_u16(b2, versions[i].to_u16());
                         i = i + 1;
                     }
-                    Ok(())
+                    Result.Ok(())
                 })
             })
         },
@@ -260,7 +260,7 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
             put_u16(out, EXT_SUPPORTED_VERSIONS);
             vec_u16(out, |b| {
                 put_u16(b, selected.to_u16());
-                Ok(())
+                Result.Ok(())
             })
         },
 
@@ -271,10 +271,10 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
                     let mut i: Int = 0;
                     while i < shares.len() {
                         put_u16(b2, shares[i].group.to_u16());
-                        vec_u16(b2, |b3| { put_bytes(b3, shares[i].key_exchange.as_slice()); Ok(()) })?;
+                        vec_u16(b2, |b3| { put_bytes(b3, shares[i].key_exchange.as_slice()); Result.Ok(()) })?;
                         i = i + 1;
                     }
-                    Ok(())
+                    Result.Ok(())
                 })
             })
         },
@@ -283,7 +283,7 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
             put_u16(out, EXT_KEY_SHARE);
             vec_u16(out, |b| {
                 put_u16(b, share.group.to_u16());
-                vec_u16(b, |b2| { put_bytes(b2, share.key_exchange.as_slice()); Ok(()) })
+                vec_u16(b, |b2| { put_bytes(b2, share.key_exchange.as_slice()); Result.Ok(()) })
             })
         },
 
@@ -291,7 +291,7 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
             put_u16(out, EXT_KEY_SHARE);
             vec_u16(out, |b| {
                 put_u16(b, selected_group.to_u16());
-                Ok(())
+                Result.Ok(())
             })
         },
 
@@ -301,7 +301,7 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
                 vec_u8(b, |b2| {
                     let mut i: Int = 0;
                     while i < modes.len() { put_u8(b2, modes[i].to_u8()); i = i + 1; }
-                    Ok(())
+                    Result.Ok(())
                 })
             })
         },
@@ -317,13 +317,13 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
                     put_u32(out, *max_early_data_size);
                 },
             }
-            Ok(())
+            Result.Ok(())
         },
 
         Extension.CookieExt { cookie } => {
             put_u16(out, EXT_COOKIE);
             vec_u16(out, |b| {
-                vec_u16(b, |b2| { put_bytes(b2, cookie.as_slice()); Ok(()) })
+                vec_u16(b, |b2| { put_bytes(b2, cookie.as_slice()); Result.Ok(()) })
             })
         },
 
@@ -336,30 +336,30 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
                 put_u8(b, 1_u8);
                 put_u16(b, 0_u16);
                 put_u16(b, 0_u16);
-                Ok(())
+                Result.Ok(())
             })
         },
 
         Extension.QuicTransportParametersExt { params } => {
             put_u16(out, EXT_QUIC_TRANSPORT_PARAMETERS);
-            vec_u16(out, |b| { put_bytes(b, params.as_slice()); Ok(()) })
+            vec_u16(out, |b| { put_bytes(b, params.as_slice()); Result.Ok(()) })
         },
 
         Extension.RecordSizeLimitExt { limit } => {
             put_u16(out, EXT_RECORD_SIZE_LIMIT);
-            vec_u16(out, |b| { put_u16(b, *limit); Ok(()) })
+            vec_u16(out, |b| { put_u16(b, *limit); Result.Ok(()) })
         },
 
         Extension.PostHandshakeAuthExt => {
             // RFC 8446 §4.6.2 — zero-length body.
             put_u16(out, EXT_POST_HANDSHAKE_AUTH);
             put_u16(out, 0_u16);
-            Ok(())
+            Result.Ok(())
         },
 
         Extension.Unknown { ext_type, data } => {
             put_u16(out, *ext_type);
-            vec_u16(out, |b| { put_bytes(b, data.as_slice()); Ok(()) })
+            vec_u16(out, |b| { put_bytes(b, data.as_slice()); Result.Ok(()) })
         },
     }
 }
@@ -377,7 +377,7 @@ fn encode_sig_schemes_ext(
                 put_u16(b2, schemes[i].to_u16());
                 i = i + 1;
             }
-            Ok(())
+            Result.Ok(())
         })
     })
 }
@@ -406,7 +406,7 @@ public fn decode_extensions_block(
         let ext = decode_extension(&mut sub, ctx.clone())?;
         out.push(ext);
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 public fn decode_extension(r: &mut Tls13HandshakeReader, ctx: ExtensionContext) -> Result<Extension, CodecError> {
@@ -554,7 +554,7 @@ public fn decode_extension(r: &mut Tls13HandshakeReader, ctx: ExtensionContext) 
             Extension.Unknown { ext_type: ext_type, data: data }
         },
     };
-    Ok(result)
+    Result.Ok(result)
 }
 
 fn take_sig_scheme_list(r: &mut Tls13HandshakeReader) -> Result<List<SignatureScheme>, CodecError> {
@@ -563,5 +563,5 @@ fn take_sig_scheme_list(r: &mut Tls13HandshakeReader) -> Result<List<SignatureSc
     while !list.is_at_end() {
         out.push(SignatureScheme.from_u16(list.take_u16()?));
     }
-    Ok(out)
+    Result.Ok(out)
 }

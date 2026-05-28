@@ -35,7 +35,7 @@
 module core.database.mysql.async_prepared_session;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
@@ -96,18 +96,18 @@ implement AsyncMysqlPreparedSession {
     ) -> Result<AsyncMysqlPreparedStatement, DbError> {
         let fp = compute_fingerprint(sql);
         match self.cache.lookup(fp) {
-            Some(stmt) => Ok(AsyncMysqlPreparedStatement { inner: stmt }),
-            None => {
+            Maybe.Some(stmt) => Result.Ok(AsyncMysqlPreparedStatement { inner: stmt }),
+            Maybe.None => {
                 let astmt = conn.prepare(sql).await?;
                 let evicted = self.cache.insert(fp, clone_stmt(astmt.inner()));
                 match evicted {
-                    Some(old) => {
+                    Maybe.Some(old) => {
                         let evicted_handle = AsyncMysqlPreparedStatement { inner: old };
                         let _ = conn.close_prepared(evicted_handle).await;
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
-                Ok(astmt)
+                Result.Ok(astmt)
             }
         }
     }
@@ -124,14 +124,14 @@ implement AsyncMysqlPreparedSession {
         let stmt = self.prepare_cached(conn, sql).await?;
         let params_clone = params.clone();
         match conn.execute_prepared(&stmt, params).await {
-            Ok(r)  => Ok(r),
-            Err(e) => {
+            Result.Ok(r)  => Result.Ok(r),
+            Result.Err(e) => {
                 if is_unknown_stmt_handler(&e) {
                     let _ = self.cache.invalidate(fp);
                     let fresh = self.prepare_cached(conn, sql).await?;
                     conn.execute_prepared(&fresh, params_clone).await
                 } else {
-                    Err(e)
+                    Result.Err(e)
                 }
             }
         }

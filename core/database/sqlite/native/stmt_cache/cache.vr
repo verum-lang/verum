@@ -133,24 +133,24 @@ implement StatementCache {
     fn find_idx(&self, key: &CacheKey) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.entries.len() {
-            if keys_equal(&self.entries[i].key, key) { return Some(i); }
+            if keys_equal(&self.entries[i].key, key) { return Maybe.Some(i); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
-    /// Look up by SQL. On hit returns Some(program_id); on miss None.
+    /// Look up by SQL. On hit returns Maybe.Some(program_id); on miss Maybe.None.
     public fn lookup(&mut self, sql: &Text, now_ns: Int64) -> Maybe<Int> {
         let key = key_for(sql);
         match self.find_idx(&key) {
-            Some(i) => {
+            Maybe.Some(i) => {
                 self.entries[i].touch(now_ns);
                 self.stats.hits = self.stats.hits + 1_i64;
-                Some(self.entries[i].program_id)
+                Maybe.Some(self.entries[i].program_id)
             }
-            None => {
+            Maybe.None => {
                 self.stats.misses = self.stats.misses + 1_i64;
-                None
+                Maybe.None
             }
         }
     }
@@ -160,18 +160,18 @@ implement StatementCache {
         let key = key_for(sql);
         // If already present — overwrite.
         match self.find_idx(&key) {
-            Some(i) => {
+            Maybe.Some(i) => {
                 self.entries[i].program_id = program_id;
                 self.entries[i].touch(now_ns);
-                return Ok(());
+                return Result.Ok(());
             }
-            None => {}
+            Maybe.None => {}
         }
         if self.entries.len() >= self.max_entries {
             // Evict.
             let victim = (&*self.policy).pick_victim(&self.entries);
             match victim {
-                Some(idx) => {
+                Maybe.Some(idx) => {
                     let mut new_entries: List<CachedStatement> = List.new();
                     let mut k: Int = 0;
                     while k < self.entries.len() {
@@ -183,39 +183,39 @@ implement StatementCache {
                     self.entries = new_entries;
                     self.stats.evictions = self.stats.evictions + 1_i64;
                 }
-                None => { return Err(CeNoSpace); }
+                Maybe.None => { return Result.Err(CeNoSpace); }
             }
         }
         self.entries.push(entry_new(key, program_id, now_ns));
-        Ok(())
+        Result.Ok(())
     }
 
     /// Pin a cached entry — pinned entries are never evicted.
     public fn pin(&mut self, sql: &Text) -> Bool {
         let key = key_for(sql);
         match self.find_idx(&key) {
-            Some(i) => {
+            Maybe.Some(i) => {
                 if !self.entries[i].is_pinned {
                     self.entries[i].pin();
                     self.stats.pinned_count = self.stats.pinned_count + 1;
                 }
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
     public fn unpin(&mut self, sql: &Text) -> Bool {
         let key = key_for(sql);
         match self.find_idx(&key) {
-            Some(i) => {
+            Maybe.Some(i) => {
                 if self.entries[i].is_pinned {
                     self.entries[i].unpin();
                     self.stats.pinned_count = self.stats.pinned_count - 1;
                 }
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 

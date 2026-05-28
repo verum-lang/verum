@@ -326,22 +326,22 @@ public fn decode(bytes: &[Byte]) -> Result<MsgPackValue, MsgPackError> {
     let mut pos: Int = 0;
     let v = decode_item(bytes, &mut pos, 0)?;
     if pos != bytes.len() {
-        return Err(MsgPackError.TrailingBytes(bytes.len() - pos));
+        return Result.Err(MsgPackError.TrailingBytes(bytes.len() - pos));
     }
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<MsgPackValue, MsgPackError> {
     if depth > MAX_MSGPACK_NESTING {
-        return Err(MsgPackError.NestingTooDeep);
+        return Result.Err(MsgPackError.NestingTooDeep);
     }
-    if *pos >= bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    if *pos >= bytes.len() { return Result.Err(MsgPackError.Truncated(*pos)); }
     let tag = bytes[*pos];
     *pos = *pos + 1;
 
     // positive fixint (0x00 .. 0x7F).
     if tag < 0x80_u8 {
-        return Ok(MsgPackValue.PositiveInt(tag as UInt64));
+        return Result.Ok(MsgPackValue.PositiveInt(tag as UInt64));
     }
     // fixmap (0x80 .. 0x8F).
     if tag >= 0x80_u8 && tag <= 0x8F_u8 {
@@ -361,14 +361,14 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<MsgPackValue
     // negative fixint (0xE0 .. 0xFF).
     if tag >= 0xE0_u8 {
         let signed: Int = (tag as Int) - 256;
-        return Ok(MsgPackValue.NegativeInt(signed));
+        return Result.Ok(MsgPackValue.NegativeInt(signed));
     }
 
     // Other specific tags.
     match tag {
-        0xC0_u8 => Ok(MsgPackValue.Nil),
-        0xC2_u8 => Ok(MsgPackValue.Bool(false)),
-        0xC3_u8 => Ok(MsgPackValue.Bool(true)),
+        0xC0_u8 => Result.Ok(MsgPackValue.Nil),
+        0xC2_u8 => Result.Ok(MsgPackValue.Bool(false)),
+        0xC3_u8 => Result.Ok(MsgPackValue.Bool(true)),
 
         // bin 8/16/32
         0xC4_u8 => { let n = read_u8(bytes, pos)? as Int; decode_bin(bytes, pos, n) },
@@ -383,40 +383,40 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<MsgPackValue
         // float 32/64
         0xCA_u8 => {
             let bits = read_u32_be(bytes, pos)?;
-            Ok(MsgPackValue.Float32(f32_bits_to_f64(bits)))
+            Result.Ok(MsgPackValue.Float32(f32_bits_to_f64(bits)))
         },
         0xCB_u8 => {
             let bits = read_u64_be(bytes, pos)?;
-            Ok(MsgPackValue.Float64(Float.from_bits(bits)))
+            Result.Ok(MsgPackValue.Float64(Float.from_bits(bits)))
         },
 
         // uint 8/16/32/64
-        0xCC_u8 => Ok(MsgPackValue.PositiveInt(read_u8(bytes, pos)? as UInt64)),
-        0xCD_u8 => Ok(MsgPackValue.PositiveInt(read_u16_be(bytes, pos)? as UInt64)),
-        0xCE_u8 => Ok(MsgPackValue.PositiveInt(read_u32_be(bytes, pos)? as UInt64)),
-        0xCF_u8 => Ok(MsgPackValue.PositiveInt(read_u64_be(bytes, pos)?)),
+        0xCC_u8 => Result.Ok(MsgPackValue.PositiveInt(read_u8(bytes, pos)? as UInt64)),
+        0xCD_u8 => Result.Ok(MsgPackValue.PositiveInt(read_u16_be(bytes, pos)? as UInt64)),
+        0xCE_u8 => Result.Ok(MsgPackValue.PositiveInt(read_u32_be(bytes, pos)? as UInt64)),
+        0xCF_u8 => Result.Ok(MsgPackValue.PositiveInt(read_u64_be(bytes, pos)?)),
 
         // int 8/16/32/64
         0xD0_u8 => {
             let b = read_u8(bytes, pos)? as Int;
             let signed = if b >= 128 { b - 256 } else { b };
-            Ok(MsgPackValue.NegativeInt(signed))
+            Result.Ok(MsgPackValue.NegativeInt(signed))
         },
         0xD1_u8 => {
             let v = read_u16_be(bytes, pos)? as Int;
             let signed = if v >= 0x8000 { v - 0x10000 } else { v };
-            Ok(MsgPackValue.NegativeInt(signed))
+            Result.Ok(MsgPackValue.NegativeInt(signed))
         },
         0xD2_u8 => {
             let v = read_u32_be(bytes, pos)?;
             let signed = if v >= 0x80000000_u32 {
                 (v as Int) - 0x100000000
             } else { v as Int };
-            Ok(MsgPackValue.NegativeInt(signed))
+            Result.Ok(MsgPackValue.NegativeInt(signed))
         },
         0xD3_u8 => {
             let v = read_u64_be(bytes, pos)?;
-            Ok(MsgPackValue.NegativeInt(v as Int))
+            Result.Ok(MsgPackValue.NegativeInt(v as Int))
         },
 
         // fixext 1/2/4/8/16
@@ -451,37 +451,37 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<MsgPackValue
             decode_map(bytes, pos, n, depth)
         },
 
-        _ => Err(MsgPackError.InvalidPrefix(tag)),
+        _ => Result.Err(MsgPackError.InvalidPrefix(tag)),
     }
 }
 
 fn decode_str(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, MsgPackError> {
     if n < 0 || n > MAX_MSGPACK_STRING_BYTES {
-        return Err(MsgPackError.StringTooLong { declared: n, limit: MAX_MSGPACK_STRING_BYTES });
+        return Result.Err(MsgPackError.StringTooLong { declared: n, limit: MAX_MSGPACK_STRING_BYTES });
     }
-    if *pos + n > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    if *pos + n > bytes.len() { return Result.Err(MsgPackError.Truncated(*pos)); }
     let mut buf: List<Byte> = [];
     let mut i: Int = 0;
     while i < n { buf.push(bytes[*pos + i]); i = i + 1; }
     *pos = *pos + n;
-    Ok(MsgPackValue.Str(Text.from_utf8_unchecked(buf.as_slice())))
+    Result.Ok(MsgPackValue.Str(Text.from_utf8_unchecked(buf.as_slice())))
 }
 
 fn decode_bin(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, MsgPackError> {
     if n < 0 || n > MAX_MSGPACK_BIN_BYTES {
-        return Err(MsgPackError.BinTooLong { declared: n, limit: MAX_MSGPACK_BIN_BYTES });
+        return Result.Err(MsgPackError.BinTooLong { declared: n, limit: MAX_MSGPACK_BIN_BYTES });
     }
-    if *pos + n > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    if *pos + n > bytes.len() { return Result.Err(MsgPackError.Truncated(*pos)); }
     let mut buf: List<Byte> = [];
     let mut i: Int = 0;
     while i < n { buf.push(bytes[*pos + i]); i = i + 1; }
     *pos = *pos + n;
-    Ok(MsgPackValue.Bin(buf))
+    Result.Ok(MsgPackValue.Bin(buf))
 }
 
 fn decode_array(bytes: &[Byte], pos: &mut Int, n: Int, depth: Int) -> Result<MsgPackValue, MsgPackError> {
     if n < 0 || n > MAX_MSGPACK_ARRAY_ITEMS {
-        return Err(MsgPackError.ArrayTooLarge { declared: n, limit: MAX_MSGPACK_ARRAY_ITEMS });
+        return Result.Err(MsgPackError.ArrayTooLarge { declared: n, limit: MAX_MSGPACK_ARRAY_ITEMS });
     }
     let mut items: List<MsgPackValue> = [];
     let mut i: Int = 0;
@@ -489,12 +489,12 @@ fn decode_array(bytes: &[Byte], pos: &mut Int, n: Int, depth: Int) -> Result<Msg
         items.push(decode_item(bytes, pos, depth + 1)?);
         i = i + 1;
     }
-    Ok(MsgPackValue.Array(items))
+    Result.Ok(MsgPackValue.Array(items))
 }
 
 fn decode_map(bytes: &[Byte], pos: &mut Int, n: Int, depth: Int) -> Result<MsgPackValue, MsgPackError> {
     if n < 0 || n > MAX_MSGPACK_MAP_ENTRIES {
-        return Err(MsgPackError.MapTooLarge { declared: n, limit: MAX_MSGPACK_MAP_ENTRIES });
+        return Result.Err(MsgPackError.MapTooLarge { declared: n, limit: MAX_MSGPACK_MAP_ENTRIES });
     }
     let mut entries: List<(MsgPackValue, MsgPackValue)> = [];
     let mut i: Int = 0;
@@ -504,14 +504,14 @@ fn decode_map(bytes: &[Byte], pos: &mut Int, n: Int, depth: Int) -> Result<MsgPa
         entries.push((k, v));
         i = i + 1;
     }
-    Ok(MsgPackValue.Map(entries))
+    Result.Ok(MsgPackValue.Map(entries))
 }
 
 fn decode_ext(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, MsgPackError> {
     if n < 0 || n > MAX_MSGPACK_EXT_BYTES {
-        return Err(MsgPackError.ExtTooLong { declared: n, limit: MAX_MSGPACK_EXT_BYTES });
+        return Result.Err(MsgPackError.ExtTooLong { declared: n, limit: MAX_MSGPACK_EXT_BYTES });
     }
-    if *pos + 1 + n > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    if *pos + 1 + n > bytes.len() { return Result.Err(MsgPackError.Truncated(*pos)); }
     let type_id_byte = bytes[*pos];
     *pos = *pos + 1;
     let type_id: Int = if type_id_byte >= 128_u8 {
@@ -523,7 +523,7 @@ fn decode_ext(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, Msg
     let mut i: Int = 0;
     while i < n { buf.push(bytes[*pos + i]); i = i + 1; }
     *pos = *pos + n;
-    Ok(MsgPackValue.Ext { type_id: type_id, data: buf })
+    Result.Ok(MsgPackValue.Ext { type_id: type_id, data: buf })
 }
 
 // =============================================================================
@@ -556,21 +556,21 @@ fn push_u64_be(dst: &mut List<Byte>, v: UInt64) {
 }
 
 fn read_u8(bytes: &[Byte], pos: &mut Int) -> Result<UInt8, MsgPackError> {
-    if *pos >= bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    if *pos >= bytes.len() { return Result.Err(MsgPackError.Truncated(*pos)); }
     let v = bytes[*pos];
     *pos = *pos + 1;
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn read_u16_be(bytes: &[Byte], pos: &mut Int) -> Result<UInt16, MsgPackError> {
-    if *pos + 2 > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    if *pos + 2 > bytes.len() { return Result.Err(MsgPackError.Truncated(*pos)); }
     let v = ((bytes[*pos] as UInt16) << 8_u16) | (bytes[*pos + 1] as UInt16);
     *pos = *pos + 2;
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn read_u32_be(bytes: &[Byte], pos: &mut Int) -> Result<UInt32, MsgPackError> {
-    if *pos + 4 > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    if *pos + 4 > bytes.len() { return Result.Err(MsgPackError.Truncated(*pos)); }
     let mut v: UInt32 = 0_u32;
     let mut i: Int = 0;
     while i < 4 {
@@ -578,11 +578,11 @@ fn read_u32_be(bytes: &[Byte], pos: &mut Int) -> Result<UInt32, MsgPackError> {
         i = i + 1;
     }
     *pos = *pos + 4;
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn read_u64_be(bytes: &[Byte], pos: &mut Int) -> Result<UInt64, MsgPackError> {
-    if *pos + 8 > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    if *pos + 8 > bytes.len() { return Result.Err(MsgPackError.Truncated(*pos)); }
     let mut v: UInt64 = 0_u64;
     let mut i: Int = 0;
     while i < 8 {
@@ -590,7 +590,7 @@ fn read_u64_be(bytes: &[Byte], pos: &mut Int) -> Result<UInt64, MsgPackError> {
         i = i + 1;
     }
     *pos = *pos + 8;
-    Ok(v)
+    Result.Ok(v)
 }
 
 // =============================================================================

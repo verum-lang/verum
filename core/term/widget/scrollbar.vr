@@ -88,8 +88,8 @@ implement Scrollbar {
             orientation: ScrollbarOrientation.Vertical,
             thumb_style: Style.new().fg(Color.White),
             track_style: Style.new().fg(Color.DarkGrey),
-            begin_symbol: Some("▲"),
-            end_symbol: Some("▼"),
+            begin_symbol: Maybe.Some("▲"),
+            end_symbol: Maybe.Some("▼"),
             thumb_symbol: "█",
             track_symbol: "░",
         }
@@ -101,8 +101,8 @@ implement Scrollbar {
             orientation: ScrollbarOrientation.Horizontal,
             thumb_style: Style.new().fg(Color.White),
             track_style: Style.new().fg(Color.DarkGrey),
-            begin_symbol: Some("◄"),
-            end_symbol: Some("►"),
+            begin_symbol: Maybe.Some("◄"),
+            end_symbol: Maybe.Some("►"),
             thumb_symbol: "█",
             track_symbol: "░",
         }
@@ -135,7 +135,7 @@ implement Scrollbar {
 
     /// Remove begin/end arrow symbols.
     public fn no_arrows(self) -> Scrollbar {
-        Scrollbar { begin_symbol: None, end_symbol: None, ..self }
+        Scrollbar { begin_symbol: Maybe.None, end_symbol: Maybe.None, ..self }
     }
 }
 
@@ -154,8 +154,8 @@ implement StatefulWidget for Scrollbar {
 
         if track_len < 1 { return; }
 
-        let begin_offset = match self.begin_symbol { Some(_) => 1, None => 0 };
-        let end_offset = match self.end_symbol { Some(_) => 1, None => 0 };
+        let begin_offset = match self.begin_symbol { Maybe.Some(_) => 1, Maybe.None => 0 };
+        let end_offset = match self.end_symbol { Maybe.Some(_) => 1, Maybe.None => 0 };
         let usable = track_len - begin_offset - end_offset;
 
         if usable < 1 { return; }
@@ -175,10 +175,10 @@ implement StatefulWidget for Scrollbar {
 
                 // Begin symbol
                 match self.begin_symbol {
-                    Some(ref sym) => {
+                    Maybe.Some(ref sym) => {
                         buf.get_mut(x, area.y).set_char(sym, self.track_style);
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
 
                 // Track and thumb
@@ -193,10 +193,10 @@ implement StatefulWidget for Scrollbar {
 
                 // End symbol
                 match self.end_symbol {
-                    Some(ref sym) => {
+                    Maybe.Some(ref sym) => {
                         buf.get_mut(x, area.bottom() - 1).set_char(sym, self.track_style);
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
             }
             Horizontal => {
@@ -204,10 +204,10 @@ implement StatefulWidget for Scrollbar {
 
                 // Begin symbol
                 match self.begin_symbol {
-                    Some(ref sym) => {
+                    Maybe.Some(ref sym) => {
                         buf.get_mut(area.x, y).set_char(sym, self.track_style);
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
 
                 // Track and thumb
@@ -222,10 +222,10 @@ implement StatefulWidget for Scrollbar {
 
                 // End symbol
                 match self.end_symbol {
-                    Some(ref sym) => {
+                    Maybe.Some(ref sym) => {
                         buf.get_mut(area.right() - 1, y).set_char(sym, self.track_style);
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
             }
         }

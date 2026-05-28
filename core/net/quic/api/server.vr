@@ -151,28 +151,28 @@ implement QuicAccepted {
     pub async fn next_bidi_stream(&mut self) -> Result<QuicStream, QuicServerError> {
         // Integration layer wires this into the connection's RecvStream
         // creation hook (RFC 9000 §3 stream opening).
-        Err(QuicServerError.Handshake(Text.from_str("pure-Verum server stream wire-up pending")))
+        Result.Err(QuicServerError.Handshake(Text.from_str("pure-Verum server stream wire-up pending")))
     }
 
     /// Await the next peer-initiated unidirectional stream (recv-only).
     pub async fn next_uni_stream(&mut self) -> Result<QuicRecvStream, QuicServerError> {
-        Err(QuicServerError.Handshake(Text.from_str("pure-Verum server stream wire-up pending")))
+        Result.Err(QuicServerError.Handshake(Text.from_str("pure-Verum server stream wire-up pending")))
     }
 
     /// Await the next inbound datagram.
     pub async fn next_datagram(&mut self) -> Result<List<Byte>, QuicServerError> {
-        Err(QuicServerError.Closed)
+        Result.Err(QuicServerError.Closed)
     }
 
     pub async fn send_datagram(&mut self, data: &[Byte]) -> Result<(), QuicServerError> {
         let _ = data;
-        Ok(())
+        Result.Ok(())
     }
 
     pub async fn close(&mut self, error_code: UInt64, reason: &Text) -> Result<(), QuicServerError> {
         let _ = error_code;
         let _ = reason;
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -191,7 +191,7 @@ implement QuicServer {
     pub async fn bind(addr_text: &Text, opts: QuicServerOptions) -> Result<QuicServer, QuicServerError> {
         let addr = SocketAddr.from_text(addr_text.clone())
             .map_err(|_| QuicServerError.Bind(Text.from_str(f"parse addr {addr_text}")))?;
-        Ok(QuicServer {
+        Result.Ok(QuicServer {
             local_addr: addr,
             opts:       opts,
         })
@@ -217,7 +217,7 @@ implement QuicServer {
 
         // The shape is carried here for the integration commit;
         // returning a Handshake stub keeps the SM well-typed.
-        Err(QuicServerError.Handshake(Text.from_str("accept pending transport wire-up")))
+        Result.Err(QuicServerError.Handshake(Text.from_str("accept pending transport wire-up")))
     }
 
     /// Convenience: run accept() in a loop, spawning `handler` for
@@ -228,16 +228,16 @@ implement QuicServer {
     {
         loop {
             match self.accept().await {
-                Ok(accepted) => {
+                Result.Ok(accepted) => {
                     core.async.nursery.spawn(async move {
                         handler(accepted);
                     });
                 },
-                Err(e) => {
+                Result.Err(e) => {
                     // Log + continue; only propagate truly fatal errors.
                     match e {
-                        QuicServerError.Bind(_)  => return Err(e),
-                        QuicServerError.Closed   => return Ok(()),
+                        QuicServerError.Bind(_)  => return Result.Err(e),
+                        QuicServerError.Closed   => return Result.Ok(()),
                         _ => {
                             // Transient — next iteration.
                         },

@@ -203,7 +203,7 @@ implement CountMinSketch {
     /// processes must share the 32-byte key explicitly.
     public fn merge(&mut self, other: &CountMinSketch) -> Result<(), CountMinError> {
         if self.width != other.width || self.depth != other.depth {
-            return Err(CountMinError.BadParameters(
+            return Result.Err(CountMinError.BadParameters(
                 Text.from("dimensions differ")));
         }
         let mut i: Int = 0;
@@ -213,7 +213,7 @@ implement CountMinSketch {
             i = i + 1;
         }
         self.total = self.total + other.total;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn width(&self) -> Int { self.width }

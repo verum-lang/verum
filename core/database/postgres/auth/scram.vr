@@ -49,7 +49,7 @@
 module core.database.postgres.auth.scram;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.security.hash.sha256.Sha256;
 mount core.security.mac.hmac.hmac_sha256;
@@ -255,9 +255,9 @@ fn parse_server_first(s: &Text) -> Result<ServerFirst, ScramError> {
     // Possibly preceded by "m=" extensions or other SASL fields — RFC
     // 5802 says extensions before mandatory fields are forbidden, so
     // we reject any unknown leading field for safety.
-    let mut nonce: Maybe<Text> = None;
-    let mut salt:  Maybe<List<Byte>> = None;
-    let mut iter:  Maybe<Int> = None;
+    let mut nonce: Maybe<Text> = Maybe.None;
+    let mut salt:  Maybe<List<Byte>> = Maybe.None;
+    let mut iter:  Maybe<Int> = Maybe.None;
     let mut start: Int = 0;
     let bytes = s.as_bytes();
     let n = bytes.len();
@@ -270,26 +270,26 @@ fn parse_server_first(s: &Text) -> Result<ServerFirst, ScramError> {
             let mut k = start;
             while k < i { field.push(bytes[k]); k = k + 1; }
             let field_text = match Text.from_bytes(&field) {
-                Ok(t) => t,
-                Err(_) => { return Err(SeMalformedServerMessage {
+                Result.Ok(t) => t,
+                Result.Err(_) => { return Result.Err(SeMalformedServerMessage {
                     stage: "server-first".clone(),
                     reason: "invalid utf8 field".clone(),
                 }); }
             };
             match consume_field(&field_text) {
-                Some((key, value)) => {
+                Maybe.Some((key, value)) => {
                     let kb = key.as_bytes();
                     if kb.len() == 1 && kb[0] == (0x72 as Byte) {        // 'r'
-                        nonce = Some(value);
+                        nonce = Maybe.Some(value);
                     } else if kb.len() == 1 && kb[0] == (0x73 as Byte) {  // 's'
                         match core.encoding.base64.decode(&value) {
-                            Ok(v)  => { salt = Some(v); }
-                            Err(_) => { return Err(SeBase64DecodeFailed); }
+                            Result.Ok(v)  => { salt = Maybe.Some(v); }
+                            Result.Err(_) => { return Result.Err(SeBase64DecodeFailed); }
                         }
                     } else if kb.len() == 1 && kb[0] == (0x69 as Byte) {  // 'i'
                         match parse_int_text(&value) {
-                            Some(v) => { iter = Some(v); }
-                            None    => { return Err(SeMalformedServerMessage {
+                            Maybe.Some(v) => { iter = Maybe.Some(v); }
+                            Maybe.None    => { return Result.Err(SeMalformedServerMessage {
                                 stage: "server-first".clone(),
                                 reason: "non-integer iterations".clone(),
                             }); }
@@ -297,24 +297,24 @@ fn parse_server_first(s: &Text) -> Result<ServerFirst, ScramError> {
                     }
                     // Unknown / extension key: ignored per RFC.
                 }
-                None => {}     // empty / malformed field: skip
+                Maybe.None => {}     // empty / malformed field: skip
             }
             start = i + 1;
         }
         i = i + 1;
     }
-    let nonce = match nonce { Some(v) => v, None => { return Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing r=".clone() }); } };
-    let salt = match salt   { Some(v) => v, None => { return Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing s=".clone() }); } };
-    let iter = match iter   { Some(v) => v, None => { return Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing i=".clone() }); } };
+    let nonce = match nonce { Maybe.Some(v) => v, Maybe.None => { return Result.Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing r=".clone() }); } };
+    let salt = match salt   { Maybe.Some(v) => v, Maybe.None => { return Result.Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing s=".clone() }); } };
+    let iter = match iter   { Maybe.Some(v) => v, Maybe.None => { return Result.Err(SeMalformedServerMessage { stage: "server-first".clone(), reason: "missing i=".clone() }); } };
     // Policy bounds. RFC 7677 recommends ≥ 4096 iterations for
     // SCRAM-SHA-256; values below that are an obvious downgrade.
     // Upper bound MAX_SCRAM_ITERATIONS prevents a hostile / MITM
     // server from forcing the client to compute a multi-million-
     // round PBKDF2 chain on every connection (CPU-DoS amplifier).
     if iter < MIN_SCRAM_ITERATIONS || iter > MAX_SCRAM_ITERATIONS {
-        return Err(SeBadIterationCount { iterations: iter });
+        return Result.Err(SeBadIterationCount { iterations: iter });
     }
-    Ok(ServerFirst { nonce: nonce, salt: salt, iterations: iter })
+    Result.Ok(ServerFirst { nonce: nonce, salt: salt, iterations: iter })
 }
 
 implement ScramClient {
@@ -327,14 +327,14 @@ implement ScramClient {
     ) -> Result<List<Byte>, ScramError> {
         match self.state {
             SsAwaitingChallenge => {}
-            _ => { return Err(SeMalformedServerMessage {
+            _ => { return Result.Err(SeMalformedServerMessage {
                 stage: "state".clone(),
                 reason: "unexpected SASL continue".clone(),
             }); }
         }
         let server_first_text = match Text.from_bytes(&bytes_to_list(server_data)) {
-            Ok(t)  => t,
-            Err(_) => { return Err(SeMalformedServerMessage {
+            Result.Ok(t)  => t,
+            Result.Err(_) => { return Result.Err(SeMalformedServerMessage {
                 stage: "server-first".clone(),
                 reason: "invalid utf8".clone(),
             }); }
@@ -344,7 +344,7 @@ implement ScramClient {
 
         // Validate that the server's nonce extends ours.
         if !text_starts_with(&parsed.nonce, &self.client_nonce) {
-            return Err(SeNonceMismatch);
+            return Result.Err(SeNonceMismatch);
         }
 
         // Compute SaltedPassword = PBKDF2(password, salt, iterations, 32)
@@ -355,8 +355,8 @@ implement ScramClient {
             parsed.iterations as UInt32,
             32,
         ) {
-            Ok(v)  => v,
-            Err(_) => { return Err(SeKdfFailed); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(SeKdfFailed); }
         };
         self.salted_password = salted.clone();
 
@@ -406,7 +406,7 @@ implement ScramClient {
         push_text(&mut out, &proof_b64);
 
         self.state = SsAwaitingFinal;
-        Ok(out)
+        Result.Ok(out)
     }
 }
 
@@ -421,14 +421,14 @@ implement ScramClient {
     ) -> Result<(), ScramError> {
         match self.state {
             SsAwaitingFinal => {}
-            _ => { return Err(SeMalformedServerMessage {
+            _ => { return Result.Err(SeMalformedServerMessage {
                 stage: "state".clone(),
                 reason: "unexpected SASL final".clone(),
             }); }
         }
         let final_text = match Text.from_bytes(&bytes_to_list(server_data)) {
-            Ok(t)  => t,
-            Err(_) => { return Err(SeMalformedServerMessage {
+            Result.Ok(t)  => t,
+            Result.Err(_) => { return Result.Err(SeMalformedServerMessage {
                 stage: "server-final".clone(),
                 reason: "invalid utf8".clone(),
             }); }
@@ -438,7 +438,7 @@ implement ScramClient {
         let bytes = trimmed.as_bytes();
         if bytes.len() < 2 {
             self.state = SsFailed;
-            return Err(SeMalformedServerMessage {
+            return Result.Err(SeMalformedServerMessage {
                 stage: "server-final".clone(),
                 reason: "too short".clone(),
             });
@@ -446,32 +446,32 @@ implement ScramClient {
         if bytes[0] == (0x65 as Byte) && bytes[1] == (0x3D as Byte) {
             // 'e=' — server reports a SCRAM error.
             self.state = SsFailed;
-            return Err(SeMalformedServerMessage {
+            return Result.Err(SeMalformedServerMessage {
                 stage: "server-final".clone(),
                 reason: "server reported SCRAM error".clone(),
             });
         }
         if !(bytes[0] == (0x76 as Byte) && bytes[1] == (0x3D as Byte)) {
             self.state = SsFailed;
-            return Err(SeMalformedServerMessage {
+            return Result.Err(SeMalformedServerMessage {
                 stage: "server-final".clone(),
                 reason: "missing v= prefix".clone(),
             });
         }
         let sig_b64 = take_after_eq(&trimmed);
         let server_sig = match core.encoding.base64.decode(&sig_b64) {
-            Ok(v)  => v,
-            Err(_) => {
+            Result.Ok(v)  => v,
+            Result.Err(_) => {
                 self.state = SsFailed;
-                return Err(SeBase64DecodeFailed);
+                return Result.Err(SeBase64DecodeFailed);
             }
         };
         if !ct_eq(&server_sig, &self.expected_server_signature) {
             self.state = SsFailed;
-            return Err(SeServerSignatureMismatch);
+            return Result.Err(SeServerSignatureMismatch);
         }
         self.state = SsAuthenticated;
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -549,7 +549,7 @@ fn saslprep_minimal(s: &Text) -> Text {
 fn consume_field(field: &Text) -> Maybe<(Text, Text)> {
     let bytes = field.as_bytes();
     if bytes.len() < 2 || bytes[1] != (0x3D as Byte) {
-        return None;
+        return Maybe.None;
     }
     let mut k: List<Byte> = List.new();
     k.push(bytes[0]);
@@ -559,31 +559,31 @@ fn consume_field(field: &Text) -> Maybe<(Text, Text)> {
         v.push(bytes[i]);
         i = i + 1;
     }
-    let key = match Text.from_bytes(&k) { Ok(t) => t, Err(_) => return None };
-    let val = match Text.from_bytes(&v) { Ok(t) => t, Err(_) => return None };
-    Some((key, val))
+    let key = match Text.from_bytes(&k) { Result.Ok(t) => t, Result.Err(_) => return Maybe.None };
+    let val = match Text.from_bytes(&v) { Result.Ok(t) => t, Result.Err(_) => return Maybe.None };
+    Maybe.Some((key, val))
 }
 
 fn parse_int_text(s: &Text) -> Maybe<Int> {
     let bytes = s.as_bytes();
-    if bytes.len() == 0 { return None; }
+    if bytes.len() == 0 { return Maybe.None; }
     // SOUNDNESS: hostile/MITM server can send arbitrarily long
     // iteration count; reject before the multiply can overflow.
     // Int.MAX is 19 digits; cap at 19 keeps acc representable.
     // Per-step `acc > Int.MAX/10` guard backs the cap with
     // overflow-safe arithmetic regardless of backend semantics.
-    if bytes.len() > 19 { return None; }
+    if bytes.len() > 19 { return Maybe.None; }
     let mut acc: Int = 0;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        if b < (0x30 as Byte) || b > (0x39 as Byte) { return None; }
-        if acc > 922_337_203_685_477_580 { return None; }   // Int.MAX / 10
+        if b < (0x30 as Byte) || b > (0x39 as Byte) { return Maybe.None; }
+        if acc > 922_337_203_685_477_580 { return Maybe.None; }   // Int.MAX / 10
         acc = acc * 10 + ((b as Int) - 0x30);
-        if acc < 0 { return None; }                          // wrap-around guard
+        if acc < 0 { return Maybe.None; }                          // wrap-around guard
         i = i + 1;
     }
-    Some(acc)
+    Maybe.Some(acc)
 }
 
 fn text_starts_with(haystack: &Text, prefix: &Text) -> Bool {

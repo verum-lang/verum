@@ -41,7 +41,7 @@
 module core.database.mysql.connection;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.net.tcp.TcpStream;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
@@ -180,9 +180,9 @@ public type MysqlConnection is {
 public fn connect(config: &MysqlConfig) -> Result<MysqlConnection, DbError> {
     let target = format_host_port(&config.host, config.port);
     let tcp = match TcpStream.connect(target.as_str()) {
-        Ok(s)  => s,
-        Err(_) => {
-            return Err(DbError.ConnectionFailed {
+        Result.Ok(s)  => s,
+        Result.Err(_) => {
+            return Result.Err(DbError.ConnectionFailed {
                 source: core.database.common.error.ConnectionErrorKind.CekConnectRefused,
                 adapter: AdMysql,
             });
@@ -205,7 +205,7 @@ public fn connect(config: &MysqlConfig) -> Result<MysqlConnection, DbError> {
     };
 
     drive_handshake(&mut conn, config)?;
-    Ok(conn)
+    Result.Ok(conn)
 }
 
 implement MysqlConnection {
@@ -220,7 +220,7 @@ implement MysqlConnection {
     public fn simple_query(&mut self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
         match self.state {
             McsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "BAD_STATE".clone(),
                 message: "simple_query requires Ready state".clone(),
@@ -245,19 +245,19 @@ implement MysqlConnection {
         match kind {
             SkError => {
                 let err = match parse_err(body.as_slice(), self.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("ERR")); }
                 };
                 self.state = McsReady;
-                return Err(dberr_from_mysql(err));
+                return Result.Err(dberr_from_mysql(err));
             }
             SkOk => {
                 let ok = match parse_ok(body.as_slice(), self.capabilities) {
-                    Ok(p)  => p,
-                    Err(_) => { return Err(bad_decode("OK")); }
+                    Result.Ok(p)  => p,
+                    Result.Err(_) => { return Result.Err(bad_decode("OK")); }
                 };
                 self.state = McsReady;
-                return Ok(MySimpleQueryResult {
+                return Result.Ok(MySimpleQueryResult {
                     columns: List.new(),
                     rows: List.new(),
                     affected_rows: ok.affected_rows,
@@ -267,7 +267,7 @@ implement MysqlConnection {
             }
             SkLocalInfile => {
                 self.state = McsFailed;
-                return Err(DbError.Adapter(AdapterSpecific {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdMysql,
                     code: "LOCAL_INFILE_DISABLED".clone(),
                     message: "LOCAL INFILE protocol disabled".clone(),
@@ -280,8 +280,8 @@ implement MysqlConnection {
         }
 
         let (col_count, _, _) = match decode_lei(body.as_slice(), 0) {
-            Ok(t)  => t,
-            Err(_) => { return Err(bad_decode("column count LEI")); }
+            Result.Ok(t)  => t,
+            Result.Err(_) => { return Result.Err(bad_decode("column count LEI")); }
         };
 
         let mut columns: List<MyColumnDef> = List.new();
@@ -289,8 +289,8 @@ implement MysqlConnection {
         while i < col_count {
             let p = recv_packet(self)?;
             let cd = match parse_column_def(p.payload().as_slice()) {
-                Ok(c)  => c,
-                Err(_) => { return Err(bad_decode("MyColumnDef41")); }
+                Result.Ok(c)  => c,
+                Result.Err(_) => { return Result.Err(bad_decode("MyColumnDef41")); }
             };
             columns.push(cd);
             i = i + 1;
@@ -311,18 +311,18 @@ implement MysqlConnection {
             match pk {
                 SkError => {
                     let err = match parse_err(payload.as_slice(), self.capabilities) {
-                        Ok(e)  => e,
-                        Err(_) => { return Err(bad_decode("ERR")); }
+                        Result.Ok(e)  => e,
+                        Result.Err(_) => { return Result.Err(bad_decode("ERR")); }
                     };
                     self.state = McsReady;
-                    return Err(dberr_from_mysql(err));
+                    return Result.Err(dberr_from_mysql(err));
                 }
                 SkEof => { break; }
                 SkOk  => { break; }
                 _ => {
                     let row = match decode_text_row(payload.as_slice(), col_count) {
-                        Ok(r)  => r,
-                        Err(_) => { return Err(bad_decode("DataRow")); }
+                        Result.Ok(r)  => r,
+                        Result.Err(_) => { return Result.Err(bad_decode("DataRow")); }
                     };
                     rows.push(row);
                 }
@@ -330,7 +330,7 @@ implement MysqlConnection {
         }
 
         self.state = McsReady;
-        Ok(MySimpleQueryResult {
+        Result.Ok(MySimpleQueryResult {
             columns: columns,
             rows: rows,
             affected_rows: 0,
@@ -346,8 +346,8 @@ implement MysqlConnection {
     /// anyway.
     public fn execute(&mut self, sql: &Text) -> Result<Int, DbError> {
         match self.simple_query(sql) {
-            Ok(result) => Ok(result.affected_rows),
-            Err(e)     => Err(e),
+            Result.Ok(result) => Result.Ok(result.affected_rows),
+            Result.Err(e)     => Result.Err(e),
         }
     }
 
@@ -369,7 +369,7 @@ implement MysqlConnection {
     {
         match self.state {
             McsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "BAD_STATE".clone(),
                 message: "multi_query requires Ready state".clone(),
@@ -388,7 +388,7 @@ implement MysqlConnection {
             if !more { break; }
         }
         self.state = McsReady;
-        Ok(results)
+        Result.Ok(results)
     }
 
     /// Internal — drive one result-set's wire packets and return
@@ -404,19 +404,19 @@ implement MysqlConnection {
         match kind {
             SkError => {
                 let err = match parse_err(body.as_slice(), self.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("multi.ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("multi.ERR")); }
                 };
                 self.state = McsReady;
-                return Err(dberr_from_mysql(err));
+                return Result.Err(dberr_from_mysql(err));
             }
             SkOk => {
                 let ok = match parse_ok(body.as_slice(), self.capabilities) {
-                    Ok(p)  => p,
-                    Err(_) => { return Err(bad_decode("multi.OK")); }
+                    Result.Ok(p)  => p,
+                    Result.Err(_) => { return Result.Err(bad_decode("multi.OK")); }
                 };
                 let more = (ok.status_flags & STATUS_MORE_RESULTS) != 0;
-                return Ok((MySimpleQueryResult {
+                return Result.Ok((MySimpleQueryResult {
                     columns: List.new(),
                     rows: List.new(),
                     affected_rows: ok.affected_rows,
@@ -426,7 +426,7 @@ implement MysqlConnection {
             }
             SkLocalInfile => {
                 self.state = McsFailed;
-                return Err(DbError.Adapter(AdapterSpecific {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdMysql,
                     code: "LOCAL_INFILE_DISABLED".clone(),
                     message: "LOCAL INFILE not supported in multi_query".clone(),
@@ -437,8 +437,8 @@ implement MysqlConnection {
         }
 
         let (col_count, _, _) = match decode_lei(body.as_slice(), 0) {
-            Ok(t)  => t,
-            Err(_) => { return Err(bad_decode("multi.column count LEI")); }
+            Result.Ok(t)  => t,
+            Result.Err(_) => { return Result.Err(bad_decode("multi.column count LEI")); }
         };
 
         let mut columns: List<MyColumnDef> = List.new();
@@ -446,8 +446,8 @@ implement MysqlConnection {
         while i < col_count {
             let p = recv_packet(self)?;
             let cd = match parse_column_def(p.payload().as_slice()) {
-                Ok(c)  => c,
-                Err(_) => { return Err(bad_decode("multi.MyColumnDef41")); }
+                Result.Ok(c)  => c,
+                Result.Err(_) => { return Result.Err(bad_decode("multi.MyColumnDef41")); }
             };
             columns.push(cd);
             i = i + 1;
@@ -467,11 +467,11 @@ implement MysqlConnection {
             match pk {
                 SkError => {
                     let err = match parse_err(payload.as_slice(), self.capabilities) {
-                        Ok(e)  => e,
-                        Err(_) => { return Err(bad_decode("multi.row.ERR")); }
+                        Result.Ok(e)  => e,
+                        Result.Err(_) => { return Result.Err(bad_decode("multi.row.ERR")); }
                     };
                     self.state = McsReady;
-                    return Err(dberr_from_mysql(err));
+                    return Result.Err(dberr_from_mysql(err));
                 }
                 SkEof => {
                     // EOF (non-DEPRECATE_EOF mode) — parse the
@@ -489,23 +489,23 @@ implement MysqlConnection {
                     // DEPRECATE_EOF mode — terminating OK packet
                     // carries status_flags directly.
                     let ok = match parse_ok(payload.as_slice(), self.capabilities) {
-                        Ok(p)  => p,
-                        Err(_) => { return Err(bad_decode("multi.row.OK")); }
+                        Result.Ok(p)  => p,
+                        Result.Err(_) => { return Result.Err(bad_decode("multi.row.OK")); }
                     };
                     more = (ok.status_flags & STATUS_MORE_RESULTS) != 0;
                     break;
                 }
                 _ => {
                     let row = match decode_text_row(payload.as_slice(), col_count) {
-                        Ok(r)  => r,
-                        Err(_) => { return Err(bad_decode("multi.DataRow")); }
+                        Result.Ok(r)  => r,
+                        Result.Err(_) => { return Result.Err(bad_decode("multi.DataRow")); }
                     };
                     rows.push(row);
                 }
             }
         }
 
-        Ok((MySimpleQueryResult {
+        Result.Ok((MySimpleQueryResult {
             columns: columns,
             rows: rows,
             affected_rows: 0,
@@ -519,22 +519,22 @@ implement MysqlConnection {
     /// `simple_query`).
     public fn query_all(&mut self, sql: &Text) -> Result<List<List<MysqlTextValue>>, DbError> {
         match self.simple_query(sql) {
-            Ok(result) => Ok(result.rows),
-            Err(e)     => Err(e),
+            Result.Ok(result) => Result.Ok(result.rows),
+            Result.Err(e)     => Result.Err(e),
         }
     }
 
-    /// Convenience — first row of a SELECT or `Ok(None)` if empty.
+    /// Convenience — first row of a SELECT or `Result.Ok(Maybe.None)` if empty.
     public fn query_first(&mut self, sql: &Text) -> Result<Maybe<List<MysqlTextValue>>, DbError> {
         match self.simple_query(sql) {
-            Ok(result) => {
+            Result.Ok(result) => {
                 if (result.rows.len() as Int) == 0 {
-                    Ok(None)
+                    Result.Ok(Maybe.None)
                 } else {
-                    Ok(Some(result.rows[0].clone()))
+                    Result.Ok(Maybe.Some(result.rows[0].clone()))
                 }
             }
-            Err(e) => Err(e),
+            Result.Err(e) => Result.Err(e),
         }
     }
 
@@ -566,7 +566,7 @@ implement MysqlConnection {
     public fn prepare(&mut self, sql: &Text) -> Result<MysqlPreparedStatement, DbError> {
         match self.state {
             McsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "BAD_STATE".clone(),
                 message: "prepare requires Ready state".clone(),
@@ -582,16 +582,16 @@ implement MysqlConnection {
         match classify(body.as_slice(), self.capabilities) {
             SkError => {
                 let err = match parse_err(body.as_slice(), self.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("prepare ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("prepare ERR")); }
                 };
-                return Err(dberr_from_mysql(err));
+                return Result.Err(dberr_from_mysql(err));
             }
             _ => {}
         }
         let prep = match parse_stmt_prepare_ok(body.as_slice()) {
-            Ok(p)  => p,
-            Err(_) => { return Err(bad_decode("prepare OK")); }
+            Result.Ok(p)  => p,
+            Result.Err(_) => { return Result.Err(bad_decode("prepare OK")); }
         };
 
         // Drain num_params MyColumnDefinitions + EOF (or skip if 0).
@@ -601,8 +601,8 @@ implement MysqlConnection {
             let p = recv_packet(self)?;
             let cb = p.into_payload();
             let col = match parse_column_def(cb.as_slice()) {
-                Ok(c)  => c,
-                Err(_) => { return Err(bad_decode("prepare param column")); }
+                Result.Ok(c)  => c,
+                Result.Err(_) => { return Result.Err(bad_decode("prepare param column")); }
             };
             param_types.push(col.column_type);
             i = i + 1;
@@ -618,8 +618,8 @@ implement MysqlConnection {
             let p = recv_packet(self)?;
             let cb = p.into_payload();
             let col = match parse_column_def(cb.as_slice()) {
-                Ok(c)  => c,
-                Err(_) => { return Err(bad_decode("prepare result column")); }
+                Result.Ok(c)  => c,
+                Result.Err(_) => { return Result.Err(bad_decode("prepare result column")); }
             };
             column_types.push(col.column_type);
             k = k + 1;
@@ -628,7 +628,7 @@ implement MysqlConnection {
             let _eof = recv_packet(self)?;
         }
 
-        Ok(MysqlPreparedStatement {
+        Result.Ok(MysqlPreparedStatement {
             statement_id: prep.statement_id,
             num_params: prep.num_params,
             num_columns: prep.num_columns,
@@ -648,7 +648,7 @@ implement MysqlConnection {
         params: &List<StmtParam>,
     ) -> Result<MysqlPreparedResult, DbError> {
         if params.len() != stmt.num_params {
-            return Err(DbError.Adapter(AdapterSpecific {
+            return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "PARAM_COUNT_MISMATCH".clone(),
                 message: f"execute_prepared: expected {stmt.num_params} params, got {params.len()}".clone(),
@@ -657,7 +657,7 @@ implement MysqlConnection {
         }
         match self.state {
             McsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "BAD_STATE".clone(),
                 message: "execute requires Ready state".clone(),
@@ -673,18 +673,18 @@ implement MysqlConnection {
         match classify(fb.as_slice(), self.capabilities) {
             SkError => {
                 let err = match parse_err(fb.as_slice(), self.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("execute ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("execute ERR")); }
                 };
-                return Err(dberr_from_mysql(err));
+                return Result.Err(dberr_from_mysql(err));
             }
             SkOk => {
                 // No result-set — single OK packet has affected_rows.
                 let ok = match parse_ok(fb.as_slice(), self.capabilities) {
-                    Ok(o)  => o,
-                    Err(_) => { return Err(bad_decode("execute OK")); }
+                    Result.Ok(o)  => o,
+                    Result.Err(_) => { return Result.Err(bad_decode("execute OK")); }
                 };
-                return Ok(MysqlPreparedResult {
+                return Result.Ok(MysqlPreparedResult {
                     affected_rows: ok.affected_rows,
                     last_insert_id: ok.last_insert_id,
                     rows: List.new(),
@@ -698,12 +698,12 @@ implement MysqlConnection {
         // from prepare time, so we skip re-decoding MyColumnDefs and
         // just count packets to find the row boundary.
         let (col_count_opt, _) = match decode_lei(fb.as_slice(), 0) {
-            Ok((n, _, h)) => (Some(n), h),
-            Err(_) => { return Err(bad_decode("execute column-count")); }
+            Result.Ok((n, _, h)) => (Maybe.Some(n), h),
+            Result.Err(_) => { return Result.Err(bad_decode("execute column-count")); }
         };
         let col_count = match col_count_opt {
-            Some(n) => n,
-            None    => 0,
+            Maybe.Some(n) => n,
+            Maybe.None    => 0,
         };
 
         // Drain MyColumnDefs.
@@ -731,8 +731,8 @@ implement MysqlConnection {
                 SkOk => {
                     // CAP_DEPRECATE_EOF terminator
                     let ok = match parse_ok(body.as_slice(), self.capabilities) {
-                        Ok(o)  => o,
-                        Err(_) => { break; }
+                        Result.Ok(o)  => o,
+                        Result.Err(_) => { break; }
                     };
                     affected = ok.affected_rows;
                     last_id = ok.last_insert_id;
@@ -740,22 +740,22 @@ implement MysqlConnection {
                 }
                 SkError => {
                     let err = match parse_err(body.as_slice(), self.capabilities) {
-                        Ok(e)  => e,
-                        Err(_) => { return Err(bad_decode("execute row ERR")); }
+                        Result.Ok(e)  => e,
+                        Result.Err(_) => { return Result.Err(bad_decode("execute row ERR")); }
                     };
-                    return Err(dberr_from_mysql(err));
+                    return Result.Err(dberr_from_mysql(err));
                 }
                 _ => {
                     // Binary row packet.
                     let row = match parse_binary_row(body.as_slice(), &stmt.column_types) {
-                        Ok(r)  => r,
-                        Err(_) => { return Err(bad_decode("execute binary row")); }
+                        Result.Ok(r)  => r,
+                        Result.Err(_) => { return Result.Err(bad_decode("execute binary row")); }
                     };
                     rows.push(row);
                 }
             }
         }
-        Ok(MysqlPreparedResult {
+        Result.Ok(MysqlPreparedResult {
             affected_rows: affected,
             last_insert_id: last_id,
             rows: rows,
@@ -772,12 +772,12 @@ implement MysqlConnection {
     {
         match self.state {
             McsReady => {}
-            _ => { return Ok(()); }    // tolerant — close-on-error path
+            _ => { return Result.Ok(()); }    // tolerant — close-on-error path
         }
         self.sequence = 0;
         let payload = com_stmt_close(stmt.statement_id);
         send_packet(self, payload.as_slice())?;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Reset a prepared statement's parameter state. Server replies
@@ -787,7 +787,7 @@ implement MysqlConnection {
     {
         match self.state {
             McsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "BAD_STATE".clone(),
                 message: "reset requires Ready state".clone(),
@@ -800,15 +800,15 @@ implement MysqlConnection {
         let pkt = recv_packet(self)?;
         let body = pkt.into_payload();
         match classify(body.as_slice(), self.capabilities) {
-            SkOk => Ok(()),
+            SkOk => Result.Ok(()),
             SkError => {
                 let err = match parse_err(body.as_slice(), self.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("reset ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("reset ERR")); }
                 };
-                Err(dberr_from_mysql(err))
+                Result.Err(dberr_from_mysql(err))
             }
-            _ => Err(bad_decode("reset reply")),
+            _ => Result.Err(bad_decode("reset reply")),
         }
     }
 
@@ -816,7 +816,7 @@ implement MysqlConnection {
     public fn ping(&mut self) -> Result<(), DbError> {
         match self.state {
             McsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "BAD_STATE".clone(),
                 message: "ping requires Ready state".clone(),
@@ -829,15 +829,15 @@ implement MysqlConnection {
         let pkt = recv_packet(self)?;
         let body = pkt.into_payload();
         match classify(body.as_slice(), self.capabilities) {
-            SkOk => Ok(()),
+            SkOk => Result.Ok(()),
             SkError => {
                 let err = match parse_err(body.as_slice(), self.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("ping ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("ping ERR")); }
                 };
-                Err(dberr_from_mysql(err))
+                Result.Err(dberr_from_mysql(err))
             }
-            _ => Err(bad_decode("ping reply")),
+            _ => Result.Err(bad_decode("ping reply")),
         }
     }
 
@@ -845,14 +845,14 @@ implement MysqlConnection {
     /// Affine: caller cannot re-use after this.
     public fn close(mut self) -> Result<(), DbError> {
         match self.state {
-            McsClosed => return Ok(()),
+            McsClosed => return Result.Ok(()),
             _ => {}
         }
         self.sequence = 0;
         let payload = com_quit();
         let _ = send_packet(&mut self, payload.as_slice());
         self.state = McsClosed;
-        Ok(())
+        Result.Ok(())
     }
 
     // -------------------------------------------------------------------------
@@ -896,7 +896,7 @@ implement MysqlConnection {
     ) -> Result<(), DbError> {
         match self.state {
             McsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "BAD_STATE".clone(),
                 message: "register_slave requires Ready state".clone(),
@@ -907,7 +907,7 @@ implement MysqlConnection {
         let user_bytes = user.as_bytes();
         let pw_bytes   = password.as_bytes();
         if (host_bytes.len() as Int) > 255 {
-            return Err(DbError.Adapter(AdapterSpecific {
+            return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "REGISTER_SLAVE_HOST_TOO_LONG".clone(),
                 message: f"host length {host_bytes.len()} > 255".clone(),
@@ -915,7 +915,7 @@ implement MysqlConnection {
             }));
         }
         if (user_bytes.len() as Int) > 255 {
-            return Err(DbError.Adapter(AdapterSpecific {
+            return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "REGISTER_SLAVE_USER_TOO_LONG".clone(),
                 message: f"user length {user_bytes.len()} > 255".clone(),
@@ -923,7 +923,7 @@ implement MysqlConnection {
             }));
         }
         if (pw_bytes.len() as Int) > 255 {
-            return Err(DbError.Adapter(AdapterSpecific {
+            return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "REGISTER_SLAVE_PW_TOO_LONG".clone(),
                 message: f"password length {pw_bytes.len()} > 255".clone(),
@@ -956,17 +956,17 @@ implement MysqlConnection {
         match kind {
             SkError => {
                 let err = match parse_err(body.as_slice(), self.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("ERR")); }
                 };
-                Err(dberr_from_mysql(err))
+                Result.Err(dberr_from_mysql(err))
             }
             SkOk => {
                 // Decode for symmetry; ignore the OK contents.
                 let _ = parse_ok(body.as_slice(), self.capabilities);
-                Ok(())
+                Result.Ok(())
             }
-            _ => Err(DbError.Adapter(AdapterSpecific {
+            _ => Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "REGISTER_SLAVE_BAD_REPLY".clone(),
                 message: "expected OK/ERR after COM_REGISTER_SLAVE".clone(),
@@ -982,7 +982,7 @@ implement MysqlConnection {
     public fn binlog_send_command(&mut self, payload: &[Byte]) -> Result<(), DbError> {
         match self.state {
             McsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "BAD_STATE".clone(),
                 message: "binlog_send_command requires Ready state".clone(),
@@ -994,7 +994,7 @@ implement MysqlConnection {
         // After dump, no further commands are accepted. Mark the
         // connection McsBusy so high-level callers don't try.
         self.state = McsBusy;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Read one wire packet — the binlog event payload sits inside.
@@ -1002,7 +1002,7 @@ implement MysqlConnection {
     /// decoder.
     public fn binlog_recv_packet(&mut self) -> Result<List<Byte>, DbError> {
         let pkt = recv_packet(self)?;
-        Ok(pkt.into_payload())
+        Result.Ok(pkt.into_payload())
     }
 
     // -------------------------------------------------------------------------
@@ -1036,7 +1036,7 @@ implement MysqlConnection {
     {
         match self.state {
             McsReady => {}
-            _ => { return Err(DbError.Adapter(AdapterSpecific {
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "BAD_STATE".clone(),
                 message: "start_load_data_local_session requires Ready state".clone(),
@@ -1056,14 +1056,14 @@ implement MysqlConnection {
         let body = pkt.into_payload();
         let kind = classify(body.as_slice(), self.capabilities);
         match kind {
-            SkLocalInfile => Ok(()),
+            SkLocalInfile => Result.Ok(()),
             SkError => {
                 let err = match parse_err(body.as_slice(), self.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("LOAD_DATA ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("LOAD_DATA ERR")); }
                 };
                 self.state = McsReady;
-                Err(dberr_from_mysql(err))
+                Result.Err(dberr_from_mysql(err))
             }
             SkOk => {
                 // Server returned OK without asking for data —
@@ -1072,14 +1072,14 @@ implement MysqlConnection {
                 // didn't enter the data-streaming substate, so
                 // return to Ready.
                 self.state = McsReady;
-                Err(DbError.Adapter(AdapterSpecific {
+                Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdMysql,
                     code: "LOAD_DATA_NO_REQUEST".clone(),
                     message: "server returned OK without Local Infile Request".clone(),
                     retryable: false,
                 }))
             }
-            _ => Err(DbError.Adapter(AdapterSpecific {
+            _ => Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "LOAD_DATA_BAD_STATE".clone(),
                 message: "unexpected packet kind awaiting Local Infile Request".clone(),
@@ -1112,23 +1112,23 @@ implement MysqlConnection {
         match kind {
             SkOk => {
                 let ok = match parse_ok(body.as_slice(), self.capabilities) {
-                    Ok(p)  => p,
-                    Err(_) => { return Err(bad_decode("LOAD_DATA OK")); }
+                    Result.Ok(p)  => p,
+                    Result.Err(_) => { return Result.Err(bad_decode("LOAD_DATA OK")); }
                 };
                 self.state = McsReady;
-                Ok(ok.affected_rows)
+                Result.Ok(ok.affected_rows)
             }
             SkError => {
                 let err = match parse_err(body.as_slice(), self.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("LOAD_DATA finish ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("LOAD_DATA finish ERR")); }
                 };
                 self.state = McsReady;
-                Err(dberr_from_mysql(err))
+                Result.Err(dberr_from_mysql(err))
             }
             _ => {
                 self.state = McsFailed;
-                Err(DbError.Adapter(AdapterSpecific {
+                Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdMysql,
                     code: "LOAD_DATA_BAD_REPLY".clone(),
                     message: "unexpected packet kind after empty terminator".clone(),
@@ -1157,19 +1157,19 @@ implement MysqlConnection {
         let kind = classify(body.as_slice(), self.capabilities);
         self.state = McsReady;
         match kind {
-            SkOk    => Ok(()),
+            SkOk    => Result.Ok(()),
             SkError => {
                 // Annotate the underlying server error with the
                 // caller-supplied reason so logs see both sides.
                 let err = match parse_err(body.as_slice(), self.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("LOAD_DATA cancel ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("LOAD_DATA cancel ERR")); }
                 };
                 let mut underlying = dberr_from_mysql(err);
                 let _ = reason;
-                Err(underlying)
+                Result.Err(underlying)
             }
-            _ => Err(DbError.Adapter(AdapterSpecific {
+            _ => Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "LOAD_DATA_CANCEL_BAD_REPLY".clone(),
                 message: f"unexpected packet kind after cancel ({reason})",
@@ -1191,15 +1191,15 @@ fn drive_handshake(conn: &mut MysqlConnection, config: &MysqlConfig) -> Result<(
     let body = pkt.into_payload();
     if body.len() > 0 && body[0] == PKT_ERROR {
         let err = match parse_err(body.as_slice(), 0) {
-            Ok(e)  => e,
-            Err(_) => { return Err(bad_decode("initial ERR")); }
+            Result.Ok(e)  => e,
+            Result.Err(_) => { return Result.Err(bad_decode("initial ERR")); }
         };
         conn.state = McsFailed;
-        return Err(dberr_from_mysql(err));
+        return Result.Err(dberr_from_mysql(err));
     }
     let hs = match parse_initial_handshake(body.as_slice()) {
-        Ok(h)  => h,
-        Err(_) => { return Err(bad_decode("InitialHandshake")); }
+        Result.Ok(h)  => h,
+        Result.Err(_) => { return Result.Err(bad_decode("InitialHandshake")); }
     };
     conn.capabilities = hs.capabilities;
     conn.server_version = hs.server_version.clone();
@@ -1208,7 +1208,7 @@ fn drive_handshake(conn: &mut MysqlConnection, config: &MysqlConfig) -> Result<(
     // Step 2 — pin caching_sha2_password.
     if hs.auth_plugin_name != plugin_caching_sha2_password() {
         conn.state = McsFailed;
-        return Err(DbError.AuthFailed {
+        return Result.Err(DbError.AuthFailed {
             kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
                 f"server requires plugin '{hs.auth_plugin_name}' (Spindle pinned to caching_sha2_password)",
             ),
@@ -1251,20 +1251,20 @@ fn drive_handshake(conn: &mut MysqlConnection, config: &MysqlConfig) -> Result<(
         match kind {
             SkOk => {
                 conn.state = McsReady;
-                return Ok(());
+                return Result.Ok(());
             }
             SkError => {
                 let err = match parse_err(body.as_slice(), conn.capabilities) {
-                    Ok(e)  => e,
-                    Err(_) => { return Err(bad_decode("auth ERR")); }
+                    Result.Ok(e)  => e,
+                    Result.Err(_) => { return Result.Err(bad_decode("auth ERR")); }
                 };
                 conn.state = McsFailed;
-                return Err(dberr_from_mysql(err));
+                return Result.Err(dberr_from_mysql(err));
             }
             SkAuthMore => {
                 let am = match parse_auth_more(body.as_slice()) {
-                    Ok(m)  => m,
-                    Err(_) => { return Err(bad_decode("AuthMoreData")); }
+                    Result.Ok(m)  => m,
+                    Result.Err(_) => { return Result.Err(bad_decode("AuthMoreData")); }
                 };
                 match classify_auth_more(am.data.as_slice()) {
                     CsFastAuthOk        => {
@@ -1281,19 +1281,19 @@ fn drive_handshake(conn: &mut MysqlConnection, config: &MysqlConfig) -> Result<(
                         //     a per-process cache) and reused
                         //     across subsequent full_auth events.
                         match drive_full_auth(conn, config, hs.auth_plugin_data.as_slice()) {
-                            Ok(_)  => {
+                            Result.Ok(_)  => {
                                 // Next packet must be OK or ERR;
                                 // loop continues.
                             }
-                            Err(e) => {
+                            Result.Err(e) => {
                                 conn.state = McsFailed;
-                                return Err(e);
+                                return Result.Err(e);
                             }
                         }
                     }
                     CsFailed            => {
                         conn.state = McsFailed;
-                        return Err(DbError.AuthFailed {
+                        return Result.Err(DbError.AuthFailed {
                             kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
                                 "caching_sha2 server reply not classifiable".clone(),
                             ),
@@ -1303,17 +1303,17 @@ fn drive_handshake(conn: &mut MysqlConnection, config: &MysqlConfig) -> Result<(
             }
             SkAuthSwitch => {
                 let sw = match parse_auth_switch(body.as_slice()) {
-                    Ok(s)  => s,
-                    Err(_) => { return Err(bad_decode("AuthSwitch")); }
+                    Result.Ok(s)  => s,
+                    Result.Err(_) => { return Result.Err(bad_decode("AuthSwitch")); }
                 };
                 conn.state = McsFailed;
-                return Err(DbError.AuthFailed {
+                return Result.Err(DbError.AuthFailed {
                     kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
                         f"server requested auth switch to '{sw.plugin_name}' (Spindle pinned to caching_sha2_password)",
                     ),
                 });
             }
-            _ => { return Err(bad_decode("unexpected packet during auth")); }
+            _ => { return Result.Err(bad_decode("unexpected packet during auth")); }
         }
     }
 }
@@ -1360,7 +1360,7 @@ fn drive_full_auth(
         // The auth packet sits in the same sequence stream as
         // the AuthMoreData we just consumed.
         send_packet(conn, payload.as_slice())?;
-        return Ok(());
+        return Result.Ok(());
     }
 
     // Plain-TCP path — RSA-OAEP exchange.
@@ -1386,26 +1386,26 @@ fn drive_full_auth(
         SkAuthMore => {}
         SkError => {
             let err = match parse_err(body.as_slice(), conn.capabilities) {
-                Ok(e)  => e,
-                Err(_) => { return Err(bad_decode("full_auth ERR")); }
+                Result.Ok(e)  => e,
+                Result.Err(_) => { return Result.Err(bad_decode("full_auth ERR")); }
             };
-            return Err(dberr_from_mysql(err));
+            return Result.Err(dberr_from_mysql(err));
         }
-        _ => { return Err(bad_decode("full_auth: expected AuthMoreData with PEM")); }
+        _ => { return Result.Err(bad_decode("full_auth: expected AuthMoreData with PEM")); }
     }
     let am = match parse_auth_more(body.as_slice()) {
-        Ok(m)  => m,
-        Err(_) => { return Err(bad_decode("full_auth AuthMoreData")); }
+        Result.Ok(m)  => m,
+        Result.Err(_) => { return Result.Err(bad_decode("full_auth AuthMoreData")); }
     };
 
     // Step c) Parse PEM → SPKI → RsaPublicKey.
     let pem_text = match Text.from_bytes(&am.data) {
-        Ok(t)  => t,
-        Err(_) => return Err(full_auth_err("server pubkey not valid UTF-8".clone())),
+        Result.Ok(t)  => t,
+        Result.Err(_) => return Result.Err(full_auth_err("server pubkey not valid UTF-8".clone())),
     };
     let pubkey = match parse_server_pubkey(&pem_text) {
-        Ok(k)  => k,
-        Err(e) => return Err(full_auth_err_from(e)),
+        Result.Ok(k)  => k,
+        Result.Err(e) => return Result.Err(full_auth_err_from(e)),
     };
 
     // Step d) Build the OAEP-encrypted response.
@@ -1414,14 +1414,14 @@ fn drive_full_auth(
         config.password.as_bytes(),
         nonce,
     ) {
-        Ok(b)  => b,
-        Err(e) => return Err(full_auth_err_from(e)),
+        Result.Ok(b)  => b,
+        Result.Err(e) => return Result.Err(full_auth_err_from(e)),
     };
 
     // Step e) Send the ciphertext. The outer auth-result loop
     //         will read OK / ERR next.
     send_packet(conn, resp.as_slice())?;
-    Ok(())
+    Result.Ok(())
 }
 
 /// Wrap a full-auth-specific failure into the common DbError
@@ -1456,25 +1456,25 @@ fn decode_text_row(payload: &[Byte], cols: Int) -> Result<List<MysqlTextValue>, 
     let mut i: Int = 0;
     while i < cols {
         if off >= payload.len() as Int {
-            return Err(bad_decode("short text row"));
+            return Result.Err(bad_decode("short text row"));
         }
         if (payload[off] as Int) == 0xFB {
             out.push(MtvNull);
             off = off + 1;
         } else {
             let (bytes_opt, used) = match read_lenenc_string(payload, off) {
-                Ok(t)  => t,
-                Err(_) => { return Err(bad_decode("text row LEI")); }
+                Result.Ok(t)  => t,
+                Result.Err(_) => { return Result.Err(bad_decode("text row LEI")); }
             };
             match bytes_opt {
-                None    => out.push(MtvNull),
-                Some(b) => out.push(MtvBytes(b)),
+                Maybe.None    => out.push(MtvNull),
+                Maybe.Some(b) => out.push(MtvBytes(b)),
             }
             off = off + used;
         }
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // -----------------------------------------------------------------------------
@@ -1490,26 +1490,26 @@ fn send_packet(conn: &mut MysqlConnection, payload: &[Byte]) -> Result<(), DbErr
 fn recv_packet(conn: &mut MysqlConnection) -> Result<MysqlPacket, DbError> {
     loop {
         match try_parse_packet(conn.recv.as_slice()) {
-            Ok(Some(out)) => {
+            Result.Ok(Maybe.Some(out)) => {
                 conn.sequence = (out.packet.sequence() + 1) & 0xFF;
                 drop_front(&mut conn.recv, out.bytes_consumed);
-                return Ok(out.packet);
+                return Result.Ok(out.packet);
             }
-            Ok(None) => {
+            Result.Ok(Maybe.None) => {
                 let mut tmp: List<Byte> = List.new();
                 let mut i = 0;
                 while i < 4096 { tmp.push(0 as Byte); i = i + 1; }
                 let n = match conn.stream.read(tmp.as_mut_slice()) {
-                    Ok(v)  => v,
-                    Err(_) => {
-                        return Err(DbError.ConnectionFailed {
+                    Result.Ok(v)  => v,
+                    Result.Err(_) => {
+                        return Result.Err(DbError.ConnectionFailed {
                             source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                             adapter: AdMysql,
                         });
                     }
                 };
                 if n <= 0 {
-                    return Err(DbError.ConnectionFailed {
+                    return Result.Err(DbError.ConnectionFailed {
                         source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                         adapter: AdMysql,
                     });
@@ -1520,8 +1520,8 @@ fn recv_packet(conn: &mut MysqlConnection) -> Result<MysqlPacket, DbError> {
                     k = k + 1;
                 }
             }
-            Err(_) => {
-                return Err(bad_decode("packet framing"));
+            Result.Err(_) => {
+                return Result.Err(bad_decode("packet framing"));
             }
         }
     }
@@ -1532,24 +1532,24 @@ fn write_all(stream: &mut MysqlStream, buf: &[Byte]) -> Result<(), DbError> {
     while written < buf.len() as Int {
         let chunk = sub_slice(buf, written, buf.len() as Int);
         match stream.write(chunk.as_slice()) {
-            Ok(n) => {
+            Result.Ok(n) => {
                 if n <= 0 {
-                    return Err(DbError.ConnectionFailed {
+                    return Result.Err(DbError.ConnectionFailed {
                         source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                         adapter: AdMysql,
                     });
                 }
                 written = written + n;
             }
-            Err(_) => {
-                return Err(DbError.ConnectionFailed {
+            Result.Err(_) => {
+                return Result.Err(DbError.ConnectionFailed {
                     source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                     adapter: AdMysql,
                 });
             }
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn sub_slice(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
@@ -1631,15 +1631,15 @@ fn drive_tls_upgrade(
     server_caps: Int,
 ) -> Result<(), DbError> {
     match config.tls_mode {
-        MtmDisable => return Ok(()),
+        MtmDisable => return Result.Ok(()),
         _ => {}
     }
     let server_supports_ssl = (server_caps & CAP_SSL) != 0;
     if !server_supports_ssl {
         if config.tls_mode.permits_plaintext_fallback() {
-            return Ok(());
+            return Result.Ok(());
         }
-        return Err(DbError.Adapter(AdapterSpecific {
+        return Result.Err(DbError.Adapter(AdapterSpecific {
             adapter: AdMysql,
             code: "TLS_REJECTED_BY_SERVER".clone(),
             message: f"server lacks CAP_SSL (mode {config.tls_mode.name()} requires encryption)",
@@ -1677,7 +1677,7 @@ fn drive_tls_upgrade(
         MsTls(_) => {
             // Already TLS — protocol violation if `drive_tls_upgrade`
             // was somehow called twice on the same connection.
-            return Err(DbError.Adapter(AdapterSpecific {
+            return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "TLS_DOUBLE_UPGRADE".clone(),
                 message: "drive_tls_upgrade called on an already-TLS connection".clone(),
@@ -1686,7 +1686,7 @@ fn drive_tls_upgrade(
         }
     };
     let _ = upgraded;
-    Ok(())
+    Result.Ok(())
 }
 
 /// Take the `MsPlain(tcp)` stream out of `conn`, drive TLS, and
@@ -1710,9 +1710,9 @@ fn swap_to_tls(
     // inside the resulting TlsStream.inner anyway.
     let tcp_clone = match &conn.stream {
         MsPlain(t) => match t.try_clone() {
-            Ok(c)  => c,
-            Err(_) => {
-                return Err(DbError.Adapter(AdapterSpecific {
+            Result.Ok(c)  => c,
+            Result.Err(_) => {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdMysql,
                     code: "TLS_HANDSHAKE_FAILED".clone(),
                     message: "TcpStream.try_clone failed before TLS handshake".clone(),
@@ -1721,7 +1721,7 @@ fn swap_to_tls(
             }
         },
         MsTls(_) => {
-            return Err(DbError.Adapter(AdapterSpecific {
+            return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "TLS_DOUBLE_UPGRADE".clone(),
                 message: "swap_to_tls on TLS already".clone(),
@@ -1730,11 +1730,11 @@ fn swap_to_tls(
         }
     };
     match upgrade_to_tls(tcp_clone, server_name, tls_config) {
-        Ok(s)  => {
+        Result.Ok(s)  => {
             conn.stream = s;
-            Ok(())
+            Result.Ok(())
         }
-        Err(e) => Err(DbError.Adapter(AdapterSpecific {
+        Result.Err(e) => Result.Err(DbError.Adapter(AdapterSpecific {
             adapter: AdMysql,
             code: "TLS_HANDSHAKE_FAILED".clone(),
             message: f"TLS handshake failed: {e}",

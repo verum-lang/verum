@@ -29,7 +29,7 @@ module core.database.sqlite.native.l1_pager.journal.writer;
 
 mount core.*;
 mount collections.List;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount core.sys.common.{FileDesc, OSError, pwrite, full_fsync};
 mount core.database.sqlite.native.l1_pager.journal.wal.{
     Wal, WalHeader, WalChecksum, WalFrameHeader,
@@ -120,26 +120,26 @@ implement WalWriter {
         checkpoint_seq: UInt32,
     ) -> Result<WalWriter, WalWriteError> {
         if !is_valid_page_size(page_size) {
-            return Err(WweBadPageSize { found: page_size });
+            return Result.Err(WweBadPageSize { found: page_size });
         }
         let wal = wal_new(page_size as UInt32, salt_1, salt_2, checkpoint_seq);
         let header_bytes = wal_header_serialize(&wal.header);
         match pwrite(fd, header_bytes.as_slice(), 0) {
-            Ok(n) => {
+            Result.Ok(n) => {
                 if n != header_bytes.len() as Int {
-                    return Err(WweShortWrite {
+                    return Result.Err(WweShortWrite {
                         wanted: header_bytes.len() as Int,
                         written: n,
                     });
                 }
             }
-            Err(e) => { return Err(WweIo(e)); }
+            Result.Err(e) => { return Result.Err(WweIo(e)); }
         }
         match full_fsync(fd) {
-            Ok(_)  => {}
-            Err(e) => { return Err(WweIo(e)); }
+            Result.Ok(_)  => {}
+            Result.Err(e) => { return Result.Err(WweIo(e)); }
         }
-        Ok(WalWriter {
+        Result.Ok(WalWriter {
             fd: fd,
             page_size: page_size,
             salt_1: salt_1,
@@ -203,9 +203,9 @@ implement WalWriter {
         db_size_after_commit: UInt32,
         body: &[Byte],
     ) -> Result<Int, WalWriteError> {
-        if self.closed { return Err(WweClosed); }
+        if self.closed { return Result.Err(WweClosed); }
         if body.len() as Int != self.page_size {
-            return Err(WweBadPageSize { found: body.len() as Int });
+            return Result.Err(WweBadPageSize { found: body.len() as Int });
         }
         let frame_idx = self.next_index;
         let offset = self.frame_offset(frame_idx);
@@ -230,47 +230,47 @@ implement WalWriter {
         let header_bytes = wal_frame_header_serialize(&frame_header);
 
         match pwrite(self.fd, header_bytes.as_slice(), offset) {
-            Ok(n) => {
+            Result.Ok(n) => {
                 if n != header_bytes.len() as Int {
-                    return Err(WweShortWrite {
+                    return Result.Err(WweShortWrite {
                         wanted: header_bytes.len() as Int,
                         written: n,
                     });
                 }
             }
-            Err(e) => { return Err(WweIo(e)); }
+            Result.Err(e) => { return Result.Err(WweIo(e)); }
         }
         let body_offset = offset + WAL_FRAME_HEADER_SIZE as Int;
         match pwrite(self.fd, body, body_offset) {
-            Ok(n) => {
+            Result.Ok(n) => {
                 if n != body.len() as Int {
-                    return Err(WweShortWrite {
+                    return Result.Err(WweShortWrite {
                         wanted: body.len() as Int,
                         written: n,
                     });
                 }
             }
-            Err(e) => { return Err(WweIo(e)); }
+            Result.Err(e) => { return Result.Err(WweIo(e)); }
         }
         if db_size_after_commit > 0_u32 {
             match full_fsync(self.fd) {
-                Ok(_)  => {}
-                Err(e) => { return Err(WweIo(e)); }
+                Result.Ok(_)  => {}
+                Result.Err(e) => { return Result.Err(WweIo(e)); }
             }
         }
         self.running = WalChecksum { s1: after_body.s1, s2: after_body.s2 };
         self.next_index = frame_idx + 1;
-        Ok(frame_idx)
+        Result.Ok(frame_idx)
     }
 
     /// Force a fsync without writing a frame — useful when the caller
     /// has appended several non-commit frames and now wants to make
     /// them durable as a group (group-commit pattern).
     public fn fsync(&self) -> Result<(), WalWriteError> {
-        if self.closed { return Err(WweClosed); }
+        if self.closed { return Result.Err(WweClosed); }
         match full_fsync(self.fd) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(WweIo(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(WweIo(e)),
         }
     }
 

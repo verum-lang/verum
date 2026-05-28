@@ -39,7 +39,7 @@
 module core.database.mysql.introspect;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.database.common.error.{DbError, AdapterId};
 mount core.database.common.schema.{
@@ -52,8 +52,8 @@ mount core.database.mysql.connection.{MysqlConnection, MysqlTextValue, MtvNull, 
 /// to introspect a different namespace.
 public fn introspect(conn: &mut MysqlConnection) -> Result<SchemaSnapshot, DbError> {
     let db = match probe_current_database(conn) {
-        Ok(s)  => s,
-        Err(e) => { return Err(e); }
+        Result.Ok(s)  => s,
+        Result.Err(e) => { return Result.Err(e); }
     };
     introspect_schema(conn, &db)
 }
@@ -62,8 +62,8 @@ public fn introspect_schema(conn: &mut MysqlConnection, schema: &Text) -> Result
     let mut snap = SchemaSnapshot.empty(AdMysql);
     snap.default_schema = schema.clone();
     snap.server_version = match probe_version(conn) {
-        Ok(v)  => v,
-        Err(_) => "unknown".clone(),
+        Result.Ok(v)  => v,
+        Result.Err(_) => "unknown".clone(),
     };
 
     let tables = list_tables(conn, schema)?;
@@ -74,7 +74,7 @@ public fn introspect_schema(conn: &mut MysqlConnection, schema: &Text) -> Result
         snap.add_table(table);
         i = i + 1;
     }
-    Ok(snap)
+    Result.Ok(snap)
 }
 
 // -----------------------------------------------------------------------------
@@ -83,29 +83,29 @@ public fn introspect_schema(conn: &mut MysqlConnection, schema: &Text) -> Result
 
 fn probe_current_database(conn: &mut MysqlConnection) -> Result<Text, DbError> {
     match conn.query_first(&"SELECT DATABASE()".clone()) {
-        Ok(opt) => match opt {
-            Some(row) => {
+        Result.Ok(opt) => match opt {
+            Maybe.Some(row) => {
                 if (row.len() as Int) >= 1 {
-                    Ok(value_to_text(&row[0]))
-                } else { Ok("".clone()) }
+                    Result.Ok(value_to_text(&row[0]))
+                } else { Result.Ok("".clone()) }
             }
-            None => Ok("".clone()),
+            Maybe.None => Result.Ok("".clone()),
         },
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
 fn probe_version(conn: &mut MysqlConnection) -> Result<Text, DbError> {
     match conn.query_first(&"SELECT VERSION()".clone()) {
-        Ok(opt) => match opt {
-            Some(row) => {
+        Result.Ok(opt) => match opt {
+            Maybe.Some(row) => {
                 if (row.len() as Int) >= 1 {
-                    Ok(value_to_text(&row[0]))
-                } else { Ok("".clone()) }
+                    Result.Ok(value_to_text(&row[0]))
+                } else { Result.Ok("".clone()) }
             }
-            None => Ok("".clone()),
+            Maybe.None => Result.Ok("".clone()),
         },
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -114,7 +114,7 @@ fn list_tables(conn: &mut MysqlConnection, schema: &Text) -> Result<List<Text>, 
     sql.push_str(schema);
     sql.push_str(&"' AND table_type = 'BASE TABLE' ORDER BY table_name".clone());
     match conn.query_all(&sql) {
-        Ok(rows) => {
+        Result.Ok(rows) => {
             let mut out: List<Text> = List.new();
             let mut i: Int = 0;
             while i < rows.len() as Int {
@@ -124,9 +124,9 @@ fn list_tables(conn: &mut MysqlConnection, schema: &Text) -> Result<List<Text>, 
                 }
                 i = i + 1;
             }
-            Ok(out)
+            Result.Ok(out)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -135,7 +135,7 @@ fn build_table_snap(conn: &mut MysqlConnection, schema: &Text, name: &Text) -> R
     t.columns      = read_columns(conn, schema, name)?;
     t.indexes      = read_indexes(conn, schema, name)?;
     t.foreign_keys = read_foreign_keys(conn, schema, name)?;
-    Ok(t)
+    Result.Ok(t)
 }
 
 // -----------------------------------------------------------------------------
@@ -149,7 +149,7 @@ fn read_columns(conn: &mut MysqlConnection, schema: &Text, table: &Text) -> Resu
     sql.push_str(table);
     sql.push_str(&"' ORDER BY ordinal_position".clone());
     match conn.query_all(&sql) {
-        Ok(rows) => {
+        Result.Ok(rows) => {
             let mut out: List<ColumnSnap> = List.new();
             let mut i: Int = 0;
             while i < rows.len() as Int {
@@ -162,7 +162,7 @@ fn read_columns(conn: &mut MysqlConnection, schema: &Text, table: &Text) -> Resu
                     let extra    = value_to_text(&r[4]);
                     let col_key  = value_to_text(&r[5]);
                     let nullable = is_null == "YES";
-                    let default_expr = if default_text.len() == 0 { None } else { Some(default_text) };
+                    let default_expr = if default_text.len() == 0 { Maybe.None } else { Maybe.Some(default_text) };
                     let autoincrement = text_contains(&extra, &"auto_increment".clone());
                     let pk     = col_key == "PRI";
                     let unique = col_key == "UNI";
@@ -174,16 +174,16 @@ fn read_columns(conn: &mut MysqlConnection, schema: &Text, table: &Text) -> Resu
                         unique: unique,
                         autoincrement: autoincrement,
                         default_expr: default_expr,
-                        refinement: None,
-                        refinement_pred: None,
-                        check_constraint: None,
+                        refinement: Maybe.None,
+                        refinement_pred: Maybe.None,
+                        check_constraint: Maybe.None,
                     });
                 }
                 i = i + 1;
             }
-            Ok(out)
+            Result.Ok(out)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -198,7 +198,7 @@ fn read_indexes(conn: &mut MysqlConnection, schema: &Text, table: &Text) -> Resu
     sql.push_str(table);
     sql.push_str(&"' ORDER BY index_name, seq_in_index".clone());
     match conn.query_all(&sql) {
-        Ok(rows) => {
+        Result.Ok(rows) => {
             let mut grouped: List<IndexSnap> = List.new();
             let mut current_name: Text = "".clone();
             let mut i: Int = 0;
@@ -213,7 +213,7 @@ fn read_indexes(conn: &mut MysqlConnection, schema: &Text, table: &Text) -> Resu
                         grouped.push(IndexSnap {
                             name: idx_name.clone(),
                             columns: List.new(),
-                            predicate: None,
+                            predicate: Maybe.None,
                             unique: unique,
                         });
                         current_name = idx_name;
@@ -223,9 +223,9 @@ fn read_indexes(conn: &mut MysqlConnection, schema: &Text, table: &Text) -> Resu
                 }
                 i = i + 1;
             }
-            Ok(grouped)
+            Result.Ok(grouped)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -240,7 +240,7 @@ fn read_foreign_keys(conn: &mut MysqlConnection, schema: &Text, table: &Text) ->
     sql.push_str(table);
     sql.push_str(&"' AND kcu.referenced_table_name IS NOT NULL ORDER BY kcu.constraint_name, kcu.ordinal_position".clone());
     match conn.query_all(&sql) {
-        Ok(rows) => {
+        Result.Ok(rows) => {
             let mut grouped: List<ForeignKeySnap> = List.new();
             let mut current_name: Text = "".clone();
             let mut i: Int = 0;
@@ -269,9 +269,9 @@ fn read_foreign_keys(conn: &mut MysqlConnection, schema: &Text, table: &Text) ->
                 }
                 i = i + 1;
             }
-            Ok(grouped)
+            Result.Ok(grouped)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 

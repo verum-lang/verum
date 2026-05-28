@@ -1069,9 +1069,9 @@ public fn safe_alloc(size: Int, protect: UInt32) -> Maybe<&unsafe Byte> {
         protect,
     );
     if ptr as Int == 0 {
-        None
+        Maybe.None
     } else {
-        Some(ptr)
+        Maybe.Some(ptr)
     }
 }
 

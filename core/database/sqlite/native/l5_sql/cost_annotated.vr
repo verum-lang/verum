@@ -78,7 +78,7 @@ mount core.database.sqlite.native.l6_session.schema_cache.{
 /// `access_method` is `Some` only for nodes that have access-method
 /// degrees of freedom (PnTableScan, PnNestedLoopJoin sides).  For
 /// pure tree-rewrite nodes (PnFilter, PnProject, PnSort, etc.) it
-/// is always `None` and the cost is derived from child + per-node
+/// is always `Maybe.None` and the cost is derived from child + per-node
 /// overhead.
 public type CostAnnotatedPlan is {
     /// The original PlanNode — owned by the annotator (heap-cloned).
@@ -89,7 +89,7 @@ public type CostAnnotatedPlan is {
     access_method: Maybe<AccessMethod>,
     /// Full access plan when the schema-aware annotator detected a
     /// seekable predicate shape (rowid lookup, index seek, range
-    /// scan, covering scan).  `None` when:
+    /// scan, covering scan).  `Maybe.None` when:
     ///   * the annotator was called WITHOUT a schema (back-compat
     ///     `annotate_with_cost` path), OR
     ///   * the predicate didn't match any seekable shape, OR
@@ -127,8 +127,8 @@ implement StatsCatalogue {
     /// missing (cheap — `table_stats_default(name, 0)` is zero-row).
     public fn table_stats_for(&self, name: &Text) -> TableStats {
         match self.tables.get(name) {
-            Some(s) => clone_table_stats(s),
-            None => table_stats_default(name.clone(), 0_i64),
+            Maybe.Some(s) => clone_table_stats(s),
+            Maybe.None => table_stats_default(name.clone(), 0_i64),
         }
     }
 
@@ -194,7 +194,7 @@ public fn annotate_with_cost(
 /// recognises rowid lookups, index seeks, range scans, and covering
 /// scans, and codegen consumes the result to emit specialised opcode
 /// sequences.  When the schema is empty (no registered tables) every
-/// `seek_plan` is `None` and behaviour matches the back-compat path.
+/// `seek_plan` is `Maybe.None` and behaviour matches the back-compat path.
 public fn annotate_with_cost_schema(
     plan: &PlanNode,
     stats: &StatsCatalogue,
@@ -273,15 +273,15 @@ fn annotate_filter_with_seek_plan(
 ) -> CostAnnotatedPlan {
     // Resolve table metadata + index list for the access planner.
     let table_meta_opt = match schema.lookup_table(&table.schema, &table.name) {
-        Ok(m) => Some(m),
-        Err(_) => None,
+        Result.Ok(m) => Maybe.Some(m),
+        Result.Err(_) => Maybe.None,
     };
     let seek_plan = match table_meta_opt {
-        Some(meta) => {
+        Maybe.Some(meta) => {
             let indices = schema.indexes_for_table(&meta.schema, &meta.name);
-            Some(plan_access(Some(predicate), &meta, &indices, projected_cols))
+            Maybe.Some(plan_access(Maybe.Some(predicate), &meta, &indices, projected_cols))
         }
-        None => None,
+        Maybe.None => Maybe.None,
     };
     // Compute cost the same way `annotate_filter` does — selectivity
     // heuristic over the (full-scan) child cost.  When the seek plan
@@ -301,7 +301,7 @@ fn annotate_filter_with_seek_plan(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: narrowed,
-        access_method: None,
+        access_method: Maybe.None,
         seek_plan: seek_plan,
         children: children,
     }
@@ -327,8 +327,8 @@ fn annotate_filter_schema_descend(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: narrowed,
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: children,
     }
 }
@@ -351,8 +351,8 @@ fn annotate_project_schema_descend(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: total,
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: children,
     }
 }
@@ -375,8 +375,8 @@ fn annotate_limit_schema_descend(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: total,
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: children,
     }
 }
@@ -438,8 +438,8 @@ fn annotate_table_scan(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: cost,
-        access_method: Some(am),
-        seek_plan: None,
+        access_method: Maybe.Some(am),
+        seek_plan: Maybe.None,
         children: List.new(),
     }
 }
@@ -469,8 +469,8 @@ fn annotate_filter(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: narrowed,
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: children,
     }
 }
@@ -492,8 +492,8 @@ fn annotate_unary_passthrough(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: total,
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: children,
     }
 }
@@ -515,8 +515,8 @@ fn annotate_sort(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: total,
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: children,
     }
 }
@@ -548,8 +548,8 @@ fn annotate_group_by(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: total,
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: children,
     }
 }
@@ -569,8 +569,8 @@ fn annotate_binary_concat(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: total,
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: children,
     }
 }
@@ -596,8 +596,8 @@ fn annotate_binary_dedup(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: total,
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: children,
     }
 }
@@ -621,8 +621,8 @@ fn annotate_nested_loop_join(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: nlj,
-        access_method: Some(AmFullScan),
-        seek_plan: None,
+        access_method: Maybe.Some(AmFullScan),
+        seek_plan: Maybe.None,
         children: List.new(),
     }
 }
@@ -645,8 +645,8 @@ fn annotate_insert(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: total,
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: children,
     }
 }
@@ -667,8 +667,8 @@ fn annotate_table_mutate(
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: total,
-        access_method: Some(AmFullScan),
-        seek_plan: None,
+        access_method: Maybe.Some(AmFullScan),
+        seek_plan: Maybe.None,
         children: List.new(),
     }
 }
@@ -677,8 +677,8 @@ fn annotate_constant_cost(plan: &PlanNode, rows: Float64) -> CostAnnotatedPlan {
     CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: Cost { rows: rows, setup_cost: 0.0, per_row_cost: 0.0 },
-        access_method: None,
-        seek_plan: None,
+        access_method: Maybe.None,
+        seek_plan: Maybe.None,
         children: List.new(),
     }
 }
@@ -795,11 +795,11 @@ fn emit_one(plan: &CostAnnotatedPlan, buf: &mut Text, depth: Int) {
     buf.push_str(" total_cost=");
     buf.push_str(&float_to_short_text(cost_total(&plan.cost)));
     match &plan.access_method {
-        Some(am) => {
+        Maybe.Some(am) => {
             buf.push_str(" via ");
             buf.push_str(&access_name(am));
         }
-        None => {}
+        Maybe.None => {}
     }
     buf.push_str("\n");
 }

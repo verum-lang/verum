@@ -77,8 +77,8 @@ mount core.time.system_time.{SystemTime};
 // a deterministic identifier.
 fn fill_random(buf: &mut [Byte]) {
     match core.sys.common.random_bytes(buf) {
-        Ok(_)  => {},
-        Err(_) => panic("ULID: kernel CSPRNG unavailable — refusing to issue zero-entropy ULID"),
+        Result.Ok(_)  => {},
+        Result.Err(_) => panic("ULID: kernel CSPRNG unavailable — refusing to issue zero-entropy ULID"),
     }
 }
 
@@ -267,7 +267,7 @@ public fn generate() -> Ulid {
 public fn parse(s: &Text) -> Result<Ulid, UlidError> {
     let b = s.as_bytes();
     if b.len() != 26 {
-        return Err(UlidError.InvalidLength(b.len()));
+        return Result.Err(UlidError.InvalidLength(b.len()));
     }
     // Timestamp = first 10 chars → 48-bit (top two bits of 50 must be 0).
     let mut ts: UInt64 = 0_u64;
@@ -295,7 +295,7 @@ public fn parse(s: &Text) -> Result<Ulid, UlidError> {
 
     let high: UInt64 = (ts << 16_u64) | (rand_hi & 0xFFFF_u64);
     let low:  UInt64 = rand_lo;
-    Ok(Ulid { high: high, low: low })
+    Result.Ok(Ulid { high: high, low: low })
 }
 
 // =============================================================================
@@ -362,7 +362,7 @@ fn decode_char(c: Byte) -> Result<UInt8, UlidError> {
     // Crockford decoding — case-insensitive with I/L/O→1/1/0 aliases
     // (common extension even though the ULID spec is strict).
     if c >= ('0' as Byte) && c <= ('9' as Byte) {
-        return Ok(c - ('0' as Byte));
+        return Result.Ok(c - ('0' as Byte));
     }
     let uc = if c >= ('a' as Byte) && c <= ('z' as Byte) {
         c - (('a' as Byte) - ('A' as Byte))
@@ -370,11 +370,11 @@ fn decode_char(c: Byte) -> Result<UInt8, UlidError> {
     // Walk the alphabet — 32 entries; constant time.
     let mut i: Int = 0;
     while i < 32 {
-        if ULID_ALPHABET[i] == uc { return Ok(i as UInt8); }
+        if ULID_ALPHABET[i] == uc { return Result.Ok(i as UInt8); }
         i = i + 1;
     }
     // Common Crockford aliases.
-    if uc == ('I' as Byte) || uc == ('L' as Byte) { return Ok(1_u8); }
-    if uc == ('O' as Byte) { return Ok(0_u8); }
-    Err(UlidError.InvalidCharacter(c))
+    if uc == ('I' as Byte) || uc == ('L' as Byte) { return Result.Ok(1_u8); }
+    if uc == ('O' as Byte) { return Result.Ok(0_u8); }
+    Result.Err(UlidError.InvalidCharacter(c))
 }

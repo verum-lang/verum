@@ -210,7 +210,7 @@ implement Debug for MemHeaderView {
 // =============================================================================
 
 /// Capture a MemHeaderView snapshot of the allocation backing the given
-/// user-data pointer. Returns `None` if `ptr` is null.
+/// user-data pointer. Returns `Maybe.None` if `ptr` is null.
 ///
 
 /// # Safety
@@ -222,9 +222,9 @@ implement Debug for MemHeaderView {
 /// short-circuits on null without dereferencing.
 public unsafe fn header_view_of(ptr: &unsafe Byte) -> Maybe<MemHeaderView> {
     if (ptr as Int) == 0 {
-        return None;
+        return Maybe.None;
     }
-    Some(MemHeaderView.from_user_ptr(ptr))
+    Maybe.Some(MemHeaderView.from_user_ptr(ptr))
 }
 
 /// Format a MemHeaderView as a panic-context block. Two-space indented

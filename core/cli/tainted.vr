@@ -81,18 +81,18 @@ implement Tainted<Text> {
         let mut i: Int = 0;
         while i < s.len() {
             match s.byte_at(i) {
-                Some(b) => {
+                Maybe.Some(b) => {
                     if !is_safe_shell_byte(b) {
-                        return Err(Text.from(
+                        return Result.Err(Text.from(
                             f"value from {self.origin} contains unsafe shell character"
                         ));
                     }
                 },
-                None => break,
+                Maybe.None => break,
             }
             i = i + 1;
         }
-        Ok(self.inner)
+        Result.Ok(self.inner)
     }
 
     /// Escape and return wrapped in single quotes, suitable for direct
@@ -102,11 +102,11 @@ implement Tainted<Text> {
         let mut i: Int = 0;
         while i < self.inner.len() {
             match self.inner.byte_at(i) {
-                Some(b) => {
+                Maybe.Some(b) => {
                     if b == b'\'' { out.push_str("'\\''"); }
                     else { out.push_byte(b); }
                 },
-                None => break,
+                Maybe.None => break,
             }
             i = i + 1;
         }
@@ -121,18 +121,18 @@ implement Tainted<Text> {
         let mut i: Int = 0;
         while i < self.inner.len() {
             match self.inner.byte_at(i) {
-                Some(b) => {
+                Maybe.Some(b) => {
                     if !is_safe_filename_byte(b) {
-                        return Err(Text.from(
+                        return Result.Err(Text.from(
                             f"value from {self.origin} contains unsafe filename character"
                         ));
                     }
                 },
-                None => break,
+                Maybe.None => break,
             }
             i = i + 1;
         }
-        Ok(self.inner)
+        Result.Ok(self.inner)
     }
 }
 

@@ -45,16 +45,16 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "RFC 5280 §6.1 X.509 path building: DFS issuer-search with AKI/SKI matching",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.x509.path_building;
@@ -164,21 +164,21 @@ public fn build_paths(
     visited.insert(cert_fingerprint(ee));
     dfs_walk(ee, ee, intermediates, trust, &mut current_inters, &mut visited, &mut paths, 0);
 
-    if paths.is_empty() { return Err(NoPathsFound); }
+    if paths.is_empty() { return Result.Err(NoPathsFound); }
     sort_by_score_desc(&mut paths);
-    Ok(paths)
+    Result.Ok(paths)
 }
 
 /// Convenience wrapper: build paths and return only the highest-
-/// scored one. Returns `Err(NoPathsFound)` when no path exists.
+/// scored one. Returns `Result.Err(NoPathsFound)` when no path exists.
 public fn build_best_path(
     ee: &X509Certificate,
     intermediates: &List<X509Certificate>,
     trust: &TrustStore,
 ) -> Result<CandidatePath, PathBuildError> {
     let mut all = build_paths(ee, intermediates, trust)?;
-    if all.is_empty() { return Err(NoPathsFound); }
-    Ok(all.swap_remove(0))
+    if all.is_empty() { return Result.Err(NoPathsFound); }
+    Result.Ok(all.swap_remove(0))
 }
 
 // =============================================================================
@@ -240,12 +240,12 @@ fn enumerate_intermediate_candidates(
 /// (DN-only) is the fallback when one or both extensions are absent.
 fn anchor_aki_ski_match(child: &X509Certificate, parent: &X509Certificate) -> Bool {
     let aki = match &child.tbs.extensions.authority_key_id {
-        Some((_, kid)) => kid,
-        None => return false,
+        Maybe.Some((_, kid)) => kid,
+        Maybe.None => return false,
     };
     let ski = match &parent.tbs.extensions.subject_key_id {
-        Some((_, kid)) => kid,
-        None => return false,
+        Maybe.Some((_, kid)) => kid,
+        Maybe.None => return false,
     };
     bytes_eq(aki, ski)
 }

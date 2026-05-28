@@ -343,8 +343,8 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
     }
     let op_maybe = program.get_opcode(state.pc);
     let op = match op_maybe {
-        Some(o) => o,
-        None    => { state.halted = true; return Done; }
+        Maybe.Some(o) => o,
+        Maybe.None    => { state.halted = true; return Done; }
     };
 
     match op {
@@ -696,8 +696,8 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             // exhaustion → jump (treat as past EOF).
             let key_vals = collect_key_values(state, key_reg, n_keys);
             match state.cursors.cmp_current_key_to(cursor_id, &key_vals, n_keys) {
-                None         => { state.pc = jump_target; }
-                Some(c) if c > 0 => { state.pc = jump_target; }
+                Maybe.None         => { state.pc = jump_target; }
+                Maybe.Some(c) if c > 0 => { state.pc = jump_target; }
                 _            => { state.pc = state.pc + 1; }
             }
             Yield
@@ -706,8 +706,8 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         IdxGE(cursor_id, jump_target, key_reg, n_keys) => {
             let key_vals = collect_key_values(state, key_reg, n_keys);
             match state.cursors.cmp_current_key_to(cursor_id, &key_vals, n_keys) {
-                None          => { state.pc = jump_target; }
-                Some(c) if c >= 0 => { state.pc = jump_target; }
+                Maybe.None          => { state.pc = jump_target; }
+                Maybe.Some(c) if c >= 0 => { state.pc = jump_target; }
                 _             => { state.pc = state.pc + 1; }
             }
             Yield
@@ -716,8 +716,8 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         IdxLT(cursor_id, jump_target, key_reg, n_keys) => {
             let key_vals = collect_key_values(state, key_reg, n_keys);
             match state.cursors.cmp_current_key_to(cursor_id, &key_vals, n_keys) {
-                None          => { state.pc = jump_target; }
-                Some(c) if c < 0  => { state.pc = jump_target; }
+                Maybe.None          => { state.pc = jump_target; }
+                Maybe.Some(c) if c < 0  => { state.pc = jump_target; }
                 _             => { state.pc = state.pc + 1; }
             }
             Yield
@@ -726,8 +726,8 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         IdxLE(cursor_id, jump_target, key_reg, n_keys) => {
             let key_vals = collect_key_values(state, key_reg, n_keys);
             match state.cursors.cmp_current_key_to(cursor_id, &key_vals, n_keys) {
-                None          => { state.pc = jump_target; }
-                Some(c) if c <= 0 => { state.pc = jump_target; }
+                Maybe.None          => { state.pc = jump_target; }
+                Maybe.Some(c) if c <= 0 => { state.pc = jump_target; }
                 _             => { state.pc = state.pc + 1; }
             }
             Yield
@@ -955,8 +955,8 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                     RInt(x)  => RInt(x),
                     RReal(x) => RInt(x as Int64),
                     RText(ref s) => match parse_int_text(s) {
-                        Some(i) => RInt(i),
-                        None    => RInt(0_i64),
+                        Maybe.Some(i) => RInt(i),
+                        Maybe.None    => RInt(0_i64),
                     },
                     RNull => RNull,
                     _ => RInt(0_i64),
@@ -965,8 +965,8 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                     RInt(x)  => RReal(x as Float64),
                     RReal(x) => RReal(x),
                     RText(ref s) => match parse_real_text(s) {
-                        Some(f) => RReal(f),
-                        None    => RReal(0.0),
+                        Maybe.Some(f) => RReal(f),
+                        Maybe.None    => RReal(0.0),
                     },
                     RNull => RNull,
                     _ => RReal(0.0),
@@ -991,10 +991,10 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                         RInt(x)  => RInt(x),
                         RReal(x) => RReal(x),
                         RText(ref s) => match parse_int_text(s) {
-                            Some(i) => RInt(i),
-                            None    => match parse_real_text(s) {
-                                Some(f) => RReal(f),
-                                None    => RText(s.clone()),
+                            Maybe.Some(i) => RInt(i),
+                            Maybe.None    => match parse_real_text(s) {
+                                Maybe.Some(f) => RReal(f),
+                                Maybe.None    => RText(s.clone()),
                             }
                         },
                         RNull => RNull,
@@ -1154,11 +1154,11 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                         };
                         let length_opt: Maybe<Int> = if n_args >= 3 {
                             match state.regs.get(first_arg_reg + 2) {
-                                RInt(x) => Some(x as Int),
-                                _       => None,
+                                RInt(x) => Maybe.Some(x as Int),
+                                _       => Maybe.None,
                             }
                         } else {
-                            None
+                            Maybe.None
                         };
                         match s_reg {
                             RText(ref s) => {
@@ -1169,8 +1169,8 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                                 if begin < 0 { begin = n + begin + 1; }
                                 if begin < 1 { begin = 1; }
                                 let end: Int = match length_opt {
-                                    Some(l) => begin + l - 1,
-                                    None    => n,
+                                    Maybe.Some(l) => begin + l - 1,
+                                    Maybe.None    => n,
                                 };
                                 let mut out = Text.new();
                                 let mut i: Int = begin;
@@ -1527,28 +1527,28 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
 
 fn parse_int_text(s: &Text) -> Maybe<Int64> {
     let bs = s.as_bytes();
-    if bs.len() == 0 { return None; }
+    if bs.len() == 0 { return Maybe.None; }
     let mut i: Int = 0;
     let mut sign: Int64 = 1 as Int64;
     if bs[0] == (45 as Byte) { sign = -1 as Int64; i = 1; }
     else if bs[0] == (43 as Byte) { i = 1; }
-    if i >= bs.len() { return None; }
+    if i >= bs.len() { return Maybe.None; }
     let mut acc: Int64 = 0 as Int64;
     while i < bs.len() {
         let b = bs[i];
-        if b < (48 as Byte) || b > (57 as Byte) { return None; }
+        if b < (48 as Byte) || b > (57 as Byte) { return Maybe.None; }
         let d: Int64 = ((b - (48 as Byte)) as Int64);
         acc = acc * 10_i64 + d;
         i = i + 1;
     }
-    Some(acc * sign)
+    Maybe.Some(acc * sign)
 }
 
 fn parse_real_text(s: &Text) -> Maybe<Float64> {
     // Very minimal: tries integer first, falls back to NaN-guard.
     match parse_int_text(s) {
-        Some(i) => Some(i as Float64),
-        None    => None,
+        Maybe.Some(i) => Maybe.Some(i as Float64),
+        Maybe.None    => Maybe.None,
     }
 }
 

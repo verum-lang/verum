@@ -91,7 +91,7 @@ public fn write_varint(out: &mut List<Byte>, value: UInt64) {
 /// Deprecated: prefer `core.encoding.varint.quic_decode` directly.
 public fn read_varint(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), Http3Error> {
     match quic_decode(buf, pos) {
-        Ok((v, next)) => Ok((v, next)),
-        Err(_)        => Err(Http3Error.NeedMore),
+        Result.Ok((v, next)) => Result.Ok((v, next)),
+        Result.Err(_)        => Result.Err(Http3Error.NeedMore),
     }
 }

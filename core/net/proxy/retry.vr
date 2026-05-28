@@ -110,7 +110,7 @@ implement RetryLayer {
             max_attempts: max_attempts,
             backoff_base_ms: 50,
             backoff_max_ms: 5_000,
-            budget: None,
+            budget: Maybe.None,
             non_idempotent_policy: NonIdempotentPolicy.Disabled,
         }
     }
@@ -120,7 +120,7 @@ implement RetryLayer {
     }
 
     public fn with_budget(self, budget: RetryBudget) -> RetryLayer {
-        RetryLayer { budget: Some(budget), ..self }
+        RetryLayer { budget: Maybe.Some(budget), ..self }
     }
 
     /// Allow non-idempotent retries when the request carries the
@@ -184,11 +184,11 @@ implement<H: Handler> Layer<H> for RetryLayer {
                 backoff_base_ms: self.backoff_base_ms,
                 backoff_max_ms: self.backoff_max_ms,
                 budget: match &self.budget {
-                    Some(b) => Some(RetryBudget {
+                    Maybe.Some(b) => Maybe.Some(RetryBudget {
                         remaining: b.remaining.clone(),
                         ceiling: b.ceiling,
                     }),
-                    None => None,
+                    Maybe.None => Maybe.None,
                 },
                 non_idempotent_policy: match &self.non_idempotent_policy {
                     NonIdempotentPolicy.Disabled => NonIdempotentPolicy.Disabled,
@@ -217,20 +217,20 @@ implement<H: Handler> Handler for RetryHandler<H> {
         }
 
         let mut attempt: Int = 0;
-        let mut last_err: Maybe<WeftError> = None;
+        let mut last_err: Maybe<WeftError> = Maybe.None;
 
         while attempt < self.layer.max_attempts {
             if attempt > 0 {
                 // Budget check before sleeping so a totally-exhausted
                 // budget exits immediately without burning the backoff.
                 match &self.layer.budget {
-                    Some(b) => if !b.try_consume() {
+                    Maybe.Some(b) => if !b.try_consume() {
                         return match last_err {
-                            Some(e) => Err(e),
-                            None    => Err(WeftError.Overloaded),
+                            Maybe.Some(e) => Result.Err(e),
+                            Maybe.None    => Result.Err(WeftError.Overloaded),
                         };
                     },
-                    None => {}
+                    Maybe.None => {}
                 }
                 timer.sleep_ms(self.layer.backoff_ms_for(attempt)).await;
             }
@@ -241,29 +241,29 @@ implement<H: Handler> Handler for RetryHandler<H> {
             let result = self.inner.handle(cloned).await;
 
             match result {
-                Ok(r) => {
+                Result.Ok(r) => {
                     let code = r.status.code();
                     if code == 502 || code == 503 || code == 504 {
                         // Treat upstream-class as retryable.
-                        last_err = Some(WeftError.UpstreamIo(f"upstream {code}"));
+                        last_err = Maybe.Some(WeftError.UpstreamIo(f"upstream {code}"));
                         attempt = attempt + 1;
                         continue;
                     }
-                    return Ok(r);
+                    return Result.Ok(r);
                 }
-                Err(e) => {
+                Result.Err(e) => {
                     if !e.category().is_retryable() {
-                        return Err(e);
+                        return Result.Err(e);
                     }
-                    last_err = Some(e);
+                    last_err = Maybe.Some(e);
                     attempt = attempt + 1;
                 }
             }
         }
 
         match last_err {
-            Some(e) => Err(e),
-            None    => Err(WeftError.Overloaded),
+            Maybe.Some(e) => Result.Err(e),
+            Maybe.None    => Result.Err(WeftError.Overloaded),
         }
     }
 }

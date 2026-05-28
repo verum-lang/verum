@@ -23,7 +23,7 @@
 //   The actor alternates:
 //     1. Drain pending standby-status updates from `status_rx`.
 //     2. Call `try_next_message` with a short TCP recv timeout.
-//        On Ok(Some(msg)) push to `msg_tx`; on Ok(None) (timeout)
+//        On Result.Ok(Maybe.Some(msg)) push to `msg_tx`; on Result.Ok(Maybe.None) (timeout)
 //        loop back to step 1. On Err propagate via the message
 //        channel and exit.
 //
@@ -63,7 +63,7 @@
 module core.database.postgres.async_replication;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -194,9 +194,9 @@ implement AsyncPgReplicationConnection {
     /// the raw estimate; the policy decision is the caller's.
     public fn rtt_estimate_us(&self) -> Maybe<Int> {
         if self.rtt_samples.load(MemoryOrdering.Acquire) == 0 {
-            None
+            Maybe.None
         } else {
-            Some(self.rtt_estimate_us.load(MemoryOrdering.Acquire))
+            Maybe.Some(self.rtt_estimate_us.load(MemoryOrdering.Acquire))
         }
     }
 
@@ -235,12 +235,12 @@ implement AsyncPgReplicationConnection {
     {
         let (rs, rr) = oneshot();
         match self.cmd_tx.send_async(RrIdentifySystem { ack: rs }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("identify_system")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("identify_system")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("identify_system reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("identify_system reply")),
         }
     }
 
@@ -254,12 +254,12 @@ implement AsyncPgReplicationConnection {
             temporary: temporary,
             ack: rs,
         }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("create_logical_slot")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("create_logical_slot")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("create_logical_slot reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("create_logical_slot reply")),
         }
     }
 
@@ -270,12 +270,12 @@ implement AsyncPgReplicationConnection {
             wait: wait,
             ack: rs,
         }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("drop_slot")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("drop_slot")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("drop_slot reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("drop_slot reply")),
         }
     }
 
@@ -293,12 +293,12 @@ implement AsyncPgReplicationConnection {
             start_lsn: start_lsn,
             ack: rs,
         }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("start_logical")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("start_logical")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("start_logical reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("start_logical reply")),
         }
     }
 
@@ -315,21 +315,21 @@ implement AsyncPgReplicationConnection {
             timeline: timeline,
             ack: rs,
         }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("start_physical")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("start_physical")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("start_physical reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("start_physical reply")),
         }
     }
 
     /// Pull the next replication event. Returns:
-    ///   * `Ok(Some(ReaEvent(msg)))` — a real ReplicationMessage.
-    ///   * `Ok(Some(ReaTerminated(err)))` — wire died; subsequent
-    ///     calls return None.
-    ///   * `Ok(Some(ReaClosed))` — clean shutdown observed.
-    ///   * `Ok(None)` — channel closed unexpectedly.
+    ///   * `Result.Ok(Maybe.Some(ReaEvent(msg)))` — a real ReplicationMessage.
+    ///   * `Result.Ok(Maybe.Some(ReaTerminated(err)))` — wire died; subsequent
+    ///     calls return Maybe.None.
+    ///   * `Result.Ok(Maybe.Some(ReaClosed))` — clean shutdown observed.
+    ///   * `Result.Ok(Maybe.None)` — channel closed unexpectedly.
     public async fn next_event(&self) -> Maybe<ReplActorEvent> {
         let mut g = self.msg_rx.lock().unwrap_or_else(|p| p.into_inner());
         let fut = g.recv_fut();
@@ -342,10 +342,10 @@ implement AsyncPgReplicationConnection {
     /// Terminated distinction use `next_event` directly.
     public async fn next_message(&self) -> Result<Maybe<ReplicationMessage>, DbError> {
         match self.next_event().await {
-            Some(ReaEvent(m))      => Ok(Some(m)),
-            Some(ReaTerminated(e)) => Err(e),
-            Some(ReaClosed)        => Ok(None),
-            None                   => Ok(None),
+            Maybe.Some(ReaEvent(m))      => Result.Ok(Maybe.Some(m)),
+            Maybe.Some(ReaTerminated(e)) => Result.Err(e),
+            Maybe.Some(ReaClosed)        => Result.Ok(Maybe.None),
+            Maybe.None                   => Result.Ok(Maybe.None),
         }
     }
 
@@ -362,24 +362,24 @@ implement AsyncPgReplicationConnection {
             client_time_us: client_time_us,
             reply_requested: reply_requested,
         }).await {
-            Ok(())  => Ok(()),
-            Err(_)  => Err(actor_dropped("send_standby_status")),
+            Result.Ok(())  => Result.Ok(()),
+            Result.Err(_)  => Result.Err(actor_dropped("send_standby_status")),
         }
     }
 
     public async fn close(&self) -> Result<(), DbError> {
         let (rs, rr) = oneshot();
         match self.cmd_tx.send_async(RrShutdown { ack: rs }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("close")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("close")); }
         }
         let _ = rr.await;
         let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
         match guard.take() {
-            Some(jh) => { let _ = jh.join().await; }
-            None     => {}
+            Maybe.Some(jh) => { let _ = jh.join().await; }
+            Maybe.None     => {}
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -397,8 +397,8 @@ public async fn connect_replication_async(
         core.database.postgres.replication.connect_replication(&cfg_owned)
     });
     let conn = match conn_jh.join().await {
-        Ok(r)  => r?,
-        Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
+        Result.Ok(r)  => r?,
+        Result.Err(_) => { return Result.Err(actor_dropped("connect: blocking-pool join")); }
     };
 
     let (cmd_tx, cmd_rx) = bounded_channel<ReplRequest>(8);
@@ -421,11 +421,11 @@ public async fn connect_replication_async(
         );
     });
 
-    Ok(AsyncPgReplicationConnection {
+    Result.Ok(AsyncPgReplicationConnection {
         cmd_tx: cmd_tx,
         status_tx: status_tx,
         msg_rx: Shared.new(sync.mutex.Mutex.new(msg_rx)),
-        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        join: Shared.new(sync.mutex.Mutex.new(Maybe.Some(join))),
         rtt_estimate_us: rtt_estimate,
         rtt_samples: rtt_samples,
     })
@@ -447,15 +447,15 @@ fn run_actor(
     // write — paired against the next observed RmKeepalive to
     // produce one RTT sample. `Maybe.None` until the first
     // status write lands.
-    let mut last_status_send_us: Maybe<Int> = None;
+    let mut last_status_send_us: Maybe<Int> = Maybe.None;
     // Setup phase — process commands until START arrives. The
     // wire is in regular sync mode (no streaming), so we use
     // blocking recv on cmd_rx.
     let mut streaming: Bool = false;
     while !streaming {
         let req = match cmd_rx.recv() {
-            Some(r) => r,
-            None    => {
+            Maybe.Some(r) => r,
+            Maybe.None    => {
                 let _ = msg_tx.send(ReaClosed);
                 return;
             }
@@ -473,7 +473,7 @@ fn run_actor(
             RrStartLogical { opts, start_lsn, ack } => {
                 let r = conn.start_logical(&opts, start_lsn);
                 match &r {
-                    Ok(()) => { streaming = true; }
+                    Result.Ok(()) => { streaming = true; }
                     _      => {}
                 }
                 let _ = ack.send(r);
@@ -481,7 +481,7 @@ fn run_actor(
             RrStartPhysical { slot, start_lsn, timeline, ack } => {
                 let r = conn.start_physical(&slot, start_lsn, timeline);
                 match &r {
-                    Ok(()) => { streaming = true; }
+                    Result.Ok(()) => { streaming = true; }
                     _      => {}
                 }
                 let _ = ack.send(r);
@@ -496,19 +496,19 @@ fn run_actor(
 
     // Streaming phase — use timeout-bounded reads so we can
     // alternate with status-update writes on a quiet wire.
-    let _ = conn.set_recv_timeout_ms(Some(DEFAULT_RECV_TIMEOUT_MS));
+    let _ = conn.set_recv_timeout_ms(Maybe.Some(DEFAULT_RECV_TIMEOUT_MS));
 
     loop {
         // Drain any pending standby-status writes first.
         loop {
             match status_rx.try_recv() {
-                Ok(s) => {
+                Result.Ok(s) => {
                     let r = conn.send_standby_status(
                         s.write, s.flush, s.apply,
                         s.client_time_us, s.reply_requested,
                     );
                     match r {
-                        Ok(()) => {
+                        Result.Ok(()) => {
                             // Stamp the send time for RTT pairing.
                             // Latest write wins — if the consumer
                             // bursts multiple statuses without a
@@ -516,22 +516,22 @@ fn run_actor(
                             // the most recent send is paired
                             // (correct: RTT measures the freshest
                             // round-trip, not stale ones).
-                            last_status_send_us = Some(wall_clock_us());
+                            last_status_send_us = Maybe.Some(wall_clock_us());
                         }
-                        Err(e) => {
+                        Result.Err(e) => {
                             let _ = msg_tx.send(ReaTerminated(e));
                             return;
                         }
                     }
                 }
-                Err(_) => { break; }
+                Result.Err(_) => { break; }
             }
         }
 
         // Drain any non-streaming control commands (currently only
         // shutdown is meaningful mid-stream).
         match cmd_rx.try_recv() {
-            Ok(req) => {
+            Result.Ok(req) => {
                 match req {
                     RrShutdown { ack } => {
                         let _ = ack.send(conn.close());
@@ -540,23 +540,23 @@ fn run_actor(
                     }
                     RrStartLogical { ack, .. }
                     | RrStartPhysical { ack, .. } => {
-                        let _ = ack.send(Err(bad_state("already streaming")));
+                        let _ = ack.send(Result.Err(bad_state("already streaming")));
                     }
                     RrIdentifySystem { ack } => {
-                        let _ = ack.send(Err(bad_state("identify_system mid-stream")));
+                        let _ = ack.send(Result.Err(bad_state("identify_system mid-stream")));
                     }
                     RrCreateLogicalSlot { ack, .. }
                     | RrDropSlot { ack, .. } => {
-                        let _ = ack.send(Err(bad_state("slot ops mid-stream")));
+                        let _ = ack.send(Result.Err(bad_state("slot ops mid-stream")));
                     }
                 }
             }
-            Err(_) => {}
+            Result.Err(_) => {}
         }
 
         // Try to read a frame within the timeout.
         match conn.try_next_message() {
-            Ok(Some(msg)) => {
+            Result.Ok(Maybe.Some(msg)) => {
                 // RTT sampling — pair the keepalive with the
                 // last outgoing standby-status. Other message
                 // shapes (XLogData, etc.) don't carry RTT
@@ -565,7 +565,7 @@ fn run_actor(
                 match &msg {
                     RmKeepalive(_) => {
                         match last_status_send_us {
-                            Some(send_us) => {
+                            Maybe.Some(send_us) => {
                                 let now_us = wall_clock_us();
                                 let sample = now_us - send_us;
                                 if sample >= 0 {
@@ -577,26 +577,26 @@ fn run_actor(
                                 }
                                 // Consume the pairing — next
                                 // sample needs a fresh send.
-                                last_status_send_us = None;
+                                last_status_send_us = Maybe.None;
                             }
-                            None => {}
+                            Maybe.None => {}
                         }
                     }
                     _ => {}
                 }
                 match msg_tx.send(ReaEvent(msg)) {
-                    Ok(())  => {}
-                    Err(_)  => {
+                    Result.Ok(())  => {}
+                    Result.Err(_)  => {
                         // Caller dropped the receiver — clean up.
                         let _ = conn.close();
                         return;
                     }
                 }
             }
-            Ok(None) => {
+            Result.Ok(Maybe.None) => {
                 // Timeout — loop back to drain queues.
             }
-            Err(e) => {
+            Result.Err(e) => {
                 let _ = msg_tx.send(ReaTerminated(e));
                 return;
             }

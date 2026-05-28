@@ -149,9 +149,9 @@ public fn blocking_read(fd: FileDesc, buf: &mut [Byte]) -> IoResult<Int> {
     mount super.super.raw.termios.read as raw_read;
     let n = raw_read(fd.0, buf as &unsafe mut Byte, buf.len());
     if n < 0 {
-        Err(StreamError.from_errno())
+        Result.Err(StreamError.from_errno())
     } else {
-        Ok(n)
+        Result.Ok(n)
     }
 }
 
@@ -188,9 +188,9 @@ public fn blocking_read(fd: FileDesc, buf: &mut [Byte]) -> IoResult<Int> {
         0 as &mut core.sys.windows.kernel32.Overlapped,
     );
     if ok {
-        Ok(bytes_read as Int)
+        Result.Ok(bytes_read as Int)
     } else {
-        Err(StreamError.new(IoErrorKind.Other, "ReadFile failed"))
+        Result.Err(StreamError.new(IoErrorKind.Other, "ReadFile failed"))
     }
 }
 

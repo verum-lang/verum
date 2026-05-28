@@ -29,7 +29,7 @@
 module core.database.sqlite.native.builtins.json_path;
 
 mount core.*;
-mount base.{Text, Maybe, Bool, Result, Ok, Err, Some, None};
+mount base.{Text, Maybe, Bool, Result, Ok, Err, Some, Maybe.None};
 mount collections.List;
 mount core.database.sqlite.native.builtins.json_fns.{
     JsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,
@@ -88,8 +88,8 @@ implement Eq for PathParseError {
 
 public fn parse_path(s: &Text) -> Result<List<PathSeg>, PathParseError> {
     let bs = s.as_bytes();
-    if bs.len() == 0 { return Err(PpEmpty); }
-    if bs[0] != (36 as Byte) { return Err(PpMissingDollar); }
+    if bs.len() == 0 { return Result.Err(PpEmpty); }
+    if bs[0] != (36 as Byte) { return Result.Err(PpMissingDollar); }
     let mut out: List<PathSeg> = List.new();
     let mut i: Int = 1;
     while i < bs.len() {
@@ -100,8 +100,8 @@ public fn parse_path(s: &Text) -> Result<List<PathSeg>, PathParseError> {
             if i < bs.len() && bs[i] == (91 as Byte) {
                 let r = parse_index(&bs, i);
                 match r {
-                    Ok(pair) => { out.push(PsIndex(pair.0)); i = pair.1; }
-                    Err(e)   => { return Err(e); }
+                    Result.Ok(pair) => { out.push(PsIndex(pair.0)); i = pair.1; }
+                    Result.Err(e)   => { return Result.Err(e); }
                 }
                 continue;
             }
@@ -127,14 +127,14 @@ public fn parse_path(s: &Text) -> Result<List<PathSeg>, PathParseError> {
         } else if b == (91 as Byte) {
             let r = parse_index(&bs, i);
             match r {
-                Ok(pair) => { out.push(PsIndex(pair.0)); i = pair.1; }
-                Err(e)   => { return Err(e); }
+                Result.Ok(pair) => { out.push(PsIndex(pair.0)); i = pair.1; }
+                Result.Err(e)   => { return Result.Err(e); }
             }
         } else {
-            return Err(PpUnclosedBracket);
+            return Result.Err(PpUnclosedBracket);
         }
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn is_name_byte(b: Byte) -> Bool {
@@ -145,7 +145,7 @@ fn is_name_byte(b: Byte) -> Bool {
 }
 
 fn parse_index(bs: &List<Byte>, start: Int) -> Result<(Int, Int), PathParseError> {
-    if start >= bs.len() || bs[start] != (91 as Byte) { return Err(PpUnclosedBracket); }
+    if start >= bs.len() || bs[start] != (91 as Byte) { return Result.Err(PpUnclosedBracket); }
     let mut i: Int = start + 1;
     let mut idx: Int = 0;
     let mut had_digit: Bool = false;
@@ -156,20 +156,20 @@ fn parse_index(bs: &List<Byte>, start: Int) -> Result<(Int, Int), PathParseError
     // a small positive value that flows into list-indexing.
     while i < bs.len() && bs[i] != (93 as Byte) {
         if bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
-            if digit_count >= 19 { return Err(PpInvalidIndex); }
-            if idx > 922_337_203_685_477_580 { return Err(PpInvalidIndex); }
+            if digit_count >= 19 { return Result.Err(PpInvalidIndex); }
+            if idx > 922_337_203_685_477_580 { return Result.Err(PpInvalidIndex); }
             idx = idx * 10 + ((bs[i] as Int) - 48);
-            if idx < 0 { return Err(PpInvalidIndex); }
+            if idx < 0 { return Result.Err(PpInvalidIndex); }
             had_digit = true;
             digit_count = digit_count + 1;
         } else {
-            return Err(PpInvalidIndex);
+            return Result.Err(PpInvalidIndex);
         }
         i = i + 1;
     }
-    if i >= bs.len() { return Err(PpUnclosedBracket); }
-    if !had_digit { return Err(PpInvalidIndex); }
-    Ok((idx, i + 1))
+    if i >= bs.len() { return Result.Err(PpUnclosedBracket); }
+    if !had_digit { return Result.Err(PpInvalidIndex); }
+    Result.Ok((idx, i + 1))
 }
 
 // -----------------------------------------------------------------------------
@@ -426,7 +426,7 @@ public fn apply_patch(base: &JsonValue, patch: &JsonValue) -> JsonValue {
                 while i < b_fields.len() {
                     let key = &b_fields[i].key;
                     match find_field(p_fields, key) {
-                        Some(p_value) => {
+                        Maybe.Some(p_value) => {
                             // Patched: maybe remove, maybe merge, maybe replace.
                             match p_value {
                                 JNull => {}  // skip — this removes the key
@@ -436,7 +436,7 @@ public fn apply_patch(base: &JsonValue, patch: &JsonValue) -> JsonValue {
                                 }
                             }
                         }
-                        None => {
+                        Maybe.None => {
                             out.push(JsonField {
                                 key: key.clone(),
                                 value: clone_json(&b_fields[i].value),
@@ -473,10 +473,10 @@ public fn apply_patch(base: &JsonValue, patch: &JsonValue) -> JsonValue {
 fn find_field(fields: &List<JsonField>, key: &Text) -> Maybe<JsonValue> {
     let mut i: Int = 0;
     while i < fields.len() {
-        if fields[i].key == key { return Some(clone_json(&fields[i].value)); }
+        if fields[i].key == key { return Maybe.Some(clone_json(&fields[i].value)); }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn field_present(fields: &List<JsonField>, key: &Text) -> Bool {

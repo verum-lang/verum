@@ -196,7 +196,7 @@ implement HyperLogLog {
     /// precision and key — otherwise returns `PrecisionMismatch`.
     public fn merge(&mut self, other: &HyperLogLog) -> Result<(), HllError> {
         if self.precision != other.precision {
-            return Err(HllError.PrecisionMismatch);
+            return Result.Err(HllError.PrecisionMismatch);
         }
         // Key mismatch = incompatible sketches; we don't enforce
         // beyond precision here because some deployments legitimately
@@ -208,7 +208,7 @@ implement HyperLogLog {
             }
             i = i + 1;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Zero the sketch. Key is preserved so subsequent adds still

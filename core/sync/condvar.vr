@@ -170,8 +170,8 @@ implement Condvar {
         let result = sys_futex_wait(&self.seq.value, my_seq, Maybe.Some(timeout_ns as UInt64));
 
         let timed_out = match result {
-            Err(_) => true,   // Timeout or error
-            Ok(_) => false,   // Woken normally
+            Result.Err(_) => true,   // Timeout or error
+            Result.Ok(_) => false,   // Woken normally
         };
 
         self.waiters.fetch_sub(1, MemoryOrdering.SeqCst);
@@ -195,7 +195,7 @@ implement Condvar {
         while predicate(&*guard) {
             guard = self.wait(guard)?;
         }
-        Ok(guard)
+        Result.Ok(guard)
     }
 
     /// Notify one waiting thread.

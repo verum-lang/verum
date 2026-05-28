@@ -192,11 +192,11 @@ implement Eq for JsonbError {
 public fn decode(bytes: &[Byte]) -> Result<JsonbValue, JsonbError> {
     let n = bytes.len() as Int;
     if n < 1 {
-        return Err(JbeEmpty);
+        return Result.Err(JbeEmpty);
     }
     let version = (bytes[0] as Int) & 0xFF;
     if version != JSONB_VERSION_1 {
-        return Err(JbeUnsupportedVersion(version));
+        return Result.Err(JbeUnsupportedVersion(version));
     }
     // Body — slice from offset 1 to end.
     let body_len = n - 1;
@@ -207,10 +207,10 @@ public fn decode(bytes: &[Byte]) -> Result<JsonbValue, JsonbError> {
         i = i + 1;
     }
     let text = match Text.from_utf8(body) {
-        Ok(t)  => t,
-        Err(_) => return Err(JbeBadUtf8),
+        Result.Ok(t)  => t,
+        Result.Err(_) => return Result.Err(JbeBadUtf8),
     };
-    Ok(JsonbValue { version: version, json_text: text })
+    Result.Ok(JsonbValue { version: version, json_text: text })
 }
 
 /// Decode + parse in one step. Returns the universal `Value`
@@ -219,10 +219,10 @@ public fn decode(bytes: &[Byte]) -> Result<JsonbValue, JsonbError> {
 public fn decode_value(bytes: &[Byte]) -> Result<Value, JsonbError> {
     let jb = decode(bytes)?;
     let jv = match parse_json(&jb.json_text) {
-        Ok(v)  => v,
-        Err(e) => return Err(JbeBadJson(e)),
+        Result.Ok(v)  => v,
+        Result.Err(e) => return Result.Err(JbeBadJson(e)),
     };
-    Ok(core.encoding.value.from_json(&jv))
+    Result.Ok(core.encoding.value.from_json(&jv))
 }
 
 /// Decode + parse to `JsonValue` (as opposed to the universal
@@ -231,8 +231,8 @@ public fn decode_value(bytes: &[Byte]) -> Result<Value, JsonbError> {
 public fn decode_json(bytes: &[Byte]) -> Result<JsonValue, JsonbError> {
     let jb = decode(bytes)?;
     match parse_json(&jb.json_text) {
-        Ok(v)  => Ok(v),
-        Err(e) => Err(JbeBadJson(e)),
+        Result.Ok(v)  => Result.Ok(v),
+        Result.Err(e) => Result.Err(JbeBadJson(e)),
     }
 }
 
@@ -267,11 +267,11 @@ public fn encode(json_text: &Text) -> List<Byte> {
 /// BSON via the equivalent format-specific encoders instead.
 public fn encode_value(v: &Value) -> Result<List<Byte>, JsonbError> {
     let jv = match core.encoding.value.to_json(v) {
-        Ok(j)  => j,
-        Err(e) => return Err(JbeBadValue(e)),
+        Result.Ok(j)  => j,
+        Result.Err(e) => return Result.Err(JbeBadValue(e)),
     };
     let text = json_stringify(&jv);
-    Ok(encode(&text))
+    Result.Ok(encode(&text))
 }
 
 /// Encode a `JsonValue` as JSONB. Convenience for callers that

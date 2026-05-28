@@ -234,8 +234,8 @@ implement ActiveHealthChecker {
     }
 
     /// Tick once. Bumps `attempts`, calls `probe`, applies the outcome
-    /// via `record_outcome`. Returns `Ok(true)` when the probe passed
-    /// and `Ok(false)` when it failed; `Err(_)` on infrastructure-level
+    /// via `record_outcome`. Returns `Result.Ok(true)` when the probe passed
+    /// and `Result.Ok(false)` when it failed; `Result.Err(_)` on infrastructure-level
     /// trouble (no socket, DNS failure, etc.) — caller decides whether
     /// to treat that as a fail.
     pub async fn tick<P: HealthProbe>(&self, probe: &P) -> Result<Bool, HealthCheckError> {
@@ -250,7 +250,7 @@ implement ActiveHealthChecker {
         };
         let outcome = probe.probe(&self.upstream, &path, timeout_ms).await?;
         self.record_outcome(outcome);
-        Ok(outcome)
+        Result.Ok(outcome)
     }
 
     /// Run the active probe loop until cancelled. The caller spawns
@@ -259,11 +259,11 @@ implement ActiveHealthChecker {
     pub async fn run<P: HealthProbe>(&self, probe: &P) -> Result<(), HealthCheckError> {
         let period_ms = match self.cfg {
             HealthCheck.Active { period_ms, .. } => period_ms,
-            _ => return Ok(()),       // not an active config — no-op
+            _ => return Result.Ok(()),       // not an active config — no-op
         };
         loop {
             if self.cancel.load(MemoryOrdering.Acquire) {
-                return Ok(());
+                return Result.Ok(());
             }
             // Treat an Err as a failed probe — the loop continues
             // ticking (transient network failure shouldn't kill the
@@ -286,8 +286,8 @@ implement ActiveHealthChecker {
 /// async + boolean-result so any backend works.
 public type HealthProbe is protocol {
     /// Issue a single probe against `(upstream, path)`. Return
-    /// `Ok(true)` on a 2xx response within `timeout_ms`, `Ok(false)`
-    /// on any other status code, `Err(_)` on transport-level failure.
+    /// `Result.Ok(true)` on a 2xx response within `timeout_ms`, `Result.Ok(false)`
+    /// on any other status code, `Result.Err(_)` on transport-level failure.
     async fn probe(
         &self,
         upstream: &Upstream,

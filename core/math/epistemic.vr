@@ -56,7 +56,7 @@ mount core.math.kan_extension.{
 };
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.base.protocols.{Eq, Ord, PartialOrd};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // 1. EpistemicStatus — ordered lattice of proof strength
@@ -101,17 +101,17 @@ implement EpistemicStatus {
     }
 
     /// Reconstruct an EpistemicStatus from its numeric rank.
-    /// Returns None for ranks outside [0, 6].
+    /// Returns Maybe.None for ranks outside [0, 6].
     public fn from_rank(r: Int) -> Maybe<EpistemicStatus> {
         match r {
-            0 => Some(Retracted),
-            1 => Some(Interpretation),
-            2 => Some(Postulate),
-            3 => Some(Hypothesis),
-            4 => Some(Definition),
-            5 => Some(Conditional),
-            6 => Some(Theorem),
-            _ => None,
+            0 => Maybe.Some(Retracted),
+            1 => Maybe.Some(Interpretation),
+            2 => Maybe.Some(Postulate),
+            3 => Maybe.Some(Hypothesis),
+            4 => Maybe.Some(Definition),
+            5 => Maybe.Some(Conditional),
+            6 => Maybe.Some(Theorem),
+            _ => Maybe.None,
         }
     }
 
@@ -173,7 +173,7 @@ implement Ord for EpistemicStatus {
 
 implement PartialOrd for EpistemicStatus {
     fn partial_cmp(&self, other: &EpistemicStatus) -> Maybe<Ordering> {
-        Some(self.cmp(other))
+        Maybe.Some(self.cmp(other))
     }
 }
 
@@ -263,7 +263,7 @@ public type Theory is {
 };
 
 implement Theory {
-    /// Look up a claim by id. Returns None if the id is not present.
+    /// Look up a claim by id. Returns Maybe.None if the id is not present.
     public fn get_claim(&self, id: &Text) -> Maybe<Claim> {
         self.claim_store.get(id)
     }
@@ -271,8 +271,8 @@ implement Theory {
     /// All direct dependencies of claim `id`.
     public fn deps_of(&self, id: &Text) -> List<Text> {
         match self.dependencies.get(id) {
-            Some(deps) => deps,
-            None       => [],
+            Maybe.Some(deps) => deps,
+            Maybe.None       => [],
         }
     }
 
@@ -296,7 +296,7 @@ implement Theory {
         let mut result: List<Text> = [];
         while !queue.is_empty() {
             let cur = queue.remove(0);
-            if visited.get(&cur) is Some(true) {
+            if visited.get(&cur) is Maybe.Some(true) {
                 continue;
             }
             visited.insert(cur.clone(), true);
@@ -381,11 +381,11 @@ implement EpistemicTopology {
             let mut witnessed = false;
             for morphism in cover {
                 match morphism.status_map.get(id) {
-                    Some(_) => {
+                    Maybe.Some(_) => {
                         witnessed = true;
                         // Found at least one source that maps this id.
                     },
-                    None => {},
+                    Maybe.None => {},
                 }
             }
             if !witnessed {
@@ -407,19 +407,19 @@ implement EpistemicTopology {
     ) -> Bool {
         for id in &target.statements {
             let target_status = match target.get_claim(id) {
-                Some(c) => c.status,
-                None    => EpistemicStatus.Retracted,
+                Maybe.Some(c) => c.status,
+                Maybe.None    => EpistemicStatus.Retracted,
             };
             let mut any_coherent = false;
             for morphism in cover {
                 match morphism.status_map.get(id) {
-                    Some(s) => {
+                    Maybe.Some(s) => {
                         // The source must assign status >= target_status.
                         if s.rank() >= target_status.rank() {
                             any_coherent = true;
                         }
                     },
-                    None => {},
+                    Maybe.None => {},
                 }
             }
             if !any_coherent {
@@ -637,9 +637,9 @@ public fn propagate_status(theory: &mut Theory) -> List<StatusChange> {
         let mut min_status: EpistemicStatus = EpistemicStatus.Theorem;
         for dep_id in &deps {
             let dep_status = match theory.get_claim(dep_id) {
-                Some(dep) => dep.status,
+                Maybe.Some(dep) => dep.status,
                 // Unknown dependency — conservative lower bound.
-                None      => EpistemicStatus.Hypothesis,
+                Maybe.None      => EpistemicStatus.Hypothesis,
             };
             min_status = min_status.meet(&dep_status);
         }
@@ -647,7 +647,7 @@ public fn propagate_status(theory: &mut Theory) -> List<StatusChange> {
         // Attempt downgrade: only act if the claim's current status exceeds
         // the minimum permitted by its dependencies.
         match theory.get_claim(&id) {
-            Some(claim) => {
+            Maybe.Some(claim) => {
                 if claim.status.cmp(&min_status) is Greater {
                     let old = claim.status;
                     // Apply the downgrade to the claim store.
@@ -670,8 +670,8 @@ public fn propagate_status(theory: &mut Theory) -> List<StatusChange> {
                     let rdeps = theory.dependents_of(&id);
                     for rdep_id in rdeps {
                         let already = match in_queue.get(&rdep_id) {
-                            Some(b) => b,
-                            None    => false,
+                            Maybe.Some(b) => b,
+                            Maybe.None    => false,
                         };
                         if !already {
                             queue.push(rdep_id.clone());
@@ -680,7 +680,7 @@ public fn propagate_status(theory: &mut Theory) -> List<StatusChange> {
                     }
                 }
             },
-            None => {
+            Maybe.None => {
                 // Claim not in store — skip silently.
             },
         }
@@ -807,13 +807,13 @@ public fn compute_kan_extension(
 
                 for a_id in &reachable {
                     let in_sub = match in_subsite.get(a_id) {
-                        Some(b) => b,
-                        None    => false,
+                        Maybe.Some(b) => b,
+                        Maybe.None    => false,
                     };
                     if in_sub {
                         let a_status = match theory.get_claim(a_id) {
-                            Some(cl) => cl.status,
-                            None     => EpistemicStatus.Retracted,
+                            Maybe.Some(cl) => cl.status,
+                            Maybe.None     => EpistemicStatus.Retracted,
                         };
                         // Record a comma object for this (a → c) pair.
                         comma_objects.push(EpistemicCommaObject {
@@ -847,13 +847,13 @@ public fn compute_kan_extension(
 
                 for a_id in &reachable {
                     let in_sub = match in_subsite.get(a_id) {
-                        Some(b) => b,
-                        None    => false,
+                        Maybe.Some(b) => b,
+                        Maybe.None    => false,
                     };
                     if in_sub {
                         let a_status = match theory.get_claim(a_id) {
-                            Some(cl) => cl.status,
-                            None     => EpistemicStatus.Retracted,
+                            Maybe.Some(cl) => cl.status,
+                            Maybe.None     => EpistemicStatus.Retracted,
                         };
                         comma_objects.push(EpistemicCommaObject {
                             source_id:     c_id.clone(),
@@ -963,8 +963,8 @@ public fn compute_obstruction(
     for c_id in &theory.statements {
         // Original status from the theory.
         let original_rank = match theory.get_claim(c_id) {
-            Some(cl) => cl.status.rank(),
-            None     => 0,
+            Maybe.Some(cl) => cl.status.rank(),
+            Maybe.None     => 0,
         };
 
         // Step 2 — right Kan extension of Lan: meet of Lan(a) over
@@ -975,13 +975,13 @@ public fn compute_obstruction(
 
         for a_id in &reachable {
             let in_sub = match in_subsite.get(a_id) {
-                Some(b) => b,
-                None    => false,
+                Maybe.Some(b) => b,
+                Maybe.None    => false,
             };
             if in_sub {
                 let lan_a_rank = match lan.pointwise_map.get(a_id) {
-                    Some(s) => s.rank(),
-                    None    => 0,
+                    Maybe.Some(s) => s.rank(),
+                    Maybe.None    => 0,
                 };
                 if lan_a_rank < meet_rank {
                     meet_rank = lan_a_rank;
@@ -1103,8 +1103,8 @@ theorem left_kan_is_pointwise_join(
         match compute_kan_extension(subsite_ids, theory, EpistemicKanDirection.Left)
             .pointwise_map.get(c_id)
         {
-            Some(_) => true,
-            None    => false,
+            Maybe.Some(_) => true,
+            Maybe.None    => false,
         }
     proof by auto;
 
@@ -1120,8 +1120,8 @@ theorem right_kan_is_pointwise_meet(
         match compute_kan_extension(subsite_ids, theory, EpistemicKanDirection.Right)
             .pointwise_map.get(c_id)
         {
-            Some(_) => true,
-            None    => false,
+            Maybe.Some(_) => true,
+            Maybe.None    => false,
         }
     proof by auto;
 

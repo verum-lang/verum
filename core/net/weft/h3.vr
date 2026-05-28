@@ -140,10 +140,10 @@ implement<H: Handler + Send + Sync + 'static> WarpH3Server<H> {
         config: WarpQuicConfig,
     ) -> Result<WarpH3Server<H>, Text> {
         let server = match H3Server.bind(addr, config.inner.clone()).await {
-            Ok(s)  => s,
-            Err(e) => return Err(f"warp h3 bind: {e}"),
+            Result.Ok(s)  => s,
+            Result.Err(e) => return Result.Err(f"warp h3 bind: {e}"),
         };
-        Ok(WarpH3Server {
+        Result.Ok(WarpH3Server {
             inner:    server,
             app:      Heap.new(app),
             config:   config,
@@ -217,8 +217,8 @@ implement<H: Handler + Send + Sync + 'static> WarpH3Server<H> {
         }
 
         match serve_result {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(f"warp h3 serve: {e}"),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(f"warp h3 serve: {e}"),
         }
     }
 }
@@ -238,14 +238,14 @@ async fn dispatch_one_request<H: Handler>(
     // Cancellation propagates to the user handler's first await
     // boundary if the server is shutting down mid-request.
     let result = if token.is_cancelled() {
-        Err(WeftError.Cancelled)
+        Result.Err(WeftError.Cancelled)
     } else {
         app.handle(&weft_req).await
     };
 
     match result {
-        Ok(weft_resp) => weft_to_h3_response(weft_resp),
-        Err(err)      => err.into_h3_response(),
+        Result.Ok(weft_resp) => weft_to_h3_response(weft_resp),
+        Result.Err(err)      => err.into_h3_response(),
     }
 }
 

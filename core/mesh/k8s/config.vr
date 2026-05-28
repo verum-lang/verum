@@ -107,11 +107,11 @@ implement KubeConfig {
 
     /// Construct from an explicit endpoint + auth.
     public fn from_endpoint(cluster: ClusterEndpoint, auth: AuthInfo) -> KubeConfig {
-        KubeConfig { cluster: cluster, auth: auth, namespace: None }
+        KubeConfig { cluster: cluster, auth: auth, namespace: Maybe.None }
     }
 
     public fn with_namespace(mut self, namespace: Text) -> KubeConfig {
-        self.namespace = Some(namespace); self
+        self.namespace = Maybe.Some(namespace); self
     }
 
     public fn cluster(&self) -> &ClusterEndpoint { &self.cluster }

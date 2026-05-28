@@ -50,7 +50,7 @@
 module core.database.postgres.wire.codec;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
 mount core.database.common.error.{DbError, DecodeFault, EncodeFault};
@@ -170,44 +170,44 @@ public fn array_oid_for_element(oid: Int) -> Int {
 }
 
 /// Reverse of `array_oid_for_element` — given an array OID,
-/// return the OID of its element type. `None` if the OID is not
+/// return the OID of its element type. `Maybe.None` if the OID is not
 /// a known array OID.
 public fn element_oid_for_array(array_oid: Int) -> Maybe<Int> {
-    if      array_oid == 1000 { Some(PG_TYPE_BOOL) }
-    else if array_oid == 1001 { Some(PG_TYPE_BYTEA) }
-    else if array_oid == 1002 { Some(PG_TYPE_CHAR) }
-    else if array_oid == 1003 { Some(PG_TYPE_NAME) }
-    else if array_oid == 1016 { Some(PG_TYPE_INT8) }
-    else if array_oid == 1005 { Some(PG_TYPE_INT2) }
-    else if array_oid == 1007 { Some(PG_TYPE_INT4) }
-    else if array_oid == 1009 { Some(PG_TYPE_TEXT) }
-    else if array_oid == 1028 { Some(PG_TYPE_OID) }
-    else if array_oid == 199  { Some(PG_TYPE_JSON) }
-    else if array_oid == 1021 { Some(PG_TYPE_FLOAT4) }
-    else if array_oid == 1022 { Some(PG_TYPE_FLOAT8) }
-    else if array_oid == 1014 { Some(PG_TYPE_BPCHAR) }
-    else if array_oid == 1015 { Some(PG_TYPE_VARCHAR) }
-    else if array_oid == 1182 { Some(PG_TYPE_DATE) }
-    else if array_oid == 1183 { Some(PG_TYPE_TIME) }
-    else if array_oid == 1115 { Some(PG_TYPE_TIMESTAMP) }
-    else if array_oid == 1185 { Some(PG_TYPE_TIMESTAMPTZ) }
-    else if array_oid == 1187 { Some(PG_TYPE_INTERVAL) }
-    else if array_oid == 1231 { Some(PG_TYPE_NUMERIC) }
-    else if array_oid == 2951 { Some(PG_TYPE_UUID) }
-    else if array_oid == 3807 { Some(PG_TYPE_JSONB) }
-    else if array_oid == 3643 { Some(PG_TYPE_TSVECTOR) }
-    else if array_oid == 1041 { Some(PG_TYPE_INET) }
-    else if array_oid == 651  { Some(PG_TYPE_CIDR) }
-    else if array_oid == 3905 { Some(PG_TYPE_INT4RANGE) }
-    else if array_oid == 3907 { Some(PG_TYPE_NUMRANGE) }
-    else if array_oid == 3909 { Some(PG_TYPE_TSRANGE) }
-    else if array_oid == 3911 { Some(PG_TYPE_TSTZRANGE) }
-    else if array_oid == 3927 { Some(PG_TYPE_INT8RANGE) }
-    else if array_oid == 3913 { Some(PG_TYPE_DATERANGE) }
-    else { None }
+    if      array_oid == 1000 { Maybe.Some(PG_TYPE_BOOL) }
+    else if array_oid == 1001 { Maybe.Some(PG_TYPE_BYTEA) }
+    else if array_oid == 1002 { Maybe.Some(PG_TYPE_CHAR) }
+    else if array_oid == 1003 { Maybe.Some(PG_TYPE_NAME) }
+    else if array_oid == 1016 { Maybe.Some(PG_TYPE_INT8) }
+    else if array_oid == 1005 { Maybe.Some(PG_TYPE_INT2) }
+    else if array_oid == 1007 { Maybe.Some(PG_TYPE_INT4) }
+    else if array_oid == 1009 { Maybe.Some(PG_TYPE_TEXT) }
+    else if array_oid == 1028 { Maybe.Some(PG_TYPE_OID) }
+    else if array_oid == 199  { Maybe.Some(PG_TYPE_JSON) }
+    else if array_oid == 1021 { Maybe.Some(PG_TYPE_FLOAT4) }
+    else if array_oid == 1022 { Maybe.Some(PG_TYPE_FLOAT8) }
+    else if array_oid == 1014 { Maybe.Some(PG_TYPE_BPCHAR) }
+    else if array_oid == 1015 { Maybe.Some(PG_TYPE_VARCHAR) }
+    else if array_oid == 1182 { Maybe.Some(PG_TYPE_DATE) }
+    else if array_oid == 1183 { Maybe.Some(PG_TYPE_TIME) }
+    else if array_oid == 1115 { Maybe.Some(PG_TYPE_TIMESTAMP) }
+    else if array_oid == 1185 { Maybe.Some(PG_TYPE_TIMESTAMPTZ) }
+    else if array_oid == 1187 { Maybe.Some(PG_TYPE_INTERVAL) }
+    else if array_oid == 1231 { Maybe.Some(PG_TYPE_NUMERIC) }
+    else if array_oid == 2951 { Maybe.Some(PG_TYPE_UUID) }
+    else if array_oid == 3807 { Maybe.Some(PG_TYPE_JSONB) }
+    else if array_oid == 3643 { Maybe.Some(PG_TYPE_TSVECTOR) }
+    else if array_oid == 1041 { Maybe.Some(PG_TYPE_INET) }
+    else if array_oid == 651  { Maybe.Some(PG_TYPE_CIDR) }
+    else if array_oid == 3905 { Maybe.Some(PG_TYPE_INT4RANGE) }
+    else if array_oid == 3907 { Maybe.Some(PG_TYPE_NUMRANGE) }
+    else if array_oid == 3909 { Maybe.Some(PG_TYPE_TSRANGE) }
+    else if array_oid == 3911 { Maybe.Some(PG_TYPE_TSTZRANGE) }
+    else if array_oid == 3927 { Maybe.Some(PG_TYPE_INT8RANGE) }
+    else if array_oid == 3913 { Maybe.Some(PG_TYPE_DATERANGE) }
+    else { Maybe.None }
 }
 
-/// Returns the element OID for a range type, or `None` if the
+/// Returns the element OID for a range type, or `Maybe.None` if the
 /// OID is not a known range. PG range types:
 ///   int4range  → int4    (3904 → 23)
 ///   int8range  → int8    (3926 → 20)
@@ -216,13 +216,13 @@ public fn element_oid_for_array(array_oid: Int) -> Maybe<Int> {
 ///   tstzrange  → timestamptz (3910 → 1184)
 ///   daterange  → date    (3912 → 1082)
 public fn range_element_oid(range_oid: Int) -> Maybe<Int> {
-    if      range_oid == PG_TYPE_INT4RANGE  { Some(PG_TYPE_INT4) }
-    else if range_oid == PG_TYPE_INT8RANGE  { Some(PG_TYPE_INT8) }
-    else if range_oid == PG_TYPE_NUMRANGE   { Some(PG_TYPE_NUMERIC) }
-    else if range_oid == PG_TYPE_TSRANGE    { Some(PG_TYPE_TIMESTAMP) }
-    else if range_oid == PG_TYPE_TSTZRANGE  { Some(PG_TYPE_TIMESTAMPTZ) }
-    else if range_oid == PG_TYPE_DATERANGE  { Some(PG_TYPE_DATE) }
-    else { None }
+    if      range_oid == PG_TYPE_INT4RANGE  { Maybe.Some(PG_TYPE_INT4) }
+    else if range_oid == PG_TYPE_INT8RANGE  { Maybe.Some(PG_TYPE_INT8) }
+    else if range_oid == PG_TYPE_NUMRANGE   { Maybe.Some(PG_TYPE_NUMERIC) }
+    else if range_oid == PG_TYPE_TSRANGE    { Maybe.Some(PG_TYPE_TIMESTAMP) }
+    else if range_oid == PG_TYPE_TSTZRANGE  { Maybe.Some(PG_TYPE_TIMESTAMPTZ) }
+    else if range_oid == PG_TYPE_DATERANGE  { Maybe.Some(PG_TYPE_DATE) }
+    else { Maybe.None }
 }
 
 /// Returns true if the given OID has a binary codec implementation
@@ -301,13 +301,13 @@ fn encode_fault(reason: Text) -> DbError {
 // arena; reads are pure pointer math.
 // -----------------------------------------------------------------------------
 
-/// Extract one byte at `off`. Returns `None` if `off` is past the
+/// Extract one byte at `off`. Returns `Maybe.None` if `off` is past the
 /// slice's end.
 fn slice_byte(s: &ArenaSlice, off: Int) -> Maybe<Int> {
     if off < 0 || off >= s.len {
-        None
+        Maybe.None
     } else {
-        Some(load_byte(s.ptr + off) & 0xFF)
+        Maybe.Some(load_byte(s.ptr + off) & 0xFF)
     }
 }
 
@@ -315,17 +315,17 @@ fn slice_byte(s: &ArenaSlice, off: Int) -> Maybe<Int> {
 /// a decode fault if the slice is too short.
 fn slice_u16_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
     if off < 0 || off + 2 > s.len {
-        return Err(decode_fault("short read: u16 BE".clone()));
+        return Result.Err(decode_fault("short read: u16 BE".clone()));
     }
     let hi = load_byte(s.ptr + off)     & 0xFF;
     let lo = load_byte(s.ptr + off + 1) & 0xFF;
-    Ok((hi << 8) | lo)
+    Result.Ok((hi << 8) | lo)
 }
 
 /// Read a 32-bit big-endian integer (signed two's-complement).
 fn slice_i32_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
     if off < 0 || off + 4 > s.len {
-        return Err(decode_fault("short read: i32 BE".clone()));
+        return Result.Err(decode_fault("short read: i32 BE".clone()));
     }
     let b0 = (load_byte(s.ptr + off)     & 0xFF) << 24;
     let b1 = (load_byte(s.ptr + off + 1) & 0xFF) << 16;
@@ -333,16 +333,16 @@ fn slice_i32_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
     let b3 = (load_byte(s.ptr + off + 3) & 0xFF);
     let u = b0 | b1 | b2 | b3;
     if (u & 0x8000_0000) != 0 {
-        Ok(u | (-1 ^ 0xFFFF_FFFF))    // sign-extend
+        Result.Ok(u | (-1 ^ 0xFFFF_FFFF))    // sign-extend
     } else {
-        Ok(u)
+        Result.Ok(u)
     }
 }
 
 /// Read a 64-bit big-endian integer.
 fn slice_i64_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
     if off < 0 || off + 8 > s.len {
-        return Err(decode_fault("short read: i64 BE".clone()));
+        return Result.Err(decode_fault("short read: i64 BE".clone()));
     }
     let mut v: Int = 0;
     let mut i: Int = 0;
@@ -350,16 +350,16 @@ fn slice_i64_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
         v = (v << 8) | (load_byte(s.ptr + off + i) & 0xFF);
         i = i + 1;
     }
-    Ok(v)
+    Result.Ok(v)
 }
 
 /// Carve a sub-slice. Generation is inherited — invalidates with the
 /// parent.
 fn subslice(parent: &ArenaSlice, off: Int, len: Int) -> Result<ArenaSlice, DbError> {
     if off < 0 || len < 0 || off + len > parent.len {
-        return Err(decode_fault("subslice out of range".clone()));
+        return Result.Err(decode_fault("subslice out of range".clone()));
     }
-    Ok(ArenaSlice {
+    Result.Ok(ArenaSlice {
         ptr: parent.ptr + off,
         len: len,
         generation: parent.generation,
@@ -402,13 +402,13 @@ implement PgJsonb {
     /// from `core.encoding.jsonb`. Pays one Text allocation; useful
     /// when the caller wants to outlive the connection arena or
     /// pass the document into a JSON parser that expects a `Text`.
-    /// Returns `None` if the underlying arena slice is stale.
+    /// Returns `Maybe.None` if the underlying arena slice is stale.
     public fn into_canonical(&self, arena: &SpindleArena) -> Maybe<JsonbValue> {
         match self.text.to_owned(arena) {
-            None       => None,
-            Some(body) => match Text.from_utf8(body) {
-                Ok(t)  => Some(JsonbValue { version: self.version, json_text: t }),
-                Err(_) => None,
+            Maybe.None       => Maybe.None,
+            Maybe.Some(body) => match Text.from_utf8(body) {
+                Result.Ok(t)  => Maybe.Some(JsonbValue { version: self.version, json_text: t }),
+                Result.Err(_) => Maybe.None,
             }
         }
     }
@@ -421,14 +421,14 @@ implement PgJsonb {
 /// payloads.
 public fn decode_jsonb(slice: &ArenaSlice) -> Result<PgJsonb, DbError> {
     let version = match slice_byte(slice, 0) {
-        Some(v) => v,
-        None    => return Err(decode_fault("jsonb: empty payload".clone())),
+        Maybe.Some(v) => v,
+        Maybe.None    => return Result.Err(decode_fault("jsonb: empty payload".clone())),
     };
     if version != JSONB_VERSION_1 {
-        return Err(decode_fault(f"jsonb: unsupported version {version}"));
+        return Result.Err(decode_fault(f"jsonb: unsupported version {version}"));
     }
     let body = subslice(slice, 1, slice.len - 1)?;
-    Ok(PgJsonb { version: version, text: body })
+    Result.Ok(PgJsonb { version: version, text: body })
 }
 
 /// Encode a JSON text payload as JSONB binary directly into the
@@ -447,7 +447,7 @@ public fn encode_jsonb(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, json_te
 /// JSON (legacy) decode — pure UTF-8 text, no version prefix. The
 /// caller treats it as a text-typed column for downstream use.
 public fn decode_json(slice: &ArenaSlice) -> Result<ArenaSlice, DbError> {
-    Ok(ArenaSlice { ptr: slice.ptr, len: slice.len, generation: slice.generation })
+    Result.Ok(ArenaSlice { ptr: slice.ptr, len: slice.len, generation: slice.generation })
 }
 
 public fn encode_json(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, json_text: &Text) -> Bool {
@@ -500,11 +500,11 @@ implement PgRange {
 
 public fn decode_range(slice: &ArenaSlice) -> Result<PgRange, DbError> {
     let flags = match slice_byte(slice, 0) {
-        Some(v) => v,
-        None    => return Err(decode_fault("range: empty payload".clone())),
+        Maybe.Some(v) => v,
+        Maybe.None    => return Result.Err(decode_fault("range: empty payload".clone())),
     };
     if (flags & PG_RANGE_FLAG_EMPTY) != 0 {
-        return Ok(PgRange { flags: flags, lower: None, upper: None });
+        return Result.Ok(PgRange { flags: flags, lower: Maybe.None, upper: Maybe.None });
     }
     let mut off: Int = 1;
     let lower = if (flags & PG_RANGE_FLAG_LB_INF) == 0 {
@@ -512,24 +512,24 @@ public fn decode_range(slice: &ArenaSlice) -> Result<PgRange, DbError> {
         off = off + 4;
         let body = subslice(slice, off, len)?;
         off = off + len;
-        Some(body)
+        Maybe.Some(body)
     } else {
-        None
+        Maybe.None
     };
     let upper = if (flags & PG_RANGE_FLAG_UB_INF) == 0 {
         let len = slice_i32_be(slice, off)?;
         off = off + 4;
         let body = subslice(slice, off, len)?;
         off = off + len;
-        Some(body)
+        Maybe.Some(body)
     } else {
-        None
+        Maybe.None
     };
-    Ok(PgRange { flags: flags, lower: lower, upper: upper })
+    Result.Ok(PgRange { flags: flags, lower: lower, upper: upper })
 }
 
 /// Encode a range value. `lower_payload` / `upper_payload` are the
-/// already-encoded element bytes (caller passes `None` to mean
+/// already-encoded element bytes (caller passes `Maybe.None` to mean
 /// "infinity"). The empty range — `flags & PG_RANGE_FLAG_EMPTY` —
 /// is encoded as a single byte and ignores the payload arguments.
 public fn encode_range(
@@ -545,8 +545,8 @@ public fn encode_range(
     }
     if (flags & PG_RANGE_FLAG_LB_INF) == 0 {
         match lower_payload {
-            None    => return false,    // contract violation — caller forgot
-            Some(b) => {
+            Maybe.None    => return false,    // contract violation — caller forgot
+            Maybe.Some(b) => {
                 if !buf.put_i32_be(arena, b.len() as Int) { return false; }
                 if !buf.put_bytes(arena, b)               { return false; }
             }
@@ -554,8 +554,8 @@ public fn encode_range(
     }
     if (flags & PG_RANGE_FLAG_UB_INF) == 0 {
         match upper_payload {
-            None    => return false,
-            Some(b) => {
+            Maybe.None    => return false,
+            Maybe.Some(b) => {
                 if !buf.put_i32_be(arena, b.len() as Int) { return false; }
                 if !buf.put_bytes(arena, b)               { return false; }
             }
@@ -599,12 +599,12 @@ public type PgArrayHeader is {
 
 /// Decode the array header + element index. Returns the metadata
 /// plus a `List<Maybe<ArenaSlice>>` whose entries are the per-
-/// element payload slices in row-major order. A `None` entry means
+/// element payload slices in row-major order. A `Maybe.None` entry means
 /// SQL NULL.
 public fn decode_array(slice: &ArenaSlice) -> Result<(PgArrayHeader, List<Maybe<ArenaSlice>>), DbError> {
     let ndim = slice_i32_be(slice, 0)?;
     if ndim < 0 || ndim > PG_ARRAY_MAX_NDIM {
-        return Err(decode_fault(f"array: ndim {ndim} out of range"));
+        return Result.Err(decode_fault(f"array: ndim {ndim} out of range"));
     }
     let flags = slice_i32_be(slice, 4)?;
     let element_oid = slice_i32_be(slice, 8)?;
@@ -616,7 +616,7 @@ public fn decode_array(slice: &ArenaSlice) -> Result<(PgArrayHeader, List<Maybe<
         let length = slice_i32_be(slice, off)?;
         let lo     = slice_i32_be(slice, off + 4)?;
         if length < 0 {
-            return Err(decode_fault(f"array: dim {i} negative length"));
+            return Result.Err(decode_fault(f"array: dim {i} negative length"));
         }
         dims.push(PgArrayDim { length: length, lower_bound: lo });
         total = total * length;
@@ -629,10 +629,10 @@ public fn decode_array(slice: &ArenaSlice) -> Result<(PgArrayHeader, List<Maybe<
         let payload_len = slice_i32_be(slice, off)?;
         off = off + 4;
         if payload_len < 0 {
-            elements.push(None);
+            elements.push(Maybe.None);
         } else {
             let body = subslice(slice, off, payload_len)?;
-            elements.push(Some(body));
+            elements.push(Maybe.Some(body));
             off = off + payload_len;
         }
         k = k + 1;
@@ -643,11 +643,11 @@ public fn decode_array(slice: &ArenaSlice) -> Result<(PgArrayHeader, List<Maybe<
         element_oid: element_oid,
         dimensions: dims,
     };
-    Ok((hdr, elements))
+    Result.Ok((hdr, elements))
 }
 
 /// Encode a one-dimensional array (the common case). `elements` is
-/// the per-element payload, with `None` for SQL NULL. Multi-
+/// the per-element payload, with `Maybe.None` for SQL NULL. Multi-
 /// dimensional encode is a follow-up — most application code only
 /// produces 1-D arrays anyway.
 public fn encode_array_1d(
@@ -661,8 +661,8 @@ public fn encode_array_1d(
     let mut i: Int = 0;
     while i < n {
         match &elements[i] {
-            None    => { has_nulls = true; }
-            Some(_) => {}
+            Maybe.None    => { has_nulls = true; }
+            Maybe.Some(_) => {}
         }
         i = i + 1;
     }
@@ -682,10 +682,10 @@ public fn encode_array_1d(
     let mut k: Int = 0;
     while k < n {
         match &elements[k] {
-            None => {
+            Maybe.None => {
                 if !buf.put_i32_be(arena, -1) { return false; }
             }
-            Some(b) => {
+            Maybe.Some(b) => {
                 if !buf.put_i32_be(arena, b.len() as Int) { return false; }
                 if !buf.put_bytes(arena, b)               { return false; }
             }
@@ -722,29 +722,29 @@ public type PgInet is {
 
 public fn decode_inet(slice: &ArenaSlice) -> Result<PgInet, DbError> {
     let family = match slice_byte(slice, 0) {
-        Some(v) => v,
-        None    => return Err(decode_fault("inet: short header".clone())),
+        Maybe.Some(v) => v,
+        Maybe.None    => return Result.Err(decode_fault("inet: short header".clone())),
     };
     let prefix = match slice_byte(slice, 1) {
-        Some(v) => v,
-        None    => return Err(decode_fault("inet: missing prefix".clone())),
+        Maybe.Some(v) => v,
+        Maybe.None    => return Result.Err(decode_fault("inet: missing prefix".clone())),
     };
     let is_cidr = match slice_byte(slice, 2) {
-        Some(v) => v != 0,
-        None    => return Err(decode_fault("inet: missing is_cidr".clone())),
+        Maybe.Some(v) => v != 0,
+        Maybe.None    => return Result.Err(decode_fault("inet: missing is_cidr".clone())),
     };
     let nb = match slice_byte(slice, 3) {
-        Some(v) => v,
-        None    => return Err(decode_fault("inet: missing nb".clone())),
+        Maybe.Some(v) => v,
+        Maybe.None    => return Result.Err(decode_fault("inet: missing nb".clone())),
     };
     let expected_nb = if family == PG_INET_FAMILY_V4 { 4 }
                       else if family == PG_INET_FAMILY_V6 { 16 }
-                      else { return Err(decode_fault(f"inet: unknown family {family}")); };
+                      else { return Result.Err(decode_fault(f"inet: unknown family {family}")); };
     if nb != expected_nb {
-        return Err(decode_fault(f"inet: family/nb mismatch (family={family}, nb={nb})"));
+        return Result.Err(decode_fault(f"inet: family/nb mismatch (family={family}, nb={nb})"));
     }
     let addr = subslice(slice, 4, nb)?;
-    Ok(PgInet {
+    Result.Ok(PgInet {
         family: family,
         prefix_bits: prefix,
         is_cidr: is_cidr,
@@ -952,7 +952,7 @@ fn decimal4(d: Int, pad: Bool) -> Text {
 /// `is_nan` / `is_pos_inf` / `is_neg_inf` before interpreting digits.
 public fn decode_numeric(slice: &ArenaSlice) -> Result<PgNumeric, DbError> {
     if slice.len < 8 {
-        return Err(decode_fault("numeric: short header (need 8 bytes)".clone()));
+        return Result.Err(decode_fault("numeric: short header (need 8 bytes)".clone()));
     }
     let ndigits = slice_i16_be(slice, 0)?;
     let weight  = slice_i16_be(slice, 2)?;
@@ -963,23 +963,23 @@ public fn decode_numeric(slice: &ArenaSlice) -> Result<PgNumeric, DbError> {
     if sign != PG_NUMERIC_POS && sign != PG_NUMERIC_NEG
        && sign != PG_NUMERIC_NAN && sign != PG_NUMERIC_PINF
        && sign != PG_NUMERIC_NINF {
-        return Err(decode_fault(f"numeric: unknown sign code 0x{sign}"));
+        return Result.Err(decode_fault(f"numeric: unknown sign code 0x{sign}"));
     }
 
     // Special values carry zero digits.
     let is_special = sign == PG_NUMERIC_NAN || sign == PG_NUMERIC_PINF || sign == PG_NUMERIC_NINF;
 
     if ndigits < 0 {
-        return Err(decode_fault(f"numeric: negative ndigits {ndigits}"));
+        return Result.Err(decode_fault(f"numeric: negative ndigits {ndigits}"));
     }
     if is_special && ndigits != 0 {
-        return Err(decode_fault(f"numeric: special value with non-zero ndigits {ndigits}"));
+        return Result.Err(decode_fault(f"numeric: special value with non-zero ndigits {ndigits}"));
     }
 
     // Payload bytes = 8 + ndigits * 2.
     let need = 8 + ndigits * 2;
     if slice.len < need {
-        return Err(decode_fault(f"numeric: payload too short (have {slice.len}, need {need})"));
+        return Result.Err(decode_fault(f"numeric: payload too short (have {slice.len}, need {need})"));
     }
 
     let mut digits: List<Int> = List.new();
@@ -987,13 +987,13 @@ public fn decode_numeric(slice: &ArenaSlice) -> Result<PgNumeric, DbError> {
     while i < ndigits {
         let d = slice_u16_be(slice, 8 + i * 2)?;
         if d < 0 || d > 9999 {
-            return Err(decode_fault(f"numeric: digit out of range [0,9999]: {d}"));
+            return Result.Err(decode_fault(f"numeric: digit out of range [0,9999]: {d}"));
         }
         digits.push(d);
         i = i + 1;
     }
 
-    Ok(PgNumeric {
+    Result.Ok(PgNumeric {
         ndigits: ndigits,
         weight: weight,
         sign: sign,
@@ -1007,7 +1007,7 @@ public fn decode_numeric(slice: &ArenaSlice) -> Result<PgNumeric, DbError> {
 fn slice_i16_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
     let raw = slice_u16_be(s, off)?;
     // Sign-extend from 16 bits.
-    if raw >= 0x8000 { Ok(raw - 0x10000) } else { Ok(raw) }
+    if raw >= 0x8000 { Result.Ok(raw - 0x10000) } else { Result.Ok(raw) }
 }
 
 // -----------------------------------------------------------------------------
@@ -1067,11 +1067,11 @@ public type PgTsVector is {
 /// size) and surfaces malformed payloads as structured `DbError`.
 public fn decode_tsvector(slice: &ArenaSlice) -> Result<PgTsVector, DbError> {
     if slice.len < 4 {
-        return Err(decode_fault("tsvector: short header (need 4 bytes)".clone()));
+        return Result.Err(decode_fault("tsvector: short header (need 4 bytes)".clone()));
     }
     let nlex = slice_i32_be(slice, 0)?;
     if nlex < 0 {
-        return Err(decode_fault(f"tsvector: negative nlex {nlex}"));
+        return Result.Err(decode_fault(f"tsvector: negative nlex {nlex}"));
     }
 
     let mut off: Int = 4;
@@ -1083,15 +1083,15 @@ public fn decode_tsvector(slice: &ArenaSlice) -> Result<PgTsVector, DbError> {
         let mut found: Bool = false;
         while nul_off < slice.len {
             match slice_byte(slice, nul_off) {
-                Some(b) => {
+                Maybe.Some(b) => {
                     if b == 0 { found = true; break; }
                     nul_off = nul_off + 1;
                 }
-                None => break,
+                Maybe.None => break,
             }
         }
         if !found {
-            return Err(decode_fault(f"tsvector: lexeme {i} missing NUL terminator"));
+            return Result.Err(decode_fault(f"tsvector: lexeme {i} missing NUL terminator"));
         }
         let text_len = nul_off - off;
         let text = subslice(slice, off, text_len)?;
@@ -1099,7 +1099,7 @@ public fn decode_tsvector(slice: &ArenaSlice) -> Result<PgTsVector, DbError> {
         // npos at nul_off + 1.
         let npos_off = nul_off + 1;
         if npos_off + 2 > slice.len {
-            return Err(decode_fault(f"tsvector: lexeme {i} missing npos field"));
+            return Result.Err(decode_fault(f"tsvector: lexeme {i} missing npos field"));
         }
         let npos = slice_u16_be(slice, npos_off)?;
 
@@ -1107,7 +1107,7 @@ public fn decode_tsvector(slice: &ArenaSlice) -> Result<PgTsVector, DbError> {
         let positions_off = npos_off + 2;
         let positions_size = npos * 2;
         if positions_off + positions_size > slice.len {
-            return Err(decode_fault(
+            return Result.Err(decode_fault(
                 f"tsvector: lexeme {i} truncated positions (need {positions_size}b)"
             ));
         }
@@ -1128,7 +1128,7 @@ public fn decode_tsvector(slice: &ArenaSlice) -> Result<PgTsVector, DbError> {
         i = i + 1;
     }
 
-    Ok(PgTsVector { lexemes: lexemes })
+    Result.Ok(PgTsVector { lexemes: lexemes })
 }
 
 /// Read a 32-bit big-endian SIGNED integer at `off`. Same semantics
@@ -1250,12 +1250,12 @@ public fn encode_numeric_from_bigdecimal(
 public fn decode_numeric_to_bigdecimal(slice: &ArenaSlice) -> Result<BigDecimal, DbError> {
     let n = decode_numeric(slice)?;
     if n.is_nan() || n.is_pos_inf() || n.is_neg_inf() {
-        return Err(decode_fault("numeric: NaN/±Infinity not representable as BigDecimal".clone()));
+        return Result.Err(decode_fault("numeric: NaN/±Infinity not representable as BigDecimal".clone()));
     }
     let text = n.to_text();
     match parse_bigdecimal(&text) {
-        Ok(bd) => Ok(bd),
-        Err(_) => Err(decode_fault(
+        Result.Ok(bd) => Result.Ok(bd),
+        Result.Err(_) => Result.Err(decode_fault(
             f"numeric: failed to parse canonical text '{text}' as BigDecimal (defensive)"
         )),
     }
@@ -1448,8 +1448,8 @@ public fn encode_numeric_from_text(
     text: &Text,
 ) -> Bool {
     match parse_bigdecimal(text) {
-        Ok(bd) => encode_numeric_from_bigdecimal(buf, arena, &bd),
-        Err(_) => false,
+        Result.Ok(bd) => encode_numeric_from_bigdecimal(buf, arena, &bd),
+        Result.Err(_) => false,
     }
 }
 
@@ -1492,11 +1492,11 @@ fn decimal_magnitude_text(n: Int) -> Text {
 // `pg_type` introspection and a generic Decoder dispatch table.
 
 /// One field inside a composite/record value — type OID + arena-borrowed
-/// binary payload. `value` is `None` for SQL NULL fields.
+/// binary payload. `value` is `Maybe.None` for SQL NULL fields.
 public type PgCompositeField is {
     /// Postgres type OID for this field (per `pg_type.oid`).
     type_oid: Int,
-    /// Arena-borrowed binary payload, or `None` for SQL NULL.
+    /// Arena-borrowed binary payload, or `Maybe.None` for SQL NULL.
     value: Maybe<ArenaSlice>,
 };
 
@@ -1519,11 +1519,11 @@ implement PgComposite {
 /// length=-1) and surfaces malformed payloads as structured `DbError`.
 public fn decode_composite(slice: &ArenaSlice) -> Result<PgComposite, DbError> {
     if slice.len < 4 {
-        return Err(decode_fault("composite: short header (need 4 bytes)".clone()));
+        return Result.Err(decode_fault("composite: short header (need 4 bytes)".clone()));
     }
     let nfields = slice_i32_be(slice, 0)?;
     if nfields < 0 {
-        return Err(decode_fault(f"composite: negative fieldcount {nfields}"));
+        return Result.Err(decode_fault(f"composite: negative fieldcount {nfields}"));
     }
 
     let mut off: Int = 4;
@@ -1532,7 +1532,7 @@ public fn decode_composite(slice: &ArenaSlice) -> Result<PgComposite, DbError> {
     while i < nfields {
         // Each field header is 8 bytes: type_oid i32 + length i32.
         if off + 8 > slice.len {
-            return Err(decode_fault(
+            return Result.Err(decode_fault(
                 f"composite: field {i} header truncated (off={off}, len={slice.len})"
             ));
         }
@@ -1542,31 +1542,31 @@ public fn decode_composite(slice: &ArenaSlice) -> Result<PgComposite, DbError> {
 
         // length == -1 ⇒ NULL field, no payload follows.
         let value: Maybe<ArenaSlice> = if length == -1 {
-            None
+            Maybe.None
         } else if length < 0 {
-            return Err(decode_fault(
+            return Result.Err(decode_fault(
                 f"composite: field {i} negative non-NULL length {length}"
             ));
         } else {
             if off + length > slice.len {
-                return Err(decode_fault(
+                return Result.Err(decode_fault(
                     f"composite: field {i} payload truncated (need {length}b, have {slice.len - off}b)"
                 ));
             }
             let payload = subslice(slice, off, length)?;
             off = off + length;
-            Some(payload)
+            Maybe.Some(payload)
         };
 
         fields.push(PgCompositeField { type_oid: type_oid, value: value });
         i = i + 1;
     }
 
-    Ok(PgComposite { fields: fields })
+    Result.Ok(PgComposite { fields: fields })
 }
 
 /// Encode a composite/record value into the arena buffer. Each field is
-/// supplied as `(type_oid, payload)` where `payload == None` represents
+/// supplied as `(type_oid, payload)` where `payload == Maybe.None` represents
 /// SQL NULL.  Returns false on arena exhaustion or if any payload is
 /// invalid (length > i32::MAX is rejected here even though i32 is signed
 /// — PG's wire protocol caps each field at 1 GiB).
@@ -1588,10 +1588,10 @@ public fn encode_composite(
         let f = &fields[i];
         if !buf.put_i32_be(arena, f.type_oid) { return false; }
         match &f.value {
-            None => {
+            Maybe.None => {
                 if !buf.put_i32_be(arena, -1) { return false; }
             }
-            Some(payload) => {
+            Maybe.Some(payload) => {
                 let plen = payload.len;
                 if plen < 0 { return false; }
                 if !buf.put_i32_be(arena, plen) { return false; }

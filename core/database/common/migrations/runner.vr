@@ -37,16 +37,16 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "vendor-neutral migration runner orchestrating MigrationStore",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.database.common.migrations.runner;
@@ -116,7 +116,7 @@ public fn report_zero(dialect: Text) -> RunReport {
     RunReport {
         dialect: dialect,
         applied: 0, skipped: 0, failed: 0, rolled_back: 0,
-        aborted: false, abort_reason: None,
+        aborted: false, abort_reason: Maybe.None,
         decisions: List.new(),
     }
 }
@@ -204,33 +204,33 @@ implement MigrationRunner {
                 }
                 RdAbortDrift(_, reason) => {
                     report.aborted = true;
-                    report.abort_reason = Some(reason.clone());
+                    report.abort_reason = Maybe.Some(reason.clone());
                     break;
                 }
                 RdApply(_, sql) => {
                     journal.record_pending(m);
-                    if let Some(entry) = journal.lookup(m.version) {
+                    if let Maybe.Some(entry) = journal.lookup(m.version) {
                         store.upsert_entry(&entry).await?;
                     }
                     let exec_res = store.execute_sql(sql).await;
                     match exec_res {
-                        Ok(_) => {
+                        Result.Ok(_) => {
                             journal.record_applied(m, clock_ns);
-                            if let Some(entry) = journal.lookup(m.version) {
+                            if let Maybe.Some(entry) = journal.lookup(m.version) {
                                 store.upsert_entry(&entry).await?;
                             }
                             report.applied = report.applied + 1;
                             applied_steps.push(clone_migration(m));
                         }
-                        Err(err) => {
+                        Result.Err(err) => {
                             let err_msg = f"{err}";
                             journal.record_failed(m, err_msg.clone());
-                            if let Some(entry) = journal.lookup(m.version) {
+                            if let Maybe.Some(entry) = journal.lookup(m.version) {
                                 let _ = store.upsert_entry(&entry).await;
                             }
                             report.failed = report.failed + 1;
                             report.aborted = true;
-                            report.abort_reason = Some(err_msg);
+                            report.abort_reason = Maybe.Some(err_msg);
                             if self.auto_rollback {
                                 let _ = self.rollback_lifo(
                                     &applied_steps, &mut journal,
@@ -248,7 +248,7 @@ implement MigrationRunner {
         // 5. Release the lock (always, even on abort).
         store.release_lock().await?;
 
-        Ok(report)
+        Result.Ok(report)
     }
 
     async fn rollback_lifo(
@@ -262,33 +262,33 @@ implement MigrationRunner {
         let mut i: Int = applied.len() - 1;
         while i >= 0 {
             match &applied[i].down_sql {
-                Some(sql) => {
+                Maybe.Some(sql) => {
                     let res = store.execute_sql(sql).await;
                     match res {
-                        Ok(_) => {
+                        Result.Ok(_) => {
                             journal.record_rolled_back(&applied[i], clock_ns);
-                            if let Some(entry) = journal.lookup(applied[i].version) {
+                            if let Maybe.Some(entry) = journal.lookup(applied[i].version) {
                                 let _ = store.upsert_entry(&entry).await;
                             }
                             report.rolled_back = report.rolled_back + 1;
                         }
-                        Err(err) => {
+                        Result.Err(err) => {
                             // Continue rolling back even if one step fails.
                             let err_msg = f"{err}";
                             journal.record_failed(&applied[i], err_msg);
-                            if let Some(entry) = journal.lookup(applied[i].version) {
+                            if let Maybe.Some(entry) = journal.lookup(applied[i].version) {
                                 let _ = store.upsert_entry(&entry).await;
                             }
                         }
                     }
                 }
-                None => {
+                Maybe.None => {
                     // Irreversible migration; cannot roll back.
                 }
             }
             i = i - 1;
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 

@@ -68,7 +68,7 @@
 module core.database.mysql.wkb_decoder;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.{List, Map};
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
@@ -141,16 +141,16 @@ implement WkbReader {
 
     fn read_u8(&mut self) -> Result<Int, DbError> {
         if self.pos >= (self.bytes.len() as Int) {
-            return Err(bad_wkb("u8 truncated"));
+            return Result.Err(bad_wkb("u8 truncated"));
         }
         let b = (self.bytes[self.pos] as Int) & 0xFF;
         self.pos = self.pos + 1;
-        Ok(b)
+        Result.Ok(b)
     }
 
     fn read_u32(&mut self) -> Result<Int, DbError> {
         if self.pos + 4 > (self.bytes.len() as Int) {
-            return Err(bad_wkb("u32 truncated"));
+            return Result.Err(bad_wkb("u32 truncated"));
         }
         let p = self.pos;
         let v: Int;
@@ -166,12 +166,12 @@ implement WkbReader {
               | ((self.bytes[p + 3] as Int) & 0xFF);
         }
         self.pos = self.pos + 4;
-        Ok(v)
+        Result.Ok(v)
     }
 
     fn read_f64(&mut self) -> Result<Float, DbError> {
         if self.pos + 8 > (self.bytes.len() as Int) {
-            return Err(bad_wkb("f64 truncated"));
+            return Result.Err(bad_wkb("f64 truncated"));
         }
         let p = self.pos;
         let bits: Int;
@@ -195,7 +195,7 @@ implement WkbReader {
                  | ((self.bytes[p + 7] as Int) & 0xFF);
         }
         self.pos = self.pos + 8;
-        Ok(core.intrinsics.float.f64_from_bits(bits))
+        Result.Ok(core.intrinsics.float.f64_from_bits(bits))
     }
 }
 
@@ -217,7 +217,7 @@ public fn decode_geometry_with_srid(bytes: List<Byte>)
     -> Result<JsonValue, DbError>
 {
     if (bytes.len() as Int) < 5 {
-        return Err(bad_wkb("geometry payload < 5 bytes"));
+        return Result.Err(bad_wkb("geometry payload < 5 bytes"));
     }
     // SRID is LE u32.
     let srid = ((bytes[0] as Int) & 0xFF)
@@ -234,9 +234,9 @@ public fn decode_geometry_with_srid(bytes: List<Byte>)
     let geom = decode_wkb(wkb_bytes)?;
     // If the EWKB body already attached `crs`, leave it alone.
     if srid != 0 && !has_crs_member(&geom) {
-        return Ok(attach_crs(geom, srid));
+        return Result.Ok(attach_crs(geom, srid));
     }
-    Ok(geom)
+    Result.Ok(geom)
 }
 
 /// Decode a raw WKB buffer (no SRID prefix). Recognises both
@@ -268,7 +268,7 @@ fn decode_geometry(r: &mut WkbReader) -> Result<JsonValue, DbError> {
     } else if bo == WKB_BO_BIG_ENDIAN {
         r.little_endian = false;
     } else {
-        return Err(bad_wkb("unknown byte-order byte"));
+        return Result.Err(bad_wkb("unknown byte-order byte"));
     }
     let raw_typ = r.read_u32()?;
 
@@ -285,7 +285,7 @@ fn decode_geometry(r: &mut WkbReader) -> Result<JsonValue, DbError> {
 
     let mut has_z = false;
     let mut has_m = false;
-    let mut srid_in_body: Maybe<Int> = None;
+    let mut srid_in_body: Maybe<Int> = Maybe.None;
     let base_typ: Int;
 
     if is_ewkb {
@@ -294,7 +294,7 @@ fn decode_geometry(r: &mut WkbReader) -> Result<JsonValue, DbError> {
         if (raw_typ & EWKB_FLAG_SRID) != 0 {
             // SRID follows the type word in EWKB.
             let s = r.read_u32()?;
-            srid_in_body = Some(s);
+            srid_in_body = Maybe.Some(s);
         }
         base_typ = raw_typ & EWKB_BASE_TYPE_MASK;
     } else {
@@ -337,31 +337,31 @@ fn decode_geometry(r: &mut WkbReader) -> Result<JsonValue, DbError> {
     } else if base_typ == WKB_GEOMETRY_COLLECTION {
         decode_collection(r)?
     } else {
-        return Err(bad_wkb(&f"unknown WKB type {raw_typ} (base {base_typ})"));
+        return Result.Err(bad_wkb(&f"unknown WKB type {raw_typ} (base {base_typ})"));
     };
 
     // Attach EWKB-embedded SRID at the geometry that carried it.
     match srid_in_body {
-        Some(s) => {
+        Maybe.Some(s) => {
             if s != 0 {
-                Ok(attach_crs(geom, s))
+                Result.Ok(attach_crs(geom, s))
             } else {
-                Ok(geom)
+                Result.Ok(geom)
             }
         }
-        None => Ok(geom),
+        Maybe.None => Result.Ok(geom),
     }
 }
 
 fn decode_point(r: &mut WkbReader) -> Result<JsonValue, DbError> {
     let coords = read_one_coord(r)?;
-    Ok(geo_object("Point", JsonArray(coords)))
+    Result.Ok(geo_object("Point", JsonArray(coords)))
 }
 
 fn decode_line_string(r: &mut WkbReader) -> Result<JsonValue, DbError> {
     let n = r.read_u32()?;
     let pts = read_point_list(r, n)?;
-    Ok(geo_object("LineString", JsonArray(pts)))
+    Result.Ok(geo_object("LineString", JsonArray(pts)))
 }
 
 fn decode_polygon(r: &mut WkbReader) -> Result<JsonValue, DbError> {
@@ -374,7 +374,7 @@ fn decode_polygon(r: &mut WkbReader) -> Result<JsonValue, DbError> {
         rings.push(JsonArray(pts));
         i = i + 1;
     }
-    Ok(geo_object("Polygon", JsonArray(rings)))
+    Result.Ok(geo_object("Polygon", JsonArray(rings)))
 }
 
 fn decode_multi_point(r: &mut WkbReader) -> Result<JsonValue, DbError> {
@@ -389,15 +389,15 @@ fn decode_multi_point(r: &mut WkbReader) -> Result<JsonValue, DbError> {
         match pt_geom {
             JsonObject(map) => {
                 match map.get(&"coordinates".clone()) {
-                    Some(c) => coords.push(c.clone()),
-                    None    => { return Err(bad_wkb("MultiPoint sub-Point missing coords")); }
+                    Maybe.Some(c) => coords.push(c.clone()),
+                    Maybe.None    => { return Result.Err(bad_wkb("MultiPoint sub-Point missing coords")); }
                 }
             }
-            _ => { return Err(bad_wkb("MultiPoint sub not an object")); }
+            _ => { return Result.Err(bad_wkb("MultiPoint sub not an object")); }
         }
         i = i + 1;
     }
-    Ok(geo_object("MultiPoint", JsonArray(coords)))
+    Result.Ok(geo_object("MultiPoint", JsonArray(coords)))
 }
 
 fn decode_multi_line_string(r: &mut WkbReader) -> Result<JsonValue, DbError> {
@@ -409,15 +409,15 @@ fn decode_multi_line_string(r: &mut WkbReader) -> Result<JsonValue, DbError> {
         match ls {
             JsonObject(map) => {
                 match map.get(&"coordinates".clone()) {
-                    Some(c) => lines.push(c.clone()),
-                    None    => { return Err(bad_wkb("MultiLineString sub missing coords")); }
+                    Maybe.Some(c) => lines.push(c.clone()),
+                    Maybe.None    => { return Result.Err(bad_wkb("MultiLineString sub missing coords")); }
                 }
             }
-            _ => { return Err(bad_wkb("MultiLineString sub not an object")); }
+            _ => { return Result.Err(bad_wkb("MultiLineString sub not an object")); }
         }
         i = i + 1;
     }
-    Ok(geo_object("MultiLineString", JsonArray(lines)))
+    Result.Ok(geo_object("MultiLineString", JsonArray(lines)))
 }
 
 fn decode_multi_polygon(r: &mut WkbReader) -> Result<JsonValue, DbError> {
@@ -429,15 +429,15 @@ fn decode_multi_polygon(r: &mut WkbReader) -> Result<JsonValue, DbError> {
         match poly {
             JsonObject(map) => {
                 match map.get(&"coordinates".clone()) {
-                    Some(c) => polys.push(c.clone()),
-                    None    => { return Err(bad_wkb("MultiPolygon sub missing coords")); }
+                    Maybe.Some(c) => polys.push(c.clone()),
+                    Maybe.None    => { return Result.Err(bad_wkb("MultiPolygon sub missing coords")); }
                 }
             }
-            _ => { return Err(bad_wkb("MultiPolygon sub not an object")); }
+            _ => { return Result.Err(bad_wkb("MultiPolygon sub not an object")); }
         }
         i = i + 1;
     }
-    Ok(geo_object("MultiPolygon", JsonArray(polys)))
+    Result.Ok(geo_object("MultiPolygon", JsonArray(polys)))
 }
 
 fn decode_collection(r: &mut WkbReader) -> Result<JsonValue, DbError> {
@@ -452,7 +452,7 @@ fn decode_collection(r: &mut WkbReader) -> Result<JsonValue, DbError> {
     let mut obj: Map<Text, JsonValue> = Map.new();
     obj.insert("type".clone(), JsonString("GeometryCollection".clone()));
     obj.insert("geometries".clone(), JsonArray(geoms));
-    Ok(JsonObject(obj))
+    Result.Ok(JsonObject(obj))
 }
 
 // =============================================================================
@@ -467,7 +467,7 @@ fn read_point_list(r: &mut WkbReader, n: Int) -> Result<List<JsonValue>, DbError
         out.push(JsonArray(coords));
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 /// Read `r.coord_arity` floats — one coord-vector for one point.
@@ -476,7 +476,7 @@ fn read_point_list(r: &mut WkbReader, n: Int) -> Result<List<JsonValue>, DbError
 fn read_one_coord(r: &mut WkbReader) -> Result<List<JsonValue>, DbError> {
     let arity = r.coord_arity;
     if arity < 2 || arity > 4 {
-        return Err(bad_wkb(&f"invalid coord arity {arity}"));
+        return Result.Err(bad_wkb(&f"invalid coord arity {arity}"));
     }
     let mut out: List<JsonValue> = List.with_capacity(arity);
     let mut k: Int = 0;
@@ -485,7 +485,7 @@ fn read_one_coord(r: &mut WkbReader) -> Result<List<JsonValue>, DbError> {
         out.push(JsonFloat(v));
         k = k + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn has_crs_member(geom: &JsonValue) -> Bool {

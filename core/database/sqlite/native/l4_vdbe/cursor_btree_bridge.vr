@@ -123,13 +123,13 @@ public fn op_open_read(
     reserved_bytes: Int,
 ) -> Result<BtreeCursor, CursorBridgeError> {
     let tree = match btree_new(TableBtree, root_page, page_size, reserved_bytes) {
-        Ok(t)  => t,
-        Err(e) => return Err(BeBtree(e)),
+        Result.Ok(t)  => t,
+        Result.Err(e) => return Result.Err(BeBtree(e)),
     };
     let mut c = core.database.sqlite.native.l3_btree.cursor.cursor_new(&tree);
     match cursor_root(&mut c) {
-        Ok(_)  => Ok(c),
-        Err(e) => Err(BeBtree(e)),
+        Result.Ok(_)  => Result.Ok(c),
+        Result.Err(e) => Result.Err(BeBtree(e)),
     }
 }
 
@@ -148,31 +148,31 @@ public fn op_column(
     col_idx: Int,
 ) -> Result<Register, CursorBridgeError> {
     if !cursor_is_valid(c) {
-        return Err(BeInvalidCursor("Column: cursor not valid".clone()));
+        return Result.Err(BeInvalidCursor("Column: cursor not valid".clone()));
     }
     let page_no = cursor_current_page(c);
     let cell_idx = cursor_current_cell(c);
     let bytes = match pages.fetch(page_no) {
-        Some(b) => b,
-        None    => return Err(BePageNotFound(page_no)),
+        Maybe.Some(b) => b,
+        Maybe.None    => return Result.Err(BePageNotFound(page_no)),
     };
     let hdr_off = if page_no == c.root_page && page_no == 1 { 100 } else { 0 };
     let (hdr, _) = match parse_page_header(&bytes, hdr_off) {
-        Ok(p)  => p,
-        Err(_) => return Err(BeBtree(InvalidRootPage(page_no))),
+        Result.Ok(p)  => p,
+        Result.Err(_) => return Result.Err(BeBtree(InvalidRootPage(page_no))),
     };
     if cell_idx < 0 || cell_idx >= hdr.cell_count {
-        return Err(BeCellOutOfRange(cell_idx));
+        return Result.Err(BeCellOutOfRange(cell_idx));
     }
     let pointers = match parse_cell_pointer_array(&bytes, &hdr.cell_pointer_offset, hdr.cell_count) {
-        Ok(p)  => p,
-        Err(_) => return Err(BeBtree(InvalidRootPage(page_no))),
+        Result.Ok(p)  => p,
+        Result.Err(_) => return Result.Err(BeBtree(InvalidRootPage(page_no))),
     };
     let cell_off = pointers[cell_idx];
     let local_max: Int = 100;
     let parts = match parse_cell(&bytes, cell_off, hdr.kind.clone(), local_max) {
-        Ok(p)  => p,
-        Err(_) => return Err(BeBtree(InvalidRootPage(page_no))),
+        Result.Ok(p)  => p,
+        Result.Err(_) => return Result.Err(BeBtree(InvalidRootPage(page_no))),
     };
     extract_column_register(&bytes, cell_off, &parts, col_idx)
 }
@@ -197,7 +197,7 @@ fn extract_column_register(
     col_idx: Int,
 ) -> Result<Register, CursorBridgeError> {
     if col_idx < 0 {
-        return Err(BeUnsupportedOp("Column: negative col_idx".clone()));
+        return Result.Err(BeUnsupportedOp("Column: negative col_idx".clone()));
     }
     match cell {
         TableLeafCell(_payload_len, rowid, local_end, _overflow) => {
@@ -210,23 +210,23 @@ fn extract_column_register(
                 // shape), the rowid is the user-visible value.
                 let payload_start = compute_payload_start(bytes, cell_off, true);
                 match decode_record_column(bytes, payload_start, local_end, 0) {
-                    Ok(reg) => match &reg {
-                        RNull => Ok(RRowId(rowid)),
-                        _     => Ok(reg),
+                    Result.Ok(reg) => match &reg {
+                        RNull => Result.Ok(RRowId(rowid)),
+                        _     => Result.Ok(reg),
                     }
-                    Err(_) => Ok(RRowId(rowid)),
+                    Result.Err(_) => Result.Ok(RRowId(rowid)),
                 }
             } else {
                 let payload_start = compute_payload_start(bytes, cell_off, true);
                 match decode_record_column(bytes, payload_start, local_end, col_idx) {
-                    Ok(reg) => Ok(reg),
-                    Err(e) => Err(e),
+                    Result.Ok(reg) => Result.Ok(reg),
+                    Result.Err(e) => Result.Err(e),
                 }
             }
         }
         TableInteriorCell(_, rowid) => {
             // Interior cells carry only the rowid + left-child pointer.
-            if col_idx == 0 { Ok(RRowId(rowid)) } else { Ok(RNull) }
+            if col_idx == 0 { Result.Ok(RRowId(rowid)) } else { Result.Ok(RNull) }
         }
         IndexLeafCell(_payload_len, local_end, _overflow) => {
             let payload_start = compute_payload_start(bytes, cell_off, false);
@@ -246,15 +246,15 @@ fn extract_column_register(
 /// false → index leaf layout `[payload_len_varint][payload]`.
 fn compute_payload_start(bytes: &List<Byte>, cell_off: Int, is_table_leaf: Bool) -> Int {
     let (_payload_len, a) = match varint.decode(bytes, cell_off) {
-        Ok(r)  => r,
-        Err(_) => return cell_off,
+        Result.Ok(r)  => r,
+        Result.Err(_) => return cell_off,
     };
     if !is_table_leaf {
         return cell_off + a;
     }
     let (_rowid, b) = match varint.decode(bytes, cell_off + a) {
-        Ok(r)  => r,
-        Err(_) => return cell_off + a,
+        Result.Ok(r)  => r,
+        Result.Err(_) => return cell_off + a,
     };
     cell_off + a + b
 }
@@ -263,8 +263,8 @@ fn compute_payload_start_index_interior(bytes: &List<Byte>, cell_off: Int) -> In
     // 4-byte left_child + payload_len varint + payload.
     let after_child = cell_off + 4;
     let (_payload_len, a) = match varint.decode(bytes, after_child) {
-        Ok(r)  => r,
-        Err(_) => return after_child,
+        Result.Ok(r)  => r,
+        Result.Err(_) => return after_child,
     };
     after_child + a
 }
@@ -278,14 +278,14 @@ fn decode_record_column(
     col_idx: Int,
 ) -> Result<Register, CursorBridgeError> {
     if payload_start >= bytes.len() || payload_start >= payload_end {
-        return Ok(RNull);
+        return Result.Ok(RNull);
     }
     let (types, header_consumed) = match decode_record_header(bytes, payload_start) {
-        Ok(r)  => r,
-        Err(_) => return Ok(RNull),
+        Result.Ok(r)  => r,
+        Result.Err(_) => return Result.Ok(RNull),
     };
     if col_idx >= types.len() {
-        return Ok(RNull);
+        return Result.Ok(RNull);
     }
 
     // Body starts immediately after the header.  Walk per-column
@@ -310,23 +310,23 @@ fn decode_serial_value(
     st: &SerialType,
 ) -> Result<Register, CursorBridgeError> {
     match st {
-        StNull   => Ok(RNull),
-        StInt8   => Ok(RInt(read_int_be(bytes, offset, 1, payload_end))),
-        StInt16  => Ok(RInt(read_int_be(bytes, offset, 2, payload_end))),
-        StInt24  => Ok(RInt(read_int_be(bytes, offset, 3, payload_end))),
-        StInt32  => Ok(RInt(read_int_be(bytes, offset, 4, payload_end))),
-        StInt48  => Ok(RInt(read_int_be(bytes, offset, 6, payload_end))),
-        StInt64  => Ok(RInt(read_int_be(bytes, offset, 8, payload_end))),
+        StNull   => Result.Ok(RNull),
+        StInt8   => Result.Ok(RInt(read_int_be(bytes, offset, 1, payload_end))),
+        StInt16  => Result.Ok(RInt(read_int_be(bytes, offset, 2, payload_end))),
+        StInt24  => Result.Ok(RInt(read_int_be(bytes, offset, 3, payload_end))),
+        StInt32  => Result.Ok(RInt(read_int_be(bytes, offset, 4, payload_end))),
+        StInt48  => Result.Ok(RInt(read_int_be(bytes, offset, 6, payload_end))),
+        StInt64  => Result.Ok(RInt(read_int_be(bytes, offset, 8, payload_end))),
         StReal   => {
             // IEEE 754 big-endian — decode as i64 bits then reinterpret.
             let bits = read_int_be(bytes, offset, 8, payload_end);
             // Verum reinterpret: caller-supplied conversion intrinsic.
             // Foundation: store the raw bits as RInt; Real value
             // reinterpretation is wired via core.intrinsics.float_bits.
-            Ok(RInt(bits))
+            Result.Ok(RInt(bits))
         }
-        StZero   => Ok(RInt(0_i64)),
-        StOne    => Ok(RInt(1_i64)),
+        StZero   => Result.Ok(RInt(0_i64)),
+        StOne    => Result.Ok(RInt(1_i64)),
         StBlob(n) => {
             let mut blob: List<Byte> = List.new();
             let mut k: Int = 0;
@@ -334,7 +334,7 @@ fn decode_serial_value(
                 blob.push(bytes[offset + k]);
                 k = k + 1;
             }
-            Ok(RBlob(blob))
+            Result.Ok(RBlob(blob))
         }
         StText(n) => {
             // Foundation: build Text from the byte slice.  Real
@@ -346,7 +346,7 @@ fn decode_serial_value(
                 buf.push(bytes[offset + k]);
                 k = k + 1;
             }
-            Ok(RText(bytes_to_utf8_text(&buf)))
+            Result.Ok(RText(bytes_to_utf8_text(&buf)))
         }
     }
 }
@@ -392,34 +392,34 @@ fn bytes_to_utf8_text(buf: &List<Byte>) -> Text {
 // -----------------------------------------------------------------------------
 
 /// Mirror of L4 `Next(cursor_id, jump_target)` opcode.  Returns
-/// `Ok(true)` if advancing succeeded (cursor now on a fresh row);
-/// `Ok(false)` if the cursor fell off the end (the interpreter
+/// `Result.Ok(true)` if advancing succeeded (cursor now on a fresh row);
+/// `Result.Ok(false)` if the cursor fell off the end (the interpreter
 /// then jumps to `jump_target`).
 public fn op_next(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
     match core.database.sqlite.native.l3_btree.cursor_seek.cursor_next(c, pages) {
-        Ok(b)  => Ok(b),
-        Err(e) => Err(BeBtree(e)),
+        Result.Ok(b)  => Result.Ok(b),
+        Result.Err(e) => Result.Err(BeBtree(e)),
     }
 }
 
 public fn op_prev(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
     match core.database.sqlite.native.l3_btree.cursor_seek.cursor_prev(c, pages) {
-        Ok(b)  => Ok(b),
-        Err(e) => Err(BeBtree(e)),
+        Result.Ok(b)  => Result.Ok(b),
+        Result.Err(e) => Result.Err(BeBtree(e)),
     }
 }
 
 public fn op_rewind(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
     match bt_cursor_first(c, pages) {
-        Ok(b)  => Ok(b),
-        Err(e) => Err(BeBtree(e)),
+        Result.Ok(b)  => Result.Ok(b),
+        Result.Err(e) => Result.Err(BeBtree(e)),
     }
 }
 
 public fn op_last(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
     match bt_cursor_last(c, pages) {
-        Ok(b)  => Ok(b),
-        Err(e) => Err(BeBtree(e)),
+        Result.Ok(b)  => Result.Ok(b),
+        Result.Err(e) => Result.Err(BeBtree(e)),
     }
 }
 
@@ -437,8 +437,8 @@ public fn op_seek(
     op: SeekOp,
 ) -> Result<SeekOutcome, CursorBridgeError> {
     match cursor_seek(c, pages, target, op) {
-        Ok(o)  => Ok(o),
-        Err(e) => Err(BeBtree(e)),
+        Result.Ok(o)  => Result.Ok(o),
+        Result.Err(e) => Result.Err(BeBtree(e)),
     }
 }
 
@@ -459,8 +459,8 @@ public fn op_insert(
 ) -> Result<RebalanceLog, CursorBridgeError> {
     let ctx = balance_context_new(page_size, reserved_bytes);
     match btree_insert_at_cursor(c, pages, &ctx, cell_bytes) {
-        Ok(log) => Ok(log),
-        Err(e)  => Err(BeBtree(e)),
+        Result.Ok(log) => Result.Ok(log),
+        Result.Err(e)  => Result.Err(BeBtree(e)),
     }
 }
 
@@ -473,8 +473,8 @@ public fn op_delete(
 ) -> Result<RebalanceLog, CursorBridgeError> {
     let ctx = balance_context_new(page_size, reserved_bytes);
     match btree_delete_at_cursor(c, pages, &ctx) {
-        Ok(log) => Ok(log),
-        Err(e)  => Err(BeBtree(e)),
+        Result.Ok(log) => Result.Ok(log),
+        Result.Err(e)  => Result.Err(BeBtree(e)),
     }
 }
 
@@ -484,36 +484,36 @@ public fn op_delete(
 
 /// Mirror of L4 `RowIdOp(cursor_id, reg_dst)`.  Returns the rowid
 /// of the current cell as `Int64`.  Only valid for table-btree
-/// cursors; index cursors return `Err(BeUnsupportedOp)`.
+/// cursors; index cursors return `Result.Err(BeUnsupportedOp)`.
 public fn op_rowid(
     c: &BtreeCursor,
     pages: &PageStore,
 ) -> Result<Int64, CursorBridgeError> {
     if !cursor_is_valid(c) {
-        return Err(BeInvalidCursor("RowId: cursor not valid".clone()));
+        return Result.Err(BeInvalidCursor("RowId: cursor not valid".clone()));
     }
     let page_no = cursor_current_page(c);
     let cell_idx = cursor_current_cell(c);
     let bytes = match pages.fetch(page_no) {
-        Some(b) => b,
-        None    => return Err(BePageNotFound(page_no)),
+        Maybe.Some(b) => b,
+        Maybe.None    => return Result.Err(BePageNotFound(page_no)),
     };
     let hdr_off = if page_no == c.root_page && page_no == 1 { 100 } else { 0 };
     let (hdr, _) = match parse_page_header(&bytes, hdr_off) {
-        Ok(p)  => p,
-        Err(_) => return Err(BeBtree(InvalidRootPage(page_no))),
+        Result.Ok(p)  => p,
+        Result.Err(_) => return Result.Err(BeBtree(InvalidRootPage(page_no))),
     };
     if cell_idx < 0 || cell_idx >= hdr.cell_count {
-        return Err(BeCellOutOfRange(cell_idx));
+        return Result.Err(BeCellOutOfRange(cell_idx));
     }
     let pointers = match parse_cell_pointer_array(&bytes, &hdr.cell_pointer_offset, hdr.cell_count) {
-        Ok(p)  => p,
-        Err(_) => return Err(BeBtree(InvalidRootPage(page_no))),
+        Result.Ok(p)  => p,
+        Result.Err(_) => return Result.Err(BeBtree(InvalidRootPage(page_no))),
     };
     let cell_off = pointers[cell_idx];
     match parse_cell(&bytes, cell_off, hdr.kind.clone(), 100) {
-        Ok(TableLeafCell(_, rowid, _, _))     => Ok(rowid),
-        Ok(TableInteriorCell(_, rowid))        => Ok(rowid),
-        _ => Err(BeUnsupportedOp("RowId on non-table-btree cell".clone())),
+        Result.Ok(TableLeafCell(_, rowid, _, _))     => Result.Ok(rowid),
+        Result.Ok(TableInteriorCell(_, rowid))        => Result.Ok(rowid),
+        _ => Result.Err(BeUnsupportedOp("RowId on non-table-btree cell".clone())),
     }
 }

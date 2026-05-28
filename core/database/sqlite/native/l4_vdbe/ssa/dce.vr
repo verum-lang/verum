@@ -214,8 +214,8 @@ fn propagate_liveness(prog: &SsaProgram, live: &mut LiveSet) -> Int {
             let mut i: Int = 0;
             while i < blk.insts.len() {
                 let dst_live = match inst_dst(&blk.insts[i]) {
-                    Some(d) => live_set_is_live(live, &d.id),
-                    None    => false,
+                    Maybe.Some(d) => live_set_is_live(live, &d.id),
+                    Maybe.None    => false,
                 };
                 if dst_live || has_side_effect(&blk.insts[i]) {
                     let ops = inst_operands(&blk.insts[i]);
@@ -238,8 +238,8 @@ fn propagate_liveness(prog: &SsaProgram, live: &mut LiveSet) -> Int {
 
 fn phi_dst_is_live(phi: &SsaInst, live: &LiveSet) -> Bool {
     match inst_dst(phi) {
-        Some(d) => live_set_is_live(live, &d.id),
-        None    => false,
+        Maybe.Some(d) => live_set_is_live(live, &d.id),
+        Maybe.None    => false,
     }
 }
 
@@ -284,8 +284,8 @@ fn sweep_dead_instructions(prog: &mut SsaProgram, live: &LiveSet) {
         while i < prog.cfg.blocks[b].insts.len() {
             let keep = has_side_effect(&prog.cfg.blocks[b].insts[i])
                 || (match inst_dst(&prog.cfg.blocks[b].insts[i]) {
-                    Some(d) => live_set_is_live(live, &d.id),
-                    None    => true,        // no dst, no SSA semantics — keep
+                    Maybe.Some(d) => live_set_is_live(live, &d.id),
+                    Maybe.None    => true,        // no dst, no SSA semantics — keep
                 });
             if keep {
                 new_insts.push(clone_inst(&prog.cfg.blocks[b].insts[i]));

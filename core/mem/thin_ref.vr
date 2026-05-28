@@ -231,7 +231,7 @@ implement<T> ThinRef<T> {
     ///
 
     /// This is the fundamental safety check that prevents use-after-free.
-    /// Returns Ok(()) if the reference is valid, or an error describing
+    /// Returns Result.Ok(()) if the reference is valid, or an error describing
     /// the validation failure.
     ///
 
@@ -242,7 +242,7 @@ implement<T> ThinRef<T> {
     @inline
     public fn validate(&self) -> Result<(), UseAfterFreeError> {
         if self.is_null() {
-            return Err(UseAfterFreeError.null_pointer(T.name));
+            return Result.Err(UseAfterFreeError.null_pointer(T.name));
         }
 
         // Access header to get current generation/epoch
@@ -251,10 +251,10 @@ implement<T> ThinRef<T> {
             let (actual_gen, actual_epoch) = header.load_generation_epoch_fast();
 
             if self.generation == actual_gen && self.epoch() == actual_epoch {
-                return Ok(());
+                return Result.Ok(());
             }
 
-            Err(UseAfterFreeError.new(
+            Result.Err(UseAfterFreeError.new(
                 self.generation,
                 actual_gen,
                 self.epoch(),
@@ -274,17 +274,17 @@ implement<T> ThinRef<T> {
     @inline
     public unsafe fn validate_fast(&self) -> Result<(), UseAfterFreeError> {
         if self.is_null() {
-            return Err(UseAfterFreeError.null_pointer(T.name));
+            return Result.Err(UseAfterFreeError.null_pointer(T.name));
         }
 
         let header = AllocationHeader.from_user_ptr(self.ptr as &unsafe Byte);
         let (actual_gen, actual_epoch) = header.load_generation_epoch_combined();
 
         if self.generation == actual_gen && self.epoch() == actual_epoch {
-            return Ok(());
+            return Result.Ok(());
         }
 
-        Err(UseAfterFreeError.new(
+        Result.Err(UseAfterFreeError.new(
             self.generation,
             actual_gen,
             self.epoch(),
@@ -338,9 +338,9 @@ implement<T> ThinRef<T> {
     @inline
     fn validate_tier3(&self) -> Result<(), UseAfterFreeError> {
         if self.is_null() {
-            Err(UseAfterFreeError.null_pointer(T.name))
+            Result.Err(UseAfterFreeError.null_pointer(T.name))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -372,14 +372,14 @@ implement<T> ThinRef<T> {
 
         // Check read capability
         if !self.can_read() {
-            return Err(UseAfterFreeError.capability_violation(
+            return Result.Err(UseAfterFreeError.capability_violation(
                 "read",
                 T.name,
             ));
         }
 
         // Safe to dereference
-        unsafe { Ok(&*self.ptr) }
+        unsafe { Result.Ok(&*self.ptr) }
     }
 
     /// Dereference mutably with generation check.
@@ -396,7 +396,7 @@ implement<T> ThinRef<T> {
 
         // Check write capability
         if !self.has_capability(CAP_WRITE) {
-            return Err(UseAfterFreeError.capability_violation(
+            return Result.Err(UseAfterFreeError.capability_violation(
                 "write",
                 T.name,
             ));
@@ -404,14 +404,14 @@ implement<T> ThinRef<T> {
 
         // Check mutable capability
         if !self.has_capability(CAP_MUTABLE) {
-            return Err(UseAfterFreeError.capability_violation(
+            return Result.Err(UseAfterFreeError.capability_violation(
                 "mutable",
                 T.name,
             ));
         }
 
         // Safe to dereference mutably
-        unsafe { Ok(&mut *self.ptr) }
+        unsafe { Result.Ok(&mut *self.ptr) }
     }
 
     /// Dereference without checking (unsafe).
@@ -512,7 +512,7 @@ implement<T> ThinRef<T> {
     ///
 
     /// Two threads racing on `revoke()` for the same allocation will
-    /// see exactly one `Ok(())` and one `Err(already_revoked)`. The
+    /// see exactly one `Result.Ok(())` and one `Result.Err(already_revoked)`. The
     /// previous implementation used a verify-then-fetch_add pattern
     /// that allowed the late thread to spuriously double-bump the
     /// generation past a freshly-issued successor reference; the
@@ -520,11 +520,11 @@ implement<T> ThinRef<T> {
     /// "verify and bump" atomic.
     public fn revoke(&self) -> Result<(), RevocationError> {
         if self.is_null() {
-            return Err(RevocationError.null_pointer(T.name));
+            return Result.Err(RevocationError.null_pointer(T.name));
         }
 
         if !self.can_revoke() {
-            return Err(RevocationError.capability_violation(T.name));
+            return Result.Err(RevocationError.capability_violation(T.name));
         }
 
         unsafe {
@@ -535,14 +535,14 @@ implement<T> ThinRef<T> {
             // (via a separate wraparound) while we were stale.
             let actual_epoch = header.load_epoch();
             if self.epoch() != actual_epoch {
-                return Err(RevocationError.already_revoked(T.name));
+                return Result.Err(RevocationError.already_revoked(T.name));
             }
 
-            // Atomic verify-and-bump. None means the generation
+            // Atomic verify-and-bump. Maybe.None means the generation
             // moved under us → already revoked by another thread.
             let new_gen = match header.try_revoke(self.generation) {
-                Some(g) => g,
-                None    => return Err(RevocationError.already_revoked(T.name)),
+                Maybe.Some(g) => g,
+                Maybe.None    => return Result.Err(RevocationError.already_revoked(T.name)),
             };
 
             // Notify epoch manager — read the post-revoke epoch
@@ -556,7 +556,7 @@ implement<T> ThinRef<T> {
                 post_epoch,
             );
 
-            Ok(())
+            Result.Ok(())
         }
     }
 

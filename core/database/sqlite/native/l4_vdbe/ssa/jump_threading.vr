@@ -130,28 +130,28 @@ fn fold_constant_branches(prog: &mut SsaProgram, const_map: &Map<Int, ConstKind>
         let new_term = match &prog.cfg.blocks[b].terminator {
             IBranch(cond, then_blk, else_blk) => {
                 match lookup_const(const_map, &cond.id) {
-                    Some(CkInt(v)) => {
+                    Maybe.Some(CkInt(v)) => {
                         if v != 0_i64 {
-                            Some(IJump(then_blk.clone()))
+                            Maybe.Some(IJump(then_blk.clone()))
                         } else {
-                            Some(IJump(else_blk.clone()))
+                            Maybe.Some(IJump(else_blk.clone()))
                         }
                     }
-                    Some(CkNull) => {
+                    Maybe.Some(CkNull) => {
                         // Null is falsy in SQLite condition semantics.
-                        Some(IJump(else_blk.clone()))
+                        Maybe.Some(IJump(else_blk.clone()))
                     }
-                    None => None,
+                    Maybe.None => Maybe.None,
                 }
             }
-            _ => None,
+            _ => Maybe.None,
         };
         match new_term {
-            Some(t) => {
+            Maybe.Some(t) => {
                 prog.cfg.blocks[b].terminator = t;
                 count = count + 1;
             }
-            None => {}
+            Maybe.None => {}
         }
         b = b + 1;
     }
@@ -192,11 +192,11 @@ fn thread_empty_jumps(prog: &mut SsaProgram) -> Int {
             IJump(t) => {
                 let raw = block_id_raw(t);
                 if raw < 0 || raw >= n {
-                    None
+                    Maybe.None
                 } else if chain_target[raw] != raw {
-                    Some(IJump(block_id(chain_target[raw])))
+                    Maybe.Some(IJump(block_id(chain_target[raw])))
                 } else {
-                    None
+                    Maybe.None
                 }
             }
             IBranch(cond, then_blk, else_blk) => {
@@ -205,19 +205,19 @@ fn thread_empty_jumps(prog: &mut SsaProgram) -> Int {
                 let then_thr = if then_raw >= 0 && then_raw < n { chain_target[then_raw] } else { then_raw };
                 let else_thr = if else_raw >= 0 && else_raw < n { chain_target[else_raw] } else { else_raw };
                 if then_thr != then_raw || else_thr != else_raw {
-                    Some(IBranch(cond.clone(), block_id(then_thr), block_id(else_thr)))
+                    Maybe.Some(IBranch(cond.clone(), block_id(then_thr), block_id(else_thr)))
                 } else {
-                    None
+                    Maybe.None
                 }
             }
-            _ => None,
+            _ => Maybe.None,
         };
         match new_term {
-            Some(t) => {
+            Maybe.Some(t) => {
                 prog.cfg.blocks[b].terminator = t;
                 count = count + 1;
             }
-            None => {}
+            Maybe.None => {}
         }
         b = b + 1;
     }

@@ -45,7 +45,7 @@ public fn is_partial(k: &IndexKind) -> Bool {
 
 public fn partial_predicate(k: &IndexKind) -> Maybe<Text> {
     match k {
-        IkPartial(p) => Some(p.clone()),
-        _            => None,
+        IkPartial(p) => Maybe.Some(p.clone()),
+        _            => Maybe.None,
     }
 }

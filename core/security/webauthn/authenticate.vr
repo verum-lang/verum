@@ -47,22 +47,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "WebAuthn §7.2 authentication ceremony — clientData + authData + sig → AuthenticationResult",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.webauthn.authenticate;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.List;
 mount encoding.json.{JsonValue, JsonObject, decode};
 mount encoding.base64.{decode_url_no_pad as b64url_decode};
@@ -147,7 +147,7 @@ pub fn verify_authentication(
 ) -> Result<AuthenticationResult, WebAuthnError> {
     // 0. Bound checks on options.
     if options.challenge.len() < CHALLENGE_MIN_BYTES || options.challenge.len() > CHALLENGE_MAX_BYTES {
-        return Err(WebAuthnError.InvalidChallengeLength(options.challenge.len()));
+        return Result.Err(WebAuthnError.InvalidChallengeLength(options.challenge.len()));
     }
 
     // (Pre-check) credentialId-in-allow-list: when allow_credentials
@@ -161,19 +161,19 @@ pub fn verify_authentication(
     if !options.allow_credentials.is_empty()
         && !cred_in_allow_list(&stored.credential_id, &options.allow_credentials)
     {
-        return Err(WebAuthnError.CredentialNotAllowed(stored.credential_id.clone()));
+        return Result.Err(WebAuthnError.CredentialNotAllowed(stored.credential_id.clone()));
     }
 
     // 1. Decode + validate clientDataJSON.
     let client_data = parse_client_data(&response.client_data_json)?;
     if !(client_data.type_ is ClientDataType.Get) {
-        return Err(WebAuthnError.InvalidClientDataType {
+        return Result.Err(WebAuthnError.InvalidClientDataType {
             expected: ClientDataType.Get,
             found:    client_data.type_.clone(),
         });
     }
     if !bytes_eq(&client_data.challenge, &options.challenge) {
-        return Err(WebAuthnError.ChallengeMismatch);
+        return Result.Err(WebAuthnError.ChallengeMismatch);
     }
     check_origin(&client_data.origin, &expected.origins)?;
 
@@ -188,21 +188,21 @@ pub fn verify_authentication(
     let mut i: Int = 0;
     while i < 32 {
         if auth_data.rp_id_hash[i] != expected_rp_id_hash[i] {
-            return Err(WebAuthnError.RpIdHashMismatch);
+            return Result.Err(WebAuthnError.RpIdHashMismatch);
         }
         i = i + 1;
     }
 
     // 5. UP flag.
     if !auth_data.flags.user_present {
-        return Err(WebAuthnError.UpFlagMissing);
+        return Result.Err(WebAuthnError.UpFlagMissing);
     }
 
     // 6. UV flag.
     match options.user_verification {
         UserVerificationRequirement.Required => {
             if !auth_data.flags.user_verified {
-                return Err(WebAuthnError.UvFlagMissing);
+                return Result.Err(WebAuthnError.UvFlagMissing);
             }
         }
         _ => {}
@@ -232,7 +232,7 @@ pub fn verify_authentication(
     let stored_count = stored.sign_count;
     let counter_supported = !(presented == 0 && stored_count == 0);
     if counter_supported && presented <= stored_count {
-        return Err(WebAuthnError.SignCountNotIncreasing {
+        return Result.Err(WebAuthnError.SignCountNotIncreasing {
             stored:    stored_count,
             presented,
         });
@@ -241,7 +241,7 @@ pub fn verify_authentication(
     // 10. Backup-state diagnostics.
     let backup_state_changed = auth_data.flags.backup_state != stored.backup_state;
 
-    Ok(AuthenticationResult {
+    Result.Ok(AuthenticationResult {
         credential_id:        stored.credential_id.clone(),
         new_sign_count:       presented,
         user_verified:        auth_data.flags.user_verified,
@@ -263,7 +263,7 @@ fn verify_signature(
     match pk {
         CredentialPublicKey.Ed25519 { x } => {
             if sig.len() != 64 || x.len() != 32 {
-                return Err(WebAuthnError.InvalidSignature);
+                return Result.Err(WebAuthnError.InvalidSignature);
             }
             let mut pk_arr: Ed25519PublicKey = [0_u8; 32];
             let mut k: Int = 0;
@@ -276,7 +276,7 @@ fn verify_signature(
         }
         CredentialPublicKey.EcdsaP256 { x, y } => {
             if x.len() != 32 || y.len() != 32 {
-                return Err(WebAuthnError.InvalidSignature);
+                return Result.Err(WebAuthnError.InvalidSignature);
             }
             let mut uncompressed: List<Byte> = List.with_capacity(65);
             uncompressed.push(0x04);
@@ -298,11 +298,11 @@ fn verify_signature(
             let res = match *alg {
                 COSE_ALG_RS256 => verify_pkcs1_v15_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice()),
                 COSE_ALG_PS256 => verify_pss_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice()),
-                _              => return Err(WebAuthnError.UnsupportedAlgorithm(*alg)),
+                _              => return Result.Err(WebAuthnError.UnsupportedAlgorithm(*alg)),
             };
             res.map_err(|_| WebAuthnError.InvalidSignature)
         }
-        _ => Err(WebAuthnError.UnsupportedAlgorithm(alg_of(pk))),
+        _ => Result.Err(WebAuthnError.UnsupportedAlgorithm(alg_of(pk))),
     }
 }
 
@@ -327,12 +327,12 @@ fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, Web
     let cross_origin = obj.get("crossOrigin").and_then(|v| v.as_bool()).unwrap_or(false);
     let challenge = b64url_decode(&challenge_b64)
         .map_err(|e| WebAuthnError.InvalidJson(f"challenge b64url: {e}"))?;
-    Ok(CollectedClientData {
+    Result.Ok(CollectedClientData {
         type_:         client_data_type_from_text(&type_text),
         challenge,
         origin,
         cross_origin,
-        token_binding: None,
+        token_binding: Maybe.None,
     })
 }
 
@@ -349,14 +349,14 @@ fn join_origins(allowed: &List<Text>) -> Text {
 
 fn check_origin(found: &Text, allowed: &List<Text>) -> Result<(), WebAuthnError> {
     if !found.starts_with("https://") && !is_localhost_http(found) {
-        return Err(WebAuthnError.OriginScheme(found.clone()));
+        return Result.Err(WebAuthnError.OriginScheme(found.clone()));
     }
     let mut i: Int = 0;
     while i < allowed.len() {
-        if &allowed[i] == found { return Ok(()); }
+        if &allowed[i] == found { return Result.Ok(()); }
         i = i + 1;
     }
-    Err(WebAuthnError.OriginMismatch {
+    Result.Err(WebAuthnError.OriginMismatch {
         expected: join_origins(allowed),
         found:    found.clone(),
     })

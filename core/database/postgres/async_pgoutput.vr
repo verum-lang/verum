@@ -65,7 +65,7 @@
 module core.database.postgres.async_pgoutput;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -126,7 +126,7 @@ public type PgoutputChange is
     /// replication actor's terminal error.
     | CdcTerminated(DbError)
     /// Replication stream closed cleanly (slot dropped, server
-    /// shutdown, etc). Subsequent next_change calls return None.
+    /// shutdown, etc). Subsequent next_change calls return Maybe.None.
     | CdcClosed;
 
 // =============================================================================
@@ -166,19 +166,19 @@ implement AsyncPgoutputConsumer {
     /// replication stream, decodes XLogData via decode_pgoutput,
     /// updates the relation cache for Relation messages, and
     /// pairs DML events with their cached relation. Returns
-    /// `None` only when the stream cleanly closes.
+    /// `Maybe.None` only when the stream cleanly closes.
     public async fn next_change(&self) -> Maybe<PgoutputChange> {
         loop {
             let ev = self.conn.next_event().await;
             match ev {
-                None => { return None; }
-                Some(ReaTerminated(e)) => {
-                    return Some(CdcTerminated(e));
+                Maybe.None => { return Maybe.None; }
+                Maybe.Some(ReaTerminated(e)) => {
+                    return Maybe.Some(CdcTerminated(e));
                 }
-                Some(ReaClosed) => {
-                    return Some(CdcClosed);
+                Maybe.Some(ReaClosed) => {
+                    return Maybe.Some(CdcClosed);
                 }
-                Some(ReaEvent(rmsg)) => {
+                Maybe.Some(ReaEvent(rmsg)) => {
                     match rmsg {
                         RmKeepalive(_) | RmOther { .. } => {
                             // Keepalives / unknown — keep
@@ -186,12 +186,12 @@ implement AsyncPgoutputConsumer {
                         }
                         RmXLogData(x) => {
                             let pgm = match decode_pgoutput(x.payload) {
-                                Ok(v)  => v,
-                                Err(e) => {
-                                    return Some(CdcTerminated(e));
+                                Result.Ok(v)  => v,
+                                Result.Err(e) => {
+                                    return Maybe.Some(CdcTerminated(e));
                                 }
                             };
-                            return Some(self.classify(pgm));
+                            return Maybe.Some(self.classify(pgm));
                         }
                     }
                 }
@@ -236,31 +236,31 @@ implement AsyncPgoutputConsumer {
             }
             PgoInsert(ins) => {
                 match self.lookup_relation(ins.relid) {
-                    Some(rel) => CdcInsert {
+                    Maybe.Some(rel) => CdcInsert {
                         relation: rel,
                         new_tuple: ins.new_tuple,
                     },
-                    None => CdcRaw(PgoInsert(ins)),
+                    Maybe.None => CdcRaw(PgoInsert(ins)),
                 }
             }
             PgoUpdate(upd) => {
                 match self.lookup_relation(upd.relid) {
-                    Some(rel) => CdcUpdate {
+                    Maybe.Some(rel) => CdcUpdate {
                         relation: rel,
                         old_tuple: upd.old_tuple,
                         new_tuple: upd.new_tuple,
                     },
-                    None => CdcRaw(PgoUpdate(upd)),
+                    Maybe.None => CdcRaw(PgoUpdate(upd)),
                 }
             }
             PgoDelete(del) => {
                 match self.lookup_relation(del.relid) {
-                    Some(rel) => CdcDelete {
+                    Maybe.Some(rel) => CdcDelete {
                         relation: rel,
                         old_tuple_kind: del.old_tuple_kind,
                         old_tuple: del.old_tuple,
                     },
-                    None => CdcRaw(PgoDelete(del)),
+                    Maybe.None => CdcRaw(PgoDelete(del)),
                 }
             }
             PgoStreamStart(s)  => CdcStreamStart(s),
@@ -274,8 +274,8 @@ implement AsyncPgoutputConsumer {
     fn lookup_relation(&self, relid: Int) -> Maybe<RelationMessage> {
         let g = self.cache.lock().unwrap_or_else(|p| p.into_inner());
         match g.lookup(relid) {
-            Some(rel) => Some(clone_relation(rel)),
-            None      => None,
+            Maybe.Some(rel) => Maybe.Some(clone_relation(rel)),
+            Maybe.None      => Maybe.None,
         }
     }
 }
@@ -293,7 +293,7 @@ public async fn start_logical_pgoutput(
     start_lsn: Lsn,
 ) -> Result<AsyncPgoutputConsumer, DbError> {
     repl.start_logical(opts, start_lsn).await?;
-    Ok(AsyncPgoutputConsumer {
+    Result.Ok(AsyncPgoutputConsumer {
         conn: repl,
         cache: Shared.new(sync.mutex.Mutex.new(PgoRelationCache.new())),
     })

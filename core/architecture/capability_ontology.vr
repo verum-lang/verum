@@ -52,7 +52,7 @@ public type CapabilityRegistration is {
     description: Text,
  /// Whether the capability transfers privilege (escalation-style).
     transfers_privilege: Bool,
- /// Deprecation status: None = active; Some(replacement) = deprecated.
+ /// Deprecation status: Maybe.None = active; Maybe.Some(replacement) = deprecated.
     deprecation: Maybe<Text>,
 };
 
@@ -69,43 +69,43 @@ public const ATS_V_CANONICAL_CAPABILITIES: List<CapabilityRegistration> = [
         name: "logger",
         description: "Structured logging sink — Spindle / Weft / arbitrary cogs emit log records.",
         transfers_privilege: false,
-        deprecation: None,
+        deprecation: Maybe.None,
     },
     CapabilityRegistration {
         name: "metrics",
         description: "Metrics emitter — counters, gauges, histograms.",
         transfers_privilege: false,
-        deprecation: None,
+        deprecation: Maybe.None,
     },
     CapabilityRegistration {
         name: "tracing",
         description: "Distributed-tracing span emitter.",
         transfers_privilege: false,
-        deprecation: None,
+        deprecation: Maybe.None,
     },
     CapabilityRegistration {
         name: "config_read",
         description: "Read-only access to configuration store.",
         transfers_privilege: false,
-        deprecation: None,
+        deprecation: Maybe.None,
     },
     CapabilityRegistration {
         name: "config_admin",
         description: "Admin-level configuration mutation.",
         transfers_privilege: true,
-        deprecation: None,
+        deprecation: Maybe.None,
     },
     CapabilityRegistration {
         name: "supervisor_spawn",
         description: "Spawn child task in supervision tree (structured concurrency).",
         transfers_privilege: false,
-        deprecation: None,
+        deprecation: Maybe.None,
     },
     CapabilityRegistration {
         name: "kernel_intrinsic",
         description: "Invoke a kernel intrinsic via @kernel_discharge.",
         transfers_privilege: true,
-        deprecation: None,
+        deprecation: Maybe.None,
     },
 ];
 

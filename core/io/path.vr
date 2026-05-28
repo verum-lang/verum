@@ -24,9 +24,9 @@
 // # Example
 // ```verum
 // let path = Path.new("/home/user/docs/file.txt");
-// assert_eq(path.file_name(), Some("file.txt"));
-// assert_eq(path.extension(), Some("txt"));
-// assert_eq(path.parent(), Some(Path.new("/home/user/docs")));
+// assert_eq(path.file_name(), Maybe.Some("file.txt"));
+// assert_eq(path.extension(), Maybe.Some("txt"));
+// assert_eq(path.parent(), Maybe.Some(Path.new("/home/user/docs")));
 //
 
 // let mut buf = PathBuf.from("/home/user");
@@ -289,13 +289,13 @@ implement Path {
     /// Get the parent directory.
     ///
 
-    /// Returns None if the path has no parent (is root || empty).
+    /// Returns Maybe.None if the path has no parent (is root || empty).
     ///
 
     /// # Example
     /// ```verum
     /// let path = Path.new("/home/user/file.txt");
-    /// assert_eq(path.parent(), Some(Path.new("/home/user")));
+    /// assert_eq(path.parent(), Maybe.Some(Path.new("/home/user")));
     /// ```
     public fn parent(&self) -> Maybe<Path> {
         if self.inner.is_empty() {
@@ -345,13 +345,13 @@ implement Path {
     /// Get the final component of the path (file || directory name).
     ///
 
-    /// Returns None if the path ends in `..` || is empty.
+    /// Returns Maybe.None if the path ends in `..` || is empty.
     ///
 
     /// # Example
     /// ```verum
-    /// assert_eq(Path.new("/home/user/file.txt").file_name(), Some("file.txt"));
-    /// assert_eq(Path.new("/home/user/").file_name(), Some("user"));
+    /// assert_eq(Path.new("/home/user/file.txt").file_name(), Maybe.Some("file.txt"));
+    /// assert_eq(Path.new("/home/user/").file_name(), Maybe.Some("user"));
     /// ```
     public fn file_name(&self) -> Maybe<Text> {
         // SOUNDNESS (closes file_name trailing-separator defect): the
@@ -402,8 +402,8 @@ implement Path {
 
     /// # Example
     /// ```verum
-    /// assert_eq(Path.new("/home/user/file.txt").file_stem(), Some("file"));
-    /// assert_eq(Path.new("/home/user/.hidden").file_stem(), Some(".hidden"));
+    /// assert_eq(Path.new("/home/user/file.txt").file_stem(), Maybe.Some("file"));
+    /// assert_eq(Path.new("/home/user/.hidden").file_stem(), Maybe.Some(".hidden"));
     /// ```
     public fn file_stem(&self) -> Maybe<Text> {
         let name = self.file_name()?;
@@ -432,9 +432,9 @@ implement Path {
 
     /// # Example
     /// ```verum
-    /// assert_eq(Path.new("/home/user/file.txt").extension(), Some("txt"));
-    /// assert_eq(Path.new("/home/user/file.tar.gz").extension(), Some("gz"));
-    /// assert_eq(Path.new("/home/user/.hidden").extension(), None);
+    /// assert_eq(Path.new("/home/user/file.txt").extension(), Maybe.Some("txt"));
+    /// assert_eq(Path.new("/home/user/file.tar.gz").extension(), Maybe.Some("gz"));
+    /// assert_eq(Path.new("/home/user/.hidden").extension(), Maybe.None);
     /// ```
     public fn extension(&self) -> Maybe<Text> {
         let name = self.file_name()?;
@@ -740,11 +740,11 @@ implement PathBuf {
     /// ```
     public fn pop(&mut self) -> Bool {
         match self.as_path().parent() {
-            Some(parent) => {
+            Maybe.Some(parent) => {
                 self.path.inner = parent.inner;
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
@@ -773,13 +773,13 @@ implement PathBuf {
     /// ```
     public fn set_extension(&mut self, ext: &Text) -> Bool {
         let name = match self.as_path().file_name() {
-            Some(n) => n,
-            None => return false,
+            Maybe.Some(n) => n,
+            Maybe.None => return false,
         };
 
         let stem = match self.as_path().file_stem() {
-            Some(s) => s,
-            None => return false,
+            Maybe.Some(s) => s,
+            Maybe.None => return false,
         };
 
         self.pop();
@@ -916,7 +916,7 @@ implement Iterator for Components {
 
     fn next(&mut self) -> Maybe<Component> {
         if self.pos >= self.path.len() {
-            return None;
+            return Maybe.None;
         }
 
         // Skip leading separators (except for root)
@@ -924,20 +924,20 @@ implement Iterator for Components {
             let first_char = self.path.char_at(0)?;
             if is_separator(first_char) {
                 self.pos = 1;
-                return Some(RootDir);
+                return Maybe.Some(RootDir);
             }
 
             // Check for Windows drive letter (e.g., C:)
             // This is cross-platform: won't match Unix paths (which don't have colons in this position)
             if self.path.len() >= 2 {
                 let second = self.path.char_at(1);
-                if second == Some(':') {
+                if second == Maybe.Some(':') {
                     let prefix = self.path.slice(0, 2);
                     self.pos = 2;
                     if self.path.len() > 2 && is_separator(self.path.char_at(2).expect("Path component iter: len > 2 guaranteed by guard above")) {
                         self.pos = 3;
                     }
-                    return Some(Prefix(prefix));
+                    return Maybe.Some(Prefix(prefix));
                 }
             }
         }
@@ -945,11 +945,11 @@ implement Iterator for Components {
         // Skip any separators.
         //
 
-        // SOUNDNESS: previous revision had `if let Some(c) = char_at()
+        // SOUNDNESS: previous revision had `if let Maybe.Some(c) = char_at()
         // { ... }` with no else branch. If `char_at` ever returned
-        // None mid-string (e.g. on an invalid UTF-8 boundary), the
+        // Maybe.None mid-string (e.g. on an invalid UTF-8 boundary), the
         // loop would never advance `self.pos` and would spin forever.
-        // The fix treats None as end-of-string and breaks out — same
+        // The fix treats Maybe.None as end-of-string and breaks out — same
         // semantics as the documented `pos >= path.len()` exit.
         while self.pos < self.path.len() {
             match self.path.char_at(self.pos) {
@@ -969,7 +969,7 @@ implement Iterator for Components {
         }
 
         // Find the end of this component. Same defensive handling
-        // for `char_at == None` as the separator-skip loop above.
+        // for `char_at == Maybe.None` as the separator-skip loop above.
         let start = self.pos;
         while self.pos < self.path.len() {
             match self.path.char_at(self.pos) {
@@ -986,11 +986,11 @@ implement Iterator for Components {
         let component = self.path.slice(start, self.pos);
 
         if component == "." {
-            Some(CurDir)
+            Maybe.Some(CurDir)
         } else if component == ".." {
-            Some(ParentDir)
+            Maybe.Some(ParentDir)
         } else {
-            Some(Normal(component))
+            Maybe.Some(Normal(component))
         }
     }
 }
@@ -1016,7 +1016,7 @@ implement Iterator for Ancestors {
     fn next(&mut self) -> Maybe<Path> {
         let current = self.path.clone()?;
         self.path = current.parent();
-        Some(current)
+        Maybe.Some(current)
     }
 }
 
@@ -1064,7 +1064,7 @@ public fn normalize(path: &Path) -> PathBuf {
             // Skip current directory
         } else if c is ParentDir {
             // Pop last component if it's not root or another ParentDir
-            let should_pop = if let Some(last) = components.last() {
+            let should_pop = if let Maybe.Some(last) = components.last() {
                 if last is RootDir || last is ParentDir { false }
                 else if let Prefix(_) = last { false }
                 else { true }
@@ -1074,7 +1074,7 @@ public fn normalize(path: &Path) -> PathBuf {
 
             let should_push = if components.is_empty() {
                 true
-            } else if let Some(last) = components.last() {
+            } else if let Maybe.Some(last) = components.last() {
                 if last is RootDir { false }
                 else if let Prefix(_) = last { false }
                 else if last is ParentDir { true }

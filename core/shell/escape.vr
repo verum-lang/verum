@@ -161,8 +161,8 @@ implement<T: ShellEscape> ShellEscape for List<T> {
 implement<T: ShellEscape> ShellEscape for Maybe<T> {
     fn shell_quote(&self, flavour: ShellFlavour) -> Text {
         match self {
-            Some(v) => v.shell_quote(flavour),
-            None    => "".into(),
+            Maybe.Some(v) => v.shell_quote(flavour),
+            Maybe.None    => "".into(),
         }
     }
 }

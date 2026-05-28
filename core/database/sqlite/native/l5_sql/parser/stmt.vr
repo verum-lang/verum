@@ -58,27 +58,27 @@ public fn parse_statement(ts: &mut SqlTokenStream) -> Result<SqlStatement, Parse
     match ts.peek() {
         TKeyword(KwSelect) | TKeyword(KwWith) => {
             let sel = match parse_select(ts) {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
-            return Ok(SSelect(sel));
+            return Result.Ok(SSelect(sel));
         }
         TKeyword(KwInsert) | TKeyword(KwReplace) => {
             let ins = match parse_insert(ts) {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
-            return Ok(SInsert(ins));
+            return Result.Ok(SInsert(ins));
         }
         TKeyword(KwUpdate) => {
             let upd = match parse_update(ts) {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
-            return Ok(SUpdate(upd));
+            return Result.Ok(SUpdate(upd));
         }
         TKeyword(KwDelete) => {
             let del = match parse_delete(ts) {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
-            return Ok(SDelete(del));
+            return Result.Ok(SDelete(del));
         }
         TKeyword(KwCreate) => parse_create(ts),
         TKeyword(KwDrop)   => parse_drop(ts),
@@ -98,17 +98,17 @@ public fn parse_statement(ts: &mut SqlTokenStream) -> Result<SqlStatement, Parse
             // `parse_statement` after consuming EXPLAIN [QUERY PLAN].
             let _ = ts.advance();
             let query_plan = if ts.accept_keyword(KwQuery) {
-                match ts.expect_keyword(KwPlan) { Ok(_) => {}, Err(e) => { return Err(e); } }
+                match ts.expect_keyword(KwPlan) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
                 true
             } else {
                 false
             };
             let inner = match parse_statement(ts) {
-                Ok(s)  => s, Err(e) => { return Err(e); }
+                Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
-            Ok(SExplain(Heap(inner), query_plan))
+            Result.Ok(SExplain(Heap(inner), query_plan))
         }
-        _ => Err(parse_error("expected statement".clone(), ts.position())),
+        _ => Result.Err(parse_error("expected statement".clone(), ts.position())),
     }
 }
 
@@ -121,8 +121,8 @@ public fn parse_statement(ts: &mut SqlTokenStream) -> Result<SqlStatement, Parse
 /// tolerated.
 public fn parse_batch(src: &Text) -> Result<List<SqlStatement>, ParseError> {
     let toks = match lex(src) {
-        Ok(t)  => t,
-        Err(e) => { return Err(ParseError { message: e.message, position: e.position }); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(ParseError { message: e.message, position: e.position }); }
     };
     let mut ts = stream_new(toks);
     let mut out: List<SqlStatement> = List.new();
@@ -132,18 +132,18 @@ public fn parse_batch(src: &Text) -> Result<List<SqlStatement>, ParseError> {
         if ts.at_eof() { break; }
 
         let s = match parse_statement(&mut ts) {
-            Ok(stmt) => stmt,
-            Err(e)   => { return Err(e); }
+            Result.Ok(stmt) => stmt,
+            Result.Err(e)   => { return Result.Err(e); }
         };
         out.push(s);
 
         // Require ';' or EOF between statements.
         if ts.at_eof() { break; }
         if !ts.accept_punct(PSemicolon) {
-            return Err(parse_error("expected ';' between statements".clone(), ts.position()));
+            return Result.Err(parse_error("expected ';' between statements".clone(), ts.position()));
         }
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 /// Single-statement convenience — parse exactly one statement from
@@ -151,14 +151,14 @@ public fn parse_batch(src: &Text) -> Result<List<SqlStatement>, ParseError> {
 /// contains more than one statement.
 public fn parse_one(src: &Text) -> Result<SqlStatement, ParseError> {
     let batch = match parse_batch(src) {
-        Ok(v)  => v,
-        Err(e) => { return Err(e); }
+        Result.Ok(v)  => v,
+        Result.Err(e) => { return Result.Err(e); }
     };
     if batch.len() == 0 {
-        return Err(ParseError { message: "no statement".clone(), position: 0 });
+        return Result.Err(ParseError { message: "no statement".clone(), position: 0 });
     }
     if batch.len() > 1 {
-        return Err(ParseError { message: "expected exactly one statement".clone(), position: 0 });
+        return Result.Err(ParseError { message: "expected exactly one statement".clone(), position: 0 });
     }
-    Ok(batch[0])
+    Result.Ok(batch[0])
 }

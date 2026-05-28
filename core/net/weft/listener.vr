@@ -83,8 +83,8 @@ public type ListenerConfig is {
     /// 0 disables the per-IP throttle (NOT recommended in
     /// internet-exposed deployments). Default 100.
     per_ip_max: Int,
-    /// Optional io_uring multi-shot accept config (§6.17). `None`
-    /// keeps the existing `TcpListener::accept` path; `Some(cfg)`
+    /// Optional io_uring multi-shot accept config (§6.17). `Maybe.None`
+    /// keeps the existing `TcpListener::accept` path; `Maybe.Some(cfg)`
     /// opts the listener into the strategy selected by
     /// `io_uring_accept.select_accept_strategy(target_triple, cfg)`.
     /// V0 (#316.3) accepts the field but the selector falls through
@@ -101,7 +101,7 @@ implement ListenerConfig {
             drain_grace_ms: 30_000,
             reuseport: false,
             per_ip_max: 100,
-            io_uring_accept: None,
+            io_uring_accept: Maybe.None,
         }
     }
 
@@ -123,9 +123,9 @@ implement ListenerConfig {
     /// or when V1 isn't yet wired the listener silently falls through
     /// to today's `TcpListener::accept` path — caller-side behaviour
     /// is unchanged either way. Default for new `ListenerConfig`s
-    /// remains `None` (no behavioural change to existing call sites).
+    /// remains `Maybe.None` (no behavioural change to existing call sites).
     public fn with_io_uring_strategy(self, cfg: IoUringAcceptConfig) -> ListenerConfig {
-        ListenerConfig { io_uring_accept: Some(cfg), ..self }
+        ListenerConfig { io_uring_accept: Maybe.Some(cfg), ..self }
     }
 }
 
@@ -286,27 +286,27 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
         if draining.load(MemoryOrdering.Acquire) { break; }
 
         match listener.accept_cancellable(&token).await {
-            Err(_cancelled) => break,
-            Ok(Err(_e)) => {
+            Result.Err(_cancelled) => break,
+            Result.Ok(Result.Err(_e)) => {
                 // Back off briefly on listener-level errors (EMFILE
                 // etc.) so we don't spin-burn the runtime.
                 timer.sleep_ms(10).await;
                 continue;
             }
-            Ok(Ok((stream, peer))) => {
+            Result.Ok(Result.Ok((stream, peer))) => {
                 // Per-IP throttle BEFORE global slot — fail-fast on
                 // hostile peers without burning a global slot.
                 let peer_ip = peer.ip();
                 let per_ip_slot = match per_ip.try_acquire(&peer_ip) {
-                    Some(s) => s,
-                    None => {
+                    Maybe.Some(s) => s,
+                    Maybe.None => {
                         runner.refuse_overloaded(stream).await;
                         continue;
                     }
                 };
                 let global_slot = match limiter.try_acquire_with_per_ip(per_ip_slot) {
-                    Some(t) => t,
-                    None => {
+                    Maybe.Some(t) => t,
+                    Maybe.None => {
                         runner.refuse_overloaded(stream).await;
                         continue;
                     }
@@ -334,7 +334,7 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
         timer.sleep_ms(50).await;
         elapsed = elapsed + 50;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -377,9 +377,9 @@ implement ConnectionLimiter {
         }
     }
 
-    /// Try to acquire a global slot. Returns `None` when the
+    /// Try to acquire a global slot. Returns `Maybe.None` when the
     /// limiter is at capacity — caller emits a 503 / refuses the
-    /// connection. On `Some(ticket)`, the slot is reserved until
+    /// connection. On `Maybe.Some(ticket)`, the slot is reserved until
     /// the ticket is dropped.
     public fn try_acquire(&self) -> Maybe<ConnectionTicket> {
         let cur = self.in_flight.fetch_add(1, MemoryOrdering.AcqRel) + 1;
@@ -387,11 +387,11 @@ implement ConnectionLimiter {
             // Race-loser: roll back the optimistic increment
             // immediately and reject.
             self.in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
-            None
+            Maybe.None
         } else {
-            Some(ConnectionTicket {
+            Maybe.Some(ConnectionTicket {
                 in_flight: self.in_flight.clone(),
-                per_ip_slot: None,
+                per_ip_slot: Maybe.None,
             })
         }
     }
@@ -414,11 +414,11 @@ implement ConnectionLimiter {
             // — release it on race-loss so the limiter doesn't
             // leak the per-IP entry.
             per_ip_slot.fetch_sub(1, MemoryOrdering.AcqRel);
-            None
+            Maybe.None
         } else {
-            Some(ConnectionTicket {
+            Maybe.Some(ConnectionTicket {
                 in_flight: self.in_flight.clone(),
-                per_ip_slot: Some(per_ip_slot),
+                per_ip_slot: Maybe.Some(per_ip_slot),
             })
         }
     }
@@ -433,7 +433,7 @@ implement ConnectionLimiter {
 /// Move-only by design — cloning would double-release.
 public type ConnectionTicket is {
     in_flight: Shared<AtomicInt>,
-    /// Per-IP slot the ticket also owns (None if per-IP limit
+    /// Per-IP slot the ticket also owns (Maybe.None if per-IP limit
     /// disabled). The Drop impl releases both atomically — global
     /// slot first, then per-IP — so a panic between releases can
     /// never leak the global slot.
@@ -443,7 +443,7 @@ public type ConnectionTicket is {
 implement Drop for ConnectionTicket {
     fn drop(&mut self) {
         self.in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
-        if let Some(slot) = &self.per_ip_slot {
+        if let Maybe.Some(slot) = &self.per_ip_slot {
             slot.fetch_sub(1, MemoryOrdering.AcqRel);
         }
     }
@@ -488,22 +488,22 @@ implement PerIpLimiter {
         }
     }
 
-    /// Try to acquire one slot for `peer`. Returns `None` when
+    /// Try to acquire one slot for `peer`. Returns `Maybe.None` when
     /// the peer-IP has already saturated its budget; caller emits
-    /// 503 + close. On `Some(slot)` the caller stores the
+    /// 503 + close. On `Maybe.Some(slot)` the caller stores the
     /// `Shared<AtomicInt>` inside the connection's `Ticket` so
     /// Drop releases it.
     public fn try_acquire(&self, peer: &IpAddr) -> Maybe<Shared<AtomicInt>> {
         if self.max <= 0 {
             // Disabled — return a dummy slot the ticket will
             // decrement on Drop with no observable effect.
-            return Some(Shared.new(AtomicInt.new(1)));
+            return Maybe.Some(Shared.new(AtomicInt.new(1)));
         }
         // Look up or create the counter for this IP.
         let mut map = self.counters.borrow_mut();
         let slot = match map.get(peer) {
-            Some(s) => s.clone(),
-            None => {
+            Maybe.Some(s) => s.clone(),
+            Maybe.None => {
                 let s = Shared.new(AtomicInt.new(0));
                 map.insert(peer.clone(), s.clone());
                 s
@@ -513,9 +513,9 @@ implement PerIpLimiter {
         if cur > self.max {
             // Race-loser: roll back the optimistic increment.
             slot.fetch_sub(1, MemoryOrdering.AcqRel);
-            None
+            Maybe.None
         } else {
-            Some(slot)
+            Maybe.Some(slot)
         }
     }
 }
@@ -551,8 +551,8 @@ implement<H: Handler + Send + Sync + 'static> Server<H> {
             TcpListener.bind(addr)
         };
         match listener_res {
-            Err(e) => Err(f"bind failed: {e}"),
-            Ok(listener) => Ok(Server {
+            Result.Err(e) => Result.Err(f"bind failed: {e}"),
+            Result.Ok(listener) => Result.Ok(Server {
                 listener: listener,
                 app: Heap.new(app),
                 config: config,

@@ -6,7 +6,7 @@ mount sys.mmio.{volatile_load, volatile_store};
 // sys/embedded.vr - Minimal runtime for embedded/bare-metal targets
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None (no heap, no threads, no async, no OS)
+// Dependencies: Maybe.None (no heap, no threads, no async, no OS)
 // Activated by: @cfg(runtime = "embedded")
 // =============================================================================
 //

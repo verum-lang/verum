@@ -131,7 +131,7 @@ implement NodeStatTable {
         while i < self.entries.len() {
             if self.entries[i].node_id == node_id {
                 let e = &self.entries[i];
-                return Some(NodeStat {
+                return Maybe.Some(NodeStat {
                     node_id: e.node_id,
                     kind: e.kind.clone(),
                     estimated_rows: e.estimated_rows,
@@ -143,6 +143,6 @@ implement NodeStatTable {
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 }

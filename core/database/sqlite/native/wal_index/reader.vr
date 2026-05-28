@@ -59,14 +59,14 @@ implement ReaderMarks {
     public fn slot_count(&self) -> Int { self.slots.len() }
 
     /// Find an inactive slot (or one with the same max_frame) and
-    /// claim it. Returns the slot index, or None if all slots are
+    /// claim it. Returns the slot index, or Maybe.None if all slots are
     /// busy with different frames.
     public fn claim(&mut self, max_frame: Int) -> Maybe<Int> {
         // First pass: look for exact match (so multiple readers at
         // the same WAL position share a slot).
         let mut i: Int = 1;
         while i < READER_SLOT_COUNT {
-            if self.slots[i].max_frame == max_frame { return Some(i); }
+            if self.slots[i].max_frame == max_frame { return Maybe.Some(i); }
             i = i + 1;
         }
         // Second pass: take the first inactive slot.
@@ -74,11 +74,11 @@ implement ReaderMarks {
         while k < READER_SLOT_COUNT {
             if !self.slots[k].is_active() {
                 self.slots[k] = slot_for(max_frame);
-                return Some(k);
+                return Maybe.Some(k);
             }
             k = k + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Release a previously-claimed slot.

@@ -138,9 +138,9 @@ implement SendStream {
             next_write_off:  0_u64,
             max_written:     0_u64,
             max_acked:       0_u64,
-            final_size:      None,
+            final_size:      Maybe.None,
             max_stream_data: initial_max_stream_data,
-            reset_code:      None,
+            reset_code:      Maybe.None,
         }
     }
 
@@ -149,8 +149,8 @@ implement SendStream {
     /// would be exceeded (caller passes the remaining connection budget).
     public fn write(&mut self, data: &[Byte], conn_fc_budget: UInt64) -> Result<Int, QuicSendError> {
         match self.state {
-            SendState.ResetSent | SendState.ResetRecvd => return Err(QuicSendError.AlreadyReset),
-            SendState.DataSent | SendState.DataRecvd    => return Err(QuicSendError.AlreadyFinished),
+            SendState.ResetSent | SendState.ResetRecvd => return Result.Err(QuicSendError.AlreadyReset),
+            SendState.DataSent | SendState.DataRecvd    => return Result.Err(QuicSendError.AlreadyFinished),
             _ => {},
         }
         // Accept bytes up to the min of stream and connection FC budget.
@@ -174,7 +174,7 @@ implement SendStream {
             SendState.Ready => { if limit > 0 { self.state = SendState.Send; } },
             _ => {},
         }
-        Ok(limit)
+        Result.Ok(limit)
     }
 
     /// Schedule the FIN bit — any already-buffered data will carry it on
@@ -182,11 +182,11 @@ implement SendStream {
     /// the last byte is emitted.
     public fn close(&mut self) -> Result<(), QuicSendError> {
         match self.state {
-            SendState.ResetSent | SendState.ResetRecvd => Err(QuicSendError.AlreadyReset),
-            SendState.DataSent | SendState.DataRecvd    => Err(QuicSendError.AlreadyFinished),
+            SendState.ResetSent | SendState.ResetRecvd => Result.Err(QuicSendError.AlreadyReset),
+            SendState.DataSent | SendState.DataRecvd    => Result.Err(QuicSendError.AlreadyFinished),
             _ => {
-                self.final_size = Some(self.next_write_off);
-                Ok(())
+                self.final_size = Maybe.Some(self.next_write_off);
+                Result.Ok(())
             },
         }
     }
@@ -196,14 +196,14 @@ implement SendStream {
     /// and `final_size = next_write_off`.
     public fn reset(&mut self, error_code: UInt64) -> Result<UInt64, QuicSendError> {
         match self.state {
-            SendState.ResetSent | SendState.ResetRecvd => return Err(QuicSendError.AlreadyReset),
-            SendState.DataRecvd                         => return Err(QuicSendError.AlreadyFinished),
+            SendState.ResetSent | SendState.ResetRecvd => return Result.Err(QuicSendError.AlreadyReset),
+            SendState.DataRecvd                         => return Result.Err(QuicSendError.AlreadyFinished),
             _ => {},
         }
         self.state = SendState.ResetSent;
-        self.reset_code = Some(error_code);
-        self.final_size = Some(self.next_write_off);
-        Ok(self.next_write_off)
+        self.reset_code = Maybe.Some(error_code);
+        self.final_size = Maybe.Some(self.next_write_off);
+        Result.Ok(self.next_write_off)
     }
 
     /// Called when the wire layer has shipped bytes [from..to) of the
@@ -215,7 +215,7 @@ implement SendStream {
         match self.state {
             SendState.Send => {
                 match self.final_size {
-                    Some(fs) if self.max_written >= fs => {
+                    Maybe.Some(fs) if self.max_written >= fs => {
                         self.state = SendState.DataSent;
                     },
                     _ => {},
@@ -234,7 +234,7 @@ implement SendStream {
         match self.state {
             SendState.DataSent => {
                 match self.final_size {
-                    Some(fs) if self.max_acked >= fs => {
+                    Maybe.Some(fs) if self.max_acked >= fs => {
                         self.state = SendState.DataRecvd;
                     },
                     _ => {},

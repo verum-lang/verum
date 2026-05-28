@@ -21,7 +21,7 @@
 //  token (for accept-loop stop + in-flight cancellation) with a wait-
 //  for-zero on the active-connection counter. `shutdown(timeout)`
 //  kicks the signal AND waits — either returns Ok once drained or
-//  Err(DrainTimeout) when the deadline expires.
+//  Result.Err(DrainTimeout) when the deadline expires.
 //
 
 // - **FD handoff** (`listener_from_raw_fd`): adopt an fd passed down
@@ -54,9 +54,9 @@
 //  // Accept loop — each task holds a ConnectionGuard
 //  loop {
 //  match listener.accept_cancellable(&token).await {
-//  Err(_) => break, // cancelled
-//  Ok(Err(e)) => continue, // transient accept error
-//  Ok(Ok((stream, _))) => {
+//  Result.Err(_) => break, // cancelled
+//  Result.Ok(Result.Err(e)) => continue, // transient accept error
+//  Result.Ok(Result.Ok((stream, _))) => {
 //  let guard = shutdown.track();
 //  spawn_detached(async move {
 //  serve_one(stream, &token).await;
@@ -161,7 +161,7 @@ implement GracefulShutdown {
             counter: Shared.new(AtomicU64.new(0)),
             token_source: Shared.new(CancellationTokenSource.new()),
             initiated: Shared.new(AtomicBool.new(false)),
-            started_at: Shared.new(Mutex.new(None)),
+            started_at: Shared.new(Mutex.new(Maybe.None)),
         }
     }
 
@@ -188,12 +188,12 @@ implement GracefulShutdown {
             false, true, MemoryOrdering.AcqRel, MemoryOrdering.Acquire,
         );
         match first {
-            Ok(_) => {
+            Result.Ok(_) => {
                 let mut g = (&*self.started_at).lock().unwrap_or_else(|p| p.into_inner());
-                *g = Some(Instant.now());
+                *g = Maybe.Some(Instant.now());
                 (&*self.token_source).cancel();
             }
-            Err(_) => {}
+            Result.Err(_) => {}
         }
     }
 
@@ -203,7 +203,7 @@ implement GracefulShutdown {
     }
 
     /// Block-await until in-flight reaches zero, or `timeout` elapses.
-    /// Returns Err(DrainTimeout{remaining}) if the deadline is hit.
+    /// Returns Result.Err(DrainTimeout{remaining}) if the deadline is hit.
     ///
 
     /// Implementation: poll the counter at 10 ms intervals plus an
@@ -216,10 +216,10 @@ implement GracefulShutdown {
         let poll_interval = Duration.millis(10);
         loop {
             let in_flight = (&*self.counter).load(MemoryOrdering.Acquire);
-            if in_flight == 0 { return Ok(()); }
+            if in_flight == 0 { return Result.Ok(()); }
             let now = Instant.now();
             if now >= deadline {
-                return Err(ShutdownError.DrainTimeout { remaining: in_flight as Int });
+                return Result.Err(ShutdownError.DrainTimeout { remaining: in_flight as Int });
             }
             // Clamp sleep so we don't oversleep past the deadline.
             let remaining = deadline - now;
@@ -317,7 +317,7 @@ public fn listen_fds() -> Result<Int, ListenFdsError> {
 public fn listen_fd(index: Int) -> Result<FileDesc, ListenFdsError> {
     let n = listen_fds()?;
     if index < 0 || index >= n {
-        return Err(ListenFdsError.ParseError("fd index out of range".into()));
+        return Result.Err(ListenFdsError.ParseError("fd index out of range".into()));
     }
-    Ok((3 + index) as FileDesc)
+    Result.Ok((3 + index) as FileDesc)
 }

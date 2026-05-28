@@ -243,7 +243,7 @@ implement AtomicInt {
         }
     }
 
-    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Compare && swap. Returns Result.Ok(current) if successful, Result.Err(actual) otherwise.
     // Uses typed atomic_cas_u64 intrinsic.
     public fn compare_exchange(
         &self,
@@ -261,9 +261,9 @@ implement AtomicInt {
             ordering_to_u8(failure)
         );
         if did_swap {
-            Ok(current)
+            Result.Ok(current)
         } else {
-            Err(actual as Int)
+            Result.Err(actual as Int)
         }
     }
 
@@ -410,7 +410,7 @@ implement AtomicU8 {
         atomic_exchange_u8(ptr, val as UInt8, ordering_to_u8(order)) as Byte
     }
 
-    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Compare && swap. Returns Result.Ok(current) if successful, Result.Err(actual) otherwise.
     //
 
     // Direct `atomic_cas_u8` intrinsic (registered compiler-side
@@ -433,9 +433,9 @@ implement AtomicU8 {
             ordering_to_u8(failure),
         );
         if did_swap {
-            Ok(current)
+            Result.Ok(current)
         } else {
-            Err(actual as Byte)
+            Result.Err(actual as Byte)
         }
     }
 
@@ -576,7 +576,7 @@ implement AtomicU16 {
         }
     }
 
-    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Compare && swap. Returns Result.Ok(current) if successful, Result.Err(actual) otherwise.
     // Uses u32-aligned word-level CAS with halfword masking for true atomicity.
     public fn compare_exchange(
         &self,
@@ -596,12 +596,12 @@ implement AtomicU16 {
             let word = atomic_load_u32(aligned_ptr as *const UInt32, failure_u8);
             let actual_half = ((word >> shift) & 0xFFFF) as UInt16;
             if actual_half != current {
-                return Err(actual_half);
+                return Result.Err(actual_half);
             }
             let new_word = (word & !mask) | (((new as UInt32) & 0xFFFF) << shift);
             let (_, did_swap) = atomic_cas_u32(aligned_ptr, word, new_word, success_u8, failure_u8);
             if did_swap {
-                return Ok(current);
+                return Result.Ok(current);
             }
         }
     }
@@ -756,7 +756,7 @@ implement AtomicU32 {
         }
     }
 
-    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Compare && swap. Returns Result.Ok(current) if successful, Result.Err(actual) otherwise.
     // Uses typed atomic_cas_u32 intrinsic.
     public fn compare_exchange(
         &self,
@@ -774,9 +774,9 @@ implement AtomicU32 {
             ordering_to_u8(failure)
         );
         if did_swap {
-            Ok(current)
+            Result.Ok(current)
         } else {
-            Err(actual)
+            Result.Err(actual)
         }
     }
 
@@ -890,7 +890,7 @@ implement AtomicU64 {
         }
     }
 
-    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Compare && swap. Returns Result.Ok(current) if successful, Result.Err(actual) otherwise.
     // Uses typed atomic_cas_u64 intrinsic.
     public fn compare_exchange(
         &self,
@@ -908,9 +908,9 @@ implement AtomicU64 {
             ordering_to_u8(failure)
         );
         if did_swap {
-            Ok(current)
+            Result.Ok(current)
         } else {
-            Err(actual)
+            Result.Err(actual)
         }
     }
 
@@ -1018,7 +1018,7 @@ implement AtomicBool {
         old != 0
     }
 
-    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Compare && swap. Returns Result.Ok(current) if successful, Result.Err(actual) otherwise.
     //
     // Direct `atomic_cas_u8` intrinsic (#333 architectural fix —
     // same pattern as `swap` above).  Earlier u32-aligned word-
@@ -1042,9 +1042,9 @@ implement AtomicBool {
             ordering_to_u8(failure),
         );
         if did_swap {
-            Ok(current)
+            Result.Ok(current)
         } else {
-            Err(actual != 0)
+            Result.Err(actual != 0)
         }
     }
 
@@ -1117,7 +1117,7 @@ implement<T> AtomicPtr<T> {
         }
     }
 
-    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Compare && swap. Returns Result.Ok(current) if successful, Result.Err(actual) otherwise.
     // Uses typed atomic_cas_u64 intrinsic.
     public fn compare_exchange(
         &self,
@@ -1135,9 +1135,9 @@ implement<T> AtomicPtr<T> {
             ordering_to_u8(failure)
         );
         if did_swap {
-            Ok(current)
+            Result.Ok(current)
         } else {
-            Err(actual as &unsafe T)
+            Result.Err(actual as &unsafe T)
         }
     }
 
@@ -1253,8 +1253,8 @@ implement FutexLock {
             // If unlocked, try to lock
             if state == FUTEX_UNLOCKED {
                 match self.state.compare_exchange(FUTEX_UNLOCKED, FUTEX_LOCKED, MemoryOrdering.Acquire, MemoryOrdering.Relaxed) {
-                    Ok(_) => { return; },
-                    Err(s) => { state = s; },
+                    Result.Ok(_) => { return; },
+                    Result.Err(s) => { state = s; },
                 }
             }
 

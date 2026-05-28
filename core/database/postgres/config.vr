@@ -21,7 +21,7 @@
 module core.database.postgres.config;
 
 mount core.*;
-mount base.{Text, Maybe, None, Some};
+mount base.{Text, Maybe, Maybe.None, Some};
 
 // -----------------------------------------------------------------------------
 // PgTlsMode

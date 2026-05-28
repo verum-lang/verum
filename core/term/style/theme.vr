@@ -173,13 +173,13 @@ implement Theme {
     /// Falls back to dark theme if detection fails.
     public fn auto_detect(bg_color: Maybe<Rgb>) -> Theme {
         match bg_color {
-            Some(bg) => {
+            Maybe.Some(bg) => {
                 let luminance = 0.299 * (bg.r as Float / 255.0)
                               + 0.587 * (bg.g as Float / 255.0)
                               + 0.114 * (bg.b as Float / 255.0);
                 if luminance > 0.5 { Theme.light() } else { Theme.dark() }
             }
-            None => Theme.dark(),
+            Maybe.None => Theme.dark(),
         }
     }
 

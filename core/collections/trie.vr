@@ -33,13 +33,13 @@
 //
 
 // // Exact match.
-// match t.get(b"/users/alice") { Some(u) => ..., None => ... }
+// match t.get(b"/users/alice") { Maybe.Some(u) => ..., Maybe.None => ... }
 //
 
 // // Longest prefix — useful for wildcard dispatch.
 // match t.longest_prefix(b"/users/alice/profile") {
-//  Some((matched_prefix_bytes, user)) => ...,
-//  None => ...,
+//  Maybe.Some((matched_prefix_bytes, user)) => ...,
+//  Maybe.None => ...,
 // }
 //
 
@@ -209,12 +209,12 @@ implement<V: Clone> Trie<V> {
     public fn entries_with_prefix(&self, prefix: &[Byte]) -> List<(List<Byte>, V)> {
         let mut out: List<(List<Byte>, V)> = [];
         match self.walk_to(prefix) {
-            Some(sub) => {
+            Maybe.Some(sub) => {
                 let mut base: List<Byte> = List.with_capacity(prefix.len());
                 base.extend_from_slice(prefix);
                 collect_entries(sub, &base, &mut out);
             },
-            None => {},
+            Maybe.None => {},
         }
         out
     }
@@ -232,12 +232,12 @@ implement<V: Clone> Trie<V> {
         while i < key.len() {
             let b = key[i];
             match node.children.get(b.clone()) {
-                Some(child) => { node = &**child; },
-                None        => return None,
+                Maybe.Some(child) => { node = &**child; },
+                Maybe.None        => return Maybe.None,
             }
             i = i + 1;
         }
-        Some(node)
+        Maybe.Some(node)
     }
 }
 
@@ -247,24 +247,24 @@ fn collect_entries<V: Clone>(
     out:    &mut List<(List<Byte>, V)>,
 ) {
     match &node.value {
-        Some(v) => { out.push((prefix.clone(), v.clone())); },
-        None    => {},
+        Maybe.Some(v) => { out.push((prefix.clone(), v.clone())); },
+        Maybe.None    => {},
     }
     let iter = node.children.keys();
     let mut it = iter;
     loop {
         match it.next() {
-            Some(k) => {
+            Maybe.Some(k) => {
                 match node.children.get(k) {
-                    Some(child) => {
+                    Maybe.Some(child) => {
                         let mut extended: List<Byte> = prefix.clone();
                         extended.push(*k);
                         collect_entries(&**child, &extended, out);
                     },
-                    None => {},
+                    Maybe.None => {},
                 }
             },
-            None => break,
+            Maybe.None => break,
         }
     }
 }

@@ -168,8 +168,8 @@ public fn begin_tx_with(
     let mut sql: Text = "BEGIN".clone();
     sql.push_str(&opts.render_sql());
     match conn.execute(&sql) {
-        Ok(_)  => Ok(pg_tx_make(opts)),
-        Err(e) => Err(e),
+        Result.Ok(_)  => Result.Ok(pg_tx_make(opts)),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -210,7 +210,7 @@ public fn commit_tx(
             // Postgres requires ROLLBACK after error; COMMIT here is
             // server-error-equivalent. Force the user to take the
             // recovery path explicitly.
-            return Err(DbError.Adapter(AdapterSpecific {
+            return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "TX_ABORTED".clone(),
                 message: "commit_tx: transaction is in failed state — call rollback_tx".clone(),
@@ -218,7 +218,7 @@ public fn commit_tx(
             }));
         }
         _ => {
-            return Err(DbError.Adapter(AdapterSpecific {
+            return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
                 code: "TX_NOT_ACTIVE".clone(),
                 message: "commit_tx: no transaction is in progress".clone(),
@@ -227,8 +227,8 @@ public fn commit_tx(
         }
     }
     match conn.execute(&"COMMIT".clone()) {
-        Ok(_)  => Ok(()),
-        Err(e) => Err(e),
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -242,12 +242,12 @@ public fn rollback_tx(
 ) -> Result<(), DbError> {
     let _ = tx;
     match conn.tx_status() {
-        TxIdle => return Ok(()),    // server-side already rolled
+        TxIdle => return Result.Ok(()),    // server-side already rolled
         _ => {}
     }
     match conn.execute(&"ROLLBACK".clone()) {
-        Ok(_)  => Ok(()),
-        Err(e) => Err(e),
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -262,8 +262,8 @@ public fn savepoint(conn: &mut PgConnection, name: &Text) -> Result<(), DbError>
     let mut sql: Text = "SAVEPOINT ".clone();
     sql.push_str(name);
     match conn.execute(&sql) {
-        Ok(_)  => Ok(()),
-        Err(e) => Err(e),
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -274,8 +274,8 @@ public fn release_savepoint(conn: &mut PgConnection, name: &Text)
     let mut sql: Text = "RELEASE SAVEPOINT ".clone();
     sql.push_str(name);
     match conn.execute(&sql) {
-        Ok(_)  => Ok(()),
-        Err(e) => Err(e),
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -286,8 +286,8 @@ public fn rollback_to_savepoint(conn: &mut PgConnection, name: &Text)
     let mut sql: Text = "ROLLBACK TO SAVEPOINT ".clone();
     sql.push_str(name);
     match conn.execute(&sql) {
-        Ok(_)  => Ok(()),
-        Err(e) => Err(e),
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -304,19 +304,19 @@ public fn with_transaction<R>(
     conn: &mut PgConnection,
     body: fn(&mut PgConnection) -> Result<R, DbError>,
 ) -> Result<R, DbError> {
-    let tx = match begin_tx(conn) { Ok(t)  => t, Err(e) => { return Err(e); } };
+    let tx = match begin_tx(conn) { Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); } };
     let body_result = body(conn);
     match body_result {
-        Ok(r) => {
+        Result.Ok(r) => {
             match commit_tx(conn, tx) {
-                Ok(_)  => Ok(r),
-                Err(e) => Err(e),
+                Result.Ok(_)  => Result.Ok(r),
+                Result.Err(e) => Result.Err(e),
             }
         }
-        Err(body_err) => {
+        Result.Err(body_err) => {
             // Best-effort rollback — original body error wins.
             let _ = rollback_tx(conn, tx);
-            Err(body_err)
+            Result.Err(body_err)
         }
     }
 }
@@ -329,20 +329,20 @@ public fn with_transaction_serializable<R>(
     body: fn(&mut PgConnection) -> Result<R, DbError>,
 ) -> Result<R, DbError> {
     let tx = match begin_tx_serializable(conn) {
-        Ok(t)  => t,
-        Err(e) => { return Err(e); }
+        Result.Ok(t)  => t,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let body_result = body(conn);
     match body_result {
-        Ok(r) => {
+        Result.Ok(r) => {
             match commit_tx(conn, tx) {
-                Ok(_)  => Ok(r),
-                Err(e) => Err(e),
+                Result.Ok(_)  => Result.Ok(r),
+                Result.Err(e) => Result.Err(e),
             }
         }
-        Err(body_err) => {
+        Result.Err(body_err) => {
             let _ = rollback_tx(conn, tx);
-            Err(body_err)
+            Result.Err(body_err)
         }
     }
 }

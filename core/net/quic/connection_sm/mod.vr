@@ -147,7 +147,7 @@ public type QuicKeys is {
 
 implement QuicKeys {
     public fn empty() -> QuicKeys {
-        QuicKeys { initial: None, handshake: None, app: None }
+        QuicKeys { initial: Maybe.None, handshake: Maybe.None, app: Maybe.None }
     }
 }
 
@@ -169,7 +169,7 @@ public type ConnState is {
 
     // Transport parameters
     params_local:  TransportParams,
-    params_remote: Maybe<TransportParams>,   // None until peer's params arrive
+    params_remote: Maybe<TransportParams>,   // Maybe.None until peer's params arrive
 
     // Crypto material
     keys:          QuicKeys,
@@ -215,7 +215,7 @@ implement QuicConnectionSm<Initial> {
         now: Instant,
     ) -> QuicConnectionSm<Initial> {
         let mut keys = QuicKeys.empty();
-        keys.initial = Some((initial_keys_tx, initial_keys_rx));
+        keys.initial = Maybe.Some((initial_keys_tx, initial_keys_rx));
         let flow = ConnFlowControl.new(
             params_local.initial_max_data,
             params_local.initial_max_data,
@@ -230,9 +230,9 @@ implement QuicConnectionSm<Initial> {
                 version:       0x00000001_u32,
                 dcid_peer:     peer_dcid,
                 scid_local:    scid_local,
-                retry_src_cid: None,
+                retry_src_cid: Maybe.None,
                 params_local:  params_local,
-                params_remote: None,
+                params_remote: Maybe.None,
                 keys:          keys,
                 loss:          LossDetection.new(),
                 cc:            NewReno.new(),
@@ -240,10 +240,10 @@ implement QuicConnectionSm<Initial> {
                 send_streams:  [],
                 recv_streams:  [],
                 opened_at:     now,
-                idle_deadline: None,
-                close_reason:  None,
-                close_sent_at: None,
-                drain_expiry:  None,
+                idle_deadline: Maybe.None,
+                close_reason:  Maybe.None,
+                close_sent_at: Maybe.None,
+                drain_expiry:  Maybe.None,
             },
         }
     }
@@ -255,7 +255,7 @@ implement QuicConnectionSm<Initial> {
         hs_keys_tx: QuicSpaceKeys,
         hs_keys_rx: QuicSpaceKeys,
     ) -> QuicConnectionSm<Handshake> {
-        self.inner.keys.handshake = Some((hs_keys_tx, hs_keys_rx));
+        self.inner.keys.handshake = Maybe.Some((hs_keys_tx, hs_keys_rx));
         QuicConnectionSm { inner: self.inner }
     }
 }
@@ -269,7 +269,7 @@ implement QuicConnectionSm<Handshake> {
         app_keys_tx: QuicSpaceKeys,
         app_keys_rx: QuicSpaceKeys,
     ) -> QuicConnectionSm<OneRtt> {
-        self.inner.keys.app = Some((app_keys_tx, app_keys_rx));
+        self.inner.keys.app = Maybe.Some((app_keys_tx, app_keys_rx));
         QuicConnectionSm { inner: self.inner }
     }
 
@@ -277,7 +277,7 @@ implement QuicConnectionSm<Handshake> {
     /// successfully validated (client) or after sending a Handshake
     /// packet (server). Idempotent.
     public fn discard_initial_keys(&mut self) {
-        self.inner.keys.initial = None;
+        self.inner.keys.initial = Maybe.None;
         self.inner.loss.on_keys_discarded(core.net.quic.recovery.PnSpaceKind.Initial);
     }
 }
@@ -287,7 +287,7 @@ implement QuicConnectionSm<OneRtt> {
     /// (client) or after sending 1-RTT response to HANDSHAKE_DONE
     /// (server). Idempotent.
     public fn discard_handshake_keys(&mut self) {
-        self.inner.keys.handshake = None;
+        self.inner.keys.handshake = Maybe.None;
         self.inner.loss.on_keys_discarded(core.net.quic.recovery.PnSpaceKind.Handshake);
     }
 
@@ -298,16 +298,16 @@ implement QuicConnectionSm<OneRtt> {
             QuicRole.ServerEnd => true,
         };
         match self.inner.flow.alloc_stream_bidi(is_server) {
-            Some(sid) => {
+            Maybe.Some(sid) => {
                 let max_sd = self.inner.params_remote
                     .clone().map(|p| p.initial_max_stream_data_bidi_remote).unwrap_or_else(|| 0_u64);
                 let send = SendStream.new(sid, max_sd);
                 let recv = RecvStream.new(sid, self.inner.params_local.initial_max_stream_data_bidi_local);
                 self.inner.send_streams.push((sid, send));
                 self.inner.recv_streams.push((sid, recv));
-                Ok(sid)
+                Result.Ok(sid)
             },
-            None => Err(QuicError.InvalidTransportParameter(Text.from_str("stream limit reached"))),
+            Maybe.None => Result.Err(QuicError.InvalidTransportParameter(Text.from_str("stream limit reached"))),
         }
     }
 
@@ -318,14 +318,14 @@ implement QuicConnectionSm<OneRtt> {
             QuicRole.ServerEnd => true,
         };
         match self.inner.flow.alloc_stream_uni(is_server) {
-            Some(sid) => {
+            Maybe.Some(sid) => {
                 let max_sd = self.inner.params_remote
                     .clone().map(|p| p.initial_max_stream_data_uni).unwrap_or_else(|| 0_u64);
                 let send = SendStream.new(sid, max_sd);
                 self.inner.send_streams.push((sid, send));
-                Ok(sid)
+                Result.Ok(sid)
             },
-            None => Err(QuicError.InvalidTransportParameter(Text.from_str("stream limit reached"))),
+            Maybe.None => Result.Err(QuicError.InvalidTransportParameter(Text.from_str("stream limit reached"))),
         }
     }
 
@@ -333,10 +333,10 @@ implement QuicConnectionSm<OneRtt> {
     /// and waits 3*PTO before fully releasing state.
     public fn close(mut self, error_code: UInt64, reason: List<Byte>, now: Instant) -> QuicConnectionSm<Closing> {
         let _ = error_code;
-        self.inner.close_reason = Some(reason);
-        self.inner.close_sent_at = Some(now);
+        self.inner.close_reason = Maybe.Some(reason);
+        self.inner.close_sent_at = Maybe.Some(now);
         // Drain expiry = now + 3 * PTO (approximate — caller refines).
-        self.inner.drain_expiry = Some(now);
+        self.inner.drain_expiry = Maybe.Some(now);
         QuicConnectionSm { inner: self.inner }
     }
 }
@@ -346,15 +346,15 @@ implement QuicConnectionSm<Closing> {
     /// CONNECTION_CLOSE frame. Caller re-emits if needed.
     public fn is_expired(&self, now: Instant) -> Bool {
         match self.inner.drain_expiry {
-            Some(d) => now >= d,
-            None    => false,
+            Maybe.Some(d) => now >= d,
+            Maybe.None    => false,
         }
     }
 
     /// Peer signalled close — we move to Draining (stop sending, wait
     /// for timer).
     public fn recv_peer_close(mut self, now: Instant) -> QuicConnectionSm<Draining> {
-        self.inner.drain_expiry = Some(now);   // refine externally
+        self.inner.drain_expiry = Maybe.Some(now);   // refine externally
         QuicConnectionSm { inner: self.inner }
     }
 }
@@ -362,8 +362,8 @@ implement QuicConnectionSm<Closing> {
 implement QuicConnectionSm<Draining> {
     public fn is_expired(&self, now: Instant) -> Bool {
         match self.inner.drain_expiry {
-            Some(d) => now >= d,
-            None    => false,
+            Maybe.Some(d) => now >= d,
+            Maybe.None    => false,
         }
     }
 }

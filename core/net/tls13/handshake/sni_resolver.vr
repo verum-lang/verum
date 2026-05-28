@@ -109,8 +109,8 @@ public type ServerIdentity is {
 /// `ExactMatchResolver` below plus any user-supplied implementation
 /// (e.g. ACME-backed dynamic cert rotation).
 public type ServerNameResolver is protocol {
-    /// `sni_hostname` is `Some(name)` when the client sent server_name,
-    /// `None` when it omitted the extension (legacy clients).
+    /// `sni_hostname` is `Maybe.Some(name)` when the client sent server_name,
+    /// `Maybe.None` when it omitted the extension (legacy clients).
     fn resolve(&self, sni_hostname: Maybe<&Text>) -> Result<ServerIdentity, SniResolveError>;
 };
 
@@ -126,7 +126,7 @@ public type ExactMatchResolver is {
     wildcard: Map<Text, ServerIdentity>,
     /// Fallback identity served when the client sends no SNI OR
     /// the SNI doesn't match any exact / wildcard entry and the
-    /// deployment chose permissive mode. None = strict: unmatched
+    /// deployment chose permissive mode. Maybe.None = strict: unmatched
     /// SNI aborts.
     default:  Maybe<ServerIdentity>,
 };
@@ -136,7 +136,7 @@ implement ExactMatchResolver {
         ExactMatchResolver {
             exact:    Map.new(),
             wildcard: Map.new(),
-            default:  None,
+            default:  Maybe.None,
         }
     }
 
@@ -159,7 +159,7 @@ implement ExactMatchResolver {
     /// Set the fallback identity served when SNI is absent or
     /// unmatched and the deployment is running in permissive mode.
     public fn set_default(&mut self, ident: ServerIdentity) {
-        self.default = Some(ident);
+        self.default = Maybe.Some(ident);
     }
 
     fn lookup_wildcard(&self, hostname: &Text) -> Maybe<ServerIdentity> {
@@ -171,11 +171,11 @@ implement ExactMatchResolver {
             if b[i] == ('.' as Byte) { dot_at = i; break; }
             i = i + 1;
         }
-        if dot_at < 0 || dot_at + 1 >= b.len() { return None; }
+        if dot_at < 0 || dot_at + 1 >= b.len() { return Maybe.None; }
         let tail = Text.from_utf8_unchecked(&b[(dot_at + 1)..]);
         match self.wildcard.get(&tail) {
-            Some(ident) => Some(clone_identity(ident)),
-            None        => None,
+            Maybe.Some(ident) => Maybe.Some(clone_identity(ident)),
+            Maybe.None        => Maybe.None,
         }
     }
 }
@@ -190,24 +190,24 @@ fn clone_identity(ident: &ServerIdentity) -> ServerIdentity {
 implement ServerNameResolver for ExactMatchResolver {
     fn resolve(&self, sni_hostname: Maybe<&Text>) -> Result<ServerIdentity, SniResolveError> {
         match sni_hostname {
-            Some(name) => {
+            Maybe.Some(name) => {
                 match self.exact.get(name) {
-                    Some(i) => return Ok(clone_identity(i)),
-                    None => {},
+                    Maybe.Some(i) => return Result.Ok(clone_identity(i)),
+                    Maybe.None => {},
                 }
                 match self.lookup_wildcard(name) {
-                    Some(i) => return Ok(i),
-                    None => {},
+                    Maybe.Some(i) => return Result.Ok(i),
+                    Maybe.None => {},
                 }
                 match &self.default {
-                    Some(d) => Ok(clone_identity(d)),
-                    None    => Err(SniResolveError.NoMatch(name.clone())),
+                    Maybe.Some(d) => Result.Ok(clone_identity(d)),
+                    Maybe.None    => Result.Err(SniResolveError.NoMatch(name.clone())),
                 }
             },
-            None => {
+            Maybe.None => {
                 match &self.default {
-                    Some(d) => Ok(clone_identity(d)),
-                    None    => Err(SniResolveError.NoSniProvided),
+                    Maybe.Some(d) => Result.Ok(clone_identity(d)),
+                    Maybe.None    => Result.Err(SniResolveError.NoSniProvided),
                 }
             },
         }

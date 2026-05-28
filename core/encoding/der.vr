@@ -283,7 +283,7 @@ implement DerReader {
     /// if the caller walked past the region limit.
     public fn buffer_copy_region(&self, start: Int, end: Int) -> Result<List<Byte>, DerError> {
         if start < 0 || end < start || end > self.buf.len() {
-            return Err(err(UnexpectedEndOfInput, start, "buffer_copy_region out of bounds"));
+            return Result.Err(err(UnexpectedEndOfInput, start, "buffer_copy_region out of bounds"));
         }
         // Output is exactly `end - start` bytes — pre-allocate.
         let mut out: List<Byte> = List.with_capacity(end - start);
@@ -292,7 +292,7 @@ implement DerReader {
             out.push(self.buf[i]);
             i = i + 1;
         }
-        Ok(out)
+        Result.Ok(out)
     }
 
     /// Parse the next element's tag + length without advancing the
@@ -314,7 +314,7 @@ implement DerReader {
         let save = probe.pos;
         let (t, len) = probe.read_tag_length()?;
         let value_start = probe.pos;
-        Ok((t, len, value_start, value_start + len))
+        Result.Ok((t, len, value_start, value_start + len))
         // save unused — retained for symmetry with other peek_* calls
     }
 
@@ -322,32 +322,32 @@ implement DerReader {
     /// reject trailing bytes.
     public fn expect_end(&self) -> Result<(), DerError> {
         if self.pos < self.end {
-            return Err(err(TrailingBytes, self.pos, "unexpected trailing bytes"));
+            return Result.Err(err(TrailingBytes, self.pos, "unexpected trailing bytes"));
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // --- Low-level byte reads ---
 
     fn peek_byte(&self) -> Result<Byte, DerError> {
         if self.pos >= self.end {
-            return Err(err(UnexpectedEndOfInput, self.pos, "peek past end"));
+            return Result.Err(err(UnexpectedEndOfInput, self.pos, "peek past end"));
         }
-        Ok(self.buf[self.pos])
+        Result.Ok(self.buf[self.pos])
     }
 
     fn take_byte(&mut self) -> Result<Byte, DerError> {
         if self.pos >= self.end {
-            return Err(err(UnexpectedEndOfInput, self.pos, "take past end"));
+            return Result.Err(err(UnexpectedEndOfInput, self.pos, "take past end"));
         }
         let b = self.buf[self.pos];
         self.pos = self.pos + 1;
-        Ok(b)
+        Result.Ok(b)
     }
 
     fn take_bytes(&mut self, n: Int) -> Result<List<Byte>, DerError> {
         if n < 0 || self.pos + n > self.end {
-            return Err(err(UnexpectedEndOfInput, self.pos, "take_bytes past end"));
+            return Result.Err(err(UnexpectedEndOfInput, self.pos, "take_bytes past end"));
         }
         // Output is exactly `n` bytes.
         let mut out: List<Byte> = List.with_capacity(n);
@@ -357,7 +357,7 @@ implement DerReader {
             i = i + 1;
         }
         self.pos = self.pos + n;
-        Ok(out)
+        Result.Ok(out)
     }
 
     // --- Tag + length parsing ---
@@ -386,12 +386,12 @@ implement DerReader {
             loop {
                 let bx = self.take_byte()?;
                 if first && bx == 0x80_u8 {
-                    return Err(err(MalformedDer, self.pos - 1, "non-canonical multi-byte tag"));
+                    return Result.Err(err(MalformedDer, self.pos - 1, "non-canonical multi-byte tag"));
                 }
                 first = false;
                 // Overflow into 32 bits — X.509 never uses tag numbers this large.
                 if (n >> 25) != 0_u32 {
-                    return Err(err(MalformedDer, self.pos - 1, "tag number overflow"));
+                    return Result.Err(err(MalformedDer, self.pos - 1, "tag number overflow"));
                 }
                 n = (n << 7) | ((bx & 0x7F_u8) as UInt32);
                 if (bx & 0x80_u8) == 0_u8 { break; }
@@ -407,18 +407,18 @@ implement DerReader {
         } else {
             let lbytes: Int = (l0 & 0x7F_u8) as Int;
             if lbytes == 0 {
-                return Err(err(MalformedDer, self.pos - 1, "indefinite length not allowed in DER"));
+                return Result.Err(err(MalformedDer, self.pos - 1, "indefinite length not allowed in DER"));
             }
             if lbytes > 4 {
-                return Err(err(LengthOverflow, self.pos - 1, "length > 4 bytes not supported"));
+                return Result.Err(err(LengthOverflow, self.pos - 1, "length > 4 bytes not supported"));
             }
             // Must use shortest form
             let first_len_byte = self.peek_byte()?;
             if lbytes == 1 && (first_len_byte as Int) < 128 {
-                return Err(err(MalformedDer, self.pos, "non-minimal length encoding"));
+                return Result.Err(err(MalformedDer, self.pos, "non-minimal length encoding"));
             }
             if first_len_byte == 0x00_u8 && lbytes > 1 {
-                return Err(err(MalformedDer, self.pos, "length with leading zero"));
+                return Result.Err(err(MalformedDer, self.pos, "length with leading zero"));
             }
             let mut v: Int = 0;
             let mut i: Int = 0;
@@ -431,10 +431,10 @@ implement DerReader {
         };
 
         if length < 0 || self.pos + length > self.end {
-            return Err(err(UnexpectedEndOfInput, self.pos, "length runs past region"));
+            return Result.Err(err(UnexpectedEndOfInput, self.pos, "length runs past region"));
         }
 
-        Ok((Tag { class_: class_, constructed: constructed, number: number }, length))
+        Result.Ok((Tag { class_: class_, constructed: constructed, number: number }, length))
     }
 
     /// Read a tag + length and immediately verify the tag matches
@@ -448,9 +448,9 @@ implement DerReader {
             _ => false,
         };
         if !is_universal || tag.number != expected_tag || tag.constructed != constructed {
-            return Err(err(UnexpectedTag, save_pos, "universal tag mismatch"));
+            return Result.Err(err(UnexpectedTag, save_pos, "universal tag mismatch"));
         }
-        Ok(len)
+        Result.Ok(len)
     }
 
     // --- Primitive readers ---
@@ -459,13 +459,13 @@ implement DerReader {
     public fn read_boolean(&mut self) -> Result<Bool, DerError> {
         let len = self.read_universal(TAG_BOOLEAN, false)?;
         if len != 1 {
-            return Err(err(MalformedDer, self.pos, "BOOLEAN length ≠ 1"));
+            return Result.Err(err(MalformedDer, self.pos, "BOOLEAN length ≠ 1"));
         }
         let b = self.take_byte()?;
         match b {
-            0x00_u8 => Ok(false),
-            0xFF_u8 => Ok(true),
-            _       => Err(err(InvalidBoolean, self.pos - 1, "BOOLEAN must be 0x00 or 0xFF in DER")),
+            0x00_u8 => Result.Ok(false),
+            0xFF_u8 => Result.Ok(true),
+            _       => Result.Err(err(InvalidBoolean, self.pos - 1, "BOOLEAN must be 0x00 or 0xFF in DER")),
         }
     }
 
@@ -476,7 +476,7 @@ implement DerReader {
     public fn read_integer_raw(&mut self) -> Result<List<Byte>, DerError> {
         let len = self.read_universal(TAG_INTEGER, false)?;
         if len < 1 {
-            return Err(err(MalformedDer, self.pos, "INTEGER empty"));
+            return Result.Err(err(MalformedDer, self.pos, "INTEGER empty"));
         }
         let bytes = self.take_bytes(len)?;
         // Minimal encoding check: if first byte is 0x00 and next byte's
@@ -484,13 +484,13 @@ implement DerReader {
         if bytes.len() > 1 {
             let b0 = bytes[0]; let b1 = bytes[1];
             if b0 == 0x00_u8 && (b1 & 0x80_u8) == 0_u8 {
-                return Err(err(InvalidInteger, self.pos - len, "INTEGER with redundant leading 0x00"));
+                return Result.Err(err(InvalidInteger, self.pos - len, "INTEGER with redundant leading 0x00"));
             }
             if b0 == 0xFF_u8 && (b1 & 0x80_u8) != 0_u8 {
-                return Err(err(InvalidInteger, self.pos - len, "INTEGER with redundant leading 0xFF"));
+                return Result.Err(err(InvalidInteger, self.pos - len, "INTEGER with redundant leading 0xFF"));
             }
         }
-        Ok(bytes)
+        Result.Ok(bytes)
     }
 
     /// Decode a small INTEGER into Int64. Fails if the value doesn't fit
@@ -498,7 +498,7 @@ implement DerReader {
     public fn read_int64(&mut self) -> Result<Int64, DerError> {
         let bytes = self.read_integer_raw()?;
         if bytes.len() > 8 {
-            return Err(err(LengthOverflow, self.pos, "INTEGER > 8 bytes"));
+            return Result.Err(err(LengthOverflow, self.pos, "INTEGER > 8 bytes"));
         }
         // Sign-extend from the high bit of the first byte.
         let mut v: Int64 = if (bytes[0] & 0x80_u8) != 0_u8 { -1_i64 } else { 0_i64 };
@@ -507,16 +507,16 @@ implement DerReader {
             v = (v << 8) | (bytes[i] as Int64);
             i = i + 1;
         }
-        Ok(v)
+        Result.Ok(v)
     }
 
     /// NULL — has no value, length must be 0.
     public fn read_null(&mut self) -> Result<(), DerError> {
         let len = self.read_universal(TAG_NULL, false)?;
         if len != 0 {
-            return Err(err(MalformedDer, self.pos, "NULL with non-zero length"));
+            return Result.Err(err(MalformedDer, self.pos, "NULL with non-zero length"));
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// OCTET STRING — returns raw bytes.
@@ -529,14 +529,14 @@ implement DerReader {
     public fn read_bit_string(&mut self) -> Result<BitString, DerError> {
         let len = self.read_universal(TAG_BIT_STRING, false)?;
         if len < 1 {
-            return Err(err(InvalidBitString, self.pos, "BIT STRING empty"));
+            return Result.Err(err(InvalidBitString, self.pos, "BIT STRING empty"));
         }
         let unused = self.take_byte()?;
         if (unused as Int) > 7 {
-            return Err(err(InvalidBitString, self.pos - 1, "unused-bits > 7"));
+            return Result.Err(err(InvalidBitString, self.pos - 1, "unused-bits > 7"));
         }
         let value = self.take_bytes(len - 1)?;
-        Ok(BitString { bytes: value, unused_bits: unused })
+        Result.Ok(BitString { bytes: value, unused_bits: unused })
     }
 
     /// OBJECT IDENTIFIER — decoded into arc sequence. Returns
@@ -553,7 +553,7 @@ implement DerReader {
     public fn read_oid(&mut self) -> Result<List<UInt32>, DerError> {
         let len = self.read_universal(TAG_OID, false)?;
         if len < 1 {
-            return Err(err(InvalidOid, self.pos, "OID empty"));
+            return Result.Err(err(InvalidOid, self.pos, "OID empty"));
         }
         let bytes = self.take_bytes(len)?;
         let mut sub_ids: List<UInt32> = [];
@@ -566,11 +566,11 @@ implement DerReader {
             let bx = bytes[i];
             // Non-canonical leading 0x80 on a fresh sub-id = forbidden.
             if !in_multibyte && bx == 0x80_u8 {
-                return Err(err(InvalidOid, self.pos - bytes.len() + i, "non-canonical OID sub-id"));
+                return Result.Err(err(InvalidOid, self.pos - bytes.len() + i, "non-canonical OID sub-id"));
             }
             // Overflow guard — no real-world OID uses sub-ids > 28 bits.
             if (cur >> 25) != 0_u32 {
-                return Err(err(InvalidOid, self.pos - bytes.len() + i, "OID sub-id overflow"));
+                return Result.Err(err(InvalidOid, self.pos - bytes.len() + i, "OID sub-id overflow"));
             }
             cur = (cur << 7) | ((bx & 0x7F_u8) as UInt32);
             if (bx & 0x80_u8) == 0_u8 {
@@ -583,10 +583,10 @@ implement DerReader {
             i = i + 1;
         }
         if in_multibyte {
-            return Err(err(InvalidOid, self.pos - 1, "OID truncated in multi-byte sub-id"));
+            return Result.Err(err(InvalidOid, self.pos - 1, "OID truncated in multi-byte sub-id"));
         }
         if sub_ids.len() == 0 {
-            return Err(err(InvalidOid, self.pos - len, "OID has no sub-identifiers"));
+            return Result.Err(err(InvalidOid, self.pos - len, "OID has no sub-identifiers"));
         }
 
         // Pass 2: split the first sub-id into (arc0, arc1).
@@ -604,7 +604,7 @@ implement DerReader {
             arcs.push(sub_ids[j]);
             j = j + 1;
         }
-        Ok(arcs)
+        Result.Ok(arcs)
     }
 
     // --- Strings ---
@@ -615,7 +615,7 @@ implement DerReader {
     public fn read_printable_string(&mut self) -> Result<Text, DerError> {
         let len = self.read_universal(TAG_PRINTABLE_STRING, false)?;
         let bytes = self.take_bytes(len)?;
-        Ok(Text.from_utf8_lossy(bytes.as_slice()))
+        Result.Ok(Text.from_utf8_lossy(bytes.as_slice()))
     }
 
     public fn read_utf8_string(&mut self) -> Result<Text, DerError> {
@@ -632,7 +632,7 @@ implement DerReader {
         let bytes = self.take_bytes(len)?;
         // IA5 = US-ASCII; accept all 0..=127 without check for simplicity —
         // callers that care (DNS labels, URIs) re-validate.
-        Ok(Text.from_utf8_lossy(bytes.as_slice()))
+        Result.Ok(Text.from_utf8_lossy(bytes.as_slice()))
     }
 
     // --- DerTime ---
@@ -641,11 +641,11 @@ implement DerReader {
     public fn read_utc_time(&mut self) -> Result<DerTime, DerError> {
         let len = self.read_universal(TAG_UTC_TIME, false)?;
         if len != 13 {
-            return Err(err(InvalidTime, self.pos, "UTCTime must be 13 bytes"));
+            return Result.Err(err(InvalidTime, self.pos, "UTCTime must be 13 bytes"));
         }
         let bytes = self.take_bytes(len)?;
         if bytes[12] != ('Z' as Byte) {
-            return Err(err(InvalidTime, self.pos - 1, "UTCTime must end in 'Z'"));
+            return Result.Err(err(InvalidTime, self.pos - 1, "UTCTime must end in 'Z'"));
         }
         let yy = parse_digits_2(&bytes, 0)?;
         // RFC 5280 §4.1.2.5.1: 00-49 → 2000-2049; 50-99 → 1950-1999.
@@ -656,7 +656,7 @@ implement DerReader {
         let mn = parse_digits_2(&bytes, 8)?;
         let ss = parse_digits_2(&bytes, 10)?;
         validate_time(year, mm, dd, hh, mn, ss, self.pos)?;
-        Ok(DerTime {
+        Result.Ok(DerTime {
             year: year, month: mm as UInt8, day: dd as UInt8,
             hour: hh as UInt8, minute: mn as UInt8, second: ss as UInt8,
         })
@@ -666,11 +666,11 @@ implement DerReader {
     public fn read_generalized_time(&mut self) -> Result<DerTime, DerError> {
         let len = self.read_universal(TAG_GENERALIZED_TIME, false)?;
         if len != 15 {
-            return Err(err(InvalidTime, self.pos, "GeneralizedTime must be 15 bytes"));
+            return Result.Err(err(InvalidTime, self.pos, "GeneralizedTime must be 15 bytes"));
         }
         let bytes = self.take_bytes(len)?;
         if bytes[14] != ('Z' as Byte) {
-            return Err(err(InvalidTime, self.pos - 1, "GeneralizedTime must end in 'Z'"));
+            return Result.Err(err(InvalidTime, self.pos - 1, "GeneralizedTime must end in 'Z'"));
         }
         let year_hi = parse_digits_2(&bytes, 0)?;
         let year_lo = parse_digits_2(&bytes, 2)?;
@@ -681,7 +681,7 @@ implement DerReader {
         let mn = parse_digits_2(&bytes, 10)?;
         let ss = parse_digits_2(&bytes, 12)?;
         validate_time(year, mm, dd, hh, mn, ss, self.pos)?;
-        Ok(DerTime {
+        Result.Ok(DerTime {
             year: year, month: mm as UInt8, day: dd as UInt8,
             hour: hh as UInt8, minute: mn as UInt8, second: ss as UInt8,
         })
@@ -694,7 +694,7 @@ implement DerReader {
     public fn read_sequence(&mut self) -> Result<DerReader, DerError> {
         let len = self.read_universal(TAG_SEQUENCE, true)?;
         let sub = self.subreader(len);
-        Ok(sub)
+        Result.Ok(sub)
     }
 
     /// Enter a SET. Same discipline as `read_sequence`. DER additionally
@@ -703,7 +703,7 @@ implement DerReader {
     /// (SET-OF parsers) because it requires two-pass.
     public fn read_set(&mut self) -> Result<DerReader, DerError> {
         let len = self.read_universal(TAG_SET, true)?;
-        Ok(self.subreader(len))
+        Result.Ok(self.subreader(len))
     }
 
     /// Enter a context-specific EXPLICIT tag `[n]`. The body is a full
@@ -713,16 +713,16 @@ implement DerReader {
         let (tag, len) = self.read_tag_length()?;
         let ok = matches_context_specific(&tag, context_tag, true);
         if !ok {
-            return Err(err(UnexpectedTag, save, "explicit tag mismatch"));
+            return Result.Err(err(UnexpectedTag, save, "explicit tag mismatch"));
         }
-        Ok(self.subreader(len))
+        Result.Ok(self.subreader(len))
     }
 
     /// Peek the next tag without consuming. Useful for optional-field
     /// lookahead: `if r.peek_is_context(0) { let body = r.read_explicit(0)?; ... }`.
     public fn peek_tag(&self) -> Result<Tag, DerError> {
         if self.pos >= self.end {
-            return Err(err(UnexpectedEndOfInput, self.pos, "peek_tag past end"));
+            return Result.Err(err(UnexpectedEndOfInput, self.pos, "peek_tag past end"));
         }
         // Non-consuming: duplicate a shallow cursor-state, parse, discard.
         let mut probe = DerReader {
@@ -731,15 +731,15 @@ implement DerReader {
             end: self.end,
         };
         let (t, _) = probe.read_tag_length()?;
-        Ok(t)
+        Result.Ok(t)
     }
 
     /// Check if the next tag is context-specific `[n]`.
     public fn peek_is_context(&self, context_tag: UInt32) -> Bool {
         match self.peek_tag() {
-            Ok(t) => matches_context_specific(&t, context_tag, false)
+            Result.Ok(t) => matches_context_specific(&t, context_tag, false)
                   || matches_context_specific(&t, context_tag, true),
-            Err(_) => false,
+            Result.Err(_) => false,
         }
     }
 
@@ -766,9 +766,9 @@ fn parse_digits_2(bytes: &List<Byte>, offset: Int) -> Result<UInt32, DerError> {
     let b1 = bytes[offset + 1];
     if b0 < ('0' as Byte) || b0 > ('9' as Byte)
         || b1 < ('0' as Byte) || b1 > ('9' as Byte) {
-        return Err(err(InvalidTime, offset, "non-digit in time"));
+        return Result.Err(err(InvalidTime, offset, "non-digit in time"));
     }
-    Ok(((b0 - ('0' as Byte)) as UInt32) * 10_u32 + ((b1 - ('0' as Byte)) as UInt32))
+    Result.Ok(((b0 - ('0' as Byte)) as UInt32) * 10_u32 + ((b1 - ('0' as Byte)) as UInt32))
 }
 
 fn validate_time(
@@ -777,21 +777,21 @@ fn validate_time(
     pos: Int,
 ) -> Result<(), DerError> {
     if month < 1_u32 || month > 12_u32 {
-        return Err(err(InvalidTime, pos, "month out of range"));
+        return Result.Err(err(InvalidTime, pos, "month out of range"));
     }
     if day < 1_u32 || day > 31_u32 {
-        return Err(err(InvalidTime, pos, "day out of range"));
+        return Result.Err(err(InvalidTime, pos, "day out of range"));
     }
     if hour > 23_u32 {
-        return Err(err(InvalidTime, pos, "hour out of range"));
+        return Result.Err(err(InvalidTime, pos, "hour out of range"));
     }
     if minute > 59_u32 {
-        return Err(err(InvalidTime, pos, "minute out of range"));
+        return Result.Err(err(InvalidTime, pos, "minute out of range"));
     }
     // X.509 profile bans leap seconds — 60 is rejected.
     if second > 59_u32 {
-        return Err(err(InvalidTime, pos, "second out of range (leap seconds banned)"));
+        return Result.Err(err(InvalidTime, pos, "second out of range (leap seconds banned)"));
     }
     let _ = year;  // no upper bound; callers enforce certificate validity window
-    Ok(())
+    Result.Ok(())
 }

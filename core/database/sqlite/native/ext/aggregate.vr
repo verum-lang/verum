@@ -142,7 +142,7 @@ implement AggregateFn for MaxInt {
     type State = Maybe<Int64>;
     fn name(&self) -> Text { "max_int".clone() }
     fn arity(&self) -> Int { 1 }
-    fn init(&self) -> Maybe<Int64> { None }
+    fn init(&self) -> Maybe<Int64> { Maybe.None }
     fn step(&self, st: &mut Maybe<Int64>, args: &List<Register>) {
         if args.len() == 0 { return; }
         let v: Int64 = match &args[0] {
@@ -151,14 +151,14 @@ implement AggregateFn for MaxInt {
             _ => { return; }
         };
         match st {
-            Some(cur) => { if v > *cur { *st = Some(v); } }
-            None      => { *st = Some(v); }
+            Maybe.Some(cur) => { if v > *cur { *st = Maybe.Some(v); } }
+            Maybe.None      => { *st = Maybe.Some(v); }
         }
     }
     fn finalize(&self, st: Maybe<Int64>) -> Register {
         match st {
-            Some(v) => core.database.sqlite.native.l4_vdbe.register.RInt(v),
-            None    => RNull,
+            Maybe.Some(v) => core.database.sqlite.native.l4_vdbe.register.RInt(v),
+            Maybe.None    => RNull,
         }
     }
 }

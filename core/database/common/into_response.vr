@@ -46,7 +46,7 @@
 module core.database.common.into_response;
 
 mount core.*;
-mount base.{Text, Maybe, None, Some};
+mount base.{Text, Maybe, Maybe.None, Some};
 mount core.net.http.{Response, StatusCode};
 mount core.net.weft.error.IntoResponse;
 mount core.net.weft.response_ext.{
@@ -69,12 +69,12 @@ implement IntoResponse for DbError {
         // the same `ConstraintViolation` shape so we don't repeat
         // the mapping for both code paths.
         match self.as_constraint_violation() {
-            Some(cv) => {
+            Maybe.Some(cv) => {
                 let (status, body) = render_for_constraint(&cv, &self);
                 let resp = resp_status(status);
                 return resp_with_body_text(resp, body);
             }
-            None => {}
+            Maybe.None => {}
         }
         let category = self.category();
         let (status, body) = render_for_category(&category, &self);

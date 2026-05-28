@@ -249,8 +249,8 @@ public fn sql_blob(b: List<Byte>) -> SqlValue { VBlob(b) }
 public fn sql_text_from_utf16(units: &List<Int>) -> SqlValue {
     let slice = units.as_slice();
     match Text.from_utf16(slice) {
-        Ok(t)  => VText(t),
-        Err(_) => VNull,
+        Result.Ok(t)  => VText(t),
+        Result.Err(_) => VNull,
     }
 }
 

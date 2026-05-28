@@ -100,12 +100,12 @@ public fn encode_identities(idents: &List<PskIdentity>, out: &mut List<Byte>) ->
         while i < idents.len() {
             vec_u16(b, |b2| {
                 put_bytes(b2, idents[i].identity.as_slice());
-                Ok(())
+                Result.Ok(())
             })?;
             put_u32(b, idents[i].obfuscated_age);
             i = i + 1;
         }
-        Ok(())
+        Result.Ok(())
     })
 }
 
@@ -121,7 +121,7 @@ public fn encode_binders(binders: &List<List<Byte>>, out: &mut List<Byte>) -> Re
             put_bytes(b, bin.as_slice());
             i = i + 1;
         }
-        Ok(())
+        Result.Ok(())
     })
 }
 
@@ -130,7 +130,7 @@ public fn encode_binders(binders: &List<List<Byte>>, out: &mut List<Byte>) -> Re
 public fn encode_offered_psks(o: &OfferedPsks, out: &mut List<Byte>) -> Result<(), CodecError> {
     encode_identities(&o.identities, out)?;
     encode_binders(&o.binders, out)?;
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -204,15 +204,15 @@ public fn compute_binder(
             h.finalize().to_list()
         },
     };
-    Ok(mac)
+    Result.Ok(mac)
 }
 
 // =============================================================================
 // Server-side binder verification
 // =============================================================================
 
-/// Verify a PSK binder the client sent. Returns Ok(true) when the
-/// MAC matches; Ok(false) when it doesn't. Server SM rejects a
+/// Verify a PSK binder the client sent. Returns Result.Ok(true) when the
+/// MAC matches; Result.Ok(false) when it doesn't. Server SM rejects a
 /// false result with HandshakeFailure (RFC 8446 §4.2.11.2).
 ///
 
@@ -225,7 +225,7 @@ public fn verify_binder(
     received_binder:   &[Byte],
 ) -> Result<Bool, HkdfError> {
     let expected = compute_binder(hash, binder_key, truncated_ch_hash)?;
-    Ok(constant_time_eq(expected.as_slice(), received_binder))
+    Result.Ok(constant_time_eq(expected.as_slice(), received_binder))
 }
 
 /// Delegates to the audited, @verify(constant_time)-annotated helper

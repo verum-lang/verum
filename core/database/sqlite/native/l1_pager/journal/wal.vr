@@ -213,13 +213,13 @@ public fn wal_header_serialize(h: &WalHeader) -> List<Byte> {
 /// magic-byte mismatch.
 public fn wal_header_parse(buf: &[Byte]) -> Result<WalHeader, Text> {
     if buf.len() < WAL_HEADER_SIZE {
-        return Err("wal_header_parse: short buffer".clone());
+        return Result.Err("wal_header_parse: short buffer".clone());
     }
     let magic = read_u32_be(buf, 0);
     if magic != WAL_MAGIC_LE && magic != WAL_MAGIC_BE {
-        return Err("wal_header_parse: bad magic".clone());
+        return Result.Err("wal_header_parse: bad magic".clone());
     }
-    Ok(WalHeader {
+    Result.Ok(WalHeader {
         magic: magic,
         format_version: read_u32_be(buf, 4),
         page_size: read_u32_be(buf, 8),
@@ -246,9 +246,9 @@ public fn wal_frame_header_serialize(h: &WalFrameHeader) -> List<Byte> {
 /// Parse a frame header from a 24-byte slice.
 public fn wal_frame_header_parse(buf: &[Byte]) -> Result<WalFrameHeader, Text> {
     if buf.len() < WAL_FRAME_HEADER_SIZE {
-        return Err("wal_frame_header_parse: short buffer".clone());
+        return Result.Err("wal_frame_header_parse: short buffer".clone());
     }
-    Ok(WalFrameHeader {
+    Result.Ok(WalFrameHeader {
         page_number: read_u32_be(buf, 0),
         db_size_after_commit: read_u32_be(buf, 4),
         salt_1: read_u32_be(buf, 8),

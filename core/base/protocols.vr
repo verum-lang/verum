@@ -14,7 +14,7 @@
 )
 module core.base.protocols;
 mount core.ordering.{Ordering, Less, Equal, Greater};
-mount core.maybe.{Maybe, Some, None};
+mount core.maybe.{Maybe, Some, Maybe.None};
 mount core.result.{Result, Ok, Err};
 mount core.intrinsics.conversion.int_to_bytes;
 
@@ -107,7 +107,7 @@ public type Ord is protocol extends Eq {
 /// Protocol for types with partial ordering (may have incomparable values).
 public type PartialOrd is protocol extends PartialEq {
     /// Compare with another value, returning Maybe<Ordering>.
-    /// Returns None if values are not comparable.
+    /// Returns Maybe.None if values are not comparable.
     fn partial_cmp(&self, other: &Self) -> Maybe<Ordering>;
 
     /// Less than (returns false if !comparable).
@@ -132,8 +132,8 @@ public type PartialOrd is protocol extends PartialEq {
 };
 
 /// Blanket: every total-order type is also a partial-order type
-/// — `partial_cmp` always returns `Some(cmp)` since totals never
-/// produce `Maybe::None`.  Lets primitives (Int / Byte / Char /
+/// — `partial_cmp` always returns `Maybe.Some(cmp)` since totals never
+/// produce `Maybe::Maybe.None`.  Lets primitives (Int / Byte / Char /
 /// UInt8..128 / Int8..128 / USize / ISize / Bool) and any user
 /// type that implements `Ord` automatically satisfy `PartialOrd`
 /// without 16+ repetitive `implement PartialOrd for X` blocks.
@@ -142,7 +142,7 @@ public type PartialOrd is protocol extends PartialEq {
 /// `Float` / `Float32` / `Float64` retain their explicit
 /// `PartialOrd` impls because they're NOT `Ord` (NaN breaks
 /// totality) and need bespoke `partial_cmp` that returns
-/// `Maybe::None` on NaN.
+/// `Maybe::Maybe.None` on NaN.
 implement<T: Ord> PartialOrd for T {
     fn partial_cmp(&self, other: &T) -> Maybe<Ordering> {
         Maybe.Some(self.cmp(other))
@@ -434,13 +434,13 @@ public type FormatError is {};
 
 implement Display for FormatError {
     fn fmt(&self, _f: &mut Formatter) -> Result<(), FormatError> {
-        Ok(())
+        Result.Ok(())
     }
 }
 
 implement Debug for FormatError {
     fn fmt_debug(&self, _f: &mut Formatter) -> Result<(), FormatError> {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -473,13 +473,13 @@ implement Formatter {
     /// Write a string to the output.
     public fn write_str(&mut self, s: &Text) -> Result<(), FormatError> {
         self.buffer.push_str(s);
-        Ok(())
+        Result.Ok(())
     }
 
     /// Write a single character.
     public fn write_char(&mut self, c: Char) -> Result<(), FormatError> {
         self.buffer.push(c);
-        Ok(())
+        Result.Ok(())
     }
 
     /// Write an integer as its decimal representation.
@@ -916,7 +916,7 @@ public type Describable is protocol {
 
 /// implement ErrorSource for IoError {
 ///  fn description(&self) -> Text { self.message.clone() }
-///  fn source(&self) -> Maybe<&dyn ErrorSource> { None }
+///  fn source(&self) -> Maybe<&dyn ErrorSource> { Maybe.None }
 /// }
 /// ```
 public type ErrorSource is protocol extends Describable {

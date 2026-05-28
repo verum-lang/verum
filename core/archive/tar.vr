@@ -51,23 +51,23 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "USTAR + PAX archive packaging for distribution / source bundles",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.archive.tar;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 
 // =============================================================================
 // Constants
@@ -116,7 +116,7 @@ public type TarEntry is {
     path: Text,
     /// File mode (POSIX bits, e.g., 0o644).
     mode: Int,
-    /// Owner uid (or `None` to omit).
+    /// Owner uid (or `Maybe.None` to omit).
     uid: Maybe<Int>,
     gid: Maybe<Int>,
     /// File size in bytes. PAX extended `size` attribute supports >8 GiB.
@@ -183,7 +183,7 @@ public fn read_archive(bytes: &[Byte]) -> Result<List<TarEntry>, TarError> {
         // Two consecutive zero blocks → end of archive.
         if is_zero_block(bytes, pos) {
             if pos + 2 * BLOCK_SIZE <= bytes.len() && is_zero_block(bytes, pos + BLOCK_SIZE) {
-                return Ok(entries);
+                return Result.Ok(entries);
             }
             // Single zero block — keep scanning (tolerant).
             pos = pos + BLOCK_SIZE;
@@ -193,7 +193,7 @@ public fn read_archive(bytes: &[Byte]) -> Result<List<TarEntry>, TarError> {
         let data_start = pos + HEADER_SIZE;
         let data_end = data_start + header.size;
         if data_end > bytes.len() {
-            return Err(TarError.UnexpectedEof);
+            return Result.Err(TarError.UnexpectedEof);
         }
         match &header.entry_type {
             PaxExtendedHeader => {
@@ -214,7 +214,7 @@ public fn read_archive(bytes: &[Byte]) -> Result<List<TarEntry>, TarError> {
         let rem = pos % BLOCK_SIZE;
         if rem != 0 { pos = pos + (BLOCK_SIZE - rem); }
     }
-    Ok(entries)
+    Result.Ok(entries)
 }
 
 fn is_zero_block(bytes: &[Byte], pos: Int) -> Bool {
@@ -229,13 +229,13 @@ fn is_zero_block(bytes: &[Byte], pos: Int) -> Bool {
 
 fn read_header(bytes: &[Byte], pos: Int) -> Result<TarEntry, TarError> {
     if pos + HEADER_SIZE > bytes.len() {
-        return Err(TarError.TruncatedArchive);
+        return Result.Err(TarError.TruncatedArchive);
     }
     // Verify ustar magic.
     let mut k = 0;
     while k < 6 {
         if bytes[pos + 257 + k] != USTAR_MAGIC[k] {
-            return Err(TarError.BadMagic);
+            return Result.Err(TarError.BadMagic);
         }
         k = k + 1;
     }
@@ -243,7 +243,7 @@ fn read_header(bytes: &[Byte], pos: Int) -> Result<TarEntry, TarError> {
     let stored_checksum = parse_octal(bytes, pos + 148, 8)?;
     let computed_checksum = compute_checksum(bytes, pos);
     if stored_checksum != computed_checksum {
-        return Err(TarError.InvalidChecksum);
+        return Result.Err(TarError.InvalidChecksum);
     }
     // Name + prefix → full path.
     let name = read_text(bytes, pos, NAME_LEN)?;
@@ -271,14 +271,14 @@ fn read_header(bytes: &[Byte], pos: Int) -> Result<TarEntry, TarError> {
         0x36_u8        => EntryType.Fifo,
         0x78_u8        => EntryType.PaxExtendedHeader,
         0x67_u8        => EntryType.PaxGlobalHeader,
-        _              => return Err(TarError.UnsupportedTypeflag(typeflag)),
+        _              => return Result.Err(TarError.UnsupportedTypeflag(typeflag)),
     };
 
-    Ok(TarEntry {
+    Result.Ok(TarEntry {
         path: path,
         mode: mode,
-        uid: Some(uid),
-        gid: Some(gid),
+        uid: Maybe.Some(uid),
+        gid: Maybe.Some(gid),
         size: size,
         mtime: mtime,
         entry_type: entry_type,
@@ -295,14 +295,14 @@ fn apply_pax(
     data_start: Int,
     data_end: Int,
 ) -> TarEntry {
-    if let Some(p) = pax.get(&"path".to_text()) {
+    if let Maybe.Some(p) = pax.get(&"path".to_text()) {
         header.path = p.clone();
     }
-    if let Some(s) = pax.get(&"size".to_text()) {
-        if let Some(n) = parse_decimal(s) { header.size = n; }
+    if let Maybe.Some(s) = pax.get(&"size".to_text()) {
+        if let Maybe.Some(n) = parse_decimal(s) { header.size = n; }
     }
-    if let Some(m) = pax.get(&"mtime".to_text()) {
-        if let Some(n) = parse_decimal(m) { header.mtime = n; }
+    if let Maybe.Some(m) = pax.get(&"mtime".to_text()) {
+        if let Maybe.Some(n) = parse_decimal(m) { header.mtime = n; }
     }
     // Copy content slice for regular files.
     match &header.entry_type {
@@ -328,12 +328,12 @@ fn parse_pax(bytes: &[Byte], start: Int, end: Int) -> Result<Map<Text, Text>, Ta
         if p >= end { break; }
         let len_text = slice_text(bytes, len_start, p)?;
         let len = match parse_decimal(&len_text) {
-            Some(n) => n,
-            None    => return Err(TarError.PaxParseError("bad length".to_text())),
+            Maybe.Some(n) => n,
+            Maybe.None    => return Result.Err(TarError.PaxParseError("bad length".to_text())),
         };
         let record_end = len_start + len;
         if record_end > end {
-            return Err(TarError.PaxParseError("record overruns extended block".to_text()));
+            return Result.Err(TarError.PaxParseError("record overruns extended block".to_text()));
         }
         p = p + 1;  // consume space
         let kv_start = p;
@@ -342,14 +342,14 @@ fn parse_pax(bytes: &[Byte], start: Int, end: Int) -> Result<Map<Text, Text>, Ta
         let mut eq = kv_start;
         while eq < kv_end && bytes[eq] != 0x3D_u8 { eq = eq + 1; }
         if eq >= kv_end {
-            return Err(TarError.PaxParseError("missing '='".to_text()));
+            return Result.Err(TarError.PaxParseError("missing '='".to_text()));
         }
         let key = slice_text(bytes, kv_start, eq)?;
         let value = slice_text(bytes, eq + 1, kv_end)?;
         out.insert(key, value);
         p = record_end;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn merge_pax(global: &Map<Text, Text>, local: &Map<Text, Text>) -> Map<Text, Text> {
@@ -372,18 +372,18 @@ fn parse_octal(bytes: &[Byte], start: Int, len: Int) -> Result<Int, TarError> {
         let b = bytes[start + i];
         if b == 0_u8 || b == 0x20_u8 { break; }  // NUL or space ends
         if b < 0x30_u8 || b > 0x37_u8 {
-            return Err(TarError.InvalidNumeric("octal".to_text()));
+            return Result.Err(TarError.InvalidNumeric("octal".to_text()));
         }
         acc = acc * 8 + ((b - 0x30_u8) as Int);
         saw_digit = true;
         i = i + 1;
     }
-    if !saw_digit { Ok(0) } else { Ok(acc) }
+    if !saw_digit { Result.Ok(0) } else { Result.Ok(acc) }
 }
 
 fn parse_decimal(s: &Text) -> Maybe<Int> {
     let bs = s.as_bytes();
-    if bs.is_empty() { return None; }
+    if bs.is_empty() { return Maybe.None; }
     let mut acc: Int = 0;
     let mut sign: Int = 1;
     let mut start = 0;
@@ -391,11 +391,11 @@ fn parse_decimal(s: &Text) -> Maybe<Int> {
     let mut i = start;
     while i < bs.len() {
         let b = bs[i];
-        if b < 0x30_u8 || b > 0x39_u8 { return None; }
+        if b < 0x30_u8 || b > 0x39_u8 { return Maybe.None; }
         acc = acc * 10 + ((b - 0x30_u8) as Int);
         i = i + 1;
     }
-    Some(acc * sign)
+    Maybe.Some(acc * sign)
 }
 
 fn read_text(bytes: &[Byte], start: Int, len: Int) -> Result<Text, TarError> {
@@ -409,8 +409,8 @@ fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Result<Text, TarError> {
     let mut i = start;
     while i < end { buf.push(bytes[i]); i = i + 1; }
     match Text.from_bytes(&buf) {
-        Some(t) => Ok(t),
-        None    => Err(TarError.InvalidUtf8),
+        Maybe.Some(t) => Result.Ok(t),
+        Maybe.None    => Result.Err(TarError.InvalidUtf8),
     }
 }
 
@@ -442,7 +442,7 @@ public fn write_archive(entries: &List<TarEntry>) -> Result<List<Byte>, TarError
     // Two zero-blocks to mark end-of-archive.
     let mut k = 0;
     while k < 2 * BLOCK_SIZE { out.push(0_u8); k = k + 1; }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn write_entry(e: &TarEntry, out: &mut List<Byte>) -> Result<(), TarError> {
@@ -475,7 +475,7 @@ fn write_entry(e: &TarEntry, out: &mut List<Byte>) -> Result<(), TarError> {
         }
         _ => {}
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn write_pax_header(records: &Map<Text, Text>, out: &mut List<Byte>) -> Result<(), TarError> {
@@ -514,7 +514,7 @@ fn write_pax_header(records: &Map<Text, Text>, out: &mut List<Byte>) -> Result<(
     let pax_entry = TarEntry {
         path: "PaxHeader".to_text(),
         mode: 0o644,
-        uid: Some(0), gid: Some(0),
+        uid: Maybe.Some(0), gid: Maybe.Some(0),
         size: body.len(),
         mtime: 0,
         entry_type: EntryType.PaxExtendedHeader,
@@ -532,7 +532,7 @@ fn write_pax_header(records: &Map<Text, Text>, out: &mut List<Byte>) -> Result<(
         let pad = BLOCK_SIZE - rem;
         let mut p = 0; while p < pad { out.push(0_u8); p = p + 1; }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn len_text_digits(n: Int) -> Int {
@@ -619,7 +619,7 @@ fn build_header(e: &TarEntry, name: &Text, prefix: &Text) -> Result<List<Byte>, 
     let mut q = 0;
     while q < HEADER_SIZE { sum = sum + (h.get(q).unwrap() as Int); q = q + 1; }
     write_octal_checksum(&mut h, 148, sum);
-    Ok(h)
+    Result.Ok(h)
 }
 
 fn write_octal(h: &mut List<Byte>, off: Int, len: Int, value: Int) {
@@ -675,8 +675,8 @@ public fn entry_for_file(path: Text, content: List<Byte>, mode: Int, mtime: Int)
     TarEntry {
         path: path,
         mode: mode,
-        uid: Some(0),
-        gid: Some(0),
+        uid: Maybe.Some(0),
+        gid: Maybe.Some(0),
         size: content.len(),
         mtime: mtime,
         entry_type: EntryType.RegularFile,
@@ -690,8 +690,8 @@ public fn entry_for_directory(path: Text, mode: Int, mtime: Int) -> TarEntry {
     TarEntry {
         path: path,
         mode: mode,
-        uid: Some(0),
-        gid: Some(0),
+        uid: Maybe.Some(0),
+        gid: Maybe.Some(0),
         size: 0,
         mtime: mtime,
         entry_type: EntryType.Directory,
@@ -705,8 +705,8 @@ public fn entry_for_symlink(path: Text, target: Text, mtime: Int) -> TarEntry {
     TarEntry {
         path: path,
         mode: 0o777,
-        uid: Some(0),
-        gid: Some(0),
+        uid: Maybe.Some(0),
+        gid: Maybe.Some(0),
         size: 0,
         mtime: mtime,
         entry_type: EntryType.Symlink(target),

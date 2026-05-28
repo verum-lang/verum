@@ -286,7 +286,7 @@ public type SupervisorSpawnConfig is {
 
     /// Owns the spilled-context list when the inline 4-slot storage
     /// is full. Pre-fix this was `Maybe<&List<...>>` (a *reference*),
-    /// initialised with `Some(&List.new())` — which borrowed a
+    /// initialised with `Maybe.Some(&List.new())` — which borrowed a
     /// temporary that dropped at end of expression, leaving a dangling
     /// reference and (separately) an immutable view that couldn't
     /// accept the subsequent `push`. Owning the list fixes both.
@@ -317,17 +317,17 @@ implement SupervisorSpawnConfig {
     /// - ~10ns (inline initialization)
     public fn new() -> Self {
         Self {
-            name: None,
-            recovery: None,
-            restart: None,
-            isolation: None,
+            name: Maybe.None,
+            recovery: Maybe.None,
+            restart: Maybe.None,
+            isolation: Maybe.None,
             priority: PriorityLevel.Normal,
-            circuit_breaker: None,
-            retry: None,
+            circuit_breaker: Maybe.None,
+            retry: Maybe.None,
             contexts_inline: InlineContextStorage.new(),
-            contexts_overflow: None,
-            supervisor: None,
-            child_spec: None,
+            contexts_overflow: Maybe.None,
+            supervisor: Maybe.None,
+            child_spec: Maybe.None,
             deadline_ns: 0,
             stack_size: 0,
         }
@@ -340,7 +340,7 @@ implement SupervisorSpawnConfig {
     /// - ~10ns (Text allocation)
     @inline
     public fn with_name<N: Into<Text>>(mut self, name: N) -> Self {
-        self.name = Some(name.into());
+        self.name = Maybe.Some(name.into());
         self
     }
 
@@ -351,7 +351,7 @@ implement SupervisorSpawnConfig {
     /// - 0ns (inline enum assignment)
     @inline
     public fn with_recovery(mut self, strategy: RuntimeRecoveryStrategy) -> Self {
-        self.recovery = Some(strategy);
+        self.recovery = Maybe.Some(strategy);
         self
     }
 
@@ -362,7 +362,7 @@ implement SupervisorSpawnConfig {
     /// - 0ns (inline struct copy)
     @inline
     public fn with_restart(mut self, policy: RuntimeRestartPolicy) -> Self {
-        self.restart = Some(policy);
+        self.restart = Maybe.Some(policy);
         self
     }
 
@@ -373,7 +373,7 @@ implement SupervisorSpawnConfig {
     /// - 0ns (inline enum assignment)
     @inline
     public fn with_isolation(mut self, isolation: EnvIsolationLevel) -> Self {
-        self.isolation = Some(isolation);
+        self.isolation = Maybe.Some(isolation);
         self
     }
 
@@ -398,7 +398,7 @@ implement SupervisorSpawnConfig {
     /// - ~5ns (struct copy)
     @inline
     public fn with_circuit_breaker(mut self, config: RecoveryCircuitBreakerConfig) -> Self {
-        self.circuit_breaker = Some(config);
+        self.circuit_breaker = Maybe.Some(config);
         self
     }
 
@@ -409,8 +409,8 @@ implement SupervisorSpawnConfig {
     /// - 0ns (inline)
     @inline
     public fn with_retry(mut self, config: RuntimeRetryConfig) -> Self {
-        self.retry = Some(config);
-        self.recovery = Some(RuntimeRecoveryStrategy.Retry);
+        self.retry = Maybe.Some(config);
+        self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry);
         self
     }
 
@@ -421,15 +421,15 @@ implement SupervisorSpawnConfig {
     /// - 0ns (inline)
     @inline
     public fn with_simple_retry(mut self, max_attempts: UInt16, delay_ms: UInt32) -> Self {
-        self.retry = Some(RuntimeRetryConfig {
+        self.retry = Maybe.Some(RuntimeRetryConfig {
             max_attempts: max_attempts,
             backoff: RecoveryBackoffStrategy.Fixed,
             backoff_base_ms: delay_ms,
             backoff_max_ms: delay_ms,
             jitter_factor: 0.0,
-            retryable_errors: None,
+            retryable_errors: Maybe.None,
         });
-        self.recovery = Some(RuntimeRecoveryStrategy.Retry);
+        self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry);
         self
     }
 
@@ -446,15 +446,15 @@ implement SupervisorSpawnConfig {
         max_ms: UInt32,
         jitter: Float32,
     ) -> Self {
-        self.retry = Some(RuntimeRetryConfig {
+        self.retry = Maybe.Some(RuntimeRetryConfig {
             max_attempts: max_attempts,
             backoff: RecoveryBackoffStrategy.Exponential,
             backoff_base_ms: base_ms,
             backoff_max_ms: max_ms,
             jitter_factor: jitter,
-            retryable_errors: None,
+            retryable_errors: Maybe.None,
         });
-        self.recovery = Some(RuntimeRecoveryStrategy.Retry);
+        self.recovery = Maybe.Some(RuntimeRecoveryStrategy.Retry);
         self
     }
 
@@ -465,7 +465,7 @@ implement SupervisorSpawnConfig {
     /// - 0ns (inline)
     @inline
     public fn with_restart_limits(mut self, max_restarts: Int, time_window_secs: UInt64) -> Self {
-        self.restart = Some(RuntimeRestartPolicy {
+        self.restart = Maybe.Some(RuntimeRestartPolicy {
             strategy: RestartStrategy.Permanent,
             max_restarts: max_restarts,
             time_window_secs: time_window_secs,
@@ -491,9 +491,9 @@ implement SupervisorSpawnConfig {
             // Overflow to heap. Lazily initialise the owned List on
             // first overflow.
             if self.contexts_overflow.is_none() {
-                self.contexts_overflow = Some(List.new());
+                self.contexts_overflow = Maybe.Some(List.new());
             }
-            // Populate-guard above just stored Some(...). `as_mut`
+            // Populate-guard above just stored Maybe.Some(...). `as_mut`
             // gives a `Maybe<&mut List<...>>`; .expect() unwraps the
             // invariant.
             let overflow = self.contexts_overflow.as_mut()
@@ -514,7 +514,7 @@ implement SupervisorSpawnConfig {
     /// - ~5ns (pointer assignment)
     @inline
     public fn with_supervisor(mut self, supervisor: &SupervisorHandle) -> Self {
-        self.supervisor = Some(supervisor);
+        self.supervisor = Maybe.Some(supervisor);
         self
     }
 
@@ -525,7 +525,7 @@ implement SupervisorSpawnConfig {
     /// - ~10ns (struct copy)
     @inline
     public fn with_child_spec(mut self, spec: ChildSpec) -> Self {
-        self.child_spec = Some(spec);
+        self.child_spec = Maybe.Some(spec);
         self
     }
 
@@ -572,13 +572,13 @@ implement SupervisorSpawnConfig {
     /// - ~50-100ns (conditional pointer swaps + context merging)
     public fn apply_to_env(&self, env: &mut ExecutionEnv) {
         // Apply recovery strategy override
-        if let Some(strategy) = &self.recovery {
+        if let Maybe.Some(strategy) = &self.recovery {
             // Set recovery strategy in error_recovery context
             env.error_recovery_mut().set_recovery_strategy(*strategy);
         }
 
         // Apply retry configuration
-        if let Some(config) = &self.retry {
+        if let Maybe.Some(config) = &self.retry {
             env.error_recovery_mut().register_retry_policy(
                 TypeId.of<()>(), // Default type
                 config.clone(),
@@ -592,7 +592,7 @@ implement SupervisorSpawnConfig {
         // Map the load-bearing fields across; the recovery-only
         // `error_predicate` is informational at the spawn-config layer
         // and isn't part of the env's circuit-breaker primitive.
-        if let Some(config) = &self.circuit_breaker {
+        if let Maybe.Some(config) = &self.circuit_breaker {
             let name = self.name.as_ref()
                 .map(|n| n.clone())
                 .unwrap_or_else(|| "spawn_task".into());
@@ -605,12 +605,12 @@ implement SupervisorSpawnConfig {
         }
 
         // Apply restart policy override
-        if let Some(policy) = &self.restart {
-            env.concurrency_mut().restart_policy = Some(*policy);
+        if let Maybe.Some(policy) = &self.restart {
+            env.concurrency_mut().restart_policy = Maybe.Some(*policy);
         }
 
         // Apply isolation level override
-        if let Some(isolation) = &self.isolation {
+        if let Maybe.Some(isolation) = &self.isolation {
             env.concurrency_mut().isolation = *isolation;
         }
 
@@ -625,15 +625,15 @@ implement SupervisorSpawnConfig {
         }
 
         // Apply overflow contexts
-        if let Some(overflow) = &self.contexts_overflow {
+        if let Maybe.Some(overflow) = &self.contexts_overflow {
             for (type_id, value) in overflow.iter() {
                 env.capabilities_mut().provide_dynamic(*type_id, *value);
             }
         }
 
         // Link to supervisor if specified
-        if let Some(supervisor) = &self.supervisor {
-            env.error_recovery_mut().supervision = Some(*supervisor);
+        if let Maybe.Some(supervisor) = &self.supervisor {
+            env.error_recovery_mut().supervision = Maybe.Some(*supervisor);
         }
     }
 }
@@ -704,7 +704,7 @@ implement SpawnConfigBuilder {
     /// Set as permanent worker (always restart)
     @inline
     public fn permanent(mut self) -> Self {
-        self.config.restart = Some(RuntimeRestartPolicy {
+        self.config.restart = Maybe.Some(RuntimeRestartPolicy {
             strategy: RestartStrategy.Permanent,
             max_restarts: 10,
             time_window_secs: 60,
@@ -715,7 +715,7 @@ implement SpawnConfigBuilder {
     /// Set as transient task (restart on failure only)
     @inline
     public fn transient(mut self) -> Self {
-        self.config.restart = Some(RuntimeRestartPolicy {
+        self.config.restart = Maybe.Some(RuntimeRestartPolicy {
             strategy: RestartStrategy.Transient,
             max_restarts: 5,
             time_window_secs: 60,
@@ -726,7 +726,7 @@ implement SpawnConfigBuilder {
     /// Set as temporary task (never restart)
     @inline
     public fn temporary(mut self) -> Self {
-        self.config.restart = Some(RuntimeRestartPolicy {
+        self.config.restart = Maybe.Some(RuntimeRestartPolicy {
             strategy: RestartStrategy.Temporary,
             max_restarts: 0,
             time_window_secs: 0,
@@ -772,14 +772,14 @@ implement SpawnConfigBuilder {
     /// Set full isolation (copy-on-write semantics)
     @inline
     public fn isolated(mut self) -> Self {
-        self.config.isolation = Some(EnvIsolationLevel.Full);
+        self.config.isolation = Maybe.Some(EnvIsolationLevel.Full);
         self
     }
 
     /// Set send-only isolation
     @inline
     public fn send_only(mut self) -> Self {
-        self.config.isolation = Some(EnvIsolationLevel.SendOnly);
+        self.config.isolation = Maybe.Some(EnvIsolationLevel.SendOnly);
         self
     }
 
@@ -789,23 +789,23 @@ implement SpawnConfigBuilder {
     /// Returns Err if validation fails.
     public fn build(self) -> Result<SupervisorSpawnConfig, Text> {
         // Validation checks
-        if let Some(retry) = &self.config.retry {
+        if let Maybe.Some(retry) = &self.config.retry {
             if retry.max_attempts == 0 {
-                return Err("retry max_attempts must be > 0".into());
+                return Result.Err("retry max_attempts must be > 0".into());
             }
         }
 
-        if let Some(restart) = &self.config.restart {
+        if let Maybe.Some(restart) = &self.config.restart {
             if restart.strategy == RestartStrategy.Permanent && restart.max_restarts == 0 {
-                return Err("permanent restart requires max_restarts > 0".into());
+                return Result.Err("permanent restart requires max_restarts > 0".into());
             }
         }
 
         if !self.errors.is_empty() {
-            return Err(self.errors.join("; "));
+            return Result.Err(self.errors.join("; "));
         }
 
-        Ok(self.config)
+        Result.Ok(self.config)
     }
 
     /// Build without validation (trust the caller)
@@ -854,7 +854,7 @@ implement SpawnConfigBuilder {
 /// let handle = spawn_with(
 ///  async {
 ///  // Work here with automatic retry on failure
-///  Ok(42)
+///  Result.Ok(42)
 ///  },
 ///  SupervisorSpawnConfig.new()
 ///  .with_name("my-task")
@@ -883,7 +883,7 @@ where type
 
     // Check if supervised
     match config.supervisor {
-        Some(supervisor) => {
+        Maybe.Some(supervisor) => {
             // Use supervisor's spawn mechanism
             let spec = config.child_spec.unwrap_or_else(|| {
                 let name = config.name.unwrap_or_else(|| "spawned".into());
@@ -892,7 +892,7 @@ where type
 
             return spawn_supervised_internal(supervisor, future, spec, child_env);
         }
-        None => {}
+        Maybe.None => {}
     }
 
     // Spawn directly on executor
@@ -912,7 +912,7 @@ where type
     T: Send,
 {
     // Generate task ID
-    let task_id = EnvTaskId.new(Some(child_env.concurrency.task_id));
+    let task_id = EnvTaskId.new(Maybe.Some(child_env.concurrency.task_id));
 
     // Wrap future to set environment as current for the task
     let wrapped_future = async move {

@@ -196,9 +196,9 @@ public type Packet is
 // =============================================================================
 
 fn parse_long_prefix(buf: &[Byte]) -> Result<(UInt8, UInt32, ConnectionId, ConnectionId, Int), PacketError> {
-    if buf.len() < 7 { return Err(PacketError.Truncated); }
+    if buf.len() < 7 { return Result.Err(PacketError.Truncated); }
     let first = buf[0];
-    if (first & 0x80_u8) == 0_u8 { return Err(PacketError.InvalidHeaderForm); }
+    if (first & 0x80_u8) == 0_u8 { return Result.Err(PacketError.InvalidHeaderForm); }
 
     let version: UInt32 =
           ((buf[1] as UInt32) << 24)
@@ -208,17 +208,17 @@ fn parse_long_prefix(buf: &[Byte]) -> Result<(UInt8, UInt32, ConnectionId, Conne
 
     // DCID length
     let dcid_len = buf[5] as Int;
-    if dcid_len > MAX_CID_LEN { return Err(PacketError.CidTooLong(dcid_len)); }
+    if dcid_len > MAX_CID_LEN { return Result.Err(PacketError.CidTooLong(dcid_len)); }
     let dcid_end = 6 + dcid_len;
-    if dcid_end + 1 > buf.len() { return Err(PacketError.Truncated); }
+    if dcid_end + 1 > buf.len() { return Result.Err(PacketError.Truncated); }
     let mut dcid_bytes: List<Byte> = List.with_capacity(dcid_len);
     dcid_bytes.extend_from_slice(&buf[6..dcid_end]);
 
     // SCID length
     let scid_len = buf[dcid_end] as Int;
-    if scid_len > MAX_CID_LEN { return Err(PacketError.CidTooLong(scid_len)); }
+    if scid_len > MAX_CID_LEN { return Result.Err(PacketError.CidTooLong(scid_len)); }
     let scid_end = dcid_end + 1 + scid_len;
-    if scid_end > buf.len() { return Err(PacketError.Truncated); }
+    if scid_end > buf.len() { return Result.Err(PacketError.Truncated); }
     let mut scid_bytes: List<Byte> = List.with_capacity(scid_len);
     scid_bytes.extend_from_slice(&buf[dcid_end + 1..scid_end]);
 
@@ -227,7 +227,7 @@ fn parse_long_prefix(buf: &[Byte]) -> Result<(UInt8, UInt32, ConnectionId, Conne
     let scid = ConnectionId.from_bytes(scid_bytes.as_slice())
         .map_err(|_| PacketError.CidTooLong(scid_len))?;
 
-    Ok((first, version, dcid, scid, scid_end))
+    Result.Ok((first, version, dcid, scid, scid_end))
 }
 
 // =============================================================================
@@ -237,11 +237,11 @@ fn parse_long_prefix(buf: &[Byte]) -> Result<(UInt8, UInt32, ConnectionId, Conne
 fn parse_version_negotiation(buf: &[Byte]) -> Result<Packet, PacketError> {
     let (_, version, dcid, scid, pos) = parse_long_prefix(buf)?;
     if version != qv.VERSION_NEGOTIATION {
-        return Err(PacketError.InvalidHeaderForm);
+        return Result.Err(PacketError.InvalidHeaderForm);
     }
     // Remaining bytes are an array of 32-bit versions.
     let remaining = buf.len() - pos;
-    if remaining == 0 || remaining % 4 != 0 { return Err(PacketError.Truncated); }
+    if remaining == 0 || remaining % 4 != 0 { return Result.Err(PacketError.Truncated); }
     let mut versions: List<UInt32> = [];
     let mut i: Int = pos;
     while i < buf.len() {
@@ -253,7 +253,7 @@ fn parse_version_negotiation(buf: &[Byte]) -> Result<Packet, PacketError> {
         versions.push(v);
         i = i + 4;
     }
-    Ok(Packet.VersionNegotiation { dcid: dcid, scid: scid, versions: versions })
+    Result.Ok(Packet.VersionNegotiation { dcid: dcid, scid: scid, versions: versions })
 }
 
 // =============================================================================
@@ -263,14 +263,14 @@ fn parse_version_negotiation(buf: &[Byte]) -> Result<Packet, PacketError> {
 fn parse_retry(first: UInt8, version: UInt32, dcid: ConnectionId, scid: ConnectionId,
                buf: &[Byte], pos: Int) -> Result<Packet, PacketError> {
     // Remainder = token (variable) || integrity tag (16 bytes)
-    if buf.len() < pos + 16 { return Err(PacketError.Truncated); }
+    if buf.len() < pos + 16 { return Result.Err(PacketError.Truncated); }
     let tag_start = buf.len() - 16;
     let mut token: List<Byte> = List.with_capacity(tag_start - pos);
     token.extend_from_slice(&buf[pos..tag_start]);
     let mut tag: [Byte; 16] = [0_u8; 16];
     let mut j: Int = 0;
     while j < 16 { tag[j] = buf[tag_start + j]; j = j + 1; }
-    Ok(Packet.Long(LongPacket {
+    Result.Ok(Packet.Long(LongPacket {
         header: LongHeader { first_byte: first, version: version, dcid: dcid, scid: scid },
         body:   LongBody.RetryBody { token: token, integrity_tag: tag },
     }))
@@ -304,7 +304,7 @@ fn parse_initial(first: UInt8, version: UInt32, dcid: ConnectionId, scid: Connec
                  buf: &[Byte], pos: Int) -> Result<Packet, PacketError> {
     let (token_len, p1) = quic_decode(buf, pos).map_err(|_| PacketError.VarintFailure)?;
     let token_end = p1 + (token_len as Int);
-    if token_end > buf.len() { return Err(PacketError.Truncated); }
+    if token_end > buf.len() { return Result.Err(PacketError.Truncated); }
     let mut token: List<Byte> = List.with_capacity(token_end - p1);
     token.extend_from_slice(&buf[p1..token_end]);
 
@@ -312,7 +312,7 @@ fn parse_initial(first: UInt8, version: UInt32, dcid: ConnectionId, scid: Connec
     let (pn, pn_len, payload, end) = parse_pn_and_payload(first, buf, p2, length)?;
     let _ = end;
 
-    Ok(Packet.Long(LongPacket {
+    Result.Ok(Packet.Long(LongPacket {
         header: LongHeader { first_byte: first, version: version, dcid: dcid, scid: scid },
         body:   LongBody.InitialBody {
             token:         token,
@@ -328,7 +328,7 @@ fn parse_handshake(first: UInt8, version: UInt32, dcid: ConnectionId, scid: Conn
                    buf: &[Byte], pos: Int) -> Result<Packet, PacketError> {
     let (length, p1) = quic_decode(buf, pos).map_err(|_| PacketError.VarintFailure)?;
     let (pn, pn_len, payload, _) = parse_pn_and_payload(first, buf, p1, length)?;
-    Ok(Packet.Long(LongPacket {
+    Result.Ok(Packet.Long(LongPacket {
         header: LongHeader { first_byte: first, version: version, dcid: dcid, scid: scid },
         body:   LongBody.HandshakeBody {
             length:        length,
@@ -343,7 +343,7 @@ fn parse_zero_rtt(first: UInt8, version: UInt32, dcid: ConnectionId, scid: Conne
                   buf: &[Byte], pos: Int) -> Result<Packet, PacketError> {
     let (length, p1) = quic_decode(buf, pos).map_err(|_| PacketError.VarintFailure)?;
     let (pn, pn_len, payload, _) = parse_pn_and_payload(first, buf, p1, length)?;
-    Ok(Packet.Long(LongPacket {
+    Result.Ok(Packet.Long(LongPacket {
         header: LongHeader { first_byte: first, version: version, dcid: dcid, scid: scid },
         body:   LongBody.ZeroRttBody {
             length:        length,
@@ -364,11 +364,11 @@ fn parse_pn_and_payload(
 ) -> Result<(UInt32, UInt8, List<Byte>, Int), PacketError> {
     let pn_len: UInt8 = (first & 0x03_u8) + 1_u8;
     if pn_len < 1_u8 || pn_len > 4_u8 {
-        return Err(PacketError.InvalidPacketNumberLength(pn_len as Int));
+        return Result.Err(PacketError.InvalidPacketNumberLength(pn_len as Int));
     }
     let payload_end = pn_start + (length as Int);
     if payload_end > buf.len() || pn_start + (pn_len as Int) > payload_end {
-        return Err(PacketError.Truncated);
+        return Result.Err(PacketError.Truncated);
     }
     // Assemble truncated PN big-endian.
     let mut pn: UInt32 = 0_u32;
@@ -381,7 +381,7 @@ fn parse_pn_and_payload(
     let payload_start = pn_start + (pn_len as Int);
     let mut payload: List<Byte> = List.with_capacity(payload_end - payload_start);
     payload.extend_from_slice(&buf[payload_start..payload_end]);
-    Ok((pn, pn_len, payload, payload_end))
+    Result.Ok((pn, pn_len, payload, payload_end))
 }
 
 // =============================================================================
@@ -402,9 +402,9 @@ fn parse_pn_and_payload(
 // =============================================================================
 
 public fn parse_short(buf: &[Byte], dcid_len: Int) -> Result<Packet, PacketError> {
-    if buf.len() < 1 + dcid_len + 1 { return Err(PacketError.Truncated); }
+    if buf.len() < 1 + dcid_len + 1 { return Result.Err(PacketError.Truncated); }
     let first = buf[0];
-    if (first & 0x80_u8) != 0_u8 { return Err(PacketError.InvalidHeaderForm); }
+    if (first & 0x80_u8) != 0_u8 { return Result.Err(PacketError.InvalidHeaderForm); }
 
     let dcid_end = 1 + dcid_len;
     let mut dcid_bytes: List<Byte> = List.with_capacity(dcid_len);
@@ -415,7 +415,7 @@ public fn parse_short(buf: &[Byte], dcid_len: Int) -> Result<Packet, PacketError
     // PN is protected by HP — this parser assumes `first` has already
     // had HP removed by the caller. pn_len = (first & 0x03) + 1.
     let pn_len: UInt8 = (first & 0x03_u8) + 1_u8;
-    if dcid_end + (pn_len as Int) > buf.len() { return Err(PacketError.Truncated); }
+    if dcid_end + (pn_len as Int) > buf.len() { return Result.Err(PacketError.Truncated); }
     let mut pn: UInt32 = 0_u32;
     let mut k: Int = 0;
     while k < (pn_len as Int) {
@@ -426,7 +426,7 @@ public fn parse_short(buf: &[Byte], dcid_len: Int) -> Result<Packet, PacketError
     let mut payload: List<Byte> = List.with_capacity(buf.len() - payload_start);
     payload.extend_from_slice(&buf[payload_start..]);
 
-    Ok(Packet.Short(ShortHeader {
+    Result.Ok(Packet.Short(ShortHeader {
         first_byte:    first,
         dcid:          dcid,
         packet_number: pn,
@@ -448,7 +448,7 @@ public fn parse_long(buf: &[Byte]) -> Result<Packet, PacketError> {
         return parse_version_negotiation(buf);
     }
     if !qv.is_supported(version) {
-        return Err(PacketError.UnsupportedVersion(version));
+        return Result.Err(PacketError.UnsupportedVersion(version));
     }
 
     let type_bits = (first >> 4) & 0x03_u8;
@@ -522,10 +522,10 @@ public fn decode_packet_number(
 /// Returns (truncated_pn, byte_length).
 public fn encode_packet_number_len(pn: UInt64, largest_acked: Maybe<UInt64>) -> (UInt32, UInt8) {
     let num_unacked: UInt64 = match largest_acked {
-        Some(la) => {
+        Maybe.Some(la) => {
             if pn > la { pn - la } else { 1_u64 }
         },
-        None => pn + 1_u64,
+        Maybe.None => pn + 1_u64,
     };
     let min_bits: Int = 64 - leading_zeros_u64(num_unacked * 2_u64);
     let nbytes: UInt8 =

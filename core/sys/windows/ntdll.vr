@@ -719,13 +719,13 @@ public const THREAD_CREATE_FLAGS_INITIAL_THREAD: UInt32 = 0x00000080;
 /// Close a handle safely
 public fn safe_close(handle: Handle) -> Result<(), NtStatus> {
     if !handle.is_valid() {
-        return Ok(());
+        return Result.Ok(());
     }
     let status = NtClose(handle);
     if status.is_success() {
-        Ok(())
+        Result.Ok(())
     } else {
-        Err(status)
+        Result.Err(status)
     }
 }
 
@@ -747,9 +747,9 @@ public fn safe_allocate(
     );
 
     if status.is_success() {
-        Ok(base)
+        Result.Ok(base)
     } else {
-        Err(status)
+        Result.Err(status)
     }
 }
 
@@ -766,9 +766,9 @@ public fn safe_free(base: &unsafe Byte) -> Result<(), NtStatus> {
     );
 
     if status.is_success() {
-        Ok(())
+        Result.Ok(())
     } else {
-        Err(status)
+        Result.Err(status)
     }
 }
 
@@ -778,8 +778,8 @@ public fn safe_delay(nanoseconds: Int64) -> Result<(), NtStatus> {
     let interval = LargeInteger(-(nanoseconds / 100));
     let status = NtDelayExecution(false, &interval);
     if status.is_success() {
-        Ok(())
+        Result.Ok(())
     } else {
-        Err(status)
+        Result.Err(status)
     }
 }

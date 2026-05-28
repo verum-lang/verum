@@ -58,7 +58,7 @@
 module core.database.postgres.replication;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -291,15 +291,15 @@ implement PgReplicationConnection {
     /// mode and simple_query is no longer valid.
     public fn identify_system(&mut self) -> Result<IdentifySystemRow, DbError> {
         if self.streaming {
-            return Err(streaming_state_error("IDENTIFY_SYSTEM after START_REPLICATION"));
+            return Result.Err(streaming_state_error("IDENTIFY_SYSTEM after START_REPLICATION"));
         }
         let r = self.conn.simple_query(&"IDENTIFY_SYSTEM".clone())?;
         if r.rows.len() != 1 {
-            return Err(bad_replication("IDENTIFY_SYSTEM produced no row"));
+            return Result.Err(bad_replication("IDENTIFY_SYSTEM produced no row"));
         }
         let row = &r.rows[0];
         if row.len() < 4 {
-            return Err(bad_replication("IDENTIFY_SYSTEM row has fewer than 4 columns"));
+            return Result.Err(bad_replication("IDENTIFY_SYSTEM row has fewer than 4 columns"));
         }
         let systemid = wire_text(&row[0])?;
         let timeline_text = wire_text(&row[1])?;
@@ -309,7 +309,7 @@ implement PgReplicationConnection {
         let xlogpos = parse_lsn_text(&xlogpos_text)
             .ok_or(bad_replication("IDENTIFY_SYSTEM.xlogpos not in X/Y form"))?;
         let dbname = wire_text(&row[3]).unwrap_or("".clone());
-        Ok(IdentifySystemRow {
+        Result.Ok(IdentifySystemRow {
             systemid: systemid,
             timeline: timeline,
             xlogpos: xlogpos,
@@ -329,23 +329,23 @@ implement PgReplicationConnection {
         temporary: Bool,
     ) -> Result<(), DbError> {
         if self.streaming {
-            return Err(streaming_state_error("CREATE_REPLICATION_SLOT after START"));
+            return Result.Err(streaming_state_error("CREATE_REPLICATION_SLOT after START"));
         }
         let temp_clause = if temporary { " TEMPORARY".clone() } else { "".clone() };
         let sql = f"CREATE_REPLICATION_SLOT {slot}{temp_clause} LOGICAL {plugin}";
         let _ = self.conn.simple_query(&sql)?;
-        Ok(())
+        Result.Ok(())
     }
 
     /// DROP_REPLICATION_SLOT slot [WAIT].
     public fn drop_slot(&mut self, slot: &Text, wait: Bool) -> Result<(), DbError> {
         if self.streaming {
-            return Err(streaming_state_error("DROP_REPLICATION_SLOT after START"));
+            return Result.Err(streaming_state_error("DROP_REPLICATION_SLOT after START"));
         }
         let wait_clause = if wait { " WAIT".clone() } else { "".clone() };
         let sql = f"DROP_REPLICATION_SLOT {slot}{wait_clause}";
         let _ = self.conn.simple_query(&sql)?;
-        Ok(())
+        Result.Ok(())
     }
 
     /// CREATE_REPLICATION_SLOT slot PHYSICAL [RESERVE_WAL].
@@ -358,12 +358,12 @@ implement PgReplicationConnection {
         reserve_wal: Bool,
     ) -> Result<(), DbError> {
         if self.streaming {
-            return Err(streaming_state_error("CREATE_REPLICATION_SLOT after START"));
+            return Result.Err(streaming_state_error("CREATE_REPLICATION_SLOT after START"));
         }
         let reserve_clause = if reserve_wal { " RESERVE_WAL".clone() } else { "".clone() };
         let sql = f"CREATE_REPLICATION_SLOT {slot} PHYSICAL{reserve_clause}";
         let _ = self.conn.simple_query(&sql)?;
-        Ok(())
+        Result.Ok(())
     }
 
     /// TIMELINE_HISTORY <tli> — server returns one row with
@@ -375,20 +375,20 @@ implement PgReplicationConnection {
         -> Result<TimelineHistoryRow, DbError>
     {
         if self.streaming {
-            return Err(streaming_state_error("TIMELINE_HISTORY after START"));
+            return Result.Err(streaming_state_error("TIMELINE_HISTORY after START"));
         }
         let sql = f"TIMELINE_HISTORY {tli}";
         let r = self.conn.simple_query(&sql)?;
         if r.rows.len() != 1 {
-            return Err(bad_replication("TIMELINE_HISTORY produced no row"));
+            return Result.Err(bad_replication("TIMELINE_HISTORY produced no row"));
         }
         let row = &r.rows[0];
         if row.len() < 2 {
-            return Err(bad_replication("TIMELINE_HISTORY row has fewer than 2 columns"));
+            return Result.Err(bad_replication("TIMELINE_HISTORY row has fewer than 2 columns"));
         }
         let filename = wire_text(&row[0])?;
         let content = wire_bytes(&row[1])?;
-        Ok(TimelineHistoryRow {
+        Result.Ok(TimelineHistoryRow {
             filename: filename,
             content: content,
         })
@@ -407,12 +407,12 @@ implement PgReplicationConnection {
         timeline: Maybe<Int>,
     ) -> Result<(), DbError> {
         if self.streaming {
-            return Err(streaming_state_error("START_REPLICATION already streaming"));
+            return Result.Err(streaming_state_error("START_REPLICATION already streaming"));
         }
         match self.mode {
             RmPhysical => {}
             _ => {
-                return Err(bad_replication("start_physical requires RmPhysical config"));
+                return Result.Err(bad_replication("start_physical requires RmPhysical config"));
             }
         }
         let lsn = start_lsn.format();
@@ -422,14 +422,14 @@ implement PgReplicationConnection {
             f"START_REPLICATION PHYSICAL {lsn}"
         };
         match timeline {
-            Some(t) => { sql.push_str(&f" TIMELINE {t}"); }
-            None    => {}
+            Maybe.Some(t) => { sql.push_str(&f" TIMELINE {t}"); }
+            Maybe.None    => {}
         }
 
         match self.conn.state() {
             PcsReady => {}
             _ => {
-                return Err(bad_replication("START_REPLICATION requires PcsReady connection state"));
+                return Result.Err(bad_replication("START_REPLICATION requires PcsReady connection state"));
             }
         }
         let payload = fe_simple_query(&sql);
@@ -445,18 +445,18 @@ implement PgReplicationConnection {
                     self.conn.push_back_replication(msg)?;
                     break;
                 }
-                BmError(d) => { return Err(dberr_from_pg(d)); }
+                BmError(d) => { return Result.Err(dberr_from_pg(d)); }
                 BmNotice(_) => {}
                 BmParameterStatus(_) => {}
                 BmReadyForQuery(_) => {
-                    return Err(bad_replication("START_REPLICATION (physical) did not enter CopyBoth"));
+                    return Result.Err(bad_replication("START_REPLICATION (physical) did not enter CopyBoth"));
                 }
                 _ => {}
             }
         }
 
         self.streaming = true;
-        Ok(())
+        Result.Ok(())
     }
 
     /// START_REPLICATION SLOT slot LOGICAL X/Y [( opt val , … )].
@@ -470,7 +470,7 @@ implement PgReplicationConnection {
         start_lsn: Lsn,
     ) -> Result<(), DbError> {
         if self.streaming {
-            return Err(streaming_state_error("START_REPLICATION already streaming"));
+            return Result.Err(streaming_state_error("START_REPLICATION already streaming"));
         }
         let slot = &opts.slot_name;
         let lsn = start_lsn.format();
@@ -498,7 +498,7 @@ implement PgReplicationConnection {
         match self.conn.state() {
             PcsReady => {}
             _ => {
-                return Err(bad_replication("START_REPLICATION requires PcsReady connection state"));
+                return Result.Err(bad_replication("START_REPLICATION requires PcsReady connection state"));
             }
         }
         let payload = fe_simple_query(&sql);
@@ -518,26 +518,26 @@ implement PgReplicationConnection {
                     break;
                 }
                 BmError(d) => {
-                    return Err(dberr_from_pg(d));
+                    return Result.Err(dberr_from_pg(d));
                 }
                 BmNotice(_) => {}
                 BmParameterStatus(_) => {}
                 BmReadyForQuery(_) => {
-                    return Err(bad_replication("START_REPLICATION did not enter CopyBoth"));
+                    return Result.Err(bad_replication("START_REPLICATION did not enter CopyBoth"));
                 }
                 _ => {}
             }
         }
 
         self.streaming = true;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Block until the next replication frame arrives. Decodes
     /// CopyData payloads dispatching on the leading byte.
     public fn next_message(&mut self) -> Result<ReplicationMessage, DbError> {
         if !self.streaming {
-            return Err(bad_replication("next_message before START_REPLICATION"));
+            return Result.Err(bad_replication("next_message before START_REPLICATION"));
         }
         loop {
             let msg = self.conn.read_replication_message()?;
@@ -549,9 +549,9 @@ implement PgReplicationConnection {
                     // Server told us no more data (e.g. slot
                     // dropped, max position reached). We surface
                     // this via Other so the caller decides.
-                    return Ok(RmOther { tag: 0 as Byte, payload: List.new() });
+                    return Result.Ok(RmOther { tag: 0 as Byte, payload: List.new() });
                 }
-                BmError(d) => { return Err(dberr_from_pg(d)); }
+                BmError(d) => { return Result.Err(dberr_from_pg(d)); }
                 BmNotice(_) => { continue; }
                 BmParameterStatus(_) => { continue; }
                 _ => { continue; }
@@ -570,28 +570,28 @@ implement PgReplicationConnection {
     }
 
     /// Timeout-bounded variant of `next_message`. Returns
-    /// `Ok(Some(msg))` for a real frame, `Ok(None)` if the read
+    /// `Result.Ok(Maybe.Some(msg))` for a real frame, `Result.Ok(Maybe.None)` if the read
     /// timed out (caller should retry, optionally after handling
-    /// pending writes), or `Err(_)` on terminate.
+    /// pending writes), or `Result.Err(_)` on terminate.
     public fn try_next_message(&mut self)
         -> Result<Maybe<ReplicationMessage>, DbError>
     {
         if !self.streaming {
-            return Err(bad_replication("try_next_message before START_REPLICATION"));
+            return Result.Err(bad_replication("try_next_message before START_REPLICATION"));
         }
         loop {
             let opt = self.conn.try_read_replication_message()?;
             match opt {
-                None => { return Ok(None); }
-                Some(msg) => {
+                Maybe.None => { return Result.Ok(Maybe.None); }
+                Maybe.Some(msg) => {
                     match msg {
                         BmCopyData { bytes } => {
-                            return Ok(Some(decode_copy_data(bytes)?));
+                            return Result.Ok(Maybe.Some(decode_copy_data(bytes)?));
                         }
                         BmCopyDone => {
-                            return Ok(Some(RmOther { tag: 0 as Byte, payload: List.new() }));
+                            return Result.Ok(Maybe.Some(RmOther { tag: 0 as Byte, payload: List.new() }));
                         }
-                        BmError(d) => { return Err(dberr_from_pg(d)); }
+                        BmError(d) => { return Result.Err(dberr_from_pg(d)); }
                         BmNotice(_) | BmParameterStatus(_) => { continue; }
                         _ => { continue; }
                     }
@@ -614,7 +614,7 @@ implement PgReplicationConnection {
         reply_requested: Bool,
     ) -> Result<(), DbError> {
         if !self.streaming {
-            return Err(bad_replication("send_standby_status before START_REPLICATION"));
+            return Result.Err(bad_replication("send_standby_status before START_REPLICATION"));
         }
         let mut buf = WireBuf.with_capacity(34);
         buf.put_u8(0x72);                       // 'r'
@@ -625,7 +625,7 @@ implement PgReplicationConnection {
         buf.put_u8(if reply_requested { 1 } else { 0 });
         let frame = copy_data(buf.as_slice());
         self.conn.write_replication_frame(frame.as_slice())?;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Tear down the replication session. Closes the underlying
@@ -641,31 +641,31 @@ implement PgReplicationConnection {
 
 fn decode_copy_data(bytes: List<Byte>) -> Result<ReplicationMessage, DbError> {
     if bytes.len() == 0 {
-        return Err(bad_replication("CopyData empty"));
+        return Result.Err(bad_replication("CopyData empty"));
     }
     let tag = bytes[0];
     let mut r = WireReader.new(bytes);
     let _ = match r.read_u8() {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_replication("CopyData tag read failed")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_replication("CopyData tag read failed")); }
     };
 
     if (tag as Int) == 0x77 {
         // 'w' — XLogData
         let wal_start = match r.read_i64_be() {
-            Ok(v)  => v,
-            Err(_) => { return Err(bad_replication("XLogData wal_start truncated")); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(bad_replication("XLogData wal_start truncated")); }
         };
         let wal_end = match r.read_i64_be() {
-            Ok(v)  => v,
-            Err(_) => { return Err(bad_replication("XLogData wal_end truncated")); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(bad_replication("XLogData wal_end truncated")); }
         };
         let send_time = match r.read_i64_be() {
-            Ok(v)  => v,
-            Err(_) => { return Err(bad_replication("XLogData send_time truncated")); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(bad_replication("XLogData send_time truncated")); }
         };
         let payload = r.remaining_bytes();
-        return Ok(RmXLogData(XLogData {
+        return Result.Ok(RmXLogData(XLogData {
             wal_start: Lsn.from_int(wal_start),
             wal_end: Lsn.from_int(wal_end),
             send_time: send_time,
@@ -675,18 +675,18 @@ fn decode_copy_data(bytes: List<Byte>) -> Result<ReplicationMessage, DbError> {
     if (tag as Int) == 0x6B {
         // 'k' — PrimaryKeepalive
         let wal_end = match r.read_i64_be() {
-            Ok(v)  => v,
-            Err(_) => { return Err(bad_replication("Keepalive wal_end truncated")); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(bad_replication("Keepalive wal_end truncated")); }
         };
         let sent_time = match r.read_i64_be() {
-            Ok(v)  => v,
-            Err(_) => { return Err(bad_replication("Keepalive sent_time truncated")); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(bad_replication("Keepalive sent_time truncated")); }
         };
         let reply = match r.read_u8() {
-            Ok(v)  => v,
-            Err(_) => { return Err(bad_replication("Keepalive reply_requested truncated")); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(bad_replication("Keepalive reply_requested truncated")); }
         };
-        return Ok(RmKeepalive(PrimaryKeepalive {
+        return Result.Ok(RmKeepalive(PrimaryKeepalive {
             wal_end: Lsn.from_int(wal_end),
             sent_time: sent_time,
             reply_requested: reply == 1,
@@ -695,7 +695,7 @@ fn decode_copy_data(bytes: List<Byte>) -> Result<ReplicationMessage, DbError> {
     // Unknown tag — return raw payload so callers can dispatch
     // future variants without rev-locking this module.
     let rest = r.remaining_bytes();
-    Ok(RmOther { tag: tag, payload: rest })
+    Result.Ok(RmOther { tag: tag, payload: rest })
 }
 
 // =============================================================================
@@ -715,7 +715,7 @@ public fn connect_replication(cfg: &PgReplicationConfig)
     let conn = core.database.postgres.connection.connect_with_replication(
         &cfg.base, &mode_text,
     )?;
-    Ok(PgReplicationConnection {
+    Result.Ok(PgReplicationConnection {
         conn: conn,
         mode: cfg.mode.clone(),
         streaming: false,
@@ -746,11 +746,11 @@ fn bad_replication(what: &str) -> DbError {
 
 fn wire_text(v: &core.database.common.types.WireValue) -> Result<Text, DbError> {
     match v {
-        core.database.common.types.WvNull => Err(bad_replication("required column was NULL")),
+        core.database.common.types.WvNull => Result.Err(bad_replication("required column was NULL")),
         core.database.common.types.WvPresent { bytes, .. } => {
             match Text.from_utf8(bytes.as_slice()) {
-                Ok(s)  => Ok(s),
-                Err(_) => Err(bad_replication("non-UTF8 in replication metadata column")),
+                Result.Ok(s)  => Result.Ok(s),
+                Result.Err(_) => Result.Err(bad_replication("non-UTF8 in replication metadata column")),
             }
         }
     }
@@ -758,8 +758,8 @@ fn wire_text(v: &core.database.common.types.WireValue) -> Result<Text, DbError> 
 
 fn wire_bytes(v: &core.database.common.types.WireValue) -> Result<List<Byte>, DbError> {
     match v {
-        core.database.common.types.WvNull => Err(bad_replication("required bytes column was NULL")),
-        core.database.common.types.WvPresent { bytes, .. } => Ok(bytes.clone()),
+        core.database.common.types.WvNull => Result.Err(bad_replication("required bytes column was NULL")),
+        core.database.common.types.WvPresent { bytes, .. } => Result.Ok(bytes.clone()),
     }
 }
 
@@ -769,15 +769,15 @@ fn parse_int_text(s: &Text) -> Maybe<Int> {
     let n = bytes.len() as Int;
     let mut neg = false;
     if n > 0 && (bytes[0] as Int) == ('-' as Int) { neg = true; i = 1; }
-    if i >= n { return None; }
+    if i >= n { return Maybe.None; }
     let mut acc: Int = 0;
     while i < n {
         let b = bytes[i] as Int;
-        if b < ('0' as Int) || b > ('9' as Int) { return None; }
+        if b < ('0' as Int) || b > ('9' as Int) { return Maybe.None; }
         acc = acc * 10 + (b - ('0' as Int));
         i = i + 1;
     }
-    Some(if neg { -acc } else { acc })
+    Maybe.Some(if neg { -acc } else { acc })
 }
 
 /// Parse a `"X/Y"` textual LSN as the server emits it in
@@ -790,17 +790,17 @@ fn parse_lsn_text(s: &Text) -> Maybe<Lsn> {
         if (bytes[i] as Int) == ('/' as Int) { split = i; break; }
         i = i + 1;
     }
-    if split <= 0 || split >= (bytes.len() as Int) - 1 { return None; }
+    if split <= 0 || split >= (bytes.len() as Int) - 1 { return Maybe.None; }
     let upper_hex = sub_text(s, 0, split);
     let lower_hex = sub_text(s, split + 1, bytes.len() as Int);
     let upper = parse_hex(&upper_hex)?;
     let lower = parse_hex(&lower_hex)?;
-    Some(Lsn { value: (upper << 32) | (lower & 0xFFFFFFFF) })
+    Maybe.Some(Lsn { value: (upper << 32) | (lower & 0xFFFFFFFF) })
 }
 
 fn parse_hex(s: &Text) -> Maybe<Int> {
     let bytes = s.as_bytes();
-    if bytes.len() == 0 { return None; }
+    if bytes.len() == 0 { return Maybe.None; }
     let mut acc: Int = 0;
     let mut i: Int = 0;
     while i < bytes.len() as Int {
@@ -812,12 +812,12 @@ fn parse_hex(s: &Text) -> Maybe<Int> {
         } else if b >= ('A' as Int) && b <= ('F' as Int) {
             10 + (b - ('A' as Int))
         } else {
-            return None;
+            return Maybe.None;
         };
         acc = (acc << 4) | nib;
         i = i + 1;
     }
-    Some(acc)
+    Maybe.Some(acc)
 }
 
 fn sub_text(s: &Text, start: Int, end: Int) -> Text {

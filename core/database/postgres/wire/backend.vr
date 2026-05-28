@@ -21,7 +21,7 @@
 module core.database.postgres.wire.backend;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.database.common.types.{
     WireReader, WireValue, WvNull, WvPresent, FmtBinary, FmtText,
@@ -118,19 +118,19 @@ public type AuthRequest is
 public fn parse_auth_request(payload: List<Byte>) -> Result<AuthRequest, BackendDecodeError> {
     let mut r = WireReader.new(payload);
     let code = match r.read_i32_be() {
-        Ok(c)  => c,
-        Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+        Result.Ok(c)  => c,
+        Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 4, available: 0 }); }
     };
     if code == AUTH_OK {
-        return Ok(AuthOk);
+        return Result.Ok(AuthOk);
     }
     if code == AUTH_CLEARTEXT_PASSWORD {
-        return Ok(AuthCleartextPassword);
+        return Result.Ok(AuthCleartextPassword);
     }
     if code == AUTH_MD5_PASSWORD {
         match r.read_bytes(4) {
-            Ok(salt) => return Ok(AuthMd5Password { salt: salt }),
-            Err(_)   => return Err(BdShortPayload { wanted: 4, available: 0 }),
+            Result.Ok(salt) => return Result.Ok(AuthMd5Password { salt: salt }),
+            Result.Err(_)   => return Result.Err(BdShortPayload { wanted: 4, available: 0 }),
         }
     }
     if code == AUTH_SASL {
@@ -139,31 +139,31 @@ public fn parse_auth_request(payload: List<Byte>) -> Result<AuthRequest, Backend
         let mut mechs: List<Text> = List.new();
         loop {
             let mech = match r.read_cstr() {
-                Ok(m)  => m,
-                Err(_) => { return Err(BdShortPayload { wanted: 1, available: 0 }); }
+                Result.Ok(m)  => m,
+                Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 1, available: 0 }); }
             };
             if mech.len() == 0 {
                 break;
             }
             mechs.push(mech);
         }
-        return Ok(AuthSasl { mechanisms: mechs });
+        return Result.Ok(AuthSasl { mechanisms: mechs });
     }
     if code == AUTH_SASL_CONTINUE {
         let n = r.remaining();
         match r.read_bytes(n) {
-            Ok(b)  => return Ok(AuthSaslContinue { server_data: b }),
-            Err(_) => return Err(BdShortPayload { wanted: n, available: 0 }),
+            Result.Ok(b)  => return Result.Ok(AuthSaslContinue { server_data: b }),
+            Result.Err(_) => return Result.Err(BdShortPayload { wanted: n, available: 0 }),
         }
     }
     if code == AUTH_SASL_FINAL {
         let n = r.remaining();
         match r.read_bytes(n) {
-            Ok(b)  => return Ok(AuthSaslFinal { server_data: b }),
-            Err(_) => return Err(BdShortPayload { wanted: n, available: 0 }),
+            Result.Ok(b)  => return Result.Ok(AuthSaslFinal { server_data: b }),
+            Result.Err(_) => return Result.Err(BdShortPayload { wanted: n, available: 0 }),
         }
     }
-    Err(BdUnsupportedAuth { code: code })
+    Result.Err(BdUnsupportedAuth { code: code })
 }
 
 // -----------------------------------------------------------------------------
@@ -175,14 +175,14 @@ public type ParameterStatus is { name: Text, value: Text };
 public fn parse_parameter_status(payload: List<Byte>) -> Result<ParameterStatus, BackendDecodeError> {
     let mut r = WireReader.new(payload);
     let name = match r.read_cstr() {
-        Ok(s)  => s,
-        Err(_) => { return Err(BdInvalidUtf8); }
+        Result.Ok(s)  => s,
+        Result.Err(_) => { return Result.Err(BdInvalidUtf8); }
     };
     let value = match r.read_cstr() {
-        Ok(s)  => s,
-        Err(_) => { return Err(BdInvalidUtf8); }
+        Result.Ok(s)  => s,
+        Result.Err(_) => { return Result.Err(BdInvalidUtf8); }
     };
-    Ok(ParameterStatus { name: name, value: value })
+    Result.Ok(ParameterStatus { name: name, value: value })
 }
 
 // -----------------------------------------------------------------------------
@@ -211,18 +211,18 @@ public fn parse_notification_response(payload: List<Byte>)
 {
     let mut r = WireReader.new(payload);
     let pid = match r.read_i32_be() {
-        Ok(v)  => v,
-        Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 4, available: 0 }); }
     };
     let channel = match r.read_cstr() {
-        Ok(s)  => s,
-        Err(_) => { return Err(BdInvalidUtf8); }
+        Result.Ok(s)  => s,
+        Result.Err(_) => { return Result.Err(BdInvalidUtf8); }
     };
     let body = match r.read_cstr() {
-        Ok(s)  => s,
-        Err(_) => { return Err(BdInvalidUtf8); }
+        Result.Ok(s)  => s,
+        Result.Err(_) => { return Result.Err(BdInvalidUtf8); }
     };
-    Ok(NotificationResponse {
+    Result.Ok(NotificationResponse {
         process_id: pid,
         channel: channel,
         payload: body,
@@ -234,27 +234,27 @@ public type BackendKeyData is { process_id: Int, secret_key: Int };
 public fn parse_backend_key_data(payload: List<Byte>) -> Result<BackendKeyData, BackendDecodeError> {
     let mut r = WireReader.new(payload);
     let pid = match r.read_i32_be() {
-        Ok(v)  => v,
-        Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 4, available: 0 }); }
     };
     let key = match r.read_i32_be() {
-        Ok(v)  => v,
-        Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 4, available: 0 }); }
     };
-    Ok(BackendKeyData { process_id: pid, secret_key: key })
+    Result.Ok(BackendKeyData { process_id: pid, secret_key: key })
 }
 
 public type TxStatus is TxIdle | TxInTransaction | TxFailedTransaction;
 
 public fn parse_ready_for_query(payload: List<Byte>) -> Result<TxStatus, BackendDecodeError> {
     if payload.len() < 1 {
-        return Err(BdShortPayload { wanted: 1, available: 0 });
+        return Result.Err(BdShortPayload { wanted: 1, available: 0 });
     }
     let b = payload[0];
-    if b == TX_IDLE  { return Ok(TxIdle); }
-    if b == TX_IN_TX { return Ok(TxInTransaction); }
-    if b == TX_FAILED { return Ok(TxFailedTransaction); }
-    Err(BdProtocolViolation { reason: "unknown tx-status byte".clone() })
+    if b == TX_IDLE  { return Result.Ok(TxIdle); }
+    if b == TX_IN_TX { return Result.Ok(TxInTransaction); }
+    if b == TX_FAILED { return Result.Ok(TxFailedTransaction); }
+    Result.Err(BdProtocolViolation { reason: "unknown tx-status byte".clone() })
 }
 
 // -----------------------------------------------------------------------------
@@ -276,19 +276,19 @@ public type RowDescription is { columns: List<ColumnDesc> };
 public fn parse_row_description(payload: List<Byte>) -> Result<RowDescription, BackendDecodeError> {
     let mut r = WireReader.new(payload);
     let n = match r.read_u16_be() {
-        Ok(v)  => v,
-        Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 2, available: 0 }); }
     };
     let mut cols: List<ColumnDesc> = List.new();
     let mut i = 0;
     while i < n {
-        let name = match r.read_cstr()    { Ok(s) => s, Err(_) => { return Err(BdInvalidUtf8); } };
-        let toid = match r.read_i32_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); } };
-        let attr = match r.read_u16_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); } };
-        let typo = match r.read_i32_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); } };
-        let tsiz = match r.read_u16_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); } };
-        let tmod = match r.read_i32_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); } };
-        let fmt  = match r.read_u16_be()  { Ok(v) => v, Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); } };
+        let name = match r.read_cstr()    { Result.Ok(s) => s, Result.Err(_) => { return Result.Err(BdInvalidUtf8); } };
+        let toid = match r.read_i32_be()  { Result.Ok(v) => v, Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 4, available: 0 }); } };
+        let attr = match r.read_u16_be()  { Result.Ok(v) => v, Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 2, available: 0 }); } };
+        let typo = match r.read_i32_be()  { Result.Ok(v) => v, Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 4, available: 0 }); } };
+        let tsiz = match r.read_u16_be()  { Result.Ok(v) => v, Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 2, available: 0 }); } };
+        let tmod = match r.read_i32_be()  { Result.Ok(v) => v, Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 4, available: 0 }); } };
+        let fmt  = match r.read_u16_be()  { Result.Ok(v) => v, Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 2, available: 0 }); } };
         cols.push(ColumnDesc {
             name: name,
             table_oid: toid,
@@ -300,7 +300,7 @@ public fn parse_row_description(payload: List<Byte>) -> Result<RowDescription, B
         });
         i = i + 1;
     }
-    Ok(RowDescription { columns: cols })
+    Result.Ok(RowDescription { columns: cols })
 }
 
 // -----------------------------------------------------------------------------
@@ -316,22 +316,22 @@ public type DataRow is { values: List<WireValue> };
 public fn parse_data_row(payload: List<Byte>, formats: &List<Int>) -> Result<DataRow, BackendDecodeError> {
     let mut r = WireReader.new(payload);
     let n = match r.read_u16_be() {
-        Ok(v)  => v,
-        Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 2, available: 0 }); }
     };
     let mut values: List<WireValue> = List.new();
     let mut i = 0;
     while i < n {
         let len = match r.read_i32_be() {
-            Ok(v)  => v,
-            Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 4, available: 0 }); }
         };
         if len < 0 {
             values.push(WvNull);
         } else {
             let bytes = match r.read_bytes(len) {
-                Ok(b)  => b,
-                Err(_) => { return Err(BdShortPayload { wanted: len, available: 0 }); }
+                Result.Ok(b)  => b,
+                Result.Err(_) => { return Result.Err(BdShortPayload { wanted: len, available: 0 }); }
             };
             let fmt = if i < formats.len() as Int && formats[i] == 1 {
                 FmtBinary
@@ -342,7 +342,7 @@ public fn parse_data_row(payload: List<Byte>, formats: &List<Int>) -> Result<Dat
         }
         i = i + 1;
     }
-    Ok(DataRow { values: values })
+    Result.Ok(DataRow { values: values })
 }
 
 /// Arena-aware DataRow parser — same wire format as
@@ -363,15 +363,15 @@ public fn parse_data_row_arena(
 ) -> Result<ArenaWireRow, BackendDecodeError> {
     let mut r = WireReader.new(payload);
     let n = match r.read_u16_be() {
-        Ok(v)  => v,
-        Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 2, available: 0 }); }
     };
     let mut values: List<ArenaWireValue> = List.with_capacity(n);
     let mut i = 0;
     while i < n {
         let len = match r.read_i32_be() {
-            Ok(v)  => v,
-            Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 4, available: 0 }); }
         };
         if len < 0 {
             values.push(AvNull);
@@ -382,12 +382,12 @@ public fn parse_data_row_arena(
             // the recv buffer so this byte-by-byte copy collapses
             // into a memcpy from one arena slice to another.
             let bytes = match r.read_bytes(len) {
-                Ok(b)  => b,
-                Err(_) => { return Err(BdShortPayload { wanted: len, available: 0 }); }
+                Result.Ok(b)  => b,
+                Result.Err(_) => { return Result.Err(BdShortPayload { wanted: len, available: 0 }); }
             };
             let dst = arena.alloc_bytes(len);
             if dst == 0 {
-                return Err(BdShortPayload { wanted: len, available: -1 });
+                return Result.Err(BdShortPayload { wanted: len, available: -1 });
             }
             let mut k: Int = 0;
             while k < len {
@@ -408,7 +408,7 @@ public fn parse_data_row_arena(
         }
         i = i + 1;
     }
-    Ok(ArenaWireRow.with_values(arena, values))
+    Result.Ok(ArenaWireRow.with_values(arena, values))
 }
 
 // -----------------------------------------------------------------------------
@@ -420,10 +420,10 @@ public type CommandComplete is { tag: Text };
 public fn parse_command_complete(payload: List<Byte>) -> Result<CommandComplete, BackendDecodeError> {
     let mut r = WireReader.new(payload);
     let tag = match r.read_cstr() {
-        Ok(s)  => s,
-        Err(_) => { return Err(BdInvalidUtf8); }
+        Result.Ok(s)  => s,
+        Result.Err(_) => { return Result.Err(BdInvalidUtf8); }
     };
-    Ok(CommandComplete { tag: tag })
+    Result.Ok(CommandComplete { tag: tag })
 }
 
 // -----------------------------------------------------------------------------
@@ -465,15 +465,15 @@ public fn parse_error_response(payload: List<Byte>) -> Result<Diagnostic, Backen
     let mut diag = Diagnostic.empty();
     loop {
         let field_byte = match r.read_u8() {
-            Ok(b)  => b,
-            Err(_) => { return Err(BdShortPayload { wanted: 1, available: 0 }); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 1, available: 0 }); }
         };
         if field_byte == 0 {
             break;
         }
         let value = match r.read_cstr() {
-            Ok(s)  => s,
-            Err(_) => { return Err(BdInvalidUtf8); }
+            Result.Ok(s)  => s,
+            Result.Err(_) => { return Result.Err(BdInvalidUtf8); }
         };
         // Match on field-tag character.
         if field_byte == 0x53 { diag.severity = value; }
@@ -493,7 +493,7 @@ public fn parse_error_response(payload: List<Byte>) -> Result<Diagnostic, Backen
         else if field_byte == 0x52 { diag.routine = value; }
         // Unknown field — Postgres allows additions; we ignore them.
     }
-    Ok(diag)
+    Result.Ok(diag)
 }
 
 // -----------------------------------------------------------------------------
@@ -523,25 +523,25 @@ public type CopyResponse is {
 fn parse_copy_response(payload: List<Byte>) -> Result<CopyResponse, BackendDecodeError> {
     let mut r = WireReader.new(payload);
     let fmt_byte = match r.read_u8() {
-        Ok(v)  => v,
-        Err(_) => { return Err(BdShortPayload { wanted: 1, available: 0 }); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 1, available: 0 }); }
     };
     let n = match r.read_i16_be() {
-        Ok(v)  => v,
-        Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 2, available: 0 }); }
     };
     let mut cols: List<Int> = List.new();
     let mut i: Int = 0;
     while i < n {
         let f = match r.read_i16_be() {
-            Ok(v)  => v,
-            Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 2, available: 0 }); }
         };
         cols.push(f);
         i = i + 1;
     }
     let fmt: CopyFormat = if fmt_byte == 1_u8 { CfBinary } else { CfText };
-    Ok(CopyResponse { format: fmt, column_formats: cols })
+    Result.Ok(CopyResponse { format: fmt, column_formats: cols })
 }
 
 public type BackendMessage is
@@ -578,20 +578,20 @@ public fn parse_parameter_description(payload: List<Byte>)
 {
     let mut r = WireReader.new(payload);
     let n = match r.read_u16_be() {
-        Ok(v)  => v,
-        Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 2, available: 0 }); }
     };
     let mut oids: List<Int> = List.with_capacity(n);
     let mut i: Int = 0;
     while i < n {
         let oid = match r.read_i32_be() {
-            Ok(v)  => v,
-            Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(BdShortPayload { wanted: 4, available: 0 }); }
         };
         oids.push(oid);
         i = i + 1;
     }
-    Ok(ParameterDescription { type_oids: oids })
+    Result.Ok(ParameterDescription { type_oids: oids })
 }
 
 /// Dispatch a `PgFrame` to the right parser. The DataRow path needs the
@@ -600,28 +600,28 @@ public fn parse_parameter_description(payload: List<Byte>)
 public fn parse_backend(frame: PgFrame, data_row_formats: &List<Int>) -> Result<BackendMessage, BackendDecodeError> {
     let tag = frame.tag();
     let payload = frame.into_payload();
-    if tag == BE_AUTH_REQUEST     { return Ok(BmAuth(parse_auth_request(payload)?)); }
-    if tag == BE_PARAMETER_STATUS { return Ok(BmParameterStatus(parse_parameter_status(payload)?)); }
-    if tag == BE_BACKEND_KEY_DATA { return Ok(BmBackendKeyData(parse_backend_key_data(payload)?)); }
-    if tag == BE_READY_FOR_QUERY  { return Ok(BmReadyForQuery(parse_ready_for_query(payload)?)); }
-    if tag == BE_ROW_DESCRIPTION  { return Ok(BmRowDescription(parse_row_description(payload)?)); }
-    if tag == BE_DATA_ROW         { return Ok(BmDataRow(parse_data_row(payload, data_row_formats)?)); }
-    if tag == BE_COMMAND_COMPLETE { return Ok(BmCommandComplete(parse_command_complete(payload)?)); }
-    if tag == BE_EMPTY_QUERY_RES  { return Ok(BmEmptyQueryResponse); }
-    if tag == BE_ERROR_RESPONSE   { return Ok(BmError(parse_error_response(payload)?)); }
-    if tag == BE_NOTICE_RESPONSE  { return Ok(BmNotice(parse_error_response(payload)?)); }
-    if tag == BE_NOTIFICATION     { return Ok(BmNotification(parse_notification_response(payload)?)); }
-    if tag == BE_COPY_IN          { return Ok(BmCopyInResponse(parse_copy_response(payload)?)); }
-    if tag == BE_COPY_OUT         { return Ok(BmCopyOutResponse(parse_copy_response(payload)?)); }
-    if tag == BE_COPY_DATA        { return Ok(BmCopyData { bytes: payload }); }
-    if tag == BE_COPY_DONE        { return Ok(BmCopyDone); }
-    if tag == BE_PARSE_COMPLETE   { return Ok(BmParseComplete); }
-    if tag == BE_BIND_COMPLETE    { return Ok(BmBindComplete); }
-    if tag == BE_CLOSE_COMPLETE   { return Ok(BmCloseComplete); }
-    if tag == BE_NO_DATA          { return Ok(BmNoData); }
-    if tag == BE_PORTAL_SUSPEND   { return Ok(BmPortalSuspend); }
-    if tag == BE_PARAMETER_DESC   { return Ok(BmParameterDescription(parse_parameter_description(payload)?)); }
-    Ok(BmUnknown { tag: tag })
+    if tag == BE_AUTH_REQUEST     { return Result.Ok(BmAuth(parse_auth_request(payload)?)); }
+    if tag == BE_PARAMETER_STATUS { return Result.Ok(BmParameterStatus(parse_parameter_status(payload)?)); }
+    if tag == BE_BACKEND_KEY_DATA { return Result.Ok(BmBackendKeyData(parse_backend_key_data(payload)?)); }
+    if tag == BE_READY_FOR_QUERY  { return Result.Ok(BmReadyForQuery(parse_ready_for_query(payload)?)); }
+    if tag == BE_ROW_DESCRIPTION  { return Result.Ok(BmRowDescription(parse_row_description(payload)?)); }
+    if tag == BE_DATA_ROW         { return Result.Ok(BmDataRow(parse_data_row(payload, data_row_formats)?)); }
+    if tag == BE_COMMAND_COMPLETE { return Result.Ok(BmCommandComplete(parse_command_complete(payload)?)); }
+    if tag == BE_EMPTY_QUERY_RES  { return Result.Ok(BmEmptyQueryResponse); }
+    if tag == BE_ERROR_RESPONSE   { return Result.Ok(BmError(parse_error_response(payload)?)); }
+    if tag == BE_NOTICE_RESPONSE  { return Result.Ok(BmNotice(parse_error_response(payload)?)); }
+    if tag == BE_NOTIFICATION     { return Result.Ok(BmNotification(parse_notification_response(payload)?)); }
+    if tag == BE_COPY_IN          { return Result.Ok(BmCopyInResponse(parse_copy_response(payload)?)); }
+    if tag == BE_COPY_OUT         { return Result.Ok(BmCopyOutResponse(parse_copy_response(payload)?)); }
+    if tag == BE_COPY_DATA        { return Result.Ok(BmCopyData { bytes: payload }); }
+    if tag == BE_COPY_DONE        { return Result.Ok(BmCopyDone); }
+    if tag == BE_PARSE_COMPLETE   { return Result.Ok(BmParseComplete); }
+    if tag == BE_BIND_COMPLETE    { return Result.Ok(BmBindComplete); }
+    if tag == BE_CLOSE_COMPLETE   { return Result.Ok(BmCloseComplete); }
+    if tag == BE_NO_DATA          { return Result.Ok(BmNoData); }
+    if tag == BE_PORTAL_SUSPEND   { return Result.Ok(BmPortalSuspend); }
+    if tag == BE_PARAMETER_DESC   { return Result.Ok(BmParameterDescription(parse_parameter_description(payload)?)); }
+    Result.Ok(BmUnknown { tag: tag })
 }
 
 // =============================================================================
@@ -676,28 +676,28 @@ public fn parse_backend_arena(
 ) -> Result<BackendMessageArena, BackendDecodeError> {
     let tag = frame.tag();
     let payload = frame.into_payload();
-    if tag == BE_AUTH_REQUEST     { return Ok(BmaAuth(parse_auth_request(payload)?)); }
-    if tag == BE_PARAMETER_STATUS { return Ok(BmaParameterStatus(parse_parameter_status(payload)?)); }
-    if tag == BE_BACKEND_KEY_DATA { return Ok(BmaBackendKeyData(parse_backend_key_data(payload)?)); }
-    if tag == BE_READY_FOR_QUERY  { return Ok(BmaReadyForQuery(parse_ready_for_query(payload)?)); }
-    if tag == BE_ROW_DESCRIPTION  { return Ok(BmaRowDescription(parse_row_description(payload)?)); }
+    if tag == BE_AUTH_REQUEST     { return Result.Ok(BmaAuth(parse_auth_request(payload)?)); }
+    if tag == BE_PARAMETER_STATUS { return Result.Ok(BmaParameterStatus(parse_parameter_status(payload)?)); }
+    if tag == BE_BACKEND_KEY_DATA { return Result.Ok(BmaBackendKeyData(parse_backend_key_data(payload)?)); }
+    if tag == BE_READY_FOR_QUERY  { return Result.Ok(BmaReadyForQuery(parse_ready_for_query(payload)?)); }
+    if tag == BE_ROW_DESCRIPTION  { return Result.Ok(BmaRowDescription(parse_row_description(payload)?)); }
     if tag == BE_DATA_ROW         {
-        return Ok(BmaDataRow(parse_data_row_arena(payload, data_row_formats, arena)?));
+        return Result.Ok(BmaDataRow(parse_data_row_arena(payload, data_row_formats, arena)?));
     }
-    if tag == BE_COMMAND_COMPLETE { return Ok(BmaCommandComplete(parse_command_complete(payload)?)); }
-    if tag == BE_EMPTY_QUERY_RES  { return Ok(BmaEmptyQueryResponse); }
-    if tag == BE_ERROR_RESPONSE   { return Ok(BmaError(parse_error_response(payload)?)); }
-    if tag == BE_NOTICE_RESPONSE  { return Ok(BmaNotice(parse_error_response(payload)?)); }
-    if tag == BE_NOTIFICATION     { return Ok(BmaNotification(parse_notification_response(payload)?)); }
-    if tag == BE_COPY_IN          { return Ok(BmaCopyInResponse(parse_copy_response(payload)?)); }
-    if tag == BE_COPY_OUT         { return Ok(BmaCopyOutResponse(parse_copy_response(payload)?)); }
-    if tag == BE_COPY_DATA        { return Ok(BmaCopyData { bytes: payload }); }
-    if tag == BE_COPY_DONE        { return Ok(BmaCopyDone); }
-    if tag == BE_PARSE_COMPLETE   { return Ok(BmaParseComplete); }
-    if tag == BE_BIND_COMPLETE    { return Ok(BmaBindComplete); }
-    if tag == BE_CLOSE_COMPLETE   { return Ok(BmaCloseComplete); }
-    if tag == BE_NO_DATA          { return Ok(BmaNoData); }
-    if tag == BE_PORTAL_SUSPEND   { return Ok(BmaPortalSuspend); }
-    if tag == BE_PARAMETER_DESC   { return Ok(BmaParameterDescription(parse_parameter_description(payload)?)); }
-    Ok(BmaUnknown { tag: tag })
+    if tag == BE_COMMAND_COMPLETE { return Result.Ok(BmaCommandComplete(parse_command_complete(payload)?)); }
+    if tag == BE_EMPTY_QUERY_RES  { return Result.Ok(BmaEmptyQueryResponse); }
+    if tag == BE_ERROR_RESPONSE   { return Result.Ok(BmaError(parse_error_response(payload)?)); }
+    if tag == BE_NOTICE_RESPONSE  { return Result.Ok(BmaNotice(parse_error_response(payload)?)); }
+    if tag == BE_NOTIFICATION     { return Result.Ok(BmaNotification(parse_notification_response(payload)?)); }
+    if tag == BE_COPY_IN          { return Result.Ok(BmaCopyInResponse(parse_copy_response(payload)?)); }
+    if tag == BE_COPY_OUT         { return Result.Ok(BmaCopyOutResponse(parse_copy_response(payload)?)); }
+    if tag == BE_COPY_DATA        { return Result.Ok(BmaCopyData { bytes: payload }); }
+    if tag == BE_COPY_DONE        { return Result.Ok(BmaCopyDone); }
+    if tag == BE_PARSE_COMPLETE   { return Result.Ok(BmaParseComplete); }
+    if tag == BE_BIND_COMPLETE    { return Result.Ok(BmaBindComplete); }
+    if tag == BE_CLOSE_COMPLETE   { return Result.Ok(BmaCloseComplete); }
+    if tag == BE_NO_DATA          { return Result.Ok(BmaNoData); }
+    if tag == BE_PORTAL_SUSPEND   { return Result.Ok(BmaPortalSuspend); }
+    if tag == BE_PARAMETER_DESC   { return Result.Ok(BmaParameterDescription(parse_parameter_description(payload)?)); }
+    Result.Ok(BmaUnknown { tag: tag })
 }

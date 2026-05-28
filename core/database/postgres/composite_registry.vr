@@ -45,7 +45,7 @@
 module core.database.postgres.composite_registry;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.postgres.wire.typed.{
     TypedValue, TypedComposite, TypedField,
@@ -93,18 +93,18 @@ implement CompositeSchema {
     }
 
     /// Position of `field_name` in the schema's field list.
-    /// `None` if the schema doesn't declare such a field. O(N)
+    /// `Maybe.None` if the schema doesn't declare such a field. O(N)
     /// linear scan — typical schemas have ≤ 32 fields, so the
     /// constant cost beats a HashMap.
     public fn field_index(&self, field_name: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < (self.fields.len() as Int) {
             if &self.fields[i].name == field_name {
-                return Some(i);
+                return Maybe.Some(i);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn arity(&self) -> Int { self.fields.len() as Int }
@@ -153,11 +153,11 @@ implement CompositeRegistry {
         let mut i: Int = 0;
         while i < (guard.len() as Int) {
             if guard[i].type_oid == type_oid {
-                return Some(clone_schema(&guard[i]));
+                return Maybe.Some(clone_schema(&guard[i]));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Look up a schema by name (linear scan over registered
@@ -168,11 +168,11 @@ implement CompositeRegistry {
         let mut i: Int = 0;
         while i < (guard.len() as Int) {
             if &guard[i].name == name {
-                return Some(clone_schema(&guard[i]));
+                return Maybe.Some(clone_schema(&guard[i]));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn len(&self) -> Int {
@@ -202,7 +202,7 @@ fn clone_schema(s: &CompositeSchema) -> CompositeSchema {
 // Field-by-name accessors
 // =============================================================================
 
-/// Position of `field_name` in `schema`. None if the schema
+/// Position of `field_name` in `schema`. Maybe.None if the schema
 /// doesn't declare it.
 public fn field_index_by_name(schema: &CompositeSchema, field_name: &Text)
     -> Maybe<Int>
@@ -211,7 +211,7 @@ public fn field_index_by_name(schema: &CompositeSchema, field_name: &Text)
 }
 
 /// Borrow the named field from `composite` against `schema`.
-/// Returns None when:
+/// Returns Maybe.None when:
 ///   * The schema doesn't declare such a field, OR
 ///   * The composite's arity doesn't match the schema's field
 ///     count (defensive — schema/composite mismatch usually
@@ -222,24 +222,24 @@ public fn field_by_name<'a>(
     field_name: &Text,
 ) -> Maybe<&'a TypedField> {
     let idx = match schema.field_index(field_name) {
-        Some(i) => i,
-        None    => return None,
+        Maybe.Some(i) => i,
+        Maybe.None    => return Maybe.None,
     };
     if (composite.fields.len() as Int) != schema.arity() {
-        return None;
+        return Maybe.None;
     }
-    Some(&composite.fields[idx])
+    Maybe.Some(&composite.fields[idx])
 }
 
 /// Sugar — borrow just the value (skipping the type_oid wrapper).
-/// Returns `Some(&None)` for a present-but-NULL field.
+/// Returns `Maybe.Some(&Maybe.None)` for a present-but-NULL field.
 public fn field_value_by_name<'a>(
     composite: &'a TypedComposite,
     schema: &CompositeSchema,
     field_name: &Text,
 ) -> Maybe<&'a Maybe<TypedValue>> {
     match field_by_name(composite, schema, field_name) {
-        Some(f) => Some(&f.value),
-        None    => None,
+        Maybe.Some(f) => Maybe.Some(&f.value),
+        Maybe.None    => Maybe.None,
     }
 }

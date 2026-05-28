@@ -102,7 +102,7 @@ public fn parse(value: &[Byte]) -> Result<SubjectAltName, DerError> {
     }
     seq.expect_end()?;
     r.expect_end()?;
-    Ok(SubjectAltName { names: names })
+    Result.Ok(SubjectAltName { names: names })
 }
 
 public fn parse_general_name(r: &mut DerReader) -> Result<GeneralName, DerError> {
@@ -112,7 +112,7 @@ public fn parse_general_name(r: &mut DerReader) -> Result<GeneralName, DerError>
     if !is_ctx {
         // Per RFC 5280, every GeneralName alternative is context-tagged.
         // Reject non-context.
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.UnexpectedTag,
             position: save,
             message: "GeneralName not context-specific",
@@ -126,41 +126,41 @@ public fn parse_general_name(r: &mut DerReader) -> Result<GeneralName, DerError>
             // OtherName — preserve raw DER of the [0] explicit value.
             let raw = r.take_bytes(len)?;
             let _ = val_start; let _ = elem_end;
-            Ok(GeneralName.OtherName(raw))
+            Result.Ok(GeneralName.OtherName(raw))
         },
         1_u32 => {
             let bytes = r.take_bytes(len)?;
-            Ok(GeneralName.Rfc822Name(Text.from_utf8_lossy(bytes.as_slice())))
+            Result.Ok(GeneralName.Rfc822Name(Text.from_utf8_lossy(bytes.as_slice())))
         },
         2_u32 => {
             let bytes = r.take_bytes(len)?;
-            Ok(GeneralName.DnsName(Text.from_utf8_lossy(bytes.as_slice())))
+            Result.Ok(GeneralName.DnsName(Text.from_utf8_lossy(bytes.as_slice())))
         },
         4_u32 => {
             // directoryName is [4] EXPLICIT Name; value contains full
             // SEQUENCE Name DER.
             let bytes = r.take_bytes(len)?;
-            Ok(GeneralName.DirectoryName(bytes))
+            Result.Ok(GeneralName.DirectoryName(bytes))
         },
         6_u32 => {
             let bytes = r.take_bytes(len)?;
-            Ok(GeneralName.Uri(Text.from_utf8_lossy(bytes.as_slice())))
+            Result.Ok(GeneralName.Uri(Text.from_utf8_lossy(bytes.as_slice())))
         },
         7_u32 => {
             let bytes = r.take_bytes(len)?;
             if bytes.len() != 4 && bytes.len() != 16 {
-                return Err(DerError {
+                return Result.Err(DerError {
                     kind: DerErrorKind.MalformedDer,
                     position: save,
                     message: "iPAddress must be 4 or 16 bytes",
                 });
             }
-            Ok(GeneralName.IpAddress(bytes))
+            Result.Ok(GeneralName.IpAddress(bytes))
         },
         _ => {
             // Skip unsupported kinds (x400Address, ediPartyName, registeredID).
             let _ = r.take_bytes(len)?;
-            Ok(GeneralName.Unsupported)
+            Result.Ok(GeneralName.Unsupported)
         },
     }
 }

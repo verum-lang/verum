@@ -140,14 +140,14 @@ public fn registry_new() -> FnRegistry {
     FnRegistry {
         scalars: List.new(),
         aggregates: List.new(),
-        commit_hook: None,
-        rollback_hook: None,
-        update_hook: None,
-        pre_update_hook: None,
-        authorizer: None,
-        busy_handler: None,
-        progress_handler: None,
-        trace_hook: None,
+        commit_hook: Maybe.None,
+        rollback_hook: Maybe.None,
+        update_hook: Maybe.None,
+        pre_update_hook: Maybe.None,
+        authorizer: Maybe.None,
+        busy_handler: Maybe.None,
+        progress_handler: Maybe.None,
+        trace_hook: Maybe.None,
     }
 }
 
@@ -160,25 +160,25 @@ implement FnRegistry {
     ) -> Result<(), RegistryError> {
         let name = (&*f).name();
         if self.find_scalar(&name).is_some() {
-            return Err(AlreadyRegistered(name));
+            return Result.Err(AlreadyRegistered(name));
         }
         self.scalars.push(ScalarEntry { name: name, fn_ref: f });
-        Ok(())
+        Result.Ok(())
     }
 
     public fn find_scalar(&self, name: &Text) -> Maybe<Int> {
         let target = ascii_lower(name);
         let mut i: Int = 0;
         while i < self.scalars.len() {
-            if ascii_lower(&self.scalars[i].name) == target { return Some(i); }
+            if ascii_lower(&self.scalars[i].name) == target { return Maybe.Some(i); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn drop_scalar(&mut self, name: &Text) -> Bool {
         match self.find_scalar(name) {
-            Some(i) => {
+            Maybe.Some(i) => {
                 let mut new_list: List<ScalarEntry> = List.new();
                 let mut k: Int = 0;
                 while k < self.scalars.len() {
@@ -193,7 +193,7 @@ implement FnRegistry {
                 self.scalars = new_list;
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
@@ -207,58 +207,58 @@ implement FnRegistry {
         let mut i: Int = 0;
         while i < self.aggregates.len() {
             if ascii_lower(&self.aggregates[i].name) == target {
-                return Err(AlreadyRegistered(factory.name));
+                return Result.Err(AlreadyRegistered(factory.name));
             }
             i = i + 1;
         }
         self.aggregates.push(factory);
-        Ok(())
+        Result.Ok(())
     }
 
     public fn find_aggregate(&self, name: &Text) -> Maybe<Int> {
         let target = ascii_lower(name);
         let mut i: Int = 0;
         while i < self.aggregates.len() {
-            if ascii_lower(&self.aggregates[i].name) == target { return Some(i); }
+            if ascii_lower(&self.aggregates[i].name) == target { return Maybe.Some(i); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     // ----- hook subscription (last subscriber wins) ----------------------
 
     public fn set_commit_hook(&mut self, h: Heap<dyn CommitHook>) {
-        self.commit_hook = Some(h);
+        self.commit_hook = Maybe.Some(h);
     }
 
-    public fn clear_commit_hook(&mut self) { self.commit_hook = None; }
+    public fn clear_commit_hook(&mut self) { self.commit_hook = Maybe.None; }
 
     public fn set_rollback_hook(&mut self, h: Heap<dyn RollbackHook>) {
-        self.rollback_hook = Some(h);
+        self.rollback_hook = Maybe.Some(h);
     }
 
     public fn set_update_hook(&mut self, h: Heap<dyn UpdateHook>) {
-        self.update_hook = Some(h);
+        self.update_hook = Maybe.Some(h);
     }
 
     public fn set_pre_update_hook(&mut self, h: Heap<dyn PreUpdateHook>) {
-        self.pre_update_hook = Some(h);
+        self.pre_update_hook = Maybe.Some(h);
     }
 
     public fn set_authorizer(&mut self, h: Heap<dyn AuthorizerHook>) {
-        self.authorizer = Some(h);
+        self.authorizer = Maybe.Some(h);
     }
 
     public fn set_busy_handler(&mut self, h: Heap<dyn BusyHandler>) {
-        self.busy_handler = Some(h);
+        self.busy_handler = Maybe.Some(h);
     }
 
     public fn set_progress_handler(&mut self, h: Heap<dyn ProgressHandler>) {
-        self.progress_handler = Some(h);
+        self.progress_handler = Maybe.Some(h);
     }
 
     public fn set_trace_hook(&mut self, h: Heap<dyn TraceHook>) {
-        self.trace_hook = Some(h);
+        self.trace_hook = Maybe.Some(h);
     }
 
     // ----- counts (for VCS smoke tests) ----------------------------------
@@ -267,25 +267,25 @@ implement FnRegistry {
     public fn aggregate_count(&self) -> Int { self.aggregates.len() }
 
     public fn has_commit_hook(&self) -> Bool {
-        match &self.commit_hook { Some(_) => true, None => false }
+        match &self.commit_hook { Maybe.Some(_) => true, Maybe.None => false }
     }
     public fn has_rollback_hook(&self) -> Bool {
-        match &self.rollback_hook { Some(_) => true, None => false }
+        match &self.rollback_hook { Maybe.Some(_) => true, Maybe.None => false }
     }
     public fn has_update_hook(&self) -> Bool {
-        match &self.update_hook { Some(_) => true, None => false }
+        match &self.update_hook { Maybe.Some(_) => true, Maybe.None => false }
     }
     public fn has_authorizer(&self) -> Bool {
-        match &self.authorizer { Some(_) => true, None => false }
+        match &self.authorizer { Maybe.Some(_) => true, Maybe.None => false }
     }
     public fn has_busy_handler(&self) -> Bool {
-        match &self.busy_handler { Some(_) => true, None => false }
+        match &self.busy_handler { Maybe.Some(_) => true, Maybe.None => false }
     }
     public fn has_progress_handler(&self) -> Bool {
-        match &self.progress_handler { Some(_) => true, None => false }
+        match &self.progress_handler { Maybe.Some(_) => true, Maybe.None => false }
     }
     public fn has_trace_hook(&self) -> Bool {
-        match &self.trace_hook { Some(_) => true, None => false }
+        match &self.trace_hook { Maybe.Some(_) => true, Maybe.None => false }
     }
 }
 

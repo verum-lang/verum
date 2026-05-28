@@ -63,14 +63,14 @@ implement NewReno {
             cwnd:            INITIAL_WINDOW_BYTES,
             ssthresh:        0xFFFFFFFF_u32,      // "infinity" — slow start
             bytes_in_flight: 0_u32,
-            recovery_start:  None,
+            recovery_start:  Maybe.None,
             paced:           false,
             pacing_rate_bps: 0_u64,
         }
     }
 
     fn in_recovery(&self) -> Bool {
-        match self.recovery_start { Some(_) => true, None => false }
+        match self.recovery_start { Maybe.Some(_) => true, Maybe.None => false }
     }
 
     fn update_pacing_rate(&mut self, rtt: Duration) {
@@ -102,8 +102,8 @@ implement CongestionCtrl for NewReno {
     fn on_ack_received(&mut self, acked_bytes: UInt32, rtt: Duration, now: Instant) {
         // Ignore acks for packets sent during recovery.
         let in_recovery = match self.recovery_start {
-            Some(_) => true,
-            None    => false,
+            Maybe.Some(_) => true,
+            Maybe.None    => false,
         };
         let _ = now;   // recovery_start comparison is deferred to on_packets_lost
 
@@ -153,7 +153,7 @@ implement CongestionCtrl for NewReno {
         self.ssthresh = self.cwnd >> 1;
         if self.ssthresh < MIN_WINDOW_BYTES { self.ssthresh = MIN_WINDOW_BYTES; }
         self.cwnd = self.ssthresh;
-        self.recovery_start = Some(now);
+        self.recovery_start = Maybe.Some(now);
 
         if self.bytes_in_flight >= lost_bytes {
             self.bytes_in_flight = self.bytes_in_flight - lost_bytes;
@@ -194,12 +194,12 @@ implement NewReno {
     /// past the recovery start time — transitions recovery → avoidance.
     public fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
         match self.recovery_start {
-            Some(rs) => {
+            Maybe.Some(rs) => {
                 if acked_time_sent >= rs {
-                    self.recovery_start = None;
+                    self.recovery_start = Maybe.None;
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
     }
 }

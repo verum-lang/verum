@@ -82,11 +82,11 @@ implement CrashBucket {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].signature == *signature {
-                return Some(self.entries[i].hit_count);
+                return Maybe.Some(self.entries[i].hit_count);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 }
 

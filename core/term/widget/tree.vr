@@ -52,7 +52,7 @@ public type TreeState is {
 
 implement TreeState {
     public fn new() -> TreeState {
-        TreeState { selected: None, expanded: List.new(), offset: 0 }
+        TreeState { selected: Maybe.None, expanded: List.new(), offset: 0 }
     }
 
     /// Check whether a given path is expanded.
@@ -66,21 +66,21 @@ implement TreeState {
     /// Toggle expansion of a node at the given path.
     public fn toggle(&mut self, path: List<Int>) {
         // Check if already expanded
-        let mut found_idx: Maybe<Int> = None;
+        let mut found_idx: Maybe<Int> = Maybe.None;
         let mut i = 0;
         for p in &self.expanded {
             if paths_equal(p, &path) {
-                found_idx = Some(i);
+                found_idx = Maybe.Some(i);
                 break;
             }
             i = i + 1;
         }
 
         match found_idx {
-            Some(idx) => {
+            Maybe.Some(idx) => {
                 self.expanded.remove(idx);
             }
-            None => {
+            Maybe.None => {
                 self.expanded.push(path);
             }
         }
@@ -92,7 +92,7 @@ implement TreeState {
         if visible.len() == 0 { return; }
 
         match self.selected {
-            Some(current) => {
+            Maybe.Some(current) => {
                 // Find current in visible list, move to next
                 let mut idx = 0;
                 for entry in &visible {
@@ -102,11 +102,11 @@ implement TreeState {
                     idx = idx + 1;
                 }
                 if idx < visible.len() - 1 {
-                    self.selected = Some(visible[idx + 1].0.clone());
+                    self.selected = Maybe.Some(visible[idx + 1].0.clone());
                 }
             }
-            None => {
-                self.selected = Some(visible[0].0.clone());
+            Maybe.None => {
+                self.selected = Maybe.Some(visible[0].0.clone());
             }
         }
     }
@@ -117,7 +117,7 @@ implement TreeState {
         if visible.len() == 0 { return; }
 
         match self.selected {
-            Some(current) => {
+            Maybe.Some(current) => {
                 let mut idx = 0;
                 for entry in &visible {
                     if paths_equal(&entry.0, &current) {
@@ -126,11 +126,11 @@ implement TreeState {
                     idx = idx + 1;
                 }
                 if idx > 0 {
-                    self.selected = Some(visible[idx - 1].0.clone());
+                    self.selected = Maybe.Some(visible[idx - 1].0.clone());
                 }
             }
-            None => {
-                self.selected = Some(visible[visible.len() - 1].0.clone());
+            Maybe.None => {
+                self.selected = Maybe.Some(visible[visible.len() - 1].0.clone());
             }
         }
     }
@@ -138,10 +138,10 @@ implement TreeState {
     /// Toggle expansion of the currently selected node.
     public fn toggle_selected(&mut self) {
         match &self.selected {
-            Some(path) => {
+            Maybe.Some(path) => {
                 self.toggle(path.clone());
             }
-            None => {}
+            Maybe.None => {}
         }
     }
 }
@@ -221,7 +221,7 @@ implement<T> Tree<T> {
     public fn new(items: List<TreeItem<T>>) -> Tree<T> {
         Tree {
             items: items,
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             highlight_style: Style.DEFAULT,
             highlight_symbol: ">> ",
@@ -230,7 +230,7 @@ implement<T> Tree<T> {
 
     /// Set the block wrapper.
     public fn block(self, block: Block) -> Tree<T> {
-        Tree { block: Some(block), ..self }
+        Tree { block: Maybe.Some(block), ..self }
     }
 
     /// Set the highlight style for the selected row.
@@ -255,12 +255,12 @@ implement<T> StatefulWidget for Tree<T> {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut TreeState) {
         let tree_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if tree_area.width < 1 || tree_area.height < 1 { return; }
@@ -274,7 +274,7 @@ implement<T> StatefulWidget for Tree<T> {
         // Adjust scroll offset so selected item stays visible
         let sel_path_opt = state.selected.clone();
         match sel_path_opt {
-            Some(sel_path) => {
+            Maybe.Some(sel_path) => {
                 let mut sel_idx = 0;
                 for entry in &visible {
                     if paths_equal(&entry.0, &sel_path) { break; }
@@ -287,7 +287,7 @@ implement<T> StatefulWidget for Tree<T> {
                     state.offset = sel_idx - tree_area.height + 1;
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
 
         let symbol_width = self.highlight_symbol.len();
@@ -307,8 +307,8 @@ implement<T> StatefulWidget for Tree<T> {
             let y = tree_area.y + row_i;
 
             let is_selected = match &state.selected {
-                Some(sp) => paths_equal(sp, path),
-                None => false,
+                Maybe.Some(sp) => paths_equal(sp, path),
+                Maybe.None => false,
             };
 
             let mut x = tree_area.x;

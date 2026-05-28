@@ -50,22 +50,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "Per-format WebAuthn attestation verifiers (none, packed, fido-u2f, apple)",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.webauthn.attestation;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.List;
 mount encoding.cbor.CborValue;
 mount security.hash.sha256.{Sha256, digest};
@@ -98,7 +98,7 @@ pub type AttestationType is
     | SelfAtt
     /// "AnonCA" — anonymous CA (e.g., Apple).
     | AnonCa
-    /// "None" — no attestation.
+    /// "Maybe.None" — no attestation.
     | NoneAtt;
 
 @derive(Clone, Debug)
@@ -132,9 +132,9 @@ pub fn verify_attestation(
         AttestationFormat.Apple   => verify_apple(att_stmt, auth_data, client_data_hash),
         AttestationFormat.Tpm | AttestationFormat.AndroidKey | AttestationFormat.AndroidSafetynet
         | AttestationFormat.AppleAppAttest =>
-            Err(WebAuthnError.InvalidAttestation(f"fmt {fmt} not supported in v0.1")),
+            Result.Err(WebAuthnError.InvalidAttestation(f"fmt {fmt} not supported in v0.1")),
         AttestationFormat.Other(s) =>
-            Err(WebAuthnError.InvalidAttestation(f"unknown fmt {s}")),
+            Result.Err(WebAuthnError.InvalidAttestation(f"unknown fmt {s}")),
     }
 }
 
@@ -147,9 +147,9 @@ fn verify_none(att_stmt: &CborValue) -> Result<VerifiedAttestation, WebAuthnErro
     let map = att_stmt.as_map()
         .ok_or_else(|| WebAuthnError.InvalidAttestation("none: attStmt not a map".to_text()))?;
     if !map.is_empty() {
-        return Err(WebAuthnError.InvalidAttestation("none: attStmt must be empty".to_text()));
+        return Result.Err(WebAuthnError.InvalidAttestation("none: attStmt must be empty".to_text()));
     }
-    Ok(VerifiedAttestation {
+    Result.Ok(VerifiedAttestation {
         fmt:              AttestationFormat.None_,
         attestation_type: AttestationType.NoneAtt,
         trust_chain:      List.new(),
@@ -195,7 +195,7 @@ fn verify_packed(
     if !x5c_chain.is_empty() {
         // Basic attestation: verify with leaf cert's SPKI.
         verify_packed_with_x5c(alg, &sig, &signed_input, &x5c_chain[0])?;
-        Ok(VerifiedAttestation {
+        Result.Ok(VerifiedAttestation {
             fmt:              AttestationFormat.Packed,
             attestation_type: AttestationType.Basic,
             trust_chain:      x5c_chain,
@@ -207,11 +207,11 @@ fn verify_packed(
                 "packed self-att requires attested credential data".to_text()))?;
         let cred_pk = decode_cose_key_value(&acd.credential_public_key)?;
         if alg_of(&cred_pk) != alg {
-            return Err(WebAuthnError.InvalidAttestation(
+            return Result.Err(WebAuthnError.InvalidAttestation(
                 f"packed self-att alg mismatch (cose={alg_of(&cred_pk)}, attStmt={alg})"));
         }
         verify_signature_with_credential_pk(&cred_pk, &signed_input, &sig)?;
-        Ok(VerifiedAttestation {
+        Result.Ok(VerifiedAttestation {
             fmt:              AttestationFormat.Packed,
             attestation_type: AttestationType.SelfAtt,
             trust_chain:      List.new(),
@@ -257,7 +257,7 @@ fn verify_fido_u2f(
         .ok_or_else(|| WebAuthnError.InvalidAttestation("fido-u2f: sig missing".to_text()))?;
     let x5c = get_text_keyed_x5c(map, "x5c");
     if x5c.len() != 1 {
-        return Err(WebAuthnError.InvalidAttestation(
+        return Result.Err(WebAuthnError.InvalidAttestation(
             f"fido-u2f: x5c must have exactly 1 cert, got {x5c.len()}"));
     }
     let acd = auth_data.attested_credential_data.as_ref()
@@ -266,7 +266,7 @@ fn verify_fido_u2f(
     let cred_pk = decode_cose_key_value(&acd.credential_public_key)?;
     let (x, y) = match &cred_pk {
         CredentialPublicKey.EcdsaP256 { x, y } => (x.clone(), y.clone()),
-        _ => return Err(WebAuthnError.InvalidAttestation(
+        _ => return Result.Err(WebAuthnError.InvalidAttestation(
             "fido-u2f credential must be P-256".to_text())),
     };
 
@@ -288,7 +288,7 @@ fn verify_fido_u2f(
         .map_err(|e| WebAuthnError.InvalidAttestation(f"fido-u2f x5c parse: {e}"))?;
     verify_signature_against_spki(COSE_ALG_ES256, &sig, &verification_data, &leaf.tbs.spki)?;
 
-    Ok(VerifiedAttestation {
+    Result.Ok(VerifiedAttestation {
         fmt:              AttestationFormat.FidoU2f,
         attestation_type: AttestationType.Basic,
         trust_chain:      x5c,
@@ -325,7 +325,7 @@ fn verify_apple(
         .ok_or_else(|| WebAuthnError.InvalidAttestation("apple: attStmt not a map".to_text()))?;
     let x5c = get_text_keyed_x5c(map, "x5c");
     if x5c.is_empty() {
-        return Err(WebAuthnError.InvalidAttestation("apple: x5c required".to_text()));
+        return Result.Err(WebAuthnError.InvalidAttestation("apple: x5c required".to_text()));
     }
     // Compute expected_nonce — caller can verify the cert extension.
     let mut input: List<Byte> = List.with_capacity(auth_data.raw.len() + client_data_hash.len());
@@ -335,7 +335,7 @@ fn verify_apple(
     while j < client_data_hash.len() { input.push(client_data_hash[j]); j = j + 1; }
     let _expected_nonce = security.hash.sha256.digest(input.as_slice());
 
-    Ok(VerifiedAttestation {
+    Result.Ok(VerifiedAttestation {
         fmt:              AttestationFormat.Apple,
         attestation_type: AttestationType.AnonCa,
         trust_chain:      x5c,
@@ -353,8 +353,8 @@ fn verify_signature_with_credential_pk(
 ) -> Result<(), WebAuthnError> {
     match pk {
         CredentialPublicKey.Ed25519 { x } => {
-            if sig.len() != 64 { return Err(WebAuthnError.InvalidSignature); }
-            if x.len() != 32 { return Err(WebAuthnError.InvalidSignature); }
+            if sig.len() != 64 { return Result.Err(WebAuthnError.InvalidSignature); }
+            if x.len() != 32 { return Result.Err(WebAuthnError.InvalidSignature); }
             let mut pk_arr: Ed25519PublicKey = [0_u8; 32];
             let mut k: Int = 0;
             while k < 32 { pk_arr[k] = x[k]; k = k + 1; }
@@ -370,7 +370,7 @@ fn verify_signature_with_credential_pk(
         CredentialPublicKey.Rsa { n, e, alg } => {
             verify_rsa(n, e, *alg, signed_input, sig)
         }
-        _ => Err(WebAuthnError.UnsupportedAlgorithm(alg_of(pk))),
+        _ => Result.Err(WebAuthnError.UnsupportedAlgorithm(alg_of(pk))),
     }
 }
 
@@ -382,7 +382,7 @@ fn verify_signature_against_spki(
 ) -> Result<(), WebAuthnError> {
     match (&spki.public_key, alg) {
         (security.x509.spki.SubjectPublicKey.Ed25519(ed), COSE_ALG_EDDSA) => {
-            if sig.len() != 64 { return Err(WebAuthnError.InvalidSignature); }
+            if sig.len() != 64 { return Result.Err(WebAuthnError.InvalidSignature); }
             let mut sig_arr: Ed25519Signature = [0_u8; 64];
             let mut k: Int = 0;
             while k < 64 { sig_arr[k] = sig[k]; k = k + 1; }
@@ -410,7 +410,7 @@ fn verify_signature_against_spki(
             verify_pss_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice())
                 .map_err(|_| WebAuthnError.InvalidSignature)
         }
-        _ => Err(WebAuthnError.UnsupportedAlgorithm(alg)),
+        _ => Result.Err(WebAuthnError.UnsupportedAlgorithm(alg)),
     }
 }
 
@@ -420,7 +420,7 @@ fn verify_ecdsa_p256(
     sig: &List<Byte>,
 ) -> Result<(), WebAuthnError> {
     if x.len() != 32 || y.len() != 32 {
-        return Err(WebAuthnError.InvalidSignature);
+        return Result.Err(WebAuthnError.InvalidSignature);
     }
     let mut uncompressed: List<Byte> = List.with_capacity(65);
     uncompressed.push(0x04);
@@ -447,7 +447,7 @@ fn verify_rsa(
     let res = match alg {
         COSE_ALG_RS256 => verify_pkcs1_v15_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice()),
         COSE_ALG_PS256 => verify_pss_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice()),
-        _              => return Err(WebAuthnError.UnsupportedAlgorithm(alg)),
+        _              => return Result.Err(WebAuthnError.UnsupportedAlgorithm(alg)),
     };
     res.map_err(|_| WebAuthnError.InvalidSignature)
 }
@@ -460,24 +460,24 @@ fn get_text_keyed_int(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<In
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];
-        if let Some(s) = k.as_text() {
+        if let Maybe.Some(s) = k.as_text() {
             if s == key { return v.as_int(); }
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn get_text_keyed_bytes(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<List<Byte>> {
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];
-        if let Some(s) = k.as_text() {
+        if let Maybe.Some(s) = k.as_text() {
             if s == key { return v.as_bytes().map(|b| b.clone()); }
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn get_text_keyed_x5c(map: &List<(CborValue, CborValue)>, key: &str) -> List<List<Byte>> {
@@ -485,12 +485,12 @@ fn get_text_keyed_x5c(map: &List<(CborValue, CborValue)>, key: &str) -> List<Lis
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];
-        if let Some(s) = k.as_text() {
+        if let Maybe.Some(s) = k.as_text() {
             if s == key {
-                if let Some(arr) = v.as_array() {
+                if let Maybe.Some(arr) = v.as_array() {
                     let mut j: Int = 0;
                     while j < arr.len() {
-                        if let Some(b) = arr[j].as_bytes() {
+                        if let Maybe.Some(b) = arr[j].as_bytes() {
                             out.push(b.clone());
                         }
                         j = j + 1;

@@ -88,7 +88,7 @@ public type JsonRpcRequest is {
 /// A JSON-RPC 2.0 response envelope.
 ///
 
-/// Exactly one of `result` or `error` is present (the other is None).
+/// Exactly one of `result` or `error` is present (the other is Maybe.None).
 public type JsonRpcResponse is {
     /// Mirrors the request id.
     id:     Int,
@@ -165,29 +165,29 @@ public type CoherenceParams is {
 ///
 
 /// Searches for `"key":"value"` or `"key": "value"` patterns.
-/// Returns None when the field is absent.
+/// Returns Maybe.None when the field is absent.
 fn extract_string_field(json: &Text, key: &Text) -> Maybe<Text> {
     let needle = f"\"{key}\":\"";
     match json.find(&needle) {
-        None => {
+        Maybe.None => {
             // Try with space after colon
             let needle2 = f"\"{key}\": \"";
             match json.find(&needle2) {
-                None        => None,
-                Some(start) => {
+                Maybe.None        => Maybe.None,
+                Maybe.Some(start) => {
                     let after = json.slice_from(start + needle2.len());
                     match after.find("\"") {
-                        None     => None,
-                        Some(end) => Some(after.slice_to(end)),
+                        Maybe.None     => Maybe.None,
+                        Maybe.Some(end) => Maybe.Some(after.slice_to(end)),
                     }
                 },
             }
         },
-        Some(start) => {
+        Maybe.Some(start) => {
             let after = json.slice_from(start + needle.len());
             match after.find("\"") {
-                None      => None,
-                Some(end) => Some(after.slice_to(end)),
+                Maybe.None      => Maybe.None,
+                Maybe.Some(end) => Maybe.Some(after.slice_to(end)),
             }
         },
     }
@@ -197,17 +197,17 @@ fn extract_string_field(json: &Text, key: &Text) -> Maybe<Text> {
 fn extract_int_field(json: &Text, key: &Text) -> Maybe<Int> {
     let needle = f"\"{key}\":";
     match json.find(&needle) {
-        None => {
+        Maybe.None => {
             let needle2 = f"\"{key}\": ";
             match json.find(&needle2) {
-                None        => None,
-                Some(start) => {
+                Maybe.None        => Maybe.None,
+                Maybe.Some(start) => {
                     let after = json.slice_from(start + needle2.len());
                     after.parse_int_prefix()
                 },
             }
         },
-        Some(start) => {
+        Maybe.Some(start) => {
             let after = json.slice_from(start + needle.len());
             after.parse_int_prefix()
         },
@@ -222,18 +222,18 @@ public fn parse_translate_params(params: &Text) -> Maybe<TranslateParams> {
     let source = extract_string_field(params, "source");
     let target = extract_string_field(params, "target");
     match (source, target) {
-        (Some(s), Some(t)) => {
+        (Maybe.Some(s), Maybe.Some(t)) => {
             let map_json = match extract_string_field(params, "map") {
-                Some(m) => m,
-                None    => "[]",
+                Maybe.Some(m) => m,
+                Maybe.None    => "[]",
             };
-            Some(TranslateParams {
+            Maybe.Some(TranslateParams {
                 source:   s,
                 target:   t,
                 map_json: map_json,
             })
         },
-        _ => None,
+        _ => Maybe.None,
     }
 }
 
@@ -243,8 +243,8 @@ public fn parse_translate_params(params: &Text) -> Maybe<TranslateParams> {
 /// Expected shape: {"theory":"MyTheory"}
 public fn parse_audit_params(params: &Text) -> Maybe<AuditParams> {
     match extract_string_field(params, "theory") {
-        Some(name) => Some(AuditParams { theory_name: name }),
-        None       => None,
+        Maybe.Some(name) => Maybe.Some(AuditParams { theory_name: name }),
+        Maybe.None       => Maybe.None,
     }
 }
 
@@ -256,8 +256,8 @@ public fn parse_load_params(params: &Text) -> Maybe<LoadParams> {
     let name = extract_string_field(params, "name");
     let body = extract_string_field(params, "body");
     match (name, body) {
-        (Some(n), Some(b)) => Some(LoadParams { name: n, body: b }),
-        _                  => None,
+        (Maybe.Some(n), Maybe.Some(b)) => Maybe.Some(LoadParams { name: n, body: b }),
+        _                  => Maybe.None,
     }
 }
 
@@ -267,8 +267,8 @@ public fn parse_load_params(params: &Text) -> Maybe<LoadParams> {
 /// Expected shape: {"pairs":"[[\"T1\",\"T2\"],[\"T2\",\"T3\"]]"}
 public fn parse_coherence_params(params: &Text) -> Maybe<CoherenceParams> {
     match extract_string_field(params, "pairs") {
-        Some(pairs) => Some(CoherenceParams { pairs_json: pairs }),
-        None        => None,
+        Maybe.Some(pairs) => Maybe.Some(CoherenceParams { pairs_json: pairs }),
+        Maybe.None        => Maybe.None,
     }
 }
 
@@ -321,8 +321,8 @@ fn serialize_coherence_result(r: &CoherenceResult) -> Text {
 fn ok_response(id: Int, result_json: Text) -> JsonRpcResponse {
     JsonRpcResponse {
         id:     id,
-        result: Some(result_json),
-        error:  None,
+        result: Maybe.Some(result_json),
+        error:  Maybe.None,
     }
 }
 
@@ -330,8 +330,8 @@ fn ok_response(id: Int, result_json: Text) -> JsonRpcResponse {
 fn err_response(id: Int, code: Int, message: Text) -> JsonRpcResponse {
     JsonRpcResponse {
         id:     id,
-        result: None,
-        error:  Some(JsonRpcError { code: code, message: message }),
+        result: Maybe.None,
+        error:  Maybe.Some(JsonRpcError { code: code, message: message }),
     }
 }
 
@@ -378,20 +378,20 @@ fn handle_translate(
     params: &Text,
 ) -> JsonRpcResponse {
     match parse_translate_params(params) {
-        None => err_response(id, -32602, "Invalid params: expected {source, target, map}"),
-        Some(p) => {
+        Maybe.None => err_response(id, -32602, "Invalid params: expected {source, target, map}"),
+        Maybe.Some(p) => {
             let src = find_theory(&server.registry, &p.source);
             let tgt = find_theory(&server.registry, &p.target);
             match (src, tgt) {
-                (Some(s), Some(t)) => {
+                (Maybe.Some(s), Maybe.Some(t)) => {
                     let partial_map: List<(Int, Int)> = List.new();
                     let result = translate(s, t, &partial_map);
                     let json   = serialize_translation_result(&result);
                     ok_response(id, json)
                 },
-                (None, _) =>
+                (Maybe.None, _) =>
                     err_response(id, 1001, f"Theory not found: {p.source}"),
-                (_, None) =>
+                (_, Maybe.None) =>
                     err_response(id, 1001, f"Theory not found: {p.target}"),
             }
         },
@@ -409,14 +409,14 @@ fn handle_audit_theory(
     params: &Text,
 ) -> JsonRpcResponse {
     match parse_audit_params(params) {
-        None => err_response(id, -32602, "Invalid params: expected {theory}"),
-        Some(p) => {
+        Maybe.None => err_response(id, -32602, "Invalid params: expected {theory}"),
+        Maybe.Some(p) => {
             // Locate the theory; we need a mutable copy to run propagation
             let found = find_theory(&server.registry, &p.theory_name);
             match found {
-                None =>
+                Maybe.None =>
                     err_response(id, 1001, f"Theory not found: {p.theory_name}"),
-                Some(loaded) => {
+                Maybe.Some(loaded) => {
                     let mut theory_copy = loaded.theory.clone();
                     let result = audit_theory(&mut theory_copy);
                     let json   = serialize_audit_result(&result);
@@ -449,8 +449,8 @@ fn handle_load_theory(
     params: &Text,
 ) -> JsonRpcResponse {
     match parse_load_params(params) {
-        None => err_response(id, -32602, "Invalid params: expected {name, body}"),
-        Some(p) => {
+        Maybe.None => err_response(id, -32602, "Invalid params: expected {name, body}"),
+        Maybe.Some(p) => {
             // Construct a minimal Theory from the provided name.
             // Full claim parsing from body JSON is delegated to the compiler
             // pipeline; here we register a skeleton theory so the registry
@@ -479,8 +479,8 @@ fn handle_coherence(
     params: &Text,
 ) -> JsonRpcResponse {
     match parse_coherence_params(params) {
-        None => err_response(id, -32602, "Invalid params: expected {pairs}"),
-        Some(p) => {
+        Maybe.None => err_response(id, -32602, "Invalid params: expected {pairs}"),
+        Maybe.Some(p) => {
             // Parse the pairs array from the JSON text.
             // We do a minimal scan for quoted name pairs.
             let pairs = parse_name_pairs(&p.pairs_json);
@@ -500,22 +500,22 @@ fn parse_name_pairs(json: &Text) -> List<(Text, Text)> {
     loop {
         // Find the opening quote of the first element in a pair
         match rest.find("\"") {
-            None => break,
-            Some(i) => {
+            Maybe.None => break,
+            Maybe.Some(i) => {
                 let after_open = rest.slice_from(i + 1);
                 match after_open.find("\"") {
-                    None => break,
-                    Some(j) => {
+                    Maybe.None => break,
+                    Maybe.Some(j) => {
                         let first = after_open.slice_to(j);
                         let remaining = after_open.slice_from(j + 1);
                         // Find second quoted string
                         match remaining.find("\"") {
-                            None => break,
-                            Some(k) => {
+                            Maybe.None => break,
+                            Maybe.Some(k) => {
                                 let after_second_open = remaining.slice_from(k + 1);
                                 match after_second_open.find("\"") {
-                                    None => break,
-                                    Some(l) => {
+                                    Maybe.None => break,
+                                    Maybe.Some(l) => {
                                         let second = after_second_open.slice_to(l);
                                         pairs.push((first, second));
                                         rest = after_second_open.slice_from(l + 1);
@@ -592,23 +592,23 @@ public fn make_request(method: Text, params: Text) -> JsonRpcRequest {
 /// Return true iff the response carries a successful result.
 public fn is_ok(resp: &JsonRpcResponse) -> Bool {
     match resp.result {
-        Some(_) => true,
-        None    => false,
+        Maybe.Some(_) => true,
+        Maybe.None    => false,
     }
 }
 
 /// Return true iff the response carries an error.
 public fn is_err(resp: &JsonRpcResponse) -> Bool {
     match resp.error {
-        Some(_) => true,
-        None    => false,
+        Maybe.Some(_) => true,
+        Maybe.None    => false,
     }
 }
 
 /// Extract the error code from a response, or 0 if no error.
 public fn error_code(resp: &JsonRpcResponse) -> Int {
     match resp.error {
-        Some(e) => e.code,
-        None    => 0,
+        Maybe.Some(e) => e.code,
+        Maybe.None    => 0,
     }
 }

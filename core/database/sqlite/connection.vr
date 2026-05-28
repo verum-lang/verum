@@ -42,7 +42,7 @@
 module core.database.sqlite.connection;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
 mount core.database.sqlite.error.dberr_from_loom;
@@ -192,32 +192,32 @@ implement SqliteConnection {
     public fn open_in_memory(cap: SqliteCapability) -> Result<SqliteConnection, DbError> {
         let mode = cap.to_loom_mode();
         match open_memory_db(mode) {
-            Ok(db)  => Ok(SqliteConnection { inner: db }),
-            Err(e)  => Err(dberr_from_loom(e)),
+            Result.Ok(db)  => Result.Ok(SqliteConnection { inner: db }),
+            Result.Err(e)  => Result.Err(dberr_from_loom(e)),
         }
     }
 
     /// Sugar — readonly in-memory.
     public fn open_in_memory_readonly() -> Result<SqliteConnection, DbError> {
         match open_readonly() {
-            Ok(db)  => Ok(SqliteConnection { inner: db }),
-            Err(e)  => Err(dberr_from_loom(e)),
+            Result.Ok(db)  => Result.Ok(SqliteConnection { inner: db }),
+            Result.Err(e)  => Result.Err(dberr_from_loom(e)),
         }
     }
 
     /// Sugar — read/write in-memory.
     public fn open_in_memory_readwrite() -> Result<SqliteConnection, DbError> {
         match open_readwrite() {
-            Ok(db)  => Ok(SqliteConnection { inner: db }),
-            Err(e)  => Err(dberr_from_loom(e)),
+            Result.Ok(db)  => Result.Ok(SqliteConnection { inner: db }),
+            Result.Err(e)  => Result.Err(dberr_from_loom(e)),
         }
     }
 
     /// Sugar — admin in-memory (allows DDL).
     public fn open_in_memory_admin() -> Result<SqliteConnection, DbError> {
         match open_admin() {
-            Ok(db)  => Ok(SqliteConnection { inner: db }),
-            Err(e)  => Err(dberr_from_loom(e)),
+            Result.Ok(db)  => Result.Ok(SqliteConnection { inner: db }),
+            Result.Err(e)  => Result.Err(dberr_from_loom(e)),
         }
     }
 
@@ -229,29 +229,29 @@ implement SqliteConnection {
     public fn open_path_with(path: &Text, cap: SqliteCapability) -> Result<SqliteConnection, DbError> {
         let mode = cap.to_loom_mode();
         match open_path(path, mode) {
-            Ok(db)  => Ok(SqliteConnection { inner: db }),
-            Err(e)  => Err(dberr_from_loom(e)),
+            Result.Ok(db)  => Result.Ok(SqliteConnection { inner: db }),
+            Result.Err(e)  => Result.Err(dberr_from_loom(e)),
         }
     }
 
     public fn open_path_ro(path: &Text) -> Result<SqliteConnection, DbError> {
         match open_path_readonly(path) {
-            Ok(db)  => Ok(SqliteConnection { inner: db }),
-            Err(e)  => Err(dberr_from_loom(e)),
+            Result.Ok(db)  => Result.Ok(SqliteConnection { inner: db }),
+            Result.Err(e)  => Result.Err(dberr_from_loom(e)),
         }
     }
 
     public fn open_path_rw(path: &Text) -> Result<SqliteConnection, DbError> {
         match open_path_readwrite(path) {
-            Ok(db)  => Ok(SqliteConnection { inner: db }),
-            Err(e)  => Err(dberr_from_loom(e)),
+            Result.Ok(db)  => Result.Ok(SqliteConnection { inner: db }),
+            Result.Err(e)  => Result.Err(dberr_from_loom(e)),
         }
     }
 
     public fn open_path_a(path: &Text) -> Result<SqliteConnection, DbError> {
         match open_path_admin(path) {
-            Ok(db)  => Ok(SqliteConnection { inner: db }),
-            Err(e)  => Err(dberr_from_loom(e)),
+            Result.Ok(db)  => Result.Ok(SqliteConnection { inner: db }),
+            Result.Err(e)  => Result.Err(dberr_from_loom(e)),
         }
     }
 
@@ -265,18 +265,18 @@ implement SqliteConnection {
     /// wired through the public surface.
     public fn execute(&mut self, sql: &Text) -> Result<(), DbError> {
         match self.inner.execute(sql) {
-            Ok(_)   => Ok(()),
-            Err(e)  => Err(dberr_from_loom(e)),
+            Result.Ok(_)   => Result.Ok(()),
+            Result.Err(e)  => Result.Err(dberr_from_loom(e)),
         }
     }
 
     /// Run a SELECT and return its first row (if any) as a list of
-    /// public values. Returns `Ok([])` if the query completes with no
+    /// public values. Returns `Result.Ok([])` if the query completes with no
     /// rows.
     public fn query_first(&mut self, sql: &Text) -> Result<List<SqliteValue>, DbError> {
         match self.inner.query_first_row(sql) {
-            Ok(regs) => Ok(registers_to_values(regs)),
-            Err(e)   => Err(dberr_from_loom(e)),
+            Result.Ok(regs) => Result.Ok(registers_to_values(regs)),
+            Result.Err(e)   => Result.Err(dberr_from_loom(e)),
         }
     }
 
@@ -285,16 +285,16 @@ implement SqliteConnection {
     /// landed.
     public fn query_all(&mut self, sql: &Text) -> Result<List<List<SqliteValue>>, DbError> {
         match self.inner.query_all(sql) {
-            Ok(rows) => {
+            Result.Ok(rows) => {
                 let mut out: List<List<SqliteValue>> = [];
                 let mut i = 0;
                 while i < rows.len() as Int {
                     out.push(registers_to_values(rows[i].clone()));
                     i = i + 1;
                 }
-                Ok(out)
+                Result.Ok(out)
             }
-            Err(e)   => Err(dberr_from_loom(e)),
+            Result.Err(e)   => Result.Err(dberr_from_loom(e)),
         }
     }
 
@@ -311,36 +311,36 @@ implement SqliteConnection {
     /// caller MUST consume via `commit_tx` / `rollback_tx`.
     public fn begin_tx(&mut self) -> Result<Transaction, DbError> {
         match self.inner.begin_tx() {
-            Ok(t)  => Ok(t),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(t)  => Result.Ok(t),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 
     public fn begin_tx_immediate(&mut self) -> Result<Transaction, DbError> {
         match self.inner.begin_tx_immediate() {
-            Ok(t)  => Ok(t),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(t)  => Result.Ok(t),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 
     public fn begin_tx_exclusive(&mut self) -> Result<Transaction, DbError> {
         match self.inner.begin_tx_exclusive() {
-            Ok(t)  => Ok(t),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(t)  => Result.Ok(t),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 
     public fn commit_tx(&mut self, tx: Transaction) -> Result<(), DbError> {
         match self.inner.commit_tx(tx) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 
     public fn rollback_tx(&mut self, tx: Transaction) -> Result<(), DbError> {
         match self.inner.rollback_tx(tx) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 
@@ -363,8 +363,8 @@ implement SqliteConnection {
         -> Result<BackupSession, DbError>
     {
         match backup_init_to_path(&self.inner, dst_path) {
-            Ok(s)  => Ok(s),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(s)  => Result.Ok(s),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 
@@ -375,8 +375,8 @@ implement SqliteConnection {
         -> Result<BackupSession, DbError>
     {
         match backup_init_into(&self.inner, dst) {
-            Ok(s)  => Ok(s),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(s)  => Result.Ok(s),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 
@@ -401,8 +401,8 @@ implement SqliteConnection {
         -> Result<core.database.sqlite.native.l7_api.database.Database, DbError>
     {
         match backup_to_path_in_one_go(&mut self.inner, dst_path) {
-            Ok(d)  => Ok(d),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(d)  => Result.Ok(d),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 
@@ -469,8 +469,8 @@ implement SqliteConnection {
         -> Result<PragmaValue, DbError>
     {
         match loom_pragma_get(&mut self.inner, kind) {
-            Ok(v)  => Ok(v),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(v)  => Result.Ok(v),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 
@@ -481,8 +481,8 @@ implement SqliteConnection {
         value: PragmaValue,
     ) -> Result<(), DbError> {
         match loom_pragma_set(&mut self.inner, kind, value) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 
@@ -490,38 +490,38 @@ implement SqliteConnection {
     /// `DbMisuse` rather than silently coercing.
     public fn pragma_get_int(&mut self, kind: PragmaKind) -> Result<Int64, DbError> {
         match loom_pragma_get_int(&mut self.inner, kind) {
-            Ok(n)  => Ok(n),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(n)  => Result.Ok(n),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
     public fn pragma_set_int(&mut self, kind: PragmaKind, n: Int64) -> Result<(), DbError> {
         match loom_pragma_set_int(&mut self.inner, kind, n) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
     public fn pragma_get_text(&mut self, kind: PragmaKind) -> Result<Text, DbError> {
         match loom_pragma_get_text(&mut self.inner, kind) {
-            Ok(s)  => Ok(s),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(s)  => Result.Ok(s),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
     public fn pragma_set_text(&mut self, kind: PragmaKind, s: Text) -> Result<(), DbError> {
         match loom_pragma_set_text(&mut self.inner, kind, s) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
     public fn pragma_get_bool(&mut self, kind: PragmaKind) -> Result<Bool, DbError> {
         match loom_pragma_get_bool(&mut self.inner, kind) {
-            Ok(b)  => Ok(b),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(b)  => Result.Ok(b),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
     public fn pragma_set_bool(&mut self, kind: PragmaKind, b: Bool) -> Result<(), DbError> {
         match loom_pragma_set_bool(&mut self.inner, kind, b) {
-            Ok(_)  => Ok(()),
-            Err(e) => Err(dberr_from_loom(e)),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
     }
 

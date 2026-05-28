@@ -152,7 +152,7 @@ implement MetaSpan {
     /// Get source location information
     ///
 
-    /// Returns None for synthetic spans or if source info unavailable.
+    /// Returns Maybe.None for synthetic spans or if source info unavailable.
     @compiler_intrinsic
     public fn location(&self) -> Maybe<SourceLocation>;
 
@@ -217,7 +217,7 @@ implement MetaSpan {
     /// Get source text covered by this span
     ///
 
-    /// Returns None if span is synthetic or source unavailable.
+    /// Returns Maybe.None if span is synthetic or source unavailable.
     @compiler_intrinsic
     public fn source_text(&self) -> Maybe<Text>;
 
@@ -273,8 +273,8 @@ implement Ord for MetaSpan {
 implement Debug for MetaSpan {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         match self.location() {
-            Some(loc) => f.write_str(f"{loc.file}:{loc.line}:{loc.column}"),
-            None => f.write_str("<synthetic>"),
+            Maybe.Some(loc) => f.write_str(f"{loc.file}:{loc.line}:{loc.column}"),
+            Maybe.None => f.write_str("<synthetic>"),
         }
     }
 }
@@ -395,7 +395,7 @@ implement MultiSpan {
     /// Create empty multi-span
     public fn empty() -> Self {
         Self {
-            primary: None,
+            primary: Maybe.None,
             spans: List.new(),
         }
     }
@@ -403,14 +403,14 @@ implement MultiSpan {
     /// Create multi-span with single primary span
     public fn from_span(span: MetaSpan) -> Self {
         Self {
-            primary: Some(span),
+            primary: Maybe.Some(span),
             spans: List.new(),
         }
     }
 
     /// Set primary span
     public fn with_primary(mut self, span: MetaSpan) -> Self {
-        self.primary = Some(span);
+        self.primary = Maybe.Some(span);
         self
     }
 
@@ -432,8 +432,8 @@ implement MultiSpan {
 
     /// Iterate over all spans with labels
     public fn iter(&self) -> some I: Iterator<Item = (MetaSpan, Maybe<Text>)> {
-        let primary_iter = self.primary.iter().map(|s| (s, None));
-        let spans_iter = self.spans.iter().map(|(s, l)| (s, Some(l)));
+        let primary_iter = self.primary.iter().map(|s| (s, Maybe.None));
+        let spans_iter = self.spans.iter().map(|(s, l)| (s, Maybe.Some(l)));
         primary_iter.chain(spans_iter)
     }
 }

@@ -168,8 +168,8 @@ fn build_constraints(cmd: &CommandSpec) -> BoolFormula {
         let f = &cmd.flags[i];
         if f.arity.is_required() {
             match &f.long {
-                Some(l) => clauses.push(var(l.clone())),
-                None => {},
+                Maybe.Some(l) => clauses.push(var(l.clone())),
+                Maybe.None => {},
             }
         }
         i = i + 1;
@@ -222,23 +222,23 @@ fn build_constraints(cmd: &CommandSpec) -> BoolFormula {
     while j < cmd.flags.len() {
         let f = &cmd.flags[j];
         match &f.long {
-            Some(this_long) => {
+            Maybe.Some(this_long) => {
                 let mut k: Int = 0;
                 while k < f.requires.len() {
                     let other = &f.requires[k];
                     match cmd.find_flag_long(other) {
-                        Some(_) => {
+                        Maybe.Some(_) => {
                             clauses.push(imply_(
                                 var(this_long.clone()),
                                 var(other.clone()),
                             ));
                         },
-                        None => {},
+                        Maybe.None => {},
                     }
                     k = k + 1;
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
         j = j + 1;
     }
@@ -248,12 +248,12 @@ fn build_constraints(cmd: &CommandSpec) -> BoolFormula {
     while p < cmd.flags.len() {
         let f = &cmd.flags[p];
         match &f.long {
-            Some(this_long) => {
+            Maybe.Some(this_long) => {
                 let mut q: Int = 0;
                 while q < f.conflicts_with.len() {
                     let other = &f.conflicts_with[q];
                     match cmd.find_flag_long(other) {
-                        Some(_) => {
+                        Maybe.Some(_) => {
                             let conj = and_({
                                 let mut both = List.new();
                                 both.push(var(this_long.clone()));
@@ -262,12 +262,12 @@ fn build_constraints(cmd: &CommandSpec) -> BoolFormula {
                             });
                             clauses.push(not_(conj));
                         },
-                        None => {},
+                        Maybe.None => {},
                     }
                     q = q + 1;
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
         p = p + 1;
     }
@@ -280,8 +280,8 @@ fn collect_existing_members(cmd: &CommandSpec, members: &List<Text>) -> List<Tex
     let mut i: Int = 0;
     while i < members.len() {
         match cmd.find_flag_long(&members[i]) {
-            Some(_) => out.push(members[i].clone()),
-            None => {},
+            Maybe.Some(_) => out.push(members[i].clone()),
+            Maybe.None => {},
         }
         i = i + 1;
     }
@@ -373,7 +373,7 @@ fn check_required_reachable(
         let f = &cmd.flags[i];
         if !f.arity.is_required() { i = i + 1; continue; }
         match &f.long {
-            Some(l) => {
+            Maybe.Some(l) => {
                 let mut conj = List.new();
                 conj.push(constraints.clone());
                 conj.push(var(l.clone()));
@@ -388,7 +388,7 @@ fn check_required_reachable(
                     });
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
         i = i + 1;
     }

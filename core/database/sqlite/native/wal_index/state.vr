@@ -78,15 +78,15 @@ implement WalIndexState {
         let mut g: Int = self.groups.len() - 1;
         while g >= 0 {
             match self.groups[g].lookup(page_no) {
-                Some(pos) => {
+                Maybe.Some(pos) => {
                     let frame_idx = g * FRAMES_PER_GROUP + pos;
-                    return Some(frame_idx);
+                    return Maybe.Some(frame_idx);
                 }
-                None => {}
+                Maybe.None => {}
             }
             g = g - 1;
         }
-        None
+        Maybe.None
     }
 
     /// Sync the backup header to match the primary (called after an

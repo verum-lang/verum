@@ -45,8 +45,8 @@ implement AtomicF64 {
             let cur = bits_to_f64(cur_bits);
             let new_bits = f64_to_bits(cur + v);
             match self.bits.compare_exchange_weak(cur_bits, new_bits, ord, ord) {
-                Ok(_) => return cur,
-                Err(_) => continue,
+                Result.Ok(_) => return cur,
+                Result.Err(_) => continue,
             }
         }
     }

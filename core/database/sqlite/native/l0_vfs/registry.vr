@@ -57,16 +57,16 @@ public fn vfs_kind_name(kind: VfsKind) -> Text {
     }
 }
 
-/// Parse a VFS name back to a kind. Returns None for unknown names.
+/// Parse a VFS name back to a kind. Returns Maybe.None for unknown names.
 public fn vfs_kind_from_name(name: &Text) -> Maybe<VfsKind> {
     if name == &"memdb".clone() || name == &":memory:".clone() {
-        Some(Memory)
+        Maybe.Some(Memory)
     } else if name == &"unix".clone() || name == &"posix".clone() {
-        Some(Posix)
+        Maybe.Some(Posix)
     } else if name == &"win32".clone() {
-        Some(Win32)
+        Maybe.Some(Win32)
     } else {
-        None
+        Maybe.None
     }
 }
 
@@ -103,7 +103,7 @@ public type VfsParsedUri is {
 /// `VfsError { kind: InvalidArgument }` on empty / malformed input.
 public fn parse_uri(uri: &Text) -> Result<VfsParsedUri, VfsError> {
     if uri.len() == 0 {
-        return Err(VfsError {
+        return Result.Err(VfsError {
             kind: InvalidArgument,
             message: "parse_uri: empty URI",
         });
@@ -111,7 +111,7 @@ public fn parse_uri(uri: &Text) -> Result<VfsParsedUri, VfsError> {
 
     // Fast path — ":memory:" bare literal.
     if uri == &":memory:".clone() {
-        return Ok(VfsParsedUri {
+        return Result.Ok(VfsParsedUri {
             kind: Memory,
             path: "".clone(),
             flags: flags_rwc(),
@@ -120,7 +120,7 @@ public fn parse_uri(uri: &Text) -> Result<VfsParsedUri, VfsError> {
 
     // No "file:" prefix → raw path, platform default, rwc.
     if !starts_with_bytes(uri, "file:") {
-        return Ok(VfsParsedUri {
+        return Result.Ok(VfsParsedUri {
             kind: platform_default(),
             path: uri.clone(),
             flags: flags_rwc(),
@@ -133,8 +133,8 @@ public fn parse_uri(uri: &Text) -> Result<VfsParsedUri, VfsError> {
     // Split on '?' into (path, query).
     let qpos = find_byte(&rest, 0x3F as Byte);   // '?'
     let (path_part, query_part) = match qpos {
-        Some(p) => (slice_text(&rest, 0, p), slice_text(&rest, p + 1, rest.len())),
-        None    => (rest.clone(), "".clone()),
+        Maybe.Some(p) => (slice_text(&rest, 0, p), slice_text(&rest, p + 1, rest.len())),
+        Maybe.None    => (rest.clone(), "".clone()),
     };
 
     // Figure out the backend.
@@ -152,9 +152,9 @@ public fn parse_uri(uri: &Text) -> Result<VfsParsedUri, VfsError> {
         if starts_with_bytes(p, "vfs=") {
             let name = drop_prefix(p, 4);
             match vfs_kind_from_name(&name) {
-                Some(k) => { kind = k; },
-                None => {
-                    return Err(VfsError {
+                Maybe.Some(k) => { kind = k; },
+                Maybe.None => {
+                    return Result.Err(VfsError {
                         kind: InvalidArgument,
                         message: "parse_uri: unknown vfs name",
                     });
@@ -178,7 +178,7 @@ public fn parse_uri(uri: &Text) -> Result<VfsParsedUri, VfsError> {
         i = i + 1;
     }
 
-    Ok(VfsParsedUri {
+    Result.Ok(VfsParsedUri {
         kind: kind,
         path: path_part,
         flags: flags,
@@ -234,12 +234,12 @@ implement VfsRegistry {
         }
     }
 
-    /// Look up a VFS by name. Returns None on unknown.
+    /// Look up a VFS by name. Returns Maybe.None on unknown.
     public fn find(&self, name: &Text) -> Maybe<VfsKind> {
         if !self.entries.contains_key(name.clone()) {
-            return None;
+            return Maybe.None;
         }
-        Some(self.entries.get(name.clone()))
+        Maybe.Some(self.entries.get(name.clone()))
     }
 
     /// Current default.
@@ -279,10 +279,10 @@ fn find_byte(text: &Text, b: Byte) -> Maybe<Int> {
     let raw = text.as_bytes();
     let mut i: Int = 0;
     while i < raw.len() {
-        if raw[i] == b { return Some(i); }
+        if raw[i] == b { return Maybe.Some(i); }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn slice_text(text: &Text, start: Int, end: Int) -> Text {

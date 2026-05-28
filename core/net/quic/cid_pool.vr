@@ -160,18 +160,18 @@ implement CidPool {
         reset_token:     [Byte; 16],
     ) -> Result<List<UInt64>, CidPoolError> {
         if retire_prior_to < self.retire_prior_to {
-            return Err(CidPoolError.RetirePriorRegression);
+            return Result.Err(CidPoolError.RetirePriorRegression);
         }
         if sequence < retire_prior_to {
             // Frame itself mandates its own retirement — ignore silently
             // per RFC 9000 §5.1.2.
-            return Ok([]);
+            return Result.Ok([]);
         }
         // Duplicate sequence?
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].sequence == sequence {
-                return Err(CidPoolError.DuplicateSequence(sequence));
+                return Result.Err(CidPoolError.DuplicateSequence(sequence));
             }
             i = i + 1;
         }
@@ -204,28 +204,28 @@ implement CidPool {
 
         // Enforce the active limit *after* retiring the forced ones.
         if self.active_count() >= self.active_connection_id_limit {
-            return Err(CidPoolError.LimitExceeded(self.active_count()));
+            return Result.Err(CidPoolError.LimitExceeded(self.active_count()));
         }
 
         self.entries.push(CidEntry {
             sequence: sequence, cid: cid, reset_token: reset_token, retired: false,
         });
-        Ok(retired_seqs)
+        Result.Ok(retired_seqs)
     }
 
     /// Peer-initiated retirement via RETIRE_CONNECTION_ID frame.
-    /// Returns Ok(()) on success, Err(UnknownSequence) when the seq
+    /// Returns Result.Ok(()) on success, Result.Err(UnknownSequence) when the seq
     /// was never active.
     public fn on_retire_connection_id(&mut self, sequence: UInt64) -> Result<(), CidPoolError> {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].sequence == sequence {
                 let _ = self.entries.remove(i);
-                return Ok(());
+                return Result.Ok(());
             }
             i = i + 1;
         }
-        Err(CidPoolError.UnknownSequence(sequence))
+        Result.Err(CidPoolError.UnknownSequence(sequence))
     }
 
     /// V6 theorem (spec §9): `active_count() <= active_connection_id_limit`.
@@ -247,21 +247,21 @@ implement CidPool {
     }
 
     /// Round-robin select an active CID for the next outbound path /
-    /// datagram. Returns None when the pool is exhausted (forces the
+    /// datagram. Returns Maybe.None when the pool is exhausted (forces the
     /// connection to stall or migrate to a new handshake-issued CID).
     public fn pick_next_for_migration(&mut self) -> Maybe<ConnectionId> {
-        if self.entries.len() == 0 { return None; }
+        if self.entries.len() == 0 { return Maybe.None; }
         let n = self.entries.len();
         let mut tried: Int = 0;
         while tried < n {
             let idx = self.rotation_cursor % n;
             self.rotation_cursor = self.rotation_cursor + 1;
             if !self.entries[idx].retired {
-                return Some(self.entries[idx].cid.clone());
+                return Maybe.Some(self.entries[idx].cid.clone());
             }
             tried = tried + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Look up the reset token for a specific sequence number (used
@@ -271,11 +271,11 @@ implement CidPool {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].sequence == sequence {
-                return Some(self.entries[i].reset_token);
+                return Maybe.Some(self.entries[i].reset_token);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn retire_prior_to(&self) -> UInt64 { self.retire_prior_to }

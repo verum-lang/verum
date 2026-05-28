@@ -27,7 +27,7 @@ mount super.keys.Modifiers;
 /// Pb encodes button and modifiers, Px/Py are 1-indexed coordinates.
 public fn parse_sgr_mouse(params: &List<Int>, final_byte: Byte) -> Maybe<MouseEvent> {
     if params.len() < 3 {
-        return None;
+        return Maybe.None;
     }
 
     let pb = params[0];
@@ -71,7 +71,7 @@ public fn parse_sgr_mouse(params: &List<Int>, final_byte: Byte) -> Maybe<MouseEv
         }
     };
 
-    Some(MouseEvent {
+    Maybe.Some(MouseEvent {
         kind: kind,
         column: px,
         row: py,

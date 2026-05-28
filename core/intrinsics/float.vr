@@ -2,7 +2,7 @@
 // core/intrinsics/float.vr - Floating-Point Intrinsics
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (compiler-provided)
+// Dependencies: Maybe.None (compiler-provided)
 //
 
 // This module provides floating-point intrinsics that map directly to LLVM/CPU

@@ -51,22 +51,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "pubgrub-style dependency resolver: term algebra + incompatibility derivation + unit propagation + conflict resolution + backtracking",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.cog.resolve;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount base.semver.{SemVer, parse_semver, semver_compare, SemVerOrdering, semver_zero};
 mount base.semver_constraint.{
     SemVerConstraint, parse as parse_constraint,
@@ -588,7 +588,7 @@ fn range_is_subset(a: &VersionRange, b: &VersionRange) -> Bool {
     range_is_empty(&range_subtract(a, b))
 }
 
-/// Conjunction: a AND b. Returns `None` if a, b are over different packages.
+/// Conjunction: a AND b. Returns `Maybe.None` if a, b are over different packages.
 pub fn term_intersect(a: &Term, b: &Term) -> Maybe<Term> {
     if a.package != b.package { return Maybe.None; }
     let a_set = if a.positive { a.range.clone() } else { range_complement(&a.range) };
@@ -711,7 +711,7 @@ public fn partial_solution_backtrack(sol: &mut PartialSolution, target_level: In
 }
 
 /// The accumulated term for a package — intersection of all terms
-/// derived/decided about it. Returns `None` if the package has no
+/// derived/decided about it. Returns `Maybe.None` if the package has no
 /// assignments yet.
 public fn partial_solution_term(sol: &PartialSolution, pkg: &PackageName) -> Maybe<Term> {
     let mut acc: Maybe<Term> = Maybe.None;
@@ -847,7 +847,7 @@ implement Display for ResolveError {
                     f.write_str(f"  {explanation[i]}\n".as_str())?;
                     i = i + 1;
                 }
-                Ok(())
+                Result.Ok(())
             }
             Provider(e) => Display.fmt(e, f),
         }
@@ -901,7 +901,7 @@ public async fn resolve<P: DependencyProvider>(
             .map_err(|reason| ResolveError.NoSolution { explanation: reason })?;
 
         match choose_next_package(&mut solver, provider).await {
-            Ok(Maybe.Some((pkg, term))) => {
+            Result.Ok(Maybe.Some((pkg, term))) => {
                 match make_decision(&mut solver, provider, pkg.clone(), &term).await? {
                     Maybe.Some(_chosen) => { next_package = pkg; }
                     Maybe.None => {
@@ -912,11 +912,11 @@ public async fn resolve<P: DependencyProvider>(
                     }
                 }
             }
-            Ok(Maybe.None) => {
+            Result.Ok(Maybe.None) => {
                 // Done — every package has a decision.
-                return Ok(extract_lockfile(&solver));
+                return Result.Ok(extract_lockfile(&solver));
             }
-            Err(e) => return Err(ResolveError.Provider(e)),
+            Result.Err(e) => return Result.Err(ResolveError.Provider(e)),
         }
     }
 }
@@ -944,8 +944,8 @@ fn unit_propagation(solver: &mut Solver, start_pkg: &PackageName) -> Result<(), 
     while !changed.is_empty() {
         let pkg = changed.pop().unwrap();
         let indices: List<Int> = match solver.incompat_index.get(&pkg) {
-            Some(v) => v.clone(),
-            None    => List.new(),
+            Maybe.Some(v) => v.clone(),
+            Maybe.None    => List.new(),
         };
         let mut i: Int = indices.len() - 1;
         while i >= 0 {
@@ -976,7 +976,7 @@ fn unit_propagation(solver: &mut Solver, start_pkg: &PackageName) -> Result<(), 
             i = i - 1;
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 type IncompatStatus is
@@ -990,7 +990,7 @@ type IncompatStatus is
     | Contradicted;
 
 fn check_incompatibility(sol: &PartialSolution, incompat: &Incompatibility) -> IncompatStatus {
-    let mut unsatisfied: Maybe<Term> = None;
+    let mut unsatisfied: Maybe<Term> = Maybe.None;
     let mut i: Int = 0;
     while i < incompat.terms.len() {
         let t = &incompat.terms[i];
@@ -999,14 +999,14 @@ fn check_incompatibility(sol: &PartialSolution, incompat: &Incompatibility) -> I
             Relation.Contradicted => return IncompatStatus.Contradicted,
             Relation.Inconclusive => {
                 if unsatisfied.is_some() { return IncompatStatus.Inconclusive; }
-                unsatisfied = Some(t.clone());
+                unsatisfied = Maybe.Some(t.clone());
             }
         }
         i = i + 1;
     }
     match unsatisfied {
-        None    => IncompatStatus.Satisfied,
-        Some(t) => IncompatStatus.AlmostSatisfied(t),
+        Maybe.None    => IncompatStatus.Satisfied,
+        Maybe.Some(t) => IncompatStatus.AlmostSatisfied(t),
     }
 }
 
@@ -1014,12 +1014,12 @@ type Relation is Satisfied | Contradicted | Inconclusive;
 
 fn relation(sol: &PartialSolution, t: &Term) -> Relation {
     match partial_solution_term(sol, &t.package) {
-        Some(acc) => {
+        Maybe.Some(acc) => {
             if term_satisfies(&acc, t) { Relation.Satisfied }
             else if term_satisfies(&acc, &term_negate(t)) { Relation.Contradicted }
             else { Relation.Inconclusive }
         }
-        None => Relation.Inconclusive,
+        Maybe.None => Relation.Inconclusive,
     }
 }
 
@@ -1033,14 +1033,14 @@ fn conflict_resolution(
 ) -> Result<Incompatibility, List<Text>> {
     loop {
         if is_unsolvable(&incompat, &solver.root) {
-            return Err(format_explanation(&incompat));
+            return Result.Err(format_explanation(&incompat));
         }
         let (most_recent_term, satisfier_level, prior_cause) =
             find_most_recent_satisfier(&solver.partial_solution, &incompat);
 
         if satisfier_level < solver.partial_solution.decision_level || prior_cause.is_none() {
             partial_solution_backtrack(&mut solver.partial_solution, satisfier_level);
-            return Ok(incompat);
+            return Result.Ok(incompat);
         }
 
         // Resolve `incompat` against `prior_cause` on `most_recent_term`.
@@ -1064,36 +1064,36 @@ fn find_most_recent_satisfier(
     // Walk assignments back-to-front; for each term, find the
     // assignment that first made it satisfied.
     let mut best_idx: Int = -1;
-    let mut best_term: Maybe<Term> = None;
-    let mut best_cause: Maybe<Incompatibility> = None;
+    let mut best_term: Maybe<Term> = Maybe.None;
+    let mut best_cause: Maybe<Incompatibility> = Maybe.None;
     let mut t_i: Int = 0;
     while t_i < incompat.terms.len() {
         let t = &incompat.terms[t_i];
         // Find the last assignment that makes term `t` satisfied.
-        let mut acc: Maybe<Term> = None;
+        let mut acc: Maybe<Term> = Maybe.None;
         let mut a_i: Int = 0;
         let mut found_idx: Int = -1;
-        let mut found_cause: Maybe<Incompatibility> = None;
+        let mut found_cause: Maybe<Incompatibility> = Maybe.None;
         while a_i < sol.assignments.len() {
             let a = &sol.assignments[a_i];
             let contributing = match a {
                 Assignment.Decision { package, version, .. } => {
                     if package == &t.package {
-                        Some((term_positive(package.clone(), range_exact(version.clone())), None))
-                    } else { None }
+                        Maybe.Some((term_positive(package.clone(), range_exact(version.clone())), Maybe.None))
+                    } else { Maybe.None }
                 }
                 Assignment.Derivation { term, cause, .. } => {
                     if &term.package == &t.package {
-                        Some((term.clone(), Some((**cause).clone())))
-                    } else { None }
+                        Maybe.Some((term.clone(), Maybe.Some((**cause).clone())))
+                    } else { Maybe.None }
                 }
             };
-            if let Some((tt, cause)) = contributing {
+            if let Maybe.Some((tt, cause)) = contributing {
                 acc = match acc {
-                    None    => Some(tt),
-                    Some(a) => term_intersect(&a, &tt),
+                    Maybe.None    => Maybe.Some(tt),
+                    Maybe.Some(a) => term_intersect(&a, &tt),
                 };
-                if let Some(ref aterm) = acc {
+                if let Maybe.Some(ref aterm) = acc {
                     if term_satisfies(aterm, t) {
                         found_idx = a_i;
                         found_cause = cause;
@@ -1105,7 +1105,7 @@ fn find_most_recent_satisfier(
         }
         if found_idx > best_idx {
             best_idx = found_idx;
-            best_term = Some(t.clone());
+            best_term = Maybe.Some(t.clone());
             best_cause = found_cause;
         }
         t_i = t_i + 1;
@@ -1147,12 +1147,12 @@ fn add_terms_except(merged: &mut Map<PackageName, Term>, terms: &List<Term>, ski
         let t = &terms[i];
         if &t.package == skip { i = i + 1; continue; }
         match merged.get(&t.package).cloned() {
-            Some(existing) => {
-                if let Some(combined) = term_intersect(&existing, t) {
+            Maybe.Some(existing) => {
+                if let Maybe.Some(combined) = term_intersect(&existing, t) {
                     merged.insert(t.package.clone(), combined);
                 }
             }
-            None => { merged.insert(t.package.clone(), t.clone()); }
+            Maybe.None => { merged.insert(t.package.clone(), t.clone()); }
         }
         i = i + 1;
     }
@@ -1177,7 +1177,7 @@ async fn choose_next_package<P: DependencyProvider>(
         seen.insert(pkg.clone());
         if partial_solution_has_decision(&solver.partial_solution, &pkg) { i = i + 1; continue; }
         match partial_solution_term(&solver.partial_solution, &pkg) {
-            Some(t) if t.positive && !range_is_empty(&t.range) => {
+            Maybe.Some(t) if t.positive && !range_is_empty(&t.range) => {
                 let prio = provider.priority(&pkg, &t.range);
                 candidates.push((pkg, t, prio));
             }
@@ -1185,7 +1185,7 @@ async fn choose_next_package<P: DependencyProvider>(
         }
         i = i + 1;
     }
-    if candidates.is_empty() { return Ok(None); }
+    if candidates.is_empty() { return Result.Ok(Maybe.None); }
     // Pick the lowest-priority package — fewest versions = smallest subtree.
     let mut best = 0;
     let mut j: Int = 1;
@@ -1194,7 +1194,7 @@ async fn choose_next_package<P: DependencyProvider>(
         j = j + 1;
     }
     let (pkg, term, _) = candidates[best].clone();
-    Ok(Some((pkg, term)))
+    Result.Ok(Maybe.Some((pkg, term)))
 }
 
 async fn make_decision<P: DependencyProvider>(
@@ -1223,12 +1223,12 @@ async fn make_decision<P: DependencyProvider>(
         // resolver backtracks.
         let no_versions = incompat_no_versions(pkg.clone(), term.clone());
         add_incompatibility(solver, no_versions);
-        return Ok(None);
+        return Result.Ok(Maybe.None);
     }
     sort_semvers_desc(&mut filtered);
     let chosen = match provider.choose_version(&pkg, &filtered) {
-        Some(v) => v,
-        None    => return Ok(None),
+        Maybe.Some(v) => v,
+        Maybe.None    => return Result.Ok(Maybe.None),
     };
 
     // Add incompatibilities derived from this version's dependencies.
@@ -1246,7 +1246,7 @@ async fn make_decision<P: DependencyProvider>(
                 k = k + 1;
             }
             partial_solution_decide(&mut solver.partial_solution, pkg, chosen.clone());
-            Ok(Some(chosen))
+            Result.Ok(Maybe.Some(chosen))
         }
         Dependencies.Unknown => {
             let no_versions = incompat_no_versions(
@@ -1254,7 +1254,7 @@ async fn make_decision<P: DependencyProvider>(
                 term_positive(pkg.clone(), range_exact(chosen.clone())),
             );
             add_incompatibility(solver, no_versions);
-            Ok(None)
+            Result.Ok(Maybe.None)
         }
         Dependencies.Unavailable(_reason) => {
             let no_versions = incompat_no_versions(
@@ -1262,7 +1262,7 @@ async fn make_decision<P: DependencyProvider>(
                 term_positive(pkg.clone(), range_exact(chosen.clone())),
             );
             add_incompatibility(solver, no_versions);
-            Ok(None)
+            Result.Ok(Maybe.None)
         }
     }
 }

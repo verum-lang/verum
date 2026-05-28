@@ -51,7 +51,7 @@
 module core.money.money;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount base.ordering.{Ordering, Less, Equal, Greater};
 mount collections.List;
 mount core.text.numeric.{
@@ -142,12 +142,12 @@ implement Money {
         -> Result<Money, MoneyError>
     {
         if amount.scale != currency.minor_units {
-            return Err(MoneyError.ScaleMismatch {
+            return Result.Err(MoneyError.ScaleMismatch {
                 expected: currency.minor_units,
                 actual: amount.scale,
             });
         }
-        Ok(Money { amount: amount, currency: currency })
+        Result.Ok(Money { amount: amount, currency: currency })
     }
 
     /// Build a Money from a count of minor units (cents for USD,
@@ -192,28 +192,28 @@ implement Money {
     /// already match.
     public fn add(&self, other: &Money) -> Result<Money, MoneyError> {
         if !self.currency.eq(&other.currency) {
-            return Err(MoneyError.CurrencyMismatch {
+            return Result.Err(MoneyError.CurrencyMismatch {
                 left: self.currency.code.clone(),
                 right: other.currency.code.clone(),
             });
         }
         match self.amount.add(&other.amount) {
-            Ok(sum) => Ok(Money { amount: sum, currency: clone_currency(&self.currency) }),
-            Err(e)  => Err(MoneyError.Underlying { source: e }),
+            Result.Ok(sum) => Result.Ok(Money { amount: sum, currency: clone_currency(&self.currency) }),
+            Result.Err(e)  => Result.Err(MoneyError.Underlying { source: e }),
         }
     }
 
     /// Difference `self - other`.  Same currency-match contract as add.
     public fn sub(&self, other: &Money) -> Result<Money, MoneyError> {
         if !self.currency.eq(&other.currency) {
-            return Err(MoneyError.CurrencyMismatch {
+            return Result.Err(MoneyError.CurrencyMismatch {
                 left: self.currency.code.clone(),
                 right: other.currency.code.clone(),
             });
         }
         match self.amount.sub(&other.amount) {
-            Ok(diff) => Ok(Money { amount: diff, currency: clone_currency(&self.currency) }),
-            Err(e)   => Err(MoneyError.Underlying { source: e }),
+            Result.Ok(diff) => Result.Ok(Money { amount: diff, currency: clone_currency(&self.currency) }),
+            Result.Err(e)   => Result.Err(MoneyError.Underlying { source: e }),
         }
     }
 
@@ -227,14 +227,14 @@ implement Money {
         mode: RoundingMode,
     ) -> Result<Money, MoneyError> {
         let raw = match self.amount.mul(factor) {
-            Ok(p)  => p,
-            Err(e) => return Err(MoneyError.Underlying { source: e }),
+            Result.Ok(p)  => p,
+            Result.Err(e) => return Result.Err(MoneyError.Underlying { source: e }),
         };
         let normalised = match round_to_currency_scale(&raw, &self.currency, mode) {
-            Ok(v)  => v,
-            Err(e) => return Err(e),
+            Result.Ok(v)  => v,
+            Result.Err(e) => return Result.Err(e),
         };
-        Ok(Money { amount: normalised, currency: clone_currency(&self.currency) })
+        Result.Ok(Money { amount: normalised, currency: clone_currency(&self.currency) })
     }
 
     /// Divide by a scalar.  Same precision-normalisation discipline
@@ -246,12 +246,12 @@ implement Money {
         divisor: &BigDecimal,
         mode: RoundingMode,
     ) -> Result<Money, MoneyError> {
-        if divisor.is_zero() { return Err(MoneyError.DivByZero); }
+        if divisor.is_zero() { return Result.Err(MoneyError.DivByZero); }
         let result = match self.amount.div(divisor, self.currency.minor_units, mode) {
-            Ok(q)  => q,
-            Err(e) => return Err(MoneyError.Underlying { source: e }),
+            Result.Ok(q)  => q,
+            Result.Err(e) => return Result.Err(MoneyError.Underlying { source: e }),
         };
-        Ok(Money { amount: result, currency: clone_currency(&self.currency) })
+        Result.Ok(Money { amount: result, currency: clone_currency(&self.currency) })
     }
 
     /// Split into `n` equal pieces with fair remainder distribution.
@@ -267,15 +267,15 @@ implement Money {
     /// Errors if `n <= 0`.
     public fn split(&self, n: Int) -> Result<List<Money>, MoneyError> {
         if n <= 0 {
-            return Err(MoneyError.InvalidSplit {
+            return Result.Err(MoneyError.InvalidSplit {
                 reason: f"split count {n} must be positive",
             });
         }
         let n_bi = BigInt.from_int(n);
         let total_minor = clone_bigint(&self.amount.coefficient);
         let (base, rem) = match total_minor.div_rem(&n_bi) {
-            Ok(t)  => t,
-            Err(_) => return Err(MoneyError.DivByZero),
+            Result.Ok(t)  => t,
+            Result.Err(_) => return Result.Err(MoneyError.DivByZero),
         };
         // For negative remainders (negative dividend), magnitude of
         // |rem| pieces should bump magnitude by one (away from zero).
@@ -289,8 +289,8 @@ implement Money {
         let mut out: List<Money> = List.with_capacity(n);
         let mut i: Int = 0;
         let abs_rem_int = match abs_rem.to_int() {
-            Some(v) => v,
-            None    => return Err(MoneyError.InvalidSplit {
+            Maybe.Some(v) => v,
+            Maybe.None    => return Result.Err(MoneyError.InvalidSplit {
                 reason: "remainder magnitude exceeds i64 (defensive — n is i64)".clone(),
             }),
         };
@@ -299,7 +299,7 @@ implement Money {
             out.push(Money.from_minor_units(piece_minor, clone_currency(&self.currency)));
             i = i + 1;
         }
-        Ok(out)
+        Result.Ok(out)
     }
 
     // -------------------------------------------------------------------------
@@ -311,28 +311,28 @@ implement Money {
     /// nonsensical without a conversion rate.
     public fn compare(&self, other: &Money) -> Result<Ordering, MoneyError> {
         if !self.currency.eq(&other.currency) {
-            return Err(MoneyError.CurrencyMismatch {
+            return Result.Err(MoneyError.CurrencyMismatch {
                 left: self.currency.code.clone(),
                 right: other.currency.code.clone(),
             });
         }
-        Ok(self.amount.compare(&other.amount))
+        Result.Ok(self.amount.compare(&other.amount))
     }
 
     public fn eq(&self, other: &Money) -> Result<Bool, MoneyError> {
-        Ok(self.compare(other)? is Equal)
+        Result.Ok(self.compare(other)? is Equal)
     }
     public fn lt(&self, other: &Money) -> Result<Bool, MoneyError> {
-        Ok(self.compare(other)? is Less)
+        Result.Ok(self.compare(other)? is Less)
     }
     public fn gt(&self, other: &Money) -> Result<Bool, MoneyError> {
-        Ok(self.compare(other)? is Greater)
+        Result.Ok(self.compare(other)? is Greater)
     }
     public fn le(&self, other: &Money) -> Result<Bool, MoneyError> {
-        Ok(!(self.compare(other)? is Greater))
+        Result.Ok(!(self.compare(other)? is Greater))
     }
     public fn ge(&self, other: &Money) -> Result<Bool, MoneyError> {
-        Ok(!(self.compare(other)? is Less))
+        Result.Ok(!(self.compare(other)? is Less))
     }
 
     // -------------------------------------------------------------------------
@@ -365,12 +365,12 @@ fn round_to_currency_scale(
     mode: RoundingMode,
 ) -> Result<BigDecimal, MoneyError> {
     if value.scale == currency.minor_units {
-        return Ok(clone_bigdecimal(value));
+        return Result.Ok(clone_bigdecimal(value));
     }
     let one = BigDecimal.one();
     match value.div(&one, currency.minor_units, mode) {
-        Ok(v)  => Ok(v),
-        Err(e) => Err(MoneyError.Underlying { source: e }),
+        Result.Ok(v)  => Result.Ok(v),
+        Result.Err(e) => Result.Err(MoneyError.Underlying { source: e }),
     }
 }
 
@@ -379,8 +379,8 @@ fn round_to_currency_scale(
 fn clone_bigint(b: &BigInt) -> BigInt {
     let t = b.to_text();
     match core.text.numeric.bigint.parse_bigint(&t) {
-        Ok(c)  => c,
-        Err(_) => BigInt.zero(),
+        Result.Ok(c)  => c,
+        Result.Err(_) => BigInt.zero(),
     }
 }
 

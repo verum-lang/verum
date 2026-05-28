@@ -120,14 +120,14 @@ implement VtabRegistry {
     /// Register a user-supplied vtab module.
     public fn register(&mut self, name: &Text, writable: Bool) -> Result<(), VtabError> {
         if self.find(name).is_some() {
-            return Err(VtabUnsupported("vtab module already registered".clone()));
+            return Result.Err(VtabUnsupported("vtab module already registered".clone()));
         }
         self.bindings.push(VtabBinding {
             name: name.clone(),
             builtin_kind: BUILTIN_USER_REGISTERED,
             is_writable: writable,
         });
-        Ok(())
+        Result.Ok(())
     }
 
     /// Look up a vtab by SQL-visible name (case-insensitive).
@@ -137,7 +137,7 @@ implement VtabRegistry {
         while i < self.bindings.len() {
             let cur = ascii_lower(&self.bindings[i].name);
             if cur == target {
-                return Some(VtabBinding {
+                return Maybe.Some(VtabBinding {
                     name: self.bindings[i].name.clone(),
                     builtin_kind: self.bindings[i].builtin_kind,
                     is_writable: self.bindings[i].is_writable,
@@ -145,7 +145,7 @@ implement VtabRegistry {
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Number of registered modules.

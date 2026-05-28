@@ -49,7 +49,7 @@
 module core.database.postgres.pg_stream;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.net.tcp.TcpStream;
 mount core.net.tls.{TlsStream, TlsConfig, LegacyTlsError};
@@ -103,12 +103,12 @@ implement PgStream {
 
     /// SHA-256 of the peer's leaf certificate. `Some` when TLS is
     /// active and the platform's TLS layer can extract the cert
-    /// hash; `None` for plaintext or when extraction failed. Spec
+    /// hash; `Maybe.None` for plaintext or when extraction failed. Spec
     /// §6.1.2 — used by SCRAM-SHA-256-PLUS for the
     /// `tls-server-end-point` channel-binding token.
     public fn peer_cert_hash_sha256(&self) -> Maybe<[Byte; 32]> {
         match self {
-            PsPlain(_)  => None,
+            PsPlain(_)  => Maybe.None,
             PsTls(tls)  => tls.peer_cert_hash_sha256(),
         }
     }
@@ -129,15 +129,15 @@ implement PgStream {
                 while i < buf.len() as Int { tmp.push(0_u8); i = i + 1; }
                 let result = block_on(tls.read(&mut tmp));
                 match result {
-                    Ok(n) => {
+                    Result.Ok(n) => {
                         let mut k: Int = 0;
                         while k < n {
                             buf[k] = tmp[k];
                             k = k + 1;
                         }
-                        Ok(n)
+                        Result.Ok(n)
                     }
-                    Err(e) => Err(IoError.Other(f"TLS read: {e}")),
+                    Result.Err(e) => Result.Err(IoError.Other(f"TLS read: {e}")),
                 }
             }
         }
@@ -151,8 +151,8 @@ implement PgStream {
             PsTls(tls) => {
                 let result = block_on(tls.write(data));
                 match result {
-                    Ok(n)  => Ok(n),
-                    Err(e) => Err(IoError.Other(f"TLS write: {e}")),
+                    Result.Ok(n)  => Result.Ok(n),
+                    Result.Err(e) => Result.Err(IoError.Other(f"TLS write: {e}")),
                 }
             }
         }
@@ -181,7 +181,7 @@ public fn upgrade_to_tls(
     config: &TlsConfig,
 ) -> Result<PgStream, LegacyTlsError> {
     match block_on(TlsStream.connect(tcp, server_name, config)) {
-        Ok(tls)  => Ok(PsTls(tls)),
-        Err(e)   => Err(e),
+        Result.Ok(tls)  => Result.Ok(PsTls(tls)),
+        Result.Err(e)   => Result.Err(e),
     }
 }

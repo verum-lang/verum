@@ -55,8 +55,8 @@ public type AsyncRead is protocol {
     /// Attempt to read from this source into `buf`.
     ///
 
-    /// Returns `Poll.Ready(Ok(n))` where `n` is the number of bytes read,
-    /// `Poll.Ready(Err(e))` on error, or `Poll.Pending` if data is not
+    /// Returns `Poll.Ready(Result.Ok(n))` where `n` is the number of bytes read,
+    /// `Poll.Ready(Result.Err(e))` on error, or `Poll.Pending` if data is not
     /// yet available.
     ///
 
@@ -78,8 +78,8 @@ public type AsyncWrite is protocol {
     /// Attempt to write bytes from `buf` to this sink.
     ///
 
-    /// Returns `Poll.Ready(Ok(n))` where `n` is the number of bytes written,
-    /// `Poll.Ready(Err(e))` on error, or `Poll.Pending` if the sink is not
+    /// Returns `Poll.Ready(Result.Ok(n))` where `n` is the number of bytes written,
+    /// `Poll.Ready(Result.Err(e))` on error, or `Poll.Pending` if the sink is not
     /// ready to accept data.
     ///
 
@@ -89,7 +89,7 @@ public type AsyncWrite is protocol {
     /// Attempt to flush any buffered data to the underlying sink.
     ///
 
-    /// Returns `Poll.Ready(Ok(()))` when all buffered data has been written,
+    /// Returns `Poll.Ready(Result.Ok(()))` when all buffered data has been written,
     /// or `Poll.Pending` if flushing is in progress.
     fn poll_flush(&mut self, cx: &mut Context) -> Poll<IoResult<()>>;
 
@@ -97,7 +97,7 @@ public type AsyncWrite is protocol {
     /// be written.
     ///
 
-    /// Returns `Poll.Ready(Ok(()))` when shutdown is complete.
+    /// Returns `Poll.Ready(Result.Ok(()))` when shutdown is complete.
     fn poll_shutdown(&mut self, cx: &mut Context) -> Poll<IoResult<()>>;
 };
 
@@ -189,22 +189,22 @@ implement<W: AsyncWrite> Future for WriteFuture<W> {
     fn poll(&mut self, cx: &mut Context) -> Poll<IoResult<Int>> {
         let remaining = self.buf.len() - self.written;
         if remaining == 0 {
-            return Poll.Ready(Ok(self.written));
+            return Poll.Ready(Result.Ok(self.written));
         }
         // Write remaining portion
         let slice = self.buf.slice(self.written, self.buf.len());
         match self.writer.poll_write(cx, &slice) {
-            Poll.Ready(Ok(n)) => {
+            Poll.Ready(Result.Ok(n)) => {
                 self.written = self.written + n;
                 if self.written >= self.buf.len() {
-                    Poll.Ready(Ok(self.written))
+                    Poll.Ready(Result.Ok(self.written))
                 } else {
                     // Re-register waker and return pending to write more
                     cx.waker().wake_by_ref();
                     Poll.Pending
                 }
             }
-            Poll.Ready(Err(e)) => Poll.Ready(Err(e)),
+            Poll.Ready(Result.Err(e)) => Poll.Ready(Result.Err(e)),
             Poll.Pending => Poll.Pending,
             Poll.Ready(_) => unreachable(),
         }

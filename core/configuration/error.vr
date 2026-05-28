@@ -25,22 +25,22 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "universal error taxonomy for all configuration-format parsers",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.configuration.error;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 
 // =============================================================================
 // Format identifier — stable across all configuration modules
@@ -255,7 +255,7 @@ public fn config_err(
         column: column,
         byte_offset: byte_offset,
         message: message,
-        path: None,
+        path: Maybe.None,
     }
 }
 
@@ -267,7 +267,7 @@ public fn with_path(err: ConfigError, path: Text) -> ConfigError {
         column: err.column,
         byte_offset: err.byte_offset,
         message: err.message,
-        path: Some(path),
+        path: Maybe.Some(path),
     }
 }
 
@@ -304,12 +304,12 @@ implement Display for ConfigError {
         f.write_str(":")?;
         f.write_int(self.column)?;
         match &self.path {
-            Some(p) => {
+            Maybe.Some(p) => {
                 f.write_str(" [path=")?;
                 f.write_str(p.as_str())?;
                 f.write_str("]")?;
             }
-            None => {}
+            Maybe.None => {}
         }
         f.write_str(": ")?;
         f.write_str(self.message.as_str())?;

@@ -223,8 +223,8 @@ implement Eq for RsaError {
 /// 1.3 (RFC 8446 §4.2.3), use salt_length = hash output size.
 ///
 
-/// Returns `Ok(())` on valid, `Err(VerificationFailed)` on clean
-/// reject, `Err(Malformed)` on ill-formed input.
+/// Returns `Result.Ok(())` on valid, `Result.Err(VerificationFailed)` on clean
+/// reject, `Result.Err(Malformed)` on ill-formed input.
 public fn verify_pss(
     public_key: &RsaPublicKey,
     message: &[Byte],

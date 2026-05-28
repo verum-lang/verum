@@ -192,7 +192,7 @@ implement Stream for AsyncInterval {
             if self.next_tick_ns < now {
                 self.next_tick_ns = now + self.period_ns;
             }
-            Poll.Ready(Some(()))
+            Poll.Ready(Maybe.Some(()))
         } else {
             // Not ready yet — register waker for later notification
             // In a real runtime, this would register a timer with the executor

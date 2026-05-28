@@ -105,11 +105,11 @@ implement MasterTable {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].name == *name {
-                return Some(clone_row(&self.rows[i]));
+                return Maybe.Some(clone_row(&self.rows[i]));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Rows of a particular kind, in insertion order.

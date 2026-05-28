@@ -72,16 +72,16 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "RFC 5280 §6.1 by-the-book X.509 path validation: state machine + policy tree + full name constraints",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.x509.path_validation;
@@ -294,8 +294,8 @@ fn name_constraints_state_empty() -> NameConstraintsState {
 public fn validate_path(input: &PathValidationInput) -> Result<ValidatedPath, PathError> {
     let chain = &input.chain;
     let n = chain.len();
-    if n == 0 { return Err(EmptyChain); }
-    if n > MAX_CHAIN_LENGTH { return Err(TooLong { length: n, limit: MAX_CHAIN_LENGTH }); }
+    if n == 0 { return Result.Err(EmptyChain); }
+    if n > MAX_CHAIN_LENGTH { return Result.Err(TooLong { length: n, limit: MAX_CHAIN_LENGTH }); }
 
     // The chain is provided EE-first, anchor-last. The algorithm
     // walks the OPPOSITE direction (anchor → EE), so reverse for
@@ -339,7 +339,7 @@ public fn validate_path(input: &PathValidationInput) -> Result<ValidatedPath, Pa
     let mut k: Int = 1;
     while k < n - 1 { intermediates.push(chain[k].clone()); k = k + 1; }
 
-    Ok(ValidatedPath {
+    Result.Ok(ValidatedPath {
         ee: chain[0].clone(),
         anchor: anchor.clone(),
         intermediates,
@@ -377,7 +377,7 @@ fn init_state(
 fn anchor_name_constraints(anchor: &X509Certificate) -> (NameConstraintsState, NameConstraintsState) {
     let mut perm = name_constraints_state_unconstrained();
     let mut excl = name_constraints_state_empty();
-    if let Some((_, nc)) = &anchor.tbs.extensions.name_constraints {
+    if let Maybe.Some((_, nc)) = &anchor.tbs.extensions.name_constraints {
         absorb_name_constraints(&mut perm, &mut excl, nc);
     }
     (perm, excl)
@@ -421,14 +421,14 @@ fn basic_processing(
     // (a)(2) validity
     if !is_valid_at(&cert.tbs.validity, now_secs) {
         let nb = core.security.x509.time.time_to_unix(&cert.tbs.validity.not_before);
-        if now_secs < nb { return Err(NotYetValid { index: i }); }
-        return Err(Expired { index: i });
+        if now_secs < nb { return Result.Err(NotYetValid { index: i }); }
+        return Result.Err(Expired { index: i });
     }
     // (a)(4) issuer name
     if !cert.tbs.issuer.raw_eq(&state.working_issuer_name) {
-        return Err(IssuerMismatch { index: i });
+        return Result.Err(IssuerMismatch { index: i });
     }
-    Ok(())
+    Result.Ok(())
 }
 
 // Bridge between chain.vr's ChainError and PathError on the signature
@@ -438,10 +438,10 @@ fn chain_to_path_error_signature(
     cert_index_rfc: Int,
 ) -> Result<(), PathError> {
     match r {
-        Ok(())                                       => Ok(()),
-        Err(ChainError.BadSignature(_))              => Err(SignatureFailed { index: cert_index_rfc }),
-        Err(ChainError.UnsupportedAlgorithm(_))      => Err(UnsupportedAlgorithm { index: cert_index_rfc }),
-        Err(_)                                       => Err(SignatureFailed { index: cert_index_rfc }),
+        Result.Ok(())                                       => Result.Ok(()),
+        Result.Err(ChainError.BadSignature(_))              => Result.Err(SignatureFailed { index: cert_index_rfc }),
+        Result.Err(ChainError.UnsupportedAlgorithm(_))      => Result.Err(UnsupportedAlgorithm { index: cert_index_rfc }),
+        Result.Err(_)                                       => Result.Err(SignatureFailed { index: cert_index_rfc }),
     }
 }
 
@@ -460,7 +460,7 @@ fn check_name_constraints(
     // intermediate certs that are also self-issued, name constraints
     // do NOT apply at the cert itself but DO propagate to its
     // subordinates via §6.1.4(g).
-    if !is_last && is_self_issued(cert) { return Ok(()); }
+    if !is_last && is_self_issued(cert) { return Result.Ok(()); }
 
     // Subject DN check — only meaningful when subject is non-empty.
     if !cert.tbs.subject.is_empty() {
@@ -473,7 +473,7 @@ fn check_name_constraints(
     }
 
     // SAN: every typed name must be permitted + non-excluded.
-    if let Some((_, san)) = &cert.tbs.extensions.subject_alt_name {
+    if let Maybe.Some((_, san)) = &cert.tbs.extensions.subject_alt_name {
         let mut k: Int = 0;
         while k < san.names.len() {
             check_general_name(
@@ -485,7 +485,7 @@ fn check_name_constraints(
             k = k + 1;
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn is_self_issued(cert: &X509Certificate) -> Bool {
@@ -501,7 +501,7 @@ fn check_dn_against_subtrees(
     if !is_in_dn_subtrees(dn_der, &excluded.dn_subtrees, false) {
         // Not in any excluded subtree — fine for excluded check.
     } else {
-        return Err(NameConstraintExcluded {
+        return Result.Err(NameConstraintExcluded {
             index: cert_index_rfc,
             name_kind: "DirectoryName".to_text(),
             name: f"<{dn_der.len()} bytes>",
@@ -509,14 +509,14 @@ fn check_dn_against_subtrees(
     }
     if permitted.initialized && !permitted.dn_subtrees.is_empty() {
         if !is_in_dn_subtrees(dn_der, &permitted.dn_subtrees, true) {
-            return Err(NameConstraintNotPermitted {
+            return Result.Err(NameConstraintNotPermitted {
                 index: cert_index_rfc,
                 name_kind: "DirectoryName".to_text(),
                 name: f"<{dn_der.len()} bytes>",
             });
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn is_in_dn_subtrees(dn_der: &[Byte], subtrees: &List<List<Byte>>, default_when_empty: Bool) -> Bool {
@@ -557,7 +557,7 @@ fn check_general_name(
             let mut i: Int = 0;
             while i < excluded.dns_subtrees.len() {
                 if dns_within_subtree(dns, &excluded.dns_subtrees[i]) {
-                    return Err(NameConstraintExcluded {
+                    return Result.Err(NameConstraintExcluded {
                         index: cert_index_rfc,
                         name_kind: "dNSName".to_text(),
                         name: dns.clone(),
@@ -573,7 +573,7 @@ fn check_general_name(
                     j = j + 1;
                 }
                 if !ok {
-                    return Err(NameConstraintNotPermitted {
+                    return Result.Err(NameConstraintNotPermitted {
                         index: cert_index_rfc,
                         name_kind: "dNSName".to_text(),
                         name: dns.clone(),
@@ -585,7 +585,7 @@ fn check_general_name(
             let mut i: Int = 0;
             while i < excluded.ip_subtrees.len() {
                 if ip_within_subtree(addr, &excluded.ip_subtrees[i]) {
-                    return Err(NameConstraintExcluded {
+                    return Result.Err(NameConstraintExcluded {
                         index: cert_index_rfc,
                         name_kind: "iPAddress".to_text(),
                         name: f"<{addr.len()} bytes>",
@@ -601,7 +601,7 @@ fn check_general_name(
                     j = j + 1;
                 }
                 if !ok {
-                    return Err(NameConstraintNotPermitted {
+                    return Result.Err(NameConstraintNotPermitted {
                         index: cert_index_rfc,
                         name_kind: "iPAddress".to_text(),
                         name: f"<{addr.len()} bytes>",
@@ -620,7 +620,7 @@ fn check_general_name(
             let mut i: Int = 0;
             while i < excluded.uri_subtrees.len() {
                 if dns_within_subtree(&host, &excluded.uri_subtrees[i]) {
-                    return Err(NameConstraintExcluded {
+                    return Result.Err(NameConstraintExcluded {
                         index: cert_index_rfc,
                         name_kind: "uniformResourceIdentifier".to_text(),
                         name: uri.clone(),
@@ -636,7 +636,7 @@ fn check_general_name(
                     j = j + 1;
                 }
                 if !ok {
-                    return Err(NameConstraintNotPermitted {
+                    return Result.Err(NameConstraintNotPermitted {
                         index: cert_index_rfc,
                         name_kind: "uniformResourceIdentifier".to_text(),
                         name: uri.clone(),
@@ -652,7 +652,7 @@ fn check_general_name(
             // to local policy. Default: pass.
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn dns_within_subtree(dns: &Text, subtree: &Text) -> Bool {
@@ -694,7 +694,7 @@ fn check_email_general_name(
     let mut i: Int = 0;
     while i < excluded.email_subtrees.len() {
         if email_within_subtree(email, &excluded.email_subtrees[i]) {
-            return Err(NameConstraintExcluded {
+            return Result.Err(NameConstraintExcluded {
                 index: cert_index_rfc,
                 name_kind: "rfc822Name".to_text(),
                 name: email.clone(),
@@ -710,14 +710,14 @@ fn check_email_general_name(
             j = j + 1;
         }
         if !ok {
-            return Err(NameConstraintNotPermitted {
+            return Result.Err(NameConstraintNotPermitted {
                 index: cert_index_rfc,
                 name_kind: "rfc822Name".to_text(),
                 name: email.clone(),
             });
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn email_within_subtree(email: &Text, subtree: &Text) -> Bool {
@@ -731,8 +731,8 @@ fn email_within_subtree(email: &Text, subtree: &Text) -> Bool {
         return elc == slc;
     }
     let at_pos = match elc.find_byte(b'@') {
-        Some(p) => p,
-        None    => return false,
+        Maybe.Some(p) => p,
+        Maybe.None    => return false,
     };
     let domain = elc.byte_substring(at_pos + 1, elc.len());
     if !slc.starts_with(".") {
@@ -750,12 +750,12 @@ fn email_within_subtree(email: &Text, subtree: &Text) -> Bool {
 fn extract_uri_host(uri: &Text) -> Text {
     // Naive URI parse: scheme://host[:port]/...
     let after_scheme = match uri.find_str("://") {
-        Some(p) => uri.byte_substring(p + 3, uri.len()),
-        None    => uri.clone(),
+        Maybe.Some(p) => uri.byte_substring(p + 3, uri.len()),
+        Maybe.None    => uri.clone(),
     };
     let host_end = match after_scheme.find_byte_any(b"/?#:") {
-        Some(p) => p,
-        None    => after_scheme.len(),
+        Maybe.Some(p) => p,
+        Maybe.None    => after_scheme.len(),
     };
     after_scheme.byte_substring(0, host_end)
 }
@@ -843,7 +843,7 @@ fn prepare_for_next(
 ) -> Result<(), PathError> {
     let i = cert_index_rfc;
     // (a) name constraints union
-    if let Some((_, nc)) = &cert.tbs.extensions.name_constraints {
+    if let Maybe.Some((_, nc)) = &cert.tbs.extensions.name_constraints {
         absorb_name_constraints(&mut state.permitted_subtrees, &mut state.excluded_subtrees, nc);
     }
 
@@ -856,27 +856,27 @@ fn prepare_for_next(
 
     // (k) basic-constraints: cA must be TRUE.
     let bc = match &cert.tbs.extensions.basic_constraints {
-        Some((_, b)) => b.clone(),
-        None         => return Err(NotCa { index: i }),
+        Maybe.Some((_, b)) => b.clone(),
+        Maybe.None         => return Result.Err(NotCa { index: i }),
     };
-    if !bc.ca { return Err(NotCa { index: i }); }
+    if !bc.ca { return Result.Err(NotCa { index: i }); }
 
     // (l) keyUsage check.
     match &cert.tbs.extensions.key_usage {
-        Some((_, ku)) => {
-            if !ku.key_cert_sign { return Err(NoKeyCertSign { index: i }); }
+        Maybe.Some((_, ku)) => {
+            if !ku.key_cert_sign { return Result.Err(NoKeyCertSign { index: i }); }
         }
-        None => {} // absent KU is permissive (not ideal but RFC-legal)
+        Maybe.None => {} // absent KU is permissive (not ideal but RFC-legal)
     }
 
     // (m) max_path_length: decrement for non-self-issued; check.
     if !is_self_issued(cert) {
         if state.max_path_length <= 0 {
-            return Err(MaxPathLengthExceeded { index: i });
+            return Result.Err(MaxPathLengthExceeded { index: i });
         }
         state.max_path_length = state.max_path_length - 1;
     }
-    if let Some(plc) = bc.path_len_constraint {
+    if let Maybe.Some(plc) = bc.path_len_constraint {
         if plc < state.max_path_length {
             state.max_path_length = plc;
         }
@@ -892,7 +892,7 @@ fn prepare_for_next(
     state.working_public_key = cert.tbs.spki.clone();
     state.working_issuer_name = cert.tbs.subject.clone();
 
-    Ok(())
+    Result.Ok(())
 }
 
 fn absorb_name_constraints(
@@ -948,7 +948,7 @@ fn check_critical_extensions(cert: &X509Certificate, cert_index_rfc: Int) -> Res
             // recognises but parses leniently (or that it tolerates
             // in practice). The truly critical-but-unknown case fails.
             if !is_recognised_critical(&raw.oid) {
-                return Err(UnrecognisedCriticalExtension {
+                return Result.Err(UnrecognisedCriticalExtension {
                     index: cert_index_rfc,
                     oid_text: "<unknown>".to_text(),
                 });
@@ -956,7 +956,7 @@ fn check_critical_extensions(cert: &X509Certificate, cert_index_rfc: Int) -> Res
         }
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn is_recognised_critical(oid: &Oid) -> Bool {
@@ -1003,16 +1003,16 @@ fn wrap_up(
     let accepted = extract_accepted_policies(&state.valid_policy_tree, &input.user_initial_policy_set);
 
     if final_explicit > 0 && accepted.is_empty() {
-        return Err(PolicyTreeEmpty);
+        return Result.Err(PolicyTreeEmpty);
     }
 
     match &input.user_initial_policy_set {
-        PolicySet.AnyPolicy => Ok(accepted),
+        PolicySet.AnyPolicy => Result.Ok(accepted),
         PolicySet.Required(req) => {
             if accepted.is_empty() && !req.is_empty() {
-                return Err(RequiredPolicyNotMet);
+                return Result.Err(RequiredPolicyNotMet);
             }
-            Ok(accepted)
+            Result.Ok(accepted)
         }
     }
 }

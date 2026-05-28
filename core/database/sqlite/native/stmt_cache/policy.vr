@@ -28,7 +28,7 @@ mount core.database.sqlite.native.stmt_cache.entry.{CachedStatement};
 
 public type EvictionPolicy is protocol {
     fn name(&self) -> Text;
-    /// Pick the index of the entry to evict, or None when no entry
+    /// Pick the index of the entry to evict, or Maybe.None when no entry
     /// is evictable (every entry is pinned).
     fn pick_victim(&self, entries: &List<CachedStatement>) -> Maybe<Int>;
 };
@@ -55,7 +55,7 @@ implement EvictionPolicy for Lru {
             }
             i = i + 1;
         }
-        if best < 0 { None } else { Some(best) }
+        if best < 0 { Maybe.None } else { Maybe.Some(best) }
     }
 }
 
@@ -88,7 +88,7 @@ implement EvictionPolicy for Lfu {
             }
             i = i + 1;
         }
-        if best < 0 { None } else { Some(best) }
+        if best < 0 { Maybe.None } else { Maybe.Some(best) }
     }
 }
 
@@ -104,9 +104,9 @@ implement EvictionPolicy for Fifo {
     fn pick_victim(&self, entries: &List<CachedStatement>) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < entries.len() {
-            if entries[i].evictable() { return Some(i); }
+            if entries[i].evictable() { return Maybe.Some(i); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 }

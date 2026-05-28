@@ -32,7 +32,7 @@
 //
 // fn __cli_spec_for_Cli() -> CommandSpec {
 //     let mut s = CommandSpec.new("tool", "...");
-//     s.version = Some("1.0");
+//     s.version = Maybe.Some("1.0");
 //     s = field_to_arg_or_flag(s, "field_name", FieldType, attrs);
 //     ...
 //     s.handler = HandlerRef.NamedHandler("Cli::__main");
@@ -105,8 +105,8 @@ public fn flag_from_meta(
     negatable: Bool,
 ) -> FlagSpec {
     let long_name = match long {
-        Some(l) => l,
-        None => "flag".to_text(),
+        Maybe.Some(l) => l,
+        Maybe.None => "flag".to_text(),
     };
 
     let mut b = match kind {
@@ -115,8 +115,8 @@ public fn flag_from_meta(
     };
 
     match short {
-        Some(c) => { b = b.short(c); },
-        None => {},
+        Maybe.Some(c) => { b = b.short(c); },
+        Maybe.None => {},
     }
     match kind {
         FieldKindHint.FieldVariadic => { b = b.repeated().arity(Arity.Unlimited); },
@@ -126,16 +126,16 @@ public fn flag_from_meta(
         _ => {},
     }
     match refinement_expr {
-        Some(expr) => { b = b.refinement(expr); },
-        None => {},
+        Maybe.Some(expr) => { b = b.refinement(expr); },
+        Maybe.None => {},
     }
     match env_name {
-        Some(e) => { b = b.env(e); },
-        None => {},
+        Maybe.Some(e) => { b = b.env(e); },
+        Maybe.None => {},
     }
     match config_path {
-        Some(p) => { b = b.config(p); },
-        None => {},
+        Maybe.Some(p) => { b = b.config(p); },
+        Maybe.None => {},
     }
     if persistent { b = b.persistent(); }
     if negatable { b = b.negatable(); }
@@ -161,16 +161,16 @@ public fn arg_from_meta(
         _ => {},
     }
     match refinement_expr {
-        Some(expr) => { b = b.refinement(expr); },
-        None => {},
+        Maybe.Some(expr) => { b = b.refinement(expr); },
+        Maybe.None => {},
     }
     match env_name {
-        Some(e) => { b = b.env(e); },
-        None => {},
+        Maybe.Some(e) => { b = b.env(e); },
+        Maybe.None => {},
     }
     match config_path {
-        Some(p) => { b = b.config(p); },
-        None => {},
+        Maybe.Some(p) => { b = b.config(p); },
+        Maybe.None => {},
     }
     b.build()
 }

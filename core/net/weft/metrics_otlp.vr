@@ -214,7 +214,7 @@ implement OtlpExporter {
     /// when the parent does.
     pub async fn run<P: OtlpTransport>(&self, transport: &P) -> Result<(), OtlpError> {
         loop {
-            if self.cancel.load(MemoryOrdering.Acquire) { return Ok(()); }
+            if self.cancel.load(MemoryOrdering.Acquire) { return Result.Ok(()); }
             let _ = self.tick(transport).await
                 .map_err(|_e| { /* logged inside tick */ });
             let period_ms = self.cfg.period.as_millis();
@@ -239,9 +239,9 @@ implement OtlpExporter {
                 Instant.now().duration_since_epoch().as_millis(),
                 MemoryOrdering.Release,
             );
-            Ok(())
+            Result.Ok(())
         } else {
-            Err(OtlpError.HttpStatus(outcome.status))
+            Result.Err(OtlpError.HttpStatus(outcome.status))
         }
     }
 
@@ -274,11 +274,11 @@ implement OtlpExporter {
         let mut iter = self.cfg.resource_attrs.iter();
         loop {
             match iter.next() {
-                Some((key, value)) => {
+                Maybe.Some((key, value)) => {
                     let kv = encode_key_value(key, value);
                     write_tag_len(&mut r, 1, &kv);
                 },
-                None => break,
+                Maybe.None => break,
             }
         }
         r

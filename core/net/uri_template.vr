@@ -137,7 +137,7 @@ type ExprOp is
 type VarSpec is {
     name:    Text,
     /// Level-4 prefix modifier: `{var:N}` → truncate to first N chars.
-    /// None = no truncation.
+    /// Maybe.None = no truncation.
     max_len: Maybe<Int>,
     /// Level-4 explode modifier: `{var*}`. True for each list value
     /// to get its own pair.
@@ -174,7 +174,7 @@ implement UriTemplate {
                 parts.push(TemplatePart.Literal(Text.from_utf8_unchecked(buf.as_slice())));
             }
         }
-        Ok(UriTemplate { parts: parts })
+        Result.Ok(UriTemplate { parts: parts })
     }
 
     public fn expand(&self, vars: &Map<Text, TemplateValue>) -> Text {
@@ -196,15 +196,15 @@ implement UriTemplate {
 fn find_close_brace(b: &[Byte], from: Int) -> Result<Int, UriTemplateError> {
     let mut i = from;
     while i < b.len() {
-        if b[i] == ('}' as Byte) { return Ok(i); }
+        if b[i] == ('}' as Byte) { return Result.Ok(i); }
         i = i + 1;
     }
-    Err(UriTemplateError.UnbalancedBraces)
+    Result.Err(UriTemplateError.UnbalancedBraces)
 }
 
 fn parse_expression(b: &[Byte], start: Int, end: Int) -> Result<TemplatePart, UriTemplateError> {
     if start >= end {
-        return Err(UriTemplateError.Malformed(Text.from("empty expression")));
+        return Result.Err(UriTemplateError.Malformed(Text.from("empty expression")));
     }
     let first = b[start];
     let (op, var_start) = match first {
@@ -227,16 +227,16 @@ fn parse_expression(b: &[Byte], start: Int, end: Int) -> Result<TemplatePart, Ur
         vars.push(spec);
         if i < end && b[i] == (',' as Byte) { i = i + 1; }
     }
-    Ok(TemplatePart.Expansion { op: op, vars: vars })
+    Result.Ok(TemplatePart.Expansion { op: op, vars: vars })
 }
 
 fn parse_var_spec(b: &[Byte], start: Int, end: Int) -> Result<VarSpec, UriTemplateError> {
     if start >= end {
-        return Err(UriTemplateError.Malformed(Text.from("empty varspec")));
+        return Result.Err(UriTemplateError.Malformed(Text.from("empty varspec")));
     }
     // Detect trailing `*` or `:N`.
     let mut name_end = end;
-    let mut max_len: Maybe<Int> = None;
+    let mut max_len: Maybe<Int> = Maybe.None;
     let mut explode: Bool = false;
 
     if b[end - 1] == ('*' as Byte) {
@@ -259,14 +259,14 @@ fn parse_var_spec(b: &[Byte], start: Int, end: Int) -> Result<VarSpec, UriTempla
             // be coaxed into asymmetric allocation by a hostile peer.
             let digit_count = end - (colon + 1);
             if digit_count == 0 || digit_count > 4 {
-                return Err(UriTemplateError.Malformed(Text.from("bad prefix len")));
+                return Result.Err(UriTemplateError.Malformed(Text.from("bad prefix len")));
             }
             let mut n: Int = 0;
             let mut j: Int = colon + 1;
             while j < end {
                 let c = b[j];
                 if c < ('0' as Byte) || c > ('9' as Byte) {
-                    return Err(UriTemplateError.Malformed(Text.from("bad prefix len")));
+                    return Result.Err(UriTemplateError.Malformed(Text.from("bad prefix len")));
                 }
                 n = n * 10 + ((c - ('0' as Byte)) as Int);
                 j = j + 1;
@@ -274,15 +274,15 @@ fn parse_var_spec(b: &[Byte], start: Int, end: Int) -> Result<VarSpec, UriTempla
             // Spec ceiling — even 4 digits permits 9999 which is the
             // RFC's hard cap; any larger value is invalid.
             if n > 9999 {
-                return Err(UriTemplateError.Malformed(Text.from("prefix len > 9999")));
+                return Result.Err(UriTemplateError.Malformed(Text.from("prefix len > 9999")));
             }
-            max_len = Some(n);
+            max_len = Maybe.Some(n);
         }
     }
 
     let mut name_bytes: List<Byte> = List.with_capacity(name_end - start);
     name_bytes.extend_from_slice(&b[start..name_end]);
-    Ok(VarSpec {
+    Result.Ok(VarSpec {
         name: Text.from_utf8_unchecked(name_bytes.as_slice()),
         max_len: max_len,
         explode: explode,
@@ -304,8 +304,8 @@ fn expand_into(
     let mut i: Int = 0;
     while i < specs.len() {
         match vars.get(&specs[i].name) {
-            Some(v) => if !is_empty_value(v) { any_defined = true; break; },
-            None    => {},
+            Maybe.Some(v) => if !is_empty_value(v) { any_defined = true; break; },
+            Maybe.None    => {},
         }
         i = i + 1;
     }
@@ -336,7 +336,7 @@ fn expand_into(
     while k < specs.len() {
         let spec = &specs[k];
         match vars.get(&spec.name) {
-            Some(v) => {
+            Maybe.Some(v) => {
                 if is_empty_value(v) {
                     // Named operators still emit the name for empty strings.
                     if op_is_named(op) {
@@ -351,7 +351,7 @@ fn expand_into(
                 emit_spec(out, op, spec, v);
                 first = false;
             },
-            None => {},
+            Maybe.None => {},
         }
         k = k + 1;
     }
@@ -362,11 +362,11 @@ fn emit_spec(out: &mut List<Byte>, op: &ExprOp, spec: &VarSpec, v: &TemplateValu
         TemplateValue.Str(s) => {
             let bytes = s.as_bytes();
             let truncated = match &spec.max_len {
-                Some(n) => {
+                Maybe.Some(n) => {
                     let take = if *n < bytes.len() { *n } else { bytes.len() };
                     slice_vec(bytes, 0, take)
                 },
-                None => slice_vec(bytes, 0, bytes.len()),
+                Maybe.None => slice_vec(bytes, 0, bytes.len()),
             };
             emit_named_prefix(out, op, spec, &truncated);
             encode_value(out, op, truncated.as_slice());

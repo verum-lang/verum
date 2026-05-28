@@ -139,11 +139,11 @@ implement KeyDerivation for RawKey {
     fn name(&self) -> Text { "raw".clone() }
     fn derive(&self, secret: &List<Byte>, params: &KdfParams) -> Result<List<Byte>, KdfError> {
         if secret.len() != params.key_len {
-            return Err(KeBadParams("raw key length mismatch".clone()));
+            return Result.Err(KeBadParams("raw key length mismatch".clone()));
         }
         let mut out: List<Byte> = List.with_capacity(secret.len());
         out.extend_from_slice(secret.as_slice());
-        Ok(out)
+        Result.Ok(out)
     }
 }
 
@@ -157,8 +157,8 @@ public fn pbkdf2_sha256() -> Pbkdf2Sha256 { Pbkdf2Sha256 { unit: true } }
 implement KeyDerivation for Pbkdf2Sha256 {
     fn name(&self) -> Text { "pbkdf2-sha256".clone() }
     fn derive(&self, secret: &List<Byte>, params: &KdfParams) -> Result<List<Byte>, KdfError> {
-        if params.cost < 1000 { return Err(KeBadParams("PBKDF2 iteration count < 1000".clone())); }
-        if params.key_len <= 0 { return Err(KeBadParams("zero key_len".clone())); }
+        if params.cost < 1000 { return Result.Err(KeBadParams("PBKDF2 iteration count < 1000".clone())); }
+        if params.key_len <= 0 { return Result.Err(KeBadParams("zero key_len".clone())); }
         // Wire to the real PBKDF2-HMAC-SHA256 in core.security.kdf.pbkdf2.
         // Pre-fix this was an XOR-only "contract-only stub" labeled
         // "NOT cryptographically safe" — using it as the SQLCipher v3
@@ -172,8 +172,8 @@ implement KeyDerivation for Pbkdf2Sha256 {
             params.cost as UInt32,
             params.key_len,
         ) {
-            Ok(bytes) => Ok(bytes),
-            Err(e) => Err(KeBadParams(f"pbkdf2_hmac_sha256 rejected params: {e}".into())),
+            Result.Ok(bytes) => Result.Ok(bytes),
+            Result.Err(e) => Result.Err(KeBadParams(f"pbkdf2_hmac_sha256 rejected params: {e}".into())),
         }
     }
 }
@@ -188,8 +188,8 @@ public fn scrypt_simple() -> ScryptSimple { ScryptSimple { unit: true } }
 implement KeyDerivation for ScryptSimple {
     fn name(&self) -> Text { "scrypt".clone() }
     fn derive(&self, _secret: &List<Byte>, params: &KdfParams) -> Result<List<Byte>, KdfError> {
-        if params.cost < 16 { return Err(KeBadParams("scrypt N too small".clone())); }
-        if params.key_len <= 0 { return Err(KeBadParams("zero key_len".clone())); }
+        if params.cost < 16 { return Result.Err(KeBadParams("scrypt N too small".clone())); }
+        if params.key_len <= 0 { return Result.Err(KeBadParams("zero key_len".clone())); }
         // No real scrypt implementation in core.security yet — the
         // legacy XOR-only stub was REMOVED here because returning
         // weakly-derived keys from a "scrypt" surface is worse than
@@ -199,7 +199,7 @@ implement KeyDerivation for ScryptSimple {
         // call instead until a real scrypt lands; downstream callers
         // either fall back to PBKDF2 (which IS correctly wired) or
         // surface the unsupported-algorithm error to the user.
-        Err(KeUnsupported(
+        Result.Err(KeUnsupported(
             "scrypt is not yet implemented in core.security.kdf — use Pbkdf2Sha256".clone()
         ))
     }

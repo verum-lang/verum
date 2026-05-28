@@ -87,7 +87,7 @@ implement DhePool for LocalDhePool {
                     pub_v.push(pk[i]);
                     i = i + 1;
                 }
-                Ok(DheKeyPair {
+                Result.Ok(DheKeyPair {
                     group: NamedGroup.X25519,
                     private_bytes: priv_v,
                     public_bytes:  pub_v,
@@ -106,14 +106,14 @@ implement DhePool for LocalDhePool {
                 // §4.2.8.2 + RFC 5480 §2.2 require uncompressed (0x04
                 // prefix) on the wire — the key generator produces that
                 // by default.
-                Ok(DheKeyPair {
+                Result.Ok(DheKeyPair {
                     group: NamedGroup.Secp256r1,
                     private_bytes: priv_v,
                     public_bytes:  pk.bytes.clone(),
                 })
             },
 
-            _ => Err(TlsError.IllegalParameter),
+            _ => Result.Err(TlsError.IllegalParameter),
         }
     }
 }
@@ -144,5 +144,5 @@ public fn generate_client_keyshares(
         privs.push((kp.group, kp.private_bytes));
         i = i + 1;
     }
-    Ok((shares, privs))
+    Result.Ok((shares, privs))
 }

@@ -112,12 +112,12 @@ public type CellKey is
 public fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<Ordering, Text> {
     match target {
         SkRowId(t) => match cell {
-            CkRowId(c)  => Ok(cmp_int64(t, c)),
-            CkRecord(_) => Err("cmp_keys: rowid target vs record cell".clone()),
+            CkRowId(c)  => Result.Ok(cmp_int64(t, c)),
+            CkRecord(_) => Result.Err("cmp_keys: rowid target vs record cell".clone()),
         }
         SkRecord(t) => match cell {
-            CkRecord(c) => Ok(cmp_bytes(&t, c)),
-            CkRowId(_)  => Err("cmp_keys: record target vs rowid cell".clone()),
+            CkRecord(c) => Result.Ok(cmp_bytes(&t, c)),
+            CkRowId(_)  => Result.Err("cmp_keys: record target vs rowid cell".clone()),
         }
     }
 }
@@ -168,12 +168,12 @@ where F: Fn(Int) -> CellKey
         let mid = lo + (hi - lo) / 2;
         let ck = cell_at(mid);
         let ord = match cmp_keys(target, &ck) {
-            Ok(o)  => o,
-            Err(e) => { return Err(e); }
+            Result.Ok(o)  => o,
+            Result.Err(e) => { return Result.Err(e); }
         };
         match ord {
             Equal   => {
-                return Ok(BinarySearchResult { index: mid, ordering: Equal });
+                return Result.Ok(BinarySearchResult { index: mid, ordering: Equal });
             }
             Less    => {
                 // target < cell[mid] — search left half.
@@ -188,7 +188,7 @@ where F: Fn(Int) -> CellKey
         }
     }
 
-    Ok(BinarySearchResult {
+    Result.Ok(BinarySearchResult {
         index: lo,
         ordering: last_ordering,
     })

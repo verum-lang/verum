@@ -211,11 +211,11 @@ public type JwtHeader is {
 
 implement JwtHeader {
     public fn new(alg: JwtAlgorithm) -> JwtHeader {
-        JwtHeader { alg: alg, typ: Text.from("JWT"), kid: None }
+        JwtHeader { alg: alg, typ: Text.from("JWT"), kid: Maybe.None }
     }
 
     public fn with_kid(mut self, kid: Text) -> JwtHeader {
-        self.kid = Some(kid); self
+        self.kid = Maybe.Some(kid); self
     }
 }
 
@@ -229,12 +229,12 @@ fn header_to_json(h: &JwtHeader) -> Text {
     push_bytes(&mut out, h.typ.as_bytes());
     push_bytes(&mut out, b"\"");
     match &h.kid {
-        Some(k) => {
+        Maybe.Some(k) => {
             push_bytes(&mut out, b",\"kid\":\"");
             push_bytes(&mut out, k.as_bytes());
             push_bytes(&mut out, b"\"");
         },
-        None => {},
+        Maybe.None => {},
     }
     push_bytes(&mut out, b"}");
     Text.from_utf8_unchecked(out.as_slice())
@@ -275,7 +275,7 @@ public fn sign_compact(
     token.extend_from_slice(signing_input.as_slice());
     token.push('.' as Byte);
     token.extend_from_slice(sig_b64.as_bytes());
-    Ok(Text.from_utf8_unchecked(token.as_slice()))
+    Result.Ok(Text.from_utf8_unchecked(token.as_slice()))
 }
 
 // =============================================================================
@@ -316,7 +316,7 @@ public fn verify_compact(
     // (small input cost on the attacker, large CPU cost on the
     // verifier).
     if bytes.len() > MAX_JWT_TOKEN_BYTES {
-        return Err(JwtError.TokenTooLong);
+        return Result.Err(JwtError.TokenTooLong);
     }
     // Split on '.'.
     let (h_end, p_end) = find_two_dots(bytes)?;
@@ -334,7 +334,7 @@ public fn verify_compact(
     // Parse header and verify alg.
     let header = parse_header(header_bytes.as_slice())?;
     if !algo_allowed(&header.alg, &opts.allowed_algorithms) {
-        return Err(JwtError.AlgorithmMismatch);
+        return Result.Err(JwtError.AlgorithmMismatch);
     }
     check_key_matches_algo(&header.alg, key)?;
 
@@ -352,7 +352,7 @@ public fn verify_compact(
     let claims = core.encoding.json.parse(&payload_text).map_err(|_| JwtError.JsonDecode)?;
     check_registered_claims(&claims, opts)?;
 
-    Ok(JwtPayload {
+    Result.Ok(JwtPayload {
         header: header,
         claims: claims,
         signing_input: signing_input,
@@ -365,12 +365,12 @@ public fn verify_compact(
 
 fn check_key_matches_algo(algo: &JwtAlgorithm, key: &JwtKey) -> Result<(), JwtError> {
     match (algo, key) {
-        (JwtAlgorithm.HS256, JwtKey.HmacSecret(_)) => Ok(()),
-        (JwtAlgorithm.HS384, JwtKey.HmacSecret(_)) => Ok(()),
-        (JwtAlgorithm.HS512, JwtKey.HmacSecret(_)) => Ok(()),
-        (JwtAlgorithm.EdDSA, JwtKey.Ed25519Seeded(_)) => Ok(()),
-        (JwtAlgorithm.EdDSA, JwtKey.Ed25519Public(_)) => Ok(()),
-        _ => Err(JwtError.WrongKeyKind),
+        (JwtAlgorithm.HS256, JwtKey.HmacSecret(_)) => Result.Ok(()),
+        (JwtAlgorithm.HS384, JwtKey.HmacSecret(_)) => Result.Ok(()),
+        (JwtAlgorithm.HS512, JwtKey.HmacSecret(_)) => Result.Ok(()),
+        (JwtAlgorithm.EdDSA, JwtKey.Ed25519Seeded(_)) => Result.Ok(()),
+        (JwtAlgorithm.EdDSA, JwtKey.Ed25519Public(_)) => Result.Ok(()),
+        _ => Result.Err(JwtError.WrongKeyKind),
     }
 }
 
@@ -381,19 +381,19 @@ fn compute_signature(
 ) -> Result<List<Byte>, JwtError> {
     match (algo, key) {
         (JwtAlgorithm.HS256, JwtKey.HmacSecret(s)) => {
-            Ok(slice_owned(&hmac_sha256(s.as_slice(), signing_input)[..]))
+            Result.Ok(slice_owned(&hmac_sha256(s.as_slice(), signing_input)[..]))
         },
         (JwtAlgorithm.HS384, JwtKey.HmacSecret(s)) => {
-            Ok(slice_owned(&hmac_sha384(s.as_slice(), signing_input)[..]))
+            Result.Ok(slice_owned(&hmac_sha384(s.as_slice(), signing_input)[..]))
         },
         (JwtAlgorithm.HS512, JwtKey.HmacSecret(s)) => {
-            Ok(slice_owned(&hmac_sha512(s.as_slice(), signing_input)[..]))
+            Result.Ok(slice_owned(&hmac_sha512(s.as_slice(), signing_input)[..]))
         },
         (JwtAlgorithm.EdDSA, JwtKey.Ed25519Seeded(sk)) => {
             let sig: Ed25519Signature = Ed25519.sign(sk, signing_input);
-            Ok(slice_owned(&sig[..]))
+            Result.Ok(slice_owned(&sig[..]))
         },
-        _ => Err(JwtError.WrongKeyKind),
+        _ => Result.Err(JwtError.WrongKeyKind),
     }
 }
 
@@ -406,42 +406,42 @@ fn verify_signature(
     match (algo, key) {
         (JwtAlgorithm.HS256, JwtKey.HmacSecret(s)) => {
             let expected = hmac_sha256(s.as_slice(), signing_input);
-            if constant_time_eq(&expected[..], sig) { Ok(()) }
-            else { Err(JwtError.SignatureMismatch) }
+            if constant_time_eq(&expected[..], sig) { Result.Ok(()) }
+            else { Result.Err(JwtError.SignatureMismatch) }
         },
         (JwtAlgorithm.HS384, JwtKey.HmacSecret(s)) => {
             let expected = hmac_sha384(s.as_slice(), signing_input);
-            if constant_time_eq(&expected[..], sig) { Ok(()) }
-            else { Err(JwtError.SignatureMismatch) }
+            if constant_time_eq(&expected[..], sig) { Result.Ok(()) }
+            else { Result.Err(JwtError.SignatureMismatch) }
         },
         (JwtAlgorithm.HS512, JwtKey.HmacSecret(s)) => {
             let expected = hmac_sha512(s.as_slice(), signing_input);
-            if constant_time_eq(&expected[..], sig) { Ok(()) }
-            else { Err(JwtError.SignatureMismatch) }
+            if constant_time_eq(&expected[..], sig) { Result.Ok(()) }
+            else { Result.Err(JwtError.SignatureMismatch) }
         },
         (JwtAlgorithm.EdDSA, JwtKey.Ed25519Public(pk)) => {
-            if sig.len() != 64 { return Err(JwtError.SignatureMismatch); }
+            if sig.len() != 64 { return Result.Err(JwtError.SignatureMismatch); }
             let mut sig_arr: [Byte; 64] = [0_u8; 64];
             let mut i: Int = 0;
             while i < 64 { sig_arr[i] = sig[i]; i = i + 1; }
             match Ed25519.verify(pk, signing_input, &sig_arr) {
-                Ok(())  => Ok(()),
-                Err(_)  => Err(JwtError.SignatureMismatch),
+                Result.Ok(())  => Result.Ok(()),
+                Result.Err(_)  => Result.Err(JwtError.SignatureMismatch),
             }
         },
         // EdDSA with a private key is OK (signer can self-verify).
         (JwtAlgorithm.EdDSA, JwtKey.Ed25519Seeded(sk)) => {
             let pk = Ed25519.public_key(sk);
-            if sig.len() != 64 { return Err(JwtError.SignatureMismatch); }
+            if sig.len() != 64 { return Result.Err(JwtError.SignatureMismatch); }
             let mut sig_arr: [Byte; 64] = [0_u8; 64];
             let mut i: Int = 0;
             while i < 64 { sig_arr[i] = sig[i]; i = i + 1; }
             match Ed25519.verify(&pk, signing_input, &sig_arr) {
-                Ok(())  => Ok(()),
-                Err(_)  => Err(JwtError.SignatureMismatch),
+                Result.Ok(())  => Result.Ok(()),
+                Result.Err(_)  => Result.Err(JwtError.SignatureMismatch),
             }
         },
-        _ => Err(JwtError.WrongKeyKind),
+        _ => Result.Err(JwtError.WrongKeyKind),
     }
 }
 
@@ -454,85 +454,85 @@ fn parse_header(bytes: &[Byte]) -> Result<JwtHeader, JwtError> {
     let v = core.encoding.json.parse(&text).map_err(|_| JwtError.JsonDecode)?;
     let obj = match v {
         JsonValue.JsonObject(m) => m,
-        _                       => return Err(JwtError.JsonDecode),
+        _                       => return Result.Err(JwtError.JsonDecode),
     };
     let alg_text = match obj.get(&Text.from("alg")) {
-        Some(JsonValue.JsonString(s)) => s.clone(),
-        _                              => return Err(JwtError.MalformedToken),
+        Maybe.Some(JsonValue.JsonString(s)) => s.clone(),
+        _                              => return Result.Err(JwtError.MalformedToken),
     };
     // "none" is a permanent, unrecoverable no.
-    if alg_text.as_bytes() == b"none" { return Err(JwtError.AlgNone); }
+    if alg_text.as_bytes() == b"none" { return Result.Err(JwtError.AlgNone); }
 
     let alg = match alg_text.as_bytes() {
         b"HS256" => JwtAlgorithm.HS256,
         b"HS384" => JwtAlgorithm.HS384,
         b"HS512" => JwtAlgorithm.HS512,
         b"EdDSA" => JwtAlgorithm.EdDSA,
-        _        => return Err(JwtError.AlgorithmMismatch),
+        _        => return Result.Err(JwtError.AlgorithmMismatch),
     };
     let typ = match obj.get(&Text.from("typ")) {
-        Some(JsonValue.JsonString(s)) => s.clone(),
+        Maybe.Some(JsonValue.JsonString(s)) => s.clone(),
         _                              => Text.from("JWT"),
     };
     let kid = match obj.get(&Text.from("kid")) {
-        Some(JsonValue.JsonString(s)) => Some(s.clone()),
-        _                              => None,
+        Maybe.Some(JsonValue.JsonString(s)) => Maybe.Some(s.clone()),
+        _                              => Maybe.None,
     };
-    Ok(JwtHeader { alg: alg, typ: typ, kid: kid })
+    Result.Ok(JwtHeader { alg: alg, typ: typ, kid: kid })
 }
 
 fn check_registered_claims(claims: &JsonValue, opts: &VerifyOptions) -> Result<(), JwtError> {
     let obj = match claims {
         JsonValue.JsonObject(m) => m,
-        _                       => return Err(JwtError.JsonDecode),
+        _                       => return Result.Err(JwtError.JsonDecode),
     };
     // exp (expiration)
     match obj.get(&Text.from("exp")) {
-        Some(JsonValue.JsonInt(exp)) => {
+        Maybe.Some(JsonValue.JsonInt(exp)) => {
             if opts.now_unix - opts.clock_skew_sec > *exp {
-                return Err(JwtError.Expired);
+                return Result.Err(JwtError.Expired);
             }
         },
         _ => {},
     }
     // nbf (not before)
     match obj.get(&Text.from("nbf")) {
-        Some(JsonValue.JsonInt(nbf)) => {
+        Maybe.Some(JsonValue.JsonInt(nbf)) => {
             if opts.now_unix + opts.clock_skew_sec < *nbf {
-                return Err(JwtError.NotYetValid);
+                return Result.Err(JwtError.NotYetValid);
             }
         },
         _ => {},
     }
     // iss
     match &opts.expected_iss {
-        Some(expected) => {
+        Maybe.Some(expected) => {
             match obj.get(&Text.from("iss")) {
-                Some(JsonValue.JsonString(got)) => {
+                Maybe.Some(JsonValue.JsonString(got)) => {
                     if got.as_bytes() != expected.as_bytes() {
-                        return Err(JwtError.IssuerMismatch);
+                        return Result.Err(JwtError.IssuerMismatch);
                     }
                 },
-                _ => return Err(JwtError.IssuerMismatch),
+                _ => return Result.Err(JwtError.IssuerMismatch),
             }
         },
-        None => {},
+        Maybe.None => {},
     }
     // aud
     match &opts.expected_aud {
-        Some(expected) => {
+        Maybe.Some(expected) => {
             match obj.get(&Text.from("aud")) {
-                Some(JsonValue.JsonString(got)) => {
+                Maybe.Some(JsonValue.JsonString(got)) => {
                     if got.as_bytes() != expected.as_bytes() {
-                        return Err(JwtError.AudienceMismatch);
+                        return Result.Err(JwtError.AudienceMismatch);
                     }
                 },
-                _ => return Err(JwtError.AudienceMismatch),
+                _ => return Result.Err(JwtError.AudienceMismatch),
             }
         },
-        None => {},
+        Maybe.None => {},
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn algo_allowed(a: &JwtAlgorithm, allowed: &List<JwtAlgorithm>) -> Bool {
@@ -556,12 +556,12 @@ fn find_two_dots(bytes: &[Byte]) -> Result<(Int, Int), JwtError> {
         if bytes[i] == ('.' as Byte) {
             if first < 0 { first = i; }
             else if second < 0 { second = i; }
-            else { return Err(JwtError.MalformedToken); }
+            else { return Result.Err(JwtError.MalformedToken); }
         }
         i = i + 1;
     }
-    if first < 0 || second < 0 { return Err(JwtError.MalformedToken); }
-    Ok((first, second))
+    if first < 0 || second < 0 { return Result.Err(JwtError.MalformedToken); }
+    Result.Ok((first, second))
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {

@@ -33,7 +33,7 @@
 
 //  * Varying-cache-key calculation (`Vary` header) — the caller's
 //  storage layer decides which fields go into the cache key.
-//  * Conditional revalidation (If-None-Match / If-Modified-Since
+//  * Conditional revalidation (If-Maybe.None-Match / If-Modified-Since
 //  exchange) — this is transport, handled by the HTTP client.
 //
 
@@ -68,7 +68,7 @@ public type CacheControl is {
     proxy_revalidate:       Bool,
     must_understand:        Bool,
 
-    // Numeric directives (seconds). `None` = directive absent.
+    // Numeric directives (seconds). `Maybe.None` = directive absent.
     max_age:                Maybe<UInt64>,
     s_maxage:               Maybe<UInt64>,
     stale_while_revalidate: Maybe<UInt64>,

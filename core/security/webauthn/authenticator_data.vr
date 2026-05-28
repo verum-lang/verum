@@ -36,22 +36,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "AuthenticatorData binary parser/encoder per WebAuthn §6.1",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.webauthn.authenticator_data;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.List;
 mount encoding.cbor.{CborValue, decode, encode, encode_canonical};
 mount security.webauthn.types.{
@@ -70,7 +70,7 @@ mount security.webauthn.types.{
 /// data, and credentialId length cap.
 pub fn parse_authenticator_data(bytes: &[Byte]) -> Result<AuthenticatorData, WebAuthnError> {
     if bytes.len() < MIN_AUTH_DATA_BYTES {
-        return Err(WebAuthnError.TruncatedAuthData);
+        return Result.Err(WebAuthnError.TruncatedAuthData);
     }
 
     // Fixed prefix.
@@ -93,13 +93,13 @@ pub fn parse_authenticator_data(bytes: &[Byte]) -> Result<AuthenticatorData, Web
     let attested = if flags.attested_credential_data {
         let (acd, new_offset) = parse_attested_credential_data(bytes, offset)?;
         offset = new_offset;
-        Some(acd)
-    } else { None };
+        Maybe.Some(acd)
+    } else { Maybe.None };
 
     // Optional Extensions (CBOR map at offset).
     let extensions = if flags.extension_data {
         if offset >= bytes.len() {
-            return Err(WebAuthnError.TruncatedAuthData);
+            return Result.Err(WebAuthnError.TruncatedAuthData);
         }
         // CBOR may be longer than we expect — decode consumes its
         // own slice. We pass the remaining bytes; the cbor decoder
@@ -112,15 +112,15 @@ pub fn parse_authenticator_data(bytes: &[Byte]) -> Result<AuthenticatorData, Web
         };
         let value = encoding.cbor.decode(remaining.as_slice())
             .map_err(|e| WebAuthnError.InvalidCbor(f"extensions: {e}"))?;
-        Some(value)
-    } else { None };
+        Maybe.Some(value)
+    } else { Maybe.None };
 
     // Preserve the raw bytes — signature input depends on them.
     let mut raw_buf: List<Byte> = List.with_capacity(bytes.len());
     let mut k: Int = 0;
     while k < bytes.len() { raw_buf.push(bytes[k]); k = k + 1; }
 
-    Ok(AuthenticatorData {
+    Result.Ok(AuthenticatorData {
         rp_id_hash,
         flags,
         sign_count,
@@ -142,7 +142,7 @@ pub fn encode_authenticator_data(auth: &AuthenticatorData) -> List<Byte> {
     out.push(((auth.sign_count >>  8) & 0xFF) as Byte);
     out.push(( auth.sign_count        & 0xFF) as Byte);
 
-    if let Some(acd) = &auth.attested_credential_data {
+    if let Maybe.Some(acd) = &auth.attested_credential_data {
         let mut k: Int = 0;
         while k < 16 { out.push(acd.aaguid[k]); k = k + 1; }
         let cid_len = acd.credential_id.len();
@@ -156,7 +156,7 @@ pub fn encode_authenticator_data(auth: &AuthenticatorData) -> List<Byte> {
         while m < cose_bytes.len() { out.push(cose_bytes[m]); m = m + 1; }
     }
 
-    if let Some(ext) = &auth.extensions {
+    if let Maybe.Some(ext) = &auth.extensions {
         let ext_bytes = encode_canonical(ext);
         let mut m: Int = 0;
         while m < ext_bytes.len() { out.push(ext_bytes[m]); m = m + 1; }
@@ -174,7 +174,7 @@ fn parse_attested_credential_data(
 ) -> Result<(AttestedCredentialData, Int), WebAuthnError> {
     // Need at least: AAGUID(16) + credIdLen(2) + 1 byte of CBOR.
     if start + 16 + 2 > bytes.len() {
-        return Err(WebAuthnError.TruncatedAttestedCredentialData);
+        return Result.Err(WebAuthnError.TruncatedAttestedCredentialData);
     }
     let mut aaguid: [Byte; 16] = [0_u8; 16];
     let mut i: Int = 0;
@@ -184,12 +184,12 @@ fn parse_attested_credential_data(
         ((bytes[start + 16] as Int) << 8)
       |  (bytes[start + 17] as Int);
     if cred_id_len < 1 || cred_id_len > CREDENTIAL_ID_MAX_BYTES {
-        return Err(WebAuthnError.InvalidCredentialIdLength(cred_id_len));
+        return Result.Err(WebAuthnError.InvalidCredentialIdLength(cred_id_len));
     }
     let cred_id_start = start + 18;
     let cose_key_start = cred_id_start + cred_id_len;
     if cose_key_start > bytes.len() {
-        return Err(WebAuthnError.TruncatedAttestedCredentialData);
+        return Result.Err(WebAuthnError.TruncatedAttestedCredentialData);
     }
     let mut credential_id: List<Byte> = List.with_capacity(cred_id_len);
     let mut j: Int = 0;
@@ -216,7 +216,7 @@ fn parse_attested_credential_data(
         credential_id,
         credential_public_key,
     };
-    Ok((acd, cose_key_start + cose_key_byte_len))
+    Result.Ok((acd, cose_key_start + cose_key_byte_len))
 }
 
 /// Decode CBOR from the start of a buffer, return the value + the
@@ -231,7 +231,7 @@ fn decode_cose_consume_length(bytes: &List<Byte>) -> Result<(CborValue, Int), We
     // input was already canonical (which authenticators MUST produce
     // per WebAuthn §6.5.4).
     let canonical = encode_canonical(&value);
-    Ok((value, canonical.len()))
+    Result.Ok((value, canonical.len()))
 }
 
 // =============================================================================

@@ -43,22 +43,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: ".vbca archive reader: header parse + kernel-bridged module index",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.cog.archive;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 mount collections.{List, Map};
 mount security.hash.sha256.{digest};
 mount encoding.hex.{encode as hex_encode};
@@ -168,22 +168,22 @@ implement Debug for ArchiveError {
 /// before paying for the full index decode.
 public fn read_header(bytes: &List<Byte>) -> Result<ArchiveHeader, ArchiveError> {
     if bytes.len() < ARCHIVE_HEADER_SIZE {
-        return Err(TruncatedHeader { expected: ARCHIVE_HEADER_SIZE, found: bytes.len() });
+        return Result.Err(TruncatedHeader { expected: ARCHIVE_HEADER_SIZE, found: bytes.len() });
     }
     let magic = read_magic(bytes, 0);
     if magic != ARCHIVE_MAGIC {
-        return Err(InvalidMagic { expected: ARCHIVE_MAGIC, found: magic });
+        return Result.Err(InvalidMagic { expected: ARCHIVE_MAGIC, found: magic });
     }
     let version_major = read_u16_le(bytes, 4);
     let version_minor = read_u16_le(bytes, 6);
     if version_major != ARCHIVE_VERSION_MAJOR {
-        return Err(UnsupportedVersion { major: version_major, minor: version_minor });
+        return Result.Err(UnsupportedVersion { major: version_major, minor: version_minor });
     }
     let flags        = read_u32_le(bytes, 8);
     let module_count = read_u32_le(bytes, 12);
     let index_offset = read_u64_le(bytes, 16);
     let index_size   = read_u64_le(bytes, 24);
-    Ok(ArchiveHeader {
+    Result.Ok(ArchiveHeader {
         magic,
         version_major,
         version_minor,
@@ -202,7 +202,7 @@ public fn read_archive_bytes(bytes: &List<Byte>) -> Result<CogArchive, ArchiveEr
     let header = read_header(bytes)?;
 
     if header.index_offset + header.index_size > bytes.len() {
-        return Err(TruncatedIndex {
+        return Result.Err(TruncatedIndex {
             offset: header.index_offset,
             size:   header.index_size,
             total:  bytes.len(),
@@ -213,7 +213,7 @@ public fn read_archive_bytes(bytes: &List<Byte>) -> Result<CogArchive, ArchiveEr
     let modules = vbc_archive_decode_index(bytes, header.index_offset, header.index_size)
         .map_err(|e| InvalidIndexEncoding(e))?;
     if modules.len() != header.module_count {
-        return Err(InvalidIndexEncoding(
+        return Result.Err(InvalidIndexEncoding(
             f"index entry count {modules.len()} != header module_count {header.module_count}".to_text()));
     }
 
@@ -223,7 +223,7 @@ public fn read_archive_bytes(bytes: &List<Byte>) -> Result<CogArchive, ArchiveEr
     while i < modules.len() {
         let entry = &modules[i];
         if entry.data_offset + entry.data_size > bytes.len() {
-            return Err(TruncatedModule {
+            return Result.Err(TruncatedModule {
                 module: entry.name.clone(),
                 offset: entry.data_offset,
                 size:   entry.data_size,
@@ -235,7 +235,7 @@ public fn read_archive_bytes(bytes: &List<Byte>) -> Result<CogArchive, ArchiveEr
     }
 
     let sha256 = hex_encode(&security.hash.sha256.digest(bytes));
-    Ok(CogArchive { header, modules, module_data, sha256 })
+    Result.Ok(CogArchive { header, modules, module_data, sha256 })
 }
 
 /// Read a `.vbca` from a filesystem path.
@@ -324,7 +324,7 @@ public fn topological_order(archive: &CogArchive) -> Result<List<Text>, Text> {
         }
         k = k + 1;
     }
-    Ok(order)
+    Result.Ok(order)
 }
 
 fn visit(
@@ -334,8 +334,8 @@ fn visit(
     order: &mut List<Text>,
 ) -> Result<(), Text> {
     match marks[idx] {
-        Mark.Done    => return Ok(()),
-        Mark.Pending => return Err(f"cycle through module {archive.modules[idx].name}".to_text()),
+        Mark.Done    => return Result.Ok(()),
+        Mark.Pending => return Result.Err(f"cycle through module {archive.modules[idx].name}".to_text()),
         Mark.Unvisited => {}
     }
     marks[idx] = Mark.Pending;
@@ -347,7 +347,7 @@ fn visit(
     }
     marks[idx] = Mark.Done;
     order.push(entry.name.clone());
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================

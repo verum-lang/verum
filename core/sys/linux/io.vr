@@ -325,7 +325,7 @@ implement IoUringDriver {
         };
 
         if ring_fd < 0 {
-            return Err(LinuxIoDriverError.UringSetupFailed { code: -ring_fd as Int });
+            return Result.Err(LinuxIoDriverError.UringSetupFailed { code: -ring_fd as Int });
         }
 
         // Map submission queue ring
@@ -344,7 +344,7 @@ implement IoUringDriver {
 
         if sq_ring_ptr < 0 && sq_ring_ptr > -4096 {
             unsafe { syscall_raw(SYS_CLOSE, ring_fd, 0, 0, 0, 0, 0) };
-            return Err(LinuxIoDriverError.MmapFailed { code: -sq_ring_ptr as Int });
+            return Result.Err(LinuxIoDriverError.MmapFailed { code: -sq_ring_ptr as Int });
         }
 
         // Map SQEs array
@@ -366,7 +366,7 @@ implement IoUringDriver {
                 syscall_raw(SYS_MUNMAP, sq_ring_ptr, sq_ring_size as Int, 0, 0, 0, 0);
                 syscall_raw(SYS_CLOSE, ring_fd, 0, 0, 0, 0, 0);
             }
-            return Err(LinuxIoDriverError.MmapFailed { code: -sqes_ptr as Int });
+            return Result.Err(LinuxIoDriverError.MmapFailed { code: -sqes_ptr as Int });
         }
 
         // Map completion queue ring (may overlap with SQ ring)
@@ -389,7 +389,7 @@ implement IoUringDriver {
                 syscall_raw(SYS_MUNMAP, sq_ring_ptr, sq_ring_size as Int, 0, 0, 0, 0);
                 syscall_raw(SYS_CLOSE, ring_fd, 0, 0, 0, 0, 0);
             }
-            return Err(LinuxIoDriverError.MmapFailed { code: -cq_ring_ptr as Int });
+            return Result.Err(LinuxIoDriverError.MmapFailed { code: -cq_ring_ptr as Int });
         }
 
         // Create eventfd for wake notifications
@@ -403,13 +403,13 @@ implement IoUringDriver {
                 syscall_raw(SYS_MUNMAP, sq_ring_ptr, sq_ring_size as Int, 0, 0, 0, 0);
                 syscall_raw(SYS_CLOSE, ring_fd, 0, 0, 0, 0, 0);
             }
-            return Err(LinuxIoDriverError.UringSetupFailed { code: -wake_fd as Int });
+            return Result.Err(LinuxIoDriverError.UringSetupFailed { code: -wake_fd as Int });
         }
 
         let sq_base = sq_ring_ptr as &unsafe Byte;
         let cq_base = cq_ring_ptr as &unsafe Byte;
 
-        Ok(IoUringDriver {
+        Result.Ok(IoUringDriver {
             ring_fd: ring_fd,
             params: params,
             sq_ring_ptr: sq_base,
@@ -435,7 +435,7 @@ implement IoUringDriver {
         let head = atomic_load_u32(self.sq_head, ORDERING_ACQUIRE);
 
         if tail - head >= self.params.sq_entries {
-            return Err(LinuxIoDriverError.QueueFull);
+            return Result.Err(LinuxIoDriverError.QueueFull);
         }
 
         let idx = tail & self.sq_mask;
@@ -443,7 +443,7 @@ implement IoUringDriver {
             self.sq_array[idx] = idx;
         }
 
-        Ok(unsafe { &mut self.sqes[idx] })
+        Result.Ok(unsafe { &mut self.sqes[idx] })
     }
 
     /// Advance SQ tail after filling SQE.
@@ -460,7 +460,7 @@ implement IoUringDriver {
         let to_submit = tail - head;
 
         if to_submit == 0 {
-            return Ok(0);
+            return Result.Ok(0);
         }
 
         let result = unsafe {
@@ -475,9 +475,9 @@ implement IoUringDriver {
         };
 
         if result < 0 {
-            Err(LinuxIoDriverError.SubmitFailed { code: -result as Int })
+            Result.Err(LinuxIoDriverError.SubmitFailed { code: -result as Int })
         } else {
-            Ok(result)
+            Result.Ok(result)
         }
     }
 
@@ -502,9 +502,9 @@ implement IoUringDriver {
         };
 
         if result < 0 && -result != EINTR {
-            Err(LinuxIoDriverError.WaitFailed { code: -result as Int })
+            Result.Err(LinuxIoDriverError.WaitFailed { code: -result as Int })
         } else {
-            Ok(self.reap_completions())
+            Result.Ok(self.reap_completions())
         }
     }
 
@@ -525,10 +525,10 @@ implement IoUringDriver {
         let tail = atomic_load_u32(self.cq_tail, ORDERING_ACQUIRE);
 
         if head == tail {
-            None
+            Maybe.None
         } else {
             let idx = head & self.cq_mask;
-            Some(unsafe { &self.cqes[idx] })
+            Maybe.Some(unsafe { &self.cqes[idx] })
         }
     }
 
@@ -552,9 +552,9 @@ implement IoUringDriver {
             )
         };
         if result < 0 {
-            Err(LinuxIoDriverError.WaitFailed { code: -result as Int })
+            Result.Err(LinuxIoDriverError.WaitFailed { code: -result as Int })
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -571,7 +571,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a write operation.
@@ -587,7 +587,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare an accept operation.
@@ -603,7 +603,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a connect operation.
@@ -618,7 +618,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a close operation.
@@ -631,7 +631,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a vectored read (readv) operation.
@@ -651,7 +651,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a vectored write (writev) operation.
@@ -671,7 +671,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a recv operation.
@@ -688,7 +688,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a send operation.
@@ -705,7 +705,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a recvmsg operation.
@@ -722,7 +722,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a sendmsg operation.
@@ -739,7 +739,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a poll add operation.
@@ -756,7 +756,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare an fsync operation.
@@ -773,7 +773,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a cancel operation.
@@ -788,7 +788,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a multi-shot accept — one SQE produces unlimited CQEs
@@ -808,7 +808,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a multi-shot recv with a provided-buffer group. The
@@ -835,7 +835,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a zero-copy send (IORING_OP_SEND_ZC). The kernel emits
@@ -862,7 +862,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a zero-copy sendmsg (IORING_OP_SENDMSG_ZC).
@@ -886,7 +886,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a fixed-buffer read — references a previously registered
@@ -912,7 +912,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Prepare a fixed-buffer write.
@@ -937,7 +937,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Register a set of fixed buffers with the kernel. Pointers are
@@ -956,9 +956,9 @@ implement IoUringDriver {
             )
         };
         if ret < 0 {
-            return Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int });
+            return Result.Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int });
         }
-        Ok(())
+        Result.Ok(())
     }
 
     public fn unregister_buffers(&mut self) -> Result<(), LinuxIoDriverError> {
@@ -970,8 +970,8 @@ implement IoUringDriver {
                 0, 0, 0, 0,
             )
         };
-        if ret < 0 { return Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int }); }
-        Ok(())
+        if ret < 0 { return Result.Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int }); }
+        Result.Ok(())
     }
 
     /// Register a fixed-size file-descriptor table. Slots can be updated
@@ -987,8 +987,8 @@ implement IoUringDriver {
                 0, 0,
             )
         };
-        if ret < 0 { return Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int }); }
-        Ok(())
+        if ret < 0 { return Result.Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int }); }
+        Result.Ok(())
     }
 
     public fn unregister_files(&mut self) -> Result<(), LinuxIoDriverError> {
@@ -1000,8 +1000,8 @@ implement IoUringDriver {
                 0, 0, 0, 0,
             )
         };
-        if ret < 0 { return Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int }); }
-        Ok(())
+        if ret < 0 { return Result.Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int }); }
+        Result.Ok(())
     }
 
     /// Register a provided-buffer ring of `entries` buffers under the
@@ -1026,8 +1026,8 @@ implement IoUringDriver {
                 0, 0,
             )
         };
-        if ret < 0 { return Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int }); }
-        Ok(())
+        if ret < 0 { return Result.Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int }); }
+        Result.Ok(())
     }
 
     public fn unregister_pbuf_ring(&mut self, group_id: UInt16) -> Result<(), LinuxIoDriverError> {
@@ -1041,8 +1041,8 @@ implement IoUringDriver {
                 0, 0,
             )
         };
-        if ret < 0 { return Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int }); }
-        Ok(())
+        if ret < 0 { return Result.Err(LinuxIoDriverError.RegisterFailed { errno: -ret as Int }); }
+        Result.Ok(())
     }
 
     /// Prepare a timeout operation.
@@ -1060,7 +1060,7 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
-        Ok(())
+        Result.Ok(())
     }
 
     /// Clean up resources.
@@ -1131,7 +1131,7 @@ implement EpollDriver {
         };
 
         if epfd < 0 {
-            return Err(LinuxIoDriverError.EpollFailed { code: -epfd as Int });
+            return Result.Err(LinuxIoDriverError.EpollFailed { code: -epfd as Int });
         }
 
         // Create eventfd for wake notifications
@@ -1139,7 +1139,7 @@ implement EpollDriver {
         let wake_fd = unsafe { syscall_raw(SYS_EVENTFD2, 0, 0, 0, 0, 0, 0) };
         if wake_fd < 0 {
             unsafe { syscall_raw(SYS_CLOSE, epfd, 0, 0, 0, 0, 0) };
-            return Err(LinuxIoDriverError.EpollFailed { code: -wake_fd as Int });
+            return Result.Err(LinuxIoDriverError.EpollFailed { code: -wake_fd as Int });
         }
 
         // Register wake_fd with epoll
@@ -1164,10 +1164,10 @@ implement EpollDriver {
                 syscall_raw(SYS_CLOSE, wake_fd, 0, 0, 0, 0, 0);
                 syscall_raw(SYS_CLOSE, epfd, 0, 0, 0, 0, 0);
             }
-            return Err(LinuxIoDriverError.EpollFailed { code: -result as Int });
+            return Result.Err(LinuxIoDriverError.EpollFailed { code: -result as Int });
         }
 
-        Ok(EpollDriver {
+        Result.Ok(EpollDriver {
             epfd: epfd,
             wake_fd: wake_fd,
             pending_ops: Map.new(),
@@ -1193,9 +1193,9 @@ implement EpollDriver {
         };
 
         if result < 0 {
-            Err(LinuxIoDriverError.EpollFailed { code: -result as Int })
+            Result.Err(LinuxIoDriverError.EpollFailed { code: -result as Int })
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -1213,9 +1213,9 @@ implement EpollDriver {
         };
 
         if result < 0 {
-            Err(LinuxIoDriverError.EpollFailed { code: -result as Int })
+            Result.Err(LinuxIoDriverError.EpollFailed { code: -result as Int })
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -1234,11 +1234,11 @@ implement EpollDriver {
         };
 
         if result < 0 && -result != EINTR {
-            Err(LinuxIoDriverError.EpollFailed { code: -result as Int })
+            Result.Err(LinuxIoDriverError.EpollFailed { code: -result as Int })
         } else if result < 0 {
-            Ok(0)  // Interrupted, no events
+            Result.Ok(0)  // Interrupted, no events
         } else {
-            Ok(result)
+            Result.Ok(result)
         }
     }
 
@@ -1255,9 +1255,9 @@ implement EpollDriver {
             )
         };
         if result < 0 {
-            Err(LinuxIoDriverError.EpollFailed { code: -result as Int })
+            Result.Err(LinuxIoDriverError.EpollFailed { code: -result as Int })
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -1299,15 +1299,15 @@ public fn create_io_driver() -> Result<LinuxIoDriver, LinuxIoDriverError> {
     // Try io_uring first
     if is_io_uring_available() {
         match IoUringDriver.new(256) {
-            Ok(driver) => return Ok(LinuxIoDriver.Uring(driver)),
-            Err(_) => {}  // Fall through to epoll
+            Result.Ok(driver) => return Result.Ok(LinuxIoDriver.Uring(driver)),
+            Result.Err(_) => {}  // Fall through to epoll
         }
     }
 
     // Fall back to epoll
     match EpollDriver.new() {
-        Ok(driver) => Ok(LinuxIoDriver.Epoll(driver)),
-        Err(e) => Err(e),
+        Result.Ok(driver) => Result.Ok(LinuxIoDriver.Epoll(driver)),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -1422,16 +1422,16 @@ implement IOEngine for IoUringDriver {
                 CompletionOp.Nop => {
                     // Submit a NOP
                     match self.get_sqe() {
-                        Ok(sqe) => {
+                        Result.Ok(sqe) => {
                             unsafe {
                                 (*sqe).opcode = IORING_OP_NOP;
                                 (*sqe).flags = 0;
                                 (*sqe).user_data = user_data;
                             }
                             self.submit_sqe();
-                            Ok(())
+                            Result.Ok(())
                         }
-                        Err(e) => Err(e),
+                        Result.Err(e) => Result.Err(e),
                     }
                 }
                 CompletionOp.ReadV { fd, iovecs } => {
@@ -1441,25 +1441,25 @@ implement IOEngine for IoUringDriver {
                     self.prep_writev(fd.as_raw() as Int, iovecs, user_data)
                 }
                 _ => {
-                    Err(LinuxIoDriverError.Unsupported)
+                    Result.Err(LinuxIoDriverError.Unsupported)
                 }
             };
 
             match result {
-                Ok(()) => submitted += 1,
-                Err(LinuxIoDriverError.QueueFull) => break,  // Stop on queue full
-                Err(_) => {}  // Skip failed ops, continue with rest
+                Result.Ok(()) => submitted += 1,
+                Result.Err(LinuxIoDriverError.QueueFull) => break,  // Stop on queue full
+                Result.Err(_) => {}  // Skip failed ops, continue with rest
             }
         }
 
         // Flush to kernel
         match self.submit() {
-            Ok(_) => Ok(submitted),
-            Err(e) => {
+            Result.Ok(_) => Result.Ok(submitted),
+            Result.Err(e) => {
                 if submitted > 0 {
-                    Ok(submitted)  // Some submitted before error
+                    Result.Ok(submitted)  // Some submitted before error
                 } else {
-                    Err(convert_error(e))
+                    Result.Err(convert_error(e))
                 }
             }
         }
@@ -1472,17 +1472,17 @@ implement IOEngine for IoUringDriver {
         timeout: Maybe<Duration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         let timeout_ns = match timeout {
-            Some(d) => d.as_nanos(),
-            None => 0,  // No timeout
+            Maybe.Some(d) => d.as_nanos(),
+            Maybe.None => 0,  // No timeout
         };
 
         match self.wait(min_complete, timeout_ns) {
-            Ok(_) => {
+            Result.Ok(_) => {
                 // Reap completions into results buffer
                 let mut count = 0;
                 while count < results.len() as Int {
                     match self.peek_cqe() {
-                        Some(cqe) => {
+                        Maybe.Some(cqe) => {
                             results[count] = CompletionResult {
                                 user_data: cqe.user_data,
                                 result: cqe.res,
@@ -1491,12 +1491,12 @@ implement IOEngine for IoUringDriver {
                             self.consume_cqe();
                             count += 1;
                         }
-                        None => break,
+                        Maybe.None => break,
                     }
                 }
-                Ok(count)
+                Result.Ok(count)
             }
-            Err(e) => Err(convert_error(e)),
+            Result.Err(e) => Result.Err(convert_error(e)),
         }
     }
 
@@ -1516,7 +1516,7 @@ implement IOEngine for IoUringDriver {
 
     fn shutdown(&mut self) -> Result<(), EngineIoError> {
         self.close();
-        Ok(())
+        Result.Ok(())
     }
 
     pure fn is_open(&self) -> Bool {
@@ -1547,7 +1547,7 @@ implement IOEngine for EpollDriver {
                         len: buf.len(),
                         offset: offset,
                     });
-                    Ok(())
+                    Result.Ok(())
                 }
                 CompletionOp.Write { fd, buf, offset } => {
                     self.add(fd.as_raw() as Int, EPOLLOUT | EPOLLET | EPOLLONESHOT, user_data)?;
@@ -1558,7 +1558,7 @@ implement IOEngine for EpollDriver {
                         len: buf.len(),
                         offset: offset,
                     });
-                    Ok(())
+                    Result.Ok(())
                 }
                 CompletionOp.Accept { fd, .. } => {
                     self.add(fd.as_raw() as Int, EPOLLIN | EPOLLET | EPOLLONESHOT, user_data)?;
@@ -1569,7 +1569,7 @@ implement IOEngine for EpollDriver {
                         len: 0,
                         offset: 0,
                     });
-                    Ok(())
+                    Result.Ok(())
                 }
                 CompletionOp.Connect { fd, .. } => {
                     self.add(fd.as_raw() as Int, EPOLLOUT | EPOLLET | EPOLLONESHOT, user_data)?;
@@ -1580,7 +1580,7 @@ implement IOEngine for EpollDriver {
                         len: 0,
                         offset: 0,
                     });
-                    Ok(())
+                    Result.Ok(())
                 }
                 CompletionOp.Recv { fd, buf, .. } => {
                     self.add(fd.as_raw() as Int, EPOLLIN | EPOLLET | EPOLLONESHOT, user_data)?;
@@ -1591,7 +1591,7 @@ implement IOEngine for EpollDriver {
                         len: buf.len(),
                         offset: 0,
                     });
-                    Ok(())
+                    Result.Ok(())
                 }
                 CompletionOp.Send { fd, buf, .. } => {
                     self.add(fd.as_raw() as Int, EPOLLOUT | EPOLLET | EPOLLONESHOT, user_data)?;
@@ -1602,26 +1602,26 @@ implement IOEngine for EpollDriver {
                         len: buf.len(),
                         offset: 0,
                     });
-                    Ok(())
+                    Result.Ok(())
                 }
                 CompletionOp.Close { fd } => {
                     let _ = self.remove(fd.as_raw() as Int);
                     let close_result = unsafe {
                         syscall_raw(SYS_CLOSE, fd.as_raw() as Int, 0, 0, 0, 0, 0)
                     };
-                    Ok(())
+                    Result.Ok(())
                 }
-                CompletionOp.Nop => Ok(()),
-                _ => Err(LinuxIoDriverError.Unsupported),
+                CompletionOp.Nop => Result.Ok(()),
+                _ => Result.Err(LinuxIoDriverError.Unsupported),
             };
 
             match result {
-                Ok(()) => submitted += 1,
-                Err(_) => {}
+                Result.Ok(()) => submitted += 1,
+                Result.Err(_) => {}
             }
         }
 
-        Ok(submitted)
+        Result.Ok(submitted)
     }
 
     fn wait(
@@ -1631,8 +1631,8 @@ implement IOEngine for EpollDriver {
         timeout: Maybe<Duration>,
     ) -> Result<Int{>= 0}, EngineIoError> {
         let timeout_ms = match timeout {
-            Some(d) => d.as_millis() as Int,
-            None => -1,
+            Maybe.Some(d) => d.as_millis() as Int,
+            Maybe.None => -1,
         };
 
         let actual_timeout = if min_complete == 0 { 0 } else { timeout_ms };
@@ -1641,7 +1641,7 @@ implement IOEngine for EpollDriver {
         let mut epoll_events: [EpollEvent; 64] = [@zero<EpollEvent>(); 64];
 
         match self.wait(&mut epoll_events, actual_timeout) {
-            Ok(count) => {
+            Result.Ok(count) => {
                 let result_count = count.min(results.len() as Int);
                 let mut filled = 0;
 
@@ -1651,7 +1651,7 @@ implement IOEngine for EpollDriver {
 
                     // Look up the pending operation for this fd
                     match self.pending_ops.remove(&user_data) {
-                        Some(pending) => {
+                        Maybe.Some(pending) => {
                             // Perform the actual I/O now that fd is ready
                             let io_result = match pending.op_type {
                                 OpType.Read => {
@@ -1674,15 +1674,15 @@ implement IOEngine for EpollDriver {
                             };
                             filled += 1;
                         }
-                        None => {
+                        Maybe.None => {
                             // Wake event or unknown — skip
                         }
                     }
                 }
 
-                Ok(filled)
+                Result.Ok(filled)
             }
-            Err(e) => Err(convert_error(e)),
+            Result.Err(e) => Result.Err(convert_error(e)),
         }
     }
 
@@ -1695,12 +1695,12 @@ implement IOEngine for EpollDriver {
     }
 
     fn flush(&mut self) -> Result<(), EngineIoError> {
-        Ok(())  // Epoll doesn't batch — registrations are immediate
+        Result.Ok(())  // Epoll doesn't batch — registrations are immediate
     }
 
     fn shutdown(&mut self) -> Result<(), EngineIoError> {
         self.close();
-        Ok(())
+        Result.Ok(())
     }
 
     pure fn is_open(&self) -> Bool {

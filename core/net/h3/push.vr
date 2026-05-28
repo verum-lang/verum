@@ -136,7 +136,7 @@ implement PushEmitter {
             limit_inclusive:    0_u64,
             next_push_id:       0_u64,
             cancelled:          [],
-            client_goneaway_at: None,
+            client_goneaway_at: Maybe.None,
         }
     }
 
@@ -165,7 +165,7 @@ implement PushEmitter {
     /// Client sent GOAWAY on the control stream. Pushes at or above
     /// `max_push_id` MUST NOT be initiated (RFC 9114 §5.2).
     public fn mark_client_goneaway(&mut self, max_push_id: UInt64) {
-        self.client_goneaway_at = Some(max_push_id);
+        self.client_goneaway_at = Maybe.Some(max_push_id);
     }
 
     /// True iff `push_id` was cancelled by the client.
@@ -184,23 +184,23 @@ implement PushEmitter {
     public fn reserve(&mut self, encoded_headers: List<Byte>) -> Result<PushReservation, PushError> {
         // Budget check.
         if self.next_push_id > self.limit_inclusive {
-            return Err(PushError.BudgetExhausted {
+            return Result.Err(PushError.BudgetExhausted {
                 requested: self.next_push_id,
                 limit:     self.limit_inclusive,
             });
         }
         // GOAWAY check.
         match &self.client_goneaway_at {
-            Some(cap) => {
+            Maybe.Some(cap) => {
                 if self.next_push_id >= *cap {
-                    return Err(PushError.ClientGoneAway);
+                    return Result.Err(PushError.ClientGoneAway);
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
         let push_id = self.next_push_id;
         self.next_push_id = push_id + 1_u64;
-        Ok(PushReservation {
+        Result.Ok(PushReservation {
             push_id: push_id,
             promise: H3Frame.PushPromiseFrame {
                 push_id:         push_id,

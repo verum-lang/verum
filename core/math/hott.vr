@@ -768,7 +768,7 @@ public theorem prop_has_decidable_eq<A>(h: IsProp<A>, x: A, y: A)
     -> Result<HottPath<A>(x, y), fn(HottPath<A>(x, y)) -> Void>
 proof {
     // A proposition always has a path between any two elements.
-    exact Ok(h.all_paths(x, y));
+    exact Result.Ok(h.all_paths(x, y));
 };
 
 // =============================================================================

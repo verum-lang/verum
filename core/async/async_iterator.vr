@@ -31,8 +31,8 @@
 // let mut it = stream.into_async_iter();
 // loop {
 //  match it.next().await {
-//  Some(item) => { process(item); }
-//  None => { break; }
+//  Maybe.Some(item) => { process(item); }
+//  Maybe.None => { break; }
 //  }
 // }
 //
@@ -80,30 +80,30 @@ mount .stream.{Stream, StreamNext};
 //
 
 // Implementors provide `next`, which returns a Future that resolves to
-// `Some(item)` for each available value or `None` when exhausted. The
+// `Maybe.Some(item)` for each available value or `Maybe.None` when exhausted. The
 // compiler's for-await-loop lowering invokes this method repeatedly,
-// awaiting each call, until it observes None.
+// awaiting each call, until it observes Maybe.None.
 //
 
 // Implementors may optionally provide `size_hint` for pre-allocation. The
-// default returns `(0, None)` — unknown.
+// default returns `(0, Maybe.None)` — unknown.
 
 public type AsyncIterator is protocol {
     /// The type of items produced by this iterator.
     type Item;
 
-    /// Fetch the next item. Returns `Some(item)` if one is available,
-    /// `None` when the iterator is exhausted.
+    /// Fetch the next item. Returns `Maybe.Some(item)` if one is available,
+    /// `Maybe.None` when the iterator is exhausted.
     ///
 
-    /// After returning `None`, further calls are allowed but will continue
-    /// returning `None` — the iterator is not restarted (matches the
+    /// After returning `Maybe.None`, further calls are allowed but will continue
+    /// returning `Maybe.None` — the iterator is not restarted (matches the
     /// "fused" behavior of std.iter.Fuse / futures.stream.Fuse).
     async fn next(&mut self) -> Maybe<Self.Item>;
 
     /// Bounds on the remaining length of the iterator. Returns
     /// `(lower_bound, optional_upper_bound)`. Implementors MAY override
-    /// for better pre-allocation; default returns `(0, None)`.
+    /// for better pre-allocation; default returns `(0, Maybe.None)`.
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         (0, Maybe.None)
     }

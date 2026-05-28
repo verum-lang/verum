@@ -5,7 +5,7 @@
 //  sqlite3changeset_invert / _concat / _strip
 //
 
-// Pure operations on `ChangeSet`. None of these touch any storage —
+// Pure operations on `ChangeSet`. Maybe.None of these touch any storage —
 // they're tree rewrites that mirror upstream SQLite's combinator API.
 // =============================================================================
 

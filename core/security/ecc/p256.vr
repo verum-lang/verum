@@ -287,8 +287,8 @@ implement P256 {
     }
 
     /// Verify an ECDSA-P256 signature over `message`. Returns
-    /// `Ok(())` on valid, `Err(VerificationFailed)` on clean
-    /// reject, `Err(InvalidSignature)` on malformed input
+    /// `Result.Ok(())` on valid, `Result.Err(VerificationFailed)` on clean
+    /// reject, `Result.Err(InvalidSignature)` on malformed input
     /// (r, s out of range).
     ///
 

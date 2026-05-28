@@ -4,7 +4,7 @@ module sys.linux.auxv;
 // sys/linux/auxv.vr - Auxiliary Vector Access (no libc)
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None
+// Dependencies: Maybe.None
 // Platform: Linux (all architectures)
 //
 

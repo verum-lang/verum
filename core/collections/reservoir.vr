@@ -35,7 +35,7 @@
 
 // ```
 // let mut res: Reservoir<TraceId> = Reservoir.new(1000);
-// while let Some(trace) = stream.next() {
+// while let Maybe.Some(trace) = stream.next() {
 //  res.offer(trace);
 // }
 // let sample: List<TraceId> = res.take();

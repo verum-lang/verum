@@ -110,7 +110,7 @@ public fn parse(value: &[Byte]) -> Result<NameConstraints, DerError> {
         let t = seq.peek_tag()?;
         let is_ctx = match t.class_ { TagClass.ContextSpecific => true, _ => false };
         if !is_ctx {
-            return Err(DerError {
+            return Result.Err(DerError {
                 kind: DerErrorKind.UnexpectedTag,
                 position: 0,
                 message: "NameConstraints entry not context-tagged",
@@ -148,7 +148,7 @@ public fn parse(value: &[Byte]) -> Result<NameConstraints, DerError> {
     }
     seq.expect_end()?;
     r.expect_end()?;
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn parse_subtree(r: &mut DerReader) -> Result<GeneralSubtree, DerError> {
@@ -161,7 +161,7 @@ fn parse_subtree(r: &mut DerReader) -> Result<GeneralSubtree, DerError> {
         let t = s.peek_tag()?;
         let is_ctx = match t.class_ { TagClass.ContextSpecific => true, _ => false };
         if !is_ctx {
-            return Err(DerError {
+            return Result.Err(DerError {
                 kind: DerErrorKind.MalformedDer,
                 position: 0,
                 message: "stray element in GeneralSubtree",
@@ -172,20 +172,20 @@ fn parse_subtree(r: &mut DerReader) -> Result<GeneralSubtree, DerError> {
             let _ = s.read_tag_length()?;
             let bytes = s.take_bytes(len)?;
             if bytes.len() != 1 || bytes[0] != 0_u8 {
-                return Err(DerError {
+                return Result.Err(DerError {
                     kind: DerErrorKind.MalformedDer,
                     position: 0,
                     message: "GeneralSubtree.minimum must be 0",
                 });
             }
         } else if t.number == 1_u32 {
-            return Err(DerError {
+            return Result.Err(DerError {
                 kind: DerErrorKind.MalformedDer,
                 position: 0,
                 message: "GeneralSubtree.maximum MUST NOT be present",
             });
         } else {
-            return Err(DerError {
+            return Result.Err(DerError {
                 kind: DerErrorKind.UnexpectedTag,
                 position: 0,
                 message: "unexpected GeneralSubtree element",
@@ -193,7 +193,7 @@ fn parse_subtree(r: &mut DerReader) -> Result<GeneralSubtree, DerError> {
         }
     }
     s.expect_end()?;
-    Ok(GeneralSubtree { base: base })
+    Result.Ok(GeneralSubtree { base: base })
 }
 
 // =============================================================================

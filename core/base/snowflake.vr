@@ -130,9 +130,9 @@ implement Snowflake {
     /// Returns `WorkerIdOutOfRange` for worker_id > 1023.
     public fn new(epoch_ms: UInt64, worker_id: UInt64) -> Result<Snowflake, SnowflakeError> {
         if worker_id > MAX_WORKER {
-            return Err(SnowflakeError.WorkerIdOutOfRange(worker_id));
+            return Result.Err(SnowflakeError.WorkerIdOutOfRange(worker_id));
         }
-        Ok(Snowflake {
+        Result.Ok(Snowflake {
             epoch_ms:   epoch_ms,
             worker_id:  worker_id,
             last_ts_ms: 0_u64,
@@ -161,10 +161,10 @@ implement Snowflake {
         let mut now_ms = current_unix_ms();
 
         if now_ms < self.epoch_ms {
-            return Err(SnowflakeError.ClockBeforeEpoch(self.epoch_ms - now_ms));
+            return Result.Err(SnowflakeError.ClockBeforeEpoch(self.epoch_ms - now_ms));
         }
         if now_ms < self.last_ts_ms {
-            return Err(SnowflakeError.ClockRegressed(self.last_ts_ms - now_ms));
+            return Result.Err(SnowflakeError.ClockRegressed(self.last_ts_ms - now_ms));
         }
 
         if now_ms == self.last_ts_ms {
@@ -182,7 +182,7 @@ implement Snowflake {
         let id = (ts_offset << TIMESTAMP_SHIFT)
                | (self.worker_id << WORKER_SHIFT)
                | self.sequence;
-        Ok(id)
+        Result.Ok(id)
     }
 
     /// Worker ID bound to this generator.

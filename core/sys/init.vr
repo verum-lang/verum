@@ -140,8 +140,8 @@ implement Eq for InitError {
 /// # Returns
 ///
 
-/// * `Ok(())` - Runtime initialized successfully
-/// * `Err(InitError)` - Initialization failed
+/// * `Result.Ok(())` - Runtime initialized successfully
+/// * `Result.Err(InitError)` - Initialization failed
 ///
 
 /// # Example
@@ -151,11 +151,11 @@ implement Eq for InitError {
 /// // Called automatically by _start
 /// fn _start() {
 ///  match verum_init() {
-///  Ok(()) => {
+///  Result.Ok(()) => {
 ///  let exit_code = user_main();
 ///  exit(exit_code);
 ///  }
-///  Err(e) => {
+///  Result.Err(e) => {
 ///  // Emergency write to stderr
 ///  write_stderr(e.message());
 ///  exit(1);
@@ -166,7 +166,7 @@ implement Eq for InitError {
 public fn verum_init() -> Result<(), InitError> {
     unsafe {
         if INIT_FULLY_INITIALIZED {
-            return Err(InitError.AlreadyInitialized);
+            return Result.Err(InitError.AlreadyInitialized);
         }
     }
 
@@ -187,7 +187,7 @@ public fn verum_init() -> Result<(), InitError> {
         INIT_FULLY_INITIALIZED = true;
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 /// Shutdown the V-LLSI runtime.
@@ -224,17 +224,17 @@ public fn is_initialized() -> Bool {
 fn init_tls() -> Result<(), InitError> {
     unsafe {
         if INIT_TLS_INITIALIZED {
-            return Ok(());
+            return Result.Ok(());
         }
     }
 
     match init_runtime() {
-        Ok(()) => {
+        Result.Ok(()) => {
             unsafe { INIT_TLS_INITIALIZED = true; }
-            Ok(())
+            Result.Ok(())
         }
-        Err(e) => {
-            Err(InitError.TlsFailed { reason: e.message })
+        Result.Err(e) => {
+            Result.Err(InitError.TlsFailed { reason: e.message })
         }
     }
 }
@@ -255,17 +255,17 @@ fn shutdown_tls() {
 fn init_context_system() -> Result<(), InitError> {
     unsafe {
         if INIT_CONTEXT_INITIALIZED {
-            return Ok(());
+            return Result.Ok(());
         }
     }
 
     // Context system is part of TLS, just verify it's accessible
     if !is_runtime_initialized() {
-        return Err(InitError.ContextFailed { reason: "TLS not initialized" });
+        return Result.Err(InitError.ContextFailed { reason: "TLS not initialized" });
     }
 
     unsafe { INIT_CONTEXT_INITIALIZED = true; }
-    Ok(())
+    Result.Ok(())
 }
 
 fn shutdown_context_system() {
@@ -282,7 +282,7 @@ fn shutdown_context_system() {
 fn init_allocator() -> Result<(), InitError> {
     unsafe {
         if INIT_ALLOCATOR_INITIALIZED {
-            return Ok(());
+            return Result.Ok(());
         }
     }
 
@@ -303,7 +303,7 @@ fn init_allocator() -> Result<(), InitError> {
         if heap_result.is_ok() {
             unsafe { INIT_ALLOCATOR_INITIALIZED = true; }
         } else {
-            return Err(InitError.AllocatorFailed { reason: "Heap init failed" });
+            return Result.Err(InitError.AllocatorFailed { reason: "Heap init failed" });
         }
     }
 
@@ -313,7 +313,7 @@ fn init_allocator() -> Result<(), InitError> {
         unsafe { INIT_ALLOCATOR_INITIALIZED = true; }
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 fn shutdown_allocator() {
@@ -386,12 +386,12 @@ public type SysInitPanicInfo is {
 fn init_panic_handler() -> Result<(), InitError> {
     unsafe {
         if INIT_PANIC_HANDLER_INITIALIZED {
-            return Ok(());
+            return Result.Ok(());
         }
         PANIC_HANDLER = default_panic_handler;
         INIT_PANIC_HANDLER_INITIALIZED = true;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn shutdown_panic_handler() {
@@ -474,7 +474,7 @@ public fn init_thread() -> Result<(), InitError> {
     // Step 3: Initialize thread-local allocator heap
     init_thread_allocator()?;
 
-    Ok(())
+    Result.Ok(())
 }
 
 /// Clean up runtime for exiting thread.
@@ -491,9 +491,9 @@ fn init_thread_context() -> Result<(), InitError> {
     // Context slots are already set up via TLS
     // Just verify they're accessible
     if !is_runtime_initialized() {
-        return Err(InitError.ContextFailed { reason: "TLS not set up for thread" });
+        return Result.Err(InitError.ContextFailed { reason: "TLS not set up for thread" });
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn cleanup_thread_context() {
@@ -502,7 +502,7 @@ fn cleanup_thread_context() {
 
 fn init_thread_allocator() -> Result<(), InitError> {
     // Thread-local heap is initialized lazily on first allocation
-    Ok(())
+    Result.Ok(())
 }
 
 fn cleanup_thread_allocator() {
@@ -572,8 +572,8 @@ module linux_entry {
 
         // Initialize runtime
         match super.verum_init() {
-            Ok(()) => {}
-            Err(_) => {
+            Result.Ok(()) => {}
+            Result.Err(_) => {
                 // Emergency exit on init failure
                 sys.linux.syscall.exit_group(1);
                 unreachable()
@@ -608,8 +608,8 @@ module darwin_entry {
 
         // Initialize runtime
         match super.verum_init() {
-            Ok(()) => {}
-            Err(_) => {
+            Result.Ok(()) => {}
+            Result.Err(_) => {
                 sys.darwin.libsystem.exit(1);
                 unreachable()
             }
@@ -640,8 +640,8 @@ module windows_entry {
     public fn mainCRTStartup() {
         // Initialize runtime
         match super.verum_init() {
-            Ok(()) => {}
-            Err(_) => {
+            Result.Ok(()) => {}
+            Result.Err(_) => {
                 sys.windows.ExitProcess(1);
             }
         }
@@ -664,8 +664,8 @@ module embedded_entry {
     public fn verum_embedded_init() {
         // Minimal initialization for embedded
         match super.verum_init() {
-            Ok(()) => {}
-            Err(_) => {
+            Result.Ok(()) => {}
+            Result.Err(_) => {
                 // Hang on error (watchdog will reset)
                 loop { spin_hint(); }
             }

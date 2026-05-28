@@ -2,7 +2,7 @@
 // core/intrinsics/memory.vr - Memory Operation Intrinsics
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (compiler-provided)
+// Dependencies: Maybe.None (compiler-provided)
 //
 
 // This module provides memory operation intrinsics that map directly to

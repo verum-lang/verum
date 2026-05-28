@@ -64,9 +64,9 @@ implement RawTcpStream {
     public fn connect(host: Text, port: Int) -> Maybe<RawTcpStream> {
         let fd = __tcp_connect_raw(host, port);
         if fd < 0 {
-            None
+            Maybe.None
         } else {
-            Some(RawTcpStream { fd: fd })
+            Maybe.Some(RawTcpStream { fd: fd })
         }
     }
 
@@ -96,9 +96,9 @@ implement RawTcpListener {
     public fn bind(port: Int) -> Maybe<RawTcpListener> {
         let fd = __tcp_listen_raw(port);
         if fd < 0 {
-            None
+            Maybe.None
         } else {
-            Some(RawTcpListener { fd: fd })
+            Maybe.Some(RawTcpListener { fd: fd })
         }
     }
 
@@ -106,9 +106,9 @@ implement RawTcpListener {
     public fn accept(&self) -> Maybe<RawTcpStream> {
         let client_fd = __tcp_accept_raw(self.fd);
         if client_fd < 0 {
-            None
+            Maybe.None
         } else {
-            Some(RawTcpStream { fd: client_fd })
+            Maybe.Some(RawTcpStream { fd: client_fd })
         }
     }
 
@@ -137,9 +137,9 @@ implement RawUdpSocket {
     public fn bind(port: Int) -> Maybe<RawUdpSocket> {
         let fd = __udp_bind_raw(port);
         if fd < 0 {
-            None
+            Maybe.None
         } else {
-            Some(RawUdpSocket { fd: fd })
+            Maybe.Some(RawUdpSocket { fd: fd })
         }
     }
 

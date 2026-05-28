@@ -53,22 +53,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "OIDC discovery + JWKS cache + token validation; coordinator over jwt + http",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.oidc;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map, Set};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount security.jwt.{
@@ -183,10 +183,10 @@ public async fn discover<C: HttpClient>(
     let resp = client.send(&req).await
         .map_err(|e| DiscoveryError.NetworkError(e))?;
     if !resp.status.is_success() {
-        return Err(DiscoveryError.InvalidStatus(resp.status));
+        return Result.Err(DiscoveryError.InvalidStatus(resp.status));
     }
     if resp.body.len() > MAX_DISCOVERY_BYTES {
-        return Err(DiscoveryError.TooLarge { size: resp.body.len(), limit: MAX_DISCOVERY_BYTES });
+        return Result.Err(DiscoveryError.TooLarge { size: resp.body.len(), limit: MAX_DISCOVERY_BYTES });
     }
     let json_value = encoding.json.decode(&resp.body)
         .map_err(|e| DiscoveryError.InvalidJson(f"{e}"))?;
@@ -216,7 +216,7 @@ fn parse_provider_config(value: &JsonValue, expected_issuer: &Text) -> Result<Oi
     let issuer = obj.get("issuer").and_then(|v| v.as_string())
         .ok_or_else(|| DiscoveryError.MissingField("issuer".to_text()))?;
     if issuer != *expected_issuer {
-        return Err(DiscoveryError.IssuerMismatch {
+        return Result.Err(DiscoveryError.IssuerMismatch {
             configured: expected_issuer.clone(),
             document:   issuer,
         });
@@ -229,12 +229,12 @@ fn parse_provider_config(value: &JsonValue, expected_issuer: &Text) -> Result<Oi
         obj.get("id_token_signing_alg_values_supported"),
     );
     if !contains_supported_alg(&id_token_signing_alg_values_supported) {
-        return Err(DiscoveryError.UnsupportedAlgorithms(id_token_signing_alg_values_supported));
+        return Result.Err(DiscoveryError.UnsupportedAlgorithms(id_token_signing_alg_values_supported));
     }
     let response_types_supported = parse_string_array(
         obj.get("response_types_supported"),
     );
-    Ok(OidcProviderConfig {
+    Result.Ok(OidcProviderConfig {
         issuer,
         jwks_uri,
         authorization_endpoint,
@@ -247,19 +247,19 @@ fn parse_provider_config(value: &JsonValue, expected_issuer: &Text) -> Result<Oi
 
 fn parse_string_array(opt: Maybe<&JsonValue>) -> List<Text> {
     match opt {
-        Some(v) => match v.as_array() {
-            Some(arr) => {
+        Maybe.Some(v) => match v.as_array() {
+            Maybe.Some(arr) => {
                 let mut out: List<Text> = List.new();
                 let mut i: Int = 0;
                 while i < arr.len() {
-                    if let Some(s) = arr[i].as_string() { out.push(s); }
+                    if let Maybe.Some(s) = arr[i].as_string() { out.push(s); }
                     i = i + 1;
                 }
                 out
             }
-            None => List.new(),
+            Maybe.None => List.new(),
         },
-        None => List.new(),
+        Maybe.None => List.new(),
     }
 }
 
@@ -301,8 +301,8 @@ public type Jwks is {
 
 public fn jwks_lookup<'a>(jwks: &'a Jwks, kid: &Text) -> Maybe<&'a JwtKey> {
     match jwks.by_kid.get(kid) {
-        Some(idx) => Some(&jwks.keys[*idx]),
-        None      => None,
+        Maybe.Some(idx) => Maybe.Some(&jwks.keys[*idx]),
+        Maybe.None      => Maybe.None,
     }
 }
 
@@ -345,10 +345,10 @@ public async fn fetch_jwks<C: HttpClient>(
     let resp = client.send(&req).await
         .map_err(|e| JwksError.NetworkError(e))?;
     if !resp.status.is_success() {
-        return Err(JwksError.InvalidStatus(resp.status));
+        return Result.Err(JwksError.InvalidStatus(resp.status));
     }
     if resp.body.len() > MAX_JWKS_BYTES {
-        return Err(JwksError.TooLarge { size: resp.body.len(), limit: MAX_JWKS_BYTES });
+        return Result.Err(JwksError.TooLarge { size: resp.body.len(), limit: MAX_JWKS_BYTES });
     }
     let value = encoding.json.decode(&resp.body)
         .map_err(|e| JwksError.InvalidJson(f"{e}"))?;
@@ -368,13 +368,13 @@ fn parse_jwks(value: &JsonValue) -> Result<Jwks, JwksError> {
             .ok_or_else(|| JwksError.InvalidKey { index: i, reason: "not an object".to_text() })?;
         let key = parse_jwk(&k_obj)
             .map_err(|reason| JwksError.InvalidKey { index: i, reason })?;
-        if let Some(kid) = jwt_key_kid(&key) {
+        if let Maybe.Some(kid) = jwt_key_kid(&key) {
             by_kid.insert(kid, keys.len());
         }
         keys.push(key);
         i = i + 1;
     }
-    Ok(Jwks { keys, by_kid })
+    Result.Ok(Jwks { keys, by_kid })
 }
 
 /// Parse a single JWK into a `JwtKey`. Delegates to
@@ -430,10 +430,10 @@ public fn jwks_cache_new<C: HttpClient>(
         jwks_uri,
         ttl_seconds,
         inner: RwLock.new(JwksCacheInner {
-            jwks: None,
+            jwks: Maybe.None,
             expires_at: 0,
             last_refresh_ok_at: 0,
-            last_refresh_err: None,
+            last_refresh_err: Maybe.None,
         }),
     }
 }
@@ -445,10 +445,10 @@ public async fn jwks_cache_get_key_for_kid<C: HttpClient>(
     let now = epoch_seconds();
     {
         let inner = cache.inner.read().await;
-        if let Some(jwks) = &inner.jwks {
+        if let Maybe.Some(jwks) = &inner.jwks {
             if now < inner.expires_at {
-                if let Some(k) = jwks_lookup(jwks, kid) {
-                    return Ok(k.clone());
+                if let Maybe.Some(k) = jwks_lookup(jwks, kid) {
+                    return Result.Ok(k.clone());
                 }
             }
         }
@@ -457,14 +457,14 @@ public async fn jwks_cache_get_key_for_kid<C: HttpClient>(
     let fresh = fetch_jwks(&cache.client, &cache.jwks_uri).await?;
     {
         let mut inner = cache.inner.write().await;
-        inner.jwks = Some(fresh.clone());
+        inner.jwks = Maybe.Some(fresh.clone());
         inner.expires_at = now + cache.ttl_seconds;
         inner.last_refresh_ok_at = now;
-        inner.last_refresh_err = None;
+        inner.last_refresh_err = Maybe.None;
     }
     match jwks_lookup(&fresh, kid) {
-        Some(k) => Ok(k.clone()),
-        None    => Err(JwksError.InvalidKey {
+        Maybe.Some(k) => Result.Ok(k.clone()),
+        Maybe.None    => Result.Err(JwksError.InvalidKey {
             index: -1,
             reason: f"kid '{kid}' not found in JWKS even after refresh",
         }),
@@ -477,11 +477,11 @@ public async fn jwks_cache_force_refresh<C: HttpClient>(
     let fresh = fetch_jwks(&cache.client, &cache.jwks_uri).await?;
     let now = epoch_seconds();
     let mut inner = cache.inner.write().await;
-    inner.jwks = Some(fresh);
+    inner.jwks = Maybe.Some(fresh);
     inner.expires_at = now + cache.ttl_seconds;
     inner.last_refresh_ok_at = now;
-    inner.last_refresh_err = None;
-    Ok(())
+    inner.last_refresh_err = Maybe.None;
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -577,7 +577,7 @@ public async fn verify_oidc_token<C: HttpClient>(
     let header = decode_header_only(token)
         .map_err(|e| OidcVerifyError.MalformedToken(f"header decode: {e}"))?;
     if !is_jwt_alg_supported(&header.alg) {
-        return Err(OidcVerifyError.UnsupportedAlgorithm(jwt_alg_to_text(&header.alg)));
+        return Result.Err(OidcVerifyError.UnsupportedAlgorithm(jwt_alg_to_text(&header.alg)));
     }
     let kid = header.kid.ok_or_else(|| OidcVerifyError.MissingKid)?;
 
@@ -597,7 +597,7 @@ public async fn verify_oidc_token<C: HttpClient>(
 
     let now = epoch_seconds();
     enforce_constraints(&payload, opts, now)?;
-    Ok(payload)
+    Result.Ok(payload)
 }
 
 fn enforce_constraints(
@@ -607,54 +607,54 @@ fn enforce_constraints(
 ) -> Result<(), OidcVerifyError> {
     // iss
     match &payload.iss {
-        Some(iss) if iss == &opts.issuer => {}
-        Some(iss) => return Err(OidcVerifyError.IssuerMismatch { expected: opts.issuer.clone(), found: iss.clone() }),
-        None => return Err(OidcVerifyError.IssuerMismatch { expected: opts.issuer.clone(), found: "<missing>".to_text() }),
+        Maybe.Some(iss) if iss == &opts.issuer => {}
+        Maybe.Some(iss) => return Result.Err(OidcVerifyError.IssuerMismatch { expected: opts.issuer.clone(), found: iss.clone() }),
+        Maybe.None => return Result.Err(OidcVerifyError.IssuerMismatch { expected: opts.issuer.clone(), found: "<missing>".to_text() }),
     }
     // aud
     match audience_matches(&payload.aud, &opts.audience) {
         true => {}
-        false => return Err(OidcVerifyError.AudienceMismatch {
+        false => return Result.Err(OidcVerifyError.AudienceMismatch {
             expected: audience_describe(&opts.audience),
             found:    payload.aud.clone(),
         }),
     }
     // exp + leeway
-    if let Some(exp) = payload.exp {
+    if let Maybe.Some(exp) = payload.exp {
         if now > exp + opts.leeway_seconds {
-            return Err(OidcVerifyError.TokenExpired { exp, now });
+            return Result.Err(OidcVerifyError.TokenExpired { exp, now });
         }
     }
     // nbf + leeway
-    if let Some(nbf) = payload.nbf {
+    if let Maybe.Some(nbf) = payload.nbf {
         if now + opts.leeway_seconds < nbf {
-            return Err(OidcVerifyError.TokenNotYetValid { nbf, now });
+            return Result.Err(OidcVerifyError.TokenNotYetValid { nbf, now });
         }
     }
     // max_age
     if opts.max_age_seconds > 0 {
-        if let Some(iat) = payload.iat {
+        if let Maybe.Some(iat) = payload.iat {
             if now - iat > opts.max_age_seconds + opts.leeway_seconds {
-                return Err(OidcVerifyError.TokenTooOld { iat, max_age: opts.max_age_seconds, now });
+                return Result.Err(OidcVerifyError.TokenTooOld { iat, max_age: opts.max_age_seconds, now });
             }
         }
     }
     // required claims
     for (claim, expected) in opts.required_claims.iter() {
         match payload.custom.get(claim).and_then(|v| v.as_string()) {
-            Some(found) => {
+            Maybe.Some(found) => {
                 if found != *expected {
-                    return Err(OidcVerifyError.RequiredClaimMismatch {
+                    return Result.Err(OidcVerifyError.RequiredClaimMismatch {
                         claim: claim.clone(),
                         expected: expected.clone(),
                         found,
                     });
                 }
             }
-            None => return Err(OidcVerifyError.RequiredClaimMissing(claim.clone())),
+            Maybe.None => return Result.Err(OidcVerifyError.RequiredClaimMissing(claim.clone())),
         }
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn audience_describe(opts: &OidcAudience) -> Text {
@@ -741,13 +741,13 @@ public const ISSUER_CIRCLECI:          Text = "https://oidc.circleci.com";
 
 public fn well_known_issuer(name: &Text) -> Maybe<Text> {
     match name.as_str() {
-        "github" | "github-actions" => Some(ISSUER_GITHUB_ACTIONS.to_text()),
-        "gitlab" | "gitlab-ci"      => Some(ISSUER_GITLAB_CI.to_text()),
-        "sigstore"                  => Some(ISSUER_SIGSTORE_PUBLIC.to_text()),
-        "google"                    => Some(ISSUER_GOOGLE.to_text()),
-        "buildkite"                 => Some(ISSUER_BUILDKITE.to_text()),
-        "circleci"                  => Some(ISSUER_CIRCLECI.to_text()),
-        _ => None,
+        "github" | "github-actions" => Maybe.Some(ISSUER_GITHUB_ACTIONS.to_text()),
+        "gitlab" | "gitlab-ci"      => Maybe.Some(ISSUER_GITLAB_CI.to_text()),
+        "sigstore"                  => Maybe.Some(ISSUER_SIGSTORE_PUBLIC.to_text()),
+        "google"                    => Maybe.Some(ISSUER_GOOGLE.to_text()),
+        "buildkite"                 => Maybe.Some(ISSUER_BUILDKITE.to_text()),
+        "circleci"                  => Maybe.Some(ISSUER_CIRCLECI.to_text()),
+        _ => Maybe.None,
     }
 }
 
@@ -774,7 +774,7 @@ public async fn oidc_verifier_new<C: HttpClient>(
 {
     let config = discover(&client, &issuer).await?;
     let cache = jwks_cache_new(client, config.jwks_uri.clone(), DEFAULT_JWKS_TTL_SECONDS);
-    Ok(OidcVerifier {
+    Result.Ok(OidcVerifier {
         config,
         jwks_cache: cache,
         options: verify_options_default(issuer, audience),

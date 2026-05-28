@@ -69,7 +69,7 @@ mount core.*;
 /// let expected = hmac_sha256(&key, &data);
 /// let received: [Byte; 32] = /* from wire */;
 /// if !constant_time_eq(&expected, &received) {
-///  return Err(AuthError.InvalidMac);
+///  return Result.Err(AuthError.InvalidMac);
 /// }
 /// ```
 ///

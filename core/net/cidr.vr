@@ -118,7 +118,7 @@ public fn parse(text: &Text) -> Result<Cidr, CidrError> {
         i = i + 1;
     }
     if slash < 0 {
-        return Err(CidrError.Malformed(Text.from("no '/' in CIDR")));
+        return Result.Err(CidrError.Malformed(Text.from("no '/' in CIDR")));
     }
     let addr_text = slice_text(b, 0, slash);
     let len_text = slice_text(b, slash + 1, b.len());
@@ -130,18 +130,18 @@ public fn parse(text: &Text) -> Result<Cidr, CidrError> {
     // match for closure-free codegen.
     let prefix_len: Int = match parse_int(len_text.as_bytes()) {
         Maybe.Some(v) => v,
-        Maybe.None    => return Err(CidrError.Malformed(Text.from("bad prefix len"))),
+        Maybe.None    => return Result.Err(CidrError.Malformed(Text.from("bad prefix len"))),
     };
 
     // Try IPv4, then IPv6.
     match Ipv4Addr.parse(&addr_text) {
-        Ok(v4) => {
+        Result.Ok(v4) => {
             if prefix_len < 0 || prefix_len > 32 {
-                return Err(CidrError.InvalidPrefixLen(prefix_len));
+                return Result.Err(CidrError.InvalidPrefixLen(prefix_len));
             }
-            return Ok(Cidr.V4 { addr: v4, prefix_len: prefix_len });
+            return Result.Ok(Cidr.V4 { addr: v4, prefix_len: prefix_len });
         },
-        Err(_) => {},
+        Result.Err(_) => {},
     }
     // Discard the Ipv6Addr Err payload — wrapping it as
     // `CidrError.AddrParseFailed(AddrParseError)` triggers the CIDR-1
@@ -150,13 +150,13 @@ public fn parse(text: &Text) -> Result<Cidr, CidrError> {
     // typed inner error can re-invoke Ipv6Addr.parse on the same
     // input.
     match Ipv6Addr.parse(&addr_text) {
-        Ok(v6) => {
+        Result.Ok(v6) => {
             if prefix_len < 0 || prefix_len > 128 {
-                return Err(CidrError.InvalidPrefixLen(prefix_len));
+                return Result.Err(CidrError.InvalidPrefixLen(prefix_len));
             }
-            return Ok(Cidr.V6 { addr: v6, prefix_len: prefix_len });
+            return Result.Ok(Cidr.V6 { addr: v6, prefix_len: prefix_len });
         },
-        Err(_) => Err(CidrError.Malformed(Text.from("not a valid IPv4 or IPv6 address"))),
+        Result.Err(_) => Result.Err(CidrError.Malformed(Text.from("not a valid IPv4 or IPv6 address"))),
     }
 }
 
@@ -225,7 +225,7 @@ implement CidrSet {
     public fn add_text(&mut self, text: &Text) -> Result<(), CidrError> {
         let c = parse(text)?;
         self.add(c);
-        Ok(())
+        Result.Ok(())
     }
 
     /// Does ANY block in the set contain `ip`? O(N) over the blocks.

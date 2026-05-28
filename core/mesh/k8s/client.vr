@@ -112,37 +112,37 @@ public type ListOptions is {
 implement ListOptions {
     public fn new() -> ListOptions {
         ListOptions {
-            label_selector: None,
-            field_selector: None,
-            resource_version: None,
-            limit: None,
-            continue_token: None,
-            timeout: None,
+            label_selector: Maybe.None,
+            field_selector: Maybe.None,
+            resource_version: Maybe.None,
+            limit: Maybe.None,
+            continue_token: Maybe.None,
+            timeout: Maybe.None,
         }
     }
 
     public fn with_labels(mut self, selector: Text) -> ListOptions {
-        self.label_selector = Some(selector); self
+        self.label_selector = Maybe.Some(selector); self
     }
 
     public fn with_fields(mut self, selector: Text) -> ListOptions {
-        self.field_selector = Some(selector); self
+        self.field_selector = Maybe.Some(selector); self
     }
 
     public fn with_resource_version(mut self, v: Text) -> ListOptions {
-        self.resource_version = Some(v); self
+        self.resource_version = Maybe.Some(v); self
     }
 
     public fn with_limit(mut self, n: UInt32) -> ListOptions {
-        self.limit = Some(n); self
+        self.limit = Maybe.Some(n); self
     }
 
     public fn with_continue(mut self, token: Text) -> ListOptions {
-        self.continue_token = Some(token); self
+        self.continue_token = Maybe.Some(token); self
     }
 
     public fn with_timeout(mut self, t: Duration) -> ListOptions {
-        self.timeout = Some(t); self
+        self.timeout = Maybe.Some(t); self
     }
 }
 
@@ -184,7 +184,7 @@ implement KubeClient {
 
     /// Resource-generic list. `resource` is the plural form
     /// ("gateways", "pods"). `api_version` is "v1" or "apps/v1".
-    /// `namespace` None for cluster-scoped resources.
+    /// `namespace` Maybe.None for cluster-scoped resources.
     pub async fn list<T>(
         &self,
         api_version: &Text,

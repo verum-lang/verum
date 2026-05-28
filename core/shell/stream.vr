@@ -143,7 +143,7 @@ implement Clone for StreamConfig {
 // =============================================================================
 
 public type LineStream is {
-    /// The receiver of UTF-8 lines (without trailing newline). `None` =
+    /// The receiver of UTF-8 lines (without trailing newline). `Maybe.None` =
     /// stream ended (process exited normally).
     pub receiver: Receiver<Result<Text, ShellError>>,
     /// Job driving the producer. `await()` to wait for child exit;
@@ -157,9 +157,9 @@ implement LineStream {
         let mut out: List<Text> = [];
         loop {
             match self.receiver.recv().await {
-                None        => return Ok(out),
-                Some(Ok(s)) => out.push(s),
-                Some(Err(e)) => return Err(e),
+                Maybe.None        => return Result.Ok(out),
+                Maybe.Some(Result.Ok(s)) => out.push(s),
+                Maybe.Some(Result.Err(e)) => return Result.Err(e),
             }
         }
     }
@@ -169,9 +169,9 @@ implement LineStream {
     pub async fn for_each(&mut self, f: fn(&Text) -> Bool) -> Result<(), ShellError> {
         loop {
             match self.receiver.recv().await {
-                None        => return Ok(()),
-                Some(Ok(s)) => if !f(&s) { return Ok(()); },
-                Some(Err(e)) => return Err(e),
+                Maybe.None        => return Result.Ok(()),
+                Maybe.Some(Result.Ok(s)) => if !f(&s) { return Result.Ok(()); },
+                Maybe.Some(Result.Err(e)) => return Result.Err(e),
             }
         }
     }
@@ -197,22 +197,22 @@ public async fn* stream_lines(cmd_text: &Text)
     let mut command = Command.new(shell_prog);
     command.arg(flag);
     command.arg(cmd_text.clone());
-    if let Some(dir) = &ctx.cwd { command.current_dir(dir.clone()); }
+    if let Maybe.Some(dir) = &ctx.cwd { command.current_dir(dir.clone()); }
     for (k, v) in ctx.env_overrides.iter() { command.env(k.clone(), v.clone()); }
     command.stdout(Stdio.Piped);
 
     let child = match command.spawn() {
-        Ok(c) => c,
-        Err(reason) => {
-            yield Err(ShellError.SpawnFailed { command: cmd_text.clone(), reason });
+        Result.Ok(c) => c,
+        Result.Err(reason) => {
+            yield Result.Err(ShellError.SpawnFailed { command: cmd_text.clone(), reason });
             return;
         }
     };
 
     let stdout_fd = match child.stdout_fd {
-        Some(fd) => fd,
-        None     => {
-            yield Err(ShellError.SpawnFailed {
+        Maybe.Some(fd) => fd,
+        Maybe.None     => {
+            yield Result.Err(ShellError.SpawnFailed {
                 command: cmd_text.clone(),
                 reason:  "stdout fd not piped".into(),
             });
@@ -223,10 +223,10 @@ public async fn* stream_lines(cmd_text: &Text)
     let mut reader = BufReader.from_fd(stdout_fd, 8192);
     loop {
         match reader.read_line_async().await {
-            Ok(None)       => break,
-            Ok(Some(line)) => yield Ok(strip_trailing_newline(line)),
-            Err(e)         => {
-                yield Err(ShellError.SpawnFailed {
+            Result.Ok(Maybe.None)       => break,
+            Result.Ok(Maybe.Some(line)) => yield Result.Ok(strip_trailing_newline(line)),
+            Result.Err(e)         => {
+                yield Result.Err(ShellError.SpawnFailed {
                     command: cmd_text.clone(),
                     reason:  f"read error: {e}",
                 });
@@ -265,7 +265,7 @@ pub async fn stream_lines_bounded(
     let mut command = Command.new(shell_prog);
     command.arg(flag);
     command.arg(cmd_text.clone());
-    if let Some(dir) = &ctx.cwd { command.current_dir(dir.clone()); }
+    if let Maybe.Some(dir) = &ctx.cwd { command.current_dir(dir.clone()); }
     for (k, v) in ctx.env_overrides.iter() { command.env(k.clone(), v.clone()); }
     command.stdout(Stdio.Piped);
 
@@ -295,23 +295,23 @@ pub async fn stream_lines_bounded(
         loop {
             select {
                 line = reader.read_line_async().await => match line {
-                    Ok(None)       => break,
-                    Ok(Some(s))    => {
+                    Result.Ok(Maybe.None)       => break,
+                    Result.Ok(Maybe.Some(s))    => {
                         let stripped = strip_trailing_newline(s);
                         total_buffered = total_buffered + stripped.len() as Int;
                         if mem_limit > 0 && total_buffered > mem_limit {
-                            let _ = tx.send_async(Err(ShellError.SpawnFailed {
+                            let _ = tx.send_async(Result.Err(ShellError.SpawnFailed {
                                 command: cmd_for_producer.clone(),
                                 reason:  f"stream memory limit ({mem_limit} bytes) exceeded".into(),
                             })).await;
                             break;
                         }
-                        let item: Result<Text, ShellError> = Ok(stripped);
+                        let item: Result<Text, ShellError> = Result.Ok(stripped);
                         let routed = route_via_policy(&tx, item, &policy, &mut sample_counter).await;
                         if !routed { break; }
                     },
-                    Err(reason) => {
-                        let _ = tx.send_async(Err(ShellError.SpawnFailed {
+                    Result.Err(reason) => {
+                        let _ = tx.send_async(Result.Err(ShellError.SpawnFailed {
                             command: cmd_for_producer.clone(),
                             reason:  f"read error: {reason}",
                         })).await;
@@ -326,13 +326,13 @@ pub async fn stream_lines_bounded(
         }
         let _ = child.wait();
         // Signal end-of-stream by dropping `tx`
-        Ok(ShellResult.from_error(ShellError.SpawnFailed {
+        Result.Ok(ShellResult.from_error(ShellError.SpawnFailed {
             command: cmd_for_producer,
             reason:  "stream ended".into(),
         }))
     });
 
-    Ok(LineStream {
+    Result.Ok(LineStream {
         receiver: rx,
         job: JobHandle {
             inner:   task,
@@ -354,12 +354,12 @@ async fn route_via_policy(
 ) -> Bool {
     match policy {
         Block => match tx.send_async(item).await {
-            Ok(_)  => true,
-            Err(_) => false,  // receiver dropped
+            Result.Ok(_)  => true,
+            Result.Err(_) => false,  // receiver dropped
         },
         DropNewest => match tx.try_send(item) {
-            Ok(_)  => true,
-            Err(_) => true,   // dropped silently
+            Result.Ok(_)  => true,
+            Result.Err(_) => true,   // dropped silently
         },
         DropOldest => {
             // Best-effort: drain one then send. If channel was full, we
@@ -368,31 +368,31 @@ async fn route_via_policy(
             // reading it. Workaround: rely on the consumer to keep up,
             // and degrade to Block when actually full.
             match tx.try_send(item) {
-                Ok(_)  => true,
-                Err(TrySendError.Full(restored)) => {
+                Result.Ok(_)  => true,
+                Result.Err(TrySendError.Full(restored)) => {
                     // Channel is full and the consumer is the only drainer.
                     // We can't peek-and-evict from a Sender side; the best
                     // *correct* behaviour here is the same as Block.
                     match tx.send_async(restored).await {
-                        Ok(_)  => true,
-                        Err(_) => false,
+                        Result.Ok(_)  => true,
+                        Result.Err(_) => false,
                     }
                 },
-                Err(_) => false,
+                Result.Err(_) => false,
             }
         },
         Sample(n) => {
             let cur = *sample_counter;
             *sample_counter = cur + 1;
             if cur % *n == 0 {
-                match tx.send_async(item).await { Ok(_) => true, Err(_) => false }
+                match tx.send_async(item).await { Result.Ok(_) => true, Result.Err(_) => false }
             } else {
                 true  // dropped
             }
         },
         Coalesce(_f) => {
             // Without peek, fall back to Block.
-            match tx.send_async(item).await { Ok(_) => true, Err(_) => false }
+            match tx.send_async(item).await { Result.Ok(_) => true, Result.Err(_) => false }
         },
     }
 }

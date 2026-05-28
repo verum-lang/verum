@@ -168,7 +168,7 @@ public fn build_long_packet(input: LongPacketInput) -> Result<List<Byte>, TxErro
     // Header protection.
     apply_hp(&mut wire, pn_field_offset, pn_len, &input.keys.hp_key, /* is_long */ true)?;
 
-    Ok(wire)
+    Result.Ok(wire)
 }
 
 // =============================================================================
@@ -210,7 +210,7 @@ public fn build_short_packet(input: ShortPacketInput) -> Result<List<Byte>, TxEr
 
     apply_hp(&mut wire, pn_field_offset, pn_len, &input.keys.hp_key, /* is_long */ false)?;
 
-    Ok(wire)
+    Result.Ok(wire)
 }
 
 // =============================================================================
@@ -224,7 +224,7 @@ fn encode_frames(frames: &List<Frame>) -> Result<List<Byte>, TxError> {
         let _ = encode_frame(&frames[i], &mut out);
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn append_truncated_pn(out: &mut List<Byte>, pn: UInt32, pn_len: UInt8) {
@@ -247,7 +247,7 @@ fn apply_hp(
 ) -> Result<(), TxError> {
     let sample_start = pn_offset + 4;
     if sample_start + 16 > wire.len() {
-        return Err(TxError.SampleUnavailable);
+        return Result.Err(TxError.SampleUnavailable);
     }
     let mut sample: [Byte; 16] = [0_u8; 16];
     let mut i: Int = 0;
@@ -263,5 +263,5 @@ fn apply_hp(
         wire[pn_offset + j] = wire[pn_offset + j] ^ mask[1 + j];
         j = j + 1;
     }
-    Ok(())
+    Result.Ok(())
 }

@@ -154,21 +154,21 @@ public fn native_spawn(
         let mut stderr_pipe: [Int32; 2] = [-1 as Int32, -1 as Int32];
 
         if capture_stdin {
-            if let Err(e) = make_pipe(&mut stdin_pipe) {
-                return Err(f"pipe(stdin) failed: {e}");
+            if let Result.Err(e) = make_pipe(&mut stdin_pipe) {
+                return Result.Err(f"pipe(stdin) failed: {e}");
             }
         }
         if capture_stdout {
-            if let Err(e) = make_pipe(&mut stdout_pipe) {
+            if let Result.Err(e) = make_pipe(&mut stdout_pipe) {
                 close_pipe(&stdin_pipe);
-                return Err(f"pipe(stdout) failed: {e}");
+                return Result.Err(f"pipe(stdout) failed: {e}");
             }
         }
         if capture_stderr {
-            if let Err(e) = make_pipe(&mut stderr_pipe) {
+            if let Result.Err(e) = make_pipe(&mut stderr_pipe) {
                 close_pipe(&stdin_pipe);
                 close_pipe(&stdout_pipe);
-                return Err(f"pipe(stderr) failed: {e}");
+                return Result.Err(f"pipe(stderr) failed: {e}");
             }
         }
 
@@ -184,10 +184,10 @@ public fn native_spawn(
 
         // 3. fork()
         let pid = match do_fork() {
-            Ok(p)  => p,
-            Err(e) => {
+            Result.Ok(p)  => p,
+            Result.Err(e) => {
                 close_pipe(&stdin_pipe); close_pipe(&stdout_pipe); close_pipe(&stderr_pipe);
-                return Err(f"fork() failed: {e}");
+                return Result.Err(f"fork() failed: {e}");
             }
         };
 
@@ -213,7 +213,7 @@ public fn native_spawn(
         // child no longer references any of these bytes.
         let _ = blob;
 
-        Ok(SpawnResult {
+        Result.Ok(SpawnResult {
             pid:       pid,
             stdin_fd:  if capture_stdin  { stdin_pipe[1]  as Int } else { -1 },
             stdout_fd: if capture_stdout { stdout_pipe[0] as Int } else { -1 },
@@ -223,7 +223,7 @@ public fn native_spawn(
 
     @cfg(target_os = "windows")
     {
-        Err("native_spawn not implemented for Windows (use io.process.spawn directly)".into())
+        Result.Err("native_spawn not implemented for Windows (use io.process.spawn directly)".into())
     }
 }
 
@@ -312,7 +312,7 @@ fn make_pipe(fds: &mut [Int32; 2]) -> Result<(), OSError> {
 @cfg(target_os = "macos")
 fn make_pipe(fds: &mut [Int32; 2]) -> Result<(), Text> {
     let r = platform_syscall.pipe(&mut fds[0]);
-    if r != 0 { Err("pipe failed".into()) } else { Ok(()) }
+    if r != 0 { Result.Err("pipe failed".into()) } else { Result.Ok(()) }
 }
 
 @cfg(target_os = "linux")
@@ -323,7 +323,7 @@ fn do_fork() -> Result<Int, OSError> {
 @cfg(target_os = "macos")
 fn do_fork() -> Result<Int, Text> {
     let r = platform_syscall.fork();
-    if r < 0 { Err("fork failed".into()) } else { Ok(r as Int) }
+    if r < 0 { Result.Err("fork failed".into()) } else { Result.Ok(r as Int) }
 }
 
 // =============================================================================
@@ -335,13 +335,13 @@ public fn native_kill(pid: Int, sig: Int) -> Result<(), Text> {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
         match platform_syscall.kill(pid, sig) {
-            Ok(_)  => Ok(()),
-            Err(_) => Err("kill failed".into()),
+            Result.Ok(_)  => Result.Ok(()),
+            Result.Err(_) => Result.Err("kill failed".into()),
         }
     }
     @cfg(target_os = "windows")
     {
-        Err("native_kill not implemented for Windows".into())
+        Result.Err("native_kill not implemented for Windows".into())
     }
 }
 
@@ -355,22 +355,22 @@ public fn native_fd_write_all(fd: Int, data: &[Byte]) -> Result<Int, Text> {
             let remaining: &[Byte] = &data[total as usize..];
             let r = platform_syscall.write(FileDesc.from_raw(fd as Int32), remaining);
             match r {
-                Ok(n) => {
-                    if n == 0 { return Err("write returned 0".into()); }
+                Result.Ok(n) => {
+                    if n == 0 { return Result.Err("write returned 0".into()); }
                     total = total + n;
                 }
-                Err(e) => {
+                Result.Err(e) => {
                     let code: Int = e.into();
                     if code == 4 { continue; }  // EINTR
-                    return Err(f"write failed: {code}");
+                    return Result.Err(f"write failed: {code}");
                 }
             }
         }
-        Ok(total)
+        Result.Ok(total)
     }
     @cfg(target_os = "windows")
     {
-        Err("native_fd_write_all not implemented for Windows".into())
+        Result.Err("native_fd_write_all not implemented for Windows".into())
     }
 }
 
@@ -383,15 +383,15 @@ public fn native_fd_read_chunk(fd: Int, max: Int) -> Result<List<Byte>, Text> {
         while i < max { buf.push(0); i = i + 1; }
         let r = platform_syscall.read(FileDesc.from_raw(fd as Int32), &mut buf);
         match r {
-            Ok(n)  => {
+            Result.Ok(n)  => {
                 buf.truncate(n as usize);
-                Ok(buf)
+                Result.Ok(buf)
             }
-            Err(e) => Err(f"read failed: {e}"),
+            Result.Err(e) => Result.Err(f"read failed: {e}"),
         }
     }
     @cfg(target_os = "windows")
     {
-        Err("native_fd_read_chunk not implemented for Windows".into())
+        Result.Err("native_fd_read_chunk not implemented for Windows".into())
     }
 }

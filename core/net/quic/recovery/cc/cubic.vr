@@ -120,27 +120,27 @@ implement Cubic {
             bytes_in_flight:  0_u32,
             w_max:            0.0,
             w_last_max:       0.0,
-            epoch_start:      None,
+            epoch_start:      Maybe.None,
             k:                0.0,
             ack_count:        0.0,
-            recovery_start:   None,
+            recovery_start:   Maybe.None,
             paced:            false,
             pacing_rate_bps:  0_u64,
         }
     }
 
     fn in_recovery(&self) -> Bool {
-        match self.recovery_start { Some(_) => true, None => false }
+        match self.recovery_start { Maybe.Some(_) => true, Maybe.None => false }
     }
 
     /// Seconds elapsed since epoch_start, in f64.
     fn t_from_epoch(&self, now: Instant) -> Float {
         match self.epoch_start {
-            Some(e) => {
+            Maybe.Some(e) => {
                 let d = now.duration_since(e).unwrap_or_else(|| Duration.from_micros(0));
                 (d.as_micros() as Float) / 1_000_000.0
             },
-            None => 0.0,
+            Maybe.None => 0.0,
         }
     }
 
@@ -190,14 +190,14 @@ implement CongestionCtrl for Cubic {
             self.cwnd = self.cwnd + acked_bytes;
         } else {
             // Congestion avoidance via CUBIC.
-            // Start of new epoch if epoch_start is None.
+            // Start of new epoch if epoch_start is Maybe.None.
             match self.epoch_start {
-                None => {
-                    self.epoch_start = Some(now.clone());
+                Maybe.None => {
+                    self.epoch_start = Maybe.Some(now.clone());
                     self.ack_count   = 0.0;
                     self.k = cbrt((self.w_max * (1.0 - CUBIC_BETA)) / CUBIC_C);
                 },
-                Some(_) => {},
+                Maybe.Some(_) => {},
             }
 
             self.ack_count = self.ack_count + ((acked_bytes as Float) / (MAX_DATAGRAM_SIZE as Float));
@@ -253,8 +253,8 @@ implement CongestionCtrl for Cubic {
         if new_cwnd < MIN_WINDOW_BYTES { new_cwnd = MIN_WINDOW_BYTES; }
         self.ssthresh = new_cwnd;
         self.cwnd     = new_cwnd;
-        self.recovery_start = Some(now.clone());
-        self.epoch_start    = None;      // reset for next avoidance episode
+        self.recovery_start = Maybe.Some(now.clone());
+        self.epoch_start    = Maybe.None;      // reset for next avoidance episode
         self.ack_count      = 0.0;
 
         if self.bytes_in_flight >= lost_bytes {
@@ -280,12 +280,12 @@ implement CongestionCtrl for Cubic {
 implement Cubic {
     public fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
         match self.recovery_start {
-            Some(rs) => {
+            Maybe.Some(rs) => {
                 if acked_time_sent >= rs {
-                    self.recovery_start = None;
+                    self.recovery_start = Maybe.None;
                 }
             },
-            None => {},
+            Maybe.None => {},
         }
     }
 

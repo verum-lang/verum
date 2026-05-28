@@ -26,7 +26,7 @@
 //        Result<List<RowValue>, DbError>
 //     Walks the raw cell bytes paired with column_types,
 //     synthesises a minimal ColumnMeta per cell, decodes via
-//     decode_value_for_type. None cells → RvNull.
+//     decode_value_for_type. Maybe.None cells → RvNull.
 //
 //   * typed_prepared_rows(result, stmt) →
 //        Result<List<List<RowValue>>, DbError>
@@ -58,7 +58,7 @@
 module core.database.mysql.typed_prepared;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
@@ -80,7 +80,7 @@ mount core.database.mysql.binlog_rows.{
 /// MysqlPreparedStatement.column_types). Position-aligned with
 /// `row`; arity mismatch surfaces as a structured error.
 ///
-/// `None` cells → RvNull (server marked NULL via the binary
+/// `Maybe.None` cells → RvNull (server marked NULL via the binary
 /// protocol's NULL-bitmap). Present cells decode via the
 /// canonical MySQL binary-protocol per-column decoder shared
 /// with the binlog ROW pump.
@@ -91,7 +91,7 @@ public fn typed_prepared_row(
     let n = row.len() as Int;
     let m = column_types.len() as Int;
     if n != m {
-        return Err(DbError.Adapter(AdapterSpecific {
+        return Result.Err(DbError.Adapter(AdapterSpecific {
             adapter: AdMysql,
             code: "PREPARED_ROW_ARITY".clone(),
             message: f"typed_prepared_row: row has {n} cells, column_types {m}",
@@ -102,8 +102,8 @@ public fn typed_prepared_row(
     let mut i: Int = 0;
     while i < n {
         match &row[i] {
-            None => { out.push(RvNull); }
-            Some(bytes) => {
+            Maybe.None => { out.push(RvNull); }
+            Maybe.Some(bytes) => {
                 // Synthesise a minimal ColumnMeta. metadata=0 is
                 // safe — the prepared-row decoder doesn't carry
                 // VARCHAR-max-length / decimal precision info on
@@ -122,7 +122,7 @@ public fn typed_prepared_row(
         }
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 /// Convenience — lift every row in a `MysqlPreparedResult`
@@ -137,9 +137,9 @@ public fn typed_prepared_rows(
     while i < (result.rows.len() as Int) {
         let r = typed_prepared_row(&result.rows[i], &stmt.column_types);
         match r {
-            Ok(v)  => { out.push(v); }
-            Err(e) => {
-                return Err(DbError.Adapter(AdapterSpecific {
+            Result.Ok(v)  => { out.push(v); }
+            Result.Err(e) => {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdMysql,
                     code: "PREPARED_ROWS_DECODE".clone(),
                     message: f"row {i}: {e}",
@@ -149,5 +149,5 @@ public fn typed_prepared_rows(
         }
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }

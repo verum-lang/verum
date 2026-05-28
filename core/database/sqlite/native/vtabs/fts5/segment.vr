@@ -176,11 +176,11 @@ public fn segment_lookup(seg: &Fts5VtabSegment, term: &Text) -> Maybe<Fts5Segmen
     let mut i: Int = 0;
     while i < seg.entries.len() {
         if seg.entries[i].term == term {
-            return Some(clone_pl(&seg.entries[i].postings));
+            return Maybe.Some(clone_pl(&seg.entries[i].postings));
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn clone_pl(pl: &Fts5SegmentPostingList) -> Fts5SegmentPostingList {

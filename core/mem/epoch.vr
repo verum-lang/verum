@@ -2,7 +2,7 @@
 // mem/epoch.vr - Global Epoch Management for Generation Wraparound Safety
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None (leaf module)
+// Dependencies: Maybe.None (leaf module)
 // =============================================================================
 //
 

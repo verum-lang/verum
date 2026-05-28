@@ -208,7 +208,7 @@ public type Command is {
     args: List<Text>,
     /// Environment variable overrides (key, value).
     env_vars: List<(Text, Text)>,
-    /// Working directory (None = inherit parent's).
+    /// Working directory (Maybe.None = inherit parent's).
     working_dir: Maybe<Text>,
     /// Stdin handling.
     stdin_cfg: Stdio,
@@ -334,7 +334,7 @@ implement Child {
     public fn write_stdin(&self, data: &[Byte]) -> Result<Int, Text> {
         match self.stdin_fd {
             Maybe.Some(fd) => write_all_to_fd(fd, data),
-            Maybe.None => Err("child was not spawned with piped stdin"),
+            Maybe.None => Result.Err("child was not spawned with piped stdin"),
         }
     }
 
@@ -358,7 +358,7 @@ implement Child {
         @cfg(target_os = "windows")
         {
             let r = __process_kill_raw_impl(self.pid, sig);
-            if r == 0 { Ok(()) } else { Err("TerminateProcess failed".into()) }
+            if r == 0 { Result.Ok(()) } else { Result.Err("TerminateProcess failed".into()) }
         }
     }
 
@@ -398,7 +398,7 @@ implement Child {
         }
 
         let exit_status = wait_for_child(self.pid)?;
-        Ok(Output {
+        Result.Ok(Output {
             status: exit_status,
             stdout_bytes: out_bytes,
             stderr_bytes: err_bytes,
@@ -456,7 +456,7 @@ fn spawn_child(cmd: &Command) -> Result<Child, Text> {
     let cap_stderr = stderr_val is Piped;
 
     let r = native_spawn(&cmd.program, &cmd.args, cap_stdin, cap_stdout, cap_stderr)?;
-    Ok(Child {
+    Result.Ok(Child {
         pid:       r.pid,
         stdin_fd:  if r.stdin_fd  >= 0 { Maybe.Some(r.stdin_fd)  } else { Maybe.None },
         stdout_fd: if r.stdout_fd >= 0 { Maybe.Some(r.stdout_fd) } else { Maybe.None },
@@ -508,15 +508,15 @@ fn spawn_child_with_output(cmd: &Command) -> Result<Output, Text> {
     if r.stderr_fd >= 0 { close_fd(r.stderr_fd); }
 
     let status = wait_for_child(r.pid)?;
-    Ok(Output { status, stdout_bytes, stderr_bytes })
+    Result.Ok(Output { status, stdout_bytes, stderr_bytes })
 }
 
 @cfg(target_os = "linux")
 fn wait_for_child(pid: Int) -> Result<ExitStatus, Text> {
     let mut status: Int32 = 0;
     match core.sys.linux.syscall.wait4(pid, &mut status, 0) {
-        Ok(_)  => Ok(ExitStatus { raw: status as Int }),
-        Err(_) => Err("wait4 failed".into()),
+        Result.Ok(_)  => Result.Ok(ExitStatus { raw: status as Int }),
+        Result.Err(_) => Result.Err("wait4 failed".into()),
     }
 }
 
@@ -524,8 +524,8 @@ fn wait_for_child(pid: Int) -> Result<ExitStatus, Text> {
 fn wait_for_child(pid: Int) -> Result<ExitStatus, Text> {
     let mut status: Int32 = 0;
     let r = core.sys.darwin.libsystem.waitpid(pid as Int32, &mut status, 0 as Int32);
-    if r < 0 { Err("waitpid failed".into()) }
-    else     { Ok(ExitStatus { raw: status as Int }) }
+    if r < 0 { Result.Err("waitpid failed".into()) }
+    else     { Result.Ok(ExitStatus { raw: status as Int }) }
 }
 
 @cfg(any(target_os = "linux", target_os = "macos"))
@@ -534,11 +534,11 @@ fn read_all_from_fd(fd: Int) -> List<Byte> {
     let mut out: List<Byte> = [];
     loop {
         match native_fd_read_chunk(fd, PIPE_CHUNK_SIZE) {
-            Ok(chunk) => {
+            Result.Ok(chunk) => {
                 if chunk.is_empty() { break; }
                 for b in chunk.iter() { out.push(*b); }
             }
-            Err(_) => break,
+            Result.Err(_) => break,
         }
     }
     out
@@ -596,7 +596,7 @@ fn spawn_child(cmd: &Command) -> Result<Child, Text> {
     let mut stdout_write = Handle.NULL;
     if capture_stdout {
         if !CreatePipe(&mut stdout_read, &mut stdout_write, &sa, 0) {
-            return Err(f"CreatePipe for stdout failed (error {GetLastError()})");
+            return Result.Err(f"CreatePipe for stdout failed (error {GetLastError()})");
         }
         // Ensure the read end is NOT inherited by child
         SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0);
@@ -608,7 +608,7 @@ fn spawn_child(cmd: &Command) -> Result<Child, Text> {
     if capture_stderr {
         if !CreatePipe(&mut stderr_read, &mut stderr_write, &sa, 0) {
             if capture_stdout { CloseHandle(stdout_read); CloseHandle(stdout_write); }
-            return Err(f"CreatePipe for stderr failed (error {GetLastError()})");
+            return Result.Err(f"CreatePipe for stderr failed (error {GetLastError()})");
         }
         SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0);
     }
@@ -652,13 +652,13 @@ fn spawn_child(cmd: &Command) -> Result<Child, Text> {
     if !success {
         if capture_stdout { CloseHandle(stdout_read); }
         if capture_stderr { CloseHandle(stderr_read); }
-        return Err(f"CreateProcessA failed (error {GetLastError()})");
+        return Result.Err(f"CreateProcessA failed (error {GetLastError()})");
     }
 
     // Close the child's primary thread handle (we only need the process handle)
     CloseHandle(pi.thread);
 
-    Ok(Child {
+    Result.Ok(Child {
         pid: pi.process.as_raw() as Int,
         stdout_fd: if capture_stdout { Maybe.Some(stdout_read.as_raw() as Int) } else { Maybe.None },
         stderr_fd: if capture_stderr { Maybe.Some(stderr_read.as_raw() as Int) } else { Maybe.None },
@@ -701,7 +701,7 @@ fn spawn_child_with_output(cmd: &Command) -> Result<Output, Text> {
 
     let exit_status = wait_for_child(child.pid)?;
 
-    Ok(Output {
+    Result.Ok(Output {
         status: exit_status,
         stdout_bytes: stdout_bytes,
         stderr_bytes: stderr_bytes,
@@ -715,17 +715,17 @@ fn wait_for_child(process_handle_raw: Int) -> Result<ExitStatus, Text> {
     let wait_result = WaitForSingleObject(handle, INFINITE);
     if wait_result == WAIT_FAILED {
         CloseHandle(handle);
-        return Err(f"WaitForSingleObject failed (error {GetLastError()})");
+        return Result.Err(f"WaitForSingleObject failed (error {GetLastError()})");
     }
 
     let mut exit_code: UInt32 = 0;
     if !GetExitCodeProcess(handle, &mut exit_code) {
         CloseHandle(handle);
-        return Err(f"GetExitCodeProcess failed (error {GetLastError()})");
+        return Result.Err(f"GetExitCodeProcess failed (error {GetLastError()})");
     }
 
     CloseHandle(handle);
-    Ok(ExitStatus { raw: exit_code as Int })
+    Result.Ok(ExitStatus { raw: exit_code as Int })
 }
 
 @cfg(target_os = "windows")

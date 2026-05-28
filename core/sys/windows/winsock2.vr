@@ -212,7 +212,7 @@ fn wsa_ensure_init() {
 
     // Try to become the initializer
     match wsa_state.compare_exchange(0, 1, MemoryOrdering.AcqRel, MemoryOrdering.Acquire) {
-        Ok(_) => {
+        Result.Ok(_) => {
             // We are the initializer — request Winsock 2.2
             let mut wsadata_buf: List<Byte> = List.with_capacity(512);
             wsadata_buf.resize(512, 0);
@@ -228,7 +228,7 @@ fn wsa_ensure_init() {
 
             wsa_state.store(2, MemoryOrdering.Release);
         }
-        Err(current) => {
+        Result.Err(current) => {
             // Another thread is initializing — spin until done
             while wsa_state.load(MemoryOrdering.Acquire) != 2 {
                 spin_hint();
@@ -262,9 +262,9 @@ public fn winsock_socket(domain: Int, sock_type: Int, protocol: Int) -> Result<F
 
     let s = ws2_socket(domain, actual_type, protocol);
     if s == INVALID_SOCKET {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(FileDesc(s as Int))
+        Result.Ok(FileDesc(s as Int))
     }
 }
 
@@ -272,9 +272,9 @@ public fn winsock_socket(domain: Int, sock_type: Int, protocol: Int) -> Result<F
 public fn winsock_connect(fd: FileDesc, addr: &unsafe Byte, addrlen: Int) -> Result<(), OSError> {
     let result = ws2_connect(fd.0 as UInt64, addr, addrlen);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -282,9 +282,9 @@ public fn winsock_connect(fd: FileDesc, addr: &unsafe Byte, addrlen: Int) -> Res
 public fn winsock_bind(fd: FileDesc, addr: &unsafe Byte, addrlen: Int) -> Result<(), OSError> {
     let result = ws2_bind(fd.0 as UInt64, addr, addrlen);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -292,9 +292,9 @@ public fn winsock_bind(fd: FileDesc, addr: &unsafe Byte, addrlen: Int) -> Result
 public fn winsock_listen(fd: FileDesc, backlog: Int) -> Result<(), OSError> {
     let result = ws2_listen(fd.0 as UInt64, backlog);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -302,9 +302,9 @@ public fn winsock_listen(fd: FileDesc, backlog: Int) -> Result<(), OSError> {
 public fn winsock_accept(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int) -> Result<FileDesc, OSError> {
     let s = ws2_accept(fd.0 as UInt64, addr, addrlen);
     if s == INVALID_SOCKET {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(FileDesc(s as Int))
+        Result.Ok(FileDesc(s as Int))
     }
 }
 
@@ -318,16 +318,16 @@ public fn winsock_accept4(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int, f
         let _ = set_nonblocking(new_fd, true);
     }
 
-    Ok(new_fd)
+    Result.Ok(new_fd)
 }
 
 /// Send data on a connected socket.
 public fn winsock_send(fd: FileDesc, buf: &[Byte], flags: Int) -> Result<Int, OSError> {
     let result = ws2_send(fd.0 as UInt64, buf.as_ptr() as &unsafe Byte, buf.len() as Int, flags);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -335,9 +335,9 @@ public fn winsock_send(fd: FileDesc, buf: &[Byte], flags: Int) -> Result<Int, OS
 public fn winsock_recv(fd: FileDesc, buf: &mut [Byte], flags: Int) -> Result<Int, OSError> {
     let result = ws2_recv(fd.0 as UInt64, buf.as_mut_ptr() as &unsafe Byte, buf.len() as Int, flags);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -345,9 +345,9 @@ public fn winsock_recv(fd: FileDesc, buf: &mut [Byte], flags: Int) -> Result<Int
 public fn winsock_sendto(fd: FileDesc, buf: &[Byte], flags: Int, dest_addr: &unsafe Byte, addrlen: Int) -> Result<Int, OSError> {
     let result = ws2_sendto(fd.0 as UInt64, buf.as_ptr() as &unsafe Byte, buf.len() as Int, flags, dest_addr, addrlen);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -356,9 +356,9 @@ public fn winsock_sendto(fd: FileDesc, buf: &[Byte], flags: Int, dest_addr: &uns
 public fn winsock_recvfrom(fd: FileDesc, buf: &mut [Byte], flags: Int32, src_addr: &unsafe Byte, addrlen: &mut Int32) -> Result<Int, OSError> {
     let result = ws2_recvfrom(fd.0 as UInt64, buf.as_mut_ptr() as &unsafe Byte, buf.len() as Int32, flags, src_addr, addrlen);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(result as Int)
+        Result.Ok(result as Int)
     }
 }
 
@@ -366,9 +366,9 @@ public fn winsock_recvfrom(fd: FileDesc, buf: &mut [Byte], flags: Int32, src_add
 public fn winsock_shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
     let result = ws2_shutdown(fd.0 as UInt64, how);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -376,9 +376,9 @@ public fn winsock_shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
 public fn winsock_close(fd: FileDesc) -> Result<(), OSError> {
     let result = ws2_closesocket(fd.0 as UInt64);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -405,10 +405,10 @@ public fn winsock_write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
 }
 
 /// Stub for fcntl (not applicable on Windows, use ioctlsocket).
-/// Provided for API compatibility — returns Ok(0).
+/// Provided for API compatibility — returns Result.Ok(0).
 public fn fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
     // fcntl is not used directly on Windows; non-blocking is handled by ioctlsocket
-    Ok(0)
+    Result.Ok(0)
 }
 
 // =============================================================================
@@ -426,9 +426,9 @@ public fn setsockopt_int(fd: FileDesc, level: Int, optname: Int, value: Int) -> 
         @size_of(Int) as Int,
     );
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -444,9 +444,9 @@ public fn getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
         &mut len,
     );
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(val)
+        Result.Ok(val)
     }
 }
 
@@ -455,9 +455,9 @@ public fn getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
 public fn winsock_getsockname(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int32) -> Result<(), OSError> {
     let result = ws2_getsockname(fd.0 as UInt64, addr, addrlen);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -465,9 +465,9 @@ public fn winsock_getsockname(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut In
 public fn winsock_getpeername(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int32) -> Result<(), OSError> {
     let result = ws2_getpeername(fd.0 as UInt64, addr, addrlen);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -476,9 +476,9 @@ public fn set_nonblocking(fd: FileDesc, nonblocking: Bool) -> Result<(), OSError
     let mut mode: UInt32 = if nonblocking { 1 } else { 0 };
     let result = ws2_ioctlsocket(fd.0 as UInt64, FIONBIO, &mut mode);
     if result == SOCKET_ERROR {
-        Err(wsa_error())
+        Result.Err(wsa_error())
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -491,7 +491,7 @@ public fn set_reuseaddr(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
 public fn set_reuseport(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
     // Windows does not have SO_REUSEPORT; SO_REUSEADDR provides similar behavior
     // (allows multiple sockets to bind to the same port).
-    Ok(())
+    Result.Ok(())
 }
 
 /// Windows-side stubs for ECN socket-option wiring. Winsock exposes
@@ -500,19 +500,19 @@ public fn set_reuseport(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
 /// accept the setting silently (caller treats ECN as unsupported).
 public fn set_ip_tos(fd: FileDesc, tos: Int) -> Result<(), OSError> {
     let _ = fd; let _ = tos;
-    Ok(())
+    Result.Ok(())
 }
 public fn set_ip_recvtos(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
     let _ = fd; let _ = enable;
-    Ok(())
+    Result.Ok(())
 }
 public fn set_ipv6_tclass(fd: FileDesc, tc: Int) -> Result<(), OSError> {
     let _ = fd; let _ = tc;
-    Ok(())
+    Result.Ok(())
 }
 public fn set_ipv6_recvtclass(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
     let _ = fd; let _ = enable;
-    Ok(())
+    Result.Ok(())
 }
 
 /// Enable/disable TCP_NODELAY (Nagle's algorithm).
@@ -553,7 +553,7 @@ public fn set_socket_timeout(fd: FileDesc, send_ms: Int, recv_ms: Int) -> Result
             @size_of(UInt32) as Int,
         );
         if r == SOCKET_ERROR {
-            return Err(wsa_error());
+            return Result.Err(wsa_error());
         }
     }
 
@@ -567,11 +567,11 @@ public fn set_socket_timeout(fd: FileDesc, send_ms: Int, recv_ms: Int) -> Result
             @size_of(UInt32) as Int,
         );
         if r == SOCKET_ERROR {
-            return Err(wsa_error());
+            return Result.Err(wsa_error());
         }
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -603,7 +603,7 @@ public fn join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface_addr: UIn
         &mreq as &unsafe Byte,
         @size_of(IpMreq) as Int,
     );
-    if result == SOCKET_ERROR { Err(wsa_error()) } else { Ok(()) }
+    if result == SOCKET_ERROR { Result.Err(wsa_error()) } else { Result.Ok(()) }
 }
 
 /// Leave a multicast group.
@@ -619,7 +619,7 @@ public fn leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface_addr: UI
         &mreq as &unsafe Byte,
         @size_of(IpMreq) as Int,
     );
-    if result == SOCKET_ERROR { Err(wsa_error()) } else { Ok(()) }
+    if result == SOCKET_ERROR { Result.Err(wsa_error()) } else { Result.Ok(()) }
 }
 
 /// Set multicast TTL.
@@ -641,14 +641,14 @@ public fn peek(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
     winsock_recv(fd, buf, MSG_PEEK)
 }
 
-/// Non-blocking receive. Returns Err(EWOULDBLOCK) if no data available.
+/// Non-blocking receive. Returns Result.Err(EWOULDBLOCK) if no data available.
 public fn recv_nonblock(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
     // On Windows, non-blocking behavior is set on the socket, not per-call.
     // This function assumes the socket is already in non-blocking mode.
     winsock_recv(fd, buf, 0)
 }
 
-/// Non-blocking send. Returns Err(EWOULDBLOCK) if buffer full.
+/// Non-blocking send. Returns Result.Err(EWOULDBLOCK) if buffer full.
 public fn send_nonblock(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
     winsock_send(fd, buf, 0)
 }

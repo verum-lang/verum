@@ -33,33 +33,33 @@ mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal
 
 fn as_real(v: &Register) -> Maybe<Float64> {
     match v {
-        RInt(x)   => Some(x as Float64),
-        RRowId(x) => Some(x as Float64),
-        RReal(x)  => Some(x),
-        _         => None,
+        RInt(x)   => Maybe.Some(x as Float64),
+        RRowId(x) => Maybe.Some(x as Float64),
+        RReal(x)  => Maybe.Some(x),
+        _         => Maybe.None,
     }
 }
 
 fn unary_real(v: &Register, op: fn(Float64) -> Maybe<Float64>) -> Register {
     match as_real(v) {
-        Some(x) => match op(x) {
-            Some(r) => RReal(r),
-            None    => RNull,
+        Maybe.Some(x) => match op(x) {
+            Maybe.Some(r) => RReal(r),
+            Maybe.None    => RNull,
         },
-        None => RNull,
+        Maybe.None => RNull,
     }
 }
 
 fn binary_real(a: &Register, b: &Register, op: fn(Float64, Float64) -> Maybe<Float64>) -> Register {
     match as_real(a) {
-        Some(xa) => match as_real(b) {
-            Some(xb) => match op(xa, xb) {
-                Some(r) => RReal(r),
-                None    => RNull,
+        Maybe.Some(xa) => match as_real(b) {
+            Maybe.Some(xb) => match op(xa, xb) {
+                Maybe.Some(r) => RReal(r),
+                Maybe.None    => RNull,
             },
-            None => RNull,
+            Maybe.None => RNull,
         },
-        None => RNull,
+        Maybe.None => RNull,
     }
 }
 
@@ -72,40 +72,40 @@ public fn pi() -> Register {
 }
 
 public fn sqrt(v: &Register) -> Register {
-    unary_real(v, |x| { if x < 0.0 { None } else { Some(real_sqrt(x)) } })
+    unary_real(v, |x| { if x < 0.0 { Maybe.None } else { Maybe.Some(real_sqrt(x)) } })
 }
 
 public fn ceil(v: &Register) -> Register {
-    unary_real(v, |x| { Some(real_ceil(x)) })
+    unary_real(v, |x| { Maybe.Some(real_ceil(x)) })
 }
 
 public fn floor(v: &Register) -> Register {
-    unary_real(v, |x| { Some(real_floor(x)) })
+    unary_real(v, |x| { Maybe.Some(real_floor(x)) })
 }
 
 public fn trunc(v: &Register) -> Register {
     unary_real(v, |x| {
-        if x >= 0.0 { Some(real_floor(x)) } else { Some(real_ceil(x)) }
+        if x >= 0.0 { Maybe.Some(real_floor(x)) } else { Maybe.Some(real_ceil(x)) }
     })
 }
 
 public fn exp(v: &Register) -> Register {
-    unary_real(v, |x| { Some(real_exp(x)) })
+    unary_real(v, |x| { Maybe.Some(real_exp(x)) })
 }
 
 public fn ln(v: &Register) -> Register {
-    unary_real(v, |x| { if x <= 0.0 { None } else { Some(real_ln(x)) } })
+    unary_real(v, |x| { if x <= 0.0 { Maybe.None } else { Maybe.Some(real_ln(x)) } })
 }
 
 public fn log10(v: &Register) -> Register {
     unary_real(v, |x| {
-        if x <= 0.0 { None } else { Some(real_ln(x) / real_ln(10.0)) }
+        if x <= 0.0 { Maybe.None } else { Maybe.Some(real_ln(x) / real_ln(10.0)) }
     })
 }
 
 public fn log2(v: &Register) -> Register {
     unary_real(v, |x| {
-        if x <= 0.0 { None } else { Some(real_ln(x) / real_ln(2.0)) }
+        if x <= 0.0 { Maybe.None } else { Maybe.Some(real_ln(x) / real_ln(2.0)) }
     })
 }
 
@@ -113,27 +113,27 @@ public fn log(v: &Register, base_opt: &Register) -> Register {
     let base_v: Maybe<Float64> = as_real(base_opt);
     let x_v: Maybe<Float64> = as_real(v);
     match x_v {
-        Some(x) => {
+        Maybe.Some(x) => {
             if x <= 0.0 { return RNull; }
             match base_v {
-                Some(b) => {
+                Maybe.Some(b) => {
                     if b <= 0.0 || b == 1.0 { return RNull; }
                     RReal(real_ln(x) / real_ln(b))
                 }
-                None => RReal(real_ln(x) / real_ln(10.0)),  // SQLite default: log10
+                Maybe.None => RReal(real_ln(x) / real_ln(10.0)),  // SQLite default: log10
             }
         }
-        None => RNull,
+        Maybe.None => RNull,
     }
 }
 
 public fn pow(a: &Register, b: &Register) -> Register {
-    binary_real(a, b, |x, y| { Some(real_pow(x, y)) })
+    binary_real(a, b, |x, y| { Maybe.Some(real_pow(x, y)) })
 }
 
 public fn modulo(a: &Register, b: &Register) -> Register {
     binary_real(a, b, |x, y| {
-        if y == 0.0 { None } else { Some(x - real_floor(x / y) * y) }
+        if y == 0.0 { Maybe.None } else { Maybe.Some(x - real_floor(x / y) * y) }
     })
 }
 
@@ -142,29 +142,29 @@ public fn modulo(a: &Register, b: &Register) -> Register {
 // -----------------------------------------------------------------------------
 
 public fn sin(v: &Register) -> Register {
-    unary_real(v, |x| { Some(real_sin(x)) })
+    unary_real(v, |x| { Maybe.Some(real_sin(x)) })
 }
 public fn cos(v: &Register) -> Register {
-    unary_real(v, |x| { Some(real_cos(x)) })
+    unary_real(v, |x| { Maybe.Some(real_cos(x)) })
 }
 public fn tan(v: &Register) -> Register {
-    unary_real(v, |x| { Some(real_sin(x) / real_cos(x)) })
+    unary_real(v, |x| { Maybe.Some(real_sin(x) / real_cos(x)) })
 }
 public fn asin(v: &Register) -> Register {
     unary_real(v, |x| {
-        if x < -1.0 || x > 1.0 { None } else { Some(real_asin(x)) }
+        if x < -1.0 || x > 1.0 { Maybe.None } else { Maybe.Some(real_asin(x)) }
     })
 }
 public fn acos(v: &Register) -> Register {
     unary_real(v, |x| {
-        if x < -1.0 || x > 1.0 { None } else { Some(pi_const() / 2.0 - real_asin(x)) }
+        if x < -1.0 || x > 1.0 { Maybe.None } else { Maybe.Some(pi_const() / 2.0 - real_asin(x)) }
     })
 }
 public fn atan(v: &Register) -> Register {
-    unary_real(v, |x| { Some(real_atan(x)) })
+    unary_real(v, |x| { Maybe.Some(real_atan(x)) })
 }
 public fn atan2(a: &Register, b: &Register) -> Register {
-    binary_real(a, b, |y, x| { Some(real_atan2(y, x)) })
+    binary_real(a, b, |y, x| { Maybe.Some(real_atan2(y, x)) })
 }
 
 // -----------------------------------------------------------------------------
@@ -172,29 +172,29 @@ public fn atan2(a: &Register, b: &Register) -> Register {
 // -----------------------------------------------------------------------------
 
 public fn sinh(v: &Register) -> Register {
-    unary_real(v, |x| { Some((real_exp(x) - real_exp(-x)) / 2.0) })
+    unary_real(v, |x| { Maybe.Some((real_exp(x) - real_exp(-x)) / 2.0) })
 }
 public fn cosh(v: &Register) -> Register {
-    unary_real(v, |x| { Some((real_exp(x) + real_exp(-x)) / 2.0) })
+    unary_real(v, |x| { Maybe.Some((real_exp(x) + real_exp(-x)) / 2.0) })
 }
 public fn tanh(v: &Register) -> Register {
     unary_real(v, |x| {
         let ex = real_exp(x);
         let exn = real_exp(-x);
-        Some((ex - exn) / (ex + exn))
+        Maybe.Some((ex - exn) / (ex + exn))
     })
 }
 public fn asinh(v: &Register) -> Register {
-    unary_real(v, |x| { Some(real_ln(x + real_sqrt(x * x + 1.0))) })
+    unary_real(v, |x| { Maybe.Some(real_ln(x + real_sqrt(x * x + 1.0))) })
 }
 public fn acosh(v: &Register) -> Register {
     unary_real(v, |x| {
-        if x < 1.0 { None } else { Some(real_ln(x + real_sqrt(x * x - 1.0))) }
+        if x < 1.0 { Maybe.None } else { Maybe.Some(real_ln(x + real_sqrt(x * x - 1.0))) }
     })
 }
 public fn atanh(v: &Register) -> Register {
     unary_real(v, |x| {
-        if x <= -1.0 || x >= 1.0 { None } else { Some(0.5 * real_ln((1.0 + x) / (1.0 - x))) }
+        if x <= -1.0 || x >= 1.0 { Maybe.None } else { Maybe.Some(0.5 * real_ln((1.0 + x) / (1.0 - x))) }
     })
 }
 
@@ -203,11 +203,11 @@ public fn atanh(v: &Register) -> Register {
 // -----------------------------------------------------------------------------
 
 public fn degrees(v: &Register) -> Register {
-    unary_real(v, |x| { Some(x * 180.0 / pi_const()) })
+    unary_real(v, |x| { Maybe.Some(x * 180.0 / pi_const()) })
 }
 
 public fn radians(v: &Register) -> Register {
-    unary_real(v, |x| { Some(x * pi_const() / 180.0) })
+    unary_real(v, |x| { Maybe.Some(x * pi_const() / 180.0) })
 }
 
 // -----------------------------------------------------------------------------

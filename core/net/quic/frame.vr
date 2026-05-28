@@ -121,7 +121,7 @@ implement Eq for FrameError {
     }
 }
 
-fn vfail<T>(_: VarintError) -> Result<T, FrameError> { Err(FrameError.VarintFailure) }
+fn vfail<T>(_: VarintError) -> Result<T, FrameError> { Result.Err(FrameError.VarintFailure) }
 
 // =============================================================================
 // ACK ranges — typed refinement would enforce non-overlap + sorted-desc
@@ -242,7 +242,7 @@ implement QuicFrame {
 /// consecutive zero bytes.
 public fn decode_frame(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
     if pos >= buf.len() {
-        return Err(FrameError.Truncated);
+        return Result.Err(FrameError.Truncated);
     }
     // PADDING — aggregate runs of 0x00 bytes so the caller sees one
     // frame regardless of how many bytes the peer emitted.
@@ -250,12 +250,12 @@ public fn decode_frame(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), Frame
         let start = pos;
         let mut cur = pos;
         while cur < buf.len() && buf[cur] == 0_u8 { cur = cur + 1; }
-        return Ok((QuicFrame.PaddingRun(cur - start), cur));
+        return Result.Ok((QuicFrame.PaddingRun(cur - start), cur));
     }
 
     let (frame_type, p1) = quic_decode(buf, pos).or_else(vfail)?;
     match frame_type {
-        1_u64           => Ok((QuicFrame.PingFrame, p1)),
+        1_u64           => Result.Ok((QuicFrame.PingFrame, p1)),
         2_u64 | 3_u64   => decode_ack(buf, p1, frame_type == 3_u64),
         4_u64           => decode_reset_stream(buf, p1),
         5_u64           => decode_stop_sending(buf, p1),
@@ -276,9 +276,9 @@ public fn decode_frame(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), Frame
         27_u64          => decode_path_response(buf, p1),
         28_u64          => decode_connection_close_transport(buf, p1),
         29_u64          => decode_connection_close_application(buf, p1),
-        30_u64          => Ok((QuicFrame.HandshakeDone, p1)),
+        30_u64          => Result.Ok((QuicFrame.HandshakeDone, p1)),
         48_u64 | 49_u64 => decode_datagram(buf, p1, frame_type == 49_u64),
-        _ => Err(FrameError.InvalidType(frame_type)),
+        _ => Result.Err(FrameError.InvalidType(frame_type)),
     }
 }
 
@@ -292,7 +292,7 @@ fn decode_ack(buf: &[Byte], pos: Int, with_ecn: Bool) -> Result<(QuicFrame, Int)
 
     // First ack range: [largest - first_len, largest]
     if first_len > largest {
-        return Err(FrameError.InvalidValue(Text.from_str("first ack range underflows")));
+        return Result.Err(FrameError.InvalidValue(Text.from_str("first ack range underflows")));
     }
     let mut ranges: List<AckRange> = [];
     ranges.push(AckRange { smallest: largest - first_len, largest: largest });
@@ -305,11 +305,11 @@ fn decode_ack(buf: &[Byte], pos: Int, with_ecn: Bool) -> Result<(QuicFrame, Int)
         let (len, q2) = quic_decode(buf, q1).or_else(vfail)?;
         // new_largest = smallest_last - gap - 2, per RFC 9000 §19.3.1
         if smallest_last < gap + 2_u64 {
-            return Err(FrameError.InvalidValue(Text.from_str("ack gap underflows")));
+            return Result.Err(FrameError.InvalidValue(Text.from_str("ack gap underflows")));
         }
         let new_largest = smallest_last - gap - 2_u64;
         if len > new_largest {
-            return Err(FrameError.InvalidValue(Text.from_str("ack range underflows")));
+            return Result.Err(FrameError.InvalidValue(Text.from_str("ack range underflows")));
         }
         let new_smallest = new_largest - len;
         ranges.push(AckRange { smallest: new_smallest, largest: new_largest });
@@ -323,12 +323,12 @@ fn decode_ack(buf: &[Byte], pos: Int, with_ecn: Bool) -> Result<(QuicFrame, Int)
         let (e1, e2_pos) = quic_decode(buf, e1_pos).or_else(vfail)?;
         let (ce_c, ce_pos) = quic_decode(buf, e2_pos).or_else(vfail)?;
         cursor = ce_pos;
-        Some(EcnCounts { ect0: e0, ect1: e1, ce: ce_c })
+        Maybe.Some(EcnCounts { ect0: e0, ect1: e1, ce: ce_c })
     } else {
-        None
+        Maybe.None
     };
 
-    Ok((QuicFrame.AckFrame {
+    Result.Ok((QuicFrame.AckFrame {
         largest_acked: largest,
         ack_delay:     delay,
         ranges:        ranges,
@@ -342,13 +342,13 @@ fn decode_reset_stream(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), Frame
     let (sid, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let (err, p2) = quic_decode(buf, p1).or_else(vfail)?;
     let (fin, p3) = quic_decode(buf, p2).or_else(vfail)?;
-    Ok((QuicFrame.ResetStream { stream_id: sid, error_code: err, final_size: fin }, p3))
+    Result.Ok((QuicFrame.ResetStream { stream_id: sid, error_code: err, final_size: fin }, p3))
 }
 
 fn decode_stop_sending(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
     let (sid, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let (err, p2) = quic_decode(buf, p1).or_else(vfail)?;
-    Ok((QuicFrame.StopSending { stream_id: sid, error_code: err }, p2))
+    Result.Ok((QuicFrame.StopSending { stream_id: sid, error_code: err }, p2))
 }
 
 // --- CRYPTO ---
@@ -357,10 +357,10 @@ fn decode_crypto(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError>
     let (off, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let (len, p2) = quic_decode(buf, p1).or_else(vfail)?;
     let end = p2 + (len as Int);
-    if end > buf.len() { return Err(FrameError.Truncated); }
+    if end > buf.len() { return Result.Err(FrameError.Truncated); }
     let mut data: List<Byte> = List.with_capacity(end - p2);
     data.extend_from_slice(&buf[p2..end]);
-    Ok((QuicFrame.CryptoFrame { offset: off, data: data }, end))
+    Result.Ok((QuicFrame.CryptoFrame { offset: off, data: data }, end))
 }
 
 // --- NEW_TOKEN ---
@@ -368,10 +368,10 @@ fn decode_crypto(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError>
 fn decode_new_token(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
     let (len, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let end = p1 + (len as Int);
-    if end > buf.len() { return Err(FrameError.Truncated); }
+    if end > buf.len() { return Result.Err(FrameError.Truncated); }
     let mut token: List<Byte> = List.with_capacity(end - p1);
     token.extend_from_slice(&buf[p1..end]);
-    Ok((QuicFrame.NewToken(token), end))
+    Result.Ok((QuicFrame.NewToken(token), end))
 }
 
 // --- STREAM (types 0x08..0x0f carry flags) ---
@@ -389,54 +389,54 @@ fn decode_stream(buf: &[Byte], pos: Int, flag_bits: UInt8) -> Result<(QuicFrame,
     };
     let (data_len_opt, p3) = if has_len {
         let (l, q) = quic_decode(buf, p2).or_else(vfail)?;
-        (Some(l), q)
+        (Maybe.Some(l), q)
     } else {
-        (None, p2)
+        (Maybe.None, p2)
     };
     let end = match data_len_opt {
-        Some(l) => p3 + (l as Int),
-        None    => buf.len(),      // LEN=0 → frame extends to end of packet
+        Maybe.Some(l) => p3 + (l as Int),
+        Maybe.None    => buf.len(),      // LEN=0 → frame extends to end of packet
     };
-    if end > buf.len() { return Err(FrameError.Truncated); }
+    if end > buf.len() { return Result.Err(FrameError.Truncated); }
     let mut data: List<Byte> = List.with_capacity(end - p3);
     data.extend_from_slice(&buf[p3..end]);
-    Ok((QuicFrame.StreamFrame { stream_id: sid, offset: offset, data: data, fin: fin }, end))
+    Result.Ok((QuicFrame.StreamFrame { stream_id: sid, offset: offset, data: data, fin: fin }, end))
 }
 
 // --- Max/Data limits ---
 
 fn decode_max_data(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
     let (limit, p1) = quic_decode(buf, pos).or_else(vfail)?;
-    Ok((QuicFrame.MaxData(limit), p1))
+    Result.Ok((QuicFrame.MaxData(limit), p1))
 }
 
 fn decode_max_stream_data(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
     let (sid, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let (lim, p2) = quic_decode(buf, p1).or_else(vfail)?;
-    Ok((QuicFrame.MaxStreamData { stream_id: sid, limit: lim }, p2))
+    Result.Ok((QuicFrame.MaxStreamData { stream_id: sid, limit: lim }, p2))
 }
 
 fn decode_max_streams(buf: &[Byte], pos: Int, is_uni: Bool) -> Result<(QuicFrame, Int), FrameError> {
     let (lim, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let f = if is_uni { QuicFrame.MaxStreamsUni(lim) } else { QuicFrame.MaxStreamsBidi(lim) };
-    Ok((f, p1))
+    Result.Ok((f, p1))
 }
 
 fn decode_data_blocked(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
     let (lim, p1) = quic_decode(buf, pos).or_else(vfail)?;
-    Ok((QuicFrame.DataBlocked(lim), p1))
+    Result.Ok((QuicFrame.DataBlocked(lim), p1))
 }
 
 fn decode_stream_data_blocked(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
     let (sid, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let (lim, p2) = quic_decode(buf, p1).or_else(vfail)?;
-    Ok((QuicFrame.StreamDataBlocked { stream_id: sid, limit: lim }, p2))
+    Result.Ok((QuicFrame.StreamDataBlocked { stream_id: sid, limit: lim }, p2))
 }
 
 fn decode_streams_blocked(buf: &[Byte], pos: Int, is_uni: Bool) -> Result<(QuicFrame, Int), FrameError> {
     let (lim, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let f = if is_uni { QuicFrame.StreamsBlockedUni(lim) } else { QuicFrame.StreamsBlockedBidi(lim) };
-    Ok((f, p1))
+    Result.Ok((f, p1))
 }
 
 // --- NEW_CONNECTION_ID ---
@@ -444,20 +444,20 @@ fn decode_streams_blocked(buf: &[Byte], pos: Int, is_uni: Bool) -> Result<(QuicF
 fn decode_new_connection_id(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
     let (seq, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let (retire, p2) = quic_decode(buf, p1).or_else(vfail)?;
-    if p2 >= buf.len() { return Err(FrameError.Truncated); }
+    if p2 >= buf.len() { return Result.Err(FrameError.Truncated); }
     let cid_len = buf[p2] as Int;
     if cid_len < 1 || cid_len > 20 {
-        return Err(FrameError.InvalidValue(Text.from_str("NEW_CONNECTION_ID invalid CID length")));
+        return Result.Err(FrameError.InvalidValue(Text.from_str("NEW_CONNECTION_ID invalid CID length")));
     }
     let cid_end = p2 + 1 + cid_len;
     let tok_end = cid_end + 16;
-    if tok_end > buf.len() { return Err(FrameError.Truncated); }
+    if tok_end > buf.len() { return Result.Err(FrameError.Truncated); }
     let mut cid: List<Byte> = List.with_capacity(cid_len);
     cid.extend_from_slice(&buf[p2 + 1..cid_end]);
     let mut tok: [Byte; 16] = [0_u8; 16];
     let mut j: Int = 0;
     while j < 16 { tok[j] = buf[cid_end + j]; j = j + 1; }
-    Ok((QuicFrame.NewConnectionId {
+    Result.Ok((QuicFrame.NewConnectionId {
         sequence_number: seq,
         retire_prior_to: retire,
         connection_id: cid,
@@ -467,25 +467,25 @@ fn decode_new_connection_id(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), 
 
 fn decode_retire_connection_id(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
     let (seq, p1) = quic_decode(buf, pos).or_else(vfail)?;
-    Ok((QuicFrame.RetireConnectionId(seq), p1))
+    Result.Ok((QuicFrame.RetireConnectionId(seq), p1))
 }
 
 // --- PATH_CHALLENGE / PATH_RESPONSE ---
 
 fn decode_path_challenge(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
-    if pos + 8 > buf.len() { return Err(FrameError.Truncated); }
+    if pos + 8 > buf.len() { return Result.Err(FrameError.Truncated); }
     let mut data: [Byte; 8] = [0_u8; 8];
     let mut i: Int = 0;
     while i < 8 { data[i] = buf[pos + i]; i = i + 1; }
-    Ok((QuicFrame.PathChallenge(data), pos + 8))
+    Result.Ok((QuicFrame.PathChallenge(data), pos + 8))
 }
 
 fn decode_path_response(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError> {
-    if pos + 8 > buf.len() { return Err(FrameError.Truncated); }
+    if pos + 8 > buf.len() { return Result.Err(FrameError.Truncated); }
     let mut data: [Byte; 8] = [0_u8; 8];
     let mut i: Int = 0;
     while i < 8 { data[i] = buf[pos + i]; i = i + 1; }
-    Ok((QuicFrame.PathResponse(data), pos + 8))
+    Result.Ok((QuicFrame.PathResponse(data), pos + 8))
 }
 
 // --- CONNECTION_CLOSE ---
@@ -495,10 +495,10 @@ fn decode_connection_close_transport(buf: &[Byte], pos: Int) -> Result<(QuicFram
     let (ftype, p2) = quic_decode(buf, p1).or_else(vfail)?;
     let (rlen, p3)  = quic_decode(buf, p2).or_else(vfail)?;
     let end = p3 + (rlen as Int);
-    if end > buf.len() { return Err(FrameError.Truncated); }
+    if end > buf.len() { return Result.Err(FrameError.Truncated); }
     let mut reason: List<Byte> = List.with_capacity(end - p3);
     reason.extend_from_slice(&buf[p3..end]);
-    Ok((QuicFrame.ConnectionCloseTransport {
+    Result.Ok((QuicFrame.ConnectionCloseTransport {
         error_code: code,
         frame_type: ftype,
         reason: reason,
@@ -509,10 +509,10 @@ fn decode_connection_close_application(buf: &[Byte], pos: Int) -> Result<(QuicFr
     let (code, p1)  = quic_decode(buf, pos).or_else(vfail)?;
     let (rlen, p2)  = quic_decode(buf, p1).or_else(vfail)?;
     let end = p2 + (rlen as Int);
-    if end > buf.len() { return Err(FrameError.Truncated); }
+    if end > buf.len() { return Result.Err(FrameError.Truncated); }
     let mut reason: List<Byte> = List.with_capacity(end - p2);
     reason.extend_from_slice(&buf[p2..end]);
-    Ok((QuicFrame.ConnectionCloseApplication { error_code: code, reason: reason }, end))
+    Result.Ok((QuicFrame.ConnectionCloseApplication { error_code: code, reason: reason }, end))
 }
 
 // --- DATAGRAM (RFC 9221) ---
@@ -521,7 +521,7 @@ fn decode_datagram(buf: &[Byte], pos: Int, with_length: Bool) -> Result<(QuicFra
     let (data, end) = if with_length {
         let (len, p1) = quic_decode(buf, pos).or_else(vfail)?;
         let e = p1 + (len as Int);
-        if e > buf.len() { return Err(FrameError.Truncated); }
+        if e > buf.len() { return Result.Err(FrameError.Truncated); }
         let mut d: List<Byte> = List.with_capacity(e - p1);
         d.extend_from_slice(&buf[p1..e]);
         (d, e)
@@ -531,7 +531,7 @@ fn decode_datagram(buf: &[Byte], pos: Int, with_length: Bool) -> Result<(QuicFra
         d.extend_from_slice(&buf[pos..]);
         (d, buf.len())
     };
-    Ok((QuicFrame.Datagram { data: data, with_length: with_length }, end))
+    Result.Ok((QuicFrame.Datagram { data: data, with_length: with_length }, end))
 }
 
 // =============================================================================
@@ -551,7 +551,7 @@ public fn encode_frame(frame: &QuicFrame, out: &mut List<Byte>) -> Int {
             let _ = quic_encode_into(out, 1_u64);
         },
         QuicFrame.AckFrame { largest_acked, ack_delay, ranges, ecn } => {
-            let with_ecn = match ecn { Some(_) => true, None => false };
+            let with_ecn = match ecn { Maybe.Some(_) => true, Maybe.None => false };
             let _ = quic_encode_into(out, if with_ecn { 3_u64 } else { 2_u64 });
             encode_ack_body(*largest_acked, *ack_delay, ranges, ecn, out);
         },
@@ -704,12 +704,12 @@ fn encode_ack_body(
     }
 
     match ecn {
-        Some(c) => {
+        Maybe.Some(c) => {
             let _ = quic_encode_into(out, c.ect0);
             let _ = quic_encode_into(out, c.ect1);
             let _ = quic_encode_into(out, c.ce);
         },
-        None => {},
+        Maybe.None => {},
     }
 }
 
@@ -733,5 +733,5 @@ public fn decode_all_frames(payload: &[Byte]) -> Result<List<QuicFrame>, FrameEr
         out.push(frame);
         pos = next;
     }
-    Ok(out)
+    Result.Ok(out)
 }

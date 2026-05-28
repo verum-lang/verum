@@ -155,10 +155,10 @@ public const MAX_BSON_FIELDS: Int = 1_000_000;
 public type BsonObjectId is { bytes: List<Byte> };
 
 implement BsonObjectId {
-    /// Construct from 12 raw bytes; returns `None` on length
+    /// Construct from 12 raw bytes; returns `Maybe.None` on length
     /// mismatch.
     public fn from_bytes(b: List<Byte>) -> Maybe<BsonObjectId> {
-        if b.len() == 12 { Some(BsonObjectId { bytes: b }) } else { None }
+        if b.len() == 12 { Maybe.Some(BsonObjectId { bytes: b }) } else { Maybe.None }
     }
 
     public fn as_bytes(&self) -> &List<Byte> { &self.bytes }
@@ -233,16 +233,16 @@ implement BsonDocument {
     public fn len(&self) -> Int { self.fields.len() as Int }
 
     /// Linear lookup — documents are typically small. Returns
-    /// `None` if the key is not present.
+    /// `Maybe.None` if the key is not present.
     public fn get(&self, key: &Text) -> Maybe<&BsonValue> {
         let mut i: Int = 0;
         while i < self.fields.len() as Int {
             if self.fields[i].0 == *key {
-                return Some(&self.fields[i].1);
+                return Maybe.Some(&self.fields[i].1);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 }
 
@@ -655,35 +655,35 @@ fn array_key_cache_lookup(i: Int) -> Text {
 public fn decode(bytes: &[Byte]) -> Result<BsonValue, BsonError> {
     let n = bytes.len() as Int;
     if n < 5 {
-        return Err(BsonE_Truncated(n));
+        return Result.Err(BsonE_Truncated(n));
     }
     let mut off: Int = 0;
     let doc = decode_document(bytes, &mut off, 0)?;
     if off != n {
-        return Err(BsonE_TrailingBytes(n - off));
+        return Result.Err(BsonE_TrailingBytes(n - off));
     }
-    Ok(BsonV_Document(Heap.new(doc)))
+    Result.Ok(BsonV_Document(Heap.new(doc)))
 }
 
 /// Parse a BSON document slice and return its body. `off` is updated
 /// to the byte just past the document terminator.
 fn decode_document(bytes: &[Byte], off: &mut Int, depth: Int) -> Result<BsonDocument, BsonError> {
     if depth >= MAX_BSON_NESTING {
-        return Err(BsonE_NestingTooDeep);
+        return Result.Err(BsonE_NestingTooDeep);
     }
     let n = bytes.len() as Int;
     if *off + 4 > n {
-        return Err(BsonE_Truncated(*off));
+        return Result.Err(BsonE_Truncated(*off));
     }
     let total = read_i32_le(bytes, *off);
     if total < 5 {
-        return Err(BsonE_BadLength(total));
+        return Result.Err(BsonE_BadLength(total));
     }
     if total > MAX_BSON_DOCUMENT_BYTES {
-        return Err(BsonE_DocumentTooLarge(total));
+        return Result.Err(BsonE_DocumentTooLarge(total));
     }
     if *off + total > n {
-        return Err(BsonE_Truncated(*off + total));
+        return Result.Err(BsonE_Truncated(*off + total));
     }
     let doc_end = *off + total;
     let mut p = *off + 4;
@@ -691,7 +691,7 @@ fn decode_document(bytes: &[Byte], off: &mut Int, depth: Int) -> Result<BsonDocu
     let mut field_count: Int = 0;
     while p < doc_end - 1 {       // -1 to leave the terminator
         if field_count >= MAX_BSON_FIELDS {
-            return Err(BsonE_TooManyFields(field_count));
+            return Result.Err(BsonE_TooManyFields(field_count));
         }
         let tag = bytes[p];
         p = p + 1;
@@ -701,28 +701,28 @@ fn decode_document(bytes: &[Byte], off: &mut Int, depth: Int) -> Result<BsonDocu
         field_count = field_count + 1;
     }
     if p != doc_end - 1 {
-        return Err(BsonE_BadLength(total));
+        return Result.Err(BsonE_BadLength(total));
     }
     if (bytes[p] as Int) != 0 {
-        return Err(BsonE_MissingDocumentTerminator);
+        return Result.Err(BsonE_MissingDocumentTerminator);
     }
     *off = p + 1;
-    Ok(BsonDocument { fields: fields })
+    Result.Ok(BsonDocument { fields: fields })
 }
 
 fn decode_value(tag: Byte, bytes: &[Byte], off: &mut Int, depth: Int) -> Result<BsonValue, BsonError> {
     let t = (tag as Int) & 0xFF;
     if t == (BSON_DOUBLE as Int) {
         let v = read_f64_le(bytes, off)?;
-        return Ok(BsonV_Double(v));
+        return Result.Ok(BsonV_Double(v));
     }
     if t == (BSON_STRING as Int) {
         let s = read_string(bytes, off)?;
-        return Ok(BsonV_String(s));
+        return Result.Ok(BsonV_String(s));
     }
     if t == (BSON_DOCUMENT as Int) {
         let d = decode_document(bytes, off, depth)?;
-        return Ok(BsonV_Document(Heap.new(d)));
+        return Result.Ok(BsonV_Document(Heap.new(d)));
     }
     if t == (BSON_ARRAY as Int) {
         let d = decode_document(bytes, off, depth)?;
@@ -733,14 +733,14 @@ fn decode_value(tag: Byte, bytes: &[Byte], off: &mut Int, depth: Int) -> Result<
             items.push(d.fields[i].1.clone());
             i = i + 1;
         }
-        return Ok(BsonV_Array(items));
+        return Result.Ok(BsonV_Array(items));
     }
     if t == (BSON_BINARY as Int) {
         let len = read_i32_le(bytes, *off);
         *off = *off + 4;
-        if len < 0 { return Err(BsonE_BadLength(len)); }
+        if len < 0 { return Result.Err(BsonE_BadLength(len)); }
         if *off + 1 + len > bytes.len() as Int {
-            return Err(BsonE_Truncated(*off + 1 + len));
+            return Result.Err(BsonE_Truncated(*off + 1 + len));
         }
         let subtype = bytes[*off];
         *off = *off + 1;
@@ -751,15 +751,15 @@ fn decode_value(tag: Byte, bytes: &[Byte], off: &mut Int, depth: Int) -> Result<
             k = k + 1;
         }
         *off = *off + len;
-        return Ok(BsonV_Binary(BsonBinary { subtype: subtype, data: data }));
+        return Result.Ok(BsonV_Binary(BsonBinary { subtype: subtype, data: data }));
     }
     if t == (BSON_UNDEFINED as Int) {
         // Deprecated → modern Null.
-        return Ok(BsonV_Null);
+        return Result.Ok(BsonV_Null);
     }
     if t == (BSON_OBJECT_ID as Int) {
         if *off + 12 > bytes.len() as Int {
-            return Err(BsonE_Truncated(*off + 12));
+            return Result.Err(BsonE_Truncated(*off + 12));
         }
         let mut b: List<Byte> = List.with_capacity(12);
         let mut k: Int = 0;
@@ -768,75 +768,75 @@ fn decode_value(tag: Byte, bytes: &[Byte], off: &mut Int, depth: Int) -> Result<
             k = k + 1;
         }
         *off = *off + 12;
-        return Ok(BsonV_ObjectId(BsonObjectId { bytes: b }));
+        return Result.Ok(BsonV_ObjectId(BsonObjectId { bytes: b }));
     }
     if t == (BSON_BOOLEAN as Int) {
-        if *off >= bytes.len() as Int { return Err(BsonE_Truncated(*off)); }
+        if *off >= bytes.len() as Int { return Result.Err(BsonE_Truncated(*off)); }
         let b = (bytes[*off] as Int) & 0xFF;
         *off = *off + 1;
-        if b != 0 && b != 1 { return Err(BsonE_BadType(b as Byte)); }
-        return Ok(BsonV_Bool(b != 0));
+        if b != 0 && b != 1 { return Result.Err(BsonE_BadType(b as Byte)); }
+        return Result.Ok(BsonV_Bool(b != 0));
     }
     if t == (BSON_DATETIME as Int) {
         let v = read_i64_le(bytes, off)?;
-        return Ok(BsonV_Datetime(v));
+        return Result.Ok(BsonV_Datetime(v));
     }
     if t == (BSON_NULL as Int) {
-        return Ok(BsonV_Null);
+        return Result.Ok(BsonV_Null);
     }
     if t == (BSON_REGEX as Int) {
         let pat = read_cstring(bytes, off)?;
         let opt = read_cstring(bytes, off)?;
-        return Ok(BsonV_Regex(BsonRegex { pattern: pat, options: opt }));
+        return Result.Ok(BsonV_Regex(BsonRegex { pattern: pat, options: opt }));
     }
     if t == (BSON_DBPOINTER as Int) {
         // Deprecated; consume + drop. Layout: string + 12-byte oid.
         let _ = read_string(bytes, off)?;
         if *off + 12 > bytes.len() as Int {
-            return Err(BsonE_Truncated(*off + 12));
+            return Result.Err(BsonE_Truncated(*off + 12));
         }
         *off = *off + 12;
-        return Ok(BsonV_Null);
+        return Result.Ok(BsonV_Null);
     }
     if t == (BSON_CODE as Int) {
         let s = read_string(bytes, off)?;
-        return Ok(BsonV_Code(s));
+        return Result.Ok(BsonV_Code(s));
     }
     if t == (BSON_SYMBOL as Int) {
         // Deprecated; map to String.
         let s = read_string(bytes, off)?;
-        return Ok(BsonV_String(s));
+        return Result.Ok(BsonV_String(s));
     }
     if t == (BSON_CODE_WS as Int) {
         // Deprecated. Layout: i32 totalLen + string code + document scope.
         // We retain the code, drop the scope.
-        if *off + 4 > bytes.len() as Int { return Err(BsonE_Truncated(*off)); }
+        if *off + 4 > bytes.len() as Int { return Result.Err(BsonE_Truncated(*off)); }
         let _total = read_i32_le(bytes, *off);
         *off = *off + 4;
         let code = read_string(bytes, off)?;
         let _scope = decode_document(bytes, off, depth)?;
-        return Ok(BsonV_Code(code));
+        return Result.Ok(BsonV_Code(code));
     }
     if t == (BSON_INT32 as Int) {
         let v = read_i32_le_advance(bytes, off)?;
-        return Ok(BsonV_Int32(v));
+        return Result.Ok(BsonV_Int32(v));
     }
     if t == (BSON_TIMESTAMP as Int) {
-        if *off + 8 > bytes.len() as Int { return Err(BsonE_Truncated(*off)); }
+        if *off + 8 > bytes.len() as Int { return Result.Err(BsonE_Truncated(*off)); }
         let inc = read_i32_le(bytes, *off);
         let sec = read_i32_le(bytes, *off + 4);
         *off = *off + 8;
-        return Ok(BsonV_Timestamp(BsonTimestamp {
+        return Result.Ok(BsonV_Timestamp(BsonTimestamp {
             increment: (inc & 0xFFFFFFFF) as UInt32,
             seconds:   (sec & 0xFFFFFFFF) as UInt32,
         }));
     }
     if t == (BSON_INT64 as Int) {
         let v = read_i64_le(bytes, off)?;
-        return Ok(BsonV_Int64(v));
+        return Result.Ok(BsonV_Int64(v));
     }
     if t == (BSON_DECIMAL128 as Int) {
-        if *off + 16 > bytes.len() as Int { return Err(BsonE_Truncated(*off)); }
+        if *off + 16 > bytes.len() as Int { return Result.Err(BsonE_Truncated(*off)); }
         let mut b: List<Byte> = List.with_capacity(16);
         let mut k: Int = 0;
         while k < 16 {
@@ -844,11 +844,11 @@ fn decode_value(tag: Byte, bytes: &[Byte], off: &mut Int, depth: Int) -> Result<
             k = k + 1;
         }
         *off = *off + 16;
-        return Ok(BsonV_Decimal128(b));
+        return Result.Ok(BsonV_Decimal128(b));
     }
-    if t == (BSON_MIN_KEY as Int) { return Ok(BsonV_MinKey); }
-    if t == (BSON_MAX_KEY as Int) { return Ok(BsonV_MaxKey); }
-    Err(BsonE_BadType(tag))
+    if t == (BSON_MIN_KEY as Int) { return Result.Ok(BsonV_MinKey); }
+    if t == (BSON_MAX_KEY as Int) { return Result.Ok(BsonV_MaxKey); }
+    Result.Err(BsonE_BadType(tag))
 }
 
 // =============================================================================
@@ -866,16 +866,16 @@ fn read_i32_le(bytes: &[Byte], off: Int) -> Int {
 
 fn read_i32_le_advance(bytes: &[Byte], off: &mut Int) -> Result<Int, BsonError> {
     if *off + 4 > bytes.len() as Int {
-        return Err(BsonE_Truncated(*off + 4));
+        return Result.Err(BsonE_Truncated(*off + 4));
     }
     let v = read_i32_le(bytes, *off);
     *off = *off + 4;
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn read_i64_le(bytes: &[Byte], off: &mut Int) -> Result<Int, BsonError> {
     if *off + 8 > bytes.len() as Int {
-        return Err(BsonE_Truncated(*off + 8));
+        return Result.Err(BsonE_Truncated(*off + 8));
     }
     let mut v: Int = 0;
     let mut i: Int = 0;
@@ -884,12 +884,12 @@ fn read_i64_le(bytes: &[Byte], off: &mut Int) -> Result<Int, BsonError> {
         i = i + 1;
     }
     *off = *off + 8;
-    Ok(v)
+    Result.Ok(v)
 }
 
 fn read_f64_le(bytes: &[Byte], off: &mut Int) -> Result<Float, BsonError> {
     if *off + 8 > bytes.len() as Int {
-        return Err(BsonE_Truncated(*off + 8));
+        return Result.Err(BsonE_Truncated(*off + 8));
     }
     let mut bits: UInt64 = 0_u64;
     let mut i: Int = 0;
@@ -899,16 +899,16 @@ fn read_f64_le(bytes: &[Byte], off: &mut Int) -> Result<Float, BsonError> {
         i = i + 1;
     }
     *off = *off + 8;
-    Ok(Float.from_bits(bits))
+    Result.Ok(Float.from_bits(bits))
 }
 
 /// Read a STRING (i32 length + UTF-8 + NUL). Length includes the
 /// NUL per spec. Returns `BsonE_BadUtf8` on invalid UTF-8.
 fn read_string(bytes: &[Byte], off: &mut Int) -> Result<Text, BsonError> {
     let len = read_i32_le_advance(bytes, off)?;
-    if len < 1 { return Err(BsonE_BadLength(len)); }
+    if len < 1 { return Result.Err(BsonE_BadLength(len)); }
     if *off + len > bytes.len() as Int {
-        return Err(BsonE_Truncated(*off + len));
+        return Result.Err(BsonE_Truncated(*off + len));
     }
     // payload = (len - 1) UTF-8 bytes + NUL terminator.
     let body_len = len - 1;
@@ -919,12 +919,12 @@ fn read_string(bytes: &[Byte], off: &mut Int) -> Result<Text, BsonError> {
         i = i + 1;
     }
     if (bytes[*off + body_len] as Int) != 0 {
-        return Err(BsonE_BadLength(len));
+        return Result.Err(BsonE_BadLength(len));
     }
     *off = *off + len;
     match Text.from_utf8(body) {
-        Ok(s)  => Ok(s),
-        Err(_) => Err(BsonE_BadUtf8),
+        Result.Ok(s)  => Result.Ok(s),
+        Result.Err(_) => Result.Err(BsonE_BadUtf8),
     }
 }
 
@@ -937,7 +937,7 @@ fn read_cstring(bytes: &[Byte], off: &mut Int) -> Result<Text, BsonError> {
         i = i + 1;
     }
     if i >= n {
-        return Err(BsonE_Truncated(i));
+        return Result.Err(BsonE_Truncated(i));
     }
     let mut body: List<Byte> = List.with_capacity(i - start);
     let mut j = start;
@@ -947,8 +947,8 @@ fn read_cstring(bytes: &[Byte], off: &mut Int) -> Result<Text, BsonError> {
     }
     *off = i + 1;       // skip NUL
     match Text.from_utf8(body) {
-        Ok(s)  => Ok(s),
-        Err(_) => Err(BsonE_BadUtf8),
+        Result.Ok(s)  => Result.Ok(s),
+        Result.Err(_) => Result.Err(BsonE_BadUtf8),
     }
 }
 

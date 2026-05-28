@@ -20,22 +20,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "Redis MULTI/EXEC/WATCH optimistic-concurrency transactions".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate: Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.redis.transaction;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.List;
 
 mount core.redis.client.{RedisClient, RedisError};
@@ -90,9 +90,9 @@ pub async fn run_simple(
     let replies = core.redis.client.exec_pipeline(client, &script).await?;
     let last = replies[replies.len() - 1].clone();
     match last {
-        RespValue.NullArray | RespValue.NullBulk | RespValue.Nil_ => Ok(TxResult.Aborted),
-        RespValue.Array(arr) => Ok(TxResult.Committed(arr)),
-        RespValue.Error_(m)  => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"EXEC unexpected: {other}")),
+        RespValue.NullArray | RespValue.NullBulk | RespValue.Nil_ => Result.Ok(TxResult.Aborted),
+        RespValue.Array(arr) => Result.Ok(TxResult.Committed(arr)),
+        RespValue.Error_(m)  => Result.Err(RedisError.Backend(m)),
+        other => Result.Err(RedisError.InvalidReply(f"EXEC unexpected: {other}")),
     }
 }

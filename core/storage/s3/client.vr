@@ -30,22 +30,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "S3-compatible object-store client implementing ObjectStore (SigV4-authenticated)".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.storage.s3.client;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.hex.{encode as hex_encode};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
@@ -131,7 +131,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         if options.if_none_match {
             headers.insert("if-none-match".to_text(), "*".to_text());
         }
-        if let Some(et) = &options.if_match_etag {
+        if let Maybe.Some(et) = &options.if_match_etag {
             headers.insert("if-match".to_text(), et.clone());
         }
         for (k, v) in options.user_metadata.iter() {
@@ -160,18 +160,18 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         let resp = self.http.send(&req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
         if resp.status.is_409() {
-            return Err(StorageError.Conflict(extract_error_message(&resp)));
+            return Result.Err(StorageError.Conflict(extract_error_message(&resp)));
         }
         if resp.status.is_403() {
-            return Err(StorageError.AccessDenied(extract_error_message(&resp)));
+            return Result.Err(StorageError.AccessDenied(extract_error_message(&resp)));
         }
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(f"PUT HTTP {resp.status} {extract_error_message(&resp)}"));
+            return Result.Err(StorageError.Backend(f"PUT HTTP {resp.status} {extract_error_message(&resp)}"));
         }
         let etag = resp.headers.get(&"etag".to_text())
             .map(|v| strip_quotes(v))
             .unwrap_or_else(|| "".to_text());
-        Ok(ObjectMetadata {
+        Result.Ok(ObjectMetadata {
             key:           key.clone(),
             content_length: data.len(),
             content_type:  options.content_type.clone(),
@@ -193,10 +193,10 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
 
         let mut headers: Map<Text, Text> = Map.new();
         headers.insert("host".to_text(), host.clone());
-        if let Some((start, end)) = options.range {
+        if let Maybe.Some((start, end)) = options.range {
             headers.insert("range".to_text(), f"bytes={start}-{end}");
         }
-        if let Some(etag) = &options.if_none_match {
+        if let Maybe.Some(etag) = &options.if_none_match {
             headers.insert("if-none-match".to_text(), etag.clone());
         }
 
@@ -223,13 +223,13 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         let resp = self.http.send(&req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
         if resp.status.is_404() {
-            return Err(StorageError.NotFound(key.clone()));
+            return Result.Err(StorageError.NotFound(key.clone()));
         }
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(f"GET HTTP {resp.status} {extract_error_message(&resp)}"));
+            return Result.Err(StorageError.Backend(f"GET HTTP {resp.status} {extract_error_message(&resp)}"));
         }
         let meta = parse_metadata_from_headers(key, &resp.headers, resp.body.len());
-        Ok((meta, resp.body))
+        Result.Ok((meta, resp.body))
     }
 
     async fn head(&self, key: &Text) -> Result<ObjectMetadata, StorageError> {
@@ -262,13 +262,13 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         };
         let resp = self.http.send(&req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
-        if resp.status.is_404() { return Err(StorageError.NotFound(key.clone())); }
+        if resp.status.is_404() { return Result.Err(StorageError.NotFound(key.clone())); }
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(f"HEAD HTTP {resp.status}"));
+            return Result.Err(StorageError.Backend(f"HEAD HTTP {resp.status}"));
         }
         let cl = resp.headers.get(&"content-length".to_text())
             .and_then(|v| Int.parse(v).ok()).unwrap_or(0);
-        Ok(parse_metadata_from_headers(key, &resp.headers, cl))
+        Result.Ok(parse_metadata_from_headers(key, &resp.headers, cl))
     }
 
     async fn delete(&self, key: &Text) -> Result<(), StorageError> {
@@ -303,21 +303,21 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
             .map_err(|e| StorageError.Network(f"{e}"))?;
         // S3 delete is idempotent — 204 even on missing keys.
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(f"DELETE HTTP {resp.status}"));
+            return Result.Err(StorageError.Backend(f"DELETE HTTP {resp.status}"));
         }
-        Ok(())
+        Result.Ok(())
     }
 
     async fn list(&self, options: &ListOptions) -> Result<ListPage, StorageError> {
         let mut q: List<(Text, Text)> = List.new();
         q.push(("list-type".to_text(), "2".to_text()));
-        if let Some(p) = &options.prefix {
+        if let Maybe.Some(p) = &options.prefix {
             q.push(("prefix".to_text(), p.clone()));
         }
-        if let Some(d) = &options.delimiter {
+        if let Maybe.Some(d) = &options.delimiter {
             q.push(("delimiter".to_text(), d.clone()));
         }
-        if let Some(t) = &options.continuation_token {
+        if let Maybe.Some(t) = &options.continuation_token {
             q.push(("continuation-token".to_text(), t.clone()));
         }
         q.push(("max-keys".to_text(), f"{options.max_keys}"));
@@ -352,7 +352,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         let resp = self.http.send(&req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(f"LIST HTTP {resp.status} {extract_error_message(&resp)}"));
+            return Result.Err(StorageError.Backend(f"LIST HTTP {resp.status} {extract_error_message(&resp)}"));
         }
         parse_list_v2_response(&resp.body)
     }
@@ -384,7 +384,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         ).map_err(|e| StorageError.Backend(e))?;
 
         let url = f"{compose_object_url(&self.config, key)}?{encode_query(&signed_q)}";
-        Ok(url)
+        Result.Ok(url)
     }
 
     async fn head_bucket(&self) -> Result<(), StorageError> {
@@ -417,12 +417,12 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         };
         let resp = self.http.send(&req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
-        if resp.status.is_404() { return Err(StorageError.NotFound(self.config.bucket.clone())); }
-        if resp.status.is_403() { return Err(StorageError.AccessDenied("HEAD bucket".to_text())); }
+        if resp.status.is_404() { return Result.Err(StorageError.NotFound(self.config.bucket.clone())); }
+        if resp.status.is_403() { return Result.Err(StorageError.AccessDenied("HEAD bucket".to_text())); }
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(f"HEAD bucket HTTP {resp.status}"));
+            return Result.Err(StorageError.Backend(f"HEAD bucket HTTP {resp.status}"));
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -437,8 +437,8 @@ fn compose_object_url(cfg: &S3Config, key: &Text) -> Text {
         let mut endpoint = cfg.endpoint.clone();
         // Insert bucket as a hostname prefix.
         let after_scheme = match endpoint.find_str("://") {
-            Some(i) => i + 3,
-            None    => 0,
+            Maybe.Some(i) => i + 3,
+            Maybe.None    => 0,
         };
         let scheme = endpoint.byte_substring(0, after_scheme);
         let rest   = endpoint.byte_substring(after_scheme, endpoint.len());
@@ -452,8 +452,8 @@ fn compose_bucket_url(cfg: &S3Config) -> Text {
     } else {
         let endpoint = &cfg.endpoint;
         let after_scheme = match endpoint.find_str("://") {
-            Some(i) => i + 3,
-            None    => 0,
+            Maybe.Some(i) => i + 3,
+            Maybe.None    => 0,
         };
         let scheme = endpoint.byte_substring(0, after_scheme);
         let rest   = endpoint.byte_substring(after_scheme, endpoint.len());
@@ -476,13 +476,13 @@ fn compose_bucket_path(cfg: &S3Config) -> Text {
 
 fn extract_host(endpoint: &Text) -> Text {
     let after_scheme = match endpoint.find_str("://") {
-        Some(i) => i + 3,
-        None    => 0,
+        Maybe.Some(i) => i + 3,
+        Maybe.None    => 0,
     };
     let rest = endpoint.byte_substring(after_scheme, endpoint.len());
     let host_end = match rest.find_byte_any(b"/?#") {
-        Some(p) => p,
-        None    => rest.len(),
+        Maybe.Some(p) => p,
+        Maybe.None    => rest.len(),
     };
     rest.byte_substring(0, host_end)
 }
@@ -548,7 +548,7 @@ fn http_date_to_rfc3339(_http_date: &Text) -> Maybe<Rfc3339Time> {
     // RFC 7231 §7.1.1.1 IMF-fixdate parser. The full implementation
     // lives in `core.time.imf_fixdate` (separate task). For now
     // surface the request timestamp as a best-effort fallback.
-    None
+    Maybe.None
 }
 
 fn now_rfc3339() -> Rfc3339Time {
@@ -582,12 +582,12 @@ fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
     let mut i: Int = 0;
     while i < xml.len() {
         let start = match xml.find_str_after("<Contents>", i) {
-            Some(p) => p,
-            None    => break,
+            Maybe.Some(p) => p,
+            Maybe.None    => break,
         };
         let end = match xml.find_str_after("</Contents>", start) {
-            Some(p) => p,
-            None    => break,
+            Maybe.Some(p) => p,
+            Maybe.None    => break,
         };
         let block = xml.byte_substring(start + 10, end);
         let key = extract_xml_text(&block, "Key").unwrap_or_else(|| "".to_text());
@@ -612,15 +612,15 @@ fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
     let mut j: Int = 0;
     while j < xml.len() {
         let start = match xml.find_str_after("<CommonPrefixes>", j) {
-            Some(p) => p,
-            None    => break,
+            Maybe.Some(p) => p,
+            Maybe.None    => break,
         };
         let end = match xml.find_str_after("</CommonPrefixes>", start) {
-            Some(p) => p,
-            None    => break,
+            Maybe.Some(p) => p,
+            Maybe.None    => break,
         };
         let block = xml.byte_substring(start + 16, end);
-        if let Some(p) = extract_xml_text(&block, "Prefix") {
+        if let Maybe.Some(p) = extract_xml_text(&block, "Prefix") {
             common.push(p);
         }
         j = end + 17;
@@ -628,7 +628,7 @@ fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
 
     let next_token = extract_xml_text(&xml, "NextContinuationToken");
 
-    Ok(ListPage { objects, common_prefixes: common, next_token })
+    Result.Ok(ListPage { objects, common_prefixes: common, next_token })
 }
 
 fn extract_xml_text(xml: &Text, tag: &str) -> Maybe<Text> {
@@ -636,5 +636,5 @@ fn extract_xml_text(xml: &Text, tag: &str) -> Maybe<Text> {
     let close = f"</{tag}>";
     let s = xml.find_str(&open)?;
     let e = xml.find_str_after(&close, s + open.len())?;
-    Some(xml.byte_substring(s + open.len(), e))
+    Maybe.Some(xml.byte_substring(s + open.len(), e))
 }

@@ -229,16 +229,16 @@ fn tcb_destructor(value: &unsafe Byte) {
 public fn init_tls_key() -> Result<(), SysTlsError> {
     unsafe {
         if TLS_KEY_INITIALIZED {
-            return Ok(());
+            return Result.Ok(());
         }
 
         let result = pthread_key_create(&mut TLS_KEY, tcb_destructor);
         if result != 0 {
-            return Err(PthreadError { code: result });
+            return Result.Err(PthreadError { code: result });
         }
 
         TLS_KEY_INITIALIZED = true;
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -253,7 +253,7 @@ public fn init_main_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTls
     // Check if already initialized
     let existing = get_current_tcb_raw();
     if existing as Int != 0 {
-        return Err(AlreadyInitialized);
+        return Result.Err(AlreadyInitialized);
     }
 
     // Create TCB for main thread
@@ -279,7 +279,7 @@ public fn create_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTlsErr
     };
 
     if base == -1 {
-        return Err(AllocationFailed { code: errno() });
+        return Result.Err(AllocationFailed { code: errno() });
     }
 
     // Make guard page inaccessible
@@ -287,7 +287,7 @@ public fn create_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTlsErr
         let guard_result = super.libsystem.mprotect(base, GUARD_PAGE_SIZE, PROT_NONE);
         if guard_result != 0 {
             munmap(base, total_size);
-            return Err(AllocationFailed { code: errno() });
+            return Result.Err(AllocationFailed { code: errno() });
         }
     };
 
@@ -316,17 +316,17 @@ public fn create_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTlsErr
     let set_result = unsafe { pthread_setspecific(TLS_KEY, tcb_addr as &unsafe Byte) };
     if set_result != 0 {
         unsafe { munmap(base, total_size) };
-        return Err(PthreadError { code: set_result });
+        return Result.Err(PthreadError { code: set_result });
     }
 
-    Ok(tcb)
+    Result.Ok(tcb)
 }
 
 /// Clean up TLS for the current thread.
 public fn cleanup_thread_tls() -> Result<(), SysTlsError> {
     let tcb = get_current_tcb_raw();
     if tcb as Int == 0 {
-        return Ok(());  // Nothing to clean up
+        return Result.Ok(());  // Nothing to clean up
     }
 
     // Clear the TLS slot (destructor will free memory)
@@ -335,7 +335,7 @@ public fn cleanup_thread_tls() -> Result<(), SysTlsError> {
     // Manually call destructor since setting to null won't trigger it
     tcb_destructor(tcb as &unsafe Byte);
 
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -355,34 +355,34 @@ fn get_current_tcb_raw() -> &mut DarwinThreadControlBlock {
 /// Get the current thread's TCB.
 ///
 
-/// Returns None if TLS is not initialized for this thread.
+/// Returns Maybe.None if TLS is not initialized for this thread.
 public fn get_current_tcb() -> Maybe<&mut DarwinThreadControlBlock> {
     let tcb = get_current_tcb_raw();
     if tcb as Int == 0 {
-        None
+        Maybe.None
     } else if tcb.magic != TCB_MAGIC {
-        None  // Corrupted TCB
+        Maybe.None  // Corrupted TCB
     } else {
-        Some(tcb)
+        Maybe.Some(tcb)
     }
 }
 
 /// Get context slots for the current thread.
 public fn get_context_slots() -> Maybe<&mut DarwinContextSlots> {
     match get_current_tcb() {
-        Some(tcb) => Some(&mut tcb.context_slots),
-        None => None,
+        Maybe.Some(tcb) => Maybe.Some(&mut tcb.context_slots),
+        Maybe.None => Maybe.None,
     }
 }
 
 /// Set context slots for the current thread.
 public fn set_context_slots(slots: DarwinContextSlots) -> Result<(), SysTlsError> {
     match get_current_tcb() {
-        Some(tcb) => {
+        Maybe.Some(tcb) => {
             tcb.context_slots = slots;
-            Ok(())
+            Result.Ok(())
         }
-        None => Err(NotInitialized),
+        Maybe.None => Result.Err(NotInitialized),
     }
 }
 
@@ -400,16 +400,16 @@ public fn set_errno(err: Int) {
 /// Get cached thread ID (fast path).
 public fn get_tid_fast() -> Maybe<UInt64> {
     match get_current_tcb() {
-        Some(tcb) => Some(tcb.tid),
-        None => None,
+        Maybe.Some(tcb) => Maybe.Some(tcb.tid),
+        Maybe.None => Maybe.None,
     }
 }
 
 /// Check if stack canary is intact.
 public fn check_stack_guard() -> Bool {
     match get_current_tcb() {
-        Some(tcb) => tcb.stack_canary != 0,  // Basic check
-        None => true,  // No TCB = no canary to check
+        Maybe.Some(tcb) => tcb.stack_canary != 0,  // Basic check
+        Maybe.None => true,  // No TCB = no canary to check
     }
 }
 
@@ -420,19 +420,19 @@ public fn check_stack_guard() -> Bool {
 /// Get a context value from a slot.
 public fn ctx_get(slot: Int) -> Maybe<&unsafe Byte> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return None;
+        return Maybe.None;
     }
 
     match get_context_slots() {
-        Some(slots) => {
+        Maybe.Some(slots) => {
             let entry = &slots.slots[slot];
             if entry.value as Int == 0 {
-                None
+                Maybe.None
             } else {
-                Some(entry.value)
+                Maybe.Some(entry.value)
             }
         }
-        None => None,
+        Maybe.None => Maybe.None,
     }
 }
 
@@ -448,15 +448,15 @@ public fn ctx_get_mut(slot: Int) -> Maybe<&unsafe Byte> {
 /// Set a context value in a slot.
 public fn ctx_set(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return Err(InvalidSlot { slot: slot });
+        return Result.Err(InvalidSlot { slot: slot });
     }
 
     match get_context_slots() {
-        Some(slots) => {
+        Maybe.Some(slots) => {
             slots.slots[slot].value = value;
-            Ok(())
+            Result.Ok(())
         }
-        None => Err(NotInitialized),
+        Maybe.None => Result.Err(NotInitialized),
     }
 }
 
@@ -471,15 +471,15 @@ public fn ctx_clear(slot: Int) -> Result<(), SysTlsError> {
 /// The previous value is saved and can be restored with ctx_pop.
 public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return Err(InvalidSlot { slot: slot });
+        return Result.Err(InvalidSlot { slot: slot });
     }
 
     match get_context_slots() {
-        Some(slots) => {
+        Maybe.Some(slots) => {
             let entry = &mut slots.slots[slot];
             if entry.depth >= CONTEXT_STACK_DEPTH {
                 let slot_idx = slot;
-                return Err(SysTlsError.StackOverflow { slot: slot_idx });
+                return Result.Err(SysTlsError.StackOverflow { slot: slot_idx });
             }
 
             // Save current value to stack
@@ -488,9 +488,9 @@ public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
 
             // Set new value
             entry.value = value;
-            Ok(())
+            Result.Ok(())
         }
-        None => Err(NotInitialized),
+        Maybe.None => Result.Err(NotInitialized),
     }
 }
 
@@ -500,14 +500,14 @@ public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
 /// Restores the previous value that was saved by ctx_push.
 public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, SysTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return Err(InvalidSlot { slot: slot });
+        return Result.Err(InvalidSlot { slot: slot });
     }
 
     match get_context_slots() {
-        Some(slots) => {
+        Maybe.Some(slots) => {
             let entry = &mut slots.slots[slot];
             if entry.depth == 0 {
-                return Err(StackUnderflow { slot: slot });
+                return Result.Err(StackUnderflow { slot: slot });
             }
 
             // Get popped value
@@ -518,21 +518,21 @@ public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, SysTlsError> {
             entry.value = entry.stack[entry.depth];
             entry.stack[entry.depth] = 0 as &unsafe Byte;
 
-            Ok(popped)
+            Result.Ok(popped)
         }
-        None => Err(NotInitialized),
+        Maybe.None => Result.Err(NotInitialized),
     }
 }
 
 /// Get the current stack depth for a context slot.
 public fn ctx_depth(slot: Int) -> Maybe<Int> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return None;
+        return Maybe.None;
     }
 
     match get_context_slots() {
-        Some(slots) => Some(slots.slots[slot].depth),
-        None => None,
+        Maybe.Some(slots) => Maybe.Some(slots.slots[slot].depth),
+        Maybe.None => Maybe.None,
     }
 }
 
@@ -556,26 +556,26 @@ fn generate_stack_canary() -> UInt64 {
 /// Check if TLS is initialized for the current thread.
 public fn is_tls_initialized() -> Bool {
     match get_current_tcb() {
-        Some(_) => true,
-        None => false,
+        Maybe.Some(_) => true,
+        Maybe.None => false,
     }
 }
 
 /// Get user data pointer from TCB.
 public fn get_user_data() -> Maybe<&unsafe Byte> {
     match get_current_tcb() {
-        Some(tcb) => Some(tcb.user_data),
-        None => None,
+        Maybe.Some(tcb) => Maybe.Some(tcb.user_data),
+        Maybe.None => Maybe.None,
     }
 }
 
 /// Set user data pointer in TCB.
 public fn set_user_data(data: &unsafe Byte) -> Result<(), SysTlsError> {
     match get_current_tcb() {
-        Some(tcb) => {
+        Maybe.Some(tcb) => {
             tcb.user_data = data;
-            Ok(())
+            Result.Ok(())
         }
-        None => Err(NotInitialized),
+        Maybe.None => Result.Err(NotInitialized),
     }
 }

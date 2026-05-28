@@ -129,13 +129,13 @@ public fn strict_type_from_text(declared: &Text) -> Result<StrictType, StrictCon
     }
     let n = end - start;
     // Compare against the five accepted tokens.
-    if is_ascii_literal(raw, start, n, "any")     { return Ok(Any); }
-    if is_ascii_literal(raw, start, n, "int")     { return Ok(Integer); }
-    if is_ascii_literal(raw, start, n, "integer") { return Ok(Integer); }
-    if is_ascii_literal(raw, start, n, "real")    { return Ok(Real); }
-    if is_ascii_literal(raw, start, n, "text")    { return Ok(Text); }
-    if is_ascii_literal(raw, start, n, "blob")    { return Ok(Blob); }
-    Err(UnknownType(declared.clone()))
+    if is_ascii_literal(raw, start, n, "any")     { return Result.Ok(Any); }
+    if is_ascii_literal(raw, start, n, "int")     { return Result.Ok(Integer); }
+    if is_ascii_literal(raw, start, n, "integer") { return Result.Ok(Integer); }
+    if is_ascii_literal(raw, start, n, "real")    { return Result.Ok(Real); }
+    if is_ascii_literal(raw, start, n, "text")    { return Result.Ok(Text); }
+    if is_ascii_literal(raw, start, n, "blob")    { return Result.Ok(Blob); }
+    Result.Err(UnknownType(declared.clone()))
 }
 
 fn is_ascii_literal(raw: &[Byte], start: Int, n: Int, lit: &str) -> Bool {
@@ -154,8 +154,8 @@ fn is_ascii_literal(raw: &[Byte], start: Int, n: Int, lit: &str) -> Bool {
 // -----------------------------------------------------------------------------
 
 /// Decide whether a value's serial type is acceptable in a column
-/// declared with the given `StrictType`. Returns `Ok(())` if so;
-/// `Err(DatatypeMismatch)` otherwise.
+/// declared with the given `StrictType`. Returns `Result.Ok(())` if so;
+/// `Result.Err(DatatypeMismatch)` otherwise.
 public fn strict_type_matches_serial(
     column: &Text,
     expected: StrictType,
@@ -169,9 +169,9 @@ public fn strict_type_matches_serial(
         Blob    => is_blob_serial(serial),
     };
     if compatible {
-        Ok(())
+        Result.Ok(())
     } else {
-        Err(DatatypeMismatch(column.clone(), expected))
+        Result.Err(DatatypeMismatch(column.clone(), expected))
     }
 }
 

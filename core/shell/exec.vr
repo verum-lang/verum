@@ -81,15 +81,15 @@ public async fn run(program: &Text, args: List<Text>)
         log_dispatched(&display_cmd);
     }
     if ctx.dry_run {
-        return Ok(synthesise_dry_run(display_cmd));
+        return Result.Ok(synthesise_dry_run(display_cmd));
     }
 
     // Mock interception
-    if let Some(mut mock) = ctx.mock.clone() {
+    if let Maybe.Some(mut mock) = ctx.mock.clone() {
         match mock.dispatch(&display_cmd) {
-            Some(resp) => return Ok(synthesise_mock_result(resp, display_cmd)),
-            None => if ctx.mock.as_ref().unwrap().strict_no_match {
-                return Err(ShellError.SpawnFailed {
+            Maybe.Some(resp) => return Result.Ok(synthesise_mock_result(resp, display_cmd)),
+            Maybe.None => if ctx.mock.as_ref().unwrap().strict_no_match {
+                return Result.Err(ShellError.SpawnFailed {
                     command: display_cmd,
                     reason:  "no mock response matched and strict_no_match=true".into(),
                 });
@@ -106,14 +106,14 @@ public async fn run(program: &Text, args: List<Text>)
     cmd.stderr(Stdio.Piped);
 
     match cmd.output() {
-        Ok(out) => Ok(ShellResult.new(
+        Result.Ok(out) => Result.Ok(ShellResult.new(
             out.status,
             out.stdout_bytes,
             out.stderr_bytes,
             display_cmd,
             start.elapsed(),
         )),
-        Err(reason) => Err(ShellError.SpawnFailed {
+        Result.Err(reason) => Result.Err(ShellError.SpawnFailed {
             command: display_cmd,
             reason:  reason,
         }),
@@ -133,8 +133,8 @@ public async fn run(program: &Text, args: List<Text>)
 /// the result to convert non-zero exits into `Err`.
 public async fn sh(cmd_text: &Text) -> ShellResult {
     match sh_check(cmd_text).await {
-        Ok(r)  => r,
-        Err(e) => ShellResult.from_error(e),
+        Result.Ok(r)  => r,
+        Result.Err(e) => ShellResult.from_error(e),
     }
 }
 
@@ -157,14 +157,14 @@ public async fn sh_check(cmd_text: &Text)
         log_dispatched(&display_cmd);
     }
     if ctx.dry_run {
-        return Ok(synthesise_dry_run(display_cmd));
+        return Result.Ok(synthesise_dry_run(display_cmd));
     }
 
-    if let Some(mut mock) = ctx.mock.clone() {
+    if let Maybe.Some(mut mock) = ctx.mock.clone() {
         match mock.dispatch(&display_cmd) {
-            Some(resp) => return Ok(synthesise_mock_result(resp, display_cmd)),
-            None => if ctx.mock.as_ref().unwrap().strict_no_match {
-                return Err(ShellError.SpawnFailed {
+            Maybe.Some(resp) => return Result.Ok(synthesise_mock_result(resp, display_cmd)),
+            Maybe.None => if ctx.mock.as_ref().unwrap().strict_no_match {
+                return Result.Err(ShellError.SpawnFailed {
                     command: display_cmd,
                     reason:  "no mock response matched and strict_no_match=true".into(),
                 });
@@ -181,14 +181,14 @@ public async fn sh_check(cmd_text: &Text)
     cmd.stderr(Stdio.Piped);
 
     match cmd.output() {
-        Ok(out) => Ok(ShellResult.new(
+        Result.Ok(out) => Result.Ok(ShellResult.new(
             out.status,
             out.stdout_bytes,
             out.stderr_bytes,
             display_cmd,
             start.elapsed(),
         )),
-        Err(reason) => Err(ShellError.SpawnFailed {
+        Result.Err(reason) => Result.Err(ShellError.SpawnFailed {
             command: display_cmd,
             reason:  reason,
         }),
@@ -201,7 +201,7 @@ public async fn sh_check(cmd_text: &Text)
 
 /// Executes a command with a `CancellationToken` watching alongside. On
 /// cancel, the child is sent SIGTERM, given `grace` to exit, then SIGKILL.
-/// Returns `Err(Cancelled)` carrying the reason from the token.
+/// Returns `Result.Err(Cancelled)` carrying the reason from the token.
 ///
 
 /// `grace` defaults to 5 seconds when `Duration.from_millis(0)` is passed.
@@ -217,13 +217,13 @@ public async fn run_with_cancel(
     ctx.permissions.check_run(program)?;
 
     let display_cmd = render_argv(program, &args);
-    if ctx.dry_run { return Ok(synthesise_dry_run(display_cmd)); }
+    if ctx.dry_run { return Result.Ok(synthesise_dry_run(display_cmd)); }
 
-    if let Some(mut mock) = ctx.mock.clone() {
+    if let Maybe.Some(mut mock) = ctx.mock.clone() {
         match mock.dispatch(&display_cmd) {
-            Some(resp) => return Ok(synthesise_mock_result(resp, display_cmd)),
-            None => if ctx.mock.as_ref().unwrap().strict_no_match {
-                return Err(ShellError.SpawnFailed {
+            Maybe.Some(resp) => return Result.Ok(synthesise_mock_result(resp, display_cmd)),
+            Maybe.None => if ctx.mock.as_ref().unwrap().strict_no_match {
+                return Result.Err(ShellError.SpawnFailed {
                     command: display_cmd,
                     reason:  "no mock response matched".into(),
                 });
@@ -239,8 +239,8 @@ public async fn run_with_cancel(
     cmd.stderr(Stdio.Piped);
 
     let child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(reason) => return Err(ShellError.SpawnFailed {
+        Result.Ok(c) => c,
+        Result.Err(reason) => return Result.Err(ShellError.SpawnFailed {
             command: display_cmd,
             reason,
         }),
@@ -251,11 +251,11 @@ public async fn run_with_cancel(
 
     select {
         out = wait_with_output_async(&child).await => match out {
-            Ok(o) => Ok(ShellResult.new(
+            Result.Ok(o) => Result.Ok(ShellResult.new(
                 o.status, o.stdout_bytes, o.stderr_bytes,
                 display_cmd, start.elapsed(),
             )),
-            Err(reason) => Err(ShellError.SpawnFailed { command: display_cmd, reason }),
+            Result.Err(reason) => Result.Err(ShellError.SpawnFailed { command: display_cmd, reason }),
         },
         reason = token.cancelled().await => {
             // Graceful shutdown — SIGTERM first
@@ -266,7 +266,7 @@ public async fn run_with_cancel(
                 _ = wait_with_output_async(&child).await => {},
                 _ = kill_ct.cancelled().await => { let _ = child.kill(); },
             };
-            Err(ShellError.Cancelled {
+            Result.Err(ShellError.Cancelled {
                 command: display_cmd,
                 reason:  reason.message(),
             })
@@ -293,7 +293,7 @@ public async fn sh_with_cancel(
 // =============================================================================
 
 fn apply_context(cmd: &mut Command, ctx: &ShellContext) {
-    if let Some(dir) = &ctx.cwd {
+    if let Maybe.Some(dir) = &ctx.cwd {
         cmd.current_dir(dir.clone());
     }
     for (k, v) in ctx.env_overrides.iter() {

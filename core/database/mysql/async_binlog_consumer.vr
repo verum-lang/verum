@@ -67,7 +67,7 @@
 module core.database.mysql.async_binlog_consumer;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.DbError;
 mount core.database.mysql.binlog.{
@@ -135,20 +135,20 @@ implement AsyncMysqlBinlogConsumer {
     /// Pull the next typed CDC change. Pumps the underlying
     /// binlog stream, updates the table-map cache for
     /// TABLE_MAP_EVENT, and pairs ROW events with their cached
-    /// TABLE_MAP for typed decode. Returns `None` only when the
+    /// TABLE_MAP for typed decode. Returns `Maybe.None` only when the
     /// stream cleanly closes (channel closed unexpectedly).
     public async fn next_change(&self) -> Maybe<BinlogChange> {
         loop {
             let ev = self.stream.next_event().await;
             match ev {
-                None => { return None; }
-                Some(MbaTerminated(e)) => {
-                    return Some(BcTerminated(e));
+                Maybe.None => { return Maybe.None; }
+                Maybe.Some(MbaTerminated(e)) => {
+                    return Maybe.Some(BcTerminated(e));
                 }
-                Some(MbaClosed) => {
-                    return Some(BcClosed);
+                Maybe.Some(MbaClosed) => {
+                    return Maybe.Some(BcClosed);
                 }
-                Some(MbaEvent(be)) => {
+                Maybe.Some(MbaEvent(be)) => {
                     match be {
                         BeTableMap { body, .. } => {
                             // Cache the TABLE_MAP — `record`
@@ -159,7 +159,7 @@ implement AsyncMysqlBinlogConsumer {
                             let mut g = self.cache.lock().unwrap_or_else(|p| p.into_inner());
                             g.record(cloned_for_cache);
                             drop(g);
-                            return Some(BcTableMap(body));
+                            return Maybe.Some(BcTableMap(body));
                         }
                         BeWriteRows { body, .. }
                         | BeUpdateRows { body, .. }
@@ -171,36 +171,36 @@ implement AsyncMysqlBinlogConsumer {
                             let tm_opt: Maybe<TableMapEvent> = {
                                 let g = self.cache.lock().unwrap_or_else(|p| p.into_inner());
                                 match g.lookup(body.table_id) {
-                                    Some(tm) => Some(clone_table_map(tm)),
-                                    None     => None,
+                                    Maybe.Some(tm) => Maybe.Some(clone_table_map(tm)),
+                                    Maybe.None     => Maybe.None,
                                 }
                             };
                             match tm_opt {
-                                Some(tm) => {
+                                Maybe.Some(tm) => {
                                     let decoded = decode_with_table_map(&body, &tm);
                                     match decoded {
-                                        Ok(rows) => {
-                                            return Some(BcRowsDecoded {
+                                        Result.Ok(rows) => {
+                                            return Maybe.Some(BcRowsDecoded {
                                                 kind: body.kind,
                                                 table_map: tm,
                                                 rows: rows,
                                             });
                                         }
-                                        Err(e) => {
-                                            return Some(BcTerminated(e));
+                                        Result.Err(e) => {
+                                            return Maybe.Some(BcTerminated(e));
                                         }
                                     }
                                 }
-                                None => {
+                                Maybe.None => {
                                     // Defensive — TABLE_MAP not
                                     // yet cached. Surface raw so
                                     // the consumer can defer.
-                                    return Some(BcRowsRaw(body));
+                                    return Maybe.Some(BcRowsRaw(body));
                                 }
                             }
                         }
                         other => {
-                            return Some(BcOther(other));
+                            return Maybe.Some(BcOther(other));
                         }
                     }
                 }

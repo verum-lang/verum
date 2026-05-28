@@ -258,7 +258,7 @@ implement H3Connection {
         self.outbound.push(StreamWrite {
             stream_id: sid, bytes: wire, fin: true,
         });
-        Ok(sid)
+        Result.Ok(sid)
     }
 
     public fn take_response(&mut self, stream_id: UInt64) -> Maybe<H3Response> {
@@ -312,7 +312,7 @@ implement H3Connection {
         self.outbound.push(StreamWrite {
             stream_id: stream_id, bytes: wire, fin: true,
         });
-        Ok(())
+        Result.Ok(())
     }
 
     // ==================== inbound dispatch ====================
@@ -327,7 +327,7 @@ implement H3Connection {
                 // on_uni_stream calls. Append, then attempt to parse.
                 pending.extend_from_slice(bytes);
                 match decode_stream_type(pending.as_slice()) {
-                    Ok((uk, pos)) => {
+                    Result.Ok((uk, pos)) => {
                         let mut remaining: List<Byte> = List.with_capacity(pending.len() - pos);
                         remaining.extend_from_slice(&pending.as_slice()[pos..]);
                         match uk {
@@ -349,7 +349,7 @@ implement H3Connection {
                             _ => { st.kind = PeerUniKind.DroppedUni; },
                         }
                     },
-                    Err(_) => {
+                    Result.Err(_) => {
                         // Prefix incomplete — keep accumulating. Cap the
                         // buffer at 16 bytes (max QUIC varint is 8 B; 2x
                         // gives slack for malformed peers without unbounded
@@ -376,7 +376,7 @@ implement H3Connection {
                 let _ = bytes;
             },
         }
-        Ok(())
+        Result.Ok(())
     }
 
     fn find_or_create_uni(&mut self, sid: UInt64) -> &mut PeerUniState {
@@ -400,16 +400,16 @@ implement H3Connection {
             let st = self.find_or_create_uni(sid);
             let buf = match &st.kind {
                 PeerUniKind.ControlStream { buf: b } => b.clone(),
-                _ => return Ok(()),
+                _ => return Result.Ok(()),
             };
-            if buf.len() == 0 { return Ok(()); }
+            if buf.len() == 0 { return Result.Ok(()); }
             match decode_frame(buf.as_slice(), 0) {
-                Ok((frame, consumed)) => {
+                Result.Ok((frame, consumed)) => {
                     // Remove consumed bytes from control buffer.
                     self.trim_control_buf(sid, consumed);
                     self.on_control_frame(frame)?;
                 },
-                Err(_) => return Ok(()),    // need more bytes
+                Result.Err(_) => return Result.Ok(()),    // need more bytes
             }
         }
     }
@@ -435,21 +435,21 @@ implement H3Connection {
     fn on_control_frame(&mut self, frame: H3Frame) -> Result<(), H3Error> {
         // RFC 9114 §7.2.4 — SETTINGS MUST be the first frame.
         match &self.peer_settings {
-            None => match frame {
+            Maybe.None => match frame {
                 H3Frame.SettingsFrame(entries) => {
-                    self.peer_settings = Some(H3Settings.from_entries(&entries));
+                    self.peer_settings = Maybe.Some(H3Settings.from_entries(&entries));
                     self.phase = H3Phase.Established;
-                    Ok(())
+                    Result.Ok(())
                 },
-                _ => Err(H3Error.MissingSettings),
+                _ => Result.Err(H3Error.MissingSettings),
             },
-            Some(_) => match frame {
-                H3Frame.SettingsFrame(_) => Err(H3Error.SettingsRepeat),
-                H3Frame.GoawayFrame(_)   => { self.phase = H3Phase.GoingAway; Ok(()) },
-                H3Frame.CancelPushFrame(_) => Ok(()),
-                H3Frame.MaxPushIdFrame(_)  => Ok(()),
-                H3Frame.ReservedFrame {..} => Ok(()),
-                _ => Err(H3Error.UnexpectedFrame {
+            Maybe.Some(_) => match frame {
+                H3Frame.SettingsFrame(_) => Result.Err(H3Error.SettingsRepeat),
+                H3Frame.GoawayFrame(_)   => { self.phase = H3Phase.GoingAway; Result.Ok(()) },
+                H3Frame.CancelPushFrame(_) => Result.Ok(()),
+                H3Frame.MaxPushIdFrame(_)  => Result.Ok(()),
+                H3Frame.ReservedFrame {..} => Result.Ok(()),
+                _ => Result.Err(H3Error.UnexpectedFrame {
                     on_stream_kind: Text.from_str("control"),
                     frame_type: 0_u64,
                 }),
@@ -469,12 +469,12 @@ implement H3Connection {
         st.buf.extend_from_slice(bytes);
 
         // Drain frames.
-        let mut decoded_headers: Maybe<List<QpackHeaderField>> = None;
+        let mut decoded_headers: Maybe<List<QpackHeaderField>> = Maybe.None;
         let mut accumulated_body: List<Byte> = [];
         loop {
             if st.buf.len() == 0 { break; }
             match decode_frame(st.buf.as_slice(), 0) {
-                Ok((frame, consumed)) => {
+                Result.Ok((frame, consumed)) => {
                     // Remove consumed bytes.
                     let mut new_buf: List<Byte> = List.with_capacity(st.buf.len() - consumed);
                     new_buf.extend_from_slice(&st.buf.as_slice()[consumed..]);
@@ -483,8 +483,8 @@ implement H3Connection {
                     match frame {
                         H3Frame.HeadersFrame(encoded) => {
                             match decode_field_section(encoded.as_slice()) {
-                                Ok(fs) => { decoded_headers = Some(fs); },
-                                Err(_) => return Err(H3Error.ConnectionError {
+                                Result.Ok(fs) => { decoded_headers = Maybe.Some(fs); },
+                                Result.Err(_) => return Result.Err(H3Error.ConnectionError {
                                     code: H3ErrorCode.new(H3ErrorCode.QPACK_DECOMPRESSION_FAILED),
                                     reason: Text.from_str("QPACK decompression failed"),
                                 }),
@@ -500,21 +500,21 @@ implement H3Connection {
                         },
                     }
                 },
-                Err(_) => break,   // need more bytes
+                Result.Err(_) => break,   // need more bytes
             }
         }
 
         // Transition logic: if we have headers and fin, we're complete.
         if fin {
             match decoded_headers {
-                Some(fs) => {
+                Maybe.Some(fs) => {
                     match self.role {
                         H3Role.ServerEnd => {
                             match parse_request_from_fields(&fs, accumulated_body) {
-                                Some(req) => {
+                                Maybe.Some(req) => {
                                     st.phase = RequestPhase.Complete { request: req };
                                 },
-                                None => return Err(H3Error.ConnectionError {
+                                Maybe.None => return Result.Err(H3Error.ConnectionError {
                                     code: H3ErrorCode.new(H3ErrorCode.H3_MESSAGE_ERROR),
                                     reason: Text.from_str("malformed request pseudo-headers"),
                                 }),
@@ -522,10 +522,10 @@ implement H3Connection {
                         },
                         H3Role.ClientEnd => {
                             match parse_response_from_fields(&fs, accumulated_body) {
-                                Some(resp) => {
+                                Maybe.Some(resp) => {
                                     self.inbound_responses.push((stream_id, resp));
                                 },
-                                None => return Err(H3Error.ConnectionError {
+                                Maybe.None => return Result.Err(H3Error.ConnectionError {
                                     code: H3ErrorCode.new(H3ErrorCode.H3_MESSAGE_ERROR),
                                     reason: Text.from_str("malformed response :status"),
                                 }),
@@ -533,9 +533,9 @@ implement H3Connection {
                         },
                     }
                 },
-                None => {
+                Maybe.None => {
                     // Body-only and peer closed without headers = error.
-                    return Err(H3Error.ConnectionError {
+                    return Result.Err(H3Error.ConnectionError {
                         code: H3ErrorCode.new(H3ErrorCode.H3_FRAME_UNEXPECTED),
                         reason: Text.from_str("stream ended before headers"),
                     });
@@ -543,19 +543,19 @@ implement H3Connection {
             }
         } else {
             match decoded_headers {
-                Some(fs) => {
+                Maybe.Some(fs) => {
                     st.phase = RequestPhase.ReceivingBody {
                         decoded_headers: fs,
                         body: accumulated_body,
                     };
                 },
-                None => {
+                Maybe.None => {
                     // Still buffering; nothing to record yet.
                 },
             }
         }
 
-        Ok(())
+        Result.Ok(())
     }
 
     fn find_or_create_req(&mut self, sid: UInt64) -> &mut RequestStreamState {

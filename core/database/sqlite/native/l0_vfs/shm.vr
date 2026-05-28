@@ -116,19 +116,19 @@ implement ShmSegment for InMemoryShm {
         -> Result<List<Byte>, VfsError>
     {
         if size != SHM_REGION_SIZE {
-            return Err(VfsError {
+            return Result.Err(VfsError {
                 kind: InvalidArgument,
                 message: "InMemoryShm requires SHM_REGION_SIZE",
             });
         }
         if self.deleted {
-            return Err(VfsError { kind: Closed, message: "shm deleted" });
+            return Result.Err(VfsError { kind: Closed, message: "shm deleted" });
         }
         if self.regions.contains_key(region_index) {
-            return Ok(self.regions.get(region_index));
+            return Result.Ok(self.regions.get(region_index));
         }
         if !extend {
-            return Err(VfsError {
+            return Result.Err(VfsError {
                 kind: NotFound,
                 message: "shm region not present (extend=false)",
             });
@@ -140,14 +140,14 @@ implement ShmSegment for InMemoryShm {
             i = i + 1;
         }
         let _ = self.regions.insert(region_index, zeros);
-        Ok(self.regions.get(region_index))
+        Result.Ok(self.regions.get(region_index))
     }
 
     fn lock(&mut self, start: Int, count: Int, flags: ShmLockFlags)
         -> Result<(), VfsError>
     {
         if start < 0 || count <= 0 || start + count > SHM_NLOCK {
-            return Err(VfsError {
+            return Result.Err(VfsError {
                 kind: InvalidArgument,
                 message: "shm_lock: slot range out of bounds",
             });
@@ -164,7 +164,7 @@ implement ShmSegment for InMemoryShm {
                 let mut j: Int = start;
                 while j < start + count {
                     if self.slot_locks[j] != 0 {
-                        return Err(VfsError {
+                        return Result.Err(VfsError {
                             kind: LockConflict,
                             message: "shm_lock: slot busy",
                         });
@@ -180,7 +180,7 @@ implement ShmSegment for InMemoryShm {
                 let mut j: Int = start;
                 while j < start + count {
                     if self.slot_locks[j] < 0 {
-                        return Err(VfsError {
+                        return Result.Err(VfsError {
                             kind: LockConflict,
                             message: "shm_lock: exclusive held",
                         });
@@ -207,7 +207,7 @@ implement ShmSegment for InMemoryShm {
                 }
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 
     fn barrier(&self) {
@@ -279,19 +279,19 @@ implement ShmSegment for MappedFileShm {
         -> Result<List<Byte>, VfsError>
     {
         if size != SHM_REGION_SIZE {
-            return Err(VfsError {
+            return Result.Err(VfsError {
                 kind: InvalidArgument,
                 message: "MappedFileShm requires SHM_REGION_SIZE",
             });
         }
         if self.deleted {
-            return Err(VfsError { kind: Closed, message: "shm deleted" });
+            return Result.Err(VfsError { kind: Closed, message: "shm deleted" });
         }
         if self.regions.contains_key(region_index) {
-            return Ok(self.regions.get(region_index));
+            return Result.Ok(self.regions.get(region_index));
         }
         if !extend {
-            return Err(VfsError {
+            return Result.Err(VfsError {
                 kind: NotFound,
                 message: "shm region not present (extend=false)",
             });
@@ -303,14 +303,14 @@ implement ShmSegment for MappedFileShm {
             i = i + 1;
         }
         let _ = self.regions.insert(region_index, zeros);
-        Ok(self.regions.get(region_index))
+        Result.Ok(self.regions.get(region_index))
     }
 
     fn lock(&mut self, start: Int, count: Int, flags: ShmLockFlags)
         -> Result<(), VfsError>
     {
         if start < 0 || count <= 0 || start + count > SHM_NLOCK {
-            return Err(VfsError {
+            return Result.Err(VfsError {
                 kind: InvalidArgument,
                 message: "shm_lock: slot range out of bounds",
             });
@@ -321,7 +321,7 @@ implement ShmSegment for MappedFileShm {
                 let mut j: Int = start;
                 while j < start + count {
                     if self.slot_locks[j] != 0 {
-                        return Err(VfsError {
+                        return Result.Err(VfsError {
                             kind: LockConflict,
                             message: "shm_lock: slot busy",
                         });
@@ -336,7 +336,7 @@ implement ShmSegment for MappedFileShm {
                 let mut j: Int = start;
                 while j < start + count {
                     if self.slot_locks[j] < 0 {
-                        return Err(VfsError {
+                        return Result.Err(VfsError {
                             kind: LockConflict,
                             message: "shm_lock: exclusive held",
                         });
@@ -363,7 +363,7 @@ implement ShmSegment for MappedFileShm {
                 }
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 
     fn barrier(&self) {

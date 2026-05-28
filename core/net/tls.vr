@@ -148,7 +148,7 @@ implement Certificate {
         let der_bytes = base64_decode(base64_data)
             .map_err(|e| LegacyTlsError.InvalidCertificate(f"invalid base64: {e}"))?;
 
-        Ok(Certificate { der_data: der_bytes })
+        Result.Ok(Certificate { der_data: der_bytes })
     }
 
     /// Parse multiple PEM-encoded certificates from a single string.
@@ -168,10 +168,10 @@ implement Certificate {
         }
 
         if certs.is_empty() {
-            return Err(LegacyTlsError.InvalidCertificate("no certificates found in PEM data"));
+            return Result.Err(LegacyTlsError.InvalidCertificate("no certificates found in PEM data"));
         }
 
-        Ok(certs)
+        Result.Ok(certs)
     }
 
     /// Get the DER-encoded data.
@@ -259,7 +259,7 @@ implement PrivateKey {
             // PKCS#8 - could be any type, default to RSA
             KeyType.Rsa
         } else {
-            return Err(LegacyTlsError.InvalidKey("unrecognized PEM key format"));
+            return Result.Err(LegacyTlsError.InvalidKey("unrecognized PEM key format"));
         };
 
         // Extract base64 data between markers
@@ -270,7 +270,7 @@ implement PrivateKey {
         let der_bytes = base64_decode(&base64_data)
             .map_err(|e| LegacyTlsError.InvalidKey(f"invalid base64: {e}"))?;
 
-        Ok(PrivateKey { der_data: der_bytes, key_type: key_type })
+        Result.Ok(PrivateKey { der_data: der_bytes, key_type: key_type })
     }
 
     /// Get the key type.
@@ -303,7 +303,7 @@ public type CertVerifyMode is
     /// Full verification (default, recommended).
     | Full
     /// Skip certificate verification (DANGEROUS - for testing only).
-    | None
+    | Maybe.None
     /// Custom verification callback.
     | Custom;
 
@@ -427,7 +427,7 @@ implement TlsConfig {
     /// Set the certificate verification mode.
     ///
 
-    /// WARNING: Setting to `None` disables certificate verification.
+    /// WARNING: Setting to `Maybe.None` disables certificate verification.
     /// Only use for testing or development.
     public fn with_verify_mode(self, mode: CertVerifyMode) -> TlsConfig {
         TlsConfig { verify_mode: mode, ..self }
@@ -514,8 +514,8 @@ implement SystemCerts {
             "/etc/ssl/ca-bundle.pem",
         ];
         for path in cert_paths {
-            if let Ok(pem) = core.io.read_text(path) {
-                if let Ok(certs) = Certificate.from_pem_chain(&pem) {
+            if let Result.Ok(pem) = core.io.read_text(path) {
+                if let Result.Ok(certs) = Certificate.from_pem_chain(&pem) {
                     return certs;
                 }
             }
@@ -596,7 +596,7 @@ implement TlsStream {
         let alpn = @intrinsic("verum.tls.get_alpn", &session);
         let version = @intrinsic("verum.tls.get_version", &session);
 
-        Ok(TlsStream {
+        Result.Ok(TlsStream {
             inner: tcp,
             session: session,
             alpn_protocol: alpn,
@@ -610,7 +610,7 @@ implement TlsStream {
         config: &TlsConfig,
     ) -> Result<TlsStream, LegacyTlsError> {
         if config.identity_cert.is_none() || config.identity_key.is_none() {
-            return Err(LegacyTlsError.HandshakeFailed("server requires identity certificate and key"));
+            return Result.Err(LegacyTlsError.HandshakeFailed("server requires identity certificate and key"));
         }
 
         let session = @intrinsic("verum.tls.server_handshake",
@@ -619,7 +619,7 @@ implement TlsStream {
         let alpn = @intrinsic("verum.tls.get_alpn", &session);
         let version = @intrinsic("verum.tls.get_version", &session);
 
-        Ok(TlsStream {
+        Result.Ok(TlsStream {
             inner: tcp,
             session: session,
             alpn_protocol: alpn,
@@ -643,11 +643,11 @@ implement TlsStream {
         while written < data.len() {
             let n = self.write(&data[written..]).await?;
             if n == 0 {
-                return Err(LegacyTlsError.IoError("write returned 0 bytes"));
+                return Result.Err(LegacyTlsError.IoError("write returned 0 bytes"));
             }
             written = written + n;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Perform a clean TLS shutdown.
@@ -681,7 +681,7 @@ implement TlsStream {
 
     /// Export the `tls-server-end-point` channel-binding data — SHA-256 hash of
     /// the server certificate, as required by SCRAM-SHA-256-PLUS (RFC 5929).
-    /// Returns None if not computable (e.g., DH-only cipher without cert).
+    /// Returns Maybe.None if not computable (e.g., DH-only cipher without cert).
     public fn peer_cert_hash_sha256(&self) -> Maybe<[Byte; 32]> {
         @intrinsic("verum.tls.peer_cert_hash_sha256", &self.session)
     }
@@ -707,7 +707,7 @@ implement TlsStream {
     /// Enable Kernel TLS (KTLS) offload on the underlying socket — hands session
     /// keys to the kernel so `sendfile(2)` zero-copies through NIC crypto
     /// hardware. Requires Linux ≥ 6.0 + OpenSSL ≥ 3.2 / rustls ktls-feature
-    /// backend. Returns Err(Unsupported) if backend doesn't expose keys.
+    /// backend. Returns Result.Err(Unsupported) if backend doesn't expose keys.
     public fn enable_ktls(&mut self) -> Result<(), LegacyTlsError> {
         @intrinsic("verum.tls.enable_ktls", &self.session, self.inner.fd)
     }
@@ -755,8 +755,8 @@ implement TlsStream {
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
-            r = self.read_async(buf).await => Ok(r),
-            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = self.read_async(buf).await => Result.Ok(r),
+            reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
         }
     }
 
@@ -770,8 +770,8 @@ implement TlsStream {
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
-            r = self.write_async(buf).await => Ok(r),
-            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = self.write_async(buf).await => Result.Ok(r),
+            reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
         }
     }
 
@@ -1081,7 +1081,7 @@ fn base64_decode(input: &Text) -> Result<List<Byte>, Text> {
     let len = chars.len();
 
     if len % 4 != 0 {
-        return Err("invalid base64 length");
+        return Result.Err("invalid base64 length");
     }
 
     let mut i = 0;
@@ -1094,7 +1094,7 @@ fn base64_decode(input: &Text) -> Result<List<Byte>, Text> {
             } else {
                 match alphabet.find_char(c) {
                     Maybe.Some(idx) => sextet[j] = idx,
-                    Maybe.None => return Err(f"invalid base64 character: {c}"),
+                    Maybe.None => return Result.Err(f"invalid base64 character: {c}"),
                 }
             }
         }
@@ -1110,5 +1110,5 @@ fn base64_decode(input: &Text) -> Result<List<Byte>, Text> {
         i = i + 4;
     }
 
-    Ok(result)
+    Result.Ok(result)
 }

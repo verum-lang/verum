@@ -241,8 +241,8 @@ public fn slh_dsa_sign(
 }
 
 /// Verify `signature` against `message` under `public_key`. Returns
-/// `Ok(true)` for valid; `Ok(false)` for clean reject (wrong signature
-/// against right key); `Err(...)` for malformed inputs.
+/// `Result.Ok(true)` for valid; `Result.Ok(false)` for clean reject (wrong signature
+/// against right key); `Result.Err(...)` for malformed inputs.
 public fn slh_dsa_verify(
     variant:    SphincsPlusVariant,
     public_key: &[Byte],

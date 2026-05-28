@@ -122,8 +122,8 @@ public fn kind_apply(s: &KindSubst, k: Kind) -> Kind {
         Kind.KType => Kind.KType,
         Kind.KConstraint => Kind.KConstraint,
         Kind.KVar { name } => match subst_lookup(s, name.clone()) {
-            Some(replacement) => replacement,
-            None => Kind.KVar { name },
+            Maybe.Some(replacement) => replacement,
+            Maybe.None => Kind.KVar { name },
         },
         Kind.KArrow { domain, codomain } =>
             k_arrow(

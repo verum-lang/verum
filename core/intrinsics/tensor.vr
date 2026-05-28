@@ -2,7 +2,7 @@
 // core/intrinsics/tensor.vr - Tensor Operation Intrinsics
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (compiler-provided)
+// Dependencies: Maybe.None (compiler-provided)
 //
 
 // This module provides tensor operations that map to VBC tensor opcodes.

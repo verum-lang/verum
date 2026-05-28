@@ -221,9 +221,9 @@ implement<N: Hash + Eq> TopoGraph<N> {
                 }
                 m = m + 1;
             }
-            return Err(TopoError.Cycle(residual));
+            return Result.Err(TopoError.Cycle(residual));
         }
-        Ok(out)
+        Result.Ok(out)
     }
 }
 

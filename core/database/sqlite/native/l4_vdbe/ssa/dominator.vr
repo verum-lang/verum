@@ -78,14 +78,14 @@ public fn build_dom_tree(cfg: &Cfg) -> DomTree {
 }
 
 implement DomTree {
-    /// Look up the immediate dominator of `b`.  Returns `None` for
+    /// Look up the immediate dominator of `b`.  Returns `Maybe.None` for
     /// the entry block (no dominator); panics on out-of-range input.
     public fn immediate_dominator(&self, b: &BlockId) -> Maybe<BlockId> {
         let raw = block_id_raw(b);
-        if raw < 0 || raw >= self.idom.len() { return None; }
+        if raw < 0 || raw >= self.idom.len() { return Maybe.None; }
         let parent = self.idom[raw];
-        if parent < 0 { return None; }
-        Some(block_id(parent))
+        if parent < 0 { return Maybe.None; }
+        Maybe.Some(block_id(parent))
     }
 
     /// `true` iff `a` dominates `b` (a is on every path from entry

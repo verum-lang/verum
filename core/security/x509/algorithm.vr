@@ -155,7 +155,7 @@ public fn parse_signature_alg(r: &mut DerReader) -> Result<SignatureAlg, DerErro
         SignatureAlg.Unknown(oid)
     };
     seq.expect_end()?;
-    Ok(sig)
+    Result.Ok(sig)
 }
 
 /// Parse an AlgorithmIdentifier sequence as a public-key algorithm.
@@ -198,7 +198,7 @@ public fn parse_public_key_alg(r: &mut DerReader) -> Result<PublicKeyAlg, DerErr
         PublicKeyAlg.UnknownPubKey(oid)
     };
     seq.expect_end()?;
-    Ok(key_alg)
+    Result.Ok(key_alg)
 }
 
 // =============================================================================
@@ -208,7 +208,7 @@ public fn parse_public_key_alg(r: &mut DerReader) -> Result<PublicKeyAlg, DerErr
 fn parse_rsa_pss_params(r: &mut DerReader) -> Result<RsaPssParams, DerError> {
     // If no parameters span, use RFC 8017 defaults (SHA-1 + salt 20).
     if r.is_at_end() {
-        return Ok(RsaPssParams { hash: RsaPssHash.Sha256Hash, salt_length: 20 });
+        return Result.Ok(RsaPssParams { hash: RsaPssHash.Sha256Hash, salt_length: 20 });
     }
     let mut seq = r.read_sequence()?;
 
@@ -234,7 +234,7 @@ fn parse_rsa_pss_params(r: &mut DerReader) -> Result<RsaPssParams, DerError> {
             RsaPssHash.Sha512Hash
         } else {
             // Unknown hash — reject outright; no WebPKI cert uses non-SHA-2.
-            return Err(DerError {
+            return Result.Err(DerError {
                 kind: DerErrorKind.MalformedDer,
                 position: 0,
                 message: "RSA-PSS with non-SHA-2 hash",
@@ -263,7 +263,7 @@ fn parse_rsa_pss_params(r: &mut DerReader) -> Result<RsaPssParams, DerError> {
         let mut t_exp = seq.read_explicit(3_u32)?;
         let t = t_exp.read_int64()?;
         if t != 1_i64 {
-            return Err(DerError {
+            return Result.Err(DerError {
                 kind: DerErrorKind.MalformedDer,
                 position: 0,
                 message: "RSA-PSS trailerField ≠ 1",
@@ -273,7 +273,7 @@ fn parse_rsa_pss_params(r: &mut DerReader) -> Result<RsaPssParams, DerError> {
     }
 
     seq.expect_end()?;
-    Ok(RsaPssParams { hash: hash, salt_length: salt_len })
+    Result.Ok(RsaPssParams { hash: hash, salt_length: salt_len })
 }
 
 // =============================================================================
@@ -284,7 +284,7 @@ fn parse_rsa_pss_params(r: &mut DerReader) -> Result<RsaPssParams, DerError> {
 /// absent (EdDSA). We accept either form without complaining — the
 /// semantic content is the same.
 fn consume_null_or_absent(r: &mut DerReader) -> Result<(), DerError> {
-    if r.is_at_end() { return Ok(()); }
+    if r.is_at_end() { return Result.Ok(()); }
     let tag = r.peek_tag()?;
     let is_null = match tag.class_ {
         TagClass.Universal => tag.number == 5_u32,   // TAG_NULL
@@ -297,12 +297,12 @@ fn consume_null_or_absent(r: &mut DerReader) -> Result<(), DerError> {
         // tolerate by dropping everything that's left.
         drain(r);
     }
-    Ok(())
+    Result.Ok(())
 }
 
 /// Strict variant — caller expects no parameters at all. ECDSA + EdDSA.
 fn expect_absent_params(r: &mut DerReader) -> Result<(), DerError> {
-    if r.is_at_end() { return Ok(()); }
+    if r.is_at_end() { return Result.Ok(()); }
     // Some cert issuers emit explicit NULL against RFC. Tolerate rather
     // than reject — the validation matters at signature verify time, not
     // on this cosmetic difference.

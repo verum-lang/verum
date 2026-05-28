@@ -34,7 +34,7 @@ module core.database.sqlite.native.l1_pager.wal_page_arena;
 //     `PageHandle` captures the generation at alloc time; reads
 //     and writes verify it before touching the slot.  A handle
 //     into a freed-and-recycled slot reads as a generation
-//     mismatch — caller observes `Maybe::None` instead of stale
+//     mismatch — caller observes `Maybe::Maybe.None` instead of stale
 //     bytes, exactly the use-after-free guarantee CBGR exists
 //     to provide.
 //   * **No raw pointers** — the slab models the same bump-arena
@@ -71,7 +71,7 @@ public type PageHandle is {
 };
 
 /// Sentinel for "no slot" / "freed handle" — the slab returns
-/// `Some(handle)` on success and `None` on full; consumers that
+/// `Maybe.Some(handle)` on success and `Maybe.None` on full; consumers that
 /// store handles in non-Option fields can use this constant as
 /// the unallocated marker.
 public fn page_handle_invalid() -> PageHandle {
@@ -122,7 +122,7 @@ type PageSlot is {
 ///   * On `write(handle, bytes)`: verify handle generation, copy
 ///     bytes into slot.
 ///   * On `read_copy(handle)`: verify handle generation, return
-///     `Some(data.clone())`.  Cloning is the safety net — once the
+///     `Maybe.Some(data.clone())`.  Cloning is the safety net — once the
 ///     slab evicts the slot, the cloned bytes survive.
 public type affine PageSlab is {
     page_size: Int,
@@ -186,12 +186,12 @@ implement PageSlab {
         self.free_list.len() == 0
     }
 
-    /// Allocate a slot from the freelist.  Returns `None` when
+    /// Allocate a slot from the freelist.  Returns `Maybe.None` when
     /// the slab is full (caller must `free` an existing handle
     /// before retrying).  The returned handle captures the slot's
     /// current generation; future reads/writes verify it.
     public fn alloc(&mut self) -> Maybe<PageHandle> {
-        if self.free_list.len() == 0 { return None; }
+        if self.free_list.len() == 0 { return Maybe.None; }
         let last = self.free_list.len() - 1;
         let slot_idx = self.free_list[last];
         // Pop without using stdlib `.pop()` — splice the trailing
@@ -206,7 +206,7 @@ implement PageSlab {
         let captured_gen = s.generation;
         self.n_allocated = self.n_allocated + 1;
         self.total_allocs = self.total_allocs + 1;
-        Some(PageHandle { slot_idx: slot_idx, generation: captured_gen })
+        Maybe.Some(PageHandle { slot_idx: slot_idx, generation: captured_gen })
     }
 
     /// Verify a handle's generation matches the slot's current
@@ -263,27 +263,27 @@ implement PageSlab {
     }
 
     /// Copy the slot's bytes into a fresh owned `List<Byte>`.
-    /// Returns `None` on handle mismatch.  The cloned bytes
+    /// Returns `Maybe.None` on handle mismatch.  The cloned bytes
     /// survive a subsequent `free + alloc` of the same slot (the
     /// CBGR generation guarantee).
     public fn read_copy(&self, h: &PageHandle) -> Maybe<List<Byte>> {
-        if !self.handle_is_live(h) { return None; }
+        if !self.handle_is_live(h) { return Maybe.None; }
         let s = &self.slots[h.slot_idx];
         let mut out: List<Byte> = List.new();
         let mut i: Int = 0;
         while i < self.page_size { out.push(s.data[i]); i = i + 1; }
-        Some(out)
+        Maybe.Some(out)
     }
 
     /// Single-byte read at offset `byte_offset`.  Cheap accessor
     /// for hot-path readers that don't need a full page copy
-    /// (e.g. record header probe).  Returns `None` on handle
+    /// (e.g. record header probe).  Returns `Maybe.None` on handle
     /// mismatch OR out-of-range offset.
     public fn read_byte(&self, h: &PageHandle, byte_offset: Int) -> Maybe<Byte> {
-        if !self.handle_is_live(h) { return None; }
-        if byte_offset < 0 || byte_offset >= self.page_size { return None; }
+        if !self.handle_is_live(h) { return Maybe.None; }
+        if byte_offset < 0 || byte_offset >= self.page_size { return Maybe.None; }
         let s = &self.slots[h.slot_idx];
-        Some(s.data[byte_offset])
+        Maybe.Some(s.data[byte_offset])
     }
 
     /// Reset the entire slab — bump every slot's generation,
@@ -348,12 +348,12 @@ implement PageHandleMap {
         }
         // Fresh page — alloc a slot, write bytes, register in map.
         match self.slab.alloc() {
-            Some(h) => {
+            Maybe.Some(h) => {
                 let _ = self.slab.write(&h, bytes);
                 let _ = self.index.insert(page_no, h);
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
@@ -361,7 +361,7 @@ implement PageHandleMap {
     /// from the slab) so the caller's reference outlives any
     /// subsequent eviction.
     public fn get(&self, page_no: Int) -> Maybe<List<Byte>> {
-        if !self.index.contains_key(&page_no) { return None; }
+        if !self.index.contains_key(&page_no) { return Maybe.None; }
         let h = self.index.get(&page_no);
         self.slab.read_copy(&h)
     }

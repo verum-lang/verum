@@ -95,7 +95,7 @@ implement<T> Deque<T> {
         }
     }
 
-    // Fallible constructor: returns None on allocation failure instead of panic.
+    // Fallible constructor: returns Maybe.None on allocation failure instead of panic.
     // Use this in production code paths that need to handle OOM gracefully
     // (e.g. daemons / services that should degrade rather than crash).
     public fn try_with_capacity(capacity: Int) -> Maybe<Deque<T>> {
@@ -167,7 +167,7 @@ implement<T> Deque<T> {
     }
 
     // Push element to back. Fallible counterpart to push_back —
-    // returns Err(AllocError.OutOfMemory) instead of panicking
+    // returns Result.Err(AllocError.OutOfMemory) instead of panicking
     // when the underlying grow() can't allocate. Use this on the
     // production hot path of long-running services that must
     // degrade gracefully rather than crash.
@@ -181,7 +181,7 @@ implement<T> Deque<T> {
             ptr_write(self.data.offset(tail), value);
         }
         self.len = self.len + 1;
-        Ok(())
+        Result.Ok(())
     }
 
     // Push element to front. Panics on OOM — use `try_push_front`
@@ -210,7 +210,7 @@ implement<T> Deque<T> {
             ptr_write(self.data.offset(self.head), value);
         }
         self.len = self.len + 1;
-        Ok(())
+        Result.Ok(())
     }
 
     // Pop element from back.
@@ -433,7 +433,7 @@ implement<T> Deque<T> {
         false
     }
 
-    // Binary search in a sorted deque. Returns Ok(index) or Err(insertion_point).
+    // Binary search in a sorted deque. Returns Result.Ok(index) or Result.Err(insertion_point).
     public fn binary_search(&self, value: &T) -> Result<Int, Int>
     where T: Ord
     {
@@ -445,10 +445,10 @@ implement<T> Deque<T> {
             match item.cmp(value) {
                 Ordering.Less => { low = mid + 1; },
                 Ordering.Greater => { high = mid; },
-                Ordering.Equal => { return Ok(mid); },
+                Ordering.Equal => { return Result.Ok(mid); },
             }
         }
-        Err(low)
+        Result.Err(low)
     }
 
     /// Binary search with custom comparator.
@@ -467,10 +467,10 @@ implement<T> Deque<T> {
             match f(item) {
                 Ordering.Less => { low = mid + 1; },
                 Ordering.Greater => { high = mid; },
-                Ordering.Equal => { return Ok(mid); },
+                Ordering.Equal => { return Result.Ok(mid); },
             }
         }
-        Err(low)
+        Result.Err(low)
     }
 
     /// Binary search by key.
@@ -859,7 +859,7 @@ implement<T> Deque<T> {
     /// ```
     public fn append(&mut self, other: &mut Deque<T>) {
         self.reserve(other.len);
-        while let Some(v) = other.pop_front() {
+        while let Maybe.Some(v) = other.pop_front() {
             self.push_back(v);
         }
     }
@@ -911,12 +911,12 @@ implement<T> Deque<T> {
     // Replace element at index and return the old value.
     public fn set(&mut self, idx: Int, value: T) -> Maybe<T> {
         if idx < 0 || idx >= self.len {
-            None
+            Maybe.None
         } else {
             let phys = self.physical_index(idx);
             let old = unsafe { ptr_read(self.data.offset(phys)) };
             unsafe { ptr_write(self.data.offset(phys), value); }
-            Some(old)
+            Maybe.Some(old)
         }
     }
 
@@ -1054,7 +1054,7 @@ implement<T> Deque<T> {
     // Swap-remove at index, filling hole from front. O(1).
     public fn swap_remove_front(&mut self, idx: Int) -> Maybe<T> {
         if idx < 0 || idx >= self.len {
-            return None;
+            return Maybe.None;
         }
         if idx == 0 {
             self.pop_front()
@@ -1067,7 +1067,7 @@ implement<T> Deque<T> {
     // Swap-remove at index, filling hole from back. O(1).
     public fn swap_remove_back(&mut self, idx: Int) -> Maybe<T> {
         if idx < 0 || idx >= self.len {
-            return None;
+            return Maybe.None;
         }
         if idx == self.len - 1 {
             self.pop_back()
@@ -1257,19 +1257,19 @@ implement<T> Deque<T> {
     }
 
     /// Reduce the deque to a single value by applying a function to pairs of elements.
-    /// Returns None if the deque is empty.
+    /// Returns Maybe.None if the deque is empty.
     public fn reduce<F: fn(T, &T) -> T>(&self, f: F) -> Maybe<T>
     where T: Clone
     {
         if self.len == 0 {
-            return None;
+            return Maybe.None;
         }
         let mut acc: T = self.get(0).expect("Deque: non-empty branch (early-empty-return above) — get(0) is_some").clone();
         for i in range(1, self.len) {
             let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             acc = f(acc, item);
         }
-        Some(acc)
+        Maybe.Some(acc)
     }
 
     /// Return a new Deque with each element transformed by the function,
@@ -1323,10 +1323,10 @@ implement<T> Deque<T> {
     {
         for i in range(0, self.len) {
             if self.get(i).expect("Deque: i in range(0, self.len) — get is_some") == value {
-                return Some(i);
+                return Maybe.Some(i);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Find the index of the last element equal to value.
@@ -1336,11 +1336,11 @@ implement<T> Deque<T> {
         let mut i = self.len - 1;
         while i >= 0 {
             if self.get(i).expect("Deque: i in range(0, self.len) — get is_some") == value {
-                return Some(i);
+                return Maybe.Some(i);
             }
             i = i - 1;
         }
-        None
+        Maybe.None
     }
 
     /// Return a new Deque with a separator inserted between each element.
@@ -1592,7 +1592,7 @@ implement<T> Deque<T> {
     }
 
     // Internal: fallible reallocate to new capacity. Returns
-    // Err(AllocError.OutOfMemory) on alloc failure rather than
+    // Result.Err(AllocError.OutOfMemory) on alloc failure rather than
     // panicking. This is the load-bearing primitive for every
     // try_<op> method; the panicking `reallocate` simply panics
     // on the same failure mode.
@@ -1604,7 +1604,7 @@ implement<T> Deque<T> {
         let new_data = new_raw as &unsafe T;
 
         if new_data.is_null() {
-            return Err(AllocError.OutOfMemory {
+            return Result.Err(AllocError.OutOfMemory {
                 requested: new_cap * T.size,
             });
         }
@@ -1651,7 +1651,7 @@ implement<T> Deque<T> {
         self.data = new_data;
         self.head = 0;
         self.cap = new_cap;
-        Ok(())
+        Result.Ok(())
     }
 
     // Internal: free buffer without copying.
@@ -1723,7 +1723,7 @@ implement<T> Iterator for DequeIter<T> {
 
     fn next(&mut self) -> Maybe<&T> {
         if self.idx >= self.back {
-            None
+            Maybe.None
         } else {
             let item = self.deque.get(self.idx);
             self.idx = self.idx + 1;
@@ -1733,14 +1733,14 @@ implement<T> Iterator for DequeIter<T> {
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.back - self.idx;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for DequeIter<T> {
     fn next_back(&mut self) -> Maybe<&T> {
         if self.idx >= self.back {
-            None
+            Maybe.None
         } else {
             self.back = self.back - 1;
             self.deque.get(self.back)
@@ -1750,7 +1750,7 @@ implement<T> DoubleEndedIterator for DequeIter<T> {
     fn nth_back(&mut self, n: Int) -> Maybe<&T> {
         if n >= self.back - self.idx {
             self.idx = self.back;
-            None
+            Maybe.None
         } else {
             self.back = self.back - n;
             self.next_back()
@@ -1761,10 +1761,10 @@ implement<T> DoubleEndedIterator for DequeIter<T> {
         let remaining = self.back - self.idx;
         if n <= remaining {
             self.back = self.back - n;
-            Ok(())
+            Result.Ok(())
         } else {
             self.back = self.idx;
-            Err(n - remaining)
+            Result.Err(n - remaining)
         }
     }
 }
@@ -1787,7 +1787,7 @@ implement<T> Iterator for DequeIterMut<T> {
 
     fn next(&mut self) -> Maybe<&mut T> {
         if self.idx >= self.back {
-            None
+            Maybe.None
         } else {
             let item = self.deque.get_mut(self.idx);
             self.idx = self.idx + 1;
@@ -1797,14 +1797,14 @@ implement<T> Iterator for DequeIterMut<T> {
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.back - self.idx;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for DequeIterMut<T> {
     fn next_back(&mut self) -> Maybe<&mut T> {
         if self.idx >= self.back {
-            None
+            Maybe.None
         } else {
             self.back = self.back - 1;
             self.deque.get_mut(self.back)
@@ -1814,7 +1814,7 @@ implement<T> DoubleEndedIterator for DequeIterMut<T> {
     fn nth_back(&mut self, n: Int) -> Maybe<&mut T> {
         if n >= self.back - self.idx {
             self.idx = self.back;
-            None
+            Maybe.None
         } else {
             self.back = self.back - n;
             self.next_back()
@@ -1825,10 +1825,10 @@ implement<T> DoubleEndedIterator for DequeIterMut<T> {
         let remaining = self.back - self.idx;
         if n <= remaining {
             self.back = self.back - n;
-            Ok(())
+            Result.Ok(())
         } else {
             self.back = self.idx;
-            Err(n - remaining)
+            Result.Err(n - remaining)
         }
     }
 }
@@ -1860,7 +1860,7 @@ implement<T> Iterator for DequeIntoIter<T> {
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.deque.len, Some(self.deque.len))
+        (self.deque.len, Maybe.Some(self.deque.len))
     }
 }
 
@@ -1891,21 +1891,21 @@ implement<T> Iterator for DequeDrain<T> {
 
     fn next(&mut self) -> Maybe<T> {
         if self.remaining == 0 {
-            return None;
+            return Maybe.None;
         }
         self.remaining = self.remaining - 1;
         self.deque.pop_front()
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.remaining, Some(self.remaining))
+        (self.remaining, Maybe.Some(self.remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for DequeDrain<T> {
     fn next_back(&mut self) -> Maybe<T> {
         if self.remaining == 0 {
-            return None;
+            return Maybe.None;
         }
         self.remaining = self.remaining - 1;
         self.deque.pop_back()

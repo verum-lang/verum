@@ -191,7 +191,7 @@ implement ObservationTrace {
         self.steps.len() == 0
     }
 
-    /// Returns the observation at index `i`, or [`None`] if `i` is out
+    /// Returns the observation at index `i`, or [`Maybe.None`] if `i` is out
     /// of range.
     public fn get(&self, i: Int) -> Maybe<Observation> {
         if i >= 0 && i < self.steps.len() {

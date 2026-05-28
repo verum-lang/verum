@@ -67,7 +67,7 @@ fn validate_schema(cert: CertificateSummary) -> Bool {
 // Look up a metadata value by key.
 //
 
-// Returns `None` if the key is not present. The order of
+// Returns `Maybe.None` if the key is not present. The order of
 // metadata pairs is preserved from construction; if the same
 // key appears twice, the first occurrence wins.
 fn get_metadata(cert: CertificateSummary, key: Text) -> Maybe<Text> {

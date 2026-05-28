@@ -336,9 +336,9 @@ implement DnsHeader {
     /// Parse header from bytes.
     fn from_bytes(buf: &[Byte]) -> Result<DnsHeader, DnsError> {
         if buf.len() < DNS_HEADER_SIZE {
-            return Err(DnsError.InvalidResponse);
+            return Result.Err(DnsError.InvalidResponse);
         }
-        Ok(DnsHeader {
+        Result.Ok(DnsHeader {
             id: ((buf[0] as UInt16) << 8) | (buf[1] as UInt16),
             flags: ((buf[2] as UInt16) << 8) | (buf[3] as UInt16),
             qdcount: ((buf[4] as UInt16) << 8) | (buf[5] as UInt16),
@@ -374,7 +374,7 @@ implement DnsHeader {
 /// Domain "www.example.com" becomes: [3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0]
 fn encode_domain_name(name: &Text) -> Result<List<Byte>, DnsError> {
     if name.is_empty() || name.len() > DNS_MAX_NAME_LENGTH {
-        return Err(DnsError.InvalidName);
+        return Result.Err(DnsError.InvalidName);
     }
 
     let mut encoded = List.new();
@@ -385,7 +385,7 @@ fn encode_domain_name(name: &Text) -> Result<List<Byte>, DnsError> {
             continue;  // Skip empty labels (trailing dot)
         }
         if label.len() > DNS_MAX_LABEL_LENGTH {
-            return Err(DnsError.InvalidName);
+            return Result.Err(DnsError.InvalidName);
         }
 
         // Length byte.
@@ -399,7 +399,7 @@ fn encode_domain_name(name: &Text) -> Result<List<Byte>, DnsError> {
 
     // Null terminator.
     encoded.push(0);
-    Ok(encoded)
+    Result.Ok(encoded)
 }
 
 /// Decode a domain name from DNS wire format with pointer decompression.
@@ -427,7 +427,7 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
 
     loop {
         if pos >= buf.len() {
-            return Err(DnsError.InvalidResponse);
+            return Result.Err(DnsError.InvalidResponse);
         }
 
         let len = buf[pos] as Int;
@@ -443,7 +443,7 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
         // Check for pointer (top 2 bits set).
         if (len & 0xC0) == 0xC0 {
             if pos + 1 >= buf.len() {
-                return Err(DnsError.InvalidResponse);
+                return Result.Err(DnsError.InvalidResponse);
             }
 
             // Pointer: 14-bit offset.
@@ -457,7 +457,7 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
             // Reject self-loops + forward pointers (already-checked
             // path) with the original guard.
             if offset >= pos && followed_pointer {
-                return Err(DnsError.InvalidResponse);
+                return Result.Err(DnsError.InvalidResponse);
             }
 
             // Cap pointer-chain depth. Hostile responses construct
@@ -466,7 +466,7 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
             // the offset >= pos check but still pins CPU.
             pointer_follows = pointer_follows + 1;
             if pointer_follows > DNS_MAX_POINTER_DEPTH {
-                return Err(DnsError.InvalidResponse);
+                return Result.Err(DnsError.InvalidResponse);
             }
 
             pos = offset;
@@ -475,7 +475,7 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
 
         // Regular label.
         if pos + 1 + len > buf.len() {
-            return Err(DnsError.InvalidResponse);
+            return Result.Err(DnsError.InvalidResponse);
         }
 
         // Belt-and-braces total-bytes cap: even with a bounded
@@ -483,7 +483,7 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
         // could exceed the legal name length. Reject early.
         total_label_bytes = total_label_bytes + len + 1;
         if total_label_bytes > DNS_MAX_NAME_LENGTH {
-            return Err(DnsError.InvalidResponse);
+            return Result.Err(DnsError.InvalidResponse);
         }
 
         let label_start = pos + 1;
@@ -499,7 +499,7 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
         bytes_consumed = pos - start + 1;
     }
 
-    Ok((name, bytes_consumed))
+    Result.Ok((name, bytes_consumed))
 }
 
 // =============================================================================
@@ -523,7 +523,7 @@ fn build_query(name: &Text, qtype: UInt16, id: UInt16) -> Result<List<Byte>, Dns
     packet.push((DNS_CLASS_IN >> 8) as Byte);
     packet.push((DNS_CLASS_IN & 0xFF) as Byte);
 
-    Ok(packet)
+    Result.Ok(packet)
 }
 
 // =============================================================================
@@ -548,7 +548,7 @@ fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int
 
     // Need at least 10 more bytes (TYPE, CLASS, TTL, RDLENGTH).
     if pos + 10 > buf.len() {
-        return Err(DnsError.InvalidResponse);
+        return Result.Err(DnsError.InvalidResponse);
     }
 
     let rtype = ((buf[pos] as UInt16) << 8) | (buf[pos + 1] as UInt16);
@@ -561,7 +561,7 @@ fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int
     pos = pos + 10;
 
     if pos + rdlength > buf.len() {
-        return Err(DnsError.InvalidResponse);
+        return Result.Err(DnsError.InvalidResponse);
     }
 
     let rdata = buf[pos..(pos + rdlength)].to_list();
@@ -570,7 +570,7 @@ fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int
     let parsed = match rtype {
         DNS_TYPE_A if rdlength == 4 => {
             let ip = Ipv4Addr.new(rdata[0], rdata[1], rdata[2], rdata[3]);
-            Some(DnsRecord.A(ip))
+            Maybe.Some(DnsRecord.A(ip))
         }
         DNS_TYPE_AAAA if rdlength == 16 => {
             let ip = Ipv6Addr.new(
@@ -583,27 +583,27 @@ fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int
                 ((rdata[12] as UInt16) << 8) | (rdata[13] as UInt16),
                 ((rdata[14] as UInt16) << 8) | (rdata[15] as UInt16),
             );
-            Some(DnsRecord.AAAA(ip))
+            Maybe.Some(DnsRecord.AAAA(ip))
         }
         5 => {
             // DNS_TYPE_CNAME
             let (target, _) = decode_domain_name(buf, pos)?;
-            Some(DnsRecord.CNAME(target))
+            Maybe.Some(DnsRecord.CNAME(target))
         }
         2 => {
             // DNS_TYPE_NS
             let (target, _) = decode_domain_name(buf, pos)?;
-            Some(DnsRecord.NS(target))
+            Maybe.Some(DnsRecord.NS(target))
         }
         12 => {
             // DNS_TYPE_PTR
             let (target, _) = decode_domain_name(buf, pos)?;
-            Some(DnsRecord.PTR(target))
+            Maybe.Some(DnsRecord.PTR(target))
         }
         DNS_TYPE_MX if rdlength >= 2 => {
             let priority = ((rdata[0] as Int) << 8) | (rdata[1] as Int);
             let (exchange, _) = decode_domain_name(buf, pos + 2)?;
-            Some(DnsRecord.MX { priority, exchange })
+            Maybe.Some(DnsRecord.MX { priority, exchange })
         }
         DNS_TYPE_TXT => {
             // TXT records: one or more <length><text> pairs.
@@ -620,14 +620,14 @@ fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int
                     break;
                 }
             }
-            Some(DnsRecord.TXT(text_parts.join("")))
+            Maybe.Some(DnsRecord.TXT(text_parts.join("")))
         }
         DNS_TYPE_SRV if rdlength >= 6 => {
             let priority = ((rdata[0] as Int) << 8) | (rdata[1] as Int);
             let weight = ((rdata[2] as Int) << 8) | (rdata[3] as Int);
             let port = ((rdata[4] as Int) << 8) | (rdata[5] as Int);
             let (target, _) = decode_domain_name(buf, pos + 6)?;
-            Some(DnsRecord.SRV { priority, weight, port, target })
+            Maybe.Some(DnsRecord.SRV { priority, weight, port, target })
         }
         DNS_TYPE_SOA if rdlength >= 20 => {
             let (mname, mname_len) = decode_domain_name(buf, pos)?;
@@ -654,12 +654,12 @@ fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int
                               ((buf[soa_pos + 17] as Int) << 16) |
                               ((buf[soa_pos + 18] as Int) << 8) |
                               (buf[soa_pos + 19] as Int);
-                Some(DnsRecord.SOA { mname, rname, serial, refresh, retry, expire, minimum })
+                Maybe.Some(DnsRecord.SOA { mname, rname, serial, refresh, retry, expire, minimum })
             } else {
-                None
+                Maybe.None
             }
         }
-        _ => None,
+        _ => Maybe.None,
     };
 
     let record = ParsedRecord {
@@ -671,7 +671,7 @@ fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int
         parsed,
     };
 
-    Ok((record, pos + rdlength - offset))
+    Result.Ok((record, pos + rdlength - offset))
 }
 
 /// Parse complete DNS response.
@@ -680,19 +680,19 @@ fn parse_response(buf: &[Byte], expected_id: UInt16) -> Result<List<DnsRecordEnt
 
     // Validate response.
     if !header.is_response() {
-        return Err(DnsError.InvalidResponse);
+        return Result.Err(DnsError.InvalidResponse);
     }
     if header.id != expected_id {
-        return Err(DnsError.InvalidResponse);
+        return Result.Err(DnsError.InvalidResponse);
     }
 
     let rcode = header.rcode();
     if rcode != RCODE_NOERROR {
-        return Err(DnsError.from_rcode(rcode));
+        return Result.Err(DnsError.from_rcode(rcode));
     }
 
     if header.is_truncated() {
-        return Err(DnsError.Truncated);
+        return Result.Err(DnsError.Truncated);
     }
 
     let mut offset = DNS_HEADER_SIZE;
@@ -707,7 +707,7 @@ fn parse_response(buf: &[Byte], expected_id: UInt16) -> Result<List<DnsRecordEnt
     // Parse answer section.
     for _ in 0..header.ancount {
         let (record, consumed) = parse_resource_record(buf, offset)?;
-        if let Some(parsed) = record.parsed {
+        if let Maybe.Some(parsed) = record.parsed {
             records.push(DnsRecordEntry {
                 record: parsed,
                 ttl: record.ttl as Int,
@@ -716,7 +716,7 @@ fn parse_response(buf: &[Byte], expected_id: UInt16) -> Result<List<DnsRecordEnt
         offset = offset + consumed;
     }
 
-    Ok(records)
+    Result.Ok(records)
 }
 
 // =============================================================================
@@ -864,7 +864,7 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
         let open_flags = O_RDONLY | O_CLOEXEC;
         let fd_result = sys_open(path_bytes, open_flags, 0);
 
-        if let Ok(fd) = fd_result {
+        if let Result.Ok(fd) = fd_result {
             let mut buf = List.with_capacity(4096);
             for _ in 0..4096 {
                 buf.push(0);
@@ -873,7 +873,7 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
             let read_result = sys_read(fd, &mut buf);
             let _ = sys_close(fd);
 
-            if let Ok(bytes_read) = read_result {
+            if let Result.Ok(bytes_read) = read_result {
                 let content = Text.from_utf8_lossy(&buf[..(bytes_read as Int)]);
 
                 // Parse nameserver lines.
@@ -881,7 +881,7 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
                     let trimmed = line.trim();
                     if trimmed.starts_with("nameserver ") {
                         let addr_str = trimmed[11..].trim();
-                        if let Ok(ip) = Ipv4Addr.parse(&addr_str) {
+                        if let Result.Ok(ip) = Ipv4Addr.parse(&addr_str) {
                             nameservers.push(ip);
                         }
                     }
@@ -898,7 +898,7 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
 
         let fd_result = sys_open(path_bytes, O_RDONLY | O_CLOEXEC, 0);
 
-        if let Ok(fd) = fd_result {
+        if let Result.Ok(fd) = fd_result {
             let mut buf = List.with_capacity(4096);
             for _ in 0..4096 {
                 buf.push(0);
@@ -907,14 +907,14 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
             let read_result = sys_read(fd, &mut buf);
             let _ = sys_close(fd);
 
-            if let Ok(bytes_read) = read_result {
+            if let Result.Ok(bytes_read) = read_result {
                 let content = Text.from_utf8_lossy(&buf[..(bytes_read as Int)]);
 
                 for line in content.lines() {
                     let trimmed = line.trim();
                     if trimmed.starts_with("nameserver ") {
                         let addr_str = trimmed[11..].trim();
-                        if let Ok(ip) = Ipv4Addr.parse(&addr_str) {
+                        if let Result.Ok(ip) = Ipv4Addr.parse(&addr_str) {
                             nameservers.push(ip);
                         }
                     }
@@ -976,7 +976,7 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
                         let ip_bytes = &buf[ip_str_offset..ip_end];
                         let ip_str = Text.from_utf8_lossy(ip_bytes);
 
-                        if let Ok(ip) = Ipv4Addr.parse(&ip_str) {
+                        if let Result.Ok(ip) = Ipv4Addr.parse(&ip_str) {
                             nameservers.push(ip);
                         }
                     }
@@ -1094,7 +1094,7 @@ implement Resolver {
 
     /// Add a nameserver by string.
     public fn nameserver(mut self, addr: &Text) -> Resolver {
-        if let Ok(ip) = Ipv4Addr.parse(addr) {
+        if let Result.Ok(ip) = Ipv4Addr.parse(addr) {
             self.nameservers.push(ip);
         }
         self
@@ -1156,7 +1156,7 @@ implement Resolver {
             .map_err(DnsError.from_io_error)?;
 
         // Set receive timeout.
-        socket.set_read_timeout(Some(self.timeout_ms as Int))
+        socket.set_read_timeout(Maybe.Some(self.timeout_ms as Int))
             .map_err(DnsError.from_io_error)?;
 
         // Send query to nameserver.
@@ -1198,7 +1198,7 @@ implement Resolver {
             .map_err(DnsError.from_io_error)?;
 
         // Set read timeout.
-        stream.set_read_timeout(Some(self.timeout_ms as Int))
+        stream.set_read_timeout(Maybe.Some(self.timeout_ms as Int))
             .map_err(DnsError.from_io_error)?;
 
         // Send length-prefixed query (2-byte big-endian length + query).
@@ -1224,7 +1224,7 @@ implement Resolver {
             // "other" — surface the typed kind so callers can
             // pattern-match on InvalidResponse vs. transport
             // errors (Timeout / NetworkError / Refused).
-            return Err(DnsError.InvalidResponse);
+            return Result.Err(DnsError.InvalidResponse);
         }
 
         // Read full response.
@@ -1252,8 +1252,8 @@ implement Resolver {
             // Use TCP directly if configured.
             if self.use_tcp {
                 match self.query_tcp(name, qtype, nameserver) {
-                    Ok(records) => return Ok(records),
-                    Err(e) => {
+                    Result.Ok(records) => return Result.Ok(records),
+                    Result.Err(e) => {
                         last_err = e;
                         continue;
                     }
@@ -1261,26 +1261,26 @@ implement Resolver {
             }
 
             match self.query_udp(name, qtype, nameserver) {
-                Ok(records) => return Ok(records),
-                Err(DnsError.Truncated) => {
+                Result.Ok(records) => return Result.Ok(records),
+                Result.Err(DnsError.Truncated) => {
                     // Fallback to TCP for truncated responses.
                     match self.query_tcp(name, qtype, nameserver) {
-                        Ok(records) => return Ok(records),
-                        Err(e) => {
+                        Result.Ok(records) => return Result.Ok(records),
+                        Result.Err(e) => {
                             last_err = e;
                         }
                     }
                 }
-                Err(DnsError.Timeout) => {
+                Result.Err(DnsError.Timeout) => {
                     last_err = DnsError.TryAgain;
                 }
-                Err(e) => {
+                Result.Err(e) => {
                     last_err = e;
                 }
             }
         }
 
-        Err(last_err)
+        Result.Err(last_err)
     }
 
     /// Resolve hostname to IP addresses.
@@ -1291,8 +1291,8 @@ implement Resolver {
         if dot_count < self.ndots && !self.search_domains.is_empty() {
             for domain in &self.search_domains {
                 let fqdn = f"{hostname}.{domain}";
-                if let Ok(addrs) = self.resolve_direct(&fqdn) {
-                    return Ok(addrs);
+                if let Result.Ok(addrs) = self.resolve_direct(&fqdn) {
+                    return Result.Ok(addrs);
                 }
             }
         }
@@ -1310,7 +1310,7 @@ implement Resolver {
         };
 
         if nameservers.is_empty() {
-            return Err(DnsError.NetworkError("no nameservers configured".to_text()));
+            return Result.Err(DnsError.NetworkError("no nameservers configured".to_text()));
         }
 
         let mut addrs = List.new();
@@ -1320,41 +1320,41 @@ implement Resolver {
         for ns in &nameservers {
             // Query for A records.
             match self.query_nameserver(hostname, ns, DNS_TYPE_A) {
-                Ok(records) => {
+                Result.Ok(records) => {
                     for entry in records {
                         if let A(ip) = entry.record {
                             addrs.push(IpAddr.V4(ip));
                         }
                     }
                 }
-                Err(e) => {
+                Result.Err(e) => {
                     last_err = e;
                 }
             }
 
             // Query for AAAA records.
             match self.query_nameserver(hostname, ns, DNS_TYPE_AAAA) {
-                Ok(records) => {
+                Result.Ok(records) => {
                     for entry in records {
                         if let AAAA(ip) = entry.record {
                             addrs.push(IpAddr.V6(ip));
                         }
                     }
                 }
-                Err(_) => {
+                Result.Err(_) => {
                     // Ignore AAAA errors if we got A records.
                 }
             }
 
             if !addrs.is_empty() {
-                return Ok(addrs);
+                return Result.Ok(addrs);
             }
         }
 
         if addrs.is_empty() {
-            Err(last_err)
+            Result.Err(last_err)
         } else {
-            Ok(addrs)
+            Result.Ok(addrs)
         }
     }
 
@@ -1369,7 +1369,7 @@ implement Resolver {
         };
 
         if nameservers.is_empty() {
-            return Err(DnsError.NetworkError("no nameservers configured".to_text()));
+            return Result.Err(DnsError.NetworkError("no nameservers configured".to_text()));
         }
 
         // Try first nameserver.
@@ -1392,7 +1392,7 @@ implement Resolver {
 
         // Sort by priority (lower is better).
         res.sort_by(|(p1, _), (p2, _)| p1.cmp(p2));
-        Ok(res)
+        Result.Ok(res)
     }
 
     /// Look up TXT records for a domain.
@@ -1406,7 +1406,7 @@ implement Resolver {
             }
         }
 
-        Ok(res)
+        Result.Ok(res)
     }
 
     /// Look up SRV records for a service.
@@ -1432,7 +1432,7 @@ implement Resolver {
             }
         });
 
-        Ok(res)
+        Result.Ok(res)
     }
 
     /// Look up NS (name server) records for a domain.
@@ -1446,7 +1446,7 @@ implement Resolver {
             }
         }
 
-        Ok(res)
+        Result.Ok(res)
     }
 
     /// Perform reverse DNS lookup (PTR record).
@@ -1456,11 +1456,11 @@ implement Resolver {
 
         for entry in records {
             if let PTR(name) = entry.record {
-                return Ok(name);
+                return Result.Ok(name);
             }
         }
 
-        Err(DnsError.NotFound)
+        Result.Err(DnsError.NotFound)
     }
 }
 
@@ -1495,15 +1495,15 @@ implement Resolver {
 public fn lookup_host(hostname: &Text) -> Result<List<IpAddr>, DnsError> {
     // Validate hostname.
     if hostname.is_empty() {
-        return Err(DnsError.InvalidName);
+        return Result.Err(DnsError.InvalidName);
     }
 
     // Try parsing as IP address first (no DNS needed).
-    if let Ok(ipv4) = Ipv4Addr.parse(hostname) {
-        return Ok(List.of(IpAddr.V4(ipv4)));
+    if let Result.Ok(ipv4) = Ipv4Addr.parse(hostname) {
+        return Result.Ok(List.of(IpAddr.V4(ipv4)));
     }
-    if let Ok(ipv6) = Ipv6Addr.parse(hostname) {
-        return Ok(List.of(IpAddr.V6(ipv6)));
+    if let Result.Ok(ipv6) = Ipv6Addr.parse(hostname) {
+        return Result.Ok(List.of(IpAddr.V6(ipv6)));
     }
 
     // Use system resolver.
@@ -1523,9 +1523,9 @@ public fn lookup_host_v4(hostname: &Text) -> Result<List<Ipv4Addr>, DnsError> {
     }
 
     if res.is_empty() {
-        Err(DnsError.NoData)
+        Result.Err(DnsError.NoData)
     } else {
-        Ok(res)
+        Result.Ok(res)
     }
 }
 
@@ -1541,9 +1541,9 @@ public fn lookup_host_v6(hostname: &Text) -> Result<List<Ipv6Addr>, DnsError> {
     }
 
     if res.is_empty() {
-        Err(DnsError.NoData)
+        Result.Err(DnsError.NoData)
     } else {
-        Ok(res)
+        Result.Ok(res)
     }
 }
 
@@ -1639,15 +1639,15 @@ fn format_nibble(n: Byte) -> Text {
 public async fn lookup_host_async(hostname: &Text) -> Result<List<IpAddr>, DnsError> {
     // Validate hostname.
     if hostname.is_empty() {
-        return Err(DnsError.InvalidName);
+        return Result.Err(DnsError.InvalidName);
     }
 
     // Try parsing as IP address first.
-    if let Ok(ipv4) = Ipv4Addr.parse(hostname) {
-        return Ok(List.of(IpAddr.V4(ipv4)));
+    if let Result.Ok(ipv4) = Ipv4Addr.parse(hostname) {
+        return Result.Ok(List.of(IpAddr.V4(ipv4)));
     }
-    if let Ok(ipv6) = Ipv6Addr.parse(hostname) {
-        return Ok(List.of(IpAddr.V6(ipv6)));
+    if let Result.Ok(ipv6) = Ipv6Addr.parse(hostname) {
+        return Result.Ok(List.of(IpAddr.V6(ipv6)));
     }
 
     // Use async UDP for DNS query.
@@ -1659,7 +1659,7 @@ public async fn lookup_host_async(hostname: &Text) -> Result<List<IpAddr>, DnsEr
     };
 
     if nameservers.is_empty() {
-        return Err(DnsError.NetworkError("no nameservers configured".to_text()));
+        return Result.Err(DnsError.NetworkError("no nameservers configured".to_text()));
     }
 
     let mut addrs = List.new();
@@ -1686,7 +1686,7 @@ public async fn lookup_host_async(hostname: &Text) -> Result<List<IpAddr>, DnsEr
     let (bytes_read, _) = socket.recv_from_async(&mut recv_buf).await
         .map_err(DnsError.from_io_error)?;
 
-    if let Ok(records) = parse_response(&recv_buf[..bytes_read], query_id) {
+    if let Result.Ok(records) = parse_response(&recv_buf[..bytes_read], query_id) {
         for entry in records {
             if let A(ip) = entry.record {
                 addrs.push(IpAddr.V4(ip));
@@ -1704,7 +1704,7 @@ public async fn lookup_host_async(hostname: &Text) -> Result<List<IpAddr>, DnsEr
     let (bytes_read_v6, _) = socket.recv_from_async(&mut recv_buf).await
         .map_err(DnsError.from_io_error)?;
 
-    if let Ok(records) = parse_response(&recv_buf[..bytes_read_v6], query_id_v6) {
+    if let Result.Ok(records) = parse_response(&recv_buf[..bytes_read_v6], query_id_v6) {
         for entry in records {
             if let AAAA(ip) = entry.record {
                 addrs.push(IpAddr.V6(ip));
@@ -1713,9 +1713,9 @@ public async fn lookup_host_async(hostname: &Text) -> Result<List<IpAddr>, DnsEr
     }
 
     if addrs.is_empty() {
-        Err(DnsError.NotFound)
+        Result.Err(DnsError.NotFound)
     } else {
-        Ok(addrs)
+        Result.Ok(addrs)
     }
 }
 
@@ -1725,7 +1725,7 @@ public async fn lookup_addr_async(addr: &IpAddr) -> Result<Text, DnsError> {
 
     let nameservers = read_system_nameservers();
     if nameservers.is_empty() {
-        return Err(DnsError.NetworkError("no nameservers configured".to_text()));
+        return Result.Err(DnsError.NetworkError("no nameservers configured".to_text()));
     }
 
     let socket = UdpSocket.bind(SocketAddr.new_v4(Ipv4Addr.new(0, 0, 0, 0), 0))
@@ -1750,11 +1750,11 @@ public async fn lookup_addr_async(addr: &IpAddr) -> Result<Text, DnsError> {
 
     for entry in records {
         if let PTR(name) = entry.record {
-            return Ok(name);
+            return Result.Ok(name);
         }
     }
 
-    Err(DnsError.NotFound)
+    Result.Err(DnsError.NotFound)
 }
 
 // =============================================================================
@@ -1788,7 +1788,7 @@ public fn resolve(hostname: &Text, port: Int) -> Result<List<SocketAddr>, DnsErr
         addrs.push(addr);
     }
 
-    Ok(addrs)
+    Result.Ok(addrs)
 }
 
 /// Async version of resolve.
@@ -1804,7 +1804,7 @@ public async fn resolve_async(hostname: &Text, port: Int) -> Result<List<SocketA
         addrs.push(addr);
     }
 
-    Ok(addrs)
+    Result.Ok(addrs)
 }
 
 /// Check if a string looks like an IP address (not a hostname).

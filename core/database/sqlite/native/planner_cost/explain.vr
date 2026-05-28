@@ -97,16 +97,16 @@ public fn detail_for(method: &AccessMethod, table: &Text, index: Maybe<Text>) ->
         AmFullScan => scan_table(table),
         AmRowidLookup => search_rowid(table),
         AmIndexSeek(_) => match index {
-            Some(name) => search_index(table, &name),
-            None       => search_rowid(table),
+            Maybe.Some(name) => search_index(table, &name),
+            Maybe.None       => search_rowid(table),
         },
         AmIndexRangeScan(_) => match index {
-            Some(name) => search_index(table, &name),
-            None       => scan_table(table),
+            Maybe.Some(name) => search_index(table, &name),
+            Maybe.None       => scan_table(table),
         },
         AmCoveringIndexScan(_) => match index {
-            Some(name) => covering_index(table, &name),
-            None       => scan_table(table),
+            Maybe.Some(name) => covering_index(table, &name),
+            Maybe.None       => scan_table(table),
         },
         AmEphemeralScan => "SCAN TEMP".clone(),
     }

@@ -56,7 +56,7 @@ implement Notification {
     /// Create an info notification.
     public fn info(msg: Text) -> Notification {
         Notification {
-            title: None,
+            title: Maybe.None,
             message: msg,
             level: NotificationLevel.Info,
             style: Style.DEFAULT.fg(Color.Blue),
@@ -69,7 +69,7 @@ implement Notification {
     /// Create a warning notification.
     public fn warning(msg: Text) -> Notification {
         Notification {
-            title: None,
+            title: Maybe.None,
             message: msg,
             level: NotificationLevel.Warning,
             style: Style.DEFAULT.fg(Color.Yellow),
@@ -82,7 +82,7 @@ implement Notification {
     /// Create an error notification.
     public fn error(msg: Text) -> Notification {
         Notification {
-            title: None,
+            title: Maybe.None,
             message: msg,
             level: NotificationLevel.Error,
             style: Style.DEFAULT.fg(Color.Red),
@@ -95,7 +95,7 @@ implement Notification {
     /// Create a success notification.
     public fn success(msg: Text) -> Notification {
         Notification {
-            title: None,
+            title: Maybe.None,
             message: msg,
             level: NotificationLevel.Success,
             style: Style.DEFAULT.fg(Color.Green),
@@ -107,7 +107,7 @@ implement Notification {
 
     /// Set the notification title.
     public fn title(self, title: Text) -> Notification {
-        Notification { title: Some(title), ..self }
+        Notification { title: Maybe.Some(title), ..self }
     }
 
     /// Set the notification width.
@@ -146,7 +146,7 @@ implement Widget for Notification {
 
         // Position at top-right corner of the area
         let w = self.width.min(area.width);
-        let h = 3 + if self.title is Some(_) { 1 } else { 0 };
+        let h = 3 + if self.title is Maybe.Some(_) { 1 } else { 0 };
         let x = area.x + area.width - w;
         let y = area.y;
         let toast_area = Rect.new(x, y, w, h.min(area.height));
@@ -155,8 +155,8 @@ implement Widget for Notification {
 
         // Build block with border
         let block_title = match self.title {
-            Some(t) => f" {self.level_icon()} {t} ",
-            None => f" {self.level_icon()} ",
+            Maybe.Some(t) => f" {self.level_icon()} {t} ",
+            Maybe.None => f" {self.level_icon()} ",
         };
         let block = Block.new()
             .title(block_title)

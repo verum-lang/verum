@@ -43,7 +43,7 @@ implement<T> NonEmpty<T> {
 
     public fn from_list(xs: List<T>) -> Result<NonEmpty<T>, ShellError> {
         if xs.is_empty() {
-            return Err(ShellError.SpawnFailed {
+            return Result.Err(ShellError.SpawnFailed {
                 command: "<NonEmpty::from_list>".into(),
                 reason:  "list is empty".into(),
             });
@@ -51,7 +51,7 @@ implement<T> NonEmpty<T> {
         let mut iter = xs.into_iter();
         let head = iter.next().unwrap();
         let rest: List<T> = iter.collect();
-        Ok(NonEmpty { head, rest })
+        Result.Ok(NonEmpty { head, rest })
     }
 
     public fn len(&self) -> Int { 1 + self.rest.len() as Int }
@@ -81,12 +81,12 @@ implement BoundedText {
     public fn parse(value: Text, min: Int, max: Int) -> Result<BoundedText, ShellError> {
         let n = value.len() as Int;
         if n < min || n > max {
-            return Err(ShellError.SpawnFailed {
+            return Result.Err(ShellError.SpawnFailed {
                 command: "<BoundedText::parse>".into(),
                 reason:  f"length {n} out of [{min}, {max}]",
             });
         }
-        Ok(BoundedText { value, min, max })
+        Result.Ok(BoundedText { value, min, max })
     }
 
     public fn as_text(&self) -> &Text { &self.value }
@@ -107,8 +107,8 @@ public type EnvName is (Text);
 implement EnvName {
     public fn parse(s: Text) -> Result<EnvName, ShellError> {
         let r = Regex.new("""^[A-Za-z_][A-Za-z0-9_]*$""").unwrap();
-        if r.is_match(&s) { Ok(EnvName(s)) }
-        else { Err(ShellError.SpawnFailed {
+        if r.is_match(&s) { Result.Ok(EnvName(s)) }
+        else { Result.Err(ShellError.SpawnFailed {
             command: "<EnvName::parse>".into(),
             reason:  f"invalid env var name: {s}",
         }) }
@@ -125,13 +125,13 @@ implement EnvValue {
     public fn parse(s: Text) -> Result<EnvValue, ShellError> {
         for ch in s.chars() {
             if ch == '\0' {
-                return Err(ShellError.SpawnFailed {
+                return Result.Err(ShellError.SpawnFailed {
                     command: "<EnvValue::parse>".into(),
                     reason:  "env value contains NUL byte".into(),
                 });
             }
         }
-        Ok(EnvValue(s))
+        Result.Ok(EnvValue(s))
     }
     public fn as_text(&self) -> &Text { &self.0 }
 }
@@ -150,8 +150,8 @@ public type SemVerRef is (Text);
 implement SemVerRef {
     public fn parse(s: Text) -> Result<SemVerRef, ShellError> {
         let r = Regex.new("""^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.\\-]+)?(\\+[a-zA-Z0-9.\\-]+)?$""").unwrap();
-        if r.is_match(&s) { Ok(SemVerRef(s)) }
-        else { Err(ShellError.SpawnFailed {
+        if r.is_match(&s) { Result.Ok(SemVerRef(s)) }
+        else { Result.Err(ShellError.SpawnFailed {
             command: "<SemVerRef::parse>".into(),
             reason:  f"invalid semver: {s}",
         }) }
@@ -170,12 +170,12 @@ public type PortNumber is {
 implement PortNumber {
     public fn parse(n: Int) -> Result<PortNumber, ShellError> {
         if n < 1 || n > 65535 {
-            return Err(ShellError.SpawnFailed {
+            return Result.Err(ShellError.SpawnFailed {
                 command: "<PortNumber::parse>".into(),
                 reason:  f"port {n} out of [1, 65535]",
             });
         }
-        Ok(PortNumber { value: n })
+        Result.Ok(PortNumber { value: n })
     }
     public fn as_int(&self) -> Int { self.value }
 }
@@ -189,14 +189,14 @@ public type HostName is (Text);
 implement HostName {
     public fn parse(s: Text) -> Result<HostName, ShellError> {
         if s.len() > 253 {
-            return Err(ShellError.SpawnFailed {
+            return Result.Err(ShellError.SpawnFailed {
                 command: "<HostName::parse>".into(),
                 reason:  f"hostname too long: {s.len()}",
             });
         }
         let r = Regex.new("""^([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)(\\.[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)*$""").unwrap();
-        if r.is_match(&s) { Ok(HostName(s)) }
-        else { Err(ShellError.SpawnFailed {
+        if r.is_match(&s) { Result.Ok(HostName(s)) }
+        else { Result.Err(ShellError.SpawnFailed {
             command: "<HostName::parse>".into(),
             reason:  f"invalid hostname: {s}",
         }) }
@@ -240,12 +240,12 @@ implement DeployConfig {
         let mp  = PathBuf.from(manifest);
         let to  = PortNumber.parse(timeout_sec)?;
         if !mp.to_text().ends_with(".yaml") && !mp.to_text().ends_with(".yml") {
-            return Err(ShellError.SpawnFailed {
+            return Result.Err(ShellError.SpawnFailed {
                 command: "<DeployConfig::parse>".into(),
                 reason:  "manifest path must end with .yaml or .yml".into(),
             });
         }
-        Ok(DeployConfig {
+        Result.Ok(DeployConfig {
             service_name:  svc,
             version:       ver,
             namespace:     ns,
@@ -264,25 +264,25 @@ implement S3Bucket {
     public fn parse(s: Text) -> Result<S3Bucket, ShellError> {
         let n = s.len() as Int;
         if n < 3 || n > 63 {
-            return Err(ShellError.SpawnFailed {
+            return Result.Err(ShellError.SpawnFailed {
                 command: "<S3Bucket::parse>".into(),
                 reason:  f"length {n} out of [3, 63]",
             });
         }
         let r = Regex.new("""^[a-z0-9][a-z0-9.\\-]+[a-z0-9]$""").unwrap();
         if !r.is_match(&s) {
-            return Err(ShellError.SpawnFailed {
+            return Result.Err(ShellError.SpawnFailed {
                 command: "<S3Bucket::parse>".into(),
                 reason:  f"invalid bucket name: {s}",
             });
         }
         if s.contains("..") {
-            return Err(ShellError.SpawnFailed {
+            return Result.Err(ShellError.SpawnFailed {
                 command: "<S3Bucket::parse>".into(),
                 reason:  "bucket name contains consecutive dots".into(),
             });
         }
-        Ok(S3Bucket(s))
+        Result.Ok(S3Bucket(s))
     }
     public fn as_text(&self) -> &Text { &self.0 }
 }

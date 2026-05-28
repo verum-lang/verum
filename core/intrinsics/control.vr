@@ -2,7 +2,7 @@
 // core/intrinsics/control.vr - Control Flow Intrinsics
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None (compiler-provided)
+// Dependencies: Maybe.None (compiler-provided)
 //
 
 // This module provides control flow intrinsics that map directly to
@@ -28,7 +28,7 @@
 )
 module core.intrinsics.control;
 
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
@@ -159,7 +159,7 @@ public type IntrinsicPanicInfo is {
 };
 
 /// Execute a closure and catch any panics
-/// Returns Ok(result) if no panic, Err(IntrinsicPanicInfo) if panic occurred
+/// Returns Result.Ok(result) if no panic, Result.Err(IntrinsicPanicInfo) if panic occurred
 public fn catch_unwind<T>(f: fn() -> T) -> Result<T, IntrinsicPanicInfo> {
     @intrinsic("catch_unwind", f)
 }

@@ -193,7 +193,7 @@ implement QuicConfig {
     public fn client(server_name: &Text) -> QuicConfig {
         let mut c = QuicConfig.defaults();
         c.is_client = true;
-        c.server_name = Some(server_name.clone());
+        c.server_name = Maybe.Some(server_name.clone());
         c.verify_peer = true;
         c
     }
@@ -208,10 +208,10 @@ implement QuicConfig {
     fn defaults() -> QuicConfig {
         QuicConfig {
             is_client: false,
-            server_name: None,
+            server_name: Maybe.None,
             alpn: List.new(),
             certificates: List.new(),
-            private_key: None,
+            private_key: Maybe.None,
             verify_peer: false,
 
             // Conservative defaults — tune per deployment.
@@ -245,7 +245,7 @@ implement QuicConfig {
     }
 
     public fn with_private_key(mut self, key: PrivateKey) -> QuicConfig {
-        self.private_key = Some(key); self
+        self.private_key = Maybe.Some(key); self
     }
 
     public fn with_verify_peer(mut self, verify: Bool) -> QuicConfig {

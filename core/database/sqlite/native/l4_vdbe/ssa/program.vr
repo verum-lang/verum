@@ -90,9 +90,9 @@ implement SsaProgram {
     /// Cursor declaration lookup; mirrors the VdbeProgram convenience
     /// used by the L6 bridge.
     public fn get_cursor_decl(&self, i: Int) -> Maybe<CursorDecl> {
-        if i < 0 || i >= self.cursors.len() { return None; }
+        if i < 0 || i >= self.cursors.len() { return Maybe.None; }
         let d = &self.cursors[i];
-        Some(CursorDecl {
+        Maybe.Some(CursorDecl {
             cursor_id: d.cursor_id,
             kind: d.kind,
             root_page: d.root_page,

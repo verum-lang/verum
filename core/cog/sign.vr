@@ -33,22 +33,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "cog signature envelope: Ed25519 over (manifest_hash || source_hash)",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.cog.sign;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 mount collections.List;
 mount security.ecc.ed25519.{
     Ed25519Seed, Ed25519PublicKey, Ed25519Signature, Ed25519Error,
@@ -137,7 +137,7 @@ public fn sign_cog(
     let to_sign = concat_hashes(&manifest_hash, &source_hash);
     let signature_bytes = security.ecc.ed25519.sign(seed, &to_sign);
     let public_key_bytes = security.ecc.ed25519.public_key(seed);
-    Ok(CogSignature {
+    Result.Ok(CogSignature {
         public_key:       encoding.hex.encode(&public_key_bytes),
         signature:        encoding.hex.encode(&signature_bytes),
         manifest_sha256:  encoding.hex.encode(&manifest_hash),
@@ -152,7 +152,7 @@ public fn sign_cog(
 /// `HashMismatch` with diagnostic context. The Ed25519 verify is
 /// strict (RFC 8032 + ZIP-215).
 ///
-/// Returns `Ok(())` on a fully valid signature; `Err(...)` otherwise.
+/// Returns `Result.Ok(())` on a fully valid signature; `Result.Err(...)` otherwise.
 public fn verify_cog(
     sig: &CogSignature,
     manifest_canonical_json: &List<Byte>,
@@ -166,13 +166,13 @@ public fn verify_cog(
 
     // Step 2: compare against the signature's stored hashes.
     if computed_manifest != sig.manifest_sha256 {
-        return Err(HashMismatch {
+        return Result.Err(HashMismatch {
             expected: sig.manifest_sha256.clone(),
             computed: computed_manifest,
         });
     }
     if computed_source != sig.source_sha256 {
-        return Err(HashMismatch {
+        return Result.Err(HashMismatch {
             expected: sig.source_sha256.clone(),
             computed: computed_source,
         });
@@ -185,8 +185,8 @@ public fn verify_cog(
     // Step 4: Ed25519 verify.
     let to_verify = concat_hashes(&manifest_hash, &source_hash);
     match security.ecc.ed25519.verify(&public_key, &to_verify, &signature_bytes) {
-        Ok(_)  => Ok(()),
-        Err(_) => Err(VerificationFailed),
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(_) => Result.Err(VerificationFailed),
     }
 }
 
@@ -202,13 +202,13 @@ public fn verify_cog_precomputed_hashes(
     let computed_manifest = encoding.hex.encode(manifest_sha256);
     let computed_source = encoding.hex.encode(source_sha256);
     if computed_manifest != sig.manifest_sha256 {
-        return Err(HashMismatch {
+        return Result.Err(HashMismatch {
             expected: sig.manifest_sha256.clone(),
             computed: computed_manifest,
         });
     }
     if computed_source != sig.source_sha256 {
-        return Err(HashMismatch {
+        return Result.Err(HashMismatch {
             expected: sig.source_sha256.clone(),
             computed: computed_source,
         });
@@ -217,8 +217,8 @@ public fn verify_cog_precomputed_hashes(
     let signature_bytes = decode_signature(&sig.signature)?;
     let to_verify = concat_hashes(manifest_sha256, source_sha256);
     match security.ecc.ed25519.verify(&public_key, &to_verify, &signature_bytes) {
-        Ok(_)  => Ok(()),
-        Err(_) => Err(VerificationFailed),
+        Result.Ok(_)  => Result.Ok(()),
+        Result.Err(_) => Result.Err(VerificationFailed),
     }
 }
 
@@ -249,32 +249,32 @@ fn concat_hashes(a: &[Byte; 32], b: &[Byte; 32]) -> List<Byte> {
 
 fn decode_public_key(hex: &Text) -> Result<Ed25519PublicKey, CogSignatureError> {
     if hex.len() != 64 {
-        return Err(InvalidPublicKey(f"expected 64 hex chars, got {hex.len()}"));
+        return Result.Err(InvalidPublicKey(f"expected 64 hex chars, got {hex.len()}"));
     }
     let bytes = encoding.hex.decode(hex)
         .map_err(|e| InvalidPublicKey(f"hex decode: {e}"))?;
     if bytes.len() != 32 {
-        return Err(InvalidPublicKey(f"expected 32 bytes, got {bytes.len()}"));
+        return Result.Err(InvalidPublicKey(f"expected 32 bytes, got {bytes.len()}"));
     }
     let mut arr: [Byte; 32] = [0_u8; 32];
     let mut i: Int = 0;
     while i < 32 { arr[i] = bytes[i]; i = i + 1; }
-    Ok(arr)
+    Result.Ok(arr)
 }
 
 fn decode_signature(hex: &Text) -> Result<Ed25519Signature, CogSignatureError> {
     if hex.len() != 128 {
-        return Err(InvalidSignature(f"expected 128 hex chars, got {hex.len()}"));
+        return Result.Err(InvalidSignature(f"expected 128 hex chars, got {hex.len()}"));
     }
     let bytes = encoding.hex.decode(hex)
         .map_err(|e| InvalidSignature(f"hex decode: {e}"))?;
     if bytes.len() != 64 {
-        return Err(InvalidSignature(f"expected 64 bytes, got {bytes.len()}"));
+        return Result.Err(InvalidSignature(f"expected 64 bytes, got {bytes.len()}"));
     }
     let mut arr: [Byte; 64] = [0_u8; 64];
     let mut i: Int = 0;
     while i < 64 { arr[i] = bytes[i]; i = i + 1; }
-    Ok(arr)
+    Result.Ok(arr)
 }
 
 // =============================================================================

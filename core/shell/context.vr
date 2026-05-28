@@ -56,15 +56,15 @@ public type PermissionKind is
     | Env    { name: Text };
 
 public type PermissionSet is {
-    /// `None` = unrestricted (script-mode default for backwards compatibility).
-    /// `Some([])` = deny-all. `Some([..])` = explicit allow-list.
+    /// `Maybe.None` = unrestricted (script-mode default for backwards compatibility).
+    /// `Maybe.Some([])` = deny-all. `Maybe.Some([..])` = explicit allow-list.
     run:        Maybe<List<Text>>,
     fs_read:    Maybe<List<Text>>,
     fs_write:   Maybe<List<Text>>,
     net:        Maybe<List<Text>>,
     env:        Maybe<List<Text>>,
     /// If `true`, deny without an allow-list. Default: false (allow when
-    /// list is None) so that legacy scripts run without frontmatter aren't
+    /// list is Maybe.None) so that legacy scripts run without frontmatter aren't
     /// surprised on first execution.
     strict:     Bool,
 }
@@ -74,7 +74,7 @@ implement PermissionSet {
     /// opt out of the capability gate.
     public fn unrestricted() -> PermissionSet {
         PermissionSet {
-            run: None, fs_read: None, fs_write: None, net: None, env: None,
+            run: Maybe.None, fs_read: Maybe.None, fs_write: Maybe.None, net: Maybe.None, env: Maybe.None,
             strict: false,
         }
     }
@@ -83,26 +83,26 @@ implement PermissionSet {
     /// `with_fs_read` / etc.
     public fn deny_all() -> PermissionSet {
         PermissionSet {
-            run: Some([]), fs_read: Some([]), fs_write: Some([]),
-            net: Some([]), env: Some([]),
+            run: Maybe.Some([]), fs_read: Maybe.Some([]), fs_write: Maybe.Some([]),
+            net: Maybe.Some([]), env: Maybe.Some([]),
             strict: true,
         }
     }
 
     public fn with_run(mut self, programs: List<Text>) -> PermissionSet {
-        self.run = Some(programs);
+        self.run = Maybe.Some(programs);
         self
     }
     public fn with_fs_read(mut self, paths: List<Text>) -> PermissionSet {
-        self.fs_read = Some(paths);
+        self.fs_read = Maybe.Some(paths);
         self
     }
     public fn with_fs_write(mut self, paths: List<Text>) -> PermissionSet {
-        self.fs_write = Some(paths);
+        self.fs_write = Maybe.Some(paths);
         self
     }
     public fn with_net(mut self, hosts: List<Text>) -> PermissionSet {
-        self.net = Some(hosts);
+        self.net = Maybe.Some(hosts);
         self
     }
 
@@ -110,13 +110,13 @@ implement PermissionSet {
     /// Programs are matched by basename; full paths and bare names both work.
     public fn check_run(&self, program: &Text) -> Result<(), ShellError> {
         match &self.run {
-            None      => Ok(()),
-            Some(allowed) => {
+            Maybe.None      => Result.Ok(()),
+            Maybe.Some(allowed) => {
                 let basename = basename_of(program);
                 for a in allowed.iter() {
-                    if a == &basename || a == program { return Ok(()); }
+                    if a == &basename || a == program { return Result.Ok(()); }
                 }
-                Err(ShellError.PermissionDenied {
+                Result.Err(ShellError.PermissionDenied {
                     command: program.clone(),
                     kind:    f"run({basename})",
                 })
@@ -140,11 +140,11 @@ implement Clone for PermissionSet {
 
 fn clone_opt_list(o: &Maybe<List<Text>>) -> Maybe<List<Text>> {
     match o {
-        None => None,
-        Some(l) => {
+        Maybe.None => Maybe.None,
+        Maybe.Some(l) => {
             let mut out: List<Text> = [];
             for x in l.iter() { out.push(x.clone()); }
-            Some(out)
+            Maybe.Some(out)
         }
     }
 }
@@ -205,7 +205,7 @@ public type MockLayer is {
     responses:       List<MockResponse>,
     /// Shadow log of every dispatched command — `recorded_calls()` returns this.
     recorded:        List<Text>,
-    /// If `true` and no pattern matches, raise `Err(SpawnFailed)` instead of
+    /// If `true` and no pattern matches, raise `Result.Err(SpawnFailed)` instead of
     /// silently falling through to a real shell. Default: true (safer).
     strict_no_match: Bool,
 }
@@ -224,19 +224,19 @@ implement MockLayer {
         self.recorded.push(command.clone());
         // Exact match first
         for r in self.responses.iter() {
-            if &r.pattern == command { return Some(r.clone()); }
+            if &r.pattern == command { return Maybe.Some(r.clone()); }
         }
         // Substring fallback
         for r in self.responses.iter() {
             if r.pattern.contains(command) || command.contains(&r.pattern) {
-                return Some(r.clone());
+                return Maybe.Some(r.clone());
             }
         }
         // Wildcard catch-all
         for r in self.responses.iter() {
-            if r.pattern == "*" { return Some(r.clone()); }
+            if r.pattern == "*" { return Maybe.Some(r.clone()); }
         }
-        None
+        Maybe.None
     }
 
     public fn recorded_calls(&self) -> &List<Text> { &self.recorded }
@@ -268,13 +268,13 @@ implement Clone for MockLayer {
 // =============================================================================
 
 public type ShellContext is {
-    /// Working directory override. If None, child inherits parent's cwd.
+    /// Working directory override. If Maybe.None, child inherits parent's cwd.
     cwd: Maybe<Text>,
     /// Additive environment overrides applied to each spawn.
     env_overrides: List<(Text, Text)>,
     /// Shell flavour for both escaping and `-c` dispatch.
     flavour: ShellFlavour,
-    /// Path to the shell program. None = autodetect from $SHELL / COMSPEC.
+    /// Path to the shell program. Maybe.None = autodetect from $SHELL / COMSPEC.
     shell_program: Maybe<Text>,
     /// Capability gate.
     permissions: PermissionSet,
@@ -292,12 +292,12 @@ implement ShellContext {
     /// `provide ShellContext = ShellContext.default();`.
     public fn default() -> ShellContext {
         ShellContext {
-            cwd: None,
+            cwd: Maybe.None,
             env_overrides: [],
             flavour: default_flavour(),
             shell_program: host_shell(),
             permissions: PermissionSet.unrestricted(),
-            mock: None,
+            mock: Maybe.None,
             verbose: false,
             dry_run: false,
         }
@@ -307,7 +307,7 @@ implement ShellContext {
     /// (real spawns will surface as SpawnFailed via the strict mock layer).
     public fn for_tests() -> ShellContext {
         let mut c = ShellContext.default();
-        c.mock = Some(MockLayer.new([]));
+        c.mock = Maybe.Some(MockLayer.new([]));
         c.permissions = PermissionSet.deny_all();
         c
     }
@@ -315,19 +315,19 @@ implement ShellContext {
     /// Construct a context bound to a specific cwd.
     public fn at(path: Text) -> ShellContext {
         let mut c = ShellContext.default();
-        c.cwd = Some(path);
+        c.cwd = Maybe.Some(path);
         c
     }
 
     // ── Builder API (chainable, value-returning) ─────────────────────────────
 
-    public fn with_cwd(mut self, path: Text) -> ShellContext { self.cwd = Some(path); self }
+    public fn with_cwd(mut self, path: Text) -> ShellContext { self.cwd = Maybe.Some(path); self }
     public fn with_env(mut self, key: Text, val: Text) -> ShellContext {
         self.env_overrides.push((key, val));
         self
     }
     public fn with_flavour(mut self, f: ShellFlavour) -> ShellContext { self.flavour = f; self }
-    public fn with_shell(mut self, prog: Text) -> ShellContext { self.shell_program = Some(prog); self }
+    public fn with_shell(mut self, prog: Text) -> ShellContext { self.shell_program = Maybe.Some(prog); self }
     public fn with_permissions(mut self, p: PermissionSet) -> ShellContext { self.permissions = p; self }
     public fn with_verbose(mut self, v: Bool) -> ShellContext { self.verbose = v; self }
     public fn with_dry_run(mut self, v: Bool) -> ShellContext { self.dry_run = v; self }
@@ -336,13 +336,13 @@ implement ShellContext {
 
     public fn mock(responses: List<MockResponse>) -> ShellContext {
         let mut c = ShellContext.default();
-        c.mock = Some(MockLayer.new(responses));
+        c.mock = Maybe.Some(MockLayer.new(responses));
         c
     }
 
     public fn lenient_mock(responses: List<MockResponse>) -> ShellContext {
         let mut c = ShellContext.default();
-        c.mock = Some(MockLayer.lenient(responses));
+        c.mock = Maybe.Some(MockLayer.lenient(responses));
         c
     }
 
@@ -352,10 +352,10 @@ implement ShellContext {
     /// no override is set.
     public fn effective_cwd(&self) -> Maybe<Text> {
         match &self.cwd {
-            Some(p) => Some(p.clone()),
-            None    => match fs_current_dir() {
-                Ok(pb) => Some(pb.to_text()),
-                Err(_) => None,
+            Maybe.Some(p) => Maybe.Some(p.clone()),
+            Maybe.None    => match fs_current_dir() {
+                Result.Ok(pb) => Maybe.Some(pb.to_text()),
+                Result.Err(_) => Maybe.None,
             },
         }
     }
@@ -363,10 +363,10 @@ implement ShellContext {
     /// Resolve the shell binary for `-c` dispatch.
     public fn resolve_shell(&self) -> Text {
         match &self.shell_program {
-            Some(s) => s.clone(),
-            None    => match host_shell() {
-                Some(s) => s,
-                None    => {
+            Maybe.Some(s) => s.clone(),
+            Maybe.None    => match host_shell() {
+                Maybe.Some(s) => s,
+                Maybe.None    => {
                     @cfg(any(target_os = "linux", target_os = "macos"))
                     { "/bin/sh".into() }
                     @cfg(target_os = "windows")

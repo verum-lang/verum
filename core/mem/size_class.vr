@@ -2,7 +2,7 @@
 // mem/size_class.vr - Mimalloc-Style Size Class System
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None
+// Dependencies: Maybe.None
 // =============================================================================
 //
 

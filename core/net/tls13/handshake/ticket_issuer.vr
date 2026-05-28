@@ -178,7 +178,7 @@ public fn issue_post_handshake_ticket(
         ticket:          ticket_bytes,
         extensions:      extensions,
     };
-    Ok(HandshakeMessage.NewSessionTicketMsg(nst))
+    Result.Ok(HandshakeMessage.NewSessionTicketMsg(nst))
 }
 
 /// Batch helper — issue `count` tickets at once (typical deployment:
@@ -199,5 +199,5 @@ public fn issue_post_handshake_tickets(
         out.push(m);
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }

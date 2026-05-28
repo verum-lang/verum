@@ -64,7 +64,7 @@ mount core.simd.mod.{Vec, Mask, Vec16b, Vec32b, Vec64b};
 // =============================================================================
 
 /// Find the first occurrence of `needle` in `haystack`. Returns the byte
-/// index, or None if not found.
+/// index, or Maybe.None if not found.
 ///
 
 /// Performance: O(N/W) where W = SIMD lane count (16/32/64).
@@ -83,7 +83,7 @@ public fn find_byte(haystack: &[Byte], needle: Byte) -> Maybe<Int> {
         if matches.any() {
             // Bit-scan forward for the first set lane — position within chunk.
             let offset = matches.first_set_lane();
-            return Some(i + offset);
+            return Maybe.Some(i + offset);
         }
         i = i + lane_w;
     }
@@ -91,12 +91,12 @@ public fn find_byte(haystack: &[Byte], needle: Byte) -> Maybe<Int> {
     // Scalar tail
     while i < n {
         if haystack[i] == needle {
-            return Some(i);
+            return Maybe.Some(i);
         }
         i = i + 1;
     }
 
-    None
+    Maybe.None
 }
 
 /// Find the first occurrence of ANY of the given needles. Returns (byte_index,
@@ -104,12 +104,12 @@ public fn find_byte(haystack: &[Byte], needle: Byte) -> Maybe<Int> {
 @multiversion
 public fn find_any_of(haystack: &[Byte], needles: &[Byte]) -> Maybe<(Int, Int)> {
     // Naive pass per needle; for >4 needles, use PCMPESTRI on SSE4.2 (future).
-    let mut best: Maybe<(Int, Int)> = None;
+    let mut best: Maybe<(Int, Int)> = Maybe.None;
     for (ni, n) in needles.iter().enumerate() {
-        if let Some(idx) = find_byte(haystack, *n) {
+        if let Maybe.Some(idx) = find_byte(haystack, *n) {
             match best {
-                None => best = Some((idx, ni)),
-                Some((b, _)) if idx < b => best = Some((idx, ni)),
+                Maybe.None => best = Maybe.Some((idx, ni)),
+                Maybe.Some((b, _)) if idx < b => best = Maybe.Some((idx, ni)),
                 _ => {}
             }
         }
@@ -118,15 +118,15 @@ public fn find_any_of(haystack: &[Byte], needles: &[Byte]) -> Maybe<(Int, Int)> 
 }
 
 /// Find the position of HTTP header terminator `\r\n\r\n` (or `\n\n`).
-/// Returns byte index of the terminator's final byte, or None.
+/// Returns byte index of the terminator's final byte, or Maybe.None.
 public fn find_header_terminator(haystack: &[Byte]) -> Maybe<Int> {
     // Two-pass: find \n, check preceding bytes for \r\n\r pattern.
     let n = haystack.len();
     let mut i = 0;
     while i < n {
         match find_byte(&haystack[i..], b'\n') {
-            None => return None,
-            Some(rel) => {
+            Maybe.None => return Maybe.None,
+            Maybe.Some(rel) => {
                 let abs = i + rel;
                 // Check \r\n\r\n pattern (abs >= 3) or \n\n (abs >= 1)
                 if abs >= 3
@@ -134,16 +134,16 @@ public fn find_header_terminator(haystack: &[Byte]) -> Maybe<Int> {
                     && haystack[abs - 2] == b'\n'
                     && haystack[abs - 3] == b'\r'
                 {
-                    return Some(abs);
+                    return Maybe.Some(abs);
                 }
                 if abs >= 1 && haystack[abs - 1] == b'\n' {
-                    return Some(abs);
+                    return Maybe.Some(abs);
                 }
                 i = abs + 1;
             }
         }
     }
-    None
+    Maybe.None
 }
 
 // =============================================================================
@@ -151,14 +151,14 @@ public fn find_header_terminator(haystack: &[Byte]) -> Maybe<Int> {
 // =============================================================================
 
 /// Find the first occurrence of `needle` (substring) in `haystack`. Returns
-/// the byte index of the match start, or None.
+/// the byte index of the match start, or Maybe.None.
 ///
 
 /// Implementation: two-way + SIMD block-scan for the first byte of needle,
 /// then compare-remaining on match. O(N) worst case, O(N/W) common case.
 public fn find_subslice(haystack: &[Byte], needle: &[Byte]) -> Maybe<Int> {
-    if needle.is_empty() { return Some(0); }
-    if needle.len() > haystack.len() { return None; }
+    if needle.is_empty() { return Maybe.Some(0); }
+    if needle.len() > haystack.len() { return Maybe.None; }
 
     let first = needle[0];
     let n = haystack.len();
@@ -168,8 +168,8 @@ public fn find_subslice(haystack: &[Byte], needle: &[Byte]) -> Maybe<Int> {
     while i <= n - m {
         // SIMD-scan for first byte.
         match find_byte(&haystack[i..n - m + 1], first) {
-            None => return None,
-            Some(rel) => {
+            Maybe.None => return Maybe.None,
+            Maybe.Some(rel) => {
                 let start = i + rel;
                 // Verify the rest.
                 let mut matched = true;
@@ -181,13 +181,13 @@ public fn find_subslice(haystack: &[Byte], needle: &[Byte]) -> Maybe<Int> {
                     }
                     j = j + 1;
                 }
-                if matched { return Some(start); }
+                if matched { return Maybe.Some(start); }
                 i = start + 1;
             }
         }
     }
 
-    None
+    Maybe.None
 }
 
 // =============================================================================

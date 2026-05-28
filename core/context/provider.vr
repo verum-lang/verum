@@ -43,7 +43,7 @@ public type Provider<T> is {
 implement<T: Clone> Provider<T> {
     /// Create a new provider with the given factory function.
     public fn new(factory: fn() -> T) -> Self {
-        // Qualify `Maybe.None` (task #17/#39 workaround). Bare `None`
+        // Qualify `Maybe.None` (task #17/#39 workaround). Bare `Maybe.None`
         // pre-fix resolved to the wrong sibling-variant (e.g.
         // `Backend.None` instead of `Maybe.None`), constructing a
         // record with a corrupted `cached` field. Subsequent
@@ -70,12 +70,12 @@ implement<T: Clone> Provider<T> {
     /// rewrite closes:
     ///
 
-    ///  1. `match self.cached { Some(ref value) => value, ... }`
+    ///  1. `match self.cached { Maybe.Some(ref value) => value, ... }`
     ///  bound `value: &T` via the `ref` pattern but the function
     ///  signature returned `T` — a type mismatch the typechecker
     ///  should reject.
-    ///  2. The `None` arm did `self.cached = Some(value); value` —
-    ///  `value` was MOVED into the Some(...) on the previous
+    ///  2. The `Maybe.None` arm did `self.cached = Maybe.Some(value); value` —
+    ///  `value` was MOVED into the Maybe.Some(...) on the previous
     ///  line; the bare `value` at the tail is a use-after-move
     ///  for any non-Copy `T`.
     ///
@@ -91,7 +91,7 @@ implement<T: Clone> Provider<T> {
         // `Unreachable { pc: 80 }` from the unreachable arm firing
         // even though the line above just stored Some.
         //
-        // Bare `Some` / `None` resolved to the wrong sibling-variant
+        // Bare `Some` / `Maybe.None` resolved to the wrong sibling-variant
         // under task #17/#39 bare-name first-wins; `Maybe.Some` /
         // `Maybe.None` is type-anchored and routes correctly.
         match self.cached.clone() {
@@ -116,10 +116,10 @@ implement<T: Clone> Provider<T> {
     public fn get_ref(&mut self) -> &T {
         // Same Maybe<T> field-tracking gap as `get` above — populate
         // via qualified-variant `&match` borrow single-pass. The first
-        // pre-fix attempt at `match self.cached { Some(_) => {}, None
-        // => self.cached = Some(...) }` MOVED self.cached then tried
+        // pre-fix attempt at `match self.cached { Maybe.Some(_) => {}, Maybe.None
+        // => self.cached = Maybe.Some(...) }` MOVED self.cached then tried
         // to borrow it — same `Unreachable {pc:74}` failure mode the
-        // bare-`Some`/`None` pattern had. Use `&self.cached` to borrow
+        // bare-`Some`/`Maybe.None` pattern had. Use `&self.cached` to borrow
         // explicitly in the discriminator match.
         let needs_populate = match &self.cached {
             Maybe.Some(_) => false,
@@ -208,13 +208,13 @@ implement ScopedProvider<T> {
 /// The compiler generates calls to this when a function accesses a context value.
 ///
 
-/// Returns None if the context is not currently provided.
+/// Returns Maybe.None if the context is not currently provided.
 public fn get_context<T>(slot_id: Int) -> Maybe<T> {
     let raw = env_ctx_get(slot_id);
     if raw == 0 {
-        None
+        Maybe.None
     } else {
-        Some(@bitcast(raw))
+        Maybe.Some(@bitcast(raw))
     }
 }
 

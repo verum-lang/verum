@@ -168,7 +168,7 @@ implement ServerSm {
         match self {
             ServerSm.WaitClientHelloSm(ws) => on_client_hello(ws, msg, wire),
             ServerSm.WaitClientFinishedSm(wf) => on_client_finished(wf, msg, wire),
-            _ => Err(TlsError.UnexpectedMessage),
+            _ => Result.Err(TlsError.UnexpectedMessage),
         }
     }
 }
@@ -304,12 +304,12 @@ fn on_client_hello(
                 server_hs_traffic: server_hs,
                 master_secret_seed: master_input,
             });
-            Ok((next, ServerStepOutput {
+            Result.Ok((next, ServerStepOutput {
                 outbound_handshake: out_wire,
-                connected: None,
+                connected: Maybe.None,
             }))
         },
-        _ => Err(TlsError.UnexpectedMessage),
+        _ => Result.Err(TlsError.UnexpectedMessage),
     }
 }
 
@@ -327,7 +327,7 @@ fn on_client_finished(
             let expected = hmac_for_hash(wf.hash.clone(), cli_fin_key.as_slice(),
                                           wf.transcript.snapshot().as_slice());
             if !constant_time_bytes_eq(expected.as_slice(), fin.verify_data.as_slice()) {
-                return Err(TlsError.DecryptError);
+                return Result.Err(TlsError.DecryptError);
             }
 
             // RFC 8446 §7.1 Figure 12 transcript boundaries:
@@ -372,13 +372,13 @@ fn on_client_finished(
                 exporter_master:   exporter,
             };
 
-            Ok((ServerSm.ServerConnectedSm(connected.clone()),
+            Result.Ok((ServerSm.ServerConnectedSm(connected.clone()),
                 ServerStepOutput {
                     outbound_handshake: [],
-                    connected: Some(connected),
+                    connected: Maybe.Some(connected),
                 }))
         },
-        _ => Err(TlsError.UnexpectedMessage),
+        _ => Result.Err(TlsError.UnexpectedMessage),
     }
 }
 
@@ -393,16 +393,16 @@ fn require_tls13_supported_version(exts: &List<Extension>) -> Result<(), TlsErro
             Extension.SupportedVersionsClient { versions } => {
                 let mut j: Int = 0;
                 while j < versions.len() {
-                    if versions[j].eq(&TLS_1_3) { return Ok(()); }
+                    if versions[j].eq(&TLS_1_3) { return Result.Ok(()); }
                     j = j + 1;
                 }
-                return Err(TlsError.ProtocolVersion);
+                return Result.Err(TlsError.ProtocolVersion);
             },
             _ => {},
         }
         i = i + 1;
     }
-    Err(TlsError.MissingExtension)
+    Result.Err(TlsError.MissingExtension)
 }
 
 fn select_cipher_suite(
@@ -416,13 +416,13 @@ fn select_cipher_suite(
         let mut j: Int = 0;
         while j < client_offers.len() {
             if ours.to_u16() == client_offers[j].to_u16() {
-                return Ok(ours.clone());
+                return Result.Ok(ours.clone());
             }
             j = j + 1;
         }
         i = i + 1;
     }
-    Err(TlsError.HandshakeFailure)
+    Result.Err(TlsError.HandshakeFailure)
 }
 
 fn select_key_share(
@@ -440,19 +440,19 @@ fn select_key_share(
                     let mut j: Int = 0;
                     while j < shares.len() {
                         if shares[j].group.to_u16() == pref.to_u16() {
-                            return Ok((shares[j].clone(), pref.clone()));
+                            return Result.Ok((shares[j].clone(), pref.clone()));
                         }
                         j = j + 1;
                     }
                     p = p + 1;
                 }
-                return Err(TlsError.HandshakeFailure);
+                return Result.Err(TlsError.HandshakeFailure);
             },
             _ => {},
         }
         i = i + 1;
     }
-    Err(TlsError.MissingExtension)
+    Result.Err(TlsError.MissingExtension)
 }
 
 fn build_server_hello_extensions(
@@ -473,7 +473,7 @@ fn build_encrypted_extensions(
 ) -> List<Extension> {
     let mut out: List<Extension> = [];
     // ALPN selection — pick first preference intersecting client's offer.
-    let mut picked: Maybe<List<Byte>> = None;
+    let mut picked: Maybe<List<Byte>> = Maybe.None;
     let mut i: Int = 0;
     while i < client_exts.len() {
         match &client_exts[i] {
@@ -483,7 +483,7 @@ fn build_encrypted_extensions(
                     let mut c: Int = 0;
                     while c < protocols.len() {
                         if bytes_eq(&alpn_prefs[p], &protocols[c]) {
-                            picked = Some(alpn_prefs[p].clone());
+                            picked = Maybe.Some(alpn_prefs[p].clone());
                             break;
                         }
                         c = c + 1;
@@ -497,8 +497,8 @@ fn build_encrypted_extensions(
         i = i + 1;
     }
     match picked {
-        Some(p) => out.push(Extension.AlpnExt { protocols: [p] }),
-        None => {},
+        Maybe.Some(p) => out.push(Extension.AlpnExt { protocols: [p] }),
+        Maybe.None => {},
     }
     out
 }
@@ -543,7 +543,7 @@ fn server_compute_shared(
     match group {
         NamedGroup.X25519 => {
             if priv_bytes.len() != 32 || peer_pub_bytes.len() != 32 {
-                return Err(TlsError.IllegalParameter);
+                return Result.Err(TlsError.IllegalParameter);
             }
             let mut sk_raw: [Byte; 32] = [0_u8; 32];
             let mut pk_raw: [Byte; 32] = [0_u8; 32];
@@ -555,17 +555,17 @@ fn server_compute_shared(
             }
             let sk = X25519.secret_key_from_bytes(&sk_raw);
             match X25519.diffie_hellman(&sk, &pk_raw) {
-                Ok(shared) => {
+                Result.Ok(shared) => {
                     let mut out: List<Byte> = List.with_capacity(32);
                     out.extend_from_slice(&shared[..]);
-                    Ok(out)
+                    Result.Ok(out)
                 },
-                Err(_) => Err(TlsError.IllegalParameter),
+                Result.Err(_) => Result.Err(TlsError.IllegalParameter),
             }
         },
         NamedGroup.Secp256r1 => {
             if priv_bytes.len() != 32 {
-                return Err(TlsError.IllegalParameter);
+                return Result.Err(TlsError.IllegalParameter);
             }
             let mut sk_raw: [Byte; 32] = [0_u8; 32];
             let mut i: Int = 0;
@@ -575,15 +575,15 @@ fn server_compute_shared(
             let pk = P256.public_key_from_bytes(peer_pub_bytes.as_slice())
                 .map_err(|_| TlsError.IllegalParameter)?;
             match P256.ecdh(&sk, &pk) {
-                Ok(shared) => {
+                Result.Ok(shared) => {
                     let mut out: List<Byte> = List.with_capacity(32);
                     out.extend_from_slice(shared.as_slice());
-                    Ok(out)
+                    Result.Ok(out)
                 },
-                Err(_) => Err(TlsError.IllegalParameter),
+                Result.Err(_) => Result.Err(TlsError.IllegalParameter),
             }
         },
-        _ => Err(TlsError.IllegalParameter),
+        _ => Result.Err(TlsError.IllegalParameter),
     }
 }
 

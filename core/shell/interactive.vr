@@ -29,17 +29,17 @@ mount core.shell.result.{ShellError};
 public fn input(prompt: &Text) -> Text {
     print(prompt);
     match read_line() {
-        Ok(s)  => strip_newline(s),
-        Err(_) => "".into(),
+        Result.Ok(s)  => strip_newline(s),
+        Result.Err(_) => "".into(),
     }
 }
 
-/// Like `input`, but returns `None` on EOF (Ctrl+D).
+/// Like `input`, but returns `Maybe.None` on EOF (Ctrl+D).
 public fn input_opt(prompt: &Text) -> Maybe<Text> {
     print(prompt);
     match read_line() {
-        Ok(s)  => Some(strip_newline(s)),
-        Err(_) => None,
+        Result.Ok(s)  => Maybe.Some(strip_newline(s)),
+        Result.Err(_) => Maybe.None,
     }
 }
 
@@ -70,8 +70,8 @@ public fn password(prompt: &Text) -> Text {
     print(prompt);
     let restore = disable_echo();
     let line = match read_line() {
-        Ok(s)  => strip_newline(s),
-        Err(_) => "".into(),
+        Result.Ok(s)  => strip_newline(s),
+        Result.Err(_) => "".into(),
     };
     restore_echo(restore);
     println(&"".into());
@@ -152,7 +152,7 @@ public fn select<T: Clone>(prompt: &Text, options: &[(Text, T)]) -> T {
     loop {
         let raw = input(&"Choice: ".into());
         match raw.parse_int() {
-            Ok(n) if n >= 1 && (n as Int) <= options.len() as Int =>
+            Result.Ok(n) if n >= 1 && (n as Int) <= options.len() as Int =>
                 return options[(n - 1) as usize].1.clone(),
             _ => println(&"Invalid choice, try again.".into()),
         }
@@ -172,7 +172,7 @@ public fn multi_select(prompt: &Text, options: &[Text]) -> List<Int> {
     for token in raw.split(",") {
         let t: Text = token.trim().into();
         match t.parse_int() {
-            Ok(n) if n >= 1 && (n as Int) <= options.len() as Int =>
+            Result.Ok(n) if n >= 1 && (n as Int) <= options.len() as Int =>
                 chosen.push(n - 1),
             _ => {},  // silently skip unparseable
         }
@@ -185,7 +185,7 @@ public fn multi_select(prompt: &Text, options: &[Text]) -> List<Int> {
 // =============================================================================
 
 /// Repeatedly prompt until input passes the validator. The validator is a
-/// pure function returning `Ok(value)` on success or `Err(message)` to
+/// pure function returning `Result.Ok(value)` on success or `Result.Err(message)` to
 /// re-prompt.
 public fn input_validated<T>(
     prompt: &Text,
@@ -194,8 +194,8 @@ public fn input_validated<T>(
     loop {
         let raw = input(prompt);
         match validator(&raw) {
-            Ok(v) => return v,
-            Err(msg) => println(&f"× {msg}"),
+            Result.Ok(v) => return v,
+            Result.Err(msg) => println(&f"× {msg}"),
         }
     }
 }
@@ -203,7 +203,7 @@ public fn input_validated<T>(
 /// Required non-empty input. Re-prompts on empty.
 public fn input_required(prompt: &Text) -> Text {
     input_validated(prompt, |s| {
-        if s.is_empty() { Err("input cannot be empty".into()) }
-        else { Ok(s.clone()) }
+        if s.is_empty() { Result.Err("input cannot be empty".into()) }
+        else { Result.Ok(s.clone()) }
     })
 }

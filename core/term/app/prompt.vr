@@ -32,22 +32,22 @@ public fn confirm(message: Text) -> IoResult<Bool> {
         })?;
 
         match events.read() {
-            Ok(Event.Key(ke)) => match ke.code {
+            Result.Ok(Event.Key(ke)) => match ke.code {
                 KeyCode.Char('y') | KeyCode.Char('Y') => { result = true; break; }
                 KeyCode.Char('n') | KeyCode.Char('N') | KeyCode.Enter | KeyCode.Escape => { result = false; break; }
                 _ => {}
             },
-            Ok(_) => {}
-            Err(_) => break,
+            Result.Ok(_) => {}
+            Result.Err(_) => break,
         }
     }
 
     terminal.restore()?;
-    Ok(result)
+    Result.Ok(result)
 }
 
 /// Selection prompt: choose from a list of options.
-/// Returns the index of the selected option, or None if cancelled.
+/// Returns the index of the selected option, or Maybe.None if cancelled.
 public fn select(message: Text, options: &List<Text>) -> IoResult<Maybe<Int>> {
     let mut terminal = Terminal.new()?;
     terminal.init()?;
@@ -79,7 +79,7 @@ public fn select(message: Text, options: &List<Text>) -> IoResult<Maybe<Int>> {
         })?;
 
         match events.read() {
-            Ok(Event.Key(ke)) => match ke.code {
+            Result.Ok(Event.Key(ke)) => match ke.code {
                 KeyCode.Up | KeyCode.Char('k') => {
                     selected = if selected > 0 { selected - 1 } else { total - 1 };
                 }
@@ -90,13 +90,13 @@ public fn select(message: Text, options: &List<Text>) -> IoResult<Maybe<Int>> {
                 KeyCode.Escape | KeyCode.Char('q') => { cancelled = true; break; }
                 _ => {}
             },
-            Ok(_) => {}
-            Err(_) => break,
+            Result.Ok(_) => {}
+            Result.Err(_) => break,
         }
     }
 
     terminal.restore()?;
-    if cancelled { Ok(None) } else { Ok(Some(selected)) }
+    if cancelled { Result.Ok(Maybe.None) } else { Result.Ok(Maybe.Some(selected)) }
 }
 
 /// Text input prompt.
@@ -121,7 +121,7 @@ public fn input(message: Text) -> IoResult<Text> {
         })?;
 
         match events.read() {
-            Ok(Event.Key(ke)) => match ke.code {
+            Result.Ok(Event.Key(ke)) => match ke.code {
                 KeyCode.Enter => break,
                 KeyCode.Escape => { value = ""; break; }
                 KeyCode.Backspace => {
@@ -151,13 +151,13 @@ public fn input(message: Text) -> IoResult<Text> {
                 }
                 _ => {}
             },
-            Ok(_) => {}
-            Err(_) => break,
+            Result.Ok(_) => {}
+            Result.Err(_) => break,
         }
     }
 
     terminal.restore()?;
-    Ok(value)
+    Result.Ok(value)
 }
 
 /// Multi-select prompt: choose multiple options.
@@ -191,7 +191,7 @@ public fn multi_select(message: Text, options: &List<Text>) -> IoResult<List<Int
         })?;
 
         match events.read() {
-            Ok(Event.Key(ke)) => match ke.code {
+            Result.Ok(Event.Key(ke)) => match ke.code {
                 KeyCode.Up | KeyCode.Char('k') => {
                     cursor = if cursor > 0 { cursor - 1 } else { total - 1 };
                 }
@@ -202,12 +202,12 @@ public fn multi_select(message: Text, options: &List<Text>) -> IoResult<List<Int
                 KeyCode.Enter => break,
                 KeyCode.Escape => {
                     terminal.restore()?;
-                    return Ok(List.new());
+                    return Result.Ok(List.new());
                 }
                 _ => {}
             },
-            Ok(_) => {}
-            Err(_) => break,
+            Result.Ok(_) => {}
+            Result.Err(_) => break,
         }
     }
 
@@ -217,7 +217,7 @@ public fn multi_select(message: Text, options: &List<Text>) -> IoResult<List<Int
     for i in 0..total {
         if selected[i] { result.push(i); }
     }
-    Ok(result)
+    Result.Ok(result)
 }
 
 /// Password prompt (hidden input).
@@ -240,7 +240,7 @@ public fn password(message: Text) -> IoResult<Text> {
         })?;
 
         match events.read() {
-            Ok(Event.Key(ke)) => match ke.code {
+            Result.Ok(Event.Key(ke)) => match ke.code {
                 KeyCode.Enter => break,
                 KeyCode.Escape => { value = ""; break; }
                 KeyCode.Backspace => {
@@ -253,11 +253,11 @@ public fn password(message: Text) -> IoResult<Text> {
                 }
                 _ => {}
             },
-            Ok(_) => {}
-            Err(_) => break,
+            Result.Ok(_) => {}
+            Result.Err(_) => break,
         }
     }
 
     terminal.restore()?;
-    Ok(value)
+    Result.Ok(value)
 }

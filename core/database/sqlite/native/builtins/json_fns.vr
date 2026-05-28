@@ -59,8 +59,8 @@ public type JsonField is { key: Text, value: SqlJsonValue };
 public fn json_valid(v: &Register) -> Register {
     match v {
         RText(s) => match parse_json(s) {
-            Some(_) => RInt(1_i64),
-            None    => RInt(0_i64),
+            Maybe.Some(_) => RInt(1_i64),
+            Maybe.None    => RInt(0_i64),
         },
         _ => RInt(0_i64),
     }
@@ -73,8 +73,8 @@ public fn json_valid(v: &Register) -> Register {
 public fn json_canonical(v: &Register) -> Register {
     match v {
         RText(s) => match parse_json(s) {
-            Some(jv) => RText(serialise(&jv)),
-            None     => RNull,
+            Maybe.Some(jv) => RText(serialise(&jv)),
+            Maybe.None     => RNull,
         },
         _ => RNull,
     }
@@ -87,8 +87,8 @@ public fn json_canonical(v: &Register) -> Register {
 public fn json_type(v: &Register, _path: &Register) -> Register {
     match v {
         RText(s) => match parse_json(s) {
-            Some(jv) => RText(type_name(&jv)),
-            None     => RNull,
+            Maybe.Some(jv) => RText(type_name(&jv)),
+            Maybe.None     => RNull,
         },
         _ => RNull,
     }
@@ -112,11 +112,11 @@ fn type_name(v: &SqlJsonValue) -> Text {
 public fn json_array_length(v: &Register) -> Register {
     match v {
         RText(s) => match parse_json(s) {
-            Some(jv) => match jv {
+            Maybe.Some(jv) => match jv {
                 JArray(items) => RInt(items.len() as Int64),
                 _ => RInt(0_i64),
             },
-            None => RNull,
+            Maybe.None => RNull,
         },
         _ => RNull,
     }
@@ -133,11 +133,11 @@ public fn json_extract(v: &Register, path: &Register) -> Register {
     };
     match v {
         RText(s) => match parse_json(s) {
-            Some(jv) => match resolve_path(&jv, &pth) {
-                Some(target) => json_to_register(&target),
-                None         => RNull,
+            Maybe.Some(jv) => match resolve_path(&jv, &pth) {
+                Maybe.Some(target) => json_to_register(&target),
+                Maybe.None         => RNull,
             },
-            None => RNull,
+            Maybe.None => RNull,
         },
         _ => RNull,
     }
@@ -145,7 +145,7 @@ public fn json_extract(v: &Register, path: &Register) -> Register {
 
 fn resolve_path(root: &SqlJsonValue, path: &Text) -> Maybe<SqlJsonValue> {
     let bs = path.as_bytes();
-    if bs.len() == 0 || bs[0] != (36 as Byte) { return None; }  // must start with $
+    if bs.len() == 0 || bs[0] != (36 as Byte) { return Maybe.None; }  // must start with $
     let mut cur: SqlJsonValue = clone_json(root);
     let mut i: Int = 1;
     while i < bs.len() {
@@ -161,10 +161,10 @@ fn resolve_path(root: &SqlJsonValue, path: &Text) -> Maybe<SqlJsonValue> {
             while k < i { key.push_byte(bs[k]); k = k + 1; }
             cur = match cur {
                 JObject(fields) => match find_field(&fields, &key) {
-                    Some(v) => v,
-                    None    => { return None; }
+                    Maybe.Some(v) => v,
+                    Maybe.None    => { return Maybe.None; }
                 },
-                _ => { return None; }
+                _ => { return Maybe.None; }
             };
         } else if b == (91 as Byte) {  // [N]
             i = i + 1;
@@ -190,30 +190,30 @@ fn resolve_path(root: &SqlJsonValue, path: &Text) -> Maybe<SqlJsonValue> {
                 i = i + 1;
             }
             if i < bs.len() && bs[i] == (93 as Byte) { i = i + 1; }
-            if overflowed { return None; }
+            if overflowed { return Maybe.None; }
             cur = match cur {
                 JArray(items) => {
-                    if idx < 0 || idx >= items.len() { return None; }
+                    if idx < 0 || idx >= items.len() { return Maybe.None; }
                     clone_json(&items[idx])
                 }
-                _ => { return None; }
+                _ => { return Maybe.None; }
             };
         } else {
-            return None;
+            return Maybe.None;
         }
     }
-    Some(cur)
+    Maybe.Some(cur)
 }
 
 fn find_field(fields: &List<JsonField>, key: &Text) -> Maybe<SqlJsonValue> {
     let mut i: Int = 0;
     while i < fields.len() {
         if fields[i].key == key {
-            return Some(clone_json(&fields[i].value));
+            return Maybe.Some(clone_json(&fields[i].value));
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn json_to_register(v: &SqlJsonValue) -> Register {
@@ -290,10 +290,10 @@ public fn parse_json(s: &Text) -> Maybe<SqlJsonValue> {
     let r = parse_value(&mut st);
     skip_ws(&mut st);
     match r {
-        Some(v) => {
-            if st.pos == st.bs.len() { Some(v) } else { None }
+        Maybe.Some(v) => {
+            if st.pos == st.bs.len() { Maybe.Some(v) } else { Maybe.None }
         }
-        None => None,
+        Maybe.None => Maybe.None,
     }
 }
 
@@ -308,7 +308,7 @@ fn skip_ws(st: &mut JsonParseState) {
 
 fn parse_value(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     skip_ws(st);
-    if st.pos >= st.bs.len() { return None; }
+    if st.pos >= st.bs.len() { return Maybe.None; }
     let b = st.bs[st.pos];
     if b == (123 as Byte) { return parse_object(st); }   // {
     if b == (91 as Byte)  { return parse_array(st); }    // [
@@ -318,14 +318,14 @@ fn parse_value(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     if b == (45 as Byte) || (b >= (48 as Byte) && b <= (57 as Byte)) {
         return parse_number(st);
     }
-    None
+    Maybe.None
 }
 
 fn parse_keyword(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
-    if matches_keyword(st, &"true".clone()) { return Some(JBool(true)); }
-    if matches_keyword(st, &"false".clone()) { return Some(JBool(false)); }
-    if matches_keyword(st, &"null".clone()) { return Some(JNull); }
-    None
+    if matches_keyword(st, &"true".clone()) { return Maybe.Some(JBool(true)); }
+    if matches_keyword(st, &"false".clone()) { return Maybe.Some(JBool(false)); }
+    if matches_keyword(st, &"null".clone()) { return Maybe.Some(JNull); }
+    Maybe.None
 }
 
 fn matches_keyword(st: &mut JsonParseState, kw: &Text) -> Bool {
@@ -354,7 +354,7 @@ fn parse_number(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     let mut text = Text.with_capacity(st.pos - start);
     let mut k: Int = start;
     while k < st.pos { text.push_byte(st.bs[k]); k = k + 1; }
-    Some(JNumber(parse_real_text(&text)))
+    Maybe.Some(JNumber(parse_real_text(&text)))
 }
 
 fn parse_real_text(s: &Text) -> Float64 {
@@ -384,24 +384,24 @@ fn parse_real_text(s: &Text) -> Float64 {
 
 fn parse_string_value(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     match parse_json_string(st) {
-        Some(s) => Some(JString(s)),
-        None    => None,
+        Maybe.Some(s) => Maybe.Some(JString(s)),
+        Maybe.None    => Maybe.None,
     }
 }
 
 fn parse_json_string(st: &mut JsonParseState) -> Maybe<Text> {
-    if st.pos >= st.bs.len() || st.bs[st.pos] != (34 as Byte) { return None; }
+    if st.pos >= st.bs.len() || st.bs[st.pos] != (34 as Byte) { return Maybe.None; }
     st.pos = st.pos + 1;
     let mut out = Text.new();
     while st.pos < st.bs.len() {
         let b = st.bs[st.pos];
         if b == (34 as Byte) {
             st.pos = st.pos + 1;
-            return Some(out);
+            return Maybe.Some(out);
         }
         if b == (92 as Byte) {  // backslash escape
             st.pos = st.pos + 1;
-            if st.pos >= st.bs.len() { return None; }
+            if st.pos >= st.bs.len() { return Maybe.None; }
             let nx = st.bs[st.pos];
             if      nx == (34 as Byte) { out.push_byte(34 as Byte); }
             else if nx == (92 as Byte) { out.push_byte(92 as Byte); }
@@ -416,7 +416,7 @@ fn parse_json_string(st: &mut JsonParseState) -> Maybe<Text> {
             st.pos = st.pos + 1;
         }
     }
-    None
+    Maybe.None
 }
 
 fn parse_array(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
@@ -425,12 +425,12 @@ fn parse_array(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     skip_ws(st);
     if st.pos < st.bs.len() && st.bs[st.pos] == (93 as Byte) {
         st.pos = st.pos + 1;
-        return Some(JArray(items));
+        return Maybe.Some(JArray(items));
     }
     while st.pos < st.bs.len() {
         match parse_value(st) {
-            Some(v) => { items.push(v); }
-            None    => { return None; }
+            Maybe.Some(v) => { items.push(v); }
+            Maybe.None    => { return Maybe.None; }
         }
         skip_ws(st);
         if st.pos < st.bs.len() && st.bs[st.pos] == (44 as Byte) {
@@ -438,12 +438,12 @@ fn parse_array(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
             skip_ws(st);
         } else if st.pos < st.bs.len() && st.bs[st.pos] == (93 as Byte) {
             st.pos = st.pos + 1;
-            return Some(JArray(items));
+            return Maybe.Some(JArray(items));
         } else {
-            return None;
+            return Maybe.None;
         }
     }
-    None
+    Maybe.None
 }
 
 fn parse_object(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
@@ -452,20 +452,20 @@ fn parse_object(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
     skip_ws(st);
     if st.pos < st.bs.len() && st.bs[st.pos] == (125 as Byte) {
         st.pos = st.pos + 1;
-        return Some(JObject(fields));
+        return Maybe.Some(JObject(fields));
     }
     while st.pos < st.bs.len() {
         skip_ws(st);
         let key = match parse_json_string(st) {
-            Some(k) => k,
-            None    => { return None; }
+            Maybe.Some(k) => k,
+            Maybe.None    => { return Maybe.None; }
         };
         skip_ws(st);
-        if st.pos >= st.bs.len() || st.bs[st.pos] != (58 as Byte) { return None; }
+        if st.pos >= st.bs.len() || st.bs[st.pos] != (58 as Byte) { return Maybe.None; }
         st.pos = st.pos + 1;
         let val = match parse_value(st) {
-            Some(v) => v,
-            None    => { return None; }
+            Maybe.Some(v) => v,
+            Maybe.None    => { return Maybe.None; }
         };
         fields.push(JsonField { key: key, value: val });
         skip_ws(st);
@@ -473,12 +473,12 @@ fn parse_object(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
             st.pos = st.pos + 1;
         } else if st.pos < st.bs.len() && st.bs[st.pos] == (125 as Byte) {
             st.pos = st.pos + 1;
-            return Some(JObject(fields));
+            return Maybe.Some(JObject(fields));
         } else {
-            return None;
+            return Maybe.None;
         }
     }
-    None
+    Maybe.None
 }
 
 // -----------------------------------------------------------------------------

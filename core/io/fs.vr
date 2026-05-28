@@ -552,7 +552,7 @@ implement Iterator for ReadDir {
                     }
                     Result.Err(e) => {
                         self.finished = true;
-                        return Maybe.Some(Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }));
+                        return Maybe.Some(Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }));
                     }
                 }
             }
@@ -590,7 +590,7 @@ implement Iterator for ReadDir {
             let mut full_path = self.base_path.clone();
             full_path.push_str(&name);
 
-            return Maybe.Some(Ok(DirEntry {
+            return Maybe.Some(Result.Ok(DirEntry {
                 path: full_path,
                 file_name: name,
                 file_type: file_type,
@@ -645,7 +645,7 @@ implement Iterator for ReadDir {
             let mut full_path = self.base_path.clone();
             full_path.push_str(&name);
 
-            return Maybe.Some(Ok(DirEntry {
+            return Maybe.Some(Result.Ok(DirEntry {
                 path: full_path,
                 file_name: name,
                 file_type: file_type,
@@ -689,7 +689,7 @@ public fn metadata(path: &Path) -> IoResult<Metadata> {
             let raw = FsMetadataRaw.from_stat(&stat_buf, true);
             Result.Ok(Metadata { raw: raw })
         }
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -704,7 +704,7 @@ public fn symlink_metadata(path: &Path) -> IoResult<Metadata> {
             let raw = FsMetadataRaw.from_stat(&stat_buf, false);
             Result.Ok(Metadata { raw: raw })
         }
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -762,8 +762,8 @@ public fn create_dir(path: &Path) -> IoResult<()> {
     let mode = DEFAULT_DIR_MODE;
 
     match sys_mkdir(path_bytes, mode) {
-        Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Ok(()) => Result.Ok(()),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -789,12 +789,12 @@ public fn create_dir_all(path: &Path) -> IoResult<()> {
 
     // Create the directory
     match create_dir(path) {
-        Result.Ok(()) => Ok(()),
+        Result.Ok(()) => Result.Ok(()),
         Result.Err(e) if e.kind() == IoErrorKind.AlreadyExists => {
             // Race condition: another process created it
-            if is_dir(path) { Ok(()) } else { Err(e) }
+            if is_dir(path) { Result.Ok(()) } else { Result.Err(e) }
         }
-        Result.Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -810,8 +810,8 @@ public fn remove_dir(path: &Path) -> IoResult<()> {
     let path_bytes = path_str.as_bytes();
 
     match sys_rmdir(path_bytes) {
-        Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Ok(()) => Result.Ok(()),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -876,7 +876,7 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
                 finished: false,
             })
         }
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -920,8 +920,8 @@ public fn remove_file(path: &Path) -> IoResult<()> {
     let path_bytes = path_str.as_bytes();
 
     match sys_unlink(path_bytes) {
-        Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Ok(()) => Result.Ok(()),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -939,8 +939,8 @@ public fn rename(from: &Path, to: &Path) -> IoResult<()> {
     let to_bytes = to_str.as_bytes();
 
     match sys_rename(from_bytes, to_bytes) {
-        Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Ok(()) => Result.Ok(()),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1000,8 +1000,8 @@ public fn hard_link(src: &Path, dst: &Path) -> IoResult<()> {
     let dst_bytes = dst_str.as_bytes();
 
     match sys_link(src_bytes, dst_bytes) {
-        Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Ok(()) => Result.Ok(()),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1020,8 +1020,8 @@ public fn symlink(src: &Path, dst: &Path) -> IoResult<()> {
     let dst_bytes = dst_str.as_bytes();
 
     match sys_symlink(src_bytes, dst_bytes) {
-        Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Ok(()) => Result.Ok(()),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1043,7 +1043,7 @@ public fn read_link(path: &Path) -> IoResult<PathBuf> {
             let target = Text.from_utf8_lossy(&buf[..n]);
             Result.Ok(PathBuf.from(&target))
         }
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1135,8 +1135,8 @@ public fn set_permissions(path: &Path, perm: Permissions) -> IoResult<()> {
     let path_bytes = path_str.as_bytes();
 
     match sys_chmod(path_bytes, perm.mode) {
-        Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Ok(()) => Result.Ok(()),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1205,7 +1205,7 @@ public fn current_dir() -> IoResult<PathBuf> {
             let path = Text.from_utf8_lossy(&buf[..len]);
             Result.Ok(PathBuf.from(&path))
         }
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1215,8 +1215,8 @@ public fn set_current_dir(path: &Path) -> IoResult<()> {
     let path_bytes = path_str.as_bytes();
 
     match sys_chdir(path_bytes) {
-        Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Ok(()) => Result.Ok(()),
+        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 

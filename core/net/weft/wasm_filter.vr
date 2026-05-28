@@ -251,15 +251,15 @@ implement WasmFilter {
     {
         // Surface-level sanity check: Wasm magic \0asm + version 1.
         if bytes.len() < 8 {
-            return Err(WasmFilterError.ModuleInvalid("too short".into()));
+            return Result.Err(WasmFilterError.ModuleInvalid("too short".into()));
         }
         if bytes[0] != 0x00 || bytes[1] != 0x61 || bytes[2] != 0x73 || bytes[3] != 0x6D {
-            return Err(WasmFilterError.ModuleInvalid("not wasm magic".into()));
+            return Result.Err(WasmFilterError.ModuleInvalid("not wasm magic".into()));
         }
         // Runtime-side load happens via `verum.wasm.load` intrinsic.
         // Phase-6 skeleton: returns a zero handle so invocation will
         // fall through the RuntimeNotReady path.
-        Ok(WasmFilter {
+        Result.Ok(WasmFilter {
             handle: 0,
             config: config,
             invocations: Shared.new(AtomicInt.new(0)),

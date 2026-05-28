@@ -35,12 +35,12 @@
 // );
 // loop {
 //  match try_operation() {
-//  Ok(r) => return r,
-//  Err(e) if !retryable(&e) => return Err(e),
-//  Err(_) => {
+//  Result.Ok(r) => return r,
+//  Result.Err(e) if !retryable(&e) => return Result.Err(e),
+//  Result.Err(_) => {
 //  match bo.next_delay() {
-//  Some(d) => async_sleep(d).await,
-//  None => return Err(LastError),
+//  Maybe.Some(d) => async_sleep(d).await,
+//  Maybe.None => return Result.Err(LastError),
 //  }
 //  }
 //  }
@@ -90,7 +90,7 @@ public type Backoff is {
     base_us:       UInt64,
     /// Hard ceiling in microseconds. 0 = no ceiling.
     cap_us:        UInt64,
-    /// Maximum attempts. None = unbounded.
+    /// Maximum attempts. Maybe.None = unbounded.
     max_attempts:  Maybe<Int>,
     /// Current attempt count (0 before the first `next_delay`).
     attempt:       Int,
@@ -104,7 +104,7 @@ implement Backoff {
             strategy:     strat,
             base_us:      base.as_micros() as UInt64,
             cap_us:       cap.as_micros() as UInt64,
-            max_attempts: None,
+            max_attempts: Maybe.None,
             attempt:      0,
             prev_raw_us:  0_u64,
         }
@@ -128,7 +128,7 @@ implement Backoff {
 
     /// Cap total attempts. Returns `self` for builder chaining.
     public fn with_max_attempts(mut self, n: Int) -> Backoff {
-        self.max_attempts = Some(n); self
+        self.max_attempts = Maybe.Some(n); self
     }
 
     /// Reset the counter (e.g. on successful operation inside a long-
@@ -138,19 +138,19 @@ implement Backoff {
         self.prev_raw_us = 0_u64;
     }
 
-    /// Return the next delay, advancing internal state. `None` once
+    /// Return the next delay, advancing internal state. `Maybe.None` once
     /// `max_attempts` has been reached.
     public fn next_delay(&mut self) -> Maybe<Duration> {
         match &self.max_attempts {
-            Some(n) => if self.attempt >= *n { return None; },
-            None    => {},
+            Maybe.Some(n) => if self.attempt >= *n { return Maybe.None; },
+            Maybe.None    => {},
         }
         let raw = self.compute_raw();
         let capped = self.apply_cap(raw);
         let final_us = self.apply_jitter(capped);
         self.attempt = self.attempt + 1;
         self.prev_raw_us = capped;
-        Some(Duration.from_micros(final_us as Int))
+        Maybe.Some(Duration.from_micros(final_us as Int))
     }
 
     fn compute_raw(&self) -> UInt64 {

@@ -139,10 +139,10 @@ public fn btree_new(
     reserved_bytes: Int,
 ) -> Result<Btree, BtreeError> {
     if root_page < 1 {
-        return Err(InvalidRootPage(root_page));
+        return Result.Err(InvalidRootPage(root_page));
     }
     if page_size < 512 || page_size > 65536 {
-        return Err(InvalidPageSize(page_size));
+        return Result.Err(InvalidPageSize(page_size));
     }
     // Power-of-two check (cheap iterative variant).
     let mut s = 512;
@@ -152,12 +152,12 @@ public fn btree_new(
         s = s * 2;
     }
     if !ok {
-        return Err(InvalidPageSize(page_size));
+        return Result.Err(InvalidPageSize(page_size));
     }
     if reserved_bytes < 0 || reserved_bytes > 255 {
-        return Err(InvalidPageSize(page_size));
+        return Result.Err(InvalidPageSize(page_size));
     }
-    Ok(Btree {
+    Result.Ok(Btree {
         kind: kind,
         root_page: root_page,
         page_size: page_size,

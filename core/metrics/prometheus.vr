@@ -99,46 +99,46 @@ fn type_string(kind: MetricKind) -> &'static Text {
 
 fn encode_counter_entry(name: &Text, label_names: &List<Text>, entry: &MetricEntry, out: &mut Text) {
     match &entry.counter {
-        Some(c) => {
+        Maybe.Some(c) => {
             out.push_str(name);
-            write_label_block(out, label_names, &entry.labels, None);
+            write_label_block(out, label_names, &entry.labels, Maybe.None);
             out.push(' ');
             write_float(out, c.get().value());
             out.push('\n');
         }
-        None => {}
+        Maybe.None => {}
     }
 }
 
 fn encode_up_down_entry(name: &Text, label_names: &List<Text>, entry: &MetricEntry, out: &mut Text) {
     match &entry.up_down {
-        Some(c) => {
+        Maybe.Some(c) => {
             out.push_str(name);
-            write_label_block(out, label_names, &entry.labels, None);
+            write_label_block(out, label_names, &entry.labels, Maybe.None);
             out.push(' ');
             write_float(out, c.get().value());
             out.push('\n');
         }
-        None => {}
+        Maybe.None => {}
     }
 }
 
 fn encode_gauge_entry(name: &Text, label_names: &List<Text>, entry: &MetricEntry, out: &mut Text) {
     match &entry.gauge {
-        Some(c) => {
+        Maybe.Some(c) => {
             out.push_str(name);
-            write_label_block(out, label_names, &entry.labels, None);
+            write_label_block(out, label_names, &entry.labels, Maybe.None);
             out.push(' ');
             write_float(out, c.get().value());
             out.push('\n');
         }
-        None => {}
+        Maybe.None => {}
     }
 }
 
 fn encode_histogram_entry(name: &Text, label_names: &List<Text>, entry: &MetricEntry, out: &mut Text) {
     match &entry.histogram {
-        Some(h) => {
+        Maybe.Some(h) => {
             let snap = h.snapshot();
             let bounds = snap.bounds();
             let counts = snap.counts();
@@ -149,7 +149,7 @@ fn encode_histogram_entry(name: &Text, label_names: &List<Text>, entry: &MetricE
                 out.push_str(name);
                 out.push_str("_bucket");
                 let le = float_to_text(bounds[i]);
-                write_label_block(out, label_names, &entry.labels, Some(("le".into(), le)));
+                write_label_block(out, label_names, &entry.labels, Maybe.Some(("le".into(), le)));
                 out.push(' ');
                 write_uint(out, counts[i]);
                 out.push('\n');
@@ -159,7 +159,7 @@ fn encode_histogram_entry(name: &Text, label_names: &List<Text>, entry: &MetricE
             // +Inf bucket (total count).
             out.push_str(name);
             out.push_str("_bucket");
-            write_label_block(out, label_names, &entry.labels, Some(("le".into(), "+Inf".into())));
+            write_label_block(out, label_names, &entry.labels, Maybe.Some(("le".into(), "+Inf".into())));
             out.push(' ');
             write_uint(out, snap.count());
             out.push('\n');
@@ -167,7 +167,7 @@ fn encode_histogram_entry(name: &Text, label_names: &List<Text>, entry: &MetricE
             // _sum
             out.push_str(name);
             out.push_str("_sum");
-            write_label_block(out, label_names, &entry.labels, None);
+            write_label_block(out, label_names, &entry.labels, Maybe.None);
             out.push(' ');
             write_float(out, snap.sum());
             out.push('\n');
@@ -175,12 +175,12 @@ fn encode_histogram_entry(name: &Text, label_names: &List<Text>, entry: &MetricE
             // _count
             out.push_str(name);
             out.push_str("_count");
-            write_label_block(out, label_names, &entry.labels, None);
+            write_label_block(out, label_names, &entry.labels, Maybe.None);
             out.push(' ');
             write_uint(out, snap.count());
             out.push('\n');
         }
-        None => {}
+        Maybe.None => {}
     }
 }
 
@@ -211,7 +211,7 @@ fn write_label_block(
         i = i + 1;
     }
     match &extra {
-        Some(kv) => {
+        Maybe.Some(kv) => {
             if !first { out.push(','); }
             out.push_str(&kv.0);
             out.push('=');
@@ -219,7 +219,7 @@ fn write_label_block(
             write_value_escaped(out, &kv.1);
             out.push('"');
         }
-        None => {}
+        Maybe.None => {}
     }
     out.push('}');
 }

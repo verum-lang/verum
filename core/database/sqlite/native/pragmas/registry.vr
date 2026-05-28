@@ -111,57 +111,57 @@ fn ascii_lower(s: &Text) -> Text {
 
 public fn pragma_from_name(name: &Text) -> Maybe<PragmaKind> {
     let n = ascii_lower(name);
-    if n == "cache_size".clone()        { return Some(PCacheSize); }
-    if n == "page_size".clone()         { return Some(PPageSize); }
-    if n == "journal_mode".clone()      { return Some(PJournalMode); }
-    if n == "synchronous".clone()       { return Some(PSynchronous); }
-    if n == "foreign_keys".clone()      { return Some(PForeignKeys); }
-    if n == "recursive_triggers".clone(){ return Some(PRecursiveTriggers); }
-    if n == "user_version".clone()      { return Some(PUserVersion); }
-    if n == "schema_version".clone()    { return Some(PSchemaVersion); }
-    if n == "application_id".clone()    { return Some(PApplicationId); }
-    if n == "journal_size_limit".clone(){ return Some(PJournalSizeLimit); }
-    if n == "auto_vacuum".clone()       { return Some(PAutoVacuum); }
-    if n == "incremental_vacuum".clone(){ return Some(PIncrementalVacuum); }
-    if n == "busy_timeout".clone()      { return Some(PBusyTimeout); }
-    if n == "case_sensitive_like".clone(){ return Some(PCaseSensitiveLike); }
-    if n == "encoding".clone()          { return Some(PEncoding); }
-    if n == "temp_store".clone()        { return Some(PTempStore); }
-    if n == "secure_delete".clone()     { return Some(PSecureDelete); }
-    if n == "writable_schema".clone()   { return Some(PWritableSchema); }
-    if n == "query_only".clone()        { return Some(PQueryOnly); }
-    if n == "locking_mode".clone()      { return Some(PLockingMode); }
-    if n == "max_page_count".clone()    { return Some(PMaxPageCount); }
-    if n == "mmap_size".clone()         { return Some(PMmapSize); }
-    if n == "threads".clone()           { return Some(PThreads); }
-    if n == "wal_autocheckpoint".clone(){ return Some(PWalAutocheckpoint); }
-    if n == "wal_checkpoint".clone()    { return Some(PWalCheckpoint); }
-    if n == "defer_foreign_keys".clone(){ return Some(PDeferForeignKeys); }
-    if n == "ignore_check_constraints".clone() { return Some(PIgnoreCheckConstraints); }
-    if n == "cell_size_check".clone()   { return Some(PCellSizeCheck); }
-    if n == "table_info".clone()        { return Some(PTableInfo); }
-    if n == "table_xinfo".clone()       { return Some(PTableXInfo); }
-    if n == "index_info".clone()        { return Some(PIndexInfo); }
-    if n == "index_xinfo".clone()       { return Some(PIndexXInfo); }
-    if n == "index_list".clone()        { return Some(PIndexList); }
-    if n == "foreign_key_list".clone()  { return Some(PForeignKeyList); }
-    if n == "foreign_key_check".clone() { return Some(PForeignKeyCheck); }
-    if n == "integrity_check".clone()   { return Some(PIntegrityCheck); }
-    if n == "quick_check".clone()       { return Some(PQuickCheck); }
-    if n == "stats".clone()             { return Some(PStats); }
-    if n == "database_list".clone()     { return Some(PDatabaseList); }
-    if n == "table_list".clone()        { return Some(PTableList); }
-    if n == "trigger_list".clone()      { return Some(PTriggerList); }
-    if n == "module_list".clone()       { return Some(PModuleList); }
-    if n == "function_list".clone()     { return Some(PFunctionList); }
-    if n == "pragma_list".clone()       { return Some(PPragmaList); }
-    if n == "compile_options".clone()   { return Some(PCompileOptions); }
-    if n == "collation_list".clone()    { return Some(PCollationList); }
-    if n == "optimize".clone()          { return Some(POptimize); }
-    if n == "shrink_memory".clone()     { return Some(PShrinkMemory); }
-    if n == "freelist_count".clone()    { return Some(PFreelistCount); }
-    if n == "page_count".clone()        { return Some(PPageCount); }
-    None
+    if n == "cache_size".clone()        { return Maybe.Some(PCacheSize); }
+    if n == "page_size".clone()         { return Maybe.Some(PPageSize); }
+    if n == "journal_mode".clone()      { return Maybe.Some(PJournalMode); }
+    if n == "synchronous".clone()       { return Maybe.Some(PSynchronous); }
+    if n == "foreign_keys".clone()      { return Maybe.Some(PForeignKeys); }
+    if n == "recursive_triggers".clone(){ return Maybe.Some(PRecursiveTriggers); }
+    if n == "user_version".clone()      { return Maybe.Some(PUserVersion); }
+    if n == "schema_version".clone()    { return Maybe.Some(PSchemaVersion); }
+    if n == "application_id".clone()    { return Maybe.Some(PApplicationId); }
+    if n == "journal_size_limit".clone(){ return Maybe.Some(PJournalSizeLimit); }
+    if n == "auto_vacuum".clone()       { return Maybe.Some(PAutoVacuum); }
+    if n == "incremental_vacuum".clone(){ return Maybe.Some(PIncrementalVacuum); }
+    if n == "busy_timeout".clone()      { return Maybe.Some(PBusyTimeout); }
+    if n == "case_sensitive_like".clone(){ return Maybe.Some(PCaseSensitiveLike); }
+    if n == "encoding".clone()          { return Maybe.Some(PEncoding); }
+    if n == "temp_store".clone()        { return Maybe.Some(PTempStore); }
+    if n == "secure_delete".clone()     { return Maybe.Some(PSecureDelete); }
+    if n == "writable_schema".clone()   { return Maybe.Some(PWritableSchema); }
+    if n == "query_only".clone()        { return Maybe.Some(PQueryOnly); }
+    if n == "locking_mode".clone()      { return Maybe.Some(PLockingMode); }
+    if n == "max_page_count".clone()    { return Maybe.Some(PMaxPageCount); }
+    if n == "mmap_size".clone()         { return Maybe.Some(PMmapSize); }
+    if n == "threads".clone()           { return Maybe.Some(PThreads); }
+    if n == "wal_autocheckpoint".clone(){ return Maybe.Some(PWalAutocheckpoint); }
+    if n == "wal_checkpoint".clone()    { return Maybe.Some(PWalCheckpoint); }
+    if n == "defer_foreign_keys".clone(){ return Maybe.Some(PDeferForeignKeys); }
+    if n == "ignore_check_constraints".clone() { return Maybe.Some(PIgnoreCheckConstraints); }
+    if n == "cell_size_check".clone()   { return Maybe.Some(PCellSizeCheck); }
+    if n == "table_info".clone()        { return Maybe.Some(PTableInfo); }
+    if n == "table_xinfo".clone()       { return Maybe.Some(PTableXInfo); }
+    if n == "index_info".clone()        { return Maybe.Some(PIndexInfo); }
+    if n == "index_xinfo".clone()       { return Maybe.Some(PIndexXInfo); }
+    if n == "index_list".clone()        { return Maybe.Some(PIndexList); }
+    if n == "foreign_key_list".clone()  { return Maybe.Some(PForeignKeyList); }
+    if n == "foreign_key_check".clone() { return Maybe.Some(PForeignKeyCheck); }
+    if n == "integrity_check".clone()   { return Maybe.Some(PIntegrityCheck); }
+    if n == "quick_check".clone()       { return Maybe.Some(PQuickCheck); }
+    if n == "stats".clone()             { return Maybe.Some(PStats); }
+    if n == "database_list".clone()     { return Maybe.Some(PDatabaseList); }
+    if n == "table_list".clone()        { return Maybe.Some(PTableList); }
+    if n == "trigger_list".clone()      { return Maybe.Some(PTriggerList); }
+    if n == "module_list".clone()       { return Maybe.Some(PModuleList); }
+    if n == "function_list".clone()     { return Maybe.Some(PFunctionList); }
+    if n == "pragma_list".clone()       { return Maybe.Some(PPragmaList); }
+    if n == "compile_options".clone()   { return Maybe.Some(PCompileOptions); }
+    if n == "collation_list".clone()    { return Maybe.Some(PCollationList); }
+    if n == "optimize".clone()          { return Maybe.Some(POptimize); }
+    if n == "shrink_memory".clone()     { return Maybe.Some(PShrinkMemory); }
+    if n == "freelist_count".clone()    { return Maybe.Some(PFreelistCount); }
+    if n == "page_count".clone()        { return Maybe.Some(PPageCount); }
+    Maybe.None
 }
 
 // -----------------------------------------------------------------------------

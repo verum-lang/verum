@@ -43,7 +43,7 @@
 module core.database.mysql.async_connection;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
@@ -202,7 +202,7 @@ implement AsyncMysqlConnection {
     /// recv_packet returns with that error.
     public async fn cancel_running_query(&self) -> Result<(), DbError> {
         if self.connection_id == 0 {
-            return Err(DbError.Adapter(AdapterSpecific {
+            return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "CANCEL_NO_CONN_ID".clone(),
                 message: "connection_id absent — handshake didn't populate".clone(),
@@ -218,7 +218,7 @@ implement AsyncMysqlConnection {
     /// with ACTOR_CLOSED.
     public async fn cancel_session(&self) -> Result<(), DbError> {
         if self.connection_id == 0 {
-            return Err(DbError.Adapter(AdapterSpecific {
+            return Result.Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdMysql,
                 code: "CANCEL_NO_CONN_ID".clone(),
                 message: "connection_id absent — handshake didn't populate".clone(),
@@ -241,13 +241,13 @@ implement AsyncMysqlConnection {
             let r = side.simple_query(&sql);
             let _ = side.close();
             match r {
-                Ok(_)  => Ok(()),
-                Err(e) => Err(e),
+                Result.Ok(_)  => Result.Ok(()),
+                Result.Err(e) => Result.Err(e),
             }
         });
         match jh.join().await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("cancel: blocking-pool join")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("cancel: blocking-pool join")),
         }
     }
 
@@ -281,12 +281,12 @@ implement AsyncMysqlConnection {
             sql: sql.clone(),
             reply: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("simple_query")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("simple_query")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("simple_query reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("simple_query reply")),
         }
     }
 
@@ -296,12 +296,12 @@ implement AsyncMysqlConnection {
             sql: sql.clone(),
             reply: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("execute")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("execute")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("execute reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("execute reply")),
         }
     }
 
@@ -317,40 +317,40 @@ implement AsyncMysqlConnection {
             sql: sql.clone(),
             reply: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("multi_query")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("multi_query")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("multi_query reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("multi_query reply")),
         }
     }
 
     public async fn ping(&self) -> Result<(), DbError> {
         let (rs, rr) = oneshot();
         match self.tx.send_async(MyReqPing { reply: rs }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("ping")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("ping")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("ping reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("ping reply")),
         }
     }
 
     public async fn close(&self) -> Result<(), DbError> {
         let (rs, rr) = oneshot();
         match self.tx.send_async(MyReqShutdown { reply: rs }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("close")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("close")); }
         }
         let _ = rr.await;
         let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
         match guard.take() {
-            Some(jh) => { let _ = jh.join().await; }
-            None     => {}
+            Maybe.Some(jh) => { let _ = jh.join().await; }
+            Maybe.None     => {}
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// COM_STMT_PREPARE — server-side prepared statement.
@@ -365,13 +365,13 @@ implement AsyncMysqlConnection {
             sql: sql.clone(),
             reply: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("prepare")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("prepare")); }
         }
         match rr.await {
-            Ok(Ok(stmt)) => Ok(AsyncMysqlPreparedStatement { inner: stmt }),
-            Ok(Err(e))   => Err(e),
-            Err(_)       => Err(actor_dropped("prepare reply")),
+            Result.Ok(Result.Ok(stmt)) => Result.Ok(AsyncMysqlPreparedStatement { inner: stmt }),
+            Result.Ok(Result.Err(e))   => Result.Err(e),
+            Result.Err(_)       => Result.Err(actor_dropped("prepare reply")),
         }
     }
 
@@ -388,12 +388,12 @@ implement AsyncMysqlConnection {
             params: params,
             reply: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("execute_prepared")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("execute_prepared")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("execute_prepared reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("execute_prepared reply")),
         }
     }
 
@@ -406,12 +406,12 @@ implement AsyncMysqlConnection {
             stmt: stmt.inner,
             reply: rs,
         }).await {
-            Ok(()) => {}
-            Err(_) => { return Err(actor_dropped("close_prepared")); }
+            Result.Ok(()) => {}
+            Result.Err(_) => { return Result.Err(actor_dropped("close_prepared")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("close_prepared reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("close_prepared reply")),
         }
     }
 }
@@ -449,8 +449,8 @@ public async fn connect(
         core.database.mysql.connection.connect(&cfg_owned)
     });
     let conn = match conn_jh.join().await {
-        Ok(r)  => r?,
-        Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
+        Result.Ok(r)  => r?,
+        Result.Err(_) => { return Result.Err(actor_dropped("connect: blocking-pool join")); }
     };
 
     // Snapshot connection_id BEFORE handing the conn to the
@@ -465,9 +465,9 @@ public async fn connect(
         run_actor(conn, rx);
     });
 
-    Ok(AsyncMysqlConnection {
+    Result.Ok(AsyncMysqlConnection {
         tx: tx,
-        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        join: Shared.new(sync.mutex.Mutex.new(Maybe.Some(join))),
         connection_id: connection_id,
         cancel_cfg: cancel_cfg,
     })
@@ -488,8 +488,8 @@ fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
     let mut cache = MysqlStmtCache.new();
     loop {
         let req = match rx.recv() {
-            Some(r) => r,
-            None    => {
+            Maybe.Some(r) => r,
+            Maybe.None    => {
                 // Every sender dropped — drain the cache + close
                 // each cached statement on the wire before disposing
                 // the socket. Mirrors the explicit MyReqShutdown path.
@@ -521,46 +521,46 @@ fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
             }
             MyReqBeginTx { begin_sql, reply } => {
                 let r = match conn.execute(&begin_sql) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             MyReqCommitTx { reply } => {
                 let r = match conn.execute(&"COMMIT".clone()) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             MyReqRollbackTx { reply } => {
                 let r = match conn.execute(&"ROLLBACK".clone()) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             MyReqSavepoint { name, reply } => {
                 let sql = f"SAVEPOINT {name}";
                 let r = match conn.execute(&sql) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             MyReqReleaseSavepoint { name, reply } => {
                 let sql = f"RELEASE SAVEPOINT {name}";
                 let r = match conn.execute(&sql) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
             MyReqRollbackToSavepoint { name, reply } => {
                 let sql = f"ROLLBACK TO SAVEPOINT {name}";
                 let r = match conn.execute(&sql) {
-                    Ok(_)  => Ok(()),
-                    Err(e) => Err(e),
+                    Result.Ok(_)  => Result.Ok(()),
+                    Result.Err(e) => Result.Err(e),
                 };
                 let _ = reply.send(r);
             }
@@ -570,18 +570,18 @@ fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
             MyReqPrepare { sql, reply } => {
                 let fp = core.database.mysql.stmt_cache.fingerprint(&sql);
                 let r = match cache.lookup(fp) {
-                    Some(cached) => Ok(cached),
-                    None => {
+                    Maybe.Some(cached) => Result.Ok(cached),
+                    Maybe.None => {
                         match conn.prepare(&sql) {
-                            Ok(stmt) => {
+                            Result.Ok(stmt) => {
                                 let evicted = cache.insert(fp, clone_my_prepared(&stmt));
                                 match evicted {
-                                    Some(e) => { let _ = conn.close_prepared(&e); }
-                                    None    => {}
+                                    Maybe.Some(e) => { let _ = conn.close_prepared(&e); }
+                                    Maybe.None    => {}
                                 }
-                                Ok(stmt)
+                                Result.Ok(stmt)
                             }
-                            Err(e) => Err(e),
+                            Result.Err(e) => Result.Err(e),
                         }
                     }
                 };
@@ -628,17 +628,17 @@ fn run_load_data_subloop(
     ack: OneshotSender<Result<(), DbError>>,
 ) {
     match conn.start_load_data_local_session(sql) {
-        Ok(())  => { let _ = ack.send(Ok(())); }
-        Err(e)  => {
-            let _ = ack.send(Err(e));
+        Result.Ok(())  => { let _ = ack.send(Result.Ok(())); }
+        Result.Err(e)  => {
+            let _ = ack.send(Result.Err(e));
             return;
         }
     }
 
     loop {
         let chunk = match chunk_rx.recv() {
-            Some(c) => c,
-            None    => {
+            Maybe.Some(c) => c,
+            Maybe.None    => {
                 // Writer dropped without explicit Done/Cancel —
                 // best-effort cancel on the wire.
                 let _ = conn.cancel_load_data_local_session(&"writer dropped".clone());
@@ -648,8 +648,8 @@ fn run_load_data_subloop(
         match chunk {
             LdcBytes(b) => {
                 match conn.write_load_data_chunk(b.as_slice()) {
-                    Ok(())  => {}
-                    Err(_)  => {
+                    Result.Ok(())  => {}
+                    Result.Err(_)  => {
                         let _ = conn.cancel_load_data_local_session(&"write failed".clone());
                         return;
                     }

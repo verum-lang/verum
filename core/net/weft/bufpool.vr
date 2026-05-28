@@ -32,7 +32,7 @@
 //  * Acquire is O(1) — Mutex-protected stack pop.
 //
 
-//  * On exhaustion the pool returns `None`; the caller falls back
+//  * On exhaustion the pool returns `Maybe.None`; the caller falls back
 //  to on-heap allocation. Never blocks the reactor thread.
 //
 
@@ -197,17 +197,17 @@ implement BufferPool {
         Self.new(BufferPoolConfig.default())
     }
 
-    /// Try to lease a buffer. Returns `None` if the pool is exhausted
+    /// Try to lease a buffer. Returns `Maybe.None` if the pool is exhausted
     /// — caller is expected to fall back to on-heap List<Byte>.
     public fn acquire(&self) -> Maybe<BufferHandle> {
         self.state.acquires_total.fetch_add(1, MemoryOrdering.AcqRel);
         let mut free = self.state.free_indices.lock();
         match free.pop() {
-            None => {
+            Maybe.None => {
                 self.state.misses_total.fetch_add(1, MemoryOrdering.AcqRel);
-                None
+                Maybe.None
             }
-            Some(idx) => Some(BufferHandle {
+            Maybe.Some(idx) => Maybe.Some(BufferHandle {
                 index: idx,
                 pool: self.state.clone(),
             }),
@@ -322,7 +322,7 @@ implement BufferPool {
     /// `prep_write_fixed` referencing each handle's `fd_offset()`.
     ///
 
-    /// Idempotent — if the pool is already registered, returns Ok(())
+    /// Idempotent — if the pool is already registered, returns Result.Ok(())
     /// without re-issuing the syscall (the kernel rejects double
     /// registration with -EBUSY otherwise).
     ///
@@ -337,12 +337,12 @@ implement BufferPool {
         driver: &mut IoUringDriver,
     ) -> Result<(), LinuxIoDriverError> {
         if self.state.iouring_registered.load(MemoryOrdering.Acquire) {
-            return Ok(());
+            return Result.Ok(());
         }
         let iovecs = self.build_iovecs();
         driver.register_buffers(iovecs.as_slice())?;
         self.state.iouring_registered.store(true, MemoryOrdering.Release);
-        Ok(())
+        Result.Ok(())
     }
 
     /// Release the kernel-side registration, allowing the pool to be
@@ -354,10 +354,10 @@ implement BufferPool {
         driver: &mut IoUringDriver,
     ) -> Result<(), LinuxIoDriverError> {
         if !self.state.iouring_registered.load(MemoryOrdering.Acquire) {
-            return Ok(());
+            return Result.Ok(());
         }
         driver.unregister_buffers()?;
         self.state.iouring_registered.store(false, MemoryOrdering.Release);
-        Ok(())
+        Result.Ok(())
     }
 }

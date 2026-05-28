@@ -113,7 +113,7 @@ implement EarlySecret {
             HashKind.Sha256 => hkdf_extract_sha256(zero_salt.as_slice(), psk).to_list(),
             HashKind.Sha384 => hkdf_extract_sha384(zero_salt.as_slice(), psk).to_list(),
         };
-        Ok(EarlySecret { secret: SecretBytes.from(prk), hash: hash })
+        Result.Ok(EarlySecret { secret: SecretBytes.from(prk), hash: hash })
     }
 
     /// Derive the IKM value (`Derive-Secret(., "derived", "")`) that
@@ -125,7 +125,7 @@ implement EarlySecret {
             self.secret.as_slice(),
             &LABEL_DERIVED,
         )?;
-        Ok(SecretBytes.from(out))
+        Result.Ok(SecretBytes.from(out))
     }
 
     /// PSK binder key (for PSK-resumption binder verification).
@@ -137,7 +137,7 @@ implement EarlySecret {
             self.secret.as_slice(),
             label,
         )?;
-        Ok(SecretBytes.from(out))
+        Result.Ok(SecretBytes.from(out))
     }
 
     /// client_early_traffic_secret (0-RTT application data cipher key).
@@ -148,7 +148,7 @@ implement EarlySecret {
             &LABEL_CLIENT_EARLY_TRAFFIC,
             transcript_after_ch,
         )?;
-        Ok(TrafficSecret {
+        Result.Ok(TrafficSecret {
             secret: SecretBytes.from(out),
             hash:   self.hash,
             phase:  TrafficPhase.EarlyPhase,
@@ -174,7 +174,7 @@ implement HandshakeSecret {
             HashKind.Sha256 => hkdf_extract_sha256(derived_from_early, dhe).to_list(),
             HashKind.Sha384 => hkdf_extract_sha384(derived_from_early, dhe).to_list(),
         };
-        Ok(HandshakeSecret { secret: SecretBytes.from(prk), hash: hash })
+        Result.Ok(HandshakeSecret { secret: SecretBytes.from(prk), hash: hash })
     }
 
     /// Snapshot of transcript hash up to & including ServerHello.
@@ -185,7 +185,7 @@ implement HandshakeSecret {
             &LABEL_CLIENT_HS_TRAFFIC,
             transcript_after_sh,
         )?;
-        Ok(TrafficSecret {
+        Result.Ok(TrafficSecret {
             secret: SecretBytes.from(out),
             hash:   self.hash,
             phase:  TrafficPhase.HandshakePhase,
@@ -200,7 +200,7 @@ implement HandshakeSecret {
             &LABEL_SERVER_HS_TRAFFIC,
             transcript_after_sh,
         )?;
-        Ok(TrafficSecret {
+        Result.Ok(TrafficSecret {
             secret: SecretBytes.from(out),
             hash:   self.hash,
             phase:  TrafficPhase.HandshakePhase,
@@ -214,7 +214,7 @@ implement HandshakeSecret {
             self.secret.as_slice(),
             &LABEL_DERIVED,
         )?;
-        Ok(SecretBytes.from(out))
+        Result.Ok(SecretBytes.from(out))
     }
 }
 
@@ -234,7 +234,7 @@ implement MasterSecret {
             HashKind.Sha256 => hkdf_extract_sha256(derived_from_handshake, zeros.as_slice()).to_list(),
             HashKind.Sha384 => hkdf_extract_sha384(derived_from_handshake, zeros.as_slice()).to_list(),
         };
-        Ok(MasterSecret { secret: SecretBytes.from(prk), hash: hash })
+        Result.Ok(MasterSecret { secret: SecretBytes.from(prk), hash: hash })
     }
 
     public fn client_traffic(&self, transcript_after_server_fin: &[Byte]) -> Result<TrafficSecret, HkdfError> {
@@ -244,7 +244,7 @@ implement MasterSecret {
             &LABEL_CLIENT_AP_TRAFFIC,
             transcript_after_server_fin,
         )?;
-        Ok(TrafficSecret {
+        Result.Ok(TrafficSecret {
             secret: SecretBytes.from(out),
             hash:   self.hash,
             phase:  TrafficPhase.ApplicationPhase,
@@ -259,7 +259,7 @@ implement MasterSecret {
             &LABEL_SERVER_AP_TRAFFIC,
             transcript_after_server_fin,
         )?;
-        Ok(TrafficSecret {
+        Result.Ok(TrafficSecret {
             secret: SecretBytes.from(out),
             hash:   self.hash,
             phase:  TrafficPhase.ApplicationPhase,
@@ -274,7 +274,7 @@ implement MasterSecret {
             &LABEL_EXPORTER_MASTER,
             transcript_after_server_fin,
         )?;
-        Ok(SecretBytes.from(out))
+        Result.Ok(SecretBytes.from(out))
     }
 
     public fn resumption_master(&self, transcript_after_client_fin: &[Byte]) -> Result<SecretBytes, HkdfError> {
@@ -284,7 +284,7 @@ implement MasterSecret {
             &LABEL_RESUMPTION_MASTER,
             transcript_after_client_fin,
         )?;
-        Ok(SecretBytes.from(out))
+        Result.Ok(SecretBytes.from(out))
     }
 }
 
@@ -305,12 +305,12 @@ implement TrafficSecret {
         let key = hkdf_expand_label(self.hash, self.secret.as_slice(), &LABEL_KEY, &[], key_len)?;
         let iv_vec = hkdf_expand_label(self.hash, self.secret.as_slice(), &LABEL_IV, &[], iv_len)?;
         if iv_len != 12 {
-            return Err(HkdfError.OutputTooLong { requested: iv_len, limit: 12 });
+            return Result.Err(HkdfError.OutputTooLong { requested: iv_len, limit: 12 });
         }
         let mut iv: [Byte; 12] = [0_u8; 12];
         let mut i: Int = 0;
         while i < 12 { iv[i] = iv_vec[i]; i = i + 1; }
-        Ok(TrafficKeys { key: SecretBytes.from(key), iv: iv })
+        Result.Ok(TrafficKeys { key: SecretBytes.from(key), iv: iv })
     }
 
     /// Finished-MAC key per RFC 8446 §4.4.4:
@@ -318,7 +318,7 @@ implement TrafficSecret {
     public fn finished_key(&self) -> Result<SecretBytes, HkdfError> {
         let out_len = match self.hash { HashKind.Sha256 => 32, HashKind.Sha384 => 48 };
         let v = hkdf_expand_label(self.hash, self.secret.as_slice(), &LABEL_FINISHED, &[], out_len)?;
-        Ok(SecretBytes.from(v))
+        Result.Ok(SecretBytes.from(v))
     }
 
     /// Key update (RFC 8446 §4.6.3):
@@ -326,7 +326,7 @@ implement TrafficSecret {
     public fn next_generation(&self) -> Result<TrafficSecret, HkdfError> {
         let out_len = match self.hash { HashKind.Sha256 => 32, HashKind.Sha384 => 48 };
         let next = hkdf_expand_label(self.hash, self.secret.as_slice(), &LABEL_TRAFFIC_UPD, &[], out_len)?;
-        Ok(TrafficSecret {
+        Result.Ok(TrafficSecret {
             secret: SecretBytes.from(next),
             hash:   self.hash,
             phase:  self.phase.clone(),

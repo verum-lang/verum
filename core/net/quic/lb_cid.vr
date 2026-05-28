@@ -104,15 +104,15 @@ implement LbCidProfile {
     }
 
     /// Reverse — recover the profile from the inbound config byte's
-    /// low 7 bits. Returns None for unknown codepoints (draft §3.2
+    /// low 7 bits. Returns Maybe.None for unknown codepoints (draft §3.2
     /// reserves these for future profiles + GREASE).
     public fn from_codepoint(byte: UInt8) -> Maybe<LbCidProfile> {
         match byte & 0x7F_u8 {
-            0x01_u8 => Some(LbCidProfile.Profile_8_1),
-            0x02_u8 => Some(LbCidProfile.Profile_12_2),
-            0x03_u8 => Some(LbCidProfile.Profile_16_3),
-            0x04_u8 => Some(LbCidProfile.Profile_20_3),
-            _       => None,
+            0x01_u8 => Maybe.Some(LbCidProfile.Profile_8_1),
+            0x02_u8 => Maybe.Some(LbCidProfile.Profile_12_2),
+            0x03_u8 => Maybe.Some(LbCidProfile.Profile_16_3),
+            0x04_u8 => Maybe.Some(LbCidProfile.Profile_20_3),
+            _       => Maybe.None,
         }
     }
 }
@@ -140,12 +140,12 @@ implement LbConfig {
         server_id: List<Byte>,
     ) -> Result<LbConfig, LbCidError> {
         if server_id.len() != profile.server_id_len() {
-            return Err(LbCidError.InvalidServerIdLen {
+            return Result.Err(LbCidError.InvalidServerIdLen {
                 expected: profile.server_id_len(),
                 actual:   server_id.len(),
             });
         }
-        Ok(LbConfig {
+        Result.Ok(LbConfig {
             profile:   profile,
             key:       key,
             server_id: server_id,
@@ -218,8 +218,8 @@ implement CidGenerator {
             j = j + 1;
         }
         match ConnectionId.from_bytes(bytes.as_slice()) {
-            Ok(cid) => cid,
-            Err(_)  => panic("CidGenerator constructed an over-length CID"),
+            Result.Ok(cid) => cid,
+            Result.Err(_)  => panic("CidGenerator constructed an over-length CID"),
         }
     }
 
@@ -256,25 +256,25 @@ implement CidDecoder {
     }
 
     /// Try to recover the server-id from an inbound DCID. Returns
-    /// `Ok(server_id)` when decryption with any retained key
-    /// produces a valid plaintext, `Err(NoMatchingKey)` when no key
-    /// works, `Err(InvalidConfigByte)` when the config byte's CR
+    /// `Result.Ok(server_id)` when decryption with any retained key
+    /// produces a valid plaintext, `Result.Err(NoMatchingKey)` when no key
+    /// works, `Result.Err(InvalidConfigByte)` when the config byte's CR
     /// bit isn't set or the codepoint is unknown (treat the
     /// connection as un-routable; LB fans out to a default replica).
     public fn decode_server_id(&self, dcid: &[Byte]) -> Result<List<Byte>, LbCidError> {
         if dcid.len() < 1 {
-            return Err(LbCidError.InvalidConfigByte);
+            return Result.Err(LbCidError.InvalidConfigByte);
         }
         let cfg = dcid[0];
         if (cfg & 0x80_u8) == 0_u8 {
-            return Err(LbCidError.InvalidConfigByte);
+            return Result.Err(LbCidError.InvalidConfigByte);
         }
         let profile = match LbCidProfile.from_codepoint(cfg) {
-            Some(p) => p,
-            None    => return Err(LbCidError.InvalidConfigByte),
+            Maybe.Some(p) => p,
+            Maybe.None    => return Result.Err(LbCidError.InvalidConfigByte),
         };
         if dcid.len() != profile.total_len() {
-            return Err(LbCidError.LengthMismatch {
+            return Result.Err(LbCidError.LengthMismatch {
                 expected: profile.total_len(),
                 actual:   dcid.len(),
             });
@@ -309,9 +309,9 @@ implement CidDecoder {
                 sid.push(block[j]);
                 j = j + 1;
             }
-            return Ok(sid);
+            return Result.Ok(sid);
         }
-        Err(LbCidError.NoMatchingKey)
+        Result.Err(LbCidError.NoMatchingKey)
     }
 }
 

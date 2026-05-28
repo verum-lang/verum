@@ -129,7 +129,7 @@ public fn decode(input: &Text) -> Result<List<Byte>, HexError> {
     let bytes = input.as_bytes();
     let n = bytes.len();
     if n % 2 != 0 {
-        return Err(HexError {
+        return Result.Err(HexError {
             kind: InvalidLength,
             position: n,
             message: "odd number of hex digits",
@@ -145,18 +145,18 @@ public fn decode(input: &Text) -> Result<List<Byte>, HexError> {
         out.push(((hi << 4) | lo) as Byte);
         i = i + 2;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 fn decode_nibble(b: Byte, pos: Int) -> Result<Int, HexError> {
     if b >= 0x30_u8 && b <= 0x39_u8 {
-        Ok((b - 0x30_u8) as Int)
+        Result.Ok((b - 0x30_u8) as Int)
     } else if b >= 0x41_u8 && b <= 0x46_u8 {
-        Ok((b - 0x41_u8 + 10) as Int)
+        Result.Ok((b - 0x41_u8 + 10) as Int)
     } else if b >= 0x61_u8 && b <= 0x66_u8 {
-        Ok((b - 0x61_u8 + 10) as Int)
+        Result.Ok((b - 0x61_u8 + 10) as Int)
     } else {
-        Err(HexError {
+        Result.Err(HexError {
             kind: InvalidChar,
             position: pos,
             message: "not a hex digit",

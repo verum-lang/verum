@@ -62,26 +62,26 @@ public type TraceContext is {
 };
 
 implement TraceContext {
-    /// Parse an inbound `traceparent` header. Returns `None` if malformed
+    /// Parse an inbound `traceparent` header. Returns `Maybe.None` if malformed
     /// — callers should synthesise a fresh context in that case.
     public fn parse_header(h: &Text) -> Maybe<TraceContext> {
         // Format: "00-<32 hex>-<16 hex>-<2 hex flags>"
         let parts: List<Text> = h.split("-").collect();
         if parts.len() != 4 {
-            return None;
+            return Maybe.None;
         }
         let version = &parts[0];
         let tid = &parts[1];
         let sid = &parts[2];
         let flags = &parts[3];
         if version != "00" || tid.len() != 32 || sid.len() != 16 || flags.len() != 2 {
-            return None;
+            return Maybe.None;
         }
         let sampled = match flags.parse_hex_int() {
-            Ok(n)  => (n & 0x01) == 0x01,
-            Err(_) => false,
+            Result.Ok(n)  => (n & 0x01) == 0x01,
+            Result.Err(_) => false,
         };
-        Some(TraceContext {
+        Maybe.Some(TraceContext {
             trace_id: tid.clone(),
             span_id: sid.clone(),
             sampled: sampled,
@@ -162,8 +162,8 @@ public type TracingHandler<H> is {
 implement<H: Handler> Handler for TracingHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         let ctx = match req.headers.get(&"traceparent") {
-            Some(v) => TraceContext.parse_header(v).unwrap_or_else(TraceContext.synthesise),
-            None    => TraceContext.synthesise(),
+            Maybe.Some(v) => TraceContext.parse_header(v).unwrap_or_else(TraceContext.synthesise),
+            Maybe.None    => TraceContext.synthesise(),
         };
 
         let start = Instant.now();
@@ -176,10 +176,10 @@ implement<H: Handler> Handler for TracingHandler<H> {
 
         let duration_ms = Instant.now().duration_since(start).as_millis();
         let (status_code, err_kind): (Int, Maybe<Text>) = match &result {
-            Ok(r)  => (r.status.code(), None),
-            Err(e) => {
+            Result.Ok(r)  => (r.status.code(), Maybe.None),
+            Result.Err(e) => {
                 let s = e.status();
-                (s.code(), Some(f"{e}"))
+                (s.code(), Maybe.Some(f"{e}"))
             }
         };
         log_span_end(&self.service_name, &ctx, status_code, duration_ms, &err_kind);
@@ -187,8 +187,8 @@ implement<H: Handler> Handler for TracingHandler<H> {
         // Stamp the response so downstream caches / load-balancers can
         // correlate with the same trace.
         match result {
-            Ok(r)  => Ok(resp_with_header(r, &"traceparent", &ctx.to_header())),
-            Err(e) => Err(e),
+            Result.Ok(r)  => Result.Ok(resp_with_header(r, &"traceparent", &ctx.to_header())),
+            Result.Err(e) => Result.Err(e),
         }
     }
 }
@@ -217,11 +217,11 @@ fn log_span_end(
     err: &Maybe<Text>,
 ) {
     match err {
-        None => core.base.logger.info(
+        Maybe.None => core.base.logger.info(
             f"span.end   service={service} trace_id={ctx.trace_id} span_id={ctx.span_id} \
               status={status} duration_ms={duration_ms}"
         ),
-        Some(msg) => core.base.logger.warn(
+        Maybe.Some(msg) => core.base.logger.warn(
             f"span.end   service={service} trace_id={ctx.trace_id} span_id={ctx.span_id} \
               status={status} duration_ms={duration_ms} err={msg}"
         ),

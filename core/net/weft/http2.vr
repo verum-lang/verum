@@ -430,7 +430,7 @@ pub async fn run_h2_session<H: Handler>(
     // 1. Connection preface.
     // -------------------------------------------------------------------------
     if !read_preface(&mut stream, token).await {
-        return Err(Http2Error.BadClientPreface);
+        return Result.Err(Http2Error.BadClientPreface);
     }
 
     // -------------------------------------------------------------------------
@@ -441,8 +441,8 @@ pub async fn run_h2_session<H: Handler>(
     let mut out: List<Byte> = List.new();
     core.net.http2.encode_frame(&settings_frame, &mut out);
     match stream.write_async(&out).await {
-        Err(_) => return Err(Http2Error.IoError),
-        Ok(_) => {}
+        Result.Err(_) => return Result.Err(Http2Error.IoError),
+        Result.Ok(_) => {}
     }
 
     // -------------------------------------------------------------------------
@@ -463,7 +463,7 @@ pub async fn run_h2_session<H: Handler>(
         if draining.load(MemoryOrdering.Acquire) { break; }
 
         let frame = match read_frame(&mut stream, limits, token).await {
-            Err(e) => {
+            Result.Err(e) => {
                 // CVE-2023-45288 (MadeYouReset): a malformed frame
                 // forces the server to RST_STREAM on the client's
                 // behalf. Charge the same budget so an attacker can't
@@ -475,12 +475,12 @@ pub async fn run_h2_session<H: Handler>(
                         let _ = send_goaway(
                             &mut stream, 0, ErrorCode.EnhanceYourCalm,
                         ).await;
-                        return Err(Http2Error.ExcessiveRstStream);
+                        return Result.Err(Http2Error.ExcessiveRstStream);
                     }
                 }
-                return Err(e);
+                return Result.Err(e);
             }
-            Ok(f)  => f,
+            Result.Ok(f)  => f,
         };
 
         match frame {
@@ -517,7 +517,7 @@ pub async fn run_h2_session<H: Handler>(
                     let _ = send_goaway(
                         &mut stream, 0, ErrorCode.EnhanceYourCalm,
                     ).await;
-                    return Err(Http2Error.ExcessiveRstStream);
+                    return Result.Err(Http2Error.ExcessiveRstStream);
                 }
             }
             Frame.HeadersFrame { .. } | Frame.DataFrame { .. } |
@@ -530,7 +530,7 @@ pub async fn run_h2_session<H: Handler>(
                     let _ = send_goaway(
                         &mut stream, 0, ErrorCode.EnhanceYourCalm,
                     ).await;
-                    return Err(Http2Error.ExcessiveRstStream);
+                    return Result.Err(Http2Error.ExcessiveRstStream);
                 }
                 // Request-handling path. Scaffolding: reply immediately
                 // with 501 Not Implemented until the full HPACK/body
@@ -553,7 +553,7 @@ pub async fn run_h2_session<H: Handler>(
 
     // Best-effort GOAWAY on clean exit.
     let _ = send_goaway(&mut stream, 0, ErrorCode.NoError).await;
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -578,9 +578,9 @@ async fn read_preface(stream: &mut TcpStream, token: &CancellationToken) -> Bool
     while buf.len() < 24 {
         let mut chunk: List<Byte> = List.with_capacity(32);
         match stream.read_cancellable(&mut chunk, token).await {
-            Err(_) => return false,
-            Ok(Err(_)) => return false,
-            Ok(Ok(n)) => {
+            Result.Err(_) => return false,
+            Result.Ok(Result.Err(_)) => return false,
+            Result.Ok(Result.Ok(n)) => {
                 if n == 0 { return false; }
                 for i in 0..n { buf.push(chunk[i]); }
             }
@@ -634,16 +634,16 @@ async fn read_frame(
     token: &CancellationToken,
 ) -> Result<Frame, Http2Error> {
     let hdr_bytes = match read_exact_bytes(stream, FRAME_HEADER_SIZE, token).await {
-        None => return Err(Http2Error.IoError),
-        Some(b) => b,
+        Maybe.None => return Result.Err(Http2Error.IoError),
+        Maybe.Some(b) => b,
     };
     let header = FrameHeader.decode(&hdr_bytes)?;
     if header.length > limits.max_frame_size {
-        return Err(Http2Error.FrameTooLarge);
+        return Result.Err(Http2Error.FrameTooLarge);
     }
     let payload = match read_exact_bytes(stream, header.length, token).await {
-        None => return Err(Http2Error.IoError),
-        Some(b) => b,
+        Maybe.None => return Result.Err(Http2Error.IoError),
+        Maybe.Some(b) => b,
     };
     Frame.decode_payload(&header, &payload)
 }
@@ -659,17 +659,17 @@ async fn read_exact_bytes(
     while out.len() < n {
         let mut chunk: List<Byte> = List.with_capacity(n - out.len());
         match stream.read_cancellable(&mut chunk, token).await {
-            Err(_) => return None,
-            Ok(Err(_)) => return None,
-            Ok(Ok(read_n)) => {
-                if read_n == 0 { return None; }
+            Result.Err(_) => return Maybe.None,
+            Result.Ok(Result.Err(_)) => return Maybe.None,
+            Result.Ok(Result.Ok(read_n)) => {
+                if read_n == 0 { return Maybe.None; }
                 for i in 0..read_n {
                     out.push(chunk[i]);
                 }
             }
         }
     }
-    Some(out)
+    Maybe.Some(out)
 }
 
 fn frame_stream_id(frame: &Frame) -> UInt32 {
@@ -698,8 +698,8 @@ async fn send_goaway(
     let mut out: List<Byte> = List.new();
     core.net.http2.encode_frame(&frame, &mut out);
     match stream.write_async(&out).await {
-        Err(_) => Err(Http2Error.IoError),
-        Ok(_)  => Ok(()),
+        Result.Err(_) => Result.Err(Http2Error.IoError),
+        Result.Ok(_)  => Result.Ok(()),
     }
 }
 
@@ -722,15 +722,15 @@ async fn send_minimal_response(
         stream_id: stream_id,
         block_fragment: block,
         pad_length: 0,
-        priority: None,
+        priority: Maybe.None,
         end_stream: true,
         end_headers: true,
     };
     let mut out: List<Byte> = List.new();
     core.net.http2.encode_frame(&headers_frame, &mut out);
     match stream.write_async(&out).await {
-        Err(_) => Err(Http2Error.IoError),
-        Ok(_)  => Ok(()),
+        Result.Err(_) => Result.Err(Http2Error.IoError),
+        Result.Ok(_)  => Result.Ok(()),
     }
 }
 

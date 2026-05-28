@@ -18,7 +18,7 @@
 module core.database.postgres.wire.frontend;
 
 mount core.*;
-mount base.{Text, Maybe, None, Some};
+mount base.{Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.database.common.types.WireBuf;
 mount core.database.postgres.wire.frame.frame;
@@ -57,15 +57,15 @@ implement StartupParams {
     public fn new(user: Text) -> StartupParams {
         StartupParams {
             user: user,
-            database: None,
+            database: Maybe.None,
             application_name: "verum-spindle".clone(),
             client_encoding: "UTF8".clone(),
-            replication: None,
+            replication: Maybe.None,
         }
     }
 
     public fn with_database(self, db: Text) -> StartupParams {
-        StartupParams { database: Some(db), .. self }
+        StartupParams { database: Maybe.Some(db), .. self }
     }
 
     public fn with_application_name(self, name: Text) -> StartupParams {
@@ -73,7 +73,7 @@ implement StartupParams {
     }
 
     public fn with_replication(self, replication: Text) -> StartupParams {
-        StartupParams { replication: Some(replication), .. self }
+        StartupParams { replication: Maybe.Some(replication), .. self }
     }
 }
 
@@ -88,22 +88,22 @@ public fn startup(params: &StartupParams) -> List<Byte> {
         buf.put_cstr(&"user".clone());
         buf.put_cstr(&user);
         match database {
-            Some(db) => {
+            Maybe.Some(db) => {
                 buf.put_cstr(&"database".clone());
                 buf.put_cstr(&db);
             }
-            None => {}
+            Maybe.None => {}
         }
         buf.put_cstr(&"application_name".clone());
         buf.put_cstr(&app_name);
         buf.put_cstr(&"client_encoding".clone());
         buf.put_cstr(&client_enc);
         match replication {
-            Some(r) => {
+            Maybe.Some(r) => {
                 buf.put_cstr(&"replication".clone());
                 buf.put_cstr(&r);
             }
-            None => {}
+            Maybe.None => {}
         }
         // Empty key terminates the parameter list.
         buf.put_u8(0);
@@ -286,7 +286,7 @@ public fn parse(name: &Text, sql: &Text, param_oids: &[Int]) -> List<Byte> {
 ///  text; pass length-1 to apply one format to
 ///  all; pass length-N to vary per param.
 ///  * `params` — the parameter values; each entry is an
-///  already-encoded byte slice or `None` for SQL NULL.
+///  already-encoded byte slice or `Maybe.None` for SQL NULL.
 ///  * `result_formats` — per-column result format. Same length-N
 ///  rules as `param_formats`.
 public fn bind(
@@ -316,8 +316,8 @@ public fn bind(
         let mut k = 0;
         while k < owned_params.len() as Int {
             match &owned_params[k] {
-                None    => { buf.put_i32_be(-1); }
-                Some(v) => {
+                Maybe.None    => { buf.put_i32_be(-1); }
+                Maybe.Some(v) => {
                     buf.put_i32_be(v.len() as Int);
                     buf.put_bytes(v.as_slice());
                 }
@@ -397,8 +397,8 @@ fn clone_params(src: &List<Maybe<List<Byte>>>) -> List<Maybe<List<Byte>>> {
     let mut i = 0;
     while i < src.len() as Int {
         match &src[i] {
-            None    => out.push(None),
-            Some(v) => out.push(Some(v.clone())),
+            Maybe.None    => out.push(Maybe.None),
+            Maybe.Some(v) => out.push(Maybe.Some(v.clone())),
         }
         i = i + 1;
     }

@@ -42,7 +42,7 @@
 module core.database.postgres.composite_introspect;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterSpecific, AdPostgres,
@@ -69,7 +69,7 @@ public fn populate_from_pg_type(
     let (schema_filter, name_only) = split_qualified(type_name);
     let probe = probe_pg_type_sync(conn, &schema_filter, &name_only)?;
     if probe.typrelid == 0 {
-        return Err(pg_error(
+        return Result.Err(pg_error(
             "PG_TYPE_NOT_COMPOSITE".clone(),
             f"pg_type entry for {type_name} is not a composite (typrelid=0)",
         ));
@@ -77,7 +77,7 @@ public fn populate_from_pg_type(
     let fields = read_pg_attribute_sync(conn, probe.typrelid)?;
     let schema = build_schema(probe.oid, probe.canonical_name, fields);
     registry.register(clone_schema(&schema));
-    Ok(schema)
+    Result.Ok(schema)
 }
 
 // =============================================================================
@@ -94,7 +94,7 @@ public async fn populate_from_pg_type_async(
     let (schema_filter, name_only) = split_qualified(type_name);
     let probe = probe_pg_type_async(conn, &schema_filter, &name_only).await?;
     if probe.typrelid == 0 {
-        return Err(pg_error(
+        return Result.Err(pg_error(
             "PG_TYPE_NOT_COMPOSITE".clone(),
             f"pg_type entry for {type_name} is not a composite (typrelid=0)",
         ));
@@ -102,7 +102,7 @@ public async fn populate_from_pg_type_async(
     let fields = read_pg_attribute_async(conn, probe.typrelid).await?;
     let schema = build_schema(probe.oid, probe.canonical_name, fields);
     registry.register(clone_schema(&schema));
-    Ok(schema)
+    Result.Ok(schema)
 }
 
 // =============================================================================
@@ -125,8 +125,8 @@ fn probe_pg_type_sync(
 ) -> Result<PgTypeProbe, DbError> {
     let sql = build_pg_type_sql(schema_filter, name_only);
     match conn.query_first(&sql) {
-        Ok(opt)  => decode_pg_type_row(opt, name_only),
-        Err(e)   => Err(e),
+        Result.Ok(opt)  => decode_pg_type_row(opt, name_only),
+        Result.Err(e)   => Result.Err(e),
     }
 }
 
@@ -137,15 +137,15 @@ async fn probe_pg_type_async(
 ) -> Result<PgTypeProbe, DbError> {
     let sql = build_pg_type_sql(schema_filter, name_only);
     match conn.simple_query(&sql).await {
-        Ok(result) => {
+        Result.Ok(result) => {
             let opt = if (result.rows.len() as Int) == 0 {
-                None
+                Maybe.None
             } else {
-                Some(result.rows[0].clone())
+                Maybe.Some(result.rows[0].clone())
             };
             decode_pg_type_row(opt, name_only)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -154,11 +154,11 @@ fn build_pg_type_sql(schema_filter: &Maybe<Text>, name_only: &Text) -> Text {
         "SELECT t.oid::text, t.typrelid::text, n.nspname, t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = ".clone();
     sql.push_str(&quote_literal(name_only));
     match schema_filter {
-        Some(s) => {
+        Maybe.Some(s) => {
             sql.push_str(&" AND n.nspname = ".clone());
             sql.push_str(&quote_literal(s));
         }
-        None => {
+        Maybe.None => {
             // Caller didn't qualify — restrict to namespaces on
             // the active search_path so we don't resolve a stray
             // shadowed type from an out-of-scope schema.
@@ -176,16 +176,16 @@ fn decode_pg_type_row(
     name_only: &Text,
 ) -> Result<PgTypeProbe, DbError> {
     let row = match opt {
-        Some(r) => r,
-        None    => {
-            return Err(pg_error(
+        Maybe.Some(r) => r,
+        Maybe.None    => {
+            return Result.Err(pg_error(
                 "PG_TYPE_NOT_FOUND".clone(),
                 f"no pg_type entry for {name_only}",
             ));
         }
     };
     if (row.len() as Int) < 4 {
-        return Err(pg_error(
+        return Result.Err(pg_error(
             "PG_INTROSPECT_BAD_ROW".clone(),
             "pg_type probe returned < 4 columns".clone(),
         ));
@@ -195,18 +195,18 @@ fn decode_pg_type_row(
     let nspname       = value_to_text(&row[2]);
     let typname       = value_to_text(&row[3]);
     let oid = match parse_int_text(&oid_text) {
-        Some(n) => n,
-        None    => {
-            return Err(pg_error(
+        Maybe.Some(n) => n,
+        Maybe.None    => {
+            return Result.Err(pg_error(
                 "PG_INTROSPECT_BAD_OID".clone(),
                 f"unparseable pg_type.oid: {oid_text}",
             ));
         }
     };
     let typrelid = match parse_int_text(&typrelid_text) {
-        Some(n) => n,
-        None    => {
-            return Err(pg_error(
+        Maybe.Some(n) => n,
+        Maybe.None    => {
+            return Result.Err(pg_error(
                 "PG_INTROSPECT_BAD_OID".clone(),
                 f"unparseable pg_type.typrelid: {typrelid_text}",
             ));
@@ -215,7 +215,7 @@ fn decode_pg_type_row(
     let mut canonical = nspname;
     canonical.push_str(&".".clone());
     canonical.push_str(&typname);
-    Ok(PgTypeProbe {
+    Result.Ok(PgTypeProbe {
         oid: oid,
         typrelid: typrelid,
         canonical_name: canonical,
@@ -232,8 +232,8 @@ fn read_pg_attribute_sync(
 ) -> Result<List<CompositeFieldDef>, DbError> {
     let sql = build_pg_attribute_sql(typrelid);
     match conn.query_all(&sql) {
-        Ok(rows) => decode_pg_attribute_rows(rows),
-        Err(e)   => Err(e),
+        Result.Ok(rows) => decode_pg_attribute_rows(rows),
+        Result.Err(e)   => Result.Err(e),
     }
 }
 
@@ -243,8 +243,8 @@ async fn read_pg_attribute_async(
 ) -> Result<List<CompositeFieldDef>, DbError> {
     let sql = build_pg_attribute_sql(typrelid);
     match conn.simple_query(&sql).await {
-        Ok(result) => decode_pg_attribute_rows(result.rows),
-        Err(e)     => Err(e),
+        Result.Ok(result) => decode_pg_attribute_rows(result.rows),
+        Result.Err(e)     => Result.Err(e),
     }
 }
 
@@ -269,7 +269,7 @@ fn decode_pg_attribute_rows(
     while i < (rows.len() as Int) {
         let row = &rows[i];
         if (row.len() as Int) < 2 {
-            return Err(pg_error(
+            return Result.Err(pg_error(
                 "PG_INTROSPECT_BAD_ROW".clone(),
                 "pg_attribute row had < 2 columns".clone(),
             ));
@@ -277,9 +277,9 @@ fn decode_pg_attribute_rows(
         let name = value_to_text(&row[0]);
         let oid_text = value_to_text(&row[1]);
         let oid = match parse_int_text(&oid_text) {
-            Some(n) => n,
-            None    => {
-                return Err(pg_error(
+            Maybe.Some(n) => n,
+            Maybe.None    => {
+                return Result.Err(pg_error(
                     "PG_INTROSPECT_BAD_OID".clone(),
                     f"unparseable pg_attribute.atttypid: {oid_text}",
                 ));
@@ -288,7 +288,7 @@ fn decode_pg_attribute_rows(
         out.push(CompositeFieldDef { name: name, type_oid: oid });
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // =============================================================================
@@ -338,11 +338,11 @@ fn split_qualified(name: &Text) -> (Maybe<Text>, Text) {
         i = i + 1;
     }
     if dot < 0 {
-        return (None, name.clone());
+        return (Maybe.None, name.clone());
     }
     let schema = sub_text(name, 0, dot);
     let only   = sub_text(name, dot + 1, bytes.len() as Int);
-    (Some(schema), only)
+    (Maybe.Some(schema), only)
 }
 
 fn sub_text(s: &Text, start: Int, end: Int) -> Text {
@@ -389,15 +389,15 @@ fn parse_int_text(s: &Text) -> Maybe<Int> {
     let n = bytes.len() as Int;
     let mut neg = false;
     if n > 0 && (bytes[0] as Int) == ('-' as Int) { neg = true; i = 1; }
-    if i >= n { return None; }
+    if i >= n { return Maybe.None; }
     let mut acc: Int = 0;
     while i < n {
         let b = bytes[i] as Int;
-        if b < ('0' as Int) || b > ('9' as Int) { return None; }
+        if b < ('0' as Int) || b > ('9' as Int) { return Maybe.None; }
         acc = acc * 10 + (b - ('0' as Int));
         i = i + 1;
     }
-    Some(if neg { -acc } else { acc })
+    Maybe.Some(if neg { -acc } else { acc })
 }
 
 fn value_to_text(v: &WireValue) -> Text {

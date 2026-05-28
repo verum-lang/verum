@@ -77,7 +77,7 @@ public fn parse(value: &[Byte]) -> Result<KeyUsage, DerError> {
 
     // The BIT STRING contents has up to 2 bytes (9 bits).
     if bs.bytes.len() == 0 {
-        return Ok(KeyUsage.empty());
+        return Result.Ok(KeyUsage.empty());
     }
 
     let b0 = bs.bytes[0];
@@ -95,5 +95,5 @@ public fn parse(value: &[Byte]) -> Result<KeyUsage, DerError> {
         encipher_only:     (b0 & 0x01_u8) != 0_u8,
         decipher_only:     (b1 & 0x80_u8) != 0_u8,
     };
-    Ok(ku)
+    Result.Ok(ku)
 }

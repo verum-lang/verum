@@ -296,7 +296,7 @@ public type StructuralMultiplicityWitness is protocol {
     /// ∉ image(Cl_cohesive).
     fn pairwise_non_equivalent(self) -> Bool;
 
-    /// None is in Meta_Cls^⊤ — each violates (Max-1).
+    /// Maybe.None is in Meta_Cls^⊤ — each violates (Max-1).
     fn none_is_maximal(self) -> Bool;
 };
 

@@ -29,7 +29,7 @@ mount core.base.protocols.{
     Describable, ErrorSource, Debug, Display, Clone, Eq, Hash, Hasher,
     Formatter, FormatError, Default, PartialEq,
 };
-mount core.maybe.{Maybe, Some, None};
+mount core.maybe.{Maybe, Some, Maybe.None};
 mount core.result.{Result, Ok, Err};
 mount core.ordering.{Ordering, Less, Equal, Greater};
 
@@ -264,8 +264,8 @@ implement Default for Backtrace {
 
 ///  fn source(&self) -> Maybe<&dyn ErrorSource> {
 ///  match &self.cause {
-///  Some(e) => Some(e.as_ref()),
-///  None => None,
+///  Maybe.Some(e) => Maybe.Some(e.as_ref()),
+///  Maybe.None => Maybe.None,
 ///  }
 ///  }
 ///
@@ -324,7 +324,7 @@ implement Iterator for ErrorChain {
 
     fn next(&mut self) -> Maybe<Text> {
         match self.current {
-            Maybe.None => None,
+            Maybe.None => Maybe.None,
             Maybe.Some(s) => {
                 let desc = s.description();
                 self.current = s.source();
@@ -350,11 +350,11 @@ implement Iterator for ErrorChain {
 ///
 
 /// Traverses the complete chain via `ErrorSource.source()` until
-/// a link returns `None`.
+/// a link returns `Maybe.None`.
 public fn format_error_chain(error: &dyn ErrorSource) -> Text {
     let mut result = error.description();
     let mut current: Maybe<&dyn ErrorSource> = error.source();
-    while current is Some(s) {
+    while current is Maybe.Some(s) {
         result = result + "\ncaused by: " + s.description();
         current = s.source();
     }

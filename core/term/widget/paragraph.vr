@@ -113,7 +113,7 @@ implement Paragraph {
     public fn new() -> Paragraph {
         Paragraph {
             text: List.new(),
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             wrap: Wrap.NoWrap,
             scroll: (0, 0),
@@ -127,7 +127,7 @@ implement Paragraph {
     }
 
     public fn block(self, block: Block) -> Paragraph {
-        Paragraph { block: Some(block), ..self }
+        Paragraph { block: Maybe.Some(block), ..self }
     }
 
     public fn wrap(self, wrap: Wrap) -> Paragraph {
@@ -153,12 +153,12 @@ implement Widget for Paragraph {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         // Render block and get inner area
         let text_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if text_area.width < 1 || text_area.height < 1 { return; }

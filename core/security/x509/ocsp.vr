@@ -195,7 +195,7 @@ public type BasicOcspResponse is {
 
 public type OcspResponse is {
     status:  OcspResponseStatus,
-    /// None iff status != Successful (RFC 6960 §4.2.1).
+    /// Maybe.None iff status != Successful (RFC 6960 §4.2.1).
     basic:   Maybe<BasicOcspResponse>,
 };
 
@@ -260,7 +260,7 @@ implement Eq for OcspError {
 // =============================================================================
 
 public fn parse_ocsp_response(_der: &[Byte]) -> Result<OcspResponse, OcspError> {
-    Err(OcspError.BadStructure(Text.from_str("parse_ocsp_response scaffold — v1.1 deliverable")))
+    Result.Err(OcspError.BadStructure(Text.from_str("parse_ocsp_response scaffold — v1.1 deliverable")))
 }
 
 // =============================================================================
@@ -268,7 +268,7 @@ public fn parse_ocsp_response(_der: &[Byte]) -> Result<OcspResponse, OcspError> 
 // =============================================================================
 
 /// Look up the status for `serial` in a parsed BasicOcspResponse.
-/// Returns `None` if the responder did not include a SingleResponse
+/// Returns `Maybe.None` if the responder did not include a SingleResponse
 /// for that serial.
 public fn find_single_response<'a>(
     basic: &'a BasicOcspResponse,
@@ -278,11 +278,11 @@ public fn find_single_response<'a>(
     while i < basic.responses.len() {
         let sr = &basic.responses[i];
         if serials_equal(sr.cert_id.serial_number.as_slice(), serial) {
-            return Some(sr);
+            return Maybe.Some(sr);
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn serials_equal(a: &[Byte], b: &[Byte]) -> Bool {

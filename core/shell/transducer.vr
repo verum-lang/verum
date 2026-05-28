@@ -182,15 +182,15 @@ public fn dropping_while<A>(pred: fn(&A) -> Bool) -> Transducer<A, A> {
 
 /// `dedup_consecutive` removes adjacent duplicates. Requires `Eq + Clone`.
 public fn dedup_consecutive<A: Eq + Clone>() -> Transducer<A, A> {
-    let prev: Cell<Maybe<A>> = Cell.new(None);
+    let prev: Cell<Maybe<A>> = Cell.new(Maybe.None);
     Transducer {
         transform: |reducer: Reducer<A, R>| -> Reducer<A, R> {
             |acc: R, x: A| {
                 let same = match prev.get() {
-                    Some(p) => p == x,
-                    None    => false,
+                    Maybe.Some(p) => p == x,
+                    Maybe.None    => false,
                 };
-                prev.set(Some(x.clone()));
+                prev.set(Maybe.Some(x.clone()));
                 if same { acc } else { reducer(acc, x) }
             }
         },

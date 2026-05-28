@@ -134,7 +134,7 @@ public fn parse_name(r: &mut DerReader) -> Result<DistinguishedName, DerError> {
     }
     seq.expect_end()?;
 
-    Ok(DistinguishedName { rdns: rdns, raw_der: name_span })
+    Result.Ok(DistinguishedName { rdns: rdns, raw_der: name_span })
 }
 
 fn parse_rdn(r: &mut DerReader) -> Result<RelativeDistinguishedName, DerError> {
@@ -146,13 +146,13 @@ fn parse_rdn(r: &mut DerReader) -> Result<RelativeDistinguishedName, DerError> {
     }
     set.expect_end()?;
     if attrs.len() == 0 {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.MalformedDer,
             position: 0,
             message: "RDN with zero attributes",
         });
     }
-    Ok(RelativeDistinguishedName { attributes: attrs })
+    Result.Ok(RelativeDistinguishedName { attributes: attrs })
 }
 
 fn parse_atv(r: &mut DerReader) -> Result<NameAttribute, DerError> {
@@ -163,7 +163,7 @@ fn parse_atv(r: &mut DerReader) -> Result<NameAttribute, DerError> {
     sub.expect_end()?;
 
     let kind = kind_from_oid(&oid);
-    Ok(NameAttribute { kind: kind, value: value })
+    Result.Ok(NameAttribute { kind: kind, value: value })
 }
 
 /// Decode the `AttributeValue` (`ANY`) as a DirectoryString. WebPKI
@@ -174,7 +174,7 @@ fn parse_atv(r: &mut DerReader) -> Result<NameAttribute, DerError> {
 /// for root-store compatibility.
 fn read_directory_string(r: &mut DerReader) -> Result<Text, DerError> {
     if r.is_at_end() {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.MalformedDer,
             position: 0,
             message: "AttributeValue empty",
@@ -183,7 +183,7 @@ fn read_directory_string(r: &mut DerReader) -> Result<Text, DerError> {
     let tag = r.peek_tag()?;
     let is_universal = match tag.class_ { TagClass.Universal => true, _ => false };
     if !is_universal {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.UnexpectedTag,
             position: 0,
             message: "AttributeValue not a universal tag",
@@ -197,26 +197,26 @@ fn read_directory_string(r: &mut DerReader) -> Result<Text, DerError> {
             // Treat as Latin-1 (T.61 is ISO-8859-1 in practice for WebPKI).
             let len = r.read_universal(der.TAG_T61_STRING, false)?;
             let bytes = r.take_bytes(len)?;
-            Ok(Text.from_utf8_lossy(bytes.as_slice()))
+            Result.Ok(Text.from_utf8_lossy(bytes.as_slice()))
         },
         n if n == der.TAG_VISIBLE_STRING => {
             let len = r.read_universal(der.TAG_VISIBLE_STRING, false)?;
             let bytes = r.take_bytes(len)?;
-            Ok(Text.from_utf8_lossy(bytes.as_slice()))
+            Result.Ok(Text.from_utf8_lossy(bytes.as_slice()))
         },
         n if n == der.TAG_UNIVERSAL_STRING => {
             // UCS-4 big-endian → UTF-8
             let len = r.read_universal(der.TAG_UNIVERSAL_STRING, false)?;
             let bytes = r.take_bytes(len)?;
-            Ok(decode_ucs4_be(bytes.as_slice()))
+            Result.Ok(decode_ucs4_be(bytes.as_slice()))
         },
         n if n == der.TAG_BMP_STRING => {
             // UCS-2 big-endian → UTF-8
             let len = r.read_universal(der.TAG_BMP_STRING, false)?;
             let bytes = r.take_bytes(len)?;
-            Ok(decode_ucs2_be(bytes.as_slice()))
+            Result.Ok(decode_ucs2_be(bytes.as_slice()))
         },
-        _ => Err(DerError {
+        _ => Result.Err(DerError {
             kind: DerErrorKind.UnexpectedTag,
             position: 0,
             message: "AttributeValue not a DirectoryString choice",
@@ -266,14 +266,14 @@ implement DistinguishedName {
             while j < rdn.attributes.len() {
                 let a = &rdn.attributes[j];
                 match &a.kind {
-                    NameAttributeKind.CommonName => return Some(a.value.clone()),
+                    NameAttributeKind.CommonName => return Maybe.Some(a.value.clone()),
                     _ => {},
                 }
                 j = j + 1;
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Return the first Organization attribute, if present.
@@ -285,14 +285,14 @@ implement DistinguishedName {
             while j < rdn.attributes.len() {
                 let a = &rdn.attributes[j];
                 match &a.kind {
-                    NameAttributeKind.Organization => return Some(a.value.clone()),
+                    NameAttributeKind.Organization => return Maybe.Some(a.value.clone()),
                     _ => {},
                 }
                 j = j + 1;
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 }
 

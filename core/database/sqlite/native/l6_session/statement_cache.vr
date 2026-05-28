@@ -129,22 +129,22 @@ implement StatementCache {
     /// matching the live schema generation.  O(1).
     public fn contains_fresh(&self, sql: &Text, schema: &SchemaCache) -> Bool {
         match self.entries.get(sql) {
-            Some(slot) => slot.schema_generation == schema.gen(),
-            None       => false,
+            Maybe.Some(slot) => slot.schema_generation == schema.gen(),
+            Maybe.None       => false,
         }
     }
 
-    /// Look up `sql`.  Returns `Some(program_handle)` on hit (where
+    /// Look up `sql`.  Returns `Maybe.Some(program_handle)` on hit (where
     /// `entry.schema_generation == schema.gen()`).  O(1) lookup +
     /// O(1) Heap clone (pointer copy).  Updates last_access_tick
     /// for LRU bookkeeping.
     public fn lookup(&mut self, sql: &Text, schema: &SchemaCache) -> Maybe<Heap<VdbeProgram>> {
         let cur_gen = schema.gen();
         match self.entries.get(sql) {
-            Some(slot) => {
+            Maybe.Some(slot) => {
                 if slot.schema_generation != cur_gen {
                     self.miss_count = self.miss_count + 1;
-                    return None;
+                    return Maybe.None;
                 }
                 self.access_clock = self.access_clock + 1;
                 let program_clone = slot.program.clone();
@@ -157,11 +157,11 @@ implement StatementCache {
                     last_access_tick: new_tick,
                 });
                 self.hit_count = self.hit_count + 1;
-                Some(program_clone)
+                Maybe.Some(program_clone)
             }
-            None => {
+            Maybe.None => {
                 self.miss_count = self.miss_count + 1;
-                None
+                Maybe.None
             }
         }
     }
@@ -224,8 +224,8 @@ implement StatementCache {
 /// the rebuild is cheap.
 fn evict_lru_entry(cache: &mut StatementCache) {
     let lru_key = match find_lru_key(&cache.entries) {
-        Some(k) => k,
-        None    => return,
+        Maybe.Some(k) => k,
+        Maybe.None    => return,
     };
     cache.entries = rebuild_excluding(&cache.entries, &lru_key);
     cache.eviction_count = cache.eviction_count + 1;
@@ -244,10 +244,10 @@ fn rebuild_excluding(
     while i < keys.len() {
         if keys[i] != drop_key {
             match src.get(&keys[i]) {
-                Some(slot) => {
+                Maybe.Some(slot) => {
                     out.insert(keys[i].clone(), clone_slot(slot));
                 }
-                None => {}
+                Maybe.None => {}
             }
         }
         i = i + 1;
@@ -263,29 +263,29 @@ fn clone_slot(src: &CachedSlot) -> CachedSlot {
     }
 }
 
-/// Pure scan — returns the SQL key of the LRU entry, or None if
+/// Pure scan — returns the SQL key of the LRU entry, or Maybe.None if
 /// the map is empty.  Reads only `&Map`; never mutates.
 fn find_lru_key(entries: &Map<Text, CachedSlot>) -> Maybe<Text> {
     let n = entries.len();
-    if n == 0 { return None; }
+    if n == 0 { return Maybe.None; }
     let keys = entries.keys();
     let mut lru_key: Text = keys[0].clone();
     let mut lru_tick: Int = match entries.get(&keys[0]) {
-        Some(slot) => slot.last_access_tick,
-        None       => 0,
+        Maybe.Some(slot) => slot.last_access_tick,
+        Maybe.None       => 0,
     };
     let mut i: Int = 1;
     while i < keys.len() {
         match entries.get(&keys[i]) {
-            Some(slot) => {
+            Maybe.Some(slot) => {
                 if slot.last_access_tick < lru_tick {
                     lru_tick = slot.last_access_tick;
                     lru_key = keys[i].clone();
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
         i = i + 1;
     }
-    Some(lru_key)
+    Maybe.Some(lru_key)
 }

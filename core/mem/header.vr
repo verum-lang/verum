@@ -333,8 +333,8 @@ implement AllocationHeader {
     ///
 
     /// Returns:
-    ///  - `Some(new_gen)` if this thread successfully revoked.
-    ///  - `None` if the generation no longer matches
+    ///  - `Maybe.Some(new_gen)` if this thread successfully revoked.
+    ///  - `Maybe.None` if the generation no longer matches
     ///  `expected_gen` (someone else revoked first; caller
     ///  should report `already_revoked`).
     ///
@@ -373,7 +373,7 @@ implement AllocationHeader {
         );
         if !swapped {
             // Snapshot stale → another thread revoked first.
-            return None;
+            return Maybe.None;
         }
 
         // If we crossed the wraparound boundary, bump the epoch
@@ -407,7 +407,7 @@ implement AllocationHeader {
         let caps = self.load_capabilities();
         record_revoke(self.address(), expected_gen, new_gen, caps, 0);
 
-        Some(new_gen)
+        Maybe.Some(new_gen)
     }
 
     /// Increment generation and return old value.
@@ -696,7 +696,7 @@ implement AllocationHeader {
     }
 
     /// Validate that a reference's generation/epoch match this header.
-    /// Returns Ok(()) if valid, Err with validation error if not.
+    /// Returns Result.Ok(()) if valid, Err with validation error if not.
     @inline
     public fn validate_reference(&self, expected_gen: UInt32, expected_epoch: UInt16) -> Result<(), MemValidationError> {
         let actual_gen = self.load_generation();
@@ -711,7 +711,7 @@ implement AllocationHeader {
     }
 
     /// Fast validation using combined atomic load.
-    /// Returns Ok(()) if valid, Err with validation error if not.
+    /// Returns Result.Ok(()) if valid, Err with validation error if not.
     @inline
     public unsafe fn validate_reference_fast(&self, expected_gen: UInt32, expected_epoch: UInt16) -> Result<(), MemValidationError> {
         let (actual_gen, actual_epoch) = self.load_generation_epoch_combined();

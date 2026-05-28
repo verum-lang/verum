@@ -68,7 +68,7 @@ mount core.time.duration.{Duration};
 
 public type IdleTimeoutTracker is {
     /// Effective timeout — min of local and peer advertisements.
-    /// `None` means "idle timeout disabled" (both sides set 0).
+    /// `Maybe.None` means "idle timeout disabled" (both sides set 0).
     effective:        Maybe<Duration>,
     /// Extra reordering buffer (typically 3 × PTO). Added to
     /// `effective` before firing.
@@ -158,8 +158,8 @@ implement IdleTimeoutTracker {
     /// Query at the next tick.
     public fn tick(&self, now: Instant) -> TickResult {
         match &self.effective {
-            None => TickResult.Active(Duration.from_secs(3600)),
-            Some(limit) => {
+            Maybe.None => TickResult.Active(Duration.from_secs(3600)),
+            Maybe.Some(limit) => {
                 let deadline_duration = limit.saturating_add(self.pto_buffer.clone());
                 let elapsed = now.duration_since(self.last_activity.clone())
                     .unwrap_or_else(|| Duration.from_millis(0));
@@ -173,12 +173,12 @@ implement IdleTimeoutTracker {
     }
 
     /// Absolute deadline — caller registers this with a timer wheel.
-    /// Returns `None` both when the timeout is disabled AND when
+    /// Returns `Maybe.None` both when the timeout is disabled AND when
     /// the deadline would overflow the Instant representation.
     public fn deadline(&self) -> Maybe<Instant> {
         match &self.effective {
-            None => None,
-            Some(limit) => {
+            Maybe.None => Maybe.None,
+            Maybe.Some(limit) => {
                 let total = limit.saturating_add(self.pto_buffer.clone());
                 self.last_activity.checked_add(total)
             },
@@ -188,8 +188,8 @@ implement IdleTimeoutTracker {
     /// Effective timeout value (for introspection / stats).
     public fn effective_ms(&self) -> Maybe<UInt64> {
         match &self.effective {
-            Some(d) => Some(d.as_millis() as UInt64),
-            None    => None,
+            Maybe.Some(d) => Maybe.Some(d.as_millis() as UInt64),
+            Maybe.None    => Maybe.None,
         }
     }
 }
@@ -199,7 +199,7 @@ implement IdleTimeoutTracker {
 // =============================================================================
 
 fn effective_timeout(local_ms: UInt64, peer_ms: UInt64) -> Maybe<Duration> {
-    if local_ms == 0_u64 && peer_ms == 0_u64 { return None; }
+    if local_ms == 0_u64 && peer_ms == 0_u64 { return Maybe.None; }
     let eff = if local_ms == 0_u64 {
         peer_ms
     } else if peer_ms == 0_u64 {
@@ -209,5 +209,5 @@ fn effective_timeout(local_ms: UInt64, peer_ms: UInt64) -> Maybe<Duration> {
     } else {
         peer_ms
     };
-    Some(Duration.from_millis(eff as Int))
+    Maybe.Some(Duration.from_millis(eff as Int))
 }

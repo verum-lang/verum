@@ -91,7 +91,7 @@ fn outcome_empty() -> ApplyOutcome {
     ApplyOutcome {
         updated_pages: List.new(),
         freed_pages: List.new(),
-        ripple: None,
+        ripple: Maybe.None,
     }
 }
 
@@ -105,7 +105,7 @@ public fn apply_balance_decision(
     ctx: &BalanceContext,
 ) -> Result<ApplyOutcome, BalanceError> {
     match decision {
-        NoChange => Ok(outcome_empty()),
+        NoChange => Result.Ok(outcome_empty()),
         Split(page, left_cells, right_cells, separator_cell, parent_cell_idx) => {
             apply_split(pages_in, page, left_cells, right_cells, separator_cell, parent_cell_idx, ctx)
         }
@@ -134,11 +134,11 @@ fn apply_split(
     ctx: &BalanceContext,
 ) -> Result<ApplyOutcome, BalanceError> {
     if left_cells <= 0 || right_cells <= 0 {
-        return Err(InvalidInput("split: left/right cell counts must be positive".clone()));
+        return Result.Err(InvalidInput("split: left/right cell counts must be positive".clone()));
     }
     let donor_buf = match find_page(pages_in, donor_page) {
-        Some(p) => p,
-        None    => return Err(InvalidInput("split: donor page missing".clone())),
+        Maybe.Some(p) => p,
+        Maybe.None    => return Result.Err(InvalidInput("split: donor page missing".clone())),
     };
 
     // Materialize the donor.  db_header_offset = 0 (root-page
@@ -146,13 +146,13 @@ fn apply_split(
     // balance layer, we treat all pages as "non-root"; root
     // splits go through GrowRoot first).
     let donor_mp = match materialize_page(&donor_buf.bytes, 0) {
-        Ok(mp) => mp,
-        Err(_) => return Err(InvalidInput("split: donor materialize failed".clone())),
+        Result.Ok(mp) => mp,
+        Result.Err(_) => return Result.Err(InvalidInput("split: donor materialize failed".clone())),
     };
 
     let total = donor_mp.cell_count();
     if left_cells + right_cells > total {
-        return Err(InvalidInput(
+        return Result.Err(InvalidInput(
             "split: left+right exceeds donor cell count".clone(),
         ));
     }
@@ -162,12 +162,12 @@ fn apply_split(
 
     // Reserialize.
     let left_bytes = match serialize_page(&left_mp, ctx.page_size) {
-        Ok(b)  => b,
-        Err(_) => return Err(InvalidInput("split: left reserialize overflowed".clone())),
+        Result.Ok(b)  => b,
+        Result.Err(_) => return Result.Err(InvalidInput("split: left reserialize overflowed".clone())),
     };
     let right_bytes = match serialize_page(&right_mp, ctx.page_size) {
-        Ok(b)  => b,
-        Err(_) => return Err(InvalidInput("split: right reserialize overflowed".clone())),
+        Result.Ok(b)  => b,
+        Result.Err(_) => return Result.Err(InvalidInput("split: right reserialize overflowed".clone())),
     };
 
     // Sibling page number is allocated by the caller (pager) and
@@ -181,10 +181,10 @@ fn apply_split(
     updated.push(page_buf(donor_buf.page_no, left_bytes));
     updated.push(page_buf(sibling_page_no, right_bytes));
 
-    Ok(ApplyOutcome {
+    Result.Ok(ApplyOutcome {
         updated_pages: updated,
         freed_pages: List.new(),
-        ripple: Some(RippleHint {
+        ripple: Maybe.Some(RippleHint {
             parent_page: 0,
             parent_cell_idx: parent_cell_idx,
             parent_grew: true,
@@ -240,21 +240,21 @@ fn apply_merge(
     ctx: &BalanceContext,
 ) -> Result<ApplyOutcome, BalanceError> {
     let left_buf = match find_page(pages_in, left_page) {
-        Some(p) => p,
-        None    => return Err(InvalidInput("merge: left page missing".clone())),
+        Maybe.Some(p) => p,
+        Maybe.None    => return Result.Err(InvalidInput("merge: left page missing".clone())),
     };
     let right_buf = match find_page(pages_in, right_page) {
-        Some(p) => p,
-        None    => return Err(InvalidInput("merge: right page missing".clone())),
+        Maybe.Some(p) => p,
+        Maybe.None    => return Result.Err(InvalidInput("merge: right page missing".clone())),
     };
 
     let mut left_mp = match materialize_page(&left_buf.bytes, 0) {
-        Ok(mp) => mp,
-        Err(_) => return Err(InvalidInput("merge: left materialize failed".clone())),
+        Result.Ok(mp) => mp,
+        Result.Err(_) => return Result.Err(InvalidInput("merge: left materialize failed".clone())),
     };
     let right_mp = match materialize_page(&right_buf.bytes, 0) {
-        Ok(mp) => mp,
-        Err(_) => return Err(InvalidInput("merge: right materialize failed".clone())),
+        Result.Ok(mp) => mp,
+        Result.Err(_) => return Result.Err(InvalidInput("merge: right materialize failed".clone())),
     };
 
     // Append every right cell to left.
@@ -267,8 +267,8 @@ fn apply_merge(
     left_mp.set_right_ptr(right_mp.right_ptr);
 
     let merged_bytes = match serialize_page(&left_mp, ctx.page_size) {
-        Ok(b)  => b,
-        Err(_) => return Err(OverCapacity),
+        Result.Ok(b)  => b,
+        Result.Err(_) => return Result.Err(OverCapacity),
     };
 
     let mut updated: List<PageBuf> = List.new();
@@ -277,10 +277,10 @@ fn apply_merge(
     let mut freed: List<Int> = List.new();
     freed.push(right_page);
 
-    Ok(ApplyOutcome {
+    Result.Ok(ApplyOutcome {
         updated_pages: updated,
         freed_pages: freed,
-        ripple: Some(RippleHint {
+        ripple: Maybe.Some(RippleHint {
             parent_page: 0,
             parent_cell_idx: parent_cell_idx,
             parent_grew: false,
@@ -301,31 +301,31 @@ fn apply_rotate(
     ctx: &BalanceContext,
 ) -> Result<ApplyOutcome, BalanceError> {
     if count == 0 {
-        return Ok(outcome_empty());
+        return Result.Ok(outcome_empty());
     }
     let donor_buf = match find_page(pages_in, donor_page) {
-        Some(p) => p,
-        None    => return Err(InvalidInput("rotate: donor missing".clone())),
+        Maybe.Some(p) => p,
+        Maybe.None    => return Result.Err(InvalidInput("rotate: donor missing".clone())),
     };
     let recipient_buf = match find_page(pages_in, recipient_page) {
-        Some(p) => p,
-        None    => return Err(InvalidInput("rotate: recipient missing".clone())),
+        Maybe.Some(p) => p,
+        Maybe.None    => return Result.Err(InvalidInput("rotate: recipient missing".clone())),
     };
 
     let mut donor_mp = match materialize_page(&donor_buf.bytes, 0) {
-        Ok(mp) => mp,
-        Err(_) => return Err(InvalidInput("rotate: donor materialize failed".clone())),
+        Result.Ok(mp) => mp,
+        Result.Err(_) => return Result.Err(InvalidInput("rotate: donor materialize failed".clone())),
     };
     let mut recipient_mp = match materialize_page(&recipient_buf.bytes, 0) {
-        Ok(mp) => mp,
-        Err(_) => return Err(InvalidInput("rotate: recipient materialize failed".clone())),
+        Result.Ok(mp) => mp,
+        Result.Err(_) => return Result.Err(InvalidInput("rotate: recipient materialize failed".clone())),
     };
 
     if count > 0 {
         // Move donor's last `count` cells to recipient's left.
         let n = donor_mp.cell_count();
         if count > n {
-            return Err(InvalidInput("rotate: count > donor cell_count".clone()));
+            return Result.Err(InvalidInput("rotate: count > donor cell_count".clone()));
         }
         let mut moved: List<MaterializedCell> = List.new();
         let mut i: Int = n - count;
@@ -359,7 +359,7 @@ fn apply_rotate(
         let take = -count;
         let n = donor_mp.cell_count();
         if take > n {
-            return Err(InvalidInput("rotate: take > donor cell_count".clone()));
+            return Result.Err(InvalidInput("rotate: take > donor cell_count".clone()));
         }
         let mut moved: List<MaterializedCell> = List.new();
         let mut i: Int = 0;
@@ -383,22 +383,22 @@ fn apply_rotate(
     }
 
     let donor_bytes = match serialize_page(&donor_mp, ctx.page_size) {
-        Ok(b)  => b,
-        Err(_) => return Err(OverCapacity),
+        Result.Ok(b)  => b,
+        Result.Err(_) => return Result.Err(OverCapacity),
     };
     let recipient_bytes = match serialize_page(&recipient_mp, ctx.page_size) {
-        Ok(b)  => b,
-        Err(_) => return Err(OverCapacity),
+        Result.Ok(b)  => b,
+        Result.Err(_) => return Result.Err(OverCapacity),
     };
 
     let _ = parent_cell_idx;
     let mut updated: List<PageBuf> = List.new();
     updated.push(page_buf(donor_page, donor_bytes));
     updated.push(page_buf(recipient_page, recipient_bytes));
-    Ok(ApplyOutcome {
+    Result.Ok(ApplyOutcome {
         updated_pages: updated,
         freed_pages: List.new(),
-        ripple: None,
+        ripple: Maybe.None,
     })
 }
 
@@ -413,16 +413,16 @@ fn apply_grow_root(
     ctx: &BalanceContext,
 ) -> Result<ApplyOutcome, BalanceError> {
     let old_buf = match find_page(pages_in, old_root) {
-        Some(p) => p,
-        None    => return Err(InvalidInput("grow_root: old_root missing".clone())),
+        Maybe.Some(p) => p,
+        Maybe.None    => return Result.Err(InvalidInput("grow_root: old_root missing".clone())),
     };
     if new_root <= 0 {
-        return Err(InvalidInput("grow_root: new_root must be > 0".clone()));
+        return Result.Err(InvalidInput("grow_root: new_root must be > 0".clone()));
     }
 
     let old_mp = match materialize_page(&old_buf.bytes, 0) {
-        Ok(mp) => mp,
-        Err(_) => return Err(InvalidInput("grow_root: old materialize failed".clone())),
+        Result.Ok(mp) => mp,
+        Result.Err(_) => return Result.Err(InvalidInput("grow_root: old materialize failed".clone())),
     };
 
     // Old root's cells migrate to new_root location verbatim — we
@@ -430,8 +430,8 @@ fn apply_grow_root(
     // BTree's internal `root_page` field is updated by the caller
     // (it's outside the page-level concern).
     let migrated_bytes = match serialize_page(&old_mp, ctx.page_size) {
-        Ok(b)  => b,
-        Err(_) => return Err(OverCapacity),
+        Result.Ok(b)  => b,
+        Result.Err(_) => return Result.Err(OverCapacity),
     };
 
     // The old_root location becomes a fresh interior page with
@@ -454,18 +454,18 @@ fn apply_grow_root(
     let _ = fresh_root.cells;       // empty; right_ptr holds the only child
 
     let fresh_bytes = match serialize_page(&fresh_root, ctx.page_size) {
-        Ok(b)  => b,
-        Err(_) => return Err(OverCapacity),
+        Result.Ok(b)  => b,
+        Result.Err(_) => return Result.Err(OverCapacity),
     };
 
     let mut updated: List<PageBuf> = List.new();
     updated.push(page_buf(old_root, fresh_bytes));   // old_root location → new root header
     updated.push(page_buf(new_root, migrated_bytes)); // migrated content under new_root_page
 
-    Ok(ApplyOutcome {
+    Result.Ok(ApplyOutcome {
         updated_pages: updated,
         freed_pages: List.new(),
-        ripple: Some(RippleHint {
+        ripple: Maybe.Some(RippleHint {
             parent_page: old_root,
             parent_cell_idx: 0,
             parent_grew: true,
@@ -493,25 +493,25 @@ fn apply_shrink_root(
 ) -> Result<ApplyOutcome, BalanceError> {
     let _ = new_root;
     let old_buf = match find_page(pages_in, old_root) {
-        Some(p) => p,
-        None    => return Err(InvalidInput("shrink_root: old_root missing".clone())),
+        Maybe.Some(p) => p,
+        Maybe.None    => return Result.Err(InvalidInput("shrink_root: old_root missing".clone())),
     };
     // pages_in[1] should be the only-child whose cells we promote.
     if pages_in.len() < 2 {
-        return Err(InvalidInput("shrink_root: only-child page not supplied".clone()));
+        return Result.Err(InvalidInput("shrink_root: only-child page not supplied".clone()));
     }
     let child_buf = &pages_in[1];
 
     let child_mp = match materialize_page(&child_buf.bytes, 0) {
-        Ok(mp) => mp,
-        Err(_) => return Err(InvalidInput("shrink_root: child materialize failed".clone())),
+        Result.Ok(mp) => mp,
+        Result.Err(_) => return Result.Err(InvalidInput("shrink_root: child materialize failed".clone())),
     };
 
     // The child's cells become the new root content — same bytes
     // under old_root's page number.
     let promoted_bytes = match serialize_page(&child_mp, ctx.page_size) {
-        Ok(b)  => b,
-        Err(_) => return Err(OverCapacity),
+        Result.Ok(b)  => b,
+        Result.Err(_) => return Result.Err(OverCapacity),
     };
 
     let mut updated: List<PageBuf> = List.new();
@@ -521,10 +521,10 @@ fn apply_shrink_root(
     freed.push(child_buf.page_no);
 
     let _ = old_buf;
-    Ok(ApplyOutcome {
+    Result.Ok(ApplyOutcome {
         updated_pages: updated,
         freed_pages: freed,
-        ripple: None,
+        ripple: Maybe.None,
     })
 }
 
@@ -536,11 +536,11 @@ fn find_page(pages: &List<PageBuf>, target: Int) -> Maybe<PageBuf> {
     let mut i: Int = 0;
     while i < pages.len() {
         if pages[i].page_no == target {
-            return Some(page_buf(pages[i].page_no, clone_bytes(&pages[i].bytes)));
+            return Maybe.Some(page_buf(pages[i].page_no, clone_bytes(&pages[i].bytes)));
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn clone_bytes(src: &List<Byte>) -> List<Byte> {

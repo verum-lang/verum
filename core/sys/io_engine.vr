@@ -160,8 +160,8 @@ implement EngineDuration {
         let a: UInt64 = self.0;
         let b: UInt64 = other.0;
         match a.checked_add(b) {
-            Some(result) => EngineDuration(result),
-            None => EngineDuration(UInt64.MAX),
+            Maybe.Some(result) => EngineDuration(result),
+            Maybe.None => EngineDuration(UInt64.MAX),
         }
     }
 
@@ -214,13 +214,13 @@ implement Fd {
         self.0 >= 0
     }
 
-    /// Try to convert to ValidFd, returns None if invalid
+    /// Try to convert to ValidFd, returns Maybe.None if invalid
     @inline
     public pure fn try_as_valid(&self) -> Maybe<ValidFd> {
         if self.0 >= 0 {
-            Some(self as ValidFd)
+            Maybe.Some(self as ValidFd)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -404,9 +404,9 @@ implement CompletionResult {
     @inline
     public fn to_result(&self) -> Result<BytesTransferred, EngineIoError> {
         if self.result >= 0 {
-            Ok(self.result as UInt32)
+            Result.Ok(self.result as UInt32)
         } else {
-            Err(EngineIoError.from_errno(-self.result))
+            Result.Err(EngineIoError.from_errno(-self.result))
         }
     }
 
@@ -678,8 +678,8 @@ implement EngineIoError {
     @inline
     public pure fn raw_code(&self) -> Maybe<Int32> {
         match self {
-            Other(_) => None,
-            _ => None,
+            Other(_) => Maybe.None,
+            _ => Maybe.None,
         }
     }
 }
@@ -749,9 +749,9 @@ public type IOEngine is protocol {
     fn submit_one(&mut self, op: CompletionOp, user_data: UInt64) -> Result<(), EngineIoError> {
         let count = self.submit(&[(op, user_data)])?;
         if count == 1 {
-            Ok(())
+            Result.Ok(())
         } else {
-            Err(SubmissionQueueFull)
+            Result.Err(SubmissionQueueFull)
         }
     }
 
@@ -768,7 +768,7 @@ public type IOEngine is protocol {
     /// # Arguments
     /// * `results` - Buffer to store completion results
     /// * `min_complete` - Minimum completions to wait for (0 = poll)
-    /// * `timeout` - Optional timeout (None = wait indefinitely)
+    /// * `timeout` - Optional timeout (Maybe.None = wait indefinitely)
     ///
 
     /// # Errors
@@ -793,7 +793,7 @@ public type IOEngine is protocol {
     /// Equivalent to wait() with min_complete=0 and timeout=0.
     /// Returns immediately with any available completions.
     fn poll(&mut self, results: &mut [CompletionResult]) -> Result<Int{>= 0}, EngineIoError> {
-        self.wait(results, 0, Some(EngineDuration.ZERO))
+        self.wait(results, 0, Maybe.Some(EngineDuration.ZERO))
     }
 
     /// Wake up a blocked wait() from another thread.
@@ -861,11 +861,11 @@ public fn create_io_engine(sq_entries: UInt32) -> Result<some E: IOEngine, Engin
 
     // Try io_uring first (Linux 5.1+)
     match IoUringDriver.new(sq_entries) {
-        Ok(driver) => Ok(IoDriver.Uring(driver)),
-        Err(_) => {
+        Result.Ok(driver) => Result.Ok(IoDriver.Uring(driver)),
+        Result.Err(_) => {
             // Fall back to epoll
             let epoll = EpollDriver.new()?;
-            Ok(IoDriver.Epoll(epoll))
+            Result.Ok(IoDriver.Epoll(epoll))
         }
     }
 }

@@ -114,7 +114,7 @@ implement SystemTime {
     /// Get the duration since the Unix epoch.
     ///
 
-    /// Returns None if the time is before the epoch (rare, but possible
+    /// Returns Maybe.None if the time is before the epoch (rare, but possible
     /// on misconfigured systems).
     @inline(always)
     public fn duration_since_epoch(&self) -> Duration {
@@ -125,9 +125,9 @@ implement SystemTime {
     ///
 
     /// Returns:
-    ///   - `Ok(d)` when `self` is later than `earlier` (or equal).
-    ///   - `Err(WentBackwards(gap))` when `earlier` is later than `self`.
-    ///   - `Err(Overflow)` when either secs value puts the nanosecond
+    ///   - `Result.Ok(d)` when `self` is later than `earlier` (or equal).
+    ///   - `Result.Err(WentBackwards(gap))` when `earlier` is later than `self`.
+    ///   - `Result.Err(Overflow)` when either secs value puts the nanosecond
     ///     product outside `Int64` range (year ≈ 2262 boundary).
     public fn duration_since(&self, earlier: &SystemTime) -> Result<Duration, SystemTimeError> {
         // Year-2262 overflow guard: `secs * NANOS_PER_SEC` must fit in Int64.
@@ -135,15 +135,15 @@ implement SystemTime {
         let max_safe_secs: Int = 9_223_372_036;
         if self.secs > max_safe_secs || self.secs < -max_safe_secs
             || earlier.secs > max_safe_secs || earlier.secs < -max_safe_secs {
-            return Err(SystemTimeError.Overflow);
+            return Result.Err(SystemTimeError.Overflow);
         }
         let self_nanos = self.secs * NANOS_PER_SEC + self.nanos;
         let earlier_nanos = earlier.secs * NANOS_PER_SEC + earlier.nanos;
 
         if self_nanos >= earlier_nanos {
-            Ok(Duration.from_nanos(self_nanos - earlier_nanos))
+            Result.Ok(Duration.from_nanos(self_nanos - earlier_nanos))
         } else {
-            Err(SystemTimeError.WentBackwards(Duration.from_nanos(earlier_nanos - self_nanos)))
+            Result.Err(SystemTimeError.WentBackwards(Duration.from_nanos(earlier_nanos - self_nanos)))
         }
     }
 
@@ -164,9 +164,9 @@ implement SystemTime {
         let new_secs = self.secs + duration.as_secs() + extra_secs;
         if new_secs < self.secs {
             // Overflow
-            None
+            Maybe.None
         } else {
-            Some(SystemTime { secs: new_secs, nanos: remaining_nanos })
+            Maybe.Some(SystemTime { secs: new_secs, nanos: remaining_nanos })
         }
     }
 
@@ -176,10 +176,10 @@ implement SystemTime {
         let dur_nanos = duration.as_nanos();
 
         if dur_nanos > total_nanos {
-            None
+            Maybe.None
         } else {
             let res_nanos = total_nanos - dur_nanos;
-            Some(SystemTime {
+            Maybe.Some(SystemTime {
                 secs: res_nanos / NANOS_PER_SEC,
                 nanos: res_nanos % NANOS_PER_SEC,
             })
@@ -319,7 +319,7 @@ implement Ord for SystemTime {
 
 implement PartialOrd for SystemTime {
     fn partial_cmp(&self, other: &SystemTime) -> Maybe<Ordering> {
-        Some(self.cmp(other))
+        Maybe.Some(self.cmp(other))
     }
 }
 

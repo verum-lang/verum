@@ -4,7 +4,7 @@ module sys.windows.ntstatus;
 // sys/windows/ntstatus.vr - NT Status Codes
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None
+// Dependencies: Maybe.None
 // Platform: Windows (x86_64)
 // =============================================================================
 //

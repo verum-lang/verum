@@ -99,11 +99,11 @@ implement AttributeSet {
         let mut i = 0;
         while i < self.entries.len() {
             if self.entries[i].0 == *key {
-                return Some(&self.entries[i].1);
+                return Maybe.Some(&self.entries[i].1);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Insert or replace. Silently drops if over ATTRIBUTE_COUNT_LIMIT.

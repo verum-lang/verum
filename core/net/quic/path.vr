@@ -131,7 +131,7 @@ implement QuicPath {
         } else {
             PathState.Unvalidated { received_bytes: 0_u64, sent_bytes: 0_u64 }
         };
-        QuicPath { local: local, remote: remote, state: state, last_rtt: None }
+        QuicPath { local: local, remote: remote, state: state, last_rtt: Maybe.None }
     }
 
     /// Can we send `n` bytes under the current anti-amplification
@@ -139,17 +139,17 @@ implement QuicPath {
     /// exceed the 3× cap while unvalidated.
     public fn can_send(&self, n: UInt64) -> Result<(), PathError> {
         match &self.state {
-            PathState.Validated => Ok(()),
-            PathState.Validating {..} => Ok(()),
+            PathState.Validated => Result.Ok(()),
+            PathState.Validating {..} => Result.Ok(()),
             PathState.Unvalidated { received_bytes, sent_bytes } => {
                 let budget = ANTI_AMPLIFICATION_FACTOR * (*received_bytes);
                 if (*sent_bytes) + n > budget {
-                    Err(PathError.AmplificationLimitExceeded)
+                    Result.Err(PathError.AmplificationLimitExceeded)
                 } else {
-                    Ok(())
+                    Result.Ok(())
                 }
             },
-            PathState.Failed => Err(PathError.ChallengeTimeout),
+            PathState.Failed => Result.Err(PathError.ChallengeTimeout),
         }
     }
 
@@ -189,9 +189,9 @@ implement QuicPath {
         challenge
     }
 
-    /// Peer sent a PATH_RESPONSE. Returns Ok(true) if the response
+    /// Peer sent a PATH_RESPONSE. Returns Result.Ok(true) if the response
     /// echoes our pending challenge and the path transitions to
-    /// Validated; Ok(false) if the response is stale or path wasn't
+    /// Validated; Result.Ok(false) if the response is stale or path wasn't
     /// being validated; Err if genuinely malformed (response on a
     /// Failed path).
     public fn on_path_response(&mut self, data: &[Byte; 8], now: Instant) -> Result<Bool, PathError> {
@@ -203,16 +203,16 @@ implement QuicPath {
                     if data[i] != challenge[i] { matches = false; break; }
                     i = i + 1;
                 }
-                if !matches { return Ok(false); }
+                if !matches { return Result.Ok(false); }
                 let rtt = now.duration_since(sent_at.clone())
                     .unwrap_or_else(|| Duration.from_micros(0));
-                self.last_rtt = Some(rtt);
+                self.last_rtt = Maybe.Some(rtt);
                 self.state = PathState.Validated;
-                Ok(true)
+                Result.Ok(true)
             },
-            PathState.Validated => Ok(false),
-            PathState.Unvalidated {..} => Ok(false),
-            PathState.Failed => Err(PathError.UnexpectedResponse),
+            PathState.Validated => Result.Ok(false),
+            PathState.Unvalidated {..} => Result.Ok(false),
+            PathState.Failed => Result.Err(PathError.UnexpectedResponse),
         }
     }
 
@@ -288,13 +288,13 @@ public type PathManager is {
     /// Currently-active path. Writes go here; reads may arrive on
     /// `standby` when peer migration is in progress.
     active:  QuicPath,
-    /// Candidate migration target; None when no migration in flight.
+    /// Candidate migration target; Maybe.None when no migration in flight.
     standby: Maybe<QuicPath>,
 };
 
 implement PathManager {
     public fn new(initial: QuicPath) -> PathManager {
-        PathManager { active: initial, standby: None }
+        PathManager { active: initial, standby: Maybe.None }
     }
 
     /// Peer sent a packet from an unexpected 4-tuple → start a
@@ -302,29 +302,29 @@ implement PathManager {
     /// from the current standby, replace it.
     public fn on_new_remote(&mut self, local: SocketAddr, remote: SocketAddr) {
         let replace = match &self.standby {
-            Some(s) => !addr_eq(&s.remote, &remote),
-            None    => true,
+            Maybe.Some(s) => !addr_eq(&s.remote, &remote),
+            Maybe.None    => true,
         };
         if replace {
             // Server MUST start unvalidated (§8.1); client considers
             // peer migration path unvalidated too until PATH_CHALLENGE
             // succeeds.
-            self.standby = Some(QuicPath.new(local, remote, false));
+            self.standby = Maybe.Some(QuicPath.new(local, remote, false));
         }
     }
 
     /// Standby path validated → promote it as active; retire old.
     public fn promote_standby(&mut self) -> Maybe<SocketAddr> {
         match self.standby.clone() {
-            Some(s) => {
+            Maybe.Some(s) => {
                 if s.is_validated() {
                     let retired_remote = self.active.remote.clone();
                     self.active = s;
-                    self.standby = None;
-                    Some(retired_remote)
-                } else { None }
+                    self.standby = Maybe.None;
+                    Maybe.Some(retired_remote)
+                } else { Maybe.None }
             },
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -332,8 +332,8 @@ implement PathManager {
     public fn active_mut(&mut self) -> &mut QuicPath { &mut self.active }
     public fn standby_mut(&mut self) -> Maybe<&mut QuicPath> {
         match &mut self.standby {
-            Some(s) => Some(s),
-            None => None,
+            Maybe.Some(s) => Maybe.Some(s),
+            Maybe.None => Maybe.None,
         }
     }
 }

@@ -157,7 +157,7 @@ public fn accept_retry(
 
     // Verify integrity tag.
     if !verify_retry_integrity_tag(pseudo.as_slice(), &retry.integrity_tag) {
-        return Err(RetryError.IntegrityTagMismatch);
+        return Result.Err(RetryError.IntegrityTagMismatch);
     }
 
     // Re-derive Initial secrets using the Retry SCID as the new DCID.
@@ -168,7 +168,7 @@ public fn accept_retry(
     let new_server_keys = derive_initial_keys(secrets.server.as_slice())
         .map_err(|_| RetryError.KeyDeriveFailed)?;
 
-    Ok(RetryAcceptOutcome {
+    Result.Ok(RetryAcceptOutcome {
         token:           retry.retry_token.clone(),
         new_client_keys: new_client_keys,
         new_server_keys: new_server_keys,
@@ -227,7 +227,7 @@ public fn build_server_retry(
     let mut wire: List<Byte> = List.with_capacity(pseudo.len() - prefix_len + 16);
     wire.extend_from_slice(&pseudo.as_slice()[prefix_len..]);
     wire.extend_from_slice(&tag[..]);
-    Ok(wire)
+    Result.Ok(wire)
 }
 
 // =============================================================================
@@ -240,7 +240,7 @@ public fn build_server_retry(
 ///  retry_source_connection_id == the SCID from the Retry (if any)
 ///
 
-/// Returns `Ok(())` when the transport-parameters match, `Err` on
+/// Returns `Result.Ok(())` when the transport-parameters match, `Err` on
 /// forgery / mismatch — caller aborts with TRANSPORT_PARAMETER_ERROR.
 public fn verify_tp_retry_sentinels(
     server_original_dcid:   &Maybe<ConnectionId>,
@@ -249,12 +249,12 @@ public fn verify_tp_retry_sentinels(
     retry_scid_we_observed: &Maybe<ConnectionId>,
 ) -> Result<(), RetryError> {
     match server_original_dcid {
-        Some(od) => {
+        Maybe.Some(od) => {
             if !od.eq(client_sent_original) {
-                return Err(RetryError.MalformedPseudo);
+                return Result.Err(RetryError.MalformedPseudo);
             }
         },
-        None => {
+        Maybe.None => {
             // Absent OK only when no Retry occurred — but the spec
             // mandates presence on any server. Accept absence as a
             // forgiving v0.1 posture and let the handshake surface
@@ -263,16 +263,16 @@ public fn verify_tp_retry_sentinels(
     }
 
     match (retry_scid_we_observed, server_retry_src_cid) {
-        (Some(observed), Some(declared)) => {
+        (Maybe.Some(observed), Maybe.Some(declared)) => {
             if !observed.eq(declared) {
-                return Err(RetryError.MalformedPseudo);
+                return Result.Err(RetryError.MalformedPseudo);
             }
         },
-        (Some(_), None) => {
+        (Maybe.Some(_), Maybe.None) => {
             // Retry happened but server didn't declare it → forgery.
-            return Err(RetryError.MalformedPseudo);
+            return Result.Err(RetryError.MalformedPseudo);
         },
         _ => {},
     }
-    Ok(())
+    Result.Ok(())
 }

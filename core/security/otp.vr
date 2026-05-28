@@ -149,8 +149,8 @@ public fn hotp(
     digits:  Int,
     algo:    &OtpHash,
 ) -> Result<Text, OtpError> {
-    if digits < 6 || digits > 10 { return Err(OtpError.InvalidDigits(digits)); }
-    if secret.len() < 1 { return Err(OtpError.InvalidSecret); }
+    if digits < 6 || digits > 10 { return Result.Err(OtpError.InvalidDigits(digits)); }
+    if secret.len() < 1 { return Result.Err(OtpError.InvalidSecret); }
 
     let counter_bytes = u64_be(counter);
     let digest = match algo {
@@ -179,7 +179,7 @@ public fn hotp(
     let bin = dynamic_truncate(digest.as_slice());
     let modulus = pow10(digits);
     let code = (bin as UInt64) % modulus;
-    Ok(format_padded(code, digits))
+    Result.Ok(format_padded(code, digits))
 }
 
 // =============================================================================
@@ -201,7 +201,7 @@ public fn totp(
     algo:      &OtpHash,
 ) -> Result<Text, OtpError> {
     if step_sec == 0_u64 {
-        return Err(OtpError.InvalidStep);
+        return Result.Err(OtpError.InvalidStep);
     }
     let counter = unix_time / step_sec;
     hotp(secret, counter, digits, algo)
@@ -250,12 +250,12 @@ public fn totp_verify(
             counter + (offset as UInt64)
         };
         match hotp(secret, cnt, digits, algo) {
-            Ok(expected) => {
+            Result.Ok(expected) => {
                 if constant_time_eq(candidate.as_bytes(), expected.as_bytes()) {
                     return true;
                 }
             },
-            Err(_) => return false,
+            Result.Err(_) => return false,
         }
         offset = offset + 1;
     }

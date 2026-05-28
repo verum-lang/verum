@@ -117,14 +117,14 @@ implement AsyncSemaphore {
         fut.await
     }
 
-    /// Non-blocking try-acquire. Returns `None` when no permits
+    /// Non-blocking try-acquire. Returns `Maybe.None` when no permits
     /// are available.
     public fn try_acquire(&self) -> Maybe<SemaphorePermit> {
         let shared = self.inner.clone();
         let mut inner = (*shared).lock().unwrap_or_else(|p| p.into_inner());
-        if inner.closed || inner.permits <= 0 { return None; }
+        if inner.closed || inner.permits <= 0 { return Maybe.None; }
         inner.permits = inner.permits - 1;
-        Some(SemaphorePermit { sem: shared.clone() })
+        Maybe.Some(SemaphorePermit { sem: shared.clone() })
     }
 
     /// Grant additional permits at runtime — useful for dynamic
@@ -138,8 +138,8 @@ implement AsyncSemaphore {
         let mut i: Int = 0;
         while i < n && inner.waiters.len() > 0 {
             match inner.waiters.pop_front() {
-                Some(w) => w.wake(),
-                None    => break,
+                Maybe.Some(w) => w.wake(),
+                Maybe.None    => break,
             }
             i = i + 1;
         }
@@ -155,8 +155,8 @@ implement AsyncSemaphore {
         // Wake every waiter so they observe the closed state.
         while inner.waiters.len() > 0 {
             match inner.waiters.pop_front() {
-                Some(w) => w.wake(),
-                None    => break,
+                Maybe.Some(w) => w.wake(),
+                Maybe.None    => break,
             }
         }
     }
@@ -190,8 +190,8 @@ implement Drop for SemaphorePermit {
         let mut inner = (*self.sem).lock().unwrap_or_else(|p| p.into_inner());
         inner.permits = inner.permits + 1;
         match inner.waiters.pop_front() {
-            Some(w) => w.wake(),
-            None    => {},
+            Maybe.Some(w) => w.wake(),
+            Maybe.None    => {},
         }
     }
 }
@@ -251,11 +251,11 @@ implement Future for SemaphoreFuture {
     fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output> {
         let mut inner = (*self.sem).lock().unwrap_or_else(|p| p.into_inner());
         if inner.closed {
-            return Poll.Ready(Err(SemaphoreError.Closed));
+            return Poll.Ready(Result.Err(SemaphoreError.Closed));
         }
         if inner.permits > 0 {
             inner.permits = inner.permits - 1;
-            return Poll.Ready(Ok(SemaphorePermit { sem: self.sem.clone() }));
+            return Poll.Ready(Result.Ok(SemaphorePermit { sem: self.sem.clone() }));
         }
         if !self.waker_registered {
             inner.waiters.push_back(cx.waker().clone());

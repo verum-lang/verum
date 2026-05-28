@@ -123,8 +123,8 @@ public fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerE
         while i < frame_header_size() { hdr_buf.push(0 as Byte); i = i + 1; }
 
         match backend_read(&mut writer.backend, &mut hdr_buf, off) {
-            Ok(_) => {}
-            Err(_) => {
+            Result.Ok(_) => {}
+            Result.Err(_) => {
                 // Short read or EOF — stop scanning.  The frames
                 // we accepted up to last_commit_frame are already
                 // in writer.state.frame_index.
@@ -156,11 +156,11 @@ public fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerE
             while k < pending_keys.len() {
                 let kp = pending_keys[k];
                 match maybe_int_get(&pending_index, kp) {
-                    Some(fn_ok) => {
+                    Maybe.Some(fn_ok) => {
                         writer.state.frame_index.insert(kp, fn_ok);
                         writer.index.append_frame(kp, fn_ok);
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
                 k = k + 1;
             }
@@ -193,7 +193,7 @@ public fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerE
         writer.index.commit_header(mx, n_pg, s1, s2);
     }
 
-    Ok(report)
+    Result.Ok(report)
 }
 
 // -----------------------------------------------------------------------------
@@ -216,7 +216,7 @@ public fn read_frame(
 ) -> Result<WalFrameRead, PagerError> {
     let page_size = writer.state.page_size;
     if frame_no < 1 || frame_no > writer.state.mx_frame {
-        return Err(PagerError {
+        return Result.Err(PagerError {
             kind: IoError,
             message: "wal read: frame out of range",
         });
@@ -227,8 +227,8 @@ public fn read_frame(
     let mut i: Int = 0;
     while i < frame_header_size() { hdr_buf.push(0 as Byte); i = i + 1; }
     match backend_read(&mut writer.backend, &mut hdr_buf, off) {
-        Ok(_) => {}
-        Err(_) => return Err(PagerError {
+        Result.Ok(_) => {}
+        Result.Err(_) => return Result.Err(PagerError {
             kind: IoError,
             message: "wal read: header read failed",
         }),
@@ -239,13 +239,13 @@ public fn read_frame(
     let mut j: Int = 0;
     while j < page_size { payload.push(0 as Byte); j = j + 1; }
     match backend_read(&mut writer.backend, &mut payload, off + frame_header_size()) {
-        Ok(_) => {}
-        Err(_) => return Err(PagerError {
+        Result.Ok(_) => {}
+        Result.Err(_) => return Result.Err(PagerError {
             kind: IoError,
             message: "wal read: payload read failed",
         }),
     }
-    Ok(WalFrameRead { header: header, payload: payload })
+    Result.Ok(WalFrameRead { header: header, payload: payload })
 }
 
 // -----------------------------------------------------------------------------

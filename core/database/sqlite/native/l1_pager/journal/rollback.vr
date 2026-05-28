@@ -152,17 +152,17 @@ public fn rollback_serialize_header(h: &RollbackHeader) -> List<Byte> {
 
 public fn rollback_parse_header(buf: &[Byte]) -> Result<RollbackHeader, RollbackError> {
     if buf.len() < ROLLBACK_HEADER_SIZE {
-        return Err(ShortBuffer);
+        return Result.Err(ShortBuffer);
     }
     let expected_magic = rollback_magic();
     let mut i: Int = 0;
     while i < 8 {
         if buf[i] != expected_magic[i] {
-            return Err(BadMagic);
+            return Result.Err(BadMagic);
         }
         i = i + 1;
     }
-    Ok(RollbackHeader {
+    Result.Ok(RollbackHeader {
         n_rec: read_u32_be(buf, 8),
         checksum_nonce: read_u32_be(buf, 12),
         initial_db_size_pages: read_u32_be(buf, 16),
@@ -222,7 +222,7 @@ public fn rollback_parse_record(
 ) -> Result<(UInt32, List<Byte>), RollbackError> {
     let record_size = 4 + page_size + 4;
     if start + record_size > buf.len() {
-        return Err(ShortBuffer);
+        return Result.Err(ShortBuffer);
     }
     let page_no = read_u32_be(buf, start);
     let mut page_bytes: List<Byte> = List.new();
@@ -234,9 +234,9 @@ public fn rollback_parse_record(
     let stored_cksum = read_u32_be(buf, start + 4 + page_size);
     let computed = rollback_record_checksum(nonce, &page_bytes);
     if stored_cksum != computed {
-        return Err(BadChecksum(page_no, computed, stored_cksum));
+        return Result.Err(BadChecksum(page_no, computed, stored_cksum));
     }
-    Ok((page_no, page_bytes))
+    Result.Ok((page_no, page_bytes))
 }
 
 // -----------------------------------------------------------------------------
@@ -252,8 +252,8 @@ public fn rollback_replay(
     journal_bytes: &[Byte],
 ) -> Result<List<(UInt32, List<Byte>)>, RollbackError> {
     let header = match rollback_parse_header(journal_bytes) {
-        Ok(h)  => h,
-        Err(e) => { return Err(e); }
+        Result.Ok(h)  => h,
+        Result.Err(e) => { return Result.Err(e); }
     };
     let mut out: List<(UInt32, List<Byte>)> = List.new();
     let page_size = header.page_size as Int;
@@ -269,7 +269,7 @@ public fn rollback_replay(
     let mut seen: Int = 0;
     while pos + record_size <= journal_bytes.len() {
         match rollback_parse_record(journal_bytes, pos, page_size, header.checksum_nonce) {
-            Ok((pn, bytes)) => {
+            Result.Ok((pn, bytes)) => {
                 out.push((pn, bytes));
                 seen = seen + 1;
                 pos = pos + record_size;
@@ -277,15 +277,15 @@ public fn rollback_replay(
                     break;
                 }
             }
-            Err(e) => {
+            Result.Err(e) => {
                 // Under 0xFFFFFFFF recovery we stop at the first bad
                 // record — it marks the mid-fsync boundary.
                 if expected_records < 0 {
                     break;
                 }
-                return Err(e);
+                return Result.Err(e);
             }
         }
     }
-    Ok(out)
+    Result.Ok(out)
 }

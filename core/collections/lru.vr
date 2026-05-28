@@ -34,7 +34,7 @@
 //
 
 // let prev = cache.insert(key.clone(), user); // returns Maybe<User>
-// match cache.get(&key) { Some(u) => ..., None => ... }
+// match cache.get(&key) { Maybe.Some(u) => ..., Maybe.None => ... }
 //
 
 // cache.remove(&key);
@@ -125,7 +125,7 @@ implement<K: Hash + Eq, V> LruCache<K, V> {
     }
 
     /// Read-through. Touches the order (LRU semantics). Returns
-    /// `None` on miss.
+    /// `Maybe.None` on miss.
     public fn get(&mut self, key: &K) -> Maybe<V>
     where K: Clone, V: Clone
     {

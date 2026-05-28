@@ -43,22 +43,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "WebAuthn §7.1 registration ceremony — clientData + attestationObject → VerifiedCredential",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.security.webauthn.register;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Set};
 mount encoding.json.{JsonValue, decode};
 type JsonObject is Map<Text, JsonValue>;
@@ -130,19 +130,19 @@ pub fn verify_registration(
 ) -> Result<VerifiedCredential, WebAuthnError> {
     // 0. Bound checks on options.challenge length.
     if options.challenge.len() < CHALLENGE_MIN_BYTES || options.challenge.len() > CHALLENGE_MAX_BYTES {
-        return Err(WebAuthnError.InvalidChallengeLength(options.challenge.len()));
+        return Result.Err(WebAuthnError.InvalidChallengeLength(options.challenge.len()));
     }
 
     // 1. Decode + validate clientDataJSON.
     let client_data = parse_client_data(&response.client_data_json)?;
     if !(client_data.type_ is ClientDataType.Create) {
-        return Err(WebAuthnError.InvalidClientDataType {
+        return Result.Err(WebAuthnError.InvalidClientDataType {
             expected: ClientDataType.Create,
             found:    client_data.type_.clone(),
         });
     }
     if !bytes_eq(&client_data.challenge, &options.challenge) {
-        return Err(WebAuthnError.ChallengeMismatch);
+        return Result.Err(WebAuthnError.ChallengeMismatch);
     }
     check_origin(&client_data.origin, &expected.origins)?;
 
@@ -163,21 +163,21 @@ pub fn verify_registration(
     let mut i: Int = 0;
     while i < 32 {
         if auth_data.rp_id_hash[i] != expected_rp_id_hash[i] {
-            return Err(WebAuthnError.RpIdHashMismatch);
+            return Result.Err(WebAuthnError.RpIdHashMismatch);
         }
         i = i + 1;
     }
 
     // 6. UP flag check.
     if !auth_data.flags.user_present {
-        return Err(WebAuthnError.UpFlagMissing);
+        return Result.Err(WebAuthnError.UpFlagMissing);
     }
 
     // 7. UV flag check (per RP policy).
     match options.user_verification {
         UserVerificationRequirement.Required => {
             if !auth_data.flags.user_verified {
-                return Err(WebAuthnError.UvFlagMissing);
+                return Result.Err(WebAuthnError.UvFlagMissing);
             }
         }
         _ => {}
@@ -185,8 +185,8 @@ pub fn verify_registration(
 
     // AT flag must be set during registration.
     let acd = match &auth_data.attested_credential_data {
-        Some(a) => a.clone(),
-        None    => return Err(WebAuthnError.InvalidAttestation(
+        Maybe.Some(a) => a.clone(),
+        Maybe.None    => return Result.Err(WebAuthnError.InvalidAttestation(
             "registration response missing attested credential data".to_text())),
     };
 
@@ -194,21 +194,21 @@ pub fn verify_registration(
     let cred_pk = decode_cose_key_value(&acd.credential_public_key)?;
     let chosen_alg = alg_of(&cred_pk);
     if !rp_allows_alg(&options.pub_key_cred_params, chosen_alg) {
-        return Err(WebAuthnError.UnsupportedAlgorithm(chosen_alg));
+        return Result.Err(WebAuthnError.UnsupportedAlgorithm(chosen_alg));
     }
 
     // AAGUID allow-list (when set).
     if !expected.allowed_aaguids.is_empty() {
         let aaguid_list = aaguid_to_list(&acd.aaguid);
         if !expected.allowed_aaguids.contains(&aaguid_list) {
-            return Err(WebAuthnError.InvalidAttestation(
+            return Result.Err(WebAuthnError.InvalidAttestation(
                 "AAGUID not in allow-list".to_text()));
         }
     }
 
     // Exclude-credentials check.
     if cred_in_exclude_list(&acd.credential_id, &options.exclude_credentials) {
-        return Err(WebAuthnError.CredentialNotAllowed(acd.credential_id.clone()));
+        return Result.Err(WebAuthnError.CredentialNotAllowed(acd.credential_id.clone()));
     }
 
     // 9. Per-fmt attestation verification.
@@ -221,7 +221,7 @@ pub fn verify_registration(
 
     // 11. Build VerifiedCredential.
     let public_key_cose = encode_cose_key(&cred_pk);
-    Ok(VerifiedCredential {
+    Result.Ok(VerifiedCredential {
         credential_id:        acd.credential_id,
         public_key_cose,
         cose_alg:             chosen_alg,
@@ -231,7 +231,7 @@ pub fn verify_registration(
         backup_state:         auth_data.flags.backup_state,
         attestation_format:   verified_att.fmt,
         attestation_chain:    verified_att.trust_chain,
-        user_handle:          Some(options.user.id.clone()),
+        user_handle:          Maybe.Some(options.user.id.clone()),
     })
 }
 
@@ -252,12 +252,12 @@ fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, Web
         .ok_or_else(|| WebAuthnError.InvalidJson("clientData.origin missing".to_text()))?;
     let cross_origin = obj.get("crossOrigin").and_then(|v| v.as_bool()).unwrap_or(false);
     let token_binding = match obj.get("tokenBinding").and_then(|v| v.as_object()) {
-        Some(tb) => Some(parse_token_binding(tb)?),
-        None     => None,
+        Maybe.Some(tb) => Maybe.Some(parse_token_binding(tb)?),
+        Maybe.None     => Maybe.None,
     };
     let challenge = b64url_decode(&challenge_b64)
         .map_err(|e| WebAuthnError.InvalidJson(f"challenge b64url: {e}"))?;
-    Ok(CollectedClientData {
+    Result.Ok(CollectedClientData {
         type_:         client_data_type_from_text(&type_text),
         challenge,
         origin,
@@ -269,7 +269,7 @@ fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, Web
 fn parse_token_binding(obj: &JsonObject) -> Result<TokenBindingStatus, WebAuthnError> {
     let status = obj.get("status").and_then(|v| v.as_string())
         .ok_or_else(|| WebAuthnError.InvalidJson("tokenBinding.status missing".to_text()))?;
-    Ok(match status.as_str() {
+    Result.Ok(match status.as_str() {
         "present" => {
             let id = obj.get("id").and_then(|v| v.as_string()).unwrap_or_else(|| "".to_text());
             TokenBindingStatus.Present(id)
@@ -298,7 +298,7 @@ fn parse_attestation_object(bytes: &List<Byte>) -> Result<AttestationObject, Web
         .ok_or_else(|| WebAuthnError.InvalidCbor("attestationObject.attStmt missing".to_text()))?;
 
     let auth_data = parse_authenticator_data(auth_data_bytes.as_slice())?;
-    Ok(AttestationObject {
+    Result.Ok(AttestationObject {
         fmt: attestation_format_from_text(&fmt_text),
         auth_data,
         att_stmt,
@@ -309,36 +309,36 @@ fn get_text_keyed_text(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<T
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];
-        if let Some(s) = k.as_text() {
+        if let Maybe.Some(s) = k.as_text() {
             if s == key { return v.as_text().map(|t| t.clone()); }
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn get_text_keyed_bytes(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<List<Byte>> {
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];
-        if let Some(s) = k.as_text() {
+        if let Maybe.Some(s) = k.as_text() {
             if s == key { return v.as_bytes().map(|b| b.clone()); }
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn get_text_keyed_value(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<CborValue> {
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];
-        if let Some(s) = k.as_text() {
-            if s == key { return Some(v.clone()); }
+        if let Maybe.Some(s) = k.as_text() {
+            if s == key { return Maybe.Some(v.clone()); }
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 // =============================================================================
@@ -361,14 +361,14 @@ fn check_origin(found: &Text, allowed: &List<Text>) -> Result<(), WebAuthnError>
     // Additionally, only `https://` (or `http://localhost*` for dev)
     // is acceptable.
     if !found.starts_with("https://") && !is_localhost_http(found) {
-        return Err(WebAuthnError.OriginScheme(found.clone()));
+        return Result.Err(WebAuthnError.OriginScheme(found.clone()));
     }
     let mut i: Int = 0;
     while i < allowed.len() {
-        if &allowed[i] == found { return Ok(()); }
+        if &allowed[i] == found { return Result.Ok(()); }
         i = i + 1;
     }
-    Err(WebAuthnError.OriginMismatch {
+    Result.Err(WebAuthnError.OriginMismatch {
         expected: join_origins(allowed),
         found:    found.clone(),
     })

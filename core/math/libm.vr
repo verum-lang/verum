@@ -2,7 +2,7 @@
 // math/libm.vr - Software Math Library (replaces libm)
 // =============================================================================
 // Layer: 0 (Core)
-// Dependencies: None
+// Dependencies: Maybe.None
 // =============================================================================
 //
 

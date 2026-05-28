@@ -121,7 +121,7 @@ implement PagerActor {
 // -----------------------------------------------------------------------------
 
 /// Execute a single request. Synchronous; the async harness will wrap
-/// this in `while let Some(req) = mailbox.recv().await { ... }`.
+/// this in `while let Maybe.Some(req) = mailbox.recv().await { ... }`.
 ///
 
 /// Routing:
@@ -136,7 +136,7 @@ public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
             // Fast path: cache hit.
             let cached = actor.cache.get(page);
             match cached {
-                Some(f) => {
+                Maybe.Some(f) => {
                     let frame = PageFrame {
                         page_no: f.page_no,
                         data: f.data.clone(),
@@ -144,11 +144,11 @@ public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
                     };
                     return ReadOk(frame, tok);
                 },
-                None => {},
+                Maybe.None => {},
             }
             // Slow path: pull from the pager.
             match pager_read(&mut actor.pager, page) {
-                Ok(frame) => {
+                Result.Ok(frame) => {
                     let cached_new = CachedFrame {
                         page_no: frame.page_no,
                         data: frame.data.clone(),
@@ -160,7 +160,7 @@ public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
                     actor.cache.put(cached_new);
                     ReadOk(frame, tok)
                 }
-                Err(e) => Failed(e, tok),
+                Result.Err(e) => Failed(e, tok),
             }
         }
         Write(frame, tok) => {
@@ -178,11 +178,11 @@ public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
             // immediately; the WAL backend buffers — abstraction is the
             // pager's responsibility, not ours).
             match pager_write(&mut actor.pager, &frame) {
-                Ok(_) => {
+                Result.Ok(_) => {
                     actor.pending_writes = actor.pending_writes + 1;
                     WriteOk(tok)
                 }
-                Err(e) => Failed(e, tok),
+                Result.Err(e) => Failed(e, tok),
             }
         }
         Commit(tok) => {
@@ -198,12 +198,12 @@ public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
             // and DOES NOT advance the visible generation — readers
             // continue to see the last durable state.
             match pager_commit(&mut actor.pager) {
-                Ok(_) => {
+                Result.Ok(_) => {
                     let _ = actor.cache.bump_generation();
                     actor.pending_writes = 0;
                     CommitOk(tok)
                 }
-                Err(e) => Failed(e, tok),
+                Result.Err(e) => Failed(e, tok),
             }
         }
         Checkpoint(mode, tok) => {
@@ -218,13 +218,13 @@ public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
             // honest by carrying the requested mode in stats.
             let frames_applied = actor.pending_writes;
             match pager_commit(&mut actor.pager) {
-                Ok(_) => {
+                Result.Ok(_) => {
                     actor.pending_writes = 0;
                     let _ = actor.cache.bump_generation();
                     let _ = mode;
                     CheckpointOk(frames_applied, tok)
                 }
-                Err(e) => Failed(e, tok),
+                Result.Err(e) => Failed(e, tok),
             }
         }
     }

@@ -237,7 +237,7 @@ implement Data {
     // Safe accessors - return Maybe<T>
     // =========================================================================
 
-    /// Extract boolean value, returns None if not a Bool
+    /// Extract boolean value, returns Maybe.None if not a Bool
     fn as_bool(&self) -> Maybe<Bool> {
         match self {
             Data.Bool(b) => Maybe.Some(*b),
@@ -245,7 +245,7 @@ implement Data {
         }
     }
 
-    /// Extract integer value, returns None if not an Int
+    /// Extract integer value, returns Maybe.None if not an Int
     fn as_int(&self) -> Maybe<Int> {
         match self {
             Data.Int(i) => Maybe.Some(*i),
@@ -253,7 +253,7 @@ implement Data {
         }
     }
 
-    /// Extract float value, returns None if not a Float
+    /// Extract float value, returns Maybe.None if not a Float
     fn as_float(&self) -> Maybe<Float> {
         match self {
             Data.Float(f) => Maybe.Some(*f),
@@ -262,7 +262,7 @@ implement Data {
         }
     }
 
-    /// Extract text value, returns None if not Text
+    /// Extract text value, returns Maybe.None if not Text
     fn as_text(&self) -> Maybe<Text> {
         match self {
             Data.Text(ref s) => Maybe.Some(s.clone()),
@@ -270,7 +270,7 @@ implement Data {
         }
     }
 
-    /// Extract array reference, returns None if not Array
+    /// Extract array reference, returns Maybe.None if not Array
     fn as_array(&self) -> Maybe<&List<Data>> {
         match self {
             Data.Array(ref arr) => Maybe.Some(arr),
@@ -286,7 +286,7 @@ implement Data {
         }
     }
 
-    /// Extract object reference, returns None if not Object
+    /// Extract object reference, returns Maybe.None if not Object
     fn as_object(&self) -> Maybe<&Map<Text, Data>> {
         match self {
             Data.Object(ref obj) => Maybe.Some(obj),
@@ -306,7 +306,7 @@ implement Data {
     // Object field access
     // =========================================================================
 
-    /// Get field by key, returns None if not an object or key doesn't exist
+    /// Get field by key, returns Maybe.None if not an object or key doesn't exist
     fn get(&self, key: Text) -> Maybe<&Data> {
         match self {
             Data.Object(ref obj) => obj.get(&key),
@@ -356,7 +356,7 @@ implement Data {
     // Array index access
     // =========================================================================
 
-    /// Get element at index, returns None if not array or index out of bounds
+    /// Get element at index, returns Maybe.None if not array or index out of bounds
     fn at(&self, index: Int) -> Maybe<&Data> {
         match self {
             Data.Array(ref arr) => {
@@ -636,8 +636,8 @@ implement Data {
                 let mut result = a.clone();
                 for (k, v) in b.iter() {
                     let merged = match result.get(&k) {
-                        Some(existing) => existing.deep_merge(v),
-                        None => v.clone(),
+                        Maybe.Some(existing) => existing.deep_merge(v),
+                        Maybe.None => v.clone(),
                     };
                     result.insert(k.clone(), merged);
                 }
@@ -655,9 +655,9 @@ implement Data {
                 for (k, _) in obj.iter() {
                     ks.push(k.clone());
                 }
-                Some(ks)
+                Maybe.Some(ks)
             }
-            _ => None,
+            _ => Maybe.None,
         }
     }
 
@@ -669,9 +669,9 @@ implement Data {
                 for (_, v) in obj.iter() {
                     vs.push(v.clone());
                 }
-                Some(vs)
+                Maybe.Some(vs)
             }
-            _ => None,
+            _ => Maybe.None,
         }
     }
 }
@@ -778,10 +778,10 @@ implement JsonParser {
         while !self.at_end() {
             let c = self.input.char_at(self.pos);
             match c {
-                Some(' ') => { self.pos = self.pos + 1; }
-                Some('\t') => { self.pos = self.pos + 1; }
-                Some('\n') => { self.pos = self.pos + 1; }
-                Some('\r') => { self.pos = self.pos + 1; }
+                Maybe.Some(' ') => { self.pos = self.pos + 1; }
+                Maybe.Some('\t') => { self.pos = self.pos + 1; }
+                Maybe.Some('\n') => { self.pos = self.pos + 1; }
+                Maybe.Some('\r') => { self.pos = self.pos + 1; }
                 _ => { return; }
             }
         }
@@ -789,16 +789,16 @@ implement JsonParser {
 
     fn expect(&mut self, expected: Char) -> Result<(), DataError> {
         match self.advance() {
-            Some(c) => {
+            Maybe.Some(c) => {
                 if c == expected {
-                    Ok(())
+                    Result.Ok(())
                 } else {
-                    Err(DataError.ParseError {
+                    Result.Err(DataError.ParseError {
                         message: f"Expected '{expected}' but got '{c}' at position {self.pos - 1}",
                     })
                 }
             }
-            None => Err(DataError.ParseError {
+            Maybe.None => Result.Err(DataError.ParseError {
                 message: f"Expected '{expected}' but got end of input",
             }),
         }
@@ -807,18 +807,18 @@ implement JsonParser {
     fn parse_value(&mut self) -> Result<Data, DataError> {
         self.skip_whitespace();
         match self.peek() {
-            None => Err(DataError.ParseError { message: "Unexpected end of input" }),
-            Some('"') => self.parse_string_value(),
-            Some('{') => self.parse_object(),
-            Some('[') => self.parse_array(),
-            Some('t') => self.parse_true(),
-            Some('f') => self.parse_false(),
-            Some('n') => self.parse_null(),
-            Some(c) => {
+            Maybe.None => Result.Err(DataError.ParseError { message: "Unexpected end of input" }),
+            Maybe.Some('"') => self.parse_string_value(),
+            Maybe.Some('{') => self.parse_object(),
+            Maybe.Some('[') => self.parse_array(),
+            Maybe.Some('t') => self.parse_true(),
+            Maybe.Some('f') => self.parse_false(),
+            Maybe.Some('n') => self.parse_null(),
+            Maybe.Some(c) => {
                 if c == '-' || (c >= '0' && c <= '9') {
                     self.parse_number()
                 } else {
-                    Err(DataError.ParseError {
+                    Result.Err(DataError.ParseError {
                         message: f"Unexpected character '{c}' at position {self.pos}",
                     })
                 }
@@ -828,25 +828,25 @@ implement JsonParser {
 
     fn parse_null(&mut self) -> Result<Data, DataError> {
         if self.match_literal("null") {
-            Ok(Data.null())
+            Result.Ok(Data.null())
         } else {
-            Err(DataError.ParseError { message: f"Invalid token at position {self.pos}" })
+            Result.Err(DataError.ParseError { message: f"Invalid token at position {self.pos}" })
         }
     }
 
     fn parse_true(&mut self) -> Result<Data, DataError> {
         if self.match_literal("true") {
-            Ok(Data.from_bool(true))
+            Result.Ok(Data.from_bool(true))
         } else {
-            Err(DataError.ParseError { message: f"Invalid token at position {self.pos}" })
+            Result.Err(DataError.ParseError { message: f"Invalid token at position {self.pos}" })
         }
     }
 
     fn parse_false(&mut self) -> Result<Data, DataError> {
         if self.match_literal("false") {
-            Ok(Data.from_bool(false))
+            Result.Ok(Data.from_bool(false))
         } else {
-            Err(DataError.ParseError { message: f"Invalid token at position {self.pos}" })
+            Result.Err(DataError.ParseError { message: f"Invalid token at position {self.pos}" })
         }
     }
 
@@ -870,13 +870,13 @@ implement JsonParser {
         let mut is_float = false;
 
         // Optional negative sign
-        if !self.at_end() && self.peek() == Some('-') {
+        if !self.at_end() && self.peek() == Maybe.Some('-') {
             self.pos = self.pos + 1;
         }
 
         // Integer part
         if self.at_end() {
-            return Err(DataError.ParseError { message: "Unexpected end in number" });
+            return Result.Err(DataError.ParseError { message: "Unexpected end in number" });
         }
         while !self.at_end() {
             let c = self.peek().expect("parse_number/int: peek is_some after !at_end guard");
@@ -888,7 +888,7 @@ implement JsonParser {
         }
 
         // Fractional part
-        if !self.at_end() && self.peek() == Some('.') {
+        if !self.at_end() && self.peek() == Maybe.Some('.') {
             is_float = true;
             self.pos = self.pos + 1;
             while !self.at_end() {
@@ -927,15 +927,15 @@ implement JsonParser {
         let num_str = self.input.substring(start, self.pos);
         if is_float {
             match num_str.parse_float() {
-                Ok(f) => Ok(Data.from_float(f)),
-                Err(_) => Err(DataError.ParseError {
+                Result.Ok(f) => Result.Ok(Data.from_float(f)),
+                Result.Err(_) => Result.Err(DataError.ParseError {
                     message: f"Invalid float: {num_str}",
                 }),
             }
         } else {
             match num_str.parse_int() {
-                Ok(i) => Ok(Data.from_int(i)),
-                Err(_) => Err(DataError.ParseError {
+                Result.Ok(i) => Result.Ok(Data.from_int(i)),
+                Result.Err(_) => Result.Err(DataError.ParseError {
                     message: f"Invalid integer: {num_str}",
                 }),
             }
@@ -947,16 +947,16 @@ implement JsonParser {
         let mut i = 0;
         while i < 4 {
             match self.advance() {
-                None => {
-                    return Err(DataError.ParseError {
+                Maybe.None => {
+                    return Result.Err(DataError.ParseError {
                         message: "Unterminated unicode escape",
                     });
                 }
-                Some(c) => {
+                Maybe.Some(c) => {
                     match c.to_digit(16) {
-                        Some(d) => { value = value * 16 + d; }
-                        None => {
-                            return Err(DataError.ParseError {
+                        Maybe.Some(d) => { value = value * 16 + d; }
+                        Maybe.None => {
+                            return Result.Err(DataError.ParseError {
                                 message: "Invalid hex digit in unicode escape",
                             });
                         }
@@ -965,12 +965,12 @@ implement JsonParser {
             }
             i = i + 1;
         }
-        Ok(value)
+        Result.Ok(value)
     }
 
     fn parse_string_value(&mut self) -> Result<Data, DataError> {
         let s = self.parse_string()?;
-        Ok(Data.from_text(s))
+        Result.Ok(Data.from_text(s))
     }
 
     fn parse_string(&mut self) -> Result<Text, DataError> {
@@ -980,61 +980,61 @@ implement JsonParser {
         while !self.at_end() {
             let c = self.advance().expect("parse_string: advance is_some after !at_end guard");
             if c == '"' {
-                return Ok(result);
+                return Result.Ok(result);
             }
             if c == '\\' {
                 // Escape sequence
                 match self.advance() {
-                    None => {
-                        return Err(DataError.ParseError {
+                    Maybe.None => {
+                        return Result.Err(DataError.ParseError {
                             message: "Unterminated escape sequence",
                         });
                     }
-                    Some('"') => result.push('"'),
-                    Some('\\') => result.push('\\'),
-                    Some('/') => result.push('/'),
-                    Some('n') => result.push('\n'),
-                    Some('t') => result.push('\t'),
-                    Some('r') => result.push('\r'),
-                    Some('b') => result.push('\x08'),
-                    Some('f') => result.push('\x0C'),
-                    Some('u') => {
+                    Maybe.Some('"') => result.push('"'),
+                    Maybe.Some('\\') => result.push('\\'),
+                    Maybe.Some('/') => result.push('/'),
+                    Maybe.Some('n') => result.push('\n'),
+                    Maybe.Some('t') => result.push('\t'),
+                    Maybe.Some('r') => result.push('\r'),
+                    Maybe.Some('b') => result.push('\x08'),
+                    Maybe.Some('f') => result.push('\x0C'),
+                    Maybe.Some('u') => {
                         // Parse \uXXXX unicode escape
                         let cp = self.parse_hex4()?;
                         if cp >= 0xD800 && cp <= 0xDBFF {
                             // High surrogate — expect \uXXXX low surrogate
-                            if self.peek() == Some('\\') {
+                            if self.peek() == Maybe.Some('\\') {
                                 self.advance();
-                                if self.peek() == Some('u') {
+                                if self.peek() == Maybe.Some('u') {
                                     self.advance();
                                     let low = self.parse_hex4()?;
                                     if low >= 0xDC00 && low <= 0xDFFF {
                                         let full = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
                                         result.push(full as Char);
                                     } else {
-                                        return Err(DataError.ParseError {
+                                        return Result.Err(DataError.ParseError {
                                             message: "Invalid low surrogate in unicode escape",
                                         });
                                     }
                                 } else {
-                                    return Err(DataError.ParseError {
+                                    return Result.Err(DataError.ParseError {
                                         message: "Expected low surrogate after high surrogate",
                                     });
                                 }
                             } else {
-                                return Err(DataError.ParseError {
+                                return Result.Err(DataError.ParseError {
                                     message: "Expected low surrogate after high surrogate",
                                 });
                             }
                         } else if cp >= 0xDC00 && cp <= 0xDFFF {
-                            return Err(DataError.ParseError {
+                            return Result.Err(DataError.ParseError {
                                 message: "Unexpected low surrogate in unicode escape",
                             });
                         } else {
                             result.push(cp as Char);
                         }
                     }
-                    Some(other) => {
+                    Maybe.Some(other) => {
                         result.push('\\');
                         result.push(other);
                     }
@@ -1044,7 +1044,7 @@ implement JsonParser {
             }
         }
 
-        Err(DataError.ParseError { message: "Unterminated string" })
+        Result.Err(DataError.ParseError { message: "Unterminated string" })
     }
 
     fn parse_array(&mut self) -> Result<Data, DataError> {
@@ -1053,9 +1053,9 @@ implement JsonParser {
 
         let mut items: List<Data> = List.new();
 
-        if !self.at_end() && self.peek() == Some(']') {
+        if !self.at_end() && self.peek() == Maybe.Some(']') {
             self.pos = self.pos + 1;
-            return Ok(Data.from_array(items));
+            return Result.Ok(Data.from_array(items));
         }
 
         // Parse first element
@@ -1064,7 +1064,7 @@ implement JsonParser {
 
         // Parse remaining elements
         self.skip_whitespace();
-        while !self.at_end() && self.peek() == Some(',') {
+        while !self.at_end() && self.peek() == Maybe.Some(',') {
             self.pos = self.pos + 1; // consume comma
             let item = self.parse_value()?;
             items.push(item);
@@ -1072,7 +1072,7 @@ implement JsonParser {
         }
 
         self.expect(']')?;
-        Ok(Data.from_array(items))
+        Result.Ok(Data.from_array(items))
     }
 
     fn parse_object(&mut self) -> Result<Data, DataError> {
@@ -1081,9 +1081,9 @@ implement JsonParser {
 
         let mut map: Map<Text, Data> = Map.new();
 
-        if !self.at_end() && self.peek() == Some('}') {
+        if !self.at_end() && self.peek() == Maybe.Some('}') {
             self.pos = self.pos + 1;
-            return Ok(Data.from_object(map));
+            return Result.Ok(Data.from_object(map));
         }
 
         // Parse first key-value pair
@@ -1096,7 +1096,7 @@ implement JsonParser {
 
         // Parse remaining pairs
         self.skip_whitespace();
-        while !self.at_end() && self.peek() == Some(',') {
+        while !self.at_end() && self.peek() == Maybe.Some(',') {
             self.pos = self.pos + 1; // consume comma
             self.skip_whitespace();
             let k = self.parse_string()?;
@@ -1108,7 +1108,7 @@ implement JsonParser {
         }
 
         self.expect('}')?;
-        Ok(Data.from_object(map))
+        Result.Ok(Data.from_object(map))
     }
 }
 
@@ -1130,11 +1130,11 @@ public fn parse_json(input: Text) -> Result<Data, DataError> {
     let result = parser.parse_value()?;
     parser.skip_whitespace();
     if !parser.at_end() {
-        Err(DataError.ParseError {
+        Result.Err(DataError.ParseError {
             message: f"Unexpected trailing content at position {parser.pos}",
         })
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 

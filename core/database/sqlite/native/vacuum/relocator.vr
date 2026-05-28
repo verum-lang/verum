@@ -81,14 +81,14 @@ implement Relocator {
         if !already { self.dropped.push(src); }
     }
 
-    /// Where did `src` go? `None` means "not relocated yet" or "dropped".
+    /// Where did `src` go? `Maybe.None` means "not relocated yet" or "dropped".
     public fn lookup(&self, src: Int) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.entries.len() {
-            if self.entries[i].src == src { return Some(self.entries[i].dst); }
+            if self.entries[i].src == src { return Maybe.Some(self.entries[i].dst); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// True if the page was explicitly dropped.
@@ -107,8 +107,8 @@ implement Relocator {
         if p == 0 { return 0; }
         if self.is_dropped(p) { return 0; }
         match self.lookup(p) {
-            Some(dst) => dst,
-            None      => p,            // unchanged
+            Maybe.Some(dst) => dst,
+            Maybe.None      => p,            // unchanged
         }
     }
 

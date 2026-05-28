@@ -24,9 +24,9 @@ mount base.{Bool, Maybe, Text};
 
 public type SqlView is {
     original: Text,
-    /// None until sqlite3_expanded_sql is called.
+    /// Maybe.None until sqlite3_expanded_sql is called.
     expanded: Maybe<Text>,
-    /// None until sqlite3_normalized_sql is called.
+    /// Maybe.None until sqlite3_normalized_sql is called.
     normalized: Maybe<Text>,
 }
 

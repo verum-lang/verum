@@ -185,7 +185,7 @@ implement ServerListener {
             .await.map_err(|e| ListenerError.Bind(e))?;
         let local = transport.local_addr();
         let (tx, rx) = Channel.unbounded();
-        Ok(ServerListener {
+        Result.Ok(ServerListener {
             transport:       Heap(transport) as Heap<dyn UdpTransport>,
             local_addr:      local,
             tls_config:      Shared.new(tls_config),
@@ -203,8 +203,8 @@ implement ServerListener {
     /// (typically spawned inside an outer nursery).
     pub async fn accept(&mut self) -> Result<AcceptedConnection, ListenerError> {
         match self.accept_pop.recv().await {
-            Some(c) => Ok(c),
-            None    => Err(ListenerError.Closed),
+            Maybe.Some(c) => Result.Ok(c),
+            Maybe.None    => Result.Err(ListenerError.Closed),
         }
     }
 
@@ -216,19 +216,19 @@ implement ServerListener {
     ///  * Else → drop (stateless reset / retry logic goes here).
     pub async fn run_demux(&self, cancel: &CancellationToken) -> Result<(), ListenerError> {
         loop {
-            if cancel.is_cancelled() { return Err(ListenerError.Closed); }
+            if cancel.is_cancelled() { return Result.Err(ListenerError.Closed); }
             match self.transport.recv().await {
-                Ok(dg) => {
+                Result.Ok(dg) => {
                     let _ = self.route_datagram(dg).await;
                 },
-                Err(TransportError.Closed) => return Ok(()),
-                Err(e) => return Err(ListenerError.Transport(e)),
+                Result.Err(TransportError.Closed) => return Result.Ok(()),
+                Result.Err(e) => return Result.Err(ListenerError.Transport(e)),
             }
         }
     }
 
     async fn route_datagram(&self, dg: InboundDatagram) -> Result<(), ListenerError> {
-        if dg.data.len() < 1 { return Ok(()); }
+        if dg.data.len() < 1 { return Result.Ok(()); }
         let first_byte = dg.data[0];
         let is_long = (first_byte & 0x80_u8) != 0_u8;
 
@@ -237,26 +237,26 @@ implement ServerListener {
 
         // Dispatch to existing connection.
         match self.find_connection(&dcid) {
-            Some(tracked) => {
+            Maybe.Some(tracked) => {
                 // Hand the datagram to the pump.
                 // Real impl pushes onto a per-pump inbound channel —
                 // here we document the shape; the pump will pull
                 // via its `try_recv` when it next ticks.
                 let _ = tracked.pump;
                 let _ = dg;
-                return Ok(());
+                return Result.Ok(());
             },
-            None => {},
+            Maybe.None => {},
         }
 
         // No matching connection. If this is an Initial long-header
         // packet, try to open a new connection.
-        if !is_long { return Ok(()); }
+        if !is_long { return Result.Ok(()); }
         let type_bits = (first_byte >> 4) & 0x03_u8;
         let ptype = LongPacketType.from_bits(type_bits);
         match ptype {
             LongPacketType.Initial => self.spawn_new_connection(dg, dcid).await,
-            _ => Ok(()),     // drop Handshake/0-RTT on unknown DCID
+            _ => Result.Ok(()),     // drop Handshake/0-RTT on unknown DCID
         }
     }
 
@@ -265,11 +265,11 @@ implement ServerListener {
         let mut i: Int = 0;
         while i < conns.len() {
             if conns[i].local_cid.eq(dcid) {
-                return Some(conns[i].clone());
+                return Maybe.Some(conns[i].clone());
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     async fn spawn_new_connection(
@@ -280,7 +280,7 @@ implement ServerListener {
         // Cap check.
         let current = self.connections.lock().unwrap_or_else(|p| p.into_inner()).len() as UInt64;
         if self.max_connections > 0_u64 && current >= self.max_connections {
-            return Err(ListenerError.TooManyConnections(current));
+            return Result.Err(ListenerError.TooManyConnections(current));
         }
 
         // Derive server-side initial keys from the client's DCID (this
@@ -312,7 +312,7 @@ implement ServerListener {
         );
 
         let mut keys = QuicKeys.empty();
-        keys.initial = Some((
+        keys.initial = Maybe.Some((
             build_space_keys(server_keys_tx),
             build_space_keys(server_keys_rx),
         ));
@@ -322,9 +322,9 @@ implement ServerListener {
             version:       qv.VERSION_1,
             dcid_peer:     peer_dcid.clone(),         // client's SCID becomes our DCID-to-peer
             scid_local:    local_cid.clone(),
-            retry_src_cid: None,
+            retry_src_cid: Maybe.None,
             params_local:  self.transport_params.clone(),
-            params_remote: None,
+            params_remote: Maybe.None,
             keys:          keys,
             loss:          LossDetection.new(),
             cc:            NewReno.new(),
@@ -332,10 +332,10 @@ implement ServerListener {
             send_streams:  [],
             recv_streams:  [],
             opened_at:     Instant.now(),
-            idle_deadline: None,
-            close_reason:  None,
-            close_sent_at: None,
-            drain_expiry:  None,
+            idle_deadline: Maybe.None,
+            close_reason:  Maybe.None,
+            close_sent_at: Maybe.None,
+            drain_expiry:  Maybe.None,
         };
 
         // Per-listener pump — writes through our transport; reads go
@@ -383,7 +383,7 @@ implement ServerListener {
         // direct process call on the pump's shared handle.
         let _ = dg;
 
-        Ok(())
+        Result.Ok(())
     }
 
     fn mint_cid(&self) -> ConnectionId {
@@ -412,7 +412,7 @@ implement ServerListener {
         let mut i: Int = 0;
         while i < conns.len() { i = i + 1; }    // per-pump close hook lives inside ConnectionPump
         self.transport.close().await.map_err(|e| ListenerError.Transport(e))?;
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -424,11 +424,11 @@ fn extract_dcid(data: &List<Byte>, is_long: Bool) -> Result<ConnectionId, Listen
     if is_long {
         // Long header: version(4) | DCID-len(1) | DCID(0..=20)
         if data.len() < 6 {
-            return Err(ListenerError.MalformedInitial(Text.from_str("short datagram")));
+            return Result.Err(ListenerError.MalformedInitial(Text.from_str("short datagram")));
         }
         let dcid_len = data[5] as Int;
         if dcid_len > MAX_CID_LEN || 6 + dcid_len > data.len() {
-            return Err(ListenerError.MalformedInitial(Text.from_str("invalid DCID length")));
+            return Result.Err(ListenerError.MalformedInitial(Text.from_str("invalid DCID length")));
         }
         let mut cid: List<Byte> = [];
         let mut i: Int = 0;
@@ -443,7 +443,7 @@ fn extract_dcid(data: &List<Byte>, is_long: Bool) -> Result<ConnectionId, Listen
         // here we use 8 as the convention.
         let dcid_len: Int = 8;
         if data.len() < 1 + dcid_len {
-            return Err(ListenerError.MalformedInitial(Text.from_str("short dgram")));
+            return Result.Err(ListenerError.MalformedInitial(Text.from_str("short dgram")));
         }
         let mut cid: List<Byte> = [];
         let mut i: Int = 0;

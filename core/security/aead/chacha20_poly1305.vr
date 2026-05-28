@@ -240,7 +240,7 @@ implement ChaCha20Poly1305 {
         plaintext: &mut List<Byte>,
     ) -> Result<(), AeadError> {
         if ciphertext.len() > CHACHA_MAX_PT_BYTES_PER_NONCE {
-            return Err(AeadError.InputTooLarge {
+            return Result.Err(AeadError.InputTooLarge {
                 limit_bytes: CHACHA_MAX_PT_BYTES_PER_NONCE,
             });
         }
@@ -264,12 +264,12 @@ implement ChaCha20Poly1305 {
 
         let expected = mac.finalize();
         if !constant_time_eq(&expected, tag) {
-            return Err(AeadError.TagMismatch);
+            return Result.Err(AeadError.TagMismatch);
         }
 
         // Tag valid — decrypt.
         chacha20_xor(&self.key, 1, nonce, ciphertext, plaintext);
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -323,7 +323,7 @@ public fn chacha20_poly1305_seal(
     cipher.encrypt(nonce, aad, pt, sealed, &mut tag);
     let mut i = 0;
     while i < 16 { sealed.push(tag[i]); i = i + 1; }
-    Ok(())
+    Result.Ok(())
 }
 
 /// ChaCha20-Poly1305 open: parse `sealed` as ciphertext || 16-byte tag,
@@ -336,7 +336,7 @@ public fn chacha20_poly1305_open(
     pt: &mut List<Byte>,
 ) -> Result<(), AeadError> {
     if sealed.len() < 16 {
-        return Err(AeadError.TagMismatch);
+        return Result.Err(AeadError.TagMismatch);
     }
     let ct_len = sealed.len() - 16;
     let cipher = ChaCha20Poly1305.new(key);

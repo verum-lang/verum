@@ -203,7 +203,7 @@ public fn decode(input: &[Byte]) -> Result<List<Byte>, HuffError> {
             abits = abits - 1;
             if is_leaf {
                 if symbol == 256 {
-                    return Err(HuffError.EosInString);
+                    return Result.Err(HuffError.EosInString);
                 }
                 out.push(symbol as Byte);
                 state = 0;
@@ -215,20 +215,20 @@ public fn decode(input: &[Byte]) -> Result<List<Byte>, HuffError> {
 
     // Remaining bits at end of input — must be ≤ 7 and all 1s
     // (EOS prefix). Anything else → InvalidPadding.
-    if abits > 7 { return Err(HuffError.InvalidPadding); }
+    if abits > 7 { return Result.Err(HuffError.InvalidPadding); }
     if abits > 0 {
         let mask = (1_u64 << (abits as UInt64)) - 1_u64;
-        if (accum & mask) != mask { return Err(HuffError.InvalidPadding); }
+        if (accum & mask) != mask { return Result.Err(HuffError.InvalidPadding); }
         // State must correspond to a valid partial EOS prefix.
         // If state is not the root and not on an EOS-prefix path,
         // reject.
         if !is_eos_prefix_state(state) {
-            return Err(HuffError.InvalidPadding);
+            return Result.Err(HuffError.InvalidPadding);
         }
     } else if state != 0 {
-        return Err(HuffError.Truncated);
+        return Result.Err(HuffError.Truncated);
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // =============================================================================

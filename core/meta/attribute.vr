@@ -88,7 +88,7 @@ implement Attribute {
             name,
             style: AttributeStyle.Value,
             args: List.of(AttributeArg {
-                name: None,
+                name: Maybe.None,
                 value,
                 span: Span.call_site(),
             }),
@@ -129,7 +129,7 @@ implement Attribute {
 
     /// Check if specific named argument exists
     public fn has_arg(&self, name: Text) -> Bool {
-        self.args.iter().any(|a| a.name == Some(name))
+        self.args.iter().any(|a| a.name == Maybe.Some(name))
     }
 
     // =========================================================================
@@ -148,7 +148,7 @@ implement Attribute {
 
     /// Get argument by name
     public fn get_named_arg(&self, name: Text) -> Maybe<&AttributeArg> {
-        self.args.iter().find(|a| a.name == Some(name))
+        self.args.iter().find(|a| a.name == Maybe.Some(name))
     }
 
     /// Get all positional arguments (unnamed)
@@ -293,7 +293,7 @@ implement AttributeArg {
     /// Create positional argument
     public fn positional(value: MetaAttributeValue) -> Self {
         Self {
-            name: None,
+            name: Maybe.None,
             value,
             span: Span.call_site(),
         }
@@ -302,7 +302,7 @@ implement AttributeArg {
     /// Create named argument
     public fn named(name: Text, value: MetaAttributeValue) -> Self {
         Self {
-            name: Some(name),
+            name: Maybe.Some(name),
             value,
             span: Span.call_site(),
         }
@@ -316,32 +316,32 @@ implement AttributeArg {
     /// Get as string value
     public fn as_string(&self) -> Maybe<Text> {
         match &self.value {
-            MetaAttributeValue.String(s) => Some(s.clone()),
-            _ => None,
+            MetaAttributeValue.String(s) => Maybe.Some(s.clone()),
+            _ => Maybe.None,
         }
     }
 
     /// Get as integer value
     public fn as_int(&self) -> Maybe<Int> {
         match &self.value {
-            MetaAttributeValue.Int(i) => Some(*i),
-            _ => None,
+            MetaAttributeValue.Int(i) => Maybe.Some(*i),
+            _ => Maybe.None,
         }
     }
 
     /// Get as boolean value
     public fn as_bool(&self) -> Maybe<Bool> {
         match &self.value {
-            MetaAttributeValue.Bool(b) => Some(*b),
-            _ => None,
+            MetaAttributeValue.Bool(b) => Maybe.Some(*b),
+            _ => Maybe.None,
         }
     }
 
     /// Get as identifier
     public fn as_ident(&self) -> Maybe<Text> {
         match &self.value {
-            MetaAttributeValue.Ident(s) => Some(s.clone()),
-            _ => None,
+            MetaAttributeValue.Ident(s) => Maybe.Some(s.clone()),
+            _ => Maybe.None,
         }
     }
 }
@@ -405,16 +405,16 @@ implement MetaAttributeValue {
     /// Get as identifier string
     public fn as_ident(&self) -> Maybe<Text> {
         match self {
-            Ident(s) => Some(s.clone()),
-            _ => None,
+            Ident(s) => Maybe.Some(s.clone()),
+            _ => Maybe.None,
         }
     }
 
     /// Get as string
     public fn as_string(&self) -> Maybe<Text> {
         match self {
-            String(s) => Some(s.clone()),
-            _ => None,
+            String(s) => Maybe.Some(s.clone()),
+            _ => Maybe.None,
         }
     }
 }
@@ -448,7 +448,7 @@ implement CfgPredicate {
     /// Parse from attribute
     public fn from_attribute(attr: &Attribute) -> Maybe<Self> {
         if !attr.is_cfg() {
-            return None;
+            return Maybe.None;
         }
 
         Self.parse_args(&attr.args)
@@ -459,58 +459,58 @@ implement CfgPredicate {
         if args.len() == 1 {
             Self.parse_value(&args[0].value)
         } else {
-            None
+            Maybe.None
         }
     }
 
     fn parse_value(value: &MetaAttributeValue) -> Maybe<Self> {
         match value {
-            MetaAttributeValue.Ident(name) => Some(CfgPredicate.Simple(name.clone())),
+            MetaAttributeValue.Ident(name) => Maybe.Some(CfgPredicate.Simple(name.clone())),
             MetaAttributeValue.Eq { left, right } => {
                 match right.as_ref() {
-                    MetaAttributeValue.String(s) => Some(CfgPredicate.KeyValue {
+                    MetaAttributeValue.String(s) => Maybe.Some(CfgPredicate.KeyValue {
                         key: left.clone(),
                         value: s.clone(),
                     }),
-                    _ => None,
+                    _ => Maybe.None,
                 }
             }
             MetaAttributeValue.Nested(args) if args.len() > 0 => {
-                if let Some(first) = args.first() {
-                    if let Some(name) = first.value.as_ident() {
+                if let Maybe.Some(first) = args.first() {
+                    if let Maybe.Some(name) = first.value.as_ident() {
                         match name.as_str() {
                             "all" => {
                                 let preds = args.iter()
                                     .skip(1)
                                     .filter_map(|a| Self.parse_value(&a.value))
                                     .collect();
-                                Some(CfgPredicate.All(preds))
+                                Maybe.Some(CfgPredicate.All(preds))
                             }
                             "any" => {
                                 let preds = args.iter()
                                     .skip(1)
                                     .filter_map(|a| Self.parse_value(&a.value))
                                     .collect();
-                                Some(CfgPredicate.Any(preds))
+                                Maybe.Some(CfgPredicate.Any(preds))
                             }
                             "not" => {
                                 if args.len() == 2 {
                                     Self.parse_value(&args[1].value)
                                         .map(|p| CfgPredicate.Not(Heap.new(p)))
                                 } else {
-                                    None
+                                    Maybe.None
                                 }
                             }
-                            _ => None,
+                            _ => Maybe.None,
                         }
                     } else {
-                        None
+                        Maybe.None
                     }
                 } else {
-                    None
+                    Maybe.None
                 }
             }
-            _ => None,
+            _ => Maybe.None,
         }
     }
 }
@@ -532,15 +532,15 @@ implement DeriveInfo {
     /// Parse from @derive attribute
     public fn from_attribute(attr: &Attribute) -> Maybe<Self> {
         if !attr.is_derive() {
-            return None;
+            return Maybe.None;
         }
 
         let derives = attr.as_ident_list();
         if derives.is_empty() {
-            return None;
+            return Maybe.None;
         }
 
-        Some(Self {
+        Maybe.Some(Self {
             derives,
             span: attr.span,
         })
@@ -587,30 +587,30 @@ implement ReprInfo {
     /// Parse from @repr attribute
     public fn from_attribute(attr: &Attribute) -> Maybe<Self> {
         if !attr.is_repr() {
-            return None;
+            return Maybe.None;
         }
 
         let mut kind = ReprKind.Verum;
-        let mut align = None;
+        let mut align = Maybe.None;
         let mut packed = false;
 
         for arg in attr.args.iter() {
             match arg.value.as_ident() {
-                Some("C") => kind = ReprKind.C,
-                Some("transparent") => kind = ReprKind.Transparent,
-                Some("packed") => packed = true,
-                Some(int_type) if is_int_repr(int_type) => kind = ReprKind.Int(int_type.to_string()),
+                Maybe.Some("C") => kind = ReprKind.C,
+                Maybe.Some("transparent") => kind = ReprKind.Transparent,
+                Maybe.Some("packed") => packed = true,
+                Maybe.Some(int_type) if is_int_repr(int_type) => kind = ReprKind.Int(int_type.to_string()),
                 _ => {}
             }
 
-            if arg.name == Some("align".to_string()) {
-                if let Some(n) = arg.as_int() {
-                    align = Some(n);
+            if arg.name == Maybe.Some("align".to_string()) {
+                if let Maybe.Some(n) = arg.as_int() {
+                    align = Maybe.Some(n);
                 }
             }
         }
 
-        Some(Self { kind, align, packed, span: attr.span })
+        Maybe.Some(Self { kind, align, packed, span: attr.span })
     }
 }
 

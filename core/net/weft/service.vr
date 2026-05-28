@@ -11,7 +11,7 @@
 //
 
 // Tower-style Services have a known foot-gun: callers must drive
-// `poll_ready` to `Ready(Ok(()))` BEFORE invoking `call`. Skipping
+// `poll_ready` to `Ready(Result.Ok(()))` BEFORE invoking `call`. Skipping
 // that step silently bypasses backpressure: load-shedding,
 // rate-limiting, and concurrency-bounding middleware all stop
 // working with no diagnostic. Tower-rs catches the error with a
@@ -88,8 +88,8 @@ public type Service<Req, Resp> is protocol {
     /// Returns:
     ///  * `Poll.Pending` — not ready; the waker registered on
     ///  `cx` will be notified when readiness changes.
-    ///  * `Poll.Ready(Ok(()))` — ready for exactly one `call`.
-    ///  * `Poll.Ready(Err(e))` — service has failed terminally;
+    ///  * `Poll.Ready(Result.Ok(()))` — ready for exactly one `call`.
+    ///  * `Poll.Ready(Result.Err(e))` — service has failed terminally;
     ///  no further calls will succeed.
     fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self.Error>>;
 
@@ -97,7 +97,7 @@ public type Service<Req, Resp> is protocol {
     ///
 
     /// **Precondition** (uncheckable here): a prior `poll_ready`
-    /// must have returned `Poll.Ready(Ok(()))` since the last
+    /// must have returned `Poll.Ready(Result.Ok(()))` since the last
     /// `call`. Application code should obtain a `Permit` via
     /// `ready()` instead — the Permit witnesses this precondition
     /// at the type level.
@@ -147,10 +147,10 @@ implement<S: Service<Req, Resp>, Req, Resp> Permit<S, Req, Resp> {
 // =============================================================================
 
 /// Future that pumps `Service::poll_ready` until it returns
-/// `Ready(Ok(()))`, then resolves with a `Permit`. Internal
+/// `Ready(Result.Ok(()))`, then resolves with a `Permit`. Internal
 /// driver for `ready()`.
 type PollReadyFuture<S: Service<Req, Resp>, Req, Resp> is {
-    /// `Some(svc)` while still polling; `None` once consumed.
+    /// `Maybe.Some(svc)` while still polling; `Maybe.None` once consumed.
     /// Encoding the lifecycle in `Maybe` makes "double poll
     /// after completion" a typed invariant.
     service: Maybe<&mut S>,
@@ -161,23 +161,23 @@ implement<S: Service<Req, Resp>, Req, Resp> Future for PollReadyFuture<S, Req, R
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<Permit<S, Req, Resp>, S.Error>> {
         let svc = match self.service.take() {
-            Some(s) => s,
-            None => panic("PollReadyFuture polled after completion"),
+            Maybe.Some(s) => s,
+            Maybe.None => panic("PollReadyFuture polled after completion"),
         };
 
         match svc.poll_ready(cx) {
             Poll.Pending => {
                 // Not ready yet — restore the borrow and wait.
-                self.service = Some(svc);
+                self.service = Maybe.Some(svc);
                 Poll.Pending
             }
-            Poll.Ready(Ok(())) => {
+            Poll.Ready(Result.Ok(())) => {
                 // Readiness witnessed — mint the Permit.
-                Poll.Ready(Ok(Permit { service: svc }))
+                Poll.Ready(Result.Ok(Permit { service: svc }))
             }
-            Poll.Ready(Err(e)) => {
+            Poll.Ready(Result.Err(e)) => {
                 // Terminal failure — surface the error.
-                Poll.Ready(Err(e))
+                Poll.Ready(Result.Err(e))
             }
         }
     }
@@ -186,8 +186,8 @@ implement<S: Service<Req, Resp>, Req, Resp> Future for PollReadyFuture<S, Req, R
 /// Earn a `Permit` to call `service` exactly once.
 ///
 
-/// Awaits `poll_ready` until it returns `Ready(Ok(()))` or fails.
-/// On success, returns `Ok(permit)` — the caller now holds an
+/// Awaits `poll_ready` until it returns `Ready(Result.Ok(()))` or fails.
+/// On success, returns `Result.Ok(permit)` — the caller now holds an
 /// affine capability they can spend via `permit.dispatch(req)`.
 ///
 
@@ -213,7 +213,7 @@ implement<S: Service<Req, Resp>, Req, Resp> Future for PollReadyFuture<S, Req, R
 public fn ready<S: Service<Req, Resp>, Req, Resp>(
     service: &mut S
 ) -> PollReadyFuture<S, Req, Resp> {
-    PollReadyFuture { service: Some(service) }
+    PollReadyFuture { service: Maybe.Some(service) }
 }
 
 // =============================================================================

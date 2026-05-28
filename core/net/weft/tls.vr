@@ -85,15 +85,15 @@ implement TlsTransport {
     /// a straight forward to `TlsStream.read`.
     async fn tls_read(&mut self, buf: &mut List<Byte>) -> Result<Int, IoError> {
         match self.inner.read(buf).await {
-            Err(e) => Err(IoError.Other { reason: f"tls read: {e}" }),
-            Ok(n)  => Ok(n),
+            Result.Err(e) => Result.Err(IoError.Other { reason: f"tls read: {e}" }),
+            Result.Ok(n)  => Result.Ok(n),
         }
     }
 }
 
 implement WeftTransport for TlsTransport {
     fn peer_addr(&self) -> Result<SocketAddr, IoError> {
-        Ok(self.peer)
+        Result.Ok(self.peer)
     }
 
     async fn read_cancellable(
@@ -102,8 +102,8 @@ implement WeftTransport for TlsTransport {
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
-            r = self.tls_read(buf).await => Ok(r),
-            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+            r = self.tls_read(buf).await => Result.Ok(r),
+            reason = token.cancelled().await => Result.Err(CancellationError.new(reason)),
         }
     }
 
@@ -111,15 +111,15 @@ implement WeftTransport for TlsTransport {
         // Transport hands us bytes directly — pass through to the
         // byte-typed TlsStream API with no marshalling.
         match self.inner.write(buf).await {
-            Ok(n)  => Ok(n),
-            Err(e) => Err(IoError.Other { reason: f"tls write: {e}" }),
+            Result.Ok(n)  => Result.Ok(n),
+            Result.Err(e) => Result.Err(IoError.Other { reason: f"tls write: {e}" }),
         }
     }
 
     async fn shutdown_write(&mut self) -> Result<(), IoError> {
         match self.inner.shutdown().await {
-            Ok(())  => Ok(()),
-            Err(e)  => Err(IoError.Other { reason: f"tls shutdown: {e}" }),
+            Result.Ok(())  => Result.Ok(()),
+            Result.Err(e)  => Result.Err(IoError.Other { reason: f"tls shutdown: {e}" }),
         }
     }
 }
@@ -175,12 +175,12 @@ implement<H: Handler + Send + Sync + 'static> Clone for TlsHttp1Runner<H> {
 implement<H: Handler + Send + Sync + 'static> ConnectionRunner for TlsHttp1Runner<H> {
     async fn run(&self, stream: TcpStream, peer: SocketAddr) {
         match TlsStream.accept(stream, &self.tls).await {
-            Err(_handshake_error) => {
+            Result.Err(_handshake_error) => {
                 // Log hook goes here once tracing context lands in the
                 // runner (§8.13). For now we just close the TCP
                 // connection — the TLS layer already freed the socket.
             }
-            Ok(tls_stream) => {
+            Result.Ok(tls_stream) => {
                 let transport = TlsTransport.new(tls_stream, peer);
                 let _ = serve_http1(
                     transport, peer,
@@ -219,7 +219,7 @@ implement<H: Handler + Send + Sync + 'static> Server<H> {
     /// ```
     pub async fn serve_tls(self, tls: TlsConfig) -> Result<(), Text> {
         if !tls.is_server {
-            return Err("serve_tls requires a server TlsConfig".into());
+            return Result.Err("serve_tls requires a server TlsConfig".into());
         }
         let Server { listener, app, config, token, draining } = self;
         let runner = TlsHttp1Runner.new(

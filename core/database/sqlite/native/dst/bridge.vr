@@ -119,23 +119,23 @@ public fn report_empty(expected: Oracle) -> DstReport {
 
 public fn op_to_sql(op: &DbOp) -> Maybe<Text> {
     match op {
-        OpInsert(id, name) => Some(
+        OpInsert(id, name) => Maybe.Some(
             f"INSERT INTO t (id, name) VALUES ({id}, '{name}')"
         ),
-        OpUpdate(id, name) => Some(
+        OpUpdate(id, name) => Maybe.Some(
             f"UPDATE t SET name = '{name}' WHERE id = {id}"
         ),
-        OpDelete(id) => Some(
+        OpDelete(id) => Maybe.Some(
             f"DELETE FROM t WHERE id = {id}"
         ),
-        OpSelectById(id) => Some(
+        OpSelectById(id) => Maybe.Some(
             f"SELECT id, name FROM t WHERE id = {id}"
         ),
-        OpBegin    => Some("BEGIN".clone()),
-        OpCommit   => Some("COMMIT".clone()),
-        OpRollback => Some("ROLLBACK".clone()),
-        OpCheckpoint => Some("PRAGMA wal_checkpoint(PASSIVE)".clone()),
-        OpVacuum     => Some("VACUUM".clone()),
+        OpBegin    => Maybe.Some("BEGIN".clone()),
+        OpCommit   => Maybe.Some("COMMIT".clone()),
+        OpRollback => Maybe.Some("ROLLBACK".clone()),
+        OpCheckpoint => Maybe.Some("PRAGMA wal_checkpoint(PASSIVE)".clone()),
+        OpVacuum     => Maybe.Some("VACUUM".clone()),
     }
 }
 
@@ -163,21 +163,21 @@ public fn drive(
 
     while !h.is_terminated() {
         let plan = match h.next_step() {
-            Some(p) => p,
-            None => break,
+            Maybe.Some(p) => p,
+            Maybe.None => break,
         };
         let op_name = op_kind_name(&plan.op);
         let outcome = match (step_runner)(&plan.op) {
-            Ok(_)  => "ok".clone(),
-            Err(m) => f"error: {m}",
+            Result.Ok(_)  => "ok".clone(),
+            Result.Err(m) => f"error: {m}",
         };
         let fault_injected = match plan.fault {
-            Some(ref f) => Some(fault_kind_name(f)),
-            None        => None,
+            Maybe.Some(ref f) => Maybe.Some(fault_kind_name(f)),
+            Maybe.None        => Maybe.None,
         };
         let crash_now = match plan.fault {
-            Some(ref f) => is_terminal(f),
-            None        => false,
+            Maybe.Some(ref f) => is_terminal(f),
+            Maybe.None        => false,
         };
         report.steps.push(step_record(
             plan.op_idx, op_name, outcome, fault_injected,
@@ -206,7 +206,7 @@ public fn report_summary(r: &DstReport) -> Text {
         let s = &r.steps[i];
         if !s.outcome.starts_with(&"error:".clone()) { applied = applied + 1; }
         else { errored = errored + 1; }
-        match s.fault_injected { Some(_) => { faulted = faulted + 1; }, None => {} }
+        match s.fault_injected { Maybe.Some(_) => { faulted = faulted + 1; }, Maybe.None => {} }
         i = i + 1;
     }
     f"DstReport(steps={total} applied={applied} errored={errored} faulted={faulted} crashed={r.crashed})"

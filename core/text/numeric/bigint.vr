@@ -66,7 +66,7 @@
 module core.text.numeric.bigint;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount base.ordering.{Ordering, Less, Equal, Greater};
 mount collections.List;
 
@@ -283,9 +283,9 @@ implement BigInt {
     ///
     /// Errors: `DivByZero` if `other` is zero.
     public fn div_rem(&self, other: &BigInt) -> Result<(BigInt, BigInt), BigIntError> {
-        if other.is_zero() { return Err(BigIntError.DivByZero); }
+        if other.is_zero() { return Result.Err(BigIntError.DivByZero); }
         if self.is_zero() {
-            return Ok((BigInt.zero(), BigInt.zero()));
+            return Result.Ok((BigInt.zero(), BigInt.zero()));
         }
 
         let quot_sign = self.sign != other.sign;
@@ -294,7 +294,7 @@ implement BigInt {
         // |self| < |other| ⇒ quot=0, rem=self.
         let mag_cmp = compare_magnitudes(&self.digits, &other.digits);
         if mag_cmp is Less {
-            return Ok((
+            return Result.Ok((
                 BigInt.zero(),
                 BigInt { sign: rem_sign, digits: clone_digits(&self.digits) },
             ));
@@ -321,7 +321,7 @@ implement BigInt {
             } else {
                 BigInt { sign: rem_sign, digits: r_digits }
             };
-            return Ok((quot, rem));
+            return Result.Ok((quot, rem));
         }
 
         // Multi-chunk divisor — Knuth Algorithm D.
@@ -336,21 +336,21 @@ implement BigInt {
         } else {
             BigInt { sign: rem_sign, digits: r_mag }
         };
-        Ok((quot, rem))
+        Result.Ok((quot, rem))
     }
 
     /// Quotient `self / other` (truncated towards zero).  Sugar for
     /// `div_rem` discarding the remainder.
     public fn div(&self, other: &BigInt) -> Result<BigInt, BigIntError> {
         let (q, _) = self.div_rem(other)?;
-        Ok(q)
+        Result.Ok(q)
     }
 
     /// Remainder `self % other` (sign matches `self`).  Sugar for
     /// `div_rem` discarding the quotient.
     public fn rem(&self, other: &BigInt) -> Result<BigInt, BigIntError> {
         let (_, r) = self.div_rem(other)?;
-        Ok(r)
+        Result.Ok(r)
     }
 
     // -------------------------------------------------------------------------
@@ -416,17 +416,17 @@ implement BigInt {
     }
 
     /// Try to fit the BigInt into a Verum Int (i64).  Returns
-    /// `None` if the value exceeds i64 range; `Some(n)` with the
+    /// `Maybe.None` if the value exceeds i64 range; `Maybe.Some(n)` with the
     /// exact i64 otherwise.  Useful for hot-path callers that
     /// optimistically expect i64-bounded values.
     public fn to_int(&self) -> Maybe<Int> {
-        if self.is_zero() { return Some(0); }
+        if self.is_zero() { return Maybe.Some(0); }
         let i64_max: Int = 9223372036854775807;
         let n = self.digits.len() as Int;
         // i64::MAX = 9_223_372_036_854_775_807 — three base-10^9
         // chunks max for any i64-bounded magnitude.  Reject up
         // front if more than three.
-        if n > 3 { return None; }
+        if n > 3 { return Maybe.None; }
 
         let mut acc: Int = 0;
         let mut k: Int = n - 1;
@@ -435,10 +435,10 @@ implement BigInt {
             //   acc_next = acc * BIGINT_BASE + digit
             // With BIGINT_BASE = 10^9, acc * 10^9 must fit.  Bound:
             //   acc ≤ i64::MAX / 10^9 ≈ 9.22 × 10^9
-            if acc > i64_max / BIGINT_BASE { return None; }
+            if acc > i64_max / BIGINT_BASE { return Maybe.None; }
             let scaled = acc * BIGINT_BASE;
             let next = scaled + self.digits[k];
-            if next < scaled { return None; }  // Overflow
+            if next < scaled { return Maybe.None; }  // Overflow
             acc = next;
             k = k - 1;
         }
@@ -449,8 +449,8 @@ implement BigInt {
         // We accept any magnitude ≤ i64::MAX for both signs (i64::MIN
         // representation requires magnitude i64::MAX + 1, which we
         // cannot construct via this i64 accumulator — caller gets
-        // None for that single edge case).
-        if self.sign { Some(-acc) } else { Some(acc) }
+        // Maybe.None for that single edge case).
+        if self.sign { Maybe.Some(-acc) } else { Maybe.Some(acc) }
     }
 
     // -------------------------------------------------------------------------
@@ -507,12 +507,12 @@ implement BigInt {
         let mut x = clone_digits_to_bigint(&mag);
         while !x.is_zero() {
             let (q, r) = match x.div_rem(&two56) {
-                Ok(t)  => t,
-                Err(_) => return List.new(),  // unreachable
+                Result.Ok(t)  => t,
+                Result.Err(_) => return List.new(),  // unreachable
             };
             let rb = match r.to_int() {
-                Some(v) => v,
-                None    => return List.new(),  // unreachable
+                Maybe.Some(v) => v,
+                Maybe.None    => return List.new(),  // unreachable
             };
             bytes_le.push(rb as Byte);
             x = q;
@@ -576,7 +576,7 @@ implement BigInt {
     //
     // A method signature like `fn m(&self, x: Maybe<Int>) -> Maybe<
     // List<Byte>>` triggers a type-inference bug at the call site:
-    // `value.m(None)` returns the WRONG inner type — `Some(v) => v`
+    // `value.m(Maybe.None)` returns the WRONG inner type — `Maybe.Some(v) => v`
     // binds `v: Int` instead of `v: List<Byte>`.
     //
     // Bisection-isolated minimum trigger conditions (verified
@@ -655,8 +655,8 @@ fn bit_length_via_div(b: &BigInt) -> Int {
     let mut count: Int = 0;
     while !x.is_zero() {
         x = match x.div(&two) {
-            Ok(v)  => v,
-            Err(_) => BigInt.zero(),
+            Result.Ok(v)  => v,
+            Result.Err(_) => BigInt.zero(),
         };
         count = count + 1;
     }
@@ -693,7 +693,7 @@ public fn parse_bigint(text: &Text) -> Result<BigInt, BigIntError> {
             break;
         }
     }
-    if i >= n { return Err(BigIntError.ParseEmpty); }
+    if i >= n { return Result.Err(BigIntError.ParseEmpty); }
 
     // Optional sign.
     let mut neg = false;
@@ -706,7 +706,7 @@ public fn parse_bigint(text: &Text) -> Result<BigInt, BigIntError> {
     }
 
     if i >= n {
-        return Err(BigIntError.ParseInvalidShape {
+        return Result.Err(BigIntError.ParseInvalidShape {
             reason: "lone sign with no digits".clone(),
         });
     }
@@ -724,7 +724,7 @@ public fn parse_bigint(text: &Text) -> Result<BigInt, BigIntError> {
     let digits_end = i;
     let digit_count = digits_end - digits_start;
     if digit_count == 0 {
-        return Err(BigIntError.ParseInvalidShape {
+        return Result.Err(BigIntError.ParseInvalidShape {
             reason: "no digits after sign".clone(),
         });
     }
@@ -735,7 +735,7 @@ public fn parse_bigint(text: &Text) -> Result<BigInt, BigIntError> {
         if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
             i = i + 1;
         } else {
-            return Err(BigIntError.ParseInvalidChar {
+            return Result.Err(BigIntError.ParseInvalidChar {
                 byte_offset: i, byte: b,
             });
         }
@@ -749,7 +749,7 @@ public fn parse_bigint(text: &Text) -> Result<BigInt, BigIntError> {
     }
     let effective_count = digits_end - start;
     if effective_count == 1 && (bytes[start] as Int) == ('0' as Int) {
-        return Ok(BigInt.zero());
+        return Result.Ok(BigInt.zero());
     }
 
     // Group digits into base-10^9 chunks, LEAST significant first.
@@ -775,9 +775,9 @@ public fn parse_bigint(text: &Text) -> Result<BigInt, BigIntError> {
     // happen given the leading-zero strip above, but defensive).
     strip_leading_zeros(&mut digits_out);
     if (digits_out.len() as Int) == 0 {
-        return Ok(BigInt.zero());
+        return Result.Ok(BigInt.zero());
     }
-    Ok(BigInt { sign: neg, digits: digits_out })
+    Result.Ok(BigInt { sign: neg, digits: digits_out })
 }
 
 // =============================================================================

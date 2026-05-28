@@ -134,7 +134,7 @@ implement<H: Handler> Handler for AdaptiveConcurrencyHandler<H> {
         let in_flight = s.inflight.fetch_add(1, MemoryOrdering.AcqRel);
         if in_flight >= limit {
             s.inflight.fetch_sub(1, MemoryOrdering.AcqRel);
-            return Err(WeftError.Overloaded);
+            return Result.Err(WeftError.Overloaded);
         }
 
         let start = Instant.now();

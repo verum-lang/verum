@@ -108,17 +108,17 @@ implement SnapshotTable {
 
     /// Drop a snapshot by id. Returns true if found.
     public fn release(&mut self, id: Int64) -> Bool {
-        let mut idx: Maybe<Int> = None;
+        let mut idx: Maybe<Int> = Maybe.None;
         let mut i: Int = 0;
         while i < self.snapshots.len() {
             if self.snapshots[i].id == id {
-                idx = Some(i);
+                idx = Maybe.Some(i);
                 break;
             }
             i = i + 1;
         }
         match idx {
-            Some(k) => {
+            Maybe.Some(k) => {
                 let mut new_list: List<Snapshot> = List.new();
                 let mut j: Int = 0;
                 while j < self.snapshots.len() {
@@ -128,14 +128,14 @@ implement SnapshotTable {
                 self.snapshots = new_list;
                 true
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
     /// Oldest snapshot still alive (used by the checkpointer to
     /// know which frames are still needed).
     public fn oldest(&self) -> Maybe<Snapshot> {
-        if self.snapshots.len() == 0 { return None; }
+        if self.snapshots.len() == 0 { return Maybe.None; }
         let mut best = self.snapshots[0].clone();
         let mut i: Int = 1;
         while i < self.snapshots.len() {
@@ -144,7 +144,7 @@ implement SnapshotTable {
             }
             i = i + 1;
         }
-        Some(best)
+        Maybe.Some(best)
     }
 
     public fn count(&self) -> Int { self.snapshots.len() }

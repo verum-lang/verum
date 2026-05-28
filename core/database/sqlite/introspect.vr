@@ -40,7 +40,7 @@
 module core.database.sqlite.introspect;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.database.common.error.{DbError, AdapterId};
 mount core.database.common.schema.{
@@ -53,8 +53,8 @@ mount core.database.sqlite.connection.{SqliteConnection, SqliteValue, SvText, Sv
 public fn introspect(conn: &mut SqliteConnection) -> Result<SchemaSnapshot, DbError> {
     let mut snap = SchemaSnapshot.empty(AdSqlite);
     snap.server_version = match probe_version(conn) {
-        Ok(v)  => v,
-        Err(_) => "unknown".clone(),
+        Result.Ok(v)  => v,
+        Result.Err(_) => "unknown".clone(),
     };
 
     // Pull the user-table list.
@@ -66,7 +66,7 @@ public fn introspect(conn: &mut SqliteConnection) -> Result<SchemaSnapshot, DbEr
         snap.add_table(table);
         i = i + 1;
     }
-    Ok(snap)
+    Result.Ok(snap)
 }
 
 // -----------------------------------------------------------------------------
@@ -76,14 +76,14 @@ public fn introspect(conn: &mut SqliteConnection) -> Result<SchemaSnapshot, DbEr
 fn probe_version(conn: &mut SqliteConnection) -> Result<Text, DbError> {
     let sql = "SELECT sqlite_version()".clone();
     match conn.query_first(&sql) {
-        Ok(row) => {
+        Result.Ok(row) => {
             if (row.len() as Int) >= 1 {
-                Ok(value_to_text(&row[0]))
+                Result.Ok(value_to_text(&row[0]))
             } else {
-                Ok("".clone())
+                Result.Ok("".clone())
             }
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -92,7 +92,7 @@ fn list_user_tables(conn: &mut SqliteConnection) -> Result<List<Text>, DbError> 
     // "sqlite_".
     let sql = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name".clone();
     match conn.query_all(&sql) {
-        Ok(rows) => {
+        Result.Ok(rows) => {
             let mut out: List<Text> = List.new();
             let mut i: Int = 0;
             while i < rows.len() as Int {
@@ -102,9 +102,9 @@ fn list_user_tables(conn: &mut SqliteConnection) -> Result<List<Text>, DbError> 
                 }
                 i = i + 1;
             }
-            Ok(out)
+            Result.Ok(out)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -113,13 +113,13 @@ fn build_table_snap(conn: &mut SqliteConnection, name: &Text) -> Result<TableSna
     t.columns      = read_columns(conn, name)?;
     t.indexes      = read_indexes(conn, name)?;
     t.foreign_keys = read_foreign_keys(conn, name)?;
-    Ok(t)
+    Result.Ok(t)
 }
 
 fn read_columns(conn: &mut SqliteConnection, table: &Text) -> Result<List<ColumnSnap>, DbError> {
     let sql = render_pragma("table_info", table);
     match conn.query_all(&sql) {
-        Ok(rows) => {
+        Result.Ok(rows) => {
             let mut out: List<ColumnSnap> = List.new();
             let mut i: Int = 0;
             while i < rows.len() as Int {
@@ -130,8 +130,8 @@ fn read_columns(conn: &mut SqliteConnection, table: &Text) -> Result<List<Column
                     let col_type = value_to_text(&r[2]);
                     let notnull  = value_to_int(&r[3]) != 0;
                     let default_expr = match &r[4] {
-                        SvNull => None,
-                        _      => Some(value_to_text(&r[4])),
+                        SvNull => Maybe.None,
+                        _      => Maybe.Some(value_to_text(&r[4])),
                     };
                     let pk = value_to_int(&r[5]) > 0;
                     out.push(ColumnSnap {
@@ -142,23 +142,23 @@ fn read_columns(conn: &mut SqliteConnection, table: &Text) -> Result<List<Column
                         unique: false,    // populated in read_indexes
                         autoincrement: false,
                         default_expr: default_expr,
-                        refinement: None,
-                        refinement_pred: None,
-                        check_constraint: None,
+                        refinement: Maybe.None,
+                        refinement_pred: Maybe.None,
+                        check_constraint: Maybe.None,
                     });
                 }
                 i = i + 1;
             }
-            Ok(out)
+            Result.Ok(out)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
 fn read_indexes(conn: &mut SqliteConnection, table: &Text) -> Result<List<IndexSnap>, DbError> {
     let sql = render_pragma("index_list", table);
     match conn.query_all(&sql) {
-        Ok(rows) => {
+        Result.Ok(rows) => {
             let mut out: List<IndexSnap> = List.new();
             let mut i: Int = 0;
             while i < rows.len() as Int {
@@ -171,7 +171,7 @@ fn read_indexes(conn: &mut SqliteConnection, table: &Text) -> Result<List<IndexS
                     out.push(IndexSnap {
                         name: idx_name,
                         columns: cols,
-                        predicate: None,    // sqlite_master.sql carries the
+                        predicate: Maybe.None,    // sqlite_master.sql carries the
                                             // WHERE clause; parsing it back
                                             // is a follow-up to keep this
                                             // module dependency-free.
@@ -180,16 +180,16 @@ fn read_indexes(conn: &mut SqliteConnection, table: &Text) -> Result<List<IndexS
                 }
                 i = i + 1;
             }
-            Ok(out)
+            Result.Ok(out)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
 fn read_index_columns(conn: &mut SqliteConnection, idx_name: &Text) -> Result<List<Text>, DbError> {
     let sql = render_pragma("index_info", idx_name);
     match conn.query_all(&sql) {
-        Ok(rows) => {
+        Result.Ok(rows) => {
             let mut out: List<Text> = List.new();
             let mut i: Int = 0;
             while i < rows.len() as Int {
@@ -200,16 +200,16 @@ fn read_index_columns(conn: &mut SqliteConnection, idx_name: &Text) -> Result<Li
                 }
                 i = i + 1;
             }
-            Ok(out)
+            Result.Ok(out)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
 fn read_foreign_keys(conn: &mut SqliteConnection, table: &Text) -> Result<List<ForeignKeySnap>, DbError> {
     let sql = render_pragma("foreign_key_list", table);
     match conn.query_all(&sql) {
-        Ok(rows) => {
+        Result.Ok(rows) => {
             // Multiple rows can belong to the same composite FK — group by id.
             let mut grouped: List<ForeignKeySnap> = List.new();
             let mut current_id: Int = -1;
@@ -240,9 +240,9 @@ fn read_foreign_keys(conn: &mut SqliteConnection, table: &Text) -> Result<List<F
                 }
                 i = i + 1;
             }
-            Ok(grouped)
+            Result.Ok(grouped)
         }
-        Err(e) => Err(e),
+        Result.Err(e) => Result.Err(e),
     }
 }
 

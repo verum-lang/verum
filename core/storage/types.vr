@@ -23,22 +23,22 @@
     stratum:       MsfsStratum.LCls,
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "abstract object-store protocol — ObjectStore + ObjectMetadata + presigned URL".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.storage.types;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
 mount collections.{List, Map};
 mount time.rfc3339.Rfc3339Time;
 
@@ -121,13 +121,13 @@ pub fn put_options_default() -> PutOptions {
         content_type:  "application/octet-stream".to_text(),
         user_metadata: Map.new(),
         if_none_match: false,
-        if_match_etag: None,
+        if_match_etag: Maybe.None,
     }
 }
 
 @derive(Clone, Debug)
 public type GetOptions is {
-    /// Byte-range request (RFC 7233): `Some((start, end_inclusive))`.
+    /// Byte-range request (RFC 7233): `Maybe.Some((start, end_inclusive))`.
     range:        Maybe<(Int, Int)>,
     /// Conditional GET — return 304-equivalent if the object ETag
     /// matches.
@@ -135,7 +135,7 @@ public type GetOptions is {
 };
 
 pub fn get_options_default() -> GetOptions {
-    GetOptions { range: None, if_none_match: None }
+    GetOptions { range: Maybe.None, if_none_match: Maybe.None }
 }
 
 // =============================================================================
@@ -160,7 +160,7 @@ public type ListPage is {
     /// "Directory-style" prefixes when a delimiter was supplied.
     common_prefixes: List<Text>,
     /// Token to pass back as `continuation_token` for the next page.
-    /// `None` when the listing is complete.
+    /// `Maybe.None` when the listing is complete.
     next_token:     Maybe<Text>,
 };
 

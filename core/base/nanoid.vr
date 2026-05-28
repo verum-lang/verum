@@ -82,8 +82,8 @@ mount core.collections.List;
 // than hand back a deterministic ID.
 fn fill_random(buf: &mut [Byte]) {
     match core.sys.common.random_bytes(buf) {
-        Ok(_)  => {},
-        Err(_) => panic("NanoID: kernel CSPRNG unavailable — refusing to issue zero-entropy ID"),
+        Result.Ok(_)  => {},
+        Result.Err(_) => panic("NanoID: kernel CSPRNG unavailable — refusing to issue zero-entropy ID"),
     }
 }
 

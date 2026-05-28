@@ -113,7 +113,7 @@ implement HashGroup {
         let mut i: Int = 0;
         while i < HASHTABLE_SIZE {
             if self.slots[slot].is_empty() {
-                return if best == 0 { None } else { Some(best) };
+                return if best == 0 { Maybe.None } else { Maybe.Some(best) };
             }
             let frame = self.slots[slot].frame_in_group();
             if frame >= 1 && frame <= FRAMES_PER_GROUP
@@ -125,7 +125,7 @@ implement HashGroup {
             slot = (slot + 1) % HASHTABLE_SIZE;
             i = i + 1;
         }
-        if best == 0 { None } else { Some(best) }
+        if best == 0 { Maybe.None } else { Maybe.Some(best) }
     }
 }
 

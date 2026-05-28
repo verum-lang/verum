@@ -75,15 +75,15 @@ implement SequenceTable {
         next
     }
 
-    /// Read the current high-water mark for a table; `None` if the
+    /// Read the current high-water mark for a table; `Maybe.None` if the
     /// table has never received an AUTOINCREMENT value.
     public fn current_seq(&self, table: &Text) -> Maybe<Int64> {
         let mut i: Int = 0;
         while i < self.rows.len() {
-            if self.rows[i].name == *table { return Some(self.rows[i].seq); }
+            if self.rows[i].name == *table { return Maybe.Some(self.rows[i].seq); }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Drop the row for `table` (called when the table is dropped).

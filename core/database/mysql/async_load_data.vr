@@ -61,7 +61,7 @@
 module core.database.mysql.async_load_data;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
@@ -97,37 +97,37 @@ implement AsyncMysqlInfileWriter {
 
     public async fn write(&self, bytes: List<Byte>) -> Result<(), DbError> {
         match &self.token {
-            Some(t) => {
+            Maybe.Some(t) => {
                 if t.is_cancelled() {
                     self.metrics.record_cancellation();
                     let _ = self.chunk_tx.send_async(LdcCancel {
                         reason: "cancellation token fired".clone(),
                         reply: oneshot<Result<(), DbError>>().0,
                     }).await;
-                    return Err(cancelled_err("load_data.write"));
+                    return Result.Err(cancelled_err("load_data.write"));
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
         let n = bytes.len() as Int;
         match self.chunk_tx.send_async(LdcBytes(bytes)).await {
-            Ok(())  => {
+            Result.Ok(())  => {
                 self.metrics.record_chunk(n);
-                Ok(())
+                Result.Ok(())
             }
-            Err(_)  => Err(actor_dropped("load_data.write")),
+            Result.Err(_)  => Result.Err(actor_dropped("load_data.write")),
         }
     }
 
     public async fn finish(self) -> Result<Int, DbError> {
         let (rs, rr) = oneshot();
         match self.chunk_tx.send_async(LdcDone(rs)).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("load_data.finish send")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("load_data.finish send")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("load_data.finish reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("load_data.finish reply")),
         }
     }
 
@@ -138,12 +138,12 @@ implement AsyncMysqlInfileWriter {
             reason: reason.clone(),
             reply: rs,
         }).await {
-            Ok(())  => {}
-            Err(_)  => { return Err(actor_dropped("load_data.cancel send")); }
+            Result.Ok(())  => {}
+            Result.Err(_)  => { return Result.Err(actor_dropped("load_data.cancel send")); }
         }
         match rr.await {
-            Ok(r)  => r,
-            Err(_) => Err(actor_dropped("load_data.cancel reply")),
+            Result.Ok(r)  => r,
+            Result.Err(_) => Result.Err(actor_dropped("load_data.cancel reply")),
         }
     }
 }
@@ -167,7 +167,7 @@ public async fn load_data_local_async(
     sql: &Text,
     chunk_capacity: Int,
 ) -> Result<AsyncMysqlInfileWriter, DbError> {
-    load_data_local_async_with_token(conn, sql, chunk_capacity, None).await
+    load_data_local_async_with_token(conn, sql, chunk_capacity, Maybe.None).await
 }
 
 /// Sibling that wires a caller-side CancellationToken. When the
@@ -188,15 +188,15 @@ public async fn load_data_local_async_with_token(
         chunk_rx: chunk_rx,
         ack: open_tx,
     }).await {
-        Ok(())  => {}
-        Err(_)  => { return Err(actor_dropped("load_data_local_async send")); }
+        Result.Ok(())  => {}
+        Result.Err(_)  => { return Result.Err(actor_dropped("load_data_local_async send")); }
     }
     match open_rx.await {
-        Ok(Ok(()))  => {}
-        Ok(Err(e))  => { return Err(e); }
-        Err(_)      => { return Err(actor_dropped("load_data_local_async ack")); }
+        Result.Ok(Result.Ok(()))  => {}
+        Result.Ok(Result.Err(e))  => { return Result.Err(e); }
+        Result.Err(_)      => { return Result.Err(actor_dropped("load_data_local_async ack")); }
     }
-    Ok(AsyncMysqlInfileWriter {
+    Result.Ok(AsyncMysqlInfileWriter {
         chunk_tx: chunk_tx,
         metrics: core.database.common.copy_metrics.CopyMetrics.new(),
         token: token,

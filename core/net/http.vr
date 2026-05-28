@@ -385,7 +385,7 @@ implement Display for Version {
 /// headers.set("Authorization", "Bearer token123");
 ///
 
-/// if let Some(ct) = headers.get("content-type") {
+/// if let Maybe.Some(ct) = headers.get("content-type") {
 ///  print(f"Content type: {ct}");
 /// }
 /// ```
@@ -489,7 +489,7 @@ implement Display for Headers {
         for (k, v) in self.entries.iter() {
             f.write_str(f"{k}: {v}\r\n")?;
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -840,7 +840,7 @@ implement HttpUrl {
         } else if s.starts_with("http://") {
             ("http", s.slice(7, s.len()))
         } else {
-            return Err(HttpError.InvalidUrl("missing scheme (http:// or https://)"));
+            return Result.Err(HttpError.InvalidUrl("missing scheme (http:// or https://)"));
         };
 
         // Split host from path
@@ -877,7 +877,7 @@ implement HttpUrl {
             }
         };
 
-        Ok(HttpUrl {
+        Result.Ok(HttpUrl {
             scheme: scheme,
             host: host,
             port: port,
@@ -890,8 +890,8 @@ implement HttpUrl {
     /// Get the effective port (using default for scheme if not specified).
     public fn effective_port(&self) -> Int {
         match self.port {
-            Some(p) => p,
-            None => {
+            Maybe.Some(p) => p,
+            Maybe.None => {
                 if self.scheme == "https" { 443 }
                 else { 80 }
             }
@@ -901,14 +901,14 @@ implement HttpUrl {
     /// Reconstruct the URL as a string.
     public fn to_string(&self) -> Text {
         let mut result = f"{self.scheme}://{self.host}";
-        if let Some(port) = self.port {
+        if let Maybe.Some(port) = self.port {
             result = f"{result}:{port}";
         }
         result = f"{result}{self.path}";
-        if let Some(query) = &self.query {
+        if let Maybe.Some(query) = &self.query {
             result = f"{result}?{query}";
         }
-        if let Some(fragment) = &self.fragment {
+        if let Maybe.Some(fragment) = &self.fragment {
             result = f"{result}#{fragment}";
         }
         result
@@ -991,28 +991,28 @@ implement Cookie {
         Cookie {
             name: name,
             value: value,
-            domain: None,
-            path: None,
-            max_age: None,
+            domain: Maybe.None,
+            path: Maybe.None,
+            max_age: Maybe.None,
             secure: false,
             http_only: false,
-            same_site: None,
+            same_site: Maybe.None,
         }
     }
 
     /// Set the domain attribute.
     public fn with_domain(self, domain: Text) -> Cookie {
-        Cookie { domain: Some(domain), ..self }
+        Cookie { domain: Maybe.Some(domain), ..self }
     }
 
     /// Set the path attribute.
     public fn with_path(self, path: Text) -> Cookie {
-        Cookie { path: Some(path), ..self }
+        Cookie { path: Maybe.Some(path), ..self }
     }
 
     /// Set the max-age attribute (in seconds).
     public fn with_max_age(self, seconds: Int) -> Cookie {
-        Cookie { max_age: Some(seconds), ..self }
+        Cookie { max_age: Maybe.Some(seconds), ..self }
     }
 
     /// Set the Secure flag.
@@ -1027,19 +1027,19 @@ implement Cookie {
 
     /// Set the SameSite attribute.
     public fn with_same_site(self, same_site: SameSite) -> Cookie {
-        Cookie { same_site: Some(same_site), ..self }
+        Cookie { same_site: Maybe.Some(same_site), ..self }
     }
 
     /// Format the cookie as a Set-Cookie header value.
     public fn to_set_cookie_header(&self) -> Text {
         let mut result = f"{self.name}={self.value}";
-        if let Some(domain) = &self.domain {
+        if let Maybe.Some(domain) = &self.domain {
             result = f"{result}; Domain={domain}";
         }
-        if let Some(path) = &self.path {
+        if let Maybe.Some(path) = &self.path {
             result = f"{result}; Path={path}";
         }
-        if let Some(max_age) = self.max_age {
+        if let Maybe.Some(max_age) = self.max_age {
             result = f"{result}; Max-Age={max_age}";
         }
         if self.secure {
@@ -1048,11 +1048,11 @@ implement Cookie {
         if self.http_only {
             result = f"{result}; HttpOnly";
         }
-        if let Some(ss) = &self.same_site {
+        if let Maybe.Some(ss) = &self.same_site {
             let ss_str = match ss {
                 Strict => "Strict",
                 Lax => "Lax",
-                NoneSameSite => "None",
+                NoneSameSite => "Maybe.None",
             };
             result = f"{result}; SameSite={ss_str}";
         }

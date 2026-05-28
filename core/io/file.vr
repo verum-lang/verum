@@ -263,8 +263,8 @@ implement File {
         let mode = DEFAULT_FILE_MODE;
 
         match sys_open(bytes, flags, mode) {
-            Ok(fd) => Ok(File { fd: fd.as_raw() }),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(fd) => Result.Ok(File { fd: fd.as_raw() }),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 
@@ -274,8 +274,8 @@ implement File {
         // Initialize stat buffer with zeros (syscall will fill it)
         let mut stat_buf: Stat = unsafe { @zeroed() };
         match sys_fstat(fd, &mut stat_buf) {
-            Ok(()) => Ok(stat_buf.st_size as Int),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(()) => Result.Ok(stat_buf.st_size as Int),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 
@@ -283,8 +283,8 @@ implement File {
     public fn sync_all(&self) -> IoResult<()> {
         let fd = FileDesc.from_raw(self.fd);
         match sys_fsync(fd) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(()) => Result.Ok(()),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 
@@ -298,8 +298,8 @@ implement File {
     public fn set_len(&self, size: Int) -> IoResult<()> {
         let fd = FileDesc.from_raw(self.fd);
         match sys_ftruncate(fd, size) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(()) => Result.Ok(()),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 
@@ -319,8 +319,8 @@ implement Read for File {
     fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
         let fd = FileDesc.from_raw(self.fd);
         match sys_read(fd, buf) {
-            Ok(n) => Ok(n),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 }
@@ -329,16 +329,16 @@ implement Write for File {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
         let fd = FileDesc.from_raw(self.fd);
         match sys_write(fd, buf) {
-            Ok(n) => Ok(n),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
         let fd = FileDesc.from_raw(self.fd);
         match sys_fsync(fd) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(()) => Result.Ok(()),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 }
@@ -353,8 +353,8 @@ implement Seek for File {
 
         let fd = FileDesc.from_raw(self.fd);
         match sys_lseek(fd, offset, whence) {
-            Ok(pos) => Ok(pos),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(pos) => Result.Ok(pos),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 }
@@ -400,8 +400,8 @@ implement Clone for File {
     fn clone(&self) -> File {
         let fd = FileDesc.from_raw(self.fd);
         match sys_dup(fd) {
-            Ok(new_fd) => File { fd: new_fd.as_raw() },
-            Err(e) => {
+            Result.Ok(new_fd) => File { fd: new_fd.as_raw() },
+            Result.Err(e) => {
                 panic(f"File.clone failed: dup({self.fd}) returned error {e}; the fallback shallow-clone path was a double-close hazard and has been removed — use try_clone() for a fallible alternative");
             }
         }
@@ -417,8 +417,8 @@ implement File {
     public fn try_clone(&self) -> IoResult<File> {
         let fd = FileDesc.from_raw(self.fd);
         match sys_dup(fd) {
-            Ok(new_fd) => Ok(File { fd: new_fd.as_raw() }),
-            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+            Result.Ok(new_fd) => Result.Ok(File { fd: new_fd.as_raw() }),
+            Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
 }
@@ -432,7 +432,7 @@ public fn read_to_string(path: &Text) -> IoResult<Text> {
     let mut file = File.open(path)?;
     let mut content = Text.new();
     file.read_to_string(&mut content)?;
-    Ok(content)
+    Result.Ok(content)
 }
 
 // Read entire file to bytes.
@@ -440,7 +440,7 @@ public fn read(path: &Text) -> IoResult<List<Byte>> {
     let mut file = File.open(path)?;
     let mut content = List.new();
     file.read_to_end(&mut content)?;
-    Ok(content)
+    Result.Ok(content)
 }
 
 // Write text to file.
@@ -503,19 +503,19 @@ implement AsyncFile {
     public async fn open(path: &Text) -> IoResult<AsyncFile> {
         // Opening itself is synchronous, but we wrap in async File
         let file = File.open(path)?;
-        Ok(AsyncFile { inner: file })
+        Result.Ok(AsyncFile { inner: file })
     }
 
     /// Create a file asynchronously for writing.
     public async fn create(path: &Text) -> IoResult<AsyncFile> {
         let file = File.create(path)?;
-        Ok(AsyncFile { inner: file })
+        Result.Ok(AsyncFile { inner: file })
     }
 
     /// Open with custom options.
     public async fn open_with_options(path: &Text, options: &OpenOptions) -> IoResult<AsyncFile> {
         let file = options.open(path)?;
-        Ok(AsyncFile { inner: file })
+        Result.Ok(AsyncFile { inner: file })
     }
 
     /// Read data asynchronously.
@@ -558,7 +558,7 @@ implement AsyncFile {
             total = total + n;
         }
 
-        Ok(total)
+        Result.Ok(total)
     }
 
     /// Read all data as string asynchronously.
@@ -566,7 +566,7 @@ implement AsyncFile {
         let mut bytes = List.new();
         let n = self.read_to_end(&mut bytes).await?;
         *buf = Text.from_utf8(bytes)?;
-        Ok(n)
+        Result.Ok(n)
     }
 
     /// Write all data asynchronously.
@@ -575,11 +575,11 @@ implement AsyncFile {
         while written < buf.len() {
             let n = self.write(&buf[written..]).await?;
             if n == 0 {
-                return Err(StreamError.new(IoErrorKind.WriteZero));
+                return Result.Err(StreamError.new(IoErrorKind.WriteZero));
             }
             written = written + n;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Flush the file asynchronously.
@@ -636,7 +636,7 @@ public async fn read_to_string_async(path: &Text) -> IoResult<Text> {
     let mut file = AsyncFile.open(path).await?;
     let mut content = Text.new();
     file.read_to_string(&mut content).await?;
-    Ok(content)
+    Result.Ok(content)
 }
 
 /// Read entire file to bytes asynchronously.
@@ -644,7 +644,7 @@ public async fn read_async(path: &Text) -> IoResult<List<Byte>> {
     let mut file = AsyncFile.open(path).await?;
     let mut content = List.new();
     file.read_to_end(&mut content).await?;
-    Ok(content)
+    Result.Ok(content)
 }
 
 /// Write text to file asynchronously.

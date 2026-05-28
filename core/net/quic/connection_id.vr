@@ -73,7 +73,7 @@ implement ConnectionId {
     /// Construct from raw bytes. `TooLong` for len > 20.
     public fn from_bytes(src: &[Byte]) -> Result<ConnectionId, CidError> {
         if src.len() > MAX_CID_LEN {
-            return Err(CidError.TooLong(src.len()));
+            return Result.Err(CidError.TooLong(src.len()));
         }
         let mut b: List<Byte> = [];
         let mut i: Int = 0;
@@ -81,7 +81,7 @@ implement ConnectionId {
             b.push(src[i]);
             i = i + 1;
         }
-        Ok(ConnectionId { bytes: b })
+        Result.Ok(ConnectionId { bytes: b })
     }
 
     /// Zero-length CID — "omitted" in Short headers when the peer

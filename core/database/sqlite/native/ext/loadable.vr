@@ -13,7 +13,7 @@
 //  public fn my_init(db: &mut Connection<Admin>) -> Result<(), DbError> {
 //  db.register_scalar(my_scalar_fn())?;
 //  db.set_busy_handler(constant_busy(50))?;
-//  Ok(())
+//  Result.Ok(())
 //  }
 //
 
@@ -136,20 +136,20 @@ implement LoadGate {
 
 // The host calls `try_load(gate, info)` BEFORE running the entry
 // function. It returns the decision; on `Ok`, the host runs the
-// entry function (which may itself fail). On `Err(LoadDisabled)`,
+// entry function (which may itself fail). On `Result.Err(LoadDisabled)`,
 // the host short-circuits with that error.
 // =============================================================================
 
 public type LoadDecision is LdProceed | LdAlreadyLoaded(Text);
 
 public fn try_load(gate: &LoadGate, info: &ExtensionInfo) -> Result<LoadDecision, LoadError> {
-    if !gate.enabled { return Err(LoadDisabled); }
+    if !gate.enabled { return Result.Err(LoadDisabled); }
     let mut i: Int = 0;
     while i < gate.loaded.len() {
         if gate.loaded[i].name == info.name {
-            return Ok(LdAlreadyLoaded(info.name.clone()));
+            return Result.Ok(LdAlreadyLoaded(info.name.clone()));
         }
         i = i + 1;
     }
-    Ok(LdProceed)
+    Result.Ok(LdProceed)
 }

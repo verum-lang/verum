@@ -36,7 +36,7 @@ implement Tabs {
         Tabs {
             titles: lines,
             selected: 0,
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             highlight_style: Style.new().bold().reversed(),
             divider: TextSpan.raw(" | "),
@@ -50,7 +50,7 @@ implement Tabs {
         Tabs {
             titles: titles,
             selected: 0,
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             highlight_style: Style.new().bold().reversed(),
             divider: TextSpan.raw(" | "),
@@ -65,7 +65,7 @@ implement Tabs {
     }
 
     public fn block(self, block: Block) -> Tabs {
-        Tabs { block: Some(block), ..self }
+        Tabs { block: Maybe.Some(block), ..self }
     }
 
     public fn style(self, style: Style) -> Tabs {
@@ -95,12 +95,12 @@ implement Tabs {
 implement Widget for Tabs {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let tab_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if tab_area.width < 1 || tab_area.height < 1 { return; }

@@ -34,7 +34,7 @@ module core.database.sqlite.native.l4_vdbe.affinity_coerce;
 
 mount core.*;
 mount collections.List;
-mount base.{Maybe, None, Some};
+mount base.{Maybe, Maybe.None, Some};
 mount core.database.sqlite.native.l4_vdbe.register.{
     Register, RNull, RInt, RReal, RText, RBlob, RRowId,
 };

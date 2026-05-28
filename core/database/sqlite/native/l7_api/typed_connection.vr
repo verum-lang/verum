@@ -84,8 +84,8 @@ public type affine TypedConnection<C> is {
 /// method calls.
 public fn open_readonly(path: &Text) -> Result<TypedConnection<ReadCap>, ConnectionError> {
     match open_file(path, CmRead) {
-        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: ReadCap }),
-        Err(e) => Err(e),
+        Result.Ok(c)  => Result.Ok(TypedConnection { inner: c, _phantom: ReadCap }),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -94,40 +94,40 @@ public fn open_readonly(path: &Text) -> Result<TypedConnection<ReadCap>, Connect
 /// remain unavailable.
 public fn open_readwrite(path: &Text) -> Result<TypedConnection<WriteCap>, ConnectionError> {
     match open_file(path, CmWrite) {
-        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: WriteCap }),
-        Err(e) => Err(e),
+        Result.Ok(c)  => Result.Ok(TypedConnection { inner: c, _phantom: WriteCap }),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
 /// Open an admin (read + write + DDL) connection to `path`.
 public fn open_admin(path: &Text) -> Result<TypedConnection<AdminCap>, ConnectionError> {
     match open_file(path, CmAdmin) {
-        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: AdminCap }),
-        Err(e) => Err(e),
+        Result.Ok(c)  => Result.Ok(TypedConnection { inner: c, _phantom: AdminCap }),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
 /// Read-only `:memory:` connection.
 public fn open_memory_readonly() -> Result<TypedConnection<ReadCap>, ConnectionError> {
     match open_memory(CmRead) {
-        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: ReadCap }),
-        Err(e) => Err(e),
+        Result.Ok(c)  => Result.Ok(TypedConnection { inner: c, _phantom: ReadCap }),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
 /// Read-write `:memory:` connection.
 public fn open_memory_readwrite() -> Result<TypedConnection<WriteCap>, ConnectionError> {
     match open_memory(CmWrite) {
-        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: WriteCap }),
-        Err(e) => Err(e),
+        Result.Ok(c)  => Result.Ok(TypedConnection { inner: c, _phantom: WriteCap }),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
 /// Admin `:memory:` connection.
 public fn open_memory_admin() -> Result<TypedConnection<AdminCap>, ConnectionError> {
     match open_memory(CmAdmin) {
-        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: AdminCap }),
-        Err(e) => Err(e),
+        Result.Ok(c)  => Result.Ok(TypedConnection { inner: c, _phantom: AdminCap }),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -172,11 +172,11 @@ implement<C: CanRead> TypedConnection<C> {
     /// `&TypedConnection<C>` directly the underlying ensure_*
     /// runtime checks become dead code.
     ///
-    /// Stub: returns `Err(IoError("typed-read not yet wired"))` for
+    /// Stub: returns `Result.Err(IoError("typed-read not yet wired"))` for
     /// the foundation pass.  The wiring is mechanical and tracked
     /// as a #134 follow-up.
     public fn execute_query_stub(&self, _sql: &Text) -> Result<(), ConnectionError> {
-        Err(IoError("typed read-execute not yet wired".clone()))
+        Result.Err(IoError("typed read-execute not yet wired".clone()))
     }
 }
 
@@ -189,11 +189,11 @@ implement<C: CanWrite> TypedConnection<C> {
     /// rejected for `TypedConnection<ReadCap>` — no runtime
     /// `ensure_writable` is consulted.
     ///
-    /// Stub: returns `Err(IoError("typed-write not yet wired"))`
+    /// Stub: returns `Result.Err(IoError("typed-write not yet wired"))`
     /// for the foundation pass.  The wiring is mechanical and
     /// tracked as a #134 follow-up.
     public fn execute_dml_stub(&mut self, _sql: &Text) -> Result<(), ConnectionError> {
-        Err(IoError("typed write-execute not yet wired".clone()))
+        Result.Err(IoError("typed write-execute not yet wired".clone()))
     }
 }
 
@@ -208,7 +208,7 @@ implement<C: CanDdl> TypedConnection<C> {
     ///
     /// Stub for the foundation pass; tracked as a #134 follow-up.
     public fn execute_ddl_stub(&mut self, _sql: &Text) -> Result<(), ConnectionError> {
-        Err(IoError("typed DDL-execute not yet wired".clone()))
+        Result.Err(IoError("typed DDL-execute not yet wired".clone()))
     }
 }
 

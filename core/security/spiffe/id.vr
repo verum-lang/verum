@@ -87,25 +87,25 @@ implement SpiffeId {
     public fn new(trust_domain: Text, path: Text) -> Result<SpiffeId, SpiffeIdError> {
         validate_trust_domain(&trust_domain)?;
         validate_path(&path)?;
-        Ok(SpiffeId { trust_domain: trust_domain, path: path })
+        Result.Ok(SpiffeId { trust_domain: trust_domain, path: path })
     }
 
     /// Trust-domain-only SPIFFE ID (e.g. "spiffe://example.org").
     public fn from_trust_domain(trust_domain: Text) -> Result<SpiffeId, SpiffeIdError> {
         validate_trust_domain(&trust_domain)?;
-        Ok(SpiffeId { trust_domain: trust_domain, path: "".into() })
+        Result.Ok(SpiffeId { trust_domain: trust_domain, path: "".into() })
     }
 
     /// Parse from canonical URI form.
     public fn parse(input: &Text) -> Result<SpiffeId, SpiffeIdError> {
-        if input.is_empty() { return Err(SpiffeIdError.Empty); }
+        if input.is_empty() { return Result.Err(SpiffeIdError.Empty); }
         if input.len() > MAX_SPIFFE_ID_LENGTH {
-            return Err(SpiffeIdError.PathTooLong { len: input.len() });
+            return Result.Err(SpiffeIdError.PathTooLong { len: input.len() });
         }
         let bytes = input.as_bytes();
         // Require "spiffe://" prefix.
         if !starts_with_ci(bytes, SPIFFE_SCHEME.as_bytes()) {
-            return Err(SpiffeIdError.MissingScheme);
+            return Result.Err(SpiffeIdError.MissingScheme);
         }
         let rest = &bytes[9..];  // "spiffe://".len()
         // Split at first '/'.
@@ -120,7 +120,7 @@ implement SpiffeId {
         } else {
             (&rest[..slash], &rest[slash..])
         };
-        if td_bytes.len() == 0 { return Err(SpiffeIdError.EmptyTrustDomain); }
+        if td_bytes.len() == 0 { return Result.Err(SpiffeIdError.EmptyTrustDomain); }
         let trust_domain = Text.from_utf8(td_bytes).map_err(|_| SpiffeIdError.InvalidTrustDomain {
             reason: "non-utf8".into(),
         })?;
@@ -156,9 +156,9 @@ implement SpiffeId {
 // =============================================================================
 
 fn validate_trust_domain(td: &Text) -> Result<(), SpiffeIdError> {
-    if td.is_empty() { return Err(SpiffeIdError.EmptyTrustDomain); }
+    if td.is_empty() { return Result.Err(SpiffeIdError.EmptyTrustDomain); }
     if td.len() > 255 {
-        return Err(SpiffeIdError.InvalidTrustDomain { reason: "exceeds 255 chars".into() });
+        return Result.Err(SpiffeIdError.InvalidTrustDomain { reason: "exceeds 255 chars".into() });
     }
     let bytes = td.as_bytes();
     let mut i = 0;
@@ -169,21 +169,21 @@ fn validate_trust_domain(td: &Text) -> Result<(), SpiffeIdError> {
             || (b >= 0x30 && b <= 0x39)     // 0-9
             || b == 0x2D || b == 0x2E || b == 0x5F;  // - . _
         if !ok {
-            return Err(SpiffeIdError.InvalidCharacters { at: i, character: b });
+            return Result.Err(SpiffeIdError.InvalidCharacters { at: i, character: b });
         }
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn validate_path(path: &Text) -> Result<(), SpiffeIdError> {
-    if path.is_empty() { return Ok(()); }
+    if path.is_empty() { return Result.Ok(()); }
     if path.len() > MAX_SPIFFE_ID_LENGTH {
-        return Err(SpiffeIdError.PathTooLong { len: path.len() });
+        return Result.Err(SpiffeIdError.PathTooLong { len: path.len() });
     }
     let bytes = path.as_bytes();
     if bytes[0] != 0x2F {
-        return Err(SpiffeIdError.InvalidCharacters { at: 0, character: bytes[0] });
+        return Result.Err(SpiffeIdError.InvalidCharacters { at: 0, character: bytes[0] });
     }
     // Permitted: alpha, digits, `-`, `.`, `_`, `~`, sub-delims, `:`, `@`.
     let mut i = 1;
@@ -197,11 +197,11 @@ fn validate_path(path: &Text) -> Result<(), SpiffeIdError> {
             || b == 0x3A || b == 0x40
             || b == 0x25 /* % */;
         if !ok {
-            return Err(SpiffeIdError.InvalidCharacters { at: i, character: b });
+            return Result.Err(SpiffeIdError.InvalidCharacters { at: i, character: b });
         }
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn starts_with_ci(haystack: &[Byte], needle: &[Byte]) -> Bool {

@@ -51,10 +51,10 @@ implement Sparkline {
     public fn new(data: List<Float>) -> Sparkline {
         Sparkline {
             data: data,
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             bar_style: Style.new().fg(Color.Green),
-            max: None,
+            max: Maybe.None,
             direction: SparkDirection.LeftToRight,
             bar_set: BarSet.Full,
         }
@@ -64,10 +64,10 @@ implement Sparkline {
     public fn empty() -> Sparkline {
         Sparkline {
             data: List.new(),
-            block: None,
+            block: Maybe.None,
             style: Style.DEFAULT,
             bar_style: Style.new().fg(Color.Green),
-            max: None,
+            max: Maybe.None,
             direction: SparkDirection.LeftToRight,
             bar_set: BarSet.Full,
         }
@@ -80,7 +80,7 @@ implement Sparkline {
 
     /// Set the block wrapper.
     public fn block(self, block: Block) -> Sparkline {
-        Sparkline { block: Some(block), ..self }
+        Sparkline { block: Maybe.Some(block), ..self }
     }
 
     /// Set the style for the sparkline area.
@@ -93,9 +93,9 @@ implement Sparkline {
         Sparkline { bar_style: style, ..self }
     }
 
-    /// Set explicit maximum value. If None, the maximum of the data is used.
+    /// Set explicit maximum value. If Maybe.None, the maximum of the data is used.
     public fn max(self, max: Float) -> Sparkline {
-        Sparkline { max: Some(max), ..self }
+        Sparkline { max: Maybe.Some(max), ..self }
     }
 
     /// Set the data direction.
@@ -112,12 +112,12 @@ implement Sparkline {
 implement Widget for Sparkline {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let spark_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if spark_area.width < 1 || spark_area.height < 1 { return; }
@@ -127,8 +127,8 @@ implement Widget for Sparkline {
 
         // Determine the effective maximum
         let data_max = match self.max {
-            Some(m) => m,
-            None => {
+            Maybe.Some(m) => m,
+            Maybe.None => {
                 let mut m = 0.0;
                 for v in &self.data {
                     if v > m { m = v; }

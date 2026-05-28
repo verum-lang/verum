@@ -36,7 +36,7 @@
 module core.database.mysql.typed_row;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
@@ -67,8 +67,8 @@ implement MysqlTypedRow for Int {
     fn from_mysql_row(row: &List<RowValue>) -> Result<Int, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            RvInt(n) | RvUInt(n) => Ok(*n),
-            other => Err(typed_row_error(0, "Int", other)),
+            RvInt(n) | RvUInt(n) => Result.Ok(*n),
+            other => Result.Err(typed_row_error(0, "Int", other)),
         }
     }
 }
@@ -77,11 +77,11 @@ implement MysqlTypedRow for Float {
     fn from_mysql_row(row: &List<RowValue>) -> Result<Float, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            RvFloat(f) => Ok(*f),
+            RvFloat(f) => Result.Ok(*f),
             // MySQL DECIMAL surfaces as RvText (canonical decimal)
             // — caller wanting Float should use a higher-level
             // parse step, not this protocol.
-            other => Err(typed_row_error(0, "Float", other)),
+            other => Result.Err(typed_row_error(0, "Float", other)),
         }
     }
 }
@@ -90,8 +90,8 @@ implement MysqlTypedRow for Text {
     fn from_mysql_row(row: &List<RowValue>) -> Result<Text, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            RvText(s) => Ok(s.clone()),
-            other => Err(typed_row_error(0, "Text", other)),
+            RvText(s) => Result.Ok(s.clone()),
+            other => Result.Err(typed_row_error(0, "Text", other)),
         }
     }
 }
@@ -101,8 +101,8 @@ implement MysqlTypedRow for Bool {
         expect_arity(row, 1)?;
         match &row[0] {
             // MySQL BOOL == TINYINT(1); arrives as RvInt.
-            RvInt(n) | RvUInt(n) => Ok(*n != 0),
-            other => Err(typed_row_error(0, "Bool", other)),
+            RvInt(n) | RvUInt(n) => Result.Ok(*n != 0),
+            other => Result.Err(typed_row_error(0, "Bool", other)),
         }
     }
 }
@@ -111,8 +111,8 @@ implement MysqlTypedRow for List<Byte> {
     fn from_mysql_row(row: &List<RowValue>) -> Result<List<Byte>, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            RvBytes(b) | RvRaw(b) => Ok(b.clone()),
-            other => Err(typed_row_error(0, "List<Byte>", other)),
+            RvBytes(b) | RvRaw(b) => Result.Ok(b.clone()),
+            other => Result.Err(typed_row_error(0, "List<Byte>", other)),
         }
     }
 }
@@ -125,10 +125,10 @@ implement<T: MysqlTypedRow> MysqlTypedRow for Maybe<T> {
     fn from_mysql_row(row: &List<RowValue>) -> Result<Maybe<T>, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            RvNull => Ok(None),
+            RvNull => Result.Ok(Maybe.None),
             _ => {
                 let v = T::from_mysql_row(row)?;
-                Ok(Some(v))
+                Result.Ok(Maybe.Some(v))
             }
         }
     }
@@ -167,7 +167,7 @@ implement<A: MysqlTypedRow> MysqlTypedRow for (A,) {
     fn from_mysql_row(row: &List<RowValue>) -> Result<(A,), DbError> {
         expect_arity(row, 1)?;
         let a = A::from_mysql_row(&slice_one(row, 0))?;
-        Ok((a,))
+        Result.Ok((a,))
     }
 }
 
@@ -176,7 +176,7 @@ implement<A: MysqlTypedRow, B: MysqlTypedRow> MysqlTypedRow for (A, B) {
         expect_arity(row, 2)?;
         let a = A::from_mysql_row(&slice_one(row, 0))?;
         let b = B::from_mysql_row(&slice_one(row, 1))?;
-        Ok((a, b))
+        Result.Ok((a, b))
     }
 }
 
@@ -188,7 +188,7 @@ implement<A: MysqlTypedRow, B: MysqlTypedRow, C: MysqlTypedRow>
         let a = A::from_mysql_row(&slice_one(row, 0))?;
         let b = B::from_mysql_row(&slice_one(row, 1))?;
         let c = C::from_mysql_row(&slice_one(row, 2))?;
-        Ok((a, b, c))
+        Result.Ok((a, b, c))
     }
 }
 
@@ -201,7 +201,7 @@ implement<A: MysqlTypedRow, B: MysqlTypedRow, C: MysqlTypedRow, D: MysqlTypedRow
         let b = B::from_mysql_row(&slice_one(row, 1))?;
         let c = C::from_mysql_row(&slice_one(row, 2))?;
         let d = D::from_mysql_row(&slice_one(row, 3))?;
-        Ok((a, b, c, d))
+        Result.Ok((a, b, c, d))
     }
 }
 
@@ -221,9 +221,9 @@ public fn rows_typed_my<R: MysqlTypedRow>(
     while i < (rows.len() as Int) {
         let r = R::from_mysql_row(&rows[i].columns);
         match r {
-            Ok(v)  => { out.push(v); }
-            Err(e) => {
-                return Err(DbError.Adapter(AdapterSpecific {
+            Result.Ok(v)  => { out.push(v); }
+            Result.Err(e) => {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdMysql,
                     code: "MYSQL_TYPED_ROW_DECODE".clone(),
                     message: f"row {i}: {e}",
@@ -233,7 +233,7 @@ public fn rows_typed_my<R: MysqlTypedRow>(
         }
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }
 
 // =============================================================================
@@ -246,14 +246,14 @@ public fn rows_typed_my<R: MysqlTypedRow>(
 public fn expect_arity(row: &List<RowValue>, want: Int) -> Result<(), DbError> {
     let got = row.len() as Int;
     if got != want {
-        return Err(DbError.Adapter(AdapterSpecific {
+        return Result.Err(DbError.Adapter(AdapterSpecific {
             adapter: AdMysql,
             code: "MYSQL_TYPED_ROW_ARITY".clone(),
             message: f"MysqlTypedRow: expected {want} columns, got {got}",
             retryable: false,
         }));
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn typed_row_error(col: Int, want: &str, got: &RowValue) -> DbError {

@@ -86,9 +86,9 @@ implement RecursionGuard {
         RgAllow
     }
 
-    /// Pop the topmost frame. Returns Some(id) when a frame existed.
+    /// Pop the topmost frame. Returns Maybe.Some(id) when a frame existed.
     public fn leave(&mut self) -> Maybe<SubProgramId> {
-        if self.stack.len() == 0 { return None; }
+        if self.stack.len() == 0 { return Maybe.None; }
         let last = self.stack.len() - 1;
         let id_v = id_value(&self.stack[last]);
         let popped = SubProgramId { id: id_v };
@@ -96,7 +96,7 @@ implement RecursionGuard {
         let mut i: Int = 0;
         while i < last { new_stack.push(SubProgramId { id: id_value(&self.stack[i]) }); i = i + 1; }
         self.stack = new_stack;
-        Some(popped)
+        Maybe.Some(popped)
     }
 
     fn contains(&self, sp_id: &SubProgramId) -> Bool {

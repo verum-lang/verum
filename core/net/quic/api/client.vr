@@ -100,8 +100,8 @@ implement QuicClientOptions {
     public fn with_system_trust() -> QuicClientOptions {
         let mut opts = QuicClientOptions.default();
         match TrustStore.system() {
-            Ok(t) => { opts.trust = t; },
-            Err(_) => {},
+            Result.Ok(t) => { opts.trust = t; },
+            Result.Err(_) => {},
         }
         opts
     }
@@ -181,7 +181,7 @@ implement QuicClient {
         // is driven by the transport integration layer which we plug
         // behind this async entry point. Once complete, the client
         // handle carries live 1-RTT keys.
-        Ok(QuicClient {
+        Result.Ok(QuicClient {
             authority:   authority.clone(),
             peer_addr:   addr,
             opts:        opts,
@@ -196,7 +196,7 @@ implement QuicClient {
         self.opened_bidi = self.opened_bidi + 1_u64;
         // Placeholder — integration layer creates real SendStream /
         // RecvStream halves against the underlying QuicConnectionSm<OneRtt>.
-        Err(QuicClientError.Handshake(Text.from_str("pure-Verum stream opening awaits transport wire-up")))
+        Result.Err(QuicClientError.Handshake(Text.from_str("pure-Verum stream opening awaits transport wire-up")))
             .or_else(|_| {
                 // The shape the integration returns — SendStream +
                 // RecvStream halves with initial flow-control limits
@@ -205,7 +205,7 @@ implement QuicClient {
                     self.opts.params.initial_max_stream_data_bidi_remote);
                 let recv = core.net.quic.stream_sm.RecvStream.new(sid,
                     self.opts.params.initial_max_stream_data_bidi_local);
-                Ok(QuicStream { stream_id: sid, send: send, recv: recv })
+                Result.Ok(QuicStream { stream_id: sid, send: send, recv: recv })
             })
     }
 
@@ -215,7 +215,7 @@ implement QuicClient {
         self.opened_uni = self.opened_uni + 1_u64;
         let send = core.net.quic.stream_sm.SendStream.new(sid,
             self.opts.params.initial_max_stream_data_uni);
-        Ok(QuicSendStream { stream_id: sid, send: send })
+        Result.Ok(QuicSendStream { stream_id: sid, send: send })
     }
 
     /// Send a raw QUIC datagram (RFC 9221). Non-reliable; drops silently
@@ -223,14 +223,14 @@ implement QuicClient {
     /// been advertised by both peers.
     pub async fn send_datagram(&mut self, data: &[Byte]) -> Result<(), QuicClientError> {
         let _ = data;
-        Ok(())
+        Result.Ok(())
     }
 
     /// Close the connection gracefully with an optional reason.
     pub async fn close(&mut self, error_code: UInt64, reason: &Text) -> Result<(), QuicClientError> {
         let _ = error_code;
         let _ = reason;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn authority(&self) -> Text      { self.authority.clone() }
@@ -271,7 +271,7 @@ fn parse_port(b: &[Byte]) -> UInt16 {
 
 async fn resolve(host: &Text, port: UInt16) -> Result<SocketAddr, QuicClientError> {
     match core.net.dns.resolve_first(host).await {
-        Ok(addr) => Ok(SocketAddr.new(addr, port)),
-        Err(_)   => Err(QuicClientError.Resolve(host.clone())),
+        Result.Ok(addr) => Result.Ok(SocketAddr.new(addr, port)),
+        Result.Err(_)   => Result.Err(QuicClientError.Resolve(host.clone())),
     }
 }

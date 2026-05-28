@@ -144,10 +144,10 @@ implement<H: Handler + Send + Sync + 'static> Http3WeftServer<H> {
         config: WeftQuicConfig,
     ) -> Result<Http3WeftServer<H>, Text> {
         let server = match Http3Server.bind(&addr, config.quic.clone()).await {
-            Ok(s)  => s,
-            Err(e) => return Err(f"h3 bind: {e}"),
+            Result.Ok(s)  => s,
+            Result.Err(e) => return Result.Err(f"h3 bind: {e}"),
         };
-        Ok(Http3WeftServer {
+        Result.Ok(Http3WeftServer {
             inner: server,
             app: Heap.new(app),
             config: config,
@@ -178,12 +178,12 @@ implement<H: Handler + Send + Sync + 'static> Http3WeftServer<H> {
             if draining.load(MemoryOrdering.Acquire) { break; }
 
             match inner.accept().await {
-                Err(_e) => {
+                Result.Err(_e) => {
                     // Listener-level errors bail the loop; caller can
                     // restart via supervisor (§4.5).
                     break;
                 }
-                Ok((req, handle)) => {
+                Result.Ok((req, handle)) => {
                     let cur = in_flight.fetch_add(1, MemoryOrdering.AcqRel) + 1;
                     if cur > max {
                         in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
@@ -207,7 +207,7 @@ implement<H: Handler + Send + Sync + 'static> Http3WeftServer<H> {
             core.async.timer.sleep_ms(50).await;
             elapsed = elapsed + 50;
         }
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -243,7 +243,7 @@ async fn dispatch_one_request<H: Handler>(
     // bridge follow-up), default to "0" — the gate sees a safe value
     // until the runtime side surfaces the bit.
     headers.set(&"x-weft-via-0rtt", &"0");
-    if let Some(client_ts) = headers.get(&"x-weft-submitted-at") {
+    if let Maybe.Some(client_ts) = headers.get(&"x-weft-submitted-at") {
         // Preserve any client-supplied submission timestamp under a
         // separate header so downstream auditing can compare it
         // against our authoritative stamp. Defends against clients
@@ -252,7 +252,7 @@ async fn dispatch_one_request<H: Handler>(
     }
     headers.set(&"x-weft-submitted-at", &submitted_at_ms.to_text());
     let (path, raw_query) = split_path_query(&req.path);
-    let peer_addr: Maybe<SocketAddr> = None;  // §6.10 follow-up — QUIC peer lookup.
+    let peer_addr: Maybe<SocketAddr> = Maybe.None;  // §6.10 follow-up — QUIC peer lookup.
 
     // H/3 request bodies arrive on the stream — phase-4 scaffolding
     // assumes empty body for now (works for GET/HEAD/OPTIONS/TRACE).
@@ -264,8 +264,8 @@ async fn dispatch_one_request<H: Handler>(
 
     // 2. Dispatch.
     let response = match app.handle(weft_req).await {
-        Ok(r)  => r,
-        Err(e) => e.into_response(),
+        Result.Ok(r)  => r,
+        Result.Err(e) => e.into_response(),
     };
 
     // 3. Emit response via H3 primitives.
@@ -284,8 +284,8 @@ async fn dispatch_one_request<H: Handler>(
 
 fn split_path_query(raw: &Text) -> (Text, Maybe<Text>) {
     match raw.find("?") {
-        Some(i) => (raw.slice(0, i), Some(raw.slice(i + 1, raw.len()))),
-        None    => (raw.clone(), None),
+        Maybe.Some(i) => (raw.slice(0, i), Maybe.Some(raw.slice(i + 1, raw.len()))),
+        Maybe.None    => (raw.clone(), Maybe.None),
     }
 }
 

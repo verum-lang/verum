@@ -19,7 +19,7 @@
 module core.database.mysql.async_pool;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
@@ -101,13 +101,13 @@ implement AsyncMysqlPool {
         while i < pool_cfg.min_size {
             let h = open_and_warm(&config, &pool_cfg).await?;
             match tx.send_async(h).await {
-                Ok(())  => { opened = opened + 1; }
-                Err(_)  => { return Err(pool_err("seat fresh connection failed")); }
+                Result.Ok(())  => { opened = opened + 1; }
+                Result.Err(_)  => { return Result.Err(pool_err("seat fresh connection failed")); }
             }
             i = i + 1;
         }
 
-        Ok(AsyncMysqlPool {
+        Result.Ok(AsyncMysqlPool {
             config: config,
             pool_cfg: pool_cfg,
             available_tx: tx,
@@ -119,27 +119,27 @@ implement AsyncMysqlPool {
     public async fn acquire(&self) -> Result<AsyncMysqlPoolGuard, DbError> {
         let mut guard = self.available_rx.lock().unwrap_or_else(|p| p.into_inner());
         match guard.try_recv() {
-            Ok(h) => {
+            Result.Ok(h) => {
                 drop(guard);
-                return Ok(AsyncMysqlPoolGuard {
-                    handle: Some(h),
+                return Result.Ok(AsyncMysqlPoolGuard {
+                    handle: Maybe.Some(h),
                     available_tx: self.available_tx.clone(),
                 });
             }
-            Err(_) => {}
+            Result.Err(_) => {}
         }
         drop(guard);
 
         let cur = self.current.fetch_add(1, MemoryOrdering.AcqRel);
         if cur < self.pool_cfg.max_size {
             match open_and_warm(&self.config, &self.pool_cfg).await {
-                Ok(h) => Ok(AsyncMysqlPoolGuard {
-                    handle: Some(h),
+                Result.Ok(h) => Result.Ok(AsyncMysqlPoolGuard {
+                    handle: Maybe.Some(h),
                     available_tx: self.available_tx.clone(),
                 }),
-                Err(e) => {
+                Result.Err(e) => {
                     let _ = self.current.fetch_sub(1, MemoryOrdering.AcqRel);
-                    Err(e)
+                    Result.Err(e)
                 }
             }
         } else {
@@ -148,11 +148,11 @@ implement AsyncMysqlPool {
             let fut = g2.recv_fut();
             drop(g2);
             match fut.await {
-                Some(h) => Ok(AsyncMysqlPoolGuard {
-                    handle: Some(h),
+                Maybe.Some(h) => Result.Ok(AsyncMysqlPoolGuard {
+                    handle: Maybe.Some(h),
                     available_tx: self.available_tx.clone(),
                 }),
-                None => Err(pool_err("available channel closed")),
+                Maybe.None => Result.Err(pool_err("available channel closed")),
             }
         }
     }
@@ -170,22 +170,22 @@ public type affine AsyncMysqlPoolGuard is {
 implement AsyncMysqlPoolGuard {
     public fn conn_ref(&self) -> &AsyncMysqlConnection {
         match &self.handle {
-            Some(h) => h,
-            None    => panic("AsyncMysqlPoolGuard: handle taken"),
+            Maybe.Some(h) => h,
+            Maybe.None    => panic("AsyncMysqlPoolGuard: handle taken"),
         }
     }
 
     public fn conn(&self) -> AsyncMysqlConnection {
         match &self.handle {
-            Some(h) => h.clone(),
-            None    => panic("AsyncMysqlPoolGuard: handle taken"),
+            Maybe.Some(h) => h.clone(),
+            Maybe.None    => panic("AsyncMysqlPoolGuard: handle taken"),
         }
     }
 
     public async fn release(mut self) {
         match self.handle.take() {
-            Some(h) => { let _ = self.available_tx.send_async(h).await; }
-            None    => {}
+            Maybe.Some(h) => { let _ = self.available_tx.send_async(h).await; }
+            Maybe.None    => {}
         }
     }
 }
@@ -193,8 +193,8 @@ implement AsyncMysqlPoolGuard {
 implement Drop for AsyncMysqlPoolGuard {
     fn drop(&mut self) {
         match self.handle.take() {
-            Some(h) => { let _ = self.available_tx.try_send(h); }
-            None    => {}
+            Maybe.Some(h) => { let _ = self.available_tx.try_send(h); }
+            Maybe.None    => {}
         }
     }
 }
@@ -220,10 +220,10 @@ async fn open_and_warm(
     let mut i: Int = 0;
     while i < (pool_cfg.prepare_on_open.len() as Int) {
         match h.prepare(&pool_cfg.prepare_on_open[i]).await {
-            Ok(_)  => {}
-            Err(e) => { return Err(e); }
+            Result.Ok(_)  => {}
+            Result.Err(e) => { return Result.Err(e); }
         }
         i = i + 1;
     }
-    Ok(h)
+    Result.Ok(h)
 }

@@ -49,7 +49,7 @@
 module core.database.common.schema;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.database.common.error.AdapterId;
 mount core.database.common.check_codegen.{RefinementPredicate};
@@ -70,7 +70,7 @@ public type ColumnSnap is {
     unique: Bool,
     /// True if the column auto-increments / has a default sequence.
     autoincrement: Bool,
-    /// SQL DEFAULT expression text, or None.
+    /// SQL DEFAULT expression text, or Maybe.None.
     default_expr: Maybe<Text>,
     /// Verum refinement-predicate text (carried verbatim from the
     /// originating column type if the introspector recognised one).
@@ -80,7 +80,7 @@ public type ColumnSnap is {
     /// Structured refinement predicate. When present, `verum
     /// db:plan` runs `check_codegen.to_check_sql_for_column` over
     /// it to emit a per-dialect CHECK constraint that mirrors the
-    /// SMT-discharged client-side guarantee. `None` here means the
+    /// SMT-discharged client-side guarantee. `Maybe.None` here means the
     /// originating refinement is outside the CHECK-codegen-able
     /// fragment (Z3-only enforcement, no server-side periscope).
     refinement_pred: Maybe<RefinementPredicate>,
@@ -146,11 +146,11 @@ implement TableSnap {
         let mut i: Int = 0;
         while i < self.columns.len() as Int {
             if self.columns[i].name == *name {
-                return Some(&self.columns[i]);
+                return Maybe.Some(&self.columns[i]);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn primary_key_columns(&self) -> List<Text> {
@@ -202,7 +202,7 @@ implement SchemaSnapshot {
         }
     }
 
-    /// Find a table by its (schema, name). Returns None if either the
+    /// Find a table by its (schema, name). Returns Maybe.None if either the
     /// schema or the name doesn't match. Pass an empty schema string
     /// to match against the default schema only.
     public fn table(&self, schema: &Text, name: &Text) -> Maybe<&TableSnap> {
@@ -215,11 +215,11 @@ implement SchemaSnapshot {
         while i < self.tables.len() as Int {
             let t = &self.tables[i];
             if t.schema == lookup_schema && t.name == *name {
-                return Some(t);
+                return Maybe.Some(t);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn table_count(&self) -> Int { self.tables.len() as Int }
@@ -317,28 +317,28 @@ fn render_column(out: &mut Text, c: &ColumnSnap) {
     if c.autoincrement { out.push_str(&" AUTOINCREMENT".clone()); }
     if !c.nullable     { out.push_str(&" NOT NULL".clone()); }
     match &c.default_expr {
-        Some(d) => {
+        Maybe.Some(d) => {
             out.push_str(&" DEFAULT (".clone());
             out.push_str(d);
             out.push_str(&")".clone());
         }
-        None => {}
+        Maybe.None => {}
     }
     match &c.check_constraint {
-        Some(p) => {
+        Maybe.Some(p) => {
             out.push_str(&" CHECK (".clone());
             out.push_str(p);
             out.push_str(&")".clone());
         }
-        None => {}
+        Maybe.None => {}
     }
     match &c.refinement {
-        Some(r) => {
+        Maybe.Some(r) => {
             out.push_str(&" REFINEMENT (".clone());
             out.push_str(r);
             out.push_str(&")".clone());
         }
-        None => {}
+        Maybe.None => {}
     }
     out.push_str(&"\n".clone());
 }
@@ -359,12 +359,12 @@ fn render_index(out: &mut Text, idx: &IndexSnap) {
     }
     out.push_str(&")".clone());
     match &idx.predicate {
-        Some(p) => {
+        Maybe.Some(p) => {
             out.push_str(&" WHERE (".clone());
             out.push_str(p);
             out.push_str(&")".clone());
         }
-        None => {}
+        Maybe.None => {}
     }
     out.push_str(&"\n".clone());
 }

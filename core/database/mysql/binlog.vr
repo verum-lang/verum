@@ -69,7 +69,7 @@
 module core.database.mysql.binlog;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
@@ -141,7 +141,7 @@ public const ET_HEARTBEAT:               Int = 0x1B;
 public type BinlogChecksum is BcNone | BcCrc32;
 
 /// Optional COM_REGISTER_SLAVE payload for semi-sync replication
-/// flows. When `BinlogConfig.register_slave` is `Some(info)`, the
+/// flows. When `BinlogConfig.register_slave` is `Maybe.Some(info)`, the
 /// `connect_binlog` constructor sends COM_REGISTER_SLAVE BEFORE
 /// COM_BINLOG_DUMP[_GTID] and waits for the OK reply. Async
 /// replication works without it on MySQL 5.7+; semi-sync requires
@@ -205,7 +205,7 @@ public type BinlogConfig is {
     /// leaves it false.
     non_blocking: Bool,
     /// Optional COM_REGISTER_SLAVE payload sent BEFORE the binlog
-    /// dump. Required for semi-sync replication; defaults to None.
+    /// dump. Required for semi-sync replication; defaults to Maybe.None.
     register_slave: Maybe<RegisterSlaveInfo>,
 };
 
@@ -219,7 +219,7 @@ implement BinlogConfig {
             checksum: BcNone,
             start_from: BfFilePosition { filename: filename, position: position },
             non_blocking: false,
-            register_slave: None,
+            register_slave: Maybe.None,
         }
     }
 
@@ -235,8 +235,8 @@ implement BinlogConfig {
             GtidSet.new()
         } else {
             match parse_gtid_set(&gtid_set) {
-                Ok(s)  => s,
-                Err(_) => GtidSet.new(),
+                Result.Ok(s)  => s,
+                Result.Err(_) => GtidSet.new(),
             }
         };
         BinlogConfig.from_gtid_set(server_id, parsed)
@@ -253,7 +253,7 @@ implement BinlogConfig {
         } else {
             parse_gtid_set(&gtid_set)?
         };
-        Ok(BinlogConfig.from_gtid_set(server_id, parsed))
+        Result.Ok(BinlogConfig.from_gtid_set(server_id, parsed))
     }
 
     /// Typed constructor — takes an already-built `GtidSet`. The
@@ -266,7 +266,7 @@ implement BinlogConfig {
             checksum: BcNone,
             start_from: BfGtidSet { gtid_set: gtid_set },
             non_blocking: false,
-            register_slave: None,
+            register_slave: Maybe.None,
         }
     }
 
@@ -275,7 +275,7 @@ implement BinlogConfig {
     public fn with_register_slave(mut self, info: RegisterSlaveInfo)
         -> BinlogConfig
     {
-        self.register_slave = Some(info);
+        self.register_slave = Maybe.Some(info);
         self
     }
 }
@@ -419,7 +419,7 @@ public fn connect_binlog(
     // Optional COM_REGISTER_SLAVE BEFORE the dump — required for
     // semi-sync replication.
     match &binlog_cfg.register_slave {
-        Some(info) => {
+        Maybe.Some(info) => {
             conn.register_slave(
                 binlog_cfg.server_id,
                 &info.host,
@@ -428,14 +428,14 @@ public fn connect_binlog(
                 info.port,
             )?;
         }
-        None => {}
+        Maybe.None => {}
     }
 
     // Build the dump payload.
     let payload = build_dump_payload(&binlog_cfg);
     conn.binlog_send_command(payload.as_slice())?;
 
-    Ok(BinlogStream {
+    Result.Ok(BinlogStream {
         conn: conn,
         config: binlog_cfg,
         streaming: true,
@@ -504,40 +504,40 @@ implement BinlogStream {
     /// 0xFE EOF). EOF closes the stream cleanly.
     public fn next_event(&mut self) -> Result<Maybe<BinlogEvent>, DbError> {
         if !self.streaming {
-            return Err(stream_state_error("next_event after end-of-stream"));
+            return Result.Err(stream_state_error("next_event after end-of-stream"));
         }
         let payload = self.conn.binlog_recv_packet()?;
         if payload.len() == 0 {
-            return Err(bad_binlog("empty binlog packet"));
+            return Result.Err(bad_binlog("empty binlog packet"));
         }
         let status = (payload[0] as Int) & 0xFF;
         if status == 0xFE {
             // EOF — server closed the stream (NON_BLOCK or end of
             // available binlog).
             self.streaming = false;
-            return Ok(None);
+            return Result.Ok(Maybe.None);
         }
         if status == 0xFF {
             // ERR packet — translate via the standard MySQL error
             // decoder. Capabilities pass-through 0 for binlog
             // (no auth-plugin negotiation in this state).
             let body_after_status = match read_bytes(payload.as_slice(), 1, payload.len() as Int - 1) {
-                Ok(b)  => b,
-                Err(_) => { return Err(bad_binlog("ERR packet body truncated")); }
+                Result.Ok(b)  => b,
+                Result.Err(_) => { return Result.Err(bad_binlog("ERR packet body truncated")); }
             };
             // Re-prepend the 0xFF marker for parse_err.
             let mut full: List<Byte> = List.with_capacity(payload.len());
             put_u8(&mut full, 0xFF);
             put_bytes(&mut full, body_after_status.as_slice());
             let err = match parse_err(full.as_slice(), 0) {
-                Ok(e)  => e,
-                Err(_) => { return Err(bad_binlog("ERR decode failed")); }
+                Result.Ok(e)  => e,
+                Result.Err(_) => { return Result.Err(bad_binlog("ERR decode failed")); }
             };
             self.streaming = false;
-            return Err(dberr_from_mysql(err));
+            return Result.Err(dberr_from_mysql(err));
         }
         if status != 0x00 {
-            return Err(bad_binlog("unexpected binlog packet status byte"));
+            return Result.Err(bad_binlog("unexpected binlog packet status byte"));
         }
 
         // ---------------------------------------------------------------------
@@ -555,7 +555,7 @@ implement BinlogStream {
         match self.config.checksum {
             BcCrc32 => {
                 if event_end < 1 + 19 + 4 {
-                    return Err(bad_binlog(&"CRC32 mode but packet < header+trailer".clone()));
+                    return Result.Err(bad_binlog(&"CRC32 mode but packet < header+trailer".clone()));
                 }
                 let crc_off: Int = event_end - 4;
                 let expected = ((payload[crc_off]     as Int) & 0xFF)
@@ -564,12 +564,12 @@ implement BinlogStream {
                              | (((payload[crc_off + 3] as Int) & 0xFF) << 24);
                 // CRC covers (header + body) — bytes [1, event_end - 4).
                 let covered = match read_bytes(payload.as_slice(), 1, crc_off - 1) {
-                    Ok(b)  => b,
-                    Err(_) => { return Err(bad_binlog(&"CRC32 covered slice truncated".clone())); }
+                    Result.Ok(b)  => b,
+                    Result.Err(_) => { return Result.Err(bad_binlog(&"CRC32 covered slice truncated".clone())); }
                 };
                 let actual = crc32_compute(covered.as_slice()) as Int;
                 if (actual & 0xFFFFFFFF) != (expected & 0xFFFFFFFF) {
-                    return Err(crc_mismatch_error(expected, actual));
+                    return Result.Err(crc_mismatch_error(expected, actual));
                 }
                 // Trim the trailer so the event-body decoder doesn't
                 // accidentally consume it.
@@ -584,12 +584,12 @@ implement BinlogStream {
         // Body starts at offset 1 + 19 = 20; runs to event_end.
         let body_start: Int = 20;
         let body = match read_bytes(payload.as_slice(), body_start, event_end - body_start) {
-            Ok(b)  => b,
-            Err(_) => { return Err(bad_binlog("event body truncated")); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(bad_binlog("event body truncated")); }
         };
 
         let event = decode_event_body(&header, body)?;
-        Ok(Some(event))
+        Result.Ok(Maybe.Some(event))
     }
 
     /// Tear down the binlog connection. Closes the underlying
@@ -607,30 +607,30 @@ implement BinlogStream {
 
 fn decode_event_header(buf: &[Byte], off: Int) -> Result<BinlogEventHeader, DbError> {
     let timestamp = match read_u32_le(buf, off) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("header.timestamp")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("header.timestamp")); }
     };
     let event_type = match read_u8(buf, off + 4) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("header.event_type")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("header.event_type")); }
     };
     let server_id = match read_u32_le(buf, off + 5) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("header.server_id")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("header.server_id")); }
     };
     let event_size = match read_u32_le(buf, off + 9) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("header.event_size")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("header.event_size")); }
     };
     let log_pos = match read_u32_le(buf, off + 13) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("header.log_pos")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("header.log_pos")); }
     };
     let flags = match read_u16_le(buf, off + 17) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("header.flags")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("header.flags")); }
     };
-    Ok(BinlogEventHeader {
+    Result.Ok(BinlogEventHeader {
         timestamp_s: timestamp,
         event_type: event_type,
         server_id: server_id,
@@ -647,55 +647,55 @@ fn decode_event_header(buf: &[Byte], off: Int) -> Result<BinlogEventHeader, DbEr
 fn decode_event_body(header: &BinlogEventHeader, body: List<Byte>) -> Result<BinlogEvent, DbError> {
     let t = header.event_type;
     if t == ET_HEARTBEAT {
-        return Ok(BeHeartbeat { header: header.clone() });
+        return Result.Ok(BeHeartbeat { header: header.clone() });
     }
     if t == ET_QUERY {
         let q = decode_query_body(body.as_slice())?;
-        return Ok(BeQuery { header: header.clone(), body: q });
+        return Result.Ok(BeQuery { header: header.clone(), body: q });
     }
     if t == ET_XID {
         let xid = match read_u64_le(body.as_slice(), 0) {
-            Ok(v)  => v,
-            Err(_) => { return Err(bad_binlog("XID.xid")); }
+            Result.Ok(v)  => v,
+            Result.Err(_) => { return Result.Err(bad_binlog("XID.xid")); }
         };
-        return Ok(BeXid { header: header.clone(), xid: xid });
+        return Result.Ok(BeXid { header: header.clone(), xid: xid });
     }
     if t == ET_ROTATE {
         let r = decode_rotate_body(body.as_slice())?;
-        return Ok(BeRotate { header: header.clone(), body: r });
+        return Result.Ok(BeRotate { header: header.clone(), body: r });
     }
     if t == ET_FORMAT_DESCRIPTION {
         let f = decode_format_description_body(body.as_slice())?;
-        return Ok(BeFormatDescription { header: header.clone(), body: f });
+        return Result.Ok(BeFormatDescription { header: header.clone(), body: f });
     }
     if t == ET_GTID || t == ET_ANONYMOUS_GTID {
         let g = decode_gtid_body(body.as_slice())?;
-        return Ok(BeGtid { header: header.clone(), body: g });
+        return Result.Ok(BeGtid { header: header.clone(), body: g });
     }
     if t == ET_TABLE_MAP {
         let tm = core.database.mysql.binlog_rows.decode_table_map_body(body.as_slice())?;
-        return Ok(BeTableMap { header: header.clone(), body: tm });
+        return Result.Ok(BeTableMap { header: header.clone(), body: tm });
     }
     if t == ET_WRITE_ROWS_V2 {
         let rs = core.database.mysql.binlog_rows.decode_rows_event_body(
             body.as_slice(),
             core.database.mysql.binlog_rows.RkWrite,
         )?;
-        return Ok(BeWriteRows { header: header.clone(), body: rs });
+        return Result.Ok(BeWriteRows { header: header.clone(), body: rs });
     }
     if t == ET_UPDATE_ROWS_V2 {
         let rs = core.database.mysql.binlog_rows.decode_rows_event_body(
             body.as_slice(),
             core.database.mysql.binlog_rows.RkUpdate,
         )?;
-        return Ok(BeUpdateRows { header: header.clone(), body: rs });
+        return Result.Ok(BeUpdateRows { header: header.clone(), body: rs });
     }
     if t == ET_DELETE_ROWS_V2 {
         let rs = core.database.mysql.binlog_rows.decode_rows_event_body(
             body.as_slice(),
             core.database.mysql.binlog_rows.RkDelete,
         )?;
-        return Ok(BeDeleteRows { header: header.clone(), body: rs });
+        return Result.Ok(BeDeleteRows { header: header.clone(), body: rs });
     }
     if t == ET_PARTIAL_UPDATE_ROWS_V2 {
         // Same wire prefix as UPDATE_ROWS_V2 — `RkPartialUpdate`
@@ -706,9 +706,9 @@ fn decode_event_body(header: &BinlogEventHeader, body: List<Byte>) -> Result<Bin
             body.as_slice(),
             core.database.mysql.binlog_rows.RkPartialUpdate,
         )?;
-        return Ok(BeUpdateRows { header: header.clone(), body: rs });
+        return Result.Ok(BeUpdateRows { header: header.clone(), body: rs });
     }
-    Ok(BeOther { header: header.clone(), payload: body })
+    Result.Ok(BeOther { header: header.clone(), payload: body })
 }
 
 fn decode_query_body(buf: &[Byte]) -> Result<QueryEventBody, DbError> {
@@ -722,36 +722,36 @@ fn decode_query_body(buf: &[Byte]) -> Result<QueryEventBody, DbError> {
     //   M bytes: schema (NUL-terminated)
     //   K bytes: query (rest of body)
     let thread_id = match read_u32_le(buf, 0) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("QUERY.thread_id")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("QUERY.thread_id")); }
     };
     let exec_time = match read_u32_le(buf, 4) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("QUERY.exec_time")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("QUERY.exec_time")); }
     };
     let schema_len = match read_u8(buf, 8) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("QUERY.schema_length")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("QUERY.schema_length")); }
     };
     let error_code = match read_u16_le(buf, 9) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("QUERY.error_code")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("QUERY.error_code")); }
     };
     let sv_len = match read_u16_le(buf, 11) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("QUERY.status_vars_length")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("QUERY.status_vars_length")); }
     };
 
     let sv_off: Int = 13;
     let status_vars = match read_bytes(buf, sv_off, sv_len) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_binlog("QUERY.status_vars")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_binlog("QUERY.status_vars")); }
     };
 
     let schema_off: Int = sv_off + sv_len;
     let schema_bytes = match read_bytes(buf, schema_off, schema_len) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_binlog("QUERY.schema")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_binlog("QUERY.schema")); }
     };
     let db = bytes_to_text(&schema_bytes);
 
@@ -760,15 +760,15 @@ fn decode_query_body(buf: &[Byte]) -> Result<QueryEventBody, DbError> {
     let stmt_len: Int = (buf.len() as Int) - stmt_off;
     let stmt_bytes = if stmt_len > 0 {
         match read_bytes(buf, stmt_off, stmt_len) {
-            Ok(b)  => b,
-            Err(_) => { return Err(bad_binlog("QUERY.statement")); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(bad_binlog("QUERY.statement")); }
         }
     } else {
         List.new()
     };
     let statement = bytes_to_text(&stmt_bytes);
 
-    Ok(QueryEventBody {
+    Result.Ok(QueryEventBody {
         thread_id: thread_id,
         exec_time_s: exec_time,
         db: db,
@@ -783,20 +783,20 @@ fn decode_rotate_body(buf: &[Byte]) -> Result<RotateEventBody, DbError> {
     //   8 bytes: position
     //   N bytes: filename (rest of body)
     let pos = match read_u64_le(buf, 0) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("ROTATE.position")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("ROTATE.position")); }
     };
     let name_off: Int = 8;
     let name_len: Int = (buf.len() as Int) - name_off;
     let name_bytes = if name_len > 0 {
         match read_bytes(buf, name_off, name_len) {
-            Ok(b)  => b,
-            Err(_) => { return Err(bad_binlog("ROTATE.filename")); }
+            Result.Ok(b)  => b,
+            Result.Err(_) => { return Result.Err(bad_binlog("ROTATE.filename")); }
         }
     } else {
         List.new()
     };
-    Ok(RotateEventBody {
+    Result.Ok(RotateEventBody {
         next_position: pos,
         next_filename: bytes_to_text(&name_bytes),
     })
@@ -812,12 +812,12 @@ fn decode_format_description_body(buf: &[Byte]) -> Result<FormatDescriptionBody,
     //             header for ET_UNKNOWN — so vector len is the
     //             count of non-zero event-types)
     let version = match read_u16_le(buf, 0) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("FDE.binlog_version")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("FDE.binlog_version")); }
     };
     let sv_bytes = match read_bytes(buf, 2, 50) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_binlog("FDE.server_version")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_binlog("FDE.server_version")); }
     };
     // Strip trailing NULs.
     let mut sv_end = sv_bytes.len() as Int;
@@ -833,12 +833,12 @@ fn decode_format_description_body(buf: &[Byte]) -> Result<FormatDescriptionBody,
     let server_version = bytes_to_text(&sv_trim);
 
     let ct = match read_u32_le(buf, 52) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("FDE.create_timestamp")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("FDE.create_timestamp")); }
     };
     let _hdr_len = match read_u8(buf, 56) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("FDE.header_length")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("FDE.header_length")); }
     };
     let phl_off: Int = 57;
     let mut phl: List<Int> = List.new();
@@ -848,7 +848,7 @@ fn decode_format_description_body(buf: &[Byte]) -> Result<FormatDescriptionBody,
         i = i + 1;
     }
 
-    Ok(FormatDescriptionBody {
+    Result.Ok(FormatDescriptionBody {
         binlog_version: version,
         server_version: server_version,
         create_timestamp: ct,
@@ -863,28 +863,28 @@ fn decode_gtid_body(buf: &[Byte]) -> Result<GtidEventBody, DbError> {
     //   8 bytes:  GNO (sequence number)
     //   trailer: logical timestamps (V1 decode)
     let commit_flag = match read_u8(buf, 0) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("GTID.commit_flag")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("GTID.commit_flag")); }
     };
     let sid = match read_bytes(buf, 1, 16) {
-        Ok(b)  => b,
-        Err(_) => { return Err(bad_binlog("GTID.sid")); }
+        Result.Ok(b)  => b,
+        Result.Err(_) => { return Result.Err(bad_binlog("GTID.sid")); }
     };
     let gno = match read_u64_le(buf, 17) {
-        Ok(v)  => v,
-        Err(_) => { return Err(bad_binlog("GTID.gno")); }
+        Result.Ok(v)  => v,
+        Result.Err(_) => { return Result.Err(bad_binlog("GTID.gno")); }
     };
     let trailer_off: Int = 25;
     let trailer_len: Int = (buf.len() as Int) - trailer_off;
     let trailer = if trailer_len > 0 {
         match read_bytes(buf, trailer_off, trailer_len) {
-            Ok(b)  => b,
-            Err(_) => List.new(),
+            Result.Ok(b)  => b,
+            Result.Err(_) => List.new(),
         }
     } else {
         List.new()
     };
-    Ok(GtidEventBody {
+    Result.Ok(GtidEventBody {
         commit_flag: commit_flag,
         sid: sid,
         gno: gno,
@@ -898,8 +898,8 @@ fn decode_gtid_body(buf: &[Byte]) -> Result<GtidEventBody, DbError> {
 
 fn bytes_to_text(b: &List<Byte>) -> Text {
     match Text.from_utf8(b.as_slice()) {
-        Ok(s)  => s,
-        Err(_) => {
+        Result.Ok(s)  => s,
+        Result.Err(_) => {
             // Lossy fallback — replace invalid sequences with U+FFFD.
             let mut out = "".clone();
             let mut i: Int = 0;

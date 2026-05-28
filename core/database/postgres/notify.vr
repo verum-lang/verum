@@ -87,7 +87,7 @@
 module core.database.postgres.notify;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount base.memory.Shared;
 mount collections.List;
 mount sync.mutex.Mutex;
@@ -202,8 +202,8 @@ implement ChannelSink {
     fn push(&self, notif: Notification) {
         {
             let mut guard = match self.inner.lock() {
-                Ok(g)  => g,
-                Err(_) => return,
+                Result.Ok(g)  => g,
+                Result.Err(_) => return,
             };
             guard.total_received = guard.total_received + 1;
             if (guard.queue.len() as Int) >= guard.cap {
@@ -227,8 +227,8 @@ implement ChannelSink {
     fn close(&self) {
         {
             let mut guard = match self.inner.lock() {
-                Ok(g)  => g,
-                Err(_) => return,
+                Result.Ok(g)  => g,
+                Result.Err(_) => return,
             };
             guard.closed = true;
         }
@@ -263,16 +263,16 @@ implement NotificationStream {
         self.sink.channel()
     }
 
-    /// Non-blocking pop. Returns `None` when the queue is empty —
+    /// Non-blocking pop. Returns `Maybe.None` when the queue is empty —
     /// caller spins on its own schedule (typically a select! /
     /// nursery wait).
     public fn try_next(&self) -> Maybe<Notification> {
         let mut guard = match self.sink.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return None,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return Maybe.None,
         };
         if (guard.queue.len() as Int) == 0 {
-            return None;
+            return Maybe.None;
         }
         let head = clone_notif(&guard.queue[0]);
         let mut new_q: List<Notification> = List.with_capacity(guard.queue.len() as Int);
@@ -282,7 +282,7 @@ implement NotificationStream {
             i = i + 1;
         }
         guard.queue = new_q;
-        Some(head)
+        Maybe.Some(head)
     }
 
     /// Block until a notification arrives or the dispatcher closes
@@ -290,12 +290,12 @@ implement NotificationStream {
     /// `Condvar` — same wakeup pattern as `core.sync.condvar.wait`.
     public fn block_until_next(&self) -> Result<NotificationOutcome, DbError> {
         let mut guard = match self.sink.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return Err(notify_poisoned("sink mutex poisoned".clone())),
+            Result.Ok(g)  => g,
+            Result.Err(_) => return Result.Err(notify_poisoned("sink mutex poisoned".clone())),
         };
         loop {
             if guard.closed && (guard.queue.len() as Int) == 0 {
-                return Ok(Drained);
+                return Result.Ok(Drained);
             }
             if (guard.queue.len() as Int) > 0 {
                 let head = clone_notif(&guard.queue[0]);
@@ -306,11 +306,11 @@ implement NotificationStream {
                     i = i + 1;
                 }
                 guard.queue = new_q;
-                return Ok(Got(head));
+                return Result.Ok(Got(head));
             }
             guard = match self.sink.notify.wait(guard) {
-                Ok(g)  => g,
-                Err(_) => return Err(notify_poisoned("sink wait poisoned".clone())),
+                Result.Ok(g)  => g,
+                Result.Err(_) => return Result.Err(notify_poisoned("sink wait poisoned".clone())),
             };
         }
     }
@@ -323,37 +323,37 @@ implement NotificationStream {
         -> Result<NotificationOutcome, DbError>
     {
         let mut guard = match self.sink.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return Err(notify_poisoned("sink mutex poisoned".clone())),
+            Result.Ok(g)  => g,
+            Result.Err(_) => return Result.Err(notify_poisoned("sink mutex poisoned".clone())),
         };
         if guard.closed && (guard.queue.len() as Int) == 0 {
-            return Ok(Drained);
+            return Result.Ok(Drained);
         }
         if (guard.queue.len() as Int) > 0 {
-            return Ok(Got(pop_head_locked(&mut guard)));
+            return Result.Ok(Got(pop_head_locked(&mut guard)));
         }
         match self.sink.notify.wait_timeout(guard, timeout_ns) {
-            Ok((mut g, timed_out)) => {
+            Result.Ok((mut g, timed_out)) => {
                 if timed_out {
-                    return Ok(Drained);
+                    return Result.Ok(Drained);
                 }
                 if (g.queue.len() as Int) > 0 {
-                    Ok(Got(pop_head_locked(&mut g)))
+                    Result.Ok(Got(pop_head_locked(&mut g)))
                 } else if g.closed {
-                    Ok(Drained)
+                    Result.Ok(Drained)
                 } else {
-                    Ok(Drained)            // spurious wake; caller retries
+                    Result.Ok(Drained)            // spurious wake; caller retries
                 }
             }
-            Err(_) => Err(notify_poisoned("sink wait poisoned".clone())),
+            Result.Err(_) => Result.Err(notify_poisoned("sink wait poisoned".clone())),
         }
     }
 
     /// Per-stream metrics snapshot.
     public fn metrics(&self) -> StreamMetrics {
         let guard = match self.sink.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return StreamMetrics.empty(),
+            Result.Ok(g)  => g,
+            Result.Err(_) => return StreamMetrics.empty(),
         };
         StreamMetrics {
             channel: self.sink.channel.clone(),
@@ -468,8 +468,8 @@ implement NotifyDispatcher {
         let sink_handle = Shared.new(sink_owned);
         {
             let mut guard = match self.inner.lock() {
-                Ok(g)  => g,
-                Err(_) => return NotificationStream { sink: sink_handle.clone() },
+                Result.Ok(g)  => g,
+                Result.Err(_) => return NotificationStream { sink: sink_handle.clone() },
             };
             guard.total_subscribes = guard.total_subscribes + 1;
             // Find an existing route or create a new one.
@@ -501,8 +501,8 @@ implement NotifyDispatcher {
     /// `Drained` on their next blocking call.
     public fn unsubscribe_channel(&self, channel: &Text) {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return,
         };
         let mut found_idx: Int = -1;
         let mut i: Int = 0;
@@ -541,8 +541,8 @@ implement NotifyDispatcher {
     public fn dispatch(&self, resp: &NotificationResponse) {
         let notif = Notification.from_wire(resp);
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return,
         };
         // Update rate-limit counters BEFORE finding the route — the
         // signal we care about is total inflight pressure, not
@@ -584,8 +584,8 @@ implement NotifyDispatcher {
     /// connection's `close()` so blocked consumers wake up cleanly.
     public fn close_all(&self) {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return,
         };
         let mut i: Int = 0;
         while i < guard.routes.len() as Int {
@@ -607,8 +607,8 @@ implement NotifyDispatcher {
     /// metrics layer.
     public fn should_emit_rate_warning(&self) -> Bool {
         let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return false,
+            Result.Ok(g)  => g,
+            Result.Err(_) => return false,
         };
         if guard.rate_warning_emitted { return false; }
         if guard.rate_window_count > NOTIFY_RATE_WARNING_THRESHOLD {
@@ -621,8 +621,8 @@ implement NotifyDispatcher {
     /// Snapshot of dispatcher-wide metrics.
     public fn metrics(&self) -> DispatcherMetrics {
         let guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => return DispatcherMetrics.empty(),
+            Result.Ok(g)  => g,
+            Result.Err(_) => return DispatcherMetrics.empty(),
         };
         DispatcherMetrics {
             total_routes: guard.routes.len() as Int,

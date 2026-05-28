@@ -37,23 +37,23 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "universal value model for all configuration formats",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.configuration.value;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
 mount time.rfc3339.{Rfc3339Time};
 mount time.duration.{Duration};
 
@@ -157,35 +157,35 @@ public fn is_tagged(v: &ConfigValue) -> Bool {
 // =============================================================================
 
 public fn as_bool(v: &ConfigValue) -> Maybe<Bool> {
-    match v { ConfigBool(b) => Some(*b), _ => None }
+    match v { ConfigBool(b) => Maybe.Some(*b), _ => Maybe.None }
 }
 
 public fn as_int(v: &ConfigValue) -> Maybe<Int> {
-    match v { ConfigInt(i) => Some(*i), _ => None }
+    match v { ConfigInt(i) => Maybe.Some(*i), _ => Maybe.None }
 }
 
 public fn as_float(v: &ConfigValue) -> Maybe<Float> {
     match v {
-        ConfigFloat(f) => Some(*f),
-        ConfigInt(i)   => Some(*i as Float),  // numeric coercion
-        _              => None,
+        ConfigFloat(f) => Maybe.Some(*f),
+        ConfigInt(i)   => Maybe.Some(*i as Float),  // numeric coercion
+        _              => Maybe.None,
     }
 }
 
 public fn as_string(v: &ConfigValue) -> Maybe<&Text> {
-    match v { ConfigString(s) => Some(s), _ => None }
+    match v { ConfigString(s) => Maybe.Some(s), _ => Maybe.None }
 }
 
 public fn as_bytes(v: &ConfigValue) -> Maybe<&List<Byte>> {
-    match v { ConfigBytes(b) => Some(b), _ => None }
+    match v { ConfigBytes(b) => Maybe.Some(b), _ => Maybe.None }
 }
 
 public fn as_array(v: &ConfigValue) -> Maybe<&List<ConfigValue>> {
-    match v { ConfigArray(a) => Some(a), _ => None }
+    match v { ConfigArray(a) => Maybe.Some(a), _ => Maybe.None }
 }
 
 public fn as_table(v: &ConfigValue) -> Maybe<&Map<Text, ConfigValue>> {
-    match v { ConfigTable(t) => Some(t), _ => None }
+    match v { ConfigTable(t) => Maybe.Some(t), _ => Maybe.None }
 }
 
 // =============================================================================
@@ -265,8 +265,8 @@ fn map_eq_value(a: &Map<Text, ConfigValue>, b: &Map<Text, ConfigValue>) -> Bool 
     while i < keys.len() {
         let k = keys.get(i).unwrap();
         match b.get(k) {
-            Some(bv) => if !a.get(k).unwrap().eq(bv) { return false; },
-            None     => return false,
+            Maybe.Some(bv) => if !a.get(k).unwrap().eq(bv) { return false; },
+            Maybe.None     => return false,
         }
         i = i + 1;
     }

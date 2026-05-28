@@ -129,22 +129,22 @@ implement WalState {
     /// last checkpoint.  Used by the read fast path.
     public fn has_wal_version(&self, page_no: Int) -> Bool {
         match map_get_int(&self.frame_index, page_no) {
-            Some(frame_no) => frame_no > self.n_backfill,
-            None => false,
+            Maybe.Some(frame_no) => frame_no > self.n_backfill,
+            Maybe.None => false,
         }
     }
 
     /// Frame number holding the newest version of `page_no`, or
-    /// `None` if the page has never been written to WAL OR its
+    /// `Maybe.None` if the page has never been written to WAL OR its
     /// only WAL frame has already been checkpointed (and is thus
     /// freely overwritable).
     public fn newest_frame_for(&self, page_no: Int) -> Maybe<Int> {
         match map_get_int(&self.frame_index, page_no) {
-            Some(frame_no) => {
-                if frame_no > self.n_backfill { Some(frame_no) }
-                else { None }
+            Maybe.Some(frame_no) => {
+                if frame_no > self.n_backfill { Maybe.Some(frame_no) }
+                else { Maybe.None }
             }
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -180,12 +180,12 @@ implement WalState {
         while i < keys.len() {
             let page_no = keys[i];
             match map_get_int(&self.frame_index, page_no) {
-                Some(frame_no) => {
+                Maybe.Some(frame_no) => {
                     if frame_no > keep_through_frame {
                         self.frame_index.remove(&page_no);
                     }
                 }
-                None => {}
+                Maybe.None => {}
             }
             i = i + 1;
         }
@@ -235,7 +235,7 @@ implement WalState {
 // -----------------------------------------------------------------------------
 // Local helpers — Verum's pattern matcher prefers method calls return
 // non-Int sums; explicitly thread the lookup through a typed helper so
-// the `Some/None` patterns dispatch on a `Maybe<Int>` rather than the
+// the `Some/Maybe.None` patterns dispatch on a `Maybe<Int>` rather than the
 // inferred-Int they get when called inline.
 // -----------------------------------------------------------------------------
 
@@ -269,8 +269,8 @@ public fn snapshot_wal(state: &WalState) -> WalReaderSnapshot {
     while i < keys.len() {
         let k = keys[i];
         match map_get_int(&state.frame_index, k) {
-            Some(v) => { idx_clone.insert(k, v); }
-            None => {}
+            Maybe.Some(v) => { idx_clone.insert(k, v); }
+            Maybe.None => {}
         }
         i = i + 1;
     }
@@ -292,14 +292,14 @@ implement WalReaderSnapshot {
     /// it cloned at open time.
     public fn newest_frame_for(&self, page_no: Int) -> Maybe<Int> {
         match map_get_int(&self.frame_index, page_no) {
-            Some(frame_no) => {
+            Maybe.Some(frame_no) => {
                 if frame_no > self.n_backfill_at_open && frame_no <= self.mx_frame {
-                    Some(frame_no)
+                    Maybe.Some(frame_no)
                 } else {
-                    None
+                    Maybe.None
                 }
             }
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 }

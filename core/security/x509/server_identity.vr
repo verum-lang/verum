@@ -122,8 +122,8 @@ implement Eq for ServerIdentityError {
 
 /// ```
 /// match verify_server_identity(&peer_cert, &server_name) {
-///  Ok(()) => proceed,
-///  Err(ServerIdentityError.DnsNameMismatch(_)) => log + abort,
+///  Result.Ok(()) => proceed,
+///  Result.Err(ServerIdentityError.DnsNameMismatch(_)) => log + abort,
 ///  ...
 /// }
 /// ```
@@ -132,14 +132,14 @@ public fn verify_server_identity(
     reference_name: &Text,
 ) -> Result<(), ServerIdentityError> {
     if reference_name.is_empty() {
-        return Err(ServerIdentityError.EmptyReference);
+        return Result.Err(ServerIdentityError.EmptyReference);
     }
 
     // Detect IP-literal references first so "192.0.2.1" never gets
     // matched against a dNSName SAN entry.
     match parse_ip_literal(reference_name) {
-        Some(ip_bytes) => verify_ip_identity(cert, ip_bytes),
-        None           => verify_dns_identity(cert, reference_name),
+        Maybe.Some(ip_bytes) => verify_ip_identity(cert, ip_bytes),
+        Maybe.None           => verify_dns_identity(cert, reference_name),
     }
 }
 
@@ -150,25 +150,25 @@ public fn verify_server_identity(
 fn parse_ip_literal(s: &Text) -> Maybe<List<Byte>> {
     // IPv4: four dot-separated LDH-decimal octets. Parse into 4 bytes.
     match Ipv4Addr.parse(s) {
-        Ok(addr) => {
+        Result.Ok(addr) => {
             let (a, b, c, d) = addr.octets();
             // IPv4 = exactly 4 bytes.
             let mut bytes: List<Byte> = List.with_capacity(4);
             bytes.push(a); bytes.push(b); bytes.push(c); bytes.push(d);
-            return Some(bytes);
+            return Maybe.Some(bytes);
         },
-        Err(_) => {},
+        Result.Err(_) => {},
     }
     // IPv6 (textual form per RFC 4291 §2.2).
     match Ipv6Addr.parse(s) {
-        Ok(addr) => {
+        Result.Ok(addr) => {
             let arr: [Byte; 16] = addr.octets();
             // IPv6 = exactly 16 bytes.
             let mut bytes: List<Byte> = List.with_capacity(16);
             bytes.extend_from_slice(&arr[..]);
-            Some(bytes)
+            Maybe.Some(bytes)
         },
-        Err(_) => None,
+        Result.Err(_) => Maybe.None,
     }
 }
 
@@ -181,21 +181,21 @@ fn verify_ip_identity(
     ip_bytes: List<Byte>,
 ) -> Result<(), ServerIdentityError> {
     match &cert.tbs.extensions.subject_alt_name {
-        Some((_critical, san)) => {
+        Maybe.Some((_critical, san)) => {
             if san_has_ip_entries(san) {
                 if san.matches_ip(ip_bytes.as_slice()) {
-                    Ok(())
+                    Result.Ok(())
                 } else {
-                    Err(ServerIdentityError.IpAddressMismatch(ip_bytes))
+                    Result.Err(ServerIdentityError.IpAddressMismatch(ip_bytes))
                 }
             } else {
                 // All entries were dNSName / rfc822Name / etc — the
                 // cert doesn't assert any IP identity and an IP
                 // literal MUST match an iPAddress SAN entry.
-                Err(ServerIdentityError.IpLiteralRequiresIpSan)
+                Result.Err(ServerIdentityError.IpLiteralRequiresIpSan)
             }
         },
-        None => Err(ServerIdentityError.NoSubjectAltName),
+        Maybe.None => Result.Err(ServerIdentityError.NoSubjectAltName),
     }
 }
 
@@ -204,14 +204,14 @@ fn verify_dns_identity(
     hostname: &Text,
 ) -> Result<(), ServerIdentityError> {
     match &cert.tbs.extensions.subject_alt_name {
-        Some((_critical, san)) => {
+        Maybe.Some((_critical, san)) => {
             if san.matches_dns(hostname) {
-                Ok(())
+                Result.Ok(())
             } else {
-                Err(ServerIdentityError.DnsNameMismatch(hostname.clone()))
+                Result.Err(ServerIdentityError.DnsNameMismatch(hostname.clone()))
             }
         },
-        None => Err(ServerIdentityError.NoSubjectAltName),
+        Maybe.None => Result.Err(ServerIdentityError.NoSubjectAltName),
     }
 }
 

@@ -88,8 +88,8 @@ implement RestoreEngine {
                 continue;
             }
             match (runner)(&s) {
-                None => { report.statements_applied = report.statements_applied + 1; }
-                Some(err) => {
+                Maybe.None => { report.statements_applied = report.statements_applied + 1; }
+                Maybe.Some(err) => {
                     report.statements_failed = report.statements_failed + 1;
                     if report.first_failure.len() == 0 {
                         report.first_failure = err.clone();

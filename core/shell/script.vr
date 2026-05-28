@@ -57,8 +57,8 @@ public fn args() -> List<Text> {
 public fn arg(n: Int) -> Maybe<Text> {
     let xs = args();
     if n >= 0 && (n as Int) < xs.len() as Int {
-        Some(xs[n as usize].clone())
-    } else { None }
+        Maybe.Some(xs[n as usize].clone())
+    } else { Maybe.None }
 }
 
 /// Number of user-supplied arguments.
@@ -96,7 +96,7 @@ public fn die(msg: &Text, code: Int) -> ! {
 /// take their defaults.
 public fn bootstrap(source: &Text) -> Result<ShellContext, ShellError> {
     let perms = parse_frontmatter(source)?;
-    Ok(ShellContext.default().with_permissions(perms))
+    Result.Ok(ShellContext.default().with_permissions(perms))
 }
 
 /// Read `path`, parse frontmatter, return configured context. Used by the
@@ -121,15 +121,15 @@ public fn bootstrap_from_file(path: &Path) -> Result<ShellContext, ShellError> {
 ///
 
 ///  fn main() {
-///  script_main(|| async { Ok(()) }).await;
+///  script_main(|| async { Result.Ok(()) }).await;
 ///  }
 public async fn script_main(body_outcome: Result<(), ShellError>) -> ! {
     // The pre-awaited outcome pattern avoids generic `async fn` bounds
     // (not yet expressible in Verum's grammar). Caller writes:
     //  script_main(my_main().await).await
     match body_outcome {
-        Ok(())   => exit_success(),
-        Err(err) => {
+        Result.Ok(())   => exit_success(),
+        Result.Err(err) => {
             eprint(&f"error: {err}\n");
             exit_failure()
         }

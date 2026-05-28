@@ -56,7 +56,7 @@ module core.database.sqlite.native.l7_api.pragma_api;
 // =============================================================================
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{
     Register, RNull, RInt, RText,
@@ -96,29 +96,29 @@ public type PragmaValue is
 
 implement PragmaValue {
     /// Best-effort coerce to Int64. PvBool maps to 0/1; PvText
-    /// returns None (the caller should use pragma_get_text).
+    /// returns Maybe.None (the caller should use pragma_get_text).
     public fn as_int(&self) -> Maybe<Int64> {
         match self {
-            PvNull       => None,
-            PvInt(n)     => Some(*n),
-            PvBool(b)    => Some(if *b { 1 as Int64 } else { 0 as Int64 }),
-            PvText(_)    => None,
+            PvNull       => Maybe.None,
+            PvInt(n)     => Maybe.Some(*n),
+            PvBool(b)    => Maybe.Some(if *b { 1 as Int64 } else { 0 as Int64 }),
+            PvText(_)    => Maybe.None,
         }
     }
 
     public fn as_bool(&self) -> Maybe<Bool> {
         match self {
-            PvNull    => None,
-            PvBool(b) => Some(*b),
-            PvInt(n)  => Some(*n != (0 as Int64)),
-            PvText(_) => None,
+            PvNull    => Maybe.None,
+            PvBool(b) => Maybe.Some(*b),
+            PvInt(n)  => Maybe.Some(*n != (0 as Int64)),
+            PvText(_) => Maybe.None,
         }
     }
 
     public fn as_text(&self) -> Maybe<Text> {
         match self {
-            PvText(s) => Some(s.clone()),
-            _         => None,
+            PvText(s) => Maybe.Some(s.clone()),
+            _         => Maybe.None,
         }
     }
 
@@ -151,18 +151,18 @@ fn value_to_register(v: &PragmaValue) -> Register {
 
 fn unwrap_single_row(result: PragmaResult) -> Result<PragmaValue, SqliteApiDbError> {
     match result {
-        PrEmpty   => Ok(PvNull),
+        PrEmpty   => Result.Ok(PvNull),
         PrRow(row) => {
-            if row.len() == 0 { return Ok(PvNull); }
-            Ok(register_to_value(&row[0]))
+            if row.len() == 0 { return Result.Ok(PvNull); }
+            Result.Ok(register_to_value(&row[0]))
         }
         PrRows(rows) => {
-            if rows.len() == 0 { return Ok(PvNull); }
+            if rows.len() == 0 { return Result.Ok(PvNull); }
             let r0 = &rows[0];
-            if r0.len() == 0 { return Ok(PvNull); }
-            Ok(register_to_value(&r0[0]))
+            if r0.len() == 0 { return Result.Ok(PvNull); }
+            Result.Ok(register_to_value(&r0[0]))
         }
-        PrError(msg) => Err(DbGeneric(msg)),
+        PrError(msg) => Result.Err(DbGeneric(msg)),
     }
 }
 
@@ -177,7 +177,7 @@ fn unwrap_single_row(result: PragmaResult) -> Result<PragmaValue, SqliteApiDbErr
 public fn pragma_get(db: &mut Database, kind: PragmaKind) -> Result<PragmaValue, SqliteApiDbError> {
     let name = pragma_kind_to_name(&kind);
     let cfg = db.pragma_cfg_mut();
-    let result = core.database.sqlite.native.pragmas.dispatch.execute(cfg, &name, None, None);
+    let result = core.database.sqlite.native.pragmas.dispatch.execute(cfg, &name, Maybe.None, Maybe.None);
     unwrap_single_row(result)
 }
 
@@ -192,15 +192,15 @@ public fn pragma_set(
 ) -> Result<(), SqliteApiDbError> {
     let spec_v = pragma_spec(&kind);
     if !spec_v.is_settable {
-        return Err(DbReadonly);
+        return Result.Err(DbReadonly);
     }
     let name = pragma_kind_to_name(&kind);
     let reg = value_to_register(&value);
     let cfg = db.pragma_cfg_mut();
-    let result = core.database.sqlite.native.pragmas.dispatch.execute(cfg, &name, Some(reg), None);
+    let result = core.database.sqlite.native.pragmas.dispatch.execute(cfg, &name, Maybe.Some(reg), Maybe.None);
     match result {
-        PrError(msg) => Err(DbGeneric(msg)),
-        _            => Ok(()),
+        PrError(msg) => Result.Err(DbGeneric(msg)),
+        _            => Result.Ok(()),
     }
 }
 
@@ -210,10 +210,10 @@ public fn pragma_set(
 
 /// Read an Int-shaped PRAGMA. Errors if the pragma returns Text.
 public fn pragma_get_int(db: &mut Database, kind: PragmaKind) -> Result<Int64, SqliteApiDbError> {
-    let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
+    let v = match pragma_get(db, kind) { Result.Ok(v) => v, Result.Err(e) => { return Result.Err(e); } };
     match v.as_int() {
-        Some(n) => Ok(n),
-        None    => Err(DbMisuse(
+        Maybe.Some(n) => Result.Ok(n),
+        Maybe.None    => Result.Err(DbMisuse(
             "pragma_get_int: pragma value is not an integer".clone(),
         )),
     }
@@ -229,10 +229,10 @@ public fn pragma_set_int(
 
 /// Read a Text-shaped PRAGMA (journal_mode, encoding, locking_mode).
 public fn pragma_get_text(db: &mut Database, kind: PragmaKind) -> Result<Text, SqliteApiDbError> {
-    let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
+    let v = match pragma_get(db, kind) { Result.Ok(v) => v, Result.Err(e) => { return Result.Err(e); } };
     match v.as_text() {
-        Some(s) => Ok(s),
-        None    => Err(DbMisuse(
+        Maybe.Some(s) => Result.Ok(s),
+        Maybe.None    => Result.Err(DbMisuse(
             "pragma_get_text: pragma value is not text".clone(),
         )),
     }
@@ -250,10 +250,10 @@ public fn pragma_set_text(
 /// recursive_triggers, …). Returns the integer interpretation
 /// (0 → false, non-zero → true).
 public fn pragma_get_bool(db: &mut Database, kind: PragmaKind) -> Result<Bool, SqliteApiDbError> {
-    let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
+    let v = match pragma_get(db, kind) { Result.Ok(v) => v, Result.Err(e) => { return Result.Err(e); } };
     match v.as_bool() {
-        Some(b) => Ok(b),
-        None    => Err(DbMisuse(
+        Maybe.Some(b) => Result.Ok(b),
+        Maybe.None    => Result.Err(DbMisuse(
             "pragma_get_bool: pragma value is not coercible to bool".clone(),
         )),
     }

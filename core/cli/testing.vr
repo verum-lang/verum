@@ -47,7 +47,7 @@ public type SimResult is {
     /// The flat captured outcome — handy for asserting parsing details
     /// independent of handler side effects.
     outcome:   Maybe<ParseOutcome>,
-    /// `Some(err)` if argv-parsing failed.
+    /// `Maybe.Some(err)` if argv-parsing failed.
     parse_err: Maybe<ParseError>,
 };
 
@@ -89,25 +89,25 @@ public fn argv_of(parts: List<Text>) -> List<Text> {
 // =============================================================================
 
 /// Compare the rendered help of `spec` to an expected text. Returns
-/// `None` on match or `Some(diff)` describing the first divergence.
+/// `Maybe.None` on match or `Maybe.Some(diff)` describing the first divergence.
 public fn snapshot_help(spec: &CommandSpec, expected: &Text) -> Maybe<Text> {
     let style = HelpStyle.plain();
     let actual = render_help(spec, &style);
-    if &actual == expected { None } else {
+    if &actual == expected { Maybe.None } else {
         let mut msg = Text.from("snapshot mismatch:\n");
         msg.push_str("--- expected ---\n");
         msg.push_str(expected);
         msg.push_str("\n--- actual ---\n");
         msg.push_str(&actual);
         msg.push_str("\n");
-        Some(msg)
+        Maybe.Some(msg)
     }
 }
 
 /// Compare a freshly rendered text to an expected snapshot. Generic
 /// helper used by `snapshot_help`, `snapshot_completion`, `snapshot_manpage`.
 public fn snapshot_text(actual: &Text, expected: &Text, label: &Text) -> Maybe<Text> {
-    if actual == expected { None } else {
+    if actual == expected { Maybe.None } else {
         let mut msg = Text.from("snapshot mismatch [");
         msg.push_str(label);
         msg.push_str("]:\n--- expected ---\n");
@@ -115,7 +115,7 @@ public fn snapshot_text(actual: &Text, expected: &Text, label: &Text) -> Maybe<T
         msg.push_str("\n--- actual ---\n");
         msg.push_str(actual);
         msg.push_str("\n");
-        Some(msg)
+        Maybe.Some(msg)
     }
 }
 
@@ -133,19 +133,19 @@ public type ArgvFuzzCallback is fn(&List<Text>) -> Result<ParseOutcome, ParseErr
 /// random generator depends on `core.testing.random` (Phase 5).
 public fn fuzz_one(spec: &CommandSpec, argv: List<Text>) -> SimResult {
     match parse_argv(spec, argv) {
-        Ok(o) => SimResult {
+        Result.Ok(o) => SimResult {
             exit_code: 0,
             stdout: "".clone(),
             stderr: "".clone(),
-            outcome: Some(o),
-            parse_err: None,
+            outcome: Maybe.Some(o),
+            parse_err: Maybe.None,
         },
-        Err(e) => SimResult {
+        Result.Err(e) => SimResult {
             exit_code: e.exit_code().code(),
             stdout: "".clone(),
             stderr: e.message.clone(),
-            outcome: None,
-            parse_err: Some(e),
+            outcome: Maybe.None,
+            parse_err: Maybe.Some(e),
         },
     }
 }

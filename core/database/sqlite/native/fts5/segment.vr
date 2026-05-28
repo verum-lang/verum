@@ -92,11 +92,11 @@ implement Segment {
         let mut hi: Int = self.entries.len();
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
-            if self.entries[mid].term == *term { return Some(mid); }
+            if self.entries[mid].term == *term { return Maybe.Some(mid); }
             if self.entries[mid].term < *term { lo = mid + 1; }
             else                              { hi = mid; }
         }
-        None
+        Maybe.None
     }
 
     public fn mark_persisted(&mut self) { self.persisted = true; }

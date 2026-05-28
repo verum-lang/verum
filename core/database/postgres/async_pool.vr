@@ -34,7 +34,7 @@
 module core.database.postgres.async_pool;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -144,17 +144,17 @@ implement AsyncPgPool {
         while i < pool_cfg.min_size {
             let h = open_and_warm(&config, &pool_cfg).await?;
             match tx.send_async(h).await {
-                Ok(())  => { opened = opened + 1; }
-                Err(_)  => {
+                Result.Ok(())  => { opened = opened + 1; }
+                Result.Err(_)  => {
                     // Should never happen — channel cap == max_size,
                     // and we've opened ≤ min_size ≤ max_size.
-                    return Err(pool_err("failed to seat freshly-opened connection"));
+                    return Result.Err(pool_err("failed to seat freshly-opened connection"));
                 }
             }
             i = i + 1;
         }
 
-        Ok(AsyncPgPool {
+        Result.Ok(AsyncPgPool {
             config: config,
             pool_cfg: pool_cfg,
             available_tx: tx,
@@ -170,14 +170,14 @@ implement AsyncPgPool {
         // Fast path — non-async try_recv before yielding.
         let mut guard = self.available_rx.lock().unwrap_or_else(|p| p.into_inner());
         match guard.try_recv() {
-            Ok(h) => {
+            Result.Ok(h) => {
                 drop(guard);
-                return Ok(AsyncPgPoolGuard {
-                    handle: Some(h),
+                return Result.Ok(AsyncPgPoolGuard {
+                    handle: Maybe.Some(h),
                     available_tx: self.available_tx.clone(),
                 });
             }
-            Err(_) => {}
+            Result.Err(_) => {}
         }
         drop(guard);
 
@@ -186,17 +186,17 @@ implement AsyncPgPool {
         if cur < self.pool_cfg.max_size {
             // We reserved a slot — open + warm a fresh one.
             match open_and_warm(&self.config, &self.pool_cfg).await {
-                Ok(h) => {
-                    return Ok(AsyncPgPoolGuard {
-                        handle: Some(h),
+                Result.Ok(h) => {
+                    return Result.Ok(AsyncPgPoolGuard {
+                        handle: Maybe.Some(h),
                         available_tx: self.available_tx.clone(),
                     });
                 }
-                Err(e) => {
+                Result.Err(e) => {
                     // Roll back the slot reservation so future
                     // acquires can retry.
                     let _ = self.current.fetch_sub(1, MemoryOrdering.AcqRel);
-                    return Err(e);
+                    return Result.Err(e);
                 }
             }
         } else {
@@ -208,11 +208,11 @@ implement AsyncPgPool {
             let fut = g2.recv_fut();
             drop(g2);
             match fut.await {
-                Some(h) => Ok(AsyncPgPoolGuard {
-                    handle: Some(h),
+                Maybe.Some(h) => Result.Ok(AsyncPgPoolGuard {
+                    handle: Maybe.Some(h),
                     available_tx: self.available_tx.clone(),
                 }),
-                None => Err(pool_err("available channel closed")),
+                Maybe.None => Result.Err(pool_err("available channel closed")),
             }
         }
     }
@@ -240,15 +240,15 @@ public type affine AsyncPgPoolGuard is {
 implement AsyncPgPoolGuard {
     public fn conn_ref(&self) -> &AsyncPgConnection {
         match &self.handle {
-            Some(h) => h,
-            None    => panic("AsyncPgPoolGuard: handle taken"),
+            Maybe.Some(h) => h,
+            Maybe.None    => panic("AsyncPgPoolGuard: handle taken"),
         }
     }
 
     public fn conn(&self) -> AsyncPgConnection {
         match &self.handle {
-            Some(h) => h.clone(),
-            None    => panic("AsyncPgPoolGuard: handle taken"),
+            Maybe.Some(h) => h.clone(),
+            Maybe.None    => panic("AsyncPgPoolGuard: handle taken"),
         }
     }
 
@@ -256,8 +256,8 @@ implement AsyncPgPoolGuard {
     /// has more work after the connection is no longer needed.
     public async fn release(mut self) {
         match self.handle.take() {
-            Some(h) => { let _ = self.available_tx.send_async(h).await; }
-            None    => {}
+            Maybe.Some(h) => { let _ = self.available_tx.send_async(h).await; }
+            Maybe.None    => {}
         }
     }
 
@@ -331,8 +331,8 @@ implement AsyncPgPoolGuard {
         let result = conn.execute_prepared_typed(&stmt, params).await?;
         let _ = conn.close_prepared(stmt).await; // best-effort cleanup
         let row_desc = match result.row_description {
-            Some(rd) => rd,
-            None     => return Ok(List.new()),
+            Maybe.Some(rd) => rd,
+            Maybe.None     => return Result.Ok(List.new()),
         };
         let mut out: List<core.database.postgres.row.Row> = List.with_capacity(result.rows.len());
         let mut i: Int = 0;
@@ -342,7 +342,7 @@ implement AsyncPgPoolGuard {
             out.push(core.database.postgres.row.Row.new(row_desc.clone(), wire_row));
             i = i + 1;
         }
-        Ok(out)
+        Result.Ok(out)
     }
 
     /// Execute a parameterised query expecting exactly one row.
@@ -354,22 +354,22 @@ implement AsyncPgPoolGuard {
         params: List<Maybe<core.database.postgres.wire.typed.TypedValue>>,
     ) -> Result<core.database.postgres.row.Row, DbError> {
         match self.query_one_opt(sql, params).await? {
-            Some(r) => Ok(r),
-            None => {
+            Maybe.Some(r) => Result.Ok(r),
+            Maybe.None => {
                 // SQLSTATE `02000` = no_data (per ISO/IEC 9075-2 §22.1).
                 let sql_state = core.database.common.error.SqlState.parse(&"02000".to_text())
                     .unwrap_or_else(|| core.database.common.error.SqlState { code: "02000".to_text() });
-                Err(DbError.QueryFailed {
+                Result.Err(DbError.QueryFailed {
                     sql_state,
                     message:  "query_one: zero rows returned (expected exactly one)".to_text(),
-                    position: None,
+                    position: Maybe.None,
                 })
             },
         }
     }
 
     /// Execute a parameterised query expecting at most one row.
-    /// Returns `Ok(None)` when the result set is empty.
+    /// Returns `Result.Ok(Maybe.None)` when the result set is empty.
     public async fn query_one_opt(
         &self,
         sql:    &Text,
@@ -380,14 +380,14 @@ implement AsyncPgPoolGuard {
         let result = conn.execute_prepared_typed(&stmt, params).await?;
         let _ = conn.close_prepared(stmt).await;
         if result.rows.is_empty() {
-            return Ok(None);
+            return Result.Ok(Maybe.None);
         }
         let row_desc = match result.row_description {
-            Some(rd) => rd,
-            None     => return Ok(None),
+            Maybe.Some(rd) => rd,
+            Maybe.None     => return Result.Ok(Maybe.None),
         };
         let wire_row = typed_row_to_wire_values(&result.rows[0]);
-        Ok(Some(core.database.postgres.row.Row.new(row_desc, wire_row)))
+        Result.Ok(Maybe.Some(core.database.postgres.row.Row.new(row_desc, wire_row)))
     }
 
     /// Execute a parameterised statement with no result rows
@@ -401,7 +401,7 @@ implement AsyncPgPoolGuard {
         let stmt = conn.prepare(sql).await?;
         let result = conn.execute_prepared_typed(&stmt, params).await?;
         let _ = conn.close_prepared(stmt).await;
-        Ok(result.command_tag)
+        Result.Ok(result.command_tag)
     }
 }
 
@@ -436,23 +436,23 @@ fn typed_value_to_wire_text(
     v: &core.database.postgres.wire.typed.TypedValue,
 ) -> core.database.common.types.WireValue {
     let bytes_opt: Maybe<List<Byte>> = match v {
-        core.database.postgres.wire.typed.TvNull => None,
+        core.database.postgres.wire.typed.TvNull => Maybe.None,
         core.database.postgres.wire.typed.TvBool(b) =>
-            Some(if *b { "t".as_bytes().to_list() } else { "f".as_bytes().to_list() }),
-        core.database.postgres.wire.typed.TvInt2(n) => Some(format_int_text(*n as Int)),
-        core.database.postgres.wire.typed.TvInt4(n) => Some(format_int_text(*n as Int)),
-        core.database.postgres.wire.typed.TvInt8(n) => Some(format_int_text(*n as Int)),
-        core.database.postgres.wire.typed.TvText(s) => Some(s.as_bytes().to_list()),
-        core.database.postgres.wire.typed.TvBytea(b) => Some(format_bytea_hex_text(b)),
+            Maybe.Some(if *b { "t".as_bytes().to_list() } else { "f".as_bytes().to_list() }),
+        core.database.postgres.wire.typed.TvInt2(n) => Maybe.Some(format_int_text(*n as Int)),
+        core.database.postgres.wire.typed.TvInt4(n) => Maybe.Some(format_int_text(*n as Int)),
+        core.database.postgres.wire.typed.TvInt8(n) => Maybe.Some(format_int_text(*n as Int)),
+        core.database.postgres.wire.typed.TvText(s) => Maybe.Some(s.as_bytes().to_list()),
+        core.database.postgres.wire.typed.TvBytea(b) => Maybe.Some(format_bytea_hex_text(b)),
         core.database.postgres.wire.typed.TvTimestamp(us) =>
-            Some(format_pg_timestamp_text(*us, false)),
+            Maybe.Some(format_pg_timestamp_text(*us, false)),
         core.database.postgres.wire.typed.TvTimestamptz(us) =>
-            Some(format_pg_timestamp_text(*us, true)),
-        _ => None,
+            Maybe.Some(format_pg_timestamp_text(*us, true)),
+        _ => Maybe.None,
     };
     match bytes_opt {
-        None => core.database.common.types.WvNull,
-        Some(bs) => core.database.common.types.WvPresent {
+        Maybe.None => core.database.common.types.WvNull,
+        Maybe.Some(bs) => core.database.common.types.WvPresent {
             bytes: bs,
             format: core.database.common.types.WfText,
         },
@@ -511,8 +511,8 @@ implement Drop for AsyncPgPoolGuard {
         // shuts down; the pool's `current` counter stays high
         // until V1 adds reconciliation.
         match self.handle.take() {
-            Some(h) => { let _ = self.available_tx.try_send(h); }
-            None    => {}
+            Maybe.Some(h) => { let _ = self.available_tx.try_send(h); }
+            Maybe.None    => {}
         }
     }
 }
@@ -546,14 +546,14 @@ async fn open_and_warm(
     let mut i: Int = 0;
     while i < (pool_cfg.prepare_on_open.len() as Int) {
         match h.prepare(&pool_cfg.prepare_on_open[i]).await {
-            Ok(_)  => {}
-            Err(e) => {
+            Result.Ok(_)  => {}
+            Result.Err(e) => {
                 // Best-effort tear-down — the actor cleanup runs
                 // on its own when every Sender drops.
-                return Err(e);
+                return Result.Err(e);
             }
         }
         i = i + 1;
     }
-    Ok(h)
+    Result.Ok(h)
 }

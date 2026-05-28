@@ -371,7 +371,7 @@ implement MemSegment {
     }
 
     /// Allocate slices for a page
-    /// Returns starting slice index or None if not enough contiguous slices
+    /// Returns starting slice index or Maybe.None if not enough contiguous slices
     public fn alloc_slices(&mut self, count: Int, size_class: Int) -> Maybe<Int> {
         // Simple first-fit for now
         let mut run_start = 1;  // Skip slice 0 (header)
@@ -387,14 +387,14 @@ implement MemSegment {
                 if run_len >= count {
                     // Found enough contiguous slices
                     self.mark_slices_used(run_start, count, size_class);
-                    return Some(run_start);
+                    return Maybe.Some(run_start);
                 }
             } else {
                 run_len = 0;
             }
         }
 
-        None  // Not enough contiguous free slices
+        Maybe.None  // Not enough contiguous free slices
     }
 
     /// Mark slices as used
@@ -534,8 +534,8 @@ fn unlock_segments() {
 /// Allocate a new segment
 public fn segment_alloc(thread_id: UInt64) -> Result<&mut MemSegment, SegmentError> {
     // First try to reclaim an abandoned segment
-    if let Some(seg) = try_reclaim_abandoned(thread_id) {
-        return Ok(seg);
+    if let Maybe.Some(seg) = try_reclaim_abandoned(thread_id) {
+        return Result.Ok(seg);
     }
 
     // Allocate new segment via mmap
@@ -601,7 +601,7 @@ public fn segment_alloc(thread_id: UInt64) -> Result<&mut MemSegment, SegmentErr
     }
     unlock_segments();
 
-    Ok(segment)
+    Result.Ok(segment)
 }
 
 /// Free a segment (return to OS)
@@ -693,7 +693,7 @@ fn try_reclaim_abandoned(thread_id: UInt64) -> Maybe<&mut MemSegment> {
                 ALL_SEGMENTS = segment as &unsafe MemSegment;
 
                 unlock_segments();
-                return Some(segment);
+                return Maybe.Some(segment);
             }
 
             // Increment visit count
@@ -702,7 +702,7 @@ fn try_reclaim_abandoned(thread_id: UInt64) -> Maybe<&mut MemSegment> {
     }
 
     unlock_segments();
-    None
+    Maybe.None
 }
 
 /// Get segment from pointer (uses alignment to find segment start)
@@ -820,7 +820,7 @@ fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
         );
 
         if (raw as Int) == -1 {
-            return Err(SegmentError.MmapFailed { code: sys.linux.errno.get_errno() });
+            return Result.Err(SegmentError.MmapFailed { code: sys.linux.errno.get_errno() });
         }
 
         // Trim to the SEGMENT_SIZE-aligned sub-region.
@@ -841,7 +841,7 @@ fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
         // Advise kernel about huge pages
         madvise(aligned, SEGMENT_SIZE, MADV_HUGEPAGE);
 
-        return Ok(aligned);
+        return Result.Ok(aligned);
     }
 
     @cfg(target_os = "macos") {
@@ -858,7 +858,7 @@ fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
         );
 
         if (raw as Int) == -1 {
-            return Err(SegmentError.MmapFailed { code: sys.darwin.libsystem.errno() });
+            return Result.Err(SegmentError.MmapFailed { code: sys.darwin.libsystem.errno() });
         }
 
         let raw_addr = raw as Int;
@@ -873,7 +873,7 @@ fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
             munmap((aligned_addr + SEGMENT_SIZE) as &unsafe Byte, tail_trim);
         }
 
-        return Ok(aligned_addr as &unsafe Byte);
+        return Result.Ok(aligned_addr as &unsafe Byte);
     }
 
     @cfg(target_os = "windows") {
@@ -893,7 +893,7 @@ fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
         );
 
         if (raw as Int) == 0 {
-            return Err(SegmentError.MmapFailed { code: sys.windows.kernel32.GetLastError() as Int });
+            return Result.Err(SegmentError.MmapFailed { code: sys.windows.kernel32.GetLastError() as Int });
         }
 
         let raw_addr = raw as Int;
@@ -918,14 +918,14 @@ fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
             // sub-region is the user's segment.
         }
 
-        return Ok(aligned_addr as &unsafe Byte);
+        return Result.Ok(aligned_addr as &unsafe Byte);
     }
 
     // No @cfg block matched: cross-compiled to an OS we don't
     // have a segment lowering for. Surface as a typed error so the
     // caller can fall back to a different allocator or refuse the
     // op explicitly (cf. AllocError::UnsupportedOs in allocator.vr).
-    Err(SegmentError.UnsupportedOs { op: "os_alloc_segment" })
+    Result.Err(SegmentError.UnsupportedOs { op: "os_alloc_segment" })
 }
 
 /// Free a segment back to OS

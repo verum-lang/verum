@@ -111,30 +111,30 @@ implement EachCursor {
         args: &List<Register>,
     ) -> Result<(), VtabError> {
         if args.len() == 0 {
-            return Err(VtabConstraint("json_each requires JSON arg".clone()));
+            return Result.Err(VtabConstraint("json_each requires JSON arg".clone()));
         }
         let json_text: Text = match &args[0] {
             RText(s) => s.clone(),
-            _        => { return Err(VtabConstraint("json must be TEXT".clone())); }
+            _        => { return Result.Err(VtabConstraint("json must be TEXT".clone())); }
         };
         let root = match parse_json(&json_text) {
-            Some(v) => v,
-            None    => { return Err(VtabConstraint("invalid JSON".clone())); }
+            Maybe.Some(v) => v,
+            Maybe.None    => { return Result.Err(VtabConstraint("invalid JSON".clone())); }
         };
         self.rows = List.new();
         self.pos = 0;
         let mut next_id: Int64 = 0 as Int64;
         if self.recursive {
-            walk_recursive(&root, &"$".clone(), None, &mut self.rows, &mut next_id);
+            walk_recursive(&root, &"$".clone(), Maybe.None, &mut self.rows, &mut next_id);
         } else {
             walk_immediate(&root, &"$".clone(), &mut self.rows, &mut next_id);
         }
-        Ok(())
+        Result.Ok(())
     }
 
     public fn next_row(&mut self) -> Result<(), VtabError> {
         self.pos = self.pos + 1;
-        Ok(())
+        Result.Ok(())
     }
 
     public fn eof(&self) -> Bool { self.pos >= self.rows.len() }
@@ -149,8 +149,8 @@ implement EachCursor {
             3 => clone_register(&r.atom),
             4 => RInt(r.id),
             5 => match r.parent {
-                Some(p) => RInt(p),
-                None    => RNull,
+                Maybe.Some(p) => RInt(p),
+                Maybe.None    => RNull,
             },
             6 => RText(r.fullkey.clone()),
             7 => RText(r.path.clone()),
@@ -181,7 +181,7 @@ fn walk_immediate(root: &JsonValue, base_path: &Text, out: &mut List<EachRow>, n
                     type_name: type_name(&items[i]),
                     atom: json_to_atom(&items[i]),
                     id: id,
-                    parent: None,
+                    parent: Maybe.None,
                     fullkey: path_str.clone(),
                     path: base_path.clone(),
                 });
@@ -200,7 +200,7 @@ fn walk_immediate(root: &JsonValue, base_path: &Text, out: &mut List<EachRow>, n
                     type_name: type_name(&fields[i].value),
                     atom: json_to_atom(&fields[i].value),
                     id: id,
-                    parent: None,
+                    parent: Maybe.None,
                     fullkey: path_str.clone(),
                     path: base_path.clone(),
                 });
@@ -217,7 +217,7 @@ fn walk_immediate(root: &JsonValue, base_path: &Text, out: &mut List<EachRow>, n
                 type_name: type_name(root),
                 atom: json_to_atom(root),
                 id: id,
-                parent: None,
+                parent: Maybe.None,
                 fullkey: base_path.clone(),
                 path: base_path.clone(),
             });
@@ -243,14 +243,14 @@ fn walk_recursive(node: &JsonValue, path: &Text, parent: Maybe<Int64>, out: &mut
         JArray(items) => {
             let mut i: Int = 0;
             while i < items.len() {
-                walk_recursive(&items[i], &format_index(path, i), Some(id), out, next_id);
+                walk_recursive(&items[i], &format_index(path, i), Maybe.Some(id), out, next_id);
                 i = i + 1;
             }
         }
         JObject(fields) => {
             let mut i: Int = 0;
             while i < fields.len() {
-                walk_recursive(&fields[i].value, &format_dot(path, &fields[i].key), Some(id), out, next_id);
+                walk_recursive(&fields[i].value, &format_dot(path, &fields[i].key), Maybe.Some(id), out, next_id);
                 i = i + 1;
             }
         }

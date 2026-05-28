@@ -225,7 +225,7 @@ implement LivenessHandler {
 
 implement Handler for LivenessHandler {
     async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
-        Ok(resp_text("ok"))
+        Result.Ok(resp_text("ok"))
     }
 }
 
@@ -244,9 +244,9 @@ implement Handler for ReadinessHandler {
         let ready = self.readiness.is_ready().await;
         let body = self.readiness.diagnostic_body().await;
         if ready {
-            Ok(resp_with_body_text(resp_status(StatusCode.ok()), body))
+            Result.Ok(resp_with_body_text(resp_status(StatusCode.ok()), body))
         } else {
-            Ok(resp_with_body_text(resp_status(StatusCode.new(503)), body))
+            Result.Ok(resp_with_body_text(resp_status(StatusCode.new(503)), body))
         }
     }
 }

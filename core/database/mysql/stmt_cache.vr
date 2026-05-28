@@ -60,7 +60,7 @@
 module core.database.mysql.stmt_cache;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount collections.List;
 mount core.database.mysql.connection.{MysqlPreparedStatement};
 
@@ -104,8 +104,8 @@ fn canonicalise(sql: &Text) -> Text {
         out = trimmed;
     }
     match Text.from_utf8(out) {
-        Ok(t)  => t,
-        Err(_) => sql.clone(),       // adversarial input → fall back to verbatim
+        Result.Ok(t)  => t,
+        Result.Err(_) => sql.clone(),       // adversarial input → fall back to verbatim
     }
 }
 
@@ -203,7 +203,7 @@ implement MysqlStmtCache {
     public fn cap(&self) -> Int { self.cap }
 
     /// Look up by fingerprint. Updates LRU recency. Returns a clone
-    /// of the cached statement on hit; `None` on miss.
+    /// of the cached statement on hit; `Maybe.None` on miss.
     ///
     /// `&mut` because we update `last_seen` and the hit counter.
     public fn lookup(&mut self, fingerprint: Int) -> Maybe<MysqlPreparedStatement> {
@@ -213,16 +213,16 @@ implement MysqlStmtCache {
             if self.entries[i].fingerprint == fingerprint {
                 self.entries[i].last_seen = self.clock;
                 self.total_hits = self.total_hits + 1;
-                return Some(clone_stmt(&self.entries[i].stmt));
+                return Maybe.Some(clone_stmt(&self.entries[i].stmt));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Insert a freshly-prepared statement under `fingerprint`. Returns
     /// the evicted statement (if cap exceeded) so the caller can
-    /// emit COM_STMT_CLOSE for it. Returns `None` when no eviction
+    /// emit COM_STMT_CLOSE for it. Returns `Maybe.None` when no eviction
     /// was necessary.
     ///
     /// Eviction MUST be visible to the caller — silently dropping a
@@ -236,7 +236,7 @@ implement MysqlStmtCache {
     ) -> Maybe<MysqlPreparedStatement> {
         self.clock = self.clock + 1;
         self.total_inserts = self.total_inserts + 1;
-        let mut evicted: Maybe<MysqlPreparedStatement> = None;
+        let mut evicted: Maybe<MysqlPreparedStatement> = Maybe.None;
         if self.entries.len() as Int >= self.cap {
             evicted = self.evict_one_internal();
         }
@@ -264,7 +264,7 @@ implement MysqlStmtCache {
             i = i + 1;
         }
         if victim < 0 {
-            return None;
+            return Maybe.None;
         }
         self.total_invalidations = self.total_invalidations + 1;
         self.remove_at(victim)
@@ -302,7 +302,7 @@ implement MysqlStmtCache {
 
     fn evict_one_internal(&mut self) -> Maybe<MysqlPreparedStatement> {
         if (self.entries.len() as Int) == 0 {
-            return None;
+            return Maybe.None;
         }
         let mut victim: Int = 0;
         let mut oldest: Int = self.entries[0].last_seen;
@@ -321,7 +321,7 @@ implement MysqlStmtCache {
     fn remove_at(&mut self, idx: Int) -> Maybe<MysqlPreparedStatement> {
         let n = self.entries.len() as Int;
         if idx < 0 || idx >= n {
-            return None;
+            return Maybe.None;
         }
         let evicted = clone_stmt(&self.entries[idx].stmt);
         let mut new_entries: List<MyCacheEntry> = List.with_capacity(n - 1);
@@ -337,7 +337,7 @@ implement MysqlStmtCache {
             k = k + 1;
         }
         self.entries = new_entries;
-        Some(evicted)
+        Maybe.Some(evicted)
     }
 }
 

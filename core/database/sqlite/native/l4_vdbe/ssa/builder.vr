@@ -150,14 +150,14 @@ implement SsaBuilder {
 
     /// Resolve a VDBE register read.  Returns the in-block reaching
     /// definition's SsaValue (kind reconstructed as SkAny — the
-    /// type-inference pass refines kinds later).  None when the
+    /// type-inference pass refines kinds later).  Maybe.None when the
     /// register has not been defined in the current block; the
     /// builder caller should record a pending-phi placeholder via
     /// `mint_pending`.
     public fn read_reg(&self, reg_idx: Int) -> Maybe<SsaValue> {
         match self.reaching_defs.get(&reg_idx) {
-            Some(id) => Some(ssa_value(id, SkAny)),
-            None     => None,
+            Maybe.Some(id) => Maybe.Some(ssa_value(id, SkAny)),
+            Maybe.None     => Maybe.None,
         }
     }
 
@@ -300,7 +300,7 @@ public fn emit_branch(
 
 fn read_or_pending(b: &mut SsaBuilder, reg_idx: Int) -> SsaValue {
     match b.read_reg(reg_idx) {
-        Some(v) => v,
-        None    => b.mint_pending(reg_idx),
+        Maybe.Some(v) => v,
+        Maybe.None    => b.mint_pending(reg_idx),
     }
 }

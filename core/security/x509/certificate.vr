@@ -118,7 +118,7 @@ public fn parse_certificate(bytes: &[Byte]) -> Result<X509Certificate, DerError>
     let sig_alg = parse_signature_alg(&mut cert_seq)?;
     let sig_bs = cert_seq.read_bit_string()?;
     if sig_bs.unused_bits != 0_u8 {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.InvalidBitString,
             position: 0,
             message: "X509Certificate.signatureValue has unused bits",
@@ -132,14 +132,14 @@ public fn parse_certificate(bytes: &[Byte]) -> Result<X509Certificate, DerError>
     // by comparing the two parsed forms; here we only check they are
     // structurally comparable (same variant).
     if !signature_alg_matches(&sig_alg, &tbs.signature_alg) {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.MalformedDer,
             position: 0,
             message: "outer/inner signature algorithm mismatch",
         });
     }
 
-    Ok(X509Certificate {
+    Result.Ok(X509Certificate {
         tbs:             tbs,
         signature_alg:   sig_alg,
         signature_value: sig_bs.bytes,
@@ -165,7 +165,7 @@ fn parse_tbs(r: &mut DerReader) -> Result<(TbsCertificate, List<Byte>), DerError
             0_i64 => X509Version.V1,
             1_i64 => X509Version.V2,
             2_i64 => X509Version.V3,
-            _ => return Err(DerError {
+            _ => return Result.Err(DerError {
                 kind: DerErrorKind.MalformedDer,
                 position: 0,
                 message: "unknown X.509 version",
@@ -207,7 +207,7 @@ fn parse_tbs(r: &mut DerReader) -> Result<(TbsCertificate, List<Byte>), DerError
 
     s.expect_end()?;
 
-    Ok((TbsCertificate {
+    Result.Ok((TbsCertificate {
         version:       version,
         serial_number: serial,
         signature_alg: signature_alg,
@@ -224,14 +224,14 @@ fn parse_validity(r: &mut DerReader) -> Result<CertValidity, DerError> {
     let not_before = parse_time_choice(&mut s)?;
     let not_after  = parse_time_choice(&mut s)?;
     s.expect_end()?;
-    Ok(CertValidity { not_before: not_before, not_after: not_after })
+    Result.Ok(CertValidity { not_before: not_before, not_after: not_after })
 }
 
 fn parse_time_choice(r: &mut DerReader) -> Result<Time, DerError> {
     let t = r.peek_tag()?;
     let is_universal = match t.class_ { TagClass.Universal => true, _ => false };
     if !is_universal {
-        return Err(DerError {
+        return Result.Err(DerError {
             kind: DerErrorKind.UnexpectedTag,
             position: 0,
             message: "CertValidity time not a universal tag",
@@ -242,7 +242,7 @@ fn parse_time_choice(r: &mut DerReader) -> Result<Time, DerError> {
     } else if t.number == der.TAG_GENERALIZED_TIME {
         r.read_generalized_time()
     } else {
-        Err(DerError {
+        Result.Err(DerError {
             kind: DerErrorKind.UnexpectedTag,
             position: 0,
             message: "CertValidity expected UTCTime or GeneralizedTime",
@@ -295,16 +295,16 @@ implement X509Certificate {
     /// cert to legitimately issue other certs.
     public fn is_ca(&self) -> Bool {
         match &self.tbs.extensions.basic_constraints {
-            Some((_, bc)) => bc.is_ca,
-            None => false,
+            Maybe.Some((_, bc)) => bc.is_ca,
+            Maybe.None => false,
         }
     }
 
-    /// pathLenConstraint (or None for unlimited) — only meaningful on CAs.
+    /// pathLenConstraint (or Maybe.None for unlimited) — only meaningful on CAs.
     public fn path_len_constraint(&self) -> Maybe<Int> {
         match &self.tbs.extensions.basic_constraints {
-            Some((_, bc)) => bc.path_len_constraint.clone(),
-            None => None,
+            Maybe.Some((_, bc)) => bc.path_len_constraint.clone(),
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -312,8 +312,8 @@ implement X509Certificate {
     /// permitting)?
     public fn matches_hostname(&self, hostname: &Text) -> Bool {
         match &self.tbs.extensions.subject_alt_name {
-            Some((_, san)) => san.matches_dns(hostname),
-            None => {
+            Maybe.Some((_, san)) => san.matches_dns(hostname),
+            Maybe.None => {
                 // No SAN present. Per RFC 6125 §6.4.4, a cert without
                 // SAN is not an HTTPS identity; CN is ignored.
                 false
@@ -326,8 +326,8 @@ implement X509Certificate {
     /// serverAuth / anyExtendedKeyUsage.
     public fn allows_server_auth(&self) -> Bool {
         match &self.tbs.extensions.ext_key_usage {
-            Some((_, eku)) => eku.allows_server_auth(),
-            None => true,
+            Maybe.Some((_, eku)) => eku.allows_server_auth(),
+            Maybe.None => true,
         }
     }
 }

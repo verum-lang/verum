@@ -56,7 +56,7 @@ public fn cleanup_on_exit(handler: fn()) -> Result<(), SignalError> {
     on_signal(Signal.Int, handler)?;
     on_signal(Signal.Term, handler)?;
     on_signal(Signal.Hup, handler)?;
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -110,7 +110,7 @@ implement SignalGuard {
     /// Install `handler` and return a guard whose Drop resets the signal.
     public fn install(sig: Signal, handler: fn()) -> Result<SignalGuard, SignalError> {
         on_signal(sig, handler)?;
-        Ok(SignalGuard { sig, released: false })
+        Result.Ok(SignalGuard { sig, released: false })
     }
 
     public fn release(mut self) {

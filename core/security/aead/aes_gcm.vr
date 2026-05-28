@@ -525,7 +525,7 @@ fn gcm_decrypt_common<F: fn(&[Byte; 16]) -> [Byte; 16]>(
     // cryptographic work so an attacker can't force the verifier
     // to GHASH+AES many GiB of input as a CPU-DoS amplifier.
     if ciphertext.len() > GCM_MAX_PT_BYTES_PER_NONCE {
-        return Err(GcmError.InputTooLarge {
+        return Result.Err(GcmError.InputTooLarge {
             limit_bytes: GCM_MAX_PT_BYTES_PER_NONCE,
         });
     }
@@ -565,7 +565,7 @@ fn gcm_decrypt_common<F: fn(&[Byte; 16]) -> [Byte; 16]>(
 
     // Constant-time compare BEFORE decrypting.
     if !constant_time_eq(&expected, tag) {
-        return Err(GcmError.TagMismatch);
+        return Result.Err(GcmError.TagMismatch);
     }
 
     // Tag is valid — decrypt with GCTR starting at inc_32(J0).
@@ -587,7 +587,7 @@ fn gcm_decrypt_common<F: fn(&[Byte; 16]) -> [Byte; 16]>(
         off = off + chunk;
         inc32(&mut ctr);
     }
-    Ok(())
+    Result.Ok(())
 }
 
 
@@ -616,7 +616,7 @@ public fn aes128_gcm_seal(
     g.encrypt(iv, aad, pt, sealed, &mut tag);
     let mut i = 0;
     while i < 16 { sealed.push(tag[i]); i = i + 1; }
-    Ok(())
+    Result.Ok(())
 }
 
 /// AES-128-GCM open: parse `sealed` as ciphertext || 16-byte tag,
@@ -629,7 +629,7 @@ public fn aes128_gcm_open(
     pt: &mut List<Byte>,
 ) -> Result<(), GcmError> {
     if sealed.len() < 16 {
-        return Err(GcmError.TagMismatch);
+        return Result.Err(GcmError.TagMismatch);
     }
     let ct_len = sealed.len() - 16;
     let g = Aes128Gcm.new(key);
@@ -655,7 +655,7 @@ public fn aes256_gcm_seal(
     g.encrypt(iv, aad, pt, sealed, &mut tag);
     let mut i = 0;
     while i < 16 { sealed.push(tag[i]); i = i + 1; }
-    Ok(())
+    Result.Ok(())
 }
 
 /// AES-256-GCM open: 32-byte key variant of `aes128_gcm_open`.
@@ -667,7 +667,7 @@ public fn aes256_gcm_open(
     pt: &mut List<Byte>,
 ) -> Result<(), GcmError> {
     if sealed.len() < 16 {
-        return Err(GcmError.TagMismatch);
+        return Result.Err(GcmError.TagMismatch);
     }
     let ct_len = sealed.len() - 16;
     let g = Aes256Gcm.new(key);

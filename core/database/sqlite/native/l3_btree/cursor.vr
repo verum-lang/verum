@@ -80,13 +80,13 @@ public fn cursor_new(tree: &Btree) -> BtreeCursor {
 /// later calling cursor_is_at_end() if the root page is empty.
 public fn cursor_root(cursor: &mut BtreeCursor) -> Result<(), BtreeError> {
     if cursor.root_page < 1 {
-        return Err(InvalidRootPage(cursor.root_page));
+        return Result.Err(InvalidRootPage(cursor.root_page));
     }
     cursor.path = List.new();
     cursor.path.push(PathStep { page_no: cursor.root_page, cell_index: 0 });
     cursor.valid = true;
     cursor.at_end = false;
-    Ok(())
+    Result.Ok(())
 }
 
 // -----------------------------------------------------------------------------

@@ -444,11 +444,11 @@ public type Read is protocol {
         while total < buf.len() {
             let n = self.read(&mut buf[total..])?;
             if n == 0 {
-                return Err(StreamError.new(IoErrorKind.UnexpectedEof));
+                return Result.Err(StreamError.new(IoErrorKind.UnexpectedEof));
             }
             total = total + n;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // Read all bytes until EOF.
@@ -462,9 +462,9 @@ public type Read is protocol {
         let mut tmp = [0_u8; 1024];
         loop {
             let n = match self.read(&mut tmp) {
-                Ok(n) => n,
-                Err(e) if e.kind() == IoErrorKind.Interrupted => continue,
-                Err(e) => return Err(e),
+                Result.Ok(n) => n,
+                Result.Err(e) if e.kind() == IoErrorKind.Interrupted => continue,
+                Result.Err(e) => return Result.Err(e),
             };
             if n == 0 {
                 break;
@@ -472,7 +472,7 @@ public type Read is protocol {
             buf.extend_from_slice(&tmp[..n]);
             total = total + n;
         }
-        Ok(total)
+        Result.Ok(total)
     }
 
     // Read all bytes as text (UTF-8).
@@ -480,11 +480,11 @@ public type Read is protocol {
         let mut bytes = List.new();
         let n = self.read_to_end(&mut bytes)?;
         match Text.from_utf8(bytes.as_slice()) {
-            Ok(s) => {
+            Result.Ok(s) => {
                 buf.push_str(&s);
-                Ok(n)
+                Result.Ok(n)
             }
-            Err(_) => Err(StreamError.new(IoErrorKind.InvalidData)),
+            Result.Err(_) => Result.Err(StreamError.new(IoErrorKind.InvalidData)),
         }
     }
 
@@ -539,16 +539,16 @@ public type Write is protocol {
         let mut written = 0;
         while written < buf.len() {
             let n = match self.write(&buf[written..]) {
-                Ok(n) => n,
-                Err(e) if e.kind() == IoErrorKind.Interrupted => continue,
-                Err(e) => return Err(e),
+                Result.Ok(n) => n,
+                Result.Err(e) if e.kind() == IoErrorKind.Interrupted => continue,
+                Result.Err(e) => return Result.Err(e),
             };
             if n == 0 {
-                return Err(StreamError.new(IoErrorKind.WriteZero));
+                return Result.Err(StreamError.new(IoErrorKind.WriteZero));
             }
             written = written + n;
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // Write formatted text.
@@ -575,7 +575,7 @@ public type Seek is protocol {
     // Rewind to beginning.
     fn rewind(&mut self) -> IoResult<()> {
         self.seek(Start(0))?;
-        Ok(())
+        Result.Ok(())
     }
 
     // Get stream length.
@@ -583,7 +583,7 @@ public type Seek is protocol {
         let old_pos = self.stream_position()?;
         let len = self.seek(End(0))?;
         self.seek(Start(old_pos))?;
-        Ok(len)
+        Result.Ok(len)
     }
 };
 
@@ -601,7 +601,7 @@ public type BufRead is protocol extends Read {
 
     // Check if buffer has data.
     fn has_data_left(&mut self) -> IoResult<Bool> {
-        Ok(!self.fill_buf()?.is_empty())
+        Result.Ok(!self.fill_buf()?.is_empty())
     }
 
     // Read until delimiter.
@@ -632,7 +632,7 @@ public type BufRead is protocol extends Read {
                 break;
             }
         }
-        Ok(total)
+        Result.Ok(total)
     }
 
     // Read line (until newline).
@@ -640,11 +640,11 @@ public type BufRead is protocol extends Read {
         let mut bytes = List.new();
         let n = self.read_until(b'\n', &mut bytes)?;
         match Text.from_utf8(bytes.as_slice()) {
-            Ok(s) => {
+            Result.Ok(s) => {
                 buf.push_str(&s);
-                Ok(n)
+                Result.Ok(n)
             }
-            Err(_) => Err(StreamError.new(IoErrorKind.InvalidData)),
+            Result.Err(_) => Result.Err(StreamError.new(IoErrorKind.InvalidData)),
         }
     }
 
@@ -681,9 +681,9 @@ implement<R: Read> Iterator for BytesIter<R> {
     fn next(&mut self) -> Maybe<IoResult<Byte>> {
         let mut buf = [0_u8; 1];
         match self.reader.read(&mut buf) {
-            Ok(0) => Maybe.None,
-            Ok(_) => Maybe.Some(Ok(buf[0])),
-            Err(e) => Maybe.Some(Err(e)),
+            Result.Ok(0) => Maybe.None,
+            Result.Ok(_) => Maybe.Some(Result.Ok(buf[0])),
+            Result.Err(e) => Maybe.Some(Result.Err(e)),
         }
     }
 }
@@ -699,8 +699,8 @@ implement<R: BufRead> Iterator for LinesIter<R> {
     fn next(&mut self) -> Maybe<IoResult<Text>> {
         let mut line = Text.new();
         match self.reader.read_line(&mut line) {
-            Ok(0) => Maybe.None,
-            Ok(_) => {
+            Result.Ok(0) => Maybe.None,
+            Result.Ok(_) => {
                 // Remove trailing newline
                 if line.ends_with("\n") {
                     line.pop();
@@ -708,9 +708,9 @@ implement<R: BufRead> Iterator for LinesIter<R> {
                         line.pop();
                     }
                 }
-                Maybe.Some(Ok(line))
+                Maybe.Some(Result.Ok(line))
             }
-            Err(e) => Maybe.Some(Err(e)),
+            Result.Err(e) => Maybe.Some(Result.Err(e)),
         }
     }
 }
@@ -727,15 +727,15 @@ implement<R: BufRead> Iterator for SplitIter<R> {
     fn next(&mut self) -> Maybe<IoResult<List<Byte>>> {
         let mut buf = List.new();
         match self.reader.read_until(self.delim, &mut buf) {
-            Ok(0) => Maybe.None,
-            Ok(_) => {
+            Result.Ok(0) => Maybe.None,
+            Result.Ok(_) => {
                 // Remove delimiter if present
                 if buf.last() == Maybe.Some(&self.delim) {
                     buf.pop();
                 }
-                Maybe.Some(Ok(buf))
+                Maybe.Some(Result.Ok(buf))
             }
-            Err(e) => Maybe.Some(Err(e)),
+            Result.Err(e) => Maybe.Some(Result.Err(e)),
         }
     }
 }
@@ -755,7 +755,7 @@ implement<T: Read, U: Read> Read for Chain<T, U> {
                     self.first = Maybe.None;
                     self.second.read(buf)
                 } else {
-                    Ok(n)
+                    Result.Ok(n)
                 }
             }
             Maybe.None => self.second.read(buf),
@@ -772,13 +772,13 @@ public type Take<T: Read> is {
 implement<T: Read> Read for Take<T> {
     fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
         if self.limit == 0 {
-            return Ok(0);
+            return Result.Ok(0);
         }
 
         let max_len = buf.len().min(self.limit);
         let n = self.inner.read(&mut buf[..max_len])?;
         self.limit = self.limit - n;
-        Ok(n)
+        Result.Ok(n)
     }
 }
 
@@ -818,13 +818,13 @@ public type EmptyReader is ();
 
 implement Read for EmptyReader {
     fn read(&mut self, _buf: &mut [Byte]) -> IoResult<Int> {
-        Ok(0)
+        Result.Ok(0)
     }
 }
 
 implement BufRead for EmptyReader {
     fn fill_buf(&mut self) -> IoResult<&[Byte]> {
-        Ok(&[])
+        Result.Ok(&[])
     }
 
     fn consume(&mut self, _amt: Int) {}
@@ -845,7 +845,7 @@ implement Read for ByteRepeat {
         for b in buf.iter_mut() {
             *b = self.byte;
         }
-        Ok(buf.len())
+        Result.Ok(buf.len())
     }
 }
 
@@ -863,11 +863,11 @@ public type Sink is ();
 
 implement Write for Sink {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
-        Ok(buf.len())
+        Result.Ok(buf.len())
     }
 
     fn flush(&mut self) -> IoResult<()> {
-        Ok(())
+        Result.Ok(())
     }
 }
 

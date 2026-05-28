@@ -245,9 +245,9 @@ public fn mprotect(addr: &unsafe Byte, len: USize, prot: Int32) -> Result<(), OS
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -270,9 +270,9 @@ public fn madvise(addr: &unsafe Byte, len: USize, advice: Int32) -> Result<(), O
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -293,8 +293,8 @@ public fn mremap(
     new_addr: Maybe<&unsafe Byte>
 ) -> Result<&unsafe Byte, OSError> {
     let new_addr_val = match new_addr {
-        Some(addr) => addr as Int,
-        None => 0,
+        Maybe.Some(addr) => addr as Int,
+        Maybe.None => 0,
     };
 
     let result = unsafe {
@@ -310,9 +310,9 @@ public fn mremap(
     };
 
     if result < 0 && result > -4096 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result as &unsafe Byte)
+        Result.Ok(result as &unsafe Byte)
     }
 }
 
@@ -335,9 +335,9 @@ public fn msync(addr: &unsafe Byte, len: USize, flags: Int32) -> Result<(), OSEr
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -360,9 +360,9 @@ public fn mincore(addr: &unsafe Byte, len: USize, vec: &mut [Byte]) -> Result<()
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(())
+        Result.Ok(())
     }
 }
 
@@ -387,9 +387,9 @@ public fn memfd_create(name: &[Byte], flags: UInt32) -> Result<Int, OSError> {
     };
 
     if result < 0 {
-        Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result as Int))
     } else {
-        Ok(result)
+        Result.Ok(result)
     }
 }
 
@@ -450,13 +450,13 @@ public fn disable_huge_pages(addr: &unsafe Byte, len: USize) -> Result<(), OSErr
 
 /// Grow a mapping (convenience wrapper for mremap).
 public fn grow_mapping(addr: &unsafe Byte, old_size: USize, new_size: USize) -> Result<&unsafe Byte, OSError> {
-    mremap(addr, old_size, new_size, MREMAP_MAYMOVE, None)
+    mremap(addr, old_size, new_size, MREMAP_MAYMOVE, Maybe.None)
 }
 
 /// Shrink a mapping (convenience wrapper for mremap).
 public fn shrink_mapping(addr: &unsafe Byte, old_size: USize, new_size: USize) -> Result<&unsafe Byte, OSError> {
     // shrink in place (no move needed)
-    mremap(addr, old_size, new_size, 0, None)
+    mremap(addr, old_size, new_size, 0, Maybe.None)
 }
 
 // =============================================================================

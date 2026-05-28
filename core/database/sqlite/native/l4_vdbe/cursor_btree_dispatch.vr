@@ -24,7 +24,7 @@ module core.database.sqlite.native.l4_vdbe.cursor_btree_dispatch;
 //      injected PageStore.  Production data path.
 //
 // This module ships per-opcode functions that dispatch on the slot's
-// kind + take an optional `&PageStore` (None when the connection
+// kind + take an optional `&PageStore` (Maybe.None when the connection
 // hasn't initialised the pager yet, e.g. for tests).  Returns the
 // same typed result the row-store path returns so the interpreter's
 // existing handler shape stays unchanged.
@@ -100,16 +100,16 @@ public fn dispatch_column(
     match kind {
         CskBtree => {
             match pages {
-                Some(p) => {
+                Maybe.Some(p) => {
                     match table.btree_cursor_for(cursor_id) {
-                        Some(cursor) => match op_column(&cursor, p, col_idx) {
-                            Ok(v)  => ColumnResult { value: v, via_btree: true },
-                            Err(_) => ColumnResult { value: RNull, via_btree: true },
+                        Maybe.Some(cursor) => match op_column(&cursor, p, col_idx) {
+                            Result.Ok(v)  => ColumnResult { value: v, via_btree: true },
+                            Result.Err(_) => ColumnResult { value: RNull, via_btree: true },
                         }
-                        None => ColumnResult { value: RNull, via_btree: false },
+                        Maybe.None => ColumnResult { value: RNull, via_btree: false },
                     }
                 }
-                None => ColumnResult {
+                Maybe.None => ColumnResult {
                     value: table.peek_cell(cursor_id, col_idx),
                     via_btree: false,
                 },
@@ -134,12 +134,12 @@ public fn dispatch_next(
     match kind {
         CskBtree => {
             match pages {
-                Some(p) => {
+                Maybe.Some(p) => {
                     match table.btree_cursor_mut_for(cursor_id) {
-                        Some(mut cursor) => {
+                        Maybe.Some(mut cursor) => {
                             let still = match op_next(&mut cursor, p) {
-                                Ok(b)  => b,
-                                Err(_) => false,
+                                Result.Ok(b)  => b,
+                                Result.Err(_) => false,
                             };
                             // Cursor advanced in-place; if `op_next`
                             // mutated it, the table must persist the
@@ -147,10 +147,10 @@ public fn dispatch_next(
                             table.store_btree_cursor(cursor_id, cursor);
                             AdvanceResult { still_has_row: still, via_btree: true }
                         }
-                        None => AdvanceResult { still_has_row: false, via_btree: false },
+                        Maybe.None => AdvanceResult { still_has_row: false, via_btree: false },
                     }
                 }
-                None => AdvanceResult {
+                Maybe.None => AdvanceResult {
                     still_has_row: table.advance(cursor_id),
                     via_btree: false,
                 },
@@ -174,20 +174,20 @@ public fn dispatch_rewind(
     match kind {
         CskBtree => {
             match pages {
-                Some(p) => {
+                Maybe.Some(p) => {
                     match table.btree_cursor_mut_for(cursor_id) {
-                        Some(mut cursor) => {
+                        Maybe.Some(mut cursor) => {
                             let still = match op_rewind(&mut cursor, p) {
-                                Ok(b)  => b,
-                                Err(_) => false,
+                                Result.Ok(b)  => b,
+                                Result.Err(_) => false,
                             };
                             table.store_btree_cursor(cursor_id, cursor);
                             AdvanceResult { still_has_row: still, via_btree: true }
                         }
-                        None => AdvanceResult { still_has_row: false, via_btree: false },
+                        Maybe.None => AdvanceResult { still_has_row: false, via_btree: false },
                     }
                 }
-                None => {
+                Maybe.None => {
                     let _ = table.rewind(cursor_id);
                     AdvanceResult {
                         still_has_row: table.has_more(cursor_id),
@@ -217,16 +217,16 @@ public fn dispatch_rowid(
     match kind {
         CskBtree => {
             match pages {
-                Some(p) => {
+                Maybe.Some(p) => {
                     match table.btree_cursor_for(cursor_id) {
-                        Some(cursor) => match op_rowid(&cursor, p) {
-                            Ok(r)  => r,
-                            Err(_) => 0_i64,
+                        Maybe.Some(cursor) => match op_rowid(&cursor, p) {
+                            Result.Ok(r)  => r,
+                            Result.Err(_) => 0_i64,
                         }
-                        None => 0_i64,
+                        Maybe.None => 0_i64,
                     }
                 }
-                None => table.current_rowid(cursor_id),
+                Maybe.None => table.current_rowid(cursor_id),
             }
         }
         _ => table.current_rowid(cursor_id),

@@ -84,10 +84,10 @@ implement BreachJournal {
 
     /// Most recent breach across every dimension.
     public fn last(&self) -> Maybe<BreachRecord> {
-        if self.entries.len() == 0 { return None; }
+        if self.entries.len() == 0 { return Maybe.None; }
         let last = self.entries.len() - 1;
         let r = &self.entries[last];
-        Some(BreachRecord {
+        Maybe.Some(BreachRecord {
             dimension: clone_dim(&r.dimension),
             cap: r.cap,
             actual: r.actual,

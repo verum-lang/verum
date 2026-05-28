@@ -14,7 +14,7 @@
 //                      migration successfully applies.
 //   * `name`         — human-readable label for journal output.
 //   * `up_sql`       — SQL run on apply.
-//   * `down_sql`     — SQL run on rollback. `None` ⇒ irreversible;
+//   * `down_sql`     — SQL run on rollback. `Maybe.None` ⇒ irreversible;
 //                      rollback past it requires manual intervention.
 //   * `depends_on`   — list of versions that must apply first.
 //   * `is_idempotent`— `True` ⇒ safe to re-run without checksum guard.
@@ -32,16 +32,16 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
-        purpose: Some(Purpose {
+        purpose: Maybe.Some(Purpose {
             role: "vendor-neutral Migration record + status + builder",
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.TypecheckPlusTests,
             e_min: CveThresholdE.StructurallyReady,
         }),
-        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
-        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
-        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
-        self_reference: None,
+        substrate:      Maybe.Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Maybe.Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Maybe.Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: Maybe.None,
     }
 )
 module core.database.common.migrations.migration;
@@ -68,7 +68,7 @@ public fn migration_new(version: Int, name: Text, up_sql: Text) -> Migration {
         version: version,
         name: name,
         up_sql: up_sql,
-        down_sql: None,
+        down_sql: Maybe.None,
         depends_on: List.new(),
         is_idempotent: false,
     }
@@ -76,7 +76,7 @@ public fn migration_new(version: Int, name: Text, up_sql: Text) -> Migration {
 
 implement Migration {
     public fn with_down(mut self, sql: Text) -> Migration {
-        self.down_sql = Some(sql);
+        self.down_sql = Maybe.Some(sql);
         self
     }
 
@@ -91,7 +91,7 @@ implement Migration {
     }
 
     public fn is_reversible(&self) -> Bool {
-        match &self.down_sql { Some(_) => true, None => false }
+        match &self.down_sql { Maybe.Some(_) => true, Maybe.None => false }
     }
 }
 
@@ -131,8 +131,8 @@ public fn clone_migration(m: &Migration) -> Migration {
     let mut deps: List<Int> = List.with_capacity(m.depends_on.len());
     deps.extend_from_slice(m.depends_on.as_slice());
     let down = match &m.down_sql {
-        Some(s) => Some(s.clone()),
-        None    => None,
+        Maybe.Some(s) => Maybe.Some(s.clone()),
+        Maybe.None    => Maybe.None,
     };
     Migration {
         version: m.version,

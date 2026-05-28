@@ -416,7 +416,7 @@ implement Canvas {
         Canvas {
             mode: CanvasMode.Braille,
             marker: Marker.Braille,
-            block: None,
+            block: Maybe.None,
             x_bounds: (0.0, 1.0),
             y_bounds: (0.0, 1.0),
             background_color: Color.Reset,
@@ -432,7 +432,7 @@ implement Canvas {
 
     /// Set the block wrapper.
     public fn block(self, block: Block) -> Canvas {
-        Canvas { block: Some(block), ..self }
+        Canvas { block: Maybe.Some(block), ..self }
     }
 
     /// Set the horizontal world-coordinate bounds.
@@ -473,12 +473,12 @@ implement Widget for Canvas {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         // Render block and compute inner area
         let canvas_area = match self.block {
-            Some(block) => {
+            Maybe.Some(block) => {
                 let inner = block.inner(area);
                 block.render(area, buf);
                 inner
             }
-            None => area,
+            Maybe.None => area,
         };
 
         if canvas_area.width < 1 || canvas_area.height < 1 { return; }

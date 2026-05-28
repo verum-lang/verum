@@ -312,7 +312,7 @@ public fn process_cputime_nanos() -> UInt64 {
 ///
 
 /// # Returns
-/// Remaining time if interrupted, None if completed.
+/// Remaining time if interrupted, Maybe.None if completed.
 public fn sleep(duration: DarwinDuration) -> Maybe<DarwinDuration> {
     let req = duration.to_timespec();
     let mut rem = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
@@ -320,9 +320,9 @@ public fn sleep(duration: DarwinDuration) -> Maybe<DarwinDuration> {
     let result = unsafe { nanosleep(&req, &mut rem) };
 
     if result == 0 {
-        None
+        Maybe.None
     } else {
-        Some(DarwinDuration((rem.tv_sec as UInt64) * 1_000_000_000 + (rem.tv_nsec as UInt64)))
+        Maybe.Some(DarwinDuration((rem.tv_sec as UInt64) * 1_000_000_000 + (rem.tv_nsec as UInt64)))
     }
 }
 
@@ -585,9 +585,9 @@ implement DarwinDeadlineTimer {
     /// Get the deadline as an DarwinInstant.
     public fn deadline(&self) -> Maybe<DarwinInstant> {
         if self.has_deadline {
-            Some(DarwinInstant(self.deadline))
+            Maybe.Some(DarwinInstant(self.deadline))
         } else {
-            None
+            Maybe.None
         }
     }
 }

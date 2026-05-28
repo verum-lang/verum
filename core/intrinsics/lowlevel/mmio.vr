@@ -2,7 +2,7 @@
 // core/intrinsics/lowlevel/mmio.vr — MMIO + Memory Barrier Primitives
 // =============================================================================
 // Layer: Stdlib (1)
-// Dependencies: None
+// Dependencies: Maybe.None
 //
 // Migrated from `core/sys/mmio.vr` (#66 Phase 1.6).  Volatile memory
 // access primitives + memory barriers — used by MmioRegister<T, MODE>

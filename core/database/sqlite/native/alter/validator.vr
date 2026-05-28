@@ -138,14 +138,14 @@ implement TableShape {
         let mut i: Int = 0;
         while i < self.columns.len() {
             if self.columns[i].name == name {
-                return Some(ColumnShape {
+                return Maybe.Some(ColumnShape {
                     name: self.columns[i].name.clone(),
                     is_pk: self.columns[i].is_pk,
                 });
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn has_inbound_fk(&self) -> Bool { self.inbound_fk_tables.len() > 0 }
@@ -168,11 +168,11 @@ implement AlterSchemaSnapshot {
         let mut i: Int = 0;
         while i < self.tables.len() {
             if self.tables[i].name == name {
-                return Some(clone_table(&self.tables[i]));
+                return Maybe.Some(clone_table(&self.tables[i]));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn table_count(&self) -> Int { self.tables.len() }
@@ -209,53 +209,53 @@ fn clone_table(t: &TableShape) -> TableShape {
 public fn validate(op: &AlterOp, snap: &AlterSchemaSnapshot) -> Result<(), AlterValidationError> {
     match op {
         AoRenameTable(old, new) => {
-            if snap.table(old).is_none() { return Err(VeNoSuchTable(old.clone())); }
-            if snap.table(new).is_some() { return Err(VeDuplicateName(new.clone())); }
+            if snap.table(old).is_none() { return Result.Err(VeNoSuchTable(old.clone())); }
+            if snap.table(new).is_some() { return Result.Err(VeDuplicateName(new.clone())); }
             // SQLite handles inbound FK rewrites itself — no extra check.
-            Ok(())
+            Result.Ok(())
         }
         AoRenameColumn(table, old_col, new_col) => {
             let t = match snap.table(table) {
-                Some(x) => x,
-                None    => { return Err(VeNoSuchTable(table.clone())); }
+                Maybe.Some(x) => x,
+                Maybe.None    => { return Result.Err(VeNoSuchTable(table.clone())); }
             };
-            if t.column(old_col).is_none() { return Err(VeNoSuchColumn(table.clone(), old_col.clone())); }
-            if t.column(new_col).is_some() { return Err(VeDuplicateName(new_col.clone())); }
-            Ok(())
+            if t.column(old_col).is_none() { return Result.Err(VeNoSuchColumn(table.clone(), old_col.clone())); }
+            if t.column(new_col).is_some() { return Result.Err(VeDuplicateName(new_col.clone())); }
+            Result.Ok(())
         }
         AoAddColumn(table, def) => {
             let t = match snap.table(table) {
-                Some(x) => x,
-                None    => { return Err(VeNoSuchTable(table.clone())); }
+                Maybe.Some(x) => x,
+                Maybe.None    => { return Result.Err(VeNoSuchTable(table.clone())); }
             };
-            if t.column(&def.name).is_some() { return Err(VeDuplicateName(def.name.clone())); }
+            if t.column(&def.name).is_some() { return Result.Err(VeDuplicateName(def.name.clone())); }
             if t.has_rows && def.not_null {
-                let no_default = match &def.default_expr { Some(_) => false, None => true };
-                if no_default { return Err(VeNotNullWithoutDefault(table.clone(), def.name.clone())); }
+                let no_default = match &def.default_expr { Maybe.Some(_) => false, Maybe.None => true };
+                if no_default { return Result.Err(VeNotNullWithoutDefault(table.clone(), def.name.clone())); }
             }
-            Ok(())
+            Result.Ok(())
         }
         AoDropColumn(table, col) => {
             let t = match snap.table(table) {
-                Some(x) => x,
-                None    => { return Err(VeNoSuchTable(table.clone())); }
+                Maybe.Some(x) => x,
+                Maybe.None    => { return Result.Err(VeNoSuchTable(table.clone())); }
             };
             let c = match t.column(col) {
-                Some(x) => x,
-                None    => { return Err(VeNoSuchColumn(table.clone(), col.clone())); }
+                Maybe.Some(x) => x,
+                Maybe.None    => { return Result.Err(VeNoSuchColumn(table.clone(), col.clone())); }
             };
-            if c.is_pk { return Err(VePrimaryKey(table.clone(), col.clone())); }
+            if c.is_pk { return Result.Err(VePrimaryKey(table.clone(), col.clone())); }
             // SQLite forbids dropping a column referenced by a FK on another table.
-            if t.has_inbound_fk() { return Err(VeForeignKey(table.clone(), col.clone())); }
-            Ok(())
+            if t.has_inbound_fk() { return Result.Err(VeForeignKey(table.clone(), col.clone())); }
+            Result.Ok(())
         }
         AoAlterColumnDefault(table, col, _) => {
             let t = match snap.table(table) {
-                Some(x) => x,
-                None    => { return Err(VeNoSuchTable(table.clone())); }
+                Maybe.Some(x) => x,
+                Maybe.None    => { return Result.Err(VeNoSuchTable(table.clone())); }
             };
-            if t.column(col).is_none() { return Err(VeNoSuchColumn(table.clone(), col.clone())); }
-            Ok(())
+            if t.column(col).is_none() { return Result.Err(VeNoSuchColumn(table.clone(), col.clone())); }
+            Result.Ok(())
         }
     }
 }

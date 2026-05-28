@@ -110,9 +110,9 @@ where F: fn(&mut List<Byte>) -> Result<(), CodecError>,
     out.push(0_u8);
     f(out)?;
     let len = out.len() - pos - 1;
-    if len > 255 { return Err(CodecError.Overflow); }
+    if len > 255 { return Result.Err(CodecError.Overflow); }
     out[pos] = len as Byte;
-    Ok(())
+    Result.Ok(())
 }
 
 public fn vec_u16<F>(out: &mut List<Byte>, f: F) -> Result<(), CodecError>
@@ -122,10 +122,10 @@ where F: fn(&mut List<Byte>) -> Result<(), CodecError>,
     out.push(0_u8); out.push(0_u8);
     f(out)?;
     let len = out.len() - pos - 2;
-    if len > 65535 { return Err(CodecError.Overflow); }
+    if len > 65535 { return Result.Err(CodecError.Overflow); }
     out[pos] = ((len >> 8) & 0xFF) as Byte;
     out[pos + 1] = (len & 0xFF) as Byte;
-    Ok(())
+    Result.Ok(())
 }
 
 public fn vec_u24<F>(out: &mut List<Byte>, f: F) -> Result<(), CodecError>
@@ -135,11 +135,11 @@ where F: fn(&mut List<Byte>) -> Result<(), CodecError>,
     out.push(0_u8); out.push(0_u8); out.push(0_u8);
     f(out)?;
     let len = out.len() - pos - 3;
-    if len > 16_777_215 { return Err(CodecError.Overflow); }
+    if len > 16_777_215 { return Result.Err(CodecError.Overflow); }
     out[pos]     = ((len >> 16) & 0xFF) as Byte;
     out[pos + 1] = ((len >>  8) & 0xFF) as Byte;
     out[pos + 2] = (len & 0xFF) as Byte;
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -165,47 +165,47 @@ implement Tls13HandshakeReader {
     public fn position(&self) -> Int { self.pos }
 
     public fn take_u8(&mut self) -> Result<UInt8, CodecError> {
-        if self.pos >= self.end { return Err(CodecError.Truncated); }
+        if self.pos >= self.end { return Result.Err(CodecError.Truncated); }
         let v = self.buf[self.pos];
         self.pos = self.pos + 1;
-        Ok(v)
+        Result.Ok(v)
     }
 
     public fn take_u16(&mut self) -> Result<UInt16, CodecError> {
-        if self.pos + 2 > self.end { return Err(CodecError.Truncated); }
+        if self.pos + 2 > self.end { return Result.Err(CodecError.Truncated); }
         let v: UInt16 = ((self.buf[self.pos] as UInt16) << 8)
                       | (self.buf[self.pos + 1] as UInt16);
         self.pos = self.pos + 2;
-        Ok(v)
+        Result.Ok(v)
     }
 
     public fn take_u24(&mut self) -> Result<UInt32, CodecError> {
-        if self.pos + 3 > self.end { return Err(CodecError.Truncated); }
+        if self.pos + 3 > self.end { return Result.Err(CodecError.Truncated); }
         let v: UInt32 =
               ((self.buf[self.pos] as UInt32) << 16)
             | ((self.buf[self.pos + 1] as UInt32) << 8)
             |  (self.buf[self.pos + 2] as UInt32);
         self.pos = self.pos + 3;
-        Ok(v)
+        Result.Ok(v)
     }
 
     public fn take_u32(&mut self) -> Result<UInt32, CodecError> {
-        if self.pos + 4 > self.end { return Err(CodecError.Truncated); }
+        if self.pos + 4 > self.end { return Result.Err(CodecError.Truncated); }
         let v: UInt32 =
               ((self.buf[self.pos] as UInt32) << 24)
             | ((self.buf[self.pos + 1] as UInt32) << 16)
             | ((self.buf[self.pos + 2] as UInt32) << 8)
             |  (self.buf[self.pos + 3] as UInt32);
         self.pos = self.pos + 4;
-        Ok(v)
+        Result.Ok(v)
     }
 
     public fn take_bytes(&mut self, n: Int) -> Result<List<Byte>, CodecError> {
-        if n < 0 || self.pos + n > self.end { return Err(CodecError.Truncated); }
+        if n < 0 || self.pos + n > self.end { return Result.Err(CodecError.Truncated); }
         let mut out: List<Byte> = List.with_capacity(n);
         out.extend_from_slice(&self.buf.as_slice()[self.pos..self.pos + n]);
         self.pos = self.pos + n;
-        Ok(out)
+        Result.Ok(out)
     }
 
     /// Read a u8-length-prefixed byte vector.
@@ -228,25 +228,25 @@ implement Tls13HandshakeReader {
     /// to that region's contents. Parent advances past it.
     public fn sub_u16(&mut self) -> Result<Tls13HandshakeReader, CodecError> {
         let len = self.take_u16()? as Int;
-        if self.pos + len > self.end { return Err(CodecError.Truncated); }
+        if self.pos + len > self.end { return Result.Err(CodecError.Truncated); }
         let start = self.pos;
         self.pos = self.pos + len;
-        Ok(Tls13HandshakeReader { buf: self.buf.clone(), pos: start, end: start + len })
+        Result.Ok(Tls13HandshakeReader { buf: self.buf.clone(), pos: start, end: start + len })
     }
 
     public fn sub_u8(&mut self) -> Result<Tls13HandshakeReader, CodecError> {
         let len = self.take_u8()? as Int;
-        if self.pos + len > self.end { return Err(CodecError.Truncated); }
+        if self.pos + len > self.end { return Result.Err(CodecError.Truncated); }
         let start = self.pos;
         self.pos = self.pos + len;
-        Ok(Tls13HandshakeReader { buf: self.buf.clone(), pos: start, end: start + len })
+        Result.Ok(Tls13HandshakeReader { buf: self.buf.clone(), pos: start, end: start + len })
     }
 
     public fn sub_u24(&mut self) -> Result<Tls13HandshakeReader, CodecError> {
         let len = self.take_u24()? as Int;
-        if self.pos + len > self.end { return Err(CodecError.Truncated); }
+        if self.pos + len > self.end { return Result.Err(CodecError.Truncated); }
         let start = self.pos;
         self.pos = self.pos + len;
-        Ok(Tls13HandshakeReader { buf: self.buf.clone(), pos: start, end: start + len })
+        Result.Ok(Tls13HandshakeReader { buf: self.buf.clone(), pos: start, end: start + len })
     }
 }

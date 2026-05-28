@@ -212,7 +212,7 @@ implement ResetTokenSet {
 }
 
 /// Scan `wire` for a trailing stateless reset token. Returns the
-/// index into `known.tokens` if a match was found, else `None`.
+/// index into `known.tokens` if a match was found, else `Maybe.None`.
 ///
 
 /// Constant-time per token (diff-accumulator comparison) to avoid
@@ -225,21 +225,21 @@ public fn try_match_stateless_reset(
     wire:  &[Byte],
     known: &ResetTokenSet,
 ) -> Maybe<Int> {
-    if wire.len() < STATELESS_RESET_MIN_SIZE { return None; }
+    if wire.len() < STATELESS_RESET_MIN_SIZE { return Maybe.None; }
     // Short-header check: bit 7 must be 0, bit 6 must be 1. If the
     // bits don't match, the packet can't be a stateless reset.
-    if (wire[0] & 0xC0_u8) != 0x40_u8 { return None; }
+    if (wire[0] & 0xC0_u8) != 0x40_u8 { return Maybe.None; }
 
     let suffix_start = wire.len() - 16;
     let mut i: Int = 0;
     while i < known.tokens.len() {
         let tok = &known.tokens[i];
         if wire_token_eq_ct(wire, suffix_start, tok) {
-            return Some(i);
+            return Maybe.Some(i);
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 // =============================================================================

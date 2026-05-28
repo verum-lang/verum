@@ -567,9 +567,9 @@ implement PageQueue {
     @inline
     public fn peek(&self) -> Maybe<&mut HeapPageHeader> {
         if (self.first as Int) != 0 {
-            Some(self.first as &mut HeapPageHeader)
+            Maybe.Some(self.first as &mut HeapPageHeader)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -699,12 +699,12 @@ implement LocalHeap {
                 let page = page_ptr as &mut HeapPageHeader;
 
                 // Try to allocate from this page
-                if let Some(block) = page.alloc_block() {
+                if let Maybe.Some(block) = page.alloc_block() {
                     self.stats.alloc_count = self.stats.alloc_count + 1;
                     self.stats.bytes_allocated = self.stats.bytes_allocated + page.block_size as UInt64;
                     self.stats.live_count = self.stats.live_count + 1;
                     self.stats.live_bytes = self.stats.live_bytes + page.block_size as UInt64;
-                    return Some(block);
+                    return Maybe.Some(block);
                 }
 
                 // Page is full - need slow path
@@ -712,7 +712,7 @@ implement LocalHeap {
         }
 
         // Fall through to slow path
-        None
+        Maybe.None
     }
 
     /// Generic allocation (slow path)
@@ -740,15 +740,15 @@ implement LocalHeap {
             self.move_to_full_queue(page);
         }
 
-        Ok(block)
+        Result.Ok(block)
     }
 
     /// Combined fast + slow path allocation
     @inline
     public fn alloc(&mut self, size: Int) -> Result<&unsafe Byte, HeapError> {
         // Try fast path first
-        if let Some(block) = self.alloc_fast(size) {
-            return Ok(block);
+        if let Maybe.Some(block) = self.alloc_fast(size) {
+            return Result.Ok(block);
         }
 
         // Fall back to generic path
@@ -760,7 +760,7 @@ implement LocalHeap {
     public fn alloc_zeroed(&mut self, size: Int) -> Result<&unsafe Byte, HeapError> {
         let ptr = self.alloc(size)?;
         memset(ptr, 0 as Byte, size);
-        Ok(ptr)
+        Result.Ok(ptr)
     }
 
     /// Find a page with free blocks or create a new one
@@ -768,9 +768,9 @@ implement LocalHeap {
         let pq = &mut self.pages[bin];
 
         // Check existing pages
-        if let Some(page) = pq.peek() {
+        if let Maybe.Some(page) = pq.peek() {
             if !page.is_full() {
-                return Ok(page);
+                return Result.Ok(page);
             }
         }
 
@@ -799,7 +799,7 @@ implement LocalHeap {
         // Update direct lookup array
         self.update_direct_lookup(bin, page_ptr);
 
-        Ok(page_ptr)
+        Result.Ok(page_ptr)
     }
 
     /// Update pages_direct array for a bin
@@ -832,8 +832,8 @@ implement LocalHeap {
         while (seg_ptr as Int) != 0 {
             let segment = seg_ptr as &mut MemSegment;
 
-            if let Some(slice_idx) = segment.alloc_slices(slices_needed, 0) {
-                return Ok((segment, slice_idx));
+            if let Maybe.Some(slice_idx) = segment.alloc_slices(slices_needed, 0) {
+                return Result.Ok((segment, slice_idx));
             }
 
             seg_ptr = segment.next;
@@ -851,7 +851,7 @@ implement LocalHeap {
         let slice_idx = segment.alloc_slices(slices_needed, 0)
             .ok_or(HeapError.OutOfMemory)?;
 
-        Ok((segment, slice_idx))
+        Result.Ok((segment, slice_idx))
     }
 
     /// Move a full page to the full queue
@@ -882,7 +882,7 @@ implement LocalHeap {
             if wsize < DIRECT_LOOKUP_SIZE {
                 if (self.pages_direct[wsize] as Int) == (page as Int) {
                     // Find another page for this size
-                    if let Some(other) = self.pages[bin].peek() {
+                    if let Maybe.Some(other) = self.pages[bin].peek() {
                         self.pages_direct[wsize] = other as &unsafe HeapPageHeader;
                     } else {
                         self.pages_direct[wsize] = 0 as &unsafe HeapPageHeader;
@@ -925,7 +925,7 @@ implement LocalHeap {
         self.stats.live_count = self.stats.live_count + 1;
         self.stats.live_bytes = self.stats.live_bytes + size as UInt64;
 
-        Ok(ptr)
+        Result.Ok(ptr)
     }
 
     /// Free a huge allocation (releases the entire segment).
@@ -957,7 +957,7 @@ implement LocalHeap {
             cur = unsafe { (*cur).next as &unsafe mut MemSegment };
         }
         if (cur as Int) == 0 {
-            return Err(HeapError.InvalidPointer);
+            return Result.Err(HeapError.InvalidPointer);
         }
 
         // Huge segments occupy a full SEGMENT_SIZE
@@ -989,7 +989,7 @@ implement LocalHeap {
         }
         self.stats.segments_owned = self.stats.segments_owned - 1;
 
-        Ok(())
+        Result.Ok(())
     }
 
     /// Free a pointer (determines thread ownership automatically)
@@ -1041,7 +1041,7 @@ implement LocalHeap {
 
         // Verify it's a valid page
         if page.bin as Int >= QUEUE_COUNT {
-            return Err(HeapError.InvalidPointer);
+            return Result.Err(HeapError.InvalidPointer);
         }
 
         let block_size = page.block_size as UInt64;
@@ -1065,7 +1065,7 @@ implement LocalHeap {
             self.release_page(page);
         }
 
-        Ok(())
+        Result.Ok(())
     }
 
     /// Cross-thread free
@@ -1106,7 +1106,7 @@ implement LocalHeap {
         self.stats.dealloc_count = self.stats.dealloc_count + 1;
         self.stats.bytes_freed = self.stats.bytes_freed + block_size;
 
-        Ok(())
+        Result.Ok(())
     }
 
     /// Move page from full queue back to size class queue
@@ -1365,18 +1365,18 @@ implement Eq for HeapError {
 
 /// Thread-local heap instance
 @thread_local
-static mut CURRENT_HEAP: Maybe<LocalHeap> = None;
+static mut CURRENT_HEAP: Maybe<LocalHeap> = Maybe.None;
 
 /// Get the current thread's heap
 @inline
 public fn get_heap() -> &mut LocalHeap {
     unsafe {
         match CURRENT_HEAP {
-            Some(ref mut heap) => heap,
-            None => {
+            Maybe.Some(ref mut heap) => heap,
+            Maybe.None => {
                 // Initialize heap for this thread
                 let tid = get_current_thread_id();
-                CURRENT_HEAP = Some(LocalHeap.new(tid));
+                CURRENT_HEAP = Maybe.Some(LocalHeap.new(tid));
                 CURRENT_HEAP.as_mut().unwrap()
             }
         }
@@ -1407,19 +1407,19 @@ public fn init_thread_heap() -> Result<(), HeapError> {
 
     let tid = get_current_thread_id();
     unsafe {
-        CURRENT_HEAP = Some(LocalHeap.new(tid));
+        CURRENT_HEAP = Maybe.Some(LocalHeap.new(tid));
     }
 
-    Ok(())
+    Result.Ok(())
 }
 
 /// Shutdown and abandon the thread-local heap
 public fn shutdown_thread_heap() {
     unsafe {
-        if let Some(ref mut heap) = CURRENT_HEAP {
+        if let Maybe.Some(ref mut heap) = CURRENT_HEAP {
             heap.abandon_all();
         }
-        CURRENT_HEAP = None;
+        CURRENT_HEAP = Maybe.None;
     }
 }
 
@@ -1432,7 +1432,7 @@ public fn shutdown_thread_heap() {
 @inline
 public fn heap_alloc(size: Int) -> Result<(&unsafe Byte, UInt32, UInt16), HeapError> {
     if size <= 0 {
-        return Err(HeapError.InvalidSize { size: size });
+        return Result.Err(HeapError.InvalidSize { size: size });
     }
 
     let heap = get_heap();
@@ -1447,14 +1447,14 @@ public fn heap_alloc(size: Int) -> Result<(&unsafe Byte, UInt32, UInt16), HeapEr
     let generation = page.slot_generation(block_idx);
     let epoch = page.epoch;
 
-    Ok((ptr, generation, epoch))
+    Result.Ok((ptr, generation, epoch))
 }
 
 /// Allocate zeroed memory with CBGR tracking
 @inline
 public fn heap_alloc_zeroed(size: Int) -> Result<(&unsafe Byte, UInt32, UInt16), HeapError> {
     if size <= 0 {
-        return Err(HeapError.InvalidSize { size: size });
+        return Result.Err(HeapError.InvalidSize { size: size });
     }
 
     let heap = get_heap();
@@ -1469,14 +1469,14 @@ public fn heap_alloc_zeroed(size: Int) -> Result<(&unsafe Byte, UInt32, UInt16),
     let generation = page.slot_generation(block_idx);
     let epoch = page.epoch;
 
-    Ok((ptr, generation, epoch))
+    Result.Ok((ptr, generation, epoch))
 }
 
 /// Free memory
 @inline
 public fn heap_free(ptr: &unsafe Byte) -> Result<(), HeapError> {
     if (ptr as Int) == 0 {
-        return Err(HeapError.InvalidPointer);
+        return Result.Err(HeapError.InvalidPointer);
     }
 
     let heap = get_heap();
@@ -1491,7 +1491,7 @@ public fn heap_free_validated(
     expected_epoch: UInt16,
 ) -> Result<(), HeapError> {
     if (ptr as Int) == 0 {
-        return Err(HeapError.InvalidPointer);
+        return Result.Err(HeapError.InvalidPointer);
     }
 
     // Validate generation and epoch
@@ -1504,7 +1504,7 @@ public fn heap_free_validated(
     let current_epoch = page.epoch;
 
     if current_gen != expected_gen || current_epoch != expected_epoch {
-        return Err(HeapError.UseAfterFree);
+        return Result.Err(HeapError.UseAfterFree);
     }
 
     let heap = get_heap();

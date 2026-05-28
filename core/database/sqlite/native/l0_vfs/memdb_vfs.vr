@@ -70,12 +70,12 @@ public type MemDbFile is {
 /// `flags.read_only` is respected on write attempts.
 public fn memdb_open(name: &Text, flags: OpenFlags) -> Result<MemDbFile, VfsError> {
     if !flags.read_only && !flags.read_write {
-        return Err(VfsError {
+        return Result.Err(VfsError {
             kind: InvalidArgument,
             message: "memdb_open: neither read_only nor read_write set",
         });
     }
-    Ok(MemDbFile {
+    Result.Ok(MemDbFile {
         name: name.clone(),
         bytes: List.new(),
         lock_state: Unlocked,
@@ -88,7 +88,7 @@ public fn memdb_open(name: &Text, flags: OpenFlags) -> Result<MemDbFile, VfsErro
 /// intermediate `OpenFlags` struct — useful for callers that don't
 /// care about the flag matrix (e.g. the in-memory Pager skeleton).
 public fn open_memory_rwc(name: &Text) -> Result<MemDbFile, VfsError> {
-    Ok(MemDbFile {
+    Result.Ok(MemDbFile {
         name: name.clone(),
         bytes: List.new(),
         lock_state: Unlocked,
@@ -102,9 +102,9 @@ implement MemDbFile {
     /// Current byte-length of the file.
     public fn size(&self) -> Result<Int, VfsError> {
         if self.closed {
-            return Err(VfsError { kind: Closed, message: "size on closed file" });
+            return Result.Err(VfsError { kind: Closed, message: "size on closed file" });
         }
-        Ok(self.bytes.len())
+        Result.Ok(self.bytes.len())
     }
 }
 
@@ -115,30 +115,30 @@ implement MemDbFile {
 /// Current byte-length of the file.
 public fn memdb_size(f: &MemDbFile) -> Result<Int, VfsError> {
     if f.closed {
-        return Err(VfsError { kind: Closed, message: "size on closed file" });
+        return Result.Err(VfsError { kind: Closed, message: "size on closed file" });
     }
-    Ok(f.bytes.len())
+    Result.Ok(f.bytes.len())
 }
 
 /// Read exactly `buf.len()` bytes from `f` starting at `offset`.
 /// `buf` must be pre-sized by the caller; this function fills it.
 public fn memdb_read(f: &MemDbFile, buf: &mut List<Byte>, offset: Int) -> Result<(), VfsError> {
     if f.closed {
-        return Err(VfsError { kind: Closed, message: "read on closed file" });
+        return Result.Err(VfsError { kind: Closed, message: "read on closed file" });
     }
     if offset < 0 {
-        return Err(VfsError { kind: InvalidArgument, message: "negative offset" });
+        return Result.Err(VfsError { kind: InvalidArgument, message: "negative offset" });
     }
     let want = buf.len();
     if offset + want > f.bytes.len() {
-        return Err(VfsError { kind: ShortRead, message: "read past EOF" });
+        return Result.Err(VfsError { kind: ShortRead, message: "read past EOF" });
     }
     let mut i: Int = 0;
     while i < want {
         buf[i] = f.bytes[offset + i];
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 /// Write every byte of `src` into `f` starting at `offset`, extending the
@@ -146,10 +146,10 @@ public fn memdb_read(f: &MemDbFile, buf: &mut List<Byte>, offset: Int) -> Result
 /// match what SQLite's PosixVfs does on hole-containing files.
 public fn memdb_write(f: &mut MemDbFile, src: &[Byte], offset: Int) -> Result<(), VfsError> {
     if f.closed {
-        return Err(VfsError { kind: Closed, message: "write on closed file" });
+        return Result.Err(VfsError { kind: Closed, message: "write on closed file" });
     }
     if offset < 0 {
-        return Err(VfsError { kind: InvalidArgument, message: "negative offset" });
+        return Result.Err(VfsError { kind: InvalidArgument, message: "negative offset" });
     }
     while f.bytes.len() < offset {
         f.bytes.push(0 as Byte);
@@ -164,17 +164,17 @@ public fn memdb_write(f: &mut MemDbFile, src: &[Byte], offset: Int) -> Result<()
         }
         i = i + 1;
     }
-    Ok(())
+    Result.Ok(())
 }
 
 /// Truncate `f` to exactly `size` bytes; grow with zeros if `size` exceeds
 /// current length.
 public fn memdb_truncate(f: &mut MemDbFile, size: Int) -> Result<(), VfsError> {
     if f.closed {
-        return Err(VfsError { kind: Closed, message: "truncate on closed file" });
+        return Result.Err(VfsError { kind: Closed, message: "truncate on closed file" });
     }
     if size < 0 {
-        return Err(VfsError { kind: InvalidArgument, message: "negative size" });
+        return Result.Err(VfsError { kind: InvalidArgument, message: "negative size" });
     }
     while f.bytes.len() > size {
         let _ = f.bytes.pop();
@@ -182,32 +182,32 @@ public fn memdb_truncate(f: &mut MemDbFile, size: Int) -> Result<(), VfsError> {
     while f.bytes.len() < size {
         f.bytes.push(0 as Byte);
     }
-    Ok(())
+    Result.Ok(())
 }
 
 /// No-op for in-memory files — durable for the process lifetime only.
 public fn memdb_sync(f: &MemDbFile, _flags: SyncFlags) -> Result<(), VfsError> {
     if f.closed {
-        return Err(VfsError { kind: Closed, message: "sync on closed file" });
+        return Result.Err(VfsError { kind: Closed, message: "sync on closed file" });
     }
-    Ok(())
+    Result.Ok(())
 }
 
 public fn memdb_lock(f: &mut MemDbFile, kind: LockKind) -> Result<(), VfsError> {
     f.lock_state = kind;
-    Ok(())
+    Result.Ok(())
 }
 
 public fn memdb_unlock(f: &mut MemDbFile, kind: LockKind) -> Result<(), VfsError> {
     f.lock_state = kind;
-    Ok(())
+    Result.Ok(())
 }
 
 /// Final close — releases the backing bytes logically; the struct itself
 /// will be reclaimed by CBGR when the caller's handle goes out of scope.
 public fn memdb_close(f: &mut MemDbFile) -> Result<(), VfsError> {
     f.closed = true;
-    Ok(())
+    Result.Ok(())
 }
 
 // =============================================================================
@@ -256,7 +256,7 @@ implement SqliteFile for MemDbFile {
             Reserved | Pending | Exclusive => true,
             Unlocked | Shared => false,
         };
-        Ok(held)
+        Result.Ok(held)
     }
 
     fn sector_size(&self) -> Int {
@@ -279,17 +279,17 @@ implement SqliteFile for MemDbFile {
     // Optional capabilities — unsupported on :memory:.
 
     fn fetch(&self, _offset: Int, _len: Int) -> Result<Maybe<List<Byte>>, VfsError> {
-        Ok(None)
+        Result.Ok(Maybe.None)
     }
 
     fn unfetch(&self, _offset: Int, _buf: &[Byte]) -> Result<(), VfsError> {
-        Ok(())
+        Result.Ok(())
     }
 
     fn shm_map(&mut self, _region: Int, _size: Int, _extend: Bool)
         -> Result<List<Byte>, VfsError>
     {
-        Err(VfsError {
+        Result.Err(VfsError {
             kind: Unsupported,
             message: "shm_map not supported on :memory:",
         })
@@ -298,7 +298,7 @@ implement SqliteFile for MemDbFile {
     fn shm_lock(&mut self, _start: Int, _count: Int, _flags: ShmLockFlags)
         -> Result<(), VfsError>
     {
-        Err(VfsError {
+        Result.Err(VfsError {
             kind: Unsupported,
             message: "shm_lock not supported on :memory:",
         })
@@ -327,17 +327,17 @@ implement VfsProtocol for MemDbVfs {
     fn delete(&self, _path: &Text, _sync_dir: Bool) -> Result<(), VfsError> {
         // :memory: files vanish with their handle. Deleting a name is
         // a no-op — there is no namespace to remove.
-        Ok(())
+        Result.Ok(())
     }
 
     fn access(&self, _path: &Text, _kind: AccessKind) -> Result<Bool, VfsError> {
         // No persistent namespace to probe.
-        Ok(false)
+        Result.Ok(false)
     }
 
     fn full_pathname(&self, path: &Text) -> Result<Text, VfsError> {
         // Identity — no resolution required for :memory: URIs.
-        Ok(path.clone())
+        Result.Ok(path.clone())
     }
 
     fn random_bytes(&self, len: Int) -> Result<List<Byte>, VfsError> {
@@ -347,7 +347,7 @@ implement VfsProtocol for MemDbVfs {
         // features that depend on randomness (`RANDOMBLOB()`, WAL
         // salts in shared-cache memory mode) is exploitable, so the
         // memdb backend signals "predictable entropy only" via
-        // `Err(VfsError::IoError)` — callers that legitimately want
+        // `Result.Err(VfsError::IoError)` — callers that legitimately want
         // the deterministic counter (DST replay) can ignore the
         // error variant by predicate-matching on `MemDbVfs` first.
         //
@@ -358,9 +358,9 @@ implement VfsProtocol for MemDbVfs {
         // instead of `Result<...>`, callers had no way to detect the
         // weakness.
         if len <= 0 {
-            return Ok(List.new());
+            return Result.Ok(List.new());
         }
-        Err(VfsError {
+        Result.Err(VfsError {
             kind: IoError,
             message: "MemDbVfs.random_bytes: deterministic placeholder; inject a CSPRNG-backed VFS for production".clone(),
         })
@@ -371,7 +371,7 @@ implement VfsProtocol for MemDbVfs {
     }
 
     fn get_last_error(&self) -> Maybe<VfsError> {
-        None
+        Maybe.None
     }
 
     fn sleep_us(&self, _micros: Int) {

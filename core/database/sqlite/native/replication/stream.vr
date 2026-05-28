@@ -173,11 +173,11 @@ implement StreamProducer {
             if self.tracks[i].replica_id == replica_id {
                 let snapshot = clone_batch(&self.tracks[i].outbox);
                 self.tracks[i].outbox = batch_empty();
-                return Some(snapshot);
+                return Maybe.Some(snapshot);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Replica acks up to `position` — drop frames with position
@@ -277,7 +277,7 @@ implement StreamConsumer {
         applier: fn(&WalFrameRecord) -> Maybe<Text>,
     ) -> Result<Int64, ReplicationStreamError> {
         if self.epoch_initialised && frame.epoch < self.expected_epoch {
-            return Err(SeEpochMismatch(self.expected_epoch, frame.epoch));
+            return Result.Err(SeEpochMismatch(self.expected_epoch, frame.epoch));
         }
         if !self.epoch_initialised {
             self.expected_epoch = frame.epoch;
@@ -285,14 +285,14 @@ implement StreamConsumer {
         }
         let pos = frame_position(frame);
         if pos <= self.applied_position {
-            return Err(SeOutOfOrder(self.applied_position + 1_i64, pos));
+            return Result.Err(SeOutOfOrder(self.applied_position + 1_i64, pos));
         }
         match applier(frame) {
-            None      => {
+            Maybe.None      => {
                 self.applied_position = pos;
-                Ok(pos)
+                Result.Ok(pos)
             }
-            Some(err) => Err(SeApplyFailed(err)),
+            Maybe.Some(err) => Result.Err(SeApplyFailed(err)),
         }
     }
 
@@ -306,11 +306,11 @@ implement StreamConsumer {
         let mut i: Int = 0;
         while i < batch.frames.len() {
             match self.apply_frame(&batch.frames[i], applier) {
-                Ok(_)  => { applied = applied + 1; }
-                Err(e) => { return Err(e); }
+                Result.Ok(_)  => { applied = applied + 1; }
+                Result.Err(e) => { return Result.Err(e); }
             }
             i = i + 1;
         }
-        Ok(applied)
+        Result.Ok(applied)
     }
 }

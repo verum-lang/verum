@@ -42,7 +42,7 @@
 module core.database.postgres.typed_row;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
@@ -86,9 +86,9 @@ implement TypedRow for Int {
     ) -> Result<Int, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            TvInt2(n) | TvInt4(n) | TvInt8(n) => Ok(*n),
-            TvOid(n)                          => Ok(*n),
-            other => Err(typed_row_error(0, "Int", other)),
+            TvInt2(n) | TvInt4(n) | TvInt8(n) => Result.Ok(*n),
+            TvOid(n)                          => Result.Ok(*n),
+            other => Result.Err(typed_row_error(0, "Int", other)),
         }
     }
 }
@@ -100,8 +100,8 @@ implement TypedRow for Float {
     ) -> Result<Float, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            TvFloat4(f) | TvFloat8(f) => Ok(*f),
-            other => Err(typed_row_error(0, "Float", other)),
+            TvFloat4(f) | TvFloat8(f) => Result.Ok(*f),
+            other => Result.Err(typed_row_error(0, "Float", other)),
         }
     }
 }
@@ -113,8 +113,8 @@ implement TypedRow for Text {
     ) -> Result<Text, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            TvText(s) | TvJson(s) | TvJsonb(s) => Ok(s.clone()),
-            other => Err(typed_row_error(0, "Text", other)),
+            TvText(s) | TvJson(s) | TvJsonb(s) => Result.Ok(s.clone()),
+            other => Result.Err(typed_row_error(0, "Text", other)),
         }
     }
 }
@@ -126,8 +126,8 @@ implement TypedRow for Bool {
     ) -> Result<Bool, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            TvBool(b) => Ok(*b),
-            other => Err(typed_row_error(0, "Bool", other)),
+            TvBool(b) => Result.Ok(*b),
+            other => Result.Err(typed_row_error(0, "Bool", other)),
         }
     }
 }
@@ -139,8 +139,8 @@ implement TypedRow for List<Byte> {
     ) -> Result<List<Byte>, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            TvBytea(b) | TvUuid(b) => Ok(b.clone()),
-            other => Err(typed_row_error(0, "List<Byte>", other)),
+            TvBytea(b) | TvUuid(b) => Result.Ok(b.clone()),
+            other => Result.Err(typed_row_error(0, "List<Byte>", other)),
         }
     }
 }
@@ -152,8 +152,8 @@ implement TypedRow for TypedComposite {
     ) -> Result<TypedComposite, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            TvComposite(c) => Ok(c.clone()),
-            other => Err(typed_row_error(0, "TypedComposite", other)),
+            TvComposite(c) => Result.Ok(c.clone()),
+            other => Result.Err(typed_row_error(0, "TypedComposite", other)),
         }
     }
 }
@@ -169,10 +169,10 @@ implement<T: TypedRow> TypedRow for Maybe<T> {
     ) -> Result<Maybe<T>, DbError> {
         expect_arity(row, 1)?;
         match &row[0] {
-            TvNull => Ok(None),
+            TvNull => Result.Ok(Maybe.None),
             _ => {
                 let v = T::from_typed_row(row, desc)?;
-                Ok(Some(v))
+                Result.Ok(Maybe.Some(v))
             }
         }
     }
@@ -203,7 +203,7 @@ implement<A: TypedRow> TypedRow for (A,) {
     ) -> Result<(A,), DbError> {
         expect_arity(row, 1)?;
         let a = A::from_typed_row(&slice_one(row, 0), desc)?;
-        Ok((a,))
+        Result.Ok((a,))
     }
 }
 
@@ -215,7 +215,7 @@ implement<A: TypedRow, B: TypedRow> TypedRow for (A, B) {
         expect_arity(row, 2)?;
         let a = A::from_typed_row(&slice_one(row, 0), desc)?;
         let b = B::from_typed_row(&slice_one(row, 1), desc)?;
-        Ok((a, b))
+        Result.Ok((a, b))
     }
 }
 
@@ -228,7 +228,7 @@ implement<A: TypedRow, B: TypedRow, C: TypedRow> TypedRow for (A, B, C) {
         let a = A::from_typed_row(&slice_one(row, 0), desc)?;
         let b = B::from_typed_row(&slice_one(row, 1), desc)?;
         let c = C::from_typed_row(&slice_one(row, 2), desc)?;
-        Ok((a, b, c))
+        Result.Ok((a, b, c))
     }
 }
 
@@ -244,7 +244,7 @@ implement<A: TypedRow, B: TypedRow, C: TypedRow, D: TypedRow>
         let b = B::from_typed_row(&slice_one(row, 1), desc)?;
         let c = C::from_typed_row(&slice_one(row, 2), desc)?;
         let d = D::from_typed_row(&slice_one(row, 3), desc)?;
-        Ok((a, b, c, d))
+        Result.Ok((a, b, c, d))
     }
 }
 
@@ -276,14 +276,14 @@ public fn decode_field<T: TypedRow>(
 public fn expect_arity(row: &List<TypedValue>, want: Int) -> Result<(), DbError> {
     let got = row.len() as Int;
     if got != want {
-        return Err(DbError.Adapter(AdapterSpecific {
+        return Result.Err(DbError.Adapter(AdapterSpecific {
             adapter: AdPostgres,
             code: "TYPED_ROW_ARITY".clone(),
             message: f"TypedRow: expected {want} columns, got {got}",
             retryable: false,
         }));
     }
-    Ok(())
+    Result.Ok(())
 }
 
 fn typed_row_error(col: Int, want: &str, got: &TypedValue) -> DbError {
@@ -311,9 +311,9 @@ public fn rows_typed<R: TypedRow>(
     while i < (result.rows.len() as Int) {
         let r = R::from_typed_row(&result.rows[i], &result.row_description);
         match r {
-            Ok(v)  => { out.push(v); }
-            Err(e) => {
-                return Err(DbError.Adapter(AdapterSpecific {
+            Result.Ok(v)  => { out.push(v); }
+            Result.Err(e) => {
+                return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdPostgres,
                     code: "TYPED_ROW_DECODE".clone(),
                     message: f"row {i}: {e}",
@@ -323,5 +323,5 @@ public fn rows_typed<R: TypedRow>(
         }
         i = i + 1;
     }
-    Ok(out)
+    Result.Ok(out)
 }

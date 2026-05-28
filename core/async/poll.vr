@@ -80,8 +80,8 @@ implement<T> Poll<T> {
     @inline(always)
     public fn ready(self) -> Maybe<T> {
         match self {
-            Ready(t) => Some(t),
-            Pending => None,
+            Ready(t) => Maybe.Some(t),
+            Pending => Maybe.None,
         }
     }
 }
@@ -91,30 +91,30 @@ implement<T> Poll<T> {
 
 // `map_ok` / `map_err` live HERE rather than the generic
 // `implement<T> Poll<T>` block above because they destructure
-// `Ready(Ok(_))` / `Ready(Err(_))` — operations only valid when
+// `Ready(Result.Ok(_))` / `Ready(Result.Err(_))` — operations only valid when
 // `T == Result<_, _>`. The earlier placement put them under
 // `implement<T> Poll<T>` with a `where T: Into<Result<T, E>>`
 // constraint that recursed on itself (T into Result<T, E> into
 // Result<T, E>…) — meaningless. A trailing `Ready(_) =>
 // unreachable()` arm covered the type-confusion gap silently.
 implement<T, E> Poll<Result<T, E>> {
-    // Shorthand for creating Ready(Ok(t)).
+    // Shorthand for creating Ready(Result.Ok(t)).
     @inline(always)
     public fn ready_ok(t: T) -> Poll<Result<T, E>> {
-        Ready(Ok(t))
+        Ready(Result.Ok(t))
     }
 
-    // Shorthand for creating Ready(Err(e)).
+    // Shorthand for creating Ready(Result.Err(e)).
     @inline(always)
     public fn ready_err(e: E) -> Poll<Result<T, E>> {
-        Ready(Err(e))
+        Ready(Result.Err(e))
     }
 
     /// Map the Ok value, leaving Err and Pending unchanged.
     public fn map_ok<U, F: fn(T) -> U>(self, f: F) -> Poll<Result<U, E>> {
         match self {
-            Ready(Ok(t))  => Ready(Ok(f(t))),
-            Ready(Err(e)) => Ready(Err(e)),
+            Ready(Result.Ok(t))  => Ready(Result.Ok(f(t))),
+            Ready(Result.Err(e)) => Ready(Result.Err(e)),
             Pending       => Pending,
         }
     }
@@ -122,8 +122,8 @@ implement<T, E> Poll<Result<T, E>> {
     /// Map the Err value, leaving Ok and Pending unchanged.
     public fn map_err<U, F: fn(E) -> U>(self, f: F) -> Poll<Result<T, U>> {
         match self {
-            Ready(Ok(t))  => Ready(Ok(t)),
-            Ready(Err(e)) => Ready(Err(f(e))),
+            Ready(Result.Ok(t))  => Ready(Result.Ok(t)),
+            Ready(Result.Err(e)) => Ready(Result.Err(f(e))),
             Pending       => Pending,
         }
     }
@@ -175,7 +175,7 @@ implement<T> Default for Poll<T> {
 // Conversions
 //
 // Only the semantically-meaningful conversion lives here: Maybe<T> →
-// Poll<T> maps the Some/None partition onto Ready/Pending. The earlier
+// Poll<T> maps the Some/Maybe.None partition onto Ready/Pending. The earlier
 // blanket `implement<T> From<T> for Poll<T>` was removed in favour of
 // the explicit `Poll.Ready(t)` constructor — the blanket impl overlapped
 // the `From<Maybe<T>>` impl under any substitution `T = Maybe<U>` and
@@ -192,8 +192,8 @@ implement<T> Default for Poll<T> {
 implement<T> From<Maybe<T>> for Poll<T> {
     fn from(opt: Maybe<T>) -> Poll<T> {
         match opt {
-            Some(t) => Ready(t),
-            None => Pending,
+            Maybe.Some(t) => Ready(t),
+            Maybe.None => Pending,
         }
     }
 }

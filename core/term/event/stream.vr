@@ -48,9 +48,9 @@ const EVENT_READ_BUF_SIZE: Int = 1024;
 ///  let mut stream = EventStream.new(FileDesc(0));
 ///  loop {
 ///  match stream.poll(Duration.from_millis(100)) {
-///  Some(Event.Key(ke)) if ke.is_ctrl_c() => break,
-///  Some(event) => handle(event),
-///  None => { /* timeout, do other work */ }
+///  Maybe.Some(Event.Key(ke)) if ke.is_ctrl_c() => break,
+///  Maybe.Some(event) => handle(event),
+///  Maybe.None => { /* timeout, do other work */ }
 ///  }
 ///  }
 public type EventStream is {
@@ -77,11 +77,11 @@ implement EventStream {
 
     /// Non-blocking poll with timeout.
     /// Returns the next event if one is available within the timeout,
-    /// or None if the timeout expires.
+    /// or Maybe.None if the timeout expires.
     public fn poll(&mut self, timeout: Duration) -> Maybe<Event> {
         // First check already-parsed events
-        if let Some(event) = self.parser.next_event() {
-            return Some(event);
+        if let Maybe.Some(event) = self.parser.next_event() {
+            return Maybe.Some(event);
         }
 
         // Read from terminal with timeout
@@ -90,7 +90,7 @@ implement EventStream {
             self.parser.feed(&self.read_buf[0..n]);
             self.parser.next_event()
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -99,21 +99,21 @@ implement EventStream {
     public fn read(&mut self) -> IoResult<Event> {
         loop {
             // Check already-parsed events first
-            if let Some(event) = self.parser.next_event() {
-                return Ok(event);
+            if let Maybe.Some(event) = self.parser.next_event() {
+                return Result.Ok(event);
             }
 
             // Blocking read from the terminal
             let n = blocking_read(self.fd, &mut self.read_buf)?;
             if n == 0 {
-                return Err(StreamError.new(IoErrorKind.UnexpectedEof));
+                return Result.Err(StreamError.new(IoErrorKind.UnexpectedEof));
             }
             self.parser.feed(&self.read_buf[0..n]);
         }
     }
 
     /// Try to read an event without blocking.
-    /// Returns Some(event) if data is immediately available, None otherwise.
+    /// Returns Maybe.Some(event) if data is immediately available, Maybe.None otherwise.
     public fn try_read(&mut self) -> Maybe<Event> {
         self.poll(Duration.from_millis(0))
     }
@@ -121,7 +121,7 @@ implement EventStream {
     /// Drain all pending events (already parsed but not yet consumed).
     public fn drain_pending(&mut self) -> List<Event> {
         let mut events = List.new();
-        while let Some(event) = self.parser.next_event() {
+        while let Maybe.Some(event) = self.parser.next_event() {
             events.push(event);
         }
         events
@@ -173,18 +173,18 @@ implement AsyncIterator for AsyncEventStream {
     async fn next(&mut self) -> Maybe<Event> {
         loop {
             // Check pending events
-            if let Some(event) = self.inner.parser.next_event() {
-                return Some(event);
+            if let Maybe.Some(event) = self.inner.parser.next_event() {
+                return Maybe.Some(event);
             }
 
             // Async read from the terminal
             let n = async_read(self.inner.fd, &mut self.inner.read_buf).await;
             match n {
-                Ok(0) => return None,
-                Ok(bytes_read) => {
+                Result.Ok(0) => return Maybe.None,
+                Result.Ok(bytes_read) => {
                     self.inner.parser.feed(&self.inner.read_buf[0..bytes_read]);
                 }
-                Err(_) => return None,
+                Result.Err(_) => return Maybe.None,
             }
         }
     }
@@ -198,7 +198,7 @@ async fn async_read(fd: FileDesc, buf: &mut [Byte]) -> IoResult<Int> {
     // Attempt non-blocking read first
     let result = poll_read(fd, buf, Duration.from_millis(0));
     if result > 0 {
-        return Ok(result);
+        return Result.Ok(result);
     }
 
     // Yield to async runtime, then retry with blocking read.

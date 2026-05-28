@@ -129,8 +129,8 @@ public async fn hup() {
 public async fn shutdown_signals() -> Signal {
     let mut stream = signal_stream(&[Signal.Int, Signal.Term, Signal.Hup]);
     match stream.next().await {
-        Some(sig) => sig,
-        None => Signal.Int,  // registry-shutdown fallback; caller treats as interrupt
+        Maybe.Some(sig) => sig,
+        Maybe.None => Signal.Int,  // registry-shutdown fallback; caller treats as interrupt
     }
 }
 
@@ -150,17 +150,17 @@ public async fn shutdown_signals() -> Signal {
 /// on first `.next()`.
 public fn signal_stream(sigs: &[Signal]) -> SignalStream {
     if sigs.is_empty() {
-        return SignalStream { recv: None };
+        return SignalStream { recv: Maybe.None };
     }
     let registry = ensure_registry();
-    let mut sender: Maybe<BroadcastSender<Signal>> = None;
+    let mut sender: Maybe<BroadcastSender<Signal>> = Maybe.None;
     for sig in sigs {
         let tx = registry.ensure_signal_registered(*sig);
-        sender = Some(tx);
+        sender = Maybe.Some(tx);
     }
     match sender {
-        Some(tx) => SignalStream { recv: Some(tx.subscribe()) },
-        None => SignalStream { recv: None },
+        Maybe.Some(tx) => SignalStream { recv: Maybe.Some(tx.subscribe()) },
+        Maybe.None => SignalStream { recv: Maybe.None },
     }
 }
 
@@ -179,21 +179,21 @@ public type SignalStream is {
 };
 
 implement SignalStream {
-    /// Receive the next signal. `None` when the registry shuts down
+    /// Receive the next signal. `Maybe.None` when the registry shuts down
     /// (process is exiting) or the stream was constructed with no signals.
     pub async fn next(&mut self) -> Maybe<Signal> {
         let r = match &mut self.recv {
-            Some(r) => r,
-            None => return None,
+            Maybe.Some(r) => r,
+            Maybe.None => return Maybe.None,
         };
         // Loop over RecvError.Lagged — treat skipped signals as delivered
         // once already (caller can't do anything anyway, the real signal
         // fired). Terminate on Closed.
         loop {
             match r.recv().await {
-                Ok(sig) => return Some(sig),
-                Err(RecvError.Lagged(_)) => continue,
-                Err(RecvError.Closed) => return None,
+                Result.Ok(sig) => return Maybe.Some(sig),
+                Result.Err(RecvError.Lagged(_)) => continue,
+                Result.Err(RecvError.Closed) => return Maybe.None,
             }
         }
     }
@@ -246,23 +246,23 @@ const POLL_INTERVAL_MS: Int = 20;
 // practice there are 1-5 subscribers, each drains immediately.
 const BROADCAST_CAPACITY: Int = 64;
 
-static REGISTRY: Mutex<Maybe<Shared<SignalRegistry>>> = Mutex.new(None);
+static REGISTRY: Mutex<Maybe<Shared<SignalRegistry>>> = Mutex.new(Maybe.None);
 
 fn ensure_registry() -> Shared<SignalRegistry> {
     // Poison-tolerant: signal infrastructure must keep running even
     // if an unrelated panic poisoned the registry mutex. The lock-
     // protected state (REGISTRY: Maybe<Shared<...>>) is always either
-    // None (uninitialized) or Some(reg); both observable values are
+    // Maybe.None (uninitialized) or Maybe.Some(reg); both observable values are
     // safe to keep using even if an unrelated thread panicked.
     let mut guard = REGISTRY.lock().unwrap_or_else(|p| p.into_inner());
     match &*guard {
-        Some(r) => r.clone(),
-        None => {
+        Maybe.Some(r) => r.clone(),
+        Maybe.None => {
             let reg = Shared.new(SignalRegistry {
                 entries: Mutex.new(List.new()),
                 poller_started: AtomicBool.new(false),
             });
-            *guard = Some(reg.clone());
+            *guard = Maybe.Some(reg.clone());
             reg
         }
     }
@@ -323,7 +323,7 @@ implement SignalRegistry {
             // invariant — `spawn_poller` is only ever reached via
             // `ensure_signal_registered`, which is only callable
             // through `ensure_registry()`, and that fn ALWAYS stores
-            // Some(reg) before returning. A None here would mean
+            // Maybe.Some(reg) before returning. A Maybe.None here would mean
             // someone bypassed the API contract; surface that with
             // a descriptive panic instead of a generic unwrap.
             let g = REGISTRY.lock().unwrap_or_else(|p| p.into_inner());

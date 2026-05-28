@@ -98,7 +98,7 @@ implement Regex {
     /// is deferred to match-time. Catches malformed patterns at compile-time
     /// will land alongside the cached-handle migration.
     public fn new(pattern: Text) -> Result<Regex, RegexError> {
-        Ok(Regex { pattern: pattern })
+        Result.Ok(Regex { pattern: pattern })
     }
 
     /// Test whether the pattern matches anywhere in the given text.
@@ -125,7 +125,7 @@ implement Regex {
     }
 
     /// Find the first match of the pattern in the text.
-    /// Returns `None` if no match.
+    /// Returns `Maybe.None` if no match.
     public fn find(&self, text: Text) -> Maybe<Text> {
         regex_find(self.pattern, text)
     }
@@ -145,7 +145,7 @@ implement Regex {
     /// for `i >= 1` is the i-th `(group)` capture. Non-participating
     /// groups appear as empty strings — callers that want
     /// `Maybe<Text>` per group should re-check membership against
-    /// the pattern's group count. Returns `None` if no match.
+    /// the pattern's group count. Returns `Maybe.None` if no match.
     public fn captures(&self, text: Text) -> Maybe<List<Text>> {
         regex_captures(self.pattern, text)
     }

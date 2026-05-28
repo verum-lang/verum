@@ -43,7 +43,7 @@ module core.database.sqlite.native.l7_api.hook_registry;
 // field); fire-events are method calls on the registry.  Sum-type
 // `HookSlot` discriminator + integer-keyed `List<Maybe<HookSlot>>`
 // store gives O(1) dispatch on the active handles for a given
-// hook type AND O(1) handle invalidation (set the slot to None).
+// hook type AND O(1) handle invalidation (set the slot to Maybe.None).
 // =============================================================================
 
 mount core.*;
@@ -196,7 +196,7 @@ fn hook_slot_kind(s: &HookSlot) -> HookKind {
 // HookHandleRegistry — owned by Connection, fired from event sites
 // -----------------------------------------------------------------------------
 
-/// Slot-vector indexed by handle ID.  `slots[id] = None` marks an
+/// Slot-vector indexed by handle ID.  `slots[id] = Maybe.None` marks an
 /// unregistered slot — handle IDs are NEVER reused, so an
 /// unregister-then-fire path can never accidentally invoke a stale
 /// callback.  This matches the CBGR generation-handle pattern from
@@ -228,7 +228,7 @@ implement HookHandleRegistry {
     fn register_internal(&mut self, slot: HookSlot) -> HookHandle {
         let kind = hook_slot_kind(&slot);
         let id = self.next_id;
-        self.slots.push(Some(slot));
+        self.slots.push(Maybe.Some(slot));
         self.next_id = self.next_id + 1;
         self.n_active = self.n_active + 1;
         HookHandle { id: id, kind: kind }
@@ -242,7 +242,7 @@ implement HookHandleRegistry {
         if h.id < 0 || h.id >= self.slots.len() { return false; }
         let cur = &self.slots[h.id];
         match cur {
-            Some(s) => {
+            Maybe.Some(s) => {
                 let s_kind = hook_slot_kind(s);
                 if !hook_kind_eq(&s_kind, &h.kind) {
                     // Cross-kind unregister attempt — reject.  The
@@ -254,12 +254,12 @@ implement HookHandleRegistry {
                     // we keep the check for forward-compat).
                     false
                 } else {
-                    self.slots[h.id] = None;
+                    self.slots[h.id] = Maybe.None;
                     self.n_active = self.n_active - 1;
                     true
                 }
             }
-            None => false,
+            Maybe.None => false,
         }
     }
 
@@ -270,8 +270,8 @@ implement HookHandleRegistry {
         if h.id < 0 || h.id >= self.slots.len() { return false; }
         let cur = &self.slots[h.id];
         match cur {
-            Some(s) => hook_kind_eq(&hook_slot_kind(s), &h.kind),
-            None    => false,
+            Maybe.Some(s) => hook_kind_eq(&hook_slot_kind(s), &h.kind),
+            Maybe.None    => false,
         }
     }
 
@@ -327,11 +327,11 @@ implement HookHandleRegistry {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
-                Some(s) => match s {
+                Maybe.Some(s) => match s {
                     HsUpdate(f) => f(clone_update_op(&op), db, table, rowid),
                     _ => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -341,11 +341,11 @@ implement HookHandleRegistry {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
-                Some(s) => match s {
+                Maybe.Some(s) => match s {
                     HsPreUpdate(f) => f(clone_update_op(&op), db, table, rowid),
                     _ => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -359,13 +359,13 @@ implement HookHandleRegistry {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
-                Some(s) => match s {
+                Maybe.Some(s) => match s {
                     HsCommit(f) => {
                         if f() { vetoed = true; }
                     }
                     _ => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -376,11 +376,11 @@ implement HookHandleRegistry {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
-                Some(s) => match s {
+                Maybe.Some(s) => match s {
                     HsRollback(f) => f(),
                     _ => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -393,14 +393,14 @@ implement HookHandleRegistry {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
-                Some(s) => match s {
+                Maybe.Some(s) => match s {
                     HsWal(f) => {
                         let rc = f(db_name, n_frames);
                         if rc != 0 { return rc; }
                     }
                     _ => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -416,14 +416,14 @@ implement HookHandleRegistry {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
-                Some(s) => match s {
+                Maybe.Some(s) => match s {
                     HsBusy(f) => {
                         have_any = true;
                         if !f(retry_count) { all_retry = false; }
                     }
                     _ => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -438,13 +438,13 @@ implement HookHandleRegistry {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
-                Some(s) => match s {
+                Maybe.Some(s) => match s {
                     HsProgress(f) => {
                         if f() { interrupt = true; }
                     }
                     _ => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -460,14 +460,14 @@ implement HookHandleRegistry {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
-                Some(s) => match s {
+                Maybe.Some(s) => match s {
                     HsAuthorizer(f) => {
                         let d = f(action);
                         decision = combine_auth_decision(&decision, &d);
                     }
                     _ => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -478,11 +478,11 @@ implement HookHandleRegistry {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
-                Some(s) => match s {
+                Maybe.Some(s) => match s {
                     HsTrace(f) => f(sql),
                     _ => {},
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -495,12 +495,12 @@ implement HookHandleRegistry {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
-                Some(s) => {
+                Maybe.Some(s) => {
                     if hook_kind_eq(&hook_slot_kind(s), kind) {
                         n = n + 1;
                     }
                 }
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }

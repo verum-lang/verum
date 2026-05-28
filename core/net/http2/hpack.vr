@@ -115,13 +115,13 @@ implement Http2DynamicTable {
     public fn lookup(&self, index: Int) -> Maybe<HeaderField> {
         if index >= 1 && index <= static_table.STATIC_TABLE_SIZE {
             match static_table.entry(index) {
-                Some(e) => Some(HeaderField.new(e.name.clone(), e.value.clone())),
-                None => None,
+                Maybe.Some(e) => Maybe.Some(HeaderField.new(e.name.clone(), e.value.clone())),
+                Maybe.None => Maybe.None,
             }
         } else {
             let d = index - static_table.STATIC_TABLE_SIZE - 1;
-            if d < 0 || d >= self.entries.len() { return None; }
-            Some(HeaderField.new(
+            if d < 0 || d >= self.entries.len() { return Maybe.None; }
+            Maybe.Some(HeaderField.new(
                 self.entries[d].name.clone(),
                 self.entries[d].value.clone(),
             ))
@@ -176,25 +176,25 @@ public fn encode_integer(value: UInt64, n: Int, flags_mask: UInt8, out: &mut Lis
 /// Decode an n-bit-prefix integer starting at offset `pos`. Returns the
 /// new position on success.
 public fn decode_integer(buf: &[Byte], pos: Int, n: Int) -> Result<(UInt64, Int), HpackError> {
-    if pos >= buf.len() { return Err(HpackError.Truncated); }
+    if pos >= buf.len() { return Result.Err(HpackError.Truncated); }
     let max: UInt64 = (1_u64 << n) - 1;
     let first_mask: UInt8 = max as UInt8;
     let mut value: UInt64 = (buf[pos] as UInt64) & (first_mask as UInt64);
     let mut p = pos + 1;
-    if value < max { return Ok((value, p)); }
+    if value < max { return Result.Ok((value, p)); }
 
     let mut shift = 0;
     let mut bytes_read = 0;
     while bytes_read < 10 {
-        if p >= buf.len() { return Err(HpackError.Truncated); }
+        if p >= buf.len() { return Result.Err(HpackError.Truncated); }
         let b = buf[p] as UInt64;
         value = value + ((b & 0x7F) << shift);
         p = p + 1;
         bytes_read = bytes_read + 1;
-        if (b & 0x80) == 0 { return Ok((value, p)); }
+        if (b & 0x80) == 0 { return Result.Ok((value, p)); }
         shift = shift + 7;
     }
-    Err(HpackError.IntegerOverflow)
+    Result.Err(HpackError.IntegerOverflow)
 }
 
 // =============================================================================
@@ -272,24 +272,24 @@ public fn encode_string(input: &[Byte], use_huffman: Bool, out: &mut List<Byte>)
 public fn decode_string(buf: &[Byte], pos: Int, max_length: Int)
     -> Result<(List<Byte>, Int), HpackError>
 {
-    if pos >= buf.len() { return Err(HpackError.Truncated); }
+    if pos >= buf.len() { return Result.Err(HpackError.Truncated); }
     let huffman_bit = (buf[pos] & 0x80) != 0;
     let (length_u64, after_len) = decode_integer(buf, pos, 7)?;
     let length = length_u64 as Int;
     if length > max_length || after_len + length > buf.len() {
-        return Err(HpackError.Truncated);
+        return Result.Err(HpackError.Truncated);
     }
     let raw = &buf[after_len..after_len + length];
     if huffman_bit {
         let mut out: List<Byte> = List.with_capacity(length * 2);
         match core.net.http2.huffman.decode(raw, max_length, &mut out) {
-            Ok(_) => Ok((out, after_len + length)),
-            Err(_) => Err(HpackError.InvalidHuffman),
+            Result.Ok(_) => Result.Ok((out, after_len + length)),
+            Result.Err(_) => Result.Err(HpackError.InvalidHuffman),
         }
     } else {
         let mut out: List<Byte> = List.with_capacity(length);
         out.extend_from_slice(raw);
-        Ok((out, after_len + length))
+        Result.Ok((out, after_len + length))
     }
 }
 
@@ -308,7 +308,7 @@ implement HpackEncoder {
         HpackEncoder {
             table: Http2DynamicTable.new(DEFAULT_HEADER_TABLE_SIZE as Int),
             huffman_enabled: true,
-            pending_resize: None,
+            pending_resize: Maybe.None,
         }
     }
 
@@ -316,7 +316,7 @@ implement HpackEncoder {
         HpackEncoder {
             table: Http2DynamicTable.new(size),
             huffman_enabled: true,
-            pending_resize: None,
+            pending_resize: Maybe.None,
         }
     }
 
@@ -330,12 +330,12 @@ implement HpackEncoder {
     public fn encode(&mut self, headers: &List<HeaderField>, out: &mut List<Byte>) {
         // Emit a pending table-size update if any.
         match self.pending_resize {
-            Some(new_size) => {
+            Maybe.Some(new_size) => {
                 self.table.resize(new_size);
                 encode_integer(new_size as UInt64, 5, 0x20, out);
-                self.pending_resize = None;
+                self.pending_resize = Maybe.None;
             }
-            None => {}
+            Maybe.None => {}
         }
 
         let mut i = 0;
@@ -365,7 +365,7 @@ implement HpackEncoder {
     }
 
     public fn schedule_resize(&mut self, new_size: Int) {
-        self.pending_resize = Some(new_size);
+        self.pending_resize = Maybe.Some(new_size);
     }
 }
 
@@ -418,7 +418,7 @@ implement HpackDecoder {
                 // 0b1xxxxxxx — indexed header field §6.1
                 let (index, next) = decode_integer(block, pos, 7)?;
                 if index == 0 {
-                    return Err(HpackError.InvalidIndex(0));
+                    return Result.Err(HpackError.InvalidIndex(0));
                 }
                 let field = self.table.lookup(index as Int)
                     .ok_or(HpackError.InvalidIndex(index))?;
@@ -431,7 +431,7 @@ implement HpackDecoder {
                 // 0b001xxxxx — dynamic table size update §6.3
                 let (new_max, next) = decode_integer(block, pos, 5)?;
                 if (new_max as Int) > self.max_table_size_settings {
-                    return Err(HpackError.DynamicTableSizeExceedsSettings);
+                    return Result.Err(HpackError.DynamicTableSizeExceedsSettings);
                 }
                 self.table.resize(new_max as Int);
                 pos = next;
@@ -443,7 +443,7 @@ implement HpackDecoder {
                 pos = self.decode_literal(block, pos, 4, false, &mut out)?;
             }
         }
-        Ok(out)
+        Result.Ok(out)
     }
 
     fn decode_literal(
@@ -474,13 +474,13 @@ implement HpackDecoder {
             self.table.insert(HeaderField.new(field.name.clone(), field.value.clone()));
         }
         out.push(field);
-        Ok(after_value)
+        Result.Ok(after_value)
     }
 }
 
 fn text_from_bytes(bytes: &[Byte]) -> Result<Text, HpackError> {
     match Text.from_utf8(bytes) {
-        Ok(t) => Ok(t),
-        Err(_) => Err(HpackError.InvalidRepresentation(0)),
+        Result.Ok(t) => Result.Ok(t),
+        Result.Err(_) => Result.Err(HpackError.InvalidRepresentation(0)),
     }
 }

@@ -73,10 +73,10 @@
 //
 
 // **Cross-export contract.** The Coq emitter walks
-// `lemma_admit_reason` for each lemma; if `Some(reason)`, the .v file
+// `lemma_admit_reason` for each lemma; if `Maybe.Some(reason)`, the .v file
 // emits `Admitted.` with `(* reason: <reason> *)`.  For
 // `DischargedByFramework`, the citation appears in the `Admitted.`
-// comment with framework attribution.  If `None`, the .v file emits
+// comment with framework attribution.  If `Maybe.None`, the .v file emits
 // the proof tactics from `coq_proof_text`.  Same for Lean.  This is
 // what makes the cross-export an *honest* foreign re-check rather
 // than a rubber-stamp.
@@ -368,7 +368,7 @@ public pure fn lemma_is_closed(r: KernelRule) -> Bool {
     }
 }
 
-/// Project: get the admit-reason if this lemma is admitted, else None.
+/// Project: get the admit-reason if this lemma is admitted, else Maybe.None.
 /// Cross-export emitters use this to populate the `(* reason: ... *)`
 /// comment on `Admitted.` / `sorry` lines.  For
 /// `DischargedByFramework`, returns the citation string — callers
@@ -376,13 +376,13 @@ public pure fn lemma_is_closed(r: KernelRule) -> Bool {
 /// uniformly.
 public pure fn lemma_admit_reason(r: KernelRule) -> Maybe<Text> {
     match lemma_status(r) {
-        LemmaStatus.Proved => None,
-        LemmaStatus.Admitted { reason } => Some(reason),
+        LemmaStatus.Proved => Maybe.None,
+        LemmaStatus.Admitted { reason } => Maybe.Some(reason),
         LemmaStatus.DischargedByFramework {
             lemma_path: _,
             framework: _,
             citation,
-        } => Some(citation),
+        } => Maybe.Some(citation),
     }
 }
 

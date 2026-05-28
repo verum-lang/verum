@@ -18,7 +18,7 @@
 module core.database.postgres.error;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
 mount core.database.common.error.{
     DbError, AdapterId, AdapterSpecific, SqlState,
     ConnectionErrorKind, AuthErrorKind, TimeoutPhase,
@@ -56,10 +56,10 @@ public fn dberr_from_pg(d: Diagnostic) -> DbError {
         };
     }
     let state = match SqlState.parse(&d.code) {
-        Some(s) => s,
-        None    => match SqlState.parse(&"XX000".clone()) {
-            Some(s2) => s2,
-            None     => SqlState.parse(&"XX000".clone()).unwrap(),
+        Maybe.Some(s) => s,
+        Maybe.None    => match SqlState.parse(&"XX000".clone()) {
+            Maybe.Some(s2) => s2,
+            Maybe.None     => SqlState.parse(&"XX000".clone()).unwrap(),
         }
     };
     let position = parse_optional_int(&d.position);
@@ -83,21 +83,21 @@ fn take_first_two(s: &Text) -> Text {
 }
 
 fn parse_optional_int(s: &Text) -> Maybe<Int> {
-    if s.len() == 0 { return None; }
+    if s.len() == 0 { return Maybe.None; }
     let bytes = s.as_bytes();
     // SOUNDNESS: server-controlled error-message position field.
     // Cap at 19 digits (Int.MAX width) plus per-step pre-multiply
     // guard. Same recipe as the #71-#75 sweep.
-    if bytes.len() > 19 { return None; }
+    if bytes.len() > 19 { return Maybe.None; }
     let mut acc: Int = 0;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        if b < (0x30 as Byte) || b > (0x39 as Byte) { return None; }
-        if acc > 922_337_203_685_477_580 { return None; }   // Int.MAX / 10
+        if b < (0x30 as Byte) || b > (0x39 as Byte) { return Maybe.None; }
+        if acc > 922_337_203_685_477_580 { return Maybe.None; }   // Int.MAX / 10
         acc = acc * 10 + ((b as Int) - 0x30);
-        if acc < 0 { return None; }                          // wrap-around guard
+        if acc < 0 { return Maybe.None; }                          // wrap-around guard
         i = i + 1;
     }
-    Some(acc)
+    Maybe.Some(acc)
 }
