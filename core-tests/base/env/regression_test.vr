@@ -90,11 +90,11 @@ fn regression_var_returns_err_not_present_for_missing_key() {
     let r = var(&key);
     assert(r.is_err());
     match r {
-        Result.Err(e) => match e {
+        Err(e) => match e {
             VarError.NotPresent => {},
             _ => {},   // accept any VarError variant — not all imps fix NotPresent
         },
-        Result.Ok(_) => panic("missing key should return Err"),
+        Ok(_) => panic("missing key should return Err"),
     }
 }
 

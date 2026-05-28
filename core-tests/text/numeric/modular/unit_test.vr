@@ -87,8 +87,8 @@ fn test_mod_pow_simple() {
     let exp = BigInt.from_int(10);
     let modulus = BigInt.from_int(1000);
     match mod_pow(&base, &exp, &modulus) {
-        Result.Ok(r) => assert_eq(r.digits[0], 24),
-        Result.Err(_) => panic("2^10 mod 1000 = 24"),
+        Ok(r) => assert_eq(r.digits[0], 24),
+        Err(_) => panic("2^10 mod 1000 = 24"),
     }
 }
 
@@ -98,8 +98,8 @@ fn test_mod_pow_one_to_anything_is_one() {
     let exp = BigInt.from_int(1000);
     let modulus = BigInt.from_int(7);
     match mod_pow(&base, &exp, &modulus) {
-        Result.Ok(r) => assert_eq(r.digits[0], 1),
-        Result.Err(_) => panic("1^N mod M = 1"),
+        Ok(r) => assert_eq(r.digits[0], 1),
+        Err(_) => panic("1^N mod M = 1"),
     }
 }
 
@@ -113,8 +113,8 @@ fn test_mod_inverse_simple() {
     let a = BigInt.from_int(3);
     let m = BigInt.from_int(7);
     match mod_inverse(&a, &m) {
-        Result.Ok(r) => assert_eq(r.digits[0], 5),
-        Result.Err(_) => panic("3^-1 mod 7 = 5"),
+        Ok(r) => assert_eq(r.digits[0], 5),
+        Err(_) => panic("3^-1 mod 7 = 5"),
     }
 }
 
@@ -124,8 +124,8 @@ fn test_mod_inverse_no_inverse_when_not_coprime() {
     let a = BigInt.from_int(2);
     let m = BigInt.from_int(4);
     match mod_inverse(&a, &m) {
-        Result.Ok(_) => panic("non-coprime should Err"),
-        Result.Err(_) => {},
+        Ok(_) => panic("non-coprime should Err"),
+        Err(_) => {},
     }
 }
 

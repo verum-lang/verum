@@ -124,8 +124,8 @@ fn property_add_zero_left_identity() {
     for n in xs.iter() {
         let d = Decimal.from_int(*n);
         match z.add(&d) {
-            Result.Ok(r) => assert_eq(r.coefficient, *n),
-            Result.Err(_) => panic("zero is left identity"),
+            Ok(r) => assert_eq(r.coefficient, *n),
+            Err(_) => panic("zero is left identity"),
         }
     }
 }
@@ -144,7 +144,7 @@ fn property_add_commutative_small() {
             let r1 = da.add(&db);
             let r2 = db.add(&da);
             match (r1, r2) {
-                (Result.Ok(x), Result.Ok(y)) => assert_eq(x.coefficient, y.coefficient),
+                (Ok(x), Ok(y)) => assert_eq(x.coefficient, y.coefficient),
                 _ => {},
             }
         }
@@ -162,8 +162,8 @@ fn property_mul_one_left_identity() {
     for n in xs.iter() {
         let d = Decimal.from_int(*n);
         match o.mul(&d) {
-            Result.Ok(r) => assert_eq(r.coefficient, *n),
-            Result.Err(_) => panic("one is left identity"),
+            Ok(r) => assert_eq(r.coefficient, *n),
+            Err(_) => panic("one is left identity"),
         }
     }
 }
@@ -179,8 +179,8 @@ fn property_mul_by_zero_is_zero() {
     for n in xs.iter() {
         let d = Decimal.from_int(*n);
         match d.mul(&z) {
-            Result.Ok(r) => assert_eq(r.coefficient, 0),
-            Result.Err(_) => panic("x * 0 = 0"),
+            Ok(r) => assert_eq(r.coefficient, 0),
+            Err(_) => panic("x * 0 = 0"),
         }
     }
 }
@@ -194,11 +194,11 @@ fn property_from_parts_preserves_fields() {
     let cases: List<(Int, Int)> = [(0, 0), (1, 0), (-1, 0), (314, 2), (-314, 2)];
     for c in cases.iter() {
         match Decimal.from_parts((*c).0, (*c).1) {
-            Result.Ok(d) => {
+            Ok(d) => {
                 assert_eq(d.coefficient, (*c).0);
                 assert_eq(d.scale, (*c).1);
             }
-            Result.Err(_) => panic("valid (coefficient, scale) must succeed"),
+            Err(_) => panic("valid (coefficient, scale) must succeed"),
         }
     }
 }

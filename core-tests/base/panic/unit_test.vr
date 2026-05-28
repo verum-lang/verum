@@ -508,13 +508,13 @@ fn test_catch_result_type() {
     });
 
     match success {
-        Result.Ok(v) => assert_eq(v, 42),
-        Result.Err(_) => panic("expected Ok"),
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => panic("expected Ok"),
     }
 
     match failure {
-        Result.Ok(_) => panic("expected Err"),
-        Result.Err(info) => assert_eq(info.message, "caught panic"),
+        Ok(_) => panic("expected Err"),
+        Err(info) => assert_eq(info.message, "caught panic"),
     }
 }
 
@@ -849,8 +849,8 @@ fn test_catch_result_ok_pattern() {
     let result: CatchResult<Int> = Result.Ok(100);
 
     let value = match result {
-        Result.Ok(v) => v,
-        Result.Err(_) => 0,
+        Ok(v) => v,
+        Err(_) => 0,
     };
 
     assert_eq(value, 100);
@@ -865,8 +865,8 @@ fn test_catch_result_err_pattern() {
     let result: CatchResult<Int> = Result.Err(info);
 
     let msg = match result {
-        Result.Ok(_) => "no panic",
-        Result.Err(info) => info.message,
+        Ok(_) => "no panic",
+        Err(info) => info.message,
     };
 
     assert_eq(msg, "test panic");
@@ -882,11 +882,11 @@ fn test_catch_result_with_complex_type() {
     });
 
     match result {
-        Result.Ok(r) => {
+        Ok(r) => {
             assert_eq(r.data.len(), 3);
             assert(r.success);
         }
-        Result.Err(_) => panic("expected Ok"),
+        Err(_) => panic("expected Ok"),
     }
 }
 

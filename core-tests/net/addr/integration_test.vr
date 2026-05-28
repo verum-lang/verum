@@ -91,12 +91,12 @@ fn integration_ipv6_segments_roundtrip() {
 fn integration_socket_addr_parse_ipv4_predicates() {
     let s = "127.0.0.1:8080".clone();
     match SocketAddr.parse(&s) {
-        Result.Ok(addr) => {
+        Ok(addr) => {
             assert(addr.is_ipv4());
             assert(!addr.is_ipv6());
             assert_eq(addr.port(), 8080);
         }
-        Result.Err(_) => panic("127.0.0.1:8080 must parse"),
+        Err(_) => panic("127.0.0.1:8080 must parse"),
     }
 }
 
@@ -104,12 +104,12 @@ fn integration_socket_addr_parse_ipv4_predicates() {
 fn integration_socket_addr_parse_ipv6_predicates() {
     let s = "[::1]:443".clone();
     match SocketAddr.parse(&s) {
-        Result.Ok(addr) => {
+        Ok(addr) => {
             assert(!addr.is_ipv4());
             assert(addr.is_ipv6());
             assert_eq(addr.port(), 443);
         }
-        Result.Err(_) => panic("[::1]:443 must parse"),
+        Err(_) => panic("[::1]:443 must parse"),
     }
 }
 
@@ -151,14 +151,14 @@ fn integration_parse_errors_accumulate_disjoint() {
     let mut count_octet = 0;
     let mut count_port = 0;
     match Ipv4Addr.parse(&bad_octet) {
-        Result.Ok(_) => panic("256.x.x.x must reject"),
-        Result.Err(e) => {
+        Ok(_) => panic("256.x.x.x must reject"),
+        Err(e) => {
             if e == AddrParseError.InvalidOctet { count_octet = count_octet + 1; }
         }
     }
     match SocketAddr.parse(&bad_port) {
-        Result.Ok(_) => panic("port > 65535 must reject"),
-        Result.Err(e) => {
+        Ok(_) => panic("port > 65535 must reject"),
+        Err(e) => {
             if e == AddrParseError.InvalidPort { count_port = count_port + 1; }
         }
     }

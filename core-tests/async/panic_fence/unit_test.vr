@@ -61,8 +61,8 @@ fn test_panic_fence_poll_ready_inner_yields_ready_ok() {
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     match fence.poll(&mut cx) {
-        Poll.Ready(Result.Ok(v)) => assert_eq(v, 42),
-        Poll.Ready(Result.Err(_)) => assert(false),
+        Poll.Ready(Ok(v)) => assert_eq(v, 42),
+        Poll.Ready(Err(_)) => assert(false),
         Poll.Pending => assert(false),
     }
 }
@@ -73,8 +73,8 @@ fn test_panic_fence_poll_ready_text_payload() {
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     match fence.poll(&mut cx) {
-        Poll.Ready(Result.Ok(v)) => assert_eq(v, "hello"),
-        Poll.Ready(Result.Err(_)) => assert(false),
+        Poll.Ready(Ok(v)) => assert_eq(v, "hello"),
+        Poll.Ready(Err(_)) => assert(false),
         Poll.Pending => assert(false),
     }
 }
@@ -101,8 +101,8 @@ fn test_panic_fence_poll_ready_completes_observably() {
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     let outcome = match fence.poll(&mut cx) {
-        Poll.Ready(Result.Ok(_)) => 1,
-        Poll.Ready(Result.Err(_)) => 2,
+        Poll.Ready(Ok(_)) => 1,
+        Poll.Ready(Err(_)) => 2,
         Poll.Pending => 3,
     };
     assert_eq(outcome, 1);

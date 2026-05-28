@@ -394,8 +394,8 @@ fn property_text_int_round_trip() {
     for n in xs.iter() {
         let s = Text.from_int(*n);
         match s.parse_int() {
-            Result.Ok(round) => assert_eq(round, *n),
-            Result.Err(_) => panic("Text.from_int / parse_int must round-trip"),
+            Ok(round) => assert_eq(round, *n),
+            Err(_) => panic("Text.from_int / parse_int must round-trip"),
         }
     }
 }
@@ -409,8 +409,8 @@ fn property_text_bool_round_trip() {
     for b in [true, false].iter() {
         let s = Text.from_bool(*b);
         match s.parse_bool() {
-            Result.Ok(round) => assert_eq(round, *b),
-            Result.Err(_) => panic("Text.from_bool / parse_bool must round-trip"),
+            Ok(round) => assert_eq(round, *b),
+            Err(_) => panic("Text.from_bool / parse_bool must round-trip"),
         }
     }
 }

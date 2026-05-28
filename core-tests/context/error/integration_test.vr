@@ -22,8 +22,8 @@ mount core.base.maybe.{Maybe, Some, None};
 fn integration_result_ok_carries_value() {
     let r: Result<Int, ContextError> = Result.Ok(42);
     match r {
-        Result.Ok(n) => assert_eq(n, 42),
-        Result.Err(_) => panic("expected Result.Ok(42)"),
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("expected Ok(42)"),
     }
 }
 
@@ -32,8 +32,8 @@ fn integration_result_err_carries_context_error() {
     let err = ContextError.NotFound { context_name: "Database".clone() };
     let r: Result<Int, ContextError> = Result.Err(err);
     match r {
-        Result.Ok(_) => panic("expected Err"),
-        Result.Err(e) => {
+        Ok(_) => panic("expected Err"),
+        Err(e) => {
             assert(e is ContextError.NotFound);
             let msg = e.message();
             assert(msg.contains("Database"));

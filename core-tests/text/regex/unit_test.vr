@@ -31,24 +31,24 @@ mount core.collections.list.List;
 @test
 fn test_new_returns_ok() {
     match Regex.new("abc") {
-        Result.Ok(_) => {},
-        Result.Err(_) => panic("Regex.new('abc') should be Ok"),
+        Ok(_) => {},
+        Err(_) => panic("Regex.new('abc') should be Ok"),
     }
 }
 
 @test
 fn test_new_empty_pattern_returns_ok() {
     match Regex.new("") {
-        Result.Ok(_) => {},
-        Result.Err(_) => panic("Regex.new('') should be Ok"),
+        Ok(_) => {},
+        Err(_) => panic("Regex.new('') should be Ok"),
     }
 }
 
 @test
 fn test_new_complex_pattern_returns_ok() {
     match Regex.new("[a-z]+\\d{2,5}") {
-        Result.Ok(_) => {},
-        Result.Err(_) => panic("complex pattern should compile"),
+        Ok(_) => {},
+        Err(_) => panic("complex pattern should compile"),
     }
 }
 

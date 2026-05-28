@@ -65,13 +65,13 @@ fn test_oserror_in_result_round_trip() {
     }
 
     match maybe_fail(0) {
-        Result.Ok(v) => assert_eq(v, 42),
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => assert(false),
     };
 
     match maybe_fail(13) {
-        Result.Ok(_) => assert(false),
-        Result.Err(e) => {
+        Ok(_) => assert(false),
+        Err(e) => {
             assert_eq(e.code, 13);
             assert_eq(e.message, "synthetic");
         }
@@ -92,8 +92,8 @@ fn test_oserror_question_mark_propagation() {
         Result.Ok(v * 2)
     }
     match outer() {
-        Result.Ok(_) => assert(false),
-        Result.Err(e) => {
+        Ok(_) => assert(false),
+        Err(e) => {
             assert_eq(e.code, 11);
             assert(e.would_block());
         }
@@ -211,13 +211,13 @@ fn test_sys_context_error_via_result_match() {
     }
 
     match try_set(100) {
-        Result.Ok(()) => assert(true),
-        Result.Err(_) => assert(false),
+        Ok(()) => assert(true),
+        Err(_) => assert(false),
     };
 
     match try_set(-1) {
-        Result.Ok(()) => assert(false),
-        Result.Err(e) => {
+        Ok(()) => assert(false),
+        Err(e) => {
             match e {
                 SysContextError.InvalidSlot { slot } => assert_eq(slot, -1),
                 _ => assert(false),
@@ -226,8 +226,8 @@ fn test_sys_context_error_via_result_match() {
     };
 
     match try_set(0) {
-        Result.Ok(()) => assert(false),
-        Result.Err(e) => {
+        Ok(()) => assert(false),
+        Err(e) => {
             match e {
                 SysContextError.SlotNotFound { slot } => assert_eq(slot, 0 as UInt8),
                 _ => assert(false),

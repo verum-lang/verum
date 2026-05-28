@@ -37,8 +37,8 @@ fn regression_alias_from_weights_empty_returns_error() {
 fn regression_alias_sample_within_bounds() {
     let weights: [Float; 4] = [0.25, 0.25, 0.25, 0.25];
     let s = match AliasSampler.from_weights(&weights) {
-        Result.Ok(s) => s,
-        Result.Err(_) => { panic("from_weights failed"); return; },
+        Ok(s) => s,
+        Err(_) => { panic("from_weights failed"); return; },
     };
     let i = s.sample();
     assert(i >= 0);

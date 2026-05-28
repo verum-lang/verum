@@ -19,40 +19,40 @@ mount core.base.result.{Result, Ok, Err};
 @test
 fn test_parse_simple_int() {
     match parse_rational(&"5") {
-        Result.Ok(_r) => {},
-        Result.Err(_) => panic("'5' parses"),
+        Ok(_r) => {},
+        Err(_) => panic("'5' parses"),
     }
 }
 
 @test
 fn test_parse_simple_fraction() {
     match parse_rational(&"1/2") {
-        Result.Ok(_r) => {},
-        Result.Err(_) => panic("'1/2' parses"),
+        Ok(_r) => {},
+        Err(_) => panic("'1/2' parses"),
     }
 }
 
 @test
 fn test_parse_negative_fraction() {
     match parse_rational(&"-3/4") {
-        Result.Ok(_r) => {},
-        Result.Err(_) => panic("'-3/4' parses"),
+        Ok(_r) => {},
+        Err(_) => panic("'-3/4' parses"),
     }
 }
 
 @test
 fn test_parse_zero_division_in_text() {
     match parse_rational(&"5/0") {
-        Result.Ok(_) => panic("denominator 0 should be Err"),
-        Result.Err(_) => {},
+        Ok(_) => panic("denominator 0 should be Err"),
+        Err(_) => {},
     }
 }
 
 @test
 fn test_parse_empty_returns_err() {
     match parse_rational(&"") {
-        Result.Ok(_) => panic("empty must Err"),
-        Result.Err(_) => {},
+        Ok(_) => panic("empty must Err"),
+        Err(_) => {},
     }
 }
 
@@ -66,8 +66,8 @@ fn test_rational_error_variants_distinct() {
     // is API-private. The fact that distinct inputs produce distinct
     // Err arms is locked elsewhere via property tests.
     match parse_rational(&"1/0") {
-        Result.Ok(_) => panic("expected Err"),
-        Result.Err(_) => {},
+        Ok(_) => panic("expected Err"),
+        Err(_) => {},
     }
 }
 

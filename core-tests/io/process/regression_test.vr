@@ -17,8 +17,8 @@ mount core.io.process.{Command, Stdio};
 fn regression_command_spawn_true_no_panic() {
     let cmd = Command.new(Text.from("/usr/bin/true"));
     match cmd.spawn() {
-        Result.Ok(_) => {}
-        Result.Err(_) => assert(false),
+        Ok(_) => {}
+        Err(_) => assert(false),
     }
 }
 
@@ -29,8 +29,8 @@ fn regression_command_output_echo_captures_stdout() {
     let _ = cmd.arg(Text.from("hello"));
     let _ = cmd.stdout(Stdio.Piped);
     match cmd.output() {
-        Result.Ok(o) => assert_eq(o.stdout(), Text.from("hello\n")),
-        Result.Err(_) => assert(false),
+        Ok(o) => assert_eq(o.stdout(), Text.from("hello\n")),
+        Err(_) => assert(false),
     }
 }
 
@@ -39,8 +39,8 @@ fn regression_command_output_echo_captures_stdout() {
 fn regression_command_status_true_returns_success() {
     let mut cmd = Command.new(Text.from("/usr/bin/true"));
     match cmd.status() {
-        Result.Ok(s) => assert(s.success()),
-        Result.Err(_) => assert(false),
+        Ok(s) => assert(s.success()),
+        Err(_) => assert(false),
     }
 }
 
@@ -49,11 +49,11 @@ fn regression_command_status_true_returns_success() {
 fn regression_command_status_false_returns_non_success() {
     let mut cmd = Command.new(Text.from("/usr/bin/false"));
     match cmd.status() {
-        Result.Ok(s) => {
+        Ok(s) => {
             assert(!s.success());
             assert_eq(s.code(), 1);
         }
-        Result.Err(_) => assert(false),
+        Err(_) => assert(false),
     }
 }
 

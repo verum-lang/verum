@@ -18,8 +18,8 @@ mount core.base.result.{Result, Ok, Err};
 fn integration_parse_to_text_round_trip() {
     let r = parse_bigdecimal(&"3.14");
     match r {
-        Result.Ok(b) => assert_eq(b.to_text(), "3.14"),
-        Result.Err(_) => panic("parse_bigdecimal('3.14') must succeed"),
+        Ok(b) => assert_eq(b.to_text(), "3.14"),
+        Err(_) => panic("parse_bigdecimal('3.14') must succeed"),
     };
 }
 
@@ -35,8 +35,8 @@ fn integration_div_by_zero_returns_err() {
     let a = BigDecimal.from_int(10);
     let zero = BigDecimal.zero();
     match a.div(&zero, 10) {
-        Result.Ok(_) => panic("div by zero must Err"),
-        Result.Err(_) => (),
+        Ok(_) => panic("div by zero must Err"),
+        Err(_) => (),
     };
 }
 

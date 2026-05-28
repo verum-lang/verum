@@ -67,7 +67,7 @@ fn regression_parse_prefix_modifier() {
 fn regression_parse_unbalanced_open_brace_rejects() {
     let s = "/users/{user".clone();
     match UriTemplate.parse(&s) {
-        Result.Ok(_) => panic("unbalanced { must reject"),
-        Result.Err(e) => assert(e == UriTemplateError.UnbalancedBraces),
+        Ok(_) => panic("unbalanced { must reject"),
+        Err(e) => assert(e == UriTemplateError.UnbalancedBraces),
     }
 }

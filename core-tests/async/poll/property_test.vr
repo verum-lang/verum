@@ -256,7 +256,7 @@ fn property_poll_map_ok_only_affects_ok_branch_exhaustive() {
 
 fn err_payload_text(q: Poll<Result<Int, Text>>) -> Text {
     match q {
-        Poll.Ready(Result.Err(e)) => e,
+        Poll.Ready(Err(e)) => e,
         _ => "<unexpected>",
     }
 }

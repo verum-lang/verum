@@ -171,8 +171,8 @@ fn first_err_or_sum(xs: &List<Result<Int, Text>>) -> Result<Int, Text> {
     let mut acc: Int = 0;
     for r in xs.iter() {
         match (*r).clone() {
-            Result.Ok(n) => acc = acc + n,
-            Result.Err(e) => return Result.Err(e),
+            Ok(n) => acc = acc + n,
+            Err(e) => return Err(e),
         }
     }
     Result.Ok(acc)

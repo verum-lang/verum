@@ -53,8 +53,8 @@ fn integration_timer_delay_wraps_future() {
 fn integration_timer_timeout_error_inside_result_classification() {
     fn tag(r: Result<Int, TimeoutError>) -> Text {
         match r {
-            Result.Ok(_) => "ok",
-            Result.Err(_) => "timed_out",
+            Ok(_) => "ok",
+            Err(_) => "timed_out",
         }
     }
     assert_eq(tag(Result.Ok(42)), "ok");
@@ -65,8 +65,8 @@ fn integration_timer_timeout_error_inside_result_classification() {
 fn integration_timer_timeout_error_to_maybe() {
     fn to_maybe(r: Result<Int, TimeoutError>) -> Maybe<Int> {
         match r {
-            Result.Ok(v) => Maybe.Some(v),
-            Result.Err(_) => Maybe.None,
+            Ok(v) => Maybe.Some(v),
+            Err(_) => Maybe.None,
         }
     }
     assert_eq(to_maybe(Result.Ok(99)), Maybe.Some(99));

@@ -60,8 +60,8 @@ fn test_toposort_empty_graph_yields_empty_order() {
     let g: TopoGraph<Int> = TopoGraph.new();
     let r = g.toposort();
     match r {
-        Result.Ok(out) => assert_eq(out.len(), 0),
-        Result.Err(_)  => panic("empty graph must topo-sort to empty list"),
+        Ok(out) => assert_eq(out.len(), 0),
+        Err(_)  => panic("empty graph must topo-sort to empty list"),
     }
 }
 

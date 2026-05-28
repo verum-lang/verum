@@ -37,7 +37,7 @@ fn integration_compose_arithmetic() {
     let three = BigInt.from_int(3);
     match (Rational.from_parts(one.clone(), two.clone()),
            Rational.from_parts(one.clone(), three.clone())) {
-        (Result.Ok(a), Result.Ok(b)) => {
+        (Ok(a), Ok(b)) => {
             let s = a.add(&b);
             // 5/6 expected; verify via to_text or reciprocal property
             let _ = s;

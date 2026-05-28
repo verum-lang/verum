@@ -31,8 +31,8 @@ fn integration_panic_fence_outcome_to_tag_ready_ok() {
         let waker = noop_waker();
         let mut cx = Context.from_waker(&waker);
         match fence.poll(&mut cx) {
-            Poll.Ready(Result.Ok(_)) => "ok",
-            Poll.Ready(Result.Err(_)) => "panicked",
+            Poll.Ready(Ok(_)) => "ok",
+            Poll.Ready(Err(_)) => "panicked",
             Poll.Pending => "pending",
         }
     }
@@ -53,8 +53,8 @@ fn integration_panic_fence_list_of_fenced_ready_futures_sums_values() {
         let waker = noop_waker();
         let mut cx = Context.from_waker(&waker);
         match fence.poll(&mut cx) {
-            Poll.Ready(Result.Ok(x)) => total = total + x,
-            Poll.Ready(Result.Err(_)) => assert(false),
+            Poll.Ready(Ok(x)) => total = total + x,
+            Poll.Ready(Err(_)) => assert(false),
             Poll.Pending => assert(false),
         }
     }

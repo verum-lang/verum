@@ -78,11 +78,11 @@ fn integration_umbrella_timespec_via_result() {
         tv_nsec: 500_000_000 as Int64,
     });
     match r {
-        Result.Ok(ts) => {
+        Ok(ts) => {
             assert_eq(ts.tv_sec, 3 as Int64);
             assert_eq(ts.tv_nsec, 500_000_000 as Int64);
         }
-        Result.Err(_) => assert(false),
+        Err(_) => assert(false),
     };
 }
 

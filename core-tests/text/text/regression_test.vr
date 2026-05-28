@@ -293,8 +293,8 @@ fn regression_l_replace_pinned() {
 fn regression_m_from_utf8_invalid_returns_err_pinned() {
     let bytes: List<Byte> = [0xC0 as Byte, 0x20 as Byte];
     match Text.from_utf8(&bytes) {
-        Result.Ok(_) => panic("invalid UTF-8 must be Err"),
-        Result.Err(_) => {},
+        Ok(_) => panic("invalid UTF-8 must be Err"),
+        Err(_) => {},
     }
 }
 
@@ -541,8 +541,8 @@ fn regression_with_capacity_reports_capacity() {
 fn regression_try_with_capacity_reports_capacity() {
     let r: Result<Text, _> = Text.try_with_capacity(64);
     match r {
-        Result.Ok(t) => assert(t.capacity() >= 64),
-        Result.Err(_) => panic("try_with_capacity(64) must succeed"),
+        Ok(t) => assert(t.capacity() >= 64),
+        Err(_) => panic("try_with_capacity(64) must succeed"),
     };
 }
 
@@ -735,8 +735,8 @@ fn regression_w_char_method_on_ref_direct_dispatch() {
 fn regression_x_result_int_ok_destructure() {
     let r: Result<Int, Text> = Result.Ok(42);
     match r {
-        Result.Ok(n) => assert_eq(n, 42),
-        Result.Err(_) => panic("Int Ok must take Ok arm"),
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("Int Ok must take Ok arm"),
     }
 }
 
@@ -744,8 +744,8 @@ fn regression_x_result_int_ok_destructure() {
 fn regression_x_result_bool_ok_true_destructure() {
     let r: Result<Bool, Text> = Result.Ok(true);
     match r {
-        Result.Ok(b) => assert(b),
-        Result.Err(_) => panic("Bool Result.Ok(true) must take Ok arm"),
+        Ok(b) => assert(b),
+        Err(_) => panic("Bool Ok(true) must take Ok arm"),
     }
 }
 
@@ -753,8 +753,8 @@ fn regression_x_result_bool_ok_true_destructure() {
 fn regression_x_result_bool_ok_false_destructure() {
     let r: Result<Bool, Text> = Result.Ok(false);
     match r {
-        Result.Ok(b) => assert(!b),
-        Result.Err(_) => panic("Bool Result.Ok(false) must take Ok arm"),
+        Ok(b) => assert(!b),
+        Err(_) => panic("Bool Ok(false) must take Ok arm"),
     }
 }
 

@@ -67,7 +67,7 @@ fn regression_a_decimal_neg_panic_pinned() {
 // fell through to the global field-intern fallback for the bound
 // variant payload — surfacing as "field access out of bounds: field
 // index 4 (offset 32+8=40) exceeds object data size 16" at every
-// `match parse_X(...) { Result.Ok(v) => v.field }` site.
+// `match parse_X(...) { Ok(v) => v.field }` site.
 //
 // Fix: extended `primitive_typeid_name` with the 15 well-known
 // generic-carrier TypeIds so cross-module names resolve regardless
@@ -83,8 +83,8 @@ fn regression_a_decimal_neg_panic_pinned() {
 @test
 fn regression_b_parse_simple_int_pinned() {
     match parse_decimal(&"42") {
-        Result.Ok(d) => assert_eq(d.coefficient, 42),
-        Result.Err(_) => panic("'42' parses"),
+        Ok(d) => assert_eq(d.coefficient, 42),
+        Err(_) => panic("'42' parses"),
     }
 }
 
@@ -93,8 +93,8 @@ fn regression_b_add_zero_pinned() {
     let z = Decimal.zero();
     let d = Decimal.from_int(7);
     match z.add(&d) {
-        Result.Ok(r) => assert_eq(r.coefficient, 7),
-        Result.Err(_) => panic("zero is left identity"),
+        Ok(r) => assert_eq(r.coefficient, 7),
+        Err(_) => panic("zero is left identity"),
     }
 }
 
@@ -103,8 +103,8 @@ fn regression_b_mul_simple_pinned() {
     let a = Decimal.from_int(3);
     let b = Decimal.from_int(4);
     match a.mul(&b) {
-        Result.Ok(d) => assert_eq(d.coefficient, 12),
-        Result.Err(_) => panic("3 * 4 = 12"),
+        Ok(d) => assert_eq(d.coefficient, 12),
+        Err(_) => panic("3 * 4 = 12"),
     }
 }
 
@@ -113,8 +113,8 @@ fn regression_b_div_simple_exact_pinned() {
     let a = Decimal.from_int(10);
     let b = Decimal.from_int(2);
     match a.div(&b, 0, RoundingMode.HalfEven) {
-        Result.Ok(d) => assert_eq(d.coefficient, 5),
-        Result.Err(_) => panic("10 / 2 = 5"),
+        Ok(d) => assert_eq(d.coefficient, 5),
+        Err(_) => panic("10 / 2 = 5"),
     }
 }
 

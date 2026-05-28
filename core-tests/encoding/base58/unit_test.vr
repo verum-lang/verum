@@ -174,8 +174,8 @@ fn test_base58_encode_empty_is_empty() {
 fn test_base58_decode_empty_is_empty() {
     let input: [Byte; 0] = [];
     match decode(&input) {
-        Result.Ok(v) => assert_eq(v.len(), 0),
-        Result.Err(_) => panic("decode([]) should succeed"),
+        Ok(v) => assert_eq(v.len(), 0),
+        Err(_) => panic("decode([]) should succeed"),
     }
 }
 

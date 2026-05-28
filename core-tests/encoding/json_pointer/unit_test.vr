@@ -91,11 +91,11 @@ fn test_root_tokens_empty() {
 fn test_parse_empty_is_root() {
     let s = "".clone();
     match parse(&s) {
-        Result.Ok(p) => {
+        Ok(p) => {
             assert(p.is_root());
             assert_eq(p.depth(), 0);
         },
-        Result.Err(_) => panic("empty string should parse to root"),
+        Err(_) => panic("empty string should parse to root"),
     }
 }
 
@@ -104,11 +104,11 @@ fn test_parse_single_token_foo() {
     // RFC 6901 §5: "/foo" → ["foo"]
     let s = "/foo".clone();
     match parse(&s) {
-        Result.Ok(p) => {
+        Ok(p) => {
             assert_eq(p.depth(), 1);
             assert_eq(p.tokens[0], "foo");
         },
-        Result.Err(_) => panic("'/foo' should parse"),
+        Err(_) => panic("'/foo' should parse"),
     }
 }
 
@@ -117,12 +117,12 @@ fn test_parse_two_tokens() {
     // "/foo/0" → ["foo", "0"]
     let s = "/foo/0".clone();
     match parse(&s) {
-        Result.Ok(p) => {
+        Ok(p) => {
             assert_eq(p.depth(), 2);
             assert_eq(p.tokens[0], "foo");
             assert_eq(p.tokens[1], "0");
         },
-        Result.Err(_) => panic("'/foo/0' should parse"),
+        Err(_) => panic("'/foo/0' should parse"),
     }
 }
 
@@ -131,8 +131,8 @@ fn test_parse_no_leading_slash_is_malformed() {
     // RFC 6901 §3: every non-root pointer MUST start with '/'
     let s = "no-slash".clone();
     match parse(&s) {
-        Result.Ok(_) => panic("missing leading slash should fail"),
-        Result.Err(e) => assert(e is JsonPointerError.Malformed),
+        Ok(_) => panic("missing leading slash should fail"),
+        Err(e) => assert(e is JsonPointerError.Malformed),
     }
 }
 
@@ -141,11 +141,11 @@ fn test_parse_escaped_tilde_in_token() {
     // RFC 6901 §3: "~0" decodes to "~"
     let s = "/~0".clone();
     match parse(&s) {
-        Result.Ok(p) => {
+        Ok(p) => {
             assert_eq(p.depth(), 1);
             assert_eq(p.tokens[0], "~");
         },
-        Result.Err(_) => panic("'/~0' should parse to '~'"),
+        Err(_) => panic("'/~0' should parse to '~'"),
     }
 }
 
@@ -154,11 +154,11 @@ fn test_parse_escaped_slash_in_token() {
     // RFC 6901 §3: "~1" decodes to "/"
     let s = "/~1".clone();
     match parse(&s) {
-        Result.Ok(p) => {
+        Ok(p) => {
             assert_eq(p.depth(), 1);
             assert_eq(p.tokens[0], "/");
         },
-        Result.Err(_) => panic("'/~1' should parse to '/'"),
+        Err(_) => panic("'/~1' should parse to '/'"),
     }
 }
 
@@ -167,8 +167,8 @@ fn test_parse_invalid_escape_tilde_3() {
     // RFC 6901 §4: only ~0 / ~1 valid; ~2/~3/etc. invalid
     let s = "/~3".clone();
     match parse(&s) {
-        Result.Ok(_) => panic("'~3' is not a valid escape"),
-        Result.Err(e) => assert(e is JsonPointerError.InvalidEscape),
+        Ok(_) => panic("'~3' is not a valid escape"),
+        Err(e) => assert(e is JsonPointerError.InvalidEscape),
     }
 }
 
@@ -186,8 +186,8 @@ fn test_format_root_is_empty_string() {
 fn test_format_single_token() {
     let s = "/foo".clone();
     match parse(&s) {
-        Result.Ok(p) => assert_eq(format_json_pointer(&p), "/foo"),
-        Result.Err(_) => panic("parse should succeed"),
+        Ok(p) => assert_eq(format_json_pointer(&p), "/foo"),
+        Err(_) => panic("parse should succeed"),
     }
 }
 
@@ -195,8 +195,8 @@ fn test_format_single_token() {
 fn test_round_trip_two_tokens() {
     let original = "/users/123".clone();
     match parse(&original) {
-        Result.Ok(p) => assert_eq(format_json_pointer(&p), "/users/123"),
-        Result.Err(_) => panic("parse should succeed"),
+        Ok(p) => assert_eq(format_json_pointer(&p), "/users/123"),
+        Err(_) => panic("parse should succeed"),
     }
 }
 
@@ -205,11 +205,11 @@ fn test_round_trip_escapes() {
     // Round-trip preserves escapes: "/a~1b" (token "a/b") → "/a~1b"
     let original = "/a~1b".clone();
     match parse(&original) {
-        Result.Ok(p) => {
+        Ok(p) => {
             assert_eq(p.tokens[0], "a/b");
             assert_eq(format_json_pointer(&p), "/a~1b");
         },
-        Result.Err(_) => panic("parse should succeed"),
+        Err(_) => panic("parse should succeed"),
     }
 }
 

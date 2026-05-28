@@ -20,8 +20,8 @@ mount core.collections.list.List;
 fn integration_semaphore_error_inside_result_ok_err_classification() {
     fn tag(r: Result<Int, SemaphoreError>) -> Text {
         match r {
-            Result.Ok(_) => "ok",
-            Result.Err(SemaphoreError.Closed) => "closed",
+            Ok(_) => "ok",
+            Err(SemaphoreError.Closed) => "closed",
         }
     }
     assert_eq(tag(Result.Ok(42)), "ok");
@@ -40,12 +40,12 @@ fn integration_semaphore_error_to_maybe_unit() {
     let ok_result = ok_or_closed(true);
     let err_result = ok_or_closed(false);
     let ok_as_maybe: Maybe<()> = match ok_result {
-        Result.Ok(()) => Maybe.Some(()),
-        Result.Err(_) => Maybe.None,
+        Ok(()) => Maybe.Some(()),
+        Err(_) => Maybe.None,
     };
     let err_as_maybe: Maybe<()> = match err_result {
-        Result.Ok(()) => Maybe.Some(()),
-        Result.Err(_) => Maybe.None,
+        Ok(()) => Maybe.Some(()),
+        Err(_) => Maybe.None,
     };
     assert(ok_as_maybe.is_some());
     assert(err_as_maybe.is_none());

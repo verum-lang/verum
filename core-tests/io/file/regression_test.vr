@@ -20,8 +20,8 @@ mount core.io.protocols.{IoErrorKind};
 @test
 fn regression_file_open_nonexistent_returns_not_found() {
     match File.open(&Text.from("/nonexistent-path-12345/foo.txt")) {
-        Result.Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
-        Result.Ok(_) => assert(false),
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Ok(_) => assert(false),
     }
 }
 
@@ -29,12 +29,12 @@ fn regression_file_open_nonexistent_returns_not_found() {
 @test
 fn regression_file_create_in_unwritable_dir_returns_permission_denied() {
     match File.create(&Text.from("/etc/protected-file-12345")) {
-        Result.Err(e) => {
+        Err(e) => {
             assert(e.kind() == IoErrorKind.PermissionDenied
                 || e.kind() == IoErrorKind.NotFound
                 || e.kind() == IoErrorKind.AlreadyExists);
         }
-        Result.Ok(_) => {}  // unexpected success — skipped
+        Ok(_) => {}  // unexpected success — skipped
     }
 }
 
@@ -47,8 +47,8 @@ fn regression_file_create_in_unwritable_dir_returns_permission_denied() {
 @test
 fn regression_read_nonexistent_returns_not_found() {
     match read(&Text.from("/nonexistent-path-12345/foo.txt")) {
-        Result.Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
-        Result.Ok(_) => assert(false),
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Ok(_) => assert(false),
     }
 }
 
@@ -56,8 +56,8 @@ fn regression_read_nonexistent_returns_not_found() {
 @test
 fn regression_read_to_string_nonexistent_returns_not_found() {
     match read_to_string(&Text.from("/nonexistent-path-12345/foo.txt")) {
-        Result.Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
-        Result.Ok(_) => assert(false),
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Ok(_) => assert(false),
     }
 }
 
