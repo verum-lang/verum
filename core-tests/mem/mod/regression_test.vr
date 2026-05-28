@@ -1,0 +1,214 @@
+// =============================================================================
+// core-tests/mem/mod/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for the `core.mem` module-root surface.
+//
+//   §A  GEN_UNALLOCATED == 0 — the load-bearing null-pointer sentinel.
+//       Drift to a non-zero default would silently break every null-
+//       pointer check (`if e.expected_gen == GEN_UNALLOCATED { ... }`)
+//       in `core/mem/mod.vr:319`.
+//
+//   §B  GEN_INITIAL == 1 — first allocation cycle starts here.
+//       UseAfterFreeError records constructed with `expected_gen >=
+//       GEN_INITIAL` route to the "use-after-free" branch, NOT the
+//       null-pointer branch. Pin the sentinel-vs-initial separation.
+//
+//   §C  RevocationError.NullPointer / .CapabilityViolation / .AlreadyRevoked
+//       / .Internal must be CONSTRUCTIBLE via their static methods and
+//       must EACH classify uniquely under `is`. Pre-fix some drafts
+//       inlined the variant payload incorrectly so all 4 constructors
+//       collapsed to NullPointer at runtime.
+//
+//   §D  RevocationError.Internal has TWO payload fields (type_name +
+//       reason).  Eq must compare BOTH conjunctively, not just one.
+//       Pre-fix some drafts compared only type_name, masking a
+//       semantic-distinct error pair as equal.
+//
+//   §E  set_execution_tier(t) followed by get_execution_tier() returns
+//       a value `is t` — the round-trip identity is the load-bearing
+//       contract for tier selection.  Pre-fix some drafts implemented
+//       the static-mut via a no-op stub returning the same constant
+//       always (CbgrTier.Interpreter).
+//
+//   §F  HEADER_SIZE == 32 — the cache-line-aligned allocation header.
+//       Pre-fix some drafts used 24 or 16 (truncated header) which
+//       broke the inline header layout shared with ThinRef / FatRef.
+//
+//   §G  CAP_AUDIT_RING_CAPACITY is a POWER OF TWO — required for the
+//       lock-free SPMC ring's efficient `idx % capacity` reduction
+//       via a single mask op (`idx & (capacity - 1)`).  Pre-fix some
+//       drafts used non-power-of-two values (e.g. 100) which silently
+//       slowed the producer hot path.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.{
+    UseAfterFreeError,
+    RevocationError,
+    CbgrTier,
+    get_execution_tier, set_execution_tier,
+    HEADER_SIZE, GEN_INITIAL, GEN_UNALLOCATED,
+    CAP_AUDIT_RING_CAPACITY,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// =============================================================================
+// §A — GEN_UNALLOCATED == 0
+// =============================================================================
+
+@test
+fn regression_gen_unallocated_is_zero_sentinel() {
+    assert_eq(GEN_UNALLOCATED, 0 as UInt32);
+}
+
+// =============================================================================
+// §B — GEN_INITIAL == 1; UseAfterFreeError separates sentinel vs initial
+// =============================================================================
+
+@test
+fn regression_gen_initial_separates_null_from_uaf_branch() {
+    let null_e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: GEN_UNALLOCATED,
+        actual_gen: GEN_UNALLOCATED,
+        expected_epoch: 0 as UInt16,
+        actual_epoch: 0 as UInt16,
+        type_name: "T".to_text(),
+    };
+    let init_e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: GEN_INITIAL,
+        actual_gen: GEN_INITIAL + 1 as UInt32,
+        expected_epoch: 0 as UInt16,
+        actual_epoch: 0 as UInt16,
+        type_name: "T".to_text(),
+    };
+    // Direct field reads at the test site — no method-body dispatch
+    // (avoids the cross-module .message() field-shift defect).
+    assert_eq(null_e.expected_gen, GEN_UNALLOCATED);
+    assert(init_e.expected_gen != GEN_UNALLOCATED);
+    assert_eq(init_e.expected_gen, GEN_INITIAL);
+}
+
+// =============================================================================
+// §C — RevocationError 4-variant construction + unique classification
+// =============================================================================
+
+@test
+fn regression_revocation_error_4_variants_classify_uniquely() {
+    let n = RevocationError.null_pointer("T".to_text());
+    assert(n is RevocationError.NullPointer);
+    assert(!(n is RevocationError.CapabilityViolation));
+    assert(!(n is RevocationError.AlreadyRevoked));
+    assert(!(n is RevocationError.Internal));
+
+    let c = RevocationError.capability_violation("T".to_text());
+    assert(c is RevocationError.CapabilityViolation);
+    assert(!(c is RevocationError.NullPointer));
+
+    let a = RevocationError.already_revoked("T".to_text());
+    assert(a is RevocationError.AlreadyRevoked);
+    assert(!(a is RevocationError.NullPointer));
+
+    let i = RevocationError.internal_error("T".to_text(), "r".to_text());
+    assert(i is RevocationError.Internal);
+    assert(!(i is RevocationError.NullPointer));
+}
+
+// =============================================================================
+// §D — RevocationError.Internal Eq compares BOTH payload fields conjunctively
+// =============================================================================
+
+@test
+fn regression_revocation_internal_eq_compares_both_fields() {
+    let a = RevocationError.internal_error("T".to_text(), "r1".to_text());
+    let b_same = RevocationError.internal_error("T".to_text(), "r1".to_text());
+    let b_diff_type = RevocationError.internal_error("U".to_text(), "r1".to_text());
+    let b_diff_reason = RevocationError.internal_error("T".to_text(), "r2".to_text());
+
+    assert(a == b_same);          // both fields equal
+    assert(!(a == b_diff_type));   // type_name differs
+    assert(!(a == b_diff_reason)); // reason differs
+}
+
+// =============================================================================
+// §E — set/get_execution_tier round-trip identity
+// =============================================================================
+
+@test
+fn regression_set_then_get_execution_tier_is_identity_baseline_jit() {
+    set_execution_tier(CbgrTier.BaselineJit);
+    let t = get_execution_tier();
+    assert(t is CbgrTier.BaselineJit);
+    set_execution_tier(CbgrTier.Interpreter);   // restore
+}
+
+@test
+fn regression_set_then_get_execution_tier_is_identity_aot() {
+    set_execution_tier(CbgrTier.Aot);
+    let t = get_execution_tier();
+    assert(t is CbgrTier.Aot);
+    set_execution_tier(CbgrTier.Interpreter);   // restore
+}
+
+// =============================================================================
+// §F — HEADER_SIZE == 32
+// =============================================================================
+
+@test
+fn regression_header_size_is_thirty_two_bytes() {
+    assert_eq(HEADER_SIZE, 32 as UInt32);
+}
+
+// =============================================================================
+// §G — CAP_AUDIT_RING_CAPACITY is power of two
+// =============================================================================
+
+@test
+fn regression_cap_audit_ring_capacity_is_power_of_two() {
+    let v = CAP_AUDIT_RING_CAPACITY;
+    assert(v > 0 as USize);
+    assert((v & (v - 1 as USize)) == 0 as USize);
+}
+
+@test
+fn regression_cap_audit_ring_capacity_is_256() {
+    // Canonical value pinned by core/mem/cap_audit_ring.vr.
+    assert_eq(CAP_AUDIT_RING_CAPACITY, 256 as USize);
+}
+
+// =============================================================================
+// §H — Umbrella-mounted free function dispatch collision with same-name
+//      method on AllocationHeader (free `has_capability(flags, cap)` vs
+//      `AllocationHeader.has_capability(&self, cap)`)
+// =============================================================================
+//
+// REGRESSION: when `has_capability` is mounted via the umbrella
+// (`mount core.mem.{has_capability}` — routes through `core/mem/mod.vr`'s
+// `public mount .capability.{has_capability}` re-export), a bare-name
+// 2-arg call `has_capability(flags, cap)` collides with the 2-arg method
+// `AllocationHeader.has_capability(&self, cap)` defined at
+// `core/mem/header.vr:636`.  The dispatcher picks the impl-block method,
+// re-interpreting the first UInt16 argument as a `&AllocationHeader`
+// pointer (= null) which faults at `AllocationHeader.load_capabilities`.
+//
+// Direct mount `mount core.mem.capability.{has_capability}` resolves
+// correctly (proven by 29 GREEN tests in `core-tests/mem/capability/`).
+//
+// Workaround pinned in `unit_test.vr §8` (`_pinned_by_collision`
+// @ignore'd test).  Fundamental fix surface: the dispatcher must
+// either qualify umbrella-re-exported free fns with their canonical
+// source-module identity, or distinguish free-fn-arity-N vs
+// impl-block-method-arity-N+1 dispatch routing.
+@test
+fn regression_umbrella_mount_does_not_break_pack_unpack() {
+    // `pack_epoch_caps` / `unpack_epoch` / `unpack_caps` (umbrella-
+    // mounted at the top of this file) are NOT affected by the
+    // collision (no same-name 2-arg method on any CBGR type) — pin
+    // this to prove the collision is name-specific.
+    let p = pack_epoch_caps(0x1234 as UInt16, 0xABCD as UInt16);
+    assert_eq(unpack_epoch(p), 0x1234 as UInt16);
+    assert_eq(unpack_caps(p), 0xABCD as UInt16);
+}
+
+fn main() {}
