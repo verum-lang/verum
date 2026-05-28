@@ -1,0 +1,103 @@
+// =============================================================================
+// core-tests/security/x509/algorithm/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/algorithm.vr` — algorithm-identifier ADTs.
+// =============================================================================
+
+mount core.security.x509.algorithm.{RsaPssHash, EcNamedCurve};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: RsaPssHash 3-variant ADT
+// =============================================================================
+
+@test
+fn test_rsa_pss_hash_sha256_variant() {
+    let h: RsaPssHash = RsaPssHash.Sha256Hash;
+    assert(h is RsaPssHash.Sha256Hash);
+}
+
+@test
+fn test_rsa_pss_hash_sha384_variant() {
+    let h: RsaPssHash = RsaPssHash.Sha384Hash;
+    assert(h is RsaPssHash.Sha384Hash);
+}
+
+@test
+fn test_rsa_pss_hash_sha512_variant() {
+    let h: RsaPssHash = RsaPssHash.Sha512Hash;
+    assert(h is RsaPssHash.Sha512Hash);
+}
+
+@test
+fn test_rsa_pss_hash_sha256_disjoint() {
+    let h: RsaPssHash = RsaPssHash.Sha256Hash;
+    assert(!(h is RsaPssHash.Sha384Hash));
+    assert(!(h is RsaPssHash.Sha512Hash));
+}
+
+@test
+fn test_rsa_pss_hash_sha384_disjoint() {
+    let h: RsaPssHash = RsaPssHash.Sha384Hash;
+    assert(!(h is RsaPssHash.Sha256Hash));
+    assert(!(h is RsaPssHash.Sha512Hash));
+}
+
+@test
+fn test_rsa_pss_hash_sha512_disjoint() {
+    let h: RsaPssHash = RsaPssHash.Sha512Hash;
+    assert(!(h is RsaPssHash.Sha256Hash));
+    assert(!(h is RsaPssHash.Sha384Hash));
+}
+
+// =============================================================================
+// Section 2: EcNamedCurve scalar variants (3 of 4)
+//   NIST P-256 / P-384 / P-521 — RFC 5480 §2.1.1.
+// =============================================================================
+
+@test
+fn test_ec_named_curve_p256_variant() {
+    let c: EcNamedCurve = EcNamedCurve.P256;
+    assert(c is EcNamedCurve.P256);
+}
+
+@test
+fn test_ec_named_curve_p384_variant() {
+    let c: EcNamedCurve = EcNamedCurve.P384;
+    assert(c is EcNamedCurve.P384);
+}
+
+@test
+fn test_ec_named_curve_p521_variant() {
+    let c: EcNamedCurve = EcNamedCurve.P521;
+    assert(c is EcNamedCurve.P521);
+}
+
+// =============================================================================
+// Section 3: EcNamedCurve pairwise disjointness — NIST family
+// =============================================================================
+
+@test
+fn test_ec_named_curve_p256_disjoint() {
+    let c: EcNamedCurve = EcNamedCurve.P256;
+    assert(!(c is EcNamedCurve.P384));
+    assert(!(c is EcNamedCurve.P521));
+}
+
+@test
+fn test_ec_named_curve_p384_disjoint() {
+    let c: EcNamedCurve = EcNamedCurve.P384;
+    assert(!(c is EcNamedCurve.P256));
+    assert(!(c is EcNamedCurve.P521));
+}
+
+@test
+fn test_ec_named_curve_p521_disjoint() {
+    let c: EcNamedCurve = EcNamedCurve.P521;
+    assert(!(c is EcNamedCurve.P256));
+    assert(!(c is EcNamedCurve.P384));
+}
+
+fn main() {}
