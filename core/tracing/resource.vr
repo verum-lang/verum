@@ -26,7 +26,7 @@ implement Resource {
     public fn empty() -> Resource {
         Resource {
             attributes: AttributeSet.new(),
-            schema_url: None,
+            schema_url: Maybe.None,
         }
     }
 
@@ -38,19 +38,19 @@ implement Resource {
         attrs.set("service.version".into(), AttributeValue.Text(version.clone()));
         Resource {
             attributes: attrs,
-            schema_url: None,
+            schema_url: Maybe.None,
         }
     }
 
     public fn from_attributes(attributes: AttributeSet) -> Resource {
         Resource {
             attributes: attributes,
-            schema_url: None,
+            schema_url: Maybe.None,
         }
     }
 
     public fn with_schema_url(mut self, url: Text) -> Resource {
-        self.schema_url = Some(url);
+        self.schema_url = Maybe.Some(url);
         self
     }
 
@@ -72,10 +72,10 @@ implement Resource {
         Resource {
             attributes: merged,
             schema_url: match &other.schema_url {
-                Some(u) => Some(u.clone()),
-                None => match &self.schema_url {
-                    Some(u) => Some(u.clone()),
-                    None => None,
+                Maybe.Some(u) => Maybe.Some(u.clone()),
+                Maybe.None => match &self.schema_url {
+                    Maybe.Some(u) => Maybe.Some(u.clone()),
+                    Maybe.None => Maybe.None,
                 }
             }
         }
@@ -94,8 +94,8 @@ implement Resource {
         Resource {
             attributes: self.attributes.clone(),
             schema_url: match &self.schema_url {
-                Some(u) => Some(u.clone()),
-                None => None,
+                Maybe.Some(u) => Maybe.Some(u.clone()),
+                Maybe.None => Maybe.None,
             }
         }
     }
