@@ -339,7 +339,13 @@ fn prop_url_parse_empty_returns_err() {
     assert(Url.parse(&s).is_err());
 }
 
-@ignore("URL-8: empty-Text `\"\".clone()` parse routes through a non-MissingScheme error kind under --interp. Suspected `as_bytes().len() == 0` short-circuit being skipped at codegen — investigate VBC Text-empty representation. e.is_err() pin retained in prop_url_parse_empty_returns_err above.")
+// URL-8 CLOSED 2026-05-28 — VBC codegen static-call generic-instantiation
+// preservation in `extract_expr_type_name` MethodCall arm. Pre-fix
+// `Url.parse(&s)` returned bare `Result` without composing
+// `return_type_inner = ["Url", "UrlError"]`; downstream `compile_match`
+// scrutinee_type lost the `<Url, UrlError>` instantiation; `Err(e)`
+// payload couldn't bind `e: UrlError`; `e.kind` field-access fell to
+// global field-intern → wrong byte offset → comparison failed.
 @test
 fn prop_url_parse_empty_error_kind_missing_scheme() {
     let s = "".clone();
