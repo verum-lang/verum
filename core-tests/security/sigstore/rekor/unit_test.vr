@@ -1,0 +1,56 @@
+// =============================================================================
+// core-tests/security/sigstore/rekor/unit_test.vr
+// =============================================================================
+//
+// `core/security/sigstore/rekor.vr` — Rekor transparency log constants.
+// =============================================================================
+
+mount core.security.sigstore.rekor.{
+    MAX_ENTRY_RESPONSE_BYTES, CONTENT_TYPE_JSON,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Rekor client constants
+// =============================================================================
+
+@test
+fn test_rekor_max_entry_response_bytes_canonical_value() {
+    // 16 MiB Rekor entry response cap — accommodates large in-toto attestations.
+    assert_eq(MAX_ENTRY_RESPONSE_BYTES, 16 * 1024 * 1024);
+}
+
+@test
+fn test_rekor_max_entry_response_bytes_concrete_value() {
+    assert_eq(MAX_ENTRY_RESPONSE_BYTES, 16_777_216);
+}
+
+@test
+fn test_rekor_content_type_json_canonical_value() {
+    assert_eq(CONTENT_TYPE_JSON, "application/json");
+}
+
+// =============================================================================
+// Section 2: Bounds
+// =============================================================================
+
+@test
+fn test_rekor_max_entry_response_positive() {
+    assert(MAX_ENTRY_RESPONSE_BYTES > 0);
+}
+
+@test
+fn test_rekor_max_entry_response_power_of_two() {
+    let n = MAX_ENTRY_RESPONSE_BYTES;
+    assert_eq(n & (n - 1), 0);
+}
+
+@test
+fn test_rekor_response_cap_larger_than_fulcio() {
+    // Rekor (16 MiB) accommodates much larger payloads than Fulcio (256 KiB).
+    let fulcio_cap = 256 * 1024;
+    assert(MAX_ENTRY_RESPONSE_BYTES > fulcio_cap);
+}
+
+fn main() {}
