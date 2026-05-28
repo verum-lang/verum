@@ -1,0 +1,79 @@
+// =============================================================================
+// core-tests/security/provenance/unit_test.vr
+// =============================================================================
+//
+// `core/security/provenance.vr` — SLSA / in-toto / SPDX / CycloneDX
+// provenance type-identifier constants.
+// =============================================================================
+
+mount core.security.provenance.{
+    PREDICATE_TYPE_SLSA_PROVENANCE_V1,
+    PREDICATE_TYPE_SLSA_VERIFICATION_SUMMARY_V1,
+    PREDICATE_TYPE_SPDX_V2_3,
+    PREDICATE_TYPE_CYCLONEDX_V1_5,
+    PREDICATE_TYPE_VEX_V0_2,
+    STATEMENT_TYPE_V1,
+    DSSE_PAYLOAD_TYPE_INTOTO,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: SLSA / in-toto / SPDX / CycloneDX / VEX type identifiers
+// =============================================================================
+
+@test
+fn test_predicate_type_slsa_provenance_v1() {
+    assert_eq(PREDICATE_TYPE_SLSA_PROVENANCE_V1, "https://slsa.dev/provenance/v1");
+}
+
+@test
+fn test_predicate_type_slsa_verification_summary_v1() {
+    assert_eq(PREDICATE_TYPE_SLSA_VERIFICATION_SUMMARY_V1, "https://slsa.dev/verification_summary/v1");
+}
+
+@test
+fn test_predicate_type_spdx_v2_3() {
+    assert_eq(PREDICATE_TYPE_SPDX_V2_3, "https://spdx.dev/Document/v2.3");
+}
+
+@test
+fn test_predicate_type_cyclonedx_v1_5() {
+    assert_eq(PREDICATE_TYPE_CYCLONEDX_V1_5, "https://cyclonedx.org/bom/v1.5");
+}
+
+@test
+fn test_predicate_type_vex_v0_2() {
+    assert_eq(PREDICATE_TYPE_VEX_V0_2, "https://openvex.dev/ns/v0.2.0");
+}
+
+@test
+fn test_statement_type_v1() {
+    assert_eq(STATEMENT_TYPE_V1, "https://in-toto.io/Statement/v1");
+}
+
+@test
+fn test_dsse_payload_type_intoto() {
+    assert_eq(DSSE_PAYLOAD_TYPE_INTOTO, "application/vnd.in-toto+json");
+}
+
+// =============================================================================
+// Section 2: Pairwise distinctness
+// =============================================================================
+
+@test
+fn test_provenance_type_ids_pairwise_distinct() {
+    assert(PREDICATE_TYPE_SLSA_PROVENANCE_V1 != PREDICATE_TYPE_SLSA_VERIFICATION_SUMMARY_V1);
+    assert(PREDICATE_TYPE_SLSA_PROVENANCE_V1 != PREDICATE_TYPE_SPDX_V2_3);
+    assert(PREDICATE_TYPE_SPDX_V2_3 != PREDICATE_TYPE_CYCLONEDX_V1_5);
+    assert(PREDICATE_TYPE_CYCLONEDX_V1_5 != PREDICATE_TYPE_VEX_V0_2);
+}
+
+@test
+fn test_statement_type_distinct_from_predicate_types() {
+    assert(STATEMENT_TYPE_V1 != PREDICATE_TYPE_SLSA_PROVENANCE_V1);
+    assert(STATEMENT_TYPE_V1 != PREDICATE_TYPE_SPDX_V2_3);
+    assert(STATEMENT_TYPE_V1 != DSSE_PAYLOAD_TYPE_INTOTO);
+}
+
+fn main() {}
