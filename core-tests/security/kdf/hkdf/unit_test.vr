@@ -1,0 +1,82 @@
+// =============================================================================
+// core-tests/security/kdf/hkdf/unit_test.vr
+// =============================================================================
+//
+// `core/security/kdf/hkdf.vr` — HKDF Extract-and-Expand KDF
+// (RFC 5869).
+// =============================================================================
+
+mount core.security.kdf.hkdf.{
+    MAX_EXPAND_OUTPUT_256, MAX_EXPAND_OUTPUT_384, MAX_EXPAND_OUTPUT_512,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: HKDF expand maximum output sizes
+//
+//   RFC 5869 §2.3: HKDF-Expand can output up to L = 255 × HashLen
+//   bytes per key. The three values pin SHA-256, SHA-384, SHA-512
+//   underlying primitives respectively.
+// =============================================================================
+
+@test
+fn test_hkdf_max_expand_output_256_canonical_value() {
+    // 255 × 32 = 8160 bytes.
+    assert_eq(MAX_EXPAND_OUTPUT_256, 255 * 32);
+}
+
+@test
+fn test_hkdf_max_expand_output_256_concrete_value() {
+    assert_eq(MAX_EXPAND_OUTPUT_256, 8160);
+}
+
+@test
+fn test_hkdf_max_expand_output_384_canonical_value() {
+    // 255 × 48 = 12240 bytes.
+    assert_eq(MAX_EXPAND_OUTPUT_384, 255 * 48);
+}
+
+@test
+fn test_hkdf_max_expand_output_384_concrete_value() {
+    assert_eq(MAX_EXPAND_OUTPUT_384, 12240);
+}
+
+@test
+fn test_hkdf_max_expand_output_512_canonical_value() {
+    // 255 × 64 = 16320 bytes.
+    assert_eq(MAX_EXPAND_OUTPUT_512, 255 * 64);
+}
+
+@test
+fn test_hkdf_max_expand_output_512_concrete_value() {
+    assert_eq(MAX_EXPAND_OUTPUT_512, 16320);
+}
+
+// =============================================================================
+// Section 2: Width ordering
+//
+//   The expand limits must strictly grow with the underlying hash
+//   width: SHA-256 < SHA-384 < SHA-512 outputs respectively.
+// =============================================================================
+
+@test
+fn test_hkdf_max_outputs_strictly_ordered() {
+    assert(MAX_EXPAND_OUTPUT_256 < MAX_EXPAND_OUTPUT_384);
+    assert(MAX_EXPAND_OUTPUT_384 < MAX_EXPAND_OUTPUT_512);
+}
+
+@test
+fn test_hkdf_max_output_256_is_three_quarters_of_384() {
+    // 32/48 = 2/3 of the SHA-384 output. So 256-limit × 3 / 2 == 384-limit.
+    assert_eq(MAX_EXPAND_OUTPUT_256 * 3, MAX_EXPAND_OUTPUT_384 * 2);
+}
+
+@test
+fn test_hkdf_max_output_512_is_double_256() {
+    // 64-byte SHA-512 output is 2× 32-byte SHA-256 output, so the
+    // 255×N limits relate the same way.
+    assert_eq(MAX_EXPAND_OUTPUT_512, MAX_EXPAND_OUTPUT_256 * 2);
+}
+
+fn main() {}

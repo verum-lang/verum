@@ -1,0 +1,56 @@
+// =============================================================================
+// core-tests/security/kdf/pbkdf2/unit_test.vr
+// =============================================================================
+//
+// `core/security/kdf/pbkdf2.vr` — PBKDF2 password-based KDF
+// (RFC 2898 / RFC 8018).
+// =============================================================================
+
+mount core.security.kdf.pbkdf2.MAX_PBKDF2_ITERATIONS;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: PBKDF2 iteration cap
+//
+//   OWASP-recommended 2025 baseline is at least 600,000 SHA-256
+//   iterations. Verum's cap MUST exceed the recommended floor while
+//   still being a hard upper bound to prevent DoS via huge `c` values.
+// =============================================================================
+
+@test
+fn test_pbkdf2_max_iterations_canonical_value() {
+    assert_eq(MAX_PBKDF2_ITERATIONS, 10_000_000_u32);
+}
+
+@test
+fn test_pbkdf2_max_iterations_exceeds_owasp_2025_floor() {
+    // OWASP Password Storage Cheat Sheet (2025) recommends ≥600,000
+    // SHA-256 iterations. Verum's cap is well above this floor.
+    assert(MAX_PBKDF2_ITERATIONS > 600_000_u32);
+}
+
+@test
+fn test_pbkdf2_max_iterations_exceeds_legacy_floors() {
+    // PBKDF2 historical recommendations:
+    //   2000 RFC 2898         — 1000
+    //   2017 NIST 800-63B     — 10,000
+    //   2023 OWASP            — 600,000
+    //   2025 OWASP            — 600,000+
+    // Cap must dominate every historical recommendation.
+    assert(MAX_PBKDF2_ITERATIONS > 1000_u32);
+    assert(MAX_PBKDF2_ITERATIONS > 10_000_u32);
+}
+
+@test
+fn test_pbkdf2_max_iterations_is_positive() {
+    assert(MAX_PBKDF2_ITERATIONS > 0_u32);
+}
+
+@test
+fn test_pbkdf2_max_iterations_fits_uint32() {
+    // Sanity — UInt32.MAX is 4_294_967_295. Our cap is well below.
+    assert(MAX_PBKDF2_ITERATIONS < 4_294_967_295_u32);
+}
+
+fn main() {}
