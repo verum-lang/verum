@@ -1,0 +1,204 @@
+// =============================================================================
+// core-tests/encoding/json_patch/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/json_patch.vr` — RFC 6902 JSON Patch operations.
+//
+// Pure-data surface tested here:
+//   * JsonPatchError 6-variant ADT
+//       - Malformed(Text) / BadPointer(Text) / MissingField(Text)
+//       - TargetNotFound(Text) / TestFailed(Text) / InvalidOp(Text)
+//   * Variant disjointness via `is`-pattern testing
+//   * Payload preservation through match-binding
+//
+// JsonPatchOp record-payload variants (Add / Remove / Replace / Move
+// / Copy / Test) carry JsonPointer + JsonValue compound payloads; they
+// are pinned at audit.md §A pending the record-destructure defect
+// closure.
+// =============================================================================
+
+mount core.encoding.json_patch.{JsonPatchError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: JsonPatchError 6-variant construction
+// =============================================================================
+
+@test
+fn test_json_patch_error_malformed_variant() {
+    let e: JsonPatchError = JsonPatchError.Malformed("patch must be array".to_text());
+    assert(e is JsonPatchError.Malformed);
+}
+
+@test
+fn test_json_patch_error_bad_pointer_variant() {
+    let e: JsonPatchError = JsonPatchError.BadPointer("/foo/bar".to_text());
+    assert(e is JsonPatchError.BadPointer);
+}
+
+@test
+fn test_json_patch_error_missing_field_variant() {
+    let e: JsonPatchError = JsonPatchError.MissingField("op".to_text());
+    assert(e is JsonPatchError.MissingField);
+}
+
+@test
+fn test_json_patch_error_target_not_found_variant() {
+    let e: JsonPatchError = JsonPatchError.TargetNotFound("/a/0".to_text());
+    assert(e is JsonPatchError.TargetNotFound);
+}
+
+@test
+fn test_json_patch_error_test_failed_variant() {
+    let e: JsonPatchError = JsonPatchError.TestFailed("/expected".to_text());
+    assert(e is JsonPatchError.TestFailed);
+}
+
+@test
+fn test_json_patch_error_invalid_op_variant() {
+    let e: JsonPatchError = JsonPatchError.InvalidOp("frobnicate".to_text());
+    assert(e is JsonPatchError.InvalidOp);
+}
+
+// =============================================================================
+// Section 2: Variant pairwise disjointness
+// =============================================================================
+
+@test
+fn test_json_patch_error_malformed_disjoint() {
+    let e: JsonPatchError = JsonPatchError.Malformed("x".to_text());
+    assert(!(e is JsonPatchError.BadPointer));
+    assert(!(e is JsonPatchError.MissingField));
+    assert(!(e is JsonPatchError.TargetNotFound));
+    assert(!(e is JsonPatchError.TestFailed));
+    assert(!(e is JsonPatchError.InvalidOp));
+}
+
+@test
+fn test_json_patch_error_bad_pointer_disjoint() {
+    let e: JsonPatchError = JsonPatchError.BadPointer("x".to_text());
+    assert(!(e is JsonPatchError.Malformed));
+    assert(!(e is JsonPatchError.MissingField));
+    assert(!(e is JsonPatchError.TargetNotFound));
+    assert(!(e is JsonPatchError.TestFailed));
+    assert(!(e is JsonPatchError.InvalidOp));
+}
+
+@test
+fn test_json_patch_error_missing_field_disjoint() {
+    let e: JsonPatchError = JsonPatchError.MissingField("x".to_text());
+    assert(!(e is JsonPatchError.Malformed));
+    assert(!(e is JsonPatchError.BadPointer));
+    assert(!(e is JsonPatchError.TargetNotFound));
+    assert(!(e is JsonPatchError.TestFailed));
+    assert(!(e is JsonPatchError.InvalidOp));
+}
+
+@test
+fn test_json_patch_error_target_not_found_disjoint() {
+    let e: JsonPatchError = JsonPatchError.TargetNotFound("x".to_text());
+    assert(!(e is JsonPatchError.Malformed));
+    assert(!(e is JsonPatchError.BadPointer));
+    assert(!(e is JsonPatchError.MissingField));
+    assert(!(e is JsonPatchError.TestFailed));
+    assert(!(e is JsonPatchError.InvalidOp));
+}
+
+@test
+fn test_json_patch_error_test_failed_disjoint() {
+    let e: JsonPatchError = JsonPatchError.TestFailed("x".to_text());
+    assert(!(e is JsonPatchError.Malformed));
+    assert(!(e is JsonPatchError.BadPointer));
+    assert(!(e is JsonPatchError.MissingField));
+    assert(!(e is JsonPatchError.TargetNotFound));
+    assert(!(e is JsonPatchError.InvalidOp));
+}
+
+@test
+fn test_json_patch_error_invalid_op_disjoint() {
+    let e: JsonPatchError = JsonPatchError.InvalidOp("x".to_text());
+    assert(!(e is JsonPatchError.Malformed));
+    assert(!(e is JsonPatchError.BadPointer));
+    assert(!(e is JsonPatchError.MissingField));
+    assert(!(e is JsonPatchError.TargetNotFound));
+    assert(!(e is JsonPatchError.TestFailed));
+}
+
+// =============================================================================
+// Section 3: Match exhaustiveness
+// =============================================================================
+
+fn describe(e: &JsonPatchError) -> Text {
+    match e {
+        JsonPatchError.Malformed(_)       => "malformed".to_text(),
+        JsonPatchError.BadPointer(_)      => "bad-pointer".to_text(),
+        JsonPatchError.MissingField(_)    => "missing".to_text(),
+        JsonPatchError.TargetNotFound(_)  => "not-found".to_text(),
+        JsonPatchError.TestFailed(_)      => "test-failed".to_text(),
+        JsonPatchError.InvalidOp(_)       => "invalid-op".to_text(),
+    }
+}
+
+@test
+fn test_json_patch_error_describe_malformed() {
+    assert_eq(describe(&JsonPatchError.Malformed("x".to_text())), "malformed");
+}
+
+@test
+fn test_json_patch_error_describe_bad_pointer() {
+    assert_eq(describe(&JsonPatchError.BadPointer("x".to_text())), "bad-pointer");
+}
+
+@test
+fn test_json_patch_error_describe_missing_field() {
+    assert_eq(describe(&JsonPatchError.MissingField("x".to_text())), "missing");
+}
+
+@test
+fn test_json_patch_error_describe_target_not_found() {
+    assert_eq(describe(&JsonPatchError.TargetNotFound("x".to_text())), "not-found");
+}
+
+@test
+fn test_json_patch_error_describe_test_failed() {
+    assert_eq(describe(&JsonPatchError.TestFailed("x".to_text())), "test-failed");
+}
+
+@test
+fn test_json_patch_error_describe_invalid_op() {
+    assert_eq(describe(&JsonPatchError.InvalidOp("x".to_text())), "invalid-op");
+}
+
+// =============================================================================
+// Section 4: Payload preservation through match-binding
+// =============================================================================
+
+@test
+fn test_json_patch_error_malformed_payload_round_trip() {
+    let e: JsonPatchError = JsonPatchError.Malformed("not an array".to_text());
+    match e {
+        JsonPatchError.Malformed(s) => assert_eq(s, "not an array"),
+        _ => panic("expected Malformed"),
+    }
+}
+
+@test
+fn test_json_patch_error_bad_pointer_payload_round_trip() {
+    let e: JsonPatchError = JsonPatchError.BadPointer("/a~3/b".to_text());
+    match e {
+        JsonPatchError.BadPointer(s) => assert_eq(s, "/a~3/b"),
+        _ => panic("expected BadPointer"),
+    }
+}
+
+@test
+fn test_json_patch_error_invalid_op_payload_round_trip() {
+    let e: JsonPatchError = JsonPatchError.InvalidOp("frobnicate".to_text());
+    match e {
+        JsonPatchError.InvalidOp(s) => assert_eq(s, "frobnicate"),
+        _ => panic("expected InvalidOp"),
+    }
+}
+
+fn main() {}
