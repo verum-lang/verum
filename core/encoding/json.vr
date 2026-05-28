@@ -195,9 +195,9 @@ fn mk_err(p: &Parser, kind: JsonErrorKind, msg: &Text) -> JsonError {
 
 fn peek(p: &Parser) -> Maybe<Byte> {
     if p.pos < p.bytes.len() {
-        Some(p.bytes[p.pos])
+        Maybe.Some(p.bytes[p.pos])
     } else {
-        None
+        Maybe.None
     }
 }
 
@@ -228,7 +228,7 @@ fn skip_ws(p: &mut Parser) {
 
 fn expect_byte(p: &mut Parser, b: Byte, ctx: &Text) -> Result<(), JsonError> {
     match peek(p) {
-        Some(c) => {
+        Maybe.Some(c) => {
             if c == b {
                 advance(p);
                 Ok(())
@@ -236,7 +236,7 @@ fn expect_byte(p: &mut Parser, b: Byte, ctx: &Text) -> Result<(), JsonError> {
                 Err(mk_err(p, UnexpectedChar, ctx))
             }
         }
-        None => Err(mk_err(p, UnexpectedEof, ctx)),
+        Maybe.None => Err(mk_err(p, UnexpectedEof, ctx)),
     }
 }
 
@@ -313,7 +313,7 @@ public fn parse_value(source: &Text) -> Result<JsonValue, JsonError> {
 fn parse_value_impl(p: &mut Parser) -> Result<JsonValue, JsonError> {
     skip_ws(p);
     match peek(p) {
-        Some(b) => match b {
+        Maybe.Some(b) => match b {
             0x7B_u8 => parse_object(p),        // '{'
             0x5B_u8 => parse_array(p),         // '['
             0x22_u8 => parse_string_value(p),  // '"'
@@ -321,7 +321,7 @@ fn parse_value_impl(p: &mut Parser) -> Result<JsonValue, JsonError> {
             0x6E_u8 => parse_null(p),                  // 'n'
             _ => parse_number(p),
         },
-        None => Err(mk_err(p, UnexpectedEof, &"expected JSON value")),
+        Maybe.None => Err(mk_err(p, UnexpectedEof, &"expected JSON value")),
     }
 }
 
@@ -370,7 +370,7 @@ fn parse_array(p: &mut Parser) -> Result<JsonValue, JsonError> {
     expect_byte(p, 0x5B_u8, &"expected '['")?;
     let mut elems: List<JsonValue> = [];
     skip_ws(p);
-    if peek(p) == Some(0x5D_u8) {
+    if peek(p) == Maybe.Some(0x5D_u8) {
         advance(p);
         p.depth = p.depth - 1;
         return Ok(JsonArray(elems));
@@ -388,10 +388,10 @@ fn parse_array(p: &mut Parser) -> Result<JsonValue, JsonError> {
         }
         skip_ws(p);
         match peek(p) {
-            Some(0x2C_u8) => { advance(p); }               // ','
-            Some(0x5D_u8) => { advance(p); break; }         // ']'
-            Some(_) => return Err(mk_err(p, UnexpectedChar, &"expected ',' or ']'")),
-            None => return Err(mk_err(p, UnexpectedEof, &"unterminated array")),
+            Maybe.Some(0x2C_u8) => { advance(p); }               // ','
+            Maybe.Some(0x5D_u8) => { advance(p); break; }         // ']'
+            Maybe.Some(_) => return Err(mk_err(p, UnexpectedChar, &"expected ',' or ']'")),
+            Maybe.None => return Err(mk_err(p, UnexpectedEof, &"unterminated array")),
         }
     }
     p.depth = p.depth - 1;
@@ -406,7 +406,7 @@ fn parse_object(p: &mut Parser) -> Result<JsonValue, JsonError> {
     expect_byte(p, 0x7B_u8, &"expected '{'")?;
     let mut fields: Map<Text, JsonValue> = Map.new();
     skip_ws(p);
-    if peek(p) == Some(0x7D_u8) {
+    if peek(p) == Maybe.Some(0x7D_u8) {
         advance(p);
         p.depth = p.depth - 1;
         return Ok(JsonObject(fields));
@@ -427,10 +427,10 @@ fn parse_object(p: &mut Parser) -> Result<JsonValue, JsonError> {
         }
         skip_ws(p);
         match peek(p) {
-            Some(0x2C_u8) => { advance(p); }               // ','
-            Some(0x7D_u8) => { advance(p); break; }         // '}'
-            Some(_) => return Err(mk_err(p, UnexpectedChar, &"expected ',' or '}'")),
-            None => return Err(mk_err(p, UnexpectedEof, &"unterminated object")),
+            Maybe.Some(0x2C_u8) => { advance(p); }               // ','
+            Maybe.Some(0x7D_u8) => { advance(p); break; }         // '}'
+            Maybe.Some(_) => return Err(mk_err(p, UnexpectedChar, &"expected ',' or '}'")),
+            Maybe.None => return Err(mk_err(p, UnexpectedEof, &"unterminated object")),
         }
     }
     p.depth = p.depth - 1;
@@ -458,8 +458,8 @@ fn parse_string_raw(p: &mut Parser) -> Result<Text, JsonError> {
     let mut buf = Text.with_capacity(32);
     loop {
         match peek(p) {
-            None => return Err(mk_err(p, UnexpectedEof, &"unterminated string")),
-            Some(b) => {
+            Maybe.None => return Err(mk_err(p, UnexpectedEof, &"unterminated string")),
+            Maybe.Some(b) => {
                 if b == 0x22_u8 {                               // '"'
                     advance(p);
                     return Ok(buf);
@@ -482,8 +482,8 @@ fn parse_string_raw(p: &mut Parser) -> Result<Text, JsonError> {
 
 fn parse_escape(p: &mut Parser, out: &mut Text) -> Result<(), JsonError> {
     match peek(p) {
-        None => Err(mk_err(p, UnexpectedEof, &"incomplete escape")),
-        Some(b) => {
+        Maybe.None => Err(mk_err(p, UnexpectedEof, &"incomplete escape")),
+        Maybe.Some(b) => {
             advance(p);
             match b {
                 0x22_u8 => { out.push_byte(0x22_u8); Ok(()) }   // \"
@@ -529,12 +529,12 @@ fn parse_hex4(p: &mut Parser) -> Result<Int, JsonError> {
     let mut i = 0;
     while i < 4 {
         match peek(p) {
-            None => return Err(mk_err(p, UnexpectedEof, &"short unicode escape")),
-            Some(b) => {
+            Maybe.None => return Err(mk_err(p, UnexpectedEof, &"short unicode escape")),
+            Maybe.Some(b) => {
                 let d = hex_digit(b);
                 match d {
-                    Some(n) => { v = v * 16 + n; advance(p); }
-                    None => return Err(mk_err(p, InvalidUnicode, &"non-hex in \\u escape")),
+                    Maybe.Some(n) => { v = v * 16 + n; advance(p); }
+                    Maybe.None => return Err(mk_err(p, InvalidUnicode, &"non-hex in \\u escape")),
                 }
             }
         }
