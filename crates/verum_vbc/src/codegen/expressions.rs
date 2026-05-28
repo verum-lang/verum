@@ -18517,6 +18517,45 @@ impl VbcCodegen {
                         {
                             let resolved =
                                 VbcCodegen::substitute_self_in_type_name(ret_type_name, name);
+                            // **URL-8 fix 2026-05-28 — static-call
+                            // generic-instantiation preservation at READ-site**.
+                            //
+                            // Archive-loaded `FunctionInfo` stores the
+                            // declared return type as a base name in
+                            // `return_type_name` ("Result") and the inner
+                            // generic args separately in `return_type_inner`
+                            // (["Url", "UrlError"]) — see
+                            // `verum_compiler/src/archive_ctx_loader.rs:443-444`.
+                            // Pre-fix this READ-site returned just the base
+                            // name, dropping the `<Url, UrlError>`
+                            // instantiation.  Downstream
+                            // `compile_match` then set `match_scrutinee_type
+                            // = "Result"`, the `Err(e)` pattern bind found
+                            // `Result.Err` with generic payload `["E"]`,
+                            // and the scrutinee-extracted inner args were
+                            // `[]` (no `<...>` in the bare name).  The
+                            // pattern binder couldn't resolve `e :
+                            // UrlError`, `variable_type_names["e"]` stayed
+                            // unset, `e.position` field access fell
+                            // through to the global field-intern fallback
+                            // and read idx=5 — OOB on the 24-byte
+                            // UrlError record.
+                            //
+                            // Compose the canonical generic form when
+                            // `return_type_inner` is populated.  Mirrors
+                            // the Call-arm composition at line ~18834
+                            // and the variant-ctor composition at line
+                            // ~18790.  Closes URL-8 for every
+                            // cross-module static method returning
+                            // `Result<T, E>` / `Maybe<T>` / any generic
+                            // wrapper without needing user-side explicit
+                            // type annotation as workaround.
+                            if let Some(ref inner) = func_info.return_type_inner
+                                && !inner.is_empty()
+                                && !resolved.contains('<')
+                            {
+                                return Some(format!("{}<{}>", resolved, inner.join(", ")));
+                            }
                             return Some(resolved);
                         }
                         // Check if this is a known static method that returns Maybe<T>
@@ -19664,15 +19703,16 @@ impl VbcCodegen {
                 }
                 // Try exact match first
                 let method_name = format!("{}.{}", receiver_type, method.name);
-                let exact_ret = self
-                    .ctx
-                    .lookup_function(&method_name)
-                    .and_then(|info| info.return_type_name.clone());
+                let exact_pair = self.ctx.lookup_function(&method_name).map(|info| {
+                    (
+                        info.return_type_name.clone(),
+                        info.return_type_inner.clone(),
+                    )
+                });
                 if trace {
-                    eprintln!("[infer-mcall] exact method_name={} ret={:?}", method_name, exact_ret);
+                    eprintln!("[infer-mcall] exact method_name={} pair={:?}", method_name, exact_pair);
                 }
-                if let Some(ret) = exact_ret
-                {
+                if let Some((Some(ret), inner_opt)) = exact_pair {
                     // **Self → concrete substitution at the READ-site**
                     // (task #11): protocol default methods declared as
                     // `fn max(self, other: Self) -> Self` are
@@ -19688,6 +19728,23 @@ impl VbcCodegen {
                     // resolve `Self` to it here as the canonical
                     // read-side fix.
                     let ret = VbcCodegen::substitute_self_in_type_name(&ret, &receiver_type);
+                    // **URL-8 fix 2026-05-28** — mirror of the
+                    // static-call composition in
+                    // `extract_expr_type_name`.  Archive-loaded
+                    // function info stores `return_type_name` as a
+                    // bare base name and the inner generic args
+                    // separately in `return_type_inner`.  Without
+                    // this composition, downstream consumers
+                    // (`compile_match` scrutinee_type, field-access
+                    // type tracking, …) lose the concrete generic
+                    // instantiation and fall through to global
+                    // field-intern.
+                    if let Some(ref inner) = inner_opt
+                        && !inner.is_empty()
+                        && !ret.contains('<')
+                    {
+                        return Some(format!("{}<{}>", ret, inner.join(", ")));
+                    }
                     return Some(ret);
                 }
                 // Try with generic params stripped (e.g., "Slot<K, V>" → "Slot")

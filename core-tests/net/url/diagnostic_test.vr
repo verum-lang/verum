@@ -1,0 +1,101 @@
+// =============================================================================
+// core-tests/net/url/diagnostic_test.vr
+// =============================================================================
+//
+// Defect-narrowing probes for URL-1 / URL-8 — cross-module record-field
+// corruption on Url + UrlError records returned through Result<>.
+// =============================================================================
+
+mount core.net.url.{Url, UrlError, UrlErrorKind, percent_encode, percent_decode, MAX_URL_LENGTH_BYTES};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Probe A: user-built UrlError, .position field at user-site
+// =============================================================================
+
+@test
+fn diag_a_user_built_url_error_position_zero() {
+    let e = UrlError {
+        kind: UrlErrorKind.MissingScheme,
+        position: 0,
+        message: "test".clone(),
+    };
+    assert_eq(e.position, 0);  // If this passes, user-side construction + read works.
+}
+
+@test
+fn diag_a_user_built_url_error_position_42() {
+    let e = UrlError {
+        kind: UrlErrorKind.MissingScheme,
+        position: 42,
+        message: "test".clone(),
+    };
+    assert_eq(e.position, 42);
+}
+
+// =============================================================================
+// Probe B: user-built UrlError wrapped in Err, then pattern-match
+// =============================================================================
+
+@test
+fn diag_b_user_built_err_wrapped_pattern_match() {
+    let e = UrlError {
+        kind: UrlErrorKind.MissingScheme,
+        position: 7,
+        message: "test".clone(),
+    };
+    let r: Result<Int, UrlError> = Err(e);
+    match r {
+        Ok(_) => panic("expected Err"),
+        Err(unwrapped) => assert_eq(unwrapped.position, 7),
+    }
+}
+
+// =============================================================================
+// Probe C: explicit annotation on Url.parse result
+// =============================================================================
+
+@test
+fn diag_c_explicit_annotation_url_parse_empty() {
+    let s = "".clone();
+    let r: Result<Url, UrlError> = Url.parse(&s);
+    match r {
+        Ok(_) => panic("empty must reject"),
+        Err(e) => assert_eq(e.position, 0),
+    }
+}
+
+// =============================================================================
+// Probe D: Url.parse oversized (KNOWN PASSING) — position field
+// =============================================================================
+
+@test
+fn diag_d_url_parse_oversized_position_field() {
+    let prefix = "http://".clone();
+    let filler = "a".clone().repeat(65530);
+    let suffix = "/".clone();
+    let mut big = prefix;
+    big.push_str(&filler);
+    big.push_str(&suffix);
+    match Url.parse(&big) {
+        Ok(_) => panic("oversized must reject"),
+        Err(e) => assert_eq(e.position, MAX_URL_LENGTH_BYTES),
+    }
+}
+
+// =============================================================================
+// Probe E: Url.parse empty — kind via is operator
+// =============================================================================
+
+@test
+fn diag_e_url_parse_empty_kind_via_is() {
+    let s = "".clone();
+    match Url.parse(&s) {
+        Ok(_) => panic("empty must reject"),
+        Err(e) => {
+            if !(e.kind is UrlErrorKind.MissingScheme) {
+                panic("e.kind did not match MissingScheme");
+            }
+        }
+    }
+}
