@@ -1,0 +1,58 @@
+// =============================================================================
+// core-tests/sys/darwin/tls/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.tls.{
+    SysTlsError,
+    TCB_MAGIC, MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH,
+};
+
+// =============================================================================
+// REGRESSION 1: TCB_MAGIC must be the exact "VERUM_TC" ASCII pattern.
+//
+// Pre-fix bug class: TCB integrity validation reads the magic field
+// and compares against this constant. If the bytes drift, every TCB
+// validation reports false positives → endless InvalidTcb errors.
+// =============================================================================
+
+@test
+fn regression_tcb_magic_exact_value() {
+    assert_eq(TCB_MAGIC, 0x5645_5255_4D5F_5443 as UInt64);
+}
+
+// =============================================================================
+// REGRESSION 2: MAX_CONTEXT_SLOTS = 256 — matches the Linux
+// implementation. Pre-fix bug class: drift between Linux and Darwin
+// would break the cross-platform context-slot indexing contract.
+// =============================================================================
+
+@test
+fn regression_max_context_slots_cross_platform() {
+    assert_eq(MAX_CONTEXT_SLOTS, 256);
+}
+
+// =============================================================================
+// REGRESSION 3: CONTEXT_STACK_DEPTH = 8 — matches the per-slot stack
+// depth in the array literal `[&unsafe Byte; 8]` in DarwinContextEntry.
+// Pre-fix bug class: drift between the constant and the array literal
+// would mismatch the codegen layout, causing OOB writes on push.
+// =============================================================================
+
+@test
+fn regression_context_stack_depth_matches_array_literal() {
+    assert_eq(CONTEXT_STACK_DEPTH, 8);
+}
+
+// =============================================================================
+// REGRESSION 4: TLS errors are NEVER retryable — same-thread retries
+// on a corrupted TCB would loop forever.
+// =============================================================================
+
+@test
+fn regression_tls_errors_never_retryable() {
+    let invalid_tcb = SysTlsError.InvalidTcb;
+    assert(!invalid_tcb.is_retryable());
+}
+
+fn main() {}

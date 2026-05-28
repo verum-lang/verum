@@ -1,0 +1,47 @@
+// =============================================================================
+// core-tests/sys/linux/auxv/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.auxv.{
+    AT_NULL, AT_ENTRY, AT_UID, AT_EUID, AT_GID, AT_EGID,
+    AT_HWCAP, AT_HWCAP2, AT_PAGESZ, AT_CLKTCK, AT_SECURE,
+    AT_PLATFORM, AT_RANDOM, AT_EXECFN, AT_SYSINFO_EHDR,
+};
+
+@test
+fn law_at_codes_pairwise_distinct() {
+    let codes: List<UInt64> = [
+        AT_NULL, AT_PAGESZ, AT_ENTRY, AT_UID, AT_EUID, AT_GID, AT_EGID,
+        AT_PLATFORM, AT_HWCAP, AT_CLKTCK, AT_SECURE, AT_RANDOM, AT_HWCAP2,
+        AT_EXECFN, AT_SYSINFO_EHDR,
+    ];
+    let n = codes.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *codes.get(i).unwrap();
+            let b = *codes.get(j).unwrap();
+            assert(a != b);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+@test
+fn law_at_null_first() {
+    assert_eq(AT_NULL, 0 as UInt64);
+}
+
+@test
+fn law_uid_euid_gid_egid_quartet_consecutive() {
+    // AT_UID=11, AT_EUID=12, AT_GID=13, AT_EGID=14 — canonical
+    // POSIX credential quartet, consecutive values.
+    assert_eq(AT_UID + (1 as UInt64), AT_EUID);
+    assert_eq(AT_EUID + (1 as UInt64), AT_GID);
+    assert_eq(AT_GID + (1 as UInt64), AT_EGID);
+}
+
+fn main() {}

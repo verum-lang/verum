@@ -1,0 +1,76 @@
+// =============================================================================
+// core-tests/sys/linux/io/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.io.{
+    IORING_SETUP_IOPOLL, IORING_SETUP_SQPOLL, IORING_SETUP_SQ_AFF,
+    IORING_SETUP_CQSIZE, IORING_SETUP_CLAMP, IORING_SETUP_ATTACH_WQ,
+    IORING_SETUP_R_DISABLED, IORING_SETUP_SUBMIT_ALL,
+    IORING_ENTER_GETEVENTS, IORING_ENTER_SQ_WAKEUP,
+    IORING_ENTER_SQ_WAIT, IORING_ENTER_EXT_ARG,
+};
+
+@test
+fn law_ioring_setup_flags_powers_of_two() {
+    let flags: List<UInt32> = [
+        IORING_SETUP_IOPOLL, IORING_SETUP_SQPOLL, IORING_SETUP_SQ_AFF,
+        IORING_SETUP_CQSIZE, IORING_SETUP_CLAMP, IORING_SETUP_ATTACH_WQ,
+        IORING_SETUP_R_DISABLED, IORING_SETUP_SUBMIT_ALL,
+    ];
+    for f in flags.iter() {
+        let v = *f;
+        assert(v != (0 as UInt32));
+        assert_eq(v & (v - (1 as UInt32)), 0 as UInt32);
+    }
+}
+
+@test
+fn law_ioring_setup_flags_pairwise_disjoint() {
+    let flags: List<UInt32> = [
+        IORING_SETUP_IOPOLL, IORING_SETUP_SQPOLL, IORING_SETUP_SQ_AFF,
+        IORING_SETUP_CQSIZE, IORING_SETUP_CLAMP, IORING_SETUP_ATTACH_WQ,
+        IORING_SETUP_R_DISABLED, IORING_SETUP_SUBMIT_ALL,
+    ];
+    let n = flags.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *flags.get(i).unwrap();
+            let b = *flags.get(j).unwrap();
+            assert_eq(a & b, 0 as UInt32);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+@test
+fn law_ioring_setup_flags_form_consecutive_bits_zero_to_seven() {
+    // SETUP_IOPOLL=1, SQPOLL=2, SQ_AFF=4, CQSIZE=8, CLAMP=16,
+    // ATTACH_WQ=32, R_DISABLED=64, SUBMIT_ALL=128 — 8 consecutive bits.
+    assert_eq(IORING_SETUP_IOPOLL,     1 as UInt32);
+    assert_eq(IORING_SETUP_SQPOLL,     2 as UInt32);
+    assert_eq(IORING_SETUP_SQ_AFF,     4 as UInt32);
+    assert_eq(IORING_SETUP_CQSIZE,     8 as UInt32);
+    assert_eq(IORING_SETUP_CLAMP,      16 as UInt32);
+    assert_eq(IORING_SETUP_ATTACH_WQ,  32 as UInt32);
+    assert_eq(IORING_SETUP_R_DISABLED, 64 as UInt32);
+    assert_eq(IORING_SETUP_SUBMIT_ALL, 128 as UInt32);
+}
+
+@test
+fn law_ioring_enter_flags_powers_of_two() {
+    let flags: List<UInt32> = [
+        IORING_ENTER_GETEVENTS, IORING_ENTER_SQ_WAKEUP,
+        IORING_ENTER_SQ_WAIT, IORING_ENTER_EXT_ARG,
+    ];
+    for f in flags.iter() {
+        let v = *f;
+        assert(v != (0 as UInt32));
+        assert_eq(v & (v - (1 as UInt32)), 0 as UInt32);
+    }
+}
+
+fn main() {}

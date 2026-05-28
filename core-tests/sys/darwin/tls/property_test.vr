@@ -1,0 +1,94 @@
+// =============================================================================
+// core-tests/sys/darwin/tls/property_test.vr
+// =============================================================================
+// Algebraic laws for `core.sys.darwin.tls`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.tls.{
+    SysTlsError,
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    DEFAULT_STACK_SIZE,
+    GUARD_PAGE_SIZE,
+};
+
+// =============================================================================
+// Section 1: TLS constants invariants
+// =============================================================================
+
+@test
+fn law_max_context_slots_power_of_two() {
+    let v = MAX_CONTEXT_SLOTS as USize;
+    assert(v > (0 as USize));
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+@test
+fn law_context_stack_depth_power_of_two() {
+    let v = CONTEXT_STACK_DEPTH as USize;
+    assert(v > (0 as USize));
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+@test
+fn law_default_stack_size_page_aligned() {
+    // 1MB stack — divisible by 4KB page.
+    assert_eq(DEFAULT_STACK_SIZE % GUARD_PAGE_SIZE, 0);
+}
+
+@test
+fn law_default_stack_size_at_least_64kb() {
+    // The default stack must be at least 64 KiB — anything smaller
+    // would routinely overflow on user-mode call chains.
+    assert(DEFAULT_STACK_SIZE >= 64 * 1024);
+}
+
+@test
+fn law_guard_page_size_power_of_two() {
+    let v = GUARD_PAGE_SIZE as USize;
+    assert(v > (0 as USize));
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+// =============================================================================
+// Section 2: SysTlsError Eq laws
+// =============================================================================
+
+@test
+fn law_sys_tls_error_eq_reflexive_unit_variants() {
+    let units: List<SysTlsError> = [
+        SysTlsError.NotInitialized,
+        SysTlsError.AlreadyInitialized,
+        SysTlsError.InvalidTcb,
+    ];
+    for e in units.iter() {
+        assert((*e).eq(e));
+    }
+}
+
+@test
+fn law_sys_tls_error_eq_payload_sensitive() {
+    let codes: List<Int> = [-1, 0, 1, 12, 99, 256];
+    for c in codes.iter() {
+        let a = SysTlsError.AllocationFailed { code: *c };
+        let b = SysTlsError.AllocationFailed { code: *c };
+        assert(a.eq(&b));
+        let z = SysTlsError.AllocationFailed { code: *c + 1 };
+        assert(!a.eq(&z));
+    }
+}
+
+@test
+fn law_sys_tls_error_eq_slot_distinct_from_other_slot_payloads() {
+    // InvalidSlot { slot: N } != StackOverflow { slot: N } —
+    // different variants, even with the same payload code.
+    let i = SysTlsError.InvalidSlot { slot: 5 };
+    let o = SysTlsError.StackOverflow { slot: 5 };
+    let u = SysTlsError.StackUnderflow { slot: 5 };
+    assert(!i.eq(&o));
+    assert(!o.eq(&u));
+    assert(!i.eq(&u));
+}
+
+fn main() {}

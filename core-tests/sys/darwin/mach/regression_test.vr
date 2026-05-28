@@ -1,0 +1,57 @@
+// =============================================================================
+// core-tests/sys/darwin/mach/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.sys.darwin.mach`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.mach.{
+    KernReturn, KERN_SUCCESS,
+    VM_PROT_READ, VM_PROT_WRITE, VM_PROT_EXECUTE, VM_PROT_ALL,
+};
+
+// =============================================================================
+// REGRESSION 1: KernReturn is (Int32) — NOT (Int).
+//
+// Pre-fix bug class (per source comment line 322-326): KernReturn used
+// to be (Int) (i64), which made the AOT extern-call lowering pick up
+// the i64 result register and inherit the high 32 bits of register
+// garbage from libSystem's epilogue. The fix tightened the type to
+// (Int32) so the deref reads exactly the 4 bytes the kernel wrote.
+//
+// This test pins the Int32 width so any future drift back to Int
+// would break the assertion.
+// =============================================================================
+
+@test
+fn regression_kern_return_is_int32_not_int() {
+    let kr: KernReturn = KernReturn(42 as Int32);
+    let inner: Int32 = kr.0;
+    assert_eq(inner, 42 as Int32);
+}
+
+// =============================================================================
+// REGRESSION 2: KERN_SUCCESS is the universal zero return code.
+// =============================================================================
+
+@test
+fn regression_kern_success_is_zero() {
+    assert_eq(KERN_SUCCESS.0, 0 as Int32);
+}
+
+// =============================================================================
+// REGRESSION 3: VM_PROT_ALL must equal the OR of the three single-bit
+// flags — pre-fix bug class: if the constant were hand-coded as 8
+// (e.g. mistakenly counting VM_PROT_COPY=0x10 as part of ALL), the
+// canonical "all permissions" mmap pattern would silently set extra
+// bits.
+// =============================================================================
+
+@test
+fn regression_vm_prot_all_canonical() {
+    assert_eq(VM_PROT_ALL.0, 7 as Int32);
+    assert_eq(VM_PROT_READ.0 | VM_PROT_WRITE.0 | VM_PROT_EXECUTE.0, VM_PROT_ALL.0);
+}
+
+fn main() {}

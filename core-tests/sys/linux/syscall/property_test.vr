@@ -1,0 +1,81 @@
+// =============================================================================
+// core-tests/sys/linux/syscall/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.syscall.{
+    F_GETFD, F_SETFD, F_GETFL, F_SETFL,
+    WNOHANG, WUNTRACED, WCONTINUED,
+    FUTEX_WAIT, FUTEX_WAKE, FUTEX_WAIT_PRIVATE, FUTEX_WAKE_PRIVATE,
+};
+
+// =============================================================================
+// Section 1: fcntl ops consecutive 1..=4
+// =============================================================================
+
+@test
+fn law_fcntl_ops_consecutive() {
+    assert_eq(F_GETFD + 1, F_SETFD);
+    assert_eq(F_SETFD + 1, F_GETFL);
+    assert_eq(F_GETFL + 1, F_SETFL);
+}
+
+@test
+fn law_fcntl_ops_in_range_one_to_four() {
+    let ops: List<Int> = [F_GETFD, F_SETFD, F_GETFL, F_SETFL];
+    for o in ops.iter() {
+        assert(*o >= 1);
+        assert(*o <= 4);
+    }
+}
+
+// =============================================================================
+// Section 2: wait flags — powers of two
+// =============================================================================
+
+@test
+fn law_wait_flags_powers_of_two() {
+    let flags: List<Int> = [WNOHANG, WUNTRACED, WCONTINUED];
+    for f in flags.iter() {
+        let v = *f;
+        assert(v > 0);
+        assert_eq(v & (v - 1), 0);
+    }
+}
+
+@test
+fn law_wait_flags_pairwise_disjoint() {
+    let flags: List<Int> = [WNOHANG, WUNTRACED, WCONTINUED];
+    let n = flags.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *flags.get(i).unwrap();
+            let b = *flags.get(j).unwrap();
+            assert_eq(a & b, 0);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+// =============================================================================
+// Section 3: futex op family
+// =============================================================================
+
+@test
+fn law_futex_private_flag_consistency() {
+    // FUTEX_*_PRIVATE = FUTEX_* | FUTEX_PRIVATE_FLAG (128).
+    assert_eq(FUTEX_WAIT_PRIVATE, FUTEX_WAIT | 128);
+    assert_eq(FUTEX_WAKE_PRIVATE, FUTEX_WAKE | 128);
+}
+
+@test
+fn law_futex_ops_distinct() {
+    assert(FUTEX_WAIT != FUTEX_WAKE);
+    assert(FUTEX_WAIT != FUTEX_WAIT_PRIVATE);
+    assert(FUTEX_WAKE != FUTEX_WAKE_PRIVATE);
+}
+
+fn main() {}

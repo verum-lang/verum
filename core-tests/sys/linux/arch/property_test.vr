@@ -1,0 +1,67 @@
+// =============================================================================
+// core-tests/sys/linux/arch/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.arch.{
+    SYS_READ, SYS_WRITE, SYS_CLOSE,
+    SYS_READV, SYS_WRITEV,
+    SYS_PREAD64, SYS_PWRITE64,
+    SYS_FSYNC, SYS_FDATASYNC,
+};
+
+@test
+fn law_aarch64_syscall_numbers_pairwise_distinct() {
+    let syscalls: List<Int> = [
+        SYS_READ, SYS_WRITE, SYS_CLOSE,
+        SYS_READV, SYS_WRITEV,
+        SYS_PREAD64, SYS_PWRITE64,
+        SYS_FSYNC, SYS_FDATASYNC,
+    ];
+    let n = syscalls.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *syscalls.get(i).unwrap();
+            let b = *syscalls.get(j).unwrap();
+            assert(a != b);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+@test
+fn law_aarch64_syscall_numbers_all_in_range() {
+    // aarch64 syscall numbers are below 600.
+    let syscalls: List<Int> = [
+        SYS_READ, SYS_WRITE, SYS_CLOSE,
+        SYS_READV, SYS_WRITEV,
+        SYS_PREAD64, SYS_PWRITE64,
+        SYS_FSYNC, SYS_FDATASYNC,
+    ];
+    for s in syscalls.iter() {
+        assert(*s >= 0);
+        assert(*s < 600);
+    }
+}
+
+@test
+fn law_aarch64_read_write_close_block_consecutive() {
+    // SYS_LSEEK=62, SYS_READ=63, SYS_WRITE=64, SYS_READV=65,
+    // SYS_WRITEV=66, SYS_PREAD64=67 — block of consecutive syscall
+    // numbers in the modern Linux aarch64 ABI.
+    assert_eq(SYS_READ + 1, SYS_WRITE);
+    assert_eq(SYS_WRITE + 1, SYS_READV);
+    assert_eq(SYS_READV + 1, SYS_WRITEV);
+    assert_eq(SYS_WRITEV + 1, SYS_PREAD64);
+    assert_eq(SYS_PREAD64 + 1, SYS_PWRITE64);
+}
+
+@test
+fn law_aarch64_fsync_family_consecutive() {
+    assert_eq(SYS_FSYNC + 1, SYS_FDATASYNC);
+}
+
+fn main() {}

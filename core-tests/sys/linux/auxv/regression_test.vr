@@ -1,0 +1,33 @@
+// =============================================================================
+// core-tests/sys/linux/auxv/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.auxv.{AT_NULL, AT_PAGESZ, AT_RANDOM, AT_SYSINFO_EHDR};
+
+// REGRESSION: AT_NULL = 0 — the terminator at the end of every auxv array.
+@test
+fn regression_at_null_terminator_zero() {
+    assert_eq(AT_NULL, 0 as UInt64);
+}
+
+// REGRESSION: AT_PAGESZ = 6 — system page-size discovery.
+@test
+fn regression_at_pagesz_six() {
+    assert_eq(AT_PAGESZ, 6 as UInt64);
+}
+
+// REGRESSION: AT_RANDOM = 25 — 16-byte random bytes for stack-canary
+// initialisation. ABI-stable.
+@test
+fn regression_at_random_twentyfive() {
+    assert_eq(AT_RANDOM, 25 as UInt64);
+}
+
+// REGRESSION: AT_SYSINFO_EHDR = 33 — vDSO base address pointer.
+@test
+fn regression_at_sysinfo_ehdr_thirtythree() {
+    assert_eq(AT_SYSINFO_EHDR, 33 as UInt64);
+}
+
+fn main() {}

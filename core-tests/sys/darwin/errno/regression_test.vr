@@ -1,0 +1,70 @@
+// =============================================================================
+// core-tests/sys/darwin/errno/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.sys.darwin.errno`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.errno.{
+    EAGAIN, EWOULDBLOCK, EINTR, ECONNREFUSED, ECONNRESET, ETIMEDOUT,
+    is_retryable, is_connection_error,
+};
+
+// =============================================================================
+// REGRESSION 1: EAGAIN and EWOULDBLOCK must be the SAME numeric value on
+// macOS (BSD convention — both are 35). Pre-fix bug shape: if the
+// constants were declared with different values, `is_retryable(EWOULDBLOCK)`
+// would fire only for EAGAIN since the predicate uses code-equality.
+// =============================================================================
+
+@test
+fn regression_eagain_ewouldblock_aliased() {
+    assert_eq(EAGAIN, 35);
+    assert_eq(EWOULDBLOCK, 35);
+    assert_eq(EAGAIN, EWOULDBLOCK);
+    // Both fire is_retryable identically.
+    assert_eq(is_retryable(EAGAIN), is_retryable(EWOULDBLOCK));
+}
+
+// =============================================================================
+// REGRESSION 2: BSD/macOS uses EAGAIN = 35, NOT Linux's 11. Pre-fix
+// shape: if the constants were copy-pasted from Linux's errno.h, EAGAIN
+// would be 11 — the value the kernel returns would then route through
+// the wrong predicate branch.
+// =============================================================================
+
+@test
+fn regression_eagain_is_darwin_value_thirtyfive_not_linux_eleven() {
+    assert_eq(EAGAIN, 35);
+    // Counter-pin: NOT 11 (Linux's value).
+    assert(EAGAIN != 11);
+}
+
+// =============================================================================
+// REGRESSION 3: is_connection_error must cover the canonical TCP failure
+// set: ECONNREFUSED + ECONNRESET + ETIMEDOUT must all fire. Pre-fix
+// shape: if any one were missing from the predicate body, the retry
+// classifier would let connection failures escape unclassified.
+// =============================================================================
+
+@test
+fn regression_is_connection_error_canonical_tcp_set() {
+    assert(is_connection_error(ECONNREFUSED));
+    assert(is_connection_error(ECONNRESET));
+    assert(is_connection_error(ETIMEDOUT));
+}
+
+// =============================================================================
+// REGRESSION 4: EINTR is retryable (was historically separate from
+// EAGAIN). Pre-fix shape: if the predicate body forgot to include EINTR,
+// the canonical interruption-handler pattern (`while is_retryable(errno)
+// { retry }`) would mis-classify EINTR as non-retryable.
+// =============================================================================
+
+@test
+fn regression_eintr_classified_as_retryable() {
+    assert(is_retryable(EINTR));
+}
+
+fn main() {}

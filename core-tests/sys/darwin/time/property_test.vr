@@ -1,0 +1,68 @@
+// =============================================================================
+// core-tests/sys/darwin/time/property_test.vr
+// =============================================================================
+// Algebraic / structural laws for `core.sys.darwin.time` constants.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.time.{
+    CLOCK_REALTIME_ID,
+    CLOCK_MONOTONIC_ID,
+    CLOCK_MONOTONIC_RAW_ID,
+    CLOCK_PROCESS_CPUTIME,
+    CLOCK_THREAD_CPUTIME,
+};
+
+@test
+fn law_clock_ids_all_non_negative() {
+    let ids: List<Int> = [
+        CLOCK_REALTIME_ID,
+        CLOCK_MONOTONIC_ID,
+        CLOCK_MONOTONIC_RAW_ID,
+        CLOCK_PROCESS_CPUTIME,
+        CLOCK_THREAD_CPUTIME,
+    ];
+    for id in ids.iter() {
+        assert(*id >= 0);
+    }
+}
+
+@test
+fn law_clock_ids_pairwise_distinct_exhaustive() {
+    let ids: List<Int> = [
+        CLOCK_REALTIME_ID,
+        CLOCK_MONOTONIC_ID,
+        CLOCK_MONOTONIC_RAW_ID,
+        CLOCK_PROCESS_CPUTIME,
+        CLOCK_THREAD_CPUTIME,
+    ];
+    let n = ids.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *ids.get(i).unwrap();
+            let b = *ids.get(j).unwrap();
+            assert(a != b);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+@test
+fn law_clock_ids_within_kernel_range() {
+    // Darwin's clk_id values fit in a small Int (< 256).
+    let ids: List<Int> = [
+        CLOCK_REALTIME_ID,
+        CLOCK_MONOTONIC_ID,
+        CLOCK_MONOTONIC_RAW_ID,
+        CLOCK_PROCESS_CPUTIME,
+        CLOCK_THREAD_CPUTIME,
+    ];
+    for id in ids.iter() {
+        assert(*id < 256);
+    }
+}
+
+fn main() {}

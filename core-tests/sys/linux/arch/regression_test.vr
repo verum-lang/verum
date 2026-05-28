@@ -1,0 +1,31 @@
+// =============================================================================
+// core-tests/sys/linux/arch/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.arch.{SYS_READ, SYS_WRITE, SYS_OPENAT2};
+
+// REGRESSION: aarch64 SYS_READ = 63 (DIVERGES from x86_64's 0).
+// Pre-fix bug class: hard-coding x86_64 syscall numbers in aarch64
+// builds would invoke the wrong kernel handler (mmap on aarch64 has
+// syscall #222, vs x86_64 #9).
+@test
+fn regression_aarch64_sys_read_is_63() {
+    assert_eq(SYS_READ, 63);
+    assert(SYS_READ != 0);   // explicitly NOT x86_64 value
+}
+
+// REGRESSION: aarch64 SYS_WRITE = 64.
+@test
+fn regression_aarch64_sys_write_is_64() {
+    assert_eq(SYS_WRITE, 64);
+    assert(SYS_WRITE != 1);
+}
+
+// REGRESSION: SYS_OPENAT2 = 437 on BOTH arches (modern Linux 5.6+).
+@test
+fn regression_sys_openat2_universal_437() {
+    assert_eq(SYS_OPENAT2, 437);
+}
+
+fn main() {}

@@ -1,0 +1,125 @@
+// =============================================================================
+// core-tests/sys/darwin/libsystem/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.darwin.libsystem` constants.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.libsystem.{
+    O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC, O_EXCL, O_APPEND, O_CLOEXEC,
+    SEEK_SET, SEEK_CUR, SEEK_END,
+    PROT_READ, PROT_WRITE, PROT_EXEC,
+    MAP_SHARED, MAP_PRIVATE, MAP_ANON,
+};
+
+// =============================================================================
+// Section 1: Open-flag list + classification
+// =============================================================================
+
+@test
+fn integration_open_flag_table_canonical_modes() {
+    // The four canonical open modes used by `core.io.fs`.
+    let read_only:  Int = O_RDONLY;
+    let write_only: Int = O_WRONLY | O_CREAT | O_TRUNC;
+    let append:     Int = O_WRONLY | O_CREAT | O_APPEND;
+    let create_new: Int = O_WRONLY | O_CREAT | O_EXCL;
+    let modes: List<Int> = [read_only, write_only, append, create_new];
+    assert_eq(modes.len(), 4);
+    // Every mode beyond read-only has O_CREAT set.
+    let mut create_count: Int = 0;
+    for m in modes.iter() {
+        if (m & O_CREAT) != 0 {
+            create_count = create_count + 1;
+        }
+    }
+    assert_eq(create_count, 3);
+}
+
+// =============================================================================
+// Section 2: PROT_ list + canonical mmap permissions
+// =============================================================================
+
+@test
+fn integration_prot_text_segment_permission() {
+    // Text segment: readable + executable, NOT writable.
+    let text_perm = PROT_READ | PROT_EXEC;
+    assert_eq(text_perm, 5);
+    assert_eq(text_perm & PROT_WRITE, 0);
+}
+
+@test
+fn integration_prot_data_segment_permission() {
+    // Data segment: readable + writable.
+    let data_perm = PROT_READ | PROT_WRITE;
+    assert_eq(data_perm, 3);
+    assert_eq(data_perm & PROT_EXEC, 0);
+}
+
+@test
+fn integration_prot_rwx_permission() {
+    // JIT-style RWX (security-sensitive but legal).
+    let rwx = PROT_READ | PROT_WRITE | PROT_EXEC;
+    assert_eq(rwx, 7);
+}
+
+// =============================================================================
+// Section 3: SEEK whence × dispatch table
+// =============================================================================
+
+type SeekFrom is
+    | FromStart
+    | FromCurrent
+    | FromEnd;
+
+@test
+fn integration_seek_whence_dispatch() {
+    fn to_libc_whence(s: SeekFrom) -> Int {
+        match s {
+            SeekFrom.FromStart   => SEEK_SET,
+            SeekFrom.FromCurrent => SEEK_CUR,
+            SeekFrom.FromEnd     => SEEK_END,
+        }
+    }
+    assert_eq(to_libc_whence(SeekFrom.FromStart),   0);
+    assert_eq(to_libc_whence(SeekFrom.FromCurrent), 1);
+    assert_eq(to_libc_whence(SeekFrom.FromEnd),     2);
+}
+
+// =============================================================================
+// Section 4: MAP_* anon mmap pattern
+// =============================================================================
+
+@test
+fn integration_anonymous_private_mapping_flags() {
+    // Canonical "fresh memory page" pattern: private + anon.
+    let flags = MAP_PRIVATE | MAP_ANON;
+    assert((flags & MAP_PRIVATE) != 0);
+    assert((flags & MAP_ANON) != 0);
+}
+
+@test
+fn integration_shared_anon_mapping_flags() {
+    let flags = MAP_SHARED | MAP_ANON;
+    assert((flags & MAP_SHARED) != 0);
+    assert((flags & MAP_ANON) != 0);
+    // Private bit must NOT be set (they're disjoint by construction).
+    assert_eq(flags & MAP_PRIVATE, 0);
+}
+
+// =============================================================================
+// Section 5: O_CLOEXEC propagation
+// =============================================================================
+
+@test
+fn integration_cloexec_propagated_through_flag_chain() {
+    // Every freshly-opened fd should carry O_CLOEXEC to avoid fd leaks
+    // through fork+exec. Pin that the bit composes cleanly with the
+    // standard open modes.
+    let safe_open_rd = O_RDONLY | O_CLOEXEC;
+    let safe_open_wr = O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC;
+    assert((safe_open_rd & O_CLOEXEC) != 0);
+    assert((safe_open_wr & O_CLOEXEC) != 0);
+}
+
+fn main() {}

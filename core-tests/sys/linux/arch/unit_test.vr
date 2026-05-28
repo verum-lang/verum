@@ -1,0 +1,105 @@
+// =============================================================================
+// core-tests/sys/linux/arch/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.linux.arch` — per-arch SYS_* syscall number
+// constants.
+//
+// IMPORTANT: This module is @cfg(target_arch="x86_64") /
+// @cfg(target_arch="aarch64") gated. Only one architecture's numbers
+// are reachable per build. This conformance suite pins the aarch64
+// values (matches the macOS aarch64 host build that the conformance
+// harness runs on); x86_64 values are pinned indirectly through
+// regression tests.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.arch.{
+    SYS_READ, SYS_WRITE, SYS_CLOSE, SYS_LSEEK,
+    SYS_PREAD64, SYS_PWRITE64, SYS_READV, SYS_WRITEV,
+    SYS_OPENAT, SYS_OPENAT2,
+    SYS_FSYNC, SYS_FDATASYNC, SYS_FTRUNCATE,
+    SYS_STATX, SYS_NEWFSTATAT,
+};
+
+// =============================================================================
+// Section 1: aarch64 syscall numbers (Linux aarch64 ABI canon)
+// =============================================================================
+
+@test
+fn test_aarch64_sys_read_is_63() {
+    assert_eq(SYS_READ, 63);
+}
+
+@test
+fn test_aarch64_sys_write_is_64() {
+    assert_eq(SYS_WRITE, 64);
+}
+
+@test
+fn test_aarch64_sys_close_is_57() {
+    assert_eq(SYS_CLOSE, 57);
+}
+
+@test
+fn test_aarch64_sys_lseek_is_62() {
+    assert_eq(SYS_LSEEK, 62);
+}
+
+@test
+fn test_aarch64_sys_pread64_is_67() {
+    assert_eq(SYS_PREAD64, 67);
+}
+
+@test
+fn test_aarch64_sys_pwrite64_is_68() {
+    assert_eq(SYS_PWRITE64, 68);
+}
+
+@test
+fn test_aarch64_sys_readv_is_65() {
+    assert_eq(SYS_READV, 65);
+}
+
+@test
+fn test_aarch64_sys_writev_is_66() {
+    assert_eq(SYS_WRITEV, 66);
+}
+
+@test
+fn test_aarch64_sys_openat_is_56() {
+    assert_eq(SYS_OPENAT, 56);
+}
+
+@test
+fn test_aarch64_sys_openat2_is_437() {
+    // OPENAT2 is the same on x86_64 + aarch64 (437) — modern Linux.
+    assert_eq(SYS_OPENAT2, 437);
+}
+
+@test
+fn test_aarch64_sys_fsync_is_82() {
+    assert_eq(SYS_FSYNC, 82);
+}
+
+@test
+fn test_aarch64_sys_fdatasync_is_83() {
+    assert_eq(SYS_FDATASYNC, 83);
+}
+
+@test
+fn test_aarch64_sys_ftruncate_is_46() {
+    assert_eq(SYS_FTRUNCATE, 46);
+}
+
+@test
+fn test_aarch64_sys_statx_is_291() {
+    assert_eq(SYS_STATX, 291);
+}
+
+@test
+fn test_aarch64_sys_newfstatat_is_79() {
+    assert_eq(SYS_NEWFSTATAT, 79);
+}
+
+fn main() {}

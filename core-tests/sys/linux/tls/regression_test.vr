@@ -1,0 +1,23 @@
+// =============================================================================
+// core-tests/sys/linux/tls/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.tls.{STACK_GUARD_MAGIC, MAX_CONTEXT_SLOTS};
+
+// REGRESSION: STACK_GUARD_MAGIC must be the canonical 0xDEAD_BEEF_CAFE_BABE
+// — used in stack-canary initialisation. Pre-fix drift would break the
+// canary-check syscall.
+@test
+fn regression_stack_guard_magic_canonical() {
+    assert_eq(STACK_GUARD_MAGIC, 0xDEAD_BEEF_CAFE_BABE as USize);
+}
+
+// REGRESSION: MAX_CONTEXT_SLOTS = 256 — cross-platform invariant with
+// Darwin. Pre-fix drift would mismatch the slot-index range.
+@test
+fn regression_max_context_slots_cross_platform() {
+    assert_eq(MAX_CONTEXT_SLOTS, 256);
+}
+
+fn main() {}

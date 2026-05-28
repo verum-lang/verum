@@ -1,0 +1,66 @@
+// =============================================================================
+// core-tests/sys/linux/tls/unit_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.tls.{
+    ARCH_SET_GS, ARCH_SET_FS, ARCH_GET_FS, ARCH_GET_GS,
+    TLS_ALIGN, DEFAULT_TLS_SIZE, TLS_CTX_OFFSET, STACK_GUARD_MAGIC,
+    MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH,
+};
+
+// arch_prctl op codes
+@test
+fn test_arch_set_gs_is_0x1001() {
+    assert_eq(ARCH_SET_GS, 0x1001);
+}
+
+@test
+fn test_arch_set_fs_is_0x1002() {
+    assert_eq(ARCH_SET_FS, 0x1002);
+}
+
+@test
+fn test_arch_get_fs_is_0x1003() {
+    assert_eq(ARCH_GET_FS, 0x1003);
+}
+
+@test
+fn test_arch_get_gs_is_0x1004() {
+    assert_eq(ARCH_GET_GS, 0x1004);
+}
+
+// TLS layout
+@test
+fn test_tls_align_is_64() {
+    // 64-byte cache-line alignment for TLS storage.
+    assert_eq(TLS_ALIGN, 64);
+}
+
+@test
+fn test_default_tls_size_4096() {
+    assert_eq(DEFAULT_TLS_SIZE, 4096);
+}
+
+@test
+fn test_tls_ctx_offset_zero() {
+    assert_eq(TLS_CTX_OFFSET, 0);
+}
+
+@test
+fn test_stack_guard_magic_pattern() {
+    assert_eq(STACK_GUARD_MAGIC, 0xDEAD_BEEF_CAFE_BABE as USize);
+}
+
+// Context slots
+@test
+fn test_linux_tls_max_context_slots() {
+    assert_eq(MAX_CONTEXT_SLOTS, 256);
+}
+
+@test
+fn test_linux_tls_context_stack_depth() {
+    assert_eq(CONTEXT_STACK_DEPTH, 8);
+}
+
+fn main() {}

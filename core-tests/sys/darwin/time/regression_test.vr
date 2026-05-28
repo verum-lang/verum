@@ -1,0 +1,41 @@
+// =============================================================================
+// core-tests/sys/darwin/time/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.sys.darwin.time` constants.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.time.{
+    CLOCK_MONOTONIC_ID,
+    CLOCK_PROCESS_CPUTIME,
+    CLOCK_THREAD_CPUTIME,
+};
+
+// =============================================================================
+// REGRESSION 1: CLOCK_MONOTONIC = 6 on Darwin, NOT Linux's 1.
+//
+// Pre-fix bug class: copy-paste from Linux `time.h` would set
+// CLOCK_MONOTONIC to 1, but Darwin's `<time.h>` uses 6. Every
+// `clock_gettime(CLOCK_MONOTONIC, ...)` call would read the wrong
+// clock domain on macOS.
+// =============================================================================
+
+@test
+fn regression_clock_monotonic_darwin_value_not_linux() {
+    assert_eq(CLOCK_MONOTONIC_ID, 6);
+    assert(CLOCK_MONOTONIC_ID != 1);
+}
+
+// =============================================================================
+// REGRESSION 2: CLOCK_PROCESS_CPUTIME = 12 + CLOCK_THREAD_CPUTIME = 16
+// on Darwin — pin the canonical CPU-time clock IDs.
+// =============================================================================
+
+@test
+fn regression_clock_cputime_canonical_values() {
+    assert_eq(CLOCK_PROCESS_CPUTIME, 12);
+    assert_eq(CLOCK_THREAD_CPUTIME, 16);
+}
+
+fn main() {}

@@ -1,0 +1,59 @@
+// =============================================================================
+// core-tests/sys/linux/tls/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.tls.{
+    ARCH_SET_GS, ARCH_SET_FS, ARCH_GET_FS, ARCH_GET_GS,
+    TLS_ALIGN, DEFAULT_TLS_SIZE,
+    MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH,
+};
+
+@test
+fn law_arch_prctl_ops_consecutive_block() {
+    // ARCH_SET_GS = 0x1001, SET_FS = 0x1002, GET_FS = 0x1003,
+    // GET_GS = 0x1004 — consecutive 4-block.
+    assert_eq(ARCH_SET_GS + 1, ARCH_SET_FS);
+    assert_eq(ARCH_SET_FS + 1, ARCH_GET_FS);
+    assert_eq(ARCH_GET_FS + 1, ARCH_GET_GS);
+}
+
+@test
+fn law_tls_align_power_of_two() {
+    let v = TLS_ALIGN as USize;
+    assert(v > (0 as USize));
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+@test
+fn law_default_tls_size_page_multiple() {
+    // DEFAULT_TLS_SIZE = 4096 — exactly one page.
+    assert_eq(DEFAULT_TLS_SIZE % 4096, 0);
+}
+
+@test
+fn law_linux_tls_max_context_slots_power_of_two() {
+    let v = MAX_CONTEXT_SLOTS as USize;
+    assert(v > (0 as USize));
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+@test
+fn law_linux_tls_stack_depth_power_of_two() {
+    let v = CONTEXT_STACK_DEPTH as USize;
+    assert(v > (0 as USize));
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+@test
+fn law_linux_tls_max_slots_matches_darwin() {
+    // Cross-platform context-slot ceiling must agree between Linux + Darwin.
+    assert_eq(MAX_CONTEXT_SLOTS, 256);
+}
+
+@test
+fn law_linux_tls_stack_depth_matches_darwin() {
+    assert_eq(CONTEXT_STACK_DEPTH, 8);
+}
+
+fn main() {}

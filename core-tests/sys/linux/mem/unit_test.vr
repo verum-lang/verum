@@ -1,0 +1,106 @@
+// =============================================================================
+// core-tests/sys/linux/mem/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.linux.mem` — Linux mmap-family PROT_* /
+// MAP_* constants.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.mem.{
+    PROT_NONE, PROT_READ, PROT_WRITE, PROT_EXEC,
+    MAP_SHARED, MAP_PRIVATE, MAP_FIXED, MAP_ANONYMOUS, MAP_ANON,
+    MAP_GROWSDOWN, MAP_STACK, MAP_HUGETLB, MAP_LOCKED, MAP_NORESERVE,
+    MAP_POPULATE, MAP_NONBLOCK,
+};
+
+// =============================================================================
+// Section 1: PROT_* — single-bit POSIX flags (universal values)
+// =============================================================================
+
+@test
+fn test_linux_prot_none_is_zero() {
+    assert_eq(PROT_NONE, 0);
+}
+
+@test
+fn test_linux_prot_read_is_one() {
+    assert_eq(PROT_READ, 1);
+}
+
+@test
+fn test_linux_prot_write_is_two() {
+    assert_eq(PROT_WRITE, 2);
+}
+
+@test
+fn test_linux_prot_exec_is_four() {
+    assert_eq(PROT_EXEC, 4);
+}
+
+// =============================================================================
+// Section 2: MAP_* — Linux mapping flags (DIVERGE from BSD/Darwin)
+// =============================================================================
+
+@test
+fn test_linux_map_shared_is_one() {
+    assert_eq(MAP_SHARED, 1);
+}
+
+@test
+fn test_linux_map_private_is_two() {
+    assert_eq(MAP_PRIVATE, 2);
+}
+
+@test
+fn test_linux_map_fixed_is_0x10() {
+    assert_eq(MAP_FIXED, 0x10);
+}
+
+@test
+fn test_linux_map_anon_is_0x20() {
+    // Linux uses 0x20 (vs Darwin's 0x1000).
+    assert_eq(MAP_ANON, 0x20);
+}
+
+@test
+fn test_linux_map_anonymous_aliases_anon() {
+    assert_eq(MAP_ANONYMOUS, MAP_ANON);
+}
+
+@test
+fn test_linux_map_growsdown_is_0x100() {
+    assert_eq(MAP_GROWSDOWN, 0x100);
+}
+
+@test
+fn test_linux_map_stack_is_0x20000() {
+    assert_eq(MAP_STACK, 0x20000);
+}
+
+@test
+fn test_linux_map_hugetlb_is_0x40000() {
+    assert_eq(MAP_HUGETLB, 0x40000);
+}
+
+@test
+fn test_linux_map_locked_is_0x2000() {
+    assert_eq(MAP_LOCKED, 0x02000);
+}
+
+@test
+fn test_linux_map_noreserve_is_0x4000() {
+    assert_eq(MAP_NORESERVE, 0x04000);
+}
+
+@test
+fn test_linux_map_populate_is_0x8000() {
+    assert_eq(MAP_POPULATE, 0x08000);
+}
+
+@test
+fn test_linux_map_nonblock_is_0x10000() {
+    assert_eq(MAP_NONBLOCK, 0x10000);
+}
+
+fn main() {}

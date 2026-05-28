@@ -1,0 +1,36 @@
+// =============================================================================
+// core-tests/sys/linux/io/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.io.{
+    IORING_SETUP_IOPOLL, IORING_SETUP_SQPOLL,
+    IORING_REGISTER_BUFFERS, IORING_REGISTER_FILES,
+};
+
+// REGRESSION: IORING_SETUP_IOPOLL = 1 (bit 0) — the kernel-poll mode.
+@test
+fn regression_ioring_setup_iopoll_bit_zero() {
+    assert_eq(IORING_SETUP_IOPOLL, 1 as UInt32);
+}
+
+// REGRESSION: IORING_SETUP_SQPOLL = 2 (bit 1) — SQ thread mode.
+@test
+fn regression_ioring_setup_sqpoll_bit_one() {
+    assert_eq(IORING_SETUP_SQPOLL, 2 as UInt32);
+}
+
+// REGRESSION: REGISTER_BUFFERS opcode = 0 — first in the canonical
+// ENUM order set by io_uring(7).
+@test
+fn regression_ioring_register_buffers_opcode_zero() {
+    assert_eq(IORING_REGISTER_BUFFERS, 0 as UInt32);
+}
+
+// REGRESSION: REGISTER_FILES opcode = 2 — pinned by io_uring(7).
+@test
+fn regression_ioring_register_files_opcode_two() {
+    assert_eq(IORING_REGISTER_FILES, 2 as UInt32);
+}
+
+fn main() {}

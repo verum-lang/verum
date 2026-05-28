@@ -1,0 +1,184 @@
+// =============================================================================
+// core-tests/sys/darwin/mod/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.darwin.mod` — umbrella module that
+// re-exports the macOS public surface (libsystem / mach / errno / tls /
+// io / thread / time).
+//
+// This file pins the umbrella re-export contract: types and constants
+// reachable through the umbrella path `core.sys.darwin.X` are
+// byte-identical to the same names reached via the direct submodule
+// path.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.{
+    // From libsystem
+    O_RDONLY, O_WRONLY, O_RDWR,
+    PROT_READ, PROT_WRITE, PROT_EXEC,
+    MAP_SHARED, MAP_PRIVATE, MAP_ANON,
+    SEEK_SET, SEEK_CUR, SEEK_END,
+    CLOCK_REALTIME, CLOCK_MONOTONIC,
+    // From mach
+    KERN_SUCCESS,
+    VM_PROT_READ, VM_PROT_WRITE, VM_PROT_EXECUTE,
+    SYNC_POLICY_FIFO,
+    // From errno
+    EPERM, ENOENT, EACCES, EAGAIN, EINTR,
+    is_retryable, is_permission_error,
+    // From tls
+    MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH, TCB_MAGIC,
+    // From io
+    MAX_EVENTS, DEFAULT_TIMEOUT_NS,
+    // From thread
+    ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE,
+    // From time
+    CLOCK_REALTIME_ID, CLOCK_MONOTONIC_ID,
+};
+
+// =============================================================================
+// Section 1: libsystem constants via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_o_rdonly() {
+    assert_eq(O_RDONLY, 0);
+}
+
+@test
+fn test_umbrella_o_rdwr() {
+    assert_eq(O_RDWR, 2);
+}
+
+@test
+fn test_umbrella_prot_read() {
+    assert_eq(PROT_READ, 1);
+}
+
+@test
+fn test_umbrella_seek_end() {
+    assert_eq(SEEK_END, 2);
+}
+
+@test
+fn test_umbrella_map_anon_bsd() {
+    assert_eq(MAP_ANON, 0x1000);
+}
+
+// =============================================================================
+// Section 2: mach constants via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_kern_success() {
+    assert_eq(KERN_SUCCESS.0, 0 as Int32);
+}
+
+@test
+fn test_umbrella_vm_prot_all_bits() {
+    let all = VM_PROT_READ.0 | VM_PROT_WRITE.0 | VM_PROT_EXECUTE.0;
+    assert_eq(all, 7 as Int32);
+}
+
+@test
+fn test_umbrella_sync_policy_fifo() {
+    assert_eq(SYNC_POLICY_FIFO, 0);
+}
+
+// =============================================================================
+// Section 3: errno constants + predicates via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_enoent_is_two() {
+    assert_eq(ENOENT, 2);
+}
+
+@test
+fn test_umbrella_eagain_is_thirtyfive() {
+    assert_eq(EAGAIN, 35);
+}
+
+@test
+fn test_umbrella_is_retryable_eintr() {
+    assert(is_retryable(EINTR));
+}
+
+@test
+fn test_umbrella_is_permission_error_eperm() {
+    assert(is_permission_error(EPERM));
+}
+
+@test
+fn test_umbrella_is_permission_error_eacces() {
+    assert(is_permission_error(EACCES));
+}
+
+// =============================================================================
+// Section 4: tls constants via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_max_context_slots() {
+    assert_eq(MAX_CONTEXT_SLOTS, 256);
+}
+
+@test
+fn test_umbrella_context_stack_depth() {
+    assert_eq(CONTEXT_STACK_DEPTH, 8);
+}
+
+@test
+fn test_umbrella_tcb_magic() {
+    assert_eq(TCB_MAGIC, 0x5645_5255_4D5F_5443 as UInt64);
+}
+
+// =============================================================================
+// Section 5: io constants via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_max_events() {
+    assert_eq(MAX_EVENTS, 256);
+}
+
+@test
+fn test_umbrella_default_timeout_ns() {
+    assert_eq(DEFAULT_TIMEOUT_NS, 1_000_000_000);
+}
+
+// =============================================================================
+// Section 6: thread constants via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_once_init_zero() {
+    assert_eq(ONCE_INIT, 0 as UInt32);
+}
+
+@test
+fn test_umbrella_once_running_one() {
+    assert_eq(ONCE_RUNNING, 1 as UInt32);
+}
+
+@test
+fn test_umbrella_once_complete_two() {
+    assert_eq(ONCE_COMPLETE, 2 as UInt32);
+}
+
+// =============================================================================
+// Section 7: time constants via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_clock_realtime_id() {
+    assert_eq(CLOCK_REALTIME_ID, 0);
+}
+
+@test
+fn test_umbrella_clock_monotonic_id() {
+    assert_eq(CLOCK_MONOTONIC_ID, 6);
+}
+
+fn main() {}

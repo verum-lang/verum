@@ -1,0 +1,155 @@
+// =============================================================================
+// core-tests/sys/linux/syscall/unit_test.vr
+// =============================================================================
+// Linux syscall.vr — non-syscall-number ABI constants (architecture-
+// invariant subset). The SYS_* syscall numbers themselves are
+// @cfg(target_arch=...) gated and only mountable in their respective
+// builds; this suite pins the architecture-invariant flags / ioctls
+// instead.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.syscall.{
+    // Termios ioctls
+    TCGETS, TCSETS, TCSETSW, TCSETSF, TIOCGWINSZ, TIOCSWINSZ,
+    // clone / fork flags
+    FORK_FLAGS, CLONE_VFORK_FLAGS,
+    // fcntl ops
+    F_GETFD, F_SETFD, F_GETFL, F_SETFL, FD_CLOEXEC, O_NONBLOCK,
+    // wait flags
+    WNOHANG, WUNTRACED, WCONTINUED,
+    // futex ops
+    FUTEX_WAIT, FUTEX_WAKE, FUTEX_WAIT_PRIVATE, FUTEX_WAKE_PRIVATE,
+};
+
+// =============================================================================
+// Section 1: Termios ioctls — canonical Linux values
+// =============================================================================
+
+@test
+fn test_tcgets_is_0x5401() {
+    assert_eq(TCGETS, 0x5401);
+}
+
+@test
+fn test_tcsets_is_0x5402() {
+    assert_eq(TCSETS, 0x5402);
+}
+
+@test
+fn test_tcsetsw_is_0x5403() {
+    assert_eq(TCSETSW, 0x5403);
+}
+
+@test
+fn test_tcsetsf_is_0x5404() {
+    assert_eq(TCSETSF, 0x5404);
+}
+
+@test
+fn test_tiocgwinsz_is_0x5413() {
+    assert_eq(TIOCGWINSZ, 0x5413);
+}
+
+@test
+fn test_tiocswinsz_is_0x5414() {
+    assert_eq(TIOCSWINSZ, 0x5414);
+}
+
+// =============================================================================
+// Section 2: clone/fork flags
+// =============================================================================
+
+@test
+fn test_fork_flags_is_seventeen() {
+    // Bare fork uses CLONE flags = SIGCHLD = 17.
+    assert_eq(FORK_FLAGS, 17);
+}
+
+@test
+fn test_clone_vfork_flags_contains_seventeen() {
+    // CLONE_VFORK | CLONE_VM | SIGCHLD = 0x4000 | 0x100 | 17
+    assert((CLONE_VFORK_FLAGS & 17) == 17);
+}
+
+// =============================================================================
+// Section 3: fcntl ops
+// =============================================================================
+
+@test
+fn test_f_getfd_is_one() {
+    assert_eq(F_GETFD, 1);
+}
+
+@test
+fn test_f_setfd_is_two() {
+    assert_eq(F_SETFD, 2);
+}
+
+@test
+fn test_f_getfl_is_three() {
+    assert_eq(F_GETFL, 3);
+}
+
+@test
+fn test_f_setfl_is_four() {
+    assert_eq(F_SETFL, 4);
+}
+
+@test
+fn test_fd_cloexec_is_one() {
+    // FD_CLOEXEC = 1 (single bit) — used as the F_SETFD argument.
+    assert_eq(FD_CLOEXEC, 1);
+}
+
+@test
+fn test_o_nonblock_is_octal_4000() {
+    // O_NONBLOCK = 0o4000 = 0x800 = 2048.
+    assert_eq(O_NONBLOCK, 2048);
+}
+
+// =============================================================================
+// Section 4: wait flags
+// =============================================================================
+
+@test
+fn test_wnohang_is_one() {
+    assert_eq(WNOHANG, 1);
+}
+
+@test
+fn test_wuntraced_is_two() {
+    assert_eq(WUNTRACED, 2);
+}
+
+@test
+fn test_wcontinued_is_eight() {
+    assert_eq(WCONTINUED, 8);
+}
+
+// =============================================================================
+// Section 5: futex ops
+// =============================================================================
+
+@test
+fn test_futex_wait_is_zero() {
+    assert_eq(FUTEX_WAIT, 0);
+}
+
+@test
+fn test_futex_wake_is_one() {
+    assert_eq(FUTEX_WAKE, 1);
+}
+
+@test
+fn test_futex_wait_private_is_128() {
+    // FUTEX_WAIT_PRIVATE = FUTEX_WAIT | FUTEX_PRIVATE_FLAG (128).
+    assert_eq(FUTEX_WAIT_PRIVATE, 128);
+}
+
+@test
+fn test_futex_wake_private_is_129() {
+    assert_eq(FUTEX_WAKE_PRIVATE, 129);
+}
+
+fn main() {}

@@ -1,0 +1,64 @@
+// =============================================================================
+// core-tests/sys/darwin/libsystem/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.sys.darwin.libsystem` constants.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.libsystem.{
+    O_CREAT, O_CLOEXEC, MAP_ANON, PROT_READ, PROT_WRITE, PROT_EXEC,
+};
+
+// =============================================================================
+// REGRESSION 1: O_CREAT is 0x200 on BSD/macOS, NOT 0x40 (Linux's value).
+// Pre-fix bug shape: if the constant were copy-pasted from Linux headers,
+// every open(2) attempting to create a file would silently set a
+// different flag and the create-or-truncate path would break.
+// =============================================================================
+
+@test
+fn regression_o_creat_is_bsd_value_not_linux() {
+    assert_eq(O_CREAT, 0x200);
+    assert(O_CREAT != 0x40);   // explicitly NOT the Linux value
+}
+
+// =============================================================================
+// REGRESSION 2: O_CLOEXEC is 0x1000000 on BSD/macOS, NOT 0x80000 (Linux).
+// Same defect class as REGRESSION 1.
+// =============================================================================
+
+@test
+fn regression_o_cloexec_is_bsd_value() {
+    assert_eq(O_CLOEXEC, 0x1000000);
+    assert(O_CLOEXEC != 0x80000);
+}
+
+// =============================================================================
+// REGRESSION 3: MAP_ANON is 0x1000 on BSD/macOS, NOT 0x20 (Linux).
+// =============================================================================
+
+@test
+fn regression_map_anon_is_bsd_value() {
+    assert_eq(MAP_ANON, 0x1000);
+    assert(MAP_ANON != 0x20);
+}
+
+// =============================================================================
+// REGRESSION 4: PROT_* flags are 1/2/4 — the universal POSIX values
+// shared across Linux, BSD, Darwin, Windows VirtualProtect translation.
+// Pre-fix bug class: if any flag were drifted (e.g. PROT_EXEC=8 by
+// accident), the `text_perm = PROT_READ | PROT_EXEC` arithmetic would
+// silently produce wrong values.
+// =============================================================================
+
+@test
+fn regression_prot_universal_values() {
+    assert_eq(PROT_READ,  1);
+    assert_eq(PROT_WRITE, 2);
+    assert_eq(PROT_EXEC,  4);
+    // Universal: PROT_READ | PROT_EXEC == 5.
+    assert_eq(PROT_READ | PROT_EXEC, 5);
+}
+
+fn main() {}

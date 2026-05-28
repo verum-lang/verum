@@ -1,0 +1,56 @@
+// =============================================================================
+// core-tests/sys/linux/errno/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.errno.{EAGAIN, EWOULDBLOCK, EINTR, EACCES, EPERM, is_retryable};
+
+// =============================================================================
+// REGRESSION 1: EAGAIN must be 11 on Linux (NOT Darwin's 35).
+// Pre-fix bug class: copy-paste from BSD headers would set EAGAIN
+// incorrectly, breaking every `errno == EAGAIN` retry check.
+// =============================================================================
+
+@test
+fn regression_linux_eagain_is_eleven_not_thirtyfive() {
+    assert_eq(EAGAIN, 11);
+    assert(EAGAIN != 35);
+}
+
+// =============================================================================
+// REGRESSION 2: EWOULDBLOCK == EAGAIN on Linux — both must alias to 11.
+// =============================================================================
+
+@test
+fn regression_linux_ewouldblock_aliases_eagain_at_eleven() {
+    assert_eq(EWOULDBLOCK, EAGAIN);
+    assert_eq(EWOULDBLOCK, 11);
+}
+
+// =============================================================================
+// REGRESSION 3: is_retryable covers {EAGAIN, EWOULDBLOCK, EINTR}.
+// Pre-fix bug class: missing EINTR from the predicate body breaks
+// signal-restart loops universally.
+// =============================================================================
+
+@test
+fn regression_linux_is_retryable_canonical_set() {
+    assert(is_retryable(EAGAIN));
+    assert(is_retryable(EWOULDBLOCK));
+    assert(is_retryable(EINTR));
+}
+
+// =============================================================================
+// REGRESSION 4: Permission errors are EPERM + EACCES (NOT a wider set).
+// Pre-fix bug class: misclassifying ENOENT as permission would surface
+// "permission denied" for missing files, masking the actual cause.
+// =============================================================================
+
+@test
+fn regression_linux_eperm_eacces_distinct_codes() {
+    assert_eq(EPERM, 1);
+    assert_eq(EACCES, 13);
+    assert(EPERM != EACCES);
+}
+
+fn main() {}

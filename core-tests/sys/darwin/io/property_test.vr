@@ -1,0 +1,129 @@
+// =============================================================================
+// core-tests/sys/darwin/io/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.io.{
+    DarwinIoDriverError,
+    DarwinIoOpKind,
+    MAX_EVENTS,
+};
+
+// =============================================================================
+// Section 1: DarwinIoOpKind 9-variant exhaustive dispatch
+// =============================================================================
+
+fn all_op_kinds() -> List<DarwinIoOpKind> {
+    [
+        DarwinIoOpKind.Read,
+        DarwinIoOpKind.Write,
+        DarwinIoOpKind.Accept,
+        DarwinIoOpKind.Connect,
+        DarwinIoOpKind.Send,
+        DarwinIoOpKind.Recv,
+        DarwinIoOpKind.Timer,
+        DarwinIoOpKind.Signal,
+        DarwinIoOpKind.User,
+    ]
+}
+
+@test
+fn law_io_op_kind_count_is_nine() {
+    assert_eq(all_op_kinds().len(), 9);
+}
+
+@test
+fn law_io_op_kind_dispatch_tags_distinct() {
+    fn tag(k: DarwinIoOpKind) -> Int {
+        match k {
+            DarwinIoOpKind.Read    => 0,
+            DarwinIoOpKind.Write   => 1,
+            DarwinIoOpKind.Accept  => 2,
+            DarwinIoOpKind.Connect => 3,
+            DarwinIoOpKind.Send    => 4,
+            DarwinIoOpKind.Recv    => 5,
+            DarwinIoOpKind.Timer   => 6,
+            DarwinIoOpKind.Signal  => 7,
+            DarwinIoOpKind.User    => 8,
+        }
+    }
+    let kinds = all_op_kinds();
+    let mut tags: List<Int> = [];
+    for k in kinds.iter() {
+        tags.push(tag(*k));
+    }
+    let n = tags.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *tags.get(i).unwrap();
+            let b = *tags.get(j).unwrap();
+            assert(a != b);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+// =============================================================================
+// Section 2: DarwinIoDriverError.is_retryable — partition
+// =============================================================================
+
+@test
+fn law_io_error_retryable_partition() {
+    // Retryable subset: { WouldBlock, Interrupted }.
+    // Non-retryable: everything else.
+    let retryable_yes: List<DarwinIoDriverError> = [
+        DarwinIoDriverError.WouldBlock,
+        DarwinIoDriverError.Interrupted,
+    ];
+    let retryable_no: List<DarwinIoDriverError> = [
+        DarwinIoDriverError.AlreadyExists,
+        DarwinIoDriverError.PermissionDenied,
+        DarwinIoDriverError.ConnectionRefused,
+        DarwinIoDriverError.ConnectionReset,
+        DarwinIoDriverError.BrokenPipe,
+        DarwinIoDriverError.TimedOut,
+        DarwinIoDriverError.QueueFull,
+        DarwinIoDriverError.Closed,
+    ];
+    for e in retryable_yes.iter()  { assert((*e).is_retryable()); }
+    for e in retryable_no.iter()   { assert(!(*e).is_retryable()); }
+}
+
+// =============================================================================
+// Section 3: DarwinIoDriverError Eq reflexivity over the unit-variant set
+// =============================================================================
+
+@test
+fn law_io_error_eq_reflexive_unit_variants() {
+    let units: List<DarwinIoDriverError> = [
+        DarwinIoDriverError.WouldBlock,
+        DarwinIoDriverError.Interrupted,
+        DarwinIoDriverError.AlreadyExists,
+        DarwinIoDriverError.PermissionDenied,
+        DarwinIoDriverError.ConnectionRefused,
+        DarwinIoDriverError.ConnectionReset,
+        DarwinIoDriverError.BrokenPipe,
+        DarwinIoDriverError.TimedOut,
+        DarwinIoDriverError.QueueFull,
+        DarwinIoDriverError.Closed,
+    ];
+    for e in units.iter() {
+        assert((*e).eq(e));
+    }
+}
+
+// =============================================================================
+// Section 4: MAX_EVENTS invariants
+// =============================================================================
+
+@test
+fn law_max_events_positive_power_of_two() {
+    let v = MAX_EVENTS as USize;
+    assert(v > (0 as USize));
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+fn main() {}

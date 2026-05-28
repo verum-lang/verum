@@ -1,0 +1,194 @@
+// =============================================================================
+// core-tests/sys/darwin/libsystem/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.darwin.libsystem` — POSIX/BSD constants via
+// libSystem FFI for macOS. Constants tested here are the public ABI
+// surface that user code reaches for when mounting Darwin-side FFI.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.libsystem.{
+    // Open flags
+    O_RDONLY, O_WRONLY, O_RDWR, O_NONBLOCK, O_APPEND,
+    O_CREAT, O_TRUNC, O_EXCL, O_CLOEXEC,
+    // Seek whence
+    SEEK_SET, SEEK_CUR, SEEK_END,
+    // Memory protection
+    PROT_NONE, PROT_READ, PROT_WRITE, PROT_EXEC,
+    // Memory mapping
+    MAP_SHARED, MAP_PRIVATE, MAP_FIXED, MAP_ANON,
+    // madvise
+    MADV_NORMAL, MADV_RANDOM, MADV_SEQUENTIAL, MADV_WILLNEED, MADV_DONTNEED,
+    // Clock
+    CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW,
+};
+
+// =============================================================================
+// Section 1: Open flags — canonical BSD values
+// =============================================================================
+
+@test
+fn test_o_rdonly_is_zero() {
+    assert_eq(O_RDONLY, 0);
+}
+
+@test
+fn test_o_wronly_is_one() {
+    assert_eq(O_WRONLY, 1);
+}
+
+@test
+fn test_o_rdwr_is_two() {
+    assert_eq(O_RDWR, 2);
+}
+
+@test
+fn test_o_nonblock_is_four() {
+    assert_eq(O_NONBLOCK, 4);
+}
+
+@test
+fn test_o_append_is_eight() {
+    assert_eq(O_APPEND, 8);
+}
+
+@test
+fn test_o_creat_is_0x200() {
+    // BSD/macOS O_CREAT differs from Linux's 0x40.
+    assert_eq(O_CREAT, 0x200);
+}
+
+@test
+fn test_o_trunc_is_0x400() {
+    assert_eq(O_TRUNC, 0x400);
+}
+
+@test
+fn test_o_excl_is_0x800() {
+    assert_eq(O_EXCL, 0x800);
+}
+
+@test
+fn test_o_cloexec_is_0x1000000() {
+    assert_eq(O_CLOEXEC, 0x1000000);
+}
+
+// =============================================================================
+// Section 2: Seek whence
+// =============================================================================
+
+@test
+fn test_seek_set_is_zero() {
+    assert_eq(SEEK_SET, 0);
+}
+
+@test
+fn test_seek_cur_is_one() {
+    assert_eq(SEEK_CUR, 1);
+}
+
+@test
+fn test_seek_end_is_two() {
+    assert_eq(SEEK_END, 2);
+}
+
+// =============================================================================
+// Section 3: Memory protection — single-bit flags
+// =============================================================================
+
+@test
+fn test_prot_none_is_zero() {
+    assert_eq(PROT_NONE, 0);
+}
+
+@test
+fn test_prot_read_is_one() {
+    assert_eq(PROT_READ, 1);
+}
+
+@test
+fn test_prot_write_is_two() {
+    assert_eq(PROT_WRITE, 2);
+}
+
+@test
+fn test_prot_exec_is_four() {
+    assert_eq(PROT_EXEC, 4);
+}
+
+// =============================================================================
+// Section 4: Memory mapping flags
+// =============================================================================
+
+@test
+fn test_map_shared_is_one() {
+    assert_eq(MAP_SHARED, 1);
+}
+
+@test
+fn test_map_private_is_two() {
+    assert_eq(MAP_PRIVATE, 2);
+}
+
+@test
+fn test_map_fixed_is_0x10() {
+    assert_eq(MAP_FIXED, 0x10);
+}
+
+@test
+fn test_map_anon_is_0x1000() {
+    // BSD/macOS MAP_ANON differs from Linux's 0x20.
+    assert_eq(MAP_ANON, 0x1000);
+}
+
+// =============================================================================
+// Section 5: madvise advice codes
+// =============================================================================
+
+@test
+fn test_madv_normal_is_zero() {
+    assert_eq(MADV_NORMAL, 0);
+}
+
+@test
+fn test_madv_random_is_one() {
+    assert_eq(MADV_RANDOM, 1);
+}
+
+@test
+fn test_madv_sequential_is_two() {
+    assert_eq(MADV_SEQUENTIAL, 2);
+}
+
+@test
+fn test_madv_willneed_is_three() {
+    assert_eq(MADV_WILLNEED, 3);
+}
+
+@test
+fn test_madv_dontneed_is_four() {
+    assert_eq(MADV_DONTNEED, 4);
+}
+
+// =============================================================================
+// Section 6: Clock IDs
+// =============================================================================
+
+@test
+fn test_clock_realtime_constant() {
+    // CLOCK_REALTIME is the canonical wall-clock identifier — positive.
+    assert(CLOCK_REALTIME >= 0);
+}
+
+@test
+fn test_clock_monotonic_constant() {
+    assert(CLOCK_MONOTONIC >= 0);
+}
+
+@test
+fn test_clock_monotonic_raw_constant() {
+    assert(CLOCK_MONOTONIC_RAW >= 0);
+}
+
+fn main() {}

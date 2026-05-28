@@ -63,4 +63,121 @@ fn law_file_lock_kind_variants_are_distinct_under_match() {
     assert_eq(tag_sum, 3);
 }
 
+// =============================================================================
+// Section 3: LockRegion constructors — semantic pinning
+// =============================================================================
+
+@test
+fn law_lock_region_new_preserves_start_and_length() {
+    let cases: List<(Int, Int)> = [(0, 1), (100, 4096), (-5, 100), (1024, -1)];
+    for c in cases.iter() {
+        let (s, l) = *c;
+        let r = LockRegion.new(s, l);
+        assert_eq(r.start, s);
+        assert_eq(r.length, l);
+    }
+}
+
+@test
+fn law_lock_region_to_eof_yields_length_minus_one() {
+    let starts: List<Int> = [0, 1, 1024, 65535];
+    for s in starts.iter() {
+        let r = LockRegion.to_eof(*s);
+        assert_eq(r.start, *s);
+        assert_eq(r.length, -1);
+    }
+}
+
+@test
+fn law_lock_region_byte_yields_length_one() {
+    let offsets: List<Int> = [0, 1, 100, 4096, 1_000_000];
+    for o in offsets.iter() {
+        let r = LockRegion.byte(*o);
+        assert_eq(r.start, *o);
+        assert_eq(r.length, 1);
+    }
+}
+
+// =============================================================================
+// Section 4: LockRegion.overlaps — predicate laws
+// =============================================================================
+
+@test
+fn law_lock_region_overlaps_reflexive() {
+    // A region overlaps itself iff it has positive length (or is EOF).
+    let regions: List<LockRegion> = [
+        LockRegion.new(0, 100),
+        LockRegion.new(50, 1),
+        LockRegion.byte(7),
+        LockRegion.to_eof(0),
+    ];
+    for r in regions.iter() {
+        assert(r.overlaps(r));
+    }
+}
+
+@test
+fn law_lock_region_overlaps_symmetric() {
+    let pairs: List<(LockRegion, LockRegion)> = [
+        (LockRegion.new(0, 100), LockRegion.new(50, 100)),
+        (LockRegion.new(0, 100), LockRegion.new(200, 100)),
+        (LockRegion.byte(7),     LockRegion.byte(7)),
+        (LockRegion.to_eof(100), LockRegion.new(200, 50)),
+    ];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a.overlaps(&b), b.overlaps(&a));
+    }
+}
+
+@test
+fn law_lock_region_overlaps_disjoint_ranges() {
+    // [0, 100) and [200, 300) do NOT overlap.
+    let a = LockRegion.new(0, 100);
+    let b = LockRegion.new(200, 100);
+    assert(!a.overlaps(&b));
+}
+
+@test
+fn law_lock_region_overlaps_overlapping_ranges() {
+    // [0, 100) and [50, 150) overlap.
+    let a = LockRegion.new(0, 100);
+    let b = LockRegion.new(50, 100);
+    assert(a.overlaps(&b));
+}
+
+@test
+fn law_lock_region_overlaps_adjacent_ranges_disjoint() {
+    // [0, 100) and [100, 200) — adjacent but non-overlapping
+    // (end is exclusive).
+    let a = LockRegion.new(0, 100);
+    let b = LockRegion.new(100, 100);
+    assert(!a.overlaps(&b));
+}
+
+@test
+fn law_lock_region_overlaps_eof_includes_everything_above_start() {
+    // [100, ∞) overlaps any range starting above 100.
+    let eof_at_100 = LockRegion.to_eof(100);
+    assert(eof_at_100.overlaps(&LockRegion.new(200, 100)));
+    assert(eof_at_100.overlaps(&LockRegion.to_eof(500)));
+}
+
+@test
+fn law_lock_region_overlaps_eof_excludes_below_start() {
+    // [100, ∞) does NOT overlap [0, 50).
+    let eof_at_100 = LockRegion.to_eof(100);
+    let below     = LockRegion.new(0, 50);
+    assert(!eof_at_100.overlaps(&below));
+}
+
+@test
+fn law_lock_region_byte_overlaps_single_point_only() {
+    // byte(7) overlaps byte(7), but not byte(6) or byte(8).
+    let b = LockRegion.byte(7);
+    assert(b.overlaps(&LockRegion.byte(7)));
+    assert(!b.overlaps(&LockRegion.byte(6)));
+    assert(!b.overlaps(&LockRegion.byte(8)));
+}
+
 fn main() {}

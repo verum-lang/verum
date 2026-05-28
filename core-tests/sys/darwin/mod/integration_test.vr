@@ -1,0 +1,119 @@
+// =============================================================================
+// core-tests/sys/darwin/mod/integration_test.vr
+// =============================================================================
+// Cross-stdlib integration: darwin umbrella surface in real usage patterns.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.{
+    O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC, O_CLOEXEC,
+    PROT_READ, PROT_WRITE, PROT_EXEC,
+    MAP_PRIVATE, MAP_ANON,
+    EAGAIN, EINTR, EACCES, ENOENT, EBADF,
+    is_retryable, is_permission_error, is_not_found,
+    ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE,
+    KERN_SUCCESS, VM_PROT_READ, VM_PROT_WRITE,
+};
+
+// =============================================================================
+// Section 1: open(2) flag composition via umbrella
+// =============================================================================
+
+@test
+fn integration_darwin_open_create_for_write_flags() {
+    let flags = O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC;
+    // O_CLOEXEC bit (0x1000000) must be present.
+    assert((flags & O_CLOEXEC) != 0);
+    // O_CREAT bit must be present.
+    assert((flags & O_CREAT) != 0);
+}
+
+// =============================================================================
+// Section 2: mmap permission composition via umbrella
+// =============================================================================
+
+@test
+fn integration_darwin_mmap_text_segment_permission() {
+    let text = PROT_READ | PROT_EXEC;
+    assert((text & PROT_READ) != 0);
+    assert((text & PROT_EXEC) != 0);
+    assert_eq(text & PROT_WRITE, 0);
+}
+
+@test
+fn integration_darwin_anon_private_mmap_flags() {
+    let flags = MAP_PRIVATE | MAP_ANON;
+    assert((flags & MAP_PRIVATE) != 0);
+    assert((flags & MAP_ANON) != 0);
+}
+
+// =============================================================================
+// Section 3: errno classification via umbrella predicates
+// =============================================================================
+
+@test
+fn integration_darwin_errno_classification_table() {
+    let cases: List<(Int, Int)> = [
+        // (errno_code, expected_class_tag)
+        // 0 = retryable, 1 = permission, 2 = not_found, 3 = other
+        (EAGAIN, 0),
+        (EINTR,  0),
+        (EACCES, 1),
+        (ENOENT, 2),
+        (EBADF,  3),
+    ];
+    for c in cases.iter() {
+        let (code, expected_tag) = *c;
+        let tag = if is_retryable(code) {
+            0
+        } else if is_permission_error(code) {
+            1
+        } else if is_not_found(code) {
+            2
+        } else {
+            3
+        };
+        assert_eq(tag, expected_tag);
+    }
+}
+
+// =============================================================================
+// Section 4: ONCE_* state machine via umbrella
+// =============================================================================
+
+@test
+fn integration_darwin_once_state_progression() {
+    let states: List<UInt32> = [ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE];
+    let mut total: UInt32 = 0 as UInt32;
+    for s in states.iter() {
+        total = total + *s;
+    }
+    // 0 + 1 + 2 = 3.
+    assert_eq(total, 3 as UInt32);
+}
+
+// =============================================================================
+// Section 5: KERN_SUCCESS predicate via umbrella
+// =============================================================================
+
+@test
+fn integration_darwin_kern_success_predicate() {
+    fn mach_succeeded(kr: Int32) -> Bool {
+        kr == KERN_SUCCESS.0
+    }
+    assert(mach_succeeded(KERN_SUCCESS.0));
+    assert(!mach_succeeded(1 as Int32));
+    assert(!mach_succeeded(-1 as Int32));
+}
+
+// =============================================================================
+// Section 6: VM_PROT composition via umbrella
+// =============================================================================
+
+@test
+fn integration_darwin_vm_prot_default_mapping() {
+    let default_perm = VM_PROT_READ.0 | VM_PROT_WRITE.0;
+    assert_eq(default_perm, 3 as Int32);
+}
+
+fn main() {}

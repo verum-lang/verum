@@ -1,0 +1,45 @@
+// =============================================================================
+// core-tests/sys/linux/time/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.time.{CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_BOOTTIME, TIMER_ABSTIME};
+
+// =============================================================================
+// REGRESSION 1: CLOCK_REALTIME = 0 — universal.
+// =============================================================================
+
+@test
+fn regression_linux_clock_realtime_zero() {
+    assert_eq(CLOCK_REALTIME, 0);
+}
+
+// =============================================================================
+// REGRESSION 2: CLOCK_MONOTONIC = 1 on Linux (NOT Darwin's 6).
+// =============================================================================
+
+@test
+fn regression_linux_clock_monotonic_one_not_six() {
+    assert_eq(CLOCK_MONOTONIC, 1);
+    assert(CLOCK_MONOTONIC != 6);
+}
+
+// =============================================================================
+// REGRESSION 3: CLOCK_BOOTTIME = 7 — Linux-specific (no BSD equivalent).
+// =============================================================================
+
+@test
+fn regression_linux_clock_boottime_seven() {
+    assert_eq(CLOCK_BOOTTIME, 7);
+}
+
+// =============================================================================
+// REGRESSION 4: TIMER_ABSTIME = 1 — flag bit for absolute-time timers.
+// =============================================================================
+
+@test
+fn regression_linux_timer_abstime_one() {
+    assert_eq(TIMER_ABSTIME, 1);
+}
+
+fn main() {}

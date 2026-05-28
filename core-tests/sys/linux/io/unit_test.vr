@@ -1,0 +1,112 @@
+// =============================================================================
+// core-tests/sys/linux/io/unit_test.vr
+// =============================================================================
+// io_uring setup / enter / register flag constants.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.io.{
+    IORING_SETUP_IOPOLL, IORING_SETUP_SQPOLL, IORING_SETUP_SQ_AFF,
+    IORING_SETUP_CQSIZE, IORING_SETUP_CLAMP, IORING_SETUP_ATTACH_WQ,
+    IORING_SETUP_R_DISABLED, IORING_SETUP_SUBMIT_ALL,
+    IORING_ENTER_GETEVENTS, IORING_ENTER_SQ_WAKEUP,
+    IORING_ENTER_SQ_WAIT, IORING_ENTER_EXT_ARG,
+    IORING_REGISTER_BUFFERS, IORING_UNREGISTER_BUFFERS,
+    IORING_REGISTER_FILES, IORING_UNREGISTER_FILES,
+    IORING_REGISTER_EVENTFD, IORING_UNREGISTER_EVENTFD,
+};
+
+// IORING_SETUP_* — single-bit flag values
+@test
+fn test_ioring_setup_iopoll_is_one() {
+    assert_eq(IORING_SETUP_IOPOLL, 1 as UInt32);
+}
+
+@test
+fn test_ioring_setup_sqpoll_is_two() {
+    assert_eq(IORING_SETUP_SQPOLL, 2 as UInt32);
+}
+
+@test
+fn test_ioring_setup_sq_aff_is_four() {
+    assert_eq(IORING_SETUP_SQ_AFF, 4 as UInt32);
+}
+
+@test
+fn test_ioring_setup_cqsize_is_eight() {
+    assert_eq(IORING_SETUP_CQSIZE, 8 as UInt32);
+}
+
+@test
+fn test_ioring_setup_clamp_is_sixteen() {
+    assert_eq(IORING_SETUP_CLAMP, 16 as UInt32);
+}
+
+@test
+fn test_ioring_setup_attach_wq_is_thirtytwo() {
+    assert_eq(IORING_SETUP_ATTACH_WQ, 32 as UInt32);
+}
+
+@test
+fn test_ioring_setup_r_disabled_is_sixtyfour() {
+    assert_eq(IORING_SETUP_R_DISABLED, 64 as UInt32);
+}
+
+@test
+fn test_ioring_setup_submit_all_is_one_hundred_twentyeight() {
+    assert_eq(IORING_SETUP_SUBMIT_ALL, 128 as UInt32);
+}
+
+// IORING_ENTER_*
+@test
+fn test_ioring_enter_getevents_is_one() {
+    assert_eq(IORING_ENTER_GETEVENTS, 1 as UInt32);
+}
+
+@test
+fn test_ioring_enter_sq_wakeup_is_two() {
+    assert_eq(IORING_ENTER_SQ_WAKEUP, 2 as UInt32);
+}
+
+@test
+fn test_ioring_enter_sq_wait_is_four() {
+    assert_eq(IORING_ENTER_SQ_WAIT, 4 as UInt32);
+}
+
+@test
+fn test_ioring_enter_ext_arg_is_eight() {
+    assert_eq(IORING_ENTER_EXT_ARG, 8 as UInt32);
+}
+
+// IORING_REGISTER_* — opcode sequence
+@test
+fn test_ioring_register_buffers_is_zero() {
+    assert_eq(IORING_REGISTER_BUFFERS, 0 as UInt32);
+}
+
+@test
+fn test_ioring_unregister_buffers_is_one() {
+    assert_eq(IORING_UNREGISTER_BUFFERS, 1 as UInt32);
+}
+
+@test
+fn test_ioring_register_files_is_two() {
+    assert_eq(IORING_REGISTER_FILES, 2 as UInt32);
+}
+
+@test
+fn test_ioring_unregister_files_is_three() {
+    assert_eq(IORING_UNREGISTER_FILES, 3 as UInt32);
+}
+
+@test
+fn test_ioring_register_eventfd_is_four() {
+    assert_eq(IORING_REGISTER_EVENTFD, 4 as UInt32);
+}
+
+@test
+fn test_ioring_unregister_eventfd_is_five() {
+    assert_eq(IORING_UNREGISTER_EVENTFD, 5 as UInt32);
+}
+
+fn main() {}

@@ -1,0 +1,161 @@
+// =============================================================================
+// core-tests/sys/darwin/errno/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.darwin.errno`.
+//
+// What this file pins:
+//   * errno codes composed into List<Int> + List.iter.filter retry
+//     classification.
+//   * Predicate-based dispatch through a custom ErrorClass ADT.
+//   * Maybe<Int> error funnel for "did syscall return -1?" pattern.
+//   * Pattern-matched error → human-readable name pipeline.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.errno.{
+    EPERM, ENOENT, EINTR, EACCES, EBADF, EEXIST, EAGAIN, EWOULDBLOCK,
+    ECONNREFUSED, ECONNRESET, ETIMEDOUT, ENOMEM,
+    is_retryable, is_connection_error, is_permission_error,
+    is_not_found, is_resource_exhausted,
+};
+
+// =============================================================================
+// Section 1: List<Int> filter — retry-worth code counting
+// =============================================================================
+
+@test
+fn integration_errno_filter_retryable_count() {
+    let candidates: List<Int> = [
+        EPERM, ENOENT, EINTR, EACCES, EBADF, EEXIST,
+        EAGAIN, EWOULDBLOCK, ECONNRESET, ETIMEDOUT,
+    ];
+    let mut retry_count: Int = 0;
+    for c in candidates.iter() {
+        if is_retryable(*c) {
+            retry_count = retry_count + 1;
+        }
+    }
+    // EINTR + EAGAIN + EWOULDBLOCK = 3 retryable, but EAGAIN ≡ EWOULDBLOCK
+    // (BSD alias), so distinct retryable values are 2; through the
+    // predicate which uses code-by-code comparison, both fire — so the
+    // count is 3.
+    assert_eq(retry_count, 3);
+}
+
+// =============================================================================
+// Section 2: Custom ErrorClass ADT dispatch
+// =============================================================================
+
+type ErrorClass is
+    | Retryable
+    | Permission
+    | NotFound
+    | Connection
+    | ResourceExhausted
+    | Other;
+
+@test
+fn integration_errno_dispatch_to_error_class() {
+    fn classify(code: Int) -> ErrorClass {
+        if is_retryable(code)          { return ErrorClass.Retryable; }
+        if is_permission_error(code)   { return ErrorClass.Permission; }
+        if is_not_found(code)          { return ErrorClass.NotFound; }
+        if is_connection_error(code)   { return ErrorClass.Connection; }
+        if is_resource_exhausted(code) { return ErrorClass.ResourceExhausted; }
+        ErrorClass.Other
+    }
+    let inputs: List<Int> = [
+        EAGAIN, EACCES, ENOENT, ECONNRESET, ENOMEM, EBADF,
+    ];
+    let expected_tags: List<Int> = [0, 1, 2, 3, 4, 5];  // 0=retryable, 5=other
+    let mut i: USize = 0 as USize;
+    while i < inputs.len() {
+        let c = *inputs.get(i).unwrap();
+        let cls = classify(c);
+        let tag = match cls {
+            ErrorClass.Retryable         => 0,
+            ErrorClass.Permission        => 1,
+            ErrorClass.NotFound          => 2,
+            ErrorClass.Connection        => 3,
+            ErrorClass.ResourceExhausted => 4,
+            ErrorClass.Other             => 5,
+        };
+        let exp = *expected_tags.get(i).unwrap();
+        assert_eq(tag, exp);
+        i = i + (1 as USize);
+    }
+}
+
+// =============================================================================
+// Section 3: Maybe<Int> syscall-return funnel
+// =============================================================================
+
+@test
+fn integration_errno_syscall_return_funnel() {
+    // The canonical "syscall returned -1 with errno X" funnel.
+    fn syscall_funnel(rv: Int, errno: Int) -> Maybe<Int> {
+        if rv >= 0 { Some(rv) } else { None }
+    }
+    // Success: syscall returned 1024 bytes read.
+    let ok = syscall_funnel(1024, 0);
+    match ok {
+        Some(n) => assert_eq(n, 1024),
+        None    => assert(false),
+    };
+    // Error: syscall returned -1 with EAGAIN.
+    let err = syscall_funnel(-1, EAGAIN);
+    match err {
+        Some(_) => assert(false),
+        None    => assert(true),
+    };
+}
+
+// =============================================================================
+// Section 4: Retry-loop coordinator
+// =============================================================================
+
+@test
+fn integration_errno_retry_loop_counts_attempts() {
+    // Simulate a retry loop that gives up after retry-classifying the
+    // error N times. Each call attempts a syscall + classifies the
+    // error code.
+    let mut attempts: Int = 0;
+    let errors: List<Int> = [EAGAIN, EINTR, EAGAIN, EAGAIN, EBADF];
+    for e in errors.iter() {
+        attempts = attempts + 1;
+        if !is_retryable(*e) {
+            break;
+        }
+    }
+    // First 4 are retryable; 5th (EBADF) is not — loop breaks after
+    // observing the 5th, so attempts = 5.
+    assert_eq(attempts, 5);
+}
+
+// =============================================================================
+// Section 5: Permission-error funnel via Result
+// =============================================================================
+
+@test
+fn integration_errno_permission_funnel_through_result() {
+    fn funnel(code: Int) -> Result<Int, Text> {
+        if is_permission_error(code) {
+            Err("permission denied".clone())
+        } else {
+            Ok(code)
+        }
+    }
+    let allowed: Result<Int, Text> = funnel(ENOENT);
+    let denied:  Result<Int, Text> = funnel(EACCES);
+    match allowed {
+        Ok(c)  => assert_eq(c, ENOENT),
+        Err(_) => assert(false),
+    };
+    match denied {
+        Ok(_)  => assert(false),
+        Err(msg) => assert_eq(msg, "permission denied".clone()),
+    };
+}
+
+fn main() {}

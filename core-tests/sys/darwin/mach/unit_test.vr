@@ -1,0 +1,159 @@
+// =============================================================================
+// core-tests/sys/darwin/mach/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.darwin.mach` — Mach kernel primitive types
+// and constants for macOS.
+//
+// API surface tested here:
+//   KernReturn  newtype (Int32) — KERN_SUCCESS .. KERN_OPERATION_TIMED_OUT
+//   VmProt      newtype (Int32) — VM_PROT_{NONE,READ,WRITE,EXECUTE,DEFAULT,ALL,COPY}
+//   VM_FLAGS_*  fixed/anywhere/purgable etc.
+//   SYNC_POLICY_FIFO / SYNC_POLICY_FIXED_PRIORITY
+//
+// What we DO test:
+//   * Canonical Mach KERN_* return code values match Darwin headers.
+//   * VM_PROT_* form a 3-bit power-of-two set (READ=1, WRITE=2, EXECUTE=4)
+//     with DEFAULT = READ | WRITE = 3 and ALL = 7.
+//   * VM_FLAGS_* are pairwise distinct.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.mach.{
+    KernReturn,
+    VmProt,
+    KERN_SUCCESS, KERN_INVALID_ADDRESS, KERN_PROTECTION_FAILURE,
+    KERN_NO_SPACE, KERN_INVALID_ARGUMENT, KERN_FAILURE,
+    KERN_RESOURCE_SHORTAGE, KERN_ABORTED,
+    VM_PROT_NONE, VM_PROT_READ, VM_PROT_WRITE, VM_PROT_EXECUTE,
+    VM_PROT_DEFAULT, VM_PROT_ALL,
+    VM_FLAGS_FIXED, VM_FLAGS_ANYWHERE, VM_FLAGS_PURGABLE,
+    SYNC_POLICY_FIFO, SYNC_POLICY_LIFO,
+};
+
+// =============================================================================
+// Section 1: KERN_* return codes — canonical Mach values
+// =============================================================================
+
+@test
+fn test_kern_success_is_zero() {
+    assert_eq(KERN_SUCCESS.0, 0 as Int32);
+}
+
+@test
+fn test_kern_invalid_address_is_one() {
+    assert_eq(KERN_INVALID_ADDRESS.0, 1 as Int32);
+}
+
+@test
+fn test_kern_protection_failure_is_two() {
+    assert_eq(KERN_PROTECTION_FAILURE.0, 2 as Int32);
+}
+
+@test
+fn test_kern_no_space_is_three() {
+    assert_eq(KERN_NO_SPACE.0, 3 as Int32);
+}
+
+@test
+fn test_kern_invalid_argument_is_four() {
+    assert_eq(KERN_INVALID_ARGUMENT.0, 4 as Int32);
+}
+
+@test
+fn test_kern_failure_is_five() {
+    assert_eq(KERN_FAILURE.0, 5 as Int32);
+}
+
+@test
+fn test_kern_aborted_is_fourteen() {
+    assert_eq(KERN_ABORTED.0, 14 as Int32);
+}
+
+// =============================================================================
+// Section 2: VM_PROT_* — canonical 3-bit protection flags
+// =============================================================================
+
+@test
+fn test_vm_prot_none_is_zero() {
+    assert_eq(VM_PROT_NONE.0, 0 as Int32);
+}
+
+@test
+fn test_vm_prot_read_is_one() {
+    assert_eq(VM_PROT_READ.0, 1 as Int32);
+}
+
+@test
+fn test_vm_prot_write_is_two() {
+    assert_eq(VM_PROT_WRITE.0, 2 as Int32);
+}
+
+@test
+fn test_vm_prot_execute_is_four() {
+    assert_eq(VM_PROT_EXECUTE.0, 4 as Int32);
+}
+
+@test
+fn test_vm_prot_default_is_read_or_write() {
+    // DEFAULT = READ | WRITE = 3.
+    assert_eq(VM_PROT_DEFAULT.0, 3 as Int32);
+}
+
+@test
+fn test_vm_prot_all_is_all_three_bits() {
+    // ALL = READ | WRITE | EXECUTE = 7.
+    assert_eq(VM_PROT_ALL.0, 7 as Int32);
+}
+
+// =============================================================================
+// Section 3: VM_FLAGS_*  — mapping policy flags
+// =============================================================================
+
+@test
+fn test_vm_flags_fixed_is_zero() {
+    assert_eq(VM_FLAGS_FIXED, 0);
+}
+
+@test
+fn test_vm_flags_anywhere_is_one() {
+    assert_eq(VM_FLAGS_ANYWHERE, 1);
+}
+
+@test
+fn test_vm_flags_purgable_is_two() {
+    assert_eq(VM_FLAGS_PURGABLE, 2);
+}
+
+// =============================================================================
+// Section 4: SYNC_POLICY_* — semaphore queue policies
+// =============================================================================
+
+@test
+fn test_sync_policy_fifo_is_zero() {
+    assert_eq(SYNC_POLICY_FIFO, 0);
+}
+
+@test
+fn test_sync_policy_lifo_is_distinct_from_fifo() {
+    // SYNC_POLICY_LIFO must be a different code than FIFO.
+    assert(SYNC_POLICY_LIFO != SYNC_POLICY_FIFO);
+}
+
+// =============================================================================
+// Section 5: KernReturn / VmProt newtype round-trip
+// =============================================================================
+
+@test
+fn test_kern_return_newtype_round_trip() {
+    let kr: KernReturn = KernReturn(7 as Int32);
+    assert_eq(kr.0, 7 as Int32);
+}
+
+@test
+fn test_vm_prot_newtype_round_trip() {
+    let p: VmProt = VmProt(0x05 as Int32);
+    assert_eq(p.0, 5 as Int32);
+}
+
+fn main() {}

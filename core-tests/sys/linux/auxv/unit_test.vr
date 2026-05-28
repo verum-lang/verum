@@ -1,0 +1,89 @@
+// =============================================================================
+// core-tests/sys/linux/auxv/unit_test.vr
+// =============================================================================
+// AT_* auxiliary vector constants pinned against ELF ABI canon.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.auxv.{
+    AT_NULL, AT_ENTRY, AT_UID, AT_EUID, AT_GID, AT_EGID,
+    AT_HWCAP, AT_HWCAP2, AT_PAGESZ, AT_CLKTCK, AT_SECURE,
+    AT_PLATFORM, AT_RANDOM, AT_EXECFN, AT_SYSINFO_EHDR,
+};
+
+@test
+fn test_at_null_is_zero() {
+    assert_eq(AT_NULL, 0 as UInt64);
+}
+
+@test
+fn test_at_pagesz_is_six() {
+    assert_eq(AT_PAGESZ, 6 as UInt64);
+}
+
+@test
+fn test_at_entry_is_nine() {
+    assert_eq(AT_ENTRY, 9 as UInt64);
+}
+
+@test
+fn test_at_uid_is_eleven() {
+    assert_eq(AT_UID, 11 as UInt64);
+}
+
+@test
+fn test_at_euid_is_twelve() {
+    assert_eq(AT_EUID, 12 as UInt64);
+}
+
+@test
+fn test_at_gid_is_thirteen() {
+    assert_eq(AT_GID, 13 as UInt64);
+}
+
+@test
+fn test_at_egid_is_fourteen() {
+    assert_eq(AT_EGID, 14 as UInt64);
+}
+
+@test
+fn test_at_platform_is_fifteen() {
+    assert_eq(AT_PLATFORM, 15 as UInt64);
+}
+
+@test
+fn test_at_hwcap_is_sixteen() {
+    assert_eq(AT_HWCAP, 16 as UInt64);
+}
+
+@test
+fn test_at_clktck_is_seventeen() {
+    assert_eq(AT_CLKTCK, 17 as UInt64);
+}
+
+@test
+fn test_at_secure_is_twentythree() {
+    assert_eq(AT_SECURE, 23 as UInt64);
+}
+
+@test
+fn test_at_random_is_twentyfive() {
+    assert_eq(AT_RANDOM, 25 as UInt64);
+}
+
+@test
+fn test_at_hwcap2_is_twentysix() {
+    assert_eq(AT_HWCAP2, 26 as UInt64);
+}
+
+@test
+fn test_at_execfn_is_thirtyone() {
+    assert_eq(AT_EXECFN, 31 as UInt64);
+}
+
+@test
+fn test_at_sysinfo_ehdr_is_thirtythree() {
+    assert_eq(AT_SYSINFO_EHDR, 33 as UInt64);
+}
+
+fn main() {}

@@ -1,0 +1,39 @@
+// =============================================================================
+// core-tests/sys/linux/mem/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.mem.{MAP_ANON, MAP_ANONYMOUS, PROT_READ, PROT_WRITE, PROT_EXEC};
+
+// =============================================================================
+// REGRESSION 1: Linux MAP_ANON = 0x20 (NOT Darwin's 0x1000).
+// =============================================================================
+
+@test
+fn regression_linux_map_anon_is_0x20_not_0x1000() {
+    assert_eq(MAP_ANON, 0x20);
+    assert(MAP_ANON != 0x1000);
+}
+
+// =============================================================================
+// REGRESSION 2: MAP_ANONYMOUS aliases MAP_ANON on Linux (both = 0x20).
+// =============================================================================
+
+@test
+fn regression_linux_map_anonymous_aliased() {
+    assert_eq(MAP_ANONYMOUS, MAP_ANON);
+    assert_eq(MAP_ANONYMOUS, 0x20);
+}
+
+// =============================================================================
+// REGRESSION 3: PROT_* values are the POSIX-universal 1/2/4.
+// =============================================================================
+
+@test
+fn regression_linux_prot_universal_values() {
+    assert_eq(PROT_READ, 1);
+    assert_eq(PROT_WRITE, 2);
+    assert_eq(PROT_EXEC, 4);
+}
+
+fn main() {}

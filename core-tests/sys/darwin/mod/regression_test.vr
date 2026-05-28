@@ -1,0 +1,43 @@
+// =============================================================================
+// core-tests/sys/darwin/mod/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.{
+    O_CREAT, MAP_ANON, EAGAIN, KERN_SUCCESS, TCB_MAGIC,
+};
+
+// =============================================================================
+// REGRESSION 1: Umbrella re-exports must preserve every value exactly.
+// Pre-fix bug class: if the umbrella `public mount` chain dropped or
+// duplicated a constant, the value at the umbrella path would diverge
+// from the direct-submodule path.
+// =============================================================================
+
+@test
+fn regression_darwin_umbrella_o_creat_value_preserved() {
+    // BSD value, NOT Linux's 0x40.
+    assert_eq(O_CREAT, 0x200);
+}
+
+@test
+fn regression_darwin_umbrella_map_anon_value_preserved() {
+    assert_eq(MAP_ANON, 0x1000);
+}
+
+@test
+fn regression_darwin_umbrella_eagain_value_preserved() {
+    assert_eq(EAGAIN, 35);
+}
+
+@test
+fn regression_darwin_umbrella_kern_success_value_preserved() {
+    assert_eq(KERN_SUCCESS.0, 0 as Int32);
+}
+
+@test
+fn regression_darwin_umbrella_tcb_magic_preserved() {
+    assert_eq(TCB_MAGIC, 0x5645_5255_4D5F_5443 as UInt64);
+}
+
+fn main() {}
