@@ -212,23 +212,54 @@ umbrella-mount dispatch, not bare-name dispatch.
    source-module identity in their function-id key, so a same-name
    impl-block method on an unrelated type cannot shadow them.
 
-**Attempted fix 2026-05-28** (reverted): A targeted method-vs-free-fn
-shadow filter was added to `type_aware_lookup` in
-`crates/verum_vbc/src/codegen/expressions.rs:4556` — when the
-type-based disambiguation fails to pick exactly one candidate (typically
-because the call-site arg types are all-None for const-path args),
-filter `arity_matches` to remove candidates whose first param is named
-`"self"`. The fix did NOT close the test surface — after rebuild and
-re-test, `test_reexport_has_capability_call_pinned_by_collision` still
-fails with `NullPointerAt at AllocationHeader.load_capabilities`.
+**Attempted fixes 2026-05-28** (4 attempts, ALL reverted — defect class
+beyond single-session scope):
 
-The dispatcher must therefore be selecting `AllocationHeader.has_capability`
-via a different codepath — possibly the umbrella re-export aliasing
-`core.mem.has_capability` to the method, or the bare-name fallback
-`lookup_function_with_arity_in_scope` picking up the method before
-`type_aware_lookup` runs.  Fundamental fix requires deeper investigation
-of the function registration + alias-table interaction during stdlib
-precompile — multi-day VBC codegen work.
+Investigation identified the root cause: `register_impl_function` at
+`codegen/mod.rs:8127-8150` `filter_map`s out `&self` / `&mut self`
+params from `param_type_names`, so for `AllocationHeader.has_capability
+(&self, cap: UInt16)`:
+* `param_count = 2` (param_names = ["self", "cap"])
+* `param_type_names = ["UInt16"]` (only 1 entry — self filtered out)
+
+Then in `type_aware_lookup`'s type filter, `param_type_names.iter().
+zip(arg_type_names.iter()).all(...)` TRUNCATES to the shorter sequence.
+For a 2-arg bare-name call with `arg_type_names = [Some("UInt16"),
+Some("UInt16")]`, the method's `param_type_names = ["UInt16"]` zips
+to `[("UInt16", "UInt16")]` and `.all()` returns true — `arg[1]` is
+never checked. So the method INCORRECTLY passes the type filter.
+
+Four targeted fixes were attempted to filter out impl-block methods
+from bare-name dispatch (using `info.param_names.first() == "self"`
+as the marker):
+
+1. **v1**: post-filter at `type_aware_lookup` after type_matched
+   (didn't fire — type_matched.len() == 1 case already chose method)
+2. **v2**: pre-filter at `type_aware_lookup` arity_matches +
+   `lookup_function_with_arity_in_scope`
+3. **v3**: v2 + `module_qualified_lookup` filter
+4. **v4**: v3 + `process_import_tree` umbrella mount registration
+   filter at `codegen/mod.rs:7632` (prefer non-method when both free
+   fn and method candidates exist)
+
+After EACH rebuild (~25 min per cycle), the test
+`test_reexport_has_capability_call_pinned_by_collision` still failed
+identically with `NullPointerAt at AllocationHeader.load_capabilities`.
+The dispatcher must be selecting `AllocationHeader.has_capability`
+via a path NOT covered by any of the 4 filters — most likely via the
+stdlib-precompile-emitted bytecode itself (the precompile baked the
+function ID into the Call instruction during stdlib's own compilation
+phase BEFORE the user-side dispatcher runs).
+
+All 4 fix attempts were reverted (git stash dropped 2026-05-28T22:55).
+Fundamental fix requires deeper investigation of:
+1. Stdlib precompile's Call-emission path during stdlib's own bytecode
+   compilation (NOT the user-side compile_call)
+2. `register_function_authoritative` ordering during archive load
+3. How `core.mem.has_capability` (umbrella alias) gets its FunctionId
+
+This is multi-day VBC codegen surgery and beyond the scope of this
+session.
 
 **Sister defects in the same class** (out of scope here; tracked
 across `memory/`):
