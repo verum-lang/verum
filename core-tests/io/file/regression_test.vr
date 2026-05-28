@@ -42,7 +42,8 @@ fn regression_file_create_in_unwritable_dir_returns_permission_denied() {
 // §B — Convenience `read` / `write` / `read_to_string` — gated by #io-1
 // =============================================================================
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp; io/fs ENOENT path
+// correctly routes through IoErrorKind.NotFound.
 @test
 fn regression_read_nonexistent_returns_not_found() {
     match read(&Text.from("/nonexistent-path-12345/foo.txt")) {
@@ -51,7 +52,7 @@ fn regression_read_nonexistent_returns_not_found() {
     }
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_read_to_string_nonexistent_returns_not_found() {
     match read_to_string(&Text.from("/nonexistent-path-12345/foo.txt")) {
