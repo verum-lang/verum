@@ -1,0 +1,128 @@
+// =============================================================================
+// core-tests/cli/derive/unit_test.vr
+// =============================================================================
+//
+// `core/cli/derive.vr` — @command derive macro support.
+// =============================================================================
+
+mount core.cli.derive.FieldKindHint;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: FieldKindHint scalar variants (5 of 6)
+// =============================================================================
+
+@test
+fn test_field_kind_hint_switch_variant() {
+    let k: FieldKindHint = FieldKindHint.FieldSwitch;
+    assert(k is FieldKindHint.FieldSwitch);
+}
+
+@test
+fn test_field_kind_hint_optional_variant() {
+    let k: FieldKindHint = FieldKindHint.FieldOptional;
+    assert(k is FieldKindHint.FieldOptional);
+}
+
+@test
+fn test_field_kind_hint_required_variant() {
+    let k: FieldKindHint = FieldKindHint.FieldRequired;
+    assert(k is FieldKindHint.FieldRequired);
+}
+
+@test
+fn test_field_kind_hint_variadic_variant() {
+    let k: FieldKindHint = FieldKindHint.FieldVariadic;
+    assert(k is FieldKindHint.FieldVariadic);
+}
+
+@test
+fn test_field_kind_hint_counter_variant() {
+    let k: FieldKindHint = FieldKindHint.FieldCounter;
+    assert(k is FieldKindHint.FieldCounter);
+}
+
+// =============================================================================
+// Section 2: FieldEnum(List<Text>) carrier variant
+// =============================================================================
+
+@test
+fn test_field_kind_hint_enum_variant_empty_list() {
+    let empty: List<Text> = [];
+    let k: FieldKindHint = FieldKindHint.FieldEnum(empty);
+    assert(k is FieldKindHint.FieldEnum);
+}
+
+@test
+fn test_field_kind_hint_enum_variant_with_values() {
+    let mut values: List<Text> = [];
+    values.push("alpha".to_text());
+    values.push("beta".to_text());
+    values.push("gamma".to_text());
+    let k: FieldKindHint = FieldKindHint.FieldEnum(values);
+    assert(k is FieldKindHint.FieldEnum);
+}
+
+// =============================================================================
+// Section 3: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_field_kind_hint_switch_disjoint() {
+    let k: FieldKindHint = FieldKindHint.FieldSwitch;
+    assert(!(k is FieldKindHint.FieldOptional));
+    assert(!(k is FieldKindHint.FieldRequired));
+    assert(!(k is FieldKindHint.FieldVariadic));
+    assert(!(k is FieldKindHint.FieldCounter));
+    assert(!(k is FieldKindHint.FieldEnum));
+}
+
+@test
+fn test_field_kind_hint_optional_disjoint() {
+    let k: FieldKindHint = FieldKindHint.FieldOptional;
+    assert(!(k is FieldKindHint.FieldSwitch));
+    assert(!(k is FieldKindHint.FieldRequired));
+    assert(!(k is FieldKindHint.FieldVariadic));
+    assert(!(k is FieldKindHint.FieldCounter));
+}
+
+@test
+fn test_field_kind_hint_required_disjoint() {
+    let k: FieldKindHint = FieldKindHint.FieldRequired;
+    assert(!(k is FieldKindHint.FieldSwitch));
+    assert(!(k is FieldKindHint.FieldOptional));
+    assert(!(k is FieldKindHint.FieldVariadic));
+    assert(!(k is FieldKindHint.FieldCounter));
+}
+
+@test
+fn test_field_kind_hint_variadic_disjoint() {
+    let k: FieldKindHint = FieldKindHint.FieldVariadic;
+    assert(!(k is FieldKindHint.FieldSwitch));
+    assert(!(k is FieldKindHint.FieldOptional));
+    assert(!(k is FieldKindHint.FieldRequired));
+    assert(!(k is FieldKindHint.FieldCounter));
+}
+
+@test
+fn test_field_kind_hint_counter_disjoint() {
+    let k: FieldKindHint = FieldKindHint.FieldCounter;
+    assert(!(k is FieldKindHint.FieldSwitch));
+    assert(!(k is FieldKindHint.FieldOptional));
+    assert(!(k is FieldKindHint.FieldRequired));
+    assert(!(k is FieldKindHint.FieldVariadic));
+}
+
+@test
+fn test_field_kind_hint_enum_disjoint() {
+    let empty: List<Text> = [];
+    let k: FieldKindHint = FieldKindHint.FieldEnum(empty);
+    assert(!(k is FieldKindHint.FieldSwitch));
+    assert(!(k is FieldKindHint.FieldOptional));
+    assert(!(k is FieldKindHint.FieldRequired));
+    assert(!(k is FieldKindHint.FieldVariadic));
+    assert(!(k is FieldKindHint.FieldCounter));
+}
+
+fn main() {}
