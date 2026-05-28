@@ -1,0 +1,62 @@
+// =============================================================================
+// core-tests/security/hash/sha1/unit_test.vr
+// =============================================================================
+//
+// `core/security/hash/sha1.vr` — SHA-1 / FIPS 180-4 §6.1.
+//
+// Pure-data constant surface tested:
+//   * SHA1_DIGEST_SIZE / SHA1_BLOCK_SIZE canonical values
+//
+// SHA-1 is cryptographically broken (Shappening, SHAttered) but
+// remains required for Git, TLS legacy, WebSocket (RFC 6455 Sec-WebSocket-Accept).
+// Pinned at the spec width contracts.
+// =============================================================================
+
+mount core.security.hash.sha1.{SHA1_DIGEST_SIZE, SHA1_BLOCK_SIZE};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Canonical constants
+// =============================================================================
+
+@test
+fn test_sha1_digest_size_canonical_value() {
+    // SHA-1 produces a 160-bit (20-byte) digest.
+    assert_eq(SHA1_DIGEST_SIZE, 20);
+}
+
+@test
+fn test_sha1_block_size_canonical_value() {
+    // SHA-1 processes 512-bit (64-byte) blocks (FIPS 180-4 §6.1).
+    assert_eq(SHA1_BLOCK_SIZE, 64);
+}
+
+// =============================================================================
+// Section 2: Width-relationship invariants
+// =============================================================================
+
+@test
+fn test_sha1_block_is_sixteen_words() {
+    // 16 × UInt32 = 64 bytes.
+    assert_eq(SHA1_BLOCK_SIZE, 16 * 4);
+}
+
+@test
+fn test_sha1_digest_is_five_words() {
+    // 5 × UInt32 = 20 bytes (160-bit digest).
+    assert_eq(SHA1_DIGEST_SIZE, 5 * 4);
+}
+
+@test
+fn test_sha1_block_larger_than_digest() {
+    assert(SHA1_BLOCK_SIZE > SHA1_DIGEST_SIZE);
+}
+
+@test
+fn test_sha1_constants_positive() {
+    assert(SHA1_DIGEST_SIZE > 0);
+    assert(SHA1_BLOCK_SIZE > 0);
+}
+
+fn main() {}
