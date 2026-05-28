@@ -1,0 +1,75 @@
+// =============================================================================
+// core-tests/security/x509/crl_client/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/crl_client.vr` — CRL fetcher constants.
+// =============================================================================
+
+mount core.security.x509.crl_client.{
+    MAX_CRL_BYTES, DEFAULT_FRESHNESS_TOLERANCE_SECONDS,
+    DEFAULT_MAX_CACHE_TTL_SECONDS, CONTENT_TYPE_PKIX_CRL,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CRL fetcher constants
+// =============================================================================
+
+@test
+fn test_max_crl_bytes_canonical_value() {
+    // 32 MiB cap — accommodates large CAs while preventing DoS.
+    assert_eq(MAX_CRL_BYTES, 32 * 1024 * 1024);
+}
+
+@test
+fn test_max_crl_bytes_concrete_value() {
+    assert_eq(MAX_CRL_BYTES, 33_554_432);
+}
+
+@test
+fn test_crl_freshness_tolerance_canonical_value() {
+    // 5-minute (300-second) clock-skew tolerance.
+    assert_eq(DEFAULT_FRESHNESS_TOLERANCE_SECONDS, 300);
+}
+
+@test
+fn test_crl_max_cache_ttl_canonical_value() {
+    // 24-hour max cache TTL.
+    assert_eq(DEFAULT_MAX_CACHE_TTL_SECONDS, 24 * 60 * 60);
+}
+
+@test
+fn test_crl_max_cache_ttl_concrete_value() {
+    assert_eq(DEFAULT_MAX_CACHE_TTL_SECONDS, 86_400);
+}
+
+@test
+fn test_content_type_pkix_crl_canonical_value() {
+    // RFC 5280 §A — application/pkix-crl MIME type.
+    assert_eq(CONTENT_TYPE_PKIX_CRL, "application/pkix-crl");
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_crl_cache_ttl_much_larger_than_freshness() {
+    // TTL is 24 hours; freshness is 5 min. Ratio: 24*60/5 = 288.
+    assert(DEFAULT_MAX_CACHE_TTL_SECONDS > DEFAULT_FRESHNESS_TOLERANCE_SECONDS);
+}
+
+@test
+fn test_crl_cache_ttl_is_288x_freshness() {
+    assert_eq(DEFAULT_MAX_CACHE_TTL_SECONDS, DEFAULT_FRESHNESS_TOLERANCE_SECONDS * 288);
+}
+
+@test
+fn test_crl_constants_positive() {
+    assert(MAX_CRL_BYTES > 0);
+    assert(DEFAULT_FRESHNESS_TOLERANCE_SECONDS > 0);
+    assert(DEFAULT_MAX_CACHE_TTL_SECONDS > 0);
+}
+
+fn main() {}
