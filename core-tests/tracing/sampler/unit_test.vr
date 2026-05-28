@@ -1,0 +1,90 @@
+// =============================================================================
+// core-tests/tracing/sampler/unit_test.vr
+// =============================================================================
+//
+// `core/tracing/sampler.vr` — OpenTelemetry sampler decision surface.
+//
+// Tested:
+//   * SamplingDecision 3-variant ADT (Drop / RecordOnly / RecordAndSample)
+//   * Variant disjointness via `is`-pattern testing
+// =============================================================================
+
+mount core.tracing.sampler.SamplingDecision;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: SamplingDecision 3-variant construction
+// =============================================================================
+
+@test
+fn test_sampling_decision_drop_variant() {
+    let d: SamplingDecision = SamplingDecision.Drop;
+    assert(d is SamplingDecision.Drop);
+}
+
+@test
+fn test_sampling_decision_record_only_variant() {
+    let d: SamplingDecision = SamplingDecision.RecordOnly;
+    assert(d is SamplingDecision.RecordOnly);
+}
+
+@test
+fn test_sampling_decision_record_and_sample_variant() {
+    let d: SamplingDecision = SamplingDecision.RecordAndSample;
+    assert(d is SamplingDecision.RecordAndSample);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_sampling_decision_drop_disjoint() {
+    let d: SamplingDecision = SamplingDecision.Drop;
+    assert(!(d is SamplingDecision.RecordOnly));
+    assert(!(d is SamplingDecision.RecordAndSample));
+}
+
+@test
+fn test_sampling_decision_record_only_disjoint() {
+    let d: SamplingDecision = SamplingDecision.RecordOnly;
+    assert(!(d is SamplingDecision.Drop));
+    assert(!(d is SamplingDecision.RecordAndSample));
+}
+
+@test
+fn test_sampling_decision_record_and_sample_disjoint() {
+    let d: SamplingDecision = SamplingDecision.RecordAndSample;
+    assert(!(d is SamplingDecision.Drop));
+    assert(!(d is SamplingDecision.RecordOnly));
+}
+
+// =============================================================================
+// Section 3: Match exhaustiveness
+// =============================================================================
+
+fn describe(d: &SamplingDecision) -> Text {
+    match d {
+        SamplingDecision.Drop             => "drop".to_text(),
+        SamplingDecision.RecordOnly       => "record-only".to_text(),
+        SamplingDecision.RecordAndSample  => "sample".to_text(),
+    }
+}
+
+@test
+fn test_sampling_decision_describe_drop() {
+    assert_eq(describe(&SamplingDecision.Drop), "drop");
+}
+
+@test
+fn test_sampling_decision_describe_record_only() {
+    assert_eq(describe(&SamplingDecision.RecordOnly), "record-only");
+}
+
+@test
+fn test_sampling_decision_describe_record_and_sample() {
+    assert_eq(describe(&SamplingDecision.RecordAndSample), "sample");
+}
+
+fn main() {}
