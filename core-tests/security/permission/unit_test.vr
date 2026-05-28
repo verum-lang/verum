@@ -1,0 +1,164 @@
+// =============================================================================
+// core-tests/security/permission/unit_test.vr
+// =============================================================================
+//
+// `core/security/permission.vr` — PermissionScope router scope tags.
+// =============================================================================
+
+mount core.security.permission.PermissionScope;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: PermissionScope 7-variant ADT construction
+// =============================================================================
+
+@test
+fn test_permission_scope_syscall_variant() {
+    let s: PermissionScope = PermissionScope.Syscall;
+    assert(s is PermissionScope.Syscall);
+}
+
+@test
+fn test_permission_scope_filesystem_variant() {
+    let s: PermissionScope = PermissionScope.FileSystem;
+    assert(s is PermissionScope.FileSystem);
+}
+
+@test
+fn test_permission_scope_network_variant() {
+    let s: PermissionScope = PermissionScope.Network;
+    assert(s is PermissionScope.Network);
+}
+
+@test
+fn test_permission_scope_process_variant() {
+    let s: PermissionScope = PermissionScope.Process;
+    assert(s is PermissionScope.Process);
+}
+
+@test
+fn test_permission_scope_memory_variant() {
+    let s: PermissionScope = PermissionScope.Memory;
+    assert(s is PermissionScope.Memory);
+}
+
+@test
+fn test_permission_scope_cryptography_variant() {
+    let s: PermissionScope = PermissionScope.Cryptography;
+    assert(s is PermissionScope.Cryptography);
+}
+
+@test
+fn test_permission_scope_time_variant() {
+    let s: PermissionScope = PermissionScope.Time;
+    assert(s is PermissionScope.Time);
+}
+
+// =============================================================================
+// Section 2: name() canonical labels
+//
+//   Stable display names — MUST match the Rust-side enum so
+//   diagnostics are coherent across the FFI boundary.
+// =============================================================================
+
+@ignore("PermissionScope.name() takes self by-value (not &self); method dispatch returns canonical-default-value not the matched arm. Sister of by-value-self method dispatch defect class.")
+@test
+fn test_permission_scope_syscall_name() {
+    let s: PermissionScope = PermissionScope.Syscall;
+    assert_eq(s.name(), "Syscall");
+}
+
+@ignore("Same by-value-self method-dispatch defect.")
+@test
+fn test_permission_scope_filesystem_name() {
+    let s: PermissionScope = PermissionScope.FileSystem;
+    assert_eq(s.name(), "FileSystem");
+}
+
+@ignore("Same by-value-self method-dispatch defect.")
+@test
+fn test_permission_scope_network_name() {
+    let s: PermissionScope = PermissionScope.Network;
+    assert_eq(s.name(), "Network");
+}
+
+@ignore("Same by-value-self method-dispatch defect.")
+@test
+fn test_permission_scope_process_name() {
+    let s: PermissionScope = PermissionScope.Process;
+    assert_eq(s.name(), "Process");
+}
+
+@ignore("Same by-value-self method-dispatch defect.")
+@test
+fn test_permission_scope_memory_name() {
+    let s: PermissionScope = PermissionScope.Memory;
+    assert_eq(s.name(), "Memory");
+}
+
+@ignore("Same by-value-self method-dispatch defect.")
+@test
+fn test_permission_scope_cryptography_name() {
+    let s: PermissionScope = PermissionScope.Cryptography;
+    assert_eq(s.name(), "Cryptography");
+}
+
+@ignore("Same by-value-self method-dispatch defect.")
+@test
+fn test_permission_scope_time_name() {
+    let s: PermissionScope = PermissionScope.Time;
+    assert_eq(s.name(), "Time");
+}
+
+// =============================================================================
+// Section 3: to_wire_tag() — stable u32 wire encoding
+//
+//   The ordering MUST match `verum_vbc::interpreter::permission::PermissionScope`
+//   so the @intrinsic boundary transcribes directly. Drift here would
+//   silently mis-route permission decisions.
+// =============================================================================
+
+@test
+fn test_permission_scope_syscall_wire_tag_is_0() {
+    let s: PermissionScope = PermissionScope.Syscall;
+    assert_eq(s.to_wire_tag(), 0_u32);
+}
+
+@test
+fn test_permission_scope_filesystem_wire_tag_is_1() {
+    let s: PermissionScope = PermissionScope.FileSystem;
+    assert_eq(s.to_wire_tag(), 1_u32);
+}
+
+@test
+fn test_permission_scope_network_wire_tag_is_2() {
+    let s: PermissionScope = PermissionScope.Network;
+    assert_eq(s.to_wire_tag(), 2_u32);
+}
+
+@test
+fn test_permission_scope_process_wire_tag_is_3() {
+    let s: PermissionScope = PermissionScope.Process;
+    assert_eq(s.to_wire_tag(), 3_u32);
+}
+
+@test
+fn test_permission_scope_memory_wire_tag_is_4() {
+    let s: PermissionScope = PermissionScope.Memory;
+    assert_eq(s.to_wire_tag(), 4_u32);
+}
+
+@test
+fn test_permission_scope_cryptography_wire_tag_is_5() {
+    let s: PermissionScope = PermissionScope.Cryptography;
+    assert_eq(s.to_wire_tag(), 5_u32);
+}
+
+@test
+fn test_permission_scope_time_wire_tag_is_6() {
+    let s: PermissionScope = PermissionScope.Time;
+    assert_eq(s.to_wire_tag(), 6_u32);
+}
+
+fn main() {}
