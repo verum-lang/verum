@@ -1,0 +1,74 @@
+// =============================================================================
+// core-tests/security/regions/unit_test.vr
+// =============================================================================
+//
+// `core/security/regions.vr` — lifetime/region surface.
+//
+// Note: type uses bare `Ok` as a local variant — qualifying via
+// EscapeVerdict.Ok per the bare-variant resolution discipline.
+// =============================================================================
+
+mount core.security.regions.{Lifetime, LifetimeSet};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Lifetime record construction
+// =============================================================================
+
+@test
+fn test_lifetime_construction() {
+    let lt: Lifetime = Lifetime { name: "'a".to_text() };
+    assert_eq(lt.name, "'a");
+}
+
+@test
+fn test_lifetime_anonymous() {
+    let lt: Lifetime = Lifetime { name: "_".to_text() };
+    assert_eq(lt.name, "_");
+}
+
+@test
+fn test_lifetime_static() {
+    let lt: Lifetime = Lifetime { name: "'static".to_text() };
+    assert_eq(lt.name, "'static");
+}
+
+@test
+fn test_lifetime_field_independence() {
+    let a: Lifetime = Lifetime { name: "'a".to_text() };
+    let b: Lifetime = Lifetime { name: "'b".to_text() };
+    assert_eq(a.name, "'a");
+    assert_eq(b.name, "'b");
+}
+
+// =============================================================================
+// Section 2: LifetimeSet record construction
+// =============================================================================
+
+@test
+fn test_lifetime_set_empty() {
+    let empty: List<Lifetime> = [];
+    let s: LifetimeSet = LifetimeSet { regions: empty };
+    assert_eq(s.regions.len(), 0);
+}
+
+@test
+fn test_lifetime_set_single() {
+    let mut regs: List<Lifetime> = [];
+    regs.push(Lifetime { name: "'a".to_text() });
+    let s: LifetimeSet = LifetimeSet { regions: regs };
+    assert_eq(s.regions.len(), 1);
+}
+
+@test
+fn test_lifetime_set_multi() {
+    let mut regs: List<Lifetime> = [];
+    regs.push(Lifetime { name: "'a".to_text() });
+    regs.push(Lifetime { name: "'b".to_text() });
+    regs.push(Lifetime { name: "'static".to_text() });
+    let s: LifetimeSet = LifetimeSet { regions: regs };
+    assert_eq(s.regions.len(), 3);
+}
+
+fn main() {}
