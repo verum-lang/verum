@@ -233,8 +233,8 @@ fn regression_question_mark_preserves_kind() {
         Result.Ok(0)
     }
     match helper() {
-        Result.Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
-        Result.Ok(_) => assert(false),
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Ok(_) => assert(false),
     }
 }
 

@@ -96,8 +96,8 @@ fn test_heap_try_new_success() {
     assert(result.is_ok());
 
     match result {
-        Result.Ok(boxed) => assert_eq(*boxed, 42),
-        Result.Err(_) => panic("Unexpected allocation failure"),
+        Ok(boxed) => assert_eq(*boxed, 42),
+        Err(_) => panic("Unexpected allocation failure"),
     }
 }
 
@@ -383,8 +383,8 @@ fn test_shared_try_unwrap_success() {
     assert(shared.is_unique());
 
     match shared.try_unwrap() {
-        Result.Ok(value) => assert_eq(value, 42),
-        Result.Err(_) => panic("Expected Ok from try_unwrap on unique Shared"),
+        Ok(value) => assert_eq(value, 42),
+        Err(_) => panic("Expected Ok from try_unwrap on unique Shared"),
     }
 }
 
@@ -394,8 +394,8 @@ fn test_shared_try_unwrap_failure() {
     let _shared2 = shared1.clone();
 
     match shared1.try_unwrap() {
-        Result.Ok(_) => panic("Expected Err from try_unwrap on non-unique Shared"),
-        Result.Err(returned) => {
+        Ok(_) => panic("Expected Err from try_unwrap on non-unique Shared"),
+        Err(returned) => {
             // Should return the Shared back
             assert_eq(*returned, 42);
         }

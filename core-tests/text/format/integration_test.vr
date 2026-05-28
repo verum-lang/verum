@@ -76,8 +76,8 @@ fn integration_format_inside_loop() {
 fn integration_write_error_in_result_ok() {
     let r: Result<Int, WriteError> = Result.Ok(42);
     match r {
-        Result.Ok(n) => assert_eq(n, 42),
-        Result.Err(_) => panic("Ok branch"),
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("Ok branch"),
     }
 }
 
@@ -85,8 +85,8 @@ fn integration_write_error_in_result_ok() {
 fn integration_write_error_in_result_err() {
     let r: Result<Int, WriteError> = Result.Err(WriteError.io());
     match r {
-        Result.Ok(_) => panic("Err branch"),
-        Result.Err(e) => assert(e.kind is WriteErrorKind.Io),
+        Ok(_) => panic("Err branch"),
+        Err(e) => assert(e.kind is WriteErrorKind.Io),
     }
 }
 

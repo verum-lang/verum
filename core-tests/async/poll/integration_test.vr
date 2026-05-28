@@ -81,7 +81,7 @@ fn integration_poll_result_ok_chain() {
 
 fn poll_result_err_text(q: Poll<Result<Int, Text>>) -> Text {
     match q {
-        Poll.Ready(Result.Err(e)) => e,
+        Poll.Ready(Err(e)) => e,
         _ => "<unexpected>",
     }
 }
@@ -184,8 +184,8 @@ fn integration_poll_of_maybe_nested_match() {
 fn integration_poll_of_result_nested_match() {
     fn classify_pr(p: Poll<Result<Int, Text>>) -> Text {
         match p {
-            Poll.Ready(Result.Ok(_)) => "ready-ok",
-            Poll.Ready(Result.Err(_)) => "ready-err",
+            Poll.Ready(Ok(_)) => "ready-ok",
+            Poll.Ready(Err(_)) => "ready-err",
             Poll.Pending => "pending",
         }
     }

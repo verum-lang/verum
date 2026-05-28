@@ -207,7 +207,7 @@ fn test_poll_map_ok_preserves_err() {
     let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Err("e"));
     fn err_payload(q: Poll<Result<Int, Text>>) -> Text {
         match q {
-            Poll.Ready(Result.Err(e)) => e,
+            Poll.Ready(Err(e)) => e,
             _ => "<unexpected>",
         }
     }
@@ -236,7 +236,7 @@ fn test_poll_map_err_on_ready_err() {
     let p: Poll<Result<Int, Int>> = Poll.Ready(Result.Err(7));
     fn extract_err(q: Poll<Result<Int, Int>>) -> Int {
         match q {
-            Poll.Ready(Result.Err(e)) => e,
+            Poll.Ready(Err(e)) => e,
             _ => -1,
         }
     }

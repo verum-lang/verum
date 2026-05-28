@@ -89,8 +89,8 @@ fn integration_block_on_via_result_ok_branch() {
     // Result<T, E> wrapping for error-path consistency.
     let r: Result<Int, Text> = Result.Ok(block_on(7));
     match r {
-        Result.Ok(v)  => assert_eq(v, 7),
-        Result.Err(_) => assert(false),
+        Ok(v)  => assert_eq(v, 7),
+        Err(_) => assert(false),
     };
 }
 

@@ -82,8 +82,8 @@ fn test_from_utf8_valid_ascii() {
     let bytes: List<Byte> = [72 as Byte, 105 as Byte];  // "Hi"
     let r = Text.from_utf8(&bytes);
     match r {
-        Result.Ok(t) => assert_eq(t, "Hi"),
-        Result.Err(_) => panic("expected valid UTF-8"),
+        Ok(t) => assert_eq(t, "Hi"),
+        Err(_) => panic("expected valid UTF-8"),
     }
 }
 
@@ -92,8 +92,8 @@ fn test_from_utf8_empty_bytes() {
     let bytes: List<Byte> = [];
     let r = Text.from_utf8(&bytes);
     match r {
-        Result.Ok(t) => assert(t.is_empty()),
-        Result.Err(_) => panic("empty bytes are valid UTF-8"),
+        Ok(t) => assert(t.is_empty()),
+        Err(_) => panic("empty bytes are valid UTF-8"),
     }
 }
 
@@ -103,8 +103,8 @@ fn test_from_utf8_invalid_continuation() {
     let bytes: List<Byte> = [0xC0 as Byte, 0x20 as Byte];
     let r = Text.from_utf8(&bytes);
     match r {
-        Result.Ok(_) => panic("expected Utf8Error"),
-        Result.Err(_) => {},
+        Ok(_) => panic("expected Utf8Error"),
+        Err(_) => {},
     }
 }
 
@@ -1102,90 +1102,90 @@ fn test_reverse_palindrome_is_self() { assert_eq("aba".reverse(), "aba"); }
 @test
 fn test_parse_int_positive() {
     match "42".parse_int() {
-        Result.Ok(n) => assert_eq(n, 42),
-        Result.Err(_) => panic("'42' is a valid Int"),
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("'42' is a valid Int"),
     }
 }
 
 @test
 fn test_parse_int_negative() {
     match "-7".parse_int() {
-        Result.Ok(n) => assert_eq(n, -7),
-        Result.Err(_) => panic("'-7' is valid"),
+        Ok(n) => assert_eq(n, -7),
+        Err(_) => panic("'-7' is valid"),
     }
 }
 
 @test
 fn test_parse_int_invalid_returns_err() {
     match "abc".parse_int() {
-        Result.Ok(_) => panic("'abc' is not an Int"),
-        Result.Err(_) => {},
+        Ok(_) => panic("'abc' is not an Int"),
+        Err(_) => {},
     }
 }
 
 @test
 fn test_parse_int_empty_returns_err() {
     match "".parse_int() {
-        Result.Ok(_) => panic("'' is not an Int"),
-        Result.Err(_) => {},
+        Ok(_) => panic("'' is not an Int"),
+        Err(_) => {},
     }
 }
 
 @test
 fn test_parse_float_positive() {
     match "3.14".parse_float() {
-        Result.Ok(f) => {
+        Ok(f) => {
             assert(f > 3.13 && f < 3.15);
         }
-        Result.Err(_) => panic("'3.14' is valid"),
+        Err(_) => panic("'3.14' is valid"),
     }
 }
 
 @test
 fn test_parse_float_invalid() {
     match "xyz".parse_float() {
-        Result.Ok(_) => panic("'xyz' is not a Float"),
-        Result.Err(_) => {},
+        Ok(_) => panic("'xyz' is not a Float"),
+        Err(_) => {},
     }
 }
 
 @test
 fn test_parse_bool_true() {
     match "true".parse_bool() {
-        Result.Ok(b) => assert(b),
-        Result.Err(_) => panic("'true' is valid"),
+        Ok(b) => assert(b),
+        Err(_) => panic("'true' is valid"),
     }
 }
 
 @test
 fn test_parse_bool_false() {
     match "false".parse_bool() {
-        Result.Ok(b) => assert(!b),
-        Result.Err(_) => panic("'false' is valid"),
+        Ok(b) => assert(!b),
+        Err(_) => panic("'false' is valid"),
     }
 }
 
 @test
 fn test_parse_bool_invalid() {
     match "yes".parse_bool() {
-        Result.Ok(_) => panic("'yes' is not Bool literal"),
-        Result.Err(_) => {},
+        Ok(_) => panic("'yes' is not Bool literal"),
+        Err(_) => {},
     }
 }
 
 @test
 fn test_parse_int_radix_hex() {
     match "ff".parse_int_radix(16) {
-        Result.Ok(n) => assert_eq(n, 255),
-        Result.Err(_) => panic("'ff' base 16"),
+        Ok(n) => assert_eq(n, 255),
+        Err(_) => panic("'ff' base 16"),
     }
 }
 
 @test
 fn test_parse_int_radix_binary() {
     match "1010".parse_int_radix(2) {
-        Result.Ok(n) => assert_eq(n, 10),
-        Result.Err(_) => panic("'1010' base 2"),
+        Ok(n) => assert_eq(n, 10),
+        Err(_) => panic("'1010' base 2"),
     }
 }
 
@@ -1290,8 +1290,8 @@ fn test_encode_utf16_ascii() {
 fn test_utf8_error_carries_index() {
     let bytes: List<Byte> = [0xC0 as Byte, 0x20 as Byte];
     match Text.from_utf8(&bytes) {
-        Result.Ok(_) => panic("expected error"),
-        Result.Err(e) => assert(e.valid_up_to >= 0),
+        Ok(_) => panic("expected error"),
+        Err(e) => assert(e.valid_up_to >= 0),
     }
 }
 
@@ -1445,8 +1445,8 @@ fn test_from_str_int() {
     let s: Text = "42";
     let parsed = Int.from_str(&s);
     match parsed {
-        Result.Ok(n) => assert_eq(n, 42),
-        Result.Err(_) => panic("Int.from_str of '42' should be Ok"),
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("Int.from_str of '42' should be Ok"),
     }
 }
 
@@ -1455,8 +1455,8 @@ fn test_from_str_bool() {
     let s: Text = "true";
     let parsed = Bool.from_str(&s);
     match parsed {
-        Result.Ok(b) => assert(b),
-        Result.Err(_) => panic("Bool.from_str of 'true' should be Ok"),
+        Ok(b) => assert(b),
+        Err(_) => panic("Bool.from_str of 'true' should be Ok"),
     }
 }
 

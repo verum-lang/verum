@@ -402,8 +402,8 @@ fn test_try_result_err() {
         Break(residual) => {
             // residual is Result<Never, Text> which must be Err
             match residual {
-                Result.Err(e) => assert_eq(e, "error"),
-                Result.Ok(_) => panic("Residual should be Err"),
+                Err(e) => assert_eq(e, "error"),
+                Ok(_) => panic("Residual should be Err"),
             }
         }
     }
@@ -572,8 +572,8 @@ fn test_control_flow_nested_types() {
     assert(cf.is_continue());
 
     match cf.continue_value() {
-        Result.Ok(v) => assert_eq(v, 42),
-        Result.Err(_) => panic("Expected Ok"),
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => panic("Expected Ok"),
     }
 }
 
@@ -852,8 +852,8 @@ fn test_control_flow_nested_pattern_matching() {
     match cf {
         Continue(Maybe.Some(v)) => assert_eq(v, 42),
         Continue(Maybe.None) => panic("Expected Some"),
-        Break(Result.Ok(_)) => panic("Expected Continue"),
-        Break(Result.Err(_)) => panic("Expected Continue"),
+        Break(Ok(_)) => panic("Expected Continue"),
+        Break(Err(_)) => panic("Expected Continue"),
     }
 }
 
@@ -872,8 +872,8 @@ fn test_try_async_pattern() {
         match ar {
             Pending => Break(Pending),
             Ready(result) => match result {
-                Result.Ok(v) => Continue(v),
-                Result.Err(e) => Break(Ready(Result.Err(e))),
+                Ok(v) => Continue(v),
+                Err(e) => Break(Ready(Err(e))),
             },
         }
     }
@@ -893,7 +893,7 @@ fn test_try_async_pattern() {
     }
 
     match poll(ready_err) {
-        Break(Ready(Result.Err(e))) => assert_eq(e, "error"),
+        Break(Ready(Err(e))) => assert_eq(e, "error"),
         _ => panic("Expected error break"),
     }
 }
@@ -1081,14 +1081,14 @@ fn test_try_result_error_type_flexibility() {
     fn outer_fn() -> Result<Int, DetailedErr> {
         let result = inner_fn();
         match result.branch() {
-            Continue(v) => Result.Ok(v),
+            Continue(v) => Ok(v),
             Break(residual) => {
                 match residual {
-                    Result.Err(simple) => Result.Err(DetailedErr {
+                    Err(simple) => Err(DetailedErr {
                         msg: simple.msg,
                         location: "outer_fn",
                     }),
-                    Result.Ok(_) => unreachable(),
+                    Ok(_) => unreachable(),
                 }
             }
         }
@@ -1117,8 +1117,8 @@ fn test_from_residual_maybe_to_result_pattern() {
     fn result_wrapper() -> Result<Int, Text> {
         let maybe_val = maybe_operation();
         match maybe_val.branch() {
-            Continue(v) => Result.Ok(v),
-            Break(_) => Result.Err("Maybe was Maybe.None"),
+            Continue(v) => Ok(v),
+            Break(_) => Err("Maybe was Maybe.None"),
         }
     }
 

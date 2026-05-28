@@ -98,8 +98,8 @@ fn integration_build_digit_sequence_parse_int() {
     b.push(&"2");
     let s = b.build();
     match s.parse_int() {
-        Result.Ok(n) => assert_eq(n, 42),
-        Result.Err(_) => panic("digit-built '42' must parse to 42"),
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("digit-built '42' must parse to 42"),
     }
 }
 

@@ -220,9 +220,9 @@ fn test_var_not_present() {
     let result = var(&"__VERUM_TEST_DEFINITELY_NOT_SET_12345__");
 
     match result {
-        Result.Ok(_) => panic("should return Err for non-existent var"),
-        Result.Err(VarError.NotPresent) => {}, // Expected
-        Result.Err(_) => panic("expected NotPresent error"),
+        Ok(_) => panic("should return Err for non-existent var"),
+        Err(VarError.NotPresent) => {}, // Expected
+        Err(_) => panic("expected NotPresent error"),
     }
 }
 
@@ -639,11 +639,11 @@ fn test_var_result_ok_path() {
 
     // Either Ok or Err is valid
     match result {
-        Result.Ok(value) => {
+        Ok(value) => {
             // Value should be usable
             let _ = value.len();
         }
-        Result.Err(_) => {
+        Err(_) => {
             // PATH not set is unusual but valid
         }
     }

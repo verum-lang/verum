@@ -37,8 +37,8 @@ mount core.base.result.{Result, Ok, Err};
 fn regression_lookup_host_real_hostname() {
     let host = "example.com".clone();
     match lookup_host(&host) {
-        Result.Ok(addrs) => assert(addrs.len() > 0),
-        Result.Err(_) => panic("expected at least one address"),
+        Ok(addrs) => assert(addrs.len() > 0),
+        Err(_) => panic("expected at least one address"),
     }
 }
 
@@ -47,8 +47,8 @@ fn regression_lookup_host_real_hostname() {
 fn regression_lookup_host_v4_real_hostname() {
     let host = "example.com".clone();
     match lookup_host_v4(&host) {
-        Result.Ok(addrs) => assert(addrs.len() > 0),
-        Result.Err(_) => panic("expected at least one v4 address"),
+        Ok(addrs) => assert(addrs.len() > 0),
+        Err(_) => panic("expected at least one v4 address"),
     }
 }
 
@@ -57,8 +57,8 @@ fn regression_lookup_host_v4_real_hostname() {
 fn regression_lookup_host_v6_real_hostname() {
     let host = "example.com".clone();
     match lookup_host_v6(&host) {
-        Result.Ok(addrs) => assert(addrs.len() > 0),
-        Result.Err(_) => panic("expected at least one v6 address"),
+        Ok(addrs) => assert(addrs.len() > 0),
+        Err(_) => panic("expected at least one v6 address"),
     }
 }
 
@@ -68,8 +68,8 @@ fn regression_lookup_addr_reverse_ptr() {
     // 8.8.8.8 PTR → dns.google. (a stable Google-DNS reverse).
     let ip = IpAddr.v4(8_u8, 8_u8, 8_u8, 8_u8);
     match lookup_addr(&ip) {
-        Result.Ok(name) => assert(name.len() > 0),
-        Result.Err(_) => panic("expected a PTR record"),
+        Ok(name) => assert(name.len() > 0),
+        Err(_) => panic("expected a PTR record"),
     }
 }
 
@@ -87,8 +87,8 @@ fn regression_resolver_new_and_query() {
 fn regression_resolve_socket_addrs() {
     let host = "example.com".clone();
     match resolve(&host, 80) {
-        Result.Ok(addrs) => assert(addrs.len() > 0),
-        Result.Err(_) => panic("expected at least one SocketAddr"),
+        Ok(addrs) => assert(addrs.len() > 0),
+        Err(_) => panic("expected at least one SocketAddr"),
     }
 }
 

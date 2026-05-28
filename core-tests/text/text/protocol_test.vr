@@ -387,8 +387,8 @@ fn as_ref_yields_byte_slice_view() {
 fn from_str_int_round_trip() {
     let r: Result<Int, ParseError> = Int.from_str(&"123");
     match r {
-        Result.Ok(n) => assert_eq(n, 123),
-        Result.Err(_) => panic("'123' must parse to 123"),
+        Ok(n) => assert_eq(n, 123),
+        Err(_) => panic("'123' must parse to 123"),
     };
 }
 
@@ -396,8 +396,8 @@ fn from_str_int_round_trip() {
 fn from_str_int_negative() {
     let r: Result<Int, ParseError> = Int.from_str(&"-42");
     match r {
-        Result.Ok(n) => assert_eq(n, -42),
-        Result.Err(_) => panic("'-42' must parse to -42"),
+        Ok(n) => assert_eq(n, -42),
+        Err(_) => panic("'-42' must parse to -42"),
     };
 }
 
@@ -405,8 +405,8 @@ fn from_str_int_negative() {
 fn from_str_int_invalid_returns_err() {
     let r: Result<Int, ParseError> = Int.from_str(&"xyz");
     match r {
-        Result.Ok(_) => panic("'xyz' must NOT parse"),
-        Result.Err(_) => (),
+        Ok(_) => panic("'xyz' must NOT parse"),
+        Err(_) => (),
     };
 }
 
@@ -414,8 +414,8 @@ fn from_str_int_invalid_returns_err() {
 fn from_str_bool_true() {
     let r: Result<Bool, ParseError> = Bool.from_str(&"true");
     match r {
-        Result.Ok(b) => assert(b),
-        Result.Err(_) => panic("'true' must parse"),
+        Ok(b) => assert(b),
+        Err(_) => panic("'true' must parse"),
     };
 }
 
@@ -423,8 +423,8 @@ fn from_str_bool_true() {
 fn from_str_bool_false() {
     let r: Result<Bool, ParseError> = Bool.from_str(&"false");
     match r {
-        Result.Ok(b) => assert(!b),
-        Result.Err(_) => panic("'false' must parse"),
+        Ok(b) => assert(!b),
+        Err(_) => panic("'false' must parse"),
     };
 }
 
@@ -432,8 +432,8 @@ fn from_str_bool_false() {
 fn from_str_bool_invalid_returns_err() {
     let r: Result<Bool, ParseError> = Bool.from_str(&"yes");
     match r {
-        Result.Ok(_) => panic("'yes' must NOT parse to Bool"),
-        Result.Err(_) => (),
+        Ok(_) => panic("'yes' must NOT parse to Bool"),
+        Err(_) => (),
     };
 }
 
@@ -441,8 +441,8 @@ fn from_str_bool_invalid_returns_err() {
 fn from_str_text_is_identity() {
     let r: Result<Text, ParseError> = Text.from_str(&"verum");
     match r {
-        Result.Ok(t) => assert_eq(t, "verum"),
-        Result.Err(_) => panic("Text.from_str must be Ok for any Text"),
+        Ok(t) => assert_eq(t, "verum"),
+        Err(_) => panic("Text.from_str must be Ok for any Text"),
     };
 }
 
@@ -454,8 +454,8 @@ fn from_str_text_is_identity() {
 fn try_with_capacity_zero_returns_empty() {
     let r: Result<Text, _> = Text.try_with_capacity(0);
     match r {
-        Result.Ok(t) => { assert(t.is_empty()); assert_eq(t.len(), 0); },
-        Result.Err(_) => panic("try_with_capacity(0) must succeed"),
+        Ok(t) => { assert(t.is_empty()); assert_eq(t.len(), 0); },
+        Err(_) => panic("try_with_capacity(0) must succeed"),
     };
 }
 
@@ -469,12 +469,12 @@ fn try_with_capacity_positive_returns_empty_with_room() {
     // `cap` field — see task #5 close-out.
     let r: Result<Text, _> = Text.try_with_capacity(64);
     match r {
-        Result.Ok(t) => {
+        Ok(t) => {
             assert(t.is_empty());
             assert_eq(t.len(), 0);
             assert(t.capacity() >= 64);
         },
-        Result.Err(_) => panic("try_with_capacity(64) must succeed"),
+        Err(_) => panic("try_with_capacity(64) must succeed"),
     };
 }
 
@@ -513,8 +513,8 @@ fn utf16_round_trip_ascii() {
     let units = s.encode_utf16();
     let r: Result<Text, Utf16Error> = Text.from_utf16(&units);
     match r {
-        Result.Ok(t) => assert_eq(t, s),
-        Result.Err(_) => panic("ASCII must round-trip through UTF-16"),
+        Ok(t) => assert_eq(t, s),
+        Err(_) => panic("ASCII must round-trip through UTF-16"),
     };
 }
 
@@ -893,8 +893,8 @@ fn from_int_round_trip() {
     let s: Text = Text.from_int(n);
     let parsed = s.parse_int();
     match parsed {
-        Result.Ok(m) => assert_eq(m, n),
-        Result.Err(_) => panic("Int -> Text -> Int must round-trip"),
+        Ok(m) => assert_eq(m, n),
+        Err(_) => panic("Int -> Text -> Int must round-trip"),
     };
 }
 

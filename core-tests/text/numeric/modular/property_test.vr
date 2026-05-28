@@ -148,8 +148,8 @@ fn law_mod_pow_exponent_zero_is_one() {
     let e = bi(0);
     let m = bi(7);
     match mod_pow(&a, &e, &m) {
-        Result.Ok(r) => must_be_one(&r, &"mod_pow(5, 0, 7)"),
-        Result.Err(_) => panic("mod_pow(5, 0, 7) must succeed"),
+        Ok(r) => must_be_one(&r, &"mod_pow(5, 0, 7)"),
+        Err(_) => panic("mod_pow(5, 0, 7) must succeed"),
     };
 }
 
@@ -159,8 +159,8 @@ fn law_mod_pow_base_zero_is_zero_when_exp_positive() {
     let e = bi(5);
     let m = bi(7);
     match mod_pow(&a, &e, &m) {
-        Result.Ok(r) => assert(r.is_zero()),
-        Result.Err(_) => panic("mod_pow(0, 5, 7) must succeed"),
+        Ok(r) => assert(r.is_zero()),
+        Err(_) => panic("mod_pow(0, 5, 7) must succeed"),
     };
 }
 
@@ -179,7 +179,7 @@ fn law_mod_pow_exponent_recurrence_3_4_7() {
     let r3 = mod_pow(&a, &bi(3), &m);
     let r4 = mod_pow(&a, &bi(4), &m);
     match (r3, r4) {
-        (Result.Ok(p3), Result.Ok(p4)) => {
+        (Ok(p3), Ok(p4)) => {
             let expected = p3.mul(&a);
             let (_q, rem) = expected.div_rem(&m).unwrap();
             assert(rem.eq(&p4));
@@ -198,12 +198,12 @@ fn law_mod_inverse_round_trip_3_mod_7() {
     let a = bi(3);
     let m = bi(7);
     match mod_inverse(&a, &m) {
-        Result.Ok(inv) => {
+        Ok(inv) => {
             let product = a.mul(&inv);
             let (_q, rem) = product.div_rem(&m).unwrap();
             must_be_one(&rem, &"3 * mod_inverse(3, 7) mod 7");
         },
-        Result.Err(_) => panic("mod_inverse(3, 7) must succeed (gcd=1)"),
+        Err(_) => panic("mod_inverse(3, 7) must succeed (gcd=1)"),
     };
 }
 
@@ -212,12 +212,12 @@ fn law_mod_inverse_round_trip_5_mod_11() {
     let a = bi(5);
     let m = bi(11);
     match mod_inverse(&a, &m) {
-        Result.Ok(inv) => {
+        Ok(inv) => {
             let product = a.mul(&inv);
             let (_q, rem) = product.div_rem(&m).unwrap();
             must_be_one(&rem, &"5 * mod_inverse(5, 11) mod 11");
         },
-        Result.Err(_) => panic("mod_inverse(5, 11) must succeed"),
+        Err(_) => panic("mod_inverse(5, 11) must succeed"),
     };
 }
 
@@ -226,8 +226,8 @@ fn law_mod_inverse_fails_when_not_coprime() {
     let a = bi(6);
     let m = bi(9);  // gcd(6, 9) = 3, not coprime
     match mod_inverse(&a, &m) {
-        Result.Ok(_) => panic("mod_inverse(6, 9) must Err (gcd != 1)"),
-        Result.Err(_) => (),
+        Ok(_) => panic("mod_inverse(6, 9) must Err (gcd != 1)"),
+        Err(_) => (),
     };
 }
 

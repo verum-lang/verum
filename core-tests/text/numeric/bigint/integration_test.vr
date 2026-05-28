@@ -28,8 +28,8 @@ fn bi(n: Int) -> BigInt {
 fn integration_parse_to_text_round_trip_positive() {
     let r = parse_bigint(&"12345");
     match r {
-        Result.Ok(b) => assert_eq(b.to_text(), "12345"),
-        Result.Err(_) => panic("parse_bigint must succeed for '12345'"),
+        Ok(b) => assert_eq(b.to_text(), "12345"),
+        Err(_) => panic("parse_bigint must succeed for '12345'"),
     };
 }
 
@@ -37,8 +37,8 @@ fn integration_parse_to_text_round_trip_positive() {
 fn integration_parse_to_text_round_trip_negative() {
     let r = parse_bigint(&"-42");
     match r {
-        Result.Ok(b) => assert_eq(b.to_text(), "-42"),
-        Result.Err(_) => panic("parse_bigint must succeed for '-42'"),
+        Ok(b) => assert_eq(b.to_text(), "-42"),
+        Err(_) => panic("parse_bigint must succeed for '-42'"),
     };
 }
 
@@ -46,8 +46,8 @@ fn integration_parse_to_text_round_trip_negative() {
 fn integration_parse_invalid_returns_err() {
     let r = parse_bigint(&"not-a-number");
     match r {
-        Result.Ok(_) => panic("'not-a-number' must NOT parse"),
-        Result.Err(_) => (),
+        Ok(_) => panic("'not-a-number' must NOT parse"),
+        Err(_) => (),
     };
 }
 
@@ -60,8 +60,8 @@ fn integration_div_rem_by_zero_returns_err() {
     let a = bi(10);
     let zero = BigInt.zero();
     match a.div_rem(&zero) {
-        Result.Ok(_) => panic("div by zero must Err"),
-        Result.Err(_) => (),
+        Ok(_) => panic("div by zero must Err"),
+        Err(_) => (),
     };
 }
 

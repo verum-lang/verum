@@ -79,10 +79,10 @@ fn integration_spawn_result_ok_branch_propagates_pid() {
         stderr_fd: -1,
     });
     match ok {
-        Result.Ok(r) => {
+        Ok(r) => {
             assert_eq(r.pid, 9999);
         }
-        Result.Err(_) => assert(false),
+        Err(_) => assert(false),
     };
 }
 
@@ -90,8 +90,8 @@ fn integration_spawn_result_ok_branch_propagates_pid() {
 fn integration_spawn_result_err_branch_carries_text() {
     let err: Result<SpawnResult, Text> = Result.Err("fork() failed: EAGAIN".clone());
     match err {
-        Result.Ok(_)    => assert(false),
-        Result.Err(msg) => assert_eq(msg, "fork() failed: EAGAIN".clone()),
+        Ok(_)    => assert(false),
+        Err(msg) => assert_eq(msg, "fork() failed: EAGAIN".clone()),
     };
 }
 

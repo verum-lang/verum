@@ -65,8 +65,8 @@ fn test_encode_six_bytes() {
 fn test_decode_empty() {
     let s = "".clone();
     match decode(&s) {
-        Result.Ok(bytes) => assert_eq(bytes.len(), 0),
-        Result.Err(_) => panic("empty should decode to empty"),
+        Ok(bytes) => assert_eq(bytes.len(), 0),
+        Err(_) => panic("empty should decode to empty"),
     }
 }
 
@@ -74,11 +74,11 @@ fn test_decode_empty() {
 fn test_decode_zg_padded() {
     let s = "Zg==".clone();
     match decode(&s) {
-        Result.Ok(bytes) => {
+        Ok(bytes) => {
             assert_eq(bytes.len(), 1);
             assert_eq(bytes[0], 0x66_u8);
         },
-        Result.Err(_) => panic("'Zg==' should decode to 'f'"),
+        Err(_) => panic("'Zg==' should decode to 'f'"),
     }
 }
 
@@ -86,12 +86,12 @@ fn test_decode_zg_padded() {
 fn test_decode_zm8_padded() {
     let s = "Zm8=".clone();
     match decode(&s) {
-        Result.Ok(bytes) => {
+        Ok(bytes) => {
             assert_eq(bytes.len(), 2);
             assert_eq(bytes[0], 0x66_u8);
             assert_eq(bytes[1], 0x6F_u8);
         },
-        Result.Err(_) => panic("'Zm8=' should decode to 'fo'"),
+        Err(_) => panic("'Zm8=' should decode to 'fo'"),
     }
 }
 
@@ -99,13 +99,13 @@ fn test_decode_zm8_padded() {
 fn test_decode_zm9v_no_pad() {
     let s = "Zm9v".clone();
     match decode(&s) {
-        Result.Ok(bytes) => {
+        Ok(bytes) => {
             assert_eq(bytes.len(), 3);
             assert_eq(bytes[0], 0x66_u8);
             assert_eq(bytes[1], 0x6F_u8);
             assert_eq(bytes[2], 0x6F_u8);
         },
-        Result.Err(_) => panic("'Zm9v' should decode to 'foo'"),
+        Err(_) => panic("'Zm9v' should decode to 'foo'"),
     }
 }
 
@@ -113,11 +113,11 @@ fn test_decode_zm9v_no_pad() {
 fn test_decode_six_bytes() {
     let s = "Zm9vYmFy".clone();
     match decode(&s) {
-        Result.Ok(bytes) => {
+        Ok(bytes) => {
             assert_eq(bytes.len(), 6);
             assert_eq(bytes[5], 0x72_u8); // 'r'
         },
-        Result.Err(_) => panic("'Zm9vYmFy' should decode to 'foobar'"),
+        Err(_) => panic("'Zm9vYmFy' should decode to 'foobar'"),
     }
 }
 
@@ -193,8 +193,8 @@ fn test_decode_invalid_char_at() {
     // '@' is not a base64 char
     let s = "Z@==".clone();
     match decode(&s) {
-        Result.Ok(_) => panic("'@' is not a base64 character"),
-        Result.Err(e) => assert(e.kind is Base64ErrorKind.InvalidChar),
+        Ok(_) => panic("'@' is not a base64 character"),
+        Err(e) => assert(e.kind is Base64ErrorKind.InvalidChar),
     }
 }
 
@@ -203,7 +203,7 @@ fn test_decode_invalid_length_3() {
     // 3 chars without padding is invalid (base64 requires multiples of 4)
     let s = "Zg=".clone();
     match decode(&s) {
-        Result.Ok(_) => panic("3-char input should fail"),
-        Result.Err(_) => assert(true),
+        Ok(_) => panic("3-char input should fail"),
+        Err(_) => assert(true),
     }
 }

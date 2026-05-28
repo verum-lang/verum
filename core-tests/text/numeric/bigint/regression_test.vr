@@ -67,11 +67,11 @@ fn guard_from_int_negative() {
 @test
 fn guard_parse_simple_positive() {
     match parse_bigint(&"42") {
-        Result.Ok(b) => {
+        Ok(b) => {
             assert_eq(b.digits.len(), 1);
             assert_eq(b.digits[0], 42);
         },
-        Result.Err(_) => panic("parse_bigint('42') must succeed"),
+        Err(_) => panic("parse_bigint('42') must succeed"),
     };
 }
 

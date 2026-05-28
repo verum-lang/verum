@@ -43,8 +43,8 @@ fn integration_io_result_map_err_transforms_error() {
     let r: IoResult<Int> = Result.Err(StreamError.new(IoErrorKind.NotFound));
     let r2: Result<Int, IoErrorKind> = r.map_err(|e| e.kind());
     match r2 {
-        Result.Err(k) => assert_eq(k, IoErrorKind.NotFound),
-        Result.Ok(_) => assert(false),
+        Err(k) => assert_eq(k, IoErrorKind.NotFound),
+        Ok(_) => assert(false),
     }
 }
 
@@ -80,10 +80,10 @@ fn integration_kind_inside_stream_error_via_question_mark() {
     }
 
     match caller() {
-        Result.Err(e) => {
+        Err(e) => {
             assert_eq(e.kind(), IoErrorKind.BrokenPipe);
         }
-        Result.Ok(_) => assert(false),
+        Ok(_) => assert(false),
     }
 }
 
@@ -153,14 +153,14 @@ fn integration_stream_error_propagates_through_nested_call() {
     }
 
     match level_c() {
-        Result.Err(e) => {
+        Err(e) => {
             assert_eq(e.kind(), IoErrorKind.PermissionDenied);
             match e.message() {
                 Maybe.Some(m) => assert_eq(*m, "denied at A"),
                 Maybe.None => assert(false),
             }
         }
-        Result.Ok(_) => assert(false),
+        Ok(_) => assert(false),
     }
 }
 

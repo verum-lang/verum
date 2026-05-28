@@ -126,8 +126,8 @@ fn regression_http3_varint_round_trip_small_value() {
     let mut buf: List<Byte> = [];
     write_varint(&mut buf, 42_u64);
     match read_varint(buf.as_slice(), 0) {
-        Result.Ok((v, _)) => assert_eq(v, 42_u64),
-        Result.Err(_) => panic("varint round-trip failed"),
+        Ok((v, _)) => assert_eq(v, 42_u64),
+        Err(_) => panic("varint round-trip failed"),
     }
 }
 

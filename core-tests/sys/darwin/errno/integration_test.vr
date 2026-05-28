@@ -149,12 +149,12 @@ fn integration_errno_permission_funnel_through_result() {
     let allowed: Result<Int, Text> = funnel(ENOENT);
     let denied:  Result<Int, Text> = funnel(EACCES);
     match allowed {
-        Result.Ok(c)  => assert_eq(c, ENOENT),
-        Result.Err(_) => assert(false),
+        Ok(c)  => assert_eq(c, ENOENT),
+        Err(_) => assert(false),
     };
     match denied {
-        Result.Ok(_)  => assert(false),
-        Result.Err(msg) => assert_eq(msg, "permission denied".clone()),
+        Ok(_)  => assert(false),
+        Err(msg) => assert_eq(msg, "permission denied".clone()),
     };
 }
 

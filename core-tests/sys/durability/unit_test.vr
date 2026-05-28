@@ -45,8 +45,8 @@ fn test_full_fsync_invalid_fd_yields_err() {
     let bad = FileDesc(-1);
     let r: Result<(), OSError> = full_fsync(bad);
     match r {
-        Result.Ok(()) => panic("fsync(-1) must NOT succeed"),
-        Result.Err(_) => {}
+        Ok(()) => panic("fsync(-1) must NOT succeed"),
+        Err(_) => {}
     }
 }
 
@@ -55,8 +55,8 @@ fn test_data_only_fsync_invalid_fd_yields_err() {
     let bad = FileDesc(-1);
     let r: Result<(), OSError> = data_only_fsync(bad);
     match r {
-        Result.Ok(()) => panic("fdatasync(-1) must NOT succeed"),
-        Result.Err(_) => {}
+        Ok(()) => panic("fdatasync(-1) must NOT succeed"),
+        Err(_) => {}
     }
 }
 
@@ -67,8 +67,8 @@ fn test_full_fsync_high_invalid_fd_yields_err() {
     let bad = FileDesc(99_999);
     let r = full_fsync(bad);
     match r {
-        Result.Ok(()) => panic("fsync(99999) must NOT succeed for unallocated fd"),
-        Result.Err(_) => {}
+        Ok(()) => panic("fsync(99999) must NOT succeed for unallocated fd"),
+        Err(_) => {}
     }
 }
 

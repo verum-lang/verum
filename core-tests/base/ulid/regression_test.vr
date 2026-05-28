@@ -129,11 +129,11 @@ fn regression_parse_rejects_short_input() {
     let r = parse(&s);
     assert(r.is_err());
     match r {
-        Result.Err(e) => match e {
+        Err(e) => match e {
             UlidError.InvalidLength(n) => assert_eq(n, 1),
             UlidError.InvalidCharacter(_) => panic("expected InvalidLength"),
         },
-        Result.Ok(_) => panic("expected Err on length-1 input"),
+        Ok(_) => panic("expected Err on length-1 input"),
     }
 }
 

@@ -127,8 +127,8 @@ fn regression_e_replace_all_every_match_pinned() {
 @test
 fn guard_new_returns_ok() {
     match Regex.new("abc") {
-        Result.Ok(_) => {},
-        Result.Err(_) => panic("Regex.new('abc') must be Ok"),
+        Ok(_) => {},
+        Err(_) => panic("Regex.new('abc') must be Ok"),
     }
 }
 

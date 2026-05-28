@@ -35,8 +35,8 @@ fn test_try_block_with_explicit_ok() {
     };
 
     match result {
-        Result.Ok(v) => assert_eq(v, 30),
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 30),
+        Err(_) => assert(false),
     }
 }
 
@@ -53,8 +53,8 @@ fn test_try_block_with_question_mark_explicit_ok() {
     };
 
     match result {
-        Result.Ok(v) => assert_eq(v, 84),
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 84),
+        Err(_) => assert(false),
     }
 }
 
@@ -70,8 +70,8 @@ fn test_try_block_error_propagation() {
     };
 
     match result {
-        Result.Ok(_) => assert(false),
-        Result.Err(e) => assert_eq(e, "operation failed"),
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "operation failed"),
     }
 }
 
@@ -105,8 +105,8 @@ fn test_try_block_chain_success() {
     };
 
     match result {
-        Result.Ok(v) => assert_eq(v, 25),  // 10 * 2 + 5 = 25
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 25),  // 10 * 2 + 5 = 25
+        Err(_) => assert(false),
     }
 }
 
@@ -123,8 +123,8 @@ fn test_try_block_chain_early_failure() {
     };
 
     match result {
-        Result.Ok(_) => assert(false),
-        Result.Err(e) => assert_eq(e, "step1 failed"),
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "step1 failed"),
     }
 }
 
@@ -142,8 +142,8 @@ fn test_try_block_chain_middle_failure() {
     };
 
     match result {
-        Result.Ok(_) => assert(false),
-        Result.Err(e) => assert_eq(e, "step2 failed"),
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "step2 failed"),
     }
 }
 
@@ -199,8 +199,8 @@ fn test_nested_try_blocks() {
     };
 
     match outer_result {
-        Result.Ok(v) => assert_eq(v, 20),  // (5 * 2) + 10 = 20
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 20),  // (5 * 2) + 10 = 20
+        Err(_) => assert(false),
     }
 }
 
@@ -222,12 +222,12 @@ fn test_try_block_in_match() {
             };
             r
         },
-        false => Result.Err("not executed"),
+        false => Err("not executed"),
     };
 
     match result {
-        Result.Ok(v) => assert_eq(v, 100),
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 100),
+        Err(_) => assert(false),
     }
 }
 
@@ -259,8 +259,8 @@ fn test_try_block_with_custom_error() {
     };
 
     match result {
-        Result.Ok(v) => assert_eq(v, 80),  // (5*10) + (3*10) = 80
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 80),  // (5*10) + (3*10) = 80
+        Err(_) => assert(false),
     }
 }
 
@@ -273,9 +273,9 @@ fn test_try_block_custom_error_propagation() {
     };
 
     match result {
-        Result.Ok(_) => assert(false),
-        Result.Err(InvalidInput(n)) => assert_eq(n, -1),
-        Result.Err(_) => assert(false),
+        Ok(_) => assert(false),
+        Err(InvalidInput(n)) => assert_eq(n, -1),
+        Err(_) => assert(false),
     }
 }
 
@@ -298,8 +298,8 @@ fn test_try_block_variable_scoping() {
     assert_eq(outer, 100);
 
     match result {
-        Result.Ok(v) => assert_eq(v, 150),
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 150),
+        Err(_) => assert(false),
     }
 }
 
@@ -326,8 +326,8 @@ fn test_try_block_mutable_state() {
     assert_eq(counter, 2);
 
     match result {
-        Result.Ok(v) => assert_eq(v, 3),  // 1 + 2 = 3
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 3),  // 1 + 2 = 3
+        Err(_) => assert(false),
     }
 }
 
@@ -350,8 +350,8 @@ fn test_try_block_mutable_state_on_error() {
     assert_eq(counter, 2);
 
     match result {
-        Result.Ok(_) => assert(false),
-        Result.Err(e) => assert_eq(e, "failed"),
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "failed"),
     }
 }
 
@@ -376,14 +376,14 @@ fn compute_with_try(a: Int, b: Int) -> Result<Int, Text> {
 fn test_try_block_as_function_body() {
     let result1 = compute_with_try(5, 10);
     match result1 {
-        Result.Ok(v) => assert_eq(v, 50),
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 50),
+        Err(_) => assert(false),
     }
 
     let result2 = compute_with_try(-1, 10);
     match result2 {
-        Result.Ok(_) => assert(false),
-        Result.Err(e) => assert_eq(e, "a is negative"),
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "a is negative"),
     }
 }
 
@@ -393,8 +393,8 @@ fn test_try_block_as_function_body() {
 
 fn generic_op<T: Default>(value: Maybe<T>) -> Result<T, Text> {
     match value {
-        Maybe.Some(v) => Result.Ok(v),
-        Maybe.None => Result.Err("no value"),
+        Maybe.Some(v) => Ok(v),
+        Maybe.None => Err("no value"),
     }
 }
 
@@ -406,8 +406,8 @@ fn test_try_block_generic_types() {
     };
 
     match result {
-        Result.Ok(v) => assert_eq(v, 42),
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => assert(false),
     }
 }
 
@@ -442,8 +442,8 @@ fn test_try_block_current_workaround_documented() {
     };
 
     match result {
-        Result.Ok(v) => assert_eq(v, 11),
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 11),
+        Err(_) => assert(false),
     }
 }
 
@@ -471,8 +471,8 @@ fn test_try_block_immediate_error() {
     };
 
     match result {
-        Result.Ok(_) => assert(false),
-        Result.Err(e) => assert_eq(e, "immediate failure"),
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "immediate failure"),
     }
 }
 
@@ -492,8 +492,8 @@ fn test_try_block_with_conditionals() {
     };
 
     match result {
-        Result.Ok(v) => assert_eq(v, 100),
-        Result.Err(_) => assert(false),
+        Ok(v) => assert_eq(v, 100),
+        Err(_) => assert(false),
     }
 }
 

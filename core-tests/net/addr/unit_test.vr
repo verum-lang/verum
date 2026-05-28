@@ -245,14 +245,14 @@ fn test_to_from_u32_round_trip() {
 fn test_parse_ipv4_localhost() {
     let s = "127.0.0.1".clone();
     match Ipv4Addr.parse(&s) {
-        Result.Ok(a) => {
+        Ok(a) => {
             let (o0, o1, o2, o3) = a.octets();
             assert_eq(o0, 127_u8);
             assert_eq(o1, 0_u8);
             assert_eq(o2, 0_u8);
             assert_eq(o3, 1_u8);
         }
-        Result.Err(_) => panic("127.0.0.1 should parse"),
+        Err(_) => panic("127.0.0.1 should parse"),
     }
 }
 
@@ -260,14 +260,14 @@ fn test_parse_ipv4_localhost() {
 fn test_parse_ipv4_private() {
     let s = "192.168.1.100".clone();
     match Ipv4Addr.parse(&s) {
-        Result.Ok(a) => {
+        Ok(a) => {
             let (o0, o1, o2, o3) = a.octets();
             assert_eq(o0, 192_u8);
             assert_eq(o1, 168_u8);
             assert_eq(o2, 1_u8);
             assert_eq(o3, 100_u8);
         }
-        Result.Err(_) => panic("192.168.1.100 should parse"),
+        Err(_) => panic("192.168.1.100 should parse"),
     }
 }
 
@@ -275,8 +275,8 @@ fn test_parse_ipv4_private() {
 fn test_parse_ipv4_zero() {
     let s = "0.0.0.0".clone();
     match Ipv4Addr.parse(&s) {
-        Result.Ok(a) => assert(a.is_unspecified()),
-        Result.Err(_) => panic("0.0.0.0 should parse"),
+        Ok(a) => assert(a.is_unspecified()),
+        Err(_) => panic("0.0.0.0 should parse"),
     }
 }
 
@@ -284,8 +284,8 @@ fn test_parse_ipv4_zero() {
 fn test_parse_ipv4_max() {
     let s = "255.255.255.255".clone();
     match Ipv4Addr.parse(&s) {
-        Result.Ok(a) => assert(a.is_broadcast()),
-        Result.Err(_) => panic("255.255.255.255 should parse"),
+        Ok(a) => assert(a.is_broadcast()),
+        Err(_) => panic("255.255.255.255 should parse"),
     }
 }
 
@@ -297,8 +297,8 @@ fn test_parse_ipv4_max() {
 fn test_parse_ipv4_too_few_segments() {
     let s = "1.2.3".clone();
     match Ipv4Addr.parse(&s) {
-        Result.Ok(_) => panic("`1.2.3` must reject"),
-        Result.Err(e) => assert(e == AddrParseError.InvalidFormat),
+        Ok(_) => panic("`1.2.3` must reject"),
+        Err(e) => assert(e == AddrParseError.InvalidFormat),
     }
 }
 
@@ -306,8 +306,8 @@ fn test_parse_ipv4_too_few_segments() {
 fn test_parse_ipv4_too_many_segments() {
     let s = "1.2.3.4.5".clone();
     match Ipv4Addr.parse(&s) {
-        Result.Ok(_) => panic("`1.2.3.4.5` must reject"),
-        Result.Err(e) => assert(e == AddrParseError.InvalidFormat),
+        Ok(_) => panic("`1.2.3.4.5` must reject"),
+        Err(e) => assert(e == AddrParseError.InvalidFormat),
     }
 }
 
@@ -315,8 +315,8 @@ fn test_parse_ipv4_too_many_segments() {
 fn test_parse_ipv4_octet_overflow() {
     let s = "256.0.0.0".clone();
     match Ipv4Addr.parse(&s) {
-        Result.Ok(_) => panic("256.x.x.x must reject"),
-        Result.Err(e) => assert(e == AddrParseError.InvalidOctet),
+        Ok(_) => panic("256.x.x.x must reject"),
+        Err(e) => assert(e == AddrParseError.InvalidOctet),
     }
 }
 
@@ -324,8 +324,8 @@ fn test_parse_ipv4_octet_overflow() {
 fn test_parse_ipv4_non_numeric() {
     let s = "a.b.c.d".clone();
     match Ipv4Addr.parse(&s) {
-        Result.Ok(_) => panic("non-numeric must reject"),
-        Result.Err(e) => assert(e == AddrParseError.InvalidOctet),
+        Ok(_) => panic("non-numeric must reject"),
+        Err(e) => assert(e == AddrParseError.InvalidOctet),
     }
 }
 
@@ -333,8 +333,8 @@ fn test_parse_ipv4_non_numeric() {
 fn test_parse_ipv4_empty() {
     let s = "".clone();
     match Ipv4Addr.parse(&s) {
-        Result.Ok(_) => panic("empty must reject"),
-        Result.Err(_) => assert(true),
+        Ok(_) => panic("empty must reject"),
+        Err(_) => assert(true),
     }
 }
 
@@ -458,8 +458,8 @@ fn test_ipv6_octets_big_endian_segment() {
 fn test_parse_ipv6_localhost_compressed() {
     let s = "::1".clone();
     match Ipv6Addr.parse(&s) {
-        Result.Ok(a) => assert(a.is_loopback()),
-        Result.Err(_) => panic("::1 should parse"),
+        Ok(a) => assert(a.is_loopback()),
+        Err(_) => panic("::1 should parse"),
     }
 }
 
@@ -467,8 +467,8 @@ fn test_parse_ipv6_localhost_compressed() {
 fn test_parse_ipv6_unspecified_compressed() {
     let s = "::".clone();
     match Ipv6Addr.parse(&s) {
-        Result.Ok(a) => assert(a.is_unspecified()),
-        Result.Err(_) => panic(":: should parse"),
+        Ok(a) => assert(a.is_unspecified()),
+        Err(_) => panic(":: should parse"),
     }
 }
 
@@ -476,12 +476,12 @@ fn test_parse_ipv6_unspecified_compressed() {
 fn test_parse_ipv6_full_notation() {
     let s = "2001:0db8:85a3:0000:0000:8a2e:0370:7334".clone();
     match Ipv6Addr.parse(&s) {
-        Result.Ok(a) => {
+        Ok(a) => {
             let (s0, _, _, _, _, _, _, s7) = a.segments();
             assert_eq(s0, 0x2001);
             assert_eq(s7, 0x7334);
         }
-        Result.Err(_) => panic("full ipv6 should parse"),
+        Err(_) => panic("full ipv6 should parse"),
     }
 }
 
@@ -489,14 +489,14 @@ fn test_parse_ipv6_full_notation() {
 fn test_parse_ipv6_compressed_middle() {
     let s = "2001:db8::1".clone();
     match Ipv6Addr.parse(&s) {
-        Result.Ok(a) => {
+        Ok(a) => {
             let (s0, s1, s2, _, _, _, _, s7) = a.segments();
             assert_eq(s0, 0x2001);
             assert_eq(s1, 0x0db8);
             assert_eq(s2, 0);
             assert_eq(s7, 1);
         }
-        Result.Err(_) => panic("2001:db8::1 should parse"),
+        Err(_) => panic("2001:db8::1 should parse"),
     }
 }
 
@@ -508,8 +508,8 @@ fn test_parse_ipv6_compressed_middle() {
 fn test_parse_ipv6_empty() {
     let s = "".clone();
     match Ipv6Addr.parse(&s) {
-        Result.Ok(_) => panic("empty must reject"),
-        Result.Err(_) => assert(true),
+        Ok(_) => panic("empty must reject"),
+        Err(_) => assert(true),
     }
 }
 
@@ -517,8 +517,8 @@ fn test_parse_ipv6_empty() {
 fn test_parse_ipv6_double_double_colon() {
     let s = "1::2::3".clone();
     match Ipv6Addr.parse(&s) {
-        Result.Ok(_) => panic("two `::` must reject (RFC 4291)"),
-        Result.Err(_) => assert(true),
+        Ok(_) => panic("two `::` must reject (RFC 4291)"),
+        Err(_) => assert(true),
     }
 }
 
@@ -526,8 +526,8 @@ fn test_parse_ipv6_double_double_colon() {
 fn test_parse_ipv6_invalid_hex() {
     let s = "xyzg::1".clone();
     match Ipv6Addr.parse(&s) {
-        Result.Ok(_) => panic("non-hex must reject"),
-        Result.Err(_) => assert(true),
+        Ok(_) => panic("non-hex must reject"),
+        Err(_) => assert(true),
     }
 }
 
@@ -668,11 +668,11 @@ fn test_socket_addr_v6_port() {
 fn test_socket_addr_parse_ipv4() {
     let s = "127.0.0.1:8080".clone();
     match SocketAddr.parse(&s) {
-        Result.Ok(a) => {
+        Ok(a) => {
             assert(a.is_ipv4());
             assert_eq(a.port(), 8080);
         }
-        Result.Err(_) => panic("127.0.0.1:8080 should parse"),
+        Err(_) => panic("127.0.0.1:8080 should parse"),
     }
 }
 
@@ -680,11 +680,11 @@ fn test_socket_addr_parse_ipv4() {
 fn test_socket_addr_parse_ipv6_bracketed() {
     let s = "[::1]:8080".clone();
     match SocketAddr.parse(&s) {
-        Result.Ok(a) => {
+        Ok(a) => {
             assert(a.is_ipv6());
             assert_eq(a.port(), 8080);
         }
-        Result.Err(_) => panic("[::1]:8080 should parse"),
+        Err(_) => panic("[::1]:8080 should parse"),
     }
 }
 
@@ -692,8 +692,8 @@ fn test_socket_addr_parse_ipv6_bracketed() {
 fn test_socket_addr_parse_port_zero() {
     let s = "0.0.0.0:0".clone();
     match SocketAddr.parse(&s) {
-        Result.Ok(a) => assert_eq(a.port(), 0),
-        Result.Err(_) => panic("0.0.0.0:0 should parse"),
+        Ok(a) => assert_eq(a.port(), 0),
+        Err(_) => panic("0.0.0.0:0 should parse"),
     }
 }
 
@@ -701,8 +701,8 @@ fn test_socket_addr_parse_port_zero() {
 fn test_socket_addr_parse_port_max() {
     let s = "0.0.0.0:65535".clone();
     match SocketAddr.parse(&s) {
-        Result.Ok(a) => assert_eq(a.port(), 65535),
-        Result.Err(_) => panic("port 65535 should parse"),
+        Ok(a) => assert_eq(a.port(), 65535),
+        Err(_) => panic("port 65535 should parse"),
     }
 }
 
@@ -710,8 +710,8 @@ fn test_socket_addr_parse_port_max() {
 fn test_socket_addr_from_text_alias() {
     let s = "127.0.0.1:80".clone();
     match SocketAddr.from_text(&s) {
-        Result.Ok(a) => assert_eq(a.port(), 80),
-        Result.Err(_) => panic("from_text should mirror parse"),
+        Ok(a) => assert_eq(a.port(), 80),
+        Err(_) => panic("from_text should mirror parse"),
     }
 }
 
@@ -723,8 +723,8 @@ fn test_socket_addr_from_text_alias() {
 fn test_socket_addr_parse_no_port() {
     let s = "127.0.0.1".clone();
     match SocketAddr.parse(&s) {
-        Result.Ok(_) => panic("no port must reject"),
-        Result.Err(_) => assert(true),
+        Ok(_) => panic("no port must reject"),
+        Err(_) => assert(true),
     }
 }
 
@@ -732,8 +732,8 @@ fn test_socket_addr_parse_no_port() {
 fn test_socket_addr_parse_port_overflow() {
     let s = "127.0.0.1:99999".clone();
     match SocketAddr.parse(&s) {
-        Result.Ok(_) => panic("port > 65535 must reject"),
-        Result.Err(e) => assert(e == AddrParseError.InvalidPort),
+        Ok(_) => panic("port > 65535 must reject"),
+        Err(e) => assert(e == AddrParseError.InvalidPort),
     }
 }
 
@@ -741,8 +741,8 @@ fn test_socket_addr_parse_port_overflow() {
 fn test_socket_addr_parse_negative_port() {
     let s = "127.0.0.1:-1".clone();
     match SocketAddr.parse(&s) {
-        Result.Ok(_) => panic("negative port must reject"),
-        Result.Err(_) => assert(true),
+        Ok(_) => panic("negative port must reject"),
+        Err(_) => assert(true),
     }
 }
 
@@ -750,8 +750,8 @@ fn test_socket_addr_parse_negative_port() {
 fn test_socket_addr_parse_non_numeric_port() {
     let s = "127.0.0.1:http".clone();
     match SocketAddr.parse(&s) {
-        Result.Ok(_) => panic("non-numeric port must reject"),
-        Result.Err(e) => assert(e == AddrParseError.InvalidPort),
+        Ok(_) => panic("non-numeric port must reject"),
+        Err(e) => assert(e == AddrParseError.InvalidPort),
     }
 }
 

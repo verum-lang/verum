@@ -29,8 +29,8 @@ fn property_panic_fence_int_payload_round_trip() {
         let waker = noop_waker();
         let mut cx = Context.from_waker(&waker);
         match fence.poll(&mut cx) {
-            Poll.Ready(Result.Ok(x)) => assert_eq(x, *v),
-            Poll.Ready(Result.Err(_)) => assert(false),
+            Poll.Ready(Ok(x)) => assert_eq(x, *v),
+            Poll.Ready(Err(_)) => assert(false),
             Poll.Pending => assert(false),
         }
     }
@@ -44,8 +44,8 @@ fn property_panic_fence_text_payload_round_trip() {
         let waker = noop_waker();
         let mut cx = Context.from_waker(&waker);
         match fence.poll(&mut cx) {
-            Poll.Ready(Result.Ok(x)) => assert_eq(x, *v),
-            Poll.Ready(Result.Err(_)) => assert(false),
+            Poll.Ready(Ok(x)) => assert_eq(x, *v),
+            Poll.Ready(Err(_)) => assert(false),
             Poll.Pending => assert(false),
         }
     }

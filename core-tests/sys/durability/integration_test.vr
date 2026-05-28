@@ -19,8 +19,8 @@ mount core.sys.durability.{
 
 fn try_full_fsync_and_classify(fd: Int) -> Int {
     match full_fsync(FileDesc(fd)) {
-        Result.Ok(()) => 0,
-        Result.Err(_) => 1,
+        Ok(()) => 0,
+        Err(_) => 1,
     }
 }
 
@@ -38,8 +38,8 @@ fn integration_full_fsync_error_collectable_into_list() {
     let mut err_count: Int = 0;
     for fd in fds.iter() {
         match full_fsync(FileDesc(*fd)) {
-            Result.Ok(()) => {}
-            Result.Err(_) => { err_count = err_count + 1; }
+            Ok(()) => {}
+            Err(_) => { err_count = err_count + 1; }
         }
     }
     assert_eq(err_count, 4);

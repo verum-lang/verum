@@ -51,8 +51,8 @@ fn regression_a_add_basic() {
     let a = BigDecimal.from_int(3);
     let b = BigDecimal.from_int(4);
     match a.add(&b) {
-        Result.Ok(r) => assert_eq(r.to_text(), "7"),
-        Result.Err(_) => panic("BigDecimal add must succeed"),
+        Ok(r) => assert_eq(r.to_text(), "7"),
+        Err(_) => panic("BigDecimal add must succeed"),
     };
 }
 
@@ -62,8 +62,8 @@ fn regression_a_mul_basic() {
     let a = BigDecimal.from_int(3);
     let b = BigDecimal.from_int(4);
     match a.mul(&b) {
-        Result.Ok(r) => assert_eq(r.to_text(), "12"),
-        Result.Err(_) => panic("BigDecimal mul must succeed"),
+        Ok(r) => assert_eq(r.to_text(), "12"),
+        Err(_) => panic("BigDecimal mul must succeed"),
     };
 }
 
