@@ -1,0 +1,51 @@
+// =============================================================================
+// core-tests/security/mac/poly1305/unit_test.vr
+// =============================================================================
+//
+// `core/security/mac/poly1305.vr` — Poly1305 one-time MAC (RFC 8439).
+// =============================================================================
+
+mount core.security.mac.poly1305.{KEY_SIZE, TAG_SIZE};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Canonical sizes
+// =============================================================================
+
+@test
+fn test_poly1305_key_size_canonical_value() {
+    // RFC 8439 §2.5 — 256-bit (32-byte) one-time key.
+    assert_eq(KEY_SIZE, 32);
+}
+
+@test
+fn test_poly1305_tag_size_canonical_value() {
+    // RFC 8439 §2.5 — 128-bit (16-byte) authentication tag.
+    assert_eq(TAG_SIZE, 16);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_poly1305_key_is_twice_tag() {
+    // 32 == 16 * 2 (key is double-tag in width).
+    assert_eq(KEY_SIZE, TAG_SIZE * 2);
+}
+
+@test
+fn test_poly1305_tag_matches_aes_block() {
+    // 128-bit Poly1305 tag matches the AES-GCM tag size, allowing
+    // shared field-size assumptions in higher AEAD constructions.
+    assert_eq(TAG_SIZE, 16);
+}
+
+@test
+fn test_poly1305_constants_positive() {
+    assert(KEY_SIZE > 0);
+    assert(TAG_SIZE > 0);
+}
+
+fn main() {}
