@@ -77,7 +77,6 @@ fn test_frac_2_sqrt_pi_canonical_value() {
 //   exactly in double-precision.
 // =============================================================================
 
-@ignore("Float `<` between computed value and small constant fails — sister of small-gap Float-Ord defect class.")
 @test
 fn test_tau_is_two_pi_within_ulp() {
     // 2 × PI may round-trip exactly given the source literal.
@@ -122,7 +121,6 @@ fn test_frac_1_sqrt_pi_lt_frac_1_sqrt2_single_pair() {
     assert(FRAC_1_SQRT_PI < FRAC_1_SQRT2);
 }
 
-@ignore("Float `<` between PHI and small literal fails — sister of small-gap Float-Ord defect class.")
 @test
 fn test_phi_strictly_between_1_and_2() {
     // Golden ratio is in (1, 2).
