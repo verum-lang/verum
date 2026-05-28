@@ -1,0 +1,106 @@
+// =============================================================================
+// core-tests/security/x509/ext/subject_alt_name/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/ext/subject_alt_name.vr` — Subject Alternative
+// Name extension (RFC 5280 §4.2.1.6).
+// =============================================================================
+
+mount core.security.x509.ext.subject_alt_name.GeneralName;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: GeneralName 7-variant ADT
+// =============================================================================
+
+@test
+fn test_general_name_dns_name_variant() {
+    let n: GeneralName = GeneralName.DnsName("example.com".to_text());
+    assert(n is GeneralName.DnsName);
+}
+
+@test
+fn test_general_name_ip_address_variant() {
+    let mut ipv4: List<Byte> = [];
+    ipv4.push(192_u8);
+    ipv4.push(0_u8);
+    ipv4.push(2_u8);
+    ipv4.push(1_u8);
+    let n: GeneralName = GeneralName.IpAddress(ipv4);
+    assert(n is GeneralName.IpAddress);
+}
+
+@test
+fn test_general_name_rfc822_name_variant() {
+    let n: GeneralName = GeneralName.Rfc822Name("admin@example.com".to_text());
+    assert(n is GeneralName.Rfc822Name);
+}
+
+@test
+fn test_general_name_uri_variant() {
+    let n: GeneralName = GeneralName.Uri("https://example.com/".to_text());
+    assert(n is GeneralName.Uri);
+}
+
+@test
+fn test_general_name_directory_name_variant() {
+    let empty: List<Byte> = [];
+    let n: GeneralName = GeneralName.DirectoryName(empty);
+    assert(n is GeneralName.DirectoryName);
+}
+
+@test
+fn test_general_name_other_name_variant() {
+    let empty: List<Byte> = [];
+    let n: GeneralName = GeneralName.OtherName(empty);
+    assert(n is GeneralName.OtherName);
+}
+
+@test
+fn test_general_name_unsupported_variant() {
+    let n: GeneralName = GeneralName.Unsupported;
+    assert(n is GeneralName.Unsupported);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness — selected
+// =============================================================================
+
+@test
+fn test_general_name_dns_name_disjoint_from_others() {
+    let n: GeneralName = GeneralName.DnsName("x".to_text());
+    assert(!(n is GeneralName.IpAddress));
+    assert(!(n is GeneralName.Rfc822Name));
+    assert(!(n is GeneralName.Uri));
+    assert(!(n is GeneralName.Unsupported));
+}
+
+@test
+fn test_general_name_ip_address_disjoint() {
+    let empty: List<Byte> = [];
+    let n: GeneralName = GeneralName.IpAddress(empty);
+    assert(!(n is GeneralName.DnsName));
+    assert(!(n is GeneralName.Uri));
+    assert(!(n is GeneralName.Unsupported));
+}
+
+@test
+fn test_general_name_uri_disjoint_from_dns() {
+    let n: GeneralName = GeneralName.Uri("https://x/".to_text());
+    assert(!(n is GeneralName.DnsName));
+    assert(!(n is GeneralName.Rfc822Name));
+}
+
+@test
+fn test_general_name_unsupported_disjoint_from_all() {
+    let n: GeneralName = GeneralName.Unsupported;
+    assert(!(n is GeneralName.DnsName));
+    assert(!(n is GeneralName.IpAddress));
+    assert(!(n is GeneralName.Rfc822Name));
+    assert(!(n is GeneralName.Uri));
+    assert(!(n is GeneralName.DirectoryName));
+    assert(!(n is GeneralName.OtherName));
+}
+
+fn main() {}
