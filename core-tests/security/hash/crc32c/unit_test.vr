@@ -1,0 +1,107 @@
+// =============================================================================
+// core-tests/security/hash/crc32c/unit_test.vr
+// =============================================================================
+//
+// `core/security/hash/crc32c.vr` — Castagnoli CRC32 (SCTP / iSCSI /
+// gRPC).
+//
+// Tested:
+//   * CRC32C_POLYNOMIAL canonical value
+//   * Crc32c streaming state record
+//   * Fresh-state, empty-input, and re-seeding semantics
+// =============================================================================
+
+mount core.security.hash.crc32c.{CRC32C_POLYNOMIAL, Crc32c};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Castagnoli polynomial constant
+//
+//   Reflected polynomial 0x82F63B78 (RFC 3309 §15). This is the Koopman
+//   form of the Castagnoli polynomial used by iSCSI, SCTP, ext4 metadata,
+//   Btrfs metadata, Apache Cassandra, and gRPC's HTTP/2 framing.
+// =============================================================================
+
+@test
+fn test_crc32c_polynomial_canonical_value() {
+    assert_eq(CRC32C_POLYNOMIAL, 0x82F63B78_u32);
+}
+
+// =============================================================================
+// Section 2: Fresh-state contract
+// =============================================================================
+
+@test
+fn test_crc32c_new_initial_state_is_all_ones() {
+    let h: Crc32c = Crc32c.new();
+    assert_eq(h.state, 0xFFFFFFFF_u32);
+}
+
+// =============================================================================
+// Section 3: Empty-input identity
+// =============================================================================
+
+@test
+fn test_crc32c_finalize_empty_is_zero() {
+    let h: Crc32c = Crc32c.new();
+    // 0xFFFFFFFF ^ 0xFFFFFFFF = 0 — canonical empty CRC-32C.
+    assert_eq(h.finalize(), 0_u32);
+}
+
+// =============================================================================
+// Section 4: Direct record construction
+// =============================================================================
+
+@test
+fn test_crc32c_direct_construction_preserves_state() {
+    let h: Crc32c = Crc32c { state: 0xCAFEBABE_u32 };
+    assert_eq(h.state, 0xCAFEBABE_u32);
+}
+
+@test
+fn test_crc32c_direct_construction_zero_finalize() {
+    let h: Crc32c = Crc32c { state: 0_u32 };
+    // 0 ^ 0xFFFFFFFF = 0xFFFFFFFF
+    assert_eq(h.finalize(), 0xFFFFFFFF_u32);
+}
+
+@test
+fn test_crc32c_direct_construction_all_ones_finalize() {
+    let h: Crc32c = Crc32c { state: 0xFFFFFFFF_u32 };
+    assert_eq(h.finalize(), 0_u32);
+}
+
+@test
+fn test_crc32c_direct_construction_pattern_finalize() {
+    // 0xDEADBEEF ^ 0xFFFFFFFF = 0x21524110
+    let h: Crc32c = Crc32c { state: 0xDEADBEEF_u32 };
+    assert_eq(h.finalize(), 0x21524110_u32);
+}
+
+// =============================================================================
+// Section 5: finalize_into — consuming-finalize parity
+// =============================================================================
+
+@test
+fn test_crc32c_finalize_into_matches_finalize_on_fresh() {
+    let h: Crc32c = Crc32c.new();
+    // finalize_into consumes self; the returned digest must equal the
+    // non-consuming finalize() on a fresh accumulator.
+    assert_eq(h.finalize_into(), 0_u32);
+}
+
+// =============================================================================
+// Section 6: Polynomial distinction
+//
+//   The Castagnoli CRC-32C polynomial 0x82F63B78 must differ from the
+//   IEEE 802.3 CRC-32 polynomial (reflected: 0xEDB88320). The two are
+//   semantically distinct error-detection codes.
+// =============================================================================
+
+@test
+fn test_crc32c_polynomial_not_ieee_802_3_reflected() {
+    assert(CRC32C_POLYNOMIAL != 0xEDB88320_u32);
+}
+
+fn main() {}
