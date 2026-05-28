@@ -100,7 +100,17 @@ implement CircuitBreakerLayer {
     }
 
     public fn current_state(&self) -> Int {
-        self.state.state.load(MemoryOrdering.Acquire)
+        // Explicit deref through Shared<BreakerState> — VBC codegen does
+        // not auto-deref Shared<T> through chained field access; the
+        // bare `self.state.state.load(...)` form panics with
+        // "BreakerState.deref not found" at the call site because the
+        // dispatcher tries to find a `BreakerState.deref` method instead
+        // of routing through `Shared.deref`'s inner-type projection.
+        // Workaround: bind `s = &*self.state` first; Shared deref is then
+        // applied at the deref-unary site rather than the field-access
+        // chain.  Pinned by `core-tests/net/proxy/circuit_breaker/unit_test.vr`.
+        let s = &*self.state;
+        s.state.load(MemoryOrdering.Acquire)
     }
 }
 

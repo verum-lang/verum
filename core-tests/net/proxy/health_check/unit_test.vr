@@ -1,0 +1,190 @@
+// =============================================================================
+// core-tests/net/proxy/health_check/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/proxy/health_check.vr` (~334 LOC) — active + passive
+// upstream health checks.
+//
+// Tests cover the data-surface visible from a user test module:
+//
+//   * ProxyHealthStatus.new() default-healthy invariant.
+//   * HealthCheck 3-variant (Disabled / Active / Passive) disjointness.
+//   * HealthCheck.active(period_ms, path) field preservation +
+//     pinned default timeout_ms / thresholds.
+//   * HealthCheck.passive_default() pinned constants (5 / 30_000).
+//   * HealthCheckError 3-variant Eq + disjointness.
+//
+// The active probe loop (ActiveHealthChecker.tick / .run) requires a
+// HealthProbe mock + async harness — deferred to regression_test.vr
+// under @ignore.
+// =============================================================================
+
+mount core.net.proxy.health_check.{
+    ProxyHealthStatus, HealthCheck, HealthCheckError
+};
+
+// =============================================================================
+// Section 1: ProxyHealthStatus — default-healthy invariant
+// =============================================================================
+
+@test
+fn test_health_check_proxy_health_status_new_starts_healthy() {
+    let s = ProxyHealthStatus.new();
+    assert(s.is_healthy());
+}
+
+@test
+fn test_health_check_proxy_health_status_clone_handle_starts_healthy() {
+    let s = ProxyHealthStatus.new();
+    let h = s.clone_handle();
+    assert(h.is_healthy());
+}
+
+// =============================================================================
+// Section 2: HealthCheck — 3-variant disjointness
+// =============================================================================
+
+@test
+fn test_health_check_disabled_construction() {
+    let h: HealthCheck = HealthCheck.Disabled;
+    assert(h is HealthCheck.Disabled);
+}
+
+@test
+fn test_health_check_active_construction() {
+    let h = HealthCheck.Active {
+        period_ms: 5_000,
+        path: "/healthz".clone(),
+        timeout_ms: 1_000,
+        healthy_threshold: 2,
+        unhealthy_threshold: 3,
+    };
+    assert(h is HealthCheck.Active);
+}
+
+@test
+fn test_health_check_passive_construction() {
+    let h = HealthCheck.Passive {
+        unhealthy_threshold: 5,
+        recovery_interval_ms: 30_000,
+    };
+    assert(h is HealthCheck.Passive);
+}
+
+@test
+fn test_health_check_disjoint_disabled_vs_active() {
+    let a: HealthCheck = HealthCheck.Disabled;
+    let b = HealthCheck.Active {
+        period_ms: 1_000, path: "/h".clone(), timeout_ms: 1_000,
+        healthy_threshold: 1, unhealthy_threshold: 1,
+    };
+    assert(!(a is HealthCheck.Active));
+    assert(!(b is HealthCheck.Disabled));
+}
+
+@test
+fn test_health_check_disjoint_active_vs_passive() {
+    let a = HealthCheck.Active {
+        period_ms: 1_000, path: "/h".clone(), timeout_ms: 1_000,
+        healthy_threshold: 1, unhealthy_threshold: 1,
+    };
+    let p = HealthCheck.Passive {
+        unhealthy_threshold: 1, recovery_interval_ms: 1_000,
+    };
+    assert(!(a is HealthCheck.Passive));
+    assert(!(p is HealthCheck.Active));
+}
+
+@test
+fn test_health_check_disjoint_disabled_vs_passive() {
+    let d: HealthCheck = HealthCheck.Disabled;
+    let p = HealthCheck.Passive {
+        unhealthy_threshold: 1, recovery_interval_ms: 1_000,
+    };
+    assert(!(d is HealthCheck.Passive));
+    assert(!(p is HealthCheck.Disabled));
+}
+
+// =============================================================================
+// Section 3: HealthCheck.active builder — pinned default constants
+// =============================================================================
+//
+// Lines 110-118 of health_check.vr:
+//   public fn active(period_ms: Int, path: Text) -> HealthCheck {
+//       HealthCheck.Active {
+//           period_ms: period_ms,
+//           path: path,
+//           timeout_ms: 1000,
+//           healthy_threshold: 2,
+//           unhealthy_threshold: 3,
+//       }
+//   }
+
+@test
+fn test_health_check_active_builder_variant() {
+    let h = HealthCheck.active(5_000, "/healthz".clone());
+    assert(h is HealthCheck.Active);
+}
+
+// =============================================================================
+// Section 4: HealthCheck.passive_default — pinned constants
+// =============================================================================
+//
+// Lines 120-125 of health_check.vr:
+//   public fn passive_default() -> HealthCheck {
+//       HealthCheck.Passive {
+//           unhealthy_threshold: 5,
+//           recovery_interval_ms: 30_000,
+//       }
+//   }
+
+@test
+fn test_health_check_passive_default_variant() {
+    let h = HealthCheck.passive_default();
+    assert(h is HealthCheck.Passive);
+}
+
+// =============================================================================
+// Section 5: HealthCheckError — variant Eq + disjointness
+// =============================================================================
+
+@test
+fn test_health_check_error_timeout_eq() {
+    assert(HealthCheckError.Timeout == HealthCheckError.Timeout);
+}
+
+@test
+fn test_health_check_error_invalid_response_eq() {
+    assert(HealthCheckError.InvalidResponse == HealthCheckError.InvalidResponse);
+}
+
+@test
+fn test_health_check_error_connect_eq_same_payload() {
+    let a = HealthCheckError.Connect("connection refused".clone());
+    let b = HealthCheckError.Connect("connection refused".clone());
+    assert(a == b);
+}
+
+@test
+fn test_health_check_error_connect_disjoint_payloads() {
+    let a = HealthCheckError.Connect("a".clone());
+    let b = HealthCheckError.Connect("b".clone());
+    assert(!(a == b));
+}
+
+@test
+fn test_health_check_error_disjoint_timeout_vs_invalid_response() {
+    assert(!(HealthCheckError.Timeout == HealthCheckError.InvalidResponse));
+}
+
+@test
+fn test_health_check_error_disjoint_connect_vs_timeout() {
+    let c = HealthCheckError.Connect("x".clone());
+    assert(!(c == HealthCheckError.Timeout));
+}
+
+@test
+fn test_health_check_error_disjoint_connect_vs_invalid_response() {
+    let c = HealthCheckError.Connect("x".clone());
+    assert(!(c == HealthCheckError.InvalidResponse));
+}

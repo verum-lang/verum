@@ -1,0 +1,91 @@
+// =============================================================================
+// core-tests/net/proxy/health_check/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.net.proxy.health_check`.
+//
+// Active pins (3) — current correct behaviour:
+//
+//   * ProxyHealthStatus.new() starts healthy.
+//   * HealthCheck.Disabled is a distinct variant from Active / Passive.
+//   * HealthCheckError variants Eq is reflexive.
+//
+// Deferred pins (3) — gated on HealthProbe mock + async harness
+// (see audit §3.1). Live HTTP probe surface is at language level.
+// =============================================================================
+
+mount core.net.proxy.health_check.{
+    ProxyHealthStatus, HealthCheck, HealthCheckError
+};
+
+// =============================================================================
+// Active LOCK-IN pins
+// =============================================================================
+
+@test
+fn regression_proxy_health_status_default_healthy() {
+    // HC-default-1: every freshly-constructed ProxyHealthStatus reports
+    // is_healthy() == true. The load-balancer consults this on every pick
+    // — a regression that flips the default to false would silently
+    // exclude all newly-spawned upstreams from rotation.
+    let s = ProxyHealthStatus.new();
+    assert(s.is_healthy());
+}
+
+@test
+fn regression_health_check_disabled_distinct_from_passive() {
+    // HC-default-2: Disabled (no probing) must not collide with Passive
+    // (probe on traffic). A first-wins variant lookup that conflated
+    // them would silently disable passive monitoring.
+    let d: HealthCheck = HealthCheck.Disabled;
+    let p = HealthCheck.Passive {
+        unhealthy_threshold: 5, recovery_interval_ms: 30_000,
+    };
+    assert(d is HealthCheck.Disabled);
+    assert(p is HealthCheck.Passive);
+    assert(!(d is HealthCheck.Passive));
+}
+
+@test
+fn regression_health_check_error_eq_reflexive() {
+    // HC-default-3: Eq is reflexive on every variant — pin the contract
+    // so a regression in Eq impl (e.g. dropping Timeout match arm)
+    // surfaces here.
+    assert(HealthCheckError.Timeout == HealthCheckError.Timeout);
+    assert(HealthCheckError.InvalidResponse == HealthCheckError.InvalidResponse);
+    let c = HealthCheckError.Connect("x".clone());
+    let d = HealthCheckError.Connect("x".clone());
+    assert(c == d);
+}
+
+// =============================================================================
+// Deferred — gated on HealthProbe mock + async harness
+// =============================================================================
+
+@ignore("HC-1: ActiveHealthChecker.tick requires a HealthProbe mock impl. The protocol is async; in-tree HTTP probe lives in callers (line 289).")
+@test
+fn regression_active_checker_tick_marks_unhealthy_after_threshold() {
+    // After `unhealthy_threshold` consecutive failed ticks, the bound
+    // ProxyHealthStatus.is_healthy() must flip to false.
+    let s = ProxyHealthStatus.new();
+    assert(!s.is_healthy());
+}
+
+@ignore("HC-1: ActiveHealthChecker.run cancellation via stop() requires an async runtime harness — the loop spawns into a nursery and exits on cancel atomic.")
+@test
+fn regression_active_checker_run_exits_on_stop() {
+    // Spawn run() into a nursery, call stop(), assert the loop exits
+    // within a bounded number of ticks.
+    let s = ProxyHealthStatus.new();
+    assert(s.is_healthy());
+}
+
+@ignore("HC-2: passive policy requires controllable clock for recovery_interval_ms expiry. After N failures + interval elapsed, status must re-probe.")
+@test
+fn regression_passive_recovery_after_interval() {
+    let h = HealthCheck.passive_default();
+    assert(h is HealthCheck.Passive);
+    // Live transition: failures > threshold -> unhealthy; clock ticks
+    // past recovery_interval_ms -> re-probe.
+    assert(false);
+}

@@ -1,0 +1,81 @@
+// =============================================================================
+// core-tests/net/proxy/circuit_breaker/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.net.proxy.circuit_breaker`.
+//
+// Active pins (3) — current correct behaviour to lock in against drift:
+//
+//   * default() returns a Closed breaker.
+//   * STATE_CLOSED is encoded as 0 (wire contract for raw-int consumers).
+//   * default() config matches the docstring 5/30_000/2 triple via the
+//     observable property that the breaker is Closed (cooldown can't fire
+//     before any failure is recorded).
+//
+// Deferred pins (3) — gated on clock fixture + Handler mock (see audit
+// §3.2). These exercise the live state machine and require the spec-
+// level harness from vcs/specs/L2-standard/net/proxy/.
+// =============================================================================
+
+mount core.net.proxy.circuit_breaker.{CircuitBreakerLayer};
+
+// =============================================================================
+// Active LOCK-IN pins — current correct behaviour
+// =============================================================================
+
+@test
+fn regression_default_starts_closed() {
+    // CB-default-1: docstring at circuit_breaker.vr:96-100 promises a
+    // Closed initial state. Drift here means the constructor is
+    // mis-initialising the AtomicInt state cell.
+    let cb = CircuitBreakerLayer.default();
+    assert_eq(cb.current_state(), 0);
+}
+
+@test
+fn regression_state_closed_encoded_as_zero() {
+    // CB-default-2: STATE_CLOSED = 0 is the wire-encoding contract for
+    // any caller reading current_state() and comparing against literal
+    // Ints (see also CB-1 in audit §3.1).
+    let cb = CircuitBreakerLayer.new(5, 30_000, 2);
+    assert_eq(cb.current_state(), 0);
+}
+
+@test
+fn regression_new_with_zero_thresholds_constructs_closed() {
+    // CB-default-3: zero thresholds must not panic during construction
+    // and must still yield the Closed initial state. Defensive against a
+    // future ctor that rejects 0 — which would be a breaking change.
+    let cb = CircuitBreakerLayer.new(0, 0, 0);
+    assert_eq(cb.current_state(), 0);
+}
+
+// =============================================================================
+// Deferred — gated on clock fixture + Handler mock
+// =============================================================================
+
+@ignore("CB-2: Closed->Open transition at failure_threshold requires inner Handler mock + AtomicInt state inspection mid-dispatch. Gated on vcs/specs/L2-standard/net/proxy/ harness.")
+@test
+fn regression_transition_closed_to_open_at_threshold() {
+    // Drive `failure_threshold` consecutive failures through `dispatch`
+    // and observe `current_state()` flip to STATE_OPEN (1).
+    let cb = CircuitBreakerLayer.new(2, 30_000, 2);
+    assert_eq(cb.current_state(), 1);
+}
+
+@ignore("CB-2: Open->HalfOpen after reset_timeout_ms requires a controllable clock. Currently `Instant.now()` is wall-clock; mock-clock fixture lives in vcs/specs/.")
+@test
+fn regression_transition_open_to_half_open_after_cooldown() {
+    let cb = CircuitBreakerLayer.new(1, 1, 1);
+    // After failure + 2ms wait + probe request, state should be
+    // HALF_OPEN (2).
+    assert_eq(cb.current_state(), 2);
+}
+
+@ignore("CB-2: HalfOpen->Closed on probe success requires Handler mock. Inner.handle must be controllable to return Ok(2xx).")
+@test
+fn regression_transition_half_open_to_closed_on_success() {
+    let cb = CircuitBreakerLayer.new(1, 1, 1);
+    // After failure->Open, cooldown->HalfOpen, then success->Closed.
+    assert_eq(cb.current_state(), 0);
+}

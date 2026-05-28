@@ -1,0 +1,182 @@
+// =============================================================================
+// core-tests/net/h3/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for `core/net/h3/`:
+//
+//   * Active pins fix wire-format constants — the IANA-registered values
+//     that `decode_frame` / `encode_frame` / `decode_stream_type` read
+//     directly. Drift here silently breaks HTTP/3 interoperability.
+//
+//   * `@ignore`'d pins document the functional surface (encode/decode
+//     round-trips, QPACK static-table, connection state machine,
+//     WebTransport datagrams) — gated on a frame-codec mock harness or
+//     end-to-end QUIC fixture not yet present in `core-tests/`.
+//     See `audit.md §3.1` (H3-1) and `§3.2` (H3-2).
+//
+// =============================================================================
+
+mount core.net.h3.frame.{
+    FT_DATA, FT_HEADERS, FT_CANCEL_PUSH, FT_SETTINGS, FT_PUSH_PROMISE,
+    FT_GOAWAY, FT_MAX_PUSH_ID,
+    SETTING_QPACK_MAX_TABLE_CAPACITY, SETTING_MAX_FIELD_SECTION_SIZE,
+    SETTING_QPACK_BLOCKED_STREAMS, SETTING_ENABLE_CONNECT_PROTOCOL,
+    SETTING_H3_DATAGRAM,
+    STREAM_TYPE_CONTROL, STREAM_TYPE_PUSH,
+    STREAM_TYPE_QPACK_ENCODER, STREAM_TYPE_QPACK_DECODER,
+    H3Frame, H3FrameError, UniStreamType,
+    decode_frame, encode_frame, decode_stream_type, encode_stream_type
+};
+mount core.net.h3.error.{H3ErrorCode, H3Error};
+
+// =============================================================================
+// Section 1: Active LOCK-IN pins — frame-type IANA wire IDs
+// =============================================================================
+//
+// RFC 9114 §11.2.1 frame-type registry. Every value is RFC-stable and
+// referenced as a literal in `decode_frame` (h3/frame.vr:180-209).
+// =============================================================================
+
+@test
+fn regression_h3_ft_data_pinned_0x00() {
+    // RFC 9114 §7.2.1: DATA carries the request/response body. Every
+    // HTTP/3 message depends on this wire ID.
+    assert_eq(FT_DATA, 0x00_u64);
+}
+
+@test
+fn regression_h3_ft_headers_pinned_0x01() {
+    // RFC 9114 §7.2.2: HEADERS carries QPACK-encoded field section.
+    assert_eq(FT_HEADERS, 0x01_u64);
+}
+
+@test
+fn regression_h3_ft_settings_pinned_0x04() {
+    // RFC 9114 §7.2.4: SETTINGS — control-stream-only negotiated params.
+    assert_eq(FT_SETTINGS, 0x04_u64);
+}
+
+@test
+fn regression_h3_ft_goaway_pinned_0x07() {
+    // RFC 9114 §5.2: GOAWAY — graceful shutdown signal.
+    assert_eq(FT_GOAWAY, 0x07_u64);
+}
+
+@test
+fn regression_h3_ft_max_push_id_pinned_0x0d() {
+    // RFC 9114 §7.2.7: MAX_PUSH_ID — raise the server-push budget.
+    assert_eq(FT_MAX_PUSH_ID, 0x0D_u64);
+}
+
+// =============================================================================
+// Section 2: Active LOCK-IN pins — SETTINGS parameter IDs
+// =============================================================================
+
+@test
+fn regression_h3_setting_h3_datagram_pinned_0x33() {
+    // RFC 9297 H3 Datagram: SETTING_H3_DATAGRAM=0x33 — distant value
+    // (well outside the §7.2.4.1 cluster), particularly easy to typo.
+    assert_eq(SETTING_H3_DATAGRAM, 0x33_u64);
+}
+
+@test
+fn regression_h3_setting_enable_connect_pinned_0x08() {
+    // RFC 9220 Extended CONNECT: enables WebSockets-over-HTTP/3.
+    assert_eq(SETTING_ENABLE_CONNECT_PROTOCOL, 0x08_u64);
+}
+
+// =============================================================================
+// Section 3: Active LOCK-IN pins — Stream-type prefix bytes
+// =============================================================================
+
+@test
+fn regression_h3_stream_type_control_pinned_0x00() {
+    // RFC 9114 §6.2.2: Control stream — both endpoints MUST open one.
+    assert_eq(STREAM_TYPE_CONTROL, 0x00_u64);
+}
+
+@test
+fn regression_h3_stream_type_qpack_decoder_pinned_0x03() {
+    // RFC 9204 §4.2: QPACK decoder stream (the receiver's
+    // acknowledgement back-channel).
+    assert_eq(STREAM_TYPE_QPACK_DECODER, 0x03_u64);
+}
+
+// =============================================================================
+// Section 4: Active LOCK-IN pins — H3ErrorCode RFC 9114 §8.1 constants
+// =============================================================================
+
+@test
+fn regression_h3_error_code_h3_no_error_pinned_0x0100() {
+    // RFC 9114 §8.1: H3_NO_ERROR — emitted on graceful GOAWAY.
+    assert_eq(H3ErrorCode.H3_NO_ERROR, 0x0100_u64);
+}
+
+@test
+fn regression_h3_error_code_qpack_decompression_failed_pinned_0x0200() {
+    // RFC 9204 §6: QPACK error code base.
+    assert_eq(H3ErrorCode.QPACK_DECOMPRESSION_FAILED, 0x0200_u64);
+}
+
+// =============================================================================
+// Section 5: @ignore'd functional pins — H3-1 frame codec round-trip
+// =============================================================================
+
+@ignore("H3-1: frame encode/decode round-trip requires harness. See audit.md §3.1.")
+@test
+fn regression_h3_encode_decode_data_frame_round_trip() {
+    let body: List<Byte> = [];
+    let f = H3Frame.DataFrame(body.clone());
+    let mut buf: List<Byte> = [];
+    encode_frame(&f, &mut buf);
+    match decode_frame(buf.as_slice(), 0) {
+        Ok((decoded, _)) => assert(decoded is H3Frame.DataFrame),
+        Err(_) => panic("DATA frame round-trip failed"),
+    }
+}
+
+@ignore("H3-1: frame encode/decode round-trip requires harness. See audit.md §3.1.")
+@test
+fn regression_h3_encode_decode_goaway_round_trip() {
+    let f = H3Frame.GoawayFrame(42_u64);
+    let mut buf: List<Byte> = [];
+    encode_frame(&f, &mut buf);
+    match decode_frame(buf.as_slice(), 0) {
+        Ok((decoded, _)) => {
+            match decoded {
+                H3Frame.GoawayFrame(id) => assert_eq(id, 42_u64),
+                _ => panic("expected GoawayFrame after round-trip"),
+            }
+        },
+        Err(_) => panic("GOAWAY frame round-trip failed"),
+    }
+}
+
+@ignore("H3-1: stream-type encode/decode round-trip requires harness. See audit.md §3.1.")
+@test
+fn regression_h3_encode_decode_stream_type_control_round_trip() {
+    let st = UniStreamType.ControlStream;
+    let mut buf: List<Byte> = [];
+    encode_stream_type(&st, &mut buf);
+    match decode_stream_type(buf.as_slice()) {
+        Ok((decoded, _)) => assert(decoded is UniStreamType.ControlStream),
+        Err(_) => panic("Control stream-type round-trip failed"),
+    }
+}
+
+@ignore("H3-2: QPACK static-table coverage (RFC 9204 §3.1) deferred. See audit.md §3.3.")
+@test
+fn regression_h3_qpack_static_table_entry_0_authority() {
+    // RFC 9204 §3.1: QPACK static-table index 0 is ":authority".
+    // Coverage requires landing the static-table umbrella export +
+    // tabular pinning that doesn't exist in this folder yet.
+    assert(true);
+}
+
+@ignore("H3-1: connection state-machine surface requires harness. See audit.md §3.1.")
+@test
+fn regression_h3_connection_state_machine_dispatch() {
+    // RFC 9114 §5: connection establishment, SETTINGS exchange, then
+    // request/response streams. Functional coverage at L2 specs.
+    assert(true);
+}

@@ -1,0 +1,165 @@
+// =============================================================================
+// core-tests/net/proxy/rate_limit/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/proxy/rate_limit.vr` (~331 LOC) — TokenBucket / LeakyBucket /
+// SlidingWindow rate limiters + KeyedRateLimiter fan-out.
+//
+// Tests cover the data-surface:
+//
+//   * RateDecision 2-variant (Admit / NotNow(Duration)) disjointness.
+//   * TokenBucket / LeakyBucket / SlidingWindow construction + field
+//     preservation.
+//   * Boundary-value ctor (zero capacity, zero rate, large capacity).
+//   * CHEAP_COST = 1, HEAVY_COST = 10 + relative-order invariant.
+// =============================================================================
+
+mount core.net.proxy.rate_limit.{
+    RateDecision, TokenBucket, LeakyBucket, SlidingWindow,
+    CHEAP_COST, HEAVY_COST
+};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Section 1: RateDecision — 2-variant disjointness
+// =============================================================================
+
+@test
+fn test_rate_limit_decision_admit_construction() {
+    let d: RateDecision = RateDecision.Admit;
+    assert(d is RateDecision.Admit);
+}
+
+@test
+fn test_rate_limit_decision_not_now_construction() {
+    let d = RateDecision.NotNow(Duration.from_millis(100));
+    assert(d is RateDecision.NotNow);
+}
+
+@test
+fn test_rate_limit_decision_disjoint_admit_vs_not_now() {
+    let a: RateDecision = RateDecision.Admit;
+    let n = RateDecision.NotNow(Duration.from_millis(0));
+    assert(!(a is RateDecision.NotNow));
+    assert(!(n is RateDecision.Admit));
+}
+
+@test
+fn test_rate_limit_decision_not_now_zero_duration() {
+    // NotNow(0) is legal — it means "ready next moment" but still
+    // structurally distinct from Admit.
+    let d = RateDecision.NotNow(Duration.from_micros(0));
+    assert(d is RateDecision.NotNow);
+}
+
+// =============================================================================
+// Section 2: TokenBucket — construction + boundary
+// =============================================================================
+
+@test
+fn test_rate_limit_token_bucket_typical_construction() {
+    let tb = TokenBucket.new(100_u64, 10_u64);
+    assert_eq(tb.capacity, 100_u64);
+    assert_eq(tb.rate_per_s, 10_u64);
+    // Initial tokens = capacity (line 105).
+    assert_eq(tb.tokens, 100_u64);
+}
+
+@test
+fn test_rate_limit_token_bucket_zero_capacity() {
+    let tb = TokenBucket.new(0_u64, 10_u64);
+    assert_eq(tb.capacity, 0_u64);
+    assert_eq(tb.tokens, 0_u64);
+}
+
+@test
+fn test_rate_limit_token_bucket_zero_rate() {
+    // Zero rate is a degenerate but constructable bucket — try_admit
+    // would return NotNow(1h) once empty (line 131).
+    let tb = TokenBucket.new(10_u64, 0_u64);
+    assert_eq(tb.capacity, 10_u64);
+    assert_eq(tb.rate_per_s, 0_u64);
+}
+
+@test
+fn test_rate_limit_token_bucket_large_capacity() {
+    let tb = TokenBucket.new(1_000_000_u64, 100_000_u64);
+    assert_eq(tb.capacity, 1_000_000_u64);
+    assert_eq(tb.tokens, 1_000_000_u64);
+}
+
+// =============================================================================
+// Section 3: LeakyBucket — construction + boundary
+// =============================================================================
+
+@test
+fn test_rate_limit_leaky_bucket_typical_construction() {
+    let lb = LeakyBucket.new(50_u64, 5_u64);
+    assert_eq(lb.capacity, 50_u64);
+    assert_eq(lb.rate_per_s, 5_u64);
+    // Initial queued = 0 (line 163).
+    assert_eq(lb.queued, 0_u64);
+}
+
+@test
+fn test_rate_limit_leaky_bucket_zero_capacity() {
+    let lb = LeakyBucket.new(0_u64, 1_u64);
+    assert_eq(lb.capacity, 0_u64);
+    assert_eq(lb.queued, 0_u64);
+}
+
+@test
+fn test_rate_limit_leaky_bucket_zero_rate() {
+    let lb = LeakyBucket.new(10_u64, 0_u64);
+    assert_eq(lb.rate_per_s, 0_u64);
+}
+
+// =============================================================================
+// Section 4: SlidingWindow — construction + boundary
+// =============================================================================
+
+@test
+fn test_rate_limit_sliding_window_typical_construction() {
+    let sw = SlidingWindow.new(1000_u64, 60_000_u64);
+    assert_eq(sw.limit, 1000_u64);
+    assert_eq(sw.window_ms, 60_000_u64);
+    // Initial counters = 0 (line 233).
+    assert_eq(sw.current, 0_u64);
+    assert_eq(sw.previous, 0_u64);
+}
+
+@test
+fn test_rate_limit_sliding_window_zero_limit() {
+    let sw = SlidingWindow.new(0_u64, 1_000_u64);
+    assert_eq(sw.limit, 0_u64);
+}
+
+@test
+fn test_rate_limit_sliding_window_zero_window() {
+    // window_ms = 0 is a degenerate config — maybe_rotate short-
+    // circuits (line 240). Pin that ctor accepts it.
+    let sw = SlidingWindow.new(100_u64, 0_u64);
+    assert_eq(sw.window_ms, 0_u64);
+}
+
+// =============================================================================
+// Section 5: CHEAP_COST / HEAVY_COST — module-local re-pin
+// =============================================================================
+//
+// Also pinned in the umbrella unit_test; re-asserted here for module
+// filter granularity + relative-order invariant.
+
+@test
+fn test_rate_limit_cheap_cost_is_one() {
+    assert_eq(CHEAP_COST, 1_u64);
+}
+
+@test
+fn test_rate_limit_heavy_cost_is_ten() {
+    assert_eq(HEAVY_COST, 10_u64);
+}
+
+@test
+fn test_rate_limit_cost_relative_order() {
+    assert(HEAVY_COST > CHEAP_COST);
+}

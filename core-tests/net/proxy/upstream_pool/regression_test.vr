@@ -1,0 +1,92 @@
+// =============================================================================
+// core-tests/net/proxy/upstream_pool/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.net.proxy.upstream_pool`.
+//
+// Active pins (3) — current correct behaviour:
+//
+//   * Upstream.new sets weight=1 (default for WLC scoring).
+//   * Upstream.addr() format is exactly "host:port" (TcpStream contract).
+//   * Upstream Eq compares only (scheme, host, port) — name+weight ignored.
+//
+// Deferred pins (4) — gated on socket harness + clock fixture (see audit
+// §3.1 / §3.2). Real acquire/release lifecycle lives at language level.
+// =============================================================================
+
+mount core.net.proxy.upstream_pool.{Upstream, UpstreamPool};
+
+// =============================================================================
+// Active LOCK-IN pins
+// =============================================================================
+
+@test
+fn regression_upstream_new_default_weight_one() {
+    // UP-default-1: line 80 — Upstream.new sets weight=1. A regression
+    // that flipped this to 0 would div-by-zero in WLC score; flipped
+    // to N>1 would silently bias load distribution.
+    let u = Upstream.new("http".clone(), "h".clone(), 80);
+    assert_eq(u.weight, 1);
+}
+
+@test
+fn regression_upstream_addr_format_is_host_colon_port() {
+    // UP-3: line 93 — addr() = f"{self.host}:{self.port}". TcpStream.
+    // connect parses this as host:port; drift would surface as
+    // connect failures at every acquire site.
+    let u = Upstream.new("http".clone(), "example.com".clone(), 9000);
+    assert(u.addr() == "example.com:9000");
+}
+
+@test
+fn regression_upstream_eq_ignores_name_and_weight() {
+    // UP-4: lines 117-122 — Eq compares (scheme, host, port) only.
+    // The pool keys connections on UpstreamKey which is built from
+    // the same triple (lines 132-138). A regression that added name
+    // or weight to Eq would silently shard the pool by metric label.
+    let a = Upstream.new("http".clone(), "h".clone(), 80)
+        .with_name("primary".clone())
+        .with_weight(10);
+    let b = Upstream.new("http".clone(), "h".clone(), 80)
+        .with_name("secondary".clone())
+        .with_weight(99);
+    assert(a == b);
+}
+
+// =============================================================================
+// Deferred — gated on socket harness + clock fixture
+// =============================================================================
+
+@ignore("UP-1: UpstreamPool.acquire requires TcpStream.connect against a loopback fixture. Currently every acquire would attempt real DNS+TCP. Gated on vcs/specs/L2-standard/net/proxy/.")
+@test
+fn regression_acquire_returns_lease() {
+    let _pool = UpstreamPool.default();
+    let _u = Upstream.new("http".clone(), "127.0.0.1".clone(), 65535);
+    // pool.acquire(&u).await should return Ok(ConnectionLease).
+    assert(false);
+}
+
+@ignore("UP-2: ConnectionLease drop returns the connection to its bucket. After acquire + drop + re-acquire, idle_count should reflect the reuse.")
+@test
+fn regression_lease_drop_returns_to_pool() {
+    let pool = UpstreamPool.default();
+    let u = Upstream.new("http".clone(), "127.0.0.1".clone(), 65535);
+    // After acquire + drop, idle_count(&u) should be 1.
+    assert_eq(pool.idle_count(&u), 1);
+}
+
+@ignore("UP-2: ConnectionLease.close() drops without re-pooling. After acquire + close, idle_count(&u) stays at 0.")
+@test
+fn regression_lease_close_does_not_return_to_pool() {
+    let pool = UpstreamPool.default();
+    let u = Upstream.new("http".clone(), "127.0.0.1".clone(), 65535);
+    assert_eq(pool.idle_count(&u), 0);
+}
+
+@ignore("UP-1: Idle-timeout expiry — after acquire + drop + clock advance past idle_timeout_ms, next acquire opens a fresh socket. Requires clock fixture + socket harness.")
+@test
+fn regression_idle_timeout_drops_stale_conns() {
+    let pool = UpstreamPool.default();
+    let u = Upstream.new("http".clone(), "127.0.0.1".clone(), 65535);
+    assert_eq(pool.idle_count(&u), 0);
+}

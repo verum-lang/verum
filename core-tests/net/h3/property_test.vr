@@ -1,0 +1,394 @@
+// =============================================================================
+// core-tests/net/h3/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/h3/` data surface:
+//
+//   §A  H3 frame-type ID pairwise disjointness (RFC 9114 §11.2.1).
+//   §B  H3 SETTINGS parameter ID pairwise disjointness
+//       (RFC 9114 §7.2.4.1 + RFC 9220 + RFC 9297).
+//   §C  H3 stream-type prefix pairwise disjointness (RFC 9114 §6.2.2).
+//   §D  Frame-type / SETTINGS-id / stream-type cross-namespace
+//       disjointness — values must NOT collide across catalogues.
+//   §E  H3Frame variant disjointness via `is` pattern.
+//   §F  H3Frame payload-preservation post-construction (DATA / HEADERS /
+//       CANCEL_PUSH / GOAWAY / MAX_PUSH_ID / PUSH_PROMISE).
+//   §G  H3Frame stream-legality dispatch — control-stream-legal vs
+//       request-stream-legal variant attribution per RFC 9114 §6.2.1.
+//   §H  H3FrameError variant Eq reflexivity + InvalidValue payload
+//       preservation.
+//   §I  UniStreamType variant disjointness — Control / Push / QPACK
+//       encoder / QPACK decoder must remain pairwise distinct.
+//   §J  H3ErrorCode value preservation + RFC 9114 §8.1 wire-stable
+//       constants pinned.
+//
+// Live transport / QPACK encode-decode / connection state-machine
+// surface is gated in `regression_test.vr` (defects H3-1 / H3-2).
+// See `audit.md §3.1 / §3.2`.
+// =============================================================================
+
+mount core.net.h3.frame.{
+    FT_DATA, FT_HEADERS, FT_CANCEL_PUSH, FT_SETTINGS, FT_PUSH_PROMISE,
+    FT_GOAWAY, FT_MAX_PUSH_ID,
+    SETTING_QPACK_MAX_TABLE_CAPACITY, SETTING_MAX_FIELD_SECTION_SIZE,
+    SETTING_QPACK_BLOCKED_STREAMS, SETTING_ENABLE_CONNECT_PROTOCOL,
+    SETTING_H3_DATAGRAM,
+    STREAM_TYPE_CONTROL, STREAM_TYPE_PUSH,
+    STREAM_TYPE_QPACK_ENCODER, STREAM_TYPE_QPACK_DECODER,
+    H3Frame, H3FrameError, UniStreamType
+};
+mount core.net.h3.error.{H3ErrorCode};
+
+// =============================================================================
+// §A  Frame-type ID pairwise disjointness
+// =============================================================================
+
+@test
+fn prop_h3_ft_data_vs_headers_disjoint() {
+    // RFC 9114 §11.2.1: DATA=0x00 vs HEADERS=0x01.
+    assert(!(FT_DATA == FT_HEADERS));
+}
+
+@test
+fn prop_h3_ft_headers_vs_cancel_push_disjoint() {
+    assert(!(FT_HEADERS == FT_CANCEL_PUSH));
+}
+
+@test
+fn prop_h3_ft_settings_vs_push_promise_disjoint() {
+    // SETTINGS=0x04 vs PUSH_PROMISE=0x05 — adjacent values, must stay distinct.
+    assert(!(FT_SETTINGS == FT_PUSH_PROMISE));
+}
+
+@test
+fn prop_h3_ft_goaway_vs_max_push_id_disjoint() {
+    // GOAWAY=0x07 vs MAX_PUSH_ID=0x0D.
+    assert(!(FT_GOAWAY == FT_MAX_PUSH_ID));
+}
+
+@test
+fn prop_h3_ft_data_disjoint_from_all_nonzero() {
+    // DATA=0x00 sentinel — must not equal any other frame type.
+    assert(!(FT_DATA == FT_HEADERS));
+    assert(!(FT_DATA == FT_CANCEL_PUSH));
+    assert(!(FT_DATA == FT_SETTINGS));
+    assert(!(FT_DATA == FT_PUSH_PROMISE));
+    assert(!(FT_DATA == FT_GOAWAY));
+    assert(!(FT_DATA == FT_MAX_PUSH_ID));
+}
+
+// =============================================================================
+// §B  SETTINGS parameter ID pairwise disjointness
+// =============================================================================
+
+@test
+fn prop_h3_setting_qpack_max_vs_blocked_streams_disjoint() {
+    // QPACK_MAX_TABLE_CAPACITY=0x01 vs QPACK_BLOCKED_STREAMS=0x07.
+    assert(!(SETTING_QPACK_MAX_TABLE_CAPACITY == SETTING_QPACK_BLOCKED_STREAMS));
+}
+
+@test
+fn prop_h3_setting_max_field_section_vs_enable_connect_disjoint() {
+    // MAX_FIELD_SECTION_SIZE=0x06 vs ENABLE_CONNECT_PROTOCOL=0x08.
+    assert(!(SETTING_MAX_FIELD_SECTION_SIZE == SETTING_ENABLE_CONNECT_PROTOCOL));
+}
+
+@test
+fn prop_h3_setting_h3_datagram_disjoint_from_all() {
+    // RFC 9297 H3_DATAGRAM=0x33 — far in the catalogue, must not collide
+    // with any §7.2.4.1 well-known parameter ID.
+    assert(!(SETTING_H3_DATAGRAM == SETTING_QPACK_MAX_TABLE_CAPACITY));
+    assert(!(SETTING_H3_DATAGRAM == SETTING_MAX_FIELD_SECTION_SIZE));
+    assert(!(SETTING_H3_DATAGRAM == SETTING_QPACK_BLOCKED_STREAMS));
+    assert(!(SETTING_H3_DATAGRAM == SETTING_ENABLE_CONNECT_PROTOCOL));
+}
+
+// =============================================================================
+// §C  Stream-type prefix pairwise disjointness
+// =============================================================================
+
+@test
+fn prop_h3_stream_types_pairwise_disjoint_full_matrix() {
+    // RFC 9114 §6.2.2: all four well-known stream types pairwise distinct.
+    assert(!(STREAM_TYPE_CONTROL == STREAM_TYPE_PUSH));
+    assert(!(STREAM_TYPE_CONTROL == STREAM_TYPE_QPACK_ENCODER));
+    assert(!(STREAM_TYPE_CONTROL == STREAM_TYPE_QPACK_DECODER));
+    assert(!(STREAM_TYPE_PUSH == STREAM_TYPE_QPACK_ENCODER));
+    assert(!(STREAM_TYPE_PUSH == STREAM_TYPE_QPACK_DECODER));
+    assert(!(STREAM_TYPE_QPACK_ENCODER == STREAM_TYPE_QPACK_DECODER));
+}
+
+// =============================================================================
+// §D  Cross-namespace disjointness — frame-type vs settings-id
+// =============================================================================
+//
+// RFC 9114 numbers frame types and SETTINGS parameter IDs from disjoint
+// namespaces, but a copy-paste typo could shift one into the other.
+// These tests pin the bare distinct values where collision would be
+// visible (DATA=0x00 vs no SETTINGS=0x00; HEADERS=0x01 vs
+// QPACK_MAX_TABLE_CAPACITY=0x01 — same numeric, distinct namespaces).
+// =============================================================================
+
+@test
+fn prop_h3_ft_headers_numerically_aliases_setting_qpack_max() {
+    // HEADERS=0x01 and QPACK_MAX_TABLE_CAPACITY=0x01 share a numeric value
+    // but live in disjoint namespaces. The constants must compare equal
+    // as raw u64 (intentional aliasing pinned for documentation).
+    assert_eq(FT_HEADERS, SETTING_QPACK_MAX_TABLE_CAPACITY);
+}
+
+@test
+fn prop_h3_setting_h3_datagram_outside_frame_type_space() {
+    // SETTING_H3_DATAGRAM=0x33 must not collide with any frame type ID,
+    // which is bounded by FT_MAX_PUSH_ID=0x0D in v1.
+    assert(!(SETTING_H3_DATAGRAM == FT_DATA));
+    assert(!(SETTING_H3_DATAGRAM == FT_MAX_PUSH_ID));
+}
+
+// =============================================================================
+// §E  H3Frame variant disjointness
+// =============================================================================
+
+@test
+fn prop_h3_frame_data_disjoint_from_headers() {
+    let body: List<Byte> = [];
+    let d = H3Frame.DataFrame(body.clone());
+    let h = H3Frame.HeadersFrame(body.clone());
+    assert(d is H3Frame.DataFrame);
+    assert(h is H3Frame.HeadersFrame);
+    assert(!(d is H3Frame.HeadersFrame));
+    assert(!(h is H3Frame.DataFrame));
+}
+
+@test
+fn prop_h3_frame_settings_disjoint_from_goaway() {
+    let entries: List<(UInt64, UInt64)> = [];
+    let s = H3Frame.SettingsFrame(entries);
+    let g = H3Frame.GoawayFrame(0_u64);
+    assert(s is H3Frame.SettingsFrame);
+    assert(g is H3Frame.GoawayFrame);
+    assert(!(s is H3Frame.GoawayFrame));
+    assert(!(g is H3Frame.SettingsFrame));
+}
+
+// =============================================================================
+// §F  H3Frame payload preservation
+// =============================================================================
+
+@test
+fn prop_h3_frame_cancel_push_payload_preserved() {
+    // CANCEL_PUSH frame carries a single push_id UInt64.
+    let f = H3Frame.CancelPushFrame(42_u64);
+    match f {
+        H3Frame.CancelPushFrame(id) => assert_eq(id, 42_u64),
+        _ => panic("expected CancelPushFrame"),
+    }
+}
+
+@test
+fn prop_h3_frame_goaway_payload_preserved() {
+    // GOAWAY frame carries a stream_id or push_id (UInt64).
+    let f = H3Frame.GoawayFrame(0x12345_u64);
+    match f {
+        H3Frame.GoawayFrame(id) => assert_eq(id, 0x12345_u64),
+        _ => panic("expected GoawayFrame"),
+    }
+}
+
+@test
+fn prop_h3_frame_max_push_id_payload_preserved() {
+    let f = H3Frame.MaxPushIdFrame(7_u64);
+    match f {
+        H3Frame.MaxPushIdFrame(id) => assert_eq(id, 7_u64),
+        _ => panic("expected MaxPushIdFrame"),
+    }
+}
+
+@test
+fn prop_h3_frame_push_promise_fields_preserved() {
+    let body: List<Byte> = [];
+    let f = H3Frame.PushPromiseFrame {
+        push_id: 99_u64,
+        encoded_headers: body,
+    };
+    match f {
+        H3Frame.PushPromiseFrame { push_id, encoded_headers: _ } => {
+            assert_eq(push_id, 99_u64);
+        },
+        _ => panic("expected PushPromiseFrame"),
+    }
+}
+
+@test
+fn prop_h3_frame_reserved_frame_type_preserved() {
+    // ReservedFrame is the catch-all per RFC 9114 §7.2.8 — unknown frame
+    // types MUST be ignored. The Reserved variant preserves both the
+    // frame_type and payload so the caller can introspect.
+    let payload: List<Byte> = [];
+    let f = H3Frame.ReservedFrame {
+        frame_type: 0xFF_u64,
+        payload: payload,
+    };
+    match f {
+        H3Frame.ReservedFrame { frame_type, payload: _ } => {
+            assert_eq(frame_type, 0xFF_u64);
+        },
+        _ => panic("expected ReservedFrame"),
+    }
+}
+
+// =============================================================================
+// §G  H3Frame stream-legality dispatch (RFC 9114 §6.2.1)
+// =============================================================================
+
+@test
+fn prop_h3_frame_data_is_request_stream_legal() {
+    let body: List<Byte> = [];
+    let f = H3Frame.DataFrame(body);
+    assert(f.is_request_stream_legal());
+    assert(!f.is_control_stream_legal());
+}
+
+@test
+fn prop_h3_frame_settings_is_control_stream_legal() {
+    let entries: List<(UInt64, UInt64)> = [];
+    let f = H3Frame.SettingsFrame(entries);
+    assert(f.is_control_stream_legal());
+    assert(!f.is_request_stream_legal());
+}
+
+@test
+fn prop_h3_frame_max_push_id_is_control_stream_legal() {
+    let f = H3Frame.MaxPushIdFrame(0_u64);
+    assert(f.is_control_stream_legal());
+    assert(!f.is_request_stream_legal());
+}
+
+@test
+fn prop_h3_frame_headers_is_request_stream_legal() {
+    let body: List<Byte> = [];
+    let f = H3Frame.HeadersFrame(body);
+    assert(f.is_request_stream_legal());
+    assert(!f.is_control_stream_legal());
+}
+
+// =============================================================================
+// §H  H3FrameError variant Eq reflexivity + payload preservation
+// =============================================================================
+
+@test
+fn prop_h3_frame_error_truncated_reflexive() {
+    assert(H3FrameError.Truncated == H3FrameError.Truncated);
+}
+
+@test
+fn prop_h3_frame_error_varint_failure_reflexive() {
+    assert(H3FrameError.VarintFailure == H3FrameError.VarintFailure);
+}
+
+@test
+fn prop_h3_frame_error_invalid_value_payload_preserved() {
+    let a = H3FrameError.InvalidValue("trailing bytes".clone());
+    let b = H3FrameError.InvalidValue("trailing bytes".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_h3_frame_error_truncated_vs_varint_disjoint() {
+    // Truncated (length mismatch) vs VarintFailure (codec error) —
+    // distinct decode-failure modes per §7.2.
+    assert(!(H3FrameError.Truncated == H3FrameError.VarintFailure));
+}
+
+@test
+fn prop_h3_frame_error_invalid_value_differing_payloads_disjoint() {
+    let a = H3FrameError.InvalidValue("alpha".clone());
+    let b = H3FrameError.InvalidValue("beta".clone());
+    assert(!(a == b));
+}
+
+// =============================================================================
+// §I  UniStreamType variant disjointness
+// =============================================================================
+
+@test
+fn prop_h3_uni_stream_type_control_disjoint_from_push() {
+    let c = UniStreamType.ControlStream;
+    let p = UniStreamType.PushStream(0_u64);
+    assert(c is UniStreamType.ControlStream);
+    assert(p is UniStreamType.PushStream);
+    assert(!(c is UniStreamType.PushStream));
+    assert(!(p is UniStreamType.ControlStream));
+}
+
+@test
+fn prop_h3_uni_stream_type_qpack_encoder_vs_decoder_disjoint() {
+    let e = UniStreamType.QpackEncoderStream;
+    let d = UniStreamType.QpackDecoderStream;
+    assert(e is UniStreamType.QpackEncoderStream);
+    assert(d is UniStreamType.QpackDecoderStream);
+    assert(!(e is UniStreamType.QpackDecoderStream));
+    assert(!(d is UniStreamType.QpackEncoderStream));
+}
+
+@test
+fn prop_h3_uni_stream_type_push_payload_preserved() {
+    let p = UniStreamType.PushStream(0xAB_u64);
+    match p {
+        UniStreamType.PushStream(pid) => assert_eq(pid, 0xAB_u64),
+        _ => panic("expected PushStream"),
+    }
+}
+
+@test
+fn prop_h3_uni_stream_type_reserved_payload_preserved() {
+    // RFC 8701 GREASE values: 0x1f * N + 0x21 — must be preserved
+    // for upstream introspection.
+    let r = UniStreamType.ReservedStream(0x40_u64);
+    match r {
+        UniStreamType.ReservedStream(v) => assert_eq(v, 0x40_u64),
+        _ => panic("expected ReservedStream"),
+    }
+}
+
+// =============================================================================
+// §J  H3ErrorCode wire-stable constants + value preservation
+// =============================================================================
+
+@test
+fn prop_h3_error_code_h3_no_error_pin() {
+    // RFC 9114 §8.1: H3_NO_ERROR = 0x0100. Drift here would break
+    // GOAWAY-on-success interop with every HTTP/3 peer.
+    assert_eq(H3ErrorCode.H3_NO_ERROR, 0x0100_u64);
+}
+
+@test
+fn prop_h3_error_code_h3_general_protocol_error_pin() {
+    assert_eq(H3ErrorCode.H3_GENERAL_PROTOCOL_ERROR, 0x0101_u64);
+}
+
+@test
+fn prop_h3_error_code_qpack_decompression_failed_pin() {
+    // RFC 9204 §6: QPACK errors live in their own 0x0200-range.
+    assert_eq(H3ErrorCode.QPACK_DECOMPRESSION_FAILED, 0x0200_u64);
+}
+
+@test
+fn prop_h3_error_code_value_round_trip() {
+    let c = H3ErrorCode.new(0x010A_u64); // H3_MISSING_SETTINGS
+    assert_eq(c.value(), 0x010A_u64);
+}
+
+@test
+fn prop_h3_error_code_eq_reflexive() {
+    let a = H3ErrorCode.new(0x0102_u64);
+    let b = H3ErrorCode.new(0x0102_u64);
+    assert(a == b);
+}
+
+@test
+fn prop_h3_error_code_eq_distinct_disjoint() {
+    let a = H3ErrorCode.new(0x0100_u64);
+    let b = H3ErrorCode.new(0x0101_u64);
+    assert(!(a == b));
+}
