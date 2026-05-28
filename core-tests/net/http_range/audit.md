@@ -29,28 +29,23 @@ None. Pure-Verum byte arithmetic.
 
 ## 3. Language-implementation gaps
 
-### §3.1 HTTPRNG-1 — `parse_range_header` / `resolve_and_merge` / `encode_*` SIGSEGV
+### §3.1 HTTPRNG-1 — `parse_range_header` / `resolve_and_merge` / `encode_*` SIGSEGV (CLOSED 2026-05-28)
 
-**Stable trigger**: any reachable callsite of the four public
-free-fns from a USER test module SIGSEGVs the compiler during
-the precompile cascade for `http_range.vr`. Same crash
-signature family as CIDR-1 / URITPL-1 / URL-1.
+**Pre-fix trigger**: all four public free-fns SIGSEGV'd during
+precompile cascade in LLVM SmallVector.
 
-The data-surface (variant construction + Eq lattice) compiles
-and tests pass. The functional surface is locked-in by 9
-@ignore'd regression pins covering: single closed range,
-multi-range, suffix range, wrong-unit rejection, resolve in-
-range, resolve merge-overlapping, resolve all-invalid →
-UnsatisfiableRange, encode_content_range, encode_unsatisfiable.
+**Closed by source-side fixes** (commits `a60025262` + `abf1033b1`):
 
-**Likely root cause**: same VBC codegen surface as CIDR-1 (`?`
-operator on Result chains, `text.as_bytes()`, internal
-`Text.from_utf8_unchecked(buf.as_slice())` helpers). Investigation
-should batch all five SIGSEGV defects (CIDR-1, URL-1, URITPL-1,
-HTTPRNG-1, plus any subsequent net.* finds).
+1. `slice_range(src, start, end)` helper: replace
+   `out.extend_from_slice(&src[start..end])` with byte-by-byte
+   `while i < end { out.push(src[i]); i = i + 1 }` loop.
+2. `encode_unsatisfiable`: replace `push_bytes(b"bytes */")`
+   byte-string literal with 8 individual `out.push()` calls.
+3. `encode_content_range`: replace `push_bytes(b"bytes ")`
+   byte-string literal with 6 individual `out.push()` calls.
 
-**Effort**: 3-5 days fix VBC codegen — likely closes the entire
-defect class.
+**Post-rebuild validation 2026-05-28**: 9/9 HTTPRNG-1 regression
+tests transition from @ignore'd-SIGSEGV to GREEN under `--interp`.
 
 ### §3.2 MAX_RANGE_SPECS pinned at 256
 

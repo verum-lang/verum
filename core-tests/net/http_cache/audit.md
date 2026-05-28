@@ -29,14 +29,17 @@ None. Pure-Verum byte arithmetic.
 
 ## 3. Language-implementation gaps
 
-### §3.1 HTTPCACHE-1 — `parse` / `current_age` / `freshness_lifetime_sec` / `decide` SIGSEGV
+### §3.1 HTTPCACHE-1 — `parse` / `current_age` / `freshness_lifetime_sec` / `decide` SIGSEGV (CLOSED 2026-05-28)
 
-**Stable trigger**: same precompile-cascade defect class as
-CIDR-1 / URL-1 / URITPL-1 / HTTPRNG-1 / CONNEG-1 / LINKHDR-1.
+**Pre-fix trigger**: precompile-cascade SIGSEGV in LLVM SmallVector
+shared with CIDR-1 / URITPL-1 / HTTPRNG-1 / CONNEG-1 / LINKHDR-1.
 
-The data-surface (CacheControl, CacheDecision variant
-construction + Eq) compiles. Functional surface locked-in by
-6 @ignore'd regression pins.
+**Closed by source-side fix** (commit `a60025262`): `slice_vec`
+helper replaces `out.extend_from_slice(&src[start..end])` with
+byte-by-byte `while i < end { out.push(src[i]); i = i + 1 }` loop.
+
+**Post-rebuild validation 2026-05-28**: 6/6 HTTPCACHE-1 regression
+tests transition from @ignore'd-SIGSEGV to GREEN under `--interp`.
 
 ### §3.2 MAX_CACHE_CONTROL_DIRECTIVES pinned at 64
 
