@@ -1,0 +1,97 @@
+// =============================================================================
+// core-tests/security/x509/verifier/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/verifier.vr` — X.509 verifier ADTs.
+// =============================================================================
+
+mount core.security.x509.verifier.CertPurpose;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CertPurpose 7-variant ADT
+//   Per RFC 5280 §4.2.1.12 + IANA EKU OIDs.
+// =============================================================================
+
+@test
+fn test_cert_purpose_server_auth_variant() {
+    let p: CertPurpose = CertPurpose.ServerAuth;
+    assert(p is CertPurpose.ServerAuth);
+}
+
+@test
+fn test_cert_purpose_client_auth_variant() {
+    let p: CertPurpose = CertPurpose.ClientAuth;
+    assert(p is CertPurpose.ClientAuth);
+}
+
+@test
+fn test_cert_purpose_code_signing_variant() {
+    let p: CertPurpose = CertPurpose.CodeSigning;
+    assert(p is CertPurpose.CodeSigning);
+}
+
+@test
+fn test_cert_purpose_email_protection_variant() {
+    let p: CertPurpose = CertPurpose.EmailProtection;
+    assert(p is CertPurpose.EmailProtection);
+}
+
+@test
+fn test_cert_purpose_time_stamping_variant() {
+    let p: CertPurpose = CertPurpose.TimeStamping;
+    assert(p is CertPurpose.TimeStamping);
+}
+
+@test
+fn test_cert_purpose_ocsp_signing_variant() {
+    let p: CertPurpose = CertPurpose.OcspSigning;
+    assert(p is CertPurpose.OcspSigning);
+}
+
+@test
+fn test_cert_purpose_any_purpose_variant() {
+    let p: CertPurpose = CertPurpose.AnyPurpose;
+    assert(p is CertPurpose.AnyPurpose);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness — selected pairs
+// =============================================================================
+
+@test
+fn test_cert_purpose_server_auth_disjoint() {
+    let p: CertPurpose = CertPurpose.ServerAuth;
+    assert(!(p is CertPurpose.ClientAuth));
+    assert(!(p is CertPurpose.CodeSigning));
+    assert(!(p is CertPurpose.AnyPurpose));
+}
+
+@test
+fn test_cert_purpose_client_auth_disjoint() {
+    let p: CertPurpose = CertPurpose.ClientAuth;
+    assert(!(p is CertPurpose.ServerAuth));
+    assert(!(p is CertPurpose.AnyPurpose));
+}
+
+@test
+fn test_cert_purpose_code_signing_disjoint() {
+    let p: CertPurpose = CertPurpose.CodeSigning;
+    assert(!(p is CertPurpose.EmailProtection));
+    assert(!(p is CertPurpose.TimeStamping));
+    assert(!(p is CertPurpose.AnyPurpose));
+}
+
+@test
+fn test_cert_purpose_any_purpose_disjoint_from_specifics() {
+    let p: CertPurpose = CertPurpose.AnyPurpose;
+    assert(!(p is CertPurpose.ServerAuth));
+    assert(!(p is CertPurpose.ClientAuth));
+    assert(!(p is CertPurpose.CodeSigning));
+    assert(!(p is CertPurpose.EmailProtection));
+    assert(!(p is CertPurpose.TimeStamping));
+    assert(!(p is CertPurpose.OcspSigning));
+}
+
+fn main() {}

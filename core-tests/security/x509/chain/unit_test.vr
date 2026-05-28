@@ -1,0 +1,43 @@
+// =============================================================================
+// core-tests/security/x509/chain/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/chain.vr` — X.509 chain validation constants.
+// =============================================================================
+
+mount core.security.x509.chain.MAX_CHAIN_LENGTH;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: MAX_CHAIN_LENGTH cap
+//
+//   Practical limit on the depth of a certificate chain — protects
+//   against pathological deeply-nested chains (DoS) while comfortably
+//   accommodating realistic PKI hierarchies (typically 3-5 deep).
+// =============================================================================
+
+@test
+fn test_max_chain_length_canonical_value() {
+    assert_eq(MAX_CHAIN_LENGTH, 16);
+}
+
+@test
+fn test_max_chain_length_positive() {
+    assert(MAX_CHAIN_LENGTH > 0);
+}
+
+@test
+fn test_max_chain_length_exceeds_typical_pki_depth() {
+    // Real-world PKI rarely goes beyond 5 deep (root → intermediate →
+    // ... → leaf). Cap must dominate.
+    assert(MAX_CHAIN_LENGTH >= 5);
+}
+
+@test
+fn test_max_chain_length_power_of_two() {
+    let n = MAX_CHAIN_LENGTH;
+    assert_eq(n & (n - 1), 0);
+}
+
+fn main() {}
