@@ -32,7 +32,9 @@ mount core.collections.list.List;
 // hand-unrolling the chain. Multi-day VBC codegen fix.
 // =============================================================================
 
-@ignore("Nested-if-else chained Result simulation returns wrong variant — chained-function-return type tracking defect.")
+// Un-@ignore'd 2026-05-28 — chained-function-return type tracking
+// now correctly resolves nested-if-else Result-variant under --interp
+// post round-13b/14b dispatch consolidation.
 @test
 fn regression_pin_nested_if_else_chained_result() {
     fn step1() -> Result<Int, Text> {
