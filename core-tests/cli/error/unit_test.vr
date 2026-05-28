@@ -140,9 +140,10 @@ fn test_exit_code_custom_passes_through() {
 // Section 3: ExitCode helper ctors
 // =============================================================================
 
-// task #17/#39: `ExitCode.ok()` is routed to a colliding bare `ok` returning ()
-// instead of the static method. usage()/fail() helpers don't collide and work.
-@ignore
+// task #17/#39 (CLOSED): `ExitCode.ok()` was previously routed to a
+// colliding bare `ok` returning (). Recent codegen improvements
+// (cumulative static-method dispatch fixes) closed the surface — now
+// resolves correctly to the inherent static method on ExitCode.
 @test
 fn test_exit_code_ok_helper() {
     let e = ExitCode.ok();
