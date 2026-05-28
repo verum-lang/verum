@@ -158,7 +158,10 @@ fn test_base58_error_input_too_long_payload_round_trip() {
 //   Pure-data ADT surface above remains the regression-only contract.
 // =============================================================================
 
-@ignore("SIGSEGV during compile when test exercises encode/decode on Byte arrays — likely related to byte-array element-addr lowering. Sister of CBOR round-trip class.")
+// Un-@ignore'd 2026-05-28 — passes under --interp; the SIGSEGV class
+// for empty Byte-array encode/decode round-trip is closed (sister of
+// CBOR round-trip empty-text class, likely via byte-array element-addr
+// lowering consolidation).
 @test
 fn test_base58_encode_empty_is_empty() {
     let input: [Byte; 0] = [];
@@ -166,7 +169,7 @@ fn test_base58_encode_empty_is_empty() {
     assert_eq(out.len(), 0);
 }
 
-@ignore("Same compile-time SIGSEGV class — gated until VBC byte-array codegen is repaired.")
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn test_base58_decode_empty_is_empty() {
     let input: [Byte; 0] = [];
