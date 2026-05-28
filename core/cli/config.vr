@@ -89,8 +89,8 @@ implement ResolvedConfig {
 
     public fn get_text(&self, key: &Text) -> Maybe<Text> {
         match self.values.get(key) {
-            Some(rv) => Some(rv.value.clone()),
-            None => None,
+            Maybe.Some(rv) => Maybe.Some(rv.value.clone()),
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -103,7 +103,7 @@ implement ResolvedConfig {
         while i < keys.len() {
             let k = &keys[i];
             match self.values.get(k) {
-                Some(rv) => {
+                Maybe.Some(rv) => {
                     b.push("  ");
                     b.push(k);
                     b.push(" = ");
@@ -112,7 +112,7 @@ implement ResolvedConfig {
                     b.push(&rv.source.to_text());
                     b.push(")\n");
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -162,11 +162,11 @@ implement ConfigResolver {
         let mut i: Int = 1;
         while i < outcome.command_path.len() {
             match cur.find_subcommand(&outcome.command_path[i]) {
-                Some(sc) => {
+                Maybe.Some(sc) => {
                     resolve_for_cmd(self, sc, outcome, &mut values);
                     cur = sc;
                 },
-                None => break,
+                Maybe.None => break,
             }
             i = i + 1;
         }
@@ -191,16 +191,16 @@ fn resolve_for_cmd(
 
         // Resolve key: explicit config_path > long-name. Skip flags with neither.
         let key_opt: Maybe<Text> = match &f.config_path {
-            Some(p) => Some(p.clone()),
-            None => match &f.long {
-                Some(l) => Some(l.clone()),
-                None => None,
+            Maybe.Some(p) => Maybe.Some(p.clone()),
+            Maybe.None => match &f.long {
+                Maybe.Some(l) => Maybe.Some(l.clone()),
+                Maybe.None => Maybe.None,
             },
         };
 
         match key_opt {
-            None => { i = i + 1; },
-            Some(key) => {
+            Maybe.None => { i = i + 1; },
+            Maybe.Some(key) => {
                 if values.contains_key(&key) {
                     i = i + 1;
                 } else {
@@ -209,11 +209,11 @@ fn resolve_for_cmd(
                     while s < resolver.sources.len() {
                         let src = &resolver.sources[s];
                         match try_source(src, f, outcome) {
-                            Some(rv) => {
+                            Maybe.Some(rv) => {
                                 values.insert(key.clone(), rv);
                                 break;
                             },
-                            None => {},
+                            Maybe.None => {},
                         }
                         s = s + 1;
                     }
@@ -232,53 +232,53 @@ fn try_source(
     match src {
         ConfigSource.CliSource => {
             match &f.long {
-                Some(long) => match outcome.flags.get(long) {
-                    Some(cap) => {
+                Maybe.Some(long) => match outcome.flags.get(long) {
+                    Maybe.Some(cap) => {
                         if cap.values.len() > 0 {
-                            Some(ResolvedValue {
+                            Maybe.Some(ResolvedValue {
                                 value: cap.values[0].clone(),
                                 source: SourceTag.FromCli,
                             })
                         } else if cap.occurrences > 0 {
-                            Some(ResolvedValue {
+                            Maybe.Some(ResolvedValue {
                                 value: "true".to_text(),
                                 source: SourceTag.FromCli,
                             })
-                        } else { None }
+                        } else { Maybe.None }
                     },
-                    None => None,
+                    Maybe.None => Maybe.None,
                 },
-                None => None,
+                Maybe.None => Maybe.None,
             }
         },
         ConfigSource.EnvSource(prefix) => {
             match &f.env_fallback {
-                Some(env_name) => match env.var_opt(env_name) {
-                    Some(v) => Some(ResolvedValue {
+                Maybe.Some(env_name) => match env.var_opt(env_name) {
+                    Maybe.Some(v) => Maybe.Some(ResolvedValue {
                         value: v,
                         source: SourceTag.FromEnv(env_name.clone()),
                     }),
-                    None => None,
+                    Maybe.None => Maybe.None,
                 },
-                None => {
+                Maybe.None => {
                     // Auto-derive env name from prefix + UPPER(long).
                     // Verum's f-string interpolation does not support nested
                     // string literals, so we build the candidate explicitly.
                     match &f.long {
-                        Some(l) => {
+                        Maybe.Some(l) => {
                             let upper = l.to_uppercase();
                             let normalised = upper.replace("-", "_");
                             let mut candidate = prefix.clone();
                             candidate.push_str(&normalised);
                             match env.var_opt(&candidate) {
-                                Some(v) => Some(ResolvedValue {
+                                Maybe.Some(v) => Maybe.Some(ResolvedValue {
                                     value: v,
                                     source: SourceTag.FromEnv(candidate),
                                 }),
-                                None => None,
+                                Maybe.None => Maybe.None,
                             }
                         },
-                        None => None,
+                        Maybe.None => Maybe.None,
                     }
                 },
             }
