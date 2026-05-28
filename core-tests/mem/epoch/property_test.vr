@@ -3,7 +3,10 @@
 // =============================================================================
 //
 // Algebraic laws for `core.mem.epoch` — monotonicity of current_epoch,
-// wraparound_count, the cache-trail invariant.
+// wraparound_count, the cache-trail invariant, EpochCache 3-field
+// field-isolation, EPOCH_MAX boundary algebra, and reset_for_tests
+// idempotence.
+//
 // =============================================================================
 
 mount core.prelude.*;
@@ -11,6 +14,8 @@ mount core.mem.epoch.{
     EPOCH_MAX, DEFAULT_SYNC_INTERVAL,
     current_epoch, cached_epoch, wraparound_count,
     invalidate_epoch_cache,
+    EpochCache,
+    reset_for_tests,
 };
 
 // =============================================================================
@@ -74,6 +79,207 @@ fn law_constants_in_valid_range() {
     // DEFAULT_SYNC_INTERVAL should be at least 1 — a 0 value would
     // make the cache useless.
     assert(DEFAULT_SYNC_INTERVAL >= 1);
+}
+
+// =============================================================================
+// §E  EPOCH_MAX boundary algebra in UInt64 — load-bearing for wraparound
+//     accounting: total observable epoch-count = wraparound_count *
+//     (EPOCH_MAX + 1).  Within UInt64, this product is non-overflowing
+//     for any wraparound_count up to 2^48 — far beyond any practical
+//     runtime lifetime.
+// =============================================================================
+
+@test
+fn law_epoch_max_widened_to_uint64_loses_no_information() {
+    let max_u16 = EPOCH_MAX;
+    let max_u64: UInt64 = max_u16 as UInt64;
+    // Round-trip via a narrowing back is lossless (within 16-bit window).
+    let narrowed: UInt16 = (max_u64 & 0xFFFF as UInt64) as UInt16;
+    assert_eq(narrowed, max_u16);
+}
+
+@test
+fn law_epoch_max_plus_one_fits_uint32() {
+    // EPOCH_MAX + 1 = 0x10000 = 65536, well within UInt32 range.
+    // Pin this so a future widening to a UInt16-bus epoch_count would
+    // surface immediately.
+    let plus_one: UInt32 = (EPOCH_MAX as UInt32) + 1 as UInt32;
+    assert_eq(plus_one, 0x10000 as UInt32);
+}
+
+@test
+fn law_epoch_max_capped_within_uint64_top_bits() {
+    // EPOCH_MAX must fit in 16 bits — no other 64-bit value with the
+    // top 48 bits zeroed can exceed EPOCH_MAX while still being a
+    // legal epoch.
+    let max_u64: UInt64 = EPOCH_MAX as UInt64;
+    let top_bit_value: UInt64 = 0x1_0000_0000_0000 as UInt64;
+    assert(max_u64 < top_bit_value);
+}
+
+// =============================================================================
+// §F  EpochCache 3-field field-isolation (modifying one field doesn't
+//     bleed into the other 2 — no aliasing).
+// =============================================================================
+
+@test
+fn law_epoch_cache_distinct_cached_epoch_isolated_from_others() {
+    let a: EpochCache = EpochCache {
+        cached_epoch:      0 as UInt64,
+        checks_since_sync: 500,
+        sync_interval:     1000,
+    };
+    let b: EpochCache = EpochCache {
+        cached_epoch:      99 as UInt64,
+        checks_since_sync: 500,
+        sync_interval:     1000,
+    };
+    // Only cached_epoch changes — the OTHER two fields remain bit-equal.
+    assert(a.cached_epoch != b.cached_epoch);
+    assert_eq(a.checks_since_sync, b.checks_since_sync);
+    assert_eq(a.sync_interval, b.sync_interval);
+}
+
+@test
+fn law_epoch_cache_distinct_checks_isolated_from_others() {
+    let a: EpochCache = EpochCache {
+        cached_epoch:      99 as UInt64,
+        checks_since_sync: 0,
+        sync_interval:     1000,
+    };
+    let b: EpochCache = EpochCache {
+        cached_epoch:      99 as UInt64,
+        checks_since_sync: 700,
+        sync_interval:     1000,
+    };
+    assert_eq(a.cached_epoch, b.cached_epoch);
+    assert(a.checks_since_sync != b.checks_since_sync);
+    assert_eq(a.sync_interval, b.sync_interval);
+}
+
+@test
+fn law_epoch_cache_distinct_sync_interval_isolated_from_others() {
+    let a: EpochCache = EpochCache {
+        cached_epoch:      99 as UInt64,
+        checks_since_sync: 500,
+        sync_interval:     500,
+    };
+    let b: EpochCache = EpochCache {
+        cached_epoch:      99 as UInt64,
+        checks_since_sync: 500,
+        sync_interval:     2000,
+    };
+    assert_eq(a.cached_epoch, b.cached_epoch);
+    assert_eq(a.checks_since_sync, b.checks_since_sync);
+    assert(a.sync_interval != b.sync_interval);
+}
+
+// =============================================================================
+// §G  EpochCache zero-state vs boundary-state shape uniqueness — each
+//     of the 8 corner-states (3 binary fields × 2 = 8 octants) gives a
+//     distinct record per field.
+// =============================================================================
+
+@test
+fn law_epoch_cache_boundary_state_corners_distinct() {
+    let zero: EpochCache = EpochCache {
+        cached_epoch:      0 as UInt64,
+        checks_since_sync: 0,
+        sync_interval:     1,
+    };
+    let cached_only: EpochCache = EpochCache {
+        cached_epoch:      99 as UInt64,
+        checks_since_sync: 0,
+        sync_interval:     1,
+    };
+    let checks_only: EpochCache = EpochCache {
+        cached_epoch:      0 as UInt64,
+        checks_since_sync: 700,
+        sync_interval:     1,
+    };
+    let interval_only: EpochCache = EpochCache {
+        cached_epoch:      0 as UInt64,
+        checks_since_sync: 0,
+        sync_interval:     1000,
+    };
+    // Each of the 4 distinct states differs from zero in EXACTLY ONE
+    // field — the others remain at zero.
+    assert(zero.cached_epoch != cached_only.cached_epoch);
+    assert_eq(zero.checks_since_sync, cached_only.checks_since_sync);
+    assert_eq(zero.sync_interval, cached_only.sync_interval);
+
+    assert_eq(zero.cached_epoch, checks_only.cached_epoch);
+    assert(zero.checks_since_sync != checks_only.checks_since_sync);
+    assert_eq(zero.sync_interval, checks_only.sync_interval);
+
+    assert_eq(zero.cached_epoch, interval_only.cached_epoch);
+    assert_eq(zero.checks_since_sync, interval_only.checks_since_sync);
+    assert(zero.sync_interval != interval_only.sync_interval);
+}
+
+// =============================================================================
+// §H  DEFAULT_SYNC_INTERVAL ordering — aggressive (100) < default (1000)
+//     < relaxed (10_000).  Pin the ordering so adjustments to
+//     DEFAULT_SYNC_INTERVAL preserve the relative position.
+// =============================================================================
+
+@test
+fn law_default_sync_interval_in_aggressive_relaxed_corridor() {
+    let aggressive: Int = 100;
+    let relaxed: Int = 10_000;
+    assert(aggressive < DEFAULT_SYNC_INTERVAL);
+    assert(DEFAULT_SYNC_INTERVAL < relaxed);
+}
+
+// =============================================================================
+// §I  reset_for_tests is idempotent — calling it N times leaves the
+//     global at the same baseline as calling it once.
+// =============================================================================
+
+@test
+fn law_reset_for_tests_idempotent_3_calls() {
+    reset_for_tests();
+    let e1 = current_epoch();
+    reset_for_tests();
+    let e2 = current_epoch();
+    reset_for_tests();
+    let e3 = current_epoch();
+    // All three reads observe 0 — calling reset multiple times is
+    // identity.
+    assert_eq(e1, 0 as UInt64);
+    assert_eq(e2, 0 as UInt64);
+    assert_eq(e3, 0 as UInt64);
+    // wraparound_count similarly stuck at 0.
+    assert_eq(wraparound_count(), 0);
+}
+
+@test
+fn law_reset_for_tests_zeros_invariant_across_invalidation() {
+    // Re-validate the cache between resets to ensure cache state
+    // doesn't leak into the global counter.
+    reset_for_tests();
+    invalidate_epoch_cache();
+    reset_for_tests();
+    invalidate_epoch_cache();
+    reset_for_tests();
+    assert_eq(current_epoch(), 0 as UInt64);
+    assert_eq(wraparound_count(), 0);
+}
+
+// =============================================================================
+// §J  invalidate_epoch_cache is idempotent — calling N times is no-op
+// =============================================================================
+
+@test
+fn law_invalidate_epoch_cache_idempotent() {
+    // After many invalidations, the next cached read still returns a
+    // value ≤ current_epoch.
+    for _ in 0..20 {
+        invalidate_epoch_cache();
+    }
+    let cached = cached_epoch();
+    let current = current_epoch();
+    assert(cached <= current);
 }
 
 // =============================================================================

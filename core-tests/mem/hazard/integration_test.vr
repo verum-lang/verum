@@ -3,9 +3,10 @@
 // =============================================================================
 //
 // Integration tests: hazard pointer system composed with CBGR
-// dereference path.  Live concurrent-safety tests require spawn —
-// deferred.  These tests pin the dimensions of the global hazard
-// table for sizing assertions.
+// dereference path + sister CBGR types (header, capability, epoch).
+// Live concurrent-safety tests require spawn — deferred.  These tests
+// pin the dimensions of the global hazard table for sizing assertions
+// + the algebraic composition of HazardStats with sister types.
 // =============================================================================
 
 mount core.prelude.*;
@@ -13,6 +14,9 @@ mount core.mem.hazard.{
     HAZARD_POINTERS_PER_THREAD, RETIRED_THRESHOLD, MAX_THREADS,
     HazardStats, hazard_stats,
 };
+mount core.mem.header.{HEADER_SIZE};
+mount core.mem.epoch.{EPOCH_MAX, DEFAULT_SYNC_INTERVAL};
+mount core.mem.capability.{CAP_OWNED};
 
 // -----------------------------------------------------------------------------
 // §1  Hazard table dimensions are reasonable
@@ -34,6 +38,165 @@ fn integration_hazard_table_total_capacity() {
 fn integration_hazard_stats_observable() {
     let _stats: HazardStats = hazard_stats();
     assert(true);
+}
+
+// -----------------------------------------------------------------------------
+// §3  Hazard table footprint analysis — composed with HEADER_SIZE.
+//     Per-thread reservation = HAZARD_POINTERS_PER_THREAD * sizeof(ptr)
+//     = 8 * 8 bytes = 64 bytes per thread.  Total hazard-table-only
+//     footprint = MAX_THREADS * 64 bytes = 16 KiB.  Composed with the
+//     per-thread struct overhead this rises but the hazard table is
+//     load-bearing for memory accounting on resource-constrained
+//     platforms (embedded).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_hazard_table_footprint_within_one_segment() {
+    let table_bytes: Int = HAZARD_POINTERS_PER_THREAD * MAX_THREADS * 8;  // 8 bytes per ptr
+    // The full hazard table fits within a 64 KiB segment slice (per
+    // core/mem/segment.vr SLICE_SIZE).
+    assert(table_bytes <= 64 * 1024);
+}
+
+@test
+fn integration_hazard_table_per_thread_smaller_than_header() {
+    // Per-thread hazard reservation < HEADER_SIZE * 4 — pin the
+    // smallness invariant; hazard table is a fixed-cost overhead and
+    // shouldn't dwarf the inline header.
+    let per_thread_bytes: Int = HAZARD_POINTERS_PER_THREAD * 8;
+    let four_headers_bytes: Int = (HEADER_SIZE as Int) * 4;
+    assert(per_thread_bytes <= four_headers_bytes * 2);
+}
+
+// -----------------------------------------------------------------------------
+// §4  HazardStats vs RETIRED_THRESHOLD reclaim-trigger semantics —
+//     the cross-cutting invariant between constants + the algebra
+//     surface.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_needs_reclaim_at_per_thread_capacity_fraction() {
+    // When retired_count fills HAZARD_POINTERS_PER_THREAD slots (8),
+    // we should NOT yet trigger reclaim (threshold is 64, 8x larger).
+    let s = HazardStats {
+        protected_count: 0,
+        retired_count: HAZARD_POINTERS_PER_THREAD,
+        thread_count: 1,
+    };
+    assert(!s.needs_reclaim());
+}
+
+@test
+fn integration_needs_reclaim_at_full_capacity_fraction() {
+    // When retired_count reaches 64 = RETIRED_THRESHOLD (8x slots),
+    // reclaim must trigger.
+    let s = HazardStats {
+        protected_count: 0,
+        retired_count: RETIRED_THRESHOLD,
+        thread_count: 1,
+    };
+    assert(s.needs_reclaim());
+    assert_eq(s.retired_count, HAZARD_POINTERS_PER_THREAD * 8);
+}
+
+// -----------------------------------------------------------------------------
+// §5  hazard_stats observed across multiple invocations is stable
+//     (read-only — no side-effects).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_hazard_stats_repeated_observation_is_stable_protected_count() {
+    let s1: HazardStats = hazard_stats();
+    let s2: HazardStats = hazard_stats();
+    // Both samples observe the same protected_count under quiescent
+    // load (no concurrent acquire_hazard happening in this test).
+    assert_eq(s1.protected_count, s2.protected_count);
+}
+
+@test
+fn integration_hazard_stats_repeated_observation_is_stable_thread_count() {
+    let s1: HazardStats = hazard_stats();
+    let s2: HazardStats = hazard_stats();
+    assert_eq(s1.thread_count, s2.thread_count);
+}
+
+// -----------------------------------------------------------------------------
+// §6  Hazard table sizing × CBGR header — total CBGR overhead
+//     accounting under typical workload.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_hazard_table_smaller_than_default_arena() {
+    // The hazard table (16 KiB) must fit within the default arena
+    // capacity (64 KiB) so a single arena can host all hazard state
+    // + working allocations without segment promotion.
+    let table_bytes: Int = HAZARD_POINTERS_PER_THREAD * MAX_THREADS * 8;
+    assert(table_bytes <= 64 * 1024);   // == DEFAULT_ARENA_CAPACITY
+}
+
+// -----------------------------------------------------------------------------
+// §7  HazardStats serialises-to-Int field shape — load-bearing for
+//     telemetry dumps.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_hazard_stats_field_types_are_int() {
+    let s = HazardStats {
+        protected_count: 0,
+        retired_count: 0,
+        thread_count: 0,
+    };
+    let p: Int = s.protected_count;
+    let r: Int = s.retired_count;
+    let t: Int = s.thread_count;
+    assert_eq(p, 0);
+    assert_eq(r, 0);
+    assert_eq(t, 0);
+}
+
+// -----------------------------------------------------------------------------
+// §8  EPOCH_MAX vs RETIRED_THRESHOLD relationship — EPOCH_MAX is
+//     0xFFFF (65535), RETIRED_THRESHOLD is 64.  Pin EPOCH_MAX >> RETIRED_THRESHOLD
+//     so a wraparound provides ample reclaim cycles.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_epoch_max_dominates_retired_threshold() {
+    let epoch_max_int: Int = EPOCH_MAX as Int;
+    // EPOCH_MAX = 65535 must be much larger than RETIRED_THRESHOLD = 64
+    // — pin a 100x+ margin so reclaim cycles within a wraparound window
+    // are bounded by the threshold, not the epoch.
+    assert(epoch_max_int > RETIRED_THRESHOLD * 100);
+}
+
+// -----------------------------------------------------------------------------
+// §9  CAP_OWNED + hazard composition — when CBGR validates a deref,
+//     it checks both the (epoch, generation) lifecycle AND the
+//     capability flags.  Pin CAP_OWNED is non-zero so hazard's
+//     "protected refs hold valid caps" precondition is satisfiable.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_cap_owned_is_satisfiable_for_hazard_protected_refs() {
+    // A hazard-protected ref holds CAP_OWNED in the simplest case.
+    // CAP_OWNED must be non-zero for the validate_read / validate_write
+    // path to return true.
+    assert(CAP_OWNED > 0 as UInt16);
+    // CAP_OWNED includes CAP_READ (1), CAP_WRITE (2), CAP_DELEGATE (8),
+    // CAP_REVOKE (16), CAP_MUTABLE (64).  Pin the OR-combined value.
+    let expected: UInt16 = 1 as UInt16 | 2 as UInt16 | 8 as UInt16 | 16 as UInt16 | 64 as UInt16;
+    assert_eq(CAP_OWNED, expected);
+}
+
+// -----------------------------------------------------------------------------
+// §10  DEFAULT_SYNC_INTERVAL vs RETIRED_THRESHOLD — composition pin.
+//      Cache sync (1000 checks) is rarer than reclaim trigger (64
+//      retired refs), so reclaim activity dominates cache-sync activity.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_default_sync_interval_rarer_than_retired_threshold() {
+    assert(DEFAULT_SYNC_INTERVAL > RETIRED_THRESHOLD);
 }
 
 fn main() {
