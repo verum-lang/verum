@@ -1,0 +1,142 @@
+// =============================================================================
+// core-tests/math/complex/unit_test.vr
+// =============================================================================
+//
+// `core/math/complex.vr` — generic complex numbers `re + im * i`.
+// =============================================================================
+
+mount core.math.complex.Complex;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Float-typed Complex construction + accessors
+// =============================================================================
+
+@test
+fn test_complex_float_new_preserves_re_and_im() {
+    let z: Complex<Float> = Complex.new(3.0, 4.0);
+    assert_eq(z.re, 3.0);
+    assert_eq(z.im, 4.0);
+}
+
+@test
+fn test_complex_float_zero_re_zero_im() {
+    let z: Complex<Float> = Complex.new(0.0, 0.0);
+    assert_eq(z.re, 0.0);
+    assert_eq(z.im, 0.0);
+}
+
+@test
+fn test_complex_float_pure_real() {
+    let z: Complex<Float> = Complex.new(7.5, 0.0);
+    assert_eq(z.re, 7.5);
+    assert_eq(z.im, 0.0);
+}
+
+@test
+fn test_complex_float_pure_imag() {
+    let z: Complex<Float> = Complex.new(0.0, 5.5);
+    assert_eq(z.re, 0.0);
+    assert_eq(z.im, 5.5);
+}
+
+@test
+fn test_complex_float_negative_real() {
+    let z: Complex<Float> = Complex.new(-3.0, 4.0);
+    assert_eq(z.re, -3.0);
+    assert_eq(z.im, 4.0);
+}
+
+@test
+fn test_complex_float_negative_imag() {
+    let z: Complex<Float> = Complex.new(3.0, -4.0);
+    assert_eq(z.re, 3.0);
+    assert_eq(z.im, -4.0);
+}
+
+@test
+fn test_complex_float_negative_both() {
+    let z: Complex<Float> = Complex.new(-3.0, -4.0);
+    assert_eq(z.re, -3.0);
+    assert_eq(z.im, -4.0);
+}
+
+// =============================================================================
+// Section 2: Int-typed Complex construction
+// =============================================================================
+
+@test
+fn test_complex_int_new_preserves_re_and_im() {
+    let z: Complex<Int> = Complex.new(3, 4);
+    assert_eq(z.re, 3);
+    assert_eq(z.im, 4);
+}
+
+@test
+fn test_complex_int_zero_zero() {
+    let z: Complex<Int> = Complex.new(0, 0);
+    assert_eq(z.re, 0);
+    assert_eq(z.im, 0);
+}
+
+@test
+fn test_complex_int_pure_real_unit() {
+    let z: Complex<Int> = Complex.new(1, 0);
+    assert_eq(z.re, 1);
+    assert_eq(z.im, 0);
+}
+
+@test
+fn test_complex_int_pure_imag_unit() {
+    let z: Complex<Int> = Complex.new(0, 1);
+    assert_eq(z.re, 0);
+    assert_eq(z.im, 1);
+}
+
+// =============================================================================
+// Section 3: Direct record construction
+// =============================================================================
+
+@test
+fn test_complex_float_direct_construction() {
+    let z: Complex<Float> = Complex { re: 1.5, im: 2.5 };
+    assert_eq(z.re, 1.5);
+    assert_eq(z.im, 2.5);
+}
+
+@test
+fn test_complex_int_direct_construction() {
+    let z: Complex<Int> = Complex { re: 100, im: 200 };
+    assert_eq(z.re, 100);
+    assert_eq(z.im, 200);
+}
+
+// =============================================================================
+// Section 4: Field independence
+//
+//   Different re/im pairs must preserve their values without
+//   cross-contamination.
+// =============================================================================
+
+@test
+fn test_complex_float_field_independence() {
+    let a: Complex<Float> = Complex.new(1.0, 2.0);
+    let b: Complex<Float> = Complex.new(3.0, 4.0);
+    assert_eq(a.re, 1.0);
+    assert_eq(a.im, 2.0);
+    assert_eq(b.re, 3.0);
+    assert_eq(b.im, 4.0);
+}
+
+@test
+fn test_complex_int_field_independence() {
+    let a: Complex<Int> = Complex.new(10, 20);
+    let b: Complex<Int> = Complex.new(30, 40);
+    assert_eq(a.re, 10);
+    assert_eq(a.im, 20);
+    assert_eq(b.re, 30);
+    assert_eq(b.im, 40);
+}
+
+fn main() {}
