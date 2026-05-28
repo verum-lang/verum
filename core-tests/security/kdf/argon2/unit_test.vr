@@ -1,0 +1,140 @@
+// =============================================================================
+// core-tests/security/kdf/argon2/unit_test.vr
+// =============================================================================
+//
+// `core/security/kdf/argon2.vr` — Argon2 memory-hard password hashing
+// (RFC 9106, OWASP 2025).
+// =============================================================================
+
+mount core.security.kdf.argon2.{
+    ARGON2_MIN_SALT_BYTES, ARGON2_MAX_SALT_BYTES,
+    ARGON2_MIN_TAG_BYTES, ARGON2_MAX_TAG_BYTES,
+    ARGON2_OWASP_MIN_MEMORY_KIB, ARGON2_MAX_MEMORY_KIB,
+    ARGON2_OWASP_MIN_TIME, ARGON2_MAX_TIME,
+    ARGON2_MIN_PARALLELISM, ARGON2_MAX_PARALLELISM,
+    ARGON2_VERSION,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Salt size bounds
+// =============================================================================
+
+@test
+fn test_argon2_min_salt_bytes_canonical_value() {
+    // RFC 9106 §3.1 — minimum salt is 8 bytes; Verum's floor is 16
+    // (stricter, matches OWASP).
+    assert_eq(ARGON2_MIN_SALT_BYTES, 16);
+}
+
+@test
+fn test_argon2_max_salt_bytes_canonical_value() {
+    assert_eq(ARGON2_MAX_SALT_BYTES, 256);
+}
+
+@test
+fn test_argon2_salt_min_less_than_max() {
+    assert(ARGON2_MIN_SALT_BYTES < ARGON2_MAX_SALT_BYTES);
+}
+
+// =============================================================================
+// Section 2: Tag (output) size bounds
+// =============================================================================
+
+@test
+fn test_argon2_min_tag_bytes_canonical_value() {
+    // RFC 9106 §3.1 — minimum tag is 4 bytes; Verum's floor is 16.
+    assert_eq(ARGON2_MIN_TAG_BYTES, 16);
+}
+
+@test
+fn test_argon2_max_tag_bytes_canonical_value() {
+    // RFC 9106 §3.1 — caps at 32-bit length; we cap at 64 (BLAKE2b digest).
+    assert_eq(ARGON2_MAX_TAG_BYTES, 64);
+}
+
+@test
+fn test_argon2_tag_min_less_than_max() {
+    assert(ARGON2_MIN_TAG_BYTES < ARGON2_MAX_TAG_BYTES);
+}
+
+// =============================================================================
+// Section 3: Memory cost bounds
+//
+//   OWASP 2025 recommends ≥12 MiB (12,288 KiB) — pinned here.
+//   Cap is 4 GiB (4 × 1024 × 1024 KiB) for sanity.
+// =============================================================================
+
+@test
+fn test_argon2_owasp_min_memory_kib_canonical_value() {
+    // 12 MiB = 12 × 1024 = 12_288 KiB.
+    assert_eq(ARGON2_OWASP_MIN_MEMORY_KIB, 12_288);
+}
+
+@test
+fn test_argon2_max_memory_kib_canonical_value() {
+    // 4 GiB cap.
+    assert_eq(ARGON2_MAX_MEMORY_KIB, 4 * 1024 * 1024);
+}
+
+@test
+fn test_argon2_memory_owasp_lt_max() {
+    assert(ARGON2_OWASP_MIN_MEMORY_KIB < ARGON2_MAX_MEMORY_KIB);
+}
+
+// =============================================================================
+// Section 4: Time (iteration count) bounds
+// =============================================================================
+
+@test
+fn test_argon2_owasp_min_time_canonical_value() {
+    // OWASP 2025 — minimum 2 iterations.
+    assert_eq(ARGON2_OWASP_MIN_TIME, 2);
+}
+
+@test
+fn test_argon2_max_time_canonical_value() {
+    // Int32.MAX.
+    assert_eq(ARGON2_MAX_TIME, 2_147_483_647);
+}
+
+@test
+fn test_argon2_time_owasp_lt_max() {
+    assert(ARGON2_OWASP_MIN_TIME < ARGON2_MAX_TIME);
+}
+
+// =============================================================================
+// Section 5: Parallelism bounds
+// =============================================================================
+
+@test
+fn test_argon2_min_parallelism_canonical_value() {
+    assert_eq(ARGON2_MIN_PARALLELISM, 1);
+}
+
+@test
+fn test_argon2_max_parallelism_canonical_value() {
+    // Practical thread-count cap.
+    assert_eq(ARGON2_MAX_PARALLELISM, 64);
+}
+
+@test
+fn test_argon2_parallelism_min_lt_max() {
+    assert(ARGON2_MIN_PARALLELISM < ARGON2_MAX_PARALLELISM);
+}
+
+// =============================================================================
+// Section 6: Version pin
+//
+//   Argon2 v1.3 is the only blessed version (RFC 9106 §3.1).
+// =============================================================================
+
+@test
+fn test_argon2_version_is_v1_3() {
+    // 0x13 = 19 decimal.
+    assert_eq(ARGON2_VERSION, 0x13);
+    assert_eq(ARGON2_VERSION, 19);
+}
+
+fn main() {}
