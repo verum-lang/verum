@@ -195,8 +195,10 @@ implement<V: Clone> Trie<V> {
         }
         match best {
             Maybe.Some((len, v)) => {
+                // EXTSLICE-1 discipline: byte-by-byte push.
                 let mut prefix: List<Byte> = List.with_capacity(len);
-                prefix.extend_from_slice(&key[..len]);
+                let mut __i = 0;
+                while __i < len { prefix.push(key[__i]); __i = __i + 1; }
                 Maybe.Some((prefix, v))
             },
             Maybe.None => Maybe.None,
@@ -210,8 +212,10 @@ implement<V: Clone> Trie<V> {
         let mut out: List<(List<Byte>, V)> = [];
         match self.walk_to(prefix) {
             Maybe.Some(sub) => {
+                // EXTSLICE-1 discipline: byte-by-byte push.
                 let mut base: List<Byte> = List.with_capacity(prefix.len());
-                base.extend_from_slice(prefix);
+                let mut __i = 0;
+                while __i < prefix.len() { base.push(prefix[__i]); __i = __i + 1; }
                 collect_entries(sub, &base, &mut out);
             },
             Maybe.None => {},

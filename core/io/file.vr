@@ -554,7 +554,9 @@ implement AsyncFile {
             if n == 0 {
                 break;
             }
-            buf.extend_from_slice(&temp[..n]);
+            // EXTSLICE-1 discipline: byte-by-byte push.
+            let mut __i = 0;
+            while __i < n { buf.push(temp[__i]); __i = __i + 1; }
             total = total + n;
         }
 
