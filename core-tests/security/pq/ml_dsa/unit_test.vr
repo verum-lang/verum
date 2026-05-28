@@ -1,0 +1,109 @@
+// =============================================================================
+// core-tests/security/pq/ml_dsa/unit_test.vr
+// =============================================================================
+//
+// `core/security/pq/ml_dsa.vr` — ML-DSA (FIPS 204) post-quantum
+// signature scheme size constants.
+// =============================================================================
+
+mount core.security.pq.ml_dsa.{
+    ML_DSA_44_PK_LEN, ML_DSA_44_SK_LEN, ML_DSA_44_SIG_LEN,
+    ML_DSA_65_PK_LEN, ML_DSA_65_SK_LEN, ML_DSA_65_SIG_LEN,
+    ML_DSA_87_PK_LEN, ML_DSA_87_SK_LEN, ML_DSA_87_SIG_LEN,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ML-DSA-44 (NIST Level 2) — FIPS 204 §4
+// =============================================================================
+
+@test
+fn test_ml_dsa_44_pk_len_canonical_value() {
+    assert_eq(ML_DSA_44_PK_LEN, 1312);
+}
+
+@test
+fn test_ml_dsa_44_sk_len_canonical_value() {
+    assert_eq(ML_DSA_44_SK_LEN, 2560);
+}
+
+@test
+fn test_ml_dsa_44_sig_len_canonical_value() {
+    assert_eq(ML_DSA_44_SIG_LEN, 2420);
+}
+
+// =============================================================================
+// Section 2: ML-DSA-65 (NIST Level 3) — FIPS 204 §4
+// =============================================================================
+
+@test
+fn test_ml_dsa_65_pk_len_canonical_value() {
+    assert_eq(ML_DSA_65_PK_LEN, 1952);
+}
+
+@test
+fn test_ml_dsa_65_sk_len_canonical_value() {
+    assert_eq(ML_DSA_65_SK_LEN, 4032);
+}
+
+@test
+fn test_ml_dsa_65_sig_len_canonical_value() {
+    assert_eq(ML_DSA_65_SIG_LEN, 3309);
+}
+
+// =============================================================================
+// Section 3: ML-DSA-87 (NIST Level 5) — FIPS 204 §4
+// =============================================================================
+
+@test
+fn test_ml_dsa_87_pk_len_canonical_value() {
+    assert_eq(ML_DSA_87_PK_LEN, 2592);
+}
+
+@test
+fn test_ml_dsa_87_sk_len_canonical_value() {
+    assert_eq(ML_DSA_87_SK_LEN, 4896);
+}
+
+@test
+fn test_ml_dsa_87_sig_len_canonical_value() {
+    assert_eq(ML_DSA_87_SIG_LEN, 4627);
+}
+
+// =============================================================================
+// Section 4: Width invariants — sizes grow monotonically with security level
+// =============================================================================
+
+@test
+fn test_ml_dsa_pk_sizes_monotonic_44_65_87() {
+    assert(ML_DSA_44_PK_LEN < ML_DSA_65_PK_LEN);
+    assert(ML_DSA_65_PK_LEN < ML_DSA_87_PK_LEN);
+}
+
+@test
+fn test_ml_dsa_sk_sizes_monotonic_44_65_87() {
+    assert(ML_DSA_44_SK_LEN < ML_DSA_65_SK_LEN);
+    assert(ML_DSA_65_SK_LEN < ML_DSA_87_SK_LEN);
+}
+
+@test
+fn test_ml_dsa_sig_sizes_monotonic_44_65_87() {
+    assert(ML_DSA_44_SIG_LEN < ML_DSA_65_SIG_LEN);
+    assert(ML_DSA_65_SIG_LEN < ML_DSA_87_SIG_LEN);
+}
+
+@test
+fn test_ml_dsa_constants_all_positive() {
+    assert(ML_DSA_44_PK_LEN > 0);
+    assert(ML_DSA_65_PK_LEN > 0);
+    assert(ML_DSA_87_PK_LEN > 0);
+    assert(ML_DSA_44_SK_LEN > 0);
+    assert(ML_DSA_65_SK_LEN > 0);
+    assert(ML_DSA_87_SK_LEN > 0);
+    assert(ML_DSA_44_SIG_LEN > 0);
+    assert(ML_DSA_65_SIG_LEN > 0);
+    assert(ML_DSA_87_SIG_LEN > 0);
+}
+
+fn main() {}

@@ -1,0 +1,115 @@
+// =============================================================================
+// core-tests/security/pq/ml_kem/unit_test.vr
+// =============================================================================
+//
+// `core/security/pq/ml_kem.vr` — ML-KEM (FIPS 203) post-quantum
+// key-encapsulation mechanism size constants.
+// =============================================================================
+
+mount core.security.pq.ml_kem.{
+    ML_KEM_SHARED_SECRET_LEN,
+    ML_KEM_512_PK_LEN, ML_KEM_512_SK_LEN, ML_KEM_512_CT_LEN,
+    ML_KEM_768_PK_LEN, ML_KEM_768_SK_LEN, ML_KEM_768_CT_LEN,
+    ML_KEM_1024_PK_LEN, ML_KEM_1024_SK_LEN, ML_KEM_1024_CT_LEN,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ML-KEM shared secret length
+// =============================================================================
+
+@test
+fn test_ml_kem_shared_secret_len_canonical_value() {
+    // 256-bit (32-byte) shared secret across all security levels.
+    assert_eq(ML_KEM_SHARED_SECRET_LEN, 32);
+}
+
+// =============================================================================
+// Section 2: ML-KEM-512 (NIST Level 1) — FIPS 203 §6
+// =============================================================================
+
+@test
+fn test_ml_kem_512_pk_len_canonical_value() {
+    assert_eq(ML_KEM_512_PK_LEN, 800);
+}
+
+@test
+fn test_ml_kem_512_sk_len_canonical_value() {
+    assert_eq(ML_KEM_512_SK_LEN, 1632);
+}
+
+@test
+fn test_ml_kem_512_ct_len_canonical_value() {
+    assert_eq(ML_KEM_512_CT_LEN, 768);
+}
+
+// =============================================================================
+// Section 3: ML-KEM-768 (NIST Level 3)
+// =============================================================================
+
+@test
+fn test_ml_kem_768_pk_len_canonical_value() {
+    assert_eq(ML_KEM_768_PK_LEN, 1184);
+}
+
+@test
+fn test_ml_kem_768_sk_len_canonical_value() {
+    assert_eq(ML_KEM_768_SK_LEN, 2400);
+}
+
+@test
+fn test_ml_kem_768_ct_len_canonical_value() {
+    assert_eq(ML_KEM_768_CT_LEN, 1088);
+}
+
+// =============================================================================
+// Section 4: ML-KEM-1024 (NIST Level 5)
+// =============================================================================
+
+@test
+fn test_ml_kem_1024_pk_len_canonical_value() {
+    assert_eq(ML_KEM_1024_PK_LEN, 1568);
+}
+
+@test
+fn test_ml_kem_1024_sk_len_canonical_value() {
+    assert_eq(ML_KEM_1024_SK_LEN, 3168);
+}
+
+@test
+fn test_ml_kem_1024_ct_len_canonical_value() {
+    assert_eq(ML_KEM_1024_CT_LEN, 1568);
+}
+
+// =============================================================================
+// Section 5: Width invariants
+// =============================================================================
+
+@test
+fn test_ml_kem_pk_sizes_monotonic_512_768_1024() {
+    assert(ML_KEM_512_PK_LEN < ML_KEM_768_PK_LEN);
+    assert(ML_KEM_768_PK_LEN < ML_KEM_1024_PK_LEN);
+}
+
+@test
+fn test_ml_kem_sk_sizes_monotonic_512_768_1024() {
+    assert(ML_KEM_512_SK_LEN < ML_KEM_768_SK_LEN);
+    assert(ML_KEM_768_SK_LEN < ML_KEM_1024_SK_LEN);
+}
+
+@test
+fn test_ml_kem_1024_pk_equals_ct() {
+    // ML-KEM-1024 has equal-sized public key and ciphertext.
+    assert_eq(ML_KEM_1024_PK_LEN, ML_KEM_1024_CT_LEN);
+}
+
+@test
+fn test_ml_kem_constants_all_positive() {
+    assert(ML_KEM_SHARED_SECRET_LEN > 0);
+    assert(ML_KEM_512_PK_LEN > 0);
+    assert(ML_KEM_768_PK_LEN > 0);
+    assert(ML_KEM_1024_PK_LEN > 0);
+}
+
+fn main() {}
