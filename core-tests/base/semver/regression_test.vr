@@ -27,11 +27,10 @@ mount core.collections.list.List;
 // becomes mount-scope-aware (multi-day VBC codegen fix).
 // =============================================================================
 
-// REGRESSED 2026-05-28 post commit 5fffcc93d — assertion `r.is_ok()`
-// fails because `parse("1.2.3")` no longer routes correctly under the
-// Maybe/Result qualification sweep.  Same defect family as the retry
-// regression — closure-typed-param dispatch + Result variant resolution.
-@ignore("post-5fffcc93d: parse returns wrong variant under --interp.")
+// Un-@ignore'd 2026-05-28 — CLOSED via parallel agents' fix for the
+// 5fffcc93d sweep regression (commits 97485d71a + e51f0338a — mod.vr
+// prelude-mount repair + 22 local-variant reverts).  `parse` resolves
+// correctly under --interp again.
 @test
 fn regression_pin_parse_bare_dispatch_returns_wrong_type() {
     let r = parse(&"1.2.3".to_text());
