@@ -1,0 +1,243 @@
+// =============================================================================
+// core-tests/encoding/pem/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/pem.vr` — RFC 7468 textual encoding for DER blobs.
+//
+// Pure-data surface tested here:
+//   * PemBlock record construction + field preservation
+//   * PemError 5-variant ADT
+//       - NoBlockFound
+//       - MismatchedLabels(Text)
+//       - Base64Failed
+//       - Malformed(Text)
+//       - TooLarge(Int)
+//   * Variant disjointness via `is`-pattern testing
+//
+// The encode_block / decode_one / decode_all surfaces require
+// Text.from_utf8_unchecked dispatch which still trips the lenient-
+// stub cascade under `--interp` — those are pinned at the regression-
+// only level pending the multi-day VBC codegen fix that lands
+// from_utf8_unchecked at the visible mount scope.
+// =============================================================================
+
+mount core.encoding.pem.{PemBlock, PemError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: PemBlock record construction
+// =============================================================================
+
+@test
+fn test_pem_block_empty_contents() {
+    let b: PemBlock = PemBlock {
+        label: "CERTIFICATE".to_text(),
+        contents: [],
+    };
+    assert_eq(b.label, "CERTIFICATE");
+    assert_eq(b.contents.len(), 0);
+}
+
+@test
+fn test_pem_block_single_byte_contents() {
+    let mut bytes: List<Byte> = [];
+    bytes.push(0xAB_u8);
+    let b: PemBlock = PemBlock {
+        label: "PRIVATE KEY".to_text(),
+        contents: bytes,
+    };
+    assert_eq(b.label, "PRIVATE KEY");
+    assert_eq(b.contents.len(), 1);
+    assert_eq(b.contents[0], 0xAB_u8);
+}
+
+@test
+fn test_pem_block_multi_byte_contents() {
+    let mut bytes: List<Byte> = [];
+    bytes.push(0xDE_u8);
+    bytes.push(0xAD_u8);
+    bytes.push(0xBE_u8);
+    bytes.push(0xEF_u8);
+    let b: PemBlock = PemBlock {
+        label: "RSA PRIVATE KEY".to_text(),
+        contents: bytes,
+    };
+    assert_eq(b.contents.len(), 4);
+    assert_eq(b.contents[0], 0xDE_u8);
+    assert_eq(b.contents[3], 0xEF_u8);
+}
+
+// =============================================================================
+// Section 2: PemError 5-variant construction
+// =============================================================================
+
+@test
+fn test_pem_error_no_block_found_variant() {
+    let e: PemError = PemError.NoBlockFound;
+    assert(e is PemError.NoBlockFound);
+}
+
+@test
+fn test_pem_error_mismatched_labels_variant() {
+    let e: PemError = PemError.MismatchedLabels("CERTIFICATE != PRIVATE KEY".to_text());
+    assert(e is PemError.MismatchedLabels);
+}
+
+@test
+fn test_pem_error_base64_failed_variant() {
+    let e: PemError = PemError.Base64Failed;
+    assert(e is PemError.Base64Failed);
+}
+
+@test
+fn test_pem_error_malformed_variant() {
+    let e: PemError = PemError.Malformed("unterminated BEGIN marker".to_text());
+    assert(e is PemError.Malformed);
+}
+
+@test
+fn test_pem_error_too_large_variant() {
+    let e: PemError = PemError.TooLarge(67108864);
+    assert(e is PemError.TooLarge);
+}
+
+// =============================================================================
+// Section 3: PemError variant pairwise disjointness
+//
+//   The 5-variant ADT must be pairwise-disjoint — no variant
+//   construction should pattern-test true against a different
+//   variant tag.
+// =============================================================================
+
+@test
+fn test_pem_error_no_block_found_disjoint_from_others() {
+    let e: PemError = PemError.NoBlockFound;
+    assert(!(e is PemError.MismatchedLabels));
+    assert(!(e is PemError.Base64Failed));
+    assert(!(e is PemError.Malformed));
+    assert(!(e is PemError.TooLarge));
+}
+
+@test
+fn test_pem_error_base64_failed_disjoint_from_others() {
+    let e: PemError = PemError.Base64Failed;
+    assert(!(e is PemError.NoBlockFound));
+    assert(!(e is PemError.MismatchedLabels));
+    assert(!(e is PemError.Malformed));
+    assert(!(e is PemError.TooLarge));
+}
+
+@test
+fn test_pem_error_mismatched_labels_disjoint_from_others() {
+    let e: PemError = PemError.MismatchedLabels("x".to_text());
+    assert(!(e is PemError.NoBlockFound));
+    assert(!(e is PemError.Base64Failed));
+    assert(!(e is PemError.Malformed));
+    assert(!(e is PemError.TooLarge));
+}
+
+@test
+fn test_pem_error_malformed_disjoint_from_others() {
+    let e: PemError = PemError.Malformed("x".to_text());
+    assert(!(e is PemError.NoBlockFound));
+    assert(!(e is PemError.MismatchedLabels));
+    assert(!(e is PemError.Base64Failed));
+    assert(!(e is PemError.TooLarge));
+}
+
+@test
+fn test_pem_error_too_large_disjoint_from_others() {
+    let e: PemError = PemError.TooLarge(0);
+    assert(!(e is PemError.NoBlockFound));
+    assert(!(e is PemError.MismatchedLabels));
+    assert(!(e is PemError.Base64Failed));
+    assert(!(e is PemError.Malformed));
+}
+
+// =============================================================================
+// Section 4: PemError match exhaustiveness
+//
+//   A function dispatching on PemError must reach exactly one arm
+//   per variant.  This is the standard match-coverage law.
+// =============================================================================
+
+fn describe(e: &PemError) -> Text {
+    match e {
+        PemError.NoBlockFound          => "no-block".to_text(),
+        PemError.MismatchedLabels(_)   => "mismatched".to_text(),
+        PemError.Base64Failed          => "base64".to_text(),
+        PemError.Malformed(_)          => "malformed".to_text(),
+        PemError.TooLarge(_)           => "too-large".to_text(),
+    }
+}
+
+@test
+fn test_pem_error_describe_no_block() {
+    let e: PemError = PemError.NoBlockFound;
+    assert_eq(describe(&e), "no-block");
+}
+
+@test
+fn test_pem_error_describe_mismatched() {
+    let e: PemError = PemError.MismatchedLabels("a".to_text());
+    assert_eq(describe(&e), "mismatched");
+}
+
+@test
+fn test_pem_error_describe_base64() {
+    let e: PemError = PemError.Base64Failed;
+    assert_eq(describe(&e), "base64");
+}
+
+@test
+fn test_pem_error_describe_malformed() {
+    let e: PemError = PemError.Malformed("oops".to_text());
+    assert_eq(describe(&e), "malformed");
+}
+
+@test
+fn test_pem_error_describe_too_large() {
+    let e: PemError = PemError.TooLarge(42);
+    assert_eq(describe(&e), "too-large");
+}
+
+// =============================================================================
+// Section 5: PemError payload preservation
+//
+//   Information-carrying variants (MismatchedLabels / Malformed /
+//   TooLarge) must round-trip their payload through construction +
+//   match-arm extraction.
+// =============================================================================
+
+@test
+fn test_pem_error_mismatched_payload_round_trip() {
+    let pinned = "CERT != KEY".to_text();
+    let e: PemError = PemError.MismatchedLabels(pinned);
+    match e {
+        PemError.MismatchedLabels(s) => assert_eq(s, "CERT != KEY"),
+        _ => panic("expected MismatchedLabels"),
+    }
+}
+
+@test
+fn test_pem_error_malformed_payload_round_trip() {
+    let pinned = "header truncated".to_text();
+    let e: PemError = PemError.Malformed(pinned);
+    match e {
+        PemError.Malformed(s) => assert_eq(s, "header truncated"),
+        _ => panic("expected Malformed"),
+    }
+}
+
+@test
+fn test_pem_error_too_large_payload_round_trip() {
+    let limit = 4194304;
+    let e: PemError = PemError.TooLarge(limit);
+    match e {
+        PemError.TooLarge(n) => assert_eq(n, 4194304),
+        _ => panic("expected TooLarge"),
+    }
+}
+
+fn main() {}
