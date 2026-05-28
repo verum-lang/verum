@@ -1,0 +1,159 @@
+// =============================================================================
+// core-tests/metrics/registry/unit_test.vr
+// =============================================================================
+//
+// `core/metrics/registry.vr` — metric registry surface.
+// =============================================================================
+
+mount core.metrics.registry.{
+    MAX_LABEL_CARDINALITY_PER_FAMILY,
+    MetricKind,
+    CounterConfig, UpDownCounterConfig, GaugeConfig,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: MAX_LABEL_CARDINALITY_PER_FAMILY cap
+//
+//   Protects against label-cardinality explosion — common Prometheus
+//   anti-pattern. 4096 is the OTel recommended default for the
+//   per-metric soft cap.
+// =============================================================================
+
+@test
+fn test_max_label_cardinality_canonical_value() {
+    assert_eq(MAX_LABEL_CARDINALITY_PER_FAMILY, 4096);
+}
+
+@test
+fn test_max_label_cardinality_positive() {
+    assert(MAX_LABEL_CARDINALITY_PER_FAMILY > 0);
+}
+
+@test
+fn test_max_label_cardinality_power_of_two() {
+    let n = MAX_LABEL_CARDINALITY_PER_FAMILY;
+    assert_eq(n & (n - 1), 0);
+}
+
+// =============================================================================
+// Section 2: MetricKind 4-variant ADT
+// =============================================================================
+
+@test
+fn test_metric_kind_k_counter_variant() {
+    let k: MetricKind = MetricKind.KCounter;
+    assert(k is MetricKind.KCounter);
+}
+
+@test
+fn test_metric_kind_k_up_down_counter_variant() {
+    let k: MetricKind = MetricKind.KUpDownCounter;
+    assert(k is MetricKind.KUpDownCounter);
+}
+
+@test
+fn test_metric_kind_k_gauge_variant() {
+    let k: MetricKind = MetricKind.KGauge;
+    assert(k is MetricKind.KGauge);
+}
+
+@test
+fn test_metric_kind_k_histogram_variant() {
+    let k: MetricKind = MetricKind.KHistogram;
+    assert(k is MetricKind.KHistogram);
+}
+
+// =============================================================================
+// Section 3: MetricKind pairwise disjointness
+// =============================================================================
+
+@test
+fn test_metric_kind_k_counter_disjoint() {
+    let k: MetricKind = MetricKind.KCounter;
+    assert(!(k is MetricKind.KUpDownCounter));
+    assert(!(k is MetricKind.KGauge));
+    assert(!(k is MetricKind.KHistogram));
+}
+
+@test
+fn test_metric_kind_k_up_down_counter_disjoint() {
+    let k: MetricKind = MetricKind.KUpDownCounter;
+    assert(!(k is MetricKind.KCounter));
+    assert(!(k is MetricKind.KGauge));
+    assert(!(k is MetricKind.KHistogram));
+}
+
+@test
+fn test_metric_kind_k_gauge_disjoint() {
+    let k: MetricKind = MetricKind.KGauge;
+    assert(!(k is MetricKind.KCounter));
+    assert(!(k is MetricKind.KUpDownCounter));
+    assert(!(k is MetricKind.KHistogram));
+}
+
+@test
+fn test_metric_kind_k_histogram_disjoint() {
+    let k: MetricKind = MetricKind.KHistogram;
+    assert(!(k is MetricKind.KCounter));
+    assert(!(k is MetricKind.KUpDownCounter));
+    assert(!(k is MetricKind.KGauge));
+}
+
+// =============================================================================
+// Section 4: CounterConfig record (3-field shape)
+// =============================================================================
+
+@test
+fn test_counter_config_construction() {
+    let empty: List<Text> = [];
+    let cfg: CounterConfig = CounterConfig {
+        name: "http_requests_total".to_text(),
+        help: "Total HTTP requests served".to_text(),
+        labels: empty,
+    };
+    assert_eq(cfg.name, "http_requests_total");
+    assert_eq(cfg.help, "Total HTTP requests served");
+}
+
+@test
+fn test_counter_config_with_labels() {
+    let mut labels: List<Text> = [];
+    labels.push("method".to_text());
+    labels.push("status".to_text());
+    let cfg: CounterConfig = CounterConfig {
+        name: "http_requests_total".to_text(),
+        help: "Total HTTP requests by method+status".to_text(),
+        labels: labels,
+    };
+    assert_eq(cfg.labels.len(), 2);
+}
+
+// =============================================================================
+// Section 5: GaugeConfig and UpDownCounterConfig records
+// =============================================================================
+
+@test
+fn test_gauge_config_construction() {
+    let empty: List<Text> = [];
+    let cfg: GaugeConfig = GaugeConfig {
+        name: "queue_depth".to_text(),
+        help: "Current queue depth".to_text(),
+        labels: empty,
+    };
+    assert_eq(cfg.name, "queue_depth");
+}
+
+@test
+fn test_up_down_counter_config_construction() {
+    let empty: List<Text> = [];
+    let cfg: UpDownCounterConfig = UpDownCounterConfig {
+        name: "active_sessions".to_text(),
+        help: "Active session count".to_text(),
+        labels: empty,
+    };
+    assert_eq(cfg.name, "active_sessions");
+}
+
+fn main() {}
