@@ -77,16 +77,16 @@ implement HandlerContext {
     /// Convenience: was this switch flag set?
     public fn switch_set(&self, long: &Text) -> Bool {
         match self.flags.get(long) {
-            Some(f) => f.occurrences > 0,
-            None => false,
+            Maybe.Some(f) => f.occurrences > 0,
+            Maybe.None => false,
         }
     }
 
     /// Lookup a flag's first value. None if flag absent or has no values.
     public fn flag_value(&self, long: &Text) -> Maybe<Text> {
         match self.flags.get(long) {
-            Some(f) => if f.values.len() > 0 { Some(f.values[0].clone()) } else { None },
-            None => None,
+            Maybe.Some(f) => if f.values.len() > 0 { Maybe.Some(f.values[0].clone()) } else { Maybe.None },
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -96,13 +96,13 @@ implement HandlerContext {
         while i < self.args.len() {
             if &self.args[i].name == name {
                 if self.args[i].values.len() > 0 {
-                    return Some(self.args[i].values[0].clone());
+                    return Maybe.Some(self.args[i].values[0].clone());
                 }
-                return None;
+                return Maybe.None;
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 }
 
@@ -191,8 +191,8 @@ implement App {
         if outcome.version_requested {
             let target = self.find_at_path(&outcome.command_path);
             let v = match &target.version {
-                Some(v) => v.clone(),
-                None => "unknown".to_text(),
+                Maybe.Some(v) => v.clone(),
+                Maybe.None => "unknown".to_text(),
             };
             stdio.println(&Text.from(f"{target.name} {v}"));
             return Ok(ExitCode.ok());
@@ -215,7 +215,7 @@ implement App {
             },
             HandlerRef.NamedHandler(name) => {
                 match self.registry.lookup(name) {
-                    Some(h) => {
+                    Maybe.Some(h) => {
                         let ctx = HandlerContext {
                             command: target.clone(),
                             command_path: outcome.command_path.clone(),
@@ -225,7 +225,7 @@ implement App {
                         };
                         Ok(h(&ctx))
                     },
-                    None => Err(ParseError.bare(
+                    Maybe.None => Err(ParseError.bare(
                         ParseErrorKind.InternalError,
                         Text.from(f"no handler registered: '{name}'"),
                     )),
@@ -254,8 +254,8 @@ implement App {
         let mut i: Int = 1;     // skip root name
         while i < path.len() {
             match cur.find_subcommand(&path[i]) {
-                Some(sc) => { cur = sc; },
-                None => break,
+                Maybe.Some(sc) => { cur = sc; },
+                Maybe.None => break,
             }
             i = i + 1;
         }
@@ -279,11 +279,11 @@ fn apply_env_fallbacks(spec: &CommandSpec, outcome: &ParseOutcome) -> ParseOutco
     let mut i: Int = 1;
     while i < outcome.command_path.len() {
         match cur.find_subcommand(&outcome.command_path[i]) {
-            Some(sc) => {
+            Maybe.Some(sc) => {
                 apply_env_for_command(sc, &mut updated);
                 cur = sc;
             },
-            None => break,
+            Maybe.None => break,
         }
         i = i + 1;
     }
@@ -296,11 +296,11 @@ fn apply_env_for_command(cmd: &CommandSpec, outcome: &mut ParseOutcome) {
         let f = &cmd.flags[i];
         // Only flags with both an env-fallback AND a long-name participate.
         match (&f.env_fallback, &f.long) {
-            (Some(env_name), Some(long)) => {
+            (Maybe.Some(env_name), Maybe.Some(long)) => {
                 let key = long.clone();
                 if !outcome.flags.contains_key(&key) {
                     match env.var_opt(env_name) {
-                        Some(v) => {
+                        Maybe.Some(v) => {
                             let mut values = List.new();
                             values.push(v);
                             outcome.flags.insert(key.clone(), CapturedFlag {
@@ -309,7 +309,7 @@ fn apply_env_for_command(cmd: &CommandSpec, outcome: &mut ParseOutcome) {
                                 occurrences: 1,
                             });
                         },
-                        None => {},
+                        Maybe.None => {},
                     }
                 }
             },
