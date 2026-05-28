@@ -82,9 +82,17 @@ loop produces the stack-overflow symptom.
 calls on primitive types. Multi-day work in `verum_vbc::codegen`
 method-table lookup.
 
-**Source-side workaround**: extract each `wrapping_add` call to a
-separate let-binding instead of chaining. Possible but invasive
-across the SHA-1 / SHA-256 / SHA-384 / SHA-512 compress loops.
+**Source-side workaround attempted 2026-05-28** (commits `92a85244b`
++ `400dccb78`): broke chained `.wrapping_add(...)` expressions in
+Sha1.compress_block + Sha256.compress_block + Sha512.compress_block
+into sequential let-bindings.
+
+**Post-rebuild verification 2026-05-28**: WS-6 STILL stack-overflows
+at depth 16384. The chain-breaking workaround DID NOT close WS-6.
+The dispatch defect is in a DIFFERENT code path within Sha1 (candidate:
+the `[0; 64]` array initialization producing a SkipWhileIter type, or
+the hot loop's array indexing). Multi-day VBC codegen investigation
+required.
 
 ### §3.2 RFC 7692 permessage-deflate — not implemented
 
