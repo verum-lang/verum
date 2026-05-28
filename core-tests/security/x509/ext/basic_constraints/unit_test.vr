@@ -1,0 +1,90 @@
+// =============================================================================
+// core-tests/security/x509/ext/basic_constraints/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/ext/basic_constraints.vr` — Basic Constraints
+// extension (RFC 5280 §4.2.1.9).
+// =============================================================================
+
+mount core.security.x509.ext.basic_constraints.BasicConstraints;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: BasicConstraints record construction
+// =============================================================================
+
+@test
+fn test_basic_constraints_end_entity_no_path_len() {
+    // End-entity certificate: is_ca=false, no path_len_constraint.
+    let bc: BasicConstraints = BasicConstraints {
+        is_ca: false,
+        path_len_constraint: Maybe.None,
+    };
+    assert_eq(bc.is_ca, false);
+}
+
+@test
+fn test_basic_constraints_ca_no_path_len() {
+    // Root CA: is_ca=true, no path constraint (unlimited).
+    let bc: BasicConstraints = BasicConstraints {
+        is_ca: true,
+        path_len_constraint: Maybe.None,
+    };
+    assert_eq(bc.is_ca, true);
+}
+
+@test
+fn test_basic_constraints_ca_with_path_len_zero() {
+    // Intermediate CA that may only sign end-entity (path_len=0).
+    let bc: BasicConstraints = BasicConstraints {
+        is_ca: true,
+        path_len_constraint: Maybe.Some(0),
+    };
+    assert_eq(bc.is_ca, true);
+}
+
+@test
+fn test_basic_constraints_ca_with_path_len_two() {
+    let bc: BasicConstraints = BasicConstraints {
+        is_ca: true,
+        path_len_constraint: Maybe.Some(2),
+    };
+    assert_eq(bc.is_ca, true);
+}
+
+@test
+fn test_basic_constraints_path_len_none_preserved() {
+    let bc: BasicConstraints = BasicConstraints {
+        is_ca: false,
+        path_len_constraint: Maybe.None,
+    };
+    let pl: Maybe<Int> = bc.path_len_constraint;
+    assert(pl is Maybe.None);
+}
+
+@test
+fn test_basic_constraints_path_len_some_preserved() {
+    let bc: BasicConstraints = BasicConstraints {
+        is_ca: true,
+        path_len_constraint: Maybe.Some(3),
+    };
+    let pl: Maybe<Int> = bc.path_len_constraint;
+    assert(pl is Maybe.Some);
+}
+
+@test
+fn test_basic_constraints_field_independence() {
+    let a: BasicConstraints = BasicConstraints {
+        is_ca: true,
+        path_len_constraint: Maybe.Some(1),
+    };
+    let b: BasicConstraints = BasicConstraints {
+        is_ca: false,
+        path_len_constraint: Maybe.None,
+    };
+    assert_eq(a.is_ca, true);
+    assert_eq(b.is_ca, false);
+}
+
+fn main() {}
