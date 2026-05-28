@@ -50,6 +50,42 @@ Subject to the precompile-cascade SIGSEGV class (CIDR-1 family).
 Data-surface tests pass; live frame codec round-trips are at
 L2 specs.
 
+### §3.6 WS-6 — `accept_key` Sha1.finalize VBC method-dispatch defect (ROOT CAUSE FOUND 2026-05-28)
+
+**Pre-fix trigger**: `accept_key(&Text)` cascade panicked with
+"method 'UInt32.wrapping_add' not found on receiver of runtime kind
+`SkipWhileIter`" at depth 16384 (which presents as a stack overflow
+due to dispatch retry loop).
+
+**Root cause isolated by probe matrix**:
+
+| Probe | Result |
+|---|---|
+| `Sha1.new()` | ✅ |
+| `Sha1.finalize()` | ❌ Panic |
+| `base64.encode(&empty)` | ✅ |
+
+The defect is in `Sha1.finalize` → `compress_block` chain at
+`core/security/hash/sha1.vr:157`:
+
+```verum
+let temp = rotl32(a, 5).wrapping_add(f).wrapping_add(e).wrapping_add(k).wrapping_add(w[t]);
+```
+
+Chained `.wrapping_add(...)` calls on UInt32 values dispatch through
+a method-resolution path where the receiver type gets misidentified
+as `SkipWhileIter` (an iterator type) instead of `UInt32`. The
+resulting method-not-found panic combined with the dispatch retry
+loop produces the stack-overflow symptom.
+
+**Fix path**: VBC codegen method-dispatch resolution for chained
+calls on primitive types. Multi-day work in `verum_vbc::codegen`
+method-table lookup.
+
+**Source-side workaround**: extract each `wrapping_add` call to a
+separate let-binding instead of chaining. Possible but invasive
+across the SHA-1 / SHA-256 / SHA-384 / SHA-512 compress loops.
+
 ### §3.2 RFC 7692 permessage-deflate — not implemented
 
 Source-side at `websocket.vr` header documents permessage-deflate
