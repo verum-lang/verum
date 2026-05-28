@@ -43,8 +43,8 @@ fn regression_parse_suffix_range() {
 fn regression_parse_wrong_unit_rejects() {
     let s = "items=0-1".clone();
     match parse_range_header(&s) {
-        Result.Ok(_) => panic("wrong unit must reject"),
-        Result.Err(_) => assert(true),
+        Ok(_) => panic("wrong unit must reject"),
+        Err(_) => assert(true),
     }
 }
 
@@ -53,12 +53,12 @@ fn regression_resolve_closed_in_range() {
     let s = "bytes=0-499".clone();
     let rs = parse_range_header(&s).unwrap();
     match resolve_and_merge(&rs, 1234_u64) {
-        Result.Ok(merged) => {
+        Ok(merged) => {
             assert_eq(merged.len(), 1);
             assert_eq(merged[0].start, 0_u64);
             assert_eq(merged[0].end, 499_u64);
         }
-        Result.Err(_) => panic("expected resolved range"),
+        Err(_) => panic("expected resolved range"),
     }
 }
 
@@ -67,12 +67,12 @@ fn regression_resolve_merge_overlapping() {
     let s = "bytes=0-499,400-899".clone();
     let rs = parse_range_header(&s).unwrap();
     match resolve_and_merge(&rs, 1000_u64) {
-        Result.Ok(merged) => {
+        Ok(merged) => {
             assert_eq(merged.len(), 1);
             assert_eq(merged[0].start, 0_u64);
             assert_eq(merged[0].end, 899_u64);
         }
-        Result.Err(_) => panic("expected merged"),
+        Err(_) => panic("expected merged"),
     }
 }
 
@@ -81,8 +81,8 @@ fn regression_resolve_all_invalid_returns_unsatisfiable() {
     let s = "bytes=2000-3000".clone();
     let rs = parse_range_header(&s).unwrap();
     match resolve_and_merge(&rs, 100_u64) {
-        Result.Ok(_) => panic("all-invalid must surface UnsatisfiableRange"),
-        Result.Err(e) => assert(e == RangeError.UnsatisfiableRange),
+        Ok(_) => panic("all-invalid must surface UnsatisfiableRange"),
+        Err(e) => assert(e == RangeError.UnsatisfiableRange),
     }
 }
 

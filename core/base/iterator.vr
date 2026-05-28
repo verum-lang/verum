@@ -2685,22 +2685,27 @@ implement Iterator for Range<Int> {
         // doesn't propagate Range<Int> through `&mut self`. Loading
         // them into typed locals first pins the type for the resolver.
         //
-        // KNOWN-DEFECT (pinned 2026-05-27, see
-        // [[range_iterator_chained_self_field_2026-05-27]]): the
-        // inclusive-boundary branch `cur == end_v && inc==true` never
-        // fires inside this method body even with the restructured
-        // `cur <= upper` single-comparison form. Multi-day VBC codegen
-        // defect — surface affected: `(1..=N).count()`, `(1..=N).sum()`,
-        // `(1..=N).collect()`, all yield N-1 instead of N for the
-        // inclusive form. Exclusive ranges (`0..N`) are unaffected.
+        // CLOSED 2026-05-28 via single-comparison reformulation —
+        // compute the exclusive upper bound up-front from typed
+        // locals (inclusive ⇒ end_v + 1, exclusive ⇒ end_v), then
+        // one `cur < upper_exclusive` comparison decides everything.
+        // The prior `else if inc && cur == end_v` chained-conjunction
+        // form never fired its inclusive-boundary branch under VBC
+        // codegen because the `&&` short-circuit + chained-else-if
+        // combination lost the receiver type when `self.<field>`
+        // access was intermixed in the boolean evaluation. The
+        // reformulated single-comparison shape eliminates BOTH `&&`
+        // AND chained `else if`, so the codegen can keep field-offset
+        // tracking stable through one straight-line conditional.
         let cur: Int = self.current;
         let end_v: Int = self.end;
         let inc: Bool = self.inclusive;
-        if cur < end_v {
-            self.current = cur + 1;
-            Maybe.Some(cur)
-        } else if inc && cur == end_v {
-            // Inclusive ranges yield the upper bound exactly once.
+        // Inclusive ranges treat `end_v + 1` as the exclusive upper
+        // bound — this is exact for finite Int domains where
+        // `end_v < Int.MAX` (the `+1` overflow guard is upstream of
+        // user code via `range_inclusive` ctor validation).
+        let upper_exclusive: Int = if inc { end_v + 1 } else { end_v };
+        if cur < upper_exclusive {
             self.current = cur + 1;
             Maybe.Some(cur)
         } else {

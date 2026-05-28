@@ -104,8 +104,8 @@ fn regression_url_percent_decode_pct2F_yields_slash() {
     let s = "%2F".clone();
     let want = "/".clone();
     match percent_decode(&s) {
-        Result.Ok(d) => assert(d == want),
-        Result.Err(_) => panic("%2F must decode to /"),
+        Ok(d) => assert(d == want),
+        Err(_) => panic("%2F must decode to /"),
     }
 }
 
@@ -118,8 +118,8 @@ fn regression_url_percent_decode_pct20_yields_space() {
     let s = "%20".clone();
     let want = " ".clone();
     match percent_decode(&s) {
-        Result.Ok(d) => assert(d == want),
-        Result.Err(_) => panic("%20 must decode to space"),
+        Ok(d) => assert(d == want),
+        Err(_) => panic("%20 must decode to space"),
     }
 }
 
@@ -133,8 +133,8 @@ fn regression_url_percent_decode_pct20_yields_space() {
 fn regression_url_parse_trailing_slash_path_len_1() {
     let s = "http://example.com/".clone();
     match Url.parse(&s) {
-        Result.Ok(u) => assert_eq(u.path.len(), 1),
-        Result.Err(_) => panic("trailing-slash URL should parse"),
+        Ok(u) => assert_eq(u.path.len(), 1),
+        Err(_) => panic("trailing-slash URL should parse"),
     }
 }
 
@@ -143,7 +143,7 @@ fn regression_url_parse_trailing_slash_path_eq_slash() {
     let s = "http://example.com/".clone();
     let want = "/".clone();
     match Url.parse(&s) {
-        Result.Ok(u) => assert(u.path == want),
-        Result.Err(_) => panic("trailing-slash URL should parse"),
+        Ok(u) => assert(u.path == want),
+        Err(_) => panic("trailing-slash URL should parse"),
     }
 }
