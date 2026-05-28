@@ -334,8 +334,14 @@ fn find_sub(haystack: &[Byte], needle: &[Byte], from: Int) -> Maybe<Int> {
 
 fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Text {
     // Output is exactly `end - start` bytes.
+    // Byte-by-byte push to avoid extend_from_slice intrinsic chain
+    // — same SIGSEGV-trigger pattern as net/* parsers.
     let mut out: List<Byte> = List.with_capacity(end - start);
-    out.extend_from_slice(&bytes[start..end]);
+    let mut i = start;
+    while i < end {
+        out.push(bytes[i]);
+        i = i + 1;
+    }
     Text.from_utf8_unchecked(out.as_slice())
 }
 
