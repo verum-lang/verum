@@ -116,9 +116,35 @@ attacker URLs before any per-byte scanning. Pinned by
 `test_max_url_length_bytes_constant` so the constant doesn't
 drift under refactoring.
 
-### §3.4 URL-8 — `e.kind` field-read corruption on cross-module record return
+### §3.4 URL-8 — **CLOSED 2026-05-28** — Static-call generic-instantiation preservation at READ-site
 
-**Diagnosis 2026-05-27** (post binary rebuild + qualified-arm fix):
+**CLOSED via commit `a8fb1933e`** — VBC codegen fix at
+`crates/verum_vbc/src/codegen/expressions.rs:18514` +
+`:19704`. Mirrors the Call-arm composition at line ~18834.
+
+**Actual root cause** (re-diagnosis 2026-05-28): NOT field-read
+corruption. The defect was **static-call generic-instantiation
+loss at READ-site**: `extract_expr_type_name`'s MethodCall
+static-call arm returned `func_info.return_type_name` without
+composing `func_info.return_type_inner`. Archive-loaded
+`FunctionInfo` for `Url.parse(&Text) -> Result<Url, UrlError>`
+stores `return_type_name = "Result"` (bare base) and
+`return_type_inner = ["Url", "UrlError"]` separately. Pre-fix
+the static-call read-site dropped the inner generic args.
+
+Downstream consequence: `compile_match` set
+`match_scrutinee_type = "Result"`, `Err(e)` payload bind failed
+to resolve `e : UrlError` (inner_types extraction empty),
+`variable_type_names["e"]` not set,
+`resolve_field_index(None, "position")` fell to scan-all-types
++ "most fields" tiebreaker → idx=5 → OOB on 24-byte UrlError.
+
+**Validation**: 33/33 URL property tests GREEN under `--interp`
+post-rebuild (was 32/33 with URL-8 @ignore'd).
+`prop_url_parse_empty_error_kind_missing_scheme` un-@ignored
+and confirmed GREEN.
+
+**Historical diagnosis** (kept for context):
 URL-8 confirmed as candidate #3 in the original audit hypothesis —
 **field-read corruption** on cross-module record returns, NOT
 variant-tag dispatch collision.
