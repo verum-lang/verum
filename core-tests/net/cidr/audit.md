@@ -60,18 +60,39 @@ surfaces, all in cidr.parse:
    `CidrError.AddrParseFailed(AddrParseError)` construction with
    cross-type payload was the final SIGSEGV trigger.
 
-**Post-rebuild validation 2026-05-28** — 4 of 5 regression tests
+**Post-rebuild validation 2026-05-28** — 5 of 5 regression tests
 transition from @ignore'd-SIGSEGV to GREEN under `--interp`:
 - `regression_parse_v4_8` ✅
 - `regression_parse_v6_32` ✅
 - `regression_parse_invalid_prefix_len` ✅
 - `regression_parse_no_slash` ✅
+- `regression_set_add_text_v4` ✅ (CIDR-2 close — see §3.4)
 
-**Residual**: `regression_set_add_text_v4` still fails AT
-runtime (NOT SIGSEGV; AssertionFailed at `set.contains`). This
-is a different defect — CIDR-2, cross-module record-field
-corruption on CidrSet.blocks. Sister of URL-1 / URL-7 / URL-8.
-Pinned by `@ignore("CIDR-2: ...")` in regression_test.vr.
+### §3.4 CIDR-2 — `add_text` transitive mutation propagation (CLOSED 2026-05-28)
+
+**Pre-fix trigger**: `CidrSet.add_text(&text)` returned `Ok(())`
+but `set.contains(&ip)` returned `false` for valid IPs that should
+have matched. Probe matrix narrowed root cause to `set.len() == 0`
+post-call — the mutation on `self.blocks` didn't persist across the
+nested `self.add(c)` method dispatch.
+
+Direct call probes worked:
+- `cidr_parse(&s).unwrap().contains(&ip)` ✅
+- `set.add(Cidr.V4{...})` + `set.contains(&ip)` ✅
+- `set.add_text(&s)` + `set.len() == 1` ❌
+
+**Source-side fix landed 2026-05-28** (commit `92480c76b`):
+inline `self.blocks.push(c)` directly in `add_text` instead of
+calling `self.add(c)`. The transitive `&mut self` propagation
+through method-to-method dispatch in nested calls lost the mutation
+on `self.blocks` in the VBC codegen.
+
+**Post-rebuild validation**: `regression_set_add_text_v4`
+transitions from @ignore'd to GREEN. The underlying VBC codegen
+defect (transitive `&mut self` propagation through nested method
+calls) is documented as a sister of URL-1 / URL-7 / URL-8 family
+and tracked at the codegen layer; source-side workaround
+discipline applies in stdlib until VBC fix lands.
 
 ### §3.2 `Cidr.contains` slice-deref pattern
 

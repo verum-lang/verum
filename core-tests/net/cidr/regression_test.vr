@@ -17,14 +17,14 @@
 //     cross-type `CidrError.AddrParseFailed(AddrParseError)` variant
 //     construction).
 //
-// Validated post-binary-rebuild 2026-05-28 — 4/5 regression tests
+// Validated post-binary-rebuild 2026-05-28 — 5/5 regression tests
 // transition from @ignore'd-SIGSEGV to GREEN under `--interp`.
 //
-// CIDR-2 (open) — `CidrSet.contains` after `add_text` returns false
-// for valid IPs. Manifest as `regression_set_add_text_v4` AssertionFailed
-// at the set.contains assertion (set.add_text succeeds, but contains
-// fails). Sister of URL-1 / URL-7 / URL-8 cross-module record-field
-// corruption defect class.
+// CIDR-2 (CLOSED 2026-05-28) — `CidrSet.add_text` did not actually
+// grow the set: the transitive `&mut self` propagation through
+// `self.add(c)` lost the mutation on `self.blocks` in the VBC codegen.
+// Closed by inlining `self.blocks.push(c)` directly in add_text
+// (commit `92480c76b`).
 // =============================================================================
 
 mount core.net.cidr.{Cidr, CidrSet, CidrError, parse as cidr_parse};
@@ -53,7 +53,6 @@ fn regression_parse_v6_32() {
     }
 }
 
-@ignore("CIDR-2: CidrSet.contains after add_text returns false for valid IPs — cross-module record-field corruption on CidrSet.blocks. Sister of URL-1/URL-7/URL-8. Multi-day VBC compile_field_access fix.")
 @test
 fn regression_set_add_text_v4() {
     let mut set = CidrSet.new();
