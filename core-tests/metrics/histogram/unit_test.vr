@@ -1,0 +1,65 @@
+// =============================================================================
+// core-tests/metrics/histogram/unit_test.vr
+// =============================================================================
+//
+// `core/metrics/histogram.vr` — Prometheus-style histograms.
+// =============================================================================
+
+mount core.metrics.histogram.{HistogramBuckets};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: HistogramBuckets record construction
+// =============================================================================
+
+@test
+fn test_histogram_buckets_empty_bounds() {
+    let empty: List<Float> = [];
+    let b: HistogramBuckets = HistogramBuckets { bounds: empty };
+    assert_eq(b.bounds.len(), 0);
+}
+
+@test
+fn test_histogram_buckets_single_bound() {
+    let mut bounds: List<Float> = [];
+    bounds.push(1.0);
+    let b: HistogramBuckets = HistogramBuckets { bounds: bounds };
+    assert_eq(b.bounds.len(), 1);
+    assert_eq(b.bounds[0], 1.0);
+}
+
+@test
+fn test_histogram_buckets_canonical_prometheus_default() {
+    // Prometheus default 11-bucket distribution: HTTP-latency canonical.
+    let mut bounds: List<Float> = [];
+    bounds.push(0.005);
+    bounds.push(0.01);
+    bounds.push(0.025);
+    bounds.push(0.05);
+    bounds.push(0.1);
+    bounds.push(0.25);
+    bounds.push(0.5);
+    bounds.push(1.0);
+    bounds.push(2.5);
+    bounds.push(5.0);
+    bounds.push(10.0);
+    let b: HistogramBuckets = HistogramBuckets { bounds: bounds };
+    assert_eq(b.bounds.len(), 11);
+    assert_eq(b.bounds[0], 0.005);
+    assert_eq(b.bounds[10], 10.0);
+}
+
+@test
+fn test_histogram_buckets_field_independence() {
+    let empty1: List<Float> = [];
+    let mut nonempty: List<Float> = [];
+    nonempty.push(1.0);
+    nonempty.push(2.0);
+    let a: HistogramBuckets = HistogramBuckets { bounds: empty1 };
+    let b: HistogramBuckets = HistogramBuckets { bounds: nonempty };
+    assert_eq(a.bounds.len(), 0);
+    assert_eq(b.bounds.len(), 2);
+}
+
+fn main() {}
