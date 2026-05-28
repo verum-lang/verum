@@ -57,15 +57,15 @@ public type SpanStatus is {
 
 implement SpanStatus {
     public fn unset() -> SpanStatus {
-        SpanStatus { code: SpanStatusCode.Unset, description: None }
+        SpanStatus { code: SpanStatusCode.Unset, description: Maybe.None }
     }
 
     public fn ok() -> SpanStatus {
-        SpanStatus { code: SpanStatusCode.Ok, description: None }
+        SpanStatus { code: SpanStatusCode.Ok, description: Maybe.None }
     }
 
     public fn error(description: Text) -> SpanStatus {
-        SpanStatus { code: SpanStatusCode.Error, description: Some(description) }
+        SpanStatus { code: SpanStatusCode.Error, description: Maybe.Some(description) }
     }
 
     public fn code(&self) -> SpanStatusCode { self.code }
@@ -213,10 +213,10 @@ implement Span {
         let inner = SpanInner {
             name: "".into(),
             context: SpanContext.invalid(),
-            parent_span_id: None,
+            parent_span_id: Maybe.None,
             kind: SpanKind.KindInternal,
             start_time: Instant.now(),
-            end_time: None,
+            end_time: Maybe.None,
             attributes: AttributeSet.new(),
             events: List.new(),
             links: List.new(),
@@ -332,27 +332,27 @@ implement Span {
     /// Idempotent — second call returns None.
     public fn end(&self) -> Maybe<SpanData> {
         // Fast-path idempotency: if already ended, skip the lock.
-        if self.ended_flag.load(MemoryOrdering.Acquire) { return None; }
+        if self.ended_flag.load(MemoryOrdering.Acquire) { return Maybe.None; }
         let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &mut SpanInner = &mut *guard;
-        if inner.end_time.is_some() { return None; }
+        if inner.end_time.is_some() { return Maybe.None; }
         let now = Instant.now();
-        inner.end_time = Some(now);
+        inner.end_time = Maybe.Some(now);
         // Publish the ended state with Release so concurrent fast-path
         // readers using Acquire see the freeze.
         self.ended_flag.store(true, MemoryOrdering.Release);
-        Some(freeze(inner, now))
+        Maybe.Some(freeze(inner, now))
     }
 
     /// End with an explicit timestamp (for replay / test scenarios).
     public fn end_at(&self, ts: Instant) -> Maybe<SpanData> {
-        if self.ended_flag.load(MemoryOrdering.Acquire) { return None; }
+        if self.ended_flag.load(MemoryOrdering.Acquire) { return Maybe.None; }
         let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
         let inner: &mut SpanInner = &mut *guard;
-        if inner.end_time.is_some() { return None; }
-        inner.end_time = Some(ts);
+        if inner.end_time.is_some() { return Maybe.None; }
+        inner.end_time = Maybe.Some(ts);
         self.ended_flag.store(true, MemoryOrdering.Release);
-        Some(freeze(inner, ts))
+        Maybe.Some(freeze(inner, ts))
     }
 }
 
@@ -403,8 +403,8 @@ fn freeze(inner: &SpanInner, end: Instant) -> SpanData {
         status: SpanStatus {
             code: inner.status.code(),
             description: match inner.status.description() {
-                Some(d) => Some(d.clone()),
-                None => None,
+                Maybe.Some(d) => Maybe.Some(d.clone()),
+                Maybe.None => Maybe.None,
             }
         },
         resource: inner.resource.clone(),
