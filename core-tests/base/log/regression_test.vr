@@ -30,7 +30,9 @@ mount core.collections.list.List;
 // builder return values.
 // =============================================================================
 
-@ignore("[[btree_pattern_match_ref_generic_class]] — chained-builder .build() return loses LogRecord type; rec.level mis-resolves. Multi-day VBC codegen fix.")
+// Un-@ignore'd 2026-05-28 — chained-builder .build() return-type
+// propagation now correctly resolves rec.level field access under
+// --interp post round-14b dispatch consolidation.
 @test
 fn regression_pin_builder_chain_level_field_access() {
     let rec: LogRecord = LogRecordBuilder.new()
