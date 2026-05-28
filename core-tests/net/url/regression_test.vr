@@ -36,7 +36,9 @@ mount core.base.maybe.{Maybe, Some, None};
 // keep @ignore'd until VBC codegen of `Text.slice` is fixed (eager
 // payload copy or alias-through-record-clone).
 
-@ignore("URL-1: Text.slice produces pointer-corrupted view — use `==` literal comparison instead. See audit.md §3.1.")
+// Un-@ignore'd 2026-05-28 — URL-1 closed via interpreter / stdlib
+// consolidation; `Text.slice` view + `as_bytes()` indexing now correct
+// across the cross-module record-field boundary.
 @test
 fn regression_url_scheme_as_str_byte_access_corrupted() {
     let s = "http://example.com/".clone();
