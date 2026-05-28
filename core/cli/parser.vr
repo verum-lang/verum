@@ -112,15 +112,15 @@ implement ParseState {
 
     @inline
     fn peek(&self) -> Maybe<&Text> {
-        if self.at_end() { None } else { Some(&self.argv[self.cursor]) }
+        if self.at_end() { Maybe.None } else { Maybe.Some(&self.argv[self.cursor]) }
     }
 
     @inline
     fn advance(&mut self) -> Maybe<Text> {
-        if self.at_end() { None } else {
+        if self.at_end() { Maybe.None } else {
             let tok = self.argv[self.cursor].clone();
             self.cursor = self.cursor + 1;
-            Some(tok)
+            Maybe.Some(tok)
         }
     }
 }
@@ -154,12 +154,12 @@ fn classify(tok: &Text, settings: &CommandSettings, after_dd: Bool) -> TokenKind
         let body = tok.slice(2, tok.len());
         let eq = Text.from("=");
         match body.find(&eq) {
-            Some(eq_idx) => {
+            Maybe.Some(eq_idx) => {
                 let name = body.slice(0, eq_idx);
                 let val = body.slice(eq_idx + 1, body.len());
-                TokenKind.TLong(name, Some(val))
+                TokenKind.TLong(name, Maybe.Some(val))
             },
-            None => TokenKind.TLong(body, None),
+            Maybe.None => TokenKind.TLong(body, Maybe.None),
         }
     } else {
         // Short flag(s): -abc, -p8080, -1 (negative number)
@@ -180,7 +180,7 @@ fn looks_like_number(s: &Text) -> Bool {
     let mut saw_dot = false;
     while i < rest.len() {
         match rest.byte_at(i) {
-            Some(c) => {
+            Maybe.Some(c) => {
                 if c >= b'0' && c <= b'9' {
                     saw_digit = true;
                 } else if c == b'.' && !saw_dot {
@@ -189,7 +189,7 @@ fn looks_like_number(s: &Text) -> Bool {
                     return false;
                 }
             },
-            None => return false,
+            Maybe.None => return false,
         }
         i = i + 1;
     }
