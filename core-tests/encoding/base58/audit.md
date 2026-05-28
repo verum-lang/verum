@@ -35,6 +35,14 @@ to byte-array element-addr lowering (sister of
 [[typed_array_ref_addr_closed_2026-05-25]] residual or a different
 byte-array-on-stack defect). 2 placeholder tests pinned @ignored.
 
+**Source-side preventive fix landed 2026-05-29** (commit `41882e63b`):
+3 EXTSLICE-1 sites inside `core/encoding/base58.vr` (encode buf-copy,
+encode_check payload+checksum concat, decode_check payload trim)
+replaced with byte-by-byte push walks per the
+[EXTSLICE-1 discipline](../../../internal/website/docs/stdlib/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv).
+This eliminates one potential SIGSEGV trigger surface but does not
+address the byte-array element-addr lowering defect that gates §A.
+
 ### §B — Bitcoin-style canonical vectors
 Deferred until §A unblocks:
 - "111ZiQRDqUSnLNm" → known-byte-string vector
