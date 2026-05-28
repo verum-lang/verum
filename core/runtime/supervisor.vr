@@ -661,21 +661,30 @@ public type ShutdownStrategy is
 
 implement ShutdownStrategy {
     /// Default graceful shutdown (5 seconds)
+    ///
+    /// QUALIFIED-ARM DISCIPLINE: every variant literal uses
+    /// `ShutdownStrategy.<Variant>` to prevent first-wins bare-name
+    /// collision with other sum-types whose variants might share the
+    /// `Graceful`/`Brutal`/`Infinite` simple name across the stdlib —
+    /// pre-fix the bare form mis-dispatched and the return-type
+    /// tracking leaked `USize` (the UInt32 field type) instead of
+    /// `ShutdownStrategy`, surfacing as `USize.timeout_ms not found`
+    /// at the user-side call site.
     public fn graceful() -> Self {
-        Graceful { timeout_ms: 5000 }
+        ShutdownStrategy.Graceful { timeout_ms: 5000_u32 }
     }
 
     /// Default brutal shutdown (100ms)
     public fn brutal() -> Self {
-        Brutal { timeout_ms: 100 }
+        ShutdownStrategy.Brutal { timeout_ms: 100_u32 }
     }
 
     /// Get timeout in milliseconds (MAX for infinite)
     public fn timeout_ms(&self) -> UInt32 {
         match self {
-            Graceful { timeout_ms } => *timeout_ms,
-            Brutal { timeout_ms } => *timeout_ms,
-            Infinite => UInt32.MAX,
+            ShutdownStrategy.Graceful { timeout_ms } => *timeout_ms,
+            ShutdownStrategy.Brutal { timeout_ms } => *timeout_ms,
+            ShutdownStrategy.Infinite => UInt32.MAX,
         }
     }
 }
