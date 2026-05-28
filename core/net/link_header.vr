@@ -383,5 +383,7 @@ fn to_lower(c: Byte) -> Byte {
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
-    dst.extend_from_slice(src);
+    // EXTSLICE-1 discipline: byte-by-byte push.
+    let mut __i = 0;
+    while __i < src.len() { dst.push(src[__i]); __i = __i + 1; }
 }

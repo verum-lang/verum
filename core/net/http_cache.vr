@@ -412,9 +412,11 @@ fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
 
 fn trim_quotes(src: List<Byte>) -> List<Byte> {
     if src.len() >= 2 && src[0] == ('"' as Byte) && src[src.len() - 1] == ('"' as Byte) {
-        let inner_len = src.len() - 2;
-        let mut out: List<Byte> = List.with_capacity(inner_len);
-        out.extend_from_slice(&src.as_slice()[1..src.len() - 1]);
+        // EXTSLICE-1 discipline: byte-by-byte push.
+        let end = src.len() - 1;
+        let mut out: List<Byte> = List.with_capacity(end - 1);
+        let mut __i = 1;
+        while __i < end { out.push(src[__i]); __i = __i + 1; }
         return out;
     }
     src

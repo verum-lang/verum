@@ -280,8 +280,10 @@ fn parse_var_spec(b: &[Byte], start: Int, end: Int) -> Result<VarSpec, UriTempla
         }
     }
 
+    // EXTSLICE-1 discipline: byte-by-byte push.
     let mut name_bytes: List<Byte> = List.with_capacity(name_end - start);
-    name_bytes.extend_from_slice(&b[start..name_end]);
+    let mut __i = start;
+    while __i < name_end { name_bytes.push(b[__i]); __i = __i + 1; }
     Result.Ok(VarSpec {
         name: Text.from_utf8_unchecked(name_bytes.as_slice()),
         max_len: max_len,
@@ -398,7 +400,10 @@ fn emit_spec(out: &mut List<Byte>, op: &ExprOp, spec: &VarSpec, v: &TemplateValu
                 let mut i: Int = 0;
                 while i < items.len() {
                     if i > 0 { joined.push(',' as Byte); }
-                    joined.extend_from_slice(items[i].as_bytes());
+                    // EXTSLICE-1 discipline: byte-by-byte push.
+                    let __item_bytes = items[i].as_bytes();
+                    let mut __k = 0;
+                    while __k < __item_bytes.len() { joined.push(__item_bytes[__k]); __k = __k + 1; }
                     i = i + 1;
                 }
                 emit_named_prefix(out, op, spec, &joined);
@@ -492,11 +497,15 @@ fn is_empty_value(v: &TemplateValue) -> Bool {
 }
 
 fn push_all(dst: &mut List<Byte>, src: &[Byte]) {
-    dst.extend_from_slice(src);
+    // EXTSLICE-1 discipline: byte-by-byte push.
+    let mut __i = 0;
+    while __i < src.len() { dst.push(src[__i]); __i = __i + 1; }
 }
 
 fn slice_vec(src: &[Byte], start: Int, end: Int) -> List<Byte> {
+    // EXTSLICE-1 discipline: byte-by-byte push.
     let mut out: List<Byte> = List.with_capacity(end - start);
-    out.extend_from_slice(&src[start..end]);
+    let mut __i = start;
+    while __i < end { out.push(src[__i]); __i = __i + 1; }
     out
 }
