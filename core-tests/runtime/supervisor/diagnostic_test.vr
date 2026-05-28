@@ -1,0 +1,46 @@
+// =============================================================================
+// core-tests/runtime/supervisor/diagnostic_test.vr
+// =============================================================================
+//
+// Defect-narrowing probes for ShutdownStrategy.graceful() Self → USize leak.
+//
+// Test names indicate which narrows the defect.
+// =============================================================================
+
+mount core.runtime.supervisor.{ShutdownStrategy};
+
+// =============================================================================
+// Probe A: Direct variant construction (KNOWN PASSING)
+// =============================================================================
+
+@test
+fn diag_shutdown_strategy_direct_graceful_timeout_ms() {
+    let s = ShutdownStrategy.Graceful { timeout_ms: 5000_u32 };
+    assert_eq(s.timeout_ms(), 5000_u32);
+}
+
+@test
+fn diag_shutdown_strategy_direct_brutal_timeout_ms() {
+    let s = ShutdownStrategy.Brutal { timeout_ms: 100_u32 };
+    assert_eq(s.timeout_ms(), 100_u32);
+}
+
+// =============================================================================
+// Probe B: Static factory with explicit annotation
+// =============================================================================
+
+@test
+fn diag_shutdown_strategy_factory_with_annotation() {
+    let s: ShutdownStrategy = ShutdownStrategy.graceful();
+    assert_eq(s.timeout_ms(), 5000_u32);
+}
+
+// =============================================================================
+// Probe C: Static factory without annotation — the defect itself
+// =============================================================================
+
+@test
+fn diag_shutdown_strategy_factory_no_annotation() {
+    let s = ShutdownStrategy.graceful();
+    assert_eq(s.timeout_ms(), 5000_u32);
+}
