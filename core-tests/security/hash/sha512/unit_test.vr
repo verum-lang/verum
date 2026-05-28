@@ -1,0 +1,50 @@
+// =============================================================================
+// core-tests/security/hash/sha512/unit_test.vr
+// =============================================================================
+//
+// `core/security/hash/sha512.vr` — SHA-512 / FIPS 180-4 §6.4.
+//
+// Pure-data constant surface tested:
+//   * BLOCK_SIZE / OUTPUT_SIZE canonical values
+// =============================================================================
+
+mount core.security.hash.sha512.{BLOCK_SIZE, OUTPUT_SIZE};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+@test
+fn test_sha512_block_size_canonical_value() {
+    // SHA-512 processes 1024-bit (128-byte) blocks (FIPS 180-4 §6.4).
+    assert_eq(BLOCK_SIZE, 128);
+}
+
+@test
+fn test_sha512_output_size_canonical_value() {
+    // SHA-512 produces 512-bit (64-byte) digest.
+    assert_eq(OUTPUT_SIZE, 64);
+}
+
+@test
+fn test_sha512_block_is_twice_output() {
+    assert_eq(BLOCK_SIZE, OUTPUT_SIZE * 2);
+}
+
+@test
+fn test_sha512_block_is_sixteen_x_uint64() {
+    // 16 × UInt64 (8 bytes each) = 128 bytes.
+    assert_eq(BLOCK_SIZE, 16 * 8);
+}
+
+@test
+fn test_sha512_output_is_eight_x_uint64() {
+    // 8 × UInt64 = 64 bytes.
+    assert_eq(OUTPUT_SIZE, 8 * 8);
+}
+
+@test
+fn test_sha512_constants_positive() {
+    assert(BLOCK_SIZE > 0);
+    assert(OUTPUT_SIZE > 0);
+}
+
+fn main() {}

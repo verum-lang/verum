@@ -1,0 +1,51 @@
+// =============================================================================
+// core-tests/security/hash/sha384/unit_test.vr
+// =============================================================================
+//
+// `core/security/hash/sha384.vr` — SHA-384 / FIPS 180-4 §6.5
+// (truncated SHA-512 with different IV).
+//
+// Pure-data constant surface tested:
+//   * BLOCK_SIZE / OUTPUT_SIZE canonical values
+// =============================================================================
+
+mount core.security.hash.sha384.{BLOCK_SIZE, OUTPUT_SIZE};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+@test
+fn test_sha384_block_size_canonical_value() {
+    // SHA-384 processes 1024-bit (128-byte) blocks (FIPS 180-4 §6.5).
+    assert_eq(BLOCK_SIZE, 128);
+}
+
+@test
+fn test_sha384_output_size_canonical_value() {
+    // SHA-384 produces 384-bit (48-byte) digest.
+    assert_eq(OUTPUT_SIZE, 48);
+}
+
+@test
+fn test_sha384_block_is_sixteen_x_uint64() {
+    // 16 × UInt64 (8 bytes each) = 128 bytes.
+    assert_eq(BLOCK_SIZE, 16 * 8);
+}
+
+@test
+fn test_sha384_output_is_six_x_uint64() {
+    // SHA-384 truncates 8 × UInt64 state to 6 × UInt64 = 48 bytes.
+    assert_eq(OUTPUT_SIZE, 6 * 8);
+}
+
+@test
+fn test_sha384_block_larger_than_output() {
+    assert(BLOCK_SIZE > OUTPUT_SIZE);
+}
+
+@test
+fn test_sha384_constants_positive() {
+    assert(BLOCK_SIZE > 0);
+    assert(OUTPUT_SIZE > 0);
+}
+
+fn main() {}
