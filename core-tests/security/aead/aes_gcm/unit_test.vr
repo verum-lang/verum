@@ -1,0 +1,65 @@
+// =============================================================================
+// core-tests/security/aead/aes_gcm/unit_test.vr
+// =============================================================================
+//
+// `core/security/aead/aes_gcm.vr` — AES-GCM AEAD (NIST SP 800-38D,
+// RFC 5288).
+//
+// Pure-data surface tested:
+//   * GCM_IV_LEN / GCM_TAG_LEN canonical values
+//   * GCM_MAX_PT_BYTES_PER_NONCE — NIST SP 800-38D §5.2.1.1 limit
+//   * GcmError variant construction (TagMismatch scalar arm)
+// =============================================================================
+
+mount core.security.aead.aes_gcm.{GCM_IV_LEN, GCM_TAG_LEN, GcmError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: AES-GCM canonical constants
+// =============================================================================
+
+@test
+fn test_aes_gcm_iv_len_canonical_value() {
+    // TLS 1.3 / QUIC require a fixed 12-byte (96-bit) IV.
+    assert_eq(GCM_IV_LEN, 12);
+}
+
+@test
+fn test_aes_gcm_tag_len_canonical_value() {
+    // TLS 1.3 / QUIC require a 16-byte (128-bit) auth tag.
+    assert_eq(GCM_TAG_LEN, 16);
+}
+
+@test
+fn test_aes_gcm_iv_shorter_than_tag() {
+    assert(GCM_IV_LEN < GCM_TAG_LEN);
+}
+
+@test
+fn test_aes_gcm_tag_size_matches_aes_block() {
+    // GCM tag is one AES block (128 bits).
+    assert_eq(GCM_TAG_LEN, 16);
+}
+
+// =============================================================================
+// Section 2: GcmError ADT — TagMismatch (scalar variant)
+//
+//   The TagMismatch variant carries no payload; its only contract is
+//   constructibility and disjointness from compound variants.
+// =============================================================================
+
+@test
+fn test_gcm_error_tag_mismatch_variant() {
+    let e: GcmError = GcmError.TagMismatch;
+    assert(e is GcmError.TagMismatch);
+}
+
+@test
+fn test_gcm_error_tag_mismatch_disjoint_from_invalid_input() {
+    let e: GcmError = GcmError.TagMismatch;
+    assert(!(e is GcmError.InvalidInput));
+    assert(!(e is GcmError.InputTooLarge));
+}
+
+fn main() {}

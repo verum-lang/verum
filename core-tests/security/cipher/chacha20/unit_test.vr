@@ -1,0 +1,74 @@
+// =============================================================================
+// core-tests/security/cipher/chacha20/unit_test.vr
+// =============================================================================
+//
+// `core/security/cipher/chacha20.vr` — ChaCha20 stream cipher
+// (RFC 7539 / RFC 8439).
+//
+// Pure-data constant surface tested:
+//   * KEY_SIZE / NONCE_SIZE / BLOCK_SIZE
+//   * Width invariants
+// =============================================================================
+
+mount core.security.cipher.chacha20.{KEY_SIZE, NONCE_SIZE, BLOCK_SIZE};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ChaCha20 canonical constants
+// =============================================================================
+
+@test
+fn test_chacha20_key_size_canonical_value() {
+    // ChaCha20 uses a 256-bit (32-byte) key (RFC 8439 §2.3).
+    assert_eq(KEY_SIZE, 32);
+}
+
+@test
+fn test_chacha20_nonce_size_canonical_value() {
+    // RFC 8439 §2.3 — 12-byte (96-bit) nonce. (XChaCha20 uses 24, not
+    // covered by this module.)
+    assert_eq(NONCE_SIZE, 12);
+}
+
+@test
+fn test_chacha20_block_size_canonical_value() {
+    // ChaCha20 block is 64 bytes (16 × UInt32 state) — RFC 8439 §2.3.
+    assert_eq(BLOCK_SIZE, 64);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_chacha20_key_size_is_eight_x_uint32() {
+    // 8 × UInt32 = 32 bytes.
+    assert_eq(KEY_SIZE, 8 * 4);
+}
+
+@test
+fn test_chacha20_block_is_sixteen_x_uint32() {
+    // 4×4 matrix of UInt32 = 16 words = 64 bytes.
+    assert_eq(BLOCK_SIZE, 16 * 4);
+}
+
+@test
+fn test_chacha20_block_is_twice_key() {
+    assert_eq(BLOCK_SIZE, KEY_SIZE * 2);
+}
+
+@test
+fn test_chacha20_nonce_shorter_than_key() {
+    // 96-bit nonce < 256-bit key — typical AEAD pattern.
+    assert(NONCE_SIZE < KEY_SIZE);
+}
+
+@test
+fn test_chacha20_constants_positive() {
+    assert(KEY_SIZE > 0);
+    assert(NONCE_SIZE > 0);
+    assert(BLOCK_SIZE > 0);
+}
+
+fn main() {}
