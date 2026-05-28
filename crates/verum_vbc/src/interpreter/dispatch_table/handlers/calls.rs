@@ -2581,6 +2581,17 @@ fn try_dispatch_intrinsic_by_suffix(
     };
 
     match suffix {
+        // Platform intrinsics that route through module-qualified names
+        // (e.g. `verum.runtime.num_cpus` → suffix `num_cpus`).  Mirror the
+        // by-name dispatch arm at the top of `try_dispatch_intrinsic_by_name`
+        // so qualified-form `@intrinsic("verum.runtime.num_cpus")` calls
+        // resolve through the suffix-extract path.
+        "num_cpus" => {
+            let cpus = std::thread::available_parallelism()
+                .map(|n| n.get() as i64)
+                .unwrap_or(1);
+            Ok(Some(Value::from_i64(cpus)))
+        }
         // Unary F64 math
         "sqrt" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).sqrt()))),
         "sin" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).sin()))),

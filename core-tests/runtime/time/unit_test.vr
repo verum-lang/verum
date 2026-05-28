@@ -111,7 +111,10 @@ fn test_realtime_consistent_with_monotonic_ordering() {
 // caller layer, but the contract is silently violated.  Pinned `@ignore`
 // until the binding lands.
 
-@ignore
+// Un-@ignore'd 2026-05-28 — closed via interpreter-side fix at
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/calls.rs`
+// `try_dispatch_intrinsic_by_suffix` now handles `num_cpus` suffix from
+// `verum.runtime.num_cpus` qualified-name dispatch.
 @test
 fn test_num_cpus_callable() {
     let n = num_cpus();
