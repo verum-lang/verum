@@ -1,0 +1,107 @@
+// =============================================================================
+// core-tests/redis/stream/unit_test.vr
+// =============================================================================
+//
+// `core/redis/stream.vr` — Redis Streams primitives (XADD / XREAD).
+//
+// Tested:
+//   * StreamEntry record construction + accessor
+//   * Field list preservation through construction
+// =============================================================================
+
+mount core.redis.stream.StreamEntry;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: StreamEntry record construction
+// =============================================================================
+
+@test
+fn test_stream_entry_empty_fields() {
+    let empty_fields: List<(Text, List<Byte>)> = [];
+    let e: StreamEntry = StreamEntry {
+        id: "1700000000000-0".to_text(),
+        fields: empty_fields,
+    };
+    assert_eq(e.id, "1700000000000-0");
+    assert_eq(e.fields.len(), 0);
+}
+
+@test
+fn test_stream_entry_single_field() {
+    let mut fields: List<(Text, List<Byte>)> = [];
+    let mut bytes: List<Byte> = [];
+    bytes.push(0x68_u8);  // 'h'
+    bytes.push(0x69_u8);  // 'i'
+    fields.push(("greeting".to_text(), bytes));
+    let e: StreamEntry = StreamEntry {
+        id: "1700000000001-0".to_text(),
+        fields: fields,
+    };
+    assert_eq(e.fields.len(), 1);
+    assert_eq(e.id, "1700000000001-0");
+}
+
+@test
+fn test_stream_entry_multi_field() {
+    let mut fields: List<(Text, List<Byte>)> = [];
+    let mut b1: List<Byte> = [];
+    b1.push(0x41_u8);
+    let mut b2: List<Byte> = [];
+    b2.push(0x42_u8);
+    let mut b3: List<Byte> = [];
+    b3.push(0x43_u8);
+    fields.push(("k1".to_text(), b1));
+    fields.push(("k2".to_text(), b2));
+    fields.push(("k3".to_text(), b3));
+    let e: StreamEntry = StreamEntry {
+        id: "1700000000002-0".to_text(),
+        fields: fields,
+    };
+    assert_eq(e.fields.len(), 3);
+}
+
+@test
+fn test_stream_entry_id_server_assigned_placeholder() {
+    // Caller-supplied "*" is the convention for "let Redis assign an ID".
+    let empty_fields: List<(Text, List<Byte>)> = [];
+    let e: StreamEntry = StreamEntry {
+        id: "*".to_text(),
+        fields: empty_fields,
+    };
+    assert_eq(e.id, "*");
+}
+
+@test
+fn test_stream_entry_id_with_seq_suffix() {
+    // <ms>-<seq> form with non-zero seq.
+    let empty_fields: List<(Text, List<Byte>)> = [];
+    let e: StreamEntry = StreamEntry {
+        id: "1700000000000-42".to_text(),
+        fields: empty_fields,
+    };
+    assert_eq(e.id, "1700000000000-42");
+}
+
+// =============================================================================
+// Section 2: Field independence
+// =============================================================================
+
+@test
+fn test_stream_entry_field_independence() {
+    let empty1: List<(Text, List<Byte>)> = [];
+    let empty2: List<(Text, List<Byte>)> = [];
+    let a: StreamEntry = StreamEntry {
+        id: "a-0".to_text(),
+        fields: empty1,
+    };
+    let b: StreamEntry = StreamEntry {
+        id: "b-0".to_text(),
+        fields: empty2,
+    };
+    assert_eq(a.id, "a-0");
+    assert_eq(b.id, "b-0");
+}
+
+fn main() {}
