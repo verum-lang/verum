@@ -43,13 +43,11 @@ fn test_clz_all_ones_returns_zero() {
 // Section 2: clz32 — UInt32
 // =============================================================================
 
-@ignore("clz32 intrinsic mis-dispatches under --interp — both inputs return wrong value (clz UInt64 works fine in §1). Likely intrinsic-table stub binding gap specific to UInt32 width.")
 @test
 fn test_clz32_msb_set_returns_zero() {
     assert_eq(clz32(0x80000000_u32), 0_u32);
 }
 
-@ignore("Same clz32 intrinsic dispatch gap.")
 @test
 fn test_clz32_lsb_set_returns_31() {
     assert_eq(clz32(1_u32), 31_u32);
