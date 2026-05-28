@@ -39,10 +39,23 @@ module core.math.bits;
 @intrinsic("llvm.ctlz.i64")
 public fn clz(x: UInt64) -> UInt32;
 
-// Count leading zeros for 32-bit integer
+// Count leading zeros for 32-bit integer.
+//
+// Implemented via the 64-bit `clz` intrinsic with a 32-bit width
+// adjustment.  The Tier-0 interpreter's `ArithSubOpcode::Clz` handler
+// uses `u64::leading_zeros()` — a 64-bit op — so a 32-bit input zero-
+// extended into the 64-bit register has 32 extra leading zeros that
+// must be subtracted to recover the 32-bit count.
+//
+// AOT lowering picks the dedicated `llvm.ctlz.i32` op via the
+// `@intrinsic("llvm.ctlz.i32")` alias in `intrinsics/mod.rs:244`
+// — the `clz(x as UInt64) - 32` reformulation is INTERP-correct AND
+// AOT-equivalent because LLVM constant-folds the `- 32` after seeing
+// the i32 input.
 @inline(always)
-@intrinsic("llvm.ctlz.i32")
-public fn clz32(x: UInt32) -> UInt32;
+public fn clz32(x: UInt32) -> UInt32 {
+    clz(x as UInt64) - 32_u32
+}
 
 // Count trailing zeros (number of 0 bits after the last 1)
 // Returns 64 if x == 0.
@@ -50,20 +63,32 @@ public fn clz32(x: UInt32) -> UInt32;
 @intrinsic("llvm.cttz.i64")
 public fn ctz(x: UInt64) -> UInt32;
 
-// Count trailing zeros for 32-bit integer
+// Count trailing zeros for 32-bit integer.
+//
+// Edge case: for x == 0, the 64-bit `ctz` intrinsic returns 64, but
+// the 32-bit caller expects 32.  Handle the zero case explicitly,
+// otherwise the underlying `ctz` is bit-width-equivalent for any
+// 32-bit value zero-extended into 64 bits (trailing zeros are unaffected
+// by zero-extension at the high end).
 @inline(always)
-@intrinsic("llvm.cttz.i32")
-public fn ctz32(x: UInt32) -> UInt32;
+public fn ctz32(x: UInt32) -> UInt32 {
+    if x == 0_u32 { 32_u32 } else { ctz(x as UInt64) }
+}
 
 // Population count (number of 1 bits, Hamming weight)
 @inline(always)
 @intrinsic("llvm.ctpop.i64")
 public fn popcnt(x: UInt64) -> UInt32;
 
-// Population count for 32-bit integer
+// Population count for 32-bit integer.
+//
+// Width-independent — counting set bits doesn't change when the value
+// is zero-extended into a wider register, so the 64-bit `popcnt` works
+// for any 32-bit input directly.
 @inline(always)
-@intrinsic("llvm.ctpop.i32")
-public fn popcnt32(x: UInt32) -> UInt32;
+public fn popcnt32(x: UInt32) -> UInt32 {
+    popcnt(x as UInt64)
+}
 
 // =============================================================================
 // Bit Position Functions
@@ -164,9 +189,15 @@ public fn rotr32(x: UInt32, n: UInt32) -> UInt32;
 public fn bswap(x: UInt64) -> UInt64;
 
 // Byte swap for 32-bit
+// Byte swap for 32-bit integer.
+//
+// The 64-bit `bswap` reverses 8 bytes; for a 4-byte input zero-extended
+// into a 64-bit register, the reversed bytes land at the high half
+// of the 64-bit result and need a 32-bit right shift to extract.
 @inline(always)
-@intrinsic("llvm.bswap.i32")
-public fn bswap32(x: UInt32) -> UInt32;
+public fn bswap32(x: UInt32) -> UInt32 {
+    (bswap(x as UInt64) >> 32_u64) as UInt32
+}
 
 // Byte swap for 16-bit
 @inline(always)
@@ -179,9 +210,16 @@ public fn bswap16(x: UInt16) -> UInt16;
 public fn bitreverse(x: UInt64) -> UInt64;
 
 // Bit reverse for 32-bit
+// Reverse bits for 32-bit integer.
+//
+// Like bswap32 — the 64-bit `bitreverse` reverses 64 bits; a 4-byte
+// input zero-extended into a 64-bit register has its reversed bits
+// land at the high half and needs a 32-bit right shift to extract
+// the 32-bit reversed value.
 @inline(always)
-@intrinsic("llvm.bitreverse.i32")
-public fn bitreverse32(x: UInt32) -> UInt32;
+public fn bitreverse32(x: UInt32) -> UInt32 {
+    (bitreverse(x as UInt64) >> 32_u64) as UInt32
+}
 
 // =============================================================================
 // Power of Two Operations
