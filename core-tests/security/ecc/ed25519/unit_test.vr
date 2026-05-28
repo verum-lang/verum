@@ -1,0 +1,59 @@
+// =============================================================================
+// core-tests/security/ecc/ed25519/unit_test.vr
+// =============================================================================
+//
+// `core/security/ecc/ed25519.vr` — Ed25519 signature scheme
+// (RFC 8032 §5.1).
+// =============================================================================
+
+mount core.security.ecc.ed25519.{SEED_SIZE, PUBLIC_KEY_SIZE, SIGNATURE_SIZE};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Ed25519 canonical sizes
+// =============================================================================
+
+@test
+fn test_ed25519_seed_size_canonical_value() {
+    // RFC 8032 §5.1.5 — 32-byte seed.
+    assert_eq(SEED_SIZE, 32);
+}
+
+@test
+fn test_ed25519_public_key_size_canonical_value() {
+    // RFC 8032 §5.1.5 — 32-byte compressed point.
+    assert_eq(PUBLIC_KEY_SIZE, 32);
+}
+
+@test
+fn test_ed25519_signature_size_canonical_value() {
+    // RFC 8032 §5.1.6 — signature is (R, s) = 32 + 32 = 64 bytes.
+    assert_eq(SIGNATURE_SIZE, 64);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_ed25519_seed_equals_public_key_width() {
+    // Both 32-byte values — the seed expands into the secret scalar
+    // and the public key is its compressed point.
+    assert_eq(SEED_SIZE, PUBLIC_KEY_SIZE);
+}
+
+@test
+fn test_ed25519_signature_is_twice_public_key() {
+    // R || s, each 32 bytes.
+    assert_eq(SIGNATURE_SIZE, PUBLIC_KEY_SIZE * 2);
+}
+
+@test
+fn test_ed25519_constants_positive() {
+    assert(SEED_SIZE > 0);
+    assert(PUBLIC_KEY_SIZE > 0);
+    assert(SIGNATURE_SIZE > 0);
+}
+
+fn main() {}

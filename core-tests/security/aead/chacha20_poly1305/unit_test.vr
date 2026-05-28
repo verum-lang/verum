@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/security/aead/chacha20_poly1305/unit_test.vr
+// =============================================================================
+//
+// `core/security/aead/chacha20_poly1305.vr` — ChaCha20-Poly1305 AEAD
+// (RFC 8439 §2.8).
+// =============================================================================
+
+mount core.security.aead.chacha20_poly1305.{KEY_SIZE, NONCE_SIZE, TAG_SIZE};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+@test
+fn test_chacha20_poly1305_key_size_canonical_value() {
+    // RFC 8439 §2.8 — 256-bit (32-byte) key.
+    assert_eq(KEY_SIZE, 32);
+}
+
+@test
+fn test_chacha20_poly1305_nonce_size_canonical_value() {
+    // RFC 8439 §2.8 — 96-bit (12-byte) nonce.
+    assert_eq(NONCE_SIZE, 12);
+}
+
+@test
+fn test_chacha20_poly1305_tag_size_canonical_value() {
+    // Poly1305 tag is 128 bits (16 bytes).
+    assert_eq(TAG_SIZE, 16);
+}
+
+@test
+fn test_chacha20_poly1305_key_double_tag() {
+    assert_eq(KEY_SIZE, TAG_SIZE * 2);
+}
+
+@test
+fn test_chacha20_poly1305_nonce_lt_key() {
+    assert(NONCE_SIZE < KEY_SIZE);
+}
+
+@test
+fn test_chacha20_poly1305_constants_positive() {
+    assert(KEY_SIZE > 0);
+    assert(NONCE_SIZE > 0);
+    assert(TAG_SIZE > 0);
+}
+
+fn main() {}

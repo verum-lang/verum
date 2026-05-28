@@ -1,0 +1,53 @@
+// =============================================================================
+// core-tests/security/ecc/x25519/unit_test.vr
+// =============================================================================
+//
+// `core/security/ecc/x25519.vr` — X25519 ECDH (RFC 7748 §5).
+// =============================================================================
+
+mount core.security.ecc.x25519.{SCALAR_SIZE, POINT_SIZE, SHARED_SECRET_SIZE};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: X25519 canonical sizes
+// =============================================================================
+
+@test
+fn test_x25519_scalar_size_canonical_value() {
+    // RFC 7748 §5 — 32-byte (255-bit clamped) scalar.
+    assert_eq(SCALAR_SIZE, 32);
+}
+
+@test
+fn test_x25519_point_size_canonical_value() {
+    // RFC 7748 §5 — 32-byte compressed u-coordinate.
+    assert_eq(POINT_SIZE, 32);
+}
+
+@test
+fn test_x25519_shared_secret_size_canonical_value() {
+    // RFC 7748 §6.1 — 32-byte shared secret (raw output, pre-HKDF).
+    assert_eq(SHARED_SECRET_SIZE, 32);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_x25519_all_widths_equal() {
+    // scalar, point, and shared secret are all 32 bytes — Curve25519
+    // operates entirely in this width.
+    assert_eq(SCALAR_SIZE, POINT_SIZE);
+    assert_eq(POINT_SIZE, SHARED_SECRET_SIZE);
+}
+
+@test
+fn test_x25519_constants_positive() {
+    assert(SCALAR_SIZE > 0);
+    assert(POINT_SIZE > 0);
+    assert(SHARED_SECRET_SIZE > 0);
+}
+
+fn main() {}
