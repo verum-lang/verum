@@ -20,6 +20,20 @@ wire identifiers and parameter tables:
 * `NamedGroup` 9-variant — X25519 + Secp256r1/384r1/521r1 +
   X448 + FFDHE2048/3072/4096 + Unknown, `is_supported` v1
   production list, `public_key_len` (X25519=32 / X448=56).
+* `ContentType` 5-variant (Invalid 0 / ChangeCipherSpec 20 /
+  Alert 21 / Handshake 22 / ApplicationData 23) per RFC 8446 §5.1.
+* `AlertLevel` warning=1 / fatal=2 + `AlertDescription`
+  27-variant wire bytes per RFC 8446 §6.
+* Extension type IDs (RFC 8446 §4.2): supported_versions=43,
+  signature_algorithms=13, key_share=51, supported_groups=10,
+  ALPN=16, pre_shared_key=41, early_data=42,
+  psk_key_exchange_modes=45, quic_transport_parameters=57.
+* `SignatureScheme` 17-variant — RFC 8446 §4.2.3 IDs +
+  `is_valid_for_certificate_verify` (rejects legacy PKCS1 / SHA-1).
+* Record-layer caps `MAX_PLAINTEXT_SIZE = 16384`,
+  `MAX_CIPHERTEXT_SIZE = 16640` per RFC 8446 §5.1 + §5.2.
+* `TlsError` 24-variant ADT + Eq reflexivity + payload
+  preservation (InternalError / IoError / RemoteAlert).
 
 ## 1. Cross-stdlib usage
 
@@ -33,7 +47,9 @@ wire identifiers and parameter tables:
 
 None — `core/net/tls13/*` is pure Verum. The crypto primitives
 in `core.security.*` are intrinsic-backed; this module is the
-TLS state machine + record layer + key schedule.
+TLS state machine + record layer + key schedule. Every wire ID
+is RFC 8446 IANA-stable; drift is pinned by 39 unit tests + 47
+property tests + 17 active regression LOCK-INs.
 
 ## 3. Language-implementation gaps
 
@@ -43,15 +59,17 @@ Source-side at `mod.vr:40-46` documents Phase 2 step 1 (key
 schedule + record layer + wire constants — what this test suite
 covers) vs Phase 2 step 2 (handshake state machine — landing in
 follow-up). The `session.*` re-exports are present in the
-umbrella but tested at L2 specs end-to-end.
+umbrella but tested at L2 specs end-to-end. AeadState seal/open,
+HKDF-Expand-Label test vectors, 0-RTT antireplay are all gated
+behind harness landing.
 
-### §3.2 RFC 8879 Certificate Compression — file shipped without umbrella
+### §3.2 TLS13-2 — RFC 8879 Certificate Compression coverage
 
 Source-side at `mod.vr:88-92` documents that
 `cert_compress.vr` shipped pre-fix without an umbrella module
 declaration; reachable via direct file mount only. The
-umbrella was added at `mod.vr:92` but external visibility was
-gated until that line landed.
+umbrella was added at `mod.vr:92` but Brotli + Zstd round-trip
+coverage is deferred to the cert-fixture harness.
 
 ### §3.3 v1 supported `NamedGroup` list excludes Secp521r1 + X448 + FFDHE
 
@@ -76,18 +94,31 @@ via `test_cipher_suite_ccm_is_not_supported`.
   AeadKind key_len/iv_len/tag_len (5), NamedGroup 6-variant
   IANA u16 wire IDs (6) + is_supported (4) + public_key_len
   (2).
+* `core-tests/net/tls13/property_test.vr` — 47 property tests
+  spanning CipherSuite IANA disjointness §A + round-trip §B,
+  NamedGroup IANA + round-trip §C-D, ProtocolVersion fields §E,
+  AlertLevel + AlertDescription wire injectivity §F, ContentType
+  wire bytes §G, extension-type IDs §H, SignatureScheme +
+  CertificateVerify gating §I, HashKind / AeadKind algebra §J,
+  record-layer size caps §K, TlsError variant + payload algebra §L.
+* `core-tests/net/tls13/regression_test.vr` — 22 regression pins
+  (17 active wire-format LOCK-IN across CipherSuite + NamedGroup +
+  extensions + ContentType + Alert + SignatureScheme + protocol
+  version + record-size caps, 5 `@ignore`'d functional pins for
+  handshake state machine + AEAD seal/open + HKDF + 0-RTT + cert
+  compression).
 * `core-tests/net/tls13/audit.md` — this file.
 
 ## 5. Action items deferred
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| SignatureScheme catalogue (RSA-PSS / ECDSA / EdDSA) data-surface | this folder | 1h |
-| AlertLevel + AlertDescription wire-form (RFC 8446 §6) | this folder | 1h |
-| TlsError ADT + alert mapping | this folder | 1h |
-| ContentType wire constants (RFC 8446 §B.1) | this folder | 30 min |
+| AlertDescription 27-variant exhaustive wire-byte coverage | this folder | 1h |
+| SignatureScheme 17-variant exhaustive wire-byte coverage | this folder | 1h |
+| ContentType from_u8 round-trip per variant | this folder | 30 min |
 | AeadState seal/open round-trip with fixture key | this folder | 4h |
 | HKDF-Expand-Label test vectors per RFC 8446 §7.1 | this folder | 4h |
 | Handshake state-machine ClientHello → Finished happy-path | language level | 1 week |
-| 0-RTT session ticket round-trip | language level | 1 week |
+| 0-RTT session ticket round-trip + antireplay | language level | 1 week |
 | RFC 8879 cert compression Brotli + Zstd round-trip | this folder | 4h |
+| Transport-parameter codec (RFC 9001 §8.2) for QUIC integration | this folder | 4h |
