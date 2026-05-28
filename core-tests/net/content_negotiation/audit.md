@@ -27,22 +27,17 @@ None. Pure-Verum byte arithmetic.
 
 ## 3. Language-implementation gaps
 
-### §3.1 CONNEG-1 — `parse_*` / `select_*` SIGSEGV during precompile cascade
+### §3.1 CONNEG-1 — `parse_*` / `select_*` SIGSEGV (CLOSED 2026-05-28)
 
-**Stable trigger**: any reachable callsite of the five public
-free-fns from a USER test module SIGSEGVs the compiler during
-the precompile cascade for `content_negotiation.vr`. Same crash
-signature family as CIDR-1 / URL-1 / URITPL-1 / HTTPRNG-1.
+**Pre-fix trigger**: precompile-cascade SIGSEGV in LLVM SmallVector
+shared with CIDR-1 / URITPL-1 / HTTPRNG-1 / HTTPCACHE-1 / LINKHDR-1.
 
-The data-surface (variant construction + Eq lattice) compiles
-and tests pass. The functional surface is locked-in by 8
-@ignore'd regression pins covering: parse_accept simple +
-q-value + wildcard, parse_accept_encoding gzip, parse_accept_language
-en-US, select_best_media exact match + no-match-None,
-select_best_coding q=0 rejection.
+**Closed by source-side fix** (commit `b30e71f92`): `trim_ws`
+helper replaces `out.extend_from_slice(&src[l..r])` with byte-by-
+byte `while k < r { out.push(src[k]); k = k + 1 }` loop.
 
-**Effort**: 3-5 days fix (batched with CIDR-1 / URL-1 / URITPL-1 /
-HTTPRNG-1).
+**Post-rebuild validation 2026-05-28**: 8/8 CONNEG-1 regression
+tests transition from @ignore'd-SIGSEGV to GREEN under `--interp`.
 
 ### §3.2 MAX_NEGOTIATION_ENTRIES pinned at 256
 

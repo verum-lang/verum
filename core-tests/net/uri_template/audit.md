@@ -23,42 +23,20 @@ None. Pure-Verum byte arithmetic.
 
 ## 3. Language-implementation gaps
 
-### §3.1 URITPL-1 — `UriTemplate.parse` / `expand` SIGSEGV during precompile cascade
+### §3.1 URITPL-1 — `UriTemplate.parse` / `expand` SIGSEGV (CLOSED 2026-05-28)
 
-**Stable trigger**: any reachable callsite of `UriTemplate.parse(&Text)`
-or `UriTemplate.expand(&self, &Map<Text, TemplateValue>)` from a USER
-test module SIGSEGVs the compiler inside
-`llvm::SmallVectorBase<unsigned long long>::grow_pod`.
+**Pre-fix trigger**: `UriTemplate.parse(&Text)` SIGSEGV'd in LLVM
+SmallVector during precompile cascade.
 
-Same crash signature family as CIDR-1 + URL-1 — likely all three
-share the same root cause in the VBC precompile cascade for stdlib
-modules whose functions use one or more of:
+**Closed by source-side fix** (commit `a69f4fd4e`): byte-by-byte
+push replaces `extend_from_slice(&b[start..i])` in the literal-
+collection loop. Same fix-class as CIDR-1 / HTTPRNG-1 / HTTPCACHE-1
+/ CONNEG-1 / LINKHDR-1 — all closed by replacing `extend_from_slice`
+intrinsic-chain with explicit byte-by-byte `out.push()` loops in
+stdlib parser helpers.
 
-* `?` operator on `Result<T, E>` with payload-carrying error variants.
-* `text.as_bytes()` → `&[Byte]` view.
-* Internal helpers like `Text.from_utf8_unchecked(buf.as_slice())`
-  that interact with archive-loader type-id propagation.
-
-**Reproduction**:
-
-```verum
-mount core.net.uri_template.{UriTemplate};
-
-@test
-fn probe() {
-    let s = "/users/{user}".clone();
-    let _ = UriTemplate.parse(&s);        // ← SIGSEGV at codegen time
-}
-```
-
-**Workaround**: none source-side; the precompiled
-`runtime.vbca` for `uri_template.vr` has the body compiled
-already but the user-side import-cascade re-compile crashes.
-Same root as CIDR-1 — investigation should batch.
-
-**Effort**: 3-5 days (root-cause CIDR-1 / URL-1 / URITPL-1 as a
-single defect class — likely one VBC codegen edit closes all
-three).
+**Post-rebuild validation 2026-05-28**: 7/7 URITPL-1 regression
+tests transition from @ignore'd-SIGSEGV to GREEN under `--interp`.
 
 ### §3.2 Level 4 explode `*` modifier — partial
 

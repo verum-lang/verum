@@ -27,13 +27,20 @@ None. Pure-Verum byte arithmetic.
 
 ## 3. Language-implementation gaps
 
-### §3.1 LINKHDR-1 — `parse` / `find_rel` / `format_link_header` SIGSEGV
+### §3.1 LINKHDR-1 — `parse` / `find_rel` / `format_link_header` SIGSEGV (CLOSED 2026-05-28)
 
-**Stable trigger**: same precompile-cascade defect class as
-CIDR-1 / URL-1 / URITPL-1 / HTTPRNG-1 / CONNEG-1. The data-
-surface (LinkEntry construction + LinkHeaderError Eq lattice)
-compiles. Functional surface locked-in by 8 @ignore'd
-regression pins.
+**Pre-fix trigger**: precompile-cascade SIGSEGV in LLVM SmallVector
+shared with CIDR-1 / URITPL-1 / HTTPRNG-1 / HTTPCACHE-1 / CONNEG-1.
+
+**Closed by source-side fixes** (commits `b30e71f92` + `abf1033b1`):
+
+1. `slice_text` helper: replace `out.extend_from_slice(&b[start..end])`
+   with byte-by-byte `while i < end { out.push(b[i]); i = i + 1 }`.
+2. `format_link_header`: replace `push_bytes(b", ")` + `push_bytes(b"; ")`
+   byte-string literals with individual `out.push()` calls.
+
+**Post-rebuild validation 2026-05-28**: 8/8 LINKHDR-1 regression
+tests transition from @ignore'd-SIGSEGV to GREEN under `--interp`.
 
 ### §3.2 MAX_LINK_ENTRIES pinned at 256
 
