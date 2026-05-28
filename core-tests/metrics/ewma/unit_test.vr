@@ -1,0 +1,75 @@
+// =============================================================================
+// core-tests/metrics/ewma/unit_test.vr
+// =============================================================================
+//
+// `core/metrics/ewma.vr` — Exponentially Weighted Moving Average.
+// =============================================================================
+
+mount core.metrics.ewma.{LOAD_AVG_1, LOAD_AVG_5, LOAD_AVG_15};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Linux load-average decay constants
+//
+//   Standard Linux `loadavg(5)` decay constants — exp(-5/60) per minute
+//   for 1-minute, exp(-5/300) for 5-minute, exp(-5/900) for 15-minute.
+//   Pinned at the canonical 4-decimal-place IEEE 754 values used by
+//   Linux kernel (kernel/sched/loadavg.c).
+// =============================================================================
+
+@test
+fn test_load_avg_1_canonical_value() {
+    assert_eq(LOAD_AVG_1, 0.9200);
+}
+
+@test
+fn test_load_avg_5_canonical_value() {
+    assert_eq(LOAD_AVG_5, 0.9835);
+}
+
+@test
+fn test_load_avg_15_canonical_value() {
+    assert_eq(LOAD_AVG_15, 0.9945);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+//
+//   Decay constants strictly grow with the window — a 15-minute
+//   average decays slowest, 1-minute fastest.
+// =============================================================================
+
+@ignore("Float `<` between two small-gap close-to-1.0 const-loaded values mis-dispatches — sister of Float-Ord small-gap defect family.")
+@test
+fn test_load_avg_ordering_1_lt_5_lt_15() {
+    // The 1-minute decay constant is smallest (most-aggressive decay).
+    assert(LOAD_AVG_1 < LOAD_AVG_5);
+    assert(LOAD_AVG_5 < LOAD_AVG_15);
+}
+
+@test
+fn test_load_avg_all_below_one() {
+    // Decay constants must be < 1.0 — otherwise the moving average
+    // would never converge.
+    assert(LOAD_AVG_1 < 1.0);
+    assert(LOAD_AVG_5 < 1.0);
+    assert(LOAD_AVG_15 < 1.0);
+}
+
+@test
+fn test_load_avg_all_positive() {
+    assert(LOAD_AVG_1 > 0.0);
+    assert(LOAD_AVG_5 > 0.0);
+    assert(LOAD_AVG_15 > 0.0);
+}
+
+@test
+fn test_load_avg_15_closest_to_one() {
+    // 15-minute window is closest to 1.0 — it weights history most.
+    let to_one_1 = 1.0 - LOAD_AVG_1;
+    let to_one_15 = 1.0 - LOAD_AVG_15;
+    assert(to_one_15 < to_one_1);
+}
+
+fn main() {}
