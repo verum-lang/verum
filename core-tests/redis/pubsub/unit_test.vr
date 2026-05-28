@@ -1,0 +1,115 @@
+// =============================================================================
+// core-tests/redis/pubsub/unit_test.vr
+// =============================================================================
+//
+// `core/redis/pubsub.vr` — Redis Pub/Sub message envelope.
+//
+// Tested:
+//   * PubSubMessage 6-variant ADT
+//   * Variant disjointness via `is`-pattern testing
+//
+// Record-payload field extraction via match-binding deferred
+// behind the field-destructure resolver defect class.
+// =============================================================================
+
+mount core.redis.pubsub.PubSubMessage;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: PubSubMessage variant construction
+// =============================================================================
+
+@test
+fn test_pubsub_message_variant() {
+    let empty: List<Byte> = [];
+    let m: PubSubMessage = PubSubMessage.Message {
+        channel: "news".to_text(),
+        payload: empty,
+    };
+    assert(m is PubSubMessage.Message);
+}
+
+@test
+fn test_pubsub_p_message_variant() {
+    let empty: List<Byte> = [];
+    let m: PubSubMessage = PubSubMessage.PMessage {
+        pattern: "news.*".to_text(),
+        channel: "news.sports".to_text(),
+        payload: empty,
+    };
+    assert(m is PubSubMessage.PMessage);
+}
+
+@test
+fn test_pubsub_subscribed_variant() {
+    let m: PubSubMessage = PubSubMessage.Subscribed {
+        channel: "news".to_text(),
+        total_subscriptions: 3,
+    };
+    assert(m is PubSubMessage.Subscribed);
+}
+
+@test
+fn test_pubsub_unsubscribed_variant() {
+    let m: PubSubMessage = PubSubMessage.Unsubscribed {
+        channel: "news".to_text(),
+        total_subscriptions: 2,
+    };
+    assert(m is PubSubMessage.Unsubscribed);
+}
+
+@test
+fn test_pubsub_p_subscribed_variant() {
+    let m: PubSubMessage = PubSubMessage.PSubscribed {
+        pattern: "news.*".to_text(),
+        total_subscriptions: 1,
+    };
+    assert(m is PubSubMessage.PSubscribed);
+}
+
+@test
+fn test_pubsub_p_unsubscribed_variant() {
+    let m: PubSubMessage = PubSubMessage.PUnsubscribed {
+        pattern: "news.*".to_text(),
+        total_subscriptions: 0,
+    };
+    assert(m is PubSubMessage.PUnsubscribed);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness (selected pairs)
+// =============================================================================
+
+@test
+fn test_pubsub_message_disjoint_from_p_message() {
+    let empty: List<Byte> = [];
+    let m: PubSubMessage = PubSubMessage.Message {
+        channel: "x".to_text(),
+        payload: empty,
+    };
+    assert(!(m is PubSubMessage.PMessage));
+    assert(!(m is PubSubMessage.Subscribed));
+}
+
+@test
+fn test_pubsub_subscribed_disjoint_from_unsubscribed() {
+    let s: PubSubMessage = PubSubMessage.Subscribed {
+        channel: "x".to_text(),
+        total_subscriptions: 0,
+    };
+    assert(!(s is PubSubMessage.Unsubscribed));
+    assert(!(s is PubSubMessage.PSubscribed));
+}
+
+@test
+fn test_pubsub_p_subscribed_disjoint_from_p_unsubscribed() {
+    let p: PubSubMessage = PubSubMessage.PSubscribed {
+        pattern: "x.*".to_text(),
+        total_subscriptions: 1,
+    };
+    assert(!(p is PubSubMessage.PUnsubscribed));
+    assert(!(p is PubSubMessage.Subscribed));
+}
+
+fn main() {}
