@@ -1,0 +1,96 @@
+// =============================================================================
+// core-tests/security/hash/blake3/unit_test.vr
+// =============================================================================
+//
+// `core/security/hash/blake3.vr` — BLAKE3 cryptographic hash (Aumasson
+// et al., 2020).
+//
+// Pure-data constant surface tested:
+//   * BLOCK_SIZE / CHUNK_SIZE / OUTPUT_SIZE / KEY_LEN canonical values
+//   * Width relationships (CHUNK = 16 * BLOCK; OUTPUT = KEY = 32)
+//
+// Streaming Blake3 record + one-shot hashing surfaces are deferred
+// behind byte-array compile-time class.
+// =============================================================================
+
+mount core.security.hash.blake3.{BLOCK_SIZE, CHUNK_SIZE, OUTPUT_SIZE, KEY_LEN};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: BLAKE3 canonical constants
+// =============================================================================
+
+@test
+fn test_blake3_block_size_canonical_value() {
+    // BLAKE3 spec §2.1 — block is 64 bytes (16 × u32 words).
+    assert_eq(BLOCK_SIZE, 64);
+}
+
+@test
+fn test_blake3_chunk_size_canonical_value() {
+    // BLAKE3 spec §2.1 — chunk is 1024 bytes (16 blocks).
+    assert_eq(CHUNK_SIZE, 1024);
+}
+
+@test
+fn test_blake3_output_size_canonical_value() {
+    // BLAKE3 spec §3 — default output is 32 bytes (256-bit digest).
+    assert_eq(OUTPUT_SIZE, 32);
+}
+
+@test
+fn test_blake3_key_len_canonical_value() {
+    // BLAKE3 spec §6 — keyed-hash key is 32 bytes (256 bits).
+    assert_eq(KEY_LEN, 32);
+}
+
+// =============================================================================
+// Section 2: Width relationships pinned
+//
+//   These invariants must hold by spec; a value drift in any constant
+//   would cascade into incorrect Merkle-tree chunking.
+// =============================================================================
+
+@test
+fn test_blake3_chunk_is_sixteen_blocks() {
+    // CHUNK_SIZE / BLOCK_SIZE must be 16 (BLAKE3 spec §2.1).
+    assert_eq(CHUNK_SIZE / BLOCK_SIZE, 16);
+}
+
+@test
+fn test_blake3_chunk_size_exact_multiple_of_block() {
+    // CHUNK_SIZE % BLOCK_SIZE must be 0 — no partial blocks at the
+    // chunk boundary.
+    assert_eq(CHUNK_SIZE % BLOCK_SIZE, 0);
+}
+
+@test
+fn test_blake3_key_len_equals_output_size() {
+    // BLAKE3 keyed-hash and default digest share width = 32.
+    assert_eq(KEY_LEN, OUTPUT_SIZE);
+}
+
+@test
+fn test_blake3_output_is_half_block() {
+    // OUTPUT_SIZE = BLOCK_SIZE / 2 = 32 — the squeeze produces one
+    // half of a block at a time.
+    assert_eq(OUTPUT_SIZE, BLOCK_SIZE / 2);
+}
+
+// =============================================================================
+// Section 3: Non-zero-ness invariants
+//
+//   All four constants must be > 0; zero-width buffers would break the
+//   compressor's well-formedness checks.
+// =============================================================================
+
+@test
+fn test_blake3_constants_all_positive() {
+    assert(BLOCK_SIZE > 0);
+    assert(CHUNK_SIZE > 0);
+    assert(OUTPUT_SIZE > 0);
+    assert(KEY_LEN > 0);
+}
+
+fn main() {}
