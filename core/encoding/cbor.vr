@@ -163,12 +163,18 @@ fn encode_into(v: &CborValue, out: &mut List<Byte>) {
         CborValue.CborNint(n) => write_head(out, 1_u8, *n),
         CborValue.CborBytes(b) => {
             write_head(out, 2_u8, b.len() as UInt64);
-            out.extend_from_slice(b.as_slice());
+            // Byte-by-byte push avoids the extend_from_slice intrinsic
+            // dispatch chain (SIGSEGV-trigger pattern, same family as
+            // CIDR-1 / URITPL-1 / HTTPRNG-1 close-outs).
+            let bs = b.as_slice();
+            let mut __i = 0;
+            while __i < bs.len() { out.push(bs[__i]); __i = __i + 1; }
         },
         CborValue.CborText(t) => {
             let bytes = t.as_bytes();
             write_head(out, 3_u8, bytes.len() as UInt64);
-            out.extend_from_slice(bytes);
+            let mut __i = 0;
+            while __i < bytes.len() { out.push(bytes[__i]); __i = __i + 1; }
         },
         CborValue.CborArray(arr) => {
             write_head(out, 4_u8, arr.len() as UInt64);
@@ -269,8 +275,12 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
             let len = read_arg(bytes, pos, minor)? as Int;
             if *pos + len > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             let mut buf: List<Byte> = List.with_capacity(len);
-            buf.extend_from_slice(&bytes[*pos..*pos + len]);
-            *pos = *pos + len;
+            // Byte-by-byte push (SIGSEGV-trigger pattern fix-family).
+            let start = *pos;
+            let end = *pos + len;
+            let mut __i = start;
+            while __i < end { buf.push(bytes[__i]); __i = __i + 1; }
+            *pos = end;
             Result.Ok(CborValue.CborBytes(buf))
         },
         3_u8 => {
@@ -278,8 +288,11 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
             let len = read_arg(bytes, pos, minor)? as Int;
             if *pos + len > bytes.len() { return Result.Err(CborError.Truncated(*pos)); }
             let mut buf: List<Byte> = List.with_capacity(len);
-            buf.extend_from_slice(&bytes[*pos..*pos + len]);
-            *pos = *pos + len;
+            let start = *pos;
+            let end = *pos + len;
+            let mut __i = start;
+            while __i < end { buf.push(bytes[__i]); __i = __i + 1; }
+            *pos = end;
             Result.Ok(CborValue.CborText(Text.from_utf8_unchecked(buf.as_slice())))
         },
         4_u8 => {
@@ -387,7 +400,9 @@ fn decode_indef_bytes(bytes: &[Byte], pos: &mut Int) -> Result<CborValue, CborEr
         let chunk = decode_item(bytes, pos, 1)?;
         match chunk {
             CborValue.CborBytes(b) => {
-                acc.extend_from_slice(b.as_slice());
+                let bs = b.as_slice();
+                let mut __i = 0;
+                while __i < bs.len() { acc.push(bs[__i]); __i = __i + 1; }
             },
             _ => return Result.Err(CborError.InvalidIndefinite),
         }
@@ -402,7 +417,9 @@ fn decode_indef_text(bytes: &[Byte], pos: &mut Int) -> Result<CborValue, CborErr
         let chunk = decode_item(bytes, pos, 1)?;
         match chunk {
             CborValue.CborText(t) => {
-                acc.extend_from_slice(t.as_bytes());
+                let tb = t.as_bytes();
+                let mut __i = 0;
+                while __i < tb.len() { acc.push(tb[__i]); __i = __i + 1; }
             },
             _ => return Result.Err(CborError.InvalidIndefinite),
         }

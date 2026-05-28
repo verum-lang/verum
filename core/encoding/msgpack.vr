@@ -531,7 +531,9 @@ fn decode_ext(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, Msg
 // =============================================================================
 
 fn push_all(dst: &mut List<Byte>, src: &[Byte]) {
-    dst.extend_from_slice(src);
+    // Byte-by-byte push (SIGSEGV-trigger pattern fix-family).
+    let mut __i = 0;
+    while __i < src.len() { dst.push(src[__i]); __i = __i + 1; }
 }
 
 fn push_u16_be(dst: &mut List<Byte>, v: UInt16) {
