@@ -1,0 +1,98 @@
+// =============================================================================
+// core-tests/cli/completion/unit_test.vr
+// =============================================================================
+//
+// `core/cli/completion.vr` — shell-completion script generators.
+// =============================================================================
+
+mount core.cli.completion.Shell;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Shell 6-variant ADT
+// =============================================================================
+
+@test
+fn test_shell_bash_variant() {
+    let s: Shell = Shell.Bash;
+    assert(s is Shell.Bash);
+}
+
+@test
+fn test_shell_zsh_variant() {
+    let s: Shell = Shell.Zsh;
+    assert(s is Shell.Zsh);
+}
+
+@test
+fn test_shell_fish_variant() {
+    let s: Shell = Shell.Fish;
+    assert(s is Shell.Fish);
+}
+
+@test
+fn test_shell_powershell_variant() {
+    let s: Shell = Shell.PowerShell;
+    assert(s is Shell.PowerShell);
+}
+
+@test
+fn test_shell_nushell_variant() {
+    let s: Shell = Shell.Nushell;
+    assert(s is Shell.Nushell);
+}
+
+@test
+fn test_shell_elvish_variant() {
+    let s: Shell = Shell.Elvish;
+    assert(s is Shell.Elvish);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness — selected pairs
+// =============================================================================
+
+@test
+fn test_shell_bash_disjoint_from_zsh() {
+    let s: Shell = Shell.Bash;
+    assert(!(s is Shell.Zsh));
+    assert(!(s is Shell.Fish));
+    assert(!(s is Shell.PowerShell));
+    assert(!(s is Shell.Nushell));
+    assert(!(s is Shell.Elvish));
+}
+
+@test
+fn test_shell_zsh_disjoint() {
+    let s: Shell = Shell.Zsh;
+    assert(!(s is Shell.Bash));
+    assert(!(s is Shell.Fish));
+}
+
+@test
+fn test_shell_powershell_disjoint() {
+    let s: Shell = Shell.PowerShell;
+    assert(!(s is Shell.Bash));
+    assert(!(s is Shell.Zsh));
+    assert(!(s is Shell.Nushell));
+    assert(!(s is Shell.Elvish));
+}
+
+// =============================================================================
+// Section 3: Canonical name() string mapping
+// =============================================================================
+
+@test
+fn test_shell_bash_name_is_bash() {
+    let s: Shell = Shell.Bash;
+    assert_eq(s.name(), "bash");
+}
+
+@test
+fn test_shell_zsh_name_is_zsh() {
+    let s: Shell = Shell.Zsh;
+    assert_eq(s.name(), "zsh");
+}
+
+fn main() {}
