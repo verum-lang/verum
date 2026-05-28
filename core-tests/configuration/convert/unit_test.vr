@@ -1,0 +1,102 @@
+// =============================================================================
+// core-tests/configuration/convert/unit_test.vr
+// =============================================================================
+//
+// `core/configuration/convert.vr` — cross-format conversion surface.
+// =============================================================================
+
+mount core.configuration.convert.{LossPolicy, ConversionWarning};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: LossPolicy 3-variant ADT
+// =============================================================================
+
+@test
+fn test_loss_policy_reject_variant() {
+    let p: LossPolicy = LossPolicy.Reject;
+    assert(p is LossPolicy.Reject);
+}
+
+@test
+fn test_loss_policy_accept_variant() {
+    let p: LossPolicy = LossPolicy.Accept;
+    assert(p is LossPolicy.Accept);
+}
+
+@test
+fn test_loss_policy_accept_with_warnings_variant() {
+    let p: LossPolicy = LossPolicy.AcceptWithWarnings;
+    assert(p is LossPolicy.AcceptWithWarnings);
+}
+
+// =============================================================================
+// Section 2: LossPolicy pairwise disjointness
+// =============================================================================
+
+@test
+fn test_loss_policy_reject_disjoint() {
+    let p: LossPolicy = LossPolicy.Reject;
+    assert(!(p is LossPolicy.Accept));
+    assert(!(p is LossPolicy.AcceptWithWarnings));
+}
+
+@test
+fn test_loss_policy_accept_disjoint() {
+    let p: LossPolicy = LossPolicy.Accept;
+    assert(!(p is LossPolicy.Reject));
+    assert(!(p is LossPolicy.AcceptWithWarnings));
+}
+
+@test
+fn test_loss_policy_accept_with_warnings_disjoint() {
+    let p: LossPolicy = LossPolicy.AcceptWithWarnings;
+    assert(!(p is LossPolicy.Reject));
+    assert(!(p is LossPolicy.Accept));
+}
+
+// =============================================================================
+// Section 3: ConversionWarning record construction
+// =============================================================================
+
+@test
+fn test_conversion_warning_offset_datetime_to_string() {
+    let w: ConversionWarning = ConversionWarning {
+        feature: "offset-datetime".to_text(),
+        coerced_to: "string".to_text(),
+        path: "/database/created_at".to_text(),
+    };
+    assert_eq(w.feature, "offset-datetime");
+    assert_eq(w.coerced_to, "string");
+    assert_eq(w.path, "/database/created_at");
+}
+
+@test
+fn test_conversion_warning_bytes_to_base64() {
+    let w: ConversionWarning = ConversionWarning {
+        feature: "bytes".to_text(),
+        coerced_to: "base64-string".to_text(),
+        path: "/binary_blob".to_text(),
+    };
+    assert_eq(w.feature, "bytes");
+    assert_eq(w.coerced_to, "base64-string");
+}
+
+@test
+fn test_conversion_warning_field_independence() {
+    let a: ConversionWarning = ConversionWarning {
+        feature: "f1".to_text(),
+        coerced_to: "t1".to_text(),
+        path: "/a".to_text(),
+    };
+    let b: ConversionWarning = ConversionWarning {
+        feature: "f2".to_text(),
+        coerced_to: "t2".to_text(),
+        path: "/b".to_text(),
+    };
+    assert_eq(a.feature, "f1");
+    assert_eq(b.feature, "f2");
+}
+
+fn main() {}
