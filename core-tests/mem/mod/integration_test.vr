@@ -112,7 +112,17 @@ fn integration_revocation_error_pinned_to_owned_capabilities() {
     // CAP_OWNED includes CAP_REVOKE — so a ref with CAP_OWNED can
     // revoke; a NullPointer RevocationError applies when the ptr is
     // null but the capability is present.
-    assert(can_revoke(CAP_OWNED));
+    //
+    // Workaround for §3.4 (umbrella-mount dispatch collision):
+    // `can_revoke(CAP_OWNED)` calls `has_capability(flags, CAP_REVOKE)`
+    // inside its body, which mis-dispatches to `FatRef.has_capability`
+    // when the receiver is a const-path value.  Binding CAP_OWNED to a
+    // typed local sidesteps the const-path dispatch defect.  Sister
+    // workaround pattern to the passing
+    // `integration_revocation_error_capability_violation_pinned_to_capability_caps`
+    // test (which uses `let no_revoke_flags: UInt16 = ...`).
+    let owned: UInt16 = CAP_OWNED;
+    assert(can_revoke(owned));
     let e = RevocationError.null_pointer("ThinRef<Int>".to_text());
     assert(e is RevocationError.NullPointer);
 }
