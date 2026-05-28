@@ -61,7 +61,19 @@ module that wraps `ntdll.dll` / `kernel32.dll`:
 
 ## 3. Defects
 
-### §A — UInt32 → Int32 cast preserves bit pattern but not sign at comparison time **[CLOSED via stdlib bit-extraction; VBC codegen fix landed]**
+### §A — UInt32 → Int32 cast preserves bit pattern but not sign at comparison time **[FULLY CLOSED 2026-05-28 via VBC `compile_let` width-preserving cast (commit 38596a92f) + stdlib NT_SUCCESS bit-31 rewrite]**
+
+**Update 2026-05-28**: the VBC codegen fix landed in `compile_let` —
+commit `38596a92f` adds a `cast_target_var_type` carve-out that inspects
+the RHS `Cast { ty: <sized-int> }` shape and returns width-preserving
+`VarTypeKind::Byte / Int32 / UInt64` BEFORE the generic
+`infer_expr_type_kind` fallback collapses everything to `TypeKind::Int`.
+After rebuild + precompile refresh, the entire NTSTATUS unit_test suite
+is GREEN (52/52 — was 47/50 with 3 failures on
+`test_status_object_name_exists_is_information` /
+`..._buffer_overflow_is_warning` / `..._unsuccessful_is_error`).  The
+stdlib NT_SUCCESS bit-31 rewrite in `core/sys/windows/ntstatus.vr::is_success`
+remains as defence-in-depth — both layers are independently sound.
 
 **Symptom.** `STATUS_BUFFER_OVERFLOW.is_success()` returned TRUE on the
 unfixed implementation.  The `is_success` body was `self.0 >= 0`, where

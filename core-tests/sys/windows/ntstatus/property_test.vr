@@ -48,10 +48,18 @@ mount core.sys.windows.ntstatus.{
 // Local helpers
 // -----------------------------------------------------------------------------
 
+/// Count how many of the four documented outcome predicates
+/// `is_information / is_warning / is_error` plus "plain success"
+/// classify the status.
+///
+/// Note: `is_success` is the NT_SUCCESS macro — true for severity 0
+/// (plain success) AND severity 1 (information).  To check mutual
+/// exclusivity we partition the OUTCOME domain — info / warn / error /
+/// plain-success — where `plain-success = is_success && !is_information`.
 fn severity_window_count(status: NtStatus) -> Int {
     let mut count = 0;
-    if status.is_success() {
-        count = count + 1;
+    if status.is_success() && !status.is_information() {
+        count = count + 1;  // plain success (severity 0)
     }
     if status.is_information() {
         count = count + 1;
