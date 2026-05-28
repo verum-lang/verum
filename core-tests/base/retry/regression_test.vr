@@ -36,11 +36,11 @@ mount core.collections.list.List;
 // Multi-day VBC codegen fix; tracked alongside task #17/#39 class.
 // =============================================================================
 
-// REGRESSED 2026-05-28 post commit 5fffcc93d (Maybe/Result 892-file
-// qualification sweep) — codegen now reports UndefinedFunction("retry")
-// at call site even though the function IS public at
-// core/base/retry.vr:197.  Re-@ignored.
-@ignore("post-5fffcc93d codegen UndefinedFunction(retry) at call site — mount-resolution regression from Maybe/Result sweep + default-value params interaction.")
+// CLOSED 2026-05-28 by commit 97485d71a + e51f0338a — the original
+// regression was a `public mount .maybe.{Maybe, Some, Maybe.None}` line
+// in core/base/mod.vr (the prelude re-export) corrupted by the
+// 5fffcc93d sweep. Once mod.vr was repaired and 22 local-variant files
+// reverted, `retry()` re-resolves and the closure dispatch works.
 @test
 fn regression_pin_retry_succeeds_after_failures() {
     let mut counter: Int = 0;
@@ -57,9 +57,7 @@ fn regression_pin_retry_succeeds_after_failures() {
     assert_eq(counter, 3);
 }
 
-// REGRESSED 2026-05-28 — same mount-resolution defect as
-// regression_pin_retry_succeeds_after_failures above.
-@ignore("post-5fffcc93d codegen UndefinedFunction(retry).")
+// CLOSED 2026-05-28 — same prelude-mount repair as above.
 @test
 fn regression_pin_retry_exhausts_returns_last_err() {
     let mut counter: Int = 0;
@@ -71,8 +69,7 @@ fn regression_pin_retry_exhausts_returns_last_err() {
     assert_eq(counter, 3);
 }
 
-// REGRESSED 2026-05-28 — same mount-resolution defect.
-@ignore("post-5fffcc93d codegen UndefinedFunction(retry_with_strategy).")
+// CLOSED 2026-05-28 — same prelude-mount repair as above.
 @test
 fn regression_pin_retry_aborts_on_permanent_error() {
     let mut counter: Int = 0;
