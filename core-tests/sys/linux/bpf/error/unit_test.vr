@@ -1,0 +1,195 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/error/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.linux.bpf.error` — the typed-error ADT that
+// every bpf() syscall wrapper returns.  Pins variant construction,
+// payload preservation, Display / Debug textual output, and the Eq
+// algebraic-equality contract.
+//
+// API surface tested:
+//
+//   Type:    BpfError ADT — OsError / VerifierRejected / InvalidAttachType /
+//                          FeatureNotSupported / MapTypeMismatch /
+//                          SizeMismatch / NotFound / UnsupportedHelper
+//   impls:   Display, Debug, Eq
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.error.BpfError;
+
+// =============================================================================
+// Section 1 — Variant construction + payload round-trip
+// =============================================================================
+
+@test
+fn test_os_error_payload() {
+    let e = BpfError.OsError { errno: 22 };
+    match e {
+        BpfError.OsError { errno } => assert_eq(errno, 22),
+        _ => panic("expected OsError"),
+    };
+}
+
+@test
+fn test_verifier_rejected_payload() {
+    let e = BpfError.VerifierRejected { log: "invalid memory access".to_text() };
+    match e {
+        BpfError.VerifierRejected { log } => assert_eq(log, "invalid memory access"),
+        _ => panic("expected VerifierRejected"),
+    };
+}
+
+@test
+fn test_invalid_attach_type_payload() {
+    let e = BpfError.InvalidAttachType {
+        program: "XDP".to_text(),
+        attach: "CgroupInetIngress".to_text(),
+    };
+    match e {
+        BpfError.InvalidAttachType { program, attach } => {
+            assert_eq(program, "XDP");
+            assert_eq(attach, "CgroupInetIngress");
+        },
+        _ => panic("expected InvalidAttachType"),
+    };
+}
+
+@test
+fn test_feature_not_supported_payload() {
+    let e = BpfError.FeatureNotSupported("BTF".to_text());
+    match e {
+        BpfError.FeatureNotSupported(feat) => assert_eq(feat, "BTF"),
+        _ => panic("expected FeatureNotSupported"),
+    };
+}
+
+@test
+fn test_map_type_mismatch_payload() {
+    let e = BpfError.MapTypeMismatch {
+        expected: "Hash".to_text(),
+        actual: "Array".to_text(),
+    };
+    match e {
+        BpfError.MapTypeMismatch { expected, actual } => {
+            assert_eq(expected, "Hash");
+            assert_eq(actual, "Array");
+        },
+        _ => panic("expected MapTypeMismatch"),
+    };
+}
+
+@test
+fn test_size_mismatch_payload() {
+    let e = BpfError.SizeMismatch { expected: 8, actual: 4 };
+    match e {
+        BpfError.SizeMismatch { expected, actual } => {
+            assert_eq(expected, 8);
+            assert_eq(actual, 4);
+        },
+        _ => panic("expected SizeMismatch"),
+    };
+}
+
+@test
+fn test_not_found_constructs() {
+    let e = BpfError.NotFound;
+    assert(e is BpfError.NotFound);
+}
+
+@test
+fn test_unsupported_helper_payload() {
+    let e = BpfError.UnsupportedHelper(42_u32);
+    match e {
+        BpfError.UnsupportedHelper(h) => assert_eq(h, 42_u32),
+        _ => panic("expected UnsupportedHelper"),
+    };
+}
+
+// =============================================================================
+// Section 2 — Display output (textual stability)
+// =============================================================================
+
+@test
+fn test_display_os_error_includes_errno() {
+    let e = BpfError.OsError { errno: 13 };
+    let s = f"{e}";
+    assert_eq(s, "BPF: bpf() syscall errno 13");
+}
+
+@test
+fn test_display_not_found() {
+    let e = BpfError.NotFound;
+    assert_eq(f"{e}", "BPF: not found");
+}
+
+@test
+fn test_display_unsupported_helper_includes_id() {
+    let e = BpfError.UnsupportedHelper(7_u32);
+    assert_eq(f"{e}", "BPF: unsupported helper 7");
+}
+
+@test
+fn test_display_size_mismatch_includes_both_sides() {
+    let e = BpfError.SizeMismatch { expected: 16, actual: 8 };
+    assert_eq(f"{e}", "BPF: size mismatch (expected 16, actual 8)");
+}
+
+@test
+fn test_display_feature_not_supported_includes_feature() {
+    let e = BpfError.FeatureNotSupported("BTF".to_text());
+    assert_eq(f"{e}", "BPF: feature not supported (BTF)");
+}
+
+// =============================================================================
+// Section 3 — Eq protocol
+// =============================================================================
+
+@test
+fn test_eq_os_error_same_errno_are_equal() {
+    let a = BpfError.OsError { errno: 22 };
+    let b = BpfError.OsError { errno: 22 };
+    assert(a == b);
+}
+
+@test
+fn test_eq_os_error_different_errno_not_equal() {
+    let a = BpfError.OsError { errno: 22 };
+    let b = BpfError.OsError { errno: 13 };
+    assert(a != b);
+}
+
+@test
+fn test_eq_not_found_equal_to_not_found() {
+    let a = BpfError.NotFound;
+    let b = BpfError.NotFound;
+    assert(a == b);
+}
+
+@test
+fn test_eq_different_variants_not_equal() {
+    let a = BpfError.OsError { errno: 1 };
+    let b = BpfError.NotFound;
+    assert(a != b);
+}
+
+@test
+fn test_eq_unsupported_helper_same_id_equal() {
+    let a = BpfError.UnsupportedHelper(99_u32);
+    let b = BpfError.UnsupportedHelper(99_u32);
+    assert(a == b);
+}
+
+@test
+fn test_eq_size_mismatch_field_pair_match() {
+    let a = BpfError.SizeMismatch { expected: 8, actual: 4 };
+    let b = BpfError.SizeMismatch { expected: 8, actual: 4 };
+    assert(a == b);
+}
+
+@test
+fn test_eq_size_mismatch_field_mismatch_inequal() {
+    let a = BpfError.SizeMismatch { expected: 8, actual: 4 };
+    let b = BpfError.SizeMismatch { expected: 8, actual: 5 };
+    assert(a != b);
+}

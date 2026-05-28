@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/mod/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.linux.bpf` — the umbrella module that re-exports
+// the typed surfaces from `error`, `program`, and `map`.  Pin the re-export
+// names so callers continue to import via the umbrella path without
+// drift.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.{
+    BpfError,
+    ProgramType, AttachType, ProgramDescriptor, ProgramBytecode, Link,
+    MapType, MapDescriptor, MapConfig,
+};
+mount core.sys.common.FileDesc;
+
+// =============================================================================
+// Section 1 — Umbrella re-exports compile + construct
+// =============================================================================
+
+@test
+fn test_bpf_error_re_exported_from_umbrella() {
+    let e = BpfError.NotFound;
+    assert(e is BpfError.NotFound);
+}
+
+@test
+fn test_program_type_re_exported_from_umbrella() {
+    let p = ProgramType.Xdp;
+    assert(p is ProgramType.Xdp);
+}
+
+@test
+fn test_attach_type_re_exported_from_umbrella() {
+    let a = AttachType.XdpDevmap;
+    assert(a is AttachType.XdpDevmap);
+}
+
+@test
+fn test_program_descriptor_re_exported_from_umbrella() {
+    let d = ProgramDescriptor {
+        fd: FileDesc(0),
+        program_type: ProgramType.Xdp,
+        name: "test".to_text(),
+    };
+    assert_eq(d.name, "test");
+}
+
+@test
+fn test_program_bytecode_re_exported_from_umbrella() {
+    let insns: List<Byte> = List.new();
+    let bc = ProgramBytecode {
+        program_type: ProgramType.Xdp,
+        insns: insns,
+        license: "GPL".to_text(),
+        kernel_version: 0_u32,
+        name: "umbrella_test".to_text(),
+    };
+    assert(bc.program_type is ProgramType.Xdp);
+}
+
+@test
+fn test_link_re_exported_from_umbrella() {
+    let l = Link {
+        fd: FileDesc(1),
+        program_fd: FileDesc(2),
+        attach_type: AttachType.XdpDevmap,
+    };
+    assert_eq(l.fd.raw(), 1);
+}
+
+@test
+fn test_map_type_re_exported_from_umbrella() {
+    let m = MapType.Hash;
+    assert(m is MapType.Hash);
+}
+
+@test
+fn test_map_descriptor_re_exported_from_umbrella() {
+    let d = MapDescriptor {
+        fd: FileDesc(0),
+        map_type: MapType.Array,
+        key_size: 4_u32,
+        value_size: 8_u32,
+        max_entries: 16_u32,
+    };
+    assert_eq(d.max_entries, 16_u32);
+}
+
+@test
+fn test_map_config_re_exported_from_umbrella() {
+    let c = MapConfig {
+        map_type: MapType.RingBuf,
+        key_size: 0_u32,
+        value_size: 0_u32,
+        max_entries: 8192_u32,
+        name: "umbrella".to_text(),
+        flags: 0_u32,
+    };
+    assert(c.map_type is MapType.RingBuf);
+}
