@@ -1,0 +1,75 @@
+// =============================================================================
+// core-tests/redis/transaction/unit_test.vr
+// =============================================================================
+//
+// `core/redis/transaction.vr` — Redis MULTI/EXEC transaction primitives.
+//
+// Tested:
+//   * TxResult 2-variant ADT
+//       - Committed(List<RespValue>) — all queued commands ran
+//       - Aborted — WATCH abort due to concurrent key change
+// =============================================================================
+
+mount core.redis.transaction.TxResult;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TxResult variant construction
+// =============================================================================
+
+@test
+fn test_tx_result_aborted_variant() {
+    let r: TxResult = TxResult.Aborted;
+    assert(r is TxResult.Aborted);
+}
+
+@test
+fn test_tx_result_committed_variant_empty_list() {
+    let empty: List<core.redis.protocol.RespValue> = [];
+    let r: TxResult = TxResult.Committed(empty);
+    assert(r is TxResult.Committed);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_tx_result_aborted_disjoint_from_committed() {
+    let r: TxResult = TxResult.Aborted;
+    assert(!(r is TxResult.Committed));
+}
+
+@test
+fn test_tx_result_committed_disjoint_from_aborted() {
+    let empty: List<core.redis.protocol.RespValue> = [];
+    let r: TxResult = TxResult.Committed(empty);
+    assert(!(r is TxResult.Aborted));
+}
+
+// =============================================================================
+// Section 3: Match exhaustiveness
+// =============================================================================
+
+fn describe(r: &TxResult) -> Text {
+    match r {
+        TxResult.Committed(_) => "committed".to_text(),
+        TxResult.Aborted      => "aborted".to_text(),
+    }
+}
+
+@test
+fn test_tx_result_describe_aborted() {
+    let r: TxResult = TxResult.Aborted;
+    assert_eq(describe(&r), "aborted");
+}
+
+@test
+fn test_tx_result_describe_committed() {
+    let empty: List<core.redis.protocol.RespValue> = [];
+    let r: TxResult = TxResult.Committed(empty);
+    assert_eq(describe(&r), "committed");
+}
+
+fn main() {}
