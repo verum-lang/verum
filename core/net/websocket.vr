@@ -221,8 +221,8 @@ implement WsFrame {
 // Encoding
 // =============================================================================
 
-/// Encode a frame to bytes. `mask_key` Maybe.Some(4 bytes) sets MASK=1 and
-/// XORs the payload per RFC 6455 §5.3; Maybe.None (server side) leaves it
+/// Encode a frame to bytes. `mask_key` Some(4 bytes) sets MASK=1 and
+/// XORs the payload per RFC 6455 §5.3; None (server side) leaves it
 /// unmasked per the server-never-masks rule.
 public fn encode(frame: &WsFrame, mask_key: Maybe<[UInt8; 4]>, out: &mut List<Byte>) {
     let b0: UInt8 =
@@ -253,7 +253,7 @@ public fn encode(frame: &WsFrame, mask_key: Maybe<[UInt8; 4]>, out: &mut List<By
     }
 
     match mask_key {
-        Maybe.Some(key) => {
+        Some(key) => {
             let mut i = 0;
             while i < 4 { out.push(key[i] as Byte); i = i + 1; }
             // Masked payload
@@ -263,7 +263,7 @@ public fn encode(frame: &WsFrame, mask_key: Maybe<[UInt8; 4]>, out: &mut List<By
                 j = j + 1;
             }
         }
-        Maybe.None => {
+        None => {
             let mut j = 0;
             while j < frame.payload.len() {
                 out.push(frame.payload[j]);
@@ -336,7 +336,7 @@ implement Eq for WebSocketDecodeError {
 public type WebSocketDecodeResult is
     | Decoded { frame: WsFrame, consumed: Int }
     | NeedMore
-    | Result.Err(WebSocketDecodeError);
+    | Err(WebSocketDecodeError);
 
 /// Decode one frame from `buf`. `expect_masked` is true on the server
 /// (client must mask) and false on the client (server must not mask).
@@ -460,13 +460,13 @@ public fn accept_key(client_key: &Text) -> Text {
 /// client's Sec-WebSocket-Key (for accept_key derivation) on success.
 public fn validate_server_handshake(headers: &Headers) -> Maybe<Text> {
     let upgrade = headers.get(&"upgrade".into())?;
-    if !ascii_eq_ci(upgrade.as_bytes(), b"websocket") { return Maybe.None; }
+    if !ascii_eq_ci(upgrade.as_bytes(), b"websocket") { return None; }
     let connection = headers.get(&"connection".into())?;
-    if !contains_token_ci(connection.as_bytes(), b"upgrade") { return Maybe.None; }
+    if !contains_token_ci(connection.as_bytes(), b"upgrade") { return None; }
     let version = headers.get(&"sec-websocket-version".into())?;
-    if *version != "13".into() { return Maybe.None; }
+    if *version != "13".into() { return None; }
     let key = headers.get(&"sec-websocket-key".into())?;
-    Maybe.Some(key.clone())
+    Some(key.clone())
 }
 
 // =============================================================================

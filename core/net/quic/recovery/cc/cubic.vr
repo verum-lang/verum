@@ -190,7 +190,7 @@ implement CongestionCtrl for Cubic {
             self.cwnd = self.cwnd + acked_bytes;
         } else {
             // Congestion avoidance via CUBIC.
-            // Start of new epoch if epoch_start is Maybe.None.
+            // Start of new epoch if epoch_start is None.
             match self.epoch_start {
                 Maybe.None => {
                     self.epoch_start = Maybe.Some(now.clone());

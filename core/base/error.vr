@@ -29,7 +29,7 @@ mount core.base.protocols.{
     Describable, ErrorSource, Debug, Display, Clone, Eq, Hash, Hasher,
     Formatter, FormatError, Default, PartialEq,
 };
-mount core.maybe.{Maybe, Some, Maybe.None};
+mount core.maybe.{Maybe, Some, None};
 mount core.result.{Result, Ok, Err};
 mount core.ordering.{Ordering, Less, Equal, Greater};
 
@@ -354,7 +354,7 @@ implement Iterator for ErrorChain {
 public fn format_error_chain(error: &dyn ErrorSource) -> Text {
     let mut result = error.description();
     let mut current: Maybe<&dyn ErrorSource> = error.source();
-    while current is Maybe.Some(s) {
+    while current is Some(s) {
         result = result + "\ncaused by: " + s.description();
         current = s.source();
     }

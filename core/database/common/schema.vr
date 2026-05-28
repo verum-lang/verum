@@ -49,7 +49,7 @@
 module core.database.common.schema;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.error.AdapterId;
 mount core.database.common.check_codegen.{RefinementPredicate};

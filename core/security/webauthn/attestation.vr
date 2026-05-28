@@ -65,7 +65,7 @@
 module core.security.webauthn.attestation;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
 mount encoding.cbor.CborValue;
 mount security.hash.sha256.{Sha256, digest};

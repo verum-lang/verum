@@ -1437,9 +1437,9 @@ public fn lifecycle_is_mature_corpus_forbidden(lc: Lifecycle) -> Bool {
 /// Number of CVE axes that discharge (0..=3).
 public fn cve_closure_degree(cve: CveClosure) -> Int {
     let mut n: Int = 0;
-    if cve.constructive is Maybe.Some(_)         { n = n + 1; }
-    if cve.verifiable_strategy is Maybe.Some(_)  { n = n + 1; }
-    if cve.executable is Maybe.Some(_)           { n = n + 1; }
+    if cve.constructive is Some(_)         { n = n + 1; }
+    if cve.verifiable_strategy is Some(_)  { n = n + 1; }
+    if cve.executable is Some(_)           { n = n + 1; }
     n
 }
 

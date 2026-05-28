@@ -62,7 +62,7 @@ module core.base.semver_constraint;
 
 mount core.*;
 mount collections.List;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount base.semver.{SemVer, SemVerError, parse as parse_version, cmp as cmp_versions, format_semver};
 
 // =============================================================================

@@ -32,7 +32,7 @@
 module core.database.postgres.stmt_cache;
 
 mount core.*;
-mount base.{Text, Maybe, Maybe.None, Some};
+mount base.{Text, Maybe, None, Some};
 mount collections.List;
 
 public type CacheEntry is {

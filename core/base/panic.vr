@@ -189,7 +189,7 @@ public fn assert_some<T>(value: Maybe<T>, msg: Text = "assertion failed: expecte
     }
 }
 
-/// Assert that a value is Maybe.None.
+/// Assert that a value is None.
 public fn assert_none<T>(value: Maybe<T>, msg: Text = "assertion failed: expected Maybe.None") {
     match value {
         Maybe.Some(_) => panic(msg),

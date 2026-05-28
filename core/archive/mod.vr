@@ -106,7 +106,7 @@ module core.archive;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 
 // Re-export the tar adapter so callers `mount core.archive.*` and have
 // it in scope.

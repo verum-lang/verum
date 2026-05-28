@@ -21,7 +21,7 @@
 module core.database.postgres.wire.backend;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.types.{
     WireReader, WireValue, WvNull, WvPresent, FmtBinary, FmtText,

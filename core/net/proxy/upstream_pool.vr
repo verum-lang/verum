@@ -278,7 +278,7 @@ implement UpstreamPool {
 }
 
 // Release-on-drop. If `stream` was closed via `ConnectionLease.close()`,
-// the Maybe is Maybe.None and nothing returns to the pool.
+// the Maybe is None and nothing returns to the pool.
 implement Drop for ConnectionLease {
     fn drop(&mut self) {
         let stream = match self.stream.take() {

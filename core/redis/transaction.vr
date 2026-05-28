@@ -35,7 +35,7 @@
 module core.redis.transaction;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
 
 mount core.redis.client.{RedisClient, RedisError};

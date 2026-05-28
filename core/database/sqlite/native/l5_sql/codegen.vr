@@ -3094,7 +3094,7 @@ fn emit_binary(
 // annotator chose a non-FullScan access method.  When so, it emits a
 // specialised opcode sequence (rowid lookup, index seek, range scan,
 // covering scan) instead of the historical OpenRead+Rewind+Next
-// loop.  When the seek_plan is Maybe.None or AmFullScan, the historical
+// loop.  When the seek_plan is None or AmFullScan, the historical
 // `emit_plan` path runs unchanged — full backwards compatibility.
 //
 // This module ships the foundation of the dispatch surface.  The

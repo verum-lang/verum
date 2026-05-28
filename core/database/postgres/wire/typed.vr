@@ -46,7 +46,7 @@
 module core.database.postgres.wire.typed;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
 mount core.database.common.error.{DbError, DecodeFault, EncodeFault};

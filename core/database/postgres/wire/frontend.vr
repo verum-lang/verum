@@ -18,7 +18,7 @@
 module core.database.postgres.wire.frontend;
 
 mount core.*;
-mount base.{Text, Maybe, Maybe.None, Some};
+mount base.{Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.types.WireBuf;
 mount core.database.postgres.wire.frame.frame;

@@ -1499,7 +1499,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
             let mut i = 0;
             while i < self.cap {
                 let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
-                if (entry.hash > 0) && result is Maybe.None {
+                if (entry.hash > 0) && result is None {
                     let key = entry.key;
                     let value = entry.value;
                     let slot: &mut Slot<K, V> = unsafe { &mut *self.entries.offset(i) };

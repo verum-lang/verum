@@ -45,7 +45,7 @@
 module core.storage.s3.client;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.hex.{encode as hex_encode};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};

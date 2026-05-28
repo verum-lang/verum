@@ -32,14 +32,14 @@ mount core.base.memory.Heap;
 ///
 
 /// Variants:
-///  * `Maybe.None` — no subscription (identity element for combination).
+///  * `None` — no subscription (identity element for combination).
 ///  * `Interval` — fire Msg every `period` until cancelled.
 ///  * `Every` — like Interval, but passes the tick timestamp.
 ///  * `Once` — fire Msg exactly once after `delay`.
 ///  * `StreamSub` — wrap any `Stream<Item = Msg>` as a subscription.
 ///  * `Batch` — run several subscriptions concurrently.
 public type Subscription<Msg> is
-    | Maybe.None
+    | None
     | Interval(Duration, fn() -> Msg)
     | Every(Duration, fn(Instant) -> Msg)
     | Once(Duration, fn() -> Msg)

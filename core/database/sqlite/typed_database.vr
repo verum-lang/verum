@@ -71,7 +71,7 @@
 module core.database.sqlite.typed_database;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount base.memory.Shared;
 
@@ -246,7 +246,7 @@ implement<C: CanTx> Database<SqlitePool, C> {
 /// Internal note on the `Maybe<Transaction>` shape: SQLite's
 /// `commit_tx` consumes the Transaction value. We hold it in a
 /// `Maybe` so the affine consume can `take()` it before passing
-/// to `commit_tx`. After `take`, the inner is Maybe.None — but the
+/// to `commit_tx`. After `take`, the inner is None — but the
 /// affine wrapper itself is consumed in the same expression, so
 /// no observation of `Maybe.None` is possible from outside.
 public type affine SqliteTxScope<P> is {

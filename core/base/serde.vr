@@ -45,7 +45,7 @@ mount core.base.protocols.{
     Debug, Display, Clone, Eq, Describable, ErrorSource,
     Formatter, FormatError,
 };
-mount core.maybe.{Maybe, Some, Maybe.None};
+mount core.maybe.{Maybe, Some, None};
 mount core.result.{Result, Ok, Err};
 
 // =============================================================================

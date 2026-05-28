@@ -37,7 +37,7 @@
 module core.net.url;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount collections.List;
 
 // Parsed URL. Empty/absent components are Maybe.None; present-but-empty

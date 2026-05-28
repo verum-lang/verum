@@ -66,7 +66,7 @@
 module core.text.numeric.bigint;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount base.ordering.{Ordering, Less, Equal, Greater};
 mount collections.List;
 

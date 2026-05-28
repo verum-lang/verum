@@ -780,8 +780,8 @@ implement Drop for Win32Semaphore {
 ///
 
 /// If *addr != expected at the time of the call, returns immediately (spurious-safe).
-/// If `timeout` is Maybe.Some(ns), the wait expires after the given nanoseconds.
-/// If `timeout` is Maybe.None, waits indefinitely.
+/// If `timeout` is Some(ns), the wait expires after the given nanoseconds.
+/// If `timeout` is None, waits indefinitely.
 ///
 
 /// Returns Result.Ok(()) on wake (including spurious), Result.Err(OSError) on timeout or failure.

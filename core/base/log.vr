@@ -44,7 +44,7 @@ mount core.base.protocols.{
     Debug, Display, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash, Hasher,
     Formatter, FormatError, Default,
 };
-mount core.maybe.{Maybe, Some, Maybe.None};
+mount core.maybe.{Maybe, Some, None};
 mount core.result.{Result, Ok, Err};
 mount core.ordering.{Ordering, Less, Equal, Greater};
 

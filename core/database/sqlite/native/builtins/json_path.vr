@@ -29,7 +29,7 @@
 module core.database.sqlite.native.builtins.json_path;
 
 mount core.*;
-mount base.{Text, Maybe, Bool, Result, Ok, Err, Some, Maybe.None};
+mount base.{Text, Maybe, Bool, Result, Ok, Err, Some, None};
 mount collections.List;
 mount core.database.sqlite.native.builtins.json_fns.{
     JsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,

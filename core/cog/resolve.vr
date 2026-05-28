@@ -66,7 +66,7 @@
 module core.cog.resolve;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount base.semver.{SemVer, parse_semver, semver_compare, SemVerOrdering, semver_zero};
 mount base.semver_constraint.{
     SemVerConstraint, parse as parse_constraint,

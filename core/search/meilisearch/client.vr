@@ -41,7 +41,7 @@
 module core.search.meilisearch.client;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int, Float};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int, Float};
 mount collections.{List, Map};
 mount encoding.json.{
     JsonValue, JsonObject,

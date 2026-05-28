@@ -57,7 +57,7 @@
 module core.security.tuf.repository;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount io.path.{Path, PathBuf};

@@ -62,7 +62,7 @@
 module core.security.webauthn.authenticate;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
 mount encoding.json.{JsonValue, JsonObject, decode};
 mount encoding.base64.{decode_url_no_pad as b64url_decode};

@@ -128,7 +128,7 @@ public fn parse_effect_attr(attr: &Attribute) -> Maybe<EffectAttr> {
     let arg_kind = match attr.args.get(0) {
         Maybe.Some(arg) => {
             // Positional only — reject named form here.
-            if arg.name is Maybe.Some { Maybe.None }
+            if arg.name is Some { Maybe.None }
             else {
                 match arg.value {
                     MetaAttributeValue.Ident(name) => DiakrisisEffectKind.from_ident(name),
@@ -179,7 +179,7 @@ public fn parse_infinity_category(attr: &Attribute) -> Maybe<InfinityCategoryAtt
     if attr.args.len() != 1 { return Maybe.None; }
     let level = match attr.args.get(0) {
         Maybe.Some(arg) => {
-            if arg.name is Maybe.Some { Maybe.None }
+            if arg.name is Some { Maybe.None }
             else {
                 match arg.value {
                     MetaAttributeValue.Int(n) => {

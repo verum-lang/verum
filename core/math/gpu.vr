@@ -88,7 +88,7 @@
 module core.math.gpu;
 
 mount core.types.{USize, U8, U16, U32, U64, Int, Float, F64, Bool, Text};
-mount core.maybe.{Maybe, Some, Maybe.None};
+mount core.maybe.{Maybe, Some, None};
 mount core.list.List;
 mount core.base.ops.Drop;
 mount core.protocols.{Ord, Eq};
@@ -106,7 +106,7 @@ public type GPUBackend is
     | Metal      // Apple Metal
     | Vulkan     // Vulkan compute
     | SYCL       // Intel oneAPI/SYCL
-    | Maybe.None;      // No GPU available
+    | None;      // No GPU available
 
 implement Eq for GPUBackend {
     fn eq(&self, other: &Self) -> Bool {
@@ -429,16 +429,16 @@ implement DeviceInfo {
     // Get GPU info if this is a GPU device
     public fn as_gpu(&self) -> Maybe<&GpuInfo> {
         match self {
-            DeviceInfo.Gpu(info) => Maybe.Some(info),
-            _ => Maybe.None,
+            DeviceInfo.Gpu(info) => Some(info),
+            _ => None,
         }
     }
 
     // Get CPU info if this is a CPU device
     public fn as_cpu(&self) -> Maybe<&CpuInfo> {
         match self {
-            DeviceInfo.Cpu(info) => Maybe.Some(info),
-            _ => Maybe.None,
+            DeviceInfo.Cpu(info) => Some(info),
+            _ => None,
         }
     }
 }
@@ -661,11 +661,11 @@ implement DeviceRegistry {
             let entry = self.devices[i];
             let (dev_id, info) = entry;
             if dev_id == id {
-                return Maybe.Some(info);
+                return Some(info);
             }
             i = i + 1;
         }
-        Maybe.None
+        None
     }
 
     // Check if any GPU is available
@@ -703,12 +703,12 @@ implement DeviceRegistry {
             let entry = self.devices[i];
             let (_, info) = entry;
             match info {
-                DeviceInfo.Cpu(cpu) => return Maybe.Some(cpu),
+                DeviceInfo.Cpu(cpu) => return Some(cpu),
                 _ => {},
             }
             i = i + 1;
         }
-        Maybe.None
+        None
     }
 
     // Get device count
@@ -773,14 +773,14 @@ public fn select_device(selector: DeviceSelector) -> Maybe<(DeviceId, &DeviceInf
     match selector {
         DeviceSelector.Best => {
             // Prefer first GPU device, fallback to first device
-            let mut best: Maybe<(DeviceId, &DeviceInfo)> = Maybe.None;
+            let mut best: Maybe<(DeviceId, &DeviceInfo)> = None;
             for (id, info) in registry.devices.iter() {
                 if info.is_gpu() {
-                    best = Maybe.Some((id.clone(), info));
+                    best = Some((id.clone(), info));
                     break;
                 }
             }
-            if best is Maybe.None {
+            if best is None {
                 best = registry.devices.first().map(|(id, info)| (id.clone(), info));
             }
             best
@@ -803,10 +803,10 @@ public fn select_device(selector: DeviceSelector) -> Maybe<(DeviceId, &DeviceInf
         }
 
         DeviceSelector.ByBackend(backend) => {
-            let mut found: Maybe<(DeviceId, &DeviceInfo)> = Maybe.None;
+            let mut found: Maybe<(DeviceId, &DeviceInfo)> = None;
             for (id, info) in registry.devices.iter() {
                 if info.is_gpu() {
-                    found = Maybe.Some((id.clone(), info));
+                    found = Some((id.clone(), info));
                     break;
                 }
             }
@@ -1136,7 +1136,7 @@ implement LaunchConfig {
             grid: Dim3.d1(1),
             block: Dim3.d1(256),
             shared_mem: 0,
-            stream: Maybe.None,
+            stream: None,
         }
     }
 
@@ -1147,7 +1147,7 @@ implement LaunchConfig {
             grid: Dim3.d1(grid_size),
             block: Dim3.d1(block_size),
             shared_mem: 0,
-            stream: Maybe.None,
+            stream: None,
         }
     }
 
@@ -1159,7 +1159,7 @@ implement LaunchConfig {
             grid: Dim3.d2(grid_x, grid_y),
             block: Dim3.d2(block_x, block_y),
             shared_mem: 0,
-            stream: Maybe.None,
+            stream: None,
         }
     }
 
@@ -1175,7 +1175,7 @@ implement LaunchConfig {
             grid: Dim3.new(grid_x, grid_y, grid_z),
             block: Dim3.new(block_x, block_y, block_z),
             shared_mem: 0,
-            stream: Maybe.None,
+            stream: None,
         }
     }
 
@@ -1186,7 +1186,7 @@ implement LaunchConfig {
 
     // Set execution stream
     public fn with_stream(self, stream: &Stream) -> Self {
-        LaunchConfig { stream: Maybe.Some(stream.handle), ..self }
+        LaunchConfig { stream: Some(stream.handle), ..self }
     }
 
     // Get total thread count
@@ -1618,9 +1618,9 @@ implement GPUDevice {
     public fn by_index(index: USize) -> Maybe<Self> {
         let device_id = DeviceId.gpu(index as U16);
         if get_registry().get_device(device_id).is_some() {
-            Maybe.Some(GPUDevice { device_id })
+            Some(GPUDevice { device_id })
         } else {
-            Maybe.None
+            None
         }
     }
 }

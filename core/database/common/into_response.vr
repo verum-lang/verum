@@ -46,7 +46,7 @@
 module core.database.common.into_response;
 
 mount core.*;
-mount base.{Text, Maybe, Maybe.None, Some};
+mount base.{Text, Maybe, None, Some};
 mount core.net.http.{Response, StatusCode};
 mount core.net.weft.error.IntoResponse;
 mount core.net.weft.response_ext.{

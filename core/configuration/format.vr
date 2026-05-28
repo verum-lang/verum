@@ -43,7 +43,7 @@ module core.configuration.format;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount configuration.value.{ConfigValue};
 mount configuration.error.{ConfigError, FormatId};
 
