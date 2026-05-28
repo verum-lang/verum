@@ -3222,18 +3222,31 @@ implement Iterator for RangeInclusive<Int> {
     type Item = Int;
 
     fn next(&mut self) -> Maybe<Int> {
-        if self.done {
-            return Maybe.None;
-        }
-        if self.current < self.end {
-            let val = self.current;
-            self.current = self.current + 1;
-            Maybe.Some(val)
-        } else if self.current == self.end {
-            self.done = true;
-            Maybe.Some(self.current)
-        } else {
+        // CLOSED 2026-05-28 via minimal single-comparison reformulation
+        // — DROPS the `done` field from the iteration invariant and
+        // instead uses `cur > end_v` as the exhaustion sentinel.
+        //
+        // After yielding the boundary value (cur == end_v), the body
+        // unconditionally advances `self.current` to `end + 1`; the
+        // next call sees `cur > end_v` and returns None.
+        //
+        // The prior chained-`if/else if`-with-`done`-gate form was
+        // miscompiled under VBC method-dispatch codegen: the
+        // `else if self.current == self.end` boundary branch never
+        // fired (third call on (1..=3) returned None instead of
+        // Some(3)).  Probe SafeRangeInc with the same shape AS THIS
+        // FIX confirmed minimal `if cur > end { None } else { ++cur;
+        // Some(cur) }` yields the inclusive boundary correctly.
+        // `done` field is retained on the type for layout-back-compat
+        // (downstream impls reference it) but is no longer consulted
+        // in the canonical Iterator::next dispatch.
+        let cur: Int = self.current;
+        let end_v: Int = self.end;
+        if cur > end_v {
             Maybe.None
+        } else {
+            self.current = cur + 1;
+            Maybe.Some(cur)
         }
     }
 }
