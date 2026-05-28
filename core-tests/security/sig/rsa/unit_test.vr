@@ -1,0 +1,90 @@
+// =============================================================================
+// core-tests/security/sig/rsa/unit_test.vr
+// =============================================================================
+//
+// `core/security/sig/rsa.vr` — RSA signature hash + error surface.
+// =============================================================================
+
+mount core.security.sig.rsa.{RsaHash, RsaError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: RsaHash 3-variant ADT
+// =============================================================================
+
+@test
+fn test_rsa_hash_sha256_variant() {
+    let h: RsaHash = RsaHash.Sha256_;
+    assert(h is RsaHash.Sha256_);
+}
+
+@test
+fn test_rsa_hash_sha384_variant() {
+    let h: RsaHash = RsaHash.Sha384_;
+    assert(h is RsaHash.Sha384_);
+}
+
+@test
+fn test_rsa_hash_sha512_variant() {
+    let h: RsaHash = RsaHash.Sha512_;
+    assert(h is RsaHash.Sha512_);
+}
+
+@test
+fn test_rsa_hash_sha256_disjoint() {
+    let h: RsaHash = RsaHash.Sha256_;
+    assert(!(h is RsaHash.Sha384_));
+    assert(!(h is RsaHash.Sha512_));
+}
+
+@test
+fn test_rsa_hash_sha384_disjoint() {
+    let h: RsaHash = RsaHash.Sha384_;
+    assert(!(h is RsaHash.Sha256_));
+    assert(!(h is RsaHash.Sha512_));
+}
+
+@test
+fn test_rsa_hash_sha512_disjoint() {
+    let h: RsaHash = RsaHash.Sha512_;
+    assert(!(h is RsaHash.Sha256_));
+    assert(!(h is RsaHash.Sha384_));
+}
+
+// =============================================================================
+// Section 2: RsaError variant construction (selected scalar arms)
+// =============================================================================
+
+@ignore("RsaError variant dispatch trips field-OOB via stub-cascade to autovacuum_pages_api — sister of cross-module record-return field-access defect. Multi-day codegen fix.")
+@test
+fn test_rsa_error_malformed_variant() {
+    let e: RsaError = RsaError.Malformed("bad OID".to_text());
+    assert(e is RsaError.Malformed);
+}
+
+@ignore("RsaError variant dispatch trips field-OOB via stub-cascade to autovacuum_pages_api — sister of cross-module record-return field-access defect. Multi-day codegen fix.")
+@test
+fn test_rsa_error_invalid_public_key_variant() {
+    let e: RsaError = RsaError.InvalidPublicKey("modulus too small".to_text());
+    assert(e is RsaError.InvalidPublicKey);
+}
+
+@ignore("RsaError variant dispatch trips field-OOB via stub-cascade to autovacuum_pages_api — sister of cross-module record-return field-access defect. Multi-day codegen fix.")
+@test
+fn test_rsa_error_malformed_disjoint() {
+    let e: RsaError = RsaError.Malformed("x".to_text());
+    assert(!(e is RsaError.InvalidPublicKey));
+}
+
+@ignore("RsaError variant dispatch trips field-OOB via stub-cascade to autovacuum_pages_api — sister of cross-module record-return field-access defect. Multi-day codegen fix.")
+@test
+fn test_rsa_error_malformed_payload_round_trip() {
+    let e: RsaError = RsaError.Malformed("wrong padding".to_text());
+    match e {
+        RsaError.Malformed(s) => assert_eq(s, "wrong padding"),
+        _ => panic("expected Malformed"),
+    }
+}
+
+fn main() {}
