@@ -1,0 +1,96 @@
+// =============================================================================
+// core-tests/security/hpke/unit_test.vr
+// =============================================================================
+//
+// `core/security/hpke/mod.vr` — HPKE Hybrid Public Key Encryption
+// (RFC 9180).
+// =============================================================================
+
+mount core.security.hpke.mod.{
+    HPKE_KEM_X25519_SHA256, HPKE_KDF_HKDF_SHA256, HPKE_AEAD_CHACHA_POLY,
+    HPKE_MODE_BASE, NH, NK, NN, NSECRET, NPK,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: HPKE algorithm-suite identifiers
+//
+//   RFC 9180 §7 — IANA HPKE Identifiers.
+// =============================================================================
+
+@test
+fn test_hpke_kem_x25519_sha256_canonical_value() {
+    // RFC 9180 §7.1 — DHKEM(X25519, HKDF-SHA256) == 0x0020.
+    assert_eq(HPKE_KEM_X25519_SHA256, 0x0020_u16);
+}
+
+@test
+fn test_hpke_kdf_hkdf_sha256_canonical_value() {
+    // RFC 9180 §7.2 — HKDF-SHA256 == 0x0001.
+    assert_eq(HPKE_KDF_HKDF_SHA256, 0x0001_u16);
+}
+
+@test
+fn test_hpke_aead_chacha_poly_canonical_value() {
+    // RFC 9180 §7.3 — ChaCha20-Poly1305 == 0x0003.
+    assert_eq(HPKE_AEAD_CHACHA_POLY, 0x0003_u16);
+}
+
+@test
+fn test_hpke_mode_base_canonical_value() {
+    // RFC 9180 §5.1 — mode_base == 0.
+    assert_eq(HPKE_MODE_BASE, 0_u8);
+}
+
+// =============================================================================
+// Section 2: HPKE width constants
+// =============================================================================
+
+@test
+fn test_hpke_nh_canonical_value() {
+    // Nh — output length of underlying KDF == 32 for HKDF-SHA256.
+    assert_eq(NH, 32);
+}
+
+@test
+fn test_hpke_nk_canonical_value() {
+    // Nk — AEAD key length == 32 for ChaCha20-Poly1305 + AES-256-GCM.
+    assert_eq(NK, 32);
+}
+
+@test
+fn test_hpke_nn_canonical_value() {
+    // Nn — AEAD nonce length == 12 (RFC 9180 §7.3).
+    assert_eq(NN, 12);
+}
+
+@test
+fn test_hpke_nsecret_canonical_value() {
+    // Nsecret — shared-secret length == 32 for X25519 KEM.
+    assert_eq(NSECRET, 32);
+}
+
+@test
+fn test_hpke_npk_canonical_value() {
+    // Npk — public-key length == 32 for X25519.
+    assert_eq(NPK, 32);
+}
+
+// =============================================================================
+// Section 3: Width invariants
+// =============================================================================
+
+@test
+fn test_hpke_widths_consistent_with_x25519() {
+    // X25519's 32-byte public keys and shared secrets must match.
+    assert_eq(NPK, NSECRET);
+    assert_eq(NH, NK);
+}
+
+@test
+fn test_hpke_nonce_shorter_than_key() {
+    assert(NN < NK);
+}
+
+fn main() {}

@@ -1,0 +1,49 @@
+// =============================================================================
+// core-tests/security/encrypt/rsa_oaep/unit_test.vr
+// =============================================================================
+//
+// `core/security/encrypt/rsa_oaep.vr` — RSA-OAEP encryption (RFC 8017
+// §7.1, PKCS #1 v2.2).
+// =============================================================================
+
+mount core.security.encrypt.rsa_oaep.{OAEP_SHA1_HLEN, OAEP_MAX_MODULUS_BYTES};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+@test
+fn test_oaep_sha1_hlen_canonical_value() {
+    // SHA-1 outputs 20 bytes — the hLen parameter for SHA-1 OAEP.
+    assert_eq(OAEP_SHA1_HLEN, 20);
+}
+
+@test
+fn test_oaep_max_modulus_bytes_canonical_value() {
+    // 1024 bytes = 8192-bit modulus cap. Adequate for RSA-8192.
+    assert_eq(OAEP_MAX_MODULUS_BYTES, 1024);
+}
+
+@test
+fn test_oaep_max_modulus_supports_rsa_2048() {
+    // RSA-2048 = 256 bytes ≤ 1024.
+    assert(OAEP_MAX_MODULUS_BYTES >= 256);
+}
+
+@test
+fn test_oaep_max_modulus_supports_rsa_3072() {
+    // RSA-3072 = 384 bytes ≤ 1024.
+    assert(OAEP_MAX_MODULUS_BYTES >= 384);
+}
+
+@test
+fn test_oaep_max_modulus_supports_rsa_4096() {
+    // RSA-4096 = 512 bytes ≤ 1024.
+    assert(OAEP_MAX_MODULUS_BYTES >= 512);
+}
+
+@test
+fn test_oaep_constants_positive() {
+    assert(OAEP_SHA1_HLEN > 0);
+    assert(OAEP_MAX_MODULUS_BYTES > 0);
+}
+
+fn main() {}
