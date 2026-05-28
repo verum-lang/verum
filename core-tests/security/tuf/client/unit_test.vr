@@ -1,0 +1,52 @@
+// =============================================================================
+// core-tests/security/tuf/client/unit_test.vr
+// =============================================================================
+//
+// `core/security/tuf/client.vr` — TUF client constants.
+// =============================================================================
+
+mount core.security.tuf.client.{MAX_ROOT_CHAIN_LENGTH, MAX_DELEGATION_DEPTH};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TUF client safety caps
+// =============================================================================
+
+@test
+fn test_max_root_chain_length_canonical_value() {
+    // TUF root rotation cap — practical limit on the root.json chain.
+    assert_eq(MAX_ROOT_CHAIN_LENGTH, 1024);
+}
+
+@test
+fn test_max_delegation_depth_canonical_value() {
+    // Delegation tree depth cap — TUF spec recommends ≤8 in practice.
+    assert_eq(MAX_DELEGATION_DEPTH, 32);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_tuf_root_chain_exceeds_delegation_depth() {
+    // Root chain (versions over time) is much longer than delegation depth.
+    assert(MAX_ROOT_CHAIN_LENGTH > MAX_DELEGATION_DEPTH);
+}
+
+@test
+fn test_tuf_caps_positive() {
+    assert(MAX_ROOT_CHAIN_LENGTH > 0);
+    assert(MAX_DELEGATION_DEPTH > 0);
+}
+
+@test
+fn test_tuf_caps_power_of_two() {
+    let r = MAX_ROOT_CHAIN_LENGTH;
+    let d = MAX_DELEGATION_DEPTH;
+    assert_eq(r & (r - 1), 0);
+    assert_eq(d & (d - 1), 0);
+}
+
+fn main() {}

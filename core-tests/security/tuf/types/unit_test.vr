@@ -1,0 +1,150 @@
+// =============================================================================
+// core-tests/security/tuf/types/unit_test.vr
+// =============================================================================
+//
+// `core/security/tuf/types.vr` — TUF role + key ADTs.
+// =============================================================================
+
+mount core.security.tuf.types.{RoleName, TufKeyType, TufKeyScheme};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: RoleName 5-variant ADT
+// =============================================================================
+
+@test
+fn test_role_name_root_variant() {
+    let r: RoleName = RoleName.Root;
+    assert(r is RoleName.Root);
+}
+
+@test
+fn test_role_name_targets_variant() {
+    let r: RoleName = RoleName.Targets;
+    assert(r is RoleName.Targets);
+}
+
+@test
+fn test_role_name_snapshot_variant() {
+    let r: RoleName = RoleName.Snapshot;
+    assert(r is RoleName.Snapshot);
+}
+
+@test
+fn test_role_name_timestamp_variant() {
+    let r: RoleName = RoleName.Timestamp;
+    assert(r is RoleName.Timestamp);
+}
+
+@test
+fn test_role_name_delegated_variant() {
+    let r: RoleName = RoleName.Delegated("namespace/foo".to_text());
+    assert(r is RoleName.Delegated);
+}
+
+// =============================================================================
+// Section 2: RoleName pairwise disjointness — top-level roles
+// =============================================================================
+
+@test
+fn test_role_name_root_disjoint_from_others() {
+    let r: RoleName = RoleName.Root;
+    assert(!(r is RoleName.Targets));
+    assert(!(r is RoleName.Snapshot));
+    assert(!(r is RoleName.Timestamp));
+    assert(!(r is RoleName.Delegated));
+}
+
+@test
+fn test_role_name_targets_disjoint() {
+    let r: RoleName = RoleName.Targets;
+    assert(!(r is RoleName.Root));
+    assert(!(r is RoleName.Snapshot));
+    assert(!(r is RoleName.Timestamp));
+}
+
+@test
+fn test_role_name_delegated_disjoint_from_top_level() {
+    let r: RoleName = RoleName.Delegated("x".to_text());
+    assert(!(r is RoleName.Root));
+    assert(!(r is RoleName.Targets));
+    assert(!(r is RoleName.Snapshot));
+    assert(!(r is RoleName.Timestamp));
+}
+
+// =============================================================================
+// Section 3: TufKeyType 4-variant ADT
+// =============================================================================
+
+@test
+fn test_tuf_key_type_ed25519_variant() {
+    let k: TufKeyType = TufKeyType.Ed25519Key;
+    assert(k is TufKeyType.Ed25519Key);
+}
+
+@test
+fn test_tuf_key_type_ecdsa_p256_variant() {
+    let k: TufKeyType = TufKeyType.EcdsaP256Key;
+    assert(k is TufKeyType.EcdsaP256Key);
+}
+
+@test
+fn test_tuf_key_type_rsa_variant() {
+    let k: TufKeyType = TufKeyType.RsaKey;
+    assert(k is TufKeyType.RsaKey);
+}
+
+@test
+fn test_tuf_key_type_other_variant() {
+    let k: TufKeyType = TufKeyType.Other("custom".to_text());
+    assert(k is TufKeyType.Other);
+}
+
+// =============================================================================
+// Section 4: TufKeyType pairwise disjointness
+// =============================================================================
+
+@test
+fn test_tuf_key_type_ed25519_disjoint() {
+    let k: TufKeyType = TufKeyType.Ed25519Key;
+    assert(!(k is TufKeyType.EcdsaP256Key));
+    assert(!(k is TufKeyType.RsaKey));
+    assert(!(k is TufKeyType.Other));
+}
+
+// =============================================================================
+// Section 5: TufKeyScheme 5-variant ADT
+// =============================================================================
+
+@test
+fn test_tuf_key_scheme_ed25519_variant() {
+    let s: TufKeyScheme = TufKeyScheme.Ed25519Scheme;
+    assert(s is TufKeyScheme.Ed25519Scheme);
+}
+
+@test
+fn test_tuf_key_scheme_ecdsa_sha2_nist_p256_variant() {
+    let s: TufKeyScheme = TufKeyScheme.EcdsaSha2NistP256;
+    assert(s is TufKeyScheme.EcdsaSha2NistP256);
+}
+
+@test
+fn test_tuf_key_scheme_rsa_pkcs1_v15_sha256_variant() {
+    let s: TufKeyScheme = TufKeyScheme.RsaPkcs1V15Sha256;
+    assert(s is TufKeyScheme.RsaPkcs1V15Sha256);
+}
+
+@test
+fn test_tuf_key_scheme_rsassa_pss_sha256_variant() {
+    let s: TufKeyScheme = TufKeyScheme.RsassaPssSha256;
+    assert(s is TufKeyScheme.RsassaPssSha256);
+}
+
+@test
+fn test_tuf_key_scheme_other_variant() {
+    let s: TufKeyScheme = TufKeyScheme.Other("ed448".to_text());
+    assert(s is TufKeyScheme.Other);
+}
+
+fn main() {}
