@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/cli/smt_verify/unit_test.vr
+// =============================================================================
+//
+// `core/cli/smt_verify.vr` — SAT-based CLI spec verification.
+// =============================================================================
+
+mount core.cli.smt_verify.Property;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Property 4-variant ADT
+// =============================================================================
+
+@test
+fn test_property_coherent_grammar_variant() {
+    let p: Property = Property.CoherentGrammar;
+    assert(p is Property.CoherentGrammar);
+}
+
+@test
+fn test_property_mutex_coverage_variant() {
+    let p: Property = Property.MutexCoverage;
+    assert(p is Property.MutexCoverage);
+}
+
+@test
+fn test_property_required_reachable_variant() {
+    let p: Property = Property.RequiredReachable;
+    assert(p is Property.RequiredReachable);
+}
+
+@test
+fn test_property_required_no_conflict_variant() {
+    let p: Property = Property.RequiredNoConflict;
+    assert(p is Property.RequiredNoConflict);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_property_coherent_grammar_disjoint() {
+    let p: Property = Property.CoherentGrammar;
+    assert(!(p is Property.MutexCoverage));
+    assert(!(p is Property.RequiredReachable));
+    assert(!(p is Property.RequiredNoConflict));
+}
+
+@test
+fn test_property_mutex_coverage_disjoint() {
+    let p: Property = Property.MutexCoverage;
+    assert(!(p is Property.CoherentGrammar));
+    assert(!(p is Property.RequiredReachable));
+    assert(!(p is Property.RequiredNoConflict));
+}
+
+@test
+fn test_property_required_reachable_disjoint() {
+    let p: Property = Property.RequiredReachable;
+    assert(!(p is Property.CoherentGrammar));
+    assert(!(p is Property.MutexCoverage));
+    assert(!(p is Property.RequiredNoConflict));
+}
+
+@test
+fn test_property_required_no_conflict_disjoint() {
+    let p: Property = Property.RequiredNoConflict;
+    assert(!(p is Property.CoherentGrammar));
+    assert(!(p is Property.MutexCoverage));
+    assert(!(p is Property.RequiredReachable));
+}
+
+// =============================================================================
+// Section 3: Canonical name() string mapping
+// =============================================================================
+
+@test
+fn test_property_coherent_grammar_name() {
+    let p: Property = Property.CoherentGrammar;
+    assert_eq(p.name(), "coherent_grammar");
+}
+
+@test
+fn test_property_mutex_coverage_name() {
+    let p: Property = Property.MutexCoverage;
+    assert_eq(p.name(), "mutex_coverage");
+}
+
+@test
+fn test_property_required_reachable_name() {
+    let p: Property = Property.RequiredReachable;
+    assert_eq(p.name(), "required_reachable");
+}
+
+@test
+fn test_property_required_no_conflict_name() {
+    let p: Property = Property.RequiredNoConflict;
+    assert_eq(p.name(), "required_no_conflict");
+}
+
+fn main() {}
