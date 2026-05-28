@@ -1,0 +1,583 @@
+// =============================================================================
+// core-tests/mem/mod/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core/mem/mod.vr` — the `core.mem` umbrella manifest.
+//
+// `core/mem/mod.vr` itself declares THREE pieces of public surface beyond
+// the submodule re-exports:
+//
+//   1. `UseAfterFreeError`   — 5-field record + 3 static constructors
+//                              (`new` / `null_pointer` / `capability_violation`)
+//                              + `message()` + Debug + Display + Eq impls.
+//   2. `RevocationError`     — 4-variant sum + 4 static constructors
+//                              (`null_pointer` / `capability_violation` /
+//                              `already_revoked` / `internal_error`) +
+//                              `message()` + Debug + Display + Eq impls.
+//   3. `CbgrTier`            — 4-variant sum (Interpreter / BaselineJit /
+//                              OptimizingJit / Aot) + `get_execution_tier()`
+//                              / `set_execution_tier()` global accessors.
+//
+// AND the umbrella re-export contract — every submodule export resolves
+// via `mount core.mem.{Name}` without reaching into the submodule path
+// directly. The full re-export surface is enumerated in `core/mem/mod.vr`
+// lines 80-244.
+//
+// Companion files:
+//   property_test.vr     — algebraic laws (Eq reflexivity, .message() injectivity)
+//   integration_test.vr  — cross-type scenarios (UseAfterFreeError + GEN_*)
+//   regression_test.vr   — pinned defects (cross-module 5-arg .new shift, etc.)
+//   audit.md             — drift surfaces & action items
+//
+// NOTE: `UseAfterFreeError.new(...)` cross-module 5-arg static constructor
+// has a known field-shift defect (memory `use_after_free_error_field_shift_2026-05-27`)
+// — the constructor BODY writes correct offsets, but field READS at the
+// call site shift by +2 indices via the global `intern_field_name`
+// fallback in `compile_field_access`. Workaround: build via direct record
+// literal at the test site. The `.message()` invocation chain works because
+// the receiver does not undergo cross-module field-resolution on read.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.{
+    // Module-root errors
+    UseAfterFreeError,
+    RevocationError,
+    // CbgrTier
+    CbgrTier,
+    get_execution_tier,
+    set_execution_tier,
+    // Re-exported capability surface (smoke-test the umbrella contract)
+    CAP_READ, CAP_WRITE, CAP_OWNED, CAP_ALL,
+    has_capability,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+    // Re-exported header surface
+    HEADER_SIZE, HEADER_ALIGN, GEN_INITIAL, GEN_MAX, GEN_UNALLOCATED,
+    // Re-exported ref surface (type aliases — touched, not constructed)
+    ThinRef, FatRef,
+    // Re-exported epoch surface
+    EPOCH_MAX, DEFAULT_SYNC_INTERVAL, current_epoch,
+    // Re-exported allocator surface
+    AllocError, Layout, align_up, align_down,
+    // Re-exported size_class surface
+    BIN_COUNT, SMALL_SIZE_MAX, MEDIUM_SIZE_MAX, LARGE_SIZE_MAX,
+    // Re-exported segment surface
+    SEGMENT_SIZE, SLICE_SIZE, SEGMENT_NORMAL, SEGMENT_HUGE,
+    // Re-exported arena surface
+    DEFAULT_ARENA_CAPACITY, MAX_ARENA_CAPACITY, ARENA_ALIGNMENT,
+    // Re-exported diagnostics surface
+    MemHeaderView, live_allocation_count,
+    // Re-exported cap_audit surface
+    CapEvent, CapEventKind,
+    // Re-exported cap_audit_ring surface
+    CAP_AUDIT_RING_CAPACITY,
+};
+
+// =============================================================================
+// Section 1: UseAfterFreeError — direct record literal construction
+// =============================================================================
+
+@test
+fn test_use_after_free_error_record_literal_round_trip() {
+    let e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 7 as UInt32,
+        actual_gen: 8 as UInt32,
+        expected_epoch: 1 as UInt16,
+        actual_epoch: 2 as UInt16,
+        type_name: "Heap<Int>".to_text(),
+    };
+    assert_eq(e.expected_gen, 7 as UInt32);
+    assert_eq(e.actual_gen, 8 as UInt32);
+    assert_eq(e.expected_epoch, 1 as UInt16);
+    assert_eq(e.actual_epoch, 2 as UInt16);
+}
+
+@test
+fn test_use_after_free_error_default_zero_state() {
+    // The all-zero record is a defined sentinel value: expected_gen == 0
+    // matches GEN_UNALLOCATED, hence message() routes to the null-pointer
+    // path.  Pin the zero-state interpretation explicitly.
+    let e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 0 as UInt32,
+        actual_gen: 0 as UInt32,
+        expected_epoch: 0 as UInt16,
+        actual_epoch: 0 as UInt16,
+        type_name: "T".to_text(),
+    };
+    let m = e.message();
+    assert(m.contains("null pointer"));
+}
+
+// REGRESSION: `.message()` body reads `self.<field>` at the WRONG offsets
+// when `UseAfterFreeError` is loaded from the precompiled stdlib archive
+// and the method body is compiled in `core/mem/mod.vr` context.  Reading
+// `self.type_name` returns slot 2 (= expected_epoch), reading
+// `self.expected_epoch` returns slot 0 (= expected_gen), etc.  Direct
+// field READ at the test site (with explicit `let e: UseAfterFreeError`
+// annotation) resolves field indices CORRECTLY — only the method body
+// drift is broken.
+//
+// Demonstration output (interpolated message under --interp 2026-05-28):
+//     "use-after-free detected for 1: expected gen=5 epoch=5,
+//                                     actual gen=6 epoch=6"
+// where actual record has type_name="Shared<Int>", expected_epoch=1,
+// actual_epoch=2 — proving the `.message()` body reads the wrong fields.
+//
+// Defect class: cross-module instance-method-body field-access OOB.
+// Same root cause as the @ignore'd `_new_constructor_round_trip` and
+// `_null_pointer_uses_gen_unallocated_sentinel` pins in
+// `core-tests/mem/thin_ref/unit_test.vr §6` — they READ via direct
+// field access at the test site after the `.new()` static constructor
+// shifts; here the shift happens inside the instance-method body itself.
+//
+// Surface where the fix must land (same as thin_ref/unit_test.vr §6):
+//   * `compile_function` in core/mem/mod.vr context must propagate the
+//     enclosing `UseAfterFreeError` `Self` type binding to
+//     `variable_type_names` for `self` so `compile_field_access` resolves
+//     field indices via the type-aware lookup rather than the global
+//     `intern_field_name` fallback in `crates/verum_vbc/src/codegen/mod.rs:13687`.
+//   * `register_impl_function` (codegen/mod.rs:8225) must record the
+//     receiver's type-name on the function-info entry so cross-module
+//     method-body field-access can look it up at compile time.
+//
+// Pinned @ignore here until the fundamental fix lands.  Flips green
+// when [[use_after_free_error_field_shift_2026-05-27]] closes.
+@test
+@ignore
+fn test_use_after_free_error_message_routes_to_uaf_path_when_gen_nonzero() {
+    let e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 5 as UInt32,
+        actual_gen: 6 as UInt32,
+        expected_epoch: 1 as UInt16,
+        actual_epoch: 2 as UInt16,
+        type_name: "Shared<Int>".to_text(),
+    };
+    let m = e.message();
+    assert(m.contains("use-after-free"));
+    assert(m.contains("Shared<Int>"));
+}
+
+@test
+@ignore
+fn test_use_after_free_error_message_contains_type_name() {
+    // Sister pin to the routing test above — `.message()` body must
+    // interpolate `self.type_name` correctly. Pinned @ignore on the
+    // same cross-module method-body field-shift defect.
+    let e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 5 as UInt32,
+        actual_gen: 6 as UInt32,
+        expected_epoch: 1 as UInt16,
+        actual_epoch: 2 as UInt16,
+        type_name: "MyType".to_text(),
+    };
+    let m = e.message();
+    assert(m.contains("MyType"));
+}
+
+// =============================================================================
+// Section 2: UseAfterFreeError — Eq impl (reflexive / payload-compared / distinct)
+// =============================================================================
+
+@test
+fn test_use_after_free_error_eq_reflexive() {
+    let e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 1 as UInt32,
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "T".to_text(),
+    };
+    assert(e == e);
+}
+
+@test
+fn test_use_after_free_error_eq_payload_compared() {
+    let a: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 1 as UInt32,
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "T".to_text(),
+    };
+    let b: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 1 as UInt32,
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "T".to_text(),
+    };
+    assert(a == b);
+}
+
+@test
+fn test_use_after_free_error_eq_distinct_on_expected_gen() {
+    let a: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 1 as UInt32,
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "T".to_text(),
+    };
+    let b: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 99 as UInt32,
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "T".to_text(),
+    };
+    assert(!(a == b));
+}
+
+// Pinned @ignore on the same cross-module method-body field-shift defect
+// — Eq.eq's body reads `self.type_name == other.type_name` which
+// degenerates to reading slots 2/2 instead of 4/4 and reports equality.
+@test
+@ignore
+fn test_use_after_free_error_eq_distinct_on_type_name() {
+    let a: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 1 as UInt32,
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "A".to_text(),
+    };
+    let b: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 1 as UInt32,
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "B".to_text(),
+    };
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 3: RevocationError — 4-variant surface
+// =============================================================================
+
+@test
+fn test_revocation_error_null_pointer_constructor() {
+    let e: RevocationError = RevocationError.null_pointer("ThinRef<Int>".to_text());
+    assert(e is RevocationError.NullPointer);
+}
+
+@test
+fn test_revocation_error_capability_violation_constructor() {
+    let e: RevocationError = RevocationError.capability_violation("FatRef<Byte>".to_text());
+    assert(e is RevocationError.CapabilityViolation);
+}
+
+@test
+fn test_revocation_error_already_revoked_constructor() {
+    let e: RevocationError = RevocationError.already_revoked("Heap<Int>".to_text());
+    assert(e is RevocationError.AlreadyRevoked);
+}
+
+@test
+fn test_revocation_error_internal_error_constructor() {
+    let e: RevocationError = RevocationError.internal_error("T".to_text(), "reason".to_text());
+    assert(e is RevocationError.Internal);
+}
+
+@test
+fn test_revocation_error_variants_pairwise_disjoint() {
+    let n = RevocationError.null_pointer("T".to_text());
+    let c = RevocationError.capability_violation("T".to_text());
+    let a = RevocationError.already_revoked("T".to_text());
+    let i = RevocationError.internal_error("T".to_text(), "r".to_text());
+
+    assert(n is RevocationError.NullPointer);
+    assert(!(n is RevocationError.CapabilityViolation));
+    assert(!(n is RevocationError.AlreadyRevoked));
+    assert(!(n is RevocationError.Internal));
+
+    assert(c is RevocationError.CapabilityViolation);
+    assert(!(c is RevocationError.NullPointer));
+
+    assert(a is RevocationError.AlreadyRevoked);
+    assert(!(a is RevocationError.NullPointer));
+
+    assert(i is RevocationError.Internal);
+    assert(!(i is RevocationError.NullPointer));
+}
+
+// =============================================================================
+// Section 4: RevocationError — message() per variant
+// =============================================================================
+
+@test
+fn test_revocation_error_message_null_pointer() {
+    let e = RevocationError.null_pointer("ThinRef<Int>".to_text());
+    let m = e.message();
+    assert(m.contains("null pointer"));
+    assert(m.contains("ThinRef<Int>"));
+}
+
+@test
+fn test_revocation_error_message_capability_violation() {
+    let e = RevocationError.capability_violation("FatRef<Byte>".to_text());
+    let m = e.message();
+    assert(m.contains("revoke capability"));
+    assert(m.contains("FatRef<Byte>"));
+}
+
+@test
+fn test_revocation_error_message_already_revoked() {
+    let e = RevocationError.already_revoked("Heap<Int>".to_text());
+    let m = e.message();
+    assert(m.contains("already revoked"));
+    assert(m.contains("Heap<Int>"));
+}
+
+@test
+fn test_revocation_error_message_internal_error() {
+    let e = RevocationError.internal_error("T".to_text(), "ring buffer full".to_text());
+    let m = e.message();
+    assert(m.contains("internal"));
+    assert(m.contains("ring buffer full"));
+}
+
+// =============================================================================
+// Section 5: RevocationError — Eq impl
+// =============================================================================
+
+@test
+fn test_revocation_error_eq_reflexive_null_pointer() {
+    let e = RevocationError.null_pointer("T".to_text());
+    assert(e == e);
+}
+
+@test
+fn test_revocation_error_eq_same_variant_same_payload() {
+    let a = RevocationError.null_pointer("T".to_text());
+    let b = RevocationError.null_pointer("T".to_text());
+    assert(a == b);
+}
+
+@test
+fn test_revocation_error_eq_same_variant_distinct_payload() {
+    let a = RevocationError.null_pointer("A".to_text());
+    let b = RevocationError.null_pointer("B".to_text());
+    assert(!(a == b));
+}
+
+@test
+fn test_revocation_error_eq_cross_variant_returns_false() {
+    let n = RevocationError.null_pointer("T".to_text());
+    let c = RevocationError.capability_violation("T".to_text());
+    assert(!(n == c));
+}
+
+@test
+fn test_revocation_error_eq_internal_compares_both_fields() {
+    // Internal has TWO fields (type_name + reason) — Eq must compare both.
+    let a = RevocationError.internal_error("T".to_text(), "r1".to_text());
+    let b = RevocationError.internal_error("T".to_text(), "r2".to_text());
+    assert(!(a == b));
+
+    let c = RevocationError.internal_error("T".to_text(), "r1".to_text());
+    assert(a == c);
+}
+
+// =============================================================================
+// Section 6: CbgrTier — 4-variant surface
+// =============================================================================
+
+@test
+fn test_cbgr_tier_interpreter_variant() {
+    let t: CbgrTier = CbgrTier.Interpreter;
+    assert(t is CbgrTier.Interpreter);
+}
+
+@test
+fn test_cbgr_tier_baseline_jit_variant() {
+    let t: CbgrTier = CbgrTier.BaselineJit;
+    assert(t is CbgrTier.BaselineJit);
+}
+
+@test
+fn test_cbgr_tier_optimizing_jit_variant() {
+    let t: CbgrTier = CbgrTier.OptimizingJit;
+    assert(t is CbgrTier.OptimizingJit);
+}
+
+@test
+fn test_cbgr_tier_aot_variant() {
+    let t: CbgrTier = CbgrTier.Aot;
+    assert(t is CbgrTier.Aot);
+}
+
+@test
+fn test_cbgr_tier_variants_pairwise_disjoint() {
+    let i: CbgrTier = CbgrTier.Interpreter;
+    let bj: CbgrTier = CbgrTier.BaselineJit;
+    let oj: CbgrTier = CbgrTier.OptimizingJit;
+    let a: CbgrTier = CbgrTier.Aot;
+
+    assert(!(i is CbgrTier.BaselineJit));
+    assert(!(i is CbgrTier.OptimizingJit));
+    assert(!(i is CbgrTier.Aot));
+
+    assert(!(bj is CbgrTier.Interpreter));
+    assert(!(bj is CbgrTier.OptimizingJit));
+    assert(!(bj is CbgrTier.Aot));
+
+    assert(!(oj is CbgrTier.Interpreter));
+    assert(!(oj is CbgrTier.BaselineJit));
+    assert(!(oj is CbgrTier.Aot));
+
+    assert(!(a is CbgrTier.Interpreter));
+    assert(!(a is CbgrTier.BaselineJit));
+    assert(!(a is CbgrTier.OptimizingJit));
+}
+
+// =============================================================================
+// Section 7: get/set_execution_tier — global accessor round-trip
+// =============================================================================
+
+@test
+fn test_get_execution_tier_returns_a_variant() {
+    // Default initial value (per mod.vr line 440) is CbgrTier.Interpreter,
+    // but this is a process-global static, so a previously-run test in
+    // the same process may have changed it. We only pin "the call
+    // returns SOMETHING that classifies into one of the 4 variants".
+    let t: CbgrTier = get_execution_tier();
+    let valid: Bool =
+        (t is CbgrTier.Interpreter) ||
+        (t is CbgrTier.BaselineJit) ||
+        (t is CbgrTier.OptimizingJit) ||
+        (t is CbgrTier.Aot);
+    assert(valid);
+}
+
+@test
+fn test_set_then_get_execution_tier_round_trip_aot() {
+    set_execution_tier(CbgrTier.Aot);
+    let t: CbgrTier = get_execution_tier();
+    assert(t is CbgrTier.Aot);
+    // Restore to a known baseline so other parallel tests don't observe
+    // a non-default tier.
+    set_execution_tier(CbgrTier.Interpreter);
+}
+
+@test
+fn test_set_then_get_execution_tier_round_trip_optimizing_jit() {
+    set_execution_tier(CbgrTier.OptimizingJit);
+    let t: CbgrTier = get_execution_tier();
+    assert(t is CbgrTier.OptimizingJit);
+    set_execution_tier(CbgrTier.Interpreter);
+}
+
+// =============================================================================
+// Section 8: Umbrella re-export contract — names resolve via core.mem
+// =============================================================================
+//
+// Each test in this section asserts that a name re-exported via
+// `core/mem/mod.vr` is reachable through `mount core.mem.{Name}` (the
+// mount declaration at the top of THIS file) without reaching into the
+// submodule path directly. The test bodies are deliberately minimal:
+// the load-bearing assertion is that the mount resolves at parse time.
+
+@test
+fn test_reexport_capability_constants_resolve() {
+    // If CAP_READ / CAP_WRITE didn't resolve via core.mem, this test
+    // would fail to compile.
+    assert_eq(CAP_READ, 1 as UInt16);
+    assert_eq(CAP_WRITE, 2 as UInt16);
+    assert_eq(CAP_OWNED & CAP_READ, CAP_READ);
+}
+
+@test
+fn test_reexport_capability_functions_resolve() {
+    // `pack_epoch_caps` / `unpack_epoch` / `unpack_caps` are
+    // umbrella-mounted from `core.mem.{...}`.  Round-trip identity
+    // pinned at the free-function surface.
+    let p = pack_epoch_caps(1 as UInt16, 2 as UInt16);
+    assert_eq(unpack_epoch(p), 1 as UInt16);
+    assert_eq(unpack_caps(p), 2 as UInt16);
+    // NOTE: `has_capability(CAP_OWNED, CAP_READ)` direct call is
+    // intentionally OMITTED — bare-name dispatch via the umbrella
+    // mount collides with `AllocationHeader.has_capability(&self,
+    // cap)` (a 2-arg method), and the dispatcher routes the free-
+    // function call to the method instead.  Failure: NullPointerAt
+    // at `AllocationHeader.load_capabilities`.  Pinned via @ignore'd
+    // sister test below + `regression_test.vr §H`.
+}
+
+@test
+@ignore
+fn test_reexport_has_capability_call_pinned_by_collision() {
+    // PINS the dispatch-collision defect class: bare-name
+    // `has_capability(flags, cap)` umbrella-mounted from `core.mem.{...}`
+    // routes to `AllocationHeader.has_capability(&self, cap)` (2-arg
+    // method) instead of `core.mem.capability.has_capability(flags, cap)`
+    // (2-arg free fn).  Flips green when the dispatcher distinguishes
+    // free-function vs impl-block-method overload by qualifying
+    // umbrella-mounted free functions with their canonical
+    // source-module identity.
+    assert(has_capability(CAP_OWNED, CAP_READ));
+}
+
+@test
+fn test_reexport_header_constants_resolve() {
+    // HEADER_SIZE / HEADER_ALIGN are `Int` per core/mem/header.vr;
+    // GEN_* are `UInt32`.  Just pin the positive-magnitude bound +
+    // GEN ordering — actual value pins live in
+    // `core-tests/mem/header/unit_test.vr`.
+    assert(HEADER_SIZE > 0);
+    assert(HEADER_ALIGN > 0);
+    assert(GEN_INITIAL > GEN_UNALLOCATED);
+    assert(GEN_MAX > GEN_INITIAL);
+}
+
+@test
+fn test_reexport_epoch_constants_resolve() {
+    assert_eq(EPOCH_MAX, 0xFFFF as UInt16);
+    assert_eq(DEFAULT_SYNC_INTERVAL, 1000 as UInt32);
+}
+
+@test
+fn test_reexport_allocator_helpers_resolve() {
+    assert_eq(align_up(7 as USize, 8 as USize), 8 as USize);
+    assert_eq(align_down(7 as USize, 8 as USize), 0 as USize);
+}
+
+@test
+fn test_reexport_size_class_constants_resolve() {
+    // Boundaries pinned in core/mem/size_class.vr.
+    assert(SMALL_SIZE_MAX > 0 as USize);
+    assert(MEDIUM_SIZE_MAX > SMALL_SIZE_MAX);
+    assert(LARGE_SIZE_MAX > MEDIUM_SIZE_MAX);
+    assert(BIN_COUNT > 0 as USize);
+}
+
+@test
+fn test_reexport_segment_constants_resolve() {
+    assert_eq(SEGMENT_SIZE, 32 * 1024 * 1024);
+    assert_eq(SLICE_SIZE, 64 * 1024);
+    assert_eq(SEGMENT_NORMAL, 0 as UInt8);
+    assert_eq(SEGMENT_HUGE, 1 as UInt8);
+}
+
+@test
+fn test_reexport_arena_constants_resolve() {
+    assert_eq(DEFAULT_ARENA_CAPACITY, 65536);
+    assert_eq(MAX_ARENA_CAPACITY, 268435456);
+    assert_eq(ARENA_ALIGNMENT, 8);
+}
+
+@test
+fn test_reexport_cap_audit_ring_capacity_resolves() {
+    // CAP_AUDIT_RING_CAPACITY must be a positive power of 2.
+    assert(CAP_AUDIT_RING_CAPACITY > 0 as USize);
+    let v = CAP_AUDIT_RING_CAPACITY;
+    assert((v & (v - 1 as USize)) == 0 as USize);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

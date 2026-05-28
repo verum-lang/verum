@@ -1,0 +1,258 @@
+// =============================================================================
+// core-tests/mem/mod/integration_test.vr
+// =============================================================================
+//
+// Cross-type scenarios exercising the `core.mem` module-root surface in
+// composition with other re-exported submodule pieces.  Each test
+// composes at least TWO surfaces to verify the umbrella-mount contract
+// transitively holds.
+//
+//   §1  UseAfterFreeError + GEN_* lifecycle composition
+//   §2  RevocationError + capability surface composition
+//   §3  CbgrTier observation under set/get round-trip
+//   §4  Cross-submodule constant-arithmetic invariants
+//   §5  Re-export equivalence (umbrella-mount === submodule-mount)
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.{
+    UseAfterFreeError,
+    RevocationError,
+    CbgrTier,
+    get_execution_tier, set_execution_tier,
+    // Header
+    HEADER_SIZE, HEADER_ALIGN, GEN_INITIAL, GEN_MAX, GEN_UNALLOCATED,
+    // Capability
+    CAP_READ, CAP_WRITE, CAP_OWNED, CAP_REVOKE, CAP_ALL,
+    has_capability, can_revoke, validate_read,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+    // Allocator
+    align_up, align_down,
+    // Size class
+    BIN_COUNT, SMALL_SIZE_MAX, MEDIUM_SIZE_MAX, LARGE_SIZE_MAX,
+    // Segment
+    SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,
+    SEGMENT_NORMAL, SEGMENT_HUGE,
+    // Arena
+    DEFAULT_ARENA_CAPACITY, MAX_ARENA_CAPACITY, ARENA_ALIGNMENT,
+    // Cap audit ring
+    CAP_AUDIT_RING_CAPACITY,
+};
+
+// =============================================================================
+// §1 — UseAfterFreeError + GEN_* lifecycle composition
+// =============================================================================
+
+@test
+fn integration_uaf_error_default_sentinel_uses_gen_unallocated() {
+    // The all-zero record models a null-pointer dereference; the
+    // expected_gen field aliases with the GEN_UNALLOCATED sentinel.
+    let e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: GEN_UNALLOCATED,
+        actual_gen: GEN_UNALLOCATED,
+        expected_epoch: 0 as UInt16,
+        actual_epoch: 0 as UInt16,
+        type_name: "T".to_text(),
+    };
+    assert_eq(e.expected_gen, GEN_UNALLOCATED);
+    assert(e.message().contains("null pointer"));
+}
+
+@test
+fn integration_uaf_error_post_initial_alloc_uses_gen_initial() {
+    // After the first allocation cycle, expected_gen == GEN_INITIAL.
+    // The error's expected_epoch/actual_epoch sit on the (epoch, caps)
+    // packed lane shared with ThinRef.
+    let e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: GEN_INITIAL,
+        actual_gen: GEN_INITIAL + 1 as UInt32,   // bumped post-free
+        expected_epoch: 7 as UInt16,
+        actual_epoch: 8 as UInt16,
+        type_name: "Heap<Int>".to_text(),
+    };
+    assert(e.expected_gen != GEN_UNALLOCATED);
+    // expected != actual ⇒ post-free divergence detected.
+    assert(e.expected_gen != e.actual_gen);
+}
+
+@test
+fn integration_uaf_error_at_gen_max_boundary() {
+    // GEN_MAX is the wraparound boundary.  An error captured at
+    // gen=GEN_MAX is the last legal pre-wraparound state.
+    let e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: GEN_MAX,
+        actual_gen: GEN_MAX,
+        expected_epoch: 0xFFFF as UInt16,
+        actual_epoch: 0xFFFF as UInt16,
+        type_name: "Boundary".to_text(),
+    };
+    assert(e.expected_gen < 0xFFFFFFFF as UInt32);
+    assert_eq(e.expected_gen, GEN_MAX);
+}
+
+// =============================================================================
+// §2 — RevocationError + capability surface composition
+// =============================================================================
+
+@test
+fn integration_revocation_error_capability_violation_pinned_to_capability_caps() {
+    // CapabilityViolation models "this reference lacks the required
+    // capability".  Compose with `can_revoke` to verify the
+    // higher-level invariant: an error arises iff the flags lack
+    // CAP_REVOKE.
+    let no_revoke_flags: UInt16 = CAP_READ | CAP_WRITE;
+    assert(!can_revoke(no_revoke_flags));
+    let e = RevocationError.capability_violation("ThinRef<Int>".to_text());
+    assert(e is RevocationError.CapabilityViolation);
+}
+
+@test
+fn integration_revocation_error_pinned_to_owned_capabilities() {
+    // CAP_OWNED includes CAP_REVOKE — so a ref with CAP_OWNED can
+    // revoke; a NullPointer RevocationError applies when the ptr is
+    // null but the capability is present.
+    assert(can_revoke(CAP_OWNED));
+    let e = RevocationError.null_pointer("ThinRef<Int>".to_text());
+    assert(e is RevocationError.NullPointer);
+}
+
+// =============================================================================
+// §3 — CbgrTier observation under set/get round-trip
+// =============================================================================
+
+@test
+fn integration_cbgr_tier_observe_returns_set_value_across_all_4_variants() {
+    // Sweep all 4 tiers; each must be observable via get_execution_tier
+    // after set_execution_tier.
+    set_execution_tier(CbgrTier.Interpreter);
+    assert(get_execution_tier() is CbgrTier.Interpreter);
+
+    set_execution_tier(CbgrTier.BaselineJit);
+    assert(get_execution_tier() is CbgrTier.BaselineJit);
+
+    set_execution_tier(CbgrTier.OptimizingJit);
+    assert(get_execution_tier() is CbgrTier.OptimizingJit);
+
+    set_execution_tier(CbgrTier.Aot);
+    assert(get_execution_tier() is CbgrTier.Aot);
+
+    // Restore baseline so concurrent tests in the same process see
+    // a known starting tier.
+    set_execution_tier(CbgrTier.Interpreter);
+}
+
+// =============================================================================
+// §4 — Cross-submodule constant-arithmetic invariants
+// =============================================================================
+
+@test
+fn integration_segment_size_is_multiple_of_default_arena_capacity() {
+    // SEGMENT_SIZE (32 MiB) is a multiple of DEFAULT_ARENA_CAPACITY
+    // (64 KiB) — pinned because both layers must agree on allocation
+    // granularity.
+    let seg_int: Int = SEGMENT_SIZE as Int;
+    let arena_int: Int = DEFAULT_ARENA_CAPACITY;
+    assert(seg_int % arena_int == 0);
+}
+
+@test
+fn integration_slice_size_divides_segment_size() {
+    // SLICE_SIZE (64 KiB) × SLICES_PER_SEGMENT (512) = SEGMENT_SIZE (32 MiB).
+    assert_eq(SLICE_SIZE * SLICES_PER_SEGMENT, SEGMENT_SIZE);
+}
+
+@test
+fn integration_header_align_divides_header_size() {
+    // The header is N-byte aligned; HEADER_SIZE is a multiple of N.
+    let hs: Int = HEADER_SIZE as Int;
+    let ha: Int = HEADER_ALIGN as Int;
+    assert(hs % ha == 0);
+}
+
+@test
+fn integration_arena_alignment_divides_default_capacity() {
+    // 8-byte arena alignment must evenly tile the default 64 KiB capacity.
+    assert(DEFAULT_ARENA_CAPACITY % ARENA_ALIGNMENT == 0);
+}
+
+@test
+fn integration_align_up_at_header_align_idempotent() {
+    // Cross-test the allocator's align_up against the header's alignment
+    // constant — pin the contract that headers fit on HEADER_ALIGN
+    // boundaries.
+    let ha: USize = HEADER_ALIGN as USize;
+    let x: USize = 33 as USize;
+    let up = align_up(x, ha);
+    assert(up >= x);
+    assert(up % ha == 0 as USize);
+    let up2 = align_up(up, ha);
+    assert_eq(up2, up);
+}
+
+@test
+fn integration_size_class_small_max_is_within_slice_size() {
+    // SMALL_SIZE_MAX must be < SLICE_SIZE — small allocations live
+    // within the smallest segment slice.
+    assert((SMALL_SIZE_MAX as Int) <= (SLICE_SIZE as Int));
+}
+
+@test
+fn integration_size_class_large_max_is_within_segment_size() {
+    // LARGE_SIZE_MAX must be < SEGMENT_SIZE — large allocations fit
+    // within a single segment.
+    assert((LARGE_SIZE_MAX as Int) <= (SEGMENT_SIZE as Int));
+}
+
+@test
+fn integration_segment_kind_constants_pairwise_disjoint() {
+    // SEGMENT_NORMAL=0 and SEGMENT_HUGE=1 — distinct values.
+    assert(SEGMENT_NORMAL != SEGMENT_HUGE);
+}
+
+@test
+fn integration_cap_audit_ring_capacity_bound_by_segment() {
+    // Sanity: a ring of CAP_AUDIT_RING_CAPACITY entries × ~64-byte
+    // CapEvent should fit comfortably within one segment.
+    let max_bytes: Int = (CAP_AUDIT_RING_CAPACITY as Int) * 64;
+    assert(max_bytes < SEGMENT_SIZE as Int);
+}
+
+// =============================================================================
+// §5 — Re-export equivalence — `core.mem.X` resolves to the same value
+//      as `core.mem.<sub>.X`.
+// =============================================================================
+
+@test
+fn integration_capability_reexport_equivalence_caps() {
+    // CAP_READ via core.mem === CAP_READ via core.mem.capability.
+    // This test depends on the LOCAL mount above being from `core.mem.{CAP_READ}`
+    // and the value matching the documented bit position.
+    assert_eq(CAP_READ,    1 as UInt16);
+    assert_eq(CAP_WRITE,   2 as UInt16);
+    assert_eq(CAP_REVOKE,  16 as UInt16);
+    assert_eq(CAP_OWNED,   CAP_READ | CAP_WRITE | (8 as UInt16) | CAP_REVOKE | (64 as UInt16));
+    assert_eq(CAP_ALL,     0x00FF as UInt16);
+}
+
+@test
+fn integration_header_reexport_equivalence_sizes() {
+    assert_eq(HEADER_SIZE,  32 as UInt32);
+    assert_eq(HEADER_ALIGN, 32 as UInt32);
+}
+
+@test
+fn integration_segment_reexport_equivalence_sizes() {
+    assert_eq(SEGMENT_SIZE,  32 * 1024 * 1024);
+    assert_eq(SLICE_SIZE,    64 * 1024);
+    assert_eq(SLICES_PER_SEGMENT, 512);
+}
+
+@test
+fn integration_arena_reexport_equivalence_constants() {
+    assert_eq(DEFAULT_ARENA_CAPACITY, 65536);
+    assert_eq(MAX_ARENA_CAPACITY,     268435456);
+    assert_eq(ARENA_ALIGNMENT,        8);
+}
+
+fn main() {}
