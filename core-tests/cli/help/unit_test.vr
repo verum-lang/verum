@@ -1,0 +1,127 @@
+// =============================================================================
+// core-tests/cli/help/unit_test.vr
+// =============================================================================
+//
+// `core/cli/help.vr` — adaptive help renderer.
+//
+// Tested:
+//   * HelpStyle record construction (default / plain)
+//   * Field preservation through construction
+//   * Default values match clig.dev recommendations
+//
+// Full render_help / render_usage_line entry points deferred behind
+// CommandSpec construction surface (Text-builder stub cascade).
+// =============================================================================
+
+mount core.cli.help.HelpStyle;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: HelpStyle.default() — clig.dev recommended values
+// =============================================================================
+
+@test
+fn test_help_style_default_use_color_is_true() {
+    let s: HelpStyle = HelpStyle.default();
+    assert_eq(s.use_color, true);
+}
+
+@test
+fn test_help_style_default_indent_is_4() {
+    let s: HelpStyle = HelpStyle.default();
+    assert_eq(s.indent, 4);
+}
+
+@test
+fn test_help_style_default_max_width_is_80() {
+    let s: HelpStyle = HelpStyle.default();
+    assert_eq(s.max_width, 80);
+}
+
+@test
+fn test_help_style_default_show_examples_is_true() {
+    let s: HelpStyle = HelpStyle.default();
+    assert_eq(s.show_examples, true);
+}
+
+@test
+fn test_help_style_default_show_after_help_is_true() {
+    let s: HelpStyle = HelpStyle.default();
+    assert_eq(s.show_after_help, true);
+}
+
+// =============================================================================
+// Section 2: HelpStyle.plain() — no-color override
+// =============================================================================
+
+@test
+fn test_help_style_plain_use_color_is_false() {
+    let s: HelpStyle = HelpStyle.plain();
+    assert_eq(s.use_color, false);
+}
+
+@test
+fn test_help_style_plain_keeps_indent_4() {
+    // plain() only overrides use_color; other fields stay at default.
+    let s: HelpStyle = HelpStyle.plain();
+    assert_eq(s.indent, 4);
+}
+
+@test
+fn test_help_style_plain_keeps_max_width_80() {
+    let s: HelpStyle = HelpStyle.plain();
+    assert_eq(s.max_width, 80);
+}
+
+// =============================================================================
+// Section 3: Direct record construction
+// =============================================================================
+
+@test
+fn test_help_style_direct_no_wrap() {
+    let s: HelpStyle = HelpStyle {
+        use_color: false,
+        indent: 2,
+        max_width: 0,                  // 0 = no wrap
+        show_examples: false,
+        show_after_help: false,
+    };
+    assert_eq(s.use_color, false);
+    assert_eq(s.indent, 2);
+    assert_eq(s.max_width, 0);
+    assert_eq(s.show_examples, false);
+    assert_eq(s.show_after_help, false);
+}
+
+@test
+fn test_help_style_direct_wide_wrap() {
+    let s: HelpStyle = HelpStyle {
+        use_color: true,
+        indent: 8,
+        max_width: 120,
+        show_examples: true,
+        show_after_help: true,
+    };
+    assert_eq(s.indent, 8);
+    assert_eq(s.max_width, 120);
+}
+
+// =============================================================================
+// Section 4: default() vs plain() distinction
+//
+//   The only documented difference is use_color — assert that.
+// =============================================================================
+
+@test
+fn test_help_style_default_plain_only_color_differs() {
+    let d: HelpStyle = HelpStyle.default();
+    let p: HelpStyle = HelpStyle.plain();
+    assert(d.use_color != p.use_color);
+    assert_eq(d.indent, p.indent);
+    assert_eq(d.max_width, p.max_width);
+    assert_eq(d.show_examples, p.show_examples);
+    assert_eq(d.show_after_help, p.show_after_help);
+}
+
+fn main() {}
