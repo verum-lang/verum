@@ -1,0 +1,93 @@
+// =============================================================================
+// core-tests/security/hash/crc32/unit_test.vr
+// =============================================================================
+//
+// `core/security/hash/crc32.vr` — IEEE 802.3 CRC32 (ZIP / PNG / zlib).
+//
+// Tested:
+//   * Crc32 streaming state record
+//   * new() / from_state() / finalize() / peek()
+//   * Empty-input identity: finalize() of fresh Crc32 == 0
+// =============================================================================
+
+mount core.security.hash.crc32.Crc32;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Fresh-state contract
+// =============================================================================
+
+@test
+fn test_crc32_new_initial_state_is_all_ones() {
+    let h: Crc32 = Crc32.new();
+    // Internal state starts at 0xFFFFFFFF (pre-XOR convention).
+    assert_eq(h.state, 0xFFFFFFFF_u32);
+}
+
+// =============================================================================
+// Section 2: Empty-input identity
+//
+//   CRC32 of zero bytes — fresh-state ^ final-XOR (both 0xFFFFFFFF)
+//   yields 0x00000000. This is the canonical empty-CRC32.
+// =============================================================================
+
+@test
+fn test_crc32_finalize_empty_is_zero() {
+    let h: Crc32 = Crc32.new();
+    assert_eq(h.finalize(), 0_u32);
+}
+
+@test
+fn test_crc32_peek_empty_is_zero() {
+    let h: Crc32 = Crc32.new();
+    // peek() must yield the same value as finalize() when no updates fired.
+    assert_eq(h.peek(), 0_u32);
+}
+
+@test
+fn test_crc32_peek_does_not_consume_state() {
+    let h: Crc32 = Crc32.new();
+    let _first  = h.peek();
+    let _second = h.peek();
+    // peek() must be idempotent — state unchanged after multiple peeks.
+    assert_eq(h.state, 0xFFFFFFFF_u32);
+}
+
+// =============================================================================
+// Section 3: from_state — re-seed accumulator
+// =============================================================================
+
+@test
+fn test_crc32_from_state_preserves_inner() {
+    let h: Crc32 = Crc32.from_state(0xCAFEBABE_u32);
+    assert_eq(h.state, 0xCAFEBABE_u32);
+}
+
+@test
+fn test_crc32_from_state_zero_finalize() {
+    // Seeded with 0x00000000 — finalize XORs with 0xFFFFFFFF.
+    let h: Crc32 = Crc32.from_state(0_u32);
+    assert_eq(h.finalize(), 0xFFFFFFFF_u32);
+}
+
+@test
+fn test_crc32_from_state_all_ones_finalize() {
+    // Seeded with 0xFFFFFFFF (matches new()).
+    let h: Crc32 = Crc32.from_state(0xFFFFFFFF_u32);
+    assert_eq(h.finalize(), 0_u32);
+}
+
+// =============================================================================
+// Section 4: Direct record construction
+// =============================================================================
+
+@test
+fn test_crc32_direct_construction_preserves_state() {
+    let h: Crc32 = Crc32 { state: 0xDEADBEEF_u32 };
+    assert_eq(h.state, 0xDEADBEEF_u32);
+    // Direct-construct + finalize: 0xDEADBEEF ^ 0xFFFFFFFF = 0x21524110
+    assert_eq(h.finalize(), 0x21524110_u32);
+}
+
+fn main() {}
