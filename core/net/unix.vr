@@ -149,22 +149,22 @@ implement UnixError {
     public fn to_io_error(self) -> IoError {
         match self {
             UnixError.IoError(msg) =>
-                IoError { kind: IoErrorKind.Other,            message: Some(msg) },
+                IoError { kind: IoErrorKind.Other,            message: Maybe.Some(msg) },
             UnixError.PathTooLong { limit, actual } =>
                 IoError {
                     kind:    IoErrorKind.InvalidInput,
-                    message: Some(f"unix path exceeds platform limit: limit={limit} actual={actual}"),
+                    message: Maybe.Some(f"unix path exceeds platform limit: limit={limit} actual={actual}"),
                 },
             UnixError.InvalidPath(msg) =>
-                IoError { kind: IoErrorKind.InvalidInput,     message: Some(msg) },
+                IoError { kind: IoErrorKind.InvalidInput,     message: Maybe.Some(msg) },
             UnixError.PermissionDenied =>
-                IoError { kind: IoErrorKind.PermissionDenied, message: None },
+                IoError { kind: IoErrorKind.PermissionDenied, message: Maybe.None },
             UnixError.PathInUse(msg) =>
-                IoError { kind: IoErrorKind.AlreadyExists,    message: Some(msg) },
+                IoError { kind: IoErrorKind.AlreadyExists,    message: Maybe.Some(msg) },
             UnixError.NotFound(msg) =>
-                IoError { kind: IoErrorKind.NotFound,         message: Some(msg) },
+                IoError { kind: IoErrorKind.NotFound,         message: Maybe.Some(msg) },
             UnixError.PeerClosed =>
-                IoError { kind: IoErrorKind.NotConnected,     message: None },
+                IoError { kind: IoErrorKind.NotConnected,     message: Maybe.None },
         }
     }
 }
@@ -355,7 +355,7 @@ implement UnixStream {
         let r = sys_connect(fd, addr.as_ptr() as &unsafe Byte, addr.len() as Int);
 
         match r {
-            Ok(()) => Ok(UnixStream { fd: fd, peer_path: Some(path.clone()) }),
+            Ok(()) => Ok(UnixStream { fd: fd, peer_path: Maybe.Some(path.clone()) }),
             Err(e) => {
                 close_fd(fd);
                 Err(UnixError.from_os_error(e))
@@ -377,10 +377,10 @@ implement UnixStream {
         // on Linux EINPROGRESS is still possible under very high server
         // load — handle it by waiting for write-readiness.
         match r {
-            Ok(()) => Ok(UnixStream { fd: fd, peer_path: Some(path.clone()) }),
+            Ok(()) => Ok(UnixStream { fd: fd, peer_path: Maybe.Some(path.clone()) }),
             Err(e) if e.code == 115 /* EINPROGRESS */ => {
                 AsyncIoReady.writable(fd).await;
-                Ok(UnixStream { fd: fd, peer_path: Some(path.clone()) })
+                Ok(UnixStream { fd: fd, peer_path: Maybe.Some(path.clone()) })
             }
             Err(e) => {
                 close_fd(fd);
@@ -749,14 +749,14 @@ implement<'a> Stream for UnixIncoming<'a> {
                 @cfg(target_os = "macos")
                 let _ = safe_set_nonblocking(client_fd, true);
                 let peer = deserialize_unix_path(&addr_buf[..addr_len as Int]);
-                Poll.Ready(Some(Ok(UnixStream { fd: client_fd, peer_path: peer })))
+                Poll.Ready(Maybe.Some(Ok(UnixStream { fd: client_fd, peer_path: peer })))
             }
             Err(e) if e.would_block() => {
                 let io_engine = IOEngine.current();
                 io_engine.register(self.listener.fd, IOInterest.Read, cx.waker());
                 Poll.Pending
             }
-            Err(e) => Poll.Ready(Some(Err(UnixError.from_os_error(e)))),
+            Err(e) => Poll.Ready(Maybe.Some(Err(UnixError.from_os_error(e)))),
         }
     }
 }
@@ -810,20 +810,20 @@ fn close_fd(fd: FileDesc) {
 /// Reconstruct the path from a sockaddr_un buffer. Returns None when the
 /// peer is anonymous (e.g., socketpair peers have empty address).
 fn deserialize_unix_path(buf: &[Byte]) -> Maybe<Text> {
-    if buf.len() < 2 { return None; }
+    if buf.len() < 2 { return Maybe.None; }
     let path_bytes = &buf[2..];
     // Find length: either null-terminated (filesystem) or whole buf
     // (abstract namespace, which starts with `\0`).
     if path_bytes.len() == 0 || (path_bytes[0] == 0 && path_bytes.len() == 1) {
-        return None;
+        return Maybe.None;
     }
     // Trim trailing nulls for filesystem paths.
     let mut end = path_bytes.len();
     while end > 0 && path_bytes[end - 1] == 0 { end = end - 1; }
-    if end == 0 { return None; }
+    if end == 0 { return Maybe.None; }
     match Text.from_utf8(&path_bytes[..end]) {
-        Ok(t) => Some(t),
-        Err(_) => None,
+        Ok(t) => Maybe.Some(t),
+        Err(_) => Maybe.None,
     }
 }
 
