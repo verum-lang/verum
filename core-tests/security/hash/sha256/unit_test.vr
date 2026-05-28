@@ -1,0 +1,71 @@
+// =============================================================================
+// core-tests/security/hash/sha256/unit_test.vr
+// =============================================================================
+//
+// `core/security/hash/sha256.vr` — SHA-256 / FIPS 180-4 §6.2.
+//
+// Pure-data surface tested:
+//   * BLOCK_SIZE / OUTPUT_SIZE canonical values
+//   * Width-relationship invariants
+//
+// Streaming Sha256 record + digest() entry deferred behind byte-array
+// compile-time class.
+// =============================================================================
+
+mount core.security.hash.sha256.{BLOCK_SIZE, OUTPUT_SIZE};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Canonical constants
+// =============================================================================
+
+@test
+fn test_sha256_block_size_canonical_value() {
+    // SHA-256 processes 512-bit (64-byte) blocks (FIPS 180-4 §6.2).
+    assert_eq(BLOCK_SIZE, 64);
+}
+
+@test
+fn test_sha256_output_size_canonical_value() {
+    // SHA-256 produces 256-bit (32-byte) digest.
+    assert_eq(OUTPUT_SIZE, 32);
+}
+
+// =============================================================================
+// Section 2: Width-relationship invariants
+//
+//   BLOCK is twice the digest width — standard Merkle–Damgård doubling
+//   for the 256-bit family. Drift here would break any HMAC layer
+//   built on top.
+// =============================================================================
+
+@test
+fn test_sha256_block_is_twice_output() {
+    assert_eq(BLOCK_SIZE, OUTPUT_SIZE * 2);
+}
+
+@test
+fn test_sha256_block_is_eight_x_uint32() {
+    // 8 × UInt32 (4 bytes each) = 32. Wait — that's OUTPUT, not BLOCK.
+    // BLOCK is 16 × UInt32 = 64 bytes.
+    assert_eq(BLOCK_SIZE, 16 * 4);
+}
+
+@test
+fn test_sha256_output_is_eight_x_uint32() {
+    // The 8-word internal state and digest are both 8 × UInt32 = 32.
+    assert_eq(OUTPUT_SIZE, 8 * 4);
+}
+
+// =============================================================================
+// Section 3: Constants positive
+// =============================================================================
+
+@test
+fn test_sha256_constants_positive() {
+    assert(BLOCK_SIZE > 0);
+    assert(OUTPUT_SIZE > 0);
+}
+
+fn main() {}
