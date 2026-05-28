@@ -234,7 +234,7 @@ fn law_zip_with_none_left_is_none() {
 // §F  filter: idempotence + and-relation.
 //   m.filter(p).filter(p) == m.filter(p)
 //   m.filter(|_| true)    == m
-//   m.filter(|_| false) is Maybe.None when m is Some, Maybe.None when m is Maybe.None
+//   m.filter(|_| false) is None when m is Some, Maybe.None when m is None
 // =============================================================================
 
 @test

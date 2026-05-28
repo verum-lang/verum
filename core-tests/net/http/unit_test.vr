@@ -11,7 +11,7 @@
 // =============================================================================
 
 mount core.net.http.{Method};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: Method 9-variant construction

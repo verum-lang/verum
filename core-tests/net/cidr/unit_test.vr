@@ -12,7 +12,7 @@
 
 mount core.net.cidr.{Cidr, CidrSet, CidrError};
 mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr, AddrParseError};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: Direct Cidr variant construction (sans parser)

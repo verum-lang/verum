@@ -19,7 +19,7 @@ mount core.text.format.{
     TextAlignment, Sign, FormatSpec,
     format_debug, format_display,
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -101,8 +101,8 @@ fn integration_format_spec_round_trip_via_default() {
     // Both should be observably equal — same defaults, no random state
     assert_eq(s1.fill, s2.fill);
     assert_eq(s1.alternate, s2.alternate);
-    assert(s1.width is Maybe.None);
-    assert(s2.width is Maybe.None);
+    assert(s1.width is None);
+    assert(s2.width is None);
 }
 
 // =============================================================================

@@ -85,8 +85,8 @@ fn law_slice_get_at_each_index_matches_iter() {
 // =============================================================================
 // Law: min and max relationship
 //   min(s) <= max(s) for non-empty s
-//   min(s) is Maybe.None iff s is empty
-//   max(s) is Maybe.None iff s is empty
+//   min(s) is None iff s is empty
+//   max(s) is None iff s is empty
 // =============================================================================
 
 @test
@@ -111,7 +111,7 @@ fn law_slice_min_le_max() {
             },
             Maybe.None => {
                 let mx_check: Maybe<&Int> = s.max();
-                assert(mx_check is Maybe.None);
+                assert(mx_check is None);
             },
         }
         i = i + 1;
@@ -123,12 +123,12 @@ fn law_slice_min_none_iff_empty() {
     let empty: List<Int> = [];
     let s_empty: &[Int] = empty.as_slice();
     let m_e: Maybe<&Int> = s_empty.min();
-    assert(m_e is Maybe.None);
+    assert(m_e is None);
 
     let nonempty: List<Int> = [1];
     let s_one: &[Int] = nonempty.as_slice();
     let m_one: Maybe<&Int> = s_one.min();
-    assert(m_one is Maybe.Some(_));
+    assert(m_one is Some(_));
 }
 
 // =============================================================================
@@ -181,7 +181,7 @@ fn law_slice_first_eq_get_zero() {
             },
             Maybe.None => {
                 let chk: Maybe<&Int> = g;
-                assert(chk is Maybe.None);
+                assert(chk is None);
             },
         }
         i = i + 1;

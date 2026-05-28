@@ -16,7 +16,7 @@ mount core.archive.tar.{
     EntryType, TarEntry, TarError, entry_type_byte,
     entry_for_file, entry_for_directory, entry_for_symlink,
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: EntryType 9-variant construction

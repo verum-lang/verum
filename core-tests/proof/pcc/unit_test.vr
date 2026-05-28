@@ -22,7 +22,7 @@ mount core.proof.pcc.{
     goal_hash, proof_certificate, empty_bundle, bundle_add,
     bundle_lookup, bundle_size,
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: goal_hash + GoalHash field

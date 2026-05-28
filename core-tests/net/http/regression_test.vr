@@ -23,7 +23,7 @@
 // =============================================================================
 
 mount core.net.http.{Method, StatusCode, Version, Headers, Request, Response};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // HTTP-1 — Method 9-variant exhaustiveness (RFC 7231 + RFC 5789)

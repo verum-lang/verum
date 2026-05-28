@@ -99,37 +99,37 @@ fn test_level_synthesize() {
 
 @test
 fn test_parse_level_runtime() {
-    assert(parse_level(Text.from("runtime")) is Maybe.Some);
+    assert(parse_level(Text.from("runtime")) is Some);
 }
 
 @test
 fn test_parse_level_formal() {
-    assert(parse_level(Text.from("formal")) is Maybe.Some);
+    assert(parse_level(Text.from("formal")) is Some);
 }
 
 @test
 fn test_parse_level_coherent() {
-    assert(parse_level(Text.from("coherent")) is Maybe.Some);
+    assert(parse_level(Text.from("coherent")) is Some);
 }
 
 @test
 fn test_parse_level_synthesize() {
-    assert(parse_level(Text.from("synthesize")) is Maybe.Some);
+    assert(parse_level(Text.from("synthesize")) is Some);
 }
 
 @test
 fn test_parse_level_unknown_is_none() {
-    assert(parse_level(Text.from("garbage")) is Maybe.None);
+    assert(parse_level(Text.from("garbage")) is None);
 }
 
 @test
 fn test_parse_level_empty_is_none() {
-    assert(parse_level(Text.from("")) is Maybe.None);
+    assert(parse_level(Text.from("")) is None);
 }
 
 @test
 fn test_parse_level_case_sensitive() {
-    assert(parse_level(Text.from("RUNTIME")) is Maybe.None);
+    assert(parse_level(Text.from("RUNTIME")) is None);
 }
 
 // =============================================================================

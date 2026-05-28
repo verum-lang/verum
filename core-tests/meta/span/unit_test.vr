@@ -263,7 +263,7 @@ fn test_multi_span_with_primary_via_direct_construction() {
         spans: List.new(),
     };
     assert(!m.is_empty());
-    assert(m.primary_span() is Maybe.Some);
+    assert(m.primary_span() is Some);
 }
 
 @test
@@ -274,7 +274,7 @@ fn test_multi_span_with_labeled_no_primary() {
         spans: List.of((s, Text.from("label"))),
     };
     assert(!m.is_empty());
-    assert(m.primary_span() is Maybe.None);
+    assert(m.primary_span() is None);
 }
 
 @test
@@ -286,5 +286,5 @@ fn test_multi_span_with_primary_and_labeled() {
         spans: List.of((s2, Text.from("note"))),
     };
     assert(!m.is_empty());
-    assert(m.primary_span() is Maybe.Some);
+    assert(m.primary_span() is Some);
 }

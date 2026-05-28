@@ -4,7 +4,7 @@
 
 
 mount core.base.primitives.*;
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
@@ -82,7 +82,7 @@ fn test_question_mark_basic_maybe() {
         Maybe.None => assert(false),
     }
 
-    assert(propagate_none_maybe() is Maybe.None);
+    assert(propagate_none_maybe() is None);
 }
 
 // =============================================================================
@@ -160,7 +160,7 @@ fn test_question_with_methods() {
     }
 
     let bad: Text = "invalid";
-    assert(sum_parsed(&s1, &bad) is Maybe.None);
+    assert(sum_parsed(&s1, &bad) is None);
 }
 
 // =============================================================================

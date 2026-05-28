@@ -7,7 +7,7 @@
 mount core.async.stream.{stream_once, stream_empty, interval};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context, noop_context};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 @test
 fn regression_stream_empty_construct_does_not_panic() {

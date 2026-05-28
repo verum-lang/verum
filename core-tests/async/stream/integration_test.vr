@@ -21,7 +21,7 @@ mount core.async.stream.{
 };
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context, noop_context};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================

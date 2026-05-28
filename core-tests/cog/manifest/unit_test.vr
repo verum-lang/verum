@@ -87,38 +87,38 @@ fn test_language_profile_tags_all_distinct() {
 @test
 fn test_parse_language_profile_application() {
     let p = parse_language_profile(&Text.from("application"));
-    assert(p is Maybe.Some);
+    assert(p is Some);
 }
 
 @test
 fn test_parse_language_profile_systems() {
     let p = parse_language_profile(&Text.from("systems"));
-    assert(p is Maybe.Some);
+    assert(p is Some);
 }
 
 @test
 fn test_parse_language_profile_research() {
     let p = parse_language_profile(&Text.from("research"));
-    assert(p is Maybe.Some);
+    assert(p is Some);
 }
 
 @test
 fn test_parse_language_profile_unknown_is_none() {
     let p = parse_language_profile(&Text.from("xyz"));
-    assert(p is Maybe.None);
+    assert(p is None);
 }
 
 @test
 fn test_parse_language_profile_case_sensitive() {
     // ASCII-lowercase only per spec
     let p = parse_language_profile(&Text.from("Application"));
-    assert(p is Maybe.None);
+    assert(p is None);
 }
 
 @test
 fn test_parse_language_profile_empty_is_none() {
     let p = parse_language_profile(&Text.from(""));
-    assert(p is Maybe.None);
+    assert(p is None);
 }
 
 @test
@@ -132,7 +132,7 @@ fn test_parse_language_profile_roundtrip() {
     while i < profiles.len() {
         let tag = language_profile_tag(&profiles[i]);
         let parsed = parse_language_profile(&tag);
-        assert(parsed is Maybe.Some);
+        assert(parsed is Some);
         i = i + 1;
     }
 }

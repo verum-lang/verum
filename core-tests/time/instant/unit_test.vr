@@ -57,7 +57,7 @@ fn test_duration_since_later_is_some() {
 fn test_duration_since_earlier_returns_none_when_reversed() {
     let a = Instant.now();
     let b = Instant.now();
-    // a.duration_since(b) is Maybe.None when b > a (i.e., a is earlier)
+    // a.duration_since(b) is None when b > a (i.e., a is earlier)
     // This may be Maybe.None or Maybe.Some(zero) depending on timing; check it doesn't panic
     let _ = a.duration_since(b);
 }

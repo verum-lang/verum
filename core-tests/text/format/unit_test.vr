@@ -26,7 +26,7 @@ mount core.text.format.{
     format_lower_exp, format_upper_exp,
     int_to_text, int_to_text_radix,
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
@@ -190,13 +190,13 @@ fn test_format_spec_default_sign_minus() {
 @test
 fn test_format_spec_default_width_none() {
     let s: FormatSpec = FormatSpec.default();
-    assert(s.width is Maybe.None);
+    assert(s.width is None);
 }
 
 @test
 fn test_format_spec_default_precision_none() {
     let s: FormatSpec = FormatSpec.default();
-    assert(s.precision is Maybe.None);
+    assert(s.precision is None);
 }
 
 // =============================================================================
@@ -669,8 +669,8 @@ fn test_text_formatter_write_int_negative() {
 fn test_text_formatter_accessors_default() {
     let mut buf = Text.new();
     let f = TextFormatter.new(&mut buf);
-    assert(f.width() is Maybe.None);
-    assert(f.precision() is Maybe.None);
+    assert(f.width() is None);
+    assert(f.precision() is None);
     assert(f.align() is TextAlignment.Left);
     assert_eq(f.fill(), ' ');
     assert(!f.alternate());

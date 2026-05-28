@@ -192,7 +192,7 @@ fn test_validate_foundation_neutral_name_neutral_returns_none() {
         Text.from("foundational_axiom"),
         synthetic_span(),
     );
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -201,7 +201,7 @@ fn test_validate_foundation_neutral_name_branded_returns_some() {
         Text.from("diakrisis_substrate_axiom"),
         synthetic_span(),
     );
-    assert(result is Maybe.Some);
+    assert(result is Some);
 }
 
 @test
@@ -210,7 +210,7 @@ fn test_validate_foundation_neutral_name_emits_R1_diagnostic() {
         Text.from("actic_constant"),
         synthetic_span(),
     );
-    assert(result is Maybe.Some);
+    assert(result is Some);
     match result {
         Maybe.Some(d) => {
             assert(d.rule == "R1");
@@ -238,7 +238,7 @@ fn test_meta_classifier_tally_new_empty() {
 fn test_validate_meta_classifier_empty_tally_returns_none() {
     let t = meta_classifier_tally_new();
     let result = validate_meta_classifier_uniqueness(t, synthetic_span());
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -247,7 +247,7 @@ fn test_validate_meta_classifier_single_candidate_returns_none() {
         candidates: List.of(Text.from("Diakrisis")),
     };
     let result = validate_meta_classifier_uniqueness(t, synthetic_span());
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -256,7 +256,7 @@ fn test_validate_meta_classifier_two_candidates_returns_some() {
         candidates: List.of(Text.from("Diakrisis")).append(List.of(Text.from("ACTIC"))),
     };
     let result = validate_meta_classifier_uniqueness(t, synthetic_span());
-    assert(result is Maybe.Some);
+    assert(result is Some);
 }
 
 @test
@@ -292,7 +292,7 @@ fn test_validate_epsilon_eps_prefix_returns_none() {
         Text.from("ε_math"),
         synthetic_span(),
     );
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -301,7 +301,7 @@ fn test_validate_epsilon_epsilon_prefix_returns_none() {
         Text.from("epsilon_compute"),
         synthetic_span(),
     );
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -310,7 +310,7 @@ fn test_validate_epsilon_ordinal_omega_only_returns_none() {
         Text.from("ω"),
         synthetic_span(),
     );
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -319,7 +319,7 @@ fn test_validate_epsilon_ordinal_capital_omega_returns_none() {
         Text.from("Ω"),
         synthetic_span(),
     );
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -328,7 +328,7 @@ fn test_validate_epsilon_ordinal_omega_plus_int_returns_none() {
         Text.from("ω+1"),
         synthetic_span(),
     );
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -337,7 +337,7 @@ fn test_validate_epsilon_ordinal_omega_times_int_returns_none() {
         Text.from("ω·2"),
         synthetic_span(),
     );
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -346,7 +346,7 @@ fn test_validate_epsilon_ordinal_omega_squared_returns_none() {
         Text.from("ω²"),
         synthetic_span(),
     );
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -356,7 +356,7 @@ fn test_validate_epsilon_ordinal_complex_returns_none() {
         Text.from("ω·3+2"),
         synthetic_span(),
     );
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -365,7 +365,7 @@ fn test_validate_epsilon_ordinal_zero_returns_none() {
         Text.from("0"),
         synthetic_span(),
     );
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 @test
@@ -374,7 +374,7 @@ fn test_validate_epsilon_empty_string_emits_R2() {
         Text.from(""),
         synthetic_span(),
     );
-    assert(result is Maybe.Some);
+    assert(result is Some);
     match result {
         Maybe.Some(d) => {
             assert(d.rule == "R2");
@@ -391,7 +391,7 @@ fn test_validate_epsilon_alpha_letter_emits_R2() {
         Text.from("ω+a"),
         synthetic_span(),
     );
-    assert(result is Maybe.Some);
+    assert(result is Some);
 }
 
 @test
@@ -400,7 +400,7 @@ fn test_validate_epsilon_space_emits_R2() {
         Text.from("ω + 1"),
         synthetic_span(),
     );
-    assert(result is Maybe.Some);
+    assert(result is Some);
 }
 
 @test
@@ -410,7 +410,7 @@ fn test_validate_epsilon_minus_sign_emits_R2() {
         Text.from("ω-1"),
         synthetic_span(),
     );
-    assert(result is Maybe.Some);
+    assert(result is Some);
 }
 
 @test
@@ -419,7 +419,7 @@ fn test_validate_epsilon_garbage_emits_R2_with_warning() {
         Text.from("frobnicate"),
         synthetic_span(),
     );
-    assert(result is Maybe.Some);
+    assert(result is Some);
     match result {
         Maybe.Some(d) => {
             assert(d.rule == "R2");

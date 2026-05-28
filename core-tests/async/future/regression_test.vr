@@ -15,7 +15,7 @@ mount core.async.future.{
     ready, pending, lazy, join, select, join3,
 };
 mount core.async.poll.{Poll};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -166,7 +166,7 @@ fn regression_future_select_yields_right_when_second_ready() {
 @test
 fn regression_future_ready_value_field_resolves_under_list_mount() {
     let f: ReadyFuture<Int> = ready(0);
-    assert(f.value is Maybe.Some);
+    assert(f.value is Some);
 }
 
 @test
@@ -174,10 +174,10 @@ fn regression_future_join_result_fields_resolve_under_list_mount() {
     let f1 = ready(1);
     let f2 = ready(2);
     let j: Join2<ReadyFuture<Int>, ReadyFuture<Int>> = join(f1, f2);
-    assert(j.result1 is Maybe.None);
-    assert(j.result2 is Maybe.None);
-    assert(j.fut1 is Maybe.Some);
-    assert(j.fut2 is Maybe.Some);
+    assert(j.result1 is None);
+    assert(j.result2 is None);
+    assert(j.fut1 is Some);
+    assert(j.fut2 is Some);
 }
 
 @test
@@ -185,14 +185,14 @@ fn regression_future_select_fut_fields_resolve_under_list_mount() {
     let f1 = ready(1);
     let f2 = ready(2);
     let s: Select2<ReadyFuture<Int>, ReadyFuture<Int>> = select(f1, f2);
-    assert(s.fut1 is Maybe.Some);
-    assert(s.fut2 is Maybe.Some);
+    assert(s.fut1 is Some);
+    assert(s.fut2 is Some);
 }
 
 @test
 fn regression_future_lazy_f_field_resolves_under_list_mount() {
     let l = lazy(|| 7);
-    assert(l.f is Maybe.Some);
+    assert(l.f is Some);
 }
 
 // =============================================================================

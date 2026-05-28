@@ -81,7 +81,7 @@ fn test_parse_effect_attr_pure() {
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("pure")))),
     );
     let r = parse_effect_attr(&attr);
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
@@ -90,7 +90,7 @@ fn test_parse_effect_attr_io() {
         Text.from("effect"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("io")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.Some);
+    assert(parse_effect_attr(&attr) is Some);
 }
 
 @test
@@ -99,7 +99,7 @@ fn test_parse_effect_attr_state() {
         Text.from("effect"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("state")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.Some);
+    assert(parse_effect_attr(&attr) is Some);
 }
 
 @test
@@ -108,7 +108,7 @@ fn test_parse_effect_attr_async() {
         Text.from("effect"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("async")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.Some);
+    assert(parse_effect_attr(&attr) is Some);
 }
 
 @test
@@ -117,7 +117,7 @@ fn test_parse_effect_attr_exception() {
         Text.from("effect"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("exception")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.Some);
+    assert(parse_effect_attr(&attr) is Some);
 }
 
 @test
@@ -126,7 +126,7 @@ fn test_parse_effect_attr_exn_alias() {
         Text.from("effect"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("exn")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.Some);
+    assert(parse_effect_attr(&attr) is Some);
 }
 
 @test
@@ -135,7 +135,7 @@ fn test_parse_effect_attr_nondet() {
         Text.from("effect"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("nondet")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.Some);
+    assert(parse_effect_attr(&attr) is Some);
 }
 
 @test
@@ -144,7 +144,7 @@ fn test_parse_effect_attr_non_det_alias() {
         Text.from("effect"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("non_det")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.Some);
+    assert(parse_effect_attr(&attr) is Some);
 }
 
 @test
@@ -153,7 +153,7 @@ fn test_parse_effect_attr_quantum() {
         Text.from("effect"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("quantum")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.Some);
+    assert(parse_effect_attr(&attr) is Some);
 }
 
 // =============================================================================
@@ -166,13 +166,13 @@ fn test_parse_effect_attr_wrong_name_rejected() {
         Text.from("not_effect"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("pure")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.None);
+    assert(parse_effect_attr(&attr) is None);
 }
 
 @test
 fn test_parse_effect_attr_no_args_rejected() {
     let attr = attr_with(Text.from("effect"), List.new());
-    assert(parse_effect_attr(&attr) is Maybe.None);
+    assert(parse_effect_attr(&attr) is None);
 }
 
 @test
@@ -181,7 +181,7 @@ fn test_parse_effect_attr_string_arg_rejected() {
         Text.from("effect"),
         List.of(positional_arg(MetaAttributeValue.String(Text.from("pure")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.None);
+    assert(parse_effect_attr(&attr) is None);
 }
 
 @test
@@ -190,7 +190,7 @@ fn test_parse_effect_attr_unknown_ident_rejected() {
         Text.from("effect"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("frobnicate")))),
     );
-    assert(parse_effect_attr(&attr) is Maybe.None);
+    assert(parse_effect_attr(&attr) is None);
 }
 
 @test
@@ -203,7 +203,7 @@ fn test_parse_effect_attr_named_arg_rejected() {
             MetaAttributeValue.Ident(Text.from("pure")),
         )),
     );
-    assert(parse_effect_attr(&attr) is Maybe.None);
+    assert(parse_effect_attr(&attr) is None);
 }
 
 // =============================================================================
@@ -216,7 +216,7 @@ fn test_parse_infinity_category_finite_zero() {
         Text.from("infinity_category"),
         List.of(positional_arg(MetaAttributeValue.Int(0))),
     );
-    assert(parse_infinity_category(&attr) is Maybe.Some);
+    assert(parse_infinity_category(&attr) is Some);
 }
 
 @test
@@ -225,7 +225,7 @@ fn test_parse_infinity_category_finite_two() {
         Text.from("infinity_category"),
         List.of(positional_arg(MetaAttributeValue.Int(2))),
     );
-    assert(parse_infinity_category(&attr) is Maybe.Some);
+    assert(parse_infinity_category(&attr) is Some);
 }
 
 @test
@@ -234,7 +234,7 @@ fn test_parse_infinity_category_omega() {
         Text.from("infinity_category"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("omega")))),
     );
-    assert(parse_infinity_category(&attr) is Maybe.Some);
+    assert(parse_infinity_category(&attr) is Some);
 }
 
 @test
@@ -243,7 +243,7 @@ fn test_parse_infinity_category_omega_omega() {
         Text.from("infinity_category"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("omega_omega")))),
     );
-    assert(parse_infinity_category(&attr) is Maybe.Some);
+    assert(parse_infinity_category(&attr) is Some);
 }
 
 @test
@@ -252,7 +252,7 @@ fn test_parse_infinity_category_negative_int_rejected() {
         Text.from("infinity_category"),
         List.of(positional_arg(MetaAttributeValue.Int(-1))),
     );
-    assert(parse_infinity_category(&attr) is Maybe.None);
+    assert(parse_infinity_category(&attr) is None);
 }
 
 @test
@@ -261,7 +261,7 @@ fn test_parse_infinity_category_unknown_ident_rejected() {
         Text.from("infinity_category"),
         List.of(positional_arg(MetaAttributeValue.Ident(Text.from("alpha")))),
     );
-    assert(parse_infinity_category(&attr) is Maybe.None);
+    assert(parse_infinity_category(&attr) is None);
 }
 
 @test
@@ -270,13 +270,13 @@ fn test_parse_infinity_category_wrong_name_rejected() {
         Text.from("category"),
         List.of(positional_arg(MetaAttributeValue.Int(1))),
     );
-    assert(parse_infinity_category(&attr) is Maybe.None);
+    assert(parse_infinity_category(&attr) is None);
 }
 
 @test
 fn test_parse_infinity_category_no_args_rejected() {
     let attr = attr_with(Text.from("infinity_category"), List.new());
-    assert(parse_infinity_category(&attr) is Maybe.None);
+    assert(parse_infinity_category(&attr) is None);
 }
 
 // =============================================================================
@@ -290,7 +290,7 @@ fn test_parse_autopoietic_both_present() {
         List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_math"))))
             .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(3)))),
     );
-    assert(parse_autopoietic(&attr) is Maybe.Some);
+    assert(parse_autopoietic(&attr) is Some);
 }
 
 @test
@@ -301,7 +301,7 @@ fn test_parse_autopoietic_order_independent() {
         List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(5)))
             .append(List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_compute"))))),
     );
-    assert(parse_autopoietic(&attr) is Maybe.Some);
+    assert(parse_autopoietic(&attr) is Some);
 }
 
 @test
@@ -310,7 +310,7 @@ fn test_parse_autopoietic_missing_epsilon_rejected() {
         Text.from("autopoietic"),
         List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(2))),
     );
-    assert(parse_autopoietic(&attr) is Maybe.None);
+    assert(parse_autopoietic(&attr) is None);
 }
 
 @test
@@ -319,7 +319,7 @@ fn test_parse_autopoietic_missing_depth_rejected() {
         Text.from("autopoietic"),
         List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_math")))),
     );
-    assert(parse_autopoietic(&attr) is Maybe.None);
+    assert(parse_autopoietic(&attr) is None);
 }
 
 @test
@@ -329,7 +329,7 @@ fn test_parse_autopoietic_negative_depth_rejected() {
         List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_math"))))
             .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(-1)))),
     );
-    assert(parse_autopoietic(&attr) is Maybe.None);
+    assert(parse_autopoietic(&attr) is None);
 }
 
 @test
@@ -339,7 +339,7 @@ fn test_parse_autopoietic_wrong_name_rejected() {
         List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("x"))))
             .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(1)))),
     );
-    assert(parse_autopoietic(&attr) is Maybe.None);
+    assert(parse_autopoietic(&attr) is None);
 }
 
 @test
@@ -350,7 +350,7 @@ fn test_parse_autopoietic_epsilon_int_value_rejected() {
         List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.Int(42)))
             .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(1)))),
     );
-    assert(parse_autopoietic(&attr) is Maybe.None);
+    assert(parse_autopoietic(&attr) is None);
 }
 
 // =============================================================================
@@ -360,7 +360,7 @@ fn test_parse_autopoietic_epsilon_int_value_rejected() {
 @test
 fn test_parse_ludic_design_zero_args() {
     let attr = simple_attr(Text.from("ludic_design"));
-    assert(parse_ludic_design(&attr) is Maybe.Some);
+    assert(parse_ludic_design(&attr) is Some);
 }
 
 @test
@@ -369,13 +369,13 @@ fn test_parse_ludic_design_with_args_rejected() {
         Text.from("ludic_design"),
         List.of(positional_arg(MetaAttributeValue.Int(1))),
     );
-    assert(parse_ludic_design(&attr) is Maybe.None);
+    assert(parse_ludic_design(&attr) is None);
 }
 
 @test
 fn test_parse_ludic_design_wrong_name_rejected() {
     let attr = simple_attr(Text.from("ludic"));
-    assert(parse_ludic_design(&attr) is Maybe.None);
+    assert(parse_ludic_design(&attr) is None);
 }
 
 // =============================================================================
@@ -385,7 +385,7 @@ fn test_parse_ludic_design_wrong_name_rejected() {
 @test
 fn test_parse_cut_elimination_zero_args_uses_default() {
     let attr = simple_attr(Text.from("cut_elimination"));
-    assert(parse_cut_elimination(&attr) is Maybe.Some);
+    assert(parse_cut_elimination(&attr) is Some);
 }
 
 @test
@@ -394,7 +394,7 @@ fn test_parse_cut_elimination_bare_int_form() {
         Text.from("cut_elimination"),
         List.of(positional_arg(MetaAttributeValue.Int(500))),
     );
-    assert(parse_cut_elimination(&attr) is Maybe.Some);
+    assert(parse_cut_elimination(&attr) is Some);
 }
 
 @test
@@ -403,7 +403,7 @@ fn test_parse_cut_elimination_named_arg_form() {
         Text.from("cut_elimination"),
         List.of(named_arg(Text.from("bound"), MetaAttributeValue.Int(750))),
     );
-    assert(parse_cut_elimination(&attr) is Maybe.Some);
+    assert(parse_cut_elimination(&attr) is Some);
 }
 
 @test
@@ -412,7 +412,7 @@ fn test_parse_cut_elimination_negative_int_rejected() {
         Text.from("cut_elimination"),
         List.of(positional_arg(MetaAttributeValue.Int(-1))),
     );
-    assert(parse_cut_elimination(&attr) is Maybe.None);
+    assert(parse_cut_elimination(&attr) is None);
 }
 
 @test
@@ -421,7 +421,7 @@ fn test_parse_cut_elimination_negative_named_arg_rejected() {
         Text.from("cut_elimination"),
         List.of(named_arg(Text.from("bound"), MetaAttributeValue.Int(-100))),
     );
-    assert(parse_cut_elimination(&attr) is Maybe.None);
+    assert(parse_cut_elimination(&attr) is None);
 }
 
 @test
@@ -430,7 +430,7 @@ fn test_parse_cut_elimination_wrong_named_key_rejected() {
         Text.from("cut_elimination"),
         List.of(named_arg(Text.from("limit"), MetaAttributeValue.Int(100))),
     );
-    assert(parse_cut_elimination(&attr) is Maybe.None);
+    assert(parse_cut_elimination(&attr) is None);
 }
 
 @test
@@ -439,7 +439,7 @@ fn test_parse_cut_elimination_named_string_value_rejected() {
         Text.from("cut_elimination"),
         List.of(named_arg(Text.from("bound"), MetaAttributeValue.String(Text.from("100")))),
     );
-    assert(parse_cut_elimination(&attr) is Maybe.None);
+    assert(parse_cut_elimination(&attr) is None);
 }
 
 @test
@@ -449,11 +449,11 @@ fn test_parse_cut_elimination_two_args_rejected() {
         List.of(positional_arg(MetaAttributeValue.Int(1)))
             .append(List.of(positional_arg(MetaAttributeValue.Int(2)))),
     );
-    assert(parse_cut_elimination(&attr) is Maybe.None);
+    assert(parse_cut_elimination(&attr) is None);
 }
 
 @test
 fn test_parse_cut_elimination_wrong_attr_name_rejected() {
     let attr = simple_attr(Text.from("elim"));
-    assert(parse_cut_elimination(&attr) is Maybe.None);
+    assert(parse_cut_elimination(&attr) is None);
 }

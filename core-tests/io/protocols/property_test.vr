@@ -12,7 +12,7 @@
 // =============================================================================
 
 mount core.io.protocols.{StreamError, IoErrorKind, IoResult, SeekFrom};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -139,7 +139,7 @@ fn law_stream_error_with_message_kind_round_trip_exhaustive() {
 }
 
 // =============================================================================
-// §G — StreamError.new(k).message() is Maybe.None
+// §G — StreamError.new(k).message() is None
 // =============================================================================
 
 @test

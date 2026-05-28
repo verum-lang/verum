@@ -16,7 +16,7 @@ mount core.proof.pcc.{
     goal_hash, proof_certificate, empty_bundle, bundle_add,
     bundle_remove, bundle_clear, bundle_lookup, bundle_size,
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // §1 bundle_size invariant

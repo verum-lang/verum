@@ -18,7 +18,7 @@
 // =============================================================================
 
 mount core.async.poll.{Poll};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================

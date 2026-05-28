@@ -8,7 +8,7 @@
 //        nested Future chains)
 //   §B — IntrinsicsYieldNow inside a manual poll-loop, modelling the
 //        two-step cooperative-yield contract
-//   §C — Executor.current's "is Maybe.None outside runtime" plus a Maybe
+//   §C — Executor.current's "is None outside runtime" plus a Maybe
 //        chain conversion
 // =============================================================================
 
@@ -18,7 +18,7 @@ mount core.async.intrinsics.{
 mount core.async.poll.{Poll};
 mount core.async.future.{ready, ReadyFuture};
 mount core.async.waker.{Context, noop_waker};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================

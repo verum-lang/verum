@@ -17,7 +17,7 @@ mount core.net.content_negotiation.{
     CodedPreference
 };
 mount core.collections.List;
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // CONNEG-1 — parse_* / select_* SIGSEGV during precompile cascade

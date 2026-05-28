@@ -11,7 +11,7 @@
 
 mount core.async.backoff.{Backoff, BackoffStrategy};
 mount core.time.duration.{Duration};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // §A  `core.sys.common.random_bytes` not registered in VBC dispatch
@@ -122,7 +122,7 @@ fn regression_backoff_max_attempts_bounds_retries() {
     let _ = b.next_delay();
     let _ = b.next_delay();
     let _ = b.next_delay();
-    assert(b.next_delay() is Maybe.None);
+    assert(b.next_delay() is None);
 }
 
 @test

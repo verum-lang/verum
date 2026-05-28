@@ -15,7 +15,7 @@
 // =============================================================================
 
 mount core.diagnostics.{PanicReport, PanicInfo, Location};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // -----------------------------------------------------------------------------
 // Helper — fresh PanicInfo (avoid clone-twice in tests).

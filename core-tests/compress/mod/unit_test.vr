@@ -13,7 +13,7 @@
 // =============================================================================
 
 mount core.compress.{Algorithm, CompressError};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: Algorithm variant construction

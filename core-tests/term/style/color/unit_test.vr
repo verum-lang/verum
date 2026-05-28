@@ -14,7 +14,7 @@
 // =============================================================================
 
 mount core.term.style.color.{Rgb, Hsl, Color, Lab};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: Rgb.new

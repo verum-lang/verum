@@ -24,7 +24,7 @@ mount core.text.format.{
     TextAlignment, Sign, FormatSpec,
     format_debug, format_display,
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -103,8 +103,8 @@ fn property_format_spec_default_is_zero_pad_none() {
     assert_eq(d.fill, ' ');
     assert(d.align is TextAlignment.Left);
     assert(d.sign is Sign.Minus);
-    assert(d.width is Maybe.None);
-    assert(d.precision is Maybe.None);
+    assert(d.width is None);
+    assert(d.precision is None);
     assert(!d.alternate);
 }
 

@@ -20,7 +20,7 @@
 
 mount core.context.standard.{ContextLogLevel, ContextLogRecord, Row, QueryResult, AuthUser};
 mount core.collections.list.List;
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: ContextLogLevel variant construction

@@ -98,14 +98,14 @@ fn test_rwlock_poison_clear_cycle_preserves_terminal_state() {
 @test
 fn test_rwlock_lock_result_ok_constructs() {
     let r: LockResult<Int> = Result.Ok(42);
-    assert(r is Result.Ok);
+    assert(r is Ok);
 }
 
 @test
 fn test_rwlock_lock_result_err_constructs() {
     let pe: PoisonError<Int> = PoisonError { guard: 99 };
     let r: LockResult<Int> = Result.Err(pe);
-    assert(r is Result.Err);
+    assert(r is Err);
 }
 
 @test

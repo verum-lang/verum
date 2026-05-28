@@ -24,7 +24,7 @@
 // =============================================================================
 
 mount core.text.char.{GeneralCategory, AnyChar, CharRange, char_any_of, any_of, char_range};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // -----------------------------------------------------------------------------

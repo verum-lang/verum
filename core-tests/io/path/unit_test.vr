@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.io.path.{Path, PathBuf, Component, MAIN_SEPARATOR};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -234,7 +234,7 @@ fn test_path_extension_no_dot_is_none() {
 
 @test
 fn test_path_extension_leading_dot_is_none() {
-    // ".hidden" → extension is Maybe.None because dot is at position 0
+    // ".hidden" → extension is None because dot is at position 0
     let p = Path.new(&Text.from("/home/.hidden"));
     assert(p.extension().is_none());
 }

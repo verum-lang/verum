@@ -20,7 +20,7 @@ fn pass_guard_ring_node_for_key_empty_none() {
     let r = ConsistentHashRing.new();
     let k: [Byte; 4] = [1, 2, 3, 4];
     let n: Maybe<Text> = r.node_for_key(&k);
-    assert(n is Maybe.None);
+    assert(n is None);
 }
 
 @test

@@ -24,7 +24,7 @@
 // =============================================================================
 
 mount core.diagnostics.{PanicReport, PanicInfo, Location};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: PanicReport.from_info — minimal construction

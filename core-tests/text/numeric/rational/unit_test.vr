@@ -9,7 +9,7 @@
 mount core.text.{Text};
 mount core.text.numeric.rational.{Rational, RationalError, parse_rational};
 mount core.text.numeric.bigint.{BigInt};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================

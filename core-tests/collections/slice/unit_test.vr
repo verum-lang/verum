@@ -68,7 +68,7 @@ fn test_slice_first_none_on_empty() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
     let f: Maybe<&Int> = s.first();
-    assert(f is Maybe.None);
+    assert(f is None);
 }
 
 @test
@@ -83,7 +83,7 @@ fn test_slice_last_none_on_empty() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
     let l: Maybe<&Int> = s.last();
-    assert(l is Maybe.None);
+    assert(l is None);
 }
 
 // =============================================================================
@@ -104,7 +104,7 @@ fn test_slice_get_negative_returns_none() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
     let v: Maybe<&Int> = s.get(-1);
-    assert(v is Maybe.None);
+    assert(v is None);
 }
 
 @test
@@ -112,7 +112,7 @@ fn test_slice_get_past_end_returns_none() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
     let v: Maybe<&Int> = s.get(99);
-    assert(v is Maybe.None);
+    assert(v is None);
 }
 
 @test
@@ -120,7 +120,7 @@ fn test_slice_get_on_empty_returns_none() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
     let v: Maybe<&Int> = s.get(0);
-    assert(v is Maybe.None);
+    assert(v is None);
 }
 
 // =============================================================================
@@ -258,7 +258,7 @@ fn test_slice_min_empty_none() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
     let m: Maybe<&Int> = s.min();
-    assert(m is Maybe.None);
+    assert(m is None);
 }
 
 @test
@@ -266,7 +266,7 @@ fn test_slice_max_empty_none() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
     let m: Maybe<&Int> = s.max();
-    assert(m is Maybe.None);
+    assert(m is None);
 }
 
 // =============================================================================
@@ -294,7 +294,7 @@ fn test_slice_iter_empty() {
     let s: &[Int] = xs.as_slice();
     let mut iter = s.iter();
     let n: Maybe<&Int> = iter.next();
-    assert(n is Maybe.None);
+    assert(n is None);
 }
 
 @test

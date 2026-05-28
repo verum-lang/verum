@@ -208,7 +208,7 @@ implement ErrorSource for MyError {
 
 implement ErrorProtocol for MyError {
     // message() default is description(); we accept default.
-    // backtrace() default is Maybe.None; we accept default.
+    // backtrace() default is None; we accept default.
 }
 
 @test

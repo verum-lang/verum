@@ -12,7 +12,7 @@ fn int_ring_empty_read_only_ops_compose() {
     let key: [Byte; 4] = [1, 2, 3, 4];
 
     let n: Maybe<Text> = r.node_for_key(&key);
-    assert(n is Maybe.None);
+    assert(n is None);
 
     let nodes = r.nodes_for_key(&key, 3);
     assert_eq(nodes.len(), 0);

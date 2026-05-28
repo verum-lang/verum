@@ -26,7 +26,7 @@ fn test_ring_with_virtual_nodes_zero_nodes() {
 }
 
 // =============================================================================
-// Section 2: node_for_key on empty ring is Maybe.None
+// Section 2: node_for_key on empty ring is None
 // =============================================================================
 
 @test
@@ -34,7 +34,7 @@ fn test_ring_node_for_key_empty_is_none() {
     let r = ConsistentHashRing.new();
     let key: [Byte; 4] = [1, 2, 3, 4];
     let n: Maybe<Text> = r.node_for_key(&key);
-    assert(n is Maybe.None);
+    assert(n is None);
 }
 
 @test
@@ -85,7 +85,7 @@ fn test_ring_node_for_key_short_key_empty_is_none() {
     let r = ConsistentHashRing.new();
     let k1: [Byte; 1] = [0];
     let n: Maybe<Text> = r.node_for_key(&k1);
-    assert(n is Maybe.None);
+    assert(n is None);
 }
 
 @test
@@ -93,7 +93,7 @@ fn test_ring_node_for_key_long_key_empty_is_none() {
     let r = ConsistentHashRing.new();
     let k: [Byte; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let n: Maybe<Text> = r.node_for_key(&k);
-    assert(n is Maybe.None);
+    assert(n is None);
 }
 
 @test

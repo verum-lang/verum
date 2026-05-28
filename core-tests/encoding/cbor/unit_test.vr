@@ -224,7 +224,7 @@ fn test_cbor_round_trip_uint_zero() {
     let v: CborValue = CborValue.CborUint(0_u64);
     let bytes = encode(&v);
     let decoded = decode(bytes.as_slice());
-    assert(decoded is Result.Ok);
+    assert(decoded is Ok);
 }
 
 // Un-@ignore'd 2026-05-28 — passes under --interp.
@@ -235,7 +235,7 @@ fn test_cbor_round_trip_uint_small() {
     // RFC 8949 §3.1: 0..23 encodes in a single byte
     assert(bytes.len() == 1);
     let decoded = decode(bytes.as_slice());
-    assert(decoded is Result.Ok);
+    assert(decoded is Ok);
 }
 
 // Un-@ignore'd 2026-05-28 — passes under --interp.
@@ -246,7 +246,7 @@ fn test_cbor_round_trip_null() {
     // RFC 8949: null encodes as 0xF6 (1 byte)
     assert(bytes.len() == 1);
     let decoded = decode(bytes.as_slice());
-    assert(decoded is Result.Ok);
+    assert(decoded is Ok);
 }
 
 // Un-@ignore'd 2026-05-28 — passes under --interp.
@@ -256,7 +256,7 @@ fn test_cbor_round_trip_bool_true() {
     let bytes = encode(&v);
     assert(bytes.len() == 1);
     let decoded = decode(bytes.as_slice());
-    assert(decoded is Result.Ok);
+    assert(decoded is Ok);
 }
 
 // Un-@ignore'd 2026-05-28 — passes under --interp.
@@ -266,7 +266,7 @@ fn test_cbor_round_trip_bool_false() {
     let bytes = encode(&v);
     assert(bytes.len() == 1);
     let decoded = decode(bytes.as_slice());
-    assert(decoded is Result.Ok);
+    assert(decoded is Ok);
 }
 
 @ignore
@@ -275,7 +275,7 @@ fn test_cbor_round_trip_text_empty() {
     let v: CborValue = CborValue.CborText(Text.from(""));
     let bytes = encode(&v);
     let decoded = decode(bytes.as_slice());
-    assert(decoded is Result.Ok);
+    assert(decoded is Ok);
 }
 
 @ignore
@@ -284,7 +284,7 @@ fn test_cbor_round_trip_text_short() {
     let v: CborValue = CborValue.CborText(Text.from("ok"));
     let bytes = encode(&v);
     let decoded = decode(bytes.as_slice());
-    assert(decoded is Result.Ok);
+    assert(decoded is Ok);
 }
 
 // Un-@ignore'd 2026-05-28 — passes under --interp.
@@ -293,7 +293,7 @@ fn test_cbor_round_trip_array_empty() {
     let v: CborValue = CborValue.CborArray([]);
     let bytes = encode(&v);
     let decoded = decode(bytes.as_slice());
-    assert(decoded is Result.Ok);
+    assert(decoded is Ok);
 }
 
 // =============================================================================
@@ -303,7 +303,7 @@ fn test_cbor_round_trip_array_empty() {
 @test
 fn test_cbor_decode_empty_is_truncated() {
     let r = decode([].as_slice());
-    assert(r is Result.Err);
+    assert(r is Err);
 }
 
 // =============================================================================
