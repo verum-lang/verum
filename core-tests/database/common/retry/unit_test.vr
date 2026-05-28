@@ -1,0 +1,71 @@
+// =============================================================================
+// core-tests/database/common/retry/unit_test.vr
+// =============================================================================
+//
+// `core/database/common/retry.vr` — database retry policy.
+//
+// Note: RetryPolicy 5-field record allocation is broken — codegen
+// allocates only 32 bytes (4 slots) for the 5-field type, so even
+// single-field reads of fields 0..3 fail under multi-test conditions.
+// Pinned at audit.md §A pending the field-layout codegen fix.
+// =============================================================================
+
+mount core.database.common.retry.RetryAttemptInfo;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: RetryAttemptInfo record — 3-field surface, layout safe
+// =============================================================================
+
+@test
+fn test_retry_attempt_info_construction() {
+    let info: RetryAttemptInfo = RetryAttemptInfo {
+        attempt: 3,
+        last_error: "ConnectionReset".to_text(),
+        next_delay_ms: 80,
+    };
+    assert_eq(info.attempt, 3);
+    assert_eq(info.last_error, "ConnectionReset");
+    assert_eq(info.next_delay_ms, 80);
+}
+
+@test
+fn test_retry_attempt_info_zeroed() {
+    let info: RetryAttemptInfo = RetryAttemptInfo {
+        attempt: 0,
+        last_error: "".to_text(),
+        next_delay_ms: 0,
+    };
+    assert_eq(info.attempt, 0);
+    assert_eq(info.next_delay_ms, 0);
+}
+
+@test
+fn test_retry_attempt_info_field_independence() {
+    let a: RetryAttemptInfo = RetryAttemptInfo {
+        attempt: 1,
+        last_error: "err-a".to_text(),
+        next_delay_ms: 10,
+    };
+    let b: RetryAttemptInfo = RetryAttemptInfo {
+        attempt: 2,
+        last_error: "err-b".to_text(),
+        next_delay_ms: 20,
+    };
+    assert_eq(a.attempt, 1);
+    assert_eq(b.attempt, 2);
+}
+
+@test
+fn test_retry_attempt_info_high_attempt_count() {
+    let info: RetryAttemptInfo = RetryAttemptInfo {
+        attempt: 100,
+        last_error: "DeadlineExceeded".to_text(),
+        next_delay_ms: 1000,
+    };
+    assert_eq(info.attempt, 100);
+    assert_eq(info.next_delay_ms, 1000);
+}
+
+fn main() {}
