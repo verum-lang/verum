@@ -34,7 +34,7 @@ fn regression_buffer_cursor_write_then_read_round_trip() {
     assert_eq(out[3], 4 as Byte);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp post round-13b/14b.
 @test
 fn regression_buffer_cursor_seek_start_returns_pos() {
     let data: List<Byte> = [1, 2, 3, 4, 5];
@@ -44,7 +44,7 @@ fn regression_buffer_cursor_seek_start_returns_pos() {
     assert_eq(c.position(), 3);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_buffer_cursor_seek_negative_returns_err() {
     let data: List<Byte> = [1, 2, 3];
