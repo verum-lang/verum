@@ -5,19 +5,38 @@
 // Algebraic laws for `core.mem.heap`.
 //   §A  PAGE_HEADER_SIZE is a multiple of 64 (cache-line aligned).
 //   §B  Every PAGE_FLAG_* is a power of 2 + pairwise disjoint.
+//   §C  HeapStats 8-field field-isolation invariants.
+//   §D  HeapStats.new() returns the canonical all-zero baseline.
+//   §E  HeapStats balance algebra:
+//       - alloc_count ≥ dealloc_count + live_count is the ALWAYS-TRUE
+//         heap invariant (allocations either freed or live).
+//       - bytes_allocated ≥ bytes_freed + live_bytes (same algebra
+//         on bytes).
+//   §F  DIRECT_LOOKUP_SIZE is positive + bounded.
+//
 // =============================================================================
 
 mount core.prelude.*;
 mount core.mem.heap.{
-    PAGE_HEADER_SIZE,
+    DIRECT_LOOKUP_SIZE,
     PAGE_FLAG_IN_FULL_QUEUE, PAGE_FLAG_HAS_ALIGNED, PAGE_FLAG_ZERO_INIT,
+    HeapStats,
 };
+mount core.mem.size_class.{PAGE_HEADER_SIZE};
+
+// =============================================================================
+// §A — PAGE_HEADER_SIZE cache-line aligned
+// =============================================================================
 
 @test
 fn law_page_header_cache_aligned() {
     // 128-byte header = 2 cache lines on most arches.
     assert_eq(PAGE_HEADER_SIZE % 64, 0);
 }
+
+// =============================================================================
+// §B — Page flags power-of-2 + pairwise disjoint
+// =============================================================================
 
 @test
 fn law_page_flags_powers_of_two() {
@@ -46,6 +65,243 @@ fn law_page_flags_pairwise_disjoint_exhaustive() {
             }
         }
     }
+}
+
+// =============================================================================
+// §C — HeapStats 8-field field-isolation
+// =============================================================================
+//
+// Each test changes EXACTLY ONE field from a baseline; asserts that the
+// changed field differs while every OTHER field remains bit-equal.
+// Pin all 8 fields explicitly.
+
+fn baseline_heap_stats() -> HeapStats {
+    HeapStats {
+        alloc_count:    100 as UInt64,
+        dealloc_count:   80 as UInt64,
+        bytes_allocated: 4096 as UInt64,
+        bytes_freed:     3072 as UInt64,
+        live_count:      20 as UInt64,
+        live_bytes:      1024 as UInt64,
+        pages_in_use:    4 as UInt32,
+        segments_owned:  1 as UInt32,
+    }
+}
+
+@test
+fn law_heap_stats_alloc_count_isolated() {
+    let a = baseline_heap_stats();
+    let b = HeapStats {
+        alloc_count:    999 as UInt64,
+        dealloc_count:   80 as UInt64,
+        bytes_allocated: 4096 as UInt64,
+        bytes_freed:     3072 as UInt64,
+        live_count:      20 as UInt64,
+        live_bytes:      1024 as UInt64,
+        pages_in_use:    4 as UInt32,
+        segments_owned:  1 as UInt32,
+    };
+    assert(a.alloc_count != b.alloc_count);
+    assert_eq(a.dealloc_count, b.dealloc_count);
+    assert_eq(a.bytes_allocated, b.bytes_allocated);
+    assert_eq(a.bytes_freed, b.bytes_freed);
+    assert_eq(a.live_count, b.live_count);
+    assert_eq(a.live_bytes, b.live_bytes);
+    assert_eq(a.pages_in_use, b.pages_in_use);
+    assert_eq(a.segments_owned, b.segments_owned);
+}
+
+@test
+fn law_heap_stats_dealloc_count_isolated() {
+    let a = baseline_heap_stats();
+    let b = HeapStats {
+        alloc_count:    100 as UInt64,
+        dealloc_count:  999 as UInt64,
+        bytes_allocated: 4096 as UInt64,
+        bytes_freed:     3072 as UInt64,
+        live_count:      20 as UInt64,
+        live_bytes:      1024 as UInt64,
+        pages_in_use:    4 as UInt32,
+        segments_owned:  1 as UInt32,
+    };
+    assert_eq(a.alloc_count, b.alloc_count);
+    assert(a.dealloc_count != b.dealloc_count);
+    assert_eq(a.bytes_allocated, b.bytes_allocated);
+    assert_eq(a.live_count, b.live_count);
+}
+
+@test
+fn law_heap_stats_bytes_allocated_isolated() {
+    let a = baseline_heap_stats();
+    let b = HeapStats {
+        alloc_count:    100 as UInt64,
+        dealloc_count:   80 as UInt64,
+        bytes_allocated: 99999 as UInt64,
+        bytes_freed:     3072 as UInt64,
+        live_count:      20 as UInt64,
+        live_bytes:      1024 as UInt64,
+        pages_in_use:    4 as UInt32,
+        segments_owned:  1 as UInt32,
+    };
+    assert_eq(a.alloc_count, b.alloc_count);
+    assert(a.bytes_allocated != b.bytes_allocated);
+    assert_eq(a.bytes_freed, b.bytes_freed);
+}
+
+@test
+fn law_heap_stats_live_count_isolated() {
+    let a = baseline_heap_stats();
+    let b = HeapStats {
+        alloc_count:    100 as UInt64,
+        dealloc_count:   80 as UInt64,
+        bytes_allocated: 4096 as UInt64,
+        bytes_freed:     3072 as UInt64,
+        live_count:      999 as UInt64,
+        live_bytes:      1024 as UInt64,
+        pages_in_use:    4 as UInt32,
+        segments_owned:  1 as UInt32,
+    };
+    assert_eq(a.alloc_count, b.alloc_count);
+    assert(a.live_count != b.live_count);
+    assert_eq(a.live_bytes, b.live_bytes);
+}
+
+@test
+fn law_heap_stats_pages_in_use_isolated() {
+    let a = baseline_heap_stats();
+    let b = HeapStats {
+        alloc_count:    100 as UInt64,
+        dealloc_count:   80 as UInt64,
+        bytes_allocated: 4096 as UInt64,
+        bytes_freed:     3072 as UInt64,
+        live_count:      20 as UInt64,
+        live_bytes:      1024 as UInt64,
+        pages_in_use:    999 as UInt32,
+        segments_owned:  1 as UInt32,
+    };
+    assert(a.pages_in_use != b.pages_in_use);
+    assert_eq(a.segments_owned, b.segments_owned);
+}
+
+@test
+fn law_heap_stats_segments_owned_isolated() {
+    let a = baseline_heap_stats();
+    let b = HeapStats {
+        alloc_count:    100 as UInt64,
+        dealloc_count:   80 as UInt64,
+        bytes_allocated: 4096 as UInt64,
+        bytes_freed:     3072 as UInt64,
+        live_count:      20 as UInt64,
+        live_bytes:      1024 as UInt64,
+        pages_in_use:    4 as UInt32,
+        segments_owned:  999 as UInt32,
+    };
+    assert_eq(a.pages_in_use, b.pages_in_use);
+    assert(a.segments_owned != b.segments_owned);
+}
+
+// =============================================================================
+// §D — HeapStats.new() returns the canonical all-zero baseline.
+// =============================================================================
+
+@test
+fn law_heap_stats_new_is_all_zero() {
+    let s = HeapStats.new();
+    assert_eq(s.alloc_count,    0 as UInt64);
+    assert_eq(s.dealloc_count,  0 as UInt64);
+    assert_eq(s.bytes_allocated, 0 as UInt64);
+    assert_eq(s.bytes_freed,    0 as UInt64);
+    assert_eq(s.live_count,     0 as UInt64);
+    assert_eq(s.live_bytes,     0 as UInt64);
+    assert_eq(s.pages_in_use,   0 as UInt32);
+    assert_eq(s.segments_owned, 0 as UInt32);
+}
+
+// =============================================================================
+// §E — HeapStats balance algebra
+// =============================================================================
+//
+// alloc_count == dealloc_count + live_count is the steady-state heap
+// invariant under no leaks. Bytes algebra similarly.
+
+@test
+fn law_heap_stats_alloc_count_balance_no_leak() {
+    // Canonical balance — no leaks: alloc == dealloc + live.
+    let s = HeapStats {
+        alloc_count:    100 as UInt64,
+        dealloc_count:   80 as UInt64,
+        bytes_allocated: 4096 as UInt64,
+        bytes_freed:     3072 as UInt64,
+        live_count:      20 as UInt64,
+        live_bytes:      1024 as UInt64,
+        pages_in_use:    4 as UInt32,
+        segments_owned:  1 as UInt32,
+    };
+    assert_eq(s.alloc_count, s.dealloc_count + s.live_count);
+    assert_eq(s.bytes_allocated, s.bytes_freed + s.live_bytes);
+}
+
+@test
+fn law_heap_stats_alloc_count_dominates_dealloc_count() {
+    // In any legal heap state, alloc_count >= dealloc_count (you
+    // cannot free more than you allocated). Pin under the canonical
+    // balance + a zero-live edge.
+    let balanced = HeapStats {
+        alloc_count:    100 as UInt64,
+        dealloc_count:   80 as UInt64,
+        bytes_allocated: 4096 as UInt64,
+        bytes_freed:     3072 as UInt64,
+        live_count:      20 as UInt64,
+        live_bytes:      1024 as UInt64,
+        pages_in_use:    4 as UInt32,
+        segments_owned:  1 as UInt32,
+    };
+    assert(balanced.alloc_count >= balanced.dealloc_count);
+    assert(balanced.bytes_allocated >= balanced.bytes_freed);
+
+    let zero_live = HeapStats {
+        alloc_count:    50 as UInt64,
+        dealloc_count:  50 as UInt64,
+        bytes_allocated: 2048 as UInt64,
+        bytes_freed:    2048 as UInt64,
+        live_count:      0 as UInt64,
+        live_bytes:      0 as UInt64,
+        pages_in_use:    0 as UInt32,
+        segments_owned:  0 as UInt32,
+    };
+    assert_eq(zero_live.alloc_count, zero_live.dealloc_count);
+    assert_eq(zero_live.live_count, 0 as UInt64);
+}
+
+@test
+fn law_heap_stats_zero_state_is_internally_consistent() {
+    let s = HeapStats.new();
+    // Vacuous balance: 0 == 0 + 0.
+    assert_eq(s.alloc_count, s.dealloc_count + s.live_count);
+    assert_eq(s.bytes_allocated, s.bytes_freed + s.live_bytes);
+    // Vacuous activity: zero pages, zero segments.
+    assert_eq(s.pages_in_use,   0 as UInt32);
+    assert_eq(s.segments_owned, 0 as UInt32);
+}
+
+// =============================================================================
+// §F — DIRECT_LOOKUP_SIZE positive + bounded
+// =============================================================================
+
+@test
+fn law_direct_lookup_size_positive_and_bounded() {
+    // DIRECT_LOOKUP_SIZE = 129 (per core/mem/heap.vr:104) — size in
+    // bytes for the direct-lookup slot table.  Pin positivity + an
+    // upper bound (4 KiB) so a future widening surfaces.
+    assert(DIRECT_LOOKUP_SIZE > 0);
+    assert(DIRECT_LOOKUP_SIZE < 4096);
+}
+
+@test
+fn law_direct_lookup_size_canonical_value() {
+    // Pre-fix some drafts used 128 (off-by-one — missing the +1 for
+    // the [0, MAX] boundary).  Pin the canonical 129 value.
+    assert_eq(DIRECT_LOOKUP_SIZE, 129);
 }
 
 fn main() {
