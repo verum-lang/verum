@@ -1,0 +1,54 @@
+// =============================================================================
+// core-tests/net/tls13/record/content_type/unit_test.vr — RFC 8446 §5.1
+// =============================================================================
+//
+// `core/net/tls13/record/content_type.vr`:
+//
+//   * ContentType 5-variant (Invalid=0, ChangeCipherSpec=20, Alert=21,
+//     Handshake=22, ApplicationData=23) + to_u8 / from_u8.
+// =============================================================================
+
+mount core.net.tls13.record.content_type.{ContentType};
+
+// =============================================================================
+// Section 1: wire codes (RFC 8446 §5.1 / RFC 5246 §6.2.1)
+// =============================================================================
+
+@test
+fn test_tls13ct_invalid_0() { assert_eq(ContentType.Invalid.to_u8(), 0_u8); }
+
+@test
+fn test_tls13ct_change_cipher_spec_20() { assert_eq(ContentType.ChangeCipherSpec.to_u8(), 20_u8); }
+
+@test
+fn test_tls13ct_alert_21() { assert_eq(ContentType.Alert.to_u8(), 21_u8); }
+
+@test
+fn test_tls13ct_handshake_22() { assert_eq(ContentType.Handshake.to_u8(), 22_u8); }
+
+@test
+fn test_tls13ct_application_data_23() { assert_eq(ContentType.ApplicationData.to_u8(), 23_u8); }
+
+// =============================================================================
+// Section 2: from_u8 + round-trip
+// =============================================================================
+
+@test
+fn test_tls13ct_from_22_handshake() { assert(ContentType.from_u8(22_u8) is ContentType.Handshake); }
+
+@test
+fn test_tls13ct_from_23_application_data() { assert(ContentType.from_u8(23_u8) is ContentType.ApplicationData); }
+
+@test
+fn test_tls13ct_round_trip_all() {
+    // from_u8 ∘ to_u8 == id over the 5 RFC 8446 §5.1 content types.
+    let codes: List<UInt8> = [0_u8, 20_u8, 21_u8, 22_u8, 23_u8];
+    let mut i = 0;
+    while i < codes.len() {
+        let ct = ContentType.from_u8(codes[i]);
+        assert_eq(ct.to_u8(), codes[i]);
+        i = i + 1;
+    }
+}
+
+fn main() {}
