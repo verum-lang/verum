@@ -1,0 +1,82 @@
+// =============================================================================
+// core-tests/math/strata/unit_test.vr
+// =============================================================================
+//
+// `core/math/strata.vr` — MSFS stratification ADT surface.
+//
+// Surface tested:
+//   * Stratum 4-variant (L_Fnd / L_Cls / L_Cls_top / L_Abs) — fully qualified
+//
+// ConcreteStrictInclusionWitness records require factory fns + MathObject
+// protocol — tested at language-level under `vcs/specs/L2-standard/math/strata/`.
+// =============================================================================
+
+mount core.math.strata.{
+    Stratum,
+};
+
+// =============================================================================
+// Section 1: Stratum 4-variant — fully qualified
+// =============================================================================
+
+@test
+fn test_stratum_l_fnd_variant() {
+    let s: Stratum = Stratum.L_Fnd;
+    assert(s is Stratum.L_Fnd);
+}
+
+@test
+fn test_stratum_l_cls_variant() {
+    let s: Stratum = Stratum.L_Cls;
+    assert(s is Stratum.L_Cls);
+}
+
+@test
+fn test_stratum_l_cls_top_variant() {
+    let s: Stratum = Stratum.L_Cls_top;
+    assert(s is Stratum.L_Cls_top);
+}
+
+@test
+fn test_stratum_l_abs_variant() {
+    let s: Stratum = Stratum.L_Abs;
+    assert(s is Stratum.L_Abs);
+}
+
+// =============================================================================
+// Section 2: Stratum pairwise disjointness
+// =============================================================================
+
+@test
+fn test_stratum_l_fnd_disjoint_from_l_cls() {
+    let f: Stratum = Stratum.L_Fnd;
+    let c: Stratum = Stratum.L_Cls;
+    assert(f is Stratum.L_Fnd && !(f is Stratum.L_Cls));
+    assert(c is Stratum.L_Cls && !(c is Stratum.L_Fnd));
+}
+
+@test
+fn test_stratum_l_cls_disjoint_from_l_cls_top() {
+    let c: Stratum = Stratum.L_Cls;
+    let ct: Stratum = Stratum.L_Cls_top;
+    assert(!(c is Stratum.L_Cls_top));
+    assert(!(ct is Stratum.L_Cls));
+}
+
+@test
+fn test_stratum_l_cls_top_disjoint_from_l_abs() {
+    let ct: Stratum = Stratum.L_Cls_top;
+    let a: Stratum = Stratum.L_Abs;
+    assert(!(ct is Stratum.L_Abs));
+    assert(!(a is Stratum.L_Cls_top));
+}
+
+@test
+fn test_stratum_l_fnd_disjoint_from_l_abs() {
+    let f: Stratum = Stratum.L_Fnd;
+    let a: Stratum = Stratum.L_Abs;
+    assert(!(f is Stratum.L_Abs));
+    assert(!(a is Stratum.L_Fnd));
+}
+
+fn main() {}
