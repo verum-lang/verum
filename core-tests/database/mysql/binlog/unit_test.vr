@@ -1,0 +1,146 @@
+// =============================================================================
+// core-tests/database/mysql/binlog/unit_test.vr
+// =============================================================================
+//
+// `core/database/mysql/binlog.vr` — MySQL binlog event type constants.
+// =============================================================================
+
+mount core.database.mysql.binlog.{
+    BINLOG_DUMP_NON_BLOCK, BINLOG_THROUGH_GTID,
+    ET_UNKNOWN, ET_START_V3, ET_QUERY, ET_STOP, ET_ROTATE, ET_INTVAR,
+    ET_FORMAT_DESCRIPTION, ET_XID, ET_TABLE_MAP,
+    ET_WRITE_ROWS_V2, ET_UPDATE_ROWS_V2, ET_DELETE_ROWS_V2,
+    ET_PARTIAL_UPDATE_ROWS_V2,
+    ET_GTID, ET_ANONYMOUS_GTID, ET_PREVIOUS_GTIDS, ET_HEARTBEAT,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Binlog dump flags
+// =============================================================================
+
+@test
+fn test_binlog_dump_non_block_canonical_value() {
+    assert_eq(BINLOG_DUMP_NON_BLOCK, 0x01);
+}
+
+@test
+fn test_binlog_through_gtid_canonical_value() {
+    assert_eq(BINLOG_THROUGH_GTID, 0x04);
+}
+
+@test
+fn test_binlog_dump_flags_distinct() {
+    assert(BINLOG_DUMP_NON_BLOCK != BINLOG_THROUGH_GTID);
+}
+
+// =============================================================================
+// Section 2: Binlog event type tag codes (MySQL 5.6+)
+// =============================================================================
+
+@test
+fn test_et_unknown_canonical_value() {
+    assert_eq(ET_UNKNOWN, 0x00);
+}
+
+@test
+fn test_et_start_v3_canonical_value() {
+    assert_eq(ET_START_V3, 0x01);
+}
+
+@test
+fn test_et_query_canonical_value() {
+    assert_eq(ET_QUERY, 0x02);
+}
+
+@test
+fn test_et_stop_canonical_value() {
+    assert_eq(ET_STOP, 0x03);
+}
+
+@test
+fn test_et_rotate_canonical_value() {
+    assert_eq(ET_ROTATE, 0x04);
+}
+
+@test
+fn test_et_intvar_canonical_value() {
+    assert_eq(ET_INTVAR, 0x05);
+}
+
+@test
+fn test_et_format_description_canonical_value() {
+    assert_eq(ET_FORMAT_DESCRIPTION, 0x0F);
+}
+
+@test
+fn test_et_xid_canonical_value() {
+    assert_eq(ET_XID, 0x10);
+}
+
+@test
+fn test_et_table_map_canonical_value() {
+    assert_eq(ET_TABLE_MAP, 0x13);
+}
+
+@test
+fn test_et_write_rows_v2_canonical_value() {
+    assert_eq(ET_WRITE_ROWS_V2, 0x1E);
+}
+
+@test
+fn test_et_update_rows_v2_canonical_value() {
+    assert_eq(ET_UPDATE_ROWS_V2, 0x1F);
+}
+
+@test
+fn test_et_delete_rows_v2_canonical_value() {
+    assert_eq(ET_DELETE_ROWS_V2, 0x20);
+}
+
+@test
+fn test_et_partial_update_rows_v2_canonical_value() {
+    // MySQL 8.0+ with binlog_row_value_options=PARTIAL_JSON.
+    assert_eq(ET_PARTIAL_UPDATE_ROWS_V2, 0x29);
+}
+
+@test
+fn test_et_gtid_canonical_value() {
+    assert_eq(ET_GTID, 0x21);
+}
+
+@test
+fn test_et_anonymous_gtid_canonical_value() {
+    assert_eq(ET_ANONYMOUS_GTID, 0x22);
+}
+
+@test
+fn test_et_previous_gtids_canonical_value() {
+    assert_eq(ET_PREVIOUS_GTIDS, 0x23);
+}
+
+@test
+fn test_et_heartbeat_canonical_value() {
+    assert_eq(ET_HEARTBEAT, 0x1B);
+}
+
+// =============================================================================
+// Section 3: Event type pairwise distinctness — selected critical pairs
+// =============================================================================
+
+@test
+fn test_et_write_update_delete_rows_distinct() {
+    assert(ET_WRITE_ROWS_V2 != ET_UPDATE_ROWS_V2);
+    assert(ET_UPDATE_ROWS_V2 != ET_DELETE_ROWS_V2);
+    assert(ET_WRITE_ROWS_V2 != ET_DELETE_ROWS_V2);
+}
+
+@test
+fn test_et_gtid_family_distinct() {
+    assert(ET_GTID != ET_ANONYMOUS_GTID);
+    assert(ET_ANONYMOUS_GTID != ET_PREVIOUS_GTIDS);
+    assert(ET_GTID != ET_PREVIOUS_GTIDS);
+}
+
+fn main() {}
