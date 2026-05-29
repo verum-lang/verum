@@ -409,7 +409,6 @@ fn parametrised_to_int_truth_table(x: Ordering, expected: Int) {
 /// iterator items without an explicit dereference. Tracked in audit.md
 /// §3.1; workaround is in regression_test.vr. Re-enable once the
 /// type-inference defect is closed at the language level.
-@ignore
 @test
 fn pinned_iterator_item_method_resolution_currently_broken() {
     // Once fixed, this should pass without `(*ord)` dereferencing.
