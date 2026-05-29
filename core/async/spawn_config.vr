@@ -67,7 +67,7 @@ implement CircuitBreakerConfig {
 
 public type RecoveryStrategy is
     /// No automatic recovery — propagate error
-    NoRecovery
+    | NoRecovery
     /// Retry with exponential backoff
     | Retry(RetryConfig)
     /// Circuit breaker pattern
@@ -84,7 +84,7 @@ public type RecoveryStrategy is
 /// Policy for restarting failed tasks.
 public type RestartPolicy is
     /// Always restart on failure
-    Permanent
+    | Permanent
     /// Restart only on unexpected failure
     | Transient
     /// Never restart
@@ -97,7 +97,7 @@ public type RestartPolicy is
 /// Isolation level for spawned tasks.
 public type IsolationLevel is
     /// Share parent's context (default)
-    Shared
+    | Shared
     /// Receive only Send-safe values
     | SendOnly
     /// Full isolation — no shared state
@@ -109,7 +109,7 @@ public type IsolationLevel is
 
 /// Task priority hint for the scheduler.
 public type Priority is
-    Low
+    | Low
     | Normal
     | High
     | Critical;
