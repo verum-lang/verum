@@ -1,0 +1,136 @@
+// =============================================================================
+// core-tests/database/sqlite/adapter/unit_test.vr
+// =============================================================================
+//
+// `core/database/sqlite/adapter.vr` — SQLite adapter ADTs.
+// =============================================================================
+
+mount core.database.sqlite.adapter.{SqliteJournalMode, SqliteTarget};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: SqliteJournalMode 6-variant ADT
+// =============================================================================
+
+@test
+fn test_journal_mode_delete_variant() {
+    let m: SqliteJournalMode = SqliteJournalMode.JmDelete;
+    assert(m is SqliteJournalMode.JmDelete);
+}
+
+@test
+fn test_journal_mode_truncate_variant() {
+    let m: SqliteJournalMode = SqliteJournalMode.JmTruncate;
+    assert(m is SqliteJournalMode.JmTruncate);
+}
+
+@test
+fn test_journal_mode_persist_variant() {
+    let m: SqliteJournalMode = SqliteJournalMode.JmPersist;
+    assert(m is SqliteJournalMode.JmPersist);
+}
+
+@test
+fn test_journal_mode_memory_variant() {
+    let m: SqliteJournalMode = SqliteJournalMode.JmMemory;
+    assert(m is SqliteJournalMode.JmMemory);
+}
+
+@test
+fn test_journal_mode_wal_variant() {
+    let m: SqliteJournalMode = SqliteJournalMode.JmWal;
+    assert(m is SqliteJournalMode.JmWal);
+}
+
+@test
+fn test_journal_mode_off_variant() {
+    let m: SqliteJournalMode = SqliteJournalMode.JmOff;
+    assert(m is SqliteJournalMode.JmOff);
+}
+
+// =============================================================================
+// Section 2: SqliteJournalMode pairwise disjointness — selected
+// =============================================================================
+
+@test
+fn test_journal_mode_delete_disjoint_from_wal() {
+    let d: SqliteJournalMode = SqliteJournalMode.JmDelete;
+    let w: SqliteJournalMode = SqliteJournalMode.JmWal;
+    assert(!(d is SqliteJournalMode.JmWal));
+    assert(!(w is SqliteJournalMode.JmDelete));
+}
+
+@test
+fn test_journal_mode_off_disjoint_from_memory() {
+    let o: SqliteJournalMode = SqliteJournalMode.JmOff;
+    let m: SqliteJournalMode = SqliteJournalMode.JmMemory;
+    assert(!(o is SqliteJournalMode.JmMemory));
+    assert(!(m is SqliteJournalMode.JmOff));
+}
+
+@test
+fn test_journal_mode_wal_disjoint_from_all_others() {
+    let w: SqliteJournalMode = SqliteJournalMode.JmWal;
+    assert(!(w is SqliteJournalMode.JmDelete));
+    assert(!(w is SqliteJournalMode.JmTruncate));
+    assert(!(w is SqliteJournalMode.JmPersist));
+    assert(!(w is SqliteJournalMode.JmMemory));
+    assert(!(w is SqliteJournalMode.JmOff));
+}
+
+// =============================================================================
+// Section 3: SqliteTarget 3-variant ADT
+// =============================================================================
+
+@test
+fn test_sqlite_target_memory_variant() {
+    let t: SqliteTarget = SqliteTarget.StMemory;
+    assert(t is SqliteTarget.StMemory);
+}
+
+@test
+fn test_sqlite_target_shared_memory_variant() {
+    let t: SqliteTarget = SqliteTarget.StSharedMemory("cachekey".to_text());
+    assert(t is SqliteTarget.StSharedMemory);
+}
+
+@test
+fn test_sqlite_target_file_variant() {
+    let t: SqliteTarget = SqliteTarget.StFile("/tmp/test.db".to_text());
+    assert(t is SqliteTarget.StFile);
+}
+
+@test
+fn test_sqlite_target_memory_disjoint() {
+    let t: SqliteTarget = SqliteTarget.StMemory;
+    assert(!(t is SqliteTarget.StSharedMemory));
+    assert(!(t is SqliteTarget.StFile));
+}
+
+@test
+fn test_sqlite_target_file_disjoint_from_memory() {
+    let t: SqliteTarget = SqliteTarget.StFile("/db".to_text());
+    assert(!(t is SqliteTarget.StMemory));
+    assert(!(t is SqliteTarget.StSharedMemory));
+}
+
+@test
+fn test_sqlite_target_file_payload_round_trip() {
+    let t: SqliteTarget = SqliteTarget.StFile("/var/lib/data.db".to_text());
+    match t {
+        SqliteTarget.StFile(p) => assert_eq(p, "/var/lib/data.db"),
+        _ => panic("expected StFile"),
+    }
+}
+
+@test
+fn test_sqlite_target_shared_memory_payload_round_trip() {
+    let t: SqliteTarget = SqliteTarget.StSharedMemory("test-cache".to_text());
+    match t {
+        SqliteTarget.StSharedMemory(n) => assert_eq(n, "test-cache"),
+        _ => panic("expected StSharedMemory"),
+    }
+}
+
+fn main() {}
