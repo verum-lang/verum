@@ -1,0 +1,117 @@
+// =============================================================================
+// core-tests/term/widget/canvas/unit_test.vr
+// =============================================================================
+//
+// `core/term/widget/canvas.vr` —
+//   * CanvasMode 3-variant (Braille / HalfBlock / Block)
+//   * Marker 4-variant (Dot / Braille / HalfBlock / Block)
+// =============================================================================
+
+mount core.term.widget.canvas.{CanvasMode, Marker};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CanvasMode 3-variant
+// =============================================================================
+
+@test
+fn test_canvas_mode_braille_variant() {
+    let m: CanvasMode = CanvasMode.Braille;
+    assert(m is CanvasMode.Braille);
+}
+
+@test
+fn test_canvas_mode_half_block_variant() {
+    let m: CanvasMode = CanvasMode.HalfBlock;
+    assert(m is CanvasMode.HalfBlock);
+}
+
+@test
+fn test_canvas_mode_block_variant() {
+    let m: CanvasMode = CanvasMode.Block;
+    assert(m is CanvasMode.Block);
+}
+
+@test
+fn test_canvas_mode_braille_disjoint() {
+    let m: CanvasMode = CanvasMode.Braille;
+    assert(!(m is CanvasMode.HalfBlock));
+    assert(!(m is CanvasMode.Block));
+}
+
+@test
+fn test_canvas_mode_half_block_disjoint() {
+    let m: CanvasMode = CanvasMode.HalfBlock;
+    assert(!(m is CanvasMode.Braille));
+    assert(!(m is CanvasMode.Block));
+}
+
+@test
+fn test_canvas_mode_block_disjoint() {
+    let m: CanvasMode = CanvasMode.Block;
+    assert(!(m is CanvasMode.Braille));
+    assert(!(m is CanvasMode.HalfBlock));
+}
+
+// =============================================================================
+// Section 2: Marker 4-variant
+// =============================================================================
+
+@test
+fn test_marker_dot_variant() {
+    let m: Marker = Marker.Dot;
+    assert(m is Marker.Dot);
+}
+
+@test
+fn test_marker_braille_variant() {
+    let m: Marker = Marker.Braille;
+    assert(m is Marker.Braille);
+}
+
+@test
+fn test_marker_half_block_variant() {
+    let m: Marker = Marker.HalfBlock;
+    assert(m is Marker.HalfBlock);
+}
+
+@test
+fn test_marker_block_variant() {
+    let m: Marker = Marker.Block;
+    assert(m is Marker.Block);
+}
+
+@test
+fn test_marker_dot_disjoint() {
+    let m: Marker = Marker.Dot;
+    assert(!(m is Marker.Braille));
+    assert(!(m is Marker.HalfBlock));
+    assert(!(m is Marker.Block));
+}
+
+@test
+fn test_marker_braille_disjoint() {
+    let m: Marker = Marker.Braille;
+    assert(!(m is Marker.Dot));
+    assert(!(m is Marker.HalfBlock));
+    assert(!(m is Marker.Block));
+}
+
+@test
+fn test_marker_half_block_disjoint() {
+    let m: Marker = Marker.HalfBlock;
+    assert(!(m is Marker.Dot));
+    assert(!(m is Marker.Braille));
+    assert(!(m is Marker.Block));
+}
+
+@test
+fn test_marker_block_disjoint() {
+    let m: Marker = Marker.Block;
+    assert(!(m is Marker.Dot));
+    assert(!(m is Marker.Braille));
+    assert(!(m is Marker.HalfBlock));
+}
+
+fn main() {}
