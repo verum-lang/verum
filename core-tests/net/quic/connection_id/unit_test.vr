@@ -1,0 +1,143 @@
+// =============================================================================
+// core-tests/net/quic/connection_id/unit_test.vr — RFC 9000 §5.1
+// =============================================================================
+//
+// `core/net/quic/connection_id.vr`:
+//
+//   * MAX_CID_LEN == 20 (RFC 9000 §5.1 length bound).
+//   * ConnectionId.from_bytes — Ok for len ≤ 20, Err(TooLong(n)) otherwise.
+//   * ConnectionId.empty / .len / .as_slice / .eq (byte-exact).
+//   * CidError.TooLong payload + Eq.
+// =============================================================================
+
+mount core.net.quic.connection_id.{MAX_CID_LEN, ConnectionId, CidError};
+
+// Helper: build a List<Byte> of `n` incrementing bytes.
+fn make_bytes(n: Int) -> List<Byte> {
+    let mut b: List<Byte> = [];
+    let mut i = 0;
+    while i < n {
+        b.push((i % 256) as Byte);
+        i = i + 1;
+    }
+    b
+}
+
+// =============================================================================
+// Section 1: length bound
+// =============================================================================
+
+@test
+fn test_qcid_max_len_is_20() {
+    assert_eq(MAX_CID_LEN, 20);
+}
+
+@test
+fn test_qcid_empty_has_len_zero() {
+    let c = ConnectionId.empty();
+    assert_eq(c.len(), 0);
+}
+
+// =============================================================================
+// Section 2: from_bytes — accept / reject
+// =============================================================================
+
+@test
+fn test_qcid_from_bytes_accepts_len_8() {
+    let src = make_bytes(8);
+    match ConnectionId.from_bytes(src.as_slice()) {
+        Ok(c)  => assert_eq(c.len(), 8),
+        Err(_) => panic("8-byte CID must be accepted"),
+    }
+}
+
+@test
+fn test_qcid_from_bytes_accepts_len_20_boundary() {
+    let src = make_bytes(20);
+    match ConnectionId.from_bytes(src.as_slice()) {
+        Ok(c)  => assert_eq(c.len(), 20),
+        Err(_) => panic("20-byte CID (boundary) must be accepted"),
+    }
+}
+
+@test
+fn test_qcid_from_bytes_accepts_empty() {
+    let src = make_bytes(0);
+    match ConnectionId.from_bytes(src.as_slice()) {
+        Ok(c)  => assert_eq(c.len(), 0),
+        Err(_) => panic("zero-length CID must be accepted"),
+    }
+}
+
+@test
+fn test_qcid_from_bytes_rejects_len_21() {
+    let src = make_bytes(21);
+    match ConnectionId.from_bytes(src.as_slice()) {
+        Ok(_)  => panic("21-byte CID must be rejected"),
+        Err(e) => assert_eq(e, CidError.TooLong(21)),
+    }
+}
+
+// =============================================================================
+// Section 3: byte preservation + eq
+// =============================================================================
+
+@test
+fn test_qcid_preserves_bytes() {
+    let src = make_bytes(4);
+    match ConnectionId.from_bytes(src.as_slice()) {
+        Ok(c) => {
+            let sl = c.as_slice();
+            assert_eq(sl.len(), 4);
+            assert(sl[0] == 0_u8);
+            assert(sl[3] == 3_u8);
+        }
+        Err(_) => panic("4-byte CID must be accepted"),
+    }
+}
+
+@test
+fn test_qcid_eq_byte_exact_true() {
+    let s1 = make_bytes(5);
+    let s2 = make_bytes(5);
+    let c1 = ConnectionId.from_bytes(s1.as_slice());
+    let c2 = ConnectionId.from_bytes(s2.as_slice());
+    match c1 {
+        Ok(a) => match c2 {
+            Ok(b)  => assert(a.eq(&b)),
+            Err(_) => panic("c2 must build"),
+        },
+        Err(_) => panic("c1 must build"),
+    }
+}
+
+@test
+fn test_qcid_eq_distinct_length_false() {
+    let s1 = make_bytes(5);
+    let s2 = make_bytes(6);
+    let c1 = ConnectionId.from_bytes(s1.as_slice());
+    let c2 = ConnectionId.from_bytes(s2.as_slice());
+    match c1 {
+        Ok(a) => match c2 {
+            Ok(b)  => assert(!a.eq(&b)),
+            Err(_) => panic("c2 must build"),
+        },
+        Err(_) => panic("c1 must build"),
+    }
+}
+
+// =============================================================================
+// Section 4: CidError ADT
+// =============================================================================
+
+@test
+fn test_qcid_error_too_long_payload() {
+    assert_eq(CidError.TooLong(25), CidError.TooLong(25));
+}
+
+@test
+fn test_qcid_error_too_long_distinct_payload() {
+    assert(!(CidError.TooLong(21) == CidError.TooLong(22)));
+}
+
+fn main() {}

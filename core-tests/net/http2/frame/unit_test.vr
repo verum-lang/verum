@@ -1,0 +1,190 @@
+// =============================================================================
+// core-tests/net/http2/frame/unit_test.vr — RFC 7540 §4 frame codec
+// =============================================================================
+//
+// `core/net/http2/frame.vr`:
+//
+//   * FrameType 10 + Unknown — to_u8 / from_u8 (§4.1 wire IDs 0x0-0x9).
+//   * FrameFlags bitmap — END_STREAM/END_HEADERS/PADDED/PRIORITY/ACK +
+//     has / with / without / raw / none.
+//   * FrameHeader.encode / .decode — the 9-byte big-endian prefix (§4.1),
+//     including 24-bit length + reserved-bit-cleared 31-bit stream id.
+//   * FRAME_HEADER_SIZE / MAX_FRAME_SIZE_INITIAL / FRAME_LENGTH_LIMIT.
+// =============================================================================
+
+mount core.net.http2.frame.{
+    FrameType, FrameFlags, FrameHeader,
+    FRAME_HEADER_SIZE, MAX_FRAME_SIZE_INITIAL, FRAME_LENGTH_LIMIT
+};
+
+// =============================================================================
+// Section 1: constants
+// =============================================================================
+
+@test
+fn test_h2frame_header_size_is_9() { assert_eq(FRAME_HEADER_SIZE, 9); }
+
+@test
+fn test_h2frame_max_frame_size_initial_is_16384() { assert_eq(MAX_FRAME_SIZE_INITIAL, 16384); }
+
+@test
+fn test_h2frame_length_limit_is_24bit() { assert_eq(FRAME_LENGTH_LIMIT, 0xFFFFFF); }
+
+// =============================================================================
+// Section 2: FrameType wire mapping (§4.1)
+// =============================================================================
+
+@test
+fn test_h2frame_type_data_is_0() { assert_eq(FrameType.Data.to_u8(), 0x0_u8); }
+
+@test
+fn test_h2frame_type_headers_is_1() { assert_eq(FrameType.Headers.to_u8(), 0x1_u8); }
+
+@test
+fn test_h2frame_type_continuation_is_9() { assert_eq(FrameType.Continuation.to_u8(), 0x9_u8); }
+
+@test
+fn test_h2frame_type_from_u8_known() {
+    assert(FrameType.from_u8(0x4_u8) is FrameType.SettingsType);
+}
+
+@test
+fn test_h2frame_type_from_u8_unknown_preserves_byte() {
+    let t = FrameType.from_u8(0xFE_u8);
+    assert_eq(t.to_u8(), 0xFE_u8);
+}
+
+// =============================================================================
+// Section 3: FrameFlags bit operations
+// =============================================================================
+
+@test
+fn test_h2frame_flags_none_is_zero() {
+    assert_eq(FrameFlags.none().raw(), 0x00_u8);
+}
+
+@test
+fn test_h2frame_flags_has_detects_set_bit() {
+    let f = FrameFlags.new(FrameFlags.END_STREAM);
+    assert(f.has(FrameFlags.END_STREAM));
+}
+
+@test
+fn test_h2frame_flags_has_false_when_clear() {
+    let f = FrameFlags.none();
+    assert(!f.has(FrameFlags.END_HEADERS));
+}
+
+@test
+fn test_h2frame_flags_with_sets_bit() {
+    let f = FrameFlags.none().with(FrameFlags.PADDED);
+    assert(f.has(FrameFlags.PADDED));
+}
+
+@test
+fn test_h2frame_flags_without_clears_bit() {
+    let f = FrameFlags.new(FrameFlags.PRIORITY).without(FrameFlags.PRIORITY);
+    assert(!f.has(FrameFlags.PRIORITY));
+}
+
+@test
+fn test_h2frame_flags_constants() {
+    assert_eq(FrameFlags.END_STREAM, 0x01_u8);
+    assert_eq(FrameFlags.END_HEADERS, 0x04_u8);
+    assert_eq(FrameFlags.PADDED, 0x08_u8);
+    assert_eq(FrameFlags.PRIORITY, 0x20_u8);
+    assert_eq(FrameFlags.ACK, 0x01_u8);
+}
+
+// =============================================================================
+// Section 4: FrameHeader.encode — 9-byte big-endian wire (§4.1)
+// =============================================================================
+
+@test
+fn test_h2frame_header_encode_is_9_bytes() {
+    let h = FrameHeader {
+        length: 0, frame_type: FrameType.Data, flags: FrameFlags.none(), stream_id: 0_u32,
+    };
+    let mut out: List<Byte> = [];
+    h.encode(&mut out);
+    assert_eq(out.len(), FRAME_HEADER_SIZE);
+}
+
+@test
+fn test_h2frame_header_encode_length_big_endian() {
+    // length 0x010203 → bytes 0x01 0x02 0x03 in the first three octets.
+    let h = FrameHeader {
+        length: 0x010203, frame_type: FrameType.Data, flags: FrameFlags.none(), stream_id: 0_u32,
+    };
+    let mut out: List<Byte> = [];
+    h.encode(&mut out);
+    assert(out[0] == 0x01_u8);
+    assert(out[1] == 0x02_u8);
+    assert(out[2] == 0x03_u8);
+}
+
+@test
+fn test_h2frame_header_encode_clears_reserved_bit() {
+    // stream_id top bit (reserved R bit, §4.1) must be cleared on the wire.
+    let h = FrameHeader {
+        length: 0, frame_type: FrameType.Headers, flags: FrameFlags.none(),
+        stream_id: 0xFFFFFFFF_u32,
+    };
+    let mut out: List<Byte> = [];
+    h.encode(&mut out);
+    // byte 5 carries the top octet of the 31-bit id; high bit must be 0.
+    assert((out[5] & 0x80_u8) == 0x00_u8);
+}
+
+// =============================================================================
+// Section 5: FrameHeader round-trip (§4.1)
+// =============================================================================
+
+@test
+fn test_h2frame_header_round_trip() {
+    let h = FrameHeader {
+        length: 12345,
+        frame_type: FrameType.Headers,
+        flags: FrameFlags.new(FrameFlags.END_HEADERS),
+        stream_id: 7_u32,
+    };
+    let mut out: List<Byte> = [];
+    h.encode(&mut out);
+    match FrameHeader.decode(out.as_slice()) {
+        Ok(d) => {
+            assert_eq(d.length, 12345);
+            assert(d.frame_type is FrameType.Headers);
+            assert(d.flags.has(FrameFlags.END_HEADERS));
+            assert_eq(d.stream_id, 7_u32);
+        }
+        Err(_) => panic("frame-header round-trip must succeed"),
+    }
+}
+
+@test
+fn test_h2frame_header_round_trip_strips_reserved_bit() {
+    // Encoding clears R; decoding must read back the masked 31-bit value.
+    let h = FrameHeader {
+        length: 0, frame_type: FrameType.Data, flags: FrameFlags.none(),
+        stream_id: 0x80000005_u32,
+    };
+    let mut out: List<Byte> = [];
+    h.encode(&mut out);
+    match FrameHeader.decode(out.as_slice()) {
+        Ok(d) => assert_eq(d.stream_id, 0x00000005_u32),
+        Err(_) => panic("decode must succeed"),
+    }
+}
+
+@test
+fn test_h2frame_header_decode_short_buffer_needs_more() {
+    let mut buf: List<Byte> = [];
+    buf.push(0x00_u8);
+    buf.push(0x00_u8);
+    match FrameHeader.decode(buf.as_slice()) {
+        Ok(_)  => panic("a 2-byte buffer cannot be a 9-byte header"),
+        Err(_) => assert(true),
+    }
+}
+
+fn main() {}

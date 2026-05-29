@@ -1,0 +1,70 @@
+// =============================================================================
+// core-tests/net/quic/version/unit_test.vr — RFC 9000 §15 / RFC 9369
+// =============================================================================
+//
+// `core/net/quic/version.vr`:
+//
+//   * VERSION_NEGOTIATION = 0x00000000, VERSION_1 = 0x00000001,
+//     VERSION_2 = 0x6B3343CF.
+//   * is_supported(v) — true only for QUIC v1.
+//   * is_greased(v) — RFC 8701 reserved pattern 0x?A?A?A?A.
+// =============================================================================
+
+mount core.net.quic.version.{
+    VERSION_NEGOTIATION, VERSION_1, VERSION_2, is_supported, is_greased
+};
+
+// =============================================================================
+// Section 1: wire constants
+// =============================================================================
+
+@test
+fn test_qver_negotiation_is_zero() { assert_eq(VERSION_NEGOTIATION, 0x00000000_u32); }
+
+@test
+fn test_qver_v1_is_one() { assert_eq(VERSION_1, 0x00000001_u32); }
+
+@test
+fn test_qver_v2_is_rfc9369() { assert_eq(VERSION_2, 0x6B3343CF_u32); }
+
+// =============================================================================
+// Section 2: is_supported
+// =============================================================================
+
+@test
+fn test_qver_supported_v1() { assert(is_supported(VERSION_1)); }
+
+@test
+fn test_qver_unsupported_v2() { assert(!is_supported(VERSION_2)); }
+
+@test
+fn test_qver_unsupported_negotiation() { assert(!is_supported(VERSION_NEGOTIATION)); }
+
+// =============================================================================
+// Section 3: is_greased (RFC 8701, pattern 0x?A?A?A?A)
+// =============================================================================
+
+@test
+fn test_qver_greased_all_a_nibbles() {
+    // Every low nibble == 0xA → greased.
+    assert(is_greased(0x1A2A3A4A_u32));
+}
+
+@test
+fn test_qver_greased_dadadada() {
+    assert(is_greased(0xDADADADA_u32));
+}
+
+@test
+fn test_qver_v1_not_greased() { assert(!is_greased(VERSION_1)); }
+
+@test
+fn test_qver_v2_not_greased() { assert(!is_greased(VERSION_2)); }
+
+@test
+fn test_qver_partial_pattern_not_greased() {
+    // Only three low nibbles are 0xA — not a greased version.
+    assert(!is_greased(0x1A2A3A4B_u32));
+}
+
+fn main() {}
