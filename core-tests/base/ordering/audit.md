@@ -43,12 +43,23 @@ through it.
 
 ## 3. Language-implementation gaps
 
-### §3.1 Iterator-item method resolution (pre-existing)
+### §3.1 Iterator-item method resolution — CLOSED 2026-05-29
 
-`for ord in xs.iter() { ord.reverse() }` — the iter-item type is
-inferred too late for method lookup, so the bare `.reverse()` call
-fails to resolve. Work-around: `(*ord).reverse()`. Pinned by
-`regression_test.vr::test_iterator_deref_reverse`.
+`for ord in xs.iter() { ord.reverse() }` — pre-fix the iter-item type
+was inferred too late for method lookup, so the bare `.reverse()` call
+failed to resolve. CLOSED 2026-05-29 via the for-loop binder type
+propagation at `crates/verum_vbc/src/codegen/expressions.rs::compile_for`
+(lines ~11901-11935): when the iter expression is a `MethodCall`
+whose method is `iter`/`iter_mut`/`into_iter`, the codegen extracts
+the container's type from the receiver, peels its inner element type
+(`List<Ordering>` → `Ordering`), and registers that as the binder's
+`variable_type_names["ord"] = "Ordering"`. The downstream
+method-dispatch Case 1a `_ =>` fallback then composes
+`Ordering.reverse` for the qualified-name lookup.
+
+Pinned by `property_test.vr::pinned_iterator_item_method_resolution_currently_broken`
+(un-`@ignore`'d post-fix verification; yields `less` / `equal` / `greater`
+in order under `--interp`).
 
 ### §3.2 Primitive-method intercepts missed heap-interior refs — CLOSED 2026-05-14
 
@@ -316,5 +327,8 @@ Duration's `Ordering`-returning `cmp`) — closed transitively by
 
 ## Action items deferred
 
-* §3.1 iterator-item method resolution (type-inference ordering) —
-  pre-existing defect, separate task.
+* ~~§3.1 iterator-item method resolution (type-inference ordering)~~ —
+  **CLOSED 2026-05-29** via for-loop binder type propagation at
+  `crates/verum_vbc/src/codegen/expressions.rs::compile_for`. Pinned by
+  `property_test.vr::pinned_iterator_item_method_resolution_currently_broken`
+  (test un-`@ignore`'d, GREEN under `--interp`).
