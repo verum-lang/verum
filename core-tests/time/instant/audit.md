@@ -102,9 +102,13 @@ text. Add `test_display_formats_as_seconds_dot_millis` pin.
 
 ## 6. Status
 
-**REGRESSED — NOT stable.** See §7. The pre-2026-05-29 "stable under
-`--interp`" claim no longer holds: 8 of 19 `duration_since`-path tests
-fail under `--interp` against the binary built 2026-05-29 11:29.
+**PARTIAL — §D core CLOSED, §E residual open.** The `duration_since`
+`Maybe<Duration>` collapse (§D) is fixed (commit `9f64335a5`):
+`duration_since` suite **13/19 GREEN** under `--interp` (was 11/19).
+The remaining 6 are blocked by §E (`Instant + Duration` operator on the
+unboxed-`Int` Instant receiver — a distinct single-field-record defect),
+not by the Maybe collapse. See §7. (AOT remains structurally
+non-functional — see Cross-tier note.)
 
 ## 7. §D — `Instant.duration_since` returns `Int` instead of `Maybe<Duration>` (precompiled-archive collapse)
 
@@ -180,32 +184,60 @@ it demotes to legacy.
 
 ### The actual two-part defect
 
-1. **Codegen (registration ordering):** full-core compile emits legacy
-   `MakeVariant` (synthetic id) for `Maybe.Some` because `Maybe`'s
-   descriptor isn't yet populated when `time` compiles.
-2. **Return unboxing (the sharper finding):** the panic reports
-   `runtime kind Int`, which (per `method_dispatch.rs:2631`) requires
-   `receiver.is_int()` — a NaN-boxed integer, **not** a heap pointer.
-   Since `alloc_variant` (the `MakeVariant` executor, `interpreter/
-   mod.rs:592`) returns `Value::from_ptr`, a correctly-built Maybe is a
-   *pointer*. Therefore the **archive body of `duration_since` returns
-   the *unboxed* `Int`**, not the `Maybe` — the precompiler applies
-   single-field-record unboxing to the `Maybe<Duration>` return (the
-   §G `Duration`-single-field-unboxing family), collapsing
-   `Maybe.Some(Duration{nanos})` all the way to its scalar. Fresh
-   compilation (small module → `MakeVariantTyped`) does not unbox, so
-   mirrors pass. **Next concrete step:** disassemble the archive's
-   `duration_since` (needs a `.vbca` disassembler CLI or precompiler
-   instrumentation — hence a build) to confirm the return-unboxing and
-   locate the offending pass; the fix is to suppress single-field-record
-   unboxing when the value is a `Maybe`/`Result` payload, not a bare
-   record.
+**Earlier theories (legacy-`MakeVariant` emit; archive return-unboxing)
+were both refuted by `main()` bytecode disassembly** — see Resolution.
 
-A fresh small-module mirror passes because it gets the typed form; the
-archive (full-core) body gets the legacy form and fails. This is the
-same archive/codegen Maybe-variant family memory flags as multi-day
-and previously-reverted — it is **NOT** a bare-vs-qualified source
-issue.
+### CONFIRMED ROOT CAUSE + RESOLUTION (2026-05-29, commit `9f64335a5`)
+
+The `main()`/caller disassembly (`verum build --emit-vbc`) showed
+`a.duration_since(a)` is **not called at all** — it was lowered inline
+to a bare `Sub` (integer subtraction → `Int`). Cause: `Instant.
+duration_since` is registered as an intrinsic (`register_stdlib_intrinsics`,
+`codegen/mod.rs`) backed by `time_instant_duration_since` →
+`InlineSequence(InstantDurationSince)`, which emitted **only**
+`self.nanos - earlier.nanos`. That drops both the `Maybe` wrapper and
+the `earlier > self → None` semantics, so the result is a raw `Int`
+("`unwrap_or` not found on receiver of runtime kind Int"; `match` reads
+it as `None`). `Instant` is a single-field `{nanos:Int}` record carried
+**unboxed** (the generic `add`/`sub` intercepts make `Instant ± Duration`
+integer arithmetic), so the intercept can't simply be removed.
+
+**Fix (landed):** rewrote the `InstantDurationSince` inline sequence to
+build the canonical typed `Maybe<Duration>`:
+`diff = self.nanos - earlier.nanos; if diff >= 0 →
+MakeVariantTyped(MAYBE, Some=tag1, 1 field=diff) else
+MakeVariantTyped(MAYBE, None=tag0)`. Plus a defence-in-depth
+`emit_make_variant` fast-path that force-emits `MakeVariantTyped` for the
+canonical core ADTs (Maybe=515, Result=516) on their exact variant
+shapes (closes the legacy-synthetic-`MakeVariant` demotion class for
+called Maybe/Result-returning fns). Verified regression-free (22/23
+`unwrap_or` tests across maybe/result/poll GREEN; the 1 fail is a
+pre-existing `@property`-discovery harness bug, not Maybe emission).
+
+**Result:** `duration_since` suite **11/19 → 13/19**.
+`test_duration_since_self_is_zero` + `test_duration_since_later_is_some`
+now pass; `match`/`unwrap`/`unwrap_or`/`is_some`/`is_none` on the result
+all work.
+
+### §E — RESIDUAL: `Instant + Duration` operator on unboxed Instant (6 tests still RED)
+
+The remaining 6 failures (`law_duration_since_some_when_later`,
+`law_duration_since_none_when_earlier_is_later`,
+`law_sub_operator_equals_duration_since`,
+`test_saturating_duration_since_floors_at_zero`,
+`law_/test_duration_since_epoch_consistency`) all construct Instants via
+`b = a + Duration.…` and then fail BEFORE reaching `duration_since` with
+`method 'Instant.add' not found on receiver of runtime kind Int`.
+`compile_binary` classifies `Instant` as non-primitive → routes `+`/`-`
+through Add/Sub-protocol dispatch (`CallM Instant.add`), which can't
+resolve on the unboxed-`Int` receiver. This is a **distinct §G
+single-field-record arithmetic-consistency defect**, not the Maybe
+collapse. Fix direction: classify the unboxed time types
+(`Instant`/`Duration`/`Stopwatch`/`PerfCounter`/`DeadlineTimer`) as
+integer-arithmetic in `compile_binary` so `+`/`-`/comparisons lower to
+`BinaryI`/`CmpI` — but this bypasses Duration's existing `add`/`sub`
+intercepts and needs a full Duration+Instant suite verification (hours).
+Tracked as a separate task.
 
 ### Cross-tier note (AOT)
 
@@ -219,32 +251,23 @@ pointer_parse`, `wrong number of arguments for raw_read` /
 interp AND aot" is currently structurally unmeetable for `time` at the
 infrastructure level. Tracked separately.
 
-### Fix direction (fundamental) — two independent fixes, either closes it
+### Fix status
 
-1. **Codegen (preferred, fixes the whole class):** populate the core
-   ADT descriptors (`Maybe`, `Result`, `Ordering`, `Poll`) with their
-   real `variants` BEFORE any stdlib module body compiles in the
-   full-core precompile, so `emit_make_variant`'s typed-form gate
-   (`codegen/expressions.rs:473`, `desc.variants.is_empty()`) passes
-   and `Maybe.Some` emits `MakeVariantTyped` everywhere — not just in
-   single-module compiles. This fixes every Maybe/Result-returning
-   stdlib function, not only `time`.
-2. **Runtime (defence-in-depth):** make CallM dispatch recognise a
-   legacy synthetic-id variant receiver (`0x8000+tag`) as the canonical
-   `Maybe`/`Result` type when the method is Maybe/Result-specific
-   (`is_some`/`is_none`/`unwrap`/`unwrap_or` → Maybe; `is_ok`/`is_err`
-   → Result), routing instead of panicking with `runtime kind Int`.
-   The runtime already has synthetic-variant handling for `eq`/`hash`/
-   `debug`/`arith` (`comparison.rs`, `debug.rs`, `arith_extended.rs`);
-   method dispatch is the missing surface.
+§D core (`duration_since` returning `Int`) is **CLOSED** — see
+*Confirmed root cause + resolution* above (commit `9f64335a5`). The
+`emit_make_variant` canonical-core-ADT fast-path also closes the
+legacy-synthetic-`MakeVariant` demotion class for *called*
+Maybe/Result-returning functions (defence-in-depth). §E (`Instant +
+Duration` operator on the unboxed-`Int` receiver) is the open residual
+blocking the last 6 tests — tracked separately.
 
-**Verification is environment-blocked:** each cycle is a ~25-min
-contended `cargo build` (full archive precompile + relink), and a
-concurrent session was observed editing `core/` + relinking
-`target/release/verum` mid-test (test killed, exit 144). Use a copied
-stable binary (`cp target/release/verum /tmp/verum-stable`) to run
-tests immune to relinks.
+**Verification note:** each cycle is a ~12–22 min `cargo build` (archive
+precompile + relink), and a concurrent session was observed editing
+`core/` + relinking `target/release/verum` mid-test (killed a run, exit
+144). Use a copied stable binary (`cp target/release/verum
+/tmp/verum-fixN`) to run tests immune to relinks.
 
-**Effort:** multi-day VBC archive/codegen work (gated). Do **not**
+**Effort (residual §E):** multi-day VBC single-field-record
+arithmetic-consistency work (gated). Do **not**
 mark instant stable until §D closes and the 8 tests are GREEN under
 both tiers.
