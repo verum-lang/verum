@@ -1,0 +1,122 @@
+// =============================================================================
+// core-tests/cog/sign/unit_test.vr
+// =============================================================================
+//
+// `core/cog/sign.vr` —
+//   * CogSignatureError 8-variant ADT
+//
+// CogSignature record left untested — refinement-typed Text fields
+// (Text { len == 64/128 }) and Rfc3339Time payload surface deferred
+// codegen layout regressions.
+// =============================================================================
+
+mount core.cog.sign.CogSignatureError;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CogSignatureError variant ctor
+// =============================================================================
+
+@test
+fn test_cog_sig_error_invalid_public_key_variant() {
+    let e: CogSignatureError = CogSignatureError.InvalidPublicKey("bad hex".to_text());
+    assert(e is CogSignatureError.InvalidPublicKey);
+}
+
+@test
+fn test_cog_sig_error_invalid_signature_variant() {
+    let e: CogSignatureError = CogSignatureError.InvalidSignature("not 128 chars".to_text());
+    assert(e is CogSignatureError.InvalidSignature);
+}
+
+@test
+fn test_cog_sig_error_invalid_manifest_hash_variant() {
+    let e: CogSignatureError = CogSignatureError.InvalidManifestHash("not 64 chars".to_text());
+    assert(e is CogSignatureError.InvalidManifestHash);
+}
+
+@test
+fn test_cog_sig_error_invalid_source_hash_variant() {
+    let e: CogSignatureError = CogSignatureError.InvalidSourceHash("not 64 chars".to_text());
+    assert(e is CogSignatureError.InvalidSourceHash);
+}
+
+@test
+fn test_cog_sig_error_hash_mismatch_variant() {
+    let e: CogSignatureError = CogSignatureError.HashMismatch {
+        expected: "deadbeef".to_text(),
+        computed: "cafebabe".to_text(),
+    };
+    assert(e is CogSignatureError.HashMismatch);
+}
+
+@test
+fn test_cog_sig_error_verification_failed_variant() {
+    let e: CogSignatureError = CogSignatureError.VerificationFailed;
+    assert(e is CogSignatureError.VerificationFailed);
+}
+
+@test
+fn test_cog_sig_error_encoding_error_variant() {
+    let e: CogSignatureError = CogSignatureError.EncodingError("bad base64".to_text());
+    assert(e is CogSignatureError.EncodingError);
+}
+
+// =============================================================================
+// Section 2: Payload round-trip
+// =============================================================================
+
+@test
+fn test_cog_sig_error_invalid_public_key_payload_round_trip() {
+    let e: CogSignatureError = CogSignatureError.InvalidPublicKey("expected 64 hex chars".to_text());
+    match e {
+        CogSignatureError.InvalidPublicKey(reason) =>
+            assert_eq(reason, "expected 64 hex chars"),
+        _ => panic("expected InvalidPublicKey"),
+    }
+}
+
+@test
+fn test_cog_sig_error_encoding_error_payload_round_trip() {
+    let e: CogSignatureError = CogSignatureError.EncodingError("malformed hex".to_text());
+    match e {
+        CogSignatureError.EncodingError(reason) =>
+            assert_eq(reason, "malformed hex"),
+        _ => panic("expected EncodingError"),
+    }
+}
+
+// =============================================================================
+// Section 3: Pairwise disjointness (high-signal pairs)
+// =============================================================================
+
+@test
+fn test_cog_sig_error_verification_failed_disjoint() {
+    let e: CogSignatureError = CogSignatureError.VerificationFailed;
+    assert(!(e is CogSignatureError.InvalidPublicKey));
+    assert(!(e is CogSignatureError.InvalidSignature));
+    assert(!(e is CogSignatureError.HashMismatch));
+    assert(!(e is CogSignatureError.EncodingError));
+}
+
+@test
+fn test_cog_sig_error_invalid_public_key_disjoint_from_signature() {
+    let e: CogSignatureError = CogSignatureError.InvalidPublicKey("x".to_text());
+    assert(!(e is CogSignatureError.InvalidSignature));
+    assert(!(e is CogSignatureError.InvalidManifestHash));
+    assert(!(e is CogSignatureError.InvalidSourceHash));
+}
+
+@test
+fn test_cog_sig_error_hash_mismatch_disjoint() {
+    let e: CogSignatureError = CogSignatureError.HashMismatch {
+        expected: "x".to_text(),
+        computed: "y".to_text(),
+    };
+    assert(!(e is CogSignatureError.InvalidPublicKey));
+    assert(!(e is CogSignatureError.VerificationFailed));
+    assert(!(e is CogSignatureError.EncodingError));
+}
+
+fn main() {}
