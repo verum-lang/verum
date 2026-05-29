@@ -2755,11 +2755,18 @@ impl VbcCodegen {
 
                 // First try local variable
                 if let Ok(target_reg) = self.ctx.get_var_reg(name) {
-                    // Check mutability — allow first assignment to uninitialized immutable vars
+                    // Check mutability — allow first assignment to uninitialized
+                    // immutable vars. Deferred-init bindings (`let x: T;`) are
+                    // exempt entirely: they are initialized once per control-flow
+                    // path (e.g. both arms of an `if`/`else`), and the flat
+                    // `is_initialized` flag is not branch-scoped, so it flips
+                    // `true` after the first arm and would otherwise reject the
+                    // sibling arm's assignment.
                     let var_is_cell = self.ctx.lookup_var(name).is_some_and(|i| i.is_cell);
                     if let Some(info) = self.ctx.lookup_var(name)
                         && !info.is_mutable
                         && info.is_initialized
+                        && !info.declared_uninit
                     {
                         return Err(CodegenError::new(CodegenErrorKind::ImmutableAssignment(
                             name.to_string(),

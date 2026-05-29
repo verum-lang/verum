@@ -928,11 +928,17 @@ impl VbcCodegen {
         }
 
         // Late initialization: mark variable as uninitialized when no initializer
+        // (`let x: T;`). `declared_uninit` additionally exempts the binding from
+        // the immutable-reassignment guard so it can be initialized once per
+        // control-flow path (e.g. assigned in both `if`/`else` arms) without the
+        // single flat `is_initialized` flag producing a false positive on the
+        // sibling arm.
         if value.is_none()
             && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
             && let Some(info) = self.ctx.lookup_var_mut(&name.name)
         {
             info.is_initialized = false;
+            info.declared_uninit = true;
         }
 
         Ok(None)
