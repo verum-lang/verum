@@ -1,0 +1,73 @@
+// =============================================================================
+// core-tests/verify/kernel_v0/soundness/unit_test.vr
+// =============================================================================
+//
+// `core/verify/kernel_v0/soundness.vr` —
+//   * LemmaStatus 3-variant ADT
+//     | Proved
+//     | Admitted { iou }
+//     | DischargedByFramework { lemma_path, framework, citation }
+// =============================================================================
+
+mount core.verify.kernel_v0.soundness.LemmaStatus;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: LemmaStatus 3-variant construction
+// =============================================================================
+
+@test
+fn test_lemma_status_proved_variant() {
+    let s: LemmaStatus = LemmaStatus.Proved;
+    assert(s is LemmaStatus.Proved);
+}
+
+@test
+fn test_lemma_status_admitted_variant() {
+    let s: LemmaStatus = LemmaStatus.Admitted {
+        iou: "TODO: complete proof of well-founded induction".to_text(),
+    };
+    assert(s is LemmaStatus.Admitted);
+}
+
+@test
+fn test_lemma_status_discharged_by_framework_variant() {
+    let s: LemmaStatus = LemmaStatus.DischargedByFramework {
+        lemma_path: "kernel_v0/lemmas/wf_induction.vr".to_text(),
+        framework: "mathlib4".to_text(),
+        citation: "Mathlib.Order.WellFoundedSet".to_text(),
+    };
+    assert(s is LemmaStatus.DischargedByFramework);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_lemma_status_proved_disjoint() {
+    let s: LemmaStatus = LemmaStatus.Proved;
+    assert(!(s is LemmaStatus.Admitted));
+    assert(!(s is LemmaStatus.DischargedByFramework));
+}
+
+@test
+fn test_lemma_status_admitted_disjoint() {
+    let s: LemmaStatus = LemmaStatus.Admitted { iou: "x".to_text() };
+    assert(!(s is LemmaStatus.Proved));
+    assert(!(s is LemmaStatus.DischargedByFramework));
+}
+
+@test
+fn test_lemma_status_discharged_by_framework_disjoint() {
+    let s: LemmaStatus = LemmaStatus.DischargedByFramework {
+        lemma_path: "x".to_text(),
+        framework: "y".to_text(),
+        citation: "z".to_text(),
+    };
+    assert(!(s is LemmaStatus.Proved));
+    assert(!(s is LemmaStatus.Admitted));
+}
+
+fn main() {}
