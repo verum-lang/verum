@@ -1,0 +1,91 @@
+// =============================================================================
+// core-tests/proof/reflection/unit_test.vr
+// =============================================================================
+//
+// `core/proof/reflection.vr` — ReflectabilityVerdict ADT.
+// =============================================================================
+
+mount core.proof.reflection.{ReflectabilityVerdict, is_reflectable};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ReflectabilityVerdict 2-variant ADT
+// =============================================================================
+
+@test
+fn test_reflectability_verdict_reflectable_variant() {
+    let v: ReflectabilityVerdict = ReflectabilityVerdict.Reflectable;
+    assert(v is ReflectabilityVerdict.Reflectable);
+}
+
+@test
+fn test_reflectability_verdict_not_reflectable_variant() {
+    let v: ReflectabilityVerdict = ReflectabilityVerdict.NotReflectable {
+        reason: "impure".to_text(),
+    };
+    assert(v is ReflectabilityVerdict.NotReflectable);
+}
+
+@test
+fn test_reflectability_verdict_reflectable_disjoint() {
+    let v: ReflectabilityVerdict = ReflectabilityVerdict.Reflectable;
+    assert(!(v is ReflectabilityVerdict.NotReflectable));
+}
+
+@test
+fn test_reflectability_verdict_not_reflectable_disjoint() {
+    let v: ReflectabilityVerdict = ReflectabilityVerdict.NotReflectable {
+        reason: "x".to_text(),
+    };
+    assert(!(v is ReflectabilityVerdict.Reflectable));
+}
+
+// =============================================================================
+// Section 2: is_reflectable() three-check gate
+//
+//   Soundness gate: pure ∧ total ∧ closed → Reflectable;
+//   any failure → NotReflectable.
+// =============================================================================
+
+@test
+fn test_is_reflectable_all_three_checks_pass() {
+    let v: ReflectabilityVerdict = is_reflectable(
+        "fact".to_text(), true, true, true,
+    );
+    assert(v is ReflectabilityVerdict.Reflectable);
+}
+
+@test
+fn test_is_reflectable_impure_fails() {
+    let v: ReflectabilityVerdict = is_reflectable(
+        "print_thing".to_text(), false, true, true,
+    );
+    assert(v is ReflectabilityVerdict.NotReflectable);
+}
+
+@test
+fn test_is_reflectable_non_total_fails() {
+    let v: ReflectabilityVerdict = is_reflectable(
+        "loop_forever".to_text(), true, false, true,
+    );
+    assert(v is ReflectabilityVerdict.NotReflectable);
+}
+
+@test
+fn test_is_reflectable_non_closed_fails() {
+    let v: ReflectabilityVerdict = is_reflectable(
+        "uses_global".to_text(), true, true, false,
+    );
+    assert(v is ReflectabilityVerdict.NotReflectable);
+}
+
+@test
+fn test_is_reflectable_all_three_checks_fail() {
+    let v: ReflectabilityVerdict = is_reflectable(
+        "very_bad".to_text(), false, false, false,
+    );
+    assert(v is ReflectabilityVerdict.NotReflectable);
+}
+
+fn main() {}
