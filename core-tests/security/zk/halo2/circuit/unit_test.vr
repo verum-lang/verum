@@ -1,0 +1,156 @@
+// =============================================================================
+// core-tests/security/zk/halo2/circuit/unit_test.vr
+// =============================================================================
+//
+// `core/security/zk/halo2/circuit.vr` —
+//   * ColumnType 4-variant ADT (Advice / Instance / Fixed / SelectorColumn)
+//   * Column record (index, kind, name)
+//   * Selector record (column)
+// =============================================================================
+
+mount core.security.zk.halo2.circuit.{ColumnType, Column, Selector};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ColumnType 4-variant construction
+// =============================================================================
+
+@test
+fn test_column_type_advice_variant() {
+    let t: ColumnType = ColumnType.Advice;
+    assert(t is ColumnType.Advice);
+}
+
+@test
+fn test_column_type_instance_variant() {
+    let t: ColumnType = ColumnType.Instance;
+    assert(t is ColumnType.Instance);
+}
+
+@test
+fn test_column_type_fixed_variant() {
+    let t: ColumnType = ColumnType.Fixed;
+    assert(t is ColumnType.Fixed);
+}
+
+@test
+fn test_column_type_selector_column_variant() {
+    let t: ColumnType = ColumnType.SelectorColumn;
+    assert(t is ColumnType.SelectorColumn);
+}
+
+// =============================================================================
+// Section 2: ColumnType pairwise disjointness
+// =============================================================================
+
+@test
+fn test_column_type_advice_disjoint() {
+    let t: ColumnType = ColumnType.Advice;
+    assert(!(t is ColumnType.Instance));
+    assert(!(t is ColumnType.Fixed));
+    assert(!(t is ColumnType.SelectorColumn));
+}
+
+@test
+fn test_column_type_instance_disjoint() {
+    let t: ColumnType = ColumnType.Instance;
+    assert(!(t is ColumnType.Advice));
+    assert(!(t is ColumnType.Fixed));
+    assert(!(t is ColumnType.SelectorColumn));
+}
+
+@test
+fn test_column_type_fixed_disjoint() {
+    let t: ColumnType = ColumnType.Fixed;
+    assert(!(t is ColumnType.Advice));
+    assert(!(t is ColumnType.Instance));
+    assert(!(t is ColumnType.SelectorColumn));
+}
+
+@test
+fn test_column_type_selector_column_disjoint() {
+    let t: ColumnType = ColumnType.SelectorColumn;
+    assert(!(t is ColumnType.Advice));
+    assert(!(t is ColumnType.Instance));
+    assert(!(t is ColumnType.Fixed));
+}
+
+// =============================================================================
+// Section 3: Column record construction
+// =============================================================================
+
+@test
+fn test_column_advice_record_construction() {
+    let c: Column = Column {
+        index: 0,
+        kind: ColumnType.Advice,
+        name: "witness_a".to_text(),
+    };
+    assert_eq(c.index, 0);
+    assert(c.kind is ColumnType.Advice);
+    assert_eq(c.name, "witness_a");
+}
+
+@test
+fn test_column_instance_record_construction() {
+    let c: Column = Column {
+        index: 0,
+        kind: ColumnType.Instance,
+        name: "public_input".to_text(),
+    };
+    assert(c.kind is ColumnType.Instance);
+    assert_eq(c.name, "public_input");
+}
+
+@test
+fn test_column_fixed_record_construction() {
+    let c: Column = Column {
+        index: 7,
+        kind: ColumnType.Fixed,
+        name: "constant_table".to_text(),
+    };
+    assert_eq(c.index, 7);
+    assert(c.kind is ColumnType.Fixed);
+}
+
+@test
+fn test_column_field_independence() {
+    let a: Column = Column {
+        index: 0,
+        kind: ColumnType.Advice,
+        name: "a".to_text(),
+    };
+    let b: Column = Column {
+        index: 1,
+        kind: ColumnType.Advice,
+        name: "b".to_text(),
+    };
+    assert_eq(a.index, 0);
+    assert_eq(b.index, 1);
+    assert_eq(a.name, "a");
+    assert_eq(b.name, "b");
+}
+
+// =============================================================================
+// Section 4: Selector record construction
+// =============================================================================
+
+// @ignore — chained field-access `s.column.field` regresses field offsets;
+// known cross-record-nested layout OOB class (sister of
+// [[btree_pattern_match_ref_generic_class]] / [[enactment_field_access_oob_2026-05-24]]).
+@test
+@ignore
+fn test_selector_wraps_selector_column() {
+    let col: Column = Column {
+        index: 0,
+        kind: ColumnType.SelectorColumn,
+        name: "s0".to_text(),
+    };
+    let s: Selector = Selector { column: col };
+    assert(s.column.kind is ColumnType.SelectorColumn);
+    assert_eq(s.column.index, 0);
+    assert_eq(s.column.name, "s0");
+}
+
+fn main() {}
