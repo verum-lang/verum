@@ -1,0 +1,184 @@
+// =============================================================================
+// core-tests/theory_interop/coord_ordinal/unit_test.vr
+// =============================================================================
+//
+// `core/theory_interop/coord.vr` — Ordinal sub-module:
+//   * Ordinal record (omega_coefficient, finite_offset)
+//   * ord_zero / ord_finite / ord_omega / ord_omega_plus /
+//     ord_omega_times / ord_omega_times_plus
+//   * ord_lt / ord_eq / ord_max
+//   * ord_is_finite / ord_is_transfinite
+// =============================================================================
+
+mount core.theory_interop.coord.{
+    Ordinal,
+    ord_zero, ord_finite, ord_omega, ord_omega_plus,
+    ord_omega_times, ord_omega_times_plus,
+    ord_lt, ord_eq, ord_max,
+    ord_is_finite, ord_is_transfinite,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Constructors
+// =============================================================================
+
+@test
+fn test_ord_zero_canonical() {
+    let o: Ordinal = ord_zero();
+    assert_eq(o.omega_coefficient, 0);
+    assert_eq(o.finite_offset, 0);
+}
+
+@test
+fn test_ord_finite_returns_finite_offset() {
+    let o: Ordinal = ord_finite(7);
+    assert_eq(o.omega_coefficient, 0);
+    assert_eq(o.finite_offset, 7);
+}
+
+@test
+fn test_ord_omega_canonical() {
+    let o: Ordinal = ord_omega();
+    assert_eq(o.omega_coefficient, 1);
+    assert_eq(o.finite_offset, 0);
+}
+
+@test
+fn test_ord_omega_plus_canonical() {
+    let o: Ordinal = ord_omega_plus(3);
+    assert_eq(o.omega_coefficient, 1);
+    assert_eq(o.finite_offset, 3);
+}
+
+@test
+fn test_ord_omega_times_canonical() {
+    let o: Ordinal = ord_omega_times(5);
+    assert_eq(o.omega_coefficient, 5);
+    assert_eq(o.finite_offset, 0);
+}
+
+@test
+fn test_ord_omega_times_plus_canonical() {
+    let o: Ordinal = ord_omega_times_plus(2, 4);
+    assert_eq(o.omega_coefficient, 2);
+    assert_eq(o.finite_offset, 4);
+}
+
+// =============================================================================
+// Section 2: ord_lt — strict less-than
+// =============================================================================
+
+@test
+fn test_ord_lt_zero_below_finite() {
+    assert(ord_lt(ord_zero(), ord_finite(1)));
+}
+
+@test
+fn test_ord_lt_finite_below_omega() {
+    assert(ord_lt(ord_finite(99), ord_omega()));
+}
+
+@test
+fn test_ord_lt_omega_below_omega_plus_one() {
+    assert(ord_lt(ord_omega(), ord_omega_plus(1)));
+}
+
+@test
+fn test_ord_lt_omega_below_omega_times_two() {
+    assert(ord_lt(ord_omega(), ord_omega_times(2)));
+}
+
+@test
+fn test_ord_lt_irreflexive() {
+    assert(!ord_lt(ord_omega(), ord_omega()));
+}
+
+// =============================================================================
+// Section 3: ord_eq — equality
+// =============================================================================
+
+@test
+fn test_ord_eq_reflexive_on_zero() {
+    assert(ord_eq(ord_zero(), ord_zero()));
+}
+
+@test
+fn test_ord_eq_reflexive_on_omega() {
+    assert(ord_eq(ord_omega(), ord_omega()));
+}
+
+@test
+fn test_ord_eq_zero_neq_omega() {
+    assert(!ord_eq(ord_zero(), ord_omega()));
+}
+
+@test
+fn test_ord_eq_omega_plus_three_neq_omega() {
+    assert(!ord_eq(ord_omega_plus(3), ord_omega()));
+}
+
+// =============================================================================
+// Section 4: ord_max
+// =============================================================================
+
+@test
+fn test_ord_max_omega_above_finite() {
+    let m: Ordinal = ord_max(ord_finite(7), ord_omega());
+    assert(ord_eq(m, ord_omega()));
+}
+
+@test
+fn test_ord_max_returns_left_when_left_larger() {
+    let m: Ordinal = ord_max(ord_omega(), ord_finite(99));
+    assert(ord_eq(m, ord_omega()));
+}
+
+@test
+fn test_ord_max_equal_returns_left() {
+    let m: Ordinal = ord_max(ord_omega(), ord_omega());
+    assert(ord_eq(m, ord_omega()));
+}
+
+// =============================================================================
+// Section 5: ord_is_finite / ord_is_transfinite
+// =============================================================================
+
+@test
+fn test_ord_is_finite_true_for_zero() {
+    assert(ord_is_finite(ord_zero()));
+}
+
+@test
+fn test_ord_is_finite_true_for_finite() {
+    assert(ord_is_finite(ord_finite(42)));
+}
+
+@test
+fn test_ord_is_finite_false_for_omega() {
+    assert(!ord_is_finite(ord_omega()));
+}
+
+@test
+fn test_ord_is_transfinite_false_for_zero() {
+    assert(!ord_is_transfinite(ord_zero()));
+}
+
+@test
+fn test_ord_is_transfinite_true_for_omega() {
+    assert(ord_is_transfinite(ord_omega()));
+}
+
+@test
+fn test_ord_is_transfinite_true_for_omega_times_n() {
+    assert(ord_is_transfinite(ord_omega_times(3)));
+}
+
+@test
+fn test_finite_and_transfinite_disjoint() {
+    let o = ord_omega();
+    assert(ord_is_finite(o.clone()) != ord_is_transfinite(o));
+}
+
+fn main() {}
