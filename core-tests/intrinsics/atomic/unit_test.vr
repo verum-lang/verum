@@ -1,0 +1,129 @@
+// =============================================================================
+// core-tests/intrinsics/atomic/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/atomic.vr` — atomic memory ordering ADT.
+// =============================================================================
+
+mount core.intrinsics.atomic.MemoryOrder;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: MemoryOrder 5-variant ADT
+//
+//   Standard C++/Rust memory model — Relaxed / Acquire / Release /
+//   AcqRel / SeqCst ladder of strength.
+// =============================================================================
+
+@test
+fn test_memory_order_relaxed_variant() {
+    let m: MemoryOrder = MemoryOrder.Relaxed;
+    assert(m is MemoryOrder.Relaxed);
+}
+
+@test
+fn test_memory_order_acquire_variant() {
+    let m: MemoryOrder = MemoryOrder.Acquire;
+    assert(m is MemoryOrder.Acquire);
+}
+
+@test
+fn test_memory_order_release_variant() {
+    let m: MemoryOrder = MemoryOrder.Release;
+    assert(m is MemoryOrder.Release);
+}
+
+@test
+fn test_memory_order_acq_rel_variant() {
+    let m: MemoryOrder = MemoryOrder.AcqRel;
+    assert(m is MemoryOrder.AcqRel);
+}
+
+@test
+fn test_memory_order_seq_cst_variant() {
+    let m: MemoryOrder = MemoryOrder.SeqCst;
+    assert(m is MemoryOrder.SeqCst);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness — selected pairs
+// =============================================================================
+
+@test
+fn test_memory_order_relaxed_disjoint() {
+    let m: MemoryOrder = MemoryOrder.Relaxed;
+    assert(!(m is MemoryOrder.Acquire));
+    assert(!(m is MemoryOrder.Release));
+    assert(!(m is MemoryOrder.AcqRel));
+    assert(!(m is MemoryOrder.SeqCst));
+}
+
+@test
+fn test_memory_order_acquire_release_distinct() {
+    let a: MemoryOrder = MemoryOrder.Acquire;
+    let r: MemoryOrder = MemoryOrder.Release;
+    assert(!(a is MemoryOrder.Release));
+    assert(!(r is MemoryOrder.Acquire));
+}
+
+@test
+fn test_memory_order_acq_rel_disjoint_from_pure_arms() {
+    let m: MemoryOrder = MemoryOrder.AcqRel;
+    assert(!(m is MemoryOrder.Acquire));
+    assert(!(m is MemoryOrder.Release));
+    assert(!(m is MemoryOrder.Relaxed));
+    assert(!(m is MemoryOrder.SeqCst));
+}
+
+@test
+fn test_memory_order_seq_cst_disjoint_from_all() {
+    let m: MemoryOrder = MemoryOrder.SeqCst;
+    assert(!(m is MemoryOrder.Relaxed));
+    assert(!(m is MemoryOrder.Acquire));
+    assert(!(m is MemoryOrder.Release));
+    assert(!(m is MemoryOrder.AcqRel));
+}
+
+// =============================================================================
+// Section 3: Match exhaustiveness — strength label
+//
+//   Standard ordering: Relaxed < Acquire/Release < AcqRel < SeqCst.
+// =============================================================================
+
+fn strength_label(m: &MemoryOrder) -> Text {
+    match m {
+        MemoryOrder.Relaxed  => "weakest".to_text(),
+        MemoryOrder.Acquire  => "acquire".to_text(),
+        MemoryOrder.Release  => "release".to_text(),
+        MemoryOrder.AcqRel   => "acq-rel".to_text(),
+        MemoryOrder.SeqCst   => "strongest".to_text(),
+    }
+}
+
+@test
+fn test_memory_order_strength_relaxed_is_weakest() {
+    assert_eq(strength_label(&MemoryOrder.Relaxed), "weakest");
+}
+
+@test
+fn test_memory_order_strength_seq_cst_is_strongest() {
+    assert_eq(strength_label(&MemoryOrder.SeqCst), "strongest");
+}
+
+@test
+fn test_memory_order_strength_acquire() {
+    assert_eq(strength_label(&MemoryOrder.Acquire), "acquire");
+}
+
+@test
+fn test_memory_order_strength_release() {
+    assert_eq(strength_label(&MemoryOrder.Release), "release");
+}
+
+@test
+fn test_memory_order_strength_acq_rel() {
+    assert_eq(strength_label(&MemoryOrder.AcqRel), "acq-rel");
+}
+
+fn main() {}
