@@ -1,0 +1,143 @@
+// =============================================================================
+// core-tests/database/common/migrations/store/unit_test.vr
+// =============================================================================
+//
+// `core/database/common/migrations/store.vr` — MigrationStoreConfig surface
+// (the MigrationStore protocol itself requires a live DB adapter and is
+// tested at language-level under vcs/specs/L2-standard/database/).
+//
+// Surface tested:
+//   * MigrationStoreConfig record (2 fields: table_name, transactional)
+//   * store_config_default() factory + canonical defaults
+//   * with_table_name + with_transactional builders
+// =============================================================================
+
+mount core.database.common.migrations.store.{
+    MigrationStoreConfig, store_config_default,
+};
+
+// =============================================================================
+// Section 1: store_config_default defaults
+// =============================================================================
+
+@test
+fn test_store_config_default_table_name_is_canonical() {
+    let c = store_config_default();
+    assert_eq(c.table_name, "__verum_migrations".to_text());
+}
+
+@test
+fn test_store_config_default_transactional_is_true() {
+    let c = store_config_default();
+    assert_eq(c.transactional, true);
+}
+
+// =============================================================================
+// Section 2: MigrationStoreConfig direct construction
+// =============================================================================
+
+@test
+fn test_store_config_direct_construction_preserves_table_name() {
+    let c: MigrationStoreConfig = MigrationStoreConfig {
+        table_name: "schema_migrations".to_text(),
+        transactional: false,
+    };
+    assert_eq(c.table_name, "schema_migrations".to_text());
+}
+
+@test
+fn test_store_config_direct_construction_preserves_transactional_true() {
+    let c: MigrationStoreConfig = MigrationStoreConfig {
+        table_name: "t".to_text(),
+        transactional: true,
+    };
+    assert_eq(c.transactional, true);
+}
+
+@test
+fn test_store_config_direct_construction_preserves_transactional_false() {
+    let c: MigrationStoreConfig = MigrationStoreConfig {
+        table_name: "t".to_text(),
+        transactional: false,
+    };
+    assert_eq(c.transactional, false);
+}
+
+// =============================================================================
+// Section 3: with_table_name builder
+// =============================================================================
+
+@test
+fn test_with_table_name_overrides_default() {
+    let c = store_config_default().with_table_name("flyway_history".to_text());
+    assert_eq(c.table_name, "flyway_history".to_text());
+}
+
+@test
+fn test_with_table_name_preserves_transactional() {
+    let c = store_config_default().with_table_name("custom".to_text());
+    // default transactional=true preserved
+    assert_eq(c.transactional, true);
+}
+
+@test
+fn test_with_table_name_chained_last_wins() {
+    let c = store_config_default()
+        .with_table_name("first".to_text())
+        .with_table_name("second".to_text());
+    assert_eq(c.table_name, "second".to_text());
+}
+
+// =============================================================================
+// Section 4: with_transactional builder
+// =============================================================================
+
+@test
+fn test_with_transactional_false_overrides_default() {
+    let c = store_config_default().with_transactional(false);
+    assert_eq(c.transactional, false);
+}
+
+@test
+fn test_with_transactional_true_no_op_from_default() {
+    let c = store_config_default().with_transactional(true);
+    assert_eq(c.transactional, true);
+}
+
+@test
+fn test_with_transactional_preserves_table_name() {
+    let c = store_config_default().with_transactional(false);
+    assert_eq(c.table_name, "__verum_migrations".to_text());
+}
+
+@test
+fn test_with_transactional_chained_last_wins() {
+    let c = store_config_default()
+        .with_transactional(false)
+        .with_transactional(true);
+    assert_eq(c.transactional, true);
+}
+
+// =============================================================================
+// Section 5: builder composition
+// =============================================================================
+
+@test
+fn test_builders_compose_both_overrides() {
+    let c = store_config_default()
+        .with_table_name("schema_log".to_text())
+        .with_transactional(false);
+    assert_eq(c.table_name, "schema_log".to_text());
+    assert_eq(c.transactional, false);
+}
+
+@test
+fn test_builders_compose_reverse_order() {
+    let c = store_config_default()
+        .with_transactional(false)
+        .with_table_name("alt".to_text());
+    assert_eq(c.table_name, "alt".to_text());
+    assert_eq(c.transactional, false);
+}
+
+fn main() {}
