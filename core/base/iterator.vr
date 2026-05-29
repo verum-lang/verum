@@ -3222,24 +3222,27 @@ implement Iterator for RangeInclusive<Int> {
     type Item = Int;
 
     fn next(&mut self) -> Maybe<Int> {
-        // CLOSED 2026-05-28 via minimal single-comparison reformulation
-        // — DROPS the `done` field from the iteration invariant and
-        // instead uses `cur > end_v` as the exhaustion sentinel.
+        // Reformulation under multi-day VBC method-dispatch codegen
+        // defect investigation. Two preceding single-comparison forms
+        // (`cur > end_v` and the original `cur < end / else if cur ==
+        // end / else None` chained form) BOTH fail to yield the
+        // boundary value when called via method dispatch — third call
+        // on (1..=3) returns None instead of Some(3). Probed cleanly:
+        //   - 2-field `SafeRangeInc { current, end }` with EXACT same
+        //     body yields the boundary correctly.
+        //   - 3-field `RangeInclusive<T> { current, end, done }` does
+        //     NOT — runtime field-read on `self.end` returns wrong
+        //     value at boundary call.
         //
-        // After yielding the boundary value (cur == end_v), the body
-        // unconditionally advances `self.current` to `end + 1`; the
-        // next call sees `cur > end_v` and returns None.
+        // The defect is in 3-field record `&mut self` field-read at
+        // codegen → GetF/SetF runtime path. The minimal `cur > end_v`
+        // form below is structurally correct and matches the working
+        // 2-field probe; documented as multi-day codegen surgery in
+        // [[range_inclusive_3field_dispatch_defect_2026-05-29]].
         //
-        // The prior chained-`if/else if`-with-`done`-gate form was
-        // miscompiled under VBC method-dispatch codegen: the
-        // `else if self.current == self.end` boundary branch never
-        // fired (third call on (1..=3) returned None instead of
-        // Some(3)).  Probe SafeRangeInc with the same shape AS THIS
-        // FIX confirmed minimal `if cur > end { None } else { ++cur;
-        // Some(cur) }` yields the inclusive boundary correctly.
-        // `done` field is retained on the type for layout-back-compat
-        // (downstream impls reference it) but is no longer consulted
-        // in the canonical Iterator::next dispatch.
+        // Workaround for end-users: use `for i in 1..=N` (runtime
+        // IterNext fast-path at `iterators.rs:456` correctly handles
+        // inclusive boundary via direct heap layout read).
         let cur: Int = self.current;
         let end_v: Int = self.end;
         if cur > end_v {
