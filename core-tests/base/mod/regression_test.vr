@@ -26,14 +26,27 @@ fn regression_pin_range_inclusive_sum_includes_upper_bound() {
 }
 
 // =============================================================================
-// REGRESSION §B (@ignore'd): `take(&mut x)` returns the value but does
-// not reset `x` to T::default(). Per the canonical mem::take contract,
-// `take(&mut x)` MUST swap `x` with `T::default()` and return the old
-// value. Defect: the swap is not landing — `x` retains its original
-// value after `take`.
+// REGRESSION §B: `take(&mut x)` swaps x with T::default() and returns the
+// old value. Per the canonical mem::take contract, this is the standard
+// "move-and-zero" pattern.
+//
+// CLOSED 2026-05-29 via method-vs-free-fn shadow filter at
+// `crates/verum_vbc/src/codegen/expressions.rs::compile_call`. Pre-fix
+// the bare-name `take(&mut x)` lookup hit hash-table first-wins on the
+// simple key `take` and resolved to one of `Cell.take` / `OnceCell.take`
+// / `Set.take` / `Args.take` / `Vars.take` / `ErrorChain.take` /
+// `Rev.take` / `FuseIter.take` / `Empty.take` impl methods (depending
+// on archive-load order). The wrong method's body executed — take
+// returned the int payload of its first arg (so the `taken==42`
+// assertion accidentally passed) but never performed the
+// replace-and-reset write-back through the CBGR ref, leaving x at 42.
+//
+// The fix filters every lookup layer of `compile_call` through a
+// `param_names.first() != "self"` predicate, ensuring bare-name Call
+// dispatch routes ONLY to free fns. impl-block instance methods are
+// receiver-syntax-only and lower to CallM, never to Call.
 // =============================================================================
 
-@ignore("take(&mut x) does not reset x to default after extracting the value.")
 @test
 fn regression_pin_take_resets_to_default() {
     let mut x: Int = 42;
