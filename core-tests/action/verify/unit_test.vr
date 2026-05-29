@@ -1,0 +1,100 @@
+// =============================================================================
+// core-tests/action/verify/unit_test.vr
+// =============================================================================
+//
+// `core/action/verify.vr` — AuditVerdict ADT.
+// =============================================================================
+
+mount core.action.verify.{AuditVerdict, verdict_as_text};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: AuditVerdict 4-variant ADT
+// =============================================================================
+
+@test
+fn test_audit_verdict_consistent_variant() {
+    let v: AuditVerdict = AuditVerdict.Consistent;
+    assert(v is AuditVerdict.Consistent);
+}
+
+@test
+fn test_audit_verdict_too_weak_variant() {
+    let v: AuditVerdict = AuditVerdict.TooWeak;
+    assert(v is AuditVerdict.TooWeak);
+}
+
+@test
+fn test_audit_verdict_too_strong_variant() {
+    let v: AuditVerdict = AuditVerdict.TooStrong;
+    assert(v is AuditVerdict.TooStrong);
+}
+
+@test
+fn test_audit_verdict_gauge_mismatch_variant() {
+    let v: AuditVerdict = AuditVerdict.GaugeMismatch;
+    assert(v is AuditVerdict.GaugeMismatch);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_audit_verdict_consistent_disjoint() {
+    let v: AuditVerdict = AuditVerdict.Consistent;
+    assert(!(v is AuditVerdict.TooWeak));
+    assert(!(v is AuditVerdict.TooStrong));
+    assert(!(v is AuditVerdict.GaugeMismatch));
+}
+
+@test
+fn test_audit_verdict_too_weak_disjoint() {
+    let v: AuditVerdict = AuditVerdict.TooWeak;
+    assert(!(v is AuditVerdict.Consistent));
+    assert(!(v is AuditVerdict.TooStrong));
+    assert(!(v is AuditVerdict.GaugeMismatch));
+}
+
+@test
+fn test_audit_verdict_too_strong_disjoint() {
+    let v: AuditVerdict = AuditVerdict.TooStrong;
+    assert(!(v is AuditVerdict.Consistent));
+    assert(!(v is AuditVerdict.TooWeak));
+    assert(!(v is AuditVerdict.GaugeMismatch));
+}
+
+@test
+fn test_audit_verdict_gauge_mismatch_disjoint() {
+    let v: AuditVerdict = AuditVerdict.GaugeMismatch;
+    assert(!(v is AuditVerdict.Consistent));
+    assert(!(v is AuditVerdict.TooWeak));
+    assert(!(v is AuditVerdict.TooStrong));
+}
+
+// =============================================================================
+// Section 3: verdict_as_text() — canonical labels
+// =============================================================================
+
+@test
+fn test_verdict_as_text_consistent() {
+    assert_eq(verdict_as_text(AuditVerdict.Consistent), "consistent");
+}
+
+@test
+fn test_verdict_as_text_too_weak() {
+    assert_eq(verdict_as_text(AuditVerdict.TooWeak), "too-weak");
+}
+
+@test
+fn test_verdict_as_text_too_strong() {
+    assert_eq(verdict_as_text(AuditVerdict.TooStrong), "too-strong");
+}
+
+@test
+fn test_verdict_as_text_gauge_mismatch() {
+    assert_eq(verdict_as_text(AuditVerdict.GaugeMismatch), "gauge-mismatch");
+}
+
+fn main() {}
