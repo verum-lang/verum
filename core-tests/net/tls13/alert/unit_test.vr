@@ -1,0 +1,91 @@
+// =============================================================================
+// core-tests/net/tls13/alert/unit_test.vr — RFC 8446 §6 alert protocol
+// =============================================================================
+//
+// `core/net/tls13/alert.vr`:
+//
+//   * AlertLevel 2-variant (Warning=1, Fatal=2) + to_u8 / from_u8.
+//   * AlertDescription — RFC 8446 §6 wire codes + to_u8.
+// =============================================================================
+
+mount core.net.tls13.alert.{AlertLevel, AlertDescription};
+
+// =============================================================================
+// Section 1: AlertLevel (§6)
+// =============================================================================
+
+@test
+fn test_tls13alert_warning_is_1() { assert_eq(AlertLevel.Warning.to_u8(), 1_u8); }
+
+@test
+fn test_tls13alert_fatal_is_2() { assert_eq(AlertLevel.Fatal.to_u8(), 2_u8); }
+
+@test
+fn test_tls13alert_from_u8_1_warning() { assert(AlertLevel.from_u8(1_u8) is AlertLevel.Warning); }
+
+@test
+fn test_tls13alert_from_u8_2_fatal() { assert(AlertLevel.from_u8(2_u8) is AlertLevel.Fatal); }
+
+@test
+fn test_tls13alert_from_u8_unknown_is_fatal() {
+    // Conservative default: any unrecognised level is treated as Fatal.
+    assert(AlertLevel.from_u8(99_u8) is AlertLevel.Fatal);
+}
+
+@test
+fn test_tls13alert_level_round_trip_warning() {
+    assert(AlertLevel.from_u8(AlertLevel.Warning.to_u8()) is AlertLevel.Warning);
+}
+
+@test
+fn test_tls13alert_level_round_trip_fatal() {
+    assert(AlertLevel.from_u8(AlertLevel.Fatal.to_u8()) is AlertLevel.Fatal);
+}
+
+// =============================================================================
+// Section 2: AlertDescription wire codes (RFC 8446 §6)
+// =============================================================================
+
+@test
+fn test_tls13alert_close_notify_0() { assert_eq(AlertDescription.CloseNotify.to_u8(), 0_u8); }
+
+@test
+fn test_tls13alert_unexpected_message_10() { assert_eq(AlertDescription.UnexpectedMessage.to_u8(), 10_u8); }
+
+@test
+fn test_tls13alert_bad_record_mac_20() { assert_eq(AlertDescription.BadRecordMac.to_u8(), 20_u8); }
+
+@test
+fn test_tls13alert_record_overflow_22() { assert_eq(AlertDescription.RecordOverflow.to_u8(), 22_u8); }
+
+@test
+fn test_tls13alert_handshake_failure_40() { assert_eq(AlertDescription.HandshakeFailure.to_u8(), 40_u8); }
+
+@test
+fn test_tls13alert_bad_certificate_42() { assert_eq(AlertDescription.BadCertificate.to_u8(), 42_u8); }
+
+@test
+fn test_tls13alert_certificate_expired_45() { assert_eq(AlertDescription.CertificateExpired.to_u8(), 45_u8); }
+
+@test
+fn test_tls13alert_unknown_ca_48() { assert_eq(AlertDescription.UnknownCa.to_u8(), 48_u8); }
+
+@test
+fn test_tls13alert_decode_error_50() { assert_eq(AlertDescription.DecodeError.to_u8(), 50_u8); }
+
+@test
+fn test_tls13alert_decrypt_error_51() { assert_eq(AlertDescription.DecryptError.to_u8(), 51_u8); }
+
+@test
+fn test_tls13alert_protocol_version_70() { assert_eq(AlertDescription.ProtocolVersion.to_u8(), 70_u8); }
+
+@test
+fn test_tls13alert_internal_error_80() { assert_eq(AlertDescription.InternalError.to_u8(), 80_u8); }
+
+@test
+fn test_tls13alert_descriptions_disjoint_sample() {
+    assert(!(AlertDescription.CloseNotify.to_u8() == AlertDescription.HandshakeFailure.to_u8()));
+    assert(!(AlertDescription.BadRecordMac.to_u8() == AlertDescription.DecodeError.to_u8()));
+}
+
+fn main() {}

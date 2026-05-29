@@ -1,0 +1,118 @@
+// =============================================================================
+// core-tests/net/h3/error/unit_test.vr — RFC 9114 §8.1 / RFC 9204 error codes
+// =============================================================================
+//
+// `core/net/h3/error.vr`:
+//
+//   * H3ErrorCode — 17 RFC 9114 §8.1 wire constants + 3 RFC 9204 QPACK codes
+//     + new/value.
+//   * H3Error ADT — connection/stream-scoped + frame/stream decode errors.
+// =============================================================================
+
+mount core.net.h3.error.{H3ErrorCode, H3Error};
+
+// =============================================================================
+// Section 1: H3ErrorCode wire constants (RFC 9114 §8.1)
+// =============================================================================
+
+@test
+fn test_h3err_no_error_0x100() { assert_eq(H3ErrorCode.H3_NO_ERROR, 0x0100_u64); }
+
+@test
+fn test_h3err_general_protocol_error_0x101() { assert_eq(H3ErrorCode.H3_GENERAL_PROTOCOL_ERROR, 0x0101_u64); }
+
+@test
+fn test_h3err_internal_error_0x102() { assert_eq(H3ErrorCode.H3_INTERNAL_ERROR, 0x0102_u64); }
+
+@test
+fn test_h3err_stream_creation_error_0x103() { assert_eq(H3ErrorCode.H3_STREAM_CREATION_ERROR, 0x0103_u64); }
+
+@test
+fn test_h3err_closed_critical_stream_0x104() { assert_eq(H3ErrorCode.H3_CLOSED_CRITICAL_STREAM, 0x0104_u64); }
+
+@test
+fn test_h3err_frame_unexpected_0x105() { assert_eq(H3ErrorCode.H3_FRAME_UNEXPECTED, 0x0105_u64); }
+
+@test
+fn test_h3err_frame_error_0x106() { assert_eq(H3ErrorCode.H3_FRAME_ERROR, 0x0106_u64); }
+
+@test
+fn test_h3err_excessive_load_0x107() { assert_eq(H3ErrorCode.H3_EXCESSIVE_LOAD, 0x0107_u64); }
+
+@test
+fn test_h3err_id_error_0x108() { assert_eq(H3ErrorCode.H3_ID_ERROR, 0x0108_u64); }
+
+@test
+fn test_h3err_settings_error_0x109() { assert_eq(H3ErrorCode.H3_SETTINGS_ERROR, 0x0109_u64); }
+
+@test
+fn test_h3err_missing_settings_0x10a() { assert_eq(H3ErrorCode.H3_MISSING_SETTINGS, 0x010A_u64); }
+
+@test
+fn test_h3err_request_rejected_0x10b() { assert_eq(H3ErrorCode.H3_REQUEST_REJECTED, 0x010B_u64); }
+
+@test
+fn test_h3err_message_error_0x10e() { assert_eq(H3ErrorCode.H3_MESSAGE_ERROR, 0x010E_u64); }
+
+@test
+fn test_h3err_connect_error_0x10f() { assert_eq(H3ErrorCode.H3_CONNECT_ERROR, 0x010F_u64); }
+
+@test
+fn test_h3err_version_fallback_0x110() { assert_eq(H3ErrorCode.H3_VERSION_FALLBACK, 0x0110_u64); }
+
+// =============================================================================
+// Section 2: QPACK error codes (RFC 9204 §6)
+// =============================================================================
+
+@test
+fn test_h3err_qpack_decompression_failed_0x200() { assert_eq(H3ErrorCode.QPACK_DECOMPRESSION_FAILED, 0x0200_u64); }
+
+@test
+fn test_h3err_qpack_encoder_stream_error_0x201() { assert_eq(H3ErrorCode.QPACK_ENCODER_STREAM_ERROR, 0x0201_u64); }
+
+@test
+fn test_h3err_qpack_decoder_stream_error_0x202() { assert_eq(H3ErrorCode.QPACK_DECODER_STREAM_ERROR, 0x0202_u64); }
+
+// =============================================================================
+// Section 3: H3ErrorCode new/value + H3 vs QPACK range disjointness
+// =============================================================================
+
+@test
+fn test_h3err_new_round_trips() {
+    let e = H3ErrorCode.new(H3ErrorCode.H3_FRAME_ERROR);
+    assert_eq(e.value(), 0x0106_u64);
+}
+
+@test
+fn test_h3err_h3_range_below_qpack_range() {
+    // H3 codes live in 0x01xx; QPACK in 0x02xx — disjoint ranges.
+    assert(H3ErrorCode.H3_VERSION_FALLBACK < H3ErrorCode.QPACK_DECOMPRESSION_FAILED);
+}
+
+// =============================================================================
+// Section 4: H3Error ADT
+// =============================================================================
+
+@test
+fn test_h3err_connection_error_variant() {
+    let e = H3Error.ConnectionError { code: H3ErrorCode.new(H3ErrorCode.H3_FRAME_UNEXPECTED), reason: "x".into() };
+    assert(e is H3Error.ConnectionError);
+}
+
+@test
+fn test_h3err_missing_settings_variant() {
+    assert(H3Error.MissingSettings is H3Error.MissingSettings);
+}
+
+@test
+fn test_h3err_connection_vs_missing_settings_disjoint() {
+    assert(!(H3Error.MissingSettings is H3Error.ConnectionError));
+}
+
+@test
+fn test_h3err_display_nonempty() {
+    let s = f"{H3Error.MissingSettings}";
+    assert(s.len() > 0);
+}
+
+fn main() {}
