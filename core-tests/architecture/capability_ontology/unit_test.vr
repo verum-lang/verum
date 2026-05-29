@@ -1,0 +1,95 @@
+// =============================================================================
+// core-tests/architecture/capability_ontology/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/capability_ontology.vr` — CapabilityRegistration record.
+// =============================================================================
+
+mount core.architecture.capability_ontology.CapabilityRegistration;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CapabilityRegistration record construction
+// =============================================================================
+
+@test
+fn test_capability_registration_active_construction() {
+    let cr: CapabilityRegistration = CapabilityRegistration {
+        name: "FileSystemAccess".to_text(),
+        description: "Read/write filesystem".to_text(),
+        transfers_privilege: false,
+        deprecation: Maybe.None,
+    };
+    assert_eq(cr.name, "FileSystemAccess");
+    assert_eq(cr.description, "Read/write filesystem");
+    assert_eq(cr.transfers_privilege, false);
+}
+
+@test
+fn test_capability_registration_escalating_construction() {
+    let cr: CapabilityRegistration = CapabilityRegistration {
+        name: "SyscallExec".to_text(),
+        description: "Raw syscall execution".to_text(),
+        transfers_privilege: true,
+        deprecation: Maybe.None,
+    };
+    assert_eq(cr.transfers_privilege, true);
+}
+
+@test
+fn test_capability_registration_deprecated_construction() {
+    let cr: CapabilityRegistration = CapabilityRegistration {
+        name: "LegacyFileAccess".to_text(),
+        description: "Legacy filesystem access".to_text(),
+        transfers_privilege: false,
+        deprecation: Maybe.Some("FileSystemAccess".to_text()),
+    };
+    assert_eq(cr.name, "LegacyFileAccess");
+}
+
+@test
+fn test_capability_registration_deprecation_none_preserved() {
+    let cr: CapabilityRegistration = CapabilityRegistration {
+        name: "x".to_text(),
+        description: "y".to_text(),
+        transfers_privilege: false,
+        deprecation: Maybe.None,
+    };
+    let d: Maybe<Text> = cr.deprecation;
+    assert(d is Maybe.None);
+}
+
+@test
+fn test_capability_registration_deprecation_some_preserved() {
+    let cr: CapabilityRegistration = CapabilityRegistration {
+        name: "x".to_text(),
+        description: "y".to_text(),
+        transfers_privilege: false,
+        deprecation: Maybe.Some("NewName".to_text()),
+    };
+    let d: Maybe<Text> = cr.deprecation;
+    assert(d is Maybe.Some);
+}
+
+@test
+fn test_capability_registration_field_independence() {
+    let a: CapabilityRegistration = CapabilityRegistration {
+        name: "A".to_text(),
+        description: "a".to_text(),
+        transfers_privilege: false,
+        deprecation: Maybe.None,
+    };
+    let b: CapabilityRegistration = CapabilityRegistration {
+        name: "B".to_text(),
+        description: "b".to_text(),
+        transfers_privilege: true,
+        deprecation: Maybe.None,
+    };
+    assert_eq(a.name, "A");
+    assert_eq(b.name, "B");
+    assert_eq(a.transfers_privilege, false);
+    assert_eq(b.transfers_privilege, true);
+}
+
+fn main() {}
