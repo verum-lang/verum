@@ -1,0 +1,196 @@
+// =============================================================================
+// core-tests/math/autodiff/unit_test.vr
+// =============================================================================
+//
+// `core/math/autodiff.vr` — Differentiation mode + Op-type ADT surface.
+//
+// Surface tested:
+//   * DiffMode 3-variant (ReverseMode / ForwardMode / MixedMode { threshold })
+//     — simple-variant subset; MixedMode record-payload deferred
+//   * OpType subset (Add / Sub / Mul / Div / Neg / Exp / Log / Sqrt / Matmul /
+//     Sum / Mean / Reshape) — fully qualified to dodge bare-name collisions
+//
+// Custom(Text) payload variant + VJPResult / JVPResult / GradientScope /
+// NodeId / TensorId / VJPRule require the autodiff runtime — tested at
+// language-level under `vcs/specs/L2-standard/math/autodiff/`.
+// =============================================================================
+
+mount core.math.autodiff.{
+    DiffMode, OpType,
+};
+
+// =============================================================================
+// Section 1: DiffMode simple-variant
+// =============================================================================
+
+@test
+fn test_diff_mode_reverse_mode_variant() {
+    let m: DiffMode = DiffMode.ReverseMode;
+    assert(m is DiffMode.ReverseMode);
+}
+
+@test
+fn test_diff_mode_forward_mode_variant() {
+    let m: DiffMode = DiffMode.ForwardMode;
+    assert(m is DiffMode.ForwardMode);
+}
+
+@test
+fn test_diff_mode_reverse_disjoint_from_forward() {
+    let r: DiffMode = DiffMode.ReverseMode;
+    let f: DiffMode = DiffMode.ForwardMode;
+    assert(r is DiffMode.ReverseMode && !(r is DiffMode.ForwardMode));
+    assert(f is DiffMode.ForwardMode && !(f is DiffMode.ReverseMode));
+}
+
+// =============================================================================
+// Section 2: OpType arithmetic variants
+// =============================================================================
+
+@test
+fn test_op_type_add_variant() {
+    let o: OpType = OpType.Add;
+    assert(o is OpType.Add);
+}
+
+@test
+fn test_op_type_sub_variant() {
+    let o: OpType = OpType.Sub;
+    assert(o is OpType.Sub);
+}
+
+@test
+fn test_op_type_mul_variant() {
+    let o: OpType = OpType.Mul;
+    assert(o is OpType.Mul);
+}
+
+@test
+fn test_op_type_div_variant() {
+    let o: OpType = OpType.Div;
+    assert(o is OpType.Div);
+}
+
+@test
+fn test_op_type_neg_variant() {
+    let o: OpType = OpType.Neg;
+    assert(o is OpType.Neg);
+}
+
+// =============================================================================
+// Section 3: OpType transcendental variants
+// =============================================================================
+
+@test
+fn test_op_type_exp_variant() {
+    let o: OpType = OpType.Exp;
+    assert(o is OpType.Exp);
+}
+
+@test
+fn test_op_type_log_variant() {
+    let o: OpType = OpType.Log;
+    assert(o is OpType.Log);
+}
+
+@test
+fn test_op_type_sqrt_variant() {
+    let o: OpType = OpType.Sqrt;
+    assert(o is OpType.Sqrt);
+}
+
+@test
+fn test_op_type_sin_variant() {
+    let o: OpType = OpType.Sin;
+    assert(o is OpType.Sin);
+}
+
+@test
+fn test_op_type_cos_variant() {
+    let o: OpType = OpType.Cos;
+    assert(o is OpType.Cos);
+}
+
+@test
+fn test_op_type_tanh_variant() {
+    let o: OpType = OpType.Tanh;
+    assert(o is OpType.Tanh);
+}
+
+// =============================================================================
+// Section 4: OpType linear-algebra + reduction variants
+// =============================================================================
+
+@test
+fn test_op_type_matmul_variant() {
+    let o: OpType = OpType.Matmul;
+    assert(o is OpType.Matmul);
+}
+
+@test
+fn test_op_type_softmax_variant() {
+    let o: OpType = OpType.Softmax;
+    assert(o is OpType.Softmax);
+}
+
+@test
+fn test_op_type_sum_variant() {
+    let o: OpType = OpType.Sum;
+    assert(o is OpType.Sum);
+}
+
+@test
+fn test_op_type_mean_variant() {
+    let o: OpType = OpType.Mean;
+    assert(o is OpType.Mean);
+}
+
+@test
+fn test_op_type_reshape_variant() {
+    let o: OpType = OpType.Reshape;
+    assert(o is OpType.Reshape);
+}
+
+@test
+fn test_op_type_transpose_variant() {
+    let o: OpType = OpType.Transpose;
+    assert(o is OpType.Transpose);
+}
+
+// =============================================================================
+// Section 5: OpType pairwise disjointness (representative)
+// =============================================================================
+
+@test
+fn test_op_type_add_disjoint_from_mul() {
+    let a: OpType = OpType.Add;
+    let m: OpType = OpType.Mul;
+    assert(a is OpType.Add && !(a is OpType.Mul));
+    assert(m is OpType.Mul && !(m is OpType.Add));
+}
+
+@test
+fn test_op_type_exp_disjoint_from_log() {
+    let e: OpType = OpType.Exp;
+    let l: OpType = OpType.Log;
+    assert(!(e is OpType.Log));
+    assert(!(l is OpType.Exp));
+}
+
+@test
+fn test_op_type_sum_disjoint_from_mean() {
+    let s: OpType = OpType.Sum;
+    let m: OpType = OpType.Mean;
+    assert(!(s is OpType.Mean));
+    assert(!(m is OpType.Sum));
+}
+
+@test
+fn test_op_type_matmul_disjoint_from_transpose() {
+    let mm: OpType = OpType.Matmul;
+    let t: OpType = OpType.Transpose;
+    assert(!(mm is OpType.Transpose));
+    assert(!(t is OpType.Matmul));
+}
+
+fn main() {}
