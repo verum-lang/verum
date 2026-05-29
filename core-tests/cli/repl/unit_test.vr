@@ -1,0 +1,145 @@
+// =============================================================================
+// core-tests/cli/repl/unit_test.vr
+// =============================================================================
+//
+// `core/cli/repl.vr` —
+//   * LineAction 5-variant (Quit / Skip / ShowHelp / ShowHistory /
+//                           Forward(List<Text>))
+//   * classify(line) — REPL meta-command discriminator
+// =============================================================================
+
+mount core.cli.repl.{LineAction, classify};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: LineAction 5-variant construction
+// =============================================================================
+
+@test
+fn test_line_action_quit_variant() {
+    let a: LineAction = LineAction.Quit;
+    assert(a is LineAction.Quit);
+}
+
+@test
+fn test_line_action_skip_variant() {
+    let a: LineAction = LineAction.Skip;
+    assert(a is LineAction.Skip);
+}
+
+@test
+fn test_line_action_show_help_variant() {
+    let a: LineAction = LineAction.ShowHelp;
+    assert(a is LineAction.ShowHelp);
+}
+
+@test
+fn test_line_action_show_history_variant() {
+    let a: LineAction = LineAction.ShowHistory;
+    assert(a is LineAction.ShowHistory);
+}
+
+@test
+fn test_line_action_forward_variant() {
+    let tokens: List<Text> = [];
+    let a: LineAction = LineAction.Forward(tokens);
+    assert(a is LineAction.Forward);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_line_action_quit_disjoint() {
+    let a: LineAction = LineAction.Quit;
+    assert(!(a is LineAction.Skip));
+    assert(!(a is LineAction.ShowHelp));
+    assert(!(a is LineAction.ShowHistory));
+    assert(!(a is LineAction.Forward));
+}
+
+@test
+fn test_line_action_skip_disjoint() {
+    let a: LineAction = LineAction.Skip;
+    assert(!(a is LineAction.Quit));
+    assert(!(a is LineAction.ShowHelp));
+    assert(!(a is LineAction.ShowHistory));
+    assert(!(a is LineAction.Forward));
+}
+
+@test
+fn test_line_action_show_help_disjoint() {
+    let a: LineAction = LineAction.ShowHelp;
+    assert(!(a is LineAction.Quit));
+    assert(!(a is LineAction.Skip));
+    assert(!(a is LineAction.ShowHistory));
+    assert(!(a is LineAction.Forward));
+}
+
+// =============================================================================
+// Section 3: classify() — REPL meta-command discriminator
+// =============================================================================
+
+@test
+fn test_classify_empty_line_is_skip() {
+    let a: LineAction = classify(&"".to_text());
+    assert(a is LineAction.Skip);
+}
+
+@test
+fn test_classify_whitespace_only_is_skip() {
+    let a: LineAction = classify(&"   ".to_text());
+    assert(a is LineAction.Skip);
+}
+
+@test
+fn test_classify_exit_is_quit() {
+    let a: LineAction = classify(&":exit".to_text());
+    assert(a is LineAction.Quit);
+}
+
+@test
+fn test_classify_quit_is_quit() {
+    let a: LineAction = classify(&":quit".to_text());
+    assert(a is LineAction.Quit);
+}
+
+@test
+fn test_classify_q_is_quit() {
+    let a: LineAction = classify(&":q".to_text());
+    assert(a is LineAction.Quit);
+}
+
+@test
+fn test_classify_help_is_show_help() {
+    let a: LineAction = classify(&":help".to_text());
+    assert(a is LineAction.ShowHelp);
+}
+
+@test
+fn test_classify_question_mark_is_show_help() {
+    let a: LineAction = classify(&"?".to_text());
+    assert(a is LineAction.ShowHelp);
+}
+
+@test
+fn test_classify_history_is_show_history() {
+    let a: LineAction = classify(&":history".to_text());
+    assert(a is LineAction.ShowHistory);
+}
+
+@test
+fn test_classify_h_is_show_history() {
+    let a: LineAction = classify(&":h".to_text());
+    assert(a is LineAction.ShowHistory);
+}
+
+@test
+fn test_classify_regular_command_is_forward() {
+    let a: LineAction = classify(&"build --release".to_text());
+    assert(a is LineAction.Forward);
+}
+
+fn main() {}
