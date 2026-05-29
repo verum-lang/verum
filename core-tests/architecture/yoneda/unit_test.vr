@@ -1,0 +1,61 @@
+// =============================================================================
+// core-tests/architecture/yoneda/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/yoneda.vr` — AgreementStatus ADT.
+// =============================================================================
+
+mount core.architecture.yoneda.AgreementStatus;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: AgreementStatus 2-variant ADT
+// =============================================================================
+
+@test
+fn test_agreement_status_agree_variant() {
+    let s: AgreementStatus = AgreementStatus.Agree;
+    assert(s is AgreementStatus.Agree);
+}
+
+@test
+fn test_agreement_status_disagree_variant() {
+    let s: AgreementStatus = AgreementStatus.Disagree;
+    assert(s is AgreementStatus.Disagree);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_agreement_status_agree_disjoint_from_disagree() {
+    let a: AgreementStatus = AgreementStatus.Agree;
+    let d: AgreementStatus = AgreementStatus.Disagree;
+    assert(!(a is AgreementStatus.Disagree));
+    assert(!(d is AgreementStatus.Agree));
+}
+
+// =============================================================================
+// Section 3: Match-coverage law
+// =============================================================================
+
+fn label(s: &AgreementStatus) -> Text {
+    match s {
+        AgreementStatus.Agree    => "agree".to_text(),
+        AgreementStatus.Disagree => "disagree".to_text(),
+    }
+}
+
+@test
+fn test_agreement_status_label_agree() {
+    assert_eq(label(&AgreementStatus.Agree), "agree");
+}
+
+@test
+fn test_agreement_status_label_disagree() {
+    assert_eq(label(&AgreementStatus.Disagree), "disagree");
+}
+
+fn main() {}
