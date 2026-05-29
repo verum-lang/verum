@@ -1,0 +1,154 @@
+// =============================================================================
+// core-tests/architecture/types/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/types.vr` — architecture resource/target/realm
+// ADTs.
+// =============================================================================
+
+mount core.architecture.types.{
+    ResourceTag, ExecTarget, PrivilegeRealm, TaskLifetime,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ResourceTag 7-variant ADT
+// =============================================================================
+
+@test
+fn test_resource_tag_database_variant() {
+    let r: ResourceTag = ResourceTag.Database("postgres".to_text());
+    assert(r is ResourceTag.Database);
+}
+
+@test
+fn test_resource_tag_file_variant() {
+    let r: ResourceTag = ResourceTag.File("/etc/conf".to_text());
+    assert(r is ResourceTag.File);
+}
+
+@test
+fn test_resource_tag_memory_variant() {
+    let r: ResourceTag = ResourceTag.Memory("heap".to_text());
+    assert(r is ResourceTag.Memory);
+}
+
+@test
+fn test_resource_tag_config_variant() {
+    let r: ResourceTag = ResourceTag.Config("app".to_text());
+    assert(r is ResourceTag.Config);
+}
+
+@test
+fn test_resource_tag_logger_variant() {
+    let r: ResourceTag = ResourceTag.Logger;
+    assert(r is ResourceTag.Logger);
+}
+
+@test
+fn test_resource_tag_random_variant() {
+    let r: ResourceTag = ResourceTag.Random;
+    assert(r is ResourceTag.Random);
+}
+
+@test
+fn test_resource_tag_custom_resource_variant() {
+    let r: ResourceTag = ResourceTag.CustomResource("metrics".to_text());
+    assert(r is ResourceTag.CustomResource);
+}
+
+// =============================================================================
+// Section 2: ExecTarget 4-variant ADT
+// =============================================================================
+
+@test
+fn test_exec_target_ffi_variant() {
+    let t: ExecTarget = ExecTarget.Ffi("libc".to_text(), "malloc".to_text());
+    assert(t is ExecTarget.Ffi);
+}
+
+@test
+fn test_exec_target_syscall_variant() {
+    let t: ExecTarget = ExecTarget.Syscall(60);
+    assert(t is ExecTarget.Syscall);
+}
+
+@test
+fn test_exec_target_program_variant() {
+    let t: ExecTarget = ExecTarget.Program("/bin/ls".to_text());
+    assert(t is ExecTarget.Program);
+}
+
+@test
+fn test_exec_target_custom_target_variant() {
+    let t: ExecTarget = ExecTarget.CustomTarget("wasm".to_text());
+    assert(t is ExecTarget.CustomTarget);
+}
+
+// =============================================================================
+// Section 3: PrivilegeRealm 4-variant ADT
+// =============================================================================
+
+@test
+fn test_privilege_realm_admin_variant() {
+    let r: PrivilegeRealm = PrivilegeRealm.Admin;
+    assert(r is PrivilegeRealm.Admin);
+}
+
+@test
+fn test_privilege_realm_root_variant() {
+    let r: PrivilegeRealm = PrivilegeRealm.Root;
+    assert(r is PrivilegeRealm.Root);
+}
+
+@test
+fn test_privilege_realm_audit_variant() {
+    let r: PrivilegeRealm = PrivilegeRealm.Audit;
+    assert(r is PrivilegeRealm.Audit);
+}
+
+@test
+fn test_privilege_realm_custom_realm_variant() {
+    let r: PrivilegeRealm = PrivilegeRealm.CustomRealm("compliance".to_text());
+    assert(r is PrivilegeRealm.CustomRealm);
+}
+
+@test
+fn test_privilege_realm_admin_disjoint() {
+    let r: PrivilegeRealm = PrivilegeRealm.Admin;
+    assert(!(r is PrivilegeRealm.Root));
+    assert(!(r is PrivilegeRealm.Audit));
+    assert(!(r is PrivilegeRealm.CustomRealm));
+}
+
+// =============================================================================
+// Section 4: TaskLifetime 3-variant ADT
+// =============================================================================
+
+@test
+fn test_task_lifetime_scoped_to_parent_variant() {
+    let l: TaskLifetime = TaskLifetime.ScopedToParent;
+    assert(l is TaskLifetime.ScopedToParent);
+}
+
+@test
+fn test_task_lifetime_detached_variant() {
+    let l: TaskLifetime = TaskLifetime.Detached;
+    assert(l is TaskLifetime.Detached);
+}
+
+@test
+fn test_task_lifetime_deadlined_variant() {
+    let l: TaskLifetime = TaskLifetime.Deadlined(5000);
+    assert(l is TaskLifetime.Deadlined);
+}
+
+@test
+fn test_task_lifetime_scoped_disjoint() {
+    let l: TaskLifetime = TaskLifetime.ScopedToParent;
+    assert(!(l is TaskLifetime.Detached));
+    assert(!(l is TaskLifetime.Deadlined));
+}
+
+fn main() {}
