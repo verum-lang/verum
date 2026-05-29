@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/security/zk/halo2/prover/unit_test.vr
+// =============================================================================
+//
+// `core/security/zk/halo2/prover.vr` — ProverError 5-variant ADT.
+//
+// ProvingKey / VerifyingKey / Proof records carry [Byte; 32] fixed-array
+// fields which surface a known codegen layout regression; we stick to
+// the variant ADT here, which exercises Text-payload + Int-record-payload
+// in the same shape.
+// =============================================================================
+
+mount core.security.zk.halo2.prover.ProverError;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ProverError 5-variant construction
+// =============================================================================
+
+@test
+fn test_prover_error_witness_assignment_failed_variant() {
+    let e: ProverError = ProverError.WitnessAssignmentFailed("witness[0] out of range".to_text());
+    assert(e is ProverError.WitnessAssignmentFailed);
+}
+
+@test
+fn test_prover_error_transcript_error_variant() {
+    let e: ProverError = ProverError.TranscriptError("hash mismatch".to_text());
+    assert(e is ProverError.TranscriptError);
+}
+
+@test
+fn test_prover_error_backend_error_variant() {
+    let e: ProverError = ProverError.BackendError("intrinsic returned bad data".to_text());
+    assert(e is ProverError.BackendError);
+}
+
+@test
+fn test_prover_error_insufficient_capacity_variant() {
+    let e: ProverError = ProverError.InsufficientCapacity {
+        circuit_k: 20,
+        srs_k: 18,
+    };
+    assert(e is ProverError.InsufficientCapacity);
+}
+
+// =============================================================================
+// Section 2: ProverError payload round-trip
+// =============================================================================
+
+@test
+fn test_prover_error_witness_assignment_failed_text_round_trip() {
+    let e: ProverError = ProverError.WitnessAssignmentFailed("custom message".to_text());
+    match e {
+        ProverError.WitnessAssignmentFailed(t) => assert_eq(t, "custom message"),
+        _ => panic("expected WitnessAssignmentFailed"),
+    }
+}
+
+@test
+fn test_prover_error_transcript_error_text_round_trip() {
+    let e: ProverError = ProverError.TranscriptError("transcript drift".to_text());
+    match e {
+        ProverError.TranscriptError(t) => assert_eq(t, "transcript drift"),
+        _ => panic("expected TranscriptError"),
+    }
+}
+
+@test
+fn test_prover_error_backend_error_text_round_trip() {
+    let e: ProverError = ProverError.BackendError("backend gone".to_text());
+    match e {
+        ProverError.BackendError(t) => assert_eq(t, "backend gone"),
+        _ => panic("expected BackendError"),
+    }
+}
+
+// =============================================================================
+// Section 3: ProverError pairwise disjointness
+// =============================================================================
+
+@test
+fn test_prover_error_witness_disjoint_from_transcript() {
+    let e: ProverError = ProverError.WitnessAssignmentFailed("x".to_text());
+    assert(!(e is ProverError.TranscriptError));
+    assert(!(e is ProverError.BackendError));
+}
+
+@test
+fn test_prover_error_transcript_disjoint_from_backend() {
+    let e: ProverError = ProverError.TranscriptError("x".to_text());
+    assert(!(e is ProverError.WitnessAssignmentFailed));
+    assert(!(e is ProverError.BackendError));
+}
+
+@test
+fn test_prover_error_backend_disjoint_from_witness() {
+    let e: ProverError = ProverError.BackendError("x".to_text());
+    assert(!(e is ProverError.WitnessAssignmentFailed));
+    assert(!(e is ProverError.TranscriptError));
+}
+
+fn main() {}
