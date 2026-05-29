@@ -1,0 +1,182 @@
+// =============================================================================
+// core-tests/database/postgres/wire/typed/unit_test.vr
+// =============================================================================
+//
+// `core/database/postgres/wire/typed.vr` — PG typed value records.
+// =============================================================================
+
+mount core.database.postgres.wire.typed.{
+    TypedInet, TypedIntRange, TypedTextRange, TypedInterval,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TypedInet — IPv4 / IPv6 + CIDR
+// =============================================================================
+
+@test
+fn test_typed_inet_ipv4_construction() {
+    let mut addr: List<Byte> = [];
+    addr.push(192_u8);
+    addr.push(0_u8);
+    addr.push(2_u8);
+    addr.push(1_u8);
+    let inet: TypedInet = TypedInet {
+        family: 2,
+        prefix_bits: 32,
+        is_cidr: false,
+        addr: addr,
+    };
+    assert_eq(inet.family, 2);
+    assert_eq(inet.prefix_bits, 32);
+    assert_eq(inet.is_cidr, false);
+}
+
+@test
+fn test_typed_inet_ipv4_cidr_24() {
+    let mut addr: List<Byte> = [];
+    addr.push(10_u8);
+    addr.push(0_u8);
+    addr.push(0_u8);
+    addr.push(0_u8);
+    let inet: TypedInet = TypedInet {
+        family: 2,
+        prefix_bits: 24,
+        is_cidr: true,
+        addr: addr,
+    };
+    assert_eq(inet.is_cidr, true);
+    assert_eq(inet.prefix_bits, 24);
+}
+
+@test
+fn test_typed_inet_ipv6_construction() {
+    let mut addr: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 16 { addr.push(0_u8); i = i + 1; }
+    let inet: TypedInet = TypedInet {
+        family: 3,
+        prefix_bits: 128,
+        is_cidr: false,
+        addr: addr,
+    };
+    assert_eq(inet.family, 3);
+    assert_eq(inet.prefix_bits, 128);
+}
+
+// =============================================================================
+// Section 2: TypedIntRange / TypedTextRange
+// =============================================================================
+
+@test
+fn test_typed_int_range_empty_bounds() {
+    let r: TypedIntRange = TypedIntRange {
+        flags: 0,
+        lower: Maybe.None,
+        upper: Maybe.None,
+    };
+    assert_eq(r.flags, 0);
+}
+
+@test
+fn test_typed_int_range_bounded() {
+    let r: TypedIntRange = TypedIntRange {
+        flags: 6,  // bounded both ends (PG_RANGE_FLAG_LB_INC | PG_RANGE_FLAG_UB_EXC)
+        lower: Maybe.Some(1),
+        upper: Maybe.Some(100),
+    };
+    assert_eq(r.flags, 6);
+}
+
+@test
+fn test_typed_text_range_empty() {
+    let r: TypedTextRange = TypedTextRange {
+        flags: 0,
+        lower: Maybe.None,
+        upper: Maybe.None,
+    };
+    assert_eq(r.flags, 0);
+}
+
+@test
+fn test_typed_text_range_bounded() {
+    let r: TypedTextRange = TypedTextRange {
+        flags: 6,
+        lower: Maybe.Some("a".to_text()),
+        upper: Maybe.Some("z".to_text()),
+    };
+    assert_eq(r.flags, 6);
+}
+
+// =============================================================================
+// Section 3: TypedInterval — months/days/microseconds tuple
+// =============================================================================
+
+@test
+fn test_typed_interval_zero() {
+    let iv: TypedInterval = TypedInterval {
+        months: 0,
+        days: 0,
+        microseconds: 0,
+    };
+    assert_eq(iv.months, 0);
+    assert_eq(iv.days, 0);
+    assert_eq(iv.microseconds, 0);
+}
+
+@test
+fn test_typed_interval_one_day() {
+    let iv: TypedInterval = TypedInterval {
+        months: 0,
+        days: 1,
+        microseconds: 0,
+    };
+    assert_eq(iv.days, 1);
+}
+
+@test
+fn test_typed_interval_one_month() {
+    let iv: TypedInterval = TypedInterval {
+        months: 1,
+        days: 0,
+        microseconds: 0,
+    };
+    assert_eq(iv.months, 1);
+}
+
+@test
+fn test_typed_interval_one_microsecond() {
+    let iv: TypedInterval = TypedInterval {
+        months: 0,
+        days: 0,
+        microseconds: 1,
+    };
+    assert_eq(iv.microseconds, 1);
+}
+
+@test
+fn test_typed_interval_compound_one_month_one_day_one_us() {
+    let iv: TypedInterval = TypedInterval {
+        months: 1,
+        days: 1,
+        microseconds: 1,
+    };
+    assert_eq(iv.months, 1);
+    assert_eq(iv.days, 1);
+    assert_eq(iv.microseconds, 1);
+}
+
+@test
+fn test_typed_interval_negative_components() {
+    let iv: TypedInterval = TypedInterval {
+        months: -1,
+        days: -1,
+        microseconds: -1,
+    };
+    assert_eq(iv.months, -1);
+    assert_eq(iv.days, -1);
+    assert_eq(iv.microseconds, -1);
+}
+
+fn main() {}
