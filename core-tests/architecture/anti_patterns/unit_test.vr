@@ -1,0 +1,86 @@
+// =============================================================================
+// core-tests/architecture/anti_patterns/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/anti_patterns.vr` — Severity 3-variant ADT.
+// =============================================================================
+
+mount core.architecture.anti_patterns.Severity;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Severity 3-variant ADT
+// =============================================================================
+
+@test
+fn test_severity_error_variant() {
+    let s: Severity = Severity.Error;
+    assert(s is Severity.Error);
+}
+
+@test
+fn test_severity_warning_variant() {
+    let s: Severity = Severity.Warning;
+    assert(s is Severity.Warning);
+}
+
+@test
+fn test_severity_hint_variant() {
+    let s: Severity = Severity.Hint;
+    assert(s is Severity.Hint);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_severity_error_disjoint() {
+    let s: Severity = Severity.Error;
+    assert(!(s is Severity.Warning));
+    assert(!(s is Severity.Hint));
+}
+
+@test
+fn test_severity_warning_disjoint() {
+    let s: Severity = Severity.Warning;
+    assert(!(s is Severity.Error));
+    assert(!(s is Severity.Hint));
+}
+
+@test
+fn test_severity_hint_disjoint() {
+    let s: Severity = Severity.Hint;
+    assert(!(s is Severity.Error));
+    assert(!(s is Severity.Warning));
+}
+
+// =============================================================================
+// Section 3: Match-coverage law
+// =============================================================================
+
+fn describe(s: &Severity) -> Text {
+    match s {
+        Severity.Error   => "hard-error".to_text(),
+        Severity.Warning => "soft-warn".to_text(),
+        Severity.Hint    => "nudge".to_text(),
+    }
+}
+
+@test
+fn test_severity_describe_error() {
+    assert_eq(describe(&Severity.Error), "hard-error");
+}
+
+@test
+fn test_severity_describe_warning() {
+    assert_eq(describe(&Severity.Warning), "soft-warn");
+}
+
+@test
+fn test_severity_describe_hint() {
+    assert_eq(describe(&Severity.Hint), "nudge");
+}
+
+fn main() {}
