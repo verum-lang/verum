@@ -1,0 +1,291 @@
+// =============================================================================
+// core-tests/math/bitvec/unit_test.vr
+// =============================================================================
+//
+// `core/math/bitvec.vr` — Fixed-width bit vectors (1-64 bits).
+//
+// Surface tested:
+//   * BitVec 2-field record (bits, width) + smart constructors bv / bv8 / bv16 /
+//     bv32 / bv64 / bv_zero / bv_ones
+//   * bitvec_and / bitvec_or / bitvec_xor / bitvec_not — boolean ops
+//   * bitvec_add / bitvec_sub — modular arithmetic
+//   * bitvec_shl / bitvec_lshr — bit shifts
+//   * bitvec_eq — equality
+// =============================================================================
+
+mount core.math.bitvec.{
+    BitVec,
+    bv, bv8, bv16, bv32, bv64, bv_zero, bv_ones,
+    bitvec_and, bitvec_or, bitvec_xor, bitvec_not,
+    bitvec_add, bitvec_sub,
+    bitvec_shl, bitvec_lshr,
+    bitvec_eq,
+};
+
+// =============================================================================
+// Section 1: Smart constructors — width preservation
+// =============================================================================
+
+@test
+fn test_bv_preserves_width_8() {
+    let v = bv(0x5A, 8);
+    assert_eq(v.width, 8);
+}
+
+@test
+fn test_bv8_width_is_8() {
+    let v = bv8(0x42);
+    assert_eq(v.width, 8);
+}
+
+@test
+fn test_bv16_width_is_16() {
+    let v = bv16(0x1234);
+    assert_eq(v.width, 16);
+}
+
+@test
+fn test_bv32_width_is_32() {
+    let v = bv32(0xDEADBEEF);
+    assert_eq(v.width, 32);
+}
+
+@test
+fn test_bv64_width_is_64() {
+    let v = bv64(0x0123456789ABCDEF);
+    assert_eq(v.width, 64);
+}
+
+// =============================================================================
+// Section 2: Smart constructors — bits preservation
+// =============================================================================
+
+@test
+fn test_bv8_preserves_bits() {
+    let v = bv8(0x42);
+    assert_eq(v.bits, 0x42);
+}
+
+@test
+fn test_bv16_preserves_bits() {
+    let v = bv16(0x1234);
+    assert_eq(v.bits, 0x1234);
+}
+
+@test
+fn test_bv32_preserves_bits() {
+    let v = bv32(0xCAFEBABE);
+    assert_eq(v.bits, 0xCAFEBABE);
+}
+
+// =============================================================================
+// Section 3: bv_zero / bv_ones
+// =============================================================================
+
+@test
+fn test_bv_zero_width_8_is_zero_bits() {
+    let v = bv_zero(8);
+    assert_eq(v.bits, 0);
+    assert_eq(v.width, 8);
+}
+
+@test
+fn test_bv_zero_width_32() {
+    let v = bv_zero(32);
+    assert_eq(v.bits, 0);
+    assert_eq(v.width, 32);
+}
+
+@test
+fn test_bv_ones_width_8_is_0xff() {
+    let v = bv_ones(8);
+    assert_eq(v.bits, 0xFF);
+    assert_eq(v.width, 8);
+}
+
+@test
+fn test_bv_ones_width_4_is_0xf() {
+    let v = bv_ones(4);
+    assert_eq(v.bits, 0xF);
+}
+
+// =============================================================================
+// Section 4: bitvec_eq
+// =============================================================================
+
+@test
+fn test_bitvec_eq_same_value_same_width() {
+    let a = bv8(0x42);
+    let b = bv8(0x42);
+    assert(bitvec_eq(a, b));
+}
+
+@test
+fn test_bitvec_eq_different_values() {
+    let a = bv8(0x01);
+    let b = bv8(0x02);
+    assert(!bitvec_eq(a, b));
+}
+
+@test
+fn test_bitvec_eq_zero_zero() {
+    let z1 = bv_zero(16);
+    let z2 = bv_zero(16);
+    assert(bitvec_eq(z1, z2));
+}
+
+// =============================================================================
+// Section 5: bitvec_and / bitvec_or / bitvec_xor
+// =============================================================================
+
+@test
+fn test_bitvec_and_basic() {
+    let a = bv8(0xF0);
+    let b = bv8(0x0F);
+    let r = bitvec_and(a, b);
+    assert_eq(r.bits, 0x00);
+}
+
+@test
+fn test_bitvec_and_self_is_self() {
+    let a = bv8(0x42);
+    let b = bv8(0x42);
+    let r = bitvec_and(a, b);
+    assert_eq(r.bits, 0x42);
+}
+
+@test
+fn test_bitvec_or_basic() {
+    let a = bv8(0xF0);
+    let b = bv8(0x0F);
+    let r = bitvec_or(a, b);
+    assert_eq(r.bits, 0xFF);
+}
+
+@test
+fn test_bitvec_or_zero_identity() {
+    let a = bv8(0x42);
+    let z = bv_zero(8);
+    let r = bitvec_or(a, z);
+    assert_eq(r.bits, 0x42);
+}
+
+@test
+fn test_bitvec_xor_basic() {
+    let a = bv8(0xFF);
+    let b = bv8(0x0F);
+    let r = bitvec_xor(a, b);
+    assert_eq(r.bits, 0xF0);
+}
+
+@test
+fn test_bitvec_xor_self_is_zero() {
+    let a = bv8(0x42);
+    let b = bv8(0x42);
+    let r = bitvec_xor(a, b);
+    assert_eq(r.bits, 0);
+}
+
+// =============================================================================
+// Section 6: bitvec_not
+// =============================================================================
+
+@test
+fn test_bitvec_not_zero_is_all_ones_at_width() {
+    let z = bv_zero(8);
+    let r = bitvec_not(z);
+    assert_eq(r.bits, 0xFF);
+}
+
+@test
+fn test_bitvec_not_ones_is_zero() {
+    let o = bv_ones(8);
+    let r = bitvec_not(o);
+    assert_eq(r.bits, 0);
+}
+
+// =============================================================================
+// Section 7: bitvec_add / bitvec_sub — modular arithmetic
+// =============================================================================
+
+@test
+fn test_bitvec_add_basic() {
+    let a = bv8(3);
+    let b = bv8(4);
+    let r = bitvec_add(a, b);
+    assert_eq(r.bits, 7);
+}
+
+@test
+fn test_bitvec_add_zero_identity() {
+    let a = bv8(0x42);
+    let z = bv_zero(8);
+    let r = bitvec_add(a, z);
+    assert_eq(r.bits, 0x42);
+}
+
+@test
+fn test_bitvec_add_overflows_modulo_width() {
+    // 0xFF + 1 = 0x100, but truncated to 8 bits = 0x00.
+    let a = bv8(0xFF);
+    let b = bv8(1);
+    let r = bitvec_add(a, b);
+    assert_eq(r.bits, 0);
+}
+
+@test
+fn test_bitvec_sub_basic() {
+    let a = bv8(7);
+    let b = bv8(3);
+    let r = bitvec_sub(a, b);
+    assert_eq(r.bits, 4);
+}
+
+@test
+fn test_bitvec_sub_zero_identity() {
+    let a = bv8(0x42);
+    let z = bv_zero(8);
+    let r = bitvec_sub(a, z);
+    assert_eq(r.bits, 0x42);
+}
+
+// =============================================================================
+// Section 8: bitvec_shl / bitvec_lshr
+// =============================================================================
+
+@test
+fn test_bitvec_shl_zero_anything_is_zero() {
+    let z = bv_zero(8);
+    let r = bitvec_shl(z, 3);
+    assert_eq(r.bits, 0);
+}
+
+@test
+fn test_bitvec_shl_one_by_zero_unchanged() {
+    let a = bv8(1);
+    let r = bitvec_shl(a, 0);
+    assert_eq(r.bits, 1);
+}
+
+@test
+fn test_bitvec_shl_one_by_three_is_eight() {
+    let a = bv8(1);
+    let r = bitvec_shl(a, 3);
+    assert_eq(r.bits, 8);
+}
+
+@test
+fn test_bitvec_lshr_basic() {
+    let a = bv8(0x80);
+    let r = bitvec_lshr(a, 4);
+    assert_eq(r.bits, 0x08);
+}
+
+@test
+fn test_bitvec_lshr_by_zero_unchanged() {
+    let a = bv8(0x42);
+    let r = bitvec_lshr(a, 0);
+    assert_eq(r.bits, 0x42);
+}
+
+fn main() {}
