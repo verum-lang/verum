@@ -1,0 +1,77 @@
+// =============================================================================
+// core-tests/security/webauthn/attestation/unit_test.vr
+// =============================================================================
+//
+// `core/security/webauthn/attestation.vr` —
+//   * AttestationType 4-variant (Basic | SelfAtt | AnonCa | NoneAtt)
+// =============================================================================
+
+mount core.security.webauthn.attestation.AttestationType;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: AttestationType 4-variant construction
+// =============================================================================
+
+@test
+fn test_attestation_type_basic_variant() {
+    let t: AttestationType = AttestationType.Basic;
+    assert(t is AttestationType.Basic);
+}
+
+@test
+fn test_attestation_type_self_att_variant() {
+    let t: AttestationType = AttestationType.SelfAtt;
+    assert(t is AttestationType.SelfAtt);
+}
+
+@test
+fn test_attestation_type_anon_ca_variant() {
+    let t: AttestationType = AttestationType.AnonCa;
+    assert(t is AttestationType.AnonCa);
+}
+
+@test
+fn test_attestation_type_none_att_variant() {
+    let t: AttestationType = AttestationType.NoneAtt;
+    assert(t is AttestationType.NoneAtt);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_attestation_type_basic_disjoint() {
+    let t: AttestationType = AttestationType.Basic;
+    assert(!(t is AttestationType.SelfAtt));
+    assert(!(t is AttestationType.AnonCa));
+    assert(!(t is AttestationType.NoneAtt));
+}
+
+@test
+fn test_attestation_type_self_att_disjoint() {
+    let t: AttestationType = AttestationType.SelfAtt;
+    assert(!(t is AttestationType.Basic));
+    assert(!(t is AttestationType.AnonCa));
+    assert(!(t is AttestationType.NoneAtt));
+}
+
+@test
+fn test_attestation_type_anon_ca_disjoint() {
+    let t: AttestationType = AttestationType.AnonCa;
+    assert(!(t is AttestationType.Basic));
+    assert(!(t is AttestationType.SelfAtt));
+    assert(!(t is AttestationType.NoneAtt));
+}
+
+@test
+fn test_attestation_type_none_att_disjoint() {
+    let t: AttestationType = AttestationType.NoneAtt;
+    assert(!(t is AttestationType.Basic));
+    assert(!(t is AttestationType.SelfAtt));
+    assert(!(t is AttestationType.AnonCa));
+}
+
+fn main() {}
