@@ -142,8 +142,8 @@ fn test_use_after_free_error_default_zero_state() {
 //
 // Pinned @ignore here until the fundamental fix lands.  Flips green
 // when [[use_after_free_error_field_shift_2026-05-27]] closes.
+// Un-@ignore'd 2026-05-29: D2/CLASS-9 closed.
 @test
-@ignore
 fn test_use_after_free_error_message_routes_to_uaf_path_when_gen_nonzero() {
     let e: UseAfterFreeError = UseAfterFreeError {
         expected_gen: 5 as UInt32,
@@ -158,7 +158,6 @@ fn test_use_after_free_error_message_routes_to_uaf_path_when_gen_nonzero() {
 }
 
 @test
-@ignore
 fn test_use_after_free_error_message_contains_type_name() {
     // Sister pin to the routing test above — `.message()` body must
     // interpolate `self.type_name` correctly. Pinned @ignore on the
@@ -231,8 +230,8 @@ fn test_use_after_free_error_eq_distinct_on_expected_gen() {
 // Pinned @ignore on the same cross-module method-body field-shift defect
 // — Eq.eq's body reads `self.type_name == other.type_name` which
 // degenerates to reading slots 2/2 instead of 4/4 and reports equality.
+// Un-@ignore'd 2026-05-29: D2/CLASS-9 closed.
 @test
-@ignore
 fn test_use_after_free_error_eq_distinct_on_type_name() {
     let a: UseAfterFreeError = UseAfterFreeError {
         expected_gen: 1 as UInt32,
