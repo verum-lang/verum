@@ -1,0 +1,66 @@
+// =============================================================================
+// core-tests/net/tls13/version/unit_test.vr — RFC 8446 §4.1.2 / §4.2.1
+// =============================================================================
+//
+// `core/net/tls13/version.vr`:
+//
+//   * ProtocolVersion { major, minor } + TLS_1_3 = {3,4},
+//     LEGACY_VERSION_TLS_1_2 = {3,3}.
+//   * to_u16 / from_u16 / eq.
+// =============================================================================
+
+mount core.net.tls13.version.{ProtocolVersion, TLS_1_3, LEGACY_VERSION_TLS_1_2};
+
+// =============================================================================
+// Section 1: version constants
+// =============================================================================
+
+@test
+fn test_tls13ver_tls13_major_3() { assert_eq(TLS_1_3.major, 0x03_u8); }
+
+@test
+fn test_tls13ver_tls13_minor_4() { assert_eq(TLS_1_3.minor, 0x04_u8); }
+
+@test
+fn test_tls13ver_legacy_tls12_major_3() { assert_eq(LEGACY_VERSION_TLS_1_2.major, 0x03_u8); }
+
+@test
+fn test_tls13ver_legacy_tls12_minor_3() { assert_eq(LEGACY_VERSION_TLS_1_2.minor, 0x03_u8); }
+
+// =============================================================================
+// Section 2: to_u16 wire form
+// =============================================================================
+
+@test
+fn test_tls13ver_tls13_to_u16_0304() { assert_eq(TLS_1_3.to_u16(), 0x0304_u16); }
+
+@test
+fn test_tls13ver_legacy_to_u16_0303() { assert_eq(LEGACY_VERSION_TLS_1_2.to_u16(), 0x0303_u16); }
+
+// =============================================================================
+// Section 3: from_u16 + round-trip + eq
+// =============================================================================
+
+@test
+fn test_tls13ver_from_u16_0304_is_tls13() {
+    let v = ProtocolVersion.from_u16(0x0304_u16);
+    assert(v.eq(&TLS_1_3));
+}
+
+@test
+fn test_tls13ver_round_trip_tls13() {
+    let v = ProtocolVersion.from_u16(TLS_1_3.to_u16());
+    assert_eq(v.to_u16(), 0x0304_u16);
+}
+
+@test
+fn test_tls13ver_eq_reflexive() {
+    assert(TLS_1_3.eq(&TLS_1_3));
+}
+
+@test
+fn test_tls13ver_tls13_neq_legacy() {
+    assert(!TLS_1_3.eq(&LEGACY_VERSION_TLS_1_2));
+}
+
+fn main() {}
