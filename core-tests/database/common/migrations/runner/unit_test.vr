@@ -1,0 +1,258 @@
+// =============================================================================
+// core-tests/database/common/migrations/runner/unit_test.vr
+// =============================================================================
+//
+// `core/database/common/migrations/runner.vr` — MigrationRunner ADT surface.
+//
+// Surface tested:
+//   * RunMode 3-variant (RmDryRun / RmStrict / RmContinueOnDrift)
+//   * run_mode_name() text rendering
+//   * RunDecision 4-variant (RdSkip / RdApply / RdSkipDrift / RdAbortDrift)
+//   * decision_kind_name() text rendering
+//   * MigrationRunner record + runner_new factory
+//   * RunReport record + report_zero factory
+// =============================================================================
+
+mount core.database.common.migrations.runner.{
+    RunMode, RunDecision, RunReport, MigrationRunner,
+    RmDryRun, RmStrict, RmContinueOnDrift,
+    RdSkip, RdApply, RdSkipDrift, RdAbortDrift,
+    run_mode_name, decision_kind_name,
+    runner_new, report_zero,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: RunMode 3-variant
+// =============================================================================
+
+@test
+fn test_run_mode_dry_run_variant() {
+    let m: RunMode = RmDryRun;
+    assert(m is RmDryRun);
+}
+
+@test
+fn test_run_mode_strict_variant() {
+    let m: RunMode = RmStrict;
+    assert(m is RmStrict);
+}
+
+@test
+fn test_run_mode_continue_on_drift_variant() {
+    let m: RunMode = RmContinueOnDrift;
+    assert(m is RmContinueOnDrift);
+}
+
+@test
+fn test_run_mode_dry_run_disjoint_from_strict() {
+    let dr: RunMode = RmDryRun;
+    let st: RunMode = RmStrict;
+    assert(dr is RmDryRun && !(dr is RmStrict));
+    assert(st is RmStrict && !(st is RmDryRun));
+}
+
+@test
+fn test_run_mode_strict_disjoint_from_continue_on_drift() {
+    let st: RunMode = RmStrict;
+    let cd: RunMode = RmContinueOnDrift;
+    assert(!(st is RmContinueOnDrift));
+    assert(!(cd is RmStrict));
+}
+
+// =============================================================================
+// Section 2: run_mode_name text rendering
+// =============================================================================
+
+@test
+fn test_run_mode_name_dry_run() {
+    assert_eq(run_mode_name(&RmDryRun), "dry-run".to_text());
+}
+
+@test
+fn test_run_mode_name_strict() {
+    assert_eq(run_mode_name(&RmStrict), "strict".to_text());
+}
+
+@test
+fn test_run_mode_name_continue_on_drift() {
+    assert_eq(run_mode_name(&RmContinueOnDrift), "continue-on-drift".to_text());
+}
+
+@test
+fn test_run_mode_names_all_distinct() {
+    let a = run_mode_name(&RmDryRun);
+    let b = run_mode_name(&RmStrict);
+    let c = run_mode_name(&RmContinueOnDrift);
+    assert(a != b);
+    assert(b != c);
+    assert(a != c);
+}
+
+// =============================================================================
+// Section 3: RunDecision 4-variant construction
+// =============================================================================
+
+@test
+fn test_run_decision_skip_variant() {
+    let d: RunDecision = RdSkip(7, "already applied".to_text());
+    assert(d is RdSkip);
+}
+
+@test
+fn test_run_decision_apply_variant() {
+    let d: RunDecision = RdApply(8, "CREATE TABLE t;".to_text());
+    assert(d is RdApply);
+}
+
+@test
+fn test_run_decision_skip_drift_variant() {
+    let d: RunDecision = RdSkipDrift(9, "drift detected".to_text());
+    assert(d is RdSkipDrift);
+}
+
+@test
+fn test_run_decision_abort_drift_variant() {
+    let d: RunDecision = RdAbortDrift(10, "drift fatal".to_text());
+    assert(d is RdAbortDrift);
+}
+
+@test
+fn test_run_decision_skip_disjoint_from_apply() {
+    let s: RunDecision = RdSkip(1, "x".to_text());
+    let a: RunDecision = RdApply(2, "y".to_text());
+    assert(s is RdSkip && !(s is RdApply));
+    assert(a is RdApply && !(a is RdSkip));
+}
+
+@test
+fn test_run_decision_skip_drift_disjoint_from_abort_drift() {
+    let sd: RunDecision = RdSkipDrift(1, "x".to_text());
+    let ad: RunDecision = RdAbortDrift(2, "y".to_text());
+    assert(sd is RdSkipDrift && !(sd is RdAbortDrift));
+    assert(ad is RdAbortDrift && !(ad is RdSkipDrift));
+}
+
+// =============================================================================
+// Section 4: decision_kind_name text rendering
+// =============================================================================
+
+@test
+fn test_decision_kind_name_skip() {
+    let d: RunDecision = RdSkip(0, "x".to_text());
+    assert_eq(decision_kind_name(&d), "skip".to_text());
+}
+
+@test
+fn test_decision_kind_name_apply() {
+    let d: RunDecision = RdApply(0, "x".to_text());
+    assert_eq(decision_kind_name(&d), "apply".to_text());
+}
+
+@test
+fn test_decision_kind_name_skip_drift() {
+    let d: RunDecision = RdSkipDrift(0, "x".to_text());
+    assert_eq(decision_kind_name(&d), "skip_drift".to_text());
+}
+
+@test
+fn test_decision_kind_name_abort_drift() {
+    let d: RunDecision = RdAbortDrift(0, "x".to_text());
+    assert_eq(decision_kind_name(&d), "abort_drift".to_text());
+}
+
+@test
+fn test_decision_kind_names_all_distinct() {
+    let s: RunDecision = RdSkip(0, "x".to_text());
+    let a: RunDecision = RdApply(0, "x".to_text());
+    let sd: RunDecision = RdSkipDrift(0, "x".to_text());
+    let ad: RunDecision = RdAbortDrift(0, "x".to_text());
+    let n_s = decision_kind_name(&s);
+    let n_a = decision_kind_name(&a);
+    let n_sd = decision_kind_name(&sd);
+    let n_ad = decision_kind_name(&ad);
+    assert(n_s != n_a);
+    assert(n_s != n_sd);
+    assert(n_s != n_ad);
+    assert(n_a != n_sd);
+    assert(n_a != n_ad);
+    assert(n_sd != n_ad);
+}
+
+// =============================================================================
+// Section 5: MigrationRunner.new factory + defaults
+// =============================================================================
+
+@test
+fn test_runner_new_default_auto_rollback_true() {
+    let r = runner_new(RmStrict);
+    assert_eq(r.auto_rollback, true);
+}
+
+// §A — RunMode stored in MigrationRunner.mode reads back wrong variant tag
+// through cross-module record. Same sister class as JournalEntry.status defect.
+@ignore("[[btree_pattern_match_ref_generic_class]] — cross-module RunMode tag drift through MigrationRunner.mode field. Multi-day codegen fix.")
+@test
+fn test_runner_new_preserves_dry_run_mode() {
+    let r = runner_new(RmDryRun);
+    assert(r.mode is RmDryRun);
+}
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — same cross-module RunMode tag drift through MigrationRunner.mode.")
+@test
+fn test_runner_new_preserves_strict_mode() {
+    let r = runner_new(RmStrict);
+    assert(r.mode is RmStrict);
+}
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — same cross-module RunMode tag drift through MigrationRunner.mode.")
+@test
+fn test_runner_new_preserves_continue_on_drift_mode() {
+    let r = runner_new(RmContinueOnDrift);
+    assert(r.mode is RmContinueOnDrift);
+}
+
+@test
+fn test_runner_disable_rollback_flips_flag() {
+    let r = runner_new(RmStrict).disable_rollback();
+    assert_eq(r.auto_rollback, false);
+}
+
+// =============================================================================
+// Section 6: report_zero factory + defaults
+// =============================================================================
+
+@test
+fn test_report_zero_preserves_dialect() {
+    let r = report_zero("postgres".to_text());
+    assert_eq(r.dialect, "postgres".to_text());
+}
+
+@test
+fn test_report_zero_counts_are_zero() {
+    let r = report_zero("sqlite".to_text());
+    assert_eq(r.applied, 0);
+    assert_eq(r.skipped, 0);
+    assert_eq(r.failed, 0);
+    assert_eq(r.rolled_back, 0);
+}
+
+@test
+fn test_report_zero_not_aborted() {
+    let r = report_zero("mysql".to_text());
+    assert_eq(r.aborted, false);
+}
+
+@test
+fn test_report_zero_abort_reason_is_none() {
+    let r = report_zero("pg".to_text());
+    assert(r.abort_reason is Maybe.None);
+}
+
+@test
+fn test_report_zero_decisions_empty() {
+    let r = report_zero("any".to_text());
+    assert_eq(r.decisions.len(), 0);
+}
+
+fn main() {}

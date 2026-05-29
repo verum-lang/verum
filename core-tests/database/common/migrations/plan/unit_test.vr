@@ -1,0 +1,108 @@
+// =============================================================================
+// core-tests/database/common/migrations/plan/unit_test.vr
+// =============================================================================
+//
+// `core/database/common/migrations/plan.vr` — MigrationPlan + topo sort.
+//
+// Surface tested:
+//   * MigrationPlanError 3-variant ADT
+//       - PeDuplicateVersion(Int)
+//       - PeUnknownDependency(Int, Int)
+//       - PeCycle(List<Int>)
+//   * Pairwise disjointness
+// =============================================================================
+
+mount core.database.common.migrations.plan.{
+    MigrationPlanError,
+    PeDuplicateVersion, PeUnknownDependency, PeCycle,
+};
+
+// =============================================================================
+// Section 1: MigrationPlanError variant construction
+// =============================================================================
+
+@test
+fn test_pe_duplicate_version_variant() {
+    let e: MigrationPlanError = PeDuplicateVersion(7);
+    assert(e is PeDuplicateVersion);
+}
+
+@test
+fn test_pe_unknown_dependency_variant() {
+    let e: MigrationPlanError = PeUnknownDependency(5, 3);
+    assert(e is PeUnknownDependency);
+}
+
+@test
+fn test_pe_cycle_variant() {
+    let versions: List<Int> = [1, 2, 3];
+    let e: MigrationPlanError = PeCycle(versions);
+    assert(e is PeCycle);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_pe_duplicate_disjoint_from_unknown_dep() {
+    let dup: MigrationPlanError = PeDuplicateVersion(1);
+    let dep: MigrationPlanError = PeUnknownDependency(1, 2);
+    assert(dup is PeDuplicateVersion && !(dup is PeUnknownDependency));
+    assert(dep is PeUnknownDependency && !(dep is PeDuplicateVersion));
+}
+
+@test
+fn test_pe_duplicate_disjoint_from_cycle() {
+    let dup: MigrationPlanError = PeDuplicateVersion(1);
+    let empty: List<Int> = [];
+    let cyc: MigrationPlanError = PeCycle(empty);
+    assert(!(dup is PeCycle));
+    assert(!(cyc is PeDuplicateVersion));
+}
+
+@test
+fn test_pe_unknown_dep_disjoint_from_cycle() {
+    let dep: MigrationPlanError = PeUnknownDependency(1, 2);
+    let empty: List<Int> = [];
+    let cyc: MigrationPlanError = PeCycle(empty);
+    assert(!(dep is PeCycle));
+    assert(!(cyc is PeUnknownDependency));
+}
+
+// =============================================================================
+// Section 3: Payload preservation via match
+// =============================================================================
+
+@test
+fn test_pe_duplicate_version_preserves_payload() {
+    let e: MigrationPlanError = PeDuplicateVersion(42);
+    match e {
+        PeDuplicateVersion(v) => assert_eq(v, 42),
+        _ => panic("expected PeDuplicateVersion"),
+    }
+}
+
+@test
+fn test_pe_unknown_dependency_preserves_both_payloads() {
+    let e: MigrationPlanError = PeUnknownDependency(10, 7);
+    match e {
+        PeUnknownDependency(ver, dep) => {
+            assert_eq(ver, 10);
+            assert_eq(dep, 7);
+        },
+        _ => panic("expected PeUnknownDependency"),
+    }
+}
+
+@test
+fn test_pe_cycle_preserves_versions_list_length() {
+    let versions: List<Int> = [3, 5, 7];
+    let e: MigrationPlanError = PeCycle(versions);
+    match e {
+        PeCycle(vs) => assert_eq(vs.len(), 3),
+        _ => panic("expected PeCycle"),
+    }
+}
+
+fn main() {}
