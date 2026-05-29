@@ -1,0 +1,102 @@
+// =============================================================================
+// core-tests/security/zk/stark/verifier/unit_test.vr
+// =============================================================================
+//
+// `core/security/zk/stark/verifier.vr` — VerifierError 5-variant ADT.
+//
+// AirVk record left untested — `digest: [Byte; 32]` fixed-array field
+// surfaces a known codegen layout regression.
+// =============================================================================
+
+mount core.security.zk.stark.verifier.VerifierError;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: VerifierError 5-variant construction
+// =============================================================================
+
+@test
+fn test_verifier_error_public_input_arity_variant() {
+    let e: VerifierError = VerifierError.PublicInputArity {
+        expected: 4,
+        got: 2,
+    };
+    assert(e is VerifierError.PublicInputArity);
+}
+
+@test
+fn test_verifier_error_malformed_proof_variant() {
+    let e: VerifierError = VerifierError.MalformedProof("truncated commitment".to_text());
+    assert(e is VerifierError.MalformedProof);
+}
+
+@test
+fn test_verifier_error_air_vk_mismatch_variant() {
+    let e: VerifierError = VerifierError.AirVkMismatch;
+    assert(e is VerifierError.AirVkMismatch);
+}
+
+@test
+fn test_verifier_error_verification_failed_variant() {
+    let e: VerifierError = VerifierError.VerificationFailed;
+    assert(e is VerifierError.VerificationFailed);
+}
+
+@test
+fn test_verifier_error_backend_error_variant() {
+    let e: VerifierError = VerifierError.BackendError("FRI subroutine returned bad data".to_text());
+    assert(e is VerifierError.BackendError);
+}
+
+// =============================================================================
+// Section 2: VerifierError payload round-trip
+// =============================================================================
+
+@test
+fn test_verifier_error_malformed_proof_text_round_trip() {
+    let e: VerifierError = VerifierError.MalformedProof("bad encoding".to_text());
+    match e {
+        VerifierError.MalformedProof(t) => assert_eq(t, "bad encoding"),
+        _ => panic("expected MalformedProof"),
+    }
+}
+
+@test
+fn test_verifier_error_backend_error_text_round_trip() {
+    let e: VerifierError = VerifierError.BackendError("backend exit code 1".to_text());
+    match e {
+        VerifierError.BackendError(t) => assert_eq(t, "backend exit code 1"),
+        _ => panic("expected BackendError"),
+    }
+}
+
+// =============================================================================
+// Section 3: VerifierError pairwise disjointness — high-signal pairs
+// =============================================================================
+
+@test
+fn test_verifier_error_air_vk_mismatch_disjoint_from_verification_failed() {
+    let e: VerifierError = VerifierError.AirVkMismatch;
+    assert(!(e is VerifierError.VerificationFailed));
+    assert(!(e is VerifierError.MalformedProof));
+    assert(!(e is VerifierError.BackendError));
+}
+
+@test
+fn test_verifier_error_verification_failed_disjoint_from_others() {
+    let e: VerifierError = VerifierError.VerificationFailed;
+    assert(!(e is VerifierError.AirVkMismatch));
+    assert(!(e is VerifierError.MalformedProof));
+    assert(!(e is VerifierError.BackendError));
+}
+
+@test
+fn test_verifier_error_malformed_proof_disjoint_from_backend() {
+    let e: VerifierError = VerifierError.MalformedProof("x".to_text());
+    assert(!(e is VerifierError.BackendError));
+    assert(!(e is VerifierError.AirVkMismatch));
+    assert(!(e is VerifierError.VerificationFailed));
+}
+
+fn main() {}
