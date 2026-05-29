@@ -1,0 +1,152 @@
+// =============================================================================
+// core-tests/types/poly_kinds/unit_test.vr
+// =============================================================================
+//
+// `core/types/poly_kinds.vr` — Polymorphic Kinds (kind-level Hindley-Milner).
+//
+// Surface tested:
+//   * Kind 4-variant — simple variant subset (KType / KConstraint)
+//   * k_type() / k_constraint() / k_var() factories
+//   * KindSubst record + subst_empty / subst_size / subst_lookup
+//   * kind_occurs over Kind.KVar
+//
+// KArrow + kind_apply + kind_unify use record-payload variants with Heap<Kind>
+// — cross-module record-payload variant defect class; deferred to language-level
+// under `vcs/specs/L2-standard/types/poly_kinds/`.
+// =============================================================================
+
+mount core.types.poly_kinds.{
+    Kind, KindSubst,
+    k_type, k_constraint, k_var,
+    subst_empty, subst_single, subst_lookup, subst_size,
+    kind_occurs,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Kind simple-variant construction
+// =============================================================================
+
+@test
+fn test_kind_k_type_variant() {
+    let k: Kind = Kind.KType;
+    assert(k is Kind.KType);
+}
+
+@test
+fn test_kind_k_constraint_variant() {
+    let k: Kind = Kind.KConstraint;
+    assert(k is Kind.KConstraint);
+}
+
+@test
+fn test_kind_k_type_disjoint_from_k_constraint() {
+    let kt: Kind = Kind.KType;
+    let kc: Kind = Kind.KConstraint;
+    assert(kt is Kind.KType && !(kt is Kind.KConstraint));
+    assert(kc is Kind.KConstraint && !(kc is Kind.KType));
+}
+
+// =============================================================================
+// Section 2: k_type / k_constraint factories
+// =============================================================================
+
+@test
+fn test_k_type_factory_returns_k_type_variant() {
+    let k = k_type();
+    assert(k is Kind.KType);
+}
+
+@test
+fn test_k_constraint_factory_returns_k_constraint_variant() {
+    let k = k_constraint();
+    assert(k is Kind.KConstraint);
+}
+
+// =============================================================================
+// Section 3: k_var factory + Kind.KVar variant
+// =============================================================================
+
+@test
+fn test_k_var_factory_yields_kvar_variant() {
+    let k = k_var("alpha".to_text());
+    assert(k is Kind.KVar);
+}
+
+@test
+fn test_k_var_preserves_name_payload() {
+    let k = k_var("beta".to_text());
+    match k {
+        Kind.KVar { name } => assert_eq(name, "beta".to_text()),
+        _ => panic("expected Kind.KVar"),
+    }
+}
+
+// =============================================================================
+// Section 4: subst_empty + subst_size = 0
+// =============================================================================
+
+@test
+fn test_subst_empty_size_is_zero() {
+    let s = subst_empty();
+    assert_eq(subst_size(&s), 0);
+}
+
+@test
+fn test_subst_empty_lookup_returns_none() {
+    let s = subst_empty();
+    let r = subst_lookup(&s, "x".to_text());
+    assert(r is Maybe.None);
+}
+
+// =============================================================================
+// Section 5: subst_single + lookup found
+// =============================================================================
+
+@test
+fn test_subst_single_size_is_one() {
+    let s = subst_single("a".to_text(), k_type());
+    assert_eq(subst_size(&s), 1);
+}
+
+@test
+fn test_subst_single_lookup_finds_binding() {
+    let s = subst_single("a".to_text(), k_type());
+    let r = subst_lookup(&s, "a".to_text());
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_subst_single_lookup_unrelated_var_returns_none() {
+    let s = subst_single("a".to_text(), k_type());
+    let r = subst_lookup(&s, "z".to_text());
+    assert(r is Maybe.None);
+}
+
+// =============================================================================
+// Section 6: kind_occurs over Kind.KVar
+// =============================================================================
+
+@test
+fn test_kind_occurs_true_for_matching_var() {
+    let k = k_var("alpha".to_text());
+    assert(kind_occurs(k, "alpha".to_text()));
+}
+
+@test
+fn test_kind_occurs_false_for_unrelated_var() {
+    let k = k_var("alpha".to_text());
+    assert(!kind_occurs(k, "beta".to_text()));
+}
+
+@test
+fn test_kind_occurs_false_in_k_type() {
+    assert(!kind_occurs(k_type(), "any".to_text()));
+}
+
+@test
+fn test_kind_occurs_false_in_k_constraint() {
+    assert(!kind_occurs(k_constraint(), "any".to_text()));
+}
+
+fn main() {}
