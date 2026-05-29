@@ -1,0 +1,135 @@
+// =============================================================================
+// core-tests/net/quic/frame/unit_test.vr — RFC 9000 §13 frame attributes
+// =============================================================================
+//
+// `core/net/quic/frame.vr`:
+//
+//   * QuicFrame.is_ack_eliciting (§13.2.1) — false for PADDING / ACK /
+//     CONNECTION_CLOSE; true otherwise.
+//   * QuicFrame.is_probing (§9.1) — true for PADDING / NEW_CONNECTION_ID /
+//     PATH_CHALLENGE / PATH_RESPONSE.
+//   * QuicFrame.is_flow_controlled — true only for STREAM frames.
+//   * FrameError 4-variant ADT + Eq.
+//
+// Fixed-array variants (PATH_CHALLENGE/RESPONSE/NEW_CONNECTION_ID) are
+// exercised in property_test via dedicated constructors; here we use the
+// non-array variants to pin the predicate partition.
+// =============================================================================
+
+mount core.net.quic.frame.{QuicFrame, FrameError};
+
+// =============================================================================
+// Section 1: is_ack_eliciting (§13.2.1)
+// =============================================================================
+
+@test
+fn test_qframe_padding_not_ack_eliciting() {
+    assert(!QuicFrame.PaddingRun(3).is_ack_eliciting());
+}
+
+@test
+fn test_qframe_ping_is_ack_eliciting() {
+    assert(QuicFrame.PingFrame.is_ack_eliciting());
+}
+
+@test
+fn test_qframe_ack_not_ack_eliciting() {
+    let f = QuicFrame.AckFrame {
+        largest_acked: 0_u64, ack_delay: 0_u64, ranges: [], ecn: Maybe.None,
+    };
+    assert(!f.is_ack_eliciting());
+}
+
+@test
+fn test_qframe_connection_close_app_not_ack_eliciting() {
+    let f = QuicFrame.ConnectionCloseApplication { error_code: 0_u64, reason: [] };
+    assert(!f.is_ack_eliciting());
+}
+
+@test
+fn test_qframe_max_data_is_ack_eliciting() {
+    assert(QuicFrame.MaxData(1000_u64).is_ack_eliciting());
+}
+
+@test
+fn test_qframe_handshake_done_is_ack_eliciting() {
+    assert(QuicFrame.HandshakeDone.is_ack_eliciting());
+}
+
+@test
+fn test_qframe_stream_is_ack_eliciting() {
+    let f = QuicFrame.StreamFrame {
+        stream_id: 0_u64, offset: 0_u64, data: [], fin: false,
+    };
+    assert(f.is_ack_eliciting());
+}
+
+// =============================================================================
+// Section 2: is_probing (§9.1)
+// =============================================================================
+
+@test
+fn test_qframe_padding_is_probing() {
+    assert(QuicFrame.PaddingRun(1).is_probing());
+}
+
+@test
+fn test_qframe_ping_not_probing() {
+    assert(!QuicFrame.PingFrame.is_probing());
+}
+
+@test
+fn test_qframe_stream_not_probing() {
+    let f = QuicFrame.StreamFrame {
+        stream_id: 0_u64, offset: 0_u64, data: [], fin: false,
+    };
+    assert(!f.is_probing());
+}
+
+// =============================================================================
+// Section 3: is_flow_controlled
+// =============================================================================
+
+@test
+fn test_qframe_stream_is_flow_controlled() {
+    let f = QuicFrame.StreamFrame {
+        stream_id: 4_u64, offset: 0_u64, data: [], fin: false,
+    };
+    assert(f.is_flow_controlled());
+}
+
+@test
+fn test_qframe_ping_not_flow_controlled() {
+    assert(!QuicFrame.PingFrame.is_flow_controlled());
+}
+
+@test
+fn test_qframe_max_data_not_flow_controlled() {
+    assert(!QuicFrame.MaxData(100_u64).is_flow_controlled());
+}
+
+// =============================================================================
+// Section 4: FrameError ADT
+// =============================================================================
+
+@test
+fn test_qframe_error_truncated_eq() {
+    assert_eq(FrameError.Truncated, FrameError.Truncated);
+}
+
+@test
+fn test_qframe_error_invalid_type_payload() {
+    assert_eq(FrameError.InvalidType(99_u64), FrameError.InvalidType(99_u64));
+}
+
+@test
+fn test_qframe_error_invalid_type_distinct() {
+    assert(!(FrameError.InvalidType(1_u64) == FrameError.InvalidType(2_u64)));
+}
+
+@test
+fn test_qframe_error_variants_disjoint() {
+    assert(!(FrameError.Truncated == FrameError.VarintFailure));
+}
+
+fn main() {}

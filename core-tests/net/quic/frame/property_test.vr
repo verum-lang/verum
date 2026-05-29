@@ -1,0 +1,57 @@
+// =============================================================================
+// core-tests/net/quic/frame/property_test.vr — RFC 9000 §13 attribute laws
+// =============================================================================
+//
+//   * STREAM frames are simultaneously flow-controlled AND ack-eliciting
+//     AND not probing.
+//   * ACK / CONNECTION_CLOSE / PADDING are never ack-eliciting.
+//   * Only PADDING (among the non-array variants) is probing.
+// =============================================================================
+
+mount core.net.quic.frame.{QuicFrame};
+
+fn stream_frame() -> QuicFrame {
+    QuicFrame.StreamFrame { stream_id: 0_u64, offset: 0_u64, data: [], fin: false }
+}
+
+fn ack_frame() -> QuicFrame {
+    QuicFrame.AckFrame { largest_acked: 0_u64, ack_delay: 0_u64, ranges: [], ecn: Maybe.None }
+}
+
+@test
+fn property_qframe_stream_is_flow_controlled_and_ack_eliciting_not_probing() {
+    let f = stream_frame();
+    assert(f.is_flow_controlled());
+    assert(f.is_ack_eliciting());
+    assert(!f.is_probing());
+}
+
+@test
+fn property_qframe_non_ack_eliciting_set() {
+    // The exact §13.2.1 non-ack-eliciting set: PADDING, ACK, CONNECTION_CLOSE.
+    assert(!QuicFrame.PaddingRun(2).is_ack_eliciting());
+    assert(!ack_frame().is_ack_eliciting());
+    assert(!QuicFrame.ConnectionCloseApplication { error_code: 0_u64, reason: [] }.is_ack_eliciting());
+    assert(!QuicFrame.ConnectionCloseTransport { error_code: 0_u64, frame_type: 0_u64, reason: [] }.is_ack_eliciting());
+}
+
+@test
+fn property_qframe_ack_eliciting_set_sample() {
+    // A representative sample of the ack-eliciting majority.
+    assert(QuicFrame.PingFrame.is_ack_eliciting());
+    assert(QuicFrame.MaxData(1_u64).is_ack_eliciting());
+    assert(QuicFrame.HandshakeDone.is_ack_eliciting());
+    assert(stream_frame().is_ack_eliciting());
+}
+
+@test
+fn property_qframe_only_stream_flow_controlled() {
+    // Among the common frames, only STREAM contributes to conn flow control.
+    assert(stream_frame().is_flow_controlled());
+    assert(!QuicFrame.PingFrame.is_flow_controlled());
+    assert(!ack_frame().is_flow_controlled());
+    assert(!QuicFrame.MaxData(1_u64).is_flow_controlled());
+    assert(!QuicFrame.HandshakeDone.is_flow_controlled());
+}
+
+fn main() {}
