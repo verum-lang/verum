@@ -1,0 +1,198 @@
+// =============================================================================
+// core-tests/encoding/json/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/json.vr` — RFC 8259 JSON value + error surface.
+// =============================================================================
+
+mount core.encoding.json.{JsonValue, JsonErrorKind};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: JsonValue scalar variants
+// =============================================================================
+
+@test
+fn test_json_value_null_variant() {
+    let v: JsonValue = JsonValue.JsonNull;
+    assert(v is JsonValue.JsonNull);
+}
+
+@test
+fn test_json_value_bool_true_variant() {
+    let v: JsonValue = JsonValue.JsonBool(true);
+    assert(v is JsonValue.JsonBool);
+}
+
+@test
+fn test_json_value_bool_false_variant() {
+    let v: JsonValue = JsonValue.JsonBool(false);
+    assert(v is JsonValue.JsonBool);
+}
+
+@test
+fn test_json_value_int_variant() {
+    let v: JsonValue = JsonValue.JsonInt(42);
+    assert(v is JsonValue.JsonInt);
+}
+
+@test
+fn test_json_value_float_variant() {
+    let v: JsonValue = JsonValue.JsonFloat(3.14);
+    assert(v is JsonValue.JsonFloat);
+}
+
+@test
+fn test_json_value_string_variant() {
+    let v: JsonValue = JsonValue.JsonString("hello".to_text());
+    assert(v is JsonValue.JsonString);
+}
+
+// =============================================================================
+// Section 2: Scalar pairwise disjointness
+// =============================================================================
+
+@test
+fn test_json_value_null_disjoint_from_others() {
+    let v: JsonValue = JsonValue.JsonNull;
+    assert(!(v is JsonValue.JsonBool));
+    assert(!(v is JsonValue.JsonInt));
+    assert(!(v is JsonValue.JsonString));
+}
+
+@test
+fn test_json_value_int_disjoint_from_float() {
+    let v: JsonValue = JsonValue.JsonInt(0);
+    assert(!(v is JsonValue.JsonFloat));
+    assert(!(v is JsonValue.JsonString));
+}
+
+@test
+fn test_json_value_string_disjoint_from_bool() {
+    let v: JsonValue = JsonValue.JsonString("true".to_text());
+    assert(!(v is JsonValue.JsonBool));
+    assert(!(v is JsonValue.JsonInt));
+}
+
+// =============================================================================
+// Section 3: Scalar payload preservation
+// =============================================================================
+
+@test
+fn test_json_value_int_payload_round_trip() {
+    let v: JsonValue = JsonValue.JsonInt(-9223372036854775807);
+    match v {
+        JsonValue.JsonInt(n) => assert_eq(n, -9223372036854775807),
+        _ => panic("expected JsonInt"),
+    }
+}
+
+@test
+fn test_json_value_string_payload_round_trip() {
+    let v: JsonValue = JsonValue.JsonString("hello world".to_text());
+    match v {
+        JsonValue.JsonString(s) => assert_eq(s, "hello world"),
+        _ => panic("expected JsonString"),
+    }
+}
+
+@test
+fn test_json_value_bool_true_payload_round_trip() {
+    let v: JsonValue = JsonValue.JsonBool(true);
+    match v {
+        JsonValue.JsonBool(b) => assert_eq(b, true),
+        _ => panic("expected JsonBool"),
+    }
+}
+
+// =============================================================================
+// Section 4: JsonErrorKind 10-variant ADT
+// =============================================================================
+
+@test
+fn test_json_error_kind_unexpected_eof_variant() {
+    let k: JsonErrorKind = JsonErrorKind.UnexpectedEof;
+    assert(k is JsonErrorKind.UnexpectedEof);
+}
+
+@test
+fn test_json_error_kind_unexpected_char_variant() {
+    let k: JsonErrorKind = JsonErrorKind.UnexpectedChar;
+    assert(k is JsonErrorKind.UnexpectedChar);
+}
+
+@test
+fn test_json_error_kind_invalid_escape_variant() {
+    let k: JsonErrorKind = JsonErrorKind.InvalidEscape;
+    assert(k is JsonErrorKind.InvalidEscape);
+}
+
+@test
+fn test_json_error_kind_invalid_number_variant() {
+    let k: JsonErrorKind = JsonErrorKind.InvalidNumber;
+    assert(k is JsonErrorKind.InvalidNumber);
+}
+
+@test
+fn test_json_error_kind_invalid_unicode_variant() {
+    let k: JsonErrorKind = JsonErrorKind.InvalidUnicode;
+    assert(k is JsonErrorKind.InvalidUnicode);
+}
+
+@test
+fn test_json_error_kind_depth_limit_variant() {
+    let k: JsonErrorKind = JsonErrorKind.DepthLimit;
+    assert(k is JsonErrorKind.DepthLimit);
+}
+
+@test
+fn test_json_error_kind_string_too_long_variant() {
+    let k: JsonErrorKind = JsonErrorKind.StringTooLong;
+    assert(k is JsonErrorKind.StringTooLong);
+}
+
+@test
+fn test_json_error_kind_array_too_large_variant() {
+    let k: JsonErrorKind = JsonErrorKind.ArrayTooLarge;
+    assert(k is JsonErrorKind.ArrayTooLarge);
+}
+
+@test
+fn test_json_error_kind_object_too_large_variant() {
+    let k: JsonErrorKind = JsonErrorKind.ObjectTooLarge;
+    assert(k is JsonErrorKind.ObjectTooLarge);
+}
+
+@test
+fn test_json_error_kind_trailing_garbage_variant() {
+    let k: JsonErrorKind = JsonErrorKind.TrailingGarbage;
+    assert(k is JsonErrorKind.TrailingGarbage);
+}
+
+// =============================================================================
+// Section 5: JsonErrorKind pairwise disjointness — selected
+// =============================================================================
+
+@test
+fn test_json_error_kind_unexpected_eof_disjoint() {
+    let k: JsonErrorKind = JsonErrorKind.UnexpectedEof;
+    assert(!(k is JsonErrorKind.UnexpectedChar));
+    assert(!(k is JsonErrorKind.InvalidNumber));
+    assert(!(k is JsonErrorKind.TrailingGarbage));
+}
+
+@test
+fn test_json_error_kind_size_variants_disjoint() {
+    let s: JsonErrorKind = JsonErrorKind.StringTooLong;
+    let a: JsonErrorKind = JsonErrorKind.ArrayTooLarge;
+    let o: JsonErrorKind = JsonErrorKind.ObjectTooLarge;
+    assert(!(s is JsonErrorKind.ArrayTooLarge));
+    assert(!(s is JsonErrorKind.ObjectTooLarge));
+    assert(!(a is JsonErrorKind.StringTooLong));
+    assert(!(a is JsonErrorKind.ObjectTooLarge));
+    assert(!(o is JsonErrorKind.StringTooLong));
+    assert(!(o is JsonErrorKind.ArrayTooLarge));
+}
+
+fn main() {}
