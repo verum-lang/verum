@@ -147,7 +147,8 @@ fn test_reset_for_tests_zeros_epoch_and_wraparounds() {
     assert_eq(wraparound_count(), 0);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-29 (D1): increment_epoch_for_tests routed through
+// the scalar-shadow + atomic path (same cell current_epoch observes).
 @test
 fn test_increment_epoch_for_tests_advances_by_one() {
     reset_for_tests();
@@ -159,7 +160,6 @@ fn test_increment_epoch_for_tests_advances_by_one() {
     assert_eq(after, current_epoch());
 }
 
-@ignore
 @test
 fn test_increment_epoch_for_tests_is_monotone_under_repeated_calls() {
     reset_for_tests();
@@ -173,7 +173,6 @@ fn test_increment_epoch_for_tests_is_monotone_under_repeated_calls() {
     assert(e2 < e3);
 }
 
-@ignore
 @test
 fn test_reset_then_increment_then_reset_round_trip() {
     reset_for_tests();
