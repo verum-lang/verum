@@ -1,0 +1,103 @@
+// =============================================================================
+// core-tests/storage/s3/client/unit_test.vr
+// =============================================================================
+//
+// `core/storage/s3/client.vr` — S3Config record.
+// =============================================================================
+
+mount core.storage.s3.client.S3Config;
+mount core.storage.s3.signing.AwsCredentials;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: S3Config record construction
+// =============================================================================
+
+fn mk_creds() -> AwsCredentials {
+    AwsCredentials {
+        access_key_id: "AKIA".to_text(),
+        secret_access_key: "secret".to_text(),
+        session_token: Maybe.None,
+    }
+}
+
+@test
+fn test_s3_config_aws_us_west_2() {
+    let c: S3Config = S3Config {
+        endpoint: "https://s3.us-west-2.amazonaws.com".to_text(),
+        region: "us-west-2".to_text(),
+        bucket: "mybucket".to_text(),
+        credentials: mk_creds(),
+        path_style: false,
+        timeout_ms: 30_000,
+    };
+    assert_eq(c.endpoint, "https://s3.us-west-2.amazonaws.com");
+    assert_eq(c.region, "us-west-2");
+    assert_eq(c.bucket, "mybucket");
+}
+
+@test
+fn test_s3_config_minio_path_style() {
+    let c: S3Config = S3Config {
+        endpoint: "https://minio.local:9000".to_text(),
+        region: "us-east-1".to_text(),
+        bucket: "uploads".to_text(),
+        credentials: mk_creds(),
+        path_style: true,
+        timeout_ms: 60_000,
+    };
+    assert_eq(c.path_style, true);
+}
+
+@test
+fn test_s3_config_aws_modern_virtual_host_style() {
+    let c: S3Config = S3Config {
+        endpoint: "https://s3.amazonaws.com".to_text(),
+        region: "us-east-1".to_text(),
+        bucket: "modern-bucket".to_text(),
+        credentials: mk_creds(),
+        path_style: false,
+        timeout_ms: 30_000,
+    };
+    assert_eq(c.path_style, false);
+}
+
+@test
+fn test_s3_config_default_timeout_30s() {
+    let c: S3Config = S3Config {
+        endpoint: "https://s3.amazonaws.com".to_text(),
+        region: "us-east-1".to_text(),
+        bucket: "x".to_text(),
+        credentials: mk_creds(),
+        path_style: false,
+        timeout_ms: 30_000,
+    };
+    assert_eq(c.timeout_ms, 30_000);
+}
+
+@test
+fn test_s3_config_field_independence() {
+    let a: S3Config = S3Config {
+        endpoint: "https://a".to_text(),
+        region: "us-east-1".to_text(),
+        bucket: "a".to_text(),
+        credentials: mk_creds(),
+        path_style: false,
+        timeout_ms: 30_000,
+    };
+    let b: S3Config = S3Config {
+        endpoint: "https://b".to_text(),
+        region: "eu-west-1".to_text(),
+        bucket: "b".to_text(),
+        credentials: mk_creds(),
+        path_style: true,
+        timeout_ms: 60_000,
+    };
+    assert_eq(a.region, "us-east-1");
+    assert_eq(b.region, "eu-west-1");
+    assert_eq(a.path_style, false);
+    assert_eq(b.path_style, true);
+}
+
+fn main() {}
