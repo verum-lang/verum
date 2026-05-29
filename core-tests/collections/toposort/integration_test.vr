@@ -1,0 +1,196 @@
+// =============================================================================
+// core-tests/collections/toposort/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios for `core.collections.toposort` — exercising
+// TopoGraph the way real callers do: resolving build / install order,
+// composing with List for the result, and driving downstream logic from
+// the sorted order.
+//
+// All scenarios use ACYCLIC graphs (the cyclic-detection path is gated by
+// defect TOPO-CYCLE-1 — see audit.md §1).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.toposort.{TopoGraph, TopoError};
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn index_of(xs: &List<Int>, target: Int) -> Int {
+    let mut i = 0;
+    while i < xs.len() {
+        if xs[i] == target { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn precedes(order: &List<Int>, dep: Int, dependent: Int) -> Bool {
+    let a = index_of(order, dep);
+    let b = index_of(order, dependent);
+    return a >= 0 && b >= 0 && a < b;
+}
+
+fn sorted_or_panic(g: &TopoGraph<Int>) -> List<Int> {
+    match g.toposort() {
+        Ok(out) => out,
+        Err(_)  => { panic("graph was expected acyclic"); [] },
+    }
+}
+
+// =============================================================================
+// Scenario 1: Package-install order
+//
+//   A realistic small dependency graph (ids stand in for package names):
+//     1 = base
+//     2 = libssl       (needs base)
+//     3 = libhttp      (needs base, libssl)
+//     4 = cli          (needs libhttp)
+//     5 = docs         (needs base)
+//   Expected: base before everything it transitively feeds.
+// =============================================================================
+
+@test
+fn integration_package_install_order() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(1, 2);
+    g.add_edge(1, 3);
+    g.add_edge(2, 3);
+    g.add_edge(3, 4);
+    g.add_edge(1, 5);
+    let order = sorted_or_panic(&g);
+
+    assert_eq(order.len(), 5);
+    // base (1) is first — it is the only zero-in-degree node.
+    assert_eq(order[0], 1);
+    // every dependency precedes its dependent.
+    assert(precedes(&order, 1, 2));
+    assert(precedes(&order, 1, 3));
+    assert(precedes(&order, 2, 3));
+    assert(precedes(&order, 3, 4));
+    assert(precedes(&order, 1, 5));
+    // transitive: base before cli.
+    assert(precedes(&order, 1, 4));
+}
+
+// =============================================================================
+// Scenario 2: Drive a downstream "build log" from the sorted order.
+//   The sorted order feeds a second pass that accumulates a running sum
+//   in visitation order — models a build runner executing steps in order.
+// =============================================================================
+
+@test
+fn integration_drive_build_runner_from_order() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(10, 20);
+    g.add_edge(20, 30);
+    g.add_edge(10, 30);
+    let order = sorted_or_panic(&g);
+
+    // "Execute" each step: here, fold into a checksum that is sensitive to
+    // order (so a wrong order would change the result).
+    let mut acc = 0;
+    let mut i = 0;
+    while i < order.len() {
+        acc = acc * 31 + order[i];
+        i = i + 1;
+    }
+    // Deterministic order [10,20,30] → ((10*31+20)*31+30) = 10260.
+    assert_eq(order.len(), 3);
+    assert_eq(order[0], 10);
+    assert_eq(order[1], 20);
+    assert_eq(order[2], 30);
+    assert_eq(acc, 10260);
+}
+
+// =============================================================================
+// Scenario 3: Independent components keep insertion order and all appear.
+//   Two disjoint chains — A: 1→2, B: 100→200 — interleaved by insertion.
+// =============================================================================
+
+@test
+fn integration_independent_components() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_node(1);
+    g.add_node(100);
+    g.add_edge(1, 2);
+    g.add_edge(100, 200);
+    let order = sorted_or_panic(&g);
+
+    assert_eq(order.len(), 4);
+    // Within each component the dep precedes its dependent.
+    assert(precedes(&order, 1, 2));
+    assert(precedes(&order, 100, 200));
+    // Roots emerge in insertion order (1 inserted before 100).
+    assert(precedes(&order, 1, 100));
+}
+
+// =============================================================================
+// Scenario 4: Incremental rebuild — adding an edge re-tightens the order.
+//   Start with two independent nodes, then add a constraint and re-sort.
+// =============================================================================
+
+@test
+fn integration_incremental_constraint_tightening() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_node(7);
+    g.add_node(3);
+    // No constraints yet: insertion order [7, 3].
+    let before = sorted_or_panic(&g);
+    assert_eq(before[0], 7);
+    assert_eq(before[1], 3);
+
+    // Now declare 3 must come before 7.
+    g.add_edge(3, 7);
+    let after = sorted_or_panic(&g);
+    assert_eq(after.len(), 2);
+    // The new constraint flips the order.
+    assert(precedes(&after, 3, 7));
+}
+
+// =============================================================================
+// Scenario 5: Result<List<N>, TopoError> composes with Result combinators.
+//   The Ok branch carries a List<Int> we can map/measure like any other.
+// =============================================================================
+
+@test
+fn integration_result_payload_is_usable_list() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(1, 2);
+    g.add_edge(2, 3);
+    let r = g.toposort();
+    // Pull the count out through the Result without panicking.
+    let n = match r {
+        Ok(out) => out.len(),
+        Err(_)  => -1,
+    };
+    assert_eq(n, 3);
+}
+
+// =============================================================================
+// Scenario 6: Large linear chain — O(V+E) sort produces a strict order.
+//   1 → 2 → ... → 20.  Verifies the algorithm scales past tiny inputs and
+//   the order is exactly ascending.
+// =============================================================================
+
+@test
+fn integration_long_linear_chain_strict_order() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    let mut k = 1;
+    while k < 20 {
+        g.add_edge(k, k + 1);
+        k = k + 1;
+    }
+    let order = sorted_or_panic(&g);
+    assert_eq(order.len(), 20);
+    // Strictly ascending 1..=20.
+    let mut i = 0;
+    while i < order.len() {
+        assert_eq(order[i], i + 1);
+        i = i + 1;
+    }
+}
+
+fn main() {}
