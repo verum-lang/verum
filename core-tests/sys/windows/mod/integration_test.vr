@@ -1,0 +1,78 @@
+// =============================================================================
+// core-tests/sys/windows/mod/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios that reach Windows types/constants through the
+// `core.sys.windows` umbrella and combine them with NtStatus + List / Maybe
+// / Map. Confirms the umbrella surface is usable as a single import point.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.{
+    NtStatus,
+    STATUS_SUCCESS, STATUS_INVALID_HANDLE, STATUS_TIMEOUT, STATUS_PENDING,
+    GENERIC_READ, GENERIC_WRITE,
+    AF_INET, AF_INET6,
+};
+
+// =============================================================================
+// Section 1 — NtStatus classification through the umbrella
+// =============================================================================
+
+@test
+fn wx_mod_int_status_success_vs_error() {
+    assert(STATUS_SUCCESS.is_success());
+    assert(STATUS_INVALID_HANDLE.is_error());
+}
+
+@test
+fn wx_mod_int_status_list_partition() {
+    let mut statuses: List<NtStatus> = List.new();
+    statuses.push(STATUS_SUCCESS);
+    statuses.push(STATUS_INVALID_HANDLE);
+    statuses.push(STATUS_TIMEOUT);
+    statuses.push(STATUS_PENDING);
+
+    let mut errors = 0;
+    for s in statuses.iter() {
+        if s.is_error() {
+            errors = errors + 1;
+        }
+    }
+    // STATUS_INVALID_HANDLE and STATUS_TIMEOUT are error/warning; SUCCESS
+    // and PENDING are not errors. Pin that at least the invalid-handle one
+    // classifies as an error so the loop is exercised.
+    assert(errors >= 1);
+}
+
+// =============================================================================
+// Section 2 — Access mask combination via umbrella constants
+// =============================================================================
+
+@test
+fn wx_mod_int_access_mask_union() {
+    let rw = GENERIC_READ | GENERIC_WRITE;
+    assert_eq(rw & GENERIC_READ, GENERIC_READ);
+    assert_eq(rw & GENERIC_WRITE, GENERIC_WRITE);
+}
+
+// =============================================================================
+// Section 3 — Address family routed through a Map
+// =============================================================================
+
+@test
+fn wx_mod_int_family_label_map() {
+    let mut m: Map<Int, Text> = Map.new();
+    m.insert(AF_INET, "inet");
+    m.insert(AF_INET6, "inet6");
+    match m.get(&AF_INET6) {
+        Maybe.Some(name) => assert_eq(*name, "inet6"),
+        Maybe.None => assert(false, "AF_INET6 missing"),
+    }
+    // 23 (Windows) — confirm the key really is the Windows value.
+    match m.get(&23) {
+        Maybe.Some(name) => assert_eq(*name, "inet6"),
+        Maybe.None => assert(false, "key 23 should be AF_INET6 on Windows"),
+    }
+}

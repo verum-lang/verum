@@ -38,12 +38,56 @@
    operators with the documented saturate-at-zero behaviour on
    `sub`, and three cross-scale equivalence laws.
 
-## 3. Action items deferred
+2. `property_test.vr` — 16 `@test`s (`wx_time_prop_*`) covering the
+   algebraic laws of the host-safe surface:
+   * scaling-relation identities among the constants (NANOS_PER_SEC
+     factorizations, FILETIME 100-ns relation, epoch-offset whole-second
+     divisibility);
+   * `WindowsDuration` `add` commutativity + associativity over sampled
+     u64 sweeps, `zero` additive identity, `mul` distribution over `add`,
+     `sub` saturate-at-zero (and exact-difference) law, cross-scale
+     constructor equivalence, the `as_secs*NANOS_PER_SEC + subsec_nanos
+     == as_nanos` decomposition law, `subsec_millis` consistency,
+     `from_secs_f64` round-trip on exact values, and `(d*f)/f == d`;
+   * `WindowsDeadlineTimer.none()` invariants (`has_deadline() == false`,
+     `remaining_ms() == INFINITE`).
+
+3. `integration_test.vr` — 8 `@test`s (`wx_time_int_*`) wiring
+   `WindowsDuration` into `List` (fold/sum via `.add()`, max-by
+   `as_nanos`), `Maybe` (wrap + match unwrap, collect-present pipeline),
+   `Map<Text, WindowsDuration>` (name→duration lookup + value sum), and
+   the `WindowsDeadlineTimer.none()` `remaining()` / `deadline()` Maybe
+   short-circuits routed through `match`.
+
+4. `regression_test.vr` — 7 LOCK-IN `@test`s (`wx_time_reg_*`) pinning
+   the exact `WINDOWS_EPOCH_OFFSET` (and its whole-second decomposition
+   `11_644_473_600 s`), the 100-ns FILETIME unit, `sub` saturate-vs-wrap
+   semantics with the strict-`>` boundary (equal clamps, off-by-one
+   yields 1), and the `none()` short-circuits for `remaining_ms` (INFINITE),
+   `remaining()` (Maybe.None), and `deadline()` (Maybe.None). Plus an
+   `@ignore`'d pin for the NEWTYPE-UNBOX-1 defect below.
+
+## Language defect — WindowsDuration `.add()` then `.as_millis()` mis-reads (NEWTYPE-UNBOX-1)
+
+**Found 2026-05-29.** `WindowsDuration is (UInt64)` is a single-field newtype.
+A value produced by the user `add` body is heap-boxed, but the `as_millis`
+intrinsic inline sequence expects an unboxed nanos `Int` — so
+`d1.add(d2).as_millis()` mis-reads (observed: yields the raw nanos
+`500_000_000` instead of `500`). Reading `.as_nanos()` (field `.0`) works.
+Same class as the core `Duration` unboxing defect (2026-05-27); catalogued as
+**NEWTYPE-UNBOX-1** (`internal/website/docs/stdlib/defect-class-catalogue.md
+§12`). `integration_test.vr::wx_time_int_map_values_sum` sums raw nanos as the
+working idiom; `regression_test.vr` pins the broken `.add().as_millis()` chain
+with `@ignore`.
+
+## 3. Action items deferred (FFI host-unsafe — Windows kernel32 only)
 
 | # | Defect / gap | Notes |
 |---|---|---|
-| 1 | `WindowsInstant.now()` / `elapsed()` round-trip | Requires QueryPerformanceCounter — Windows host only. |
-| 2 | `sleep` / `sleep_ms` / `sleep_us` / `sleep_until` | Requires kernel32 Sleep / SleepEx. |
-| 3 | `system_time` / `local_time` / `realtime_nanos` / `unix_timestamp` | Requires GetSystemTime / GetSystemTimeAsFileTime / GetSystemTimePreciseAsFileTime. |
-| 4 | `WindowsStopwatch` start/stop/elapsed | Wraps WindowsInstant; gated on §1. |
-| 5 | property_test.vr — Duration arithmetic associativity / commutativity / identity laws | Deferred until the broader stdlib base/protocols suite ships a generic property runner. |
+| 1 | `WindowsInstant.now()` / `elapsed()` / `duration_since` / `add` / `sub` | Requires QueryPerformanceCounter — Windows host only. |
+| 2 | `sleep` / `sleep_ms` / `sleep_us` / `sleep_until` | Requires kernel32 Sleep / SleepEx (sleep_us also busy-waits on QPC). |
+| 3 | `system_time` / `local_time` / `realtime_nanos` / `unix_timestamp` | Requires GetSystemTime / GetLocalTime / GetSystemTimePreciseAsFileTime. |
+| 4 | `WindowsStopwatch` `start` / `started` / `stop` / `elapsed` / `lap` / `restart` | All call QueryPerformanceCounter. `new()` / `is_running()` / `reset()` are pure but trivially covered by the constructor unit tests; not re-pinned. |
+| 5 | `WindowsPerfCounter` `now` / `elapsed` / `elapsed_ticks` / `diff` | All call QueryPerformanceCounter. |
+| 6 | `WindowsDeadlineTimer` `after` / `at` / `is_expired` + `remaining()`/`deadline()`/`remaining_ms()` *with* a deadline | The deadline-bearing arms call `WindowsInstant.now()` → QPC. Only the `none()` path is host-safe and covered. |
+| 7 | `time_it`, `get_perf_freq`, `monotonic_nanos/micros/millis` | All read QueryPerformanceCounter / GetTickCount64. |

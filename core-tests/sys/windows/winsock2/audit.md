@@ -54,6 +54,17 @@ would silently break cross-platform sockets at runtime.
    above plus shutdown-mode pairwise distinctness and
    `WindowsSockaddrIn` / `WindowsSockaddrIn6` record-shape round-trip
    (including the 16-byte addr buffer for IPv6 ::1).
+2. **`property_test.vr` (NEW, 2026-05-29)** — class-distinctness of
+   address families / socket types / protocols / SO_* option codes;
+   no-op-flag = OR-identity law (SOCK_NONBLOCK / SOCK_CLOEXEC /
+   MSG_DONTWAIT == 0); SOL_TCP aliases IPPROTO_TCP; shutdown 0/1/2
+   partition; sockaddr field-independence + 16-byte addr invariant.
+3. **`integration_test.vr` (NEW)** — sockaddr list round-trip,
+   proto-for-socktype `Map`, shutdown mode through `Maybe`,
+   family-tagged dispatch.
+4. **`regression_test.vr` (NEW)** — Windows-vs-POSIX divergence LOCK-IN
+   pins (AF_INET6=23≠10, SOL_SOCKET=0xFFFF≠1, SO_* 0x1000-range,
+   SOCK_* no-ops, INVALID_SOCKET all-ones vs SOCKET_ERROR=-1).
 
 ## 4. Action items deferred
 

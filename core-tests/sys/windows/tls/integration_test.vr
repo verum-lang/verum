@@ -1,0 +1,249 @@
+// =============================================================================
+// core-tests/sys/windows/tls/integration_test.vr
+// =============================================================================
+//
+// Composition of the host-safe `core.sys.windows.tls` surface with the
+// standard library: WindowsTlsError flowing through List / Maybe / Map /
+// Result, match exhaustiveness over the 8-variant ADT, and cross-type
+// composition with the pinned constants.
+//
+// HOST-SAFE: nothing here touches kernel32/Tls*/Virtual*/the TCB pointer
+// path. Only the error ADT, its message()/is_retryable() methods, and the
+// numeric constants are exercised. The live TLS / TCB path is deferred
+// (see audit.md §4).
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.tls.{
+    MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH, TCB_MAGIC,
+    DEFAULT_STACK_SIZE, GUARD_PAGE_SIZE,
+    TLS_OUT_OF_INDEXES,
+    WindowsTlsError,
+};
+
+// -----------------------------------------------------------------------------
+// A pure host-side re-implementation of the slot-bounds predicate that the
+// real ctx_get / ctx_set apply (`slot < 0 || slot >= MAX_CONTEXT_SLOTS`),
+// so we can exercise the predicate truth-table without touching FFI.
+// -----------------------------------------------------------------------------
+
+fn wx_tls_validate_slot(slot: Int) -> Result<Int, WindowsTlsError> {
+    if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
+        Result.Err(WindowsTlsError.InvalidSlot { slot: slot })
+    } else {
+        Result.Ok(slot)
+    }
+}
+
+// Pure mirror of the ctx_push overflow guard (`depth >= CONTEXT_STACK_DEPTH`).
+fn wx_tls_check_push(slot: Int, depth: Int) -> Result<(), WindowsTlsError> {
+    if depth >= CONTEXT_STACK_DEPTH {
+        Result.Err(WindowsTlsError.StackOverflow { slot: slot })
+    } else {
+        Result.Ok(())
+    }
+}
+
+// Pure mirror of the ctx_pop underflow guard (`depth == 0`).
+fn wx_tls_check_pop(slot: Int, depth: Int) -> Result<(), WindowsTlsError> {
+    if depth == 0 {
+        Result.Err(WindowsTlsError.StackUnderflow { slot: slot })
+    } else {
+        Result.Ok(())
+    }
+}
+
+// =============================================================================
+// Section 1 — Errors in a List
+// =============================================================================
+
+@test
+fn wx_tls_int_errors_collect_in_list() {
+    let mut errs: List<WindowsTlsError> = List.new();
+    errs.push(WindowsTlsError.NotInitialized);
+    errs.push(WindowsTlsError.AlreadyInitialized);
+    errs.push(WindowsTlsError.InvalidSlot { slot: 5 });
+    errs.push(WindowsTlsError.TlsIndexExhausted);
+    assert_eq(errs.len(), 4);
+    assert(errs[0] == WindowsTlsError.NotInitialized);
+    assert(errs[2] == WindowsTlsError.InvalidSlot { slot: 5 });
+}
+
+@test
+fn wx_tls_int_count_retryable_in_list_is_zero() {
+    let mut errs: List<WindowsTlsError> = List.new();
+    errs.push(WindowsTlsError.NotInitialized);
+    errs.push(WindowsTlsError.InvalidTcb);
+    errs.push(WindowsTlsError.StackOverflow { slot: 1 });
+    errs.push(WindowsTlsError.AllocationFailed { code: 8_u32, size: 4096_usize });
+    let mut retryable = 0;
+    for e in errs.iter() {
+        if e.is_retryable() {
+            retryable = retryable + 1;
+        }
+    }
+    assert_eq(retryable, 0);
+}
+
+// =============================================================================
+// Section 2 — Errors in a Maybe
+// =============================================================================
+
+@test
+fn wx_tls_int_error_in_maybe_some() {
+    let m: Maybe<WindowsTlsError> = Maybe.Some(WindowsTlsError.InvalidTcb);
+    match m {
+        Maybe.Some(e) => assert(e == WindowsTlsError.InvalidTcb),
+        Maybe.None => panic("expected Some"),
+    };
+}
+
+@test
+fn wx_tls_int_error_in_maybe_none() {
+    let m: Maybe<WindowsTlsError> = Maybe.None;
+    assert(m is Maybe.None);
+}
+
+// =============================================================================
+// Section 3 — Errors flowing through Result
+// =============================================================================
+
+@test
+fn wx_tls_int_validate_slot_ok() {
+    match wx_tls_validate_slot(0) {
+        Result.Ok(s) => assert_eq(s, 0),
+        Result.Err(_) => panic("0 is a valid slot"),
+    };
+    match wx_tls_validate_slot(255) {
+        Result.Ok(s) => assert_eq(s, 255),
+        Result.Err(_) => panic("255 is the last valid slot"),
+    };
+}
+
+@test
+fn wx_tls_int_validate_slot_negative_rejected() {
+    match wx_tls_validate_slot(-1) {
+        Result.Ok(_) => panic("-1 must be rejected"),
+        Result.Err(e) => assert(e == WindowsTlsError.InvalidSlot { slot: -1 }),
+    };
+}
+
+@test
+fn wx_tls_int_validate_slot_at_ceiling_rejected() {
+    // slot == MAX_CONTEXT_SLOTS is one past the end and must be rejected.
+    match wx_tls_validate_slot(MAX_CONTEXT_SLOTS) {
+        Result.Ok(_) => panic("256 is out of range"),
+        Result.Err(e) => assert(e == WindowsTlsError.InvalidSlot { slot: 256 }),
+    };
+}
+
+@test
+fn wx_tls_int_push_guard_truth_table() {
+    // Depth strictly below the ceiling => Ok; at/above => StackOverflow.
+    assert(wx_tls_check_push(0, 0) is Result.Ok);
+    assert(wx_tls_check_push(0, CONTEXT_STACK_DEPTH - 1) is Result.Ok);
+    match wx_tls_check_push(4, CONTEXT_STACK_DEPTH) {
+        Result.Ok(_) => panic("full stack must overflow"),
+        Result.Err(e) => assert(e == WindowsTlsError.StackOverflow { slot: 4 }),
+    };
+}
+
+@test
+fn wx_tls_int_pop_guard_truth_table() {
+    // Depth 0 => underflow; any positive depth => Ok.
+    match wx_tls_check_pop(2, 0) {
+        Result.Ok(_) => panic("empty stack must underflow"),
+        Result.Err(e) => assert(e == WindowsTlsError.StackUnderflow { slot: 2 }),
+    };
+    assert(wx_tls_check_pop(2, 1) is Result.Ok);
+    assert(wx_tls_check_pop(2, CONTEXT_STACK_DEPTH) is Result.Ok);
+}
+
+// =============================================================================
+// Section 4 — Match exhaustiveness over all 8 variants
+// =============================================================================
+
+fn wx_tls_error_tag(e: &WindowsTlsError) -> Int {
+    match e {
+        WindowsTlsError.NotInitialized           => 0,
+        WindowsTlsError.AlreadyInitialized       => 1,
+        WindowsTlsError.AllocationFailed { .. }  => 2,
+        WindowsTlsError.InvalidSlot { .. }       => 3,
+        WindowsTlsError.StackOverflow { .. }     => 4,
+        WindowsTlsError.StackUnderflow { .. }    => 5,
+        WindowsTlsError.InvalidTcb               => 6,
+        WindowsTlsError.TlsIndexExhausted        => 7,
+    }
+}
+
+@test
+fn wx_tls_int_error_tags_are_distinct() {
+    let mut tags: List<Int> = List.new();
+    tags.push(wx_tls_error_tag(&WindowsTlsError.NotInitialized));
+    tags.push(wx_tls_error_tag(&WindowsTlsError.AlreadyInitialized));
+    tags.push(wx_tls_error_tag(&WindowsTlsError.AllocationFailed { code: 0_u32, size: 0_usize }));
+    tags.push(wx_tls_error_tag(&WindowsTlsError.InvalidSlot { slot: 0 }));
+    tags.push(wx_tls_error_tag(&WindowsTlsError.StackOverflow { slot: 0 }));
+    tags.push(wx_tls_error_tag(&WindowsTlsError.StackUnderflow { slot: 0 }));
+    tags.push(wx_tls_error_tag(&WindowsTlsError.InvalidTcb));
+    tags.push(wx_tls_error_tag(&WindowsTlsError.TlsIndexExhausted));
+    let mut i = 0;
+    while i < tags.len() {
+        let mut j = i + 1;
+        while j < tags.len() {
+            assert(tags[i] != tags[j], "every variant must map to a distinct tag");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 5 — message() composition
+// =============================================================================
+
+@test
+fn wx_tls_int_message_nonempty_for_all_variants() {
+    let mut errs: List<WindowsTlsError> = List.new();
+    errs.push(WindowsTlsError.NotInitialized);
+    errs.push(WindowsTlsError.AlreadyInitialized);
+    errs.push(WindowsTlsError.AllocationFailed { code: 8_u32, size: 4096_usize });
+    errs.push(WindowsTlsError.InvalidSlot { slot: 9 });
+    errs.push(WindowsTlsError.StackOverflow { slot: 9 });
+    errs.push(WindowsTlsError.StackUnderflow { slot: 9 });
+    errs.push(WindowsTlsError.InvalidTcb);
+    errs.push(WindowsTlsError.TlsIndexExhausted);
+    for e in errs.iter() {
+        assert(e.message().len() > 0, "every error must carry a non-empty message");
+    }
+}
+
+// =============================================================================
+// Section 6 — Constants as Map keys / values
+// =============================================================================
+
+@test
+fn wx_tls_int_constants_as_map_values() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("max_slots", MAX_CONTEXT_SLOTS);
+    m.insert("stack_depth", CONTEXT_STACK_DEPTH);
+    m.insert("guard_page", GUARD_PAGE_SIZE);
+    m.insert("default_stack", DEFAULT_STACK_SIZE);
+    match m.get("max_slots") {
+        Maybe.Some(v) => assert_eq(v, 256),
+        Maybe.None => panic("expected max_slots key"),
+    };
+    match m.get("guard_page") {
+        Maybe.Some(v) => assert_eq(v, 4096),
+        Maybe.None => panic("expected guard_page key"),
+    };
+    assert_eq(m.len(), 4);
+}
+
+@test
+fn wx_tls_int_out_of_indexes_distinct_from_zero_index() {
+    // A real TLS index is a small non-negative integer; the sentinel must
+    // never collide with the very first allocatable index (0).
+    assert(TLS_OUT_OF_INDEXES != 0_u32);
+}

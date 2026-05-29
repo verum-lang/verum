@@ -1,0 +1,69 @@
+// =============================================================================
+// core-tests/sys/windows/winsock2/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for the Windows-vs-POSIX socket-constant divergences.
+// These numbers DIFFER from Linux/Darwin; a copy-paste from a POSIX header
+// would silently break Winsock2. Never delete — they guard the boundary.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.winsock2.{
+    AF_INET, AF_INET6,
+    SOL_SOCKET, SO_ERROR, SO_RCVTIMEO, SO_SNDTIMEO, SO_RCVBUF, SO_SNDBUF,
+    SOCK_NONBLOCK, SOCK_CLOEXEC, MSG_DONTWAIT, MSG_PEEK,
+    INVALID_SOCKET, SOCKET_ERROR,
+};
+
+// LOCK-IN: Windows AF_INET6 = 23, NOT the Linux value 10. The single most
+// common cross-platform socket bug.
+@test
+fn wx_winsock2_reg_af_inet6_is_23_not_10() {
+    assert_eq(AF_INET6, 23);
+    assert(AF_INET6 != 10);
+    assert_eq(AF_INET, 2);  // AF_INET agrees with POSIX
+}
+
+// LOCK-IN: Windows SOL_SOCKET = 0xFFFF, NOT the Linux value 1.
+@test
+fn wx_winsock2_reg_sol_socket_is_ffff_not_1() {
+    assert_eq(SOL_SOCKET, 0xFFFF);
+    assert(SOL_SOCKET != 1);
+}
+
+// LOCK-IN: Windows SO_* live in the 0x1000 range, NOT POSIX small ints.
+@test
+fn wx_winsock2_reg_so_options_windows_range() {
+    assert_eq(SO_ERROR, 0x1007);   // POSIX: 4
+    assert_eq(SO_RCVTIMEO, 0x1006);
+    assert_eq(SO_SNDTIMEO, 0x1005);
+    assert_eq(SO_RCVBUF, 0x1002);
+    assert_eq(SO_SNDBUF, 0x1001);
+}
+
+// LOCK-IN: MSG_PEEK = 2 (agrees with POSIX), MSG_DONTWAIT = 0 (no Windows
+// analogue — non-blocking is via ioctlsocket FIONBIO).
+@test
+fn wx_winsock2_reg_msg_flags() {
+    assert_eq(MSG_PEEK, 2);
+    assert_eq(MSG_DONTWAIT, 0);
+}
+
+// LOCK-IN: SOCK_NONBLOCK / SOCK_CLOEXEC are no-ops (0) on Windows. If these
+// ever pick up the Linux bit values (0x800 / 0x80000) they corrupt the
+// socket() type argument.
+@test
+fn wx_winsock2_reg_sock_flags_are_noops() {
+    assert_eq(SOCK_NONBLOCK, 0);
+    assert_eq(SOCK_CLOEXEC, 0);
+}
+
+// LOCK-IN: INVALID_SOCKET is the unsigned all-ones sentinel (Windows
+// SOCKETs are unsigned UINT_PTR), distinct from the signed SOCKET_ERROR=-1
+// used for int-returning calls. Conflating them breaks error detection.
+@test
+fn wx_winsock2_reg_invalid_socket_vs_socket_error() {
+    assert_eq(INVALID_SOCKET, 0xFFFFFFFFFFFFFFFF_u64);
+    assert_eq(SOCKET_ERROR, -1);
+}

@@ -1,0 +1,90 @@
+// =============================================================================
+// core-tests/sys/windows/ntdll/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for fragile NT Native API constant/newtype invariants.
+// Never delete — these guard against silent re-regression of the
+// `core.sys.windows.ntdll` binding tables.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.ntdll.{
+    Handle, IoStatusBlock,
+    OBJ_VALID_ATTRIBUTES,
+    GENERIC_READ, GENERIC_WRITE, GENERIC_EXECUTE, GENERIC_ALL,
+    FILE_ALL_ACCESS, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE,
+    FILE_SUPERSEDE, FILE_OPEN, FILE_CREATE, FILE_OPEN_IF,
+};
+
+// NEWTYPE-UNBOX-1 (single-field-newtype method-return unboxing): a value of a
+// single-field newtype (here `NtStatus is (Int32)`) returned from a method
+// (`IoStatusBlock.status()`) unboxes to a bare `Int` at runtime, so a chained
+// method call (`.is_success()`) fails dispatch with "NtStatus.is_success not
+// found on receiver of runtime kind `Int`". Direct `NtStatus` values (e.g.
+// the `STATUS_*` consts) dispatch fine — only method-returned newtypes lose
+// the type. Same class as the Duration single-field-record unboxing
+// (memory: duration_single_field_record_unboxing_2026-05-27). Deep fix is
+// VBC codegen newtype-boxing parity; pinned here until then.
+@ignore("NEWTYPE-UNBOX-1: IoStatusBlock.status().is_success() unboxes NtStatus to Int and loses dispatch. See audit.md §B.")
+@test
+fn wx_ntdll_reg_iosb_status_is_success_newtype_unbox() {
+    let iosb = IoStatusBlock.new();
+    assert(iosb.status().is_success());
+}
+
+// LOCK-IN: OBJ_VALID_ATTRIBUTES is the documented union mask 0x7F2. The
+// kernel rejects OBJECT_ATTRIBUTES whose Attributes field has bits outside
+// this mask, so an off-by-one here breaks every NtCreateFile call.
+@test
+fn wx_ntdll_reg_obj_valid_attributes_mask() {
+    assert_eq(OBJ_VALID_ATTRIBUTES, 0x000007F2_u32);
+}
+
+// LOCK-IN: GENERIC_* masks occupy the documented top-nibble bit positions.
+@test
+fn wx_ntdll_reg_generic_masks_exact() {
+    assert_eq(GENERIC_READ, 0x80000000_u32);
+    assert_eq(GENERIC_WRITE, 0x40000000_u32);
+    assert_eq(GENERIC_EXECUTE, 0x20000000_u32);
+    assert_eq(GENERIC_ALL, 0x10000000_u32);
+}
+
+// LOCK-IN: composite FILE_GENERIC_* masks. These are precomputed unions of
+// STANDARD_RIGHTS + fine-grained FILE_* bits; the exact values are part of
+// the ABI between Verum and ntdll.
+@test
+fn wx_ntdll_reg_file_generic_composite_masks() {
+    assert_eq(FILE_ALL_ACCESS, 0x001F01FF_u32);
+    assert_eq(FILE_GENERIC_READ, 0x00120089_u32);
+    assert_eq(FILE_GENERIC_WRITE, 0x00120116_u32);
+    assert_eq(FILE_GENERIC_EXECUTE, 0x001200A0_u32);
+}
+
+// LOCK-IN: disposition codes are the consecutive 0..=3 prefix used most.
+@test
+fn wx_ntdll_reg_disposition_prefix() {
+    assert_eq(FILE_SUPERSEDE, 0_u32);
+    assert_eq(FILE_OPEN, 1_u32);
+    assert_eq(FILE_CREATE, 2_u32);
+    assert_eq(FILE_OPEN_IF, 3_u32);
+}
+
+// LOCK-IN: Handle sentinels. NULL=0 and INVALID=-1 must remain distinct
+// and both classify as not-valid. A bug folding these together would let
+// NtClose(NULL) masquerade as a real handle close.
+@test
+fn wx_ntdll_reg_handle_sentinels() {
+    assert_eq(Handle.NULL.raw(), 0);
+    assert_eq(Handle.INVALID.raw(), -1);
+    assert(!Handle.NULL.is_valid());
+    assert(!Handle.INVALID.is_valid());
+    assert(Handle.NULL.raw() != Handle.INVALID.raw());
+}
+
+// LOCK-IN: a nonzero, non-(-1) handle is valid. Guards the is_valid bounds.
+@test
+fn wx_ntdll_reg_arbitrary_handle_valid() {
+    assert(Handle(1).is_valid());
+    assert(Handle(0x7FFFFFFF).is_valid());
+}

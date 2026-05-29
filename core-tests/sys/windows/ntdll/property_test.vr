@@ -1,0 +1,263 @@
+// =============================================================================
+// core-tests/sys/windows/ntdll/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core.sys.windows.ntdll` constant tables and the
+// pure newtype/struct surface. No NT Native API FFI is invoked.
+//
+// Properties:
+//   * OBJ_* attribute flags are single-bit (power-of-two) and pairwise
+//     disjoint; OBJ_VALID_ATTRIBUTES is exactly their bitwise union.
+//   * GENERIC_* / PAGE_* / MEM_* / fine-grained FILE_* constants are
+//     pairwise distinct and (where documented as bit flags) single-bit.
+//   * NtCreateFile disposition codes are consecutive 0..=5.
+//   * THREAD_CREATE_FLAGS_* are single-bit and pairwise disjoint.
+//   * Handle.is_valid is exactly `raw ∉ {0, -1}`.
+//   * LargeInteger / ULargeInteger are injective wrappers.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.ntdll.{
+    Handle, LargeInteger, ULargeInteger,
+    OBJ_INHERIT, OBJ_PERMANENT, OBJ_EXCLUSIVE, OBJ_CASE_INSENSITIVE,
+    OBJ_OPENIF, OBJ_OPENLINK, OBJ_KERNEL_HANDLE, OBJ_FORCE_ACCESS_CHECK,
+    OBJ_VALID_ATTRIBUTES,
+    GENERIC_READ, GENERIC_WRITE, GENERIC_EXECUTE, GENERIC_ALL,
+    PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
+    PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE,
+    PAGE_EXECUTE_WRITECOPY, PAGE_GUARD,
+    MEM_COMMIT, MEM_RESERVE, MEM_DECOMMIT, MEM_RELEASE, MEM_RESET,
+    FILE_READ_DATA, FILE_WRITE_DATA, FILE_APPEND_DATA, FILE_READ_EA,
+    FILE_WRITE_EA, FILE_EXECUTE, FILE_DELETE_CHILD, FILE_READ_ATTRIBUTES,
+    FILE_WRITE_ATTRIBUTES,
+    FILE_SUPERSEDE, FILE_OPEN, FILE_CREATE, FILE_OPEN_IF,
+    FILE_OVERWRITE, FILE_OVERWRITE_IF,
+    THREAD_CREATE_FLAGS_CREATE_SUSPENDED,
+    THREAD_CREATE_FLAGS_SKIP_THREAD_ATTACH,
+    THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER,
+    THREAD_CREATE_FLAGS_HAS_SECURITY_DESCRIPTOR,
+    THREAD_CREATE_FLAGS_ACCESS_CHECK_IN_TARGET,
+    THREAD_CREATE_FLAGS_INITIAL_THREAD,
+};
+
+fn is_pow2(x: UInt32) -> Bool {
+    x != 0 && (x & (x - 1)) == 0
+}
+
+fn pairwise_distinct(xs: &List<UInt32>, label: Text) {
+    let mut i = 0;
+    while i < xs.len() {
+        let mut j = i + 1;
+        while j < xs.len() {
+            assert(xs[i] != xs[j], label);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 1 — OBJ_* flags: single-bit, disjoint, union == VALID_ATTRIBUTES
+// =============================================================================
+
+fn obj_flags() -> List<UInt32> {
+    let mut xs: List<UInt32> = List.new();
+    xs.push(OBJ_INHERIT);
+    xs.push(OBJ_PERMANENT);
+    xs.push(OBJ_EXCLUSIVE);
+    xs.push(OBJ_CASE_INSENSITIVE);
+    xs.push(OBJ_OPENIF);
+    xs.push(OBJ_OPENLINK);
+    xs.push(OBJ_KERNEL_HANDLE);
+    xs.push(OBJ_FORCE_ACCESS_CHECK);
+    xs
+}
+
+@test
+fn wx_ntdll_prop_obj_flags_single_bit() {
+    for f in obj_flags().iter() {
+        assert(is_pow2(*f), "OBJ_* flags must be single-bit");
+    }
+}
+
+@test
+fn wx_ntdll_prop_obj_flags_pairwise_distinct() {
+    pairwise_distinct(&obj_flags(), "OBJ_* must be pairwise distinct");
+}
+
+@test
+fn wx_ntdll_prop_obj_valid_attributes_is_union() {
+    let mut acc: UInt32 = 0;
+    for f in obj_flags().iter() {
+        acc = acc | *f;
+    }
+    assert_eq(acc, OBJ_VALID_ATTRIBUTES);
+    assert_eq(acc, 0x000007F2_u32);
+}
+
+// =============================================================================
+// Property 2 — GENERIC_* masks pairwise distinct
+// =============================================================================
+
+@test
+fn wx_ntdll_prop_generic_masks_distinct() {
+    let mut xs: List<UInt32> = List.new();
+    xs.push(GENERIC_READ);
+    xs.push(GENERIC_WRITE);
+    xs.push(GENERIC_EXECUTE);
+    xs.push(GENERIC_ALL);
+    pairwise_distinct(&xs, "GENERIC_* must be pairwise distinct");
+}
+
+@test
+fn wx_ntdll_prop_generic_masks_single_bit() {
+    assert(is_pow2(GENERIC_READ));
+    assert(is_pow2(GENERIC_WRITE));
+    assert(is_pow2(GENERIC_EXECUTE));
+    assert(is_pow2(GENERIC_ALL));
+}
+
+// =============================================================================
+// Property 3 — PAGE_* protection flags single-bit & distinct
+// =============================================================================
+
+fn page_flags() -> List<UInt32> {
+    let mut xs: List<UInt32> = List.new();
+    xs.push(PAGE_NOACCESS);
+    xs.push(PAGE_READONLY);
+    xs.push(PAGE_READWRITE);
+    xs.push(PAGE_WRITECOPY);
+    xs.push(PAGE_EXECUTE);
+    xs.push(PAGE_EXECUTE_READ);
+    xs.push(PAGE_EXECUTE_READWRITE);
+    xs.push(PAGE_EXECUTE_WRITECOPY);
+    xs.push(PAGE_GUARD);
+    xs
+}
+
+@test
+fn wx_ntdll_prop_page_flags_single_bit() {
+    for f in page_flags().iter() {
+        assert(is_pow2(*f), "PAGE_* must be single-bit");
+    }
+}
+
+@test
+fn wx_ntdll_prop_page_flags_pairwise_distinct() {
+    pairwise_distinct(&page_flags(), "PAGE_* must be pairwise distinct");
+}
+
+// =============================================================================
+// Property 4 — MEM_* allocation flags single-bit & distinct
+// =============================================================================
+
+@test
+fn wx_ntdll_prop_mem_flags_single_bit_and_distinct() {
+    let mut xs: List<UInt32> = List.new();
+    xs.push(MEM_COMMIT);
+    xs.push(MEM_RESERVE);
+    xs.push(MEM_DECOMMIT);
+    xs.push(MEM_RELEASE);
+    xs.push(MEM_RESET);
+    for f in xs.iter() {
+        assert(is_pow2(*f), "MEM_* must be single-bit");
+    }
+    pairwise_distinct(&xs, "MEM_* must be pairwise distinct");
+}
+
+// =============================================================================
+// Property 5 — Fine-grained FILE_* access rights single-bit & distinct
+// =============================================================================
+
+@test
+fn wx_ntdll_prop_file_access_rights_single_bit_distinct() {
+    let mut xs: List<UInt32> = List.new();
+    xs.push(FILE_READ_DATA);
+    xs.push(FILE_WRITE_DATA);
+    xs.push(FILE_APPEND_DATA);
+    xs.push(FILE_READ_EA);
+    xs.push(FILE_WRITE_EA);
+    xs.push(FILE_EXECUTE);
+    xs.push(FILE_DELETE_CHILD);
+    xs.push(FILE_READ_ATTRIBUTES);
+    xs.push(FILE_WRITE_ATTRIBUTES);
+    for f in xs.iter() {
+        assert(is_pow2(*f), "fine-grained FILE_* must be single-bit");
+    }
+    pairwise_distinct(&xs, "fine-grained FILE_* must be pairwise distinct");
+}
+
+// =============================================================================
+// Property 6 — Disposition codes consecutive 0..=5
+// =============================================================================
+
+@test
+fn wx_ntdll_prop_disposition_consecutive() {
+    assert_eq(FILE_SUPERSEDE, 0_u32);
+    assert_eq(FILE_OPEN, 1_u32);
+    assert_eq(FILE_CREATE, 2_u32);
+    assert_eq(FILE_OPEN_IF, 3_u32);
+    assert_eq(FILE_OVERWRITE, 4_u32);
+    assert_eq(FILE_OVERWRITE_IF, 5_u32);
+}
+
+// =============================================================================
+// Property 7 — THREAD_CREATE_FLAGS_* single-bit & disjoint
+// =============================================================================
+
+@test
+fn wx_ntdll_prop_thread_create_flags_single_bit_distinct() {
+    let mut xs: List<UInt32> = List.new();
+    xs.push(THREAD_CREATE_FLAGS_CREATE_SUSPENDED);
+    xs.push(THREAD_CREATE_FLAGS_SKIP_THREAD_ATTACH);
+    xs.push(THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER);
+    xs.push(THREAD_CREATE_FLAGS_HAS_SECURITY_DESCRIPTOR);
+    xs.push(THREAD_CREATE_FLAGS_ACCESS_CHECK_IN_TARGET);
+    xs.push(THREAD_CREATE_FLAGS_INITIAL_THREAD);
+    for f in xs.iter() {
+        assert(is_pow2(*f), "THREAD_CREATE_FLAGS_* must be single-bit");
+    }
+    pairwise_distinct(&xs, "THREAD_CREATE_FLAGS_* must be pairwise distinct");
+}
+
+// =============================================================================
+// Property 8 — Handle.is_valid ≡ raw ∉ {0, -1}
+// =============================================================================
+
+@test
+fn wx_ntdll_prop_handle_validity_predicate() {
+    let samples: List<Int> = [-1, 0, 1, 42, 0xCAFE, -2];
+    for r in samples.iter() {
+        let h = Handle(*r);
+        let expected = *r != 0 && *r != -1;
+        assert_eq(h.is_valid(), expected);
+        assert_eq(h.raw(), *r);
+    }
+}
+
+@test
+fn wx_ntdll_prop_handle_sentinels_invalid() {
+    assert(!Handle.NULL.is_valid());
+    assert(!Handle.INVALID.is_valid());
+    assert(Handle.NULL.raw() != Handle.INVALID.raw());
+}
+
+// =============================================================================
+// Property 9 — LargeInteger / ULargeInteger injective wrappers
+// =============================================================================
+
+@test
+fn wx_ntdll_prop_large_integer_round_trip() {
+    let samples: List<Int64> = [0_i64, 1_i64, -1_i64, 9223372036854775807_i64];
+    for v in samples.iter() {
+        let li = LargeInteger(*v);
+        assert_eq(li.0, *v);
+    }
+}
+
+@test
+fn wx_ntdll_prop_ularge_integer_round_trip() {
+    let li = ULargeInteger(0xFFFFFFFFFFFFFFFF_u64);
+    assert_eq(li.0, 0xFFFFFFFFFFFFFFFF_u64);
+}

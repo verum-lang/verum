@@ -1,0 +1,173 @@
+// =============================================================================
+// core-tests/sys/windows/io/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core.sys.windows.io` — the IOCP bootstrap module.
+//
+// Host-safe surfaces only (no IOCP runtime / GetQueuedCompletionStatus FFI):
+//
+//   * Constant scaling invariants (DEFAULT_TIMEOUT_NS == DEFAULT_TIMEOUT_MS·1e6).
+//   * WindowsIoToken newtype is an injective wrapper over UInt64 (distinct
+//     payloads ⇒ distinct tokens; equal payloads ⇒ equal tokens).
+//   * WindowsIoDriverError.from_error_code is a deterministic, total mapping
+//     from Win32/WSA error numbers onto the 15-variant error ADT.
+//   * WindowsIoDriverError.is_retryable partitions the ADT into exactly the
+//     transient set {WouldBlock, Interrupted}.
+//   * Eq over WindowsIoDriverError is reflexive and payload-sensitive.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.io.{
+    MAX_EVENTS, DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_NS,
+    WindowsIoToken, WindowsIoDriverError,
+};
+
+// =============================================================================
+// Property 1 — Constant scaling invariants
+// =============================================================================
+
+@test
+fn wx_io_prop_timeout_ns_is_ms_times_million() {
+    assert_eq(DEFAULT_TIMEOUT_NS, (DEFAULT_TIMEOUT_MS as Int) * 1_000_000);
+}
+
+@test
+fn wx_io_prop_max_events_is_power_of_two() {
+    let x = MAX_EVENTS;
+    assert(x != 0 && (x & (x - 1)) == 0);
+}
+
+// =============================================================================
+// Property 2 — WindowsIoToken is an injective UInt64 wrapper
+// =============================================================================
+
+fn token_payloads() -> List<UInt64> {
+    let mut xs: List<UInt64> = List.new();
+    xs.push(0_u64);
+    xs.push(1_u64);
+    xs.push(255_u64);
+    xs.push(4096_u64);
+    xs.push(0xDEAD_BEEF_u64);
+    xs.push(0xFFFFFFFFFFFFFFFF_u64);
+    xs
+}
+
+@test
+fn wx_io_prop_token_round_trip() {
+    for p in token_payloads().iter() {
+        let t = WindowsIoToken(*p);
+        assert_eq(t.0, *p);
+    }
+}
+
+@test
+fn wx_io_prop_token_injective_over_distinct_payloads() {
+    let xs = token_payloads();
+    let mut i = 0;
+    while i < xs.len() {
+        let mut j = i + 1;
+        while j < xs.len() {
+            let a = WindowsIoToken(xs[i]);
+            let b = WindowsIoToken(xs[j]);
+            assert(a.0 != b.0, "distinct payloads must yield distinct tokens");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 3 — from_error_code is deterministic & total
+// =============================================================================
+
+fn sample_codes() -> List<UInt32> {
+    let mut xs: List<UInt32> = List.new();
+    xs.push(996_u32);   xs.push(997_u32);   xs.push(2_u32);
+    xs.push(3_u32);     xs.push(80_u32);    xs.push(183_u32);
+    xs.push(87_u32);    xs.push(5_u32);     xs.push(1225_u32);
+    xs.push(10061_u32); xs.push(10054_u32); xs.push(109_u32);
+    xs.push(1460_u32);  xs.push(10060_u32); xs.push(38_u32);
+    xs.push(995_u32);   xs.push(0_u32);     xs.push(424242_u32);
+    xs
+}
+
+@test
+fn wx_io_prop_from_error_code_deterministic() {
+    // Same input must map to the same variant on every call.
+    for c in sample_codes().iter() {
+        let a = WindowsIoDriverError.from_error_code(*c);
+        let b = WindowsIoDriverError.from_error_code(*c);
+        assert(a == b, "from_error_code must be a pure function");
+    }
+}
+
+@test
+fn wx_io_prop_from_error_code_total_message_nonempty() {
+    // Every mapped variant must produce a non-empty message — proves the
+    // mapping is total (no panic / no empty fall-through).
+    for c in sample_codes().iter() {
+        let e = WindowsIoDriverError.from_error_code(*c);
+        assert(e.message().len() > 0, "every error variant must have a message");
+    }
+}
+
+@test
+fn wx_io_prop_unknown_code_preserved_in_other() {
+    // Codes outside the known table become Other { code, .. } and preserve
+    // the original code verbatim.
+    let e = WindowsIoDriverError.from_error_code(424242_u32);
+    assert_eq(e, WindowsIoDriverError.Other { code: 424242_u32, message: "Unknown error" });
+}
+
+// =============================================================================
+// Property 4 — is_retryable partitions exactly {WouldBlock, Interrupted}
+// =============================================================================
+
+@test
+fn wx_io_prop_retryable_set_is_transient_only() {
+    assert(WindowsIoDriverError.WouldBlock.is_retryable());
+    assert(WindowsIoDriverError.Interrupted.is_retryable());
+    // Representative non-transient variants are NOT retryable.
+    assert(!WindowsIoDriverError.AlreadyExists.is_retryable());
+    assert(!WindowsIoDriverError.PermissionDenied.is_retryable());
+    assert(!WindowsIoDriverError.ConnectionReset.is_retryable());
+    assert(!WindowsIoDriverError.TimedOut.is_retryable());
+    assert(!WindowsIoDriverError.Closed.is_retryable());
+    assert(!WindowsIoDriverError.EndOfFile.is_retryable());
+}
+
+// =============================================================================
+// Property 5 — Eq is reflexive and payload-sensitive
+// =============================================================================
+
+@test
+fn wx_io_prop_eq_reflexive_unit_variants() {
+    assert_eq(WindowsIoDriverError.WouldBlock, WindowsIoDriverError.WouldBlock);
+    assert_eq(WindowsIoDriverError.BrokenPipe, WindowsIoDriverError.BrokenPipe);
+    assert_eq(WindowsIoDriverError.Cancelled, WindowsIoDriverError.Cancelled);
+}
+
+@test
+fn wx_io_prop_eq_payload_sensitive_notfound() {
+    let a = WindowsIoDriverError.NotFound { path: "a.txt" };
+    let b = WindowsIoDriverError.NotFound { path: "a.txt" };
+    let c = WindowsIoDriverError.NotFound { path: "b.txt" };
+    assert(a == b);
+    assert(a != c);
+}
+
+@test
+fn wx_io_prop_eq_payload_sensitive_other() {
+    let a = WindowsIoDriverError.Other { code: 1_u32, message: "x" };
+    let b = WindowsIoDriverError.Other { code: 1_u32, message: "x" };
+    let c = WindowsIoDriverError.Other { code: 2_u32, message: "x" };
+    assert(a == b);
+    assert(a != c);
+}
+
+@test
+fn wx_io_prop_eq_cross_variant_distinct() {
+    assert(WindowsIoDriverError.WouldBlock != WindowsIoDriverError.Interrupted);
+    assert(WindowsIoDriverError.Closed != WindowsIoDriverError.EndOfFile);
+}

@@ -99,51 +99,57 @@ public type WindowsIoDriverError is
 
 implement WindowsIoDriverError {
     public fn from_error_code(err: UInt32) -> WindowsIoDriverError {
+        // NOTE: variant constructors are written in fully-qualified
+        // `WindowsIoDriverError.<Variant>` form. Bare-variant constructors
+        // are mis-represented when this ADT is loaded from the precompiled
+        // core archive (cross-archive bare-variant resolution defect — see
+        // core-tests/sys/windows/io/audit.md §A). Qualified form round-trips
+        // correctly. Keep qualified.
         match err {
-            996 => WouldBlock,                                              // ERROR_IO_INCOMPLETE
-            997 => WouldBlock,                                              // ERROR_IO_PENDING
-            2 => NotFound { path: "" },                                     // ERROR_FILE_NOT_FOUND
-            3 => NotFound { path: "" },                                     // ERROR_PATH_NOT_FOUND
-            80 => AlreadyExists,                                            // ERROR_FILE_EXISTS
-            183 => AlreadyExists,                                           // ERROR_ALREADY_EXISTS
-            87 => InvalidInput { reason: "Invalid parameter" },             // ERROR_INVALID_PARAMETER
-            5 => PermissionDenied,                                          // ERROR_ACCESS_DENIED
-            1225 => ConnectionRefused,                                      // ERROR_CONNECTION_REFUSED
-            10061 => ConnectionRefused,                                     // WSAECONNREFUSED
-            10054 => ConnectionReset,                                       // WSAECONNRESET
-            109 => BrokenPipe,                                              // ERROR_BROKEN_PIPE
-            1460 => TimedOut,                                               // ERROR_TIMEOUT
-            10060 => TimedOut,                                              // WSAETIMEDOUT
-            38 => EndOfFile,                                                // ERROR_HANDLE_EOF
-            995 => Cancelled,                                               // ERROR_OPERATION_ABORTED
-            _ => Other { code: err, message: "Unknown error" },
+            996 => WindowsIoDriverError.WouldBlock,                         // ERROR_IO_INCOMPLETE
+            997 => WindowsIoDriverError.WouldBlock,                         // ERROR_IO_PENDING
+            2 => WindowsIoDriverError.NotFound { path: "" },               // ERROR_FILE_NOT_FOUND
+            3 => WindowsIoDriverError.NotFound { path: "" },               // ERROR_PATH_NOT_FOUND
+            80 => WindowsIoDriverError.AlreadyExists,                       // ERROR_FILE_EXISTS
+            183 => WindowsIoDriverError.AlreadyExists,                      // ERROR_ALREADY_EXISTS
+            87 => WindowsIoDriverError.InvalidInput { reason: "Invalid parameter" }, // ERROR_INVALID_PARAMETER
+            5 => WindowsIoDriverError.PermissionDenied,                     // ERROR_ACCESS_DENIED
+            1225 => WindowsIoDriverError.ConnectionRefused,                 // ERROR_CONNECTION_REFUSED
+            10061 => WindowsIoDriverError.ConnectionRefused,                // WSAECONNREFUSED
+            10054 => WindowsIoDriverError.ConnectionReset,                  // WSAECONNRESET
+            109 => WindowsIoDriverError.BrokenPipe,                         // ERROR_BROKEN_PIPE
+            1460 => WindowsIoDriverError.TimedOut,                          // ERROR_TIMEOUT
+            10060 => WindowsIoDriverError.TimedOut,                         // WSAETIMEDOUT
+            38 => WindowsIoDriverError.EndOfFile,                           // ERROR_HANDLE_EOF
+            995 => WindowsIoDriverError.Cancelled,                          // ERROR_OPERATION_ABORTED
+            _ => WindowsIoDriverError.Other { code: err, message: "Unknown error" },
         }
     }
 
     public fn message(&self) -> Text {
         match self {
-            WouldBlock => "Resource temporarily unavailable",
-            Interrupted => "Interrupted system call",
-            NotFound { path } => f"Not found: {path}",
-            AlreadyExists => "Already exists",
-            InvalidInput { reason } => f"Invalid input: {reason}",
-            PermissionDenied => "Permission denied",
-            ConnectionRefused => "Connection refused",
-            ConnectionReset => "Connection reset by peer",
-            BrokenPipe => "Broken pipe",
-            TimedOut => "Operation timed out",
-            QueueFull => "Completion queue is full",
-            Closed => "I/O driver is closed",
-            EndOfFile => "End of file reached",
-            Cancelled => "Operation was cancelled",
-            Other { code, message } => f"Error {code}: {message}",
+            WindowsIoDriverError.WouldBlock => "Resource temporarily unavailable",
+            WindowsIoDriverError.Interrupted => "Interrupted system call",
+            WindowsIoDriverError.NotFound { path } => f"Not found: {path}",
+            WindowsIoDriverError.AlreadyExists => "Already exists",
+            WindowsIoDriverError.InvalidInput { reason } => f"Invalid input: {reason}",
+            WindowsIoDriverError.PermissionDenied => "Permission denied",
+            WindowsIoDriverError.ConnectionRefused => "Connection refused",
+            WindowsIoDriverError.ConnectionReset => "Connection reset by peer",
+            WindowsIoDriverError.BrokenPipe => "Broken pipe",
+            WindowsIoDriverError.TimedOut => "Operation timed out",
+            WindowsIoDriverError.QueueFull => "Completion queue is full",
+            WindowsIoDriverError.Closed => "I/O driver is closed",
+            WindowsIoDriverError.EndOfFile => "End of file reached",
+            WindowsIoDriverError.Cancelled => "Operation was cancelled",
+            WindowsIoDriverError.Other { code, message } => f"Error {code}: {message}",
         }
     }
 
     public fn is_retryable(&self) -> Bool {
         match self {
-            WouldBlock => true,
-            Interrupted => true,
+            WindowsIoDriverError.WouldBlock => true,
+            WindowsIoDriverError.Interrupted => true,
             _ => false,
         }
     }
@@ -158,21 +164,21 @@ implement Display for WindowsIoDriverError {
 implement Debug for WindowsIoDriverError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            WouldBlock                       => f.write_str("WouldBlock"),
-            Interrupted                      => f.write_str("Interrupted"),
-            NotFound { path }                => f.write_str(f"NotFound {{ path: {path} }}".as_str()),
-            AlreadyExists                    => f.write_str("AlreadyExists"),
-            InvalidInput { reason }          => f.write_str(f"InvalidInput {{ reason: {reason} }}".as_str()),
-            PermissionDenied                 => f.write_str("PermissionDenied"),
-            ConnectionRefused                => f.write_str("ConnectionRefused"),
-            ConnectionReset                  => f.write_str("ConnectionReset"),
-            BrokenPipe                       => f.write_str("BrokenPipe"),
-            TimedOut                         => f.write_str("TimedOut"),
-            QueueFull                        => f.write_str("QueueFull"),
-            Closed                           => f.write_str("Closed"),
-            EndOfFile                        => f.write_str("EndOfFile"),
-            Cancelled                        => f.write_str("Cancelled"),
-            Other { code, message }          => f.write_str(f"Other {{ code: {code}, message: {message} }}".as_str()),
+            WindowsIoDriverError.WouldBlock          => f.write_str("WouldBlock"),
+            WindowsIoDriverError.Interrupted         => f.write_str("Interrupted"),
+            WindowsIoDriverError.NotFound { path }   => f.write_str(f"NotFound {{ path: {path} }}".as_str()),
+            WindowsIoDriverError.AlreadyExists       => f.write_str("AlreadyExists"),
+            WindowsIoDriverError.InvalidInput { reason } => f.write_str(f"InvalidInput {{ reason: {reason} }}".as_str()),
+            WindowsIoDriverError.PermissionDenied    => f.write_str("PermissionDenied"),
+            WindowsIoDriverError.ConnectionRefused   => f.write_str("ConnectionRefused"),
+            WindowsIoDriverError.ConnectionReset     => f.write_str("ConnectionReset"),
+            WindowsIoDriverError.BrokenPipe          => f.write_str("BrokenPipe"),
+            WindowsIoDriverError.TimedOut            => f.write_str("TimedOut"),
+            WindowsIoDriverError.QueueFull           => f.write_str("QueueFull"),
+            WindowsIoDriverError.Closed              => f.write_str("Closed"),
+            WindowsIoDriverError.EndOfFile           => f.write_str("EndOfFile"),
+            WindowsIoDriverError.Cancelled           => f.write_str("Cancelled"),
+            WindowsIoDriverError.Other { code, message } => f.write_str(f"Other {{ code: {code}, message: {message} }}".as_str()),
         }
     }
 }
@@ -180,21 +186,21 @@ implement Debug for WindowsIoDriverError {
 implement Eq for WindowsIoDriverError {
     fn eq(&self, other: &WindowsIoDriverError) -> Bool {
         match (self, other) {
-            (WouldBlock,                     WouldBlock)                     => true,
-            (Interrupted,                    Interrupted)                    => true,
-            (NotFound { path: a },           NotFound { path: b })           => a == b,
-            (AlreadyExists,                  AlreadyExists)                  => true,
-            (InvalidInput { reason: a },     InvalidInput { reason: b })     => a == b,
-            (PermissionDenied,               PermissionDenied)               => true,
-            (ConnectionRefused,              ConnectionRefused)              => true,
-            (ConnectionReset,                ConnectionReset)                => true,
-            (BrokenPipe,                     BrokenPipe)                     => true,
-            (TimedOut,                       TimedOut)                       => true,
-            (QueueFull,                      QueueFull)                      => true,
-            (Closed,                         Closed)                         => true,
-            (EndOfFile,                      EndOfFile)                      => true,
-            (Cancelled,                      Cancelled)                      => true,
-            (Other { code: ca, message: ma }, Other { code: cb, message: mb }) => ca == cb && ma == mb,
+            (WindowsIoDriverError.WouldBlock,        WindowsIoDriverError.WouldBlock)        => true,
+            (WindowsIoDriverError.Interrupted,       WindowsIoDriverError.Interrupted)       => true,
+            (WindowsIoDriverError.NotFound { path: a }, WindowsIoDriverError.NotFound { path: b }) => a == b,
+            (WindowsIoDriverError.AlreadyExists,     WindowsIoDriverError.AlreadyExists)     => true,
+            (WindowsIoDriverError.InvalidInput { reason: a }, WindowsIoDriverError.InvalidInput { reason: b }) => a == b,
+            (WindowsIoDriverError.PermissionDenied,  WindowsIoDriverError.PermissionDenied)  => true,
+            (WindowsIoDriverError.ConnectionRefused, WindowsIoDriverError.ConnectionRefused) => true,
+            (WindowsIoDriverError.ConnectionReset,   WindowsIoDriverError.ConnectionReset)   => true,
+            (WindowsIoDriverError.BrokenPipe,        WindowsIoDriverError.BrokenPipe)        => true,
+            (WindowsIoDriverError.TimedOut,          WindowsIoDriverError.TimedOut)          => true,
+            (WindowsIoDriverError.QueueFull,         WindowsIoDriverError.QueueFull)         => true,
+            (WindowsIoDriverError.Closed,            WindowsIoDriverError.Closed)            => true,
+            (WindowsIoDriverError.EndOfFile,         WindowsIoDriverError.EndOfFile)         => true,
+            (WindowsIoDriverError.Cancelled,         WindowsIoDriverError.Cancelled)         => true,
+            (WindowsIoDriverError.Other { code: ca, message: ma }, WindowsIoDriverError.Other { code: cb, message: mb }) => ca == cb && ma == mb,
             _ => false,
         }
     }

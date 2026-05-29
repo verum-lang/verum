@@ -1,0 +1,49 @@
+// =============================================================================
+// core-tests/sys/windows/mod/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for the `core.sys.windows` umbrella. Each test reaches a
+// value ONLY through the umbrella path; if `core/sys/windows/mod.vr` drops
+// a re-export or re-exports a stale value, the corresponding test breaks.
+// Never delete.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.{
+    TCB_MAGIC,
+    AF_INET6, SOL_SOCKET,
+    INVALID_HANDLE_VALUE, INVALID_SOCKET,
+    STD_INPUT_HANDLE,
+};
+
+// LOCK-IN: TCB_MAGIC reached through the umbrella must equal the canonical
+// 64-bit "VERUM_TC" value. (Guards the 2026-05-29 over-wide-literal typo
+// that asserted an 18-hex-digit value; the source is 16 hex digits.)
+@test
+fn wx_mod_reg_tcb_magic_canonical_via_umbrella() {
+    assert_eq(TCB_MAGIC, 0x5645_5255_4D5F_5443_u64);
+}
+
+// LOCK-IN: the two all-ones sentinels reachable via the umbrella must keep
+// their distinct widths — INVALID_HANDLE_VALUE is 64-bit, the socket one
+// is also 64-bit unsigned, both 0xFFFF...F. A width regression here would
+// truncate one of them.
+@test
+fn wx_mod_reg_all_ones_sentinels_via_umbrella() {
+    assert_eq(INVALID_HANDLE_VALUE, 0xFFFFFFFFFFFFFFFF_u64);
+    assert_eq(INVALID_SOCKET, 0xFFFFFFFFFFFFFFFF_u64);
+}
+
+// LOCK-IN: Windows-specific divergences must survive the re-export.
+@test
+fn wx_mod_reg_windows_divergences_via_umbrella() {
+    assert_eq(AF_INET6, 23);
+    assert_eq(SOL_SOCKET, 0xFFFF);
+}
+
+// LOCK-IN: STD_INPUT_HANDLE (-10 as UInt32) reached via the umbrella.
+@test
+fn wx_mod_reg_std_input_handle_via_umbrella() {
+    assert_eq(STD_INPUT_HANDLE, 0xFFFFFFF6_u32);
+}

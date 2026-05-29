@@ -41,10 +41,11 @@ fn test_context_stack_depth_is_8() {
 
 @test
 fn test_tcb_magic_value() {
-    // 0x5645525_5_4D5F_5443 — "VERUM_TC" packed as little-endian ASCII.
+    // 0x5645_5255_4D5F_5443 — "VERUM_TC" packed as ASCII (matches the
+    // source definition in core/sys/windows/tls.vr:49 exactly).
     // Used by the bootstrap kernel to validate that a `&TCB` actually
     // points at a TCB and not arbitrary memory.
-    assert_eq(TCB_MAGIC, 0x5645525545_4D5F_5443_u64);
+    assert_eq(TCB_MAGIC, 0x5645_5255_4D5F_5443_u64);
 }
 
 @test

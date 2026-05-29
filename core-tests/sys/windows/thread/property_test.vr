@@ -1,0 +1,214 @@
+// =============================================================================
+// core-tests/sys/windows/thread/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over the PURE surface of `core.sys.windows.thread`:
+//
+//   * Once state constants form a 3-element pairwise-distinct set and are
+//     the consecutive integers 0,1,2 (CAS state machine invariant).
+//   * DEFAULT_THREAD_STACK_SIZE is exactly 1 MiB and is a power of two.
+//   * WindowsThreadError Eq is reflexive, payload-sensitive, and
+//     variant-discriminating (different variants never compare equal).
+//   * WindowsThreadError.message() is total + injective across the
+//     three unit-payload variants.
+//
+// HOST-SAFE: no kernel32 FFI is invoked. spawn/join/mutex/condvar/futex/
+// atomic-ops are all deferred (see audit.md §4).
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.thread.{
+    WindowsThreadError,
+    DEFAULT_THREAD_STACK_SIZE,
+    ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE,
+};
+
+// =============================================================================
+// Property 1 — Once state constants: consecutive 0,1,2 + pairwise distinct
+// =============================================================================
+
+@test
+fn wx_thread_once_states_consecutive_0_1_2() {
+    assert_eq(ONCE_INIT, 0_u32);
+    assert_eq(ONCE_RUNNING, 1_u32);
+    assert_eq(ONCE_COMPLETE, 2_u32);
+}
+
+@test
+fn wx_thread_once_states_pairwise_distinct_via_list() {
+    let mut states: List<UInt32> = List.new();
+    states.push(ONCE_INIT);
+    states.push(ONCE_RUNNING);
+    states.push(ONCE_COMPLETE);
+    let mut i = 0;
+    while i < states.len() {
+        let mut j = i + 1;
+        while j < states.len() {
+            assert(states[i] != states[j],
+                   "ONCE_* states must be pairwise distinct");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn wx_thread_once_states_strictly_increasing() {
+    // The CAS state machine advances INIT -> RUNNING -> COMPLETE; the
+    // ordering must be strictly monotone so a single < comparison can
+    // detect "already past" states.
+    assert(ONCE_INIT < ONCE_RUNNING);
+    assert(ONCE_RUNNING < ONCE_COMPLETE);
+    assert(ONCE_INIT < ONCE_COMPLETE);
+}
+
+// =============================================================================
+// Property 2 — DEFAULT_THREAD_STACK_SIZE shape
+// =============================================================================
+
+fn wx_thread_is_power_of_two_usize(x: USize) -> Bool {
+    x != 0_usize && (x & (x - 1_usize)) == 0_usize
+}
+
+@test
+fn wx_thread_default_stack_size_is_1mib() {
+    assert_eq(DEFAULT_THREAD_STACK_SIZE, 1048576_usize);
+}
+
+@test
+fn wx_thread_default_stack_size_is_power_of_two() {
+    assert(wx_thread_is_power_of_two_usize(DEFAULT_THREAD_STACK_SIZE),
+           "1 MiB stack reservation must be a power of two");
+}
+
+@test
+fn wx_thread_default_stack_size_equals_2_pow_20() {
+    // 1 MiB == 2^20 == 1 << 20.
+    let two_pow_20: USize = 1_usize << 20_usize;
+    assert_eq(DEFAULT_THREAD_STACK_SIZE, two_pow_20);
+}
+
+// =============================================================================
+// Property 3 — WindowsThreadError Eq reflexivity (code-bearing variants)
+// =============================================================================
+
+@test
+fn wx_thread_error_eq_reflexive_code_variants() {
+    assert(WindowsThreadError.CreateFailed { code: 5_u32 }
+           == WindowsThreadError.CreateFailed { code: 5_u32 });
+    assert(WindowsThreadError.JoinFailed { code: 6_u32 }
+           == WindowsThreadError.JoinFailed { code: 6_u32 });
+    assert(WindowsThreadError.SuspendFailed { code: 7_u32 }
+           == WindowsThreadError.SuspendFailed { code: 7_u32 });
+    assert(WindowsThreadError.ResumeFailed { code: 8_u32 }
+           == WindowsThreadError.ResumeFailed { code: 8_u32 });
+    assert(WindowsThreadError.MutexInitFailed { code: 9_u32 }
+           == WindowsThreadError.MutexInitFailed { code: 9_u32 });
+    assert(WindowsThreadError.MutexLockFailed { code: 10_u32 }
+           == WindowsThreadError.MutexLockFailed { code: 10_u32 });
+    assert(WindowsThreadError.CondInitFailed { code: 11_u32 }
+           == WindowsThreadError.CondInitFailed { code: 11_u32 });
+    assert(WindowsThreadError.CondWaitFailed { code: 12_u32 }
+           == WindowsThreadError.CondWaitFailed { code: 12_u32 });
+}
+
+@test
+fn wx_thread_error_eq_reflexive_unit_variants() {
+    assert(WindowsThreadError.TlsInitFailed == WindowsThreadError.TlsInitFailed);
+    assert(WindowsThreadError.AlreadyJoined == WindowsThreadError.AlreadyJoined);
+    assert(WindowsThreadError.AlreadyDetached == WindowsThreadError.AlreadyDetached);
+}
+
+// =============================================================================
+// Property 4 — Eq is payload-sensitive (different code => not equal)
+// =============================================================================
+
+@test
+fn wx_thread_error_eq_payload_sensitive() {
+    assert(WindowsThreadError.CreateFailed { code: 1_u32 }
+           != WindowsThreadError.CreateFailed { code: 2_u32 });
+    assert(WindowsThreadError.JoinFailed { code: 100_u32 }
+           != WindowsThreadError.JoinFailed { code: 200_u32 });
+    assert(WindowsThreadError.MutexLockFailed { code: 258_u32 }
+           != WindowsThreadError.MutexLockFailed { code: 0_u32 });
+}
+
+// =============================================================================
+// Property 5 — Eq discriminates variants (same payload, different tag)
+// =============================================================================
+
+@test
+fn wx_thread_error_eq_variant_discriminating_same_code() {
+    // Same code 8, different variant — must never compare equal.
+    assert(WindowsThreadError.CreateFailed { code: 8_u32 }
+           != WindowsThreadError.JoinFailed { code: 8_u32 });
+    assert(WindowsThreadError.CreateFailed { code: 8_u32 }
+           != WindowsThreadError.CondInitFailed { code: 8_u32 });
+    assert(WindowsThreadError.MutexInitFailed { code: 8_u32 }
+           != WindowsThreadError.MutexLockFailed { code: 8_u32 });
+    assert(WindowsThreadError.SuspendFailed { code: 8_u32 }
+           != WindowsThreadError.ResumeFailed { code: 8_u32 });
+}
+
+@test
+fn wx_thread_error_eq_unit_variants_discriminating() {
+    assert(WindowsThreadError.TlsInitFailed != WindowsThreadError.AlreadyJoined);
+    assert(WindowsThreadError.TlsInitFailed != WindowsThreadError.AlreadyDetached);
+    assert(WindowsThreadError.AlreadyJoined != WindowsThreadError.AlreadyDetached);
+}
+
+@test
+fn wx_thread_error_eq_unit_vs_code_variant() {
+    // A unit-payload variant must never equal a code-bearing variant.
+    assert(WindowsThreadError.AlreadyJoined
+           != WindowsThreadError.CreateFailed { code: 0_u32 });
+    assert(WindowsThreadError.TlsInitFailed
+           != WindowsThreadError.JoinFailed { code: 0_u32 });
+}
+
+// =============================================================================
+// Property 6 — message() is total + injective over unit variants
+// =============================================================================
+
+@test
+fn wx_thread_error_message_unit_variants_distinct() {
+    let m_tls = WindowsThreadError.TlsInitFailed.message();
+    let m_join = WindowsThreadError.AlreadyJoined.message();
+    let m_detach = WindowsThreadError.AlreadyDetached.message();
+    assert(m_tls != m_join);
+    assert(m_tls != m_detach);
+    assert(m_join != m_detach);
+}
+
+@test
+fn wx_thread_error_message_nonempty_for_all_variants() {
+    // message() must never produce an empty string for any variant.
+    assert(WindowsThreadError.CreateFailed { code: 1_u32 }.message().len() > 0);
+    assert(WindowsThreadError.JoinFailed { code: 1_u32 }.message().len() > 0);
+    assert(WindowsThreadError.SuspendFailed { code: 1_u32 }.message().len() > 0);
+    assert(WindowsThreadError.ResumeFailed { code: 1_u32 }.message().len() > 0);
+    assert(WindowsThreadError.MutexInitFailed { code: 1_u32 }.message().len() > 0);
+    assert(WindowsThreadError.MutexLockFailed { code: 1_u32 }.message().len() > 0);
+    assert(WindowsThreadError.CondInitFailed { code: 1_u32 }.message().len() > 0);
+    assert(WindowsThreadError.CondWaitFailed { code: 1_u32 }.message().len() > 0);
+    assert(WindowsThreadError.TlsInitFailed.message().len() > 0);
+    assert(WindowsThreadError.AlreadyJoined.message().len() > 0);
+    assert(WindowsThreadError.AlreadyDetached.message().len() > 0);
+}
+
+// =============================================================================
+// Property 7 — `is` operator discriminates variant tags
+// =============================================================================
+
+@test
+fn wx_thread_error_is_operator_tag_disjoint() {
+    let e = WindowsThreadError.CreateFailed { code: 3_u32 };
+    assert(e is WindowsThreadError.CreateFailed);
+    assert(!(e is WindowsThreadError.JoinFailed));
+    assert(!(e is WindowsThreadError.TlsInitFailed));
+
+    let u = WindowsThreadError.AlreadyDetached;
+    assert(u is WindowsThreadError.AlreadyDetached);
+    assert(!(u is WindowsThreadError.AlreadyJoined));
+}

@@ -3301,15 +3301,78 @@ impl<'a> RecursiveParser<'a> {
                 // Parse the integer value, supporting arbitrary precision via i128
                 // For values that don't fit in i128, we store them as a string literal
                 let digits: String = raw_value.chars().filter(|&c| c != '_').collect();
-                let value = i128::from_str_radix(&digits, *base as u32).unwrap_or(0);
-                let mut lit = Literal::int(value, *span);
-                if let Some(suffix_str) = suffix {
-                    let int_suffix = parse_int_suffix(suffix_str.as_str()).unwrap_or_else(|| {
+
+                // Resolve the suffix early so the magnitude check below can
+                // consult the declared integer width.
+                let int_suffix = suffix.as_ref().map(|suffix_str| {
+                    parse_int_suffix(suffix_str.as_str()).unwrap_or_else(|| {
                         verum_ast::literal::IntSuffix::Custom(suffix_str.clone())
-                    });
-                    if let verum_ast::literal::LiteralKind::Int(ref mut int_lit) = lit.kind {
-                        int_lit.suffix = Some(int_suffix);
+                    })
+                });
+
+                // INTLIT-OVERFLOW-1: reject integer literals that do not fit.
+                // The literal magnitude is always non-negative here (a leading
+                // `-` is a separate unary-minus expression), so we validate the
+                // unsigned bit-pattern range `[0, 2^width - 1]`. Using the bit
+                // width (rather than the signed max) deliberately accepts
+                // two's-complement constants such as `0x8000000000000000_i64`
+                // while still catching genuine overflow (e.g. an 18-hex-digit
+                // 72-bit literal assigned to a `u64`). Without this guard the
+                // value was silently narrowed mod 2^64 with no diagnostic.
+                match u128::from_str_radix(&digits, *base as u32) {
+                    Ok(mag) => {
+                        if let Some(width) = int_suffix
+                            .as_ref()
+                            .and_then(int_suffix_bit_width)
+                        {
+                            let max: u128 = if width >= 128 {
+                                u128::MAX
+                            } else {
+                                (1u128 << width) - 1
+                            };
+                            if mag > max {
+                                let sname = int_suffix
+                                    .as_ref()
+                                    .map(|s| s.as_str().to_string())
+                                    .unwrap_or_default();
+                                return Err(ParseError::invalid_number(
+                                    format!(
+                                        "integer literal does not fit in type `{}` (maximum is {})",
+                                        sname, max
+                                    ),
+                                    *span,
+                                )
+                                .with_help(
+                                    "the value exceeds the range of its declared integer type; \
+                                     use a wider type or correct the literal",
+                                ));
+                            }
+                        }
                     }
+                    Err(_) => {
+                        // Exceeds 128 bits — too large for any Verum integer type.
+                        return Err(ParseError::invalid_number(
+                            "integer literal is too large to be represented (exceeds 128 bits)"
+                                .to_string(),
+                            *span,
+                        ));
+                    }
+                }
+
+                // Store the value as i128. u64/u128 magnitudes above i128::MAX
+                // fall back through u128 then bit-cast into i128 so the AST
+                // preserves the bit pattern instead of the old `unwrap_or(0)`
+                // silent-zero corruption.
+                let value = i128::from_str_radix(&digits, *base as u32).unwrap_or_else(|_| {
+                    u128::from_str_radix(&digits, *base as u32)
+                        .map(|u| u as i128)
+                        .unwrap_or(0)
+                });
+                let mut lit = Literal::int(value, *span);
+                if let Some(int_suffix) = int_suffix
+                    && let verum_ast::literal::LiteralKind::Int(ref mut int_lit) = lit.kind
+                {
+                    int_lit.suffix = Some(int_suffix);
                 }
                 Ok(Expr::literal(lit))
             }
@@ -8602,6 +8665,22 @@ fn parse_int_suffix(s: &str) -> Option<verum_ast::literal::IntSuffix> {
         "u128" => Some(IntSuffix::U128),
         "usize" => Some(IntSuffix::Usize),
         _ => None,
+    }
+}
+
+/// Bit width of a sized integer suffix, for literal range validation
+/// (INTLIT-OVERFLOW-1). Returns `None` for `Custom` unit suffixes
+/// (units of measure such as `km` / `ms`), which carry no integer range.
+/// `isize` / `usize` are pointer-width — 64 on every Verum target triple.
+fn int_suffix_bit_width(suffix: &verum_ast::literal::IntSuffix) -> Option<u32> {
+    use verum_ast::literal::IntSuffix;
+    match suffix {
+        IntSuffix::I8 | IntSuffix::U8 => Some(8),
+        IntSuffix::I16 | IntSuffix::U16 => Some(16),
+        IntSuffix::I32 | IntSuffix::U32 => Some(32),
+        IntSuffix::I64 | IntSuffix::U64 | IntSuffix::Isize | IntSuffix::Usize => Some(64),
+        IntSuffix::I128 | IntSuffix::U128 => Some(128),
+        IntSuffix::Custom(_) => None,
     }
 }
 
