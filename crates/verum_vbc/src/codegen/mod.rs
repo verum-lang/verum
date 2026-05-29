@@ -6048,6 +6048,46 @@ impl VbcCodegen {
     pub fn register_runtime_io_functions(&mut self) {
         use crate::codegen::context::FunctionInfo;
         // (name, param_count)
+        //
+        // **CLASS-1 FUNDAMENTAL FIX 2026-05-29**: add Text.from_utf8_unchecked
+        // and Text.from_utf8_lossy as pre-registered stubs. Both are intercepted
+        // at runtime by `text_static_runtime.rs::try_intercept_text_static_runtime`
+        // (lines ~240 for from_utf8_lossy, ~250 for from_utf8_unchecked), so the
+        // actual body never runs — the intercept fires by function-name match.
+        //
+        // Pre-fix: in topological compilation order, consumers in `core.base`
+        // (Ulid.to_text, Formatter.write_int, format=semver.format,
+        // write_int_stderr, slice_text helpers) and `core.base.env`
+        // (arg, args_get, get_arg, safe_getenv, Vars.next) compile BEFORE
+        // `core.text` registers the real Text.from_utf8_unchecked /
+        // from_utf8_lossy. Their `compile_call` lookup of
+        // `Text.from_utf8_unchecked` fails → `UndefinedFunction` propagates
+        // → the consumer's whole body lenient-stubs to panic. 6+5 = 11
+        // panic-stubs in runtime.vbca, every test exercising those bodies
+        // panics with `[lenient] X compiled to panic-stub: undefined
+        // function: Text.from_utf8_*`.
+        //
+        // The pre-registration here puts stub FunctionInfos in every module's
+        // ctx.functions at codegen-start, so consumer lookups succeed → emit
+        // clean `Call(stub_id, args)` → at runtime, dispatcher reads the
+        // function's name and routes through the text_static_runtime intercept.
+        //
+        // The intercept guarantees correct behavior because:
+        //   - from_utf8_unchecked is a `public unsafe fn` whose body just
+        //     copies bytes verbatim into an allocated buffer (no validation);
+        //     the intercept performs an equivalent byte-copy via Rust's
+        //     `String::from_utf8_lossy` + allocator.
+        //   - from_utf8_lossy validates UTF-8 and replaces invalid sequences
+        //     with U+FFFD; the intercept does exactly this via the canonical
+        //     `String::from_utf8_lossy`.
+        //
+        // Architectural rule pinned: every Text static factory that has a
+        // runtime intercept MUST be in this pre-registered list so its
+        // qualified name resolves at every module's codegen-start regardless
+        // of topological order. Future text_static_runtime intercepts should
+        // be added here AND to that file's match table simultaneously.
+        // Regression-pinned by every `@ignore` flip in the un-ignoring sweep
+        // after this fix lands.
         let functions: &[(&str, usize)] = &[
             ("file_write", 2),
             ("file_read", 1),
@@ -6070,6 +6110,9 @@ impl VbcCodegen {
             ("udp_send", 3),
             ("udp_recv", 2),
             ("udp_close", 1),
+            // Text static factories with runtime intercepts (CLASS-1 fix).
+            ("Text.from_utf8_unchecked", 1),
+            ("Text.from_utf8_lossy", 1),
         ];
 
         for (name, param_count) in functions {
