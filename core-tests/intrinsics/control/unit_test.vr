@@ -1,0 +1,115 @@
+// =============================================================================
+// core-tests/intrinsics/control/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/control.vr` — panic + source location structures.
+// =============================================================================
+
+mount core.intrinsics.control.{IntrinsicSourceLocation, IntrinsicPanicInfo};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: IntrinsicSourceLocation record
+// =============================================================================
+
+@test
+fn test_intrinsic_source_location_construction() {
+    let loc: IntrinsicSourceLocation = IntrinsicSourceLocation {
+        file: "main.vr".to_text(),
+        line: 42,
+        column: 13,
+        offset: 1024,
+    };
+    assert_eq(loc.file, "main.vr");
+    assert_eq(loc.line, 42);
+    assert_eq(loc.column, 13);
+    assert_eq(loc.offset, 1024);
+}
+
+@test
+fn test_intrinsic_source_location_origin_line_one() {
+    let loc: IntrinsicSourceLocation = IntrinsicSourceLocation {
+        file: "lib.vr".to_text(),
+        line: 1,
+        column: 1,
+        offset: 0,
+    };
+    assert_eq(loc.line, 1);
+    assert_eq(loc.column, 1);
+    assert_eq(loc.offset, 0);
+}
+
+@test
+fn test_intrinsic_source_location_field_independence() {
+    let a: IntrinsicSourceLocation = IntrinsicSourceLocation {
+        file: "a.vr".to_text(),
+        line: 1,
+        column: 1,
+        offset: 0,
+    };
+    let b: IntrinsicSourceLocation = IntrinsicSourceLocation {
+        file: "b.vr".to_text(),
+        line: 2,
+        column: 2,
+        offset: 100,
+    };
+    assert_eq(a.file, "a.vr");
+    assert_eq(b.file, "b.vr");
+    assert_eq(a.line, 1);
+    assert_eq(b.line, 2);
+}
+
+// =============================================================================
+// Section 2: IntrinsicPanicInfo record
+// =============================================================================
+
+@test
+fn test_intrinsic_panic_info_no_location() {
+    let info: IntrinsicPanicInfo = IntrinsicPanicInfo {
+        message: "assertion failed".to_text(),
+        location: Maybe.None,
+    };
+    assert_eq(info.message, "assertion failed");
+}
+
+@test
+fn test_intrinsic_panic_info_with_location() {
+    let loc: IntrinsicSourceLocation = IntrinsicSourceLocation {
+        file: "main.vr".to_text(),
+        line: 10,
+        column: 5,
+        offset: 250,
+    };
+    let info: IntrinsicPanicInfo = IntrinsicPanicInfo {
+        message: "divide by zero".to_text(),
+        location: Maybe.Some(loc),
+    };
+    assert_eq(info.message, "divide by zero");
+}
+
+@test
+fn test_intrinsic_panic_info_location_none_preserved() {
+    let info: IntrinsicPanicInfo = IntrinsicPanicInfo {
+        message: "oom".to_text(),
+        location: Maybe.None,
+    };
+    let l: Maybe<IntrinsicSourceLocation> = info.location;
+    assert(l is Maybe.None);
+}
+
+@test
+fn test_intrinsic_panic_info_field_independence() {
+    let a: IntrinsicPanicInfo = IntrinsicPanicInfo {
+        message: "fail-a".to_text(),
+        location: Maybe.None,
+    };
+    let b: IntrinsicPanicInfo = IntrinsicPanicInfo {
+        message: "fail-b".to_text(),
+        location: Maybe.None,
+    };
+    assert_eq(a.message, "fail-a");
+    assert_eq(b.message, "fail-b");
+}
+
+fn main() {}
