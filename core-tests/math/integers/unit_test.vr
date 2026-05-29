@@ -1,0 +1,249 @@
+// =============================================================================
+// core-tests/math/integers/unit_test.vr
+// =============================================================================
+//
+// `core/math/integers.vr` — Integer division modes + number-theoretic ops.
+//
+// Surface tested:
+//   * DivMode 4-variant (Truncate / Floor / Ceiling / Euclidean)
+//   * div_floor / div_ceiling / div_euclidean — division with rounding modes
+//   * mod_euclidean / mod_floor — modular arithmetic
+//   * gcd / try_gcd — greatest common divisor
+//
+// Refinement-type division panic cases (b==0, Int.MIN / -1) tested at
+// language-level under `vcs/specs/L2-standard/math/integers/`.
+// =============================================================================
+
+mount core.math.integers.{
+    DivMode,
+    div_floor, div_ceiling, div_euclidean,
+    mod_euclidean, mod_floor,
+    gcd, try_gcd,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: DivMode 4-variant
+// =============================================================================
+
+@test
+fn test_div_mode_truncate_variant() {
+    let m: DivMode = DivMode.Truncate;
+    assert(m is DivMode.Truncate);
+}
+
+@test
+fn test_div_mode_floor_variant() {
+    let m: DivMode = DivMode.Floor;
+    assert(m is DivMode.Floor);
+}
+
+@test
+fn test_div_mode_ceiling_variant() {
+    let m: DivMode = DivMode.Ceiling;
+    assert(m is DivMode.Ceiling);
+}
+
+@test
+fn test_div_mode_euclidean_variant() {
+    let m: DivMode = DivMode.Euclidean;
+    assert(m is DivMode.Euclidean);
+}
+
+@test
+fn test_div_mode_truncate_disjoint_from_floor() {
+    let t: DivMode = DivMode.Truncate;
+    let f: DivMode = DivMode.Floor;
+    assert(t is DivMode.Truncate && !(t is DivMode.Floor));
+    assert(f is DivMode.Floor && !(f is DivMode.Truncate));
+}
+
+@test
+fn test_div_mode_floor_disjoint_from_ceiling() {
+    let f: DivMode = DivMode.Floor;
+    let c: DivMode = DivMode.Ceiling;
+    assert(!(f is DivMode.Ceiling));
+    assert(!(c is DivMode.Floor));
+}
+
+@test
+fn test_div_mode_ceiling_disjoint_from_euclidean() {
+    let c: DivMode = DivMode.Ceiling;
+    let e: DivMode = DivMode.Euclidean;
+    assert(!(c is DivMode.Euclidean));
+    assert(!(e is DivMode.Ceiling));
+}
+
+// =============================================================================
+// Section 2: div_floor — rounds toward -∞
+// =============================================================================
+
+@test
+fn test_div_floor_positive_both() {
+    assert_eq(div_floor(10, 3), 3);
+}
+
+@test
+fn test_div_floor_negative_dividend() {
+    // -10 / 3 ⇒ -4 (rounds toward -∞, not toward 0)
+    assert_eq(div_floor(-10, 3), -4);
+}
+
+@test
+fn test_div_floor_negative_divisor() {
+    // 10 / -3 ⇒ -4 (rounds toward -∞)
+    assert_eq(div_floor(10, -3), -4);
+}
+
+@test
+fn test_div_floor_negative_both_yields_positive() {
+    // -10 / -3 ⇒ 3 (rounds toward -∞, equivalent to truncation here)
+    assert_eq(div_floor(-10, -3), 3);
+}
+
+@test
+fn test_div_floor_exact_division() {
+    // No rounding adjustment.
+    assert_eq(div_floor(12, 4), 3);
+    assert_eq(div_floor(-12, 4), -3);
+}
+
+// =============================================================================
+// Section 3: div_ceiling — rounds toward +∞
+// =============================================================================
+
+@test
+fn test_div_ceiling_positive_both() {
+    assert_eq(div_ceiling(10, 3), 4);
+}
+
+@test
+fn test_div_ceiling_negative_dividend() {
+    // -10 / 3 ⇒ -3 (rounds toward +∞)
+    assert_eq(div_ceiling(-10, 3), -3);
+}
+
+@test
+fn test_div_ceiling_negative_divisor() {
+    // 10 / -3 ⇒ -3 (rounds toward +∞)
+    assert_eq(div_ceiling(10, -3), -3);
+}
+
+@test
+fn test_div_ceiling_exact_division() {
+    assert_eq(div_ceiling(12, 4), 3);
+    assert_eq(div_ceiling(-12, 4), -3);
+}
+
+// =============================================================================
+// Section 4: div_euclidean + mod_euclidean — non-negative remainder
+// =============================================================================
+
+@test
+fn test_div_euclidean_positive_both() {
+    assert_eq(div_euclidean(10, 3), 3);
+}
+
+@test
+fn test_mod_euclidean_positive() {
+    assert_eq(mod_euclidean(10, 3), 1);
+}
+
+@test
+fn test_mod_euclidean_negative_dividend_yields_non_negative() {
+    // -10 mod 3 ⇒ 2 (non-negative)
+    assert_eq(mod_euclidean(-10, 3), 2);
+}
+
+@test
+fn test_mod_euclidean_negative_divisor_yields_non_negative() {
+    // 10 mod -3 ⇒ 1 (non-negative)
+    assert_eq(mod_euclidean(10, -3), 1);
+}
+
+@test
+fn test_mod_euclidean_zero_dividend() {
+    assert_eq(mod_euclidean(0, 7), 0);
+}
+
+// =============================================================================
+// Section 5: mod_floor — sign matches divisor
+// =============================================================================
+
+@test
+fn test_mod_floor_positive_both() {
+    assert_eq(mod_floor(10, 3), 1);
+}
+
+@test
+fn test_mod_floor_negative_divisor_yields_negative() {
+    // mod_floor result has the sign of the divisor.
+    assert_eq(mod_floor(10, -3), -2);
+}
+
+@test
+fn test_mod_floor_negative_dividend_positive_divisor() {
+    assert_eq(mod_floor(-10, 3), 2);
+}
+
+// =============================================================================
+// Section 6: gcd — greatest common divisor
+// =============================================================================
+
+@test
+fn test_gcd_basic() {
+    assert_eq(gcd(12, 8), 4);
+}
+
+@test
+fn test_gcd_coprime() {
+    assert_eq(gcd(7, 11), 1);
+}
+
+@test
+fn test_gcd_with_zero_left() {
+    // gcd(0, n) = |n|
+    assert_eq(gcd(0, 5), 5);
+}
+
+@test
+fn test_gcd_with_zero_right() {
+    assert_eq(gcd(5, 0), 5);
+}
+
+@test
+fn test_gcd_with_negative_returns_non_negative() {
+    // gcd is always non-negative
+    assert_eq(gcd(-12, 8), 4);
+    assert_eq(gcd(12, -8), 4);
+    assert_eq(gcd(-12, -8), 4);
+}
+
+@test
+fn test_gcd_equal_args() {
+    assert_eq(gcd(7, 7), 7);
+}
+
+// =============================================================================
+// Section 7: try_gcd — Maybe variant of gcd
+// =============================================================================
+
+@test
+fn test_try_gcd_basic_returns_some() {
+    let r = try_gcd(12, 8);
+    match r {
+        Maybe.Some(v) => assert_eq(v, 4),
+        Maybe.None    => panic("expected Some"),
+    }
+}
+
+@test
+fn test_try_gcd_coprime_returns_some_one() {
+    let r = try_gcd(7, 11);
+    match r {
+        Maybe.Some(v) => assert_eq(v, 1),
+        Maybe.None    => panic("expected Some"),
+    }
+}
+
+fn main() {}
