@@ -1,0 +1,329 @@
+// =============================================================================
+// core-tests/database/common/migrations/migration/unit_test.vr
+// =============================================================================
+//
+// `core/database/common/migrations/migration.vr` — Migration record +
+// MigrationStatus 4-variant + builder + helpers.
+//
+// Surface tested:
+//   * Migration record (6 fields) — version, name, up_sql, down_sql,
+//     depends_on, is_idempotent
+//   * migration_new() factory constructor + defaults
+//   * Migration.with_down / with_dependency / mark_idempotent builders
+//   * Migration.is_reversible() predicate
+//   * MigrationStatus 4-variant — MsPending / MsApplied(Int64) /
+//     MsRolledBack(Int64) / MsFailed(Text)
+//   * status_name() text rendering
+//   * clone_status / clone_migration deep-copy helpers
+// =============================================================================
+
+mount core.database.common.migrations.migration.{
+    Migration, MigrationStatus,
+    MsPending, MsApplied, MsRolledBack, MsFailed,
+    migration_new, status_name, clone_status, clone_migration,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: migration_new factory + Migration defaults
+// =============================================================================
+
+@test
+fn test_migration_new_preserves_version() {
+    let m = migration_new(1, "init".to_text(), "CREATE TABLE t (id INT);".to_text());
+    assert_eq(m.version, 1);
+}
+
+@test
+fn test_migration_new_preserves_name() {
+    let m = migration_new(2, "add_users".to_text(), "CREATE TABLE users (id INT);".to_text());
+    assert_eq(m.name, "add_users".to_text());
+}
+
+@test
+fn test_migration_new_preserves_up_sql() {
+    let m = migration_new(3, "x".to_text(), "ALTER TABLE t ADD COLUMN c TEXT;".to_text());
+    assert_eq(m.up_sql, "ALTER TABLE t ADD COLUMN c TEXT;".to_text());
+}
+
+@test
+fn test_migration_new_default_down_sql_is_none() {
+    let m = migration_new(4, "x".to_text(), "SELECT 1;".to_text());
+    assert(m.down_sql is Maybe.None);
+}
+
+@test
+fn test_migration_new_default_depends_on_is_empty() {
+    let m = migration_new(5, "x".to_text(), "SELECT 1;".to_text());
+    assert_eq(m.depends_on.len(), 0);
+}
+
+@test
+fn test_migration_new_default_is_idempotent_false() {
+    let m = migration_new(6, "x".to_text(), "SELECT 1;".to_text());
+    assert_eq(m.is_idempotent, false);
+}
+
+// =============================================================================
+// Section 2: Migration builder — with_down
+// =============================================================================
+
+@test
+fn test_migration_with_down_sets_some() {
+    let m = migration_new(7, "drop_t".to_text(), "DROP TABLE t;".to_text())
+        .with_down("CREATE TABLE t (id INT);".to_text());
+    assert(m.down_sql is Maybe.Some);
+}
+
+@test
+fn test_migration_with_down_preserves_other_fields() {
+    let m = migration_new(8, "x".to_text(), "UP".to_text())
+        .with_down("DOWN".to_text());
+    assert_eq(m.version, 8);
+    assert_eq(m.name, "x".to_text());
+    assert_eq(m.up_sql, "UP".to_text());
+}
+
+// =============================================================================
+// Section 3: Migration builder — with_dependency
+// =============================================================================
+
+@test
+fn test_migration_with_dependency_adds_one() {
+    let m = migration_new(10, "x".to_text(), "SELECT 1;".to_text())
+        .with_dependency(7);
+    assert_eq(m.depends_on.len(), 1);
+}
+
+@test
+fn test_migration_with_dependency_chains_multiple() {
+    let m = migration_new(11, "x".to_text(), "SELECT 1;".to_text())
+        .with_dependency(7)
+        .with_dependency(9);
+    assert_eq(m.depends_on.len(), 2);
+}
+
+// =============================================================================
+// Section 4: Migration builder — mark_idempotent
+// =============================================================================
+
+@test
+fn test_migration_mark_idempotent_flips_flag() {
+    let m = migration_new(12, "x".to_text(), "SELECT 1;".to_text())
+        .mark_idempotent();
+    assert_eq(m.is_idempotent, true);
+}
+
+// =============================================================================
+// Section 5: Migration.is_reversible() predicate
+// =============================================================================
+
+@test
+fn test_migration_is_reversible_false_initially() {
+    let m = migration_new(20, "x".to_text(), "SELECT 1;".to_text());
+    assert_eq(m.is_reversible(), false);
+}
+
+@test
+fn test_migration_is_reversible_true_after_with_down() {
+    let m = migration_new(21, "x".to_text(), "SELECT 1;".to_text())
+        .with_down("ROLLBACK".to_text());
+    assert_eq(m.is_reversible(), true);
+}
+
+// =============================================================================
+// Section 6: MigrationStatus 4-variant constructors
+// =============================================================================
+
+@test
+fn test_migration_status_ms_pending_variant() {
+    let s: MigrationStatus = MsPending;
+    assert(s is MsPending);
+}
+
+@test
+fn test_migration_status_ms_applied_variant() {
+    let s: MigrationStatus = MsApplied(1_000_000_000_i64);
+    assert(s is MsApplied);
+}
+
+@test
+fn test_migration_status_ms_rolled_back_variant() {
+    let s: MigrationStatus = MsRolledBack(2_000_000_000_i64);
+    assert(s is MsRolledBack);
+}
+
+@test
+fn test_migration_status_ms_failed_variant() {
+    let s: MigrationStatus = MsFailed("syntax error".to_text());
+    assert(s is MsFailed);
+}
+
+@test
+fn test_migration_status_pending_disjoint_from_applied() {
+    let p: MigrationStatus = MsPending;
+    let a: MigrationStatus = MsApplied(0_i64);
+    assert(p is MsPending && !(p is MsApplied));
+    assert(a is MsApplied && !(a is MsPending));
+}
+
+@test
+fn test_migration_status_applied_disjoint_from_rolled_back() {
+    let a: MigrationStatus = MsApplied(1_i64);
+    let r: MigrationStatus = MsRolledBack(2_i64);
+    assert(!(a is MsRolledBack));
+    assert(!(r is MsApplied));
+}
+
+@test
+fn test_migration_status_failed_disjoint_from_pending() {
+    let f: MigrationStatus = MsFailed("e".to_text());
+    let p: MigrationStatus = MsPending;
+    assert(!(f is MsPending));
+    assert(!(p is MsFailed));
+}
+
+// =============================================================================
+// Section 7: status_name() text rendering
+// =============================================================================
+
+@test
+fn test_status_name_pending() {
+    assert_eq(status_name(&MsPending), "pending".to_text());
+}
+
+@test
+fn test_status_name_applied() {
+    let s: MigrationStatus = MsApplied(123_i64);
+    assert_eq(status_name(&s), "applied".to_text());
+}
+
+@test
+fn test_status_name_rolled_back() {
+    let s: MigrationStatus = MsRolledBack(456_i64);
+    assert_eq(status_name(&s), "rolled_back".to_text());
+}
+
+@test
+fn test_status_name_failed() {
+    let s: MigrationStatus = MsFailed("oops".to_text());
+    assert_eq(status_name(&s), "failed".to_text());
+}
+
+@test
+fn test_status_name_all_distinct() {
+    let p = status_name(&MsPending);
+    let a_status: MigrationStatus = MsApplied(0_i64);
+    let r_status: MigrationStatus = MsRolledBack(0_i64);
+    let f_status: MigrationStatus = MsFailed("".to_text());
+    let a = status_name(&a_status);
+    let r = status_name(&r_status);
+    let f = status_name(&f_status);
+    assert(p != a);
+    assert(p != r);
+    assert(p != f);
+    assert(a != r);
+    assert(a != f);
+    assert(r != f);
+}
+
+// =============================================================================
+// Section 8: clone_status preserves variant + payload
+// =============================================================================
+
+@test
+fn test_clone_status_preserves_pending() {
+    let c = clone_status(&MsPending);
+    assert(c is MsPending);
+}
+
+@test
+fn test_clone_status_preserves_applied_payload() {
+    let s: MigrationStatus = MsApplied(7_777_777_i64);
+    let c = clone_status(&s);
+    assert(c is MsApplied);
+    match c {
+        MsApplied(t) => assert_eq(t, 7_777_777_i64),
+        _ => panic("expected MsApplied"),
+    }
+}
+
+@test
+fn test_clone_status_preserves_rolled_back_payload() {
+    let s: MigrationStatus = MsRolledBack(99_i64);
+    let c = clone_status(&s);
+    match c {
+        MsRolledBack(t) => assert_eq(t, 99_i64),
+        _ => panic("expected MsRolledBack"),
+    }
+}
+
+@test
+fn test_clone_status_preserves_failed_payload() {
+    let s: MigrationStatus = MsFailed("e1".to_text());
+    let c = clone_status(&s);
+    match c {
+        MsFailed(msg) => assert_eq(msg, "e1".to_text()),
+        _ => panic("expected MsFailed"),
+    }
+}
+
+// =============================================================================
+// Section 9: clone_migration deep-copies all fields
+// =============================================================================
+
+@test
+fn test_clone_migration_preserves_version() {
+    let m = migration_new(42, "x".to_text(), "S".to_text());
+    let c = clone_migration(&m);
+    assert_eq(c.version, 42);
+}
+
+@test
+fn test_clone_migration_preserves_name() {
+    let m = migration_new(43, "named".to_text(), "S".to_text());
+    let c = clone_migration(&m);
+    assert_eq(c.name, "named".to_text());
+}
+
+@test
+fn test_clone_migration_preserves_up_sql() {
+    let m = migration_new(44, "x".to_text(), "SELECT *;".to_text());
+    let c = clone_migration(&m);
+    assert_eq(c.up_sql, "SELECT *;".to_text());
+}
+
+@test
+fn test_clone_migration_preserves_down_sql_some() {
+    let m = migration_new(45, "x".to_text(), "U".to_text())
+        .with_down("D".to_text());
+    let c = clone_migration(&m);
+    assert(c.down_sql is Maybe.Some);
+}
+
+@test
+fn test_clone_migration_preserves_down_sql_none() {
+    let m = migration_new(46, "x".to_text(), "U".to_text());
+    let c = clone_migration(&m);
+    assert(c.down_sql is Maybe.None);
+}
+
+@test
+fn test_clone_migration_preserves_depends_on_count() {
+    let m = migration_new(47, "x".to_text(), "U".to_text())
+        .with_dependency(1)
+        .with_dependency(2)
+        .with_dependency(3);
+    let c = clone_migration(&m);
+    assert_eq(c.depends_on.len(), 3);
+}
+
+@test
+fn test_clone_migration_preserves_is_idempotent() {
+    let m = migration_new(48, "x".to_text(), "U".to_text())
+        .mark_idempotent();
+    let c = clone_migration(&m);
+    assert_eq(c.is_idempotent, true);
+}
+
+fn main() {}
