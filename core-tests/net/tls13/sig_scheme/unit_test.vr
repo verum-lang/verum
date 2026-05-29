@@ -1,0 +1,82 @@
+// =============================================================================
+// core-tests/net/tls13/sig_scheme/unit_test.vr — RFC 8446 §4.2.3
+// =============================================================================
+//
+// `core/net/tls13/sig_scheme.vr`:
+//
+//   * SignatureScheme + to_u16 / from_u16 (IANA SignatureScheme codepoints).
+//   * Unknown(v) preserves the raw codepoint.
+// =============================================================================
+
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+
+// =============================================================================
+// Section 1: IANA codepoints (RFC 8446 §4.2.3)
+// =============================================================================
+
+@test
+fn test_tls13sig_ecdsa_secp256r1_sha256_0403() {
+    assert_eq(SignatureScheme.EcdsaSecp256r1Sha256.to_u16(), 0x0403_u16);
+}
+
+@test
+fn test_tls13sig_ecdsa_secp384r1_sha384_0503() {
+    assert_eq(SignatureScheme.EcdsaSecp384r1Sha384.to_u16(), 0x0503_u16);
+}
+
+@test
+fn test_tls13sig_rsa_pss_rsae_sha256_0804() {
+    assert_eq(SignatureScheme.RsaPssRsaeSha256.to_u16(), 0x0804_u16);
+}
+
+@test
+fn test_tls13sig_rsa_pss_rsae_sha384_0805() {
+    assert_eq(SignatureScheme.RsaPssRsaeSha384.to_u16(), 0x0805_u16);
+}
+
+@test
+fn test_tls13sig_rsa_pss_rsae_sha512_0806() {
+    assert_eq(SignatureScheme.RsaPssRsaeSha512.to_u16(), 0x0806_u16);
+}
+
+@test
+fn test_tls13sig_ed25519_0807() {
+    assert_eq(SignatureScheme.Ed25519Scheme.to_u16(), 0x0807_u16);
+}
+
+@test
+fn test_tls13sig_ed448_0808() {
+    assert_eq(SignatureScheme.Ed448Scheme.to_u16(), 0x0808_u16);
+}
+
+@test
+fn test_tls13sig_rsa_pss_pss_sha256_0809() {
+    assert_eq(SignatureScheme.RsaPssPssSha256.to_u16(), 0x0809_u16);
+}
+
+@test
+fn test_tls13sig_rsa_pkcs1_sha256_0401() {
+    assert_eq(SignatureScheme.RsaPkcs1Sha256.to_u16(), 0x0401_u16);
+}
+
+// =============================================================================
+// Section 2: from_u16 + Unknown preservation
+// =============================================================================
+
+@test
+fn test_tls13sig_from_ed25519() {
+    assert(SignatureScheme.from_u16(0x0807_u16) is SignatureScheme.Ed25519Scheme);
+}
+
+@test
+fn test_tls13sig_from_rsa_pss_rsae_sha256() {
+    assert(SignatureScheme.from_u16(0x0804_u16) is SignatureScheme.RsaPssRsaeSha256);
+}
+
+@test
+fn test_tls13sig_unknown_preserves_codepoint() {
+    let s = SignatureScheme.from_u16(0xFFFF_u16);
+    assert_eq(s.to_u16(), 0xFFFF_u16);
+}
+
+fn main() {}
