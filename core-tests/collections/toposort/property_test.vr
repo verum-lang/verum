@@ -1,0 +1,344 @@
+// =============================================================================
+// core-tests/collections/toposort/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.collections.toposort` — Kahn's
+// algorithm over `TopoGraph<N: Hash + Eq>`.
+//
+// The defining contract of a topological sort is a *single* invariant
+// from which everything else follows:
+//
+//   (TOPO)  for every edge dep → dependent,
+//           index_of(dep) < index_of(dependent) in the output order.
+//
+// Plus the totality/cycle laws:
+//
+//   §1   Empty graph        → Ok([])
+//   §2   Isolated nodes      → Ok(insertion order)              (stable)
+//   §3   Output is a permutation of the node set (len + membership)
+//   §4   (TOPO) holds for linear chains
+//   §5   (TOPO) holds for diamonds / DAGs with re-convergence
+//   §6   (TOPO) holds for a wide fan-out and fan-in
+//   §7   Determinism — toposort() is pure: repeated calls are identical
+//   §8   Stable tie-break — independent nodes keep insertion order
+//   §9   Self-loop          → Err(Cycle)
+//   §10  2-cycle / 3-cycle   → Err(Cycle)
+//   §11  DAG + back-edge     → Err(Cycle) (one cycle poisons the whole sort)
+//   §12  Duplicate add_edge  → in-degree counted once (no phantom prereq)
+//   §13  add_node idempotent → node_count stable under re-adds
+//
+// Domain: Int graphs (the Text payload path is gated by the
+// `Text.from` codegen defect — see regression_test.vr §D).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.toposort.{TopoGraph, TopoError};
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+/// Index of `target` in `xs`, or -1 if absent.
+fn index_of(xs: &List<Int>, target: Int) -> Int {
+    let mut i = 0;
+    while i < xs.len() {
+        if xs[i] == target { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+/// True iff `dep` appears strictly before `dependent` in `order`
+/// (and both are present).
+fn precedes(order: &List<Int>, dep: Int, dependent: Int) -> Bool {
+    let a = index_of(order, dep);
+    let b = index_of(order, dependent);
+    return a >= 0 && b >= 0 && a < b;
+}
+
+/// Run toposort and return the order, panicking if a cycle is reported.
+fn order_of(g: &TopoGraph<Int>) -> List<Int> {
+    match g.toposort() {
+        Ok(out) => out,
+        Err(_)  => {
+            panic("expected an acyclic graph");
+            []
+        },
+    }
+}
+
+/// True iff toposort reports a cycle.
+fn is_cyclic(g: &TopoGraph<Int>) -> Bool {
+    match g.toposort() {
+        Ok(_)  => false,
+        Err(_) => true,
+    }
+}
+
+// =============================================================================
+// §1  Empty graph → Ok([])
+// =============================================================================
+
+@test
+fn prop_toposort_empty_graph_sorts_to_empty() {
+    let g: TopoGraph<Int> = TopoGraph.new();
+    let out = order_of(&g);
+    assert_eq(out.len(), 0);
+}
+
+// =============================================================================
+// §2  Isolated nodes → insertion order (stability with no edges)
+// =============================================================================
+
+@test
+fn prop_toposort_isolated_nodes_preserve_insertion_order() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_node(5);
+    g.add_node(3);
+    g.add_node(9);
+    g.add_node(1);
+    let out = order_of(&g);
+    assert_eq(out.len(), 4);
+    assert_eq(out[0], 5);
+    assert_eq(out[1], 3);
+    assert_eq(out[2], 9);
+    assert_eq(out[3], 1);
+}
+
+// =============================================================================
+// §3  Output is a permutation of the node set
+// =============================================================================
+
+@test
+fn prop_toposort_output_is_permutation_of_nodes() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(1, 2);
+    g.add_edge(1, 3);
+    g.add_edge(2, 4);
+    g.add_edge(3, 4);
+    g.add_node(5); // isolated
+    let out = order_of(&g);
+    // Same cardinality...
+    assert_eq(out.len(), g.node_count());
+    assert_eq(out.len(), 5);
+    // ...and every declared node appears exactly once.
+    assert(index_of(&out, 1) >= 0);
+    assert(index_of(&out, 2) >= 0);
+    assert(index_of(&out, 3) >= 0);
+    assert(index_of(&out, 4) >= 0);
+    assert(index_of(&out, 5) >= 0);
+}
+
+// =============================================================================
+// §4  (TOPO) on a linear chain 1 → 2 → 3 → 4 → 5
+// =============================================================================
+
+@test
+fn prop_toposort_invariant_linear_chain() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(1, 2);
+    g.add_edge(2, 3);
+    g.add_edge(3, 4);
+    g.add_edge(4, 5);
+    let out = order_of(&g);
+    assert(precedes(&out, 1, 2));
+    assert(precedes(&out, 2, 3));
+    assert(precedes(&out, 3, 4));
+    assert(precedes(&out, 4, 5));
+    // Transitive consequence.
+    assert(precedes(&out, 1, 5));
+}
+
+// =============================================================================
+// §5  (TOPO) on a diamond 1 → {2,3} → 4
+// =============================================================================
+
+@test
+fn prop_toposort_invariant_diamond() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(1, 2);
+    g.add_edge(1, 3);
+    g.add_edge(2, 4);
+    g.add_edge(3, 4);
+    let out = order_of(&g);
+    assert(precedes(&out, 1, 2));
+    assert(precedes(&out, 1, 3));
+    assert(precedes(&out, 2, 4));
+    assert(precedes(&out, 3, 4));
+    assert(precedes(&out, 1, 4));
+}
+
+// =============================================================================
+// §6  (TOPO) on a wide fan-out then fan-in
+//      0 → {1,2,3,4} ; {1,2,3,4} → 5
+// =============================================================================
+
+@test
+fn prop_toposort_invariant_fan_out_fan_in() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(0, 1);
+    g.add_edge(0, 2);
+    g.add_edge(0, 3);
+    g.add_edge(0, 4);
+    g.add_edge(1, 5);
+    g.add_edge(2, 5);
+    g.add_edge(3, 5);
+    g.add_edge(4, 5);
+    let out = order_of(&g);
+    assert_eq(out.len(), 6);
+    // Root first, sink last.
+    assert_eq(out[0], 0);
+    assert_eq(out[out.len() - 1], 5);
+    // Every fan node sits between root and sink.
+    let mut n = 1;
+    while n <= 4 {
+        assert(precedes(&out, 0, n));
+        assert(precedes(&out, n, 5));
+        n = n + 1;
+    }
+}
+
+// =============================================================================
+// §7  Determinism — toposort() is pure (referentially transparent)
+// =============================================================================
+
+@test
+fn prop_toposort_is_deterministic() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(10, 20);
+    g.add_edge(10, 30);
+    g.add_edge(20, 40);
+    g.add_edge(30, 40);
+    g.add_node(99);
+    let a = order_of(&g);
+    let b = order_of(&g);
+    assert_eq(a.len(), b.len());
+    let mut i = 0;
+    while i < a.len() {
+        assert_eq(a[i], b[i]);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §8  Stable tie-break — independent roots keep insertion order
+// =============================================================================
+
+@test
+fn prop_toposort_stable_tie_break_independent_roots() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    // Three independent roots inserted 7, 4, 1; each with one child.
+    g.add_node(7);
+    g.add_node(4);
+    g.add_node(1);
+    g.add_edge(7, 70);
+    g.add_edge(4, 40);
+    g.add_edge(1, 10);
+    let out = order_of(&g);
+    // Roots emerge in insertion order (Kahn wave preserves node order).
+    assert(precedes(&out, 7, 4));
+    assert(precedes(&out, 4, 1));
+    // Each child follows its own parent.
+    assert(precedes(&out, 7, 70));
+    assert(precedes(&out, 4, 40));
+    assert(precedes(&out, 1, 10));
+}
+
+// =============================================================================
+// §9  Self-loop → Cycle
+// =============================================================================
+//
+// DEFECT (TOPO-CYCLE-1, see audit.md §1): the cycle-reporting path of
+// `toposort()` panics instead of returning `Err(Cycle(...))`.  Any cyclic
+// graph reaches the residual-collection loop which calls the generic free
+// fn `node_label(n)` from inside the generic `implement<N> TopoGraph<N>`
+// method; VBC codegen miscomputes the call frame and panics with
+// "field write out of bounds: field index 80 ... type_id=0"
+// (backtrace: node_label <- TopoGraph.toposort <- ...).  Acyclic graphs
+// never enter this branch, so §1–§8 pass.  These four cycle laws are
+// @ignore'd until the codegen defect (or the stdlib source workaround
+// described in audit.md §1) lands.
+
+@ignore
+@test
+fn prop_toposort_self_loop_is_cycle() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(1, 1);
+    assert(is_cyclic(&g));
+}
+
+// =============================================================================
+// §10  2-cycle and 3-cycle → Cycle
+// =============================================================================
+
+@ignore
+@test
+fn prop_toposort_two_cycle_is_cycle() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(1, 2);
+    g.add_edge(2, 1);
+    assert(is_cyclic(&g));
+}
+
+@ignore
+@test
+fn prop_toposort_three_cycle_is_cycle() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(1, 2);
+    g.add_edge(2, 3);
+    g.add_edge(3, 1);
+    assert(is_cyclic(&g));
+}
+
+// =============================================================================
+// §11  DAG + a single back-edge → Cycle (poisons the whole sort)
+// =============================================================================
+
+@ignore
+@test
+fn prop_toposort_dag_plus_back_edge_is_cycle() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    // 1 → 2 → 3 → 4 chain ...
+    g.add_edge(1, 2);
+    g.add_edge(2, 3);
+    g.add_edge(3, 4);
+    // ... plus a back-edge 4 → 2 closing a cycle {2,3,4}.
+    g.add_edge(4, 2);
+    assert(is_cyclic(&g));
+}
+
+// =============================================================================
+// §12  Duplicate add_edge counts the prerequisite once
+//      (no phantom in-degree that would strand a node)
+// =============================================================================
+
+@test
+fn prop_toposort_duplicate_edge_counted_once() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_edge(1, 2);
+    g.add_edge(1, 2); // duplicate
+    g.add_edge(1, 2); // duplicate
+    let out = order_of(&g);
+    // If the duplicate bumped in-degree, node 2 would never reach 0 and
+    // the graph would falsely report a cycle / drop node 2.
+    assert_eq(out.len(), 2);
+    assert(precedes(&out, 1, 2));
+}
+
+// =============================================================================
+// §13  add_node is idempotent
+// =============================================================================
+
+@test
+fn prop_toposort_add_node_idempotent() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_node(42);
+    g.add_node(42);
+    g.add_node(42);
+    assert_eq(g.node_count(), 1);
+    let out = order_of(&g);
+    assert_eq(out.len(), 1);
+    assert_eq(out[0], 42);
+}
+
+fn main() {}
