@@ -1,0 +1,116 @@
+// =============================================================================
+// core-tests/tracing/span/unit_test.vr
+// =============================================================================
+//
+// `core/tracing/span.vr` — OTel SpanKind + SpanStatusCode ADTs.
+// =============================================================================
+
+mount core.tracing.span.{SpanKind, SpanStatusCode};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: SpanKind 5-variant ADT
+// =============================================================================
+
+@test
+fn test_span_kind_internal_variant() {
+    let k: SpanKind = SpanKind.KindInternal;
+    assert(k is SpanKind.KindInternal);
+}
+
+@test
+fn test_span_kind_client_variant() {
+    let k: SpanKind = SpanKind.KindClient;
+    assert(k is SpanKind.KindClient);
+}
+
+@test
+fn test_span_kind_server_variant() {
+    let k: SpanKind = SpanKind.KindServer;
+    assert(k is SpanKind.KindServer);
+}
+
+@test
+fn test_span_kind_producer_variant() {
+    let k: SpanKind = SpanKind.KindProducer;
+    assert(k is SpanKind.KindProducer);
+}
+
+@test
+fn test_span_kind_consumer_variant() {
+    let k: SpanKind = SpanKind.KindConsumer;
+    assert(k is SpanKind.KindConsumer);
+}
+
+// =============================================================================
+// Section 2: SpanKind pairwise disjointness — selected
+// =============================================================================
+
+@test
+fn test_span_kind_internal_disjoint() {
+    let k: SpanKind = SpanKind.KindInternal;
+    assert(!(k is SpanKind.KindClient));
+    assert(!(k is SpanKind.KindServer));
+    assert(!(k is SpanKind.KindProducer));
+    assert(!(k is SpanKind.KindConsumer));
+}
+
+@test
+fn test_span_kind_client_server_distinct() {
+    let c: SpanKind = SpanKind.KindClient;
+    let s: SpanKind = SpanKind.KindServer;
+    assert(!(c is SpanKind.KindServer));
+    assert(!(s is SpanKind.KindClient));
+}
+
+@test
+fn test_span_kind_producer_consumer_distinct() {
+    let p: SpanKind = SpanKind.KindProducer;
+    let c: SpanKind = SpanKind.KindConsumer;
+    assert(!(p is SpanKind.KindConsumer));
+    assert(!(c is SpanKind.KindProducer));
+}
+
+// =============================================================================
+// Section 3: SpanStatusCode 3-variant ADT
+//
+//   Note: SpanStatusCode has a local variant `Ok` (success marker)
+//   distinct from Result.Ok — qualified `SpanStatusCode.Ok` resolves
+//   the bare-variant collision.
+// =============================================================================
+
+@test
+fn test_span_status_code_unset_variant() {
+    let s: SpanStatusCode = SpanStatusCode.Unset;
+    assert(s is SpanStatusCode.Unset);
+}
+
+@test
+fn test_span_status_code_ok_variant() {
+    let s: SpanStatusCode = SpanStatusCode.Ok;
+    assert(s is SpanStatusCode.Ok);
+}
+
+@test
+fn test_span_status_code_error_variant() {
+    let s: SpanStatusCode = SpanStatusCode.Error;
+    assert(s is SpanStatusCode.Error);
+}
+
+@test
+fn test_span_status_code_unset_disjoint() {
+    let s: SpanStatusCode = SpanStatusCode.Unset;
+    assert(!(s is SpanStatusCode.Ok));
+    assert(!(s is SpanStatusCode.Error));
+}
+
+@test
+fn test_span_status_code_ok_error_distinct() {
+    let o: SpanStatusCode = SpanStatusCode.Ok;
+    let e: SpanStatusCode = SpanStatusCode.Error;
+    assert(!(o is SpanStatusCode.Error));
+    assert(!(e is SpanStatusCode.Ok));
+}
+
+fn main() {}
