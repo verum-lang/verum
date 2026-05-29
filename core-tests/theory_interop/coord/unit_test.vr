@@ -1,0 +1,145 @@
+// =============================================================================
+// core-tests/theory_interop/coord/unit_test.vr
+// =============================================================================
+//
+// `core/theory_interop/coord.vr` —
+//   * TranslationVerdict 5-variant (Morita / Strong / Moderate / Weak /
+//                                   Untranslatable)
+//   * verdict_of(Float) — obstruction-severity → verdict bucketing
+//   * verdict_as_text() — stable text projection
+//   * verdict_admits() — accept/reject discriminator
+// =============================================================================
+
+mount core.theory_interop.coord.{
+    TranslationVerdict, verdict_of, verdict_as_text, verdict_admits,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TranslationVerdict 5-variant construction
+// =============================================================================
+
+@test
+fn test_translation_verdict_morita_variant() {
+    let v: TranslationVerdict = TranslationVerdict.Morita;
+    assert(v is TranslationVerdict.Morita);
+}
+
+@test
+fn test_translation_verdict_strong_variant() {
+    let v: TranslationVerdict = TranslationVerdict.Strong;
+    assert(v is TranslationVerdict.Strong);
+}
+
+@test
+fn test_translation_verdict_moderate_variant() {
+    let v: TranslationVerdict = TranslationVerdict.Moderate;
+    assert(v is TranslationVerdict.Moderate);
+}
+
+@test
+fn test_translation_verdict_weak_variant() {
+    let v: TranslationVerdict = TranslationVerdict.Weak;
+    assert(v is TranslationVerdict.Weak);
+}
+
+@test
+fn test_translation_verdict_untranslatable_variant() {
+    let v: TranslationVerdict = TranslationVerdict.Untranslatable;
+    assert(v is TranslationVerdict.Untranslatable);
+}
+
+// =============================================================================
+// Section 2: verdict_of() — obstruction-severity → verdict bucketing
+// =============================================================================
+
+@test
+fn test_verdict_of_zero_obstruction_morita() {
+    let v: TranslationVerdict = verdict_of(0.0);
+    assert(v is TranslationVerdict.Morita);
+}
+
+@test
+fn test_verdict_of_below_strong_bound_strong() {
+    let v: TranslationVerdict = verdict_of(0.05);
+    assert(v is TranslationVerdict.Strong);
+}
+
+@test
+fn test_verdict_of_moderate_bound_moderate() {
+    let v: TranslationVerdict = verdict_of(0.20);
+    assert(v is TranslationVerdict.Moderate);
+}
+
+@test
+fn test_verdict_of_weak_bound_weak() {
+    let v: TranslationVerdict = verdict_of(0.50);
+    assert(v is TranslationVerdict.Weak);
+}
+
+@test
+fn test_verdict_of_high_obstruction_untranslatable() {
+    let v: TranslationVerdict = verdict_of(0.99);
+    assert(v is TranslationVerdict.Untranslatable);
+}
+
+// =============================================================================
+// Section 3: verdict_as_text() — stable text projection
+// =============================================================================
+
+@test
+fn test_verdict_as_text_morita() {
+    assert_eq(verdict_as_text(TranslationVerdict.Morita), "morita");
+}
+
+@test
+fn test_verdict_as_text_strong() {
+    assert_eq(verdict_as_text(TranslationVerdict.Strong), "strong");
+}
+
+@test
+fn test_verdict_as_text_moderate() {
+    assert_eq(verdict_as_text(TranslationVerdict.Moderate), "moderate");
+}
+
+@test
+fn test_verdict_as_text_weak() {
+    assert_eq(verdict_as_text(TranslationVerdict.Weak), "weak");
+}
+
+@test
+fn test_verdict_as_text_untranslatable() {
+    assert_eq(verdict_as_text(TranslationVerdict.Untranslatable), "untranslatable");
+}
+
+// =============================================================================
+// Section 4: verdict_admits() — accept/reject discriminator
+// =============================================================================
+
+@test
+fn test_verdict_admits_morita_true() {
+    assert(verdict_admits(TranslationVerdict.Morita));
+}
+
+@test
+fn test_verdict_admits_strong_true() {
+    assert(verdict_admits(TranslationVerdict.Strong));
+}
+
+@test
+fn test_verdict_admits_moderate_true() {
+    assert(verdict_admits(TranslationVerdict.Moderate));
+}
+
+@test
+fn test_verdict_admits_weak_true() {
+    assert(verdict_admits(TranslationVerdict.Weak));
+}
+
+@test
+fn test_verdict_admits_untranslatable_false() {
+    assert(!verdict_admits(TranslationVerdict.Untranslatable));
+}
+
+fn main() {}
