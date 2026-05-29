@@ -67,7 +67,7 @@ implement CircuitBreakerConfig {
 
 public type RecoveryStrategy is
     /// No automatic recovery — propagate error
-    Maybe.None
+    NoRecovery
     /// Retry with exponential backoff
     | Retry(RetryConfig)
     /// Circuit breaker pattern
@@ -145,7 +145,7 @@ implement SpawnConfig {
     /// Create default spawn configuration.
     public fn new() -> SpawnConfig {
         SpawnConfig {
-            recovery: Maybe.None,
+            recovery: RecoveryStrategy.NoRecovery,
             restart: Temporary,
             isolation: Shared,
             priority: Normal,
