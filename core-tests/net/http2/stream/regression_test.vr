@@ -1,0 +1,50 @@
+// =============================================================================
+// core-tests/net/http2/stream/regression_test.vr — §5.1 FSM LOCK-IN pins
+// =============================================================================
+
+mount core.net.http2.stream.{
+    StreamState, StreamEvent, StreamFsm, StreamTransitionError,
+    next_client_stream_id, next_server_stream_id
+};
+
+// RFC 7540 §5.1: an idle stream that sends HEADERS without END_STREAM is
+// Open; with END_STREAM it is half-closed (local). Pin both legs so a
+// future edit to the transition table cannot silently swap them.
+@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+@test
+fn regression_h2stream_idle_headers_open_vs_half_closed() {
+    let mut a = StreamFsm.new(1_u32);
+    let _ = a.step(&StreamEvent.SendHeaders { end_stream: false });
+    assert_eq(a.state(), StreamState.Open);
+
+    let mut b = StreamFsm.new(3_u32);
+    let _ = b.step(&StreamEvent.SendHeaders { end_stream: true });
+    assert_eq(b.state(), StreamState.HalfClosedLocal);
+}
+
+// §5.1: Closed is absorbing — RST after close must still error, not panic.
+@test
+fn regression_h2stream_closed_absorbing() {
+    let mut fsm = StreamFsm.new(1_u32);
+    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
+    let _ = fsm.step(&StreamEvent.SendRstStream);
+    match fsm.step(&StreamEvent.RecvRstStream) {
+        Ok(_)  => panic("closed must reject"),
+        Err(e) => assert(e is StreamTransitionError.InvalidTransition),
+    }
+}
+
+// §5.1.1: client ids odd from 1, server ids even from 2.
+@test
+fn regression_h2stream_id_parity_seeds() {
+    match next_client_stream_id(0_u32) {
+        Maybe.Some(id) => assert_eq(id, 1_u32),
+        Maybe.None     => panic("client seed 0 → 1"),
+    }
+    match next_server_stream_id(0_u32) {
+        Maybe.Some(id) => assert_eq(id, 2_u32),
+        Maybe.None     => panic("server seed 0 → 2"),
+    }
+}
+
+fn main() {}

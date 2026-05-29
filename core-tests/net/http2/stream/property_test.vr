@@ -1,0 +1,149 @@
+// =============================================================================
+// core-tests/net/http2/stream/property_test.vr — RFC 7540 §5.1 FSM laws
+// =============================================================================
+//
+//   * RST_STREAM from any non-Closed state drives the stream to Closed.
+//   * Closed is absorbing: every event from Closed is rejected.
+//   * Client ids are odd and strictly increasing; server ids are even and
+//     strictly increasing (§5.1.1).
+// =============================================================================
+
+mount core.net.http2.stream.{
+    StreamState, StreamEvent, StreamFsm, StreamTransitionError,
+    next_client_stream_id, next_server_stream_id
+};
+
+// -----------------------------------------------------------------------------
+// RST_STREAM is a universal close (§5.1): from Open, ReservedLocal,
+// ReservedRemote, HalfClosedLocal and HalfClosedRemote it reaches Closed.
+// -----------------------------------------------------------------------------
+
+fn assert_rst_closes(setup: &StreamEvent) {
+    let mut fsm = StreamFsm.new(1_u32);
+    let _ = fsm.step(setup);
+    match fsm.step(&StreamEvent.SendRstStream) {
+        Ok(s)  => assert_eq(s, StreamState.Closed),
+        Err(_) => panic("SendRstStream must always close"),
+    }
+    assert(fsm.is_terminal());
+}
+
+@test
+fn property_h2stream_rst_closes_from_open() {
+    assert_rst_closes(&StreamEvent.SendHeaders { end_stream: false });
+}
+
+@test
+fn property_h2stream_rst_closes_from_reserved_local() {
+    assert_rst_closes(&StreamEvent.SendPushPromise);
+}
+
+@test
+fn property_h2stream_rst_closes_from_reserved_remote() {
+    assert_rst_closes(&StreamEvent.RecvPushPromise);
+}
+
+@test
+fn property_h2stream_rst_closes_from_half_closed_local() {
+    assert_rst_closes(&StreamEvent.SendHeaders { end_stream: true });
+}
+
+@test
+fn property_h2stream_rst_closes_from_half_closed_remote() {
+    assert_rst_closes(&StreamEvent.RecvHeaders { end_stream: true });
+}
+
+// -----------------------------------------------------------------------------
+// Closed is absorbing: every one of the 8 events is rejected once Closed.
+// -----------------------------------------------------------------------------
+
+fn all_events() -> List<StreamEvent> {
+    [
+        StreamEvent.SendHeaders { end_stream: false },
+        StreamEvent.RecvHeaders { end_stream: false },
+        StreamEvent.SendPushPromise,
+        StreamEvent.RecvPushPromise,
+        StreamEvent.SendData { end_stream: false },
+        StreamEvent.RecvData { end_stream: false },
+        StreamEvent.SendRstStream,
+        StreamEvent.RecvRstStream,
+    ]
+}
+
+@ignore("MUTSELF-MATCH-1: multi-step FSM needs persisted self.state across step() calls; inline payload-event step corrupts the writeback. See audit.md §3.1.")
+@test
+fn property_h2stream_closed_rejects_every_event() {
+    let events = all_events();
+    let mut i = 0;
+    while i < events.len() {
+        let mut fsm = StreamFsm.new(1_u32);
+        let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
+        let _ = fsm.step(&StreamEvent.SendRstStream);   // → Closed
+        match fsm.step(&events[i]) {
+            Ok(_)  => panic("Closed must reject all events"),
+            Err(e) => assert(e is StreamTransitionError.InvalidTransition),
+        }
+        i = i + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Stream-id allocation laws (§5.1.1).
+//
+// next_client_stream_id / next_server_stream_id add 2, preserving parity (with
+// the 0 → 1 / 0 → 2 seed). The "odd" / "even" laws therefore hold only when the
+// seed already respects the parity contract (client ids odd, server ids even),
+// so the sweeps below are parity-correct by construction.
+// -----------------------------------------------------------------------------
+
+fn client_seed_sweep() -> List<UInt32> {
+    // 0 or odd — the legal "last client stream id" inputs.
+    [0_u32, 1_u32, 3_u32, 99_u32, 1001_u32, 65535_u32]
+}
+
+fn server_seed_sweep() -> List<UInt32> {
+    // 0 or even — the legal "last server stream id" inputs.
+    [0_u32, 2_u32, 4_u32, 100_u32, 1000_u32, 65534_u32]
+}
+
+@test
+fn property_h2stream_client_ids_are_odd() {
+    let seeds = client_seed_sweep();
+    let mut i = 0;
+    while i < seeds.len() {
+        match next_client_stream_id(seeds[i]) {
+            Maybe.Some(id) => assert_eq(id % 2_u32, 1_u32),
+            Maybe.None     => {}
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn property_h2stream_client_ids_strictly_increase() {
+    let seeds = client_seed_sweep();
+    let mut i = 0;
+    while i < seeds.len() {
+        let cur = seeds[i];
+        match next_client_stream_id(cur) {
+            Maybe.Some(id) => assert(id > cur),
+            Maybe.None     => {}
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn property_h2stream_server_ids_are_even() {
+    let seeds = server_seed_sweep();
+    let mut i = 0;
+    while i < seeds.len() {
+        match next_server_stream_id(seeds[i]) {
+            Maybe.Some(id) => assert_eq(id % 2_u32, 0_u32),
+            Maybe.None     => {}
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {}
