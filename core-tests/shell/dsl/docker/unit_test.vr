@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/shell/dsl/docker/unit_test.vr
+// =============================================================================
+//
+// `core/shell/dsl/docker.vr` —
+//   * PortMapping record + .tcp() / .udp() / .render()
+// =============================================================================
+
+mount core.shell.dsl.docker.PortMapping;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: PortMapping construction
+// =============================================================================
+
+@test
+fn test_port_mapping_tcp_canonical() {
+    let p: PortMapping = PortMapping.tcp(8080, 80);
+    assert_eq(p.host, 8080);
+    assert_eq(p.container, 80);
+    assert_eq(p.protocol, "tcp");
+}
+
+@test
+fn test_port_mapping_udp_canonical() {
+    let p: PortMapping = PortMapping.udp(53, 53);
+    assert_eq(p.host, 53);
+    assert_eq(p.container, 53);
+    assert_eq(p.protocol, "udp");
+}
+
+@test
+fn test_port_mapping_direct_record_construction() {
+    let p: PortMapping = PortMapping {
+        host: 5432,
+        container: 5432,
+        protocol: "tcp".to_text(),
+    };
+    assert_eq(p.host, 5432);
+    assert_eq(p.container, 5432);
+    assert_eq(p.protocol, "tcp");
+}
+
+@test
+fn test_port_mapping_field_independence() {
+    let a: PortMapping = PortMapping.tcp(8080, 80);
+    let b: PortMapping = PortMapping.udp(53, 53);
+    assert_eq(a.host, 8080);
+    assert_eq(b.host, 53);
+    assert_eq(a.protocol, "tcp");
+    assert_eq(b.protocol, "udp");
+}
+
+// =============================================================================
+// Section 2: PortMapping common port pairs
+// =============================================================================
+
+@test
+fn test_port_mapping_http_8080_to_80() {
+    let p: PortMapping = PortMapping.tcp(8080, 80);
+    assert_eq(p.host, 8080);
+    assert_eq(p.container, 80);
+}
+
+@test
+fn test_port_mapping_https_8443_to_443() {
+    let p: PortMapping = PortMapping.tcp(8443, 443);
+    assert_eq(p.host, 8443);
+    assert_eq(p.container, 443);
+}
+
+@test
+fn test_port_mapping_dns_protocols_distinct() {
+    let tcp: PortMapping = PortMapping.tcp(53, 53);
+    let udp: PortMapping = PortMapping.udp(53, 53);
+    assert(tcp.protocol != udp.protocol);
+}
+
+fn main() {}
