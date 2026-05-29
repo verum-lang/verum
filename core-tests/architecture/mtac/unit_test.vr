@@ -1,0 +1,124 @@
+// =============================================================================
+// core-tests/architecture/mtac/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/mtac.vr` — MTAC architectural evolution ADTs.
+// =============================================================================
+
+mount core.architecture.mtac.{ComplexityClass, Reversibility};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ComplexityClass 5-variant ADT
+// =============================================================================
+
+@test
+fn test_complexity_class_trivial_variant() {
+    let c: ComplexityClass = ComplexityClass.Trivial;
+    assert(c is ComplexityClass.Trivial);
+}
+
+@test
+fn test_complexity_class_linear_variant() {
+    let c: ComplexityClass = ComplexityClass.Linear;
+    assert(c is ComplexityClass.Linear);
+}
+
+@test
+fn test_complexity_class_quadratic_variant() {
+    let c: ComplexityClass = ComplexityClass.Quadratic;
+    assert(c is ComplexityClass.Quadratic);
+}
+
+@test
+fn test_complexity_class_architectural_redesign_variant() {
+    let c: ComplexityClass = ComplexityClass.ArchitecturalRedesign;
+    assert(c is ComplexityClass.ArchitecturalRedesign);
+}
+
+@test
+fn test_complexity_class_rewrite_variant() {
+    let c: ComplexityClass = ComplexityClass.Rewrite;
+    assert(c is ComplexityClass.Rewrite);
+}
+
+// =============================================================================
+// Section 2: ComplexityClass pairwise disjointness — selected pairs
+// =============================================================================
+
+@test
+fn test_complexity_class_trivial_disjoint_from_rewrite() {
+    let t: ComplexityClass = ComplexityClass.Trivial;
+    let r: ComplexityClass = ComplexityClass.Rewrite;
+    assert(!(t is ComplexityClass.Rewrite));
+    assert(!(r is ComplexityClass.Trivial));
+}
+
+@test
+fn test_complexity_class_linear_disjoint() {
+    let c: ComplexityClass = ComplexityClass.Linear;
+    assert(!(c is ComplexityClass.Trivial));
+    assert(!(c is ComplexityClass.Quadratic));
+    assert(!(c is ComplexityClass.Rewrite));
+}
+
+@test
+fn test_complexity_class_rewrite_disjoint_from_all_others() {
+    let c: ComplexityClass = ComplexityClass.Rewrite;
+    assert(!(c is ComplexityClass.Trivial));
+    assert(!(c is ComplexityClass.Linear));
+    assert(!(c is ComplexityClass.Quadratic));
+    assert(!(c is ComplexityClass.ArchitecturalRedesign));
+}
+
+// =============================================================================
+// Section 3: Reversibility 3-variant ADT
+// =============================================================================
+
+@test
+fn test_reversibility_adjoint_reversible_variant() {
+    let r: Reversibility = Reversibility.AdjointReversible;
+    assert(r is Reversibility.AdjointReversible);
+}
+
+@test
+fn test_reversibility_irreversible_variant() {
+    let r: Reversibility = Reversibility.Irreversible;
+    assert(r is Reversibility.Irreversible);
+}
+
+@test
+fn test_reversibility_bounded_reversible_variant() {
+    let r: Reversibility = Reversibility.BoundedReversible(86400);
+    assert(r is Reversibility.BoundedReversible);
+}
+
+// =============================================================================
+// Section 4: Reversibility pairwise disjointness + payload preservation
+// =============================================================================
+
+@test
+fn test_reversibility_adjoint_disjoint() {
+    let r: Reversibility = Reversibility.AdjointReversible;
+    assert(!(r is Reversibility.Irreversible));
+    assert(!(r is Reversibility.BoundedReversible));
+}
+
+@test
+fn test_reversibility_irreversible_disjoint() {
+    let r: Reversibility = Reversibility.Irreversible;
+    assert(!(r is Reversibility.AdjointReversible));
+    assert(!(r is Reversibility.BoundedReversible));
+}
+
+@test
+fn test_reversibility_bounded_payload_round_trip() {
+    let r: Reversibility = Reversibility.BoundedReversible(3600);
+    match r {
+        Reversibility.BoundedReversible(window) => assert_eq(window, 3600),
+        _ => panic("expected BoundedReversible"),
+    }
+}
+
+fn main() {}
