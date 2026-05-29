@@ -1,0 +1,139 @@
+// =============================================================================
+// core-tests/theory_interop/bridges/unit_test.vr
+// =============================================================================
+//
+// `core/theory_interop/bridges/mod.vr` — canonical cross-framework
+// translations + Morita-bridge registry.
+//
+// Surface tested:
+//   * MORITA_PAIR_OC_DC public canonical value — Diakrisis 108.T α⊣ε structure
+//   * MORITA_PAIR_OWL2_HTT public canonical value — DL fragment of HTT
+//   * registered_morita_pairs() returns both pairs
+//   * is_morita_equivalent / bridge_admits_round_trip / marker_pairing_balanced
+//     predicates over the canonical registry
+// =============================================================================
+
+mount core.theory_interop.bridges.{
+    MoritaBridgePair,
+    MORITA_PAIR_OC_DC, MORITA_PAIR_OWL2_HTT,
+    is_morita_equivalent, marker_pairing_balanced,
+    registered_morita_pairs,
+};
+
+// =============================================================================
+// Section 1: MORITA_PAIR_OC_DC canonical values
+// =============================================================================
+
+@test
+fn test_morita_pair_oc_dc_forward_framework() {
+    assert_eq(MORITA_PAIR_OC_DC.forward_framework, "oc_articulation".to_text());
+}
+
+@test
+fn test_morita_pair_oc_dc_inverse_framework() {
+    assert_eq(MORITA_PAIR_OC_DC.inverse_framework, "dc_enactment".to_text());
+}
+
+@test
+fn test_morita_pair_oc_dc_forward_markers_one() {
+    assert_eq(MORITA_PAIR_OC_DC.forward_markers, 1);
+}
+
+@test
+fn test_morita_pair_oc_dc_inverse_markers_one() {
+    assert_eq(MORITA_PAIR_OC_DC.inverse_markers, 1);
+}
+
+// =============================================================================
+// Section 2: MORITA_PAIR_OWL2_HTT canonical values
+// =============================================================================
+
+@test
+fn test_morita_pair_owl2_htt_forward_framework() {
+    assert_eq(MORITA_PAIR_OWL2_HTT.forward_framework, "owl2_fs".to_text());
+}
+
+@test
+fn test_morita_pair_owl2_htt_inverse_framework() {
+    assert_eq(MORITA_PAIR_OWL2_HTT.inverse_framework, "lurie_htt".to_text());
+}
+
+@test
+fn test_morita_pair_owl2_htt_forward_markers_31() {
+    // OWL 2 ↔ HTT: 31 directional markers per Lurie HTT 5.1.4 + 1.2.1 + 5.2.7.
+    assert_eq(MORITA_PAIR_OWL2_HTT.forward_markers, 31);
+}
+
+@test
+fn test_morita_pair_owl2_htt_inverse_markers_31() {
+    assert_eq(MORITA_PAIR_OWL2_HTT.inverse_markers, 31);
+}
+
+// =============================================================================
+// Section 3: registered_morita_pairs registry
+// =============================================================================
+
+@test
+fn test_registered_morita_pairs_has_two_entries() {
+    let pairs = registered_morita_pairs();
+    assert_eq(pairs.len(), 2);
+}
+
+@test
+fn test_registered_morita_pairs_first_is_oc_dc() {
+    let pairs = registered_morita_pairs();
+    assert_eq(pairs[0].forward_framework, "oc_articulation".to_text());
+    assert_eq(pairs[0].inverse_framework, "dc_enactment".to_text());
+}
+
+@test
+fn test_registered_morita_pairs_second_is_owl2_htt() {
+    let pairs = registered_morita_pairs();
+    assert_eq(pairs[1].forward_framework, "owl2_fs".to_text());
+    assert_eq(pairs[1].inverse_framework, "lurie_htt".to_text());
+}
+
+// =============================================================================
+// Section 4: marker_pairing_balanced — structural pre-condition for Morita
+// =============================================================================
+
+@test
+fn test_marker_pairing_balanced_for_oc_dc() {
+    // 1 forward marker + 1 inverse marker → balanced.
+    assert(marker_pairing_balanced(MORITA_PAIR_OC_DC));
+}
+
+@test
+fn test_marker_pairing_balanced_for_owl2_htt() {
+    // 31 forward markers + 31 inverse markers → balanced.
+    assert(marker_pairing_balanced(MORITA_PAIR_OWL2_HTT));
+}
+
+@test
+fn test_marker_pairing_unbalanced_when_forward_differs_from_inverse() {
+    // Hand-constructed unbalanced pair must return false.
+    let unbalanced = MoritaBridgePair {
+        forward_framework: "x".to_text(),
+        inverse_framework: "y".to_text(),
+        verdict: MORITA_PAIR_OC_DC.verdict,   // any verdict
+        forward_markers: 3,
+        inverse_markers: 5,
+    };
+    assert(!marker_pairing_balanced(unbalanced));
+}
+
+// =============================================================================
+// Section 5: is_morita_equivalent — Morita verdict classification
+// =============================================================================
+
+@test
+fn test_oc_dc_is_morita_equivalent() {
+    assert(is_morita_equivalent(MORITA_PAIR_OC_DC));
+}
+
+@test
+fn test_owl2_htt_is_morita_equivalent() {
+    assert(is_morita_equivalent(MORITA_PAIR_OWL2_HTT));
+}
+
+fn main() {}
