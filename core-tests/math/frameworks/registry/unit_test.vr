@@ -1,0 +1,93 @@
+// =============================================================================
+// core-tests/math/frameworks/registry/unit_test.vr
+// =============================================================================
+//
+// `core/math/frameworks/registry.vr` —
+//   * FrameworkClass 3-variant ADT (Standard / VerifiedExtension / Experimental)
+//   * framework_class_as_text() text projection
+// =============================================================================
+
+mount core.math.frameworks.registry.{FrameworkClass, framework_class_as_text};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: FrameworkClass 3-variant
+// =============================================================================
+
+@test
+fn test_framework_class_standard_variant() {
+    let c: FrameworkClass = FrameworkClass.Standard;
+    assert(c is FrameworkClass.Standard);
+}
+
+@test
+fn test_framework_class_verified_extension_variant() {
+    let c: FrameworkClass = FrameworkClass.VerifiedExtension;
+    assert(c is FrameworkClass.VerifiedExtension);
+}
+
+@test
+fn test_framework_class_experimental_variant() {
+    let c: FrameworkClass = FrameworkClass.Experimental;
+    assert(c is FrameworkClass.Experimental);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_framework_class_standard_disjoint() {
+    let c: FrameworkClass = FrameworkClass.Standard;
+    assert(!(c is FrameworkClass.VerifiedExtension));
+    assert(!(c is FrameworkClass.Experimental));
+}
+
+@test
+fn test_framework_class_verified_extension_disjoint() {
+    let c: FrameworkClass = FrameworkClass.VerifiedExtension;
+    assert(!(c is FrameworkClass.Standard));
+    assert(!(c is FrameworkClass.Experimental));
+}
+
+@test
+fn test_framework_class_experimental_disjoint() {
+    let c: FrameworkClass = FrameworkClass.Experimental;
+    assert(!(c is FrameworkClass.Standard));
+    assert(!(c is FrameworkClass.VerifiedExtension));
+}
+
+// =============================================================================
+// Section 3: framework_class_as_text() projection
+// =============================================================================
+
+@test
+fn test_framework_class_as_text_standard() {
+    assert_eq(framework_class_as_text(FrameworkClass.Standard), "standard");
+}
+
+@test
+fn test_framework_class_as_text_verified_extension() {
+    assert_eq(
+        framework_class_as_text(FrameworkClass.VerifiedExtension),
+        "verified-extension",
+    );
+}
+
+@test
+fn test_framework_class_as_text_experimental() {
+    assert_eq(framework_class_as_text(FrameworkClass.Experimental), "experimental");
+}
+
+@test
+fn test_framework_class_as_text_pairwise_distinct() {
+    let s = framework_class_as_text(FrameworkClass.Standard);
+    let v = framework_class_as_text(FrameworkClass.VerifiedExtension);
+    let e = framework_class_as_text(FrameworkClass.Experimental);
+    assert(s != v);
+    assert(s != e);
+    assert(v != e);
+}
+
+fn main() {}
