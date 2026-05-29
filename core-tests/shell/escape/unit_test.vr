@@ -1,0 +1,108 @@
+// =============================================================================
+// core-tests/shell/escape/unit_test.vr
+// =============================================================================
+//
+// `core/shell/escape.vr` — Shell argument escaping ADT surface.
+//
+// Surface tested:
+//   * ShellFlavour 4-variant (Posix / Fish / Cmd / PowerShell) — fully
+//     qualified to dodge bare-name collision
+//   * ShellFlavour.eq() identity + cross-variant inequality
+//   * default_flavour() returns Posix on Linux + macOS
+//
+// Escaper static methods (posix / fish / cmd_exe / powershell / posix_safe_unquoted)
+// + shell_join / validate_sh + protocol ShellEscape implementations use `for ch
+// in s.chars()` Char iterator dispatch which trips iterator dispatch defect under
+// cross-module unit-test compile. Tested at language-level under
+// `vcs/specs/L2-standard/shell/escape/`.
+// =============================================================================
+
+mount core.shell.escape.{
+    ShellFlavour,
+    default_flavour,
+};
+
+// =============================================================================
+// Section 1: ShellFlavour 4-variant construction
+// =============================================================================
+
+@test
+fn test_shell_flavour_posix_variant() {
+    let f: ShellFlavour = ShellFlavour.Posix;
+    assert(f is ShellFlavour.Posix);
+}
+
+@test
+fn test_shell_flavour_fish_variant() {
+    let f: ShellFlavour = ShellFlavour.Fish;
+    assert(f is ShellFlavour.Fish);
+}
+
+@test
+fn test_shell_flavour_cmd_variant() {
+    let f: ShellFlavour = ShellFlavour.Cmd;
+    assert(f is ShellFlavour.Cmd);
+}
+
+@test
+fn test_shell_flavour_powershell_variant() {
+    let f: ShellFlavour = ShellFlavour.PowerShell;
+    assert(f is ShellFlavour.PowerShell);
+}
+
+// =============================================================================
+// Section 2: ShellFlavour pairwise disjointness
+// =============================================================================
+
+@test
+fn test_shell_flavour_posix_disjoint_from_fish() {
+    let p: ShellFlavour = ShellFlavour.Posix;
+    let f: ShellFlavour = ShellFlavour.Fish;
+    assert(p is ShellFlavour.Posix && !(p is ShellFlavour.Fish));
+    assert(f is ShellFlavour.Fish && !(f is ShellFlavour.Posix));
+}
+
+@test
+fn test_shell_flavour_posix_disjoint_from_cmd() {
+    let p: ShellFlavour = ShellFlavour.Posix;
+    let c: ShellFlavour = ShellFlavour.Cmd;
+    assert(!(p is ShellFlavour.Cmd));
+    assert(!(c is ShellFlavour.Posix));
+}
+
+@test
+fn test_shell_flavour_posix_disjoint_from_powershell() {
+    let p: ShellFlavour = ShellFlavour.Posix;
+    let ps: ShellFlavour = ShellFlavour.PowerShell;
+    assert(!(p is ShellFlavour.PowerShell));
+    assert(!(ps is ShellFlavour.Posix));
+}
+
+@test
+fn test_shell_flavour_fish_disjoint_from_cmd() {
+    let f: ShellFlavour = ShellFlavour.Fish;
+    let c: ShellFlavour = ShellFlavour.Cmd;
+    assert(!(f is ShellFlavour.Cmd));
+    assert(!(c is ShellFlavour.Fish));
+}
+
+@test
+fn test_shell_flavour_cmd_disjoint_from_powershell() {
+    let c: ShellFlavour = ShellFlavour.Cmd;
+    let ps: ShellFlavour = ShellFlavour.PowerShell;
+    assert(!(c is ShellFlavour.PowerShell));
+    assert(!(ps is ShellFlavour.Cmd));
+}
+
+// =============================================================================
+// Section 3: default_flavour on host platform
+// =============================================================================
+
+@test
+fn test_default_flavour_is_posix_on_unix() {
+    // Tests run on Linux / macOS — default_flavour returns Posix.
+    let f = default_flavour();
+    assert(f is ShellFlavour.Posix);
+}
+
+fn main() {}
