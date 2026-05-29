@@ -1,0 +1,103 @@
+// =============================================================================
+// core-tests/shell/dsl/git/unit_test.vr
+// =============================================================================
+//
+// `core/shell/dsl/git.vr` —
+//   * ForceMode 2-variant (Force / ForceWithLease)
+//   * GitLogFormat 5-variant (Oneline/Short/Medium/Full/Custom(Text))
+// =============================================================================
+
+mount core.shell.dsl.git.{ForceMode, GitLogFormat};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ForceMode 2-variant
+// =============================================================================
+
+@test
+fn test_force_mode_force_variant() {
+    let m: ForceMode = ForceMode.Force;
+    assert(m is ForceMode.Force);
+}
+
+@test
+fn test_force_mode_force_with_lease_variant() {
+    let m: ForceMode = ForceMode.ForceWithLease;
+    assert(m is ForceMode.ForceWithLease);
+}
+
+@test
+fn test_force_mode_force_disjoint() {
+    let m: ForceMode = ForceMode.Force;
+    assert(!(m is ForceMode.ForceWithLease));
+}
+
+@test
+fn test_force_mode_force_with_lease_disjoint() {
+    let m: ForceMode = ForceMode.ForceWithLease;
+    assert(!(m is ForceMode.Force));
+}
+
+// =============================================================================
+// Section 2: GitLogFormat 5-variant
+// =============================================================================
+
+@test
+fn test_git_log_format_oneline_variant() {
+    let f: GitLogFormat = GitLogFormat.Oneline;
+    assert(f is GitLogFormat.Oneline);
+}
+
+@test
+fn test_git_log_format_short_variant() {
+    let f: GitLogFormat = GitLogFormat.Short;
+    assert(f is GitLogFormat.Short);
+}
+
+@test
+fn test_git_log_format_medium_variant() {
+    let f: GitLogFormat = GitLogFormat.Medium;
+    assert(f is GitLogFormat.Medium);
+}
+
+@test
+fn test_git_log_format_full_variant() {
+    let f: GitLogFormat = GitLogFormat.Full;
+    assert(f is GitLogFormat.Full);
+}
+
+@test
+fn test_git_log_format_custom_variant() {
+    let f: GitLogFormat = GitLogFormat.Custom("%H %s".to_text());
+    assert(f is GitLogFormat.Custom);
+}
+
+@test
+fn test_git_log_format_custom_payload_round_trip() {
+    let f: GitLogFormat = GitLogFormat.Custom("%H %s%n%b".to_text());
+    match f {
+        GitLogFormat.Custom(s) => assert_eq(s, "%H %s%n%b"),
+        _ => panic("expected Custom"),
+    }
+}
+
+@test
+fn test_git_log_format_oneline_disjoint() {
+    let f: GitLogFormat = GitLogFormat.Oneline;
+    assert(!(f is GitLogFormat.Short));
+    assert(!(f is GitLogFormat.Medium));
+    assert(!(f is GitLogFormat.Full));
+    assert(!(f is GitLogFormat.Custom));
+}
+
+@test
+fn test_git_log_format_full_disjoint() {
+    let f: GitLogFormat = GitLogFormat.Full;
+    assert(!(f is GitLogFormat.Oneline));
+    assert(!(f is GitLogFormat.Short));
+    assert(!(f is GitLogFormat.Medium));
+    assert(!(f is GitLogFormat.Custom));
+}
+
+fn main() {}
