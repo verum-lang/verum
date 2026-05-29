@@ -1,0 +1,102 @@
+// =============================================================================
+// core-tests/logic/separation/unit_test.vr
+// =============================================================================
+//
+// `core/logic/separation.vr` — separation-logic Capability ADT.
+// =============================================================================
+
+mount core.logic.separation.{Capability, can_read};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Capability 4-variant ADT
+// =============================================================================
+
+@test
+fn test_capability_read_variant() {
+    let c: Capability = Capability.Read;
+    assert(c is Capability.Read);
+}
+
+@test
+fn test_capability_write_variant() {
+    let c: Capability = Capability.Write;
+    assert(c is Capability.Write);
+}
+
+@test
+fn test_capability_own_variant() {
+    let c: Capability = Capability.Own;
+    assert(c is Capability.Own);
+}
+
+@test
+fn test_capability_no_cap_variant() {
+    let c: Capability = Capability.NoCap;
+    assert(c is Capability.NoCap);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_capability_read_disjoint() {
+    let c: Capability = Capability.Read;
+    assert(!(c is Capability.Write));
+    assert(!(c is Capability.Own));
+    assert(!(c is Capability.NoCap));
+}
+
+@test
+fn test_capability_write_disjoint() {
+    let c: Capability = Capability.Write;
+    assert(!(c is Capability.Read));
+    assert(!(c is Capability.Own));
+    assert(!(c is Capability.NoCap));
+}
+
+@test
+fn test_capability_own_disjoint() {
+    let c: Capability = Capability.Own;
+    assert(!(c is Capability.Read));
+    assert(!(c is Capability.Write));
+    assert(!(c is Capability.NoCap));
+}
+
+@test
+fn test_capability_no_cap_disjoint() {
+    let c: Capability = Capability.NoCap;
+    assert(!(c is Capability.Read));
+    assert(!(c is Capability.Write));
+    assert(!(c is Capability.Own));
+}
+
+// =============================================================================
+// Section 3: can_read() permission lattice
+//
+//   Read / Write / Own all admit reading. Only NoCap rejects.
+// =============================================================================
+
+@test
+fn test_can_read_read_returns_true() {
+    assert_eq(can_read(Capability.Read), true);
+}
+
+@test
+fn test_can_read_write_returns_true() {
+    assert_eq(can_read(Capability.Write), true);
+}
+
+@test
+fn test_can_read_own_returns_true() {
+    assert_eq(can_read(Capability.Own), true);
+}
+
+@test
+fn test_can_read_no_cap_returns_false() {
+    assert_eq(can_read(Capability.NoCap), false);
+}
+
+fn main() {}
