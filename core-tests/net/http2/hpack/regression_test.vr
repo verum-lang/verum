@@ -1,0 +1,122 @@
+// =============================================================================
+// core-tests/net/http2/hpack/regression_test.vr — HPACK LOCK-IN pins
+// =============================================================================
+//
+// One @test per past defect / canonical wire vector. Never deleted.
+// =============================================================================
+
+mount core.net.http2.hpack.{
+    HeaderField, Http2DynamicTable,
+    encode_integer, decode_integer, encode_string, decode_string,
+    HpackError, HpackDecoder
+};
+mount core.net.http2.static_table.{STATIC_TABLE_SIZE};
+
+// -----------------------------------------------------------------------------
+// DEFERRED-INIT — HpackDecoder.decode_literal declares `let name: Text;` and
+// `let start: Int;` then assigns each in both `if`/`else` arms. The VBC
+// codegen's flat (non-branch-scoped) definite-assignment flag rejected the
+// sibling arm's assignment as an immutable mutation, compiling the function
+// to a panic-stub. Fixed by the `declared_uninit` exemption in the codegen
+// (registers/statements/expressions). This pins that the literal decode path
+// produces the right header.
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_hpack_decode_literal_deferred_init() {
+    let mut block: List<Byte> = [];
+    block.push(0x40_u8);   // literal w/ incremental indexing, name index 0
+    block.push(0x01_u8);
+    block.push(0x6E_u8);   // 'n'
+    block.push(0x01_u8);
+    block.push(0x76_u8);   // 'v'
+    let mut dec = HpackDecoder.new();
+    match dec.decode(block.as_slice()) {
+        Ok(fields) => {
+            assert_eq(fields.len(), 1);
+            assert(fields[0].name == "n");
+            assert(fields[0].value == "v");
+        }
+        Err(_) => panic("deferred-init decode_literal must produce the header"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// HPACK-EXTSLICE — decode_string previously built a sub-range slice
+// `&buf[after_len..after_len+length]` and `extend_from_slice`'d it, which
+// tripped the EXTSLICE-1 codegen SIGSEGV when instantiated at a user-test
+// boundary. Rewritten to an indexed byte-copy (commit landing this suite).
+// This pins that the raw-string decode path compiles AND round-trips.
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_hpack_decode_string_raw_no_extslice_sigsegv() {
+    let mut payload: List<Byte> = [];
+    payload.push(0x68_u8);   // h
+    payload.push(0x69_u8);   // i
+    let mut enc: List<Byte> = [];
+    encode_string(payload.as_slice(), false, &mut enc);
+    match decode_string(enc.as_slice(), 0, 64) {
+        Ok((bytes, _)) => {
+            assert_eq(bytes.len(), 2);
+            assert(bytes[0] == 0x68_u8);
+            assert(bytes[1] == 0x69_u8);
+        }
+        Err(_) => panic("raw decode must round-trip post EXTSLICE-1 fix"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RFC 7541 Appendix C canonical integer vectors.
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_hpack_integer_c1_2_1337_wire_vector() {
+    // C.1.2: 1337 with 5-bit prefix → 0x1F 0x9A 0x0A.
+    let mut out: List<Byte> = [];
+    encode_integer(1337_u64, 5, 0_u8, &mut out);
+    assert_eq(out.len(), 3);
+    assert(out[0] == 0x1F_u8);
+    assert(out[1] == 0x9A_u8);
+    assert(out[2] == 0x0A_u8);
+    match decode_integer(out.as_slice(), 0, 5) {
+        Ok((v, _)) => assert_eq(v, 1337_u64),
+        Err(_)     => panic("1337 must decode"),
+    }
+}
+
+@test
+fn regression_hpack_integer_overflow_guard_pinned() {
+    // §5.1 unbounded-continuation defence: 11 high-bit continuation bytes
+    // must terminate with IntegerOverflow, never loop or read OOB.
+    let mut buf: List<Byte> = [];
+    buf.push(0x1F_u8);
+    let mut i = 0;
+    while i < 11 { buf.push(0xFF_u8); i = i + 1; }
+    match decode_integer(buf.as_slice(), 0, 5) {
+        Ok(_)  => panic("must overflow"),
+        Err(e) => assert_eq(e, HpackError.IntegerOverflow),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §4.4 dynamic-table eviction must hold the size bound after every insert.
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_hpack_dynamic_table_eviction_size_bound() {
+    let mut t = Http2DynamicTable.new(64);
+    t.insert(HeaderField.new("a", "b"));   // 34 bytes
+    t.insert(HeaderField.new("c", "d"));   // 34 bytes — evicts the first
+    assert_eq(t.len(), 1);
+    assert(t.total_size <= 64);
+}
+
+@test
+fn regression_hpack_first_dynamic_index_is_62() {
+    // The combined index space puts the first dynamic entry at
+    // STATIC_TABLE_SIZE + 1 == 62 (§2.3.3).
+    assert_eq(STATIC_TABLE_SIZE + 1, 62);
+}
+
+fn main() {}

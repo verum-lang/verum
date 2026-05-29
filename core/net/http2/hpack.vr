@@ -279,17 +279,26 @@ public fn decode_string(buf: &[Byte], pos: Int, max_length: Int)
     if length > max_length || after_len + length > buf.len() {
         return Result.Err(HpackError.Truncated);
     }
-    let raw = &buf[after_len..after_len + length];
+    // EXTSLICE-1 discipline (see internal/website defect-class-catalogue):
+    // sub-range slice expressions `&buf[a..b]` trip a codegen SIGSEGV when
+    // this helper is instantiated at a user-test boundary. Materialise the
+    // raw window with an indexed byte-copy into an owned List instead — the
+    // resulting `.as_slice()` is a full-slice view, which lowers cleanly.
+    let end = after_len + length;
+    let mut raw: List<Byte> = List.with_capacity(length);
+    let mut k = after_len;
+    while k < end {
+        raw.push(buf[k]);
+        k = k + 1;
+    }
     if huffman_bit {
         let mut out: List<Byte> = List.with_capacity(length * 2);
-        match core.net.http2.huffman.decode(raw, max_length, &mut out) {
-            Result.Ok(_) => Result.Ok((out, after_len + length)),
+        match core.net.http2.huffman.decode(raw.as_slice(), max_length, &mut out) {
+            Result.Ok(_) => Result.Ok((out, end)),
             Result.Err(_) => Result.Err(HpackError.InvalidHuffman),
         }
     } else {
-        let mut out: List<Byte> = List.with_capacity(length);
-        out.extend_from_slice(raw);
-        Result.Ok((out, after_len + length))
+        Result.Ok((raw, end))
     }
 }
 

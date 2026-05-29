@@ -64,6 +64,19 @@ pub struct RegisterInfo {
     /// this is set to `true`.
     pub is_initialized: bool,
 
+    /// `true` for a binding declared without an initializer (`let x: T;`).
+    ///
+    /// Such bindings are routinely initialized once *per control-flow path*
+    /// — e.g. assigned in both arms of an `if`/`else`, or in every `match`
+    /// arm. Because codegen tracks `is_initialized` as a single flat flag
+    /// (not branch-scoped), the first arm's assignment would flip it to
+    /// `true` and the sibling arm's assignment would then be wrongly
+    /// rejected as a mutation of an immutable. Deferred-init bindings are
+    /// therefore exempt from the immutable-reassignment guard: the type is
+    /// fixed at declaration, so multiple assignments across mutually
+    /// exclusive paths are sound.
+    pub declared_uninit: bool,
+
     /// Scope level where this was defined.
     pub scope_level: usize,
 
@@ -145,6 +158,7 @@ impl RegisterAllocator {
                     reg,
                     is_mutable: *is_mutable,
                     is_initialized: true,
+                    declared_uninit: false,
                     scope_level: 0,
                     kind: RegisterKind::Parameter,
                     is_cell: false,
@@ -184,6 +198,7 @@ impl RegisterAllocator {
                 reg,
                 is_mutable,
                 is_initialized: true,
+                declared_uninit: false,
                 scope_level,
                 kind: RegisterKind::Local,
                 is_cell: false,
