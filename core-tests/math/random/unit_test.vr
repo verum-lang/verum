@@ -1,0 +1,107 @@
+// =============================================================================
+// core-tests/math/random/unit_test.vr
+// =============================================================================
+//
+// `core/math/random.vr` — PRNG keys + generator state records.
+//
+// Surface tested:
+//   * RandomKey 2-field record (high, low: UInt64) direct construction
+//   * XorShift128 2-field record (s0, s1: UInt64) direct construction
+//   * PCG 2-field record (state, inc: UInt64) direct construction
+//
+// new() factory methods use splitmix64 internally — tested indirectly via the
+// downstream `uniform_01` / `normal_01` distributions at language level under
+// `vcs/specs/L2-standard/math/random/`.
+// =============================================================================
+
+mount core.math.random.{
+    RandomKey, XorShift128, PCG,
+};
+
+// =============================================================================
+// Section 1: RandomKey record direct construction
+// =============================================================================
+
+@test
+fn test_random_key_construct_zero_zero() {
+    let k: RandomKey = RandomKey { high: 0_u64, low: 0_u64 };
+    assert_eq(k.high, 0_u64);
+    assert_eq(k.low, 0_u64);
+}
+
+@test
+fn test_random_key_preserves_high() {
+    let k: RandomKey = RandomKey { high: 0xDEADBEEFCAFEBABE_u64, low: 0_u64 };
+    assert_eq(k.high, 0xDEADBEEFCAFEBABE_u64);
+}
+
+@test
+fn test_random_key_preserves_low() {
+    let k: RandomKey = RandomKey { high: 0_u64, low: 0x0123456789ABCDEF_u64 };
+    assert_eq(k.low, 0x0123456789ABCDEF_u64);
+}
+
+@test
+fn test_random_key_fields_independent() {
+    let k1: RandomKey = RandomKey { high: 1_u64, low: 0_u64 };
+    let k2: RandomKey = RandomKey { high: 0_u64, low: 1_u64 };
+    assert(k1.high != k2.high);
+    assert(k1.low != k2.low);
+}
+
+// =============================================================================
+// Section 2: XorShift128 record direct construction
+// =============================================================================
+
+@test
+fn test_xorshift128_construct_zero_zero() {
+    let s: XorShift128 = XorShift128 { s0: 0_u64, s1: 0_u64 };
+    assert_eq(s.s0, 0_u64);
+    assert_eq(s.s1, 0_u64);
+}
+
+@test
+fn test_xorshift128_preserves_s0() {
+    let s: XorShift128 = XorShift128 { s0: 0xAAAAAAAAAAAAAAAA_u64, s1: 0_u64 };
+    assert_eq(s.s0, 0xAAAAAAAAAAAAAAAA_u64);
+}
+
+@test
+fn test_xorshift128_preserves_s1() {
+    let s: XorShift128 = XorShift128 { s0: 0_u64, s1: 0x5555555555555555_u64 };
+    assert_eq(s.s1, 0x5555555555555555_u64);
+}
+
+// =============================================================================
+// Section 3: PCG record direct construction
+// =============================================================================
+
+@test
+fn test_pcg_construct_zero_zero() {
+    let p: PCG = PCG { state: 0_u64, inc: 0_u64 };
+    assert_eq(p.state, 0_u64);
+    assert_eq(p.inc, 0_u64);
+}
+
+@test
+fn test_pcg_preserves_state() {
+    let p: PCG = PCG { state: 0x123456789ABCDEF0_u64, inc: 0_u64 };
+    assert_eq(p.state, 0x123456789ABCDEF0_u64);
+}
+
+@test
+fn test_pcg_preserves_inc() {
+    let p: PCG = PCG { state: 0_u64, inc: 0x0F0F0F0F0F0F0F0F_u64 };
+    assert_eq(p.inc, 0x0F0F0F0F0F0F0F0F_u64);
+}
+
+@test
+fn test_pcg_inc_canonical_odd() {
+    // PCG.new uses `(stream << 1) | 1` to force odd `inc` — the
+    // increment must be odd for the LCG cycle to cover full 2^64.
+    let p: PCG = PCG { state: 0_u64, inc: 1_u64 };
+    // Lowest bit set ⇒ odd.
+    assert_eq(p.inc & 1_u64, 1_u64);
+}
+
+fn main() {}
