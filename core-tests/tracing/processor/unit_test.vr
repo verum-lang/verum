@@ -1,0 +1,102 @@
+// =============================================================================
+// core-tests/tracing/processor/unit_test.vr
+// =============================================================================
+//
+// `core/tracing/processor.vr` — OTel BatchConfig record.
+// =============================================================================
+
+mount core.tracing.processor.BatchConfig;
+mount core.time.duration.Duration;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: BatchConfig direct record construction
+// =============================================================================
+
+@test
+fn test_batch_config_direct_construction_defaults() {
+    // Mirror of `BatchConfig.default()` ctor with the OTel-spec values.
+    let c: BatchConfig = BatchConfig {
+        max_queue_size: 2048,
+        scheduled_delay: Duration.from_secs(5),
+        max_export_batch_size: 512,
+        export_timeout: Duration.from_secs(30),
+    };
+    assert_eq(c.max_queue_size, 2048);
+    assert_eq(c.max_export_batch_size, 512);
+}
+
+@test
+fn test_batch_config_direct_construction_small_queue() {
+    let c: BatchConfig = BatchConfig {
+        max_queue_size: 64,
+        scheduled_delay: Duration.from_secs(1),
+        max_export_batch_size: 16,
+        export_timeout: Duration.from_secs(5),
+    };
+    assert_eq(c.max_queue_size, 64);
+    assert_eq(c.max_export_batch_size, 16);
+}
+
+@test
+fn test_batch_config_direct_construction_large_queue() {
+    let c: BatchConfig = BatchConfig {
+        max_queue_size: 65536,
+        scheduled_delay: Duration.from_secs(10),
+        max_export_batch_size: 2048,
+        export_timeout: Duration.from_secs(60),
+    };
+    assert_eq(c.max_queue_size, 65536);
+    assert_eq(c.max_export_batch_size, 2048);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_batch_config_queue_size_at_least_batch_size() {
+    // Queue must accommodate at least one full export batch.
+    let c: BatchConfig = BatchConfig {
+        max_queue_size: 2048,
+        scheduled_delay: Duration.from_secs(5),
+        max_export_batch_size: 512,
+        export_timeout: Duration.from_secs(30),
+    };
+    assert(c.max_queue_size >= c.max_export_batch_size);
+}
+
+@test
+fn test_batch_config_queue_size_is_4x_batch_size() {
+    // OTel default: 2048 / 512 = 4.
+    let c: BatchConfig = BatchConfig {
+        max_queue_size: 2048,
+        scheduled_delay: Duration.from_secs(5),
+        max_export_batch_size: 512,
+        export_timeout: Duration.from_secs(30),
+    };
+    assert_eq(c.max_queue_size, c.max_export_batch_size * 4);
+}
+
+@test
+fn test_batch_config_field_independence() {
+    let a: BatchConfig = BatchConfig {
+        max_queue_size: 100,
+        scheduled_delay: Duration.from_secs(1),
+        max_export_batch_size: 10,
+        export_timeout: Duration.from_secs(5),
+    };
+    let b: BatchConfig = BatchConfig {
+        max_queue_size: 200,
+        scheduled_delay: Duration.from_secs(2),
+        max_export_batch_size: 20,
+        export_timeout: Duration.from_secs(10),
+    };
+    assert_eq(a.max_queue_size, 100);
+    assert_eq(b.max_queue_size, 200);
+    assert_eq(a.max_export_batch_size, 10);
+    assert_eq(b.max_export_batch_size, 20);
+}
+
+fn main() {}
