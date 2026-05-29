@@ -1,0 +1,85 @@
+// =============================================================================
+// core-tests/term/widget/textarea/unit_test.vr
+// =============================================================================
+//
+// `core/term/widget/textarea.vr` —
+//   * WrapMode 3-variant (NoWrap / CharWrap / WordWrap)
+//   * Pos record (line, col)
+// =============================================================================
+
+mount core.term.widget.textarea.{WrapMode, Pos};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: WrapMode 3-variant
+// =============================================================================
+
+@test
+fn test_wrap_mode_nowrap_variant() {
+    let m: WrapMode = WrapMode.NoWrap;
+    assert(m is WrapMode.NoWrap);
+}
+
+@test
+fn test_wrap_mode_charwrap_variant() {
+    let m: WrapMode = WrapMode.CharWrap;
+    assert(m is WrapMode.CharWrap);
+}
+
+@test
+fn test_wrap_mode_wordwrap_variant() {
+    let m: WrapMode = WrapMode.WordWrap;
+    assert(m is WrapMode.WordWrap);
+}
+
+@test
+fn test_wrap_mode_nowrap_disjoint() {
+    let m: WrapMode = WrapMode.NoWrap;
+    assert(!(m is WrapMode.CharWrap));
+    assert(!(m is WrapMode.WordWrap));
+}
+
+@test
+fn test_wrap_mode_charwrap_disjoint() {
+    let m: WrapMode = WrapMode.CharWrap;
+    assert(!(m is WrapMode.NoWrap));
+    assert(!(m is WrapMode.WordWrap));
+}
+
+@test
+fn test_wrap_mode_wordwrap_disjoint() {
+    let m: WrapMode = WrapMode.WordWrap;
+    assert(!(m is WrapMode.NoWrap));
+    assert(!(m is WrapMode.CharWrap));
+}
+
+// =============================================================================
+// Section 2: Pos record
+// =============================================================================
+
+@test
+fn test_pos_origin() {
+    let p: Pos = Pos { line: 0, col: 0 };
+    assert_eq(p.line, 0);
+    assert_eq(p.col, 0);
+}
+
+@test
+fn test_pos_arbitrary_coord() {
+    let p: Pos = Pos { line: 42, col: 13 };
+    assert_eq(p.line, 42);
+    assert_eq(p.col, 13);
+}
+
+@test
+fn test_pos_field_independence() {
+    let a: Pos = Pos { line: 1, col: 2 };
+    let b: Pos = Pos { line: 3, col: 4 };
+    assert_eq(a.line, 1);
+    assert_eq(b.line, 3);
+    assert_eq(a.col, 2);
+    assert_eq(b.col, 4);
+}
+
+fn main() {}
