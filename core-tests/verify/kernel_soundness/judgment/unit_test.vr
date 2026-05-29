@@ -1,0 +1,172 @@
+// =============================================================================
+// core-tests/verify/kernel_soundness/judgment/unit_test.vr
+// =============================================================================
+//
+// `core/verify/kernel_soundness/judgment.vr` —
+//   * KernelRule 35-variant ADT — sample bare-variant ctors per category
+//     (Structural 9 / Cubical 6 / Refinement 4 / Quotient 3 /
+//      Inductive 3 / SMT-Axiom 2 / Diakrisis 11 / Cohesive 3)
+//   * kernel_rule_name() text projection — stable cross-export key
+// =============================================================================
+
+mount core.verify.kernel_soundness.judgment.{KernelRule, kernel_rule_name};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: KernelRule structural category (sample)
+// =============================================================================
+
+@test
+fn test_kernel_rule_kvar_variant() {
+    let r: KernelRule = KernelRule.KVar;
+    assert(r is KernelRule.KVar);
+}
+
+@test
+fn test_kernel_rule_kuniv_variant() {
+    let r: KernelRule = KernelRule.KUniv;
+    assert(r is KernelRule.KUniv);
+}
+
+@test
+fn test_kernel_rule_kpi_form_variant() {
+    let r: KernelRule = KernelRule.KPiForm;
+    assert(r is KernelRule.KPiForm);
+}
+
+@test
+fn test_kernel_rule_klam_intro_variant() {
+    let r: KernelRule = KernelRule.KLamIntro;
+    assert(r is KernelRule.KLamIntro);
+}
+
+@test
+fn test_kernel_rule_kapp_elim_variant() {
+    let r: KernelRule = KernelRule.KAppElim;
+    assert(r is KernelRule.KAppElim);
+}
+
+// =============================================================================
+// Section 2: KernelRule cubical / refinement / quotient categories (sample)
+// =============================================================================
+
+@test
+fn test_kernel_rule_kpath_ty_form_variant() {
+    let r: KernelRule = KernelRule.KPathTyForm;
+    assert(r is KernelRule.KPathTyForm);
+}
+
+@test
+fn test_kernel_rule_krefl_intro_variant() {
+    let r: KernelRule = KernelRule.KReflIntro;
+    assert(r is KernelRule.KReflIntro);
+}
+
+@test
+fn test_kernel_rule_krefine_variant() {
+    let r: KernelRule = KernelRule.KRefine;
+    assert(r is KernelRule.KRefine);
+}
+
+@test
+fn test_kernel_rule_kquot_form_variant() {
+    let r: KernelRule = KernelRule.KQuotForm;
+    assert(r is KernelRule.KQuotForm);
+}
+
+// =============================================================================
+// Section 3: KernelRule SMT/Axiom + diakrisis + cohesive (sample)
+// =============================================================================
+
+@test
+fn test_kernel_rule_ksmt_variant() {
+    let r: KernelRule = KernelRule.KSmt;
+    assert(r is KernelRule.KSmt);
+}
+
+@test
+fn test_kernel_rule_kfwax_variant() {
+    let r: KernelRule = KernelRule.KFwAx;
+    assert(r is KernelRule.KFwAx);
+}
+
+@test
+fn test_kernel_rule_keps_mu_variant() {
+    let r: KernelRule = KernelRule.KEpsMu;
+    assert(r is KernelRule.KEpsMu);
+}
+
+@test
+fn test_kernel_rule_kshape_variant() {
+    let r: KernelRule = KernelRule.KShape;
+    assert(r is KernelRule.KShape);
+}
+
+@test
+fn test_kernel_rule_kflat_variant() {
+    let r: KernelRule = KernelRule.KFlat;
+    assert(r is KernelRule.KFlat);
+}
+
+@test
+fn test_kernel_rule_ksharp_variant() {
+    let r: KernelRule = KernelRule.KSharp;
+    assert(r is KernelRule.KSharp);
+}
+
+// =============================================================================
+// Section 4: KernelRule cross-category disjointness
+// =============================================================================
+
+@test
+fn test_kernel_rule_kvar_disjoint_from_other_categories() {
+    let r: KernelRule = KernelRule.KVar;
+    assert(!(r is KernelRule.KSmt));
+    assert(!(r is KernelRule.KRefine));
+    assert(!(r is KernelRule.KShape));
+}
+
+@test
+fn test_kernel_rule_kshape_disjoint_from_other_modals() {
+    let r: KernelRule = KernelRule.KShape;
+    assert(!(r is KernelRule.KFlat));
+    assert(!(r is KernelRule.KSharp));
+    assert(!(r is KernelRule.KModalBox));
+}
+
+// =============================================================================
+// Section 5: kernel_rule_name() text projection — stable cross-export key
+// =============================================================================
+
+@test
+fn test_kernel_rule_name_kvar() {
+    assert_eq(kernel_rule_name(KernelRule.KVar), "K_Var");
+}
+
+@test
+fn test_kernel_rule_name_kuniv() {
+    assert_eq(kernel_rule_name(KernelRule.KUniv), "K_Univ");
+}
+
+@test
+fn test_kernel_rule_name_kpi_form() {
+    assert_eq(kernel_rule_name(KernelRule.KPiForm), "K_Pi_Form");
+}
+
+@test
+fn test_kernel_rule_name_klam_intro() {
+    assert_eq(kernel_rule_name(KernelRule.KLamIntro), "K_Lam_Intro");
+}
+
+@test
+fn test_kernel_rule_name_kapp_elim() {
+    assert_eq(kernel_rule_name(KernelRule.KAppElim), "K_App_Elim");
+}
+
+@test
+fn test_kernel_rule_name_kvar_distinct_from_kuniv() {
+    assert(kernel_rule_name(KernelRule.KVar) != kernel_rule_name(KernelRule.KUniv));
+}
+
+fn main() {}
