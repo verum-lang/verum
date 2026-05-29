@@ -1,0 +1,112 @@
+// =============================================================================
+// core-tests/cli/frontmatter/unit_test.vr
+// =============================================================================
+//
+// `core/cli/frontmatter.vr` —
+//   * FrontmatterError 4-variant ADT
+//   * Frontmatter.empty() constructor
+// =============================================================================
+
+mount core.cli.frontmatter.{Frontmatter, FrontmatterError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: FrontmatterError 4-variant ctor
+// =============================================================================
+
+@test
+fn test_frontmatter_error_no_frontmatter_variant() {
+    let e: FrontmatterError = FrontmatterError.NoFrontmatter;
+    assert(e is FrontmatterError.NoFrontmatter);
+}
+
+@test
+fn test_frontmatter_error_missing_closing_variant() {
+    let e: FrontmatterError = FrontmatterError.MissingClosing;
+    assert(e is FrontmatterError.MissingClosing);
+}
+
+@test
+fn test_frontmatter_error_invalid_line_variant() {
+    let e: FrontmatterError = FrontmatterError.InvalidLine(3, "= no key".to_text());
+    assert(e is FrontmatterError.InvalidLine);
+}
+
+@test
+fn test_frontmatter_error_duplicate_key_variant() {
+    let e: FrontmatterError = FrontmatterError.DuplicateKey("name".to_text());
+    assert(e is FrontmatterError.DuplicateKey);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_frontmatter_error_no_frontmatter_disjoint() {
+    let e: FrontmatterError = FrontmatterError.NoFrontmatter;
+    assert(!(e is FrontmatterError.MissingClosing));
+    assert(!(e is FrontmatterError.InvalidLine));
+    assert(!(e is FrontmatterError.DuplicateKey));
+}
+
+@test
+fn test_frontmatter_error_missing_closing_disjoint() {
+    let e: FrontmatterError = FrontmatterError.MissingClosing;
+    assert(!(e is FrontmatterError.NoFrontmatter));
+    assert(!(e is FrontmatterError.InvalidLine));
+    assert(!(e is FrontmatterError.DuplicateKey));
+}
+
+@test
+fn test_frontmatter_error_invalid_line_disjoint() {
+    let e: FrontmatterError = FrontmatterError.InvalidLine(1, "x".to_text());
+    assert(!(e is FrontmatterError.NoFrontmatter));
+    assert(!(e is FrontmatterError.MissingClosing));
+    assert(!(e is FrontmatterError.DuplicateKey));
+}
+
+@test
+fn test_frontmatter_error_duplicate_key_disjoint() {
+    let e: FrontmatterError = FrontmatterError.DuplicateKey("x".to_text());
+    assert(!(e is FrontmatterError.NoFrontmatter));
+    assert(!(e is FrontmatterError.MissingClosing));
+    assert(!(e is FrontmatterError.InvalidLine));
+}
+
+// =============================================================================
+// Section 3: Frontmatter.empty() — initial state
+// =============================================================================
+
+@test
+fn test_frontmatter_empty_name_is_none() {
+    let f: Frontmatter = Frontmatter.empty();
+    assert(f.name is Maybe.None);
+}
+
+@test
+fn test_frontmatter_empty_version_is_none() {
+    let f: Frontmatter = Frontmatter.empty();
+    assert(f.version is Maybe.None);
+}
+
+@test
+fn test_frontmatter_empty_description_is_none() {
+    let f: Frontmatter = Frontmatter.empty();
+    assert(f.description is Maybe.None);
+}
+
+@test
+fn test_frontmatter_empty_requires_verum_is_none() {
+    let f: Frontmatter = Frontmatter.empty();
+    assert(f.requires_verum is Maybe.None);
+}
+
+@test
+fn test_frontmatter_empty_requires_cogs_is_empty_list() {
+    let f: Frontmatter = Frontmatter.empty();
+    assert_eq(f.requires_cogs.len(), 0);
+}
+
+fn main() {}
