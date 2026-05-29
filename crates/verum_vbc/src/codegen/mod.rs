@@ -13527,19 +13527,44 @@ impl VbcCodegen {
                 && let Some(td) = self.types.iter().find(|t| t.id == tid)
                 && matches!(td.kind, crate::types::TypeKind::Record)
             {
-                let field_id = self.field_name_indices.get(field_name).copied();
+                // **Authoritative resolution: compare the field's actual
+                // NAME STRING** to `field_name`.  This is the single
+                // correct source — each `FieldDescriptor.name` is a
+                // `StringId` into `self.ctx.strings`, so the positional
+                // index of the matching string IS the slot index.
+                //
+                // CRITICAL (closes the cross-module +N field-shift defect
+                // class / D2 / CLASS-9): the previous primary loop compared
+                // `fd.name.0` (a `ctx.strings` StringId) against
+                // `field_name_indices[field_name]` (a value from the
+                // SEPARATE global field-name intern table).  Those two
+                // numbering namespaces are unrelated; the numeric equality
+                // produced FALSE positives whenever the ids coincided —
+                // e.g. `UseAfterFreeError`'s `expected_epoch` (slot 2)
+                // false-matched `td.fields[0]` (`expected_gen`) and
+                // resolved to index 0, so the precompiled `.new` ctor wrote
+                // both fields to slot 0 (last-write-wins => slot 0 held the
+                // epoch value).  Every record whose fields' two id
+                // namespaces collided silently mis-laid out at stdlib
+                // precompile.  String comparison cannot false-positive.
                 for (idx, fd) in td.fields.iter().enumerate() {
-                    if Some(fd.name.0) == field_id {
+                    if let Some(fname) = self.ctx.strings.get(fd.name.0 as usize)
+                        && fname == field_name
+                    {
                         return idx as u32;
                     }
                 }
-                // Also try lookup by interned name string — covers cases
-                // where field_name_indices race ahead of the descriptor's
-                // own name interning.
+                // Fallback ONLY when the descriptor's field-name strings
+                // are not present in `ctx.strings` (archive-loaded
+                // descriptors whose StringIds index a foreign table).
+                // Numeric id match is unsound (see above) but is better
+                // than falling through to the global-intern fallback when
+                // no string is available; gated behind the string-miss so
+                // it can never override a correct string match.
+                let field_id = self.field_name_indices.get(field_name).copied();
                 for (idx, fd) in td.fields.iter().enumerate() {
-                    if let Some(fname) =
-                        self.ctx.strings.get(fd.name.0 as usize)
-                        && fname == field_name
+                    if self.ctx.strings.get(fd.name.0 as usize).is_none()
+                        && Some(fd.name.0) == field_id
                     {
                         return idx as u32;
                     }

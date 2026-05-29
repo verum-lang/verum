@@ -242,8 +242,10 @@ fn test_use_after_free_error_record_construction() {
 // `audit.md §6` + memory `use_after_free_error_field_shift_2026-05-27.md`
 // for the full diagnostic trace.
 
+// Un-@ignore'd 2026-05-29: D2/CLASS-9 closed (resolve_field_index
+// descriptor-path string-comparison fix). Cross-module `.new()`
+// constructor field round-trip now correct.
 @test
-@ignore
 fn test_use_after_free_error_new_constructor_round_trip_pinned_by_collision() {
     let e: UseAfterFreeError = UseAfterFreeError.new(
         100 as UInt32,
