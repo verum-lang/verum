@@ -1,0 +1,69 @@
+// =============================================================================
+// core-tests/term/widget/notification/unit_test.vr
+// =============================================================================
+//
+// `core/term/widget/notification.vr` —
+//   * NotificationLevel 4-variant (Info / Warning / Error / Success)
+// =============================================================================
+
+mount core.term.widget.notification.NotificationLevel;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+@test
+fn test_notification_level_info_variant() {
+    let l: NotificationLevel = NotificationLevel.Info;
+    assert(l is NotificationLevel.Info);
+}
+
+@test
+fn test_notification_level_warning_variant() {
+    let l: NotificationLevel = NotificationLevel.Warning;
+    assert(l is NotificationLevel.Warning);
+}
+
+@test
+fn test_notification_level_error_variant() {
+    let l: NotificationLevel = NotificationLevel.Error;
+    assert(l is NotificationLevel.Error);
+}
+
+@test
+fn test_notification_level_success_variant() {
+    let l: NotificationLevel = NotificationLevel.Success;
+    assert(l is NotificationLevel.Success);
+}
+
+@test
+fn test_notification_level_info_disjoint() {
+    let l: NotificationLevel = NotificationLevel.Info;
+    assert(!(l is NotificationLevel.Warning));
+    assert(!(l is NotificationLevel.Error));
+    assert(!(l is NotificationLevel.Success));
+}
+
+@test
+fn test_notification_level_warning_disjoint() {
+    let l: NotificationLevel = NotificationLevel.Warning;
+    assert(!(l is NotificationLevel.Info));
+    assert(!(l is NotificationLevel.Error));
+    assert(!(l is NotificationLevel.Success));
+}
+
+@test
+fn test_notification_level_error_disjoint() {
+    let l: NotificationLevel = NotificationLevel.Error;
+    assert(!(l is NotificationLevel.Info));
+    assert(!(l is NotificationLevel.Warning));
+    assert(!(l is NotificationLevel.Success));
+}
+
+@test
+fn test_notification_level_success_disjoint() {
+    let l: NotificationLevel = NotificationLevel.Success;
+    assert(!(l is NotificationLevel.Info));
+    assert(!(l is NotificationLevel.Warning));
+    assert(!(l is NotificationLevel.Error));
+}
+
+fn main() {}

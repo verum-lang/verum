@@ -1,0 +1,37 @@
+// =============================================================================
+// core-tests/term/widget/split/unit_test.vr
+// =============================================================================
+//
+// `core/term/widget/split.vr` —
+//   * SplitOrientation 2-variant (Horizontal / Vertical)
+// =============================================================================
+
+mount core.term.widget.split.SplitOrientation;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+@test
+fn test_split_orientation_horizontal_variant() {
+    let o: SplitOrientation = SplitOrientation.Horizontal;
+    assert(o is SplitOrientation.Horizontal);
+}
+
+@test
+fn test_split_orientation_vertical_variant() {
+    let o: SplitOrientation = SplitOrientation.Vertical;
+    assert(o is SplitOrientation.Vertical);
+}
+
+@test
+fn test_split_orientation_horizontal_disjoint() {
+    let o: SplitOrientation = SplitOrientation.Horizontal;
+    assert(!(o is SplitOrientation.Vertical));
+}
+
+@test
+fn test_split_orientation_vertical_disjoint() {
+    let o: SplitOrientation = SplitOrientation.Vertical;
+    assert(!(o is SplitOrientation.Horizontal));
+}
+
+fn main() {}
