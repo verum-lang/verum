@@ -88,7 +88,6 @@ fn regression_lb_pool_skips_unhealthy_upstreams() {
     assert(p.pick(0).is_some());
 }
 
-@ignore("LB-3: weight=0 clamp at line 153 (weight < 1 -> 1). With in_flight=5 and weight=0, score=(5*1000)/1=5000 (not div by zero).")
 @test
 fn regression_weighted_least_conn_zero_weight_clamps() {
     let upstreams: List<Upstream> = List.new();
