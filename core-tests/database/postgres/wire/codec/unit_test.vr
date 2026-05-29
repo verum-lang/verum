@@ -1,0 +1,188 @@
+// =============================================================================
+// core-tests/database/postgres/wire/codec/unit_test.vr
+// =============================================================================
+//
+// `core/database/postgres/wire/codec.vr` — PostgreSQL canonical OID table.
+// =============================================================================
+
+mount core.database.postgres.wire.codec.{
+    PG_TYPE_BOOL, PG_TYPE_BYTEA, PG_TYPE_CHAR, PG_TYPE_NAME,
+    PG_TYPE_INT8, PG_TYPE_INT2, PG_TYPE_INT4,
+    PG_TYPE_TEXT, PG_TYPE_OID, PG_TYPE_JSON,
+    PG_TYPE_FLOAT4, PG_TYPE_FLOAT8,
+    PG_TYPE_BPCHAR, PG_TYPE_VARCHAR,
+    PG_TYPE_DATE, PG_TYPE_TIME, PG_TYPE_TIMESTAMP,
+    PG_TYPE_TIMESTAMPTZ, PG_TYPE_INTERVAL,
+    PG_TYPE_NUMERIC, PG_TYPE_UUID,
+    PG_TYPE_JSONB, PG_TYPE_TSVECTOR, PG_TYPE_INET,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Low-OID core types (1-30)
+//
+//   PG OID assignments are stable across versions — drift would
+//   silently break wire-format compatibility.
+// =============================================================================
+
+@test
+fn test_pg_type_bool_canonical_value() {
+    assert_eq(PG_TYPE_BOOL, 16);
+}
+
+@test
+fn test_pg_type_bytea_canonical_value() {
+    assert_eq(PG_TYPE_BYTEA, 17);
+}
+
+@test
+fn test_pg_type_char_canonical_value() {
+    assert_eq(PG_TYPE_CHAR, 18);
+}
+
+@test
+fn test_pg_type_name_canonical_value() {
+    assert_eq(PG_TYPE_NAME, 19);
+}
+
+@test
+fn test_pg_type_int8_canonical_value() {
+    assert_eq(PG_TYPE_INT8, 20);
+}
+
+@test
+fn test_pg_type_int2_canonical_value() {
+    assert_eq(PG_TYPE_INT2, 21);
+}
+
+@test
+fn test_pg_type_int4_canonical_value() {
+    assert_eq(PG_TYPE_INT4, 23);
+}
+
+@test
+fn test_pg_type_text_canonical_value() {
+    assert_eq(PG_TYPE_TEXT, 25);
+}
+
+@test
+fn test_pg_type_oid_canonical_value() {
+    assert_eq(PG_TYPE_OID, 26);
+}
+
+// =============================================================================
+// Section 2: Mid-OID extended types
+// =============================================================================
+
+@test
+fn test_pg_type_json_canonical_value() {
+    assert_eq(PG_TYPE_JSON, 114);
+}
+
+@test
+fn test_pg_type_inet_canonical_value() {
+    assert_eq(PG_TYPE_INET, 869);
+}
+
+@test
+fn test_pg_type_float4_canonical_value() {
+    assert_eq(PG_TYPE_FLOAT4, 700);
+}
+
+@test
+fn test_pg_type_float8_canonical_value() {
+    assert_eq(PG_TYPE_FLOAT8, 701);
+}
+
+@test
+fn test_pg_type_bpchar_canonical_value() {
+    // CHAR(N) blank-padded.
+    assert_eq(PG_TYPE_BPCHAR, 1042);
+}
+
+@test
+fn test_pg_type_varchar_canonical_value() {
+    assert_eq(PG_TYPE_VARCHAR, 1043);
+}
+
+// =============================================================================
+// Section 3: Temporal types
+// =============================================================================
+
+@test
+fn test_pg_type_date_canonical_value() {
+    assert_eq(PG_TYPE_DATE, 1082);
+}
+
+@test
+fn test_pg_type_time_canonical_value() {
+    assert_eq(PG_TYPE_TIME, 1083);
+}
+
+@test
+fn test_pg_type_timestamp_canonical_value() {
+    // Naive (no TZ).
+    assert_eq(PG_TYPE_TIMESTAMP, 1114);
+}
+
+@test
+fn test_pg_type_timestamptz_canonical_value() {
+    // UTC.
+    assert_eq(PG_TYPE_TIMESTAMPTZ, 1184);
+}
+
+@test
+fn test_pg_type_interval_canonical_value() {
+    assert_eq(PG_TYPE_INTERVAL, 1186);
+}
+
+// =============================================================================
+// Section 4: High-OID extension types
+// =============================================================================
+
+@test
+fn test_pg_type_numeric_canonical_value() {
+    assert_eq(PG_TYPE_NUMERIC, 1700);
+}
+
+@test
+fn test_pg_type_uuid_canonical_value() {
+    assert_eq(PG_TYPE_UUID, 2950);
+}
+
+@test
+fn test_pg_type_tsvector_canonical_value() {
+    assert_eq(PG_TYPE_TSVECTOR, 3614);
+}
+
+@test
+fn test_pg_type_jsonb_canonical_value() {
+    assert_eq(PG_TYPE_JSONB, 3802);
+}
+
+// =============================================================================
+// Section 5: Width invariants
+// =============================================================================
+
+@test
+fn test_pg_type_int_family_ordered_by_byte_width() {
+    // int2 (2-byte) < int4 (4-byte) < int8 (8-byte) — OID coincidence:
+    // INT8=20 < INT2=21 (yes!) < INT4=23 — PG ordering does NOT
+    // correspond to byte width. This pin catches assumption drift.
+    assert(PG_TYPE_INT8 < PG_TYPE_INT2);
+    assert(PG_TYPE_INT2 < PG_TYPE_INT4);
+}
+
+@test
+fn test_pg_type_float_pair_ordered() {
+    assert(PG_TYPE_FLOAT4 < PG_TYPE_FLOAT8);
+}
+
+@test
+fn test_pg_type_json_vs_jsonb_ordering() {
+    // JSON (legacy text) has small OID; JSONB (binary) is much larger.
+    assert(PG_TYPE_JSON < PG_TYPE_JSONB);
+}
+
+fn main() {}
