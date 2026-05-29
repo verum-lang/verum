@@ -1,0 +1,130 @@
+// =============================================================================
+// core-tests/action/ludics_lazy/unit_test.vr
+// =============================================================================
+//
+// `core/action/ludics_lazy.vr` —
+//   * CutElimVerdict 3-variant (Normalised{steps_taken} | DepthExceeded | NotBisimilar)
+//   * OrthogonalityVerdict 3-variant (Orthogonal | NonOrthogonal | DepthBoundReached)
+//   * CUT_ELIM_DEFAULT_DEPTH constant
+// =============================================================================
+
+mount core.action.ludics_lazy.{
+    CutElimVerdict, OrthogonalityVerdict, CUT_ELIM_DEFAULT_DEPTH,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CutElimVerdict variant construction
+// =============================================================================
+
+@test
+fn test_cut_elim_normalised_variant() {
+    let v: CutElimVerdict = CutElimVerdict.Normalised { steps_taken: 7 };
+    assert(v is CutElimVerdict.Normalised);
+}
+
+@test
+fn test_cut_elim_depth_exceeded_variant() {
+    let v: CutElimVerdict = CutElimVerdict.DepthExceeded;
+    assert(v is CutElimVerdict.DepthExceeded);
+}
+
+@test
+fn test_cut_elim_not_bisimilar_variant() {
+    let v: CutElimVerdict = CutElimVerdict.NotBisimilar;
+    assert(v is CutElimVerdict.NotBisimilar);
+}
+
+// =============================================================================
+// Section 2: CutElimVerdict pairwise disjointness
+// =============================================================================
+
+@test
+fn test_cut_elim_normalised_disjoint_from_others() {
+    let v: CutElimVerdict = CutElimVerdict.Normalised { steps_taken: 1 };
+    assert(!(v is CutElimVerdict.DepthExceeded));
+    assert(!(v is CutElimVerdict.NotBisimilar));
+}
+
+@test
+fn test_cut_elim_depth_exceeded_disjoint_from_others() {
+    let v: CutElimVerdict = CutElimVerdict.DepthExceeded;
+    assert(!(v is CutElimVerdict.Normalised));
+    assert(!(v is CutElimVerdict.NotBisimilar));
+}
+
+@test
+fn test_cut_elim_not_bisimilar_disjoint_from_others() {
+    let v: CutElimVerdict = CutElimVerdict.NotBisimilar;
+    assert(!(v is CutElimVerdict.Normalised));
+    assert(!(v is CutElimVerdict.DepthExceeded));
+}
+
+// =============================================================================
+// Section 3: OrthogonalityVerdict variant construction
+// =============================================================================
+
+@test
+fn test_orthogonality_verdict_orthogonal_variant() {
+    let v: OrthogonalityVerdict = OrthogonalityVerdict.Orthogonal;
+    assert(v is OrthogonalityVerdict.Orthogonal);
+}
+
+@test
+fn test_orthogonality_verdict_non_orthogonal_variant() {
+    let v: OrthogonalityVerdict = OrthogonalityVerdict.NonOrthogonal;
+    assert(v is OrthogonalityVerdict.NonOrthogonal);
+}
+
+@test
+fn test_orthogonality_verdict_depth_bound_reached_variant() {
+    let v: OrthogonalityVerdict = OrthogonalityVerdict.DepthBoundReached;
+    assert(v is OrthogonalityVerdict.DepthBoundReached);
+}
+
+// =============================================================================
+// Section 4: OrthogonalityVerdict pairwise disjointness
+// =============================================================================
+
+@test
+fn test_orthogonality_verdict_orthogonal_disjoint() {
+    let v: OrthogonalityVerdict = OrthogonalityVerdict.Orthogonal;
+    assert(!(v is OrthogonalityVerdict.NonOrthogonal));
+    assert(!(v is OrthogonalityVerdict.DepthBoundReached));
+}
+
+@test
+fn test_orthogonality_verdict_non_orthogonal_disjoint() {
+    let v: OrthogonalityVerdict = OrthogonalityVerdict.NonOrthogonal;
+    assert(!(v is OrthogonalityVerdict.Orthogonal));
+    assert(!(v is OrthogonalityVerdict.DepthBoundReached));
+}
+
+@test
+fn test_orthogonality_verdict_depth_bound_reached_disjoint() {
+    let v: OrthogonalityVerdict = OrthogonalityVerdict.DepthBoundReached;
+    assert(!(v is OrthogonalityVerdict.Orthogonal));
+    assert(!(v is OrthogonalityVerdict.NonOrthogonal));
+}
+
+// =============================================================================
+// Section 5: CUT_ELIM_DEFAULT_DEPTH constant
+// =============================================================================
+
+@test
+fn test_cut_elim_default_depth_canonical_value() {
+    assert_eq(CUT_ELIM_DEFAULT_DEPTH, 1000);
+}
+
+@test
+fn test_cut_elim_default_depth_positive() {
+    assert(CUT_ELIM_DEFAULT_DEPTH > 0);
+}
+
+@test
+fn test_cut_elim_default_depth_at_least_hundred() {
+    assert(CUT_ELIM_DEFAULT_DEPTH >= 100);
+}
+
+fn main() {}
