@@ -1,0 +1,100 @@
+// =============================================================================
+// core-tests/shell/dsl/kubectl/unit_test.vr
+// =============================================================================
+//
+// `core/shell/dsl/kubectl.vr` —
+//   * KubeOutput 5-variant (Wide / Json / Yaml / Name / Custom(Text))
+// =============================================================================
+
+mount core.shell.dsl.kubectl.KubeOutput;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: KubeOutput variant ctor
+// =============================================================================
+
+@test
+fn test_kube_output_wide_variant() {
+    let o: KubeOutput = KubeOutput.Wide;
+    assert(o is KubeOutput.Wide);
+}
+
+@test
+fn test_kube_output_json_variant() {
+    let o: KubeOutput = KubeOutput.Json;
+    assert(o is KubeOutput.Json);
+}
+
+@test
+fn test_kube_output_yaml_variant() {
+    let o: KubeOutput = KubeOutput.Yaml;
+    assert(o is KubeOutput.Yaml);
+}
+
+@test
+fn test_kube_output_name_variant() {
+    let o: KubeOutput = KubeOutput.Name;
+    assert(o is KubeOutput.Name);
+}
+
+@test
+fn test_kube_output_custom_variant() {
+    let o: KubeOutput = KubeOutput.Custom("custom-columns=NAME:.metadata.name".to_text());
+    assert(o is KubeOutput.Custom);
+}
+
+// =============================================================================
+// Section 2: Custom payload round-trip
+// =============================================================================
+
+@test
+fn test_kube_output_custom_payload_round_trip() {
+    let o: KubeOutput = KubeOutput.Custom("jsonpath={.items[*].metadata.name}".to_text());
+    match o {
+        KubeOutput.Custom(s) => assert_eq(s, "jsonpath={.items[*].metadata.name}"),
+        _ => panic("expected Custom"),
+    }
+}
+
+// =============================================================================
+// Section 3: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_kube_output_wide_disjoint() {
+    let o: KubeOutput = KubeOutput.Wide;
+    assert(!(o is KubeOutput.Json));
+    assert(!(o is KubeOutput.Yaml));
+    assert(!(o is KubeOutput.Name));
+    assert(!(o is KubeOutput.Custom));
+}
+
+@test
+fn test_kube_output_json_disjoint() {
+    let o: KubeOutput = KubeOutput.Json;
+    assert(!(o is KubeOutput.Wide));
+    assert(!(o is KubeOutput.Yaml));
+    assert(!(o is KubeOutput.Name));
+    assert(!(o is KubeOutput.Custom));
+}
+
+@test
+fn test_kube_output_yaml_disjoint() {
+    let o: KubeOutput = KubeOutput.Yaml;
+    assert(!(o is KubeOutput.Wide));
+    assert(!(o is KubeOutput.Json));
+    assert(!(o is KubeOutput.Name));
+    assert(!(o is KubeOutput.Custom));
+}
+
+@test
+fn test_kube_output_name_disjoint() {
+    let o: KubeOutput = KubeOutput.Name;
+    assert(!(o is KubeOutput.Wide));
+    assert(!(o is KubeOutput.Json));
+    assert(!(o is KubeOutput.Yaml));
+    assert(!(o is KubeOutput.Custom));
+}
+
+fn main() {}
