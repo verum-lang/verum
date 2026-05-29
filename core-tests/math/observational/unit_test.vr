@@ -1,0 +1,124 @@
+// =============================================================================
+// core-tests/math/observational/unit_test.vr
+// =============================================================================
+//
+// `core/math/observational.vr` — Observational Type Theory ADT surface.
+//
+// Surface tested:
+//   * OttType simple-variant subset (OttBool / OttNat / OttUnit)
+//   * OttValue simple-variant subset (OttUnitVal)
+//   * OttEqResult 3-variant (OttTrue / OttFalse / OttStuck) — fully qualified
+//
+// Record-payload variants (OttProduct / OttFunction / OttOpaque /
+// OttBoolVal / OttNatVal / OttPair / OttOpaqueVal) + ott_decide require
+// cross-module Heap<T> dispatch — tested at language-level under
+// `vcs/specs/L2-standard/math/observational/`.
+// =============================================================================
+
+mount core.math.observational.{
+    OttType, OttValue, OttEqResult,
+};
+
+// =============================================================================
+// Section 1: OttType simple-variant
+// =============================================================================
+
+@test
+fn test_ott_type_bool_variant() {
+    let t: OttType = OttType.OttBool;
+    assert(t is OttType.OttBool);
+}
+
+@test
+fn test_ott_type_nat_variant() {
+    let t: OttType = OttType.OttNat;
+    assert(t is OttType.OttNat);
+}
+
+@test
+fn test_ott_type_unit_variant() {
+    let t: OttType = OttType.OttUnit;
+    assert(t is OttType.OttUnit);
+}
+
+@test
+fn test_ott_type_bool_disjoint_from_nat() {
+    let b: OttType = OttType.OttBool;
+    let n: OttType = OttType.OttNat;
+    assert(b is OttType.OttBool && !(b is OttType.OttNat));
+    assert(n is OttType.OttNat && !(n is OttType.OttBool));
+}
+
+@test
+fn test_ott_type_nat_disjoint_from_unit() {
+    let n: OttType = OttType.OttNat;
+    let u: OttType = OttType.OttUnit;
+    assert(!(n is OttType.OttUnit));
+    assert(!(u is OttType.OttNat));
+}
+
+@test
+fn test_ott_type_bool_disjoint_from_unit() {
+    let b: OttType = OttType.OttBool;
+    let u: OttType = OttType.OttUnit;
+    assert(!(b is OttType.OttUnit));
+    assert(!(u is OttType.OttBool));
+}
+
+// =============================================================================
+// Section 2: OttValue simple-variant (OttUnitVal)
+// =============================================================================
+
+@test
+fn test_ott_value_unit_val_variant() {
+    let v: OttValue = OttValue.OttUnitVal;
+    assert(v is OttValue.OttUnitVal);
+}
+
+// =============================================================================
+// Section 3: OttEqResult 3-variant — fully qualified
+// =============================================================================
+
+@test
+fn test_ott_eq_result_true_variant() {
+    let r: OttEqResult = OttEqResult.OttTrue;
+    assert(r is OttEqResult.OttTrue);
+}
+
+@test
+fn test_ott_eq_result_false_variant() {
+    let r: OttEqResult = OttEqResult.OttFalse;
+    assert(r is OttEqResult.OttFalse);
+}
+
+@test
+fn test_ott_eq_result_stuck_variant() {
+    let r: OttEqResult = OttEqResult.OttStuck;
+    assert(r is OttEqResult.OttStuck);
+}
+
+@test
+fn test_ott_eq_result_true_disjoint_from_false() {
+    let t: OttEqResult = OttEqResult.OttTrue;
+    let f: OttEqResult = OttEqResult.OttFalse;
+    assert(t is OttEqResult.OttTrue && !(t is OttEqResult.OttFalse));
+    assert(f is OttEqResult.OttFalse && !(f is OttEqResult.OttTrue));
+}
+
+@test
+fn test_ott_eq_result_false_disjoint_from_stuck() {
+    let f: OttEqResult = OttEqResult.OttFalse;
+    let s: OttEqResult = OttEqResult.OttStuck;
+    assert(!(f is OttEqResult.OttStuck));
+    assert(!(s is OttEqResult.OttFalse));
+}
+
+@test
+fn test_ott_eq_result_true_disjoint_from_stuck() {
+    let t: OttEqResult = OttEqResult.OttTrue;
+    let s: OttEqResult = OttEqResult.OttStuck;
+    assert(!(t is OttEqResult.OttStuck));
+    assert(!(s is OttEqResult.OttTrue));
+}
+
+fn main() {}
