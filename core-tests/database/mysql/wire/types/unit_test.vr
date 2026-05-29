@@ -1,0 +1,360 @@
+// =============================================================================
+// core-tests/database/mysql/wire/types/unit_test.vr
+// =============================================================================
+//
+// `core/database/mysql/wire/types.vr` — MySQL wire protocol constants.
+//
+// Surface tested:
+//   * PKT_* first-byte packet markers (server packets)
+//   * COM_* command bytes (frontend → server)
+//   * CAP_* capability flags + SPINDLE_CLIENT_FLAGS composition
+//   * STATUS_* status flags (in EOF / OK packets)
+//   * CSHA2_* caching_sha2_password sub-protocol markers
+//   * plugin_caching_sha2_password / plugin_mysql_native_password names
+// =============================================================================
+
+mount core.database.mysql.wire.types.{
+    PKT_OK, PKT_AUTH_SW, PKT_EOF, PKT_ERROR, PKT_LOCAL_INF, PKT_AUTH_MORE,
+    COM_SLEEP, COM_QUIT, COM_INIT_DB, COM_QUERY, COM_FIELD_LIST, COM_PING,
+    COM_STMT_PREPARE, COM_STMT_EXECUTE, COM_STMT_CLOSE, COM_STMT_RESET,
+    COM_RESET_CONNECTION,
+    CAP_LONG_PASSWORD, CAP_FOUND_ROWS, CAP_LONG_FLAG, CAP_CONNECT_WITH_DB,
+    CAP_NO_SCHEMA, CAP_COMPRESS, CAP_ODBC, CAP_LOCAL_FILES,
+    CAP_IGNORE_SPACE, CAP_PROTOCOL_41, CAP_INTERACTIVE, CAP_SSL,
+    CAP_TRANSACTIONS, CAP_SECURE_CONNECTION, CAP_MULTI_STATEMENTS,
+    CAP_MULTI_RESULTS, CAP_PS_MULTI_RESULTS, CAP_PLUGIN_AUTH,
+    CAP_CONNECT_ATTRS, CAP_PLUGIN_AUTH_LENENC, CAP_DEPRECATE_EOF,
+    SPINDLE_CLIENT_FLAGS,
+    STATUS_IN_TRANS, STATUS_AUTOCOMMIT, STATUS_MORE_RESULTS,
+    STATUS_NO_GOOD_INDEX, STATUS_NO_INDEX_USED, STATUS_CURSOR_EXISTS,
+    STATUS_LAST_ROW_SENT, STATUS_DB_DROPPED, STATUS_NO_BACKSLASH_ESCAPES,
+    STATUS_METADATA_CHANGED,
+    CSHA2_FAST_AUTH_DONE, CSHA2_FULL_AUTH_NEEDED,
+    plugin_caching_sha2_password, plugin_mysql_native_password,
+};
+
+// =============================================================================
+// Section 1: PKT_* first-byte payload markers (canonical values)
+// =============================================================================
+
+@test
+fn test_pkt_ok_is_0x00() {
+    assert_eq(PKT_OK, 0x00_u8);
+}
+
+@test
+fn test_pkt_auth_sw_is_0xfe() {
+    assert_eq(PKT_AUTH_SW, 0xFE_u8);
+}
+
+@test
+fn test_pkt_eof_is_0xfe() {
+    // PKT_EOF and PKT_AUTH_SW share the same byte (0xFE) — disambiguated
+    // by packet-length per the MySQL spec.
+    assert_eq(PKT_EOF, 0xFE_u8);
+    assert_eq(PKT_EOF, PKT_AUTH_SW);
+}
+
+@test
+fn test_pkt_error_is_0xff() {
+    assert_eq(PKT_ERROR, 0xFF_u8);
+}
+
+@test
+fn test_pkt_local_inf_is_0xfb() {
+    assert_eq(PKT_LOCAL_INF, 0xFB_u8);
+}
+
+@test
+fn test_pkt_auth_more_is_0x01() {
+    assert_eq(PKT_AUTH_MORE, 0x01_u8);
+}
+
+@test
+fn test_pkt_markers_distinct_pairs() {
+    // Distinct first-byte markers — OK / Error / LocalInf / AuthMore.
+    assert(PKT_OK != PKT_ERROR);
+    assert(PKT_OK != PKT_LOCAL_INF);
+    assert(PKT_OK != PKT_AUTH_MORE);
+    assert(PKT_ERROR != PKT_LOCAL_INF);
+    assert(PKT_ERROR != PKT_AUTH_MORE);
+    assert(PKT_LOCAL_INF != PKT_AUTH_MORE);
+}
+
+// =============================================================================
+// Section 2: COM_* command bytes (canonical values)
+// =============================================================================
+
+@test
+fn test_com_sleep_is_0x00() {
+    assert_eq(COM_SLEEP, 0x00_u8);
+}
+
+@test
+fn test_com_quit_is_0x01() {
+    assert_eq(COM_QUIT, 0x01_u8);
+}
+
+@test
+fn test_com_init_db_is_0x02() {
+    assert_eq(COM_INIT_DB, 0x02_u8);
+}
+
+@test
+fn test_com_query_is_0x03() {
+    assert_eq(COM_QUERY, 0x03_u8);
+}
+
+@test
+fn test_com_field_list_is_0x04() {
+    assert_eq(COM_FIELD_LIST, 0x04_u8);
+}
+
+@test
+fn test_com_ping_is_0x0e() {
+    assert_eq(COM_PING, 0x0E_u8);
+}
+
+@test
+fn test_com_stmt_prepare_is_0x16() {
+    assert_eq(COM_STMT_PREPARE, 0x16_u8);
+}
+
+@test
+fn test_com_stmt_execute_is_0x17() {
+    assert_eq(COM_STMT_EXECUTE, 0x17_u8);
+}
+
+@test
+fn test_com_stmt_close_is_0x19() {
+    assert_eq(COM_STMT_CLOSE, 0x19_u8);
+}
+
+@test
+fn test_com_stmt_reset_is_0x1a() {
+    assert_eq(COM_STMT_RESET, 0x1A_u8);
+}
+
+@test
+fn test_com_reset_connection_is_0x1f() {
+    assert_eq(COM_RESET_CONNECTION, 0x1F_u8);
+}
+
+@test
+fn test_com_query_distinct_from_stmt_prepare() {
+    // Text-protocol vs prepared-statement protocol entry points must differ.
+    assert(COM_QUERY != COM_STMT_PREPARE);
+}
+
+@test
+fn test_com_stmt_lifecycle_bytes_distinct() {
+    // PREPARE / EXECUTE / CLOSE / RESET form a lifecycle — all distinct.
+    assert(COM_STMT_PREPARE != COM_STMT_EXECUTE);
+    assert(COM_STMT_PREPARE != COM_STMT_CLOSE);
+    assert(COM_STMT_PREPARE != COM_STMT_RESET);
+    assert(COM_STMT_EXECUTE != COM_STMT_CLOSE);
+    assert(COM_STMT_EXECUTE != COM_STMT_RESET);
+    assert(COM_STMT_CLOSE != COM_STMT_RESET);
+}
+
+// =============================================================================
+// Section 3: CAP_* capability flags (canonical power-of-two bits)
+// =============================================================================
+
+@test
+fn test_cap_long_password_is_bit_0() {
+    assert_eq(CAP_LONG_PASSWORD, 0x00000001);
+}
+
+@test
+fn test_cap_found_rows_is_bit_1() {
+    assert_eq(CAP_FOUND_ROWS, 0x00000002);
+}
+
+@test
+fn test_cap_long_flag_is_bit_2() {
+    assert_eq(CAP_LONG_FLAG, 0x00000004);
+}
+
+@test
+fn test_cap_connect_with_db_is_bit_3() {
+    assert_eq(CAP_CONNECT_WITH_DB, 0x00000008);
+}
+
+@test
+fn test_cap_protocol_41_is_bit_9() {
+    assert_eq(CAP_PROTOCOL_41, 0x00000200);
+}
+
+@test
+fn test_cap_ssl_is_bit_11() {
+    assert_eq(CAP_SSL, 0x00000800);
+}
+
+@test
+fn test_cap_secure_connection_is_bit_15() {
+    assert_eq(CAP_SECURE_CONNECTION, 0x00008000);
+}
+
+@test
+fn test_cap_plugin_auth_is_bit_19() {
+    assert_eq(CAP_PLUGIN_AUTH, 0x00080000);
+}
+
+@test
+fn test_cap_deprecate_eof_is_bit_24() {
+    assert_eq(CAP_DEPRECATE_EOF, 0x01000000);
+}
+
+@test
+fn test_cap_low_bits_pairwise_distinct() {
+    assert(CAP_LONG_PASSWORD != CAP_FOUND_ROWS);
+    assert(CAP_FOUND_ROWS != CAP_LONG_FLAG);
+    assert(CAP_LONG_FLAG != CAP_CONNECT_WITH_DB);
+}
+
+// =============================================================================
+// Section 4: SPINDLE_CLIENT_FLAGS composition
+// =============================================================================
+//
+// Verifies SPINDLE_CLIENT_FLAGS contains the 11 capability bits declared in
+// types.vr. Bitwise-AND each capability against SPINDLE_CLIENT_FLAGS — if the
+// bit is set, AND yields the bit's value; otherwise zero.
+// =============================================================================
+
+@test
+fn test_spindle_flags_contains_protocol_41() {
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_PROTOCOL_41, CAP_PROTOCOL_41);
+}
+
+@test
+fn test_spindle_flags_contains_secure_connection() {
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_SECURE_CONNECTION, CAP_SECURE_CONNECTION);
+}
+
+@test
+fn test_spindle_flags_contains_plugin_auth() {
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_PLUGIN_AUTH, CAP_PLUGIN_AUTH);
+}
+
+@test
+fn test_spindle_flags_contains_plugin_auth_lenenc() {
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_PLUGIN_AUTH_LENENC, CAP_PLUGIN_AUTH_LENENC);
+}
+
+@test
+fn test_spindle_flags_contains_connect_with_db() {
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_CONNECT_WITH_DB, CAP_CONNECT_WITH_DB);
+}
+
+@test
+fn test_spindle_flags_contains_transactions() {
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_TRANSACTIONS, CAP_TRANSACTIONS);
+}
+
+@test
+fn test_spindle_flags_contains_deprecate_eof() {
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_DEPRECATE_EOF, CAP_DEPRECATE_EOF);
+}
+
+@test
+fn test_spindle_flags_contains_long_flag() {
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_LONG_FLAG, CAP_LONG_FLAG);
+}
+
+@test
+fn test_spindle_flags_contains_local_files() {
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_LOCAL_FILES, CAP_LOCAL_FILES);
+}
+
+@test
+fn test_spindle_flags_does_not_contain_ssl() {
+    // SSL negotiated separately, not in the static client flags.
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_SSL, 0);
+}
+
+@test
+fn test_spindle_flags_does_not_contain_compress() {
+    assert_eq(SPINDLE_CLIENT_FLAGS & CAP_COMPRESS, 0);
+}
+
+// =============================================================================
+// Section 5: STATUS_* flags (canonical bits in EOF/OK packets)
+// =============================================================================
+
+@test
+fn test_status_in_trans_is_bit_0() {
+    assert_eq(STATUS_IN_TRANS, 0x0001);
+}
+
+@test
+fn test_status_autocommit_is_bit_1() {
+    assert_eq(STATUS_AUTOCOMMIT, 0x0002);
+}
+
+@test
+fn test_status_more_results_is_bit_3() {
+    assert_eq(STATUS_MORE_RESULTS, 0x0008);
+}
+
+@test
+fn test_status_cursor_exists_is_bit_6() {
+    assert_eq(STATUS_CURSOR_EXISTS, 0x0040);
+}
+
+@test
+fn test_status_last_row_sent_is_bit_7() {
+    assert_eq(STATUS_LAST_ROW_SENT, 0x0080);
+}
+
+@test
+fn test_status_metadata_changed_is_bit_10() {
+    assert_eq(STATUS_METADATA_CHANGED, 0x0400);
+}
+
+@test
+fn test_status_flags_pairwise_distinct_subset() {
+    assert(STATUS_IN_TRANS != STATUS_AUTOCOMMIT);
+    assert(STATUS_MORE_RESULTS != STATUS_CURSOR_EXISTS);
+    assert(STATUS_LAST_ROW_SENT != STATUS_METADATA_CHANGED);
+}
+
+// =============================================================================
+// Section 6: caching_sha2_password sub-protocol markers
+// =============================================================================
+
+@test
+fn test_csha2_fast_auth_done_is_0x03() {
+    assert_eq(CSHA2_FAST_AUTH_DONE, 0x03_u8);
+}
+
+@test
+fn test_csha2_full_auth_needed_is_0x04() {
+    assert_eq(CSHA2_FULL_AUTH_NEEDED, 0x04_u8);
+}
+
+@test
+fn test_csha2_markers_distinct() {
+    assert(CSHA2_FAST_AUTH_DONE != CSHA2_FULL_AUTH_NEEDED);
+}
+
+// =============================================================================
+// Section 7: plugin name functions
+// =============================================================================
+
+@test
+fn test_plugin_caching_sha2_password_name() {
+    assert_eq(plugin_caching_sha2_password(), "caching_sha2_password".to_text());
+}
+
+@test
+fn test_plugin_mysql_native_password_name() {
+    assert_eq(plugin_mysql_native_password(), "mysql_native_password".to_text());
+}
+
+@test
+fn test_plugin_names_distinct() {
+    assert(plugin_caching_sha2_password() != plugin_mysql_native_password());
+}
+
+fn main() {}
