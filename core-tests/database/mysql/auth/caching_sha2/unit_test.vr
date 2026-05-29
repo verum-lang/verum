@@ -1,0 +1,209 @@
+// =============================================================================
+// core-tests/database/mysql/auth/caching_sha2/unit_test.vr
+// =============================================================================
+//
+// `core/database/mysql/auth/caching_sha2.vr` — caching_sha2_password client.
+//
+// Surface tested:
+//   * CachingSha2State 3-variant (CsFastAuthOk / CsFullAuthRequired / CsFailed)
+//   * classify_auth_more() — server-reply byte → state mapping
+//   * FULL_AUTH_REQUEST_PUBKEY = 0x02_u8 constant
+//   * make_cleartext_password() — appends NUL terminator
+//   * FullAuthError 4-variant (FaePemDecode / FaeDerDecode / FaeNotRsaKey / FaeOaep)
+//
+// Crypto pipeline (scramble_caching_sha2 + parse_server_pubkey + encrypt_oaep)
+// requires SHA-256 + RSA-OAEP / PEM decode — tested at language-level under
+// `vcs/specs/L2-standard/database/mysql/auth/`.
+// =============================================================================
+
+mount core.database.mysql.auth.caching_sha2.{
+    CachingSha2State, FullAuthError,
+    CsFastAuthOk, CsFullAuthRequired, CsFailed,
+    FaePemDecode, FaeDerDecode, FaeNotRsaKey, FaeOaep,
+    classify_auth_more, make_cleartext_password,
+    FULL_AUTH_REQUEST_PUBKEY,
+};
+
+// =============================================================================
+// Section 1: CachingSha2State 3-variant
+// =============================================================================
+
+@test
+fn test_caching_sha2_state_fast_auth_ok_variant() {
+    let s: CachingSha2State = CsFastAuthOk;
+    assert(s is CsFastAuthOk);
+}
+
+@test
+fn test_caching_sha2_state_full_auth_required_variant() {
+    let s: CachingSha2State = CsFullAuthRequired;
+    assert(s is CsFullAuthRequired);
+}
+
+@test
+fn test_caching_sha2_state_failed_variant() {
+    let s: CachingSha2State = CsFailed;
+    assert(s is CsFailed);
+}
+
+@test
+fn test_caching_sha2_state_fast_disjoint_from_full() {
+    let f: CachingSha2State = CsFastAuthOk;
+    let fl: CachingSha2State = CsFullAuthRequired;
+    assert(f is CsFastAuthOk && !(f is CsFullAuthRequired));
+    assert(fl is CsFullAuthRequired && !(fl is CsFastAuthOk));
+}
+
+@test
+fn test_caching_sha2_state_fast_disjoint_from_failed() {
+    let f: CachingSha2State = CsFastAuthOk;
+    let fl: CachingSha2State = CsFailed;
+    assert(!(f is CsFailed));
+    assert(!(fl is CsFastAuthOk));
+}
+
+@test
+fn test_caching_sha2_state_full_disjoint_from_failed() {
+    let f: CachingSha2State = CsFullAuthRequired;
+    let fl: CachingSha2State = CsFailed;
+    assert(!(f is CsFailed));
+    assert(!(fl is CsFullAuthRequired));
+}
+
+// =============================================================================
+// Section 2: classify_auth_more — byte → state mapping
+// =============================================================================
+
+@test
+fn test_classify_auth_more_0x03_is_fast_auth_ok() {
+    let payload: List<Byte> = [0x03_u8];
+    let s = classify_auth_more(payload.as_slice());
+    assert(s is CsFastAuthOk);
+}
+
+@test
+fn test_classify_auth_more_0x04_is_full_auth_required() {
+    let payload: List<Byte> = [0x04_u8];
+    let s = classify_auth_more(payload.as_slice());
+    assert(s is CsFullAuthRequired);
+}
+
+@test
+fn test_classify_auth_more_other_byte_is_failed() {
+    let payload: List<Byte> = [0xFF_u8];
+    let s = classify_auth_more(payload.as_slice());
+    assert(s is CsFailed);
+}
+
+@test
+fn test_classify_auth_more_zero_byte_is_failed() {
+    let payload: List<Byte> = [0x00_u8];
+    let s = classify_auth_more(payload.as_slice());
+    assert(s is CsFailed);
+}
+
+@test
+fn test_classify_auth_more_empty_is_failed() {
+    let payload: List<Byte> = [];
+    let s = classify_auth_more(payload.as_slice());
+    assert(s is CsFailed);
+}
+
+@test
+fn test_classify_auth_more_ignores_subsequent_bytes() {
+    // Only the FIRST byte determines the state.
+    let payload: List<Byte> = [0x03_u8, 0xFF_u8, 0x00_u8];
+    let s = classify_auth_more(payload.as_slice());
+    assert(s is CsFastAuthOk);
+}
+
+// =============================================================================
+// Section 3: FULL_AUTH_REQUEST_PUBKEY constant
+// =============================================================================
+
+@test
+fn test_full_auth_request_pubkey_is_0x02() {
+    assert_eq(FULL_AUTH_REQUEST_PUBKEY, 0x02_u8);
+}
+
+@test
+fn test_full_auth_request_pubkey_distinct_from_fast_auth_ok_byte() {
+    // 0x02 (PUBKEY request) MUST differ from 0x03 (fast auth ok).
+    assert(FULL_AUTH_REQUEST_PUBKEY != 0x03_u8);
+}
+
+@test
+fn test_full_auth_request_pubkey_distinct_from_full_auth_req_byte() {
+    // 0x02 (client→server PUBKEY request) MUST differ from 0x04
+    // (server→client full-auth required).
+    assert(FULL_AUTH_REQUEST_PUBKEY != 0x04_u8);
+}
+
+// =============================================================================
+// Section 4: make_cleartext_password — NUL-terminated cleartext password
+// =============================================================================
+
+@test
+fn test_make_cleartext_password_empty_yields_one_nul_byte() {
+    let pw: List<Byte> = [];
+    let out = make_cleartext_password(pw.as_slice());
+    // Empty password → NUL terminator only.
+    assert_eq(out.len(), 1);
+    assert_eq(out[0], 0x00_u8);
+}
+
+@test
+fn test_make_cleartext_password_appends_nul_terminator() {
+    let pw: List<Byte> = [0x68_u8, 0x69_u8];  // "hi"
+    let out = make_cleartext_password(pw.as_slice());
+    assert_eq(out.len(), 3);
+    assert_eq(out[0], 0x68_u8);
+    assert_eq(out[1], 0x69_u8);
+    assert_eq(out[2], 0x00_u8);
+}
+
+@test
+fn test_make_cleartext_password_preserves_byte_order() {
+    let pw: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
+    let out = make_cleartext_password(pw.as_slice());
+    assert_eq(out.len(), 5);
+    assert_eq(out[0], 0x01_u8);
+    assert_eq(out[3], 0x04_u8);
+    assert_eq(out[4], 0x00_u8);
+}
+
+@test
+fn test_make_cleartext_password_handles_high_bytes() {
+    let pw: List<Byte> = [0xFF_u8, 0xFE_u8];
+    let out = make_cleartext_password(pw.as_slice());
+    assert_eq(out.len(), 3);
+    assert_eq(out[0], 0xFF_u8);
+    assert_eq(out[1], 0xFE_u8);
+    assert_eq(out[2], 0x00_u8);
+}
+
+// =============================================================================
+// Section 5: FullAuthError 4-variant simple cases
+// =============================================================================
+
+@test
+fn test_full_auth_error_der_decode_variant() {
+    let e: FullAuthError = FaeDerDecode;
+    assert(e is FaeDerDecode);
+}
+
+@test
+fn test_full_auth_error_not_rsa_key_variant() {
+    let e: FullAuthError = FaeNotRsaKey;
+    assert(e is FaeNotRsaKey);
+}
+
+@test
+fn test_full_auth_error_der_disjoint_from_not_rsa() {
+    let de: FullAuthError = FaeDerDecode;
+    let nr: FullAuthError = FaeNotRsaKey;
+    assert(de is FaeDerDecode && !(de is FaeNotRsaKey));
+    assert(nr is FaeNotRsaKey && !(nr is FaeDerDecode));
+}
+
+fn main() {}
