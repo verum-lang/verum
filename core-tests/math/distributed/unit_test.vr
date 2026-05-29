@@ -1,0 +1,138 @@
+// =============================================================================
+// core-tests/math/distributed/unit_test.vr
+// =============================================================================
+//
+// `core/math/distributed.vr` — Distributed compute ADTs.
+//
+// Surface tested:
+//   * CommBackend 3-variant (NCCL / Gloo / MPI) — qualified to dodge bare-name
+//     collision with MPI standard symbol
+//   * ReduceOp 5-variant (Sum / Avg / Min / Max / Product) — qualified to
+//     dodge Min/Max/Sum bare-name collisions
+//
+// current_rank / world_size + collective ops (all_reduce / all_gather /
+// reduce_scatter / broadcast / scatter) require a live process group —
+// tested at language-level under `vcs/specs/L2-standard/math/distributed/`.
+// =============================================================================
+
+mount core.math.distributed.{
+    CommBackend, ReduceOp,
+};
+
+// =============================================================================
+// Section 1: CommBackend 3-variant — fully qualified
+// =============================================================================
+
+@test
+fn test_comm_backend_nccl_variant() {
+    let b: CommBackend = CommBackend.NCCL;
+    assert(b is CommBackend.NCCL);
+}
+
+@test
+fn test_comm_backend_gloo_variant() {
+    let b: CommBackend = CommBackend.Gloo;
+    assert(b is CommBackend.Gloo);
+}
+
+@test
+fn test_comm_backend_mpi_variant() {
+    let b: CommBackend = CommBackend.MPI;
+    assert(b is CommBackend.MPI);
+}
+
+@test
+fn test_comm_backend_nccl_disjoint_from_gloo() {
+    let n: CommBackend = CommBackend.NCCL;
+    let g: CommBackend = CommBackend.Gloo;
+    assert(n is CommBackend.NCCL && !(n is CommBackend.Gloo));
+    assert(g is CommBackend.Gloo && !(g is CommBackend.NCCL));
+}
+
+@test
+fn test_comm_backend_gloo_disjoint_from_mpi() {
+    let g: CommBackend = CommBackend.Gloo;
+    let m: CommBackend = CommBackend.MPI;
+    assert(!(g is CommBackend.MPI));
+    assert(!(m is CommBackend.Gloo));
+}
+
+@test
+fn test_comm_backend_nccl_disjoint_from_mpi() {
+    let n: CommBackend = CommBackend.NCCL;
+    let m: CommBackend = CommBackend.MPI;
+    assert(!(n is CommBackend.MPI));
+    assert(!(m is CommBackend.NCCL));
+}
+
+// =============================================================================
+// Section 2: ReduceOp 5-variant — fully qualified
+// =============================================================================
+
+@test
+fn test_reduce_op_sum_variant() {
+    let r: ReduceOp = ReduceOp.Sum;
+    assert(r is ReduceOp.Sum);
+}
+
+@test
+fn test_reduce_op_avg_variant() {
+    let r: ReduceOp = ReduceOp.Avg;
+    assert(r is ReduceOp.Avg);
+}
+
+@test
+fn test_reduce_op_min_variant() {
+    let r: ReduceOp = ReduceOp.Min;
+    assert(r is ReduceOp.Min);
+}
+
+@test
+fn test_reduce_op_max_variant() {
+    let r: ReduceOp = ReduceOp.Max;
+    assert(r is ReduceOp.Max);
+}
+
+@test
+fn test_reduce_op_product_variant() {
+    let r: ReduceOp = ReduceOp.Product;
+    assert(r is ReduceOp.Product);
+}
+
+// =============================================================================
+// Section 3: ReduceOp pairwise disjointness
+// =============================================================================
+
+@test
+fn test_reduce_op_sum_disjoint_from_avg() {
+    let s: ReduceOp = ReduceOp.Sum;
+    let a: ReduceOp = ReduceOp.Avg;
+    assert(s is ReduceOp.Sum && !(s is ReduceOp.Avg));
+    assert(a is ReduceOp.Avg && !(a is ReduceOp.Sum));
+}
+
+@test
+fn test_reduce_op_min_disjoint_from_max() {
+    let mi: ReduceOp = ReduceOp.Min;
+    let ma: ReduceOp = ReduceOp.Max;
+    assert(!(mi is ReduceOp.Max));
+    assert(!(ma is ReduceOp.Min));
+}
+
+@test
+fn test_reduce_op_sum_disjoint_from_product() {
+    let s: ReduceOp = ReduceOp.Sum;
+    let p: ReduceOp = ReduceOp.Product;
+    assert(!(s is ReduceOp.Product));
+    assert(!(p is ReduceOp.Sum));
+}
+
+@test
+fn test_reduce_op_avg_disjoint_from_min() {
+    let a: ReduceOp = ReduceOp.Avg;
+    let mi: ReduceOp = ReduceOp.Min;
+    assert(!(a is ReduceOp.Min));
+    assert(!(mi is ReduceOp.Avg));
+}
+
+fn main() {}
