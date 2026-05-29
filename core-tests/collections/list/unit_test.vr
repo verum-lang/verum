@@ -1010,7 +1010,6 @@ fn test_list_shrink_to_fit_reduces_capacity_to_len() {
     assert_eq(xs.get(2), Maybe.Some(3));
 }
 
-@ignore
 @test
 fn test_list_shrink_to_min_capacity() {
     let mut xs: List<Int> = List.with_capacity(64);
@@ -1244,7 +1243,6 @@ fn test_list_windows_size_equals_len_yields_one() {
     assert_eq(ws.len(), 1);
 }
 
-@ignore
 @test
 fn test_list_windows_size_larger_than_len_yields_zero() {
     let xs: List<Int> = [1, 2];
