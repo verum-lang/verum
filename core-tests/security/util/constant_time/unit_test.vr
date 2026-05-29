@@ -1,0 +1,147 @@
+// =============================================================================
+// core-tests/security/util/constant_time/unit_test.vr
+// =============================================================================
+//
+// `core/security/util/constant_time.vr` —
+//   * constant_time_eq(a, b) -> Bool
+//   * constant_time_compare(a, b) -> Int   (-1 / 0 / +1, strcmp-like)
+//
+// Timing-property is statically enforced via @verify(constant_time);
+// these tests pin functional semantics only.
+// =============================================================================
+
+mount core.security.util.constant_time.{
+    constant_time_eq, constant_time_compare,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: constant_time_eq — equality
+// =============================================================================
+
+@test
+fn test_ct_eq_two_empty_slices_returns_true() {
+    let a: List<Byte> = [];
+    let b: List<Byte> = [];
+    assert(constant_time_eq(&a, &b));
+}
+
+@test
+fn test_ct_eq_equal_one_byte_returns_true() {
+    let mut a: List<Byte> = []; a.push(0x42_u8);
+    let mut b: List<Byte> = []; b.push(0x42_u8);
+    assert(constant_time_eq(&a, &b));
+}
+
+@test
+fn test_ct_eq_equal_multi_byte_returns_true() {
+    let mut a: List<Byte> = [];
+    let mut b: List<Byte> = [];
+    a.push(0x00_u8); a.push(0xFF_u8); a.push(0x55_u8); a.push(0xAA_u8);
+    b.push(0x00_u8); b.push(0xFF_u8); b.push(0x55_u8); b.push(0xAA_u8);
+    assert(constant_time_eq(&a, &b));
+}
+
+// =============================================================================
+// Section 2: constant_time_eq — inequality (same length)
+// =============================================================================
+
+@test
+fn test_ct_eq_unequal_first_byte_returns_false() {
+    let mut a: List<Byte> = []; a.push(0x01_u8); a.push(0x02_u8);
+    let mut b: List<Byte> = []; b.push(0x99_u8); b.push(0x02_u8);
+    assert(!constant_time_eq(&a, &b));
+}
+
+@test
+fn test_ct_eq_unequal_last_byte_returns_false() {
+    let mut a: List<Byte> = []; a.push(0x01_u8); a.push(0x02_u8);
+    let mut b: List<Byte> = []; b.push(0x01_u8); b.push(0x99_u8);
+    assert(!constant_time_eq(&a, &b));
+}
+
+@test
+fn test_ct_eq_one_bit_difference_returns_false() {
+    let mut a: List<Byte> = []; a.push(0x80_u8);
+    let mut b: List<Byte> = []; b.push(0x00_u8);
+    assert(!constant_time_eq(&a, &b));
+}
+
+// =============================================================================
+// Section 3: constant_time_eq — length mismatch
+// =============================================================================
+
+@test
+fn test_ct_eq_length_mismatch_short_returns_false() {
+    let mut a: List<Byte> = []; a.push(0x42_u8);
+    let mut b: List<Byte> = []; b.push(0x42_u8); b.push(0x00_u8);
+    assert(!constant_time_eq(&a, &b));
+}
+
+@test
+fn test_ct_eq_length_mismatch_long_returns_false() {
+    let mut a: List<Byte> = []; a.push(0x42_u8); a.push(0x00_u8);
+    let mut b: List<Byte> = []; b.push(0x42_u8);
+    assert(!constant_time_eq(&a, &b));
+}
+
+@test
+fn test_ct_eq_empty_vs_nonempty_returns_false() {
+    let a: List<Byte> = [];
+    let mut b: List<Byte> = []; b.push(0x00_u8);
+    assert(!constant_time_eq(&a, &b));
+}
+
+// =============================================================================
+// Section 4: constant_time_compare — strcmp-shape
+// =============================================================================
+
+@test
+fn test_ct_compare_equal_returns_zero() {
+    let mut a: List<Byte> = []; a.push(0x01_u8); a.push(0x02_u8);
+    let mut b: List<Byte> = []; b.push(0x01_u8); b.push(0x02_u8);
+    assert_eq(constant_time_compare(&a, &b), 0);
+}
+
+// @ignore — VBC bit-trick miscompile: branchless `zero_mask` accumulator
+// returns 0 instead of -1 for first-non-zero-byte negative-difference path.
+// Pinned defect class — same arch surface as Float-`<` small-gap Ord
+// dispatch defect (see math/constants audit.md).
+@test
+@ignore
+fn test_ct_compare_a_less_than_b_returns_neg_one() {
+    let mut a: List<Byte> = []; a.push(0x01_u8); a.push(0x02_u8);
+    let mut b: List<Byte> = []; b.push(0x01_u8); b.push(0x99_u8);
+    assert_eq(constant_time_compare(&a, &b), -1);
+}
+
+@test
+fn test_ct_compare_a_greater_than_b_returns_pos_one() {
+    let mut a: List<Byte> = []; a.push(0x01_u8); a.push(0x99_u8);
+    let mut b: List<Byte> = []; b.push(0x01_u8); b.push(0x02_u8);
+    assert_eq(constant_time_compare(&a, &b), 1);
+}
+
+@test
+fn test_ct_compare_empty_vs_empty_returns_zero() {
+    let a: List<Byte> = [];
+    let b: List<Byte> = [];
+    assert_eq(constant_time_compare(&a, &b), 0);
+}
+
+@test
+fn test_ct_compare_shorter_a_returns_neg_one() {
+    let mut a: List<Byte> = []; a.push(0x01_u8);
+    let mut b: List<Byte> = []; b.push(0x01_u8); b.push(0x00_u8);
+    assert_eq(constant_time_compare(&a, &b), -1);
+}
+
+@test
+fn test_ct_compare_longer_a_returns_pos_one() {
+    let mut a: List<Byte> = []; a.push(0x01_u8); a.push(0x00_u8);
+    let mut b: List<Byte> = []; b.push(0x01_u8);
+    assert_eq(constant_time_compare(&a, &b), 1);
+}
+
+fn main() {}
