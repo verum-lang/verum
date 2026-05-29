@@ -1,0 +1,130 @@
+// =============================================================================
+// core-tests/net/quic/error/unit_test.vr — RFC 9000 §20 error surface
+// =============================================================================
+//
+// `core/net/quic/error.vr`:
+//
+//   * TransportErrorCode — 17 RFC 9000 §20.1 wire constants + CRYPTO_ERROR_BASE.
+//   * ApplicationErrorCode — application-defined 62-bit code.
+//   * QuicError ADT — connection/stream-scoped protocol errors.
+// =============================================================================
+
+mount core.net.quic.error.{TransportErrorCode, ApplicationErrorCode, QuicError};
+
+// =============================================================================
+// Section 1: TransportErrorCode wire constants (RFC 9000 §20.1)
+// =============================================================================
+
+@test
+fn test_qerr_no_error_0() { assert_eq(TransportErrorCode.NO_ERROR, 0x00_u64); }
+
+@test
+fn test_qerr_internal_error_1() { assert_eq(TransportErrorCode.INTERNAL_ERROR, 0x01_u64); }
+
+@test
+fn test_qerr_connection_refused_2() { assert_eq(TransportErrorCode.CONNECTION_REFUSED, 0x02_u64); }
+
+@test
+fn test_qerr_flow_control_error_3() { assert_eq(TransportErrorCode.FLOW_CONTROL_ERROR, 0x03_u64); }
+
+@test
+fn test_qerr_stream_limit_error_4() { assert_eq(TransportErrorCode.STREAM_LIMIT_ERROR, 0x04_u64); }
+
+@test
+fn test_qerr_final_size_error_6() { assert_eq(TransportErrorCode.FINAL_SIZE_ERROR, 0x06_u64); }
+
+@test
+fn test_qerr_frame_encoding_error_7() { assert_eq(TransportErrorCode.FRAME_ENCODING_ERROR, 0x07_u64); }
+
+@test
+fn test_qerr_transport_parameter_error_8() { assert_eq(TransportErrorCode.TRANSPORT_PARAMETER_ERROR, 0x08_u64); }
+
+@test
+fn test_qerr_connection_id_limit_error_9() { assert_eq(TransportErrorCode.CONNECTION_ID_LIMIT_ERROR, 0x09_u64); }
+
+@test
+fn test_qerr_protocol_violation_a() { assert_eq(TransportErrorCode.PROTOCOL_VIOLATION, 0x0A_u64); }
+
+@test
+fn test_qerr_invalid_token_b() { assert_eq(TransportErrorCode.INVALID_TOKEN, 0x0B_u64); }
+
+@test
+fn test_qerr_application_error_c() { assert_eq(TransportErrorCode.APPLICATION_ERROR, 0x0C_u64); }
+
+@test
+fn test_qerr_crypto_buffer_exceeded_d() { assert_eq(TransportErrorCode.CRYPTO_BUFFER_EXCEEDED, 0x0D_u64); }
+
+@test
+fn test_qerr_key_update_error_e() { assert_eq(TransportErrorCode.KEY_UPDATE_ERROR, 0x0E_u64); }
+
+@test
+fn test_qerr_aead_limit_reached_f() { assert_eq(TransportErrorCode.AEAD_LIMIT_REACHED, 0x0F_u64); }
+
+@test
+fn test_qerr_no_viable_path_10() { assert_eq(TransportErrorCode.NO_VIABLE_PATH, 0x10_u64); }
+
+@test
+fn test_qerr_crypto_error_base_0x100() { assert_eq(TransportErrorCode.CRYPTO_ERROR_BASE, 0x0100_u64); }
+
+// =============================================================================
+// Section 2: TransportErrorCode / ApplicationErrorCode new/value
+// =============================================================================
+
+@test
+fn test_qerr_transport_new_round_trips() {
+    let e = TransportErrorCode.new(TransportErrorCode.FLOW_CONTROL_ERROR);
+    assert_eq(e.value(), 0x03_u64);
+}
+
+@test
+fn test_qerr_crypto_error_base_plus_alert() {
+    // RFC 9000 §20.1: CRYPTO_ERROR is 0x0100 + TLS alert code.
+    let e = TransportErrorCode.new(TransportErrorCode.CRYPTO_ERROR_BASE + 48_u64);
+    assert_eq(e.value(), 0x0130_u64);
+}
+
+@test
+fn test_qerr_application_new_round_trips() {
+    let e = ApplicationErrorCode.new(0x1234_u64);
+    assert_eq(e.value(), 0x1234_u64);
+}
+
+// =============================================================================
+// Section 3: QuicError ADT
+// =============================================================================
+
+@test
+fn test_qerr_transport_error_variant() {
+    let e = QuicError.TransportError {
+        code: TransportErrorCode.new(TransportErrorCode.PROTOCOL_VIOLATION),
+        frame_type: 0_u64,
+        reason: "x".into(),
+    };
+    assert(e is QuicError.TransportError);
+}
+
+@test
+fn test_qerr_stream_reset_variant() {
+    let e = QuicError.StreamReset { stream_id: 4_u64, code: ApplicationErrorCode.new(7_u64) };
+    assert(e is QuicError.StreamReset);
+}
+
+@test
+fn test_qerr_idle_timeout_variant() {
+    assert(QuicError.IdleTimeout is QuicError.IdleTimeout);
+}
+
+@test
+fn test_qerr_transport_vs_stream_disjoint() {
+    let e = QuicError.StreamReset { stream_id: 0_u64, code: ApplicationErrorCode.new(0_u64) };
+    assert(!(e is QuicError.TransportError));
+}
+
+@test
+fn test_qerr_display_nonempty() {
+    let e = QuicError.StreamReset { stream_id: 1_u64, code: ApplicationErrorCode.new(2_u64) };
+    let s = f"{e}";
+    assert(s.len() > 0);
+}
+
+fn main() {}
