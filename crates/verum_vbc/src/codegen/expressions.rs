@@ -4553,7 +4553,63 @@ impl VbcCodegen {
                     let (name, info) = type_matched[0];
                     Some((name.clone(), info.clone()))
                 } else {
-                    None
+                    // **Method-vs-free-fn shadow filter** (FUNDAMENTAL —
+                    // closes the bare-name vs impl-method dispatch
+                    // collision class).
+                    //
+                    // A bare-name call site `name(args...)` lowers to a
+                    // free-fn dispatch (Call instruction). Impl-block
+                    // instance methods on type T whose first parameter is
+                    // `self` (any of `&self`/`&mut self`/`self` shapes)
+                    // are NEVER legal targets of bare-name dispatch —
+                    // they require receiver-syntax `receiver.name(...)`
+                    // which lowers to CallM, not Call.
+                    //
+                    // Without this filter, `take(&mut x)` mounted via
+                    // `mount core.base.memory.{take}` (or by prelude
+                    // re-export) routes to one of `Set.take` / `Cell.take`
+                    // / `OnceCell.take` / `Args.take` / `Vars.take` /
+                    // `ErrorChain.take` / `Rev.take` / `FuseIter.take` /
+                    // `Empty.take` impl methods — the dispatcher's
+                    // argument-type filter fails when arg types are
+                    // unknown (closure params without annotations,
+                    // generic monomorphisations), and any matching impl
+                    // method may win. Pre-fix `take(&mut x)` resolved
+                    // to a wrong impl method that didn't perform the
+                    // expected replace-and-reset write-back, so x kept
+                    // its original value after the call.
+                    //
+                    // The filter excludes any candidate whose first
+                    // param_name is `self` (the canonical Verum naming
+                    // for impl-block receivers). If exactly one
+                    // non-method candidate remains, dispatch to it
+                    // (closes the unambiguous case); otherwise return
+                    // None and let the existing fallback chain handle
+                    // (most commonly resolving to the free fn by name).
+                    //
+                    // Architectural rule pinned: every bare-name Call
+                    // dispatch MUST exclude impl-block instance methods
+                    // from its candidate set. CallM dispatch (which
+                    // takes a receiver) handles impl methods correctly
+                    // through receiver-type qualification; mixing the
+                    // two surfaces creates the shadow-collision class
+                    // closed here. Regression-pinned at
+                    // `core-tests/base/mod/regression_test.vr §B::
+                    // regression_pin_take_resets_to_default`.
+                    let non_method: Vec<&(String, FunctionInfo)> = arity_matches
+                        .iter()
+                        .filter(|(_, info)| {
+                            info.param_names
+                                .first()
+                                .is_none_or(|n| n != "self")
+                        })
+                        .collect();
+                    if non_method.len() == 1 {
+                        let (name, info) = non_method[0];
+                        Some((name.clone(), info.clone()))
+                    } else {
+                        None
+                    }
                 }
             }
         } else {
@@ -4565,12 +4621,66 @@ impl VbcCodegen {
         // name collisions (SIZE_CLASSES, BLOCK_SIZE, Char.from_digit,
         // index_of) prefer the entry registered in the caller's own
         // module rather than first-wins archive-load order.
+        //
+        // **Method-vs-free-fn shadow filter** applied at every lookup
+        // layer: bare-name call sites lower to free-fn dispatch (Call)
+        // and MUST NEVER target impl-block instance methods (first
+        // param `self`). Pre-fix `take(&mut x)` mounted via the
+        // prelude was resolving to one of `Cell.take`/`OnceCell.take`/
+        // `Set.take`/etc. via hash-table first-wins on the bare key
+        // `take` — the wrong method's body ran, x kept its original
+        // value because the method body didn't perform the replace-
+        // and-reset write-back. Filtering each layer's result through
+        // the `param_names.first() != "self"` predicate ensures the
+        // dispatch routes to the canonical free fn
+        // `core.base.memory.take(dest)`.
+        //
+        // Architectural rule pinned: every bare-name `Call` dispatch
+        // layer MUST exclude impl-block instance methods from its
+        // candidate set. CallM (receiver-syntax) is the only legal
+        // dispatch surface for impl methods. Regression-pinned at
+        // `core-tests/base/mod/regression_test.vr §B::regression_pin_take_resets_to_default`
+        // and the broader `core-tests/base/memory/cbgr_test.vr::test_take`.
+        let is_free_fn = |info: &FunctionInfo| -> bool {
+            info.param_names
+                .first()
+                .is_none_or(|n| n != "self")
+        };
         let (resolved_name, func_info) = match module_qualified_lookup
+            .filter(|(_, info)| is_free_fn(info))
             .or_else(|| type_aware_lookup)
             .or_else(|| {
                 self.ctx
                     .lookup_function_with_arity_in_scope(&func_name, args.len())
+                    .filter(|info| is_free_fn(info))
                     .map(|info| (func_name.clone(), info.clone()))
+            })
+            .or_else(|| {
+                // Filtered suffix-scan fallback: when the direct lookup
+                // returned an impl method (was filtered out above), do
+                // a global scan for any qualified entry whose simple
+                // name equals func_name AND whose first param is NOT
+                // `self`. Picks the unique free-fn candidate when one
+                // exists; closes the case where the bare-name table
+                // entry is shadowed by an impl method but the qualified
+                // free-fn key (`core.base.memory.take`) lives elsewhere.
+                let suffix = format!(".{}", func_name);
+                let candidates: Vec<(String, FunctionInfo)> = self
+                    .ctx
+                    .functions
+                    .iter()
+                    .filter(|(k, info)| {
+                        (k.ends_with(&suffix) || k.as_str() == func_name)
+                            && info.param_count == args.len()
+                            && is_free_fn(info)
+                    })
+                    .map(|(k, info)| (k.clone(), info.clone()))
+                    .collect();
+                if candidates.len() == 1 {
+                    Some(candidates.into_iter().next().unwrap())
+                } else {
+                    None
+                }
             })
             .or_else(suffix_match_lookup)
         {
