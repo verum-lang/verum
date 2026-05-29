@@ -1,0 +1,118 @@
+// =============================================================================
+// core-tests/logic/kripke/unit_test.vr
+// =============================================================================
+//
+// `core/logic/kripke.vr` — Kripke frame surface (modal logic).
+// =============================================================================
+
+mount core.logic.kripke.{World, KripkeEdge, KripkeFrame, world, edge, frame};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: World record construction
+// =============================================================================
+
+@test
+fn test_world_direct_construction() {
+    let w: World = World { id: "w0".to_text() };
+    assert_eq(w.id, "w0");
+}
+
+@test
+fn test_world_constructor_function() {
+    let w: World = world("alpha".to_text());
+    assert_eq(w.id, "alpha");
+}
+
+@test
+fn test_world_field_independence() {
+    let a: World = World { id: "x".to_text() };
+    let b: World = World { id: "y".to_text() };
+    assert_eq(a.id, "x");
+    assert_eq(b.id, "y");
+}
+
+// =============================================================================
+// Section 2: KripkeEdge record construction
+// =============================================================================
+
+@test
+fn test_kripke_edge_self_loop() {
+    let w: World = World { id: "w".to_text() };
+    let e: KripkeEdge = KripkeEdge { from: w, to: World { id: "w".to_text() } };
+    assert_eq(e.from.id, "w");
+    assert_eq(e.to.id, "w");
+}
+
+@test
+fn test_kripke_edge_constructor_function() {
+    let a: World = World { id: "a".to_text() };
+    let b: World = World { id: "b".to_text() };
+    let e: KripkeEdge = edge(a, b);
+    assert_eq(e.from.id, "a");
+    assert_eq(e.to.id, "b");
+}
+
+// =============================================================================
+// Section 3: KripkeFrame record construction
+// =============================================================================
+
+@test
+fn test_kripke_frame_empty_construction() {
+    let empty_w: List<World> = [];
+    let empty_e: List<KripkeEdge> = [];
+    let f: KripkeFrame = KripkeFrame {
+        worlds: empty_w,
+        edges: empty_e,
+    };
+    assert_eq(f.worlds.len(), 0);
+    assert_eq(f.edges.len(), 0);
+}
+
+@test
+fn test_kripke_frame_single_world() {
+    let mut ws: List<World> = [];
+    ws.push(World { id: "alone".to_text() });
+    let empty_e: List<KripkeEdge> = [];
+    let f: KripkeFrame = KripkeFrame {
+        worlds: ws,
+        edges: empty_e,
+    };
+    assert_eq(f.worlds.len(), 1);
+    assert_eq(f.edges.len(), 0);
+}
+
+@test
+fn test_kripke_frame_two_world_one_edge() {
+    let mut ws: List<World> = [];
+    ws.push(World { id: "w0".to_text() });
+    ws.push(World { id: "w1".to_text() });
+    let mut es: List<KripkeEdge> = [];
+    es.push(KripkeEdge {
+        from: World { id: "w0".to_text() },
+        to: World { id: "w1".to_text() },
+    });
+    let f: KripkeFrame = KripkeFrame {
+        worlds: ws,
+        edges: es,
+    };
+    assert_eq(f.worlds.len(), 2);
+    assert_eq(f.edges.len(), 1);
+}
+
+@test
+fn test_kripke_frame_constructor_function() {
+    let mut ws: List<World> = [];
+    ws.push(World { id: "w".to_text() });
+    let mut es: List<KripkeEdge> = [];
+    es.push(KripkeEdge {
+        from: World { id: "w".to_text() },
+        to: World { id: "w".to_text() },
+    });
+    let f: KripkeFrame = frame(ws, es);
+    assert_eq(f.worlds.len(), 1);
+    assert_eq(f.edges.len(), 1);
+}
+
+fn main() {}
