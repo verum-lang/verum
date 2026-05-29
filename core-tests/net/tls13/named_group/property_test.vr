@@ -1,0 +1,22 @@
+// =============================================================================
+// core-tests/net/tls13/named_group/property_test.vr — round-trip law
+// =============================================================================
+
+mount core.net.tls13.named_group.{NamedGroup};
+
+@test
+fn property_tls13ng_to_from_round_trip() {
+    // from_u16 ∘ to_u16 == id over all 8 RFC 8446 §4.2.7 groups.
+    let codes: List<UInt16> = [
+        0x001D_u16, 0x0017_u16, 0x0018_u16, 0x0019_u16,
+        0x001E_u16, 0x0100_u16, 0x0101_u16, 0x0102_u16,
+    ];
+    let mut i = 0;
+    while i < codes.len() {
+        let g = NamedGroup.from_u16(codes[i]);
+        assert_eq(g.to_u16(), codes[i]);
+        i = i + 1;
+    }
+}
+
+fn main() {}

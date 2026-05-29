@@ -1,0 +1,61 @@
+// =============================================================================
+// core-tests/net/tls13/cipher_suite/unit_test.vr — RFC 8446 §B.4
+// =============================================================================
+//
+// `core/net/tls13/cipher_suite.vr`:
+//
+//   * CipherSuite 5-variant + to_u16 / from_u16 (IANA codepoints).
+//   * hash_kind (SHA-256 vs SHA-384) per suite.
+// =============================================================================
+
+mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
+
+// =============================================================================
+// Section 1: IANA codepoints (RFC 8446 §B.4)
+// =============================================================================
+
+@test
+fn test_tls13cs_aes128gcm_1301() { assert_eq(CipherSuite.TlsAes128GcmSha256.to_u16(), 0x1301_u16); }
+
+@test
+fn test_tls13cs_aes256gcm_1302() { assert_eq(CipherSuite.TlsAes256GcmSha384.to_u16(), 0x1302_u16); }
+
+@test
+fn test_tls13cs_chacha20_1303() { assert_eq(CipherSuite.TlsChaCha20Poly1305Sha256.to_u16(), 0x1303_u16); }
+
+@test
+fn test_tls13cs_aes128ccm_1304() { assert_eq(CipherSuite.TlsAes128CcmSha256.to_u16(), 0x1304_u16); }
+
+@test
+fn test_tls13cs_aes128ccm8_1305() { assert_eq(CipherSuite.TlsAes128Ccm8Sha256.to_u16(), 0x1305_u16); }
+
+// =============================================================================
+// Section 2: from_u16
+// =============================================================================
+
+@test
+fn test_tls13cs_from_1301() { assert(CipherSuite.from_u16(0x1301_u16) is CipherSuite.TlsAes128GcmSha256); }
+
+@test
+fn test_tls13cs_from_1303() { assert(CipherSuite.from_u16(0x1303_u16) is CipherSuite.TlsChaCha20Poly1305Sha256); }
+
+// =============================================================================
+// Section 3: hash_kind (SHA-384 only for AES-256-GCM)
+// =============================================================================
+
+@test
+fn test_tls13cs_aes256_uses_sha384() {
+    assert(CipherSuite.TlsAes256GcmSha384.hash_kind() is HashKind.Sha384);
+}
+
+@test
+fn test_tls13cs_aes128_uses_sha256() {
+    assert(CipherSuite.TlsAes128GcmSha256.hash_kind() is HashKind.Sha256);
+}
+
+@test
+fn test_tls13cs_chacha_uses_sha256() {
+    assert(CipherSuite.TlsChaCha20Poly1305Sha256.hash_kind() is HashKind.Sha256);
+}
+
+fn main() {}
