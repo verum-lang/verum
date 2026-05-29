@@ -1,0 +1,168 @@
+// =============================================================================
+// core-tests/term/layout/constraint/unit_test.vr
+// =============================================================================
+//
+// `core/term/layout/constraint.vr` —
+//   * Constraint 6-variant (Length/Min/Max/Percentage/Ratio/Fill)
+//   * Direction 2-variant (Horizontal/Vertical)
+//   * Flex 5-variant (Start/Center/End/SpaceBetween/SpaceAround)
+// =============================================================================
+
+mount core.term.layout.constraint.{Constraint, Direction, Flex};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Constraint 6-variant
+// =============================================================================
+
+@test
+fn test_constraint_length_variant() {
+    let c: Constraint = Constraint.Length(40);
+    assert(c is Constraint.Length);
+}
+
+@test
+fn test_constraint_min_variant() {
+    let c: Constraint = Constraint.Min(10);
+    assert(c is Constraint.Min);
+}
+
+@test
+fn test_constraint_max_variant() {
+    let c: Constraint = Constraint.Max(80);
+    assert(c is Constraint.Max);
+}
+
+@test
+fn test_constraint_percentage_variant() {
+    let c: Constraint = Constraint.Percentage(50);
+    assert(c is Constraint.Percentage);
+}
+
+@test
+fn test_constraint_ratio_variant() {
+    let c: Constraint = Constraint.Ratio(2, 3);
+    assert(c is Constraint.Ratio);
+}
+
+@test
+fn test_constraint_fill_variant() {
+    let c: Constraint = Constraint.Fill(1);
+    assert(c is Constraint.Fill);
+}
+
+@test
+fn test_constraint_length_disjoint() {
+    let c: Constraint = Constraint.Length(10);
+    assert(!(c is Constraint.Min));
+    assert(!(c is Constraint.Max));
+    assert(!(c is Constraint.Percentage));
+    assert(!(c is Constraint.Ratio));
+    assert(!(c is Constraint.Fill));
+}
+
+@test
+fn test_constraint_length_payload_round_trip() {
+    let c: Constraint = Constraint.Length(40);
+    match c {
+        Constraint.Length(n) => assert_eq(n, 40),
+        _ => panic("expected Length"),
+    }
+}
+
+@test
+fn test_constraint_percentage_payload_round_trip() {
+    let c: Constraint = Constraint.Percentage(75);
+    match c {
+        Constraint.Percentage(n) => assert_eq(n, 75),
+        _ => panic("expected Percentage"),
+    }
+}
+
+@test
+fn test_constraint_ratio_two_payload_round_trip() {
+    let c: Constraint = Constraint.Ratio(1, 4);
+    match c {
+        Constraint.Ratio(num, denom) => {
+            assert_eq(num, 1);
+            assert_eq(denom, 4);
+        }
+        _ => panic("expected Ratio"),
+    }
+}
+
+// =============================================================================
+// Section 2: Direction 2-variant
+// =============================================================================
+
+@test
+fn test_direction_horizontal_variant() {
+    let d: Direction = Direction.Horizontal;
+    assert(d is Direction.Horizontal);
+}
+
+@test
+fn test_direction_vertical_variant() {
+    let d: Direction = Direction.Vertical;
+    assert(d is Direction.Vertical);
+}
+
+@test
+fn test_direction_horizontal_disjoint() {
+    let d: Direction = Direction.Horizontal;
+    assert(!(d is Direction.Vertical));
+}
+
+// =============================================================================
+// Section 3: Flex 5-variant
+// =============================================================================
+
+@test
+fn test_flex_start_variant() {
+    let f: Flex = Flex.Start;
+    assert(f is Flex.Start);
+}
+
+@test
+fn test_flex_center_variant() {
+    let f: Flex = Flex.Center;
+    assert(f is Flex.Center);
+}
+
+@test
+fn test_flex_end_variant() {
+    let f: Flex = Flex.End;
+    assert(f is Flex.End);
+}
+
+@test
+fn test_flex_space_between_variant() {
+    let f: Flex = Flex.SpaceBetween;
+    assert(f is Flex.SpaceBetween);
+}
+
+@test
+fn test_flex_space_around_variant() {
+    let f: Flex = Flex.SpaceAround;
+    assert(f is Flex.SpaceAround);
+}
+
+@test
+fn test_flex_start_disjoint() {
+    let f: Flex = Flex.Start;
+    assert(!(f is Flex.Center));
+    assert(!(f is Flex.End));
+    assert(!(f is Flex.SpaceBetween));
+    assert(!(f is Flex.SpaceAround));
+}
+
+@test
+fn test_flex_space_between_disjoint_from_space_around() {
+    let f: Flex = Flex.SpaceBetween;
+    assert(!(f is Flex.SpaceAround));
+    assert(!(f is Flex.Start));
+    assert(!(f is Flex.End));
+}
+
+fn main() {}
