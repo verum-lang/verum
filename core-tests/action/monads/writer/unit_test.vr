@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/action/monads/writer/unit_test.vr
+// =============================================================================
+//
+// `core/action/monads/writer.vr` — Writer<W, A> record.
+// =============================================================================
+
+mount core.action.monads.writer.Writer;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Writer<Text, Int> direct record construction
+// =============================================================================
+
+@test
+fn test_writer_int_value_empty_log() {
+    let w: Writer<Text, Int> = Writer {
+        value: 42,
+        output: "".to_text(),
+    };
+    assert_eq(w.value, 42);
+    assert_eq(w.output, "");
+}
+
+@test
+fn test_writer_int_value_with_log() {
+    let w: Writer<Text, Int> = Writer {
+        value: 100,
+        output: "computed: 100\n".to_text(),
+    };
+    assert_eq(w.value, 100);
+    assert_eq(w.output, "computed: 100\n");
+}
+
+@test
+fn test_writer_zero_value_with_log() {
+    let w: Writer<Text, Int> = Writer {
+        value: 0,
+        output: "zero path".to_text(),
+    };
+    assert_eq(w.value, 0);
+    assert_eq(w.output, "zero path");
+}
+
+// =============================================================================
+// Section 2: Writer<Int, Text> alternate type parameter binding
+// =============================================================================
+
+@test
+fn test_writer_text_value_int_log() {
+    let w: Writer<Int, Text> = Writer {
+        value: "result".to_text(),
+        output: 7,
+    };
+    assert_eq(w.value, "result");
+    assert_eq(w.output, 7);
+}
+
+// =============================================================================
+// Section 3: Field independence
+// =============================================================================
+
+@test
+fn test_writer_field_independence() {
+    let a: Writer<Text, Int> = Writer {
+        value: 1,
+        output: "a".to_text(),
+    };
+    let b: Writer<Text, Int> = Writer {
+        value: 2,
+        output: "b".to_text(),
+    };
+    assert_eq(a.value, 1);
+    assert_eq(b.value, 2);
+    assert_eq(a.output, "a");
+    assert_eq(b.output, "b");
+}
+
+fn main() {}
