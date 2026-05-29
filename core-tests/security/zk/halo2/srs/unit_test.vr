@@ -1,0 +1,138 @@
+// =============================================================================
+// core-tests/security/zk/halo2/srs/unit_test.vr
+// =============================================================================
+//
+// `core/security/zk/halo2/srs.vr` —
+//   * SrsParams record (k, label, participants)
+//   * SrsError 4-variant ADT
+//
+// UniversalSrs left untested — `transcript_hash: [Byte; 32]` fixed-array
+// field surfaces a known codegen layout regression.
+// =============================================================================
+
+mount core.security.zk.halo2.srs.{SrsParams, SrsError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: SrsParams record construction
+// =============================================================================
+
+@test
+fn test_srs_params_new_zero_participants() {
+    let p: SrsParams = SrsParams.new(10, "test".to_text());
+    assert_eq(p.k, 10);
+    assert_eq(p.label, "test");
+    assert_eq(p.participants.len(), 0);
+}
+
+@test
+fn test_srs_params_new_typical_k() {
+    let p: SrsParams = SrsParams.new(18, "production".to_text());
+    assert_eq(p.k, 18);
+    assert_eq(p.label, "production");
+}
+
+@test
+fn test_srs_params_record_direct_construction() {
+    let empty: List<List<Byte>> = [];
+    let p: SrsParams = SrsParams {
+        k: 12,
+        label: "label-x".to_text(),
+        participants: empty,
+    };
+    assert_eq(p.k, 12);
+    assert_eq(p.label, "label-x");
+    assert_eq(p.participants.len(), 0);
+}
+
+@test
+fn test_srs_params_field_independence() {
+    let a: SrsParams = SrsParams.new(8, "a".to_text());
+    let b: SrsParams = SrsParams.new(16, "b".to_text());
+    assert_eq(a.k, 8);
+    assert_eq(b.k, 16);
+    assert_eq(a.label, "a");
+    assert_eq(b.label, "b");
+}
+
+// =============================================================================
+// Section 2: SrsError 4-variant construction
+// =============================================================================
+
+@test
+fn test_srs_error_setup_failed_variant() {
+    let e: SrsError = SrsError.SetupFailed("entropy too short".to_text());
+    assert(e is SrsError.SetupFailed);
+}
+
+@test
+fn test_srs_error_integrity_failed_variant() {
+    let e: SrsError = SrsError.IntegrityFailed;
+    assert(e is SrsError.IntegrityFailed);
+}
+
+@test
+fn test_srs_error_load_failed_variant() {
+    let e: SrsError = SrsError.LoadFailed("file not found".to_text());
+    assert(e is SrsError.LoadFailed);
+}
+
+@test
+fn test_srs_error_capacity_exceeded_variant() {
+    let e: SrsError = SrsError.CapacityExceeded {
+        circuit_k: 20,
+        srs_k: 18,
+    };
+    assert(e is SrsError.CapacityExceeded);
+}
+
+// =============================================================================
+// Section 3: SrsError payload round-trip
+// =============================================================================
+
+@test
+fn test_srs_error_setup_failed_text_round_trip() {
+    let e: SrsError = SrsError.SetupFailed("ceremony aborted".to_text());
+    match e {
+        SrsError.SetupFailed(t) => assert_eq(t, "ceremony aborted"),
+        _ => panic("expected SetupFailed"),
+    }
+}
+
+@test
+fn test_srs_error_load_failed_text_round_trip() {
+    let e: SrsError = SrsError.LoadFailed("permission denied".to_text());
+    match e {
+        SrsError.LoadFailed(t) => assert_eq(t, "permission denied"),
+        _ => panic("expected LoadFailed"),
+    }
+}
+
+// =============================================================================
+// Section 4: SrsError pairwise disjointness
+// =============================================================================
+
+@test
+fn test_srs_error_integrity_disjoint_from_setup() {
+    let e: SrsError = SrsError.IntegrityFailed;
+    assert(!(e is SrsError.SetupFailed));
+    assert(!(e is SrsError.LoadFailed));
+    assert(!(e is SrsError.CapacityExceeded));
+}
+
+@test
+fn test_srs_error_setup_failed_disjoint_from_load_failed() {
+    let e: SrsError = SrsError.SetupFailed("x".to_text());
+    assert(!(e is SrsError.LoadFailed));
+    assert(!(e is SrsError.IntegrityFailed));
+}
+
+@test
+fn test_srs_error_load_failed_disjoint_from_setup() {
+    let e: SrsError = SrsError.LoadFailed("x".to_text());
+    assert(!(e is SrsError.SetupFailed));
+    assert(!(e is SrsError.IntegrityFailed));
+}
+
+fn main() {}
