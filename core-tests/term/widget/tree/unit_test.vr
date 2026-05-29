@@ -1,0 +1,83 @@
+// =============================================================================
+// core-tests/term/widget/tree/unit_test.vr
+// =============================================================================
+//
+// `core/term/widget/tree.vr` —
+//   * TreeState record (selected, expanded, offset)
+//   * .new() ctor
+// =============================================================================
+
+mount core.term.widget.tree.TreeState;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TreeState construction
+// =============================================================================
+
+@test
+fn test_tree_state_new_no_selection() {
+    let s: TreeState = TreeState.new();
+    assert(s.selected is Maybe.None);
+}
+
+@test
+fn test_tree_state_new_no_expanded_nodes() {
+    let s: TreeState = TreeState.new();
+    assert_eq(s.expanded.len(), 0);
+}
+
+@test
+fn test_tree_state_new_zero_offset() {
+    let s: TreeState = TreeState.new();
+    assert_eq(s.offset, 0);
+}
+
+@test
+fn test_tree_state_direct_record_no_selection() {
+    let path: List<List<Int>> = [];
+    let s: TreeState = TreeState {
+        selected: Maybe.None,
+        expanded: path,
+        offset: 0,
+    };
+    assert(s.selected is Maybe.None);
+    assert_eq(s.offset, 0);
+}
+
+@test
+fn test_tree_state_direct_record_with_selection() {
+    let mut path: List<Int> = [];
+    path.push(0);
+    path.push(2);
+    let expanded: List<List<Int>> = [];
+    let s: TreeState = TreeState {
+        selected: Maybe.Some(path),
+        expanded: expanded,
+        offset: 0,
+    };
+    assert(s.selected is Maybe.Some);
+    match s.selected {
+        Maybe.Some(p) => {
+            assert_eq(p.len(), 2);
+            assert_eq(p[0], 0);
+            assert_eq(p[1], 2);
+        }
+        Maybe.None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_tree_state_offset_independence() {
+    let a: TreeState = TreeState.new();
+    let path: List<List<Int>> = [];
+    let b: TreeState = TreeState {
+        selected: Maybe.None,
+        expanded: path,
+        offset: 99,
+    };
+    assert_eq(a.offset, 0);
+    assert_eq(b.offset, 99);
+}
+
+fn main() {}
