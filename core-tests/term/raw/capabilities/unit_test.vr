@@ -1,0 +1,198 @@
+// =============================================================================
+// core-tests/term/raw/capabilities/unit_test.vr
+// =============================================================================
+//
+// `core/term/raw/capabilities.vr` — Terminal capability detection ADTs.
+//
+// Surface tested:
+//   * ColorSupportLevel 4-variant (NoColor / Base16 / Ansi256 / TrueColor)
+//   * UnicodeSupport 3-variant (AsciiOnly / BasicWidth / Full)
+//   * MouseProtocol 4-variant (None / X10 / Normal / Sgr) — use qualified
+//     names because variants collide with stdlib (Maybe.None)
+//   * QueryRgb 3-field record (r, g, b: UInt8)
+//
+// detect_capabilities / query_background_color require live env vars + I/O —
+// tested at language-level under `vcs/specs/L2-standard/term/raw/`.
+// =============================================================================
+
+mount core.term.raw.capabilities.{
+    ColorSupportLevel, UnicodeSupport, MouseProtocol, QueryRgb,
+};
+
+// =============================================================================
+// Section 1: ColorSupportLevel 4-variant
+// =============================================================================
+
+@test
+fn test_color_support_level_no_color_variant() {
+    let c: ColorSupportLevel = ColorSupportLevel.NoColor;
+    assert(c is ColorSupportLevel.NoColor);
+}
+
+@test
+fn test_color_support_level_base16_variant() {
+    let c: ColorSupportLevel = ColorSupportLevel.Base16;
+    assert(c is ColorSupportLevel.Base16);
+}
+
+@test
+fn test_color_support_level_ansi256_variant() {
+    let c: ColorSupportLevel = ColorSupportLevel.Ansi256;
+    assert(c is ColorSupportLevel.Ansi256);
+}
+
+@test
+fn test_color_support_level_true_color_variant() {
+    let c: ColorSupportLevel = ColorSupportLevel.TrueColor;
+    assert(c is ColorSupportLevel.TrueColor);
+}
+
+@test
+fn test_color_support_level_no_color_disjoint_from_true_color() {
+    let nc: ColorSupportLevel = ColorSupportLevel.NoColor;
+    let tc: ColorSupportLevel = ColorSupportLevel.TrueColor;
+    assert(nc is ColorSupportLevel.NoColor && !(nc is ColorSupportLevel.TrueColor));
+    assert(tc is ColorSupportLevel.TrueColor && !(tc is ColorSupportLevel.NoColor));
+}
+
+@test
+fn test_color_support_level_base16_disjoint_from_ansi256() {
+    let b: ColorSupportLevel = ColorSupportLevel.Base16;
+    let a: ColorSupportLevel = ColorSupportLevel.Ansi256;
+    assert(!(b is ColorSupportLevel.Ansi256));
+    assert(!(a is ColorSupportLevel.Base16));
+}
+
+// =============================================================================
+// Section 2: UnicodeSupport 3-variant
+// =============================================================================
+
+@test
+fn test_unicode_support_ascii_only_variant() {
+    let u: UnicodeSupport = UnicodeSupport.AsciiOnly;
+    assert(u is UnicodeSupport.AsciiOnly);
+}
+
+@test
+fn test_unicode_support_basic_width_variant() {
+    let u: UnicodeSupport = UnicodeSupport.BasicWidth;
+    assert(u is UnicodeSupport.BasicWidth);
+}
+
+@test
+fn test_unicode_support_full_variant() {
+    let u: UnicodeSupport = UnicodeSupport.Full;
+    assert(u is UnicodeSupport.Full);
+}
+
+@test
+fn test_unicode_support_ascii_disjoint_from_full() {
+    let a: UnicodeSupport = UnicodeSupport.AsciiOnly;
+    let f: UnicodeSupport = UnicodeSupport.Full;
+    assert(a is UnicodeSupport.AsciiOnly && !(a is UnicodeSupport.Full));
+    assert(f is UnicodeSupport.Full && !(f is UnicodeSupport.AsciiOnly));
+}
+
+@test
+fn test_unicode_support_basic_disjoint_from_full() {
+    let b: UnicodeSupport = UnicodeSupport.BasicWidth;
+    let f: UnicodeSupport = UnicodeSupport.Full;
+    assert(!(b is UnicodeSupport.Full));
+    assert(!(f is UnicodeSupport.BasicWidth));
+}
+
+// =============================================================================
+// Section 3: MouseProtocol 4-variant (qualified — collides with Maybe.None)
+// =============================================================================
+
+@test
+fn test_mouse_protocol_none_variant() {
+    let m: MouseProtocol = MouseProtocol.None;
+    assert(m is MouseProtocol.None);
+}
+
+@test
+fn test_mouse_protocol_x10_variant() {
+    let m: MouseProtocol = MouseProtocol.X10;
+    assert(m is MouseProtocol.X10);
+}
+
+@test
+fn test_mouse_protocol_normal_variant() {
+    let m: MouseProtocol = MouseProtocol.Normal;
+    assert(m is MouseProtocol.Normal);
+}
+
+@test
+fn test_mouse_protocol_sgr_variant() {
+    let m: MouseProtocol = MouseProtocol.Sgr;
+    assert(m is MouseProtocol.Sgr);
+}
+
+@test
+fn test_mouse_protocol_none_disjoint_from_sgr() {
+    let n: MouseProtocol = MouseProtocol.None;
+    let s: MouseProtocol = MouseProtocol.Sgr;
+    assert(n is MouseProtocol.None && !(n is MouseProtocol.Sgr));
+    assert(s is MouseProtocol.Sgr && !(s is MouseProtocol.None));
+}
+
+@test
+fn test_mouse_protocol_x10_disjoint_from_normal() {
+    let x: MouseProtocol = MouseProtocol.X10;
+    let n: MouseProtocol = MouseProtocol.Normal;
+    assert(!(x is MouseProtocol.Normal));
+    assert(!(n is MouseProtocol.X10));
+}
+
+// =============================================================================
+// Section 4: QueryRgb record direct construction
+// =============================================================================
+
+@test
+fn test_query_rgb_construct_zero() {
+    let rgb: QueryRgb = QueryRgb { r: 0_u8, g: 0_u8, b: 0_u8 };
+    assert_eq(rgb.r, 0_u8);
+    assert_eq(rgb.g, 0_u8);
+    assert_eq(rgb.b, 0_u8);
+}
+
+@test
+fn test_query_rgb_construct_white() {
+    let rgb: QueryRgb = QueryRgb { r: 0xFF_u8, g: 0xFF_u8, b: 0xFF_u8 };
+    assert_eq(rgb.r, 0xFF_u8);
+    assert_eq(rgb.g, 0xFF_u8);
+    assert_eq(rgb.b, 0xFF_u8);
+}
+
+@test
+fn test_query_rgb_construct_red() {
+    let rgb: QueryRgb = QueryRgb { r: 0xFF_u8, g: 0x00_u8, b: 0x00_u8 };
+    assert_eq(rgb.r, 0xFF_u8);
+    assert_eq(rgb.g, 0x00_u8);
+    assert_eq(rgb.b, 0x00_u8);
+}
+
+@test
+fn test_query_rgb_construct_mixed() {
+    let rgb: QueryRgb = QueryRgb { r: 0x12_u8, g: 0x34_u8, b: 0x56_u8 };
+    assert_eq(rgb.r, 0x12_u8);
+    assert_eq(rgb.g, 0x34_u8);
+    assert_eq(rgb.b, 0x56_u8);
+}
+
+@test
+fn test_query_rgb_field_independence() {
+    let rgb1: QueryRgb = QueryRgb { r: 1_u8, g: 0_u8, b: 0_u8 };
+    let rgb2: QueryRgb = QueryRgb { r: 0_u8, g: 1_u8, b: 0_u8 };
+    let rgb3: QueryRgb = QueryRgb { r: 0_u8, g: 0_u8, b: 1_u8 };
+    // Independent field assignment.
+    assert_eq(rgb1.r, 1_u8);
+    assert_eq(rgb1.g, 0_u8);
+    assert_eq(rgb2.g, 1_u8);
+    assert_eq(rgb2.r, 0_u8);
+    assert_eq(rgb3.b, 1_u8);
+    assert_eq(rgb3.r, 0_u8);
+}
+
+fn main() {}
