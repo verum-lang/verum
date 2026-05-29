@@ -1,0 +1,125 @@
+// =============================================================================
+// core-tests/net/http2/static_table/unit_test.vr — HPACK static table
+// =============================================================================
+//
+// `core/net/http2/static_table.vr` — RFC 7541 Appendix A.
+//
+//   * STATIC_TABLE_SIZE == 61.
+//   * entry(index) is 1-indexed (§2.3.3); 0 and >61 yield None.
+//   * Spot-check canonical (name, value) pairs at the boundaries and at
+//     representative interior indices.
+// =============================================================================
+
+mount core.net.http2.static_table.{STATIC_TABLE_SIZE, entry};
+
+// =============================================================================
+// Section 1: table size + index bounds
+// =============================================================================
+
+@test
+fn test_h2stat_size_is_61() {
+    assert_eq(STATIC_TABLE_SIZE, 61);
+}
+
+@test
+fn test_h2stat_index_zero_is_none() {
+    assert(entry(0) is Maybe.None);
+}
+
+@test
+fn test_h2stat_index_past_end_is_none() {
+    assert(entry(62) is Maybe.None);
+}
+
+@test
+fn test_h2stat_negative_index_is_none() {
+    assert(entry(-1) is Maybe.None);
+}
+
+@test
+fn test_h2stat_first_index_is_some() {
+    assert(entry(1) is Maybe.Some);
+}
+
+@test
+fn test_h2stat_last_index_is_some() {
+    assert(entry(61) is Maybe.Some);
+}
+
+// =============================================================================
+// Section 2: canonical entries (RFC 7541 Appendix A)
+// =============================================================================
+
+@test
+fn test_h2stat_entry_1_authority() {
+    match entry(1) {
+        Maybe.Some(e) => { assert(e.name == ":authority"); assert(e.value == ""); }
+        Maybe.None    => panic("index 1 must be :authority"),
+    }
+}
+
+@test
+fn test_h2stat_entry_2_method_get() {
+    match entry(2) {
+        Maybe.Some(e) => { assert(e.name == ":method"); assert(e.value == "GET"); }
+        Maybe.None    => panic("index 2 must be :method GET"),
+    }
+}
+
+@test
+fn test_h2stat_entry_3_method_post() {
+    match entry(3) {
+        Maybe.Some(e) => { assert(e.name == ":method"); assert(e.value == "POST"); }
+        Maybe.None    => panic("index 3 must be :method POST"),
+    }
+}
+
+@test
+fn test_h2stat_entry_4_path_root() {
+    match entry(4) {
+        Maybe.Some(e) => { assert(e.name == ":path"); assert(e.value == "/"); }
+        Maybe.None    => panic("index 4 must be :path /"),
+    }
+}
+
+@test
+fn test_h2stat_entry_7_scheme_https() {
+    match entry(7) {
+        Maybe.Some(e) => { assert(e.name == ":scheme"); assert(e.value == "https"); }
+        Maybe.None    => panic("index 7 must be :scheme https"),
+    }
+}
+
+@test
+fn test_h2stat_entry_8_status_200() {
+    match entry(8) {
+        Maybe.Some(e) => { assert(e.name == ":status"); assert(e.value == "200"); }
+        Maybe.None    => panic("index 8 must be :status 200"),
+    }
+}
+
+@test
+fn test_h2stat_entry_16_accept_encoding() {
+    match entry(16) {
+        Maybe.Some(e) => { assert(e.name == "accept-encoding"); assert(e.value == "gzip, deflate"); }
+        Maybe.None    => panic("index 16 must be accept-encoding"),
+    }
+}
+
+@test
+fn test_h2stat_entry_32_cookie() {
+    match entry(32) {
+        Maybe.Some(e) => assert(e.name == "cookie"),
+        Maybe.None    => panic("index 32 must be cookie"),
+    }
+}
+
+@test
+fn test_h2stat_entry_61_www_authenticate() {
+    match entry(61) {
+        Maybe.Some(e) => assert(e.name == "www-authenticate"),
+        Maybe.None    => panic("index 61 must be www-authenticate"),
+    }
+}
+
+fn main() {}

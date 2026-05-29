@@ -1,0 +1,55 @@
+// =============================================================================
+// core-tests/net/quic/version/property_test.vr — RFC 8701 greasing laws
+// =============================================================================
+//
+//   * is_supported is true for exactly one version (VERSION_1).
+//   * is_greased holds iff every low nibble is 0xA — verified by
+//     constructing greased and near-greased values.
+// =============================================================================
+
+mount core.net.quic.version.{VERSION_NEGOTIATION, VERSION_1, VERSION_2, is_supported, is_greased};
+
+@test
+fn property_qver_only_v1_supported() {
+    // A sweep of non-v1 versions must all be unsupported.
+    let others: List<UInt32> = [
+        VERSION_NEGOTIATION, VERSION_2,
+        0x00000002_u32, 0xFF000000_u32, 0x6B3343CF_u32, 0xDADADADA_u32,
+    ];
+    let mut i = 0;
+    while i < others.len() {
+        assert(!is_supported(others[i]));
+        i = i + 1;
+    }
+    assert(is_supported(VERSION_1));
+}
+
+@test
+fn property_qver_constructed_greased_versions() {
+    // For each high-nibble choice h, the value (h<<4|A) repeated across
+    // all four bytes is greased.
+    let highs: List<UInt32> = [0x0_u32, 0x1_u32, 0x5_u32, 0x9_u32, 0xD_u32, 0xF_u32];
+    let mut i = 0;
+    while i < highs.len() {
+        let byte_val = (highs[i] << 4) | 0x0A_u32;       // 0x?A
+        let v = (byte_val << 24) | (byte_val << 16) | (byte_val << 8) | byte_val;
+        assert(is_greased(v));
+        i = i + 1;
+    }
+}
+
+@test
+fn property_qver_one_wrong_nibble_breaks_greasing() {
+    // Flip the lowest byte's nibble away from 0xA in an otherwise greased
+    // value: greasing must no longer hold.
+    let mut byte: Int = 0;
+    while byte < 16 {
+        if byte != 0x0A {
+            let v = (0x1A1A1A00_u32) | (byte as UInt32);
+            assert(!is_greased(v));
+        }
+        byte = byte + 1;
+    }
+}
+
+fn main() {}

@@ -1,0 +1,161 @@
+// =============================================================================
+// core-tests/net/http2/error/unit_test.vr — RFC 7540 §7 error surface
+// =============================================================================
+//
+// `core/net/http2/error.vr`:
+//
+//   * ErrorCode — 14 RFC 7540 §7 wire constants + new/value + Eq/Display.
+//   * Http2Error — 7-variant scope-tagged protocol error ADT + Eq.
+//   * connection_error / stream_error convenience constructors.
+// =============================================================================
+
+mount core.net.http2.error.{ErrorCode, Http2Error, connection_error, stream_error};
+
+// =============================================================================
+// Section 1: ErrorCode wire constants (RFC 7540 §7)
+// =============================================================================
+
+@test
+fn test_h2err_code_no_error_is_0() { assert_eq(ErrorCode.NO_ERROR, 0x00_u32); }
+
+@test
+fn test_h2err_code_protocol_error_is_1() { assert_eq(ErrorCode.PROTOCOL_ERROR, 0x01_u32); }
+
+@test
+fn test_h2err_code_internal_error_is_2() { assert_eq(ErrorCode.INTERNAL_ERROR, 0x02_u32); }
+
+@test
+fn test_h2err_code_flow_control_error_is_3() { assert_eq(ErrorCode.FLOW_CONTROL_ERROR, 0x03_u32); }
+
+@test
+fn test_h2err_code_settings_timeout_is_4() { assert_eq(ErrorCode.SETTINGS_TIMEOUT, 0x04_u32); }
+
+@test
+fn test_h2err_code_stream_closed_is_5() { assert_eq(ErrorCode.STREAM_CLOSED, 0x05_u32); }
+
+@test
+fn test_h2err_code_frame_size_error_is_6() { assert_eq(ErrorCode.FRAME_SIZE_ERROR, 0x06_u32); }
+
+@test
+fn test_h2err_code_refused_stream_is_7() { assert_eq(ErrorCode.REFUSED_STREAM, 0x07_u32); }
+
+@test
+fn test_h2err_code_cancel_is_8() { assert_eq(ErrorCode.CANCEL, 0x08_u32); }
+
+@test
+fn test_h2err_code_compression_error_is_9() { assert_eq(ErrorCode.COMPRESSION_ERROR, 0x09_u32); }
+
+@test
+fn test_h2err_code_connect_error_is_a() { assert_eq(ErrorCode.CONNECT_ERROR, 0x0A_u32); }
+
+@test
+fn test_h2err_code_enhance_your_calm_is_b() { assert_eq(ErrorCode.ENHANCE_YOUR_CALM, 0x0B_u32); }
+
+@test
+fn test_h2err_code_inadequate_security_is_c() { assert_eq(ErrorCode.INADEQUATE_SECURITY, 0x0C_u32); }
+
+@test
+fn test_h2err_code_http_1_1_required_is_d() { assert_eq(ErrorCode.HTTP_1_1_REQUIRED, 0x0D_u32); }
+
+// =============================================================================
+// Section 2: ErrorCode — new / value / Eq
+// =============================================================================
+
+@test
+fn test_h2err_code_new_round_trips_value() {
+    let e = ErrorCode.new(ErrorCode.REFUSED_STREAM);
+    assert_eq(e.value(), 0x07_u32);
+}
+
+@test
+fn test_h2err_code_eq_reflexive() {
+    assert_eq(ErrorCode.new(0x09_u32), ErrorCode.new(0x09_u32));
+}
+
+@test
+fn test_h2err_code_eq_distinct() {
+    assert(!(ErrorCode.new(0x01_u32) == ErrorCode.new(0x02_u32)));
+}
+
+// =============================================================================
+// Section 3: Http2Error variants + scope semantics
+// =============================================================================
+
+@test
+fn test_h2err_connection_error_constructor() {
+    let e = connection_error(ErrorCode.PROTOCOL_ERROR, &"bad preface".into());
+    assert(e is Http2Error.ConnectionError);
+}
+
+@test
+fn test_h2err_stream_error_constructor() {
+    let e = stream_error(5_u32, ErrorCode.CANCEL, &"cancelled".into());
+    assert(e is Http2Error.StreamError);
+}
+
+@test
+fn test_h2err_connection_vs_stream_disjoint() {
+    let c = connection_error(ErrorCode.INTERNAL_ERROR, &"x".into());
+    assert(!(c is Http2Error.StreamError));
+}
+
+@test
+fn test_h2err_need_more_variant() {
+    let e = Http2Error.NeedMore;
+    assert(e is Http2Error.NeedMore);
+}
+
+@test
+fn test_h2err_bad_client_preface_variant() {
+    let e = Http2Error.BadClientPreface;
+    assert(e is Http2Error.BadClientPreface);
+}
+
+@test
+fn test_h2err_frame_size_exceeded_payload() {
+    let e = Http2Error.FrameSizeExceeded { size: 20000, limit: 16384 };
+    assert(e is Http2Error.FrameSizeExceeded);
+}
+
+// =============================================================================
+// Section 4: Http2Error — Eq
+// =============================================================================
+
+@test
+fn test_h2err_need_more_eq_reflexive() {
+    assert_eq(Http2Error.NeedMore, Http2Error.NeedMore);
+}
+
+@test
+fn test_h2err_connection_error_eq_payload() {
+    let a = connection_error(ErrorCode.PROTOCOL_ERROR, &"r".into());
+    let b = connection_error(ErrorCode.PROTOCOL_ERROR, &"r".into());
+    assert_eq(a, b);
+}
+
+@test
+fn test_h2err_connection_error_neq_distinct_code() {
+    let a = connection_error(ErrorCode.PROTOCOL_ERROR, &"r".into());
+    let b = connection_error(ErrorCode.INTERNAL_ERROR, &"r".into());
+    assert(!(a == b));
+}
+
+@test
+fn test_h2err_frame_size_exceeded_eq_payload() {
+    let a = Http2Error.FrameSizeExceeded { size: 100, limit: 50 };
+    let b = Http2Error.FrameSizeExceeded { size: 100, limit: 50 };
+    assert_eq(a, b);
+}
+
+@test
+fn test_h2err_variants_disjoint() {
+    assert(!(Http2Error.NeedMore == Http2Error.BadClientPreface));
+}
+
+@test
+fn test_h2err_display_nonempty() {
+    let s = f"{Http2Error.NeedMore}";
+    assert(s.len() > 0);
+}
+
+fn main() {}

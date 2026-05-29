@@ -1,0 +1,55 @@
+// =============================================================================
+// core-tests/net/http2/frame/property_test.vr — RFC 7540 §4 codec laws
+// =============================================================================
+//
+//   * FrameType.from_u8 ∘ to_u8 == id over the 10 well-known IDs and the
+//     full 0..255 unknown space.
+//   * FrameHeader round-trip: decode ∘ encode == id over a length/flag/id
+//     sweep, with the reserved bit masked on the stream id.
+// =============================================================================
+
+mount core.net.http2.frame.{FrameType, FrameFlags, FrameHeader};
+
+@test
+fn property_h2frame_type_round_trip_all_bytes() {
+    // Every 8-bit value must round-trip through from_u8 ∘ to_u8.
+    let mut b: Int = 0;
+    while b <= 255 {
+        let t = FrameType.from_u8(b as UInt8);
+        assert_eq(t.to_u8(), b as UInt8);
+        b = b + 1;
+    }
+}
+
+@test
+fn property_h2frame_header_round_trip_sweep() {
+    let lengths: List<Int> = [0, 1, 255, 256, 16384, 0xFFFF, 0xFFFFFF];
+    let sids: List<UInt32> = [0_u32, 1_u32, 2_u32, 0x7FFFFFFF_u32, 0x80000001_u32];
+    let mut li = 0;
+    while li < lengths.len() {
+        let mut si = 0;
+        while si < sids.len() {
+            let h = FrameHeader {
+                length: lengths[li],
+                frame_type: FrameType.Headers,
+                flags: FrameFlags.new(FrameFlags.END_STREAM),
+                stream_id: sids[si],
+            };
+            let mut out: List<Byte> = [];
+            h.encode(&mut out);
+            match FrameHeader.decode(out.as_slice()) {
+                Ok(d) => {
+                    assert_eq(d.length, lengths[li]);
+                    // Reserved top bit is always masked off on encode/decode.
+                    assert_eq(d.stream_id, sids[si] & 0x7FFFFFFF_u32);
+                    assert(d.flags.has(FrameFlags.END_STREAM));
+                }
+                Err(_) => panic("round-trip must succeed"),
+            }
+            si = si + 1;
+        }
+        li = li + 1;
+    }
+}
+
+fn main() {}
