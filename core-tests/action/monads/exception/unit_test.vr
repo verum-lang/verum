@@ -1,0 +1,71 @@
+// =============================================================================
+// core-tests/action/monads/exception/unit_test.vr
+// =============================================================================
+//
+// `core/action/monads/exception.vr` — Exception<E, A> 2-variant ADT.
+// =============================================================================
+
+mount core.action.monads.exception.Exception;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Exception<Text, Int> variant construction
+// =============================================================================
+
+@test
+fn test_exception_throw_variant() {
+    let e: Exception<Text, Int> = Exception.Throw("io error".to_text());
+    assert(e is Exception.Throw);
+}
+
+@test
+fn test_exception_done_variant() {
+    let e: Exception<Text, Int> = Exception.Done(42);
+    assert(e is Exception.Done);
+}
+
+@test
+fn test_exception_throw_disjoint_from_done() {
+    let e: Exception<Text, Int> = Exception.Throw("err".to_text());
+    assert(!(e is Exception.Done));
+}
+
+@test
+fn test_exception_done_disjoint_from_throw() {
+    let e: Exception<Text, Int> = Exception.Done(0);
+    assert(!(e is Exception.Throw));
+}
+
+// =============================================================================
+// Section 2: Payload preservation
+// =============================================================================
+
+@test
+fn test_exception_throw_payload_round_trip() {
+    let e: Exception<Text, Int> = Exception.Throw("permission denied".to_text());
+    match e {
+        Exception.Throw(msg) => assert_eq(msg, "permission denied"),
+        Exception.Done(_)    => panic("expected Throw"),
+    }
+}
+
+@test
+fn test_exception_done_payload_round_trip() {
+    let e: Exception<Text, Int> = Exception.Done(255);
+    match e {
+        Exception.Done(v)    => assert_eq(v, 255),
+        Exception.Throw(_)   => panic("expected Done"),
+    }
+}
+
+@test
+fn test_exception_done_negative_payload() {
+    let e: Exception<Text, Int> = Exception.Done(-1);
+    match e {
+        Exception.Done(v)    => assert_eq(v, -1),
+        Exception.Throw(_)   => panic("expected Done"),
+    }
+}
+
+fn main() {}

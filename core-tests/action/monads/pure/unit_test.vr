@@ -1,0 +1,62 @@
+// =============================================================================
+// core-tests/action/monads/pure/unit_test.vr
+// =============================================================================
+//
+// `core/action/monads/pure.vr` — Pure<A> 1-variant ADT (Identity monad).
+// =============================================================================
+
+mount core.action.monads.pure.Pure;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Pure<Int> Identity variant construction
+// =============================================================================
+
+@test
+fn test_pure_identity_int_zero() {
+    let p: Pure<Int> = Pure.Identity(0);
+    assert(p is Pure.Identity);
+}
+
+@test
+fn test_pure_identity_int_positive() {
+    let p: Pure<Int> = Pure.Identity(42);
+    assert(p is Pure.Identity);
+}
+
+@test
+fn test_pure_identity_int_negative() {
+    let p: Pure<Int> = Pure.Identity(-1);
+    assert(p is Pure.Identity);
+}
+
+// =============================================================================
+// Section 2: Payload preservation
+// =============================================================================
+
+@test
+fn test_pure_identity_int_payload_round_trip() {
+    let p: Pure<Int> = Pure.Identity(99);
+    match p {
+        Pure.Identity(v) => assert_eq(v, 99),
+    }
+}
+
+@test
+fn test_pure_identity_int_max_value_round_trip() {
+    let p: Pure<Int> = Pure.Identity(0x7FFFFFFFFFFFFFFF);
+    match p {
+        Pure.Identity(v) => assert_eq(v, 0x7FFFFFFFFFFFFFFF),
+    }
+}
+
+@test
+fn test_pure_identity_text_payload_round_trip() {
+    let p: Pure<Text> = Pure.Identity("hello".to_text());
+    match p {
+        Pure.Identity(s) => assert_eq(s, "hello"),
+    }
+}
+
+fn main() {}
