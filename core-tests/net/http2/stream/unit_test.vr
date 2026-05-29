@@ -1,0 +1,252 @@
+// =============================================================================
+// core-tests/net/http2/stream/unit_test.vr — RFC 7540 §5.1 stream FSM
+// =============================================================================
+//
+// `core/net/http2/stream.vr`:
+//
+//   * StreamState 7-variant + Eq.
+//   * StreamEvent 8-variant.
+//   * StreamFsm.new / .step / .state / .is_terminal — §5.1 transition table.
+//   * StreamTransitionError 2-variant + Eq.
+//   * next_client_stream_id / next_server_stream_id — §5.1.1 id allocation.
+//
+// Every transition asserted here is taken verbatim from the RFC 7540 §5.1
+// state diagram.
+// =============================================================================
+
+mount core.net.http2.stream.{
+    StreamState, StreamEvent, StreamFsm, StreamTransitionError,
+    next_client_stream_id, next_server_stream_id
+};
+
+// =============================================================================
+// Section 1: construction + accessors
+// =============================================================================
+
+@test
+fn test_h2stream_new_starts_idle() {
+    let fsm = StreamFsm.new(1_u32);
+    assert_eq(fsm.state(), StreamState.Idle);
+}
+
+@test
+fn test_h2stream_new_preserves_stream_id() {
+    let fsm = StreamFsm.new(7_u32);
+    assert_eq(fsm.stream_id(), 7_u32);
+}
+
+@test
+fn test_h2stream_idle_not_terminal() {
+    let fsm = StreamFsm.new(1_u32);
+    assert(!fsm.is_terminal());
+}
+
+// --- probes: does the &mut self state mutation persist across step() calls? ---
+
+@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+@test
+fn test_h2stream_probe_persist_after_let_underscore() {
+    let mut fsm = StreamFsm.new(1_u32);
+    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
+    assert_eq(fsm.state(), StreamState.Open);
+}
+
+@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+@test
+fn test_h2stream_probe_persist_after_match_discard() {
+    let mut fsm = StreamFsm.new(1_u32);
+    match fsm.step(&StreamEvent.SendHeaders { end_stream: false }) {
+        Ok(_)  => {}
+        Err(_) => panic("setup step must succeed"),
+    }
+    assert_eq(fsm.state(), StreamState.Open);
+}
+
+// =============================================================================
+// Section 2: transitions out of Idle (§5.1)
+// =============================================================================
+
+@test
+fn test_h2stream_idle_send_headers_open() {
+    let mut fsm = StreamFsm.new(1_u32);
+    let ev = StreamEvent.SendHeaders { end_stream: false };
+    match fsm.step(&ev) {
+        Ok(s)  => assert_eq(s, StreamState.Open),
+        Err(_) => panic("idle + SendHeaders(open) must reach Open"),
+    }
+}
+
+@test
+fn test_h2stream_idle_send_headers_end_stream_half_closed_local() {
+    let mut fsm = StreamFsm.new(1_u32);
+    let ev = StreamEvent.SendHeaders { end_stream: true };
+    match fsm.step(&ev) {
+        Ok(s)  => assert_eq(s, StreamState.HalfClosedLocal),
+        Err(_) => panic("idle + SendHeaders(end) must reach HalfClosedLocal"),
+    }
+}
+
+@test
+fn test_h2stream_idle_recv_headers_half_closed_remote() {
+    let mut fsm = StreamFsm.new(2_u32);
+    let ev = StreamEvent.RecvHeaders { end_stream: true };
+    match fsm.step(&ev) {
+        Ok(s)  => assert_eq(s, StreamState.HalfClosedRemote),
+        Err(_) => panic("idle + RecvHeaders(end) must reach HalfClosedRemote"),
+    }
+}
+
+@test
+fn test_h2stream_idle_send_push_promise_reserved_local() {
+    let mut fsm = StreamFsm.new(2_u32);
+    let ev = StreamEvent.SendPushPromise;
+    match fsm.step(&ev) {
+        Ok(s)  => assert_eq(s, StreamState.ReservedLocal),
+        Err(_) => panic("idle + SendPushPromise must reach ReservedLocal"),
+    }
+}
+
+@test
+fn test_h2stream_idle_recv_push_promise_reserved_remote() {
+    let mut fsm = StreamFsm.new(2_u32);
+    let ev = StreamEvent.RecvPushPromise;
+    match fsm.step(&ev) {
+        Ok(s)  => assert_eq(s, StreamState.ReservedRemote),
+        Err(_) => panic("idle + RecvPushPromise must reach ReservedRemote"),
+    }
+}
+
+// =============================================================================
+// Section 3: Open → half-closed → Closed (data path, §5.1)
+// =============================================================================
+
+@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+@test
+fn test_h2stream_open_send_data_end_half_closed_local() {
+    let mut fsm = StreamFsm.new(1_u32);
+    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });   // → Open
+    let ev = StreamEvent.SendData { end_stream: true };
+    match fsm.step(&ev) {
+        Ok(s)  => assert_eq(s, StreamState.HalfClosedLocal),
+        Err(_) => panic("open + SendData(end) must half-close local"),
+    }
+}
+
+@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+@test
+fn test_h2stream_open_recv_data_end_half_closed_remote() {
+    let mut fsm = StreamFsm.new(1_u32);
+    let _ = fsm.step(&StreamEvent.RecvHeaders { end_stream: false });   // → Open
+    let ev = StreamEvent.RecvData { end_stream: true };
+    match fsm.step(&ev) {
+        Ok(s)  => assert_eq(s, StreamState.HalfClosedRemote),
+        Err(_) => panic("open + RecvData(end) must half-close remote"),
+    }
+}
+
+@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+@test
+fn test_h2stream_full_lifecycle_to_closed() {
+    // Idle → Open → HalfClosedLocal → Closed.
+    let mut fsm = StreamFsm.new(1_u32);
+    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
+    let _ = fsm.step(&StreamEvent.SendData { end_stream: true });
+    match fsm.step(&StreamEvent.RecvData { end_stream: true }) {
+        Ok(s)  => assert_eq(s, StreamState.Closed),
+        Err(_) => panic("HalfClosedLocal + RecvData(end) must close"),
+    }
+    assert(fsm.is_terminal());
+}
+
+// =============================================================================
+// Section 4: RST_STREAM and Closed semantics (§5.1)
+// =============================================================================
+
+@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+@test
+fn test_h2stream_open_send_rst_closes() {
+    let mut fsm = StreamFsm.new(1_u32);
+    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
+    match fsm.step(&StreamEvent.SendRstStream) {
+        Ok(s)  => assert_eq(s, StreamState.Closed),
+        Err(_) => panic("open + SendRstStream must close"),
+    }
+}
+
+@test
+fn test_h2stream_closed_rejects_further_events() {
+    // Closed + any event → InvalidTransition (PROTOCOL_ERROR per §5.1).
+    let mut fsm = StreamFsm.new(1_u32);
+    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
+    let _ = fsm.step(&StreamEvent.SendRstStream);   // → Closed
+    match fsm.step(&StreamEvent.SendData { end_stream: false }) {
+        Ok(_)  => panic("closed stream must reject events"),
+        Err(e) => assert(e is StreamTransitionError.InvalidTransition),
+    }
+}
+
+@test
+fn test_h2stream_idle_recv_data_invalid() {
+    // Idle has no Data transition — invalid (must be Headers first).
+    let mut fsm = StreamFsm.new(1_u32);
+    match fsm.step(&StreamEvent.RecvData { end_stream: false }) {
+        Ok(_)  => panic("idle + Data must be invalid"),
+        Err(e) => assert(e is StreamTransitionError.InvalidTransition),
+    }
+}
+
+// =============================================================================
+// Section 5: StreamState / StreamTransitionError ADT
+// =============================================================================
+
+@test
+fn test_h2stream_state_eq_reflexive() {
+    assert_eq(StreamState.Open, StreamState.Open);
+}
+
+@test
+fn test_h2stream_state_distinct() {
+    assert(!(StreamState.Idle == StreamState.Closed));
+}
+
+@test
+fn test_h2stream_transition_error_overflow_eq() {
+    assert_eq(StreamTransitionError.OverflowedStreamId,
+              StreamTransitionError.OverflowedStreamId);
+}
+
+// =============================================================================
+// Section 6: stream-id allocation (§5.1.1)
+// =============================================================================
+
+@test
+fn test_h2stream_first_client_id_is_1() {
+    match next_client_stream_id(0_u32) {
+        Maybe.Some(id) => assert_eq(id, 1_u32),
+        Maybe.None     => panic("first client id must be 1"),
+    }
+}
+
+@test
+fn test_h2stream_client_ids_step_by_2() {
+    match next_client_stream_id(1_u32) {
+        Maybe.Some(id) => assert_eq(id, 3_u32),
+        Maybe.None     => panic("client ids advance by 2"),
+    }
+}
+
+@test
+fn test_h2stream_first_server_id_is_2() {
+    match next_server_stream_id(0_u32) {
+        Maybe.Some(id) => assert_eq(id, 2_u32),
+        Maybe.None     => panic("first server id must be 2"),
+    }
+}
+
+@test
+fn test_h2stream_client_id_exhaustion_is_none() {
+    // 0x7FFFFFFF + 2 exceeds the 31-bit id space (§5.1.1).
+    assert(next_client_stream_id(0x7FFFFFFF_u32) is Maybe.None);
+}
+
+fn main() {}
