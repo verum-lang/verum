@@ -1,0 +1,112 @@
+// =============================================================================
+// core-tests/security/zk/stark/air/unit_test.vr
+// =============================================================================
+//
+// `core/security/zk/stark/air.vr` —
+//   * FieldChoice 4-variant ADT (Goldilocks / Mersenne31 / BabyBear /
+//                                Custom { modulus })
+//   * TraceLayout record (length, width)
+// =============================================================================
+
+mount core.security.zk.stark.air.{FieldChoice, TraceLayout};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: FieldChoice 4-variant construction
+// =============================================================================
+
+@test
+fn test_field_choice_goldilocks_variant() {
+    let f: FieldChoice = FieldChoice.Goldilocks;
+    assert(f is FieldChoice.Goldilocks);
+}
+
+@test
+fn test_field_choice_mersenne31_variant() {
+    let f: FieldChoice = FieldChoice.Mersenne31;
+    assert(f is FieldChoice.Mersenne31);
+}
+
+@test
+fn test_field_choice_babybear_variant() {
+    let f: FieldChoice = FieldChoice.BabyBear;
+    assert(f is FieldChoice.BabyBear);
+}
+
+@test
+fn test_field_choice_custom_variant() {
+    let mut modulus: List<Byte> = [];
+    modulus.push(0xFF_u8);
+    modulus.push(0xFF_u8);
+    let f: FieldChoice = FieldChoice.Custom { modulus };
+    assert(f is FieldChoice.Custom);
+}
+
+// =============================================================================
+// Section 2: FieldChoice pairwise disjointness
+// =============================================================================
+
+@test
+fn test_field_choice_goldilocks_disjoint() {
+    let f: FieldChoice = FieldChoice.Goldilocks;
+    assert(!(f is FieldChoice.Mersenne31));
+    assert(!(f is FieldChoice.BabyBear));
+    assert(!(f is FieldChoice.Custom));
+}
+
+@test
+fn test_field_choice_mersenne31_disjoint() {
+    let f: FieldChoice = FieldChoice.Mersenne31;
+    assert(!(f is FieldChoice.Goldilocks));
+    assert(!(f is FieldChoice.BabyBear));
+    assert(!(f is FieldChoice.Custom));
+}
+
+@test
+fn test_field_choice_babybear_disjoint() {
+    let f: FieldChoice = FieldChoice.BabyBear;
+    assert(!(f is FieldChoice.Goldilocks));
+    assert(!(f is FieldChoice.Mersenne31));
+    assert(!(f is FieldChoice.Custom));
+}
+
+// =============================================================================
+// Section 3: TraceLayout record + .new() ctor
+// =============================================================================
+
+@test
+fn test_trace_layout_new_small() {
+    let t: TraceLayout = TraceLayout.new(16, 8);
+    assert_eq(t.length, 16);
+    assert_eq(t.width, 8);
+}
+
+@test
+fn test_trace_layout_new_zk_vm_scale() {
+    let t: TraceLayout = TraceLayout.new(1024, 32);
+    assert_eq(t.length, 1024);
+    assert_eq(t.width, 32);
+}
+
+@test
+fn test_trace_layout_direct_record_construction() {
+    let t: TraceLayout = TraceLayout {
+        length: 256,
+        width: 16,
+    };
+    assert_eq(t.length, 256);
+    assert_eq(t.width, 16);
+}
+
+@test
+fn test_trace_layout_field_independence() {
+    let a: TraceLayout = TraceLayout.new(16, 4);
+    let b: TraceLayout = TraceLayout.new(32, 8);
+    assert_eq(a.length, 16);
+    assert_eq(b.length, 32);
+    assert_eq(a.width, 4);
+    assert_eq(b.width, 8);
+}
+
+fn main() {}
