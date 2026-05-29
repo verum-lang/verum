@@ -1,0 +1,391 @@
+// =============================================================================
+// core-tests/database/common/migrations/journal/unit_test.vr
+// =============================================================================
+//
+// `core/database/common/migrations/journal.vr` — applied-migration log,
+// JournalEntry record, MigrationJournal aggregate, FNV-1a drift checksum.
+//
+// Surface tested:
+//   * checksum_for_sql() FNV-1a Int64 fingerprint determinism + collision check
+//   * JournalEntry 4-field record direct construction
+//   * clone_entry preserves all fields + status variant
+//   * journal_new() empty aggregate
+//   * MigrationJournal.entry_count + record_pending + record_applied +
+//     record_rolled_back + record_failed
+//   * MigrationJournal.lookup (Some/None paths)
+//   * MigrationJournal.is_applied predicate
+//   * MigrationJournal.high_water monotone
+//   * MigrationJournal.drift_detected predicate
+// =============================================================================
+
+mount core.database.common.migrations.journal.{
+    JournalEntry, MigrationJournal,
+    checksum_for_sql, clone_entry, journal_new, journal_from_entries,
+};
+mount core.database.common.migrations.migration.{
+    Migration, MigrationStatus,
+    MsPending, MsApplied, MsRolledBack, MsFailed,
+    migration_new,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: checksum_for_sql — FNV-1a 64-bit fingerprint
+// =============================================================================
+
+@test
+fn test_checksum_empty_sql_is_offset_basis() {
+    // FNV-1a offset basis = 0xCBF29CE484222325 = -3750763034362895579 as Int64
+    let cs = checksum_for_sql(&"".to_text());
+    assert_eq(cs, -3750763034362895579_i64);
+}
+
+@test
+fn test_checksum_deterministic_same_input() {
+    let a = checksum_for_sql(&"CREATE TABLE t (id INT);".to_text());
+    let b = checksum_for_sql(&"CREATE TABLE t (id INT);".to_text());
+    assert_eq(a, b);
+}
+
+@test
+fn test_checksum_differs_for_different_input() {
+    let a = checksum_for_sql(&"SELECT 1;".to_text());
+    let b = checksum_for_sql(&"SELECT 2;".to_text());
+    assert(a != b);
+}
+
+@test
+fn test_checksum_one_byte_difference_differs() {
+    let a = checksum_for_sql(&"abc".to_text());
+    let b = checksum_for_sql(&"abd".to_text());
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 2: JournalEntry direct construction
+// =============================================================================
+
+@test
+fn test_journal_entry_construct_version() {
+    let e: JournalEntry = JournalEntry {
+        version: 7,
+        name: "init".to_text(),
+        status: MsPending,
+        checksum: 0_i64,
+    };
+    assert_eq(e.version, 7);
+}
+
+@test
+fn test_journal_entry_construct_name() {
+    let e: JournalEntry = JournalEntry {
+        version: 1,
+        name: "add_users".to_text(),
+        status: MsPending,
+        checksum: 0_i64,
+    };
+    assert_eq(e.name, "add_users".to_text());
+}
+
+// §A — cross-module ADT field tag drift: JournalEntry { status: MigrationStatus }
+// reads back the wrong variant tag through the record. Same sister class as
+// btree_pattern_match_ref_generic_class / enactment_field_access_oob — field-index
+// resolver loses MigrationStatus type through cross-module record store. Workaround:
+// pattern match doesn't help (defect is in storage, not match dispatch).
+@ignore("[[btree_pattern_match_ref_generic_class]] — JournalEntry stored MigrationStatus reads back wrong tag through cross-module record field-access. Multi-day codegen fix.")
+@test
+fn test_journal_entry_construct_status_pending() {
+    let e: JournalEntry = JournalEntry {
+        version: 1,
+        name: "x".to_text(),
+        status: MsPending,
+        checksum: 0_i64,
+    };
+    match e.status {
+        MsPending => assert(true),
+        _ => panic("expected MsPending"),
+    }
+}
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — JournalEntry stored MigrationStatus reads back wrong tag through cross-module record field-access. Multi-day codegen fix.")
+@test
+fn test_journal_entry_construct_status_applied() {
+    let e: JournalEntry = JournalEntry {
+        version: 2,
+        name: "x".to_text(),
+        status: MsApplied(123_i64),
+        checksum: 99_i64,
+    };
+    match e.status {
+        MsApplied(t) => assert_eq(t, 123_i64),
+        _ => panic("expected MsApplied"),
+    }
+}
+
+@test
+fn test_journal_entry_construct_checksum() {
+    let e: JournalEntry = JournalEntry {
+        version: 1,
+        name: "x".to_text(),
+        status: MsPending,
+        checksum: 42_i64,
+    };
+    assert_eq(e.checksum, 42_i64);
+}
+
+// =============================================================================
+// Section 3: clone_entry deep-copies
+// =============================================================================
+
+@test
+fn test_clone_entry_preserves_version() {
+    let e: JournalEntry = JournalEntry {
+        version: 99,
+        name: "x".to_text(),
+        status: MsPending,
+        checksum: 0_i64,
+    };
+    let c = clone_entry(&e);
+    assert_eq(c.version, 99);
+}
+
+@test
+fn test_clone_entry_preserves_name() {
+    let e: JournalEntry = JournalEntry {
+        version: 1,
+        name: "named".to_text(),
+        status: MsPending,
+        checksum: 0_i64,
+    };
+    let c = clone_entry(&e);
+    assert_eq(c.name, "named".to_text());
+}
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — same cross-module MigrationStatus tag drift through JournalEntry.status.")
+@test
+fn test_clone_entry_preserves_status_applied_payload() {
+    let e: JournalEntry = JournalEntry {
+        version: 1,
+        name: "x".to_text(),
+        status: MsApplied(1_234_567_i64),
+        checksum: 0_i64,
+    };
+    let c = clone_entry(&e);
+    match c.status {
+        MsApplied(t) => assert_eq(t, 1_234_567_i64),
+        _ => panic("expected MsApplied"),
+    }
+}
+
+@test
+fn test_clone_entry_preserves_checksum() {
+    let e: JournalEntry = JournalEntry {
+        version: 1,
+        name: "x".to_text(),
+        status: MsPending,
+        checksum: 777_i64,
+    };
+    let c = clone_entry(&e);
+    assert_eq(c.checksum, 777_i64);
+}
+
+// =============================================================================
+// Section 4: journal_new + empty state
+// =============================================================================
+
+@test
+fn test_journal_new_entries_empty() {
+    let j = journal_new();
+    assert_eq(j.entry_count(), 0);
+}
+
+@test
+fn test_journal_new_lookup_returns_none() {
+    let j = journal_new();
+    let r = j.lookup(42);
+    assert(r is Maybe.None);
+}
+
+@test
+fn test_journal_new_is_applied_returns_false() {
+    let j = journal_new();
+    assert_eq(j.is_applied(1), false);
+}
+
+@test
+fn test_journal_new_high_water_is_zero() {
+    let j = journal_new();
+    assert_eq(j.high_water(), 0);
+}
+
+// =============================================================================
+// Section 5: record_pending + record_applied + entry_count growth
+// =============================================================================
+
+@test
+fn test_record_pending_increments_count() {
+    let m = migration_new(1, "init".to_text(), "CREATE TABLE t;".to_text());
+    let mut j = journal_new();
+    j.record_pending(&m);
+    assert_eq(j.entry_count(), 1);
+}
+
+@test
+fn test_record_applied_increments_count() {
+    let m = migration_new(1, "init".to_text(), "CREATE TABLE t;".to_text());
+    let mut j = journal_new();
+    j.record_applied(&m, 1_000_000_000_i64);
+    assert_eq(j.entry_count(), 1);
+}
+
+@test
+fn test_record_two_distinct_versions_yields_two_entries() {
+    let m1 = migration_new(1, "a".to_text(), "U1".to_text());
+    let m2 = migration_new(2, "b".to_text(), "U2".to_text());
+    let mut j = journal_new();
+    j.record_pending(&m1);
+    j.record_pending(&m2);
+    assert_eq(j.entry_count(), 2);
+}
+
+@test
+fn test_record_same_version_twice_yields_one_entry() {
+    // replace_or_insert semantics: re-recording the same version
+    // updates the existing entry rather than appending.
+    let m = migration_new(7, "x".to_text(), "U".to_text());
+    let mut j = journal_new();
+    j.record_pending(&m);
+    j.record_applied(&m, 100_i64);
+    assert_eq(j.entry_count(), 1);
+}
+
+// =============================================================================
+// Section 6: lookup
+// =============================================================================
+
+@test
+fn test_lookup_after_record_pending_finds_entry() {
+    let m = migration_new(5, "x".to_text(), "U".to_text());
+    let mut j = journal_new();
+    j.record_pending(&m);
+    let r = j.lookup(5);
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_lookup_for_unknown_version_returns_none() {
+    let m = migration_new(5, "x".to_text(), "U".to_text());
+    let mut j = journal_new();
+    j.record_pending(&m);
+    let r = j.lookup(99);
+    assert(r is Maybe.None);
+}
+
+// =============================================================================
+// Section 7: is_applied predicate
+// =============================================================================
+
+@test
+fn test_is_applied_true_after_record_applied() {
+    let m = migration_new(3, "x".to_text(), "U".to_text());
+    let mut j = journal_new();
+    j.record_applied(&m, 500_i64);
+    assert_eq(j.is_applied(3), true);
+}
+
+@test
+fn test_is_applied_false_after_record_pending() {
+    let m = migration_new(4, "x".to_text(), "U".to_text());
+    let mut j = journal_new();
+    j.record_pending(&m);
+    assert_eq(j.is_applied(4), false);
+}
+
+@test
+fn test_is_applied_false_after_record_rolled_back() {
+    let m = migration_new(5, "x".to_text(), "U".to_text());
+    let mut j = journal_new();
+    j.record_rolled_back(&m, 600_i64);
+    assert_eq(j.is_applied(5), false);
+}
+
+@test
+fn test_is_applied_false_after_record_failed() {
+    let m = migration_new(6, "x".to_text(), "U".to_text());
+    let mut j = journal_new();
+    j.record_failed(&m, "err".to_text());
+    assert_eq(j.is_applied(6), false);
+}
+
+// =============================================================================
+// Section 8: high_water — max applied version
+// =============================================================================
+
+@test
+fn test_high_water_is_max_of_applied_versions() {
+    let m1 = migration_new(1, "a".to_text(), "U1".to_text());
+    let m3 = migration_new(3, "c".to_text(), "U3".to_text());
+    let m7 = migration_new(7, "g".to_text(), "U7".to_text());
+    let mut j = journal_new();
+    j.record_applied(&m1, 100_i64);
+    j.record_applied(&m3, 300_i64);
+    j.record_applied(&m7, 700_i64);
+    assert_eq(j.high_water(), 7);
+}
+
+@test
+fn test_high_water_ignores_pending() {
+    let m1 = migration_new(1, "a".to_text(), "U1".to_text());
+    let m5 = migration_new(5, "e".to_text(), "U5".to_text());
+    let mut j = journal_new();
+    j.record_applied(&m1, 100_i64);
+    j.record_pending(&m5);
+    // Pending entries don't count toward high_water.
+    assert_eq(j.high_water(), 1);
+}
+
+@test
+fn test_high_water_ignores_failed() {
+    let m1 = migration_new(1, "a".to_text(), "U1".to_text());
+    let m9 = migration_new(9, "i".to_text(), "U9".to_text());
+    let mut j = journal_new();
+    j.record_applied(&m1, 100_i64);
+    j.record_failed(&m9, "boom".to_text());
+    assert_eq(j.high_water(), 1);
+}
+
+// =============================================================================
+// Section 9: drift_detected predicate
+// =============================================================================
+
+@test
+fn test_drift_detected_false_for_same_sql() {
+    let m = migration_new(1, "x".to_text(), "CREATE TABLE t (id INT);".to_text());
+    let mut j = journal_new();
+    j.record_applied(&m, 100_i64);
+    // Same migration text — no drift.
+    assert_eq(j.drift_detected(&m), false);
+}
+
+// §A — drift_detected reads e.checksum from looked-up JournalEntry — same
+// cross-module record field-access defect class as status field above.
+@ignore("[[btree_pattern_match_ref_generic_class]] — drift_detected reads stored .checksum through cross-module JournalEntry field-access. Multi-day codegen fix.")
+@test
+fn test_drift_detected_true_for_modified_sql() {
+    let m_orig = migration_new(1, "x".to_text(), "CREATE TABLE t (id INT);".to_text());
+    let m_edited = migration_new(1, "x".to_text(), "CREATE TABLE t (id BIGINT);".to_text());
+    let mut j = journal_new();
+    j.record_applied(&m_orig, 100_i64);
+    // Edited up_sql — drift must surface.
+    assert_eq(j.drift_detected(&m_edited), true);
+}
+
+@test
+fn test_drift_detected_false_for_unrecorded_version() {
+    let m = migration_new(99, "x".to_text(), "SELECT 1;".to_text());
+    let j = journal_new();
+    // Not recorded — no anchor to drift from.
+    assert_eq(j.drift_detected(&m), false);
+}
+
+fn main() {}
