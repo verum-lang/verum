@@ -1,0 +1,111 @@
+// =============================================================================
+// core-tests/term/app/accessibility/unit_test.vr
+// =============================================================================
+//
+// `core/term/app/accessibility.vr` — OSC 133 semantic zones.
+//
+// Surface tested:
+//   * SemanticZone 6-variant (Prompt / CommandInput / CommandOutput /
+//     CommandEnd { exit_code } / Region { role, label } / Live { politeness })
+//     — simple-variant subset; record-payload variants @ignored on cross-module
+//     field defect
+//   * Politeness 3-variant (Off / Polite / Assertive) — fully qualified to
+//     dodge Off bare-name collision
+//
+// write_semantic_zone + mark_* functions require EscapeWriter — tested at
+// language-level under `vcs/specs/L2-standard/term/app/`.
+// =============================================================================
+
+mount core.term.app.accessibility.{
+    SemanticZone, Politeness,
+};
+
+// =============================================================================
+// Section 1: SemanticZone simple-variant construction
+// =============================================================================
+
+@test
+fn test_semantic_zone_prompt_variant() {
+    let z: SemanticZone = SemanticZone.Prompt;
+    assert(z is SemanticZone.Prompt);
+}
+
+@test
+fn test_semantic_zone_command_input_variant() {
+    let z: SemanticZone = SemanticZone.CommandInput;
+    assert(z is SemanticZone.CommandInput);
+}
+
+@test
+fn test_semantic_zone_command_output_variant() {
+    let z: SemanticZone = SemanticZone.CommandOutput;
+    assert(z is SemanticZone.CommandOutput);
+}
+
+@test
+fn test_semantic_zone_prompt_disjoint_from_command_input() {
+    let p: SemanticZone = SemanticZone.Prompt;
+    let i: SemanticZone = SemanticZone.CommandInput;
+    assert(p is SemanticZone.Prompt && !(p is SemanticZone.CommandInput));
+    assert(i is SemanticZone.CommandInput && !(i is SemanticZone.Prompt));
+}
+
+@test
+fn test_semantic_zone_command_input_disjoint_from_command_output() {
+    let i: SemanticZone = SemanticZone.CommandInput;
+    let o: SemanticZone = SemanticZone.CommandOutput;
+    assert(!(i is SemanticZone.CommandOutput));
+    assert(!(o is SemanticZone.CommandInput));
+}
+
+// =============================================================================
+// Section 2: Politeness 3-variant (fully-qualified)
+// =============================================================================
+//
+// Politeness.Off collides with bare-name Off in cross-module dispatch; use
+// `Politeness.Off` qualified.
+// =============================================================================
+
+@test
+fn test_politeness_off_variant() {
+    let p: Politeness = Politeness.Off;
+    assert(p is Politeness.Off);
+}
+
+@test
+fn test_politeness_polite_variant() {
+    let p: Politeness = Politeness.Polite;
+    assert(p is Politeness.Polite);
+}
+
+@test
+fn test_politeness_assertive_variant() {
+    let p: Politeness = Politeness.Assertive;
+    assert(p is Politeness.Assertive);
+}
+
+@test
+fn test_politeness_off_disjoint_from_polite() {
+    let o: Politeness = Politeness.Off;
+    let p: Politeness = Politeness.Polite;
+    assert(o is Politeness.Off && !(o is Politeness.Polite));
+    assert(p is Politeness.Polite && !(p is Politeness.Off));
+}
+
+@test
+fn test_politeness_polite_disjoint_from_assertive() {
+    let p: Politeness = Politeness.Polite;
+    let a: Politeness = Politeness.Assertive;
+    assert(!(p is Politeness.Assertive));
+    assert(!(a is Politeness.Polite));
+}
+
+@test
+fn test_politeness_off_disjoint_from_assertive() {
+    let o: Politeness = Politeness.Off;
+    let a: Politeness = Politeness.Assertive;
+    assert(!(o is Politeness.Assertive));
+    assert(!(a is Politeness.Off));
+}
+
+fn main() {}
