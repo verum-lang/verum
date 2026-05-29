@@ -1,0 +1,362 @@
+// =============================================================================
+// core-tests/database/mysql/wire/frame/unit_test.vr
+// =============================================================================
+//
+// `core/database/mysql/wire/frame.vr` — MySQL packet framing + LEI codec.
+//
+// Surface tested:
+//   * MyFrameError 3-variant (FeShort / FeBadLength / FeInvalidUtf8) — simple-
+//     variant only (record-payload variants @ignore on cross-module field tag)
+//   * LeiKind 5-variant (LkNull / LkOneByte / LkTwoBytes / LkThreeBytes /
+//     LkEightBytes)
+//   * frame_packet() — 4-byte header + payload layout
+//   * put_u8 / put_u16_le / put_u32_le / put_u64_le little-endian byte ordering
+//   * encode_lei across 4 size tiers (1B / 3B / 4B / 9B) + negative clamp
+//   * decode_lei round-trip across all 5 LeiKind variants
+// =============================================================================
+
+mount core.database.mysql.wire.frame.{
+    MyFrameError, LeiKind,
+    FeShort, FeBadLength, FeInvalidUtf8,
+    LkNull, LkOneByte, LkTwoBytes, LkThreeBytes, LkEightBytes,
+    frame_packet, encode_lei, decode_lei,
+    put_u8, put_u16_le, put_u32_le, put_u64_le,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: MyFrameError simple-variant
+// =============================================================================
+
+@test
+fn test_my_frame_error_invalid_utf8_variant() {
+    let e: MyFrameError = FeInvalidUtf8;
+    assert(e is FeInvalidUtf8);
+}
+
+// =============================================================================
+// Section 2: LeiKind 5-variant construction
+// =============================================================================
+
+@test
+fn test_lei_kind_null_variant() {
+    let k: LeiKind = LkNull;
+    assert(k is LkNull);
+}
+
+@test
+fn test_lei_kind_one_byte_variant() {
+    let k: LeiKind = LkOneByte;
+    assert(k is LkOneByte);
+}
+
+@test
+fn test_lei_kind_two_bytes_variant() {
+    let k: LeiKind = LkTwoBytes;
+    assert(k is LkTwoBytes);
+}
+
+@test
+fn test_lei_kind_three_bytes_variant() {
+    let k: LeiKind = LkThreeBytes;
+    assert(k is LkThreeBytes);
+}
+
+@test
+fn test_lei_kind_eight_bytes_variant() {
+    let k: LeiKind = LkEightBytes;
+    assert(k is LkEightBytes);
+}
+
+@test
+fn test_lei_kind_null_disjoint_from_one_byte() {
+    let n: LeiKind = LkNull;
+    let o: LeiKind = LkOneByte;
+    assert(n is LkNull && !(n is LkOneByte));
+    assert(o is LkOneByte && !(o is LkNull));
+}
+
+@test
+fn test_lei_kind_one_byte_disjoint_from_eight_bytes() {
+    let o: LeiKind = LkOneByte;
+    let e: LeiKind = LkEightBytes;
+    assert(!(o is LkEightBytes));
+    assert(!(e is LkOneByte));
+}
+
+@test
+fn test_lei_kind_two_disjoint_from_three() {
+    let t: LeiKind = LkTwoBytes;
+    let r: LeiKind = LkThreeBytes;
+    assert(t is LkTwoBytes && !(t is LkThreeBytes));
+    assert(r is LkThreeBytes && !(r is LkTwoBytes));
+}
+
+// =============================================================================
+// Section 3: frame_packet — 4-byte header layout
+// =============================================================================
+
+@test
+fn test_frame_packet_empty_payload_yields_4_bytes() {
+    let empty: List<Byte> = [];
+    let out = frame_packet(0, empty.as_slice());
+    assert_eq(out.len(), 4);
+}
+
+@test
+fn test_frame_packet_empty_payload_length_bytes_zero() {
+    let empty: List<Byte> = [];
+    let out = frame_packet(0, empty.as_slice());
+    assert_eq(out[0], 0x00_u8);
+    assert_eq(out[1], 0x00_u8);
+    assert_eq(out[2], 0x00_u8);
+}
+
+@test
+fn test_frame_packet_sequence_in_byte_3() {
+    let empty: List<Byte> = [];
+    let out = frame_packet(42, empty.as_slice());
+    assert_eq(out[3], 42_u8);
+}
+
+@test
+fn test_frame_packet_appends_payload_after_header() {
+    let pl: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+    let out = frame_packet(0, pl.as_slice());
+    // Header (4) + payload (3) = 7
+    assert_eq(out.len(), 7);
+    assert_eq(out[4], 0xAA_u8);
+    assert_eq(out[5], 0xBB_u8);
+    assert_eq(out[6], 0xCC_u8);
+}
+
+@test
+fn test_frame_packet_length_le_encoded_3_bytes() {
+    // Payload of length 0x010203 = 66051; verify length is little-endian.
+    let mut pl: List<Byte> = List.new();
+    let mut i = 0;
+    while i < 66051 {
+        pl.push(0x55_u8);
+        i = i + 1;
+    }
+    let out = frame_packet(0, pl.as_slice());
+    // Length bytes: 0x03 0x02 0x01 (LE for 0x010203)
+    assert_eq(out[0], 0x03_u8);
+    assert_eq(out[1], 0x02_u8);
+    assert_eq(out[2], 0x01_u8);
+}
+
+@test
+fn test_frame_packet_sequence_wraps_at_byte_boundary() {
+    let empty: List<Byte> = [];
+    let out = frame_packet(0xFF, empty.as_slice());
+    assert_eq(out[3], 0xFF_u8);
+}
+
+// =============================================================================
+// Section 4: put_u8 / put_u16_le / put_u32_le / put_u64_le
+// =============================================================================
+
+@test
+fn test_put_u8_appends_single_byte() {
+    let mut buf: List<Byte> = List.new();
+    put_u8(&mut buf, 0x7A);
+    assert_eq(buf.len(), 1);
+    assert_eq(buf[0], 0x7A_u8);
+}
+
+@test
+fn test_put_u8_masks_to_low_byte() {
+    let mut buf: List<Byte> = List.new();
+    put_u8(&mut buf, 0x1FF);
+    assert_eq(buf[0], 0xFF_u8);
+}
+
+@test
+fn test_put_u16_le_appends_two_bytes() {
+    let mut buf: List<Byte> = List.new();
+    put_u16_le(&mut buf, 0x1234);
+    assert_eq(buf.len(), 2);
+    assert_eq(buf[0], 0x34_u8);
+    assert_eq(buf[1], 0x12_u8);
+}
+
+@test
+fn test_put_u32_le_appends_four_bytes() {
+    let mut buf: List<Byte> = List.new();
+    put_u32_le(&mut buf, 0xDEADBEEF);
+    assert_eq(buf.len(), 4);
+    assert_eq(buf[0], 0xEF_u8);
+    assert_eq(buf[1], 0xBE_u8);
+    assert_eq(buf[2], 0xAD_u8);
+    assert_eq(buf[3], 0xDE_u8);
+}
+
+@test
+fn test_put_u64_le_appends_eight_bytes() {
+    let mut buf: List<Byte> = List.new();
+    put_u64_le(&mut buf, 0x0123456789ABCDEF);
+    assert_eq(buf.len(), 8);
+    assert_eq(buf[0], 0xEF_u8);
+    assert_eq(buf[7], 0x01_u8);
+}
+
+@test
+fn test_put_u32_le_preserves_existing_buffer() {
+    let mut buf: List<Byte> = [];
+    buf.push(0xAA_u8);
+    put_u32_le(&mut buf, 0x42);
+    assert_eq(buf.len(), 5);
+    assert_eq(buf[0], 0xAA_u8);
+    assert_eq(buf[1], 0x42_u8);
+}
+
+// =============================================================================
+// Section 5: encode_lei tier dispatch
+// =============================================================================
+
+@test
+fn test_encode_lei_0_uses_one_byte() {
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, 0);
+    assert_eq(buf.len(), 1);
+    assert_eq(buf[0], 0x00_u8);
+}
+
+@test
+fn test_encode_lei_small_uses_one_byte() {
+    // 0..0xFA inclusive uses one byte.
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, 0xFA);
+    assert_eq(buf.len(), 1);
+    assert_eq(buf[0], 0xFA_u8);
+}
+
+@test
+fn test_encode_lei_two_bytes_tier_uses_marker_0xfc() {
+    // 0xFB..0xFFFF → 0xFC + 2 LE bytes (total 3).
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, 0xFB);
+    assert_eq(buf.len(), 3);
+    assert_eq(buf[0], 0xFC_u8);
+}
+
+@test
+fn test_encode_lei_three_bytes_tier_uses_marker_0xfd() {
+    // 0x10000..0xFFFFFF → 0xFD + 3 LE bytes (total 4).
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, 0x10000);
+    assert_eq(buf.len(), 4);
+    assert_eq(buf[0], 0xFD_u8);
+}
+
+@test
+fn test_encode_lei_eight_bytes_tier_uses_marker_0xfe() {
+    // ≥ 0x1000000 → 0xFE + 8 LE bytes (total 9).
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, 0x1000000);
+    assert_eq(buf.len(), 9);
+    assert_eq(buf[0], 0xFE_u8);
+}
+
+@test
+fn test_encode_lei_negative_clamps_to_zero() {
+    // Negative LEI is undefined — the encoder clamps to 0 to avoid
+    // emitting a malformed LEI that the server would reject.
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, -1);
+    assert_eq(buf.len(), 1);
+    assert_eq(buf[0], 0x00_u8);
+}
+
+// =============================================================================
+// Section 6: decode_lei round-trip
+// =============================================================================
+
+@test
+fn test_decode_lei_one_byte_0() {
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, 0);
+    let r = decode_lei(buf.as_slice(), 0);
+    match r {
+        Result.Ok((v, _, consumed)) => {
+            assert_eq(v, 0);
+            assert_eq(consumed, 1);
+        },
+        _ => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_decode_lei_one_byte_max() {
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, 0xFA);
+    let r = decode_lei(buf.as_slice(), 0);
+    match r {
+        Result.Ok((v, _, consumed)) => {
+            assert_eq(v, 0xFA);
+            assert_eq(consumed, 1);
+        },
+        _ => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_decode_lei_two_byte_tier() {
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, 0x1234);
+    let r = decode_lei(buf.as_slice(), 0);
+    match r {
+        Result.Ok((v, _, consumed)) => {
+            assert_eq(v, 0x1234);
+            assert_eq(consumed, 3);
+        },
+        _ => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_decode_lei_three_byte_tier() {
+    let mut buf: List<Byte> = List.new();
+    encode_lei(&mut buf, 0x123456);
+    let r = decode_lei(buf.as_slice(), 0);
+    match r {
+        Result.Ok((v, _, consumed)) => {
+            assert_eq(v, 0x123456);
+            assert_eq(consumed, 4);
+        },
+        _ => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_decode_lei_null_returns_minus_one() {
+    // 0xFB is the NULL marker — decode returns (-1, LkNull, 1).
+    let buf: List<Byte> = [0xFB_u8];
+    let r = decode_lei(buf.as_slice(), 0);
+    match r {
+        Result.Ok((v, _, consumed)) => {
+            assert_eq(v, -1);
+            assert_eq(consumed, 1);
+        },
+        _ => panic("expected Ok"),
+    }
+}
+
+@test
+fn test_decode_lei_empty_buffer_returns_err() {
+    let buf: List<Byte> = [];
+    let r = decode_lei(buf.as_slice(), 0);
+    assert(r is Result.Err);
+}
+
+@test
+fn test_decode_lei_short_two_byte_buffer_returns_err() {
+    // 0xFC followed by 1 byte — wanted 3, got 2.
+    let buf: List<Byte> = [0xFC_u8, 0x42_u8];
+    let r = decode_lei(buf.as_slice(), 0);
+    assert(r is Result.Err);
+}
+
+fn main() {}
