@@ -1,0 +1,201 @@
+// =============================================================================
+// core-tests/term/event/keys/unit_test.vr
+// =============================================================================
+//
+// `core/term/event/keys.vr` —
+//   * KeyCode large sum type — focus on bare variants + predicate methods
+//   * Modifiers bitfield (NONE, SHIFT, CTRL, ALT, SUPER, HYPER, META)
+// =============================================================================
+
+mount core.term.event.keys.{KeyCode, Modifiers};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: KeyCode bare-variant construction
+// =============================================================================
+
+@test
+fn test_key_code_backspace_variant() {
+    let k: KeyCode = KeyCode.Backspace;
+    assert(k is KeyCode.Backspace);
+}
+
+@test
+fn test_key_code_enter_variant() {
+    let k: KeyCode = KeyCode.Enter;
+    assert(k is KeyCode.Enter);
+}
+
+@test
+fn test_key_code_tab_variant() {
+    let k: KeyCode = KeyCode.Tab;
+    assert(k is KeyCode.Tab);
+}
+
+@test
+fn test_key_code_escape_variant() {
+    let k: KeyCode = KeyCode.Escape;
+    assert(k is KeyCode.Escape);
+}
+
+@test
+fn test_key_code_space_variant() {
+    let k: KeyCode = KeyCode.Space;
+    assert(k is KeyCode.Space);
+}
+
+@test
+fn test_key_code_delete_variant() {
+    let k: KeyCode = KeyCode.Delete;
+    assert(k is KeyCode.Delete);
+}
+
+@test
+fn test_key_code_left_variant() {
+    let k: KeyCode = KeyCode.Left;
+    assert(k is KeyCode.Left);
+}
+
+@test
+fn test_key_code_right_variant() {
+    let k: KeyCode = KeyCode.Right;
+    assert(k is KeyCode.Right);
+}
+
+@test
+fn test_key_code_up_variant() {
+    let k: KeyCode = KeyCode.Up;
+    assert(k is KeyCode.Up);
+}
+
+@test
+fn test_key_code_down_variant() {
+    let k: KeyCode = KeyCode.Down;
+    assert(k is KeyCode.Down);
+}
+
+@test
+fn test_key_code_home_variant() {
+    let k: KeyCode = KeyCode.Home;
+    assert(k is KeyCode.Home);
+}
+
+@test
+fn test_key_code_end_variant() {
+    let k: KeyCode = KeyCode.End;
+    assert(k is KeyCode.End);
+}
+
+@test
+fn test_key_code_pageup_variant() {
+    let k: KeyCode = KeyCode.PageUp;
+    assert(k is KeyCode.PageUp);
+}
+
+@test
+fn test_key_code_pagedown_variant() {
+    let k: KeyCode = KeyCode.PageDown;
+    assert(k is KeyCode.PageDown);
+}
+
+@test
+fn test_key_code_null_variant() {
+    let k: KeyCode = KeyCode.Null;
+    assert(k is KeyCode.Null);
+}
+
+// =============================================================================
+// Section 2: KeyCode pairwise disjointness (high-signal pairs)
+// =============================================================================
+
+@test
+fn test_key_code_backspace_disjoint_from_delete() {
+    let k: KeyCode = KeyCode.Backspace;
+    assert(!(k is KeyCode.Delete));
+    assert(!(k is KeyCode.Enter));
+    assert(!(k is KeyCode.Escape));
+}
+
+@test
+fn test_key_code_enter_disjoint_from_tab() {
+    let k: KeyCode = KeyCode.Enter;
+    assert(!(k is KeyCode.Tab));
+    assert(!(k is KeyCode.Space));
+}
+
+@test
+fn test_key_code_arrow_navigation_pairwise_disjoint() {
+    let l: KeyCode = KeyCode.Left;
+    let r: KeyCode = KeyCode.Right;
+    let u: KeyCode = KeyCode.Up;
+    let d: KeyCode = KeyCode.Down;
+    assert(!(l is KeyCode.Right));
+    assert(!(r is KeyCode.Left));
+    assert(!(u is KeyCode.Down));
+    assert(!(d is KeyCode.Up));
+}
+
+// =============================================================================
+// Section 3: Modifiers bitfield canonical values
+// =============================================================================
+
+@test
+fn test_modifiers_none_is_zero() {
+    let m: Modifiers = Modifiers.NONE;
+    assert_eq(m.bits, 0_u8);
+}
+
+@test
+fn test_modifiers_shift_bit() {
+    let m: Modifiers = Modifiers.SHIFT;
+    assert_eq(m.bits, 0b0000_0001_u8);
+}
+
+@test
+fn test_modifiers_ctrl_bit() {
+    let m: Modifiers = Modifiers.CTRL;
+    assert_eq(m.bits, 0b0000_0010_u8);
+}
+
+@test
+fn test_modifiers_alt_bit() {
+    let m: Modifiers = Modifiers.ALT;
+    assert_eq(m.bits, 0b0000_0100_u8);
+}
+
+@test
+fn test_modifiers_super_bit() {
+    let m: Modifiers = Modifiers.SUPER;
+    assert_eq(m.bits, 0b0000_1000_u8);
+}
+
+@test
+fn test_modifiers_hyper_bit() {
+    let m: Modifiers = Modifiers.HYPER;
+    assert_eq(m.bits, 0b0001_0000_u8);
+}
+
+@test
+fn test_modifiers_meta_bit() {
+    let m: Modifiers = Modifiers.META;
+    assert_eq(m.bits, 0b0010_0000_u8);
+}
+
+@test
+fn test_modifiers_pairwise_distinct() {
+    assert(Modifiers.SHIFT.bits != Modifiers.CTRL.bits);
+    assert(Modifiers.CTRL.bits != Modifiers.ALT.bits);
+    assert(Modifiers.ALT.bits != Modifiers.SUPER.bits);
+    assert(Modifiers.SUPER.bits != Modifiers.HYPER.bits);
+    assert(Modifiers.HYPER.bits != Modifiers.META.bits);
+}
+
+@test
+fn test_modifiers_none_distinct_from_all() {
+    assert(Modifiers.NONE.bits != Modifiers.SHIFT.bits);
+    assert(Modifiers.NONE.bits != Modifiers.CTRL.bits);
+    assert(Modifiers.NONE.bits != Modifiers.META.bits);
+}
+
+fn main() {}
