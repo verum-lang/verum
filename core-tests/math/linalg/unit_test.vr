@@ -1,0 +1,140 @@
+// =============================================================================
+// core-tests/math/linalg/unit_test.vr
+// =============================================================================
+//
+// `core/math/linalg.vr` — Linear algebra ADT surface.
+//
+// Surface tested:
+//   * Transpose 3-variant (NoTrans / Trans / ConjTrans)
+//   * TriangularType 2-variant (Upper / Lower)
+//   * DiagonalType 2-variant (Unit / NonUnit)
+//   * Side 2-variant (Left / Right)
+//
+// Vector / Matrix / StaticVector / StaticMatrix / LUDecomposition + linear-
+// algebra ops require Numeric protocol — tested at language-level under
+// `vcs/specs/L2-standard/math/linalg/`.
+// =============================================================================
+
+mount core.math.linalg.{
+    Transpose, TriangularType, DiagonalType, Side,
+};
+
+// =============================================================================
+// Section 1: Transpose 3-variant
+// =============================================================================
+
+@test
+fn test_transpose_no_trans_variant() {
+    let t: Transpose = Transpose.NoTrans;
+    assert(t is Transpose.NoTrans);
+}
+
+@test
+fn test_transpose_trans_variant() {
+    let t: Transpose = Transpose.Trans;
+    assert(t is Transpose.Trans);
+}
+
+@test
+fn test_transpose_conj_trans_variant() {
+    let t: Transpose = Transpose.ConjTrans;
+    assert(t is Transpose.ConjTrans);
+}
+
+@test
+fn test_transpose_no_trans_disjoint_from_trans() {
+    let n: Transpose = Transpose.NoTrans;
+    let t: Transpose = Transpose.Trans;
+    assert(n is Transpose.NoTrans && !(n is Transpose.Trans));
+    assert(t is Transpose.Trans && !(t is Transpose.NoTrans));
+}
+
+@test
+fn test_transpose_trans_disjoint_from_conj_trans() {
+    let t: Transpose = Transpose.Trans;
+    let c: Transpose = Transpose.ConjTrans;
+    assert(!(t is Transpose.ConjTrans));
+    assert(!(c is Transpose.Trans));
+}
+
+@test
+fn test_transpose_no_trans_disjoint_from_conj_trans() {
+    let n: Transpose = Transpose.NoTrans;
+    let c: Transpose = Transpose.ConjTrans;
+    assert(!(n is Transpose.ConjTrans));
+    assert(!(c is Transpose.NoTrans));
+}
+
+// =============================================================================
+// Section 2: TriangularType 2-variant
+// =============================================================================
+
+@test
+fn test_triangular_type_upper_variant() {
+    let t: TriangularType = TriangularType.Upper;
+    assert(t is TriangularType.Upper);
+}
+
+@test
+fn test_triangular_type_lower_variant() {
+    let t: TriangularType = TriangularType.Lower;
+    assert(t is TriangularType.Lower);
+}
+
+@test
+fn test_triangular_type_upper_disjoint_from_lower() {
+    let u: TriangularType = TriangularType.Upper;
+    let l: TriangularType = TriangularType.Lower;
+    assert(u is TriangularType.Upper && !(u is TriangularType.Lower));
+    assert(l is TriangularType.Lower && !(l is TriangularType.Upper));
+}
+
+// =============================================================================
+// Section 3: DiagonalType 2-variant
+// =============================================================================
+
+@test
+fn test_diagonal_type_unit_variant() {
+    let d: DiagonalType = DiagonalType.Unit;
+    assert(d is DiagonalType.Unit);
+}
+
+@test
+fn test_diagonal_type_non_unit_variant() {
+    let d: DiagonalType = DiagonalType.NonUnit;
+    assert(d is DiagonalType.NonUnit);
+}
+
+@test
+fn test_diagonal_type_unit_disjoint_from_non_unit() {
+    let u: DiagonalType = DiagonalType.Unit;
+    let n: DiagonalType = DiagonalType.NonUnit;
+    assert(u is DiagonalType.Unit && !(u is DiagonalType.NonUnit));
+    assert(n is DiagonalType.NonUnit && !(n is DiagonalType.Unit));
+}
+
+// =============================================================================
+// Section 4: Side 2-variant
+// =============================================================================
+
+@test
+fn test_side_left_variant() {
+    let s: Side = Side.Left;
+    assert(s is Side.Left);
+}
+
+@test
+fn test_side_right_variant() {
+    let s: Side = Side.Right;
+    assert(s is Side.Right);
+}
+
+@test
+fn test_side_left_disjoint_from_right() {
+    let l: Side = Side.Left;
+    let r: Side = Side.Right;
+    assert(l is Side.Left && !(l is Side.Right));
+    assert(r is Side.Right && !(r is Side.Left));
+}
+
+fn main() {}
