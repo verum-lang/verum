@@ -1,0 +1,287 @@
+// =============================================================================
+// core-tests/math/big_uint/unit_test.vr
+// =============================================================================
+//
+// `core/math/big_uint.vr` — Arbitrary-precision unsigned integers.
+//
+// Surface tested:
+//   * BigUint.zero / .one / .from_u64 — canonical factories
+//   * BigUint.is_zero / .bit_len / .equals / .cmp — predicates + comparison
+//   * add / sub_checked / mul — basic arithmetic on small inputs
+//   * shl — bit-shift left
+// =============================================================================
+
+mount core.math.big_uint.{
+    BigUint,
+    add, sub_checked, mul, shl,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: BigUint.zero / .one / .from_u64 factories + .is_zero predicate
+// =============================================================================
+
+@test
+fn test_big_uint_zero_is_zero() {
+    let z = BigUint.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn test_big_uint_one_is_not_zero() {
+    let o = BigUint.one();
+    assert(!o.is_zero());
+}
+
+@test
+fn test_big_uint_from_u64_zero_is_zero() {
+    let z = BigUint.from_u64(0_u64);
+    assert(z.is_zero());
+}
+
+@test
+fn test_big_uint_from_u64_one_is_not_zero() {
+    let o = BigUint.from_u64(1_u64);
+    assert(!o.is_zero());
+}
+
+@test
+fn test_big_uint_from_u64_max_is_not_zero() {
+    let m = BigUint.from_u64(0xFFFFFFFFFFFFFFFF_u64);
+    assert(!m.is_zero());
+}
+
+// =============================================================================
+// Section 2: BigUint.equals — pairwise equality
+// =============================================================================
+
+@test
+fn test_big_uint_zero_equals_zero() {
+    let z1 = BigUint.zero();
+    let z2 = BigUint.zero();
+    assert(z1.equals(&z2));
+}
+
+@test
+fn test_big_uint_one_equals_one() {
+    let a = BigUint.one();
+    let b = BigUint.one();
+    assert(a.equals(&b));
+}
+
+@test
+fn test_big_uint_from_u64_equality_for_same_value() {
+    let a = BigUint.from_u64(42_u64);
+    let b = BigUint.from_u64(42_u64);
+    assert(a.equals(&b));
+}
+
+@test
+fn test_big_uint_from_u64_inequality_for_different_values() {
+    let a = BigUint.from_u64(1_u64);
+    let b = BigUint.from_u64(2_u64);
+    assert(!a.equals(&b));
+}
+
+@test
+fn test_big_uint_zero_not_equals_one() {
+    let z = BigUint.zero();
+    let o = BigUint.one();
+    assert(!z.equals(&o));
+}
+
+// =============================================================================
+// Section 3: BigUint.cmp — three-way comparison
+// =============================================================================
+
+@test
+fn test_big_uint_cmp_zero_zero_is_zero() {
+    let a = BigUint.zero();
+    let b = BigUint.zero();
+    assert_eq(a.cmp(&b), 0);
+}
+
+@test
+fn test_big_uint_cmp_zero_less_than_one() {
+    let z = BigUint.zero();
+    let o = BigUint.one();
+    assert(z.cmp(&o) < 0);
+}
+
+@test
+fn test_big_uint_cmp_one_greater_than_zero() {
+    let o = BigUint.one();
+    let z = BigUint.zero();
+    assert(o.cmp(&z) > 0);
+}
+
+@test
+fn test_big_uint_cmp_smaller_less_than_larger() {
+    let a = BigUint.from_u64(5_u64);
+    let b = BigUint.from_u64(10_u64);
+    assert(a.cmp(&b) < 0);
+}
+
+// =============================================================================
+// Section 4: BigUint.bit_len — bit length
+// =============================================================================
+
+@test
+fn test_big_uint_bit_len_of_zero_is_zero() {
+    assert_eq(BigUint.zero().bit_len(), 0);
+}
+
+@test
+fn test_big_uint_bit_len_of_one_is_one() {
+    assert_eq(BigUint.one().bit_len(), 1);
+}
+
+@test
+fn test_big_uint_bit_len_of_two_is_two() {
+    assert_eq(BigUint.from_u64(2_u64).bit_len(), 2);
+}
+
+@test
+fn test_big_uint_bit_len_of_seven_is_three() {
+    // 7 = 0b111 ⇒ bit_len=3
+    assert_eq(BigUint.from_u64(7_u64).bit_len(), 3);
+}
+
+// =============================================================================
+// Section 5: add — basic small-input addition
+// =============================================================================
+
+@test
+fn test_big_uint_add_zero_zero_is_zero() {
+    let z = BigUint.zero();
+    let r = add(&z, &z);
+    assert(r.is_zero());
+}
+
+@test
+fn test_big_uint_add_one_plus_zero_is_one() {
+    let o = BigUint.one();
+    let z = BigUint.zero();
+    let r = add(&o, &z);
+    let one = BigUint.one();
+    assert(r.equals(&one));
+}
+
+@test
+fn test_big_uint_add_one_plus_one_is_two() {
+    let o1 = BigUint.one();
+    let o2 = BigUint.one();
+    let two = BigUint.from_u64(2_u64);
+    let r = add(&o1, &o2);
+    assert(r.equals(&two));
+}
+
+@test
+fn test_big_uint_add_three_plus_four_is_seven() {
+    let a = BigUint.from_u64(3_u64);
+    let b = BigUint.from_u64(4_u64);
+    let r = add(&a, &b);
+    let seven = BigUint.from_u64(7_u64);
+    assert(r.equals(&seven));
+}
+
+// =============================================================================
+// Section 6: sub_checked — Maybe variant of subtraction
+// =============================================================================
+
+@test
+fn test_big_uint_sub_checked_zero_zero_is_some_zero() {
+    let z = BigUint.zero();
+    let r = sub_checked(&z, &z);
+    match r {
+        Maybe.Some(diff) => assert(diff.is_zero()),
+        Maybe.None       => panic("expected Some"),
+    }
+}
+
+@test
+fn test_big_uint_sub_checked_one_minus_zero_is_some_one() {
+    let o = BigUint.one();
+    let z = BigUint.zero();
+    let r = sub_checked(&o, &z);
+    let one = BigUint.one();
+    match r {
+        Maybe.Some(diff) => assert(diff.equals(&one)),
+        Maybe.None       => panic("expected Some"),
+    }
+}
+
+@test
+fn test_big_uint_sub_checked_underflow_returns_none() {
+    let z = BigUint.zero();
+    let o = BigUint.one();
+    // 0 - 1 would underflow ⇒ Maybe.None
+    let r = sub_checked(&z, &o);
+    assert(r is Maybe.None);
+}
+
+// =============================================================================
+// Section 7: mul — small-input multiplication
+// =============================================================================
+
+@test
+fn test_big_uint_mul_zero_anything_is_zero() {
+    let z = BigUint.zero();
+    let a = BigUint.from_u64(42_u64);
+    let r = mul(&z, &a);
+    assert(r.is_zero());
+}
+
+@test
+fn test_big_uint_mul_one_anything_is_unchanged() {
+    let o = BigUint.one();
+    let a = BigUint.from_u64(99_u64);
+    let r = mul(&o, &a);
+    assert(r.equals(&a));
+}
+
+@test
+fn test_big_uint_mul_two_times_three_is_six() {
+    let two = BigUint.from_u64(2_u64);
+    let three = BigUint.from_u64(3_u64);
+    let six = BigUint.from_u64(6_u64);
+    let r = mul(&two, &three);
+    assert(r.equals(&six));
+}
+
+// =============================================================================
+// Section 8: shl — bit-shift left
+// =============================================================================
+
+@test
+fn test_big_uint_shl_zero_anything_is_zero() {
+    let z = BigUint.zero();
+    let r = shl(&z, 5);
+    assert(r.is_zero());
+}
+
+@test
+fn test_big_uint_shl_one_by_zero_is_one() {
+    let o = BigUint.one();
+    let r = shl(&o, 0);
+    let one = BigUint.one();
+    assert(r.equals(&one));
+}
+
+@test
+fn test_big_uint_shl_one_by_one_is_two() {
+    let o = BigUint.one();
+    let two = BigUint.from_u64(2_u64);
+    let r = shl(&o, 1);
+    assert(r.equals(&two));
+}
+
+@test
+fn test_big_uint_shl_one_by_three_is_eight() {
+    let o = BigUint.one();
+    let eight = BigUint.from_u64(8_u64);
+    let r = shl(&o, 3);
+    assert(r.equals(&eight));
+}
+
+fn main() {}
