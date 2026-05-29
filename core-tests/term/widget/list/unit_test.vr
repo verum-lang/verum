@@ -1,0 +1,112 @@
+// =============================================================================
+// core-tests/term/widget/list/unit_test.vr
+// =============================================================================
+//
+// `core/term/widget/list.vr` — ListState record:
+//   .new() / .with_selected(idx) / .next() / .previous() / .unselect()
+// =============================================================================
+
+mount core.term.widget.list.ListState;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ListState construction
+// =============================================================================
+
+@test
+fn test_list_state_new_starts_unselected() {
+    let s: ListState = ListState.new();
+    assert(s.selected is Maybe.None);
+    assert_eq(s.offset, 0);
+}
+
+@test
+fn test_list_state_with_selected_idx_zero() {
+    let s: ListState = ListState.with_selected(0);
+    assert(s.selected is Maybe.Some);
+    assert_eq(s.offset, 0);
+}
+
+@test
+fn test_list_state_with_selected_arbitrary_idx() {
+    let s: ListState = ListState.with_selected(7);
+    assert(s.selected is Maybe.Some);
+    match s.selected {
+        Maybe.Some(i) => assert_eq(i, 7),
+        Maybe.None    => panic("expected Some"),
+    }
+}
+
+@test
+fn test_list_state_direct_record_construction() {
+    let s: ListState = ListState {
+        selected: Maybe.None,
+        offset: 0,
+    };
+    assert(s.selected is Maybe.None);
+    assert_eq(s.offset, 0);
+}
+
+// =============================================================================
+// Section 2: Selection mutation
+// =============================================================================
+
+@test
+fn test_list_state_next_from_none_advances_to_zero() {
+    let mut s: ListState = ListState.new();
+    s.next(5);
+    match s.selected {
+        Maybe.Some(i) => assert_eq(i, 0),
+        Maybe.None    => panic("expected Some after .next() from unselected"),
+    }
+}
+
+@test
+fn test_list_state_next_advances_index() {
+    let mut s: ListState = ListState.with_selected(0);
+    s.next(5);
+    match s.selected {
+        Maybe.Some(i) => assert_eq(i, 1),
+        Maybe.None    => panic("expected Some after .next()"),
+    }
+}
+
+@test
+fn test_list_state_next_wraps_at_end() {
+    let mut s: ListState = ListState.with_selected(4);
+    s.next(5);
+    match s.selected {
+        Maybe.Some(i) => assert_eq(i, 0),
+        Maybe.None    => panic("expected Some after wrap"),
+    }
+}
+
+@test
+fn test_list_state_previous_from_zero_wraps_to_end() {
+    let mut s: ListState = ListState.with_selected(0);
+    s.previous(5);
+    match s.selected {
+        Maybe.Some(i) => assert_eq(i, 4),
+        Maybe.None    => panic("expected Some after .previous() wrap"),
+    }
+}
+
+@test
+fn test_list_state_previous_decrements_index() {
+    let mut s: ListState = ListState.with_selected(3);
+    s.previous(5);
+    match s.selected {
+        Maybe.Some(i) => assert_eq(i, 2),
+        Maybe.None    => panic("expected Some after .previous()"),
+    }
+}
+
+@test
+fn test_list_state_unselect_clears_selection() {
+    let mut s: ListState = ListState.with_selected(2);
+    s.unselect();
+    assert(s.selected is Maybe.None);
+}
+
+fn main() {}
