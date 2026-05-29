@@ -1,0 +1,142 @@
+// =============================================================================
+// core-tests/database/postgres/wire/backend/unit_test.vr
+// =============================================================================
+//
+// `core/database/postgres/wire/backend.vr` — backend message types.
+// =============================================================================
+
+mount core.database.postgres.wire.backend.{
+    TxStatus, ParameterStatus, BackendKeyData, ColumnDesc,
+    RowDescription, CommandComplete,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TxStatus 3-variant ADT
+// =============================================================================
+
+@test
+fn test_tx_status_tx_idle_variant() {
+    let s: TxStatus = TxStatus.TxIdle;
+    assert(s is TxStatus.TxIdle);
+}
+
+@test
+fn test_tx_status_tx_in_transaction_variant() {
+    let s: TxStatus = TxStatus.TxInTransaction;
+    assert(s is TxStatus.TxInTransaction);
+}
+
+@test
+fn test_tx_status_tx_failed_transaction_variant() {
+    let s: TxStatus = TxStatus.TxFailedTransaction;
+    assert(s is TxStatus.TxFailedTransaction);
+}
+
+@test
+fn test_tx_status_idle_disjoint() {
+    let s: TxStatus = TxStatus.TxIdle;
+    assert(!(s is TxStatus.TxInTransaction));
+    assert(!(s is TxStatus.TxFailedTransaction));
+}
+
+@test
+fn test_tx_status_in_transaction_disjoint() {
+    let s: TxStatus = TxStatus.TxInTransaction;
+    assert(!(s is TxStatus.TxIdle));
+    assert(!(s is TxStatus.TxFailedTransaction));
+}
+
+@test
+fn test_tx_status_failed_transaction_disjoint() {
+    let s: TxStatus = TxStatus.TxFailedTransaction;
+    assert(!(s is TxStatus.TxIdle));
+    assert(!(s is TxStatus.TxInTransaction));
+}
+
+// =============================================================================
+// Section 2: ParameterStatus record
+// =============================================================================
+
+@test
+fn test_parameter_status_construction() {
+    let p: ParameterStatus = ParameterStatus {
+        name: "server_version".to_text(),
+        value: "16.1".to_text(),
+    };
+    assert_eq(p.name, "server_version");
+    assert_eq(p.value, "16.1");
+}
+
+@test
+fn test_parameter_status_timezone() {
+    let p: ParameterStatus = ParameterStatus {
+        name: "TimeZone".to_text(),
+        value: "UTC".to_text(),
+    };
+    assert_eq(p.name, "TimeZone");
+    assert_eq(p.value, "UTC");
+}
+
+// =============================================================================
+// Section 3: BackendKeyData record
+// =============================================================================
+
+@test
+fn test_backend_key_data_construction() {
+    let b: BackendKeyData = BackendKeyData {
+        process_id: 12345,
+        secret_key: 0x12345678,
+    };
+    assert_eq(b.process_id, 12345);
+    assert_eq(b.secret_key, 0x12345678);
+}
+
+@test
+fn test_backend_key_data_field_independence() {
+    let a: BackendKeyData = BackendKeyData { process_id: 1, secret_key: 100 };
+    let b: BackendKeyData = BackendKeyData { process_id: 2, secret_key: 200 };
+    assert_eq(a.process_id, 1);
+    assert_eq(b.process_id, 2);
+    assert_eq(a.secret_key, 100);
+    assert_eq(b.secret_key, 200);
+}
+
+// =============================================================================
+// Section 4: CommandComplete record
+// =============================================================================
+
+@test
+fn test_command_complete_select() {
+    let c: CommandComplete = CommandComplete {
+        tag: "SELECT 42".to_text(),
+    };
+    assert_eq(c.tag, "SELECT 42");
+}
+
+@test
+fn test_command_complete_insert() {
+    let c: CommandComplete = CommandComplete {
+        tag: "INSERT 0 1".to_text(),
+    };
+    assert_eq(c.tag, "INSERT 0 1");
+}
+
+@test
+fn test_command_complete_update() {
+    let c: CommandComplete = CommandComplete {
+        tag: "UPDATE 5".to_text(),
+    };
+    assert_eq(c.tag, "UPDATE 5");
+}
+
+@test
+fn test_command_complete_delete() {
+    let c: CommandComplete = CommandComplete {
+        tag: "DELETE 3".to_text(),
+    };
+    assert_eq(c.tag, "DELETE 3");
+}
+
+fn main() {}
