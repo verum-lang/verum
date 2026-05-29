@@ -690,7 +690,23 @@ public fn reset_for_tests() {
 /// `increment_generation` path; this entry-point exists exclusively to
 /// make the write-surface observable from test scope.
 public fn increment_epoch_for_tests() -> UInt64 {
-    unsafe { GLOBAL_EPOCH.increment_epoch() }
+    // Advance the REAL epoch counter — the scalar shadow that
+    // `current_epoch()` observes and `reset_for_tests()` zeroes.  The
+    // scalar shadow IS the implemented epoch mechanism (see the
+    // `GLOBAL_EPOCH_COUNTER` doc): the record-method path
+    // `GLOBAL_EPOCH.increment_epoch()` routes through
+    // `&mut GLOBAL_EPOCH.epoch` (field-of-static-mut-struct), which the
+    // Tier-0 codegen does not cell-back, so it null-derefs at
+    // `CbgrExtended`.  Routing the write-surface through the same scalar
+    // cell + atomic ops as the read-surface makes the
+    // `reset → increment → current` sequence deterministic and
+    // self-consistent without depending on the unimplemented
+    // record-shaped static-mut path.
+    let rp = unsafe { &GLOBAL_EPOCH_COUNTER as *const UInt64 };
+    let next = atomic_load_u64(rp, ORDERING_ACQUIRE) + 1;
+    let wp = unsafe { &mut GLOBAL_EPOCH_COUNTER as *mut UInt64 };
+    atomic_store_u64(wp, next, ORDERING_RELEASE);
+    next
 }
 
 // =============================================================================
