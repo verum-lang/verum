@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/term/render/viewport/unit_test.vr
+// =============================================================================
+//
+// `core/term/render/viewport.vr` —
+//   * RenderViewport 3-variant (Fullscreen / Inline{height} / Fixed{area})
+//   * .fullscreen() / .inline(height) / .fixed(area) ctors
+// =============================================================================
+
+mount core.term.render.viewport.RenderViewport;
+mount core.term.layout.rect.Rect;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: RenderViewport variant ctor
+// =============================================================================
+
+@test
+fn test_viewport_fullscreen_variant() {
+    let v: RenderViewport = RenderViewport.Fullscreen;
+    assert(v is RenderViewport.Fullscreen);
+}
+
+@test
+fn test_viewport_inline_variant() {
+    let v: RenderViewport = RenderViewport.Inline { height: 10 };
+    assert(v is RenderViewport.Inline);
+}
+
+@test
+fn test_viewport_fixed_variant() {
+    let v: RenderViewport = RenderViewport.Fixed {
+        area: Rect.new(0, 0, 80, 24),
+    };
+    assert(v is RenderViewport.Fixed);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_viewport_fullscreen_disjoint() {
+    let v: RenderViewport = RenderViewport.Fullscreen;
+    assert(!(v is RenderViewport.Inline));
+    assert(!(v is RenderViewport.Fixed));
+}
+
+@test
+fn test_viewport_inline_disjoint() {
+    let v: RenderViewport = RenderViewport.Inline { height: 5 };
+    assert(!(v is RenderViewport.Fullscreen));
+    assert(!(v is RenderViewport.Fixed));
+}
+
+@test
+fn test_viewport_fixed_disjoint() {
+    let v: RenderViewport = RenderViewport.Fixed {
+        area: Rect.new(0, 0, 10, 10),
+    };
+    assert(!(v is RenderViewport.Fullscreen));
+    assert(!(v is RenderViewport.Inline));
+}
+
+// =============================================================================
+// Section 3: Static constructors
+// =============================================================================
+
+@test
+fn test_viewport_fullscreen_ctor() {
+    let v: RenderViewport = RenderViewport.fullscreen();
+    assert(v is RenderViewport.Fullscreen);
+}
+
+@test
+fn test_viewport_inline_ctor_clamps_zero_to_one() {
+    // .inline(height) applies .max(1) — zero height clamps up.
+    let v: RenderViewport = RenderViewport.inline(0);
+    match v {
+        RenderViewport.Inline { height } => assert_eq(height, 1),
+        _ => panic("expected Inline"),
+    }
+}
+
+@test
+fn test_viewport_inline_ctor_preserves_positive() {
+    let v: RenderViewport = RenderViewport.inline(10);
+    match v {
+        RenderViewport.Inline { height } => assert_eq(height, 10),
+        _ => panic("expected Inline"),
+    }
+}
+
+@test
+fn test_viewport_inline_ctor_clamps_negative() {
+    let v: RenderViewport = RenderViewport.inline(-5);
+    match v {
+        RenderViewport.Inline { height } => assert_eq(height, 1),
+        _ => panic("expected Inline"),
+    }
+}
+
+fn main() {}
