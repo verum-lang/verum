@@ -1,0 +1,173 @@
+// =============================================================================
+// core-tests/term/event/types/unit_test.vr
+// =============================================================================
+//
+// `core/term/event/types.vr` —
+//   * KeyEventKind 3-variant (Press / Release / Repeat)
+//   * MouseEventKind 8-variant (Down/Up/Drag(Btn) + Moved + 4× Scroll*)
+//   * MouseButton 3-variant (Left / Right / Middle)
+//   * ResizeEvent record (columns, rows) + .new() ctor
+// =============================================================================
+
+mount core.term.event.types.{
+    KeyEventKind, MouseEventKind, MouseButton, ResizeEvent,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: KeyEventKind 3-variant
+// =============================================================================
+
+@test
+fn test_key_event_kind_press_variant() {
+    let k: KeyEventKind = KeyEventKind.Press;
+    assert(k is KeyEventKind.Press);
+}
+
+@test
+fn test_key_event_kind_release_variant() {
+    let k: KeyEventKind = KeyEventKind.Release;
+    assert(k is KeyEventKind.Release);
+}
+
+@test
+fn test_key_event_kind_repeat_variant() {
+    let k: KeyEventKind = KeyEventKind.Repeat;
+    assert(k is KeyEventKind.Repeat);
+}
+
+@test
+fn test_key_event_kind_press_disjoint() {
+    let k: KeyEventKind = KeyEventKind.Press;
+    assert(!(k is KeyEventKind.Release));
+    assert(!(k is KeyEventKind.Repeat));
+}
+
+// =============================================================================
+// Section 2: MouseButton 3-variant
+// =============================================================================
+
+@test
+fn test_mouse_button_left_variant() {
+    let b: MouseButton = MouseButton.Left;
+    assert(b is MouseButton.Left);
+}
+
+@test
+fn test_mouse_button_right_variant() {
+    let b: MouseButton = MouseButton.Right;
+    assert(b is MouseButton.Right);
+}
+
+@test
+fn test_mouse_button_middle_variant() {
+    let b: MouseButton = MouseButton.Middle;
+    assert(b is MouseButton.Middle);
+}
+
+@test
+fn test_mouse_button_left_disjoint() {
+    let b: MouseButton = MouseButton.Left;
+    assert(!(b is MouseButton.Right));
+    assert(!(b is MouseButton.Middle));
+}
+
+// =============================================================================
+// Section 3: MouseEventKind 8-variant
+// =============================================================================
+
+@test
+fn test_mouse_event_kind_down_variant() {
+    let k: MouseEventKind = MouseEventKind.Down(MouseButton.Left);
+    assert(k is MouseEventKind.Down);
+}
+
+@test
+fn test_mouse_event_kind_up_variant() {
+    let k: MouseEventKind = MouseEventKind.Up(MouseButton.Right);
+    assert(k is MouseEventKind.Up);
+}
+
+@test
+fn test_mouse_event_kind_drag_variant() {
+    let k: MouseEventKind = MouseEventKind.Drag(MouseButton.Middle);
+    assert(k is MouseEventKind.Drag);
+}
+
+@test
+fn test_mouse_event_kind_moved_variant() {
+    let k: MouseEventKind = MouseEventKind.Moved;
+    assert(k is MouseEventKind.Moved);
+}
+
+@test
+fn test_mouse_event_kind_scroll_up_variant() {
+    let k: MouseEventKind = MouseEventKind.ScrollUp;
+    assert(k is MouseEventKind.ScrollUp);
+}
+
+@test
+fn test_mouse_event_kind_scroll_down_variant() {
+    let k: MouseEventKind = MouseEventKind.ScrollDown;
+    assert(k is MouseEventKind.ScrollDown);
+}
+
+@test
+fn test_mouse_event_kind_scroll_left_variant() {
+    let k: MouseEventKind = MouseEventKind.ScrollLeft;
+    assert(k is MouseEventKind.ScrollLeft);
+}
+
+@test
+fn test_mouse_event_kind_scroll_right_variant() {
+    let k: MouseEventKind = MouseEventKind.ScrollRight;
+    assert(k is MouseEventKind.ScrollRight);
+}
+
+@test
+fn test_mouse_event_kind_moved_disjoint_from_scrolls() {
+    let k: MouseEventKind = MouseEventKind.Moved;
+    assert(!(k is MouseEventKind.ScrollUp));
+    assert(!(k is MouseEventKind.ScrollDown));
+    assert(!(k is MouseEventKind.ScrollLeft));
+    assert(!(k is MouseEventKind.ScrollRight));
+    assert(!(k is MouseEventKind.Down));
+}
+
+// =============================================================================
+// Section 4: ResizeEvent record + .new()
+// =============================================================================
+
+@test
+fn test_resize_event_new_80x24() {
+    let r: ResizeEvent = ResizeEvent.new(80, 24);
+    assert_eq(r.columns, 80);
+    assert_eq(r.rows, 24);
+}
+
+@test
+fn test_resize_event_new_modern_terminal() {
+    let r: ResizeEvent = ResizeEvent.new(200, 50);
+    assert_eq(r.columns, 200);
+    assert_eq(r.rows, 50);
+}
+
+@test
+fn test_resize_event_direct_record_construction() {
+    let r: ResizeEvent = ResizeEvent { columns: 132, rows: 43 };
+    assert_eq(r.columns, 132);
+    assert_eq(r.rows, 43);
+}
+
+@test
+fn test_resize_event_field_independence() {
+    let a: ResizeEvent = ResizeEvent.new(80, 24);
+    let b: ResizeEvent = ResizeEvent.new(132, 50);
+    assert_eq(a.columns, 80);
+    assert_eq(b.columns, 132);
+    assert_eq(a.rows, 24);
+    assert_eq(b.rows, 50);
+}
+
+fn main() {}
