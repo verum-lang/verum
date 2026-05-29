@@ -1,0 +1,105 @@
+// =============================================================================
+// core-tests/security/webauthn/cose_key/unit_test.vr
+// =============================================================================
+//
+// `core/security/webauthn/cose_key.vr` — COSE key registry constants
+// (RFC 8152 IANA registry, used by WebAuthn L3 + FIDO2 CTAP2).
+// =============================================================================
+
+mount core.security.webauthn.cose_key.{
+    COSE_KTY_OKP, COSE_KTY_EC2, COSE_KTY_RSA,
+    COSE_CRV_P256, COSE_CRV_P384, COSE_CRV_P521, COSE_CRV_ED25519,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: COSE key-type (kty) constants — RFC 8152 §13
+// =============================================================================
+
+@test
+fn test_cose_kty_okp_canonical_value() {
+    // kty=1 — Octet Key Pair (used by Ed25519, X25519).
+    assert_eq(COSE_KTY_OKP, 1);
+}
+
+@test
+fn test_cose_kty_ec2_canonical_value() {
+    // kty=2 — EC with x/y coordinates (used by ECDSA on P-256/P-384/P-521).
+    assert_eq(COSE_KTY_EC2, 2);
+}
+
+@test
+fn test_cose_kty_rsa_canonical_value() {
+    // kty=3 — RSA (used by RS256/PS256).
+    assert_eq(COSE_KTY_RSA, 3);
+}
+
+@test
+fn test_cose_kty_pairwise_distinct() {
+    assert(COSE_KTY_OKP != COSE_KTY_EC2);
+    assert(COSE_KTY_OKP != COSE_KTY_RSA);
+    assert(COSE_KTY_EC2 != COSE_KTY_RSA);
+}
+
+@test
+fn test_cose_kty_all_positive() {
+    assert(COSE_KTY_OKP > 0);
+    assert(COSE_KTY_EC2 > 0);
+    assert(COSE_KTY_RSA > 0);
+}
+
+// =============================================================================
+// Section 2: COSE curve constants — RFC 8152 §13.1
+// =============================================================================
+
+@test
+fn test_cose_crv_p256_canonical_value() {
+    // crv=1 — NIST P-256 (secp256r1).
+    assert_eq(COSE_CRV_P256, 1);
+}
+
+@test
+fn test_cose_crv_p384_canonical_value() {
+    // crv=2 — NIST P-384 (secp384r1).
+    assert_eq(COSE_CRV_P384, 2);
+}
+
+@test
+fn test_cose_crv_p521_canonical_value() {
+    // crv=3 — NIST P-521 (secp521r1).
+    assert_eq(COSE_CRV_P521, 3);
+}
+
+@test
+fn test_cose_crv_ed25519_canonical_value() {
+    // crv=6 — Ed25519 (RFC 8032).
+    assert_eq(COSE_CRV_ED25519, 6);
+}
+
+@test
+fn test_cose_crv_pairwise_distinct() {
+    assert(COSE_CRV_P256 != COSE_CRV_P384);
+    assert(COSE_CRV_P256 != COSE_CRV_P521);
+    assert(COSE_CRV_P256 != COSE_CRV_ED25519);
+    assert(COSE_CRV_P384 != COSE_CRV_P521);
+    assert(COSE_CRV_P384 != COSE_CRV_ED25519);
+    assert(COSE_CRV_P521 != COSE_CRV_ED25519);
+}
+
+@test
+fn test_cose_crv_all_positive() {
+    assert(COSE_CRV_P256 > 0);
+    assert(COSE_CRV_P384 > 0);
+    assert(COSE_CRV_P521 > 0);
+    assert(COSE_CRV_ED25519 > 0);
+}
+
+@test
+fn test_cose_crv_p_family_consecutive_ascending() {
+    // P-256 < P-384 < P-521 (NIST family ordering).
+    assert(COSE_CRV_P256 < COSE_CRV_P384);
+    assert(COSE_CRV_P384 < COSE_CRV_P521);
+}
+
+fn main() {}
