@@ -1,0 +1,49 @@
+// =============================================================================
+// core-tests/mesh/xds/client/unit_test.vr
+// =============================================================================
+//
+// `core/mesh/xds/client.vr` — DiscoveryEvent ADT.
+// =============================================================================
+
+mount core.mesh.xds.client.DiscoveryEvent;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: DiscoveryEvent.Disconnected scalar surface
+// =============================================================================
+
+@test
+fn test_discovery_event_disconnected_variant() {
+    let e: DiscoveryEvent = DiscoveryEvent.Disconnected("network drop".to_text());
+    assert(e is DiscoveryEvent.Disconnected);
+}
+
+@test
+fn test_discovery_event_disconnected_payload_round_trip() {
+    let e: DiscoveryEvent = DiscoveryEvent.Disconnected("read timeout".to_text());
+    match e {
+        DiscoveryEvent.Disconnected(reason) => assert_eq(reason, "read timeout"),
+        _ => panic("expected Disconnected"),
+    }
+}
+
+@test
+fn test_discovery_event_disconnected_disjoint_from_reconnected() {
+    let e: DiscoveryEvent = DiscoveryEvent.Disconnected("x".to_text());
+    assert(!(e is DiscoveryEvent.Reconnected));
+}
+
+@test
+fn test_discovery_event_disconnected_disjoint_from_sotw() {
+    let e: DiscoveryEvent = DiscoveryEvent.Disconnected("x".to_text());
+    assert(!(e is DiscoveryEvent.Sotw));
+}
+
+@test
+fn test_discovery_event_disconnected_disjoint_from_delta() {
+    let e: DiscoveryEvent = DiscoveryEvent.Disconnected("x".to_text());
+    assert(!(e is DiscoveryEvent.Delta));
+}
+
+fn main() {}
