@@ -1,0 +1,35 @@
+// =============================================================================
+// core-tests/net/tls13/sig_scheme/property_test.vr — round-trip law
+// =============================================================================
+
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+
+@test
+fn property_tls13sig_to_from_round_trip() {
+    // from_u16 ∘ to_u16 == id over the RFC 8446 §4.2.3 codepoints.
+    let codes: List<UInt16> = [
+        0x0401_u16, 0x0403_u16, 0x0501_u16, 0x0503_u16, 0x0601_u16, 0x0603_u16,
+        0x0804_u16, 0x0805_u16, 0x0806_u16, 0x0807_u16, 0x0808_u16,
+        0x0809_u16, 0x080A_u16, 0x080B_u16, 0x0201_u16, 0x0203_u16,
+    ];
+    let mut i = 0;
+    while i < codes.len() {
+        let s = SignatureScheme.from_u16(codes[i]);
+        assert_eq(s.to_u16(), codes[i]);
+        i = i + 1;
+    }
+}
+
+@test
+fn property_tls13sig_unknown_round_trips_arbitrary() {
+    // Unknown(v) preserves the raw codepoint for non-IANA values.
+    let codes: List<UInt16> = [0x0000_u16, 0x1234_u16, 0xABCD_u16, 0xFFFF_u16];
+    let mut i = 0;
+    while i < codes.len() {
+        let s = SignatureScheme.from_u16(codes[i]);
+        assert_eq(s.to_u16(), codes[i]);
+        i = i + 1;
+    }
+}
+
+fn main() {}
