@@ -1,0 +1,139 @@
+// =============================================================================
+// core-tests/database/sqlite/connection/unit_test.vr
+// =============================================================================
+//
+// `core/database/sqlite/connection.vr` — SqliteValue 5-variant ADT.
+// =============================================================================
+
+mount core.database.sqlite.connection.SqliteValue;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: SqliteValue 5-variant ADT
+//
+//   SQLite storage classes — NULL / INTEGER / REAL / TEXT / BLOB.
+// =============================================================================
+
+@test
+fn test_sqlite_value_null_variant() {
+    let v: SqliteValue = SqliteValue.SvNull;
+    assert(v is SqliteValue.SvNull);
+}
+
+@test
+fn test_sqlite_value_int_variant() {
+    let v: SqliteValue = SqliteValue.SvInt(42);
+    assert(v is SqliteValue.SvInt);
+}
+
+@test
+fn test_sqlite_value_real_variant() {
+    let v: SqliteValue = SqliteValue.SvReal(3.14_f64);
+    assert(v is SqliteValue.SvReal);
+}
+
+@test
+fn test_sqlite_value_text_variant() {
+    let v: SqliteValue = SqliteValue.SvText("hello".to_text());
+    assert(v is SqliteValue.SvText);
+}
+
+@test
+fn test_sqlite_value_blob_variant() {
+    let empty: List<Byte> = [];
+    let v: SqliteValue = SqliteValue.SvBlob(empty);
+    assert(v is SqliteValue.SvBlob);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_sqlite_value_null_disjoint_from_others() {
+    let v: SqliteValue = SqliteValue.SvNull;
+    assert(!(v is SqliteValue.SvInt));
+    assert(!(v is SqliteValue.SvReal));
+    assert(!(v is SqliteValue.SvText));
+    assert(!(v is SqliteValue.SvBlob));
+}
+
+@test
+fn test_sqlite_value_int_disjoint_from_real() {
+    // SQLite treats INTEGER and REAL as distinct storage classes.
+    let v: SqliteValue = SqliteValue.SvInt(0);
+    assert(!(v is SqliteValue.SvReal));
+    assert(!(v is SqliteValue.SvText));
+}
+
+@test
+fn test_sqlite_value_text_disjoint_from_blob() {
+    // TEXT and BLOB are distinct — BLOB preserves any bytes including
+    // invalid UTF-8.
+    let v: SqliteValue = SqliteValue.SvText("hello".to_text());
+    assert(!(v is SqliteValue.SvBlob));
+    assert(!(v is SqliteValue.SvNull));
+}
+
+// =============================================================================
+// Section 3: Scalar payload preservation
+// =============================================================================
+
+@test
+fn test_sqlite_value_int_payload_round_trip() {
+    let v: SqliteValue = SqliteValue.SvInt(0x7FFFFFFFFFFFFFFF);
+    match v {
+        SqliteValue.SvInt(n) => assert_eq(n, 0x7FFFFFFFFFFFFFFF),
+        _ => panic("expected SvInt"),
+    }
+}
+
+@test
+fn test_sqlite_value_text_payload_round_trip() {
+    let v: SqliteValue = SqliteValue.SvText("SQL value".to_text());
+    match v {
+        SqliteValue.SvText(s) => assert_eq(s, "SQL value"),
+        _ => panic("expected SvText"),
+    }
+}
+
+@test
+fn test_sqlite_value_int_negative_payload_round_trip() {
+    let v: SqliteValue = SqliteValue.SvInt(-9223372036854775807);
+    match v {
+        SqliteValue.SvInt(n) => assert_eq(n, -9223372036854775807),
+        _ => panic("expected SvInt"),
+    }
+}
+
+// =============================================================================
+// Section 4: is_null() helper method
+// =============================================================================
+
+@test
+fn test_sqlite_value_is_null_true_for_null() {
+    let v: SqliteValue = SqliteValue.SvNull;
+    assert_eq(v.is_null(), true);
+}
+
+@test
+fn test_sqlite_value_is_null_false_for_int() {
+    let v: SqliteValue = SqliteValue.SvInt(0);
+    assert_eq(v.is_null(), false);
+}
+
+@test
+fn test_sqlite_value_is_null_false_for_text() {
+    let v: SqliteValue = SqliteValue.SvText("".to_text());
+    assert_eq(v.is_null(), false);
+}
+
+@test
+fn test_sqlite_value_is_null_false_for_blob() {
+    let empty: List<Byte> = [];
+    let v: SqliteValue = SqliteValue.SvBlob(empty);
+    assert_eq(v.is_null(), false);
+}
+
+fn main() {}
