@@ -13474,6 +13474,31 @@ impl VbcCodegen {
     }
 
     fn resolve_field_index(&mut self, type_name: Option<&str>, field_name: &str) -> u32 {
+        let __idx = self.resolve_field_index_impl(type_name, field_name);
+        // INSTRUMENTATION (VERUM_TRACE_FIELDSHIFT): pinpoint the cross-module
+        // field-index disagreement (CLASS-9 / D2). Logs the (type_name, field,
+        // returned idx, fn, src_mod) for every resolution of a watched field.
+        if std::env::var("VERUM_TRACE_FIELDSHIFT").is_ok() {
+            let watch = std::env::var("VERUM_FIELDSHIFT_FIELD")
+                .unwrap_or_else(|_| "expected_gen".to_string());
+            if field_name == watch {
+                let layout = type_name
+                    .and_then(|tn| self.type_field_layouts.get(tn).cloned());
+                eprintln!(
+                    "[FIELDSHIFT] resolve('{:?}', '{}') = {} | fn={} src_mod={:?} layout={:?}",
+                    type_name,
+                    field_name,
+                    __idx,
+                    self.ctx.current_function.as_deref().unwrap_or("?"),
+                    self.ctx.current_source_module,
+                    layout,
+                );
+            }
+        }
+        __idx
+    }
+
+    fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> u32 {
         if let Some(tn) = type_name {
             // **Architectural rule** (closes task #16 consumer side):
             // resolve field index from the canonical TypeDescriptor's
@@ -13730,6 +13755,22 @@ impl VbcCodegen {
         let idx = self.intern_field_name(field_name);
         if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
             tracing::debug!("[FIELD] global intern '{}' → idx {}", field_name, idx);
+        }
+        // INSTRUMENTATION (VERUM_TRACE_FIELDSHIFT): a non-None type_name that
+        // reaches the global-intern fallback is ALWAYS a cross-module field-
+        // index hazard — the write/read indices become non-positional and
+        // disagree with a re-parsed descriptor. Surface every such site.
+        if let Some(tn) = type_name
+            && std::env::var("VERUM_TRACE_FIELDSHIFT").is_ok()
+        {
+            eprintln!(
+                "[FIELDSHIFT] type='{}' field='{}' -> GLOBAL-INTERN idx={} (fn={}, src_mod={:?})",
+                tn,
+                field_name,
+                idx,
+                self.ctx.current_function.as_deref().unwrap_or("?"),
+                self.ctx.current_source_module
+            );
         }
         idx
     }

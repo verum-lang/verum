@@ -249,3 +249,63 @@ directly rather than a downstream fallback.
 
 The defect class continues to be tracked in
 `use_after_free_error_field_shift_2026-05-27.md`.
+
+## 8. Decisive triangulation 2026-05-29 (Opus 4.8 session) — READ-side +2, import-layout root
+
+The §6 read-side hypothesis is **confirmed and sharpened**, and §6's
+"value carries no type info through fn-return" framing is **superseded**
+by a precise root cause.
+
+### Evidence (probes under `--interp`, freshly recompiled)
+
+| Probe | Result |
+|---|---|
+| `let v: UseAfterFreeError = UseAfterFreeError { … }; v.expected_gen == 100` | **PASS** (literal binding) |
+| `let v: UseAfterFreeError = UseAfterFreeError.new(…); v.expected_gen == 100` | **FAIL** |
+| same `.new()` value, `assert_eq(v.expected_gen, 7)` (= the **expected_epoch** input) | **PASS** |
+| same `.new()` value, `assert_eq(v.expected_gen, 99)` / `== 0` | FAIL / FAIL |
+| `LocalUAF` (type + ctor + caller all in test module) `.new()` round-trip | PASS |
+| local field-name pollution (`PollutA{a,b,expected_gen}`, `PollutB{x,expected_gen}`) + `UAF.new()` | PASS |
+
+Reading slot-0-declared `expected_gen` off a `.new()` result yields **7**,
+which is the value the constructor wrote to **slot 2** (`expected_epoch`).
+⟹ the READ resolves `expected_gen` to **index 2, not 0** — a uniform **+2**.
+
+### Why the literal binding masks it
+
+Both bindings carry the identical annotation `let v: UseAfterFreeError`.
+The record **literal** is internally consistent: `compile_record` writes
+`expected_gen` at the SAME (wrong) index the read uses, so write@2/read@2
+round-trips and the test passes — masking the defect. The cross-module
+**`.new()`** constructor was compiled in the stdlib (`core.mem`) context
+with the CORRECT declaration order (`expected_gen`→slot 0), so it writes
+100→slot 0; the test then reads slot 2 (=7).
+
+### Root cause (corrected)
+
+`resolve_field_index(Some("UseAfterFreeError"), "expected_gen")` returns
+**2** in the **test module** compile context but **0** in the **stdlib**
+compile context. The test module's imported view of `UseAfterFreeError`'s
+field layout disagrees with declaration order — the import path
+(`collect_all_declarations` re-parse of `core/mem/mod.vr` and/or
+`populate_types_from_archive`) registers `type_field_layouts` /
+TypeDescriptor fields in an order where `expected_gen` lands at index 2.
+The global-intern fallback is **NOT** the culprit (`VERUM_TRACE_FIELDSHIFT`
+recorded zero fallback hits for a known type name).
+
+### Ruled out
+
+- Same-module compilation (LocalUAF) — correct.
+- Local field-name pollution — the descriptor path disambiguates correctly.
+- Global-intern fallback — not reached for known type names.
+- Dispatch collision on `.new` — disproved in §6, re-confirmed here.
+
+### Fix target
+
+Make the import-time field-layout registration for cross-module record
+types **declaration-order canonical**, so a re-parsed / archive-imported
+descriptor's field order is identical to the order used when the type's
+own module compiled its constructors. Instrumentation
+`resolve_field_index` → `resolve_field_index_impl` wrapper
+(`VERUM_TRACE_FIELDSHIFT` + `VERUM_FIELDSHIFT_FIELD`) is in place to read
+off the exact `(type_name, idx, layout)` at the failing site.
