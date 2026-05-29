@@ -1,0 +1,257 @@
+// =============================================================================
+// core-tests/database/postgres/auth/scram/unit_test.vr
+// =============================================================================
+//
+// `core/database/postgres/auth/scram.vr` — SCRAM-SHA-256 client ADT surface.
+//
+// Surface tested:
+//   * ScramError 8-variant (SeMechanismRejected / SeMalformedServerMessage /
+//     SeBadIterationCount / SeBase64DecodeFailed / SeNonceMismatch /
+//     SeServerSignatureMismatch / SeUnsupportedChannelBinding / SeKdfFailed)
+//   * ScramState 5-variant (SsInitial / SsAwaitingChallenge / SsAwaitingFinal /
+//     SsAuthenticated / SsFailed)
+//   * ChannelBinding 2-variant (CbNone / CbTlsServerEndPoint(List<Byte>))
+//   * MIN_SCRAM_ITERATIONS = 4096 (RFC 7677 §4)
+//   * MAX_SCRAM_ITERATIONS = 10_000_000 (CPU-DoS cap)
+//
+// Public crypto surface (scram_client_new + step methods) requires a live
+// server-message harness — tested at language level under
+// `vcs/specs/L2-standard/database/postgres/auth/`.
+// =============================================================================
+
+mount core.database.postgres.auth.scram.{
+    ScramError, ScramState, ChannelBinding,
+    SeMechanismRejected, SeMalformedServerMessage, SeBadIterationCount,
+    SeBase64DecodeFailed, SeNonceMismatch, SeServerSignatureMismatch,
+    SeUnsupportedChannelBinding, SeKdfFailed,
+    SsInitial, SsAwaitingChallenge, SsAwaitingFinal, SsAuthenticated, SsFailed,
+    CbNone, CbTlsServerEndPoint,
+    MIN_SCRAM_ITERATIONS, MAX_SCRAM_ITERATIONS,
+};
+
+// =============================================================================
+// Section 1: ScramError 8-variant construction
+// =============================================================================
+
+@test
+fn test_scram_error_mechanism_rejected_variant() {
+    let e: ScramError = SeMechanismRejected;
+    assert(e is SeMechanismRejected);
+}
+
+// §A — record-payload variant construction (named fields) hits the
+// cross-module record-payload variant tag defect. Same sister class as
+// btree_pattern_match_ref_generic_class / journal §A.
+@ignore("[[btree_pattern_match_ref_generic_class]] — record-payload variant `SeMalformedServerMessage { stage, reason }` mis-tags through cross-module construction. Multi-day codegen fix.")
+@test
+fn test_scram_error_malformed_server_message_variant() {
+    let e: ScramError = SeMalformedServerMessage {
+        stage: "server-first".to_text(),
+        reason: "missing r=".to_text(),
+    };
+    assert(e is SeMalformedServerMessage);
+}
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — record-payload variant `SeBadIterationCount { iterations }` mis-tags through cross-module construction. Multi-day codegen fix.")
+@test
+fn test_scram_error_bad_iteration_count_variant() {
+    let e: ScramError = SeBadIterationCount { iterations: 100 };
+    assert(e is SeBadIterationCount);
+}
+
+@test
+fn test_scram_error_base64_decode_failed_variant() {
+    let e: ScramError = SeBase64DecodeFailed;
+    assert(e is SeBase64DecodeFailed);
+}
+
+@test
+fn test_scram_error_nonce_mismatch_variant() {
+    let e: ScramError = SeNonceMismatch;
+    assert(e is SeNonceMismatch);
+}
+
+@test
+fn test_scram_error_server_signature_mismatch_variant() {
+    let e: ScramError = SeServerSignatureMismatch;
+    assert(e is SeServerSignatureMismatch);
+}
+
+@test
+fn test_scram_error_unsupported_channel_binding_variant() {
+    let e: ScramError = SeUnsupportedChannelBinding("tls-unique".to_text());
+    assert(e is SeUnsupportedChannelBinding);
+}
+
+@test
+fn test_scram_error_kdf_failed_variant() {
+    let e: ScramError = SeKdfFailed;
+    assert(e is SeKdfFailed);
+}
+
+// =============================================================================
+// Section 2: ScramError disjointness (representative pairs)
+// =============================================================================
+
+@test
+fn test_scram_error_mechanism_rejected_disjoint_from_nonce_mismatch() {
+    let mr: ScramError = SeMechanismRejected;
+    let nm: ScramError = SeNonceMismatch;
+    assert(mr is SeMechanismRejected && !(mr is SeNonceMismatch));
+    assert(nm is SeNonceMismatch && !(nm is SeMechanismRejected));
+}
+
+@test
+fn test_scram_error_server_sig_disjoint_from_kdf_failed() {
+    let ss: ScramError = SeServerSignatureMismatch;
+    let kf: ScramError = SeKdfFailed;
+    assert(!(ss is SeKdfFailed));
+    assert(!(kf is SeServerSignatureMismatch));
+}
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — record-payload variant tag drift cascades through disjointness test.")
+@test
+fn test_scram_error_payload_variants_disjoint() {
+    let bi: ScramError = SeBadIterationCount { iterations: 1 };
+    let cb: ScramError = SeUnsupportedChannelBinding("x".to_text());
+    assert(bi is SeBadIterationCount && !(bi is SeUnsupportedChannelBinding));
+    assert(cb is SeUnsupportedChannelBinding && !(cb is SeBadIterationCount));
+}
+
+// =============================================================================
+// Section 3: ScramError payload preservation via match
+// =============================================================================
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — record-payload variant mis-tags; match fallthrough to wildcard.")
+@test
+fn test_scram_error_bad_iteration_count_preserves_payload() {
+    let e: ScramError = SeBadIterationCount { iterations: 1000 };
+    match e {
+        SeBadIterationCount { iterations } => assert_eq(iterations, 1000),
+        _ => panic("expected SeBadIterationCount"),
+    }
+}
+
+@test
+fn test_scram_error_unsupported_channel_binding_preserves_payload() {
+    let e: ScramError = SeUnsupportedChannelBinding("tls-server-end-point".to_text());
+    match e {
+        SeUnsupportedChannelBinding(name) =>
+            assert_eq(name, "tls-server-end-point".to_text()),
+        _ => panic("expected SeUnsupportedChannelBinding"),
+    }
+}
+
+// =============================================================================
+// Section 4: ScramState 5-variant construction
+// =============================================================================
+
+@test
+fn test_scram_state_initial_variant() {
+    let s: ScramState = SsInitial;
+    assert(s is SsInitial);
+}
+
+@test
+fn test_scram_state_awaiting_challenge_variant() {
+    let s: ScramState = SsAwaitingChallenge;
+    assert(s is SsAwaitingChallenge);
+}
+
+@test
+fn test_scram_state_awaiting_final_variant() {
+    let s: ScramState = SsAwaitingFinal;
+    assert(s is SsAwaitingFinal);
+}
+
+@test
+fn test_scram_state_authenticated_variant() {
+    let s: ScramState = SsAuthenticated;
+    assert(s is SsAuthenticated);
+}
+
+@test
+fn test_scram_state_failed_variant() {
+    let s: ScramState = SsFailed;
+    assert(s is SsFailed);
+}
+
+@test
+fn test_scram_state_initial_disjoint_from_authenticated() {
+    let i: ScramState = SsInitial;
+    let a: ScramState = SsAuthenticated;
+    assert(i is SsInitial && !(i is SsAuthenticated));
+    assert(a is SsAuthenticated && !(a is SsInitial));
+}
+
+@test
+fn test_scram_state_authenticated_disjoint_from_failed() {
+    let a: ScramState = SsAuthenticated;
+    let f: ScramState = SsFailed;
+    assert(!(a is SsFailed));
+    assert(!(f is SsAuthenticated));
+}
+
+// =============================================================================
+// Section 5: ChannelBinding 2-variant construction
+// =============================================================================
+
+@test
+fn test_channel_binding_none_variant() {
+    let cb: ChannelBinding = CbNone;
+    assert(cb is CbNone);
+}
+
+@test
+fn test_channel_binding_tls_server_end_point_variant() {
+    let bytes: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+    let cb: ChannelBinding = CbTlsServerEndPoint(bytes);
+    assert(cb is CbTlsServerEndPoint);
+}
+
+@test
+fn test_channel_binding_none_disjoint_from_tls_end_point() {
+    let n: ChannelBinding = CbNone;
+    let bytes: List<Byte> = [];
+    let t: ChannelBinding = CbTlsServerEndPoint(bytes);
+    assert(n is CbNone && !(n is CbTlsServerEndPoint));
+    assert(t is CbTlsServerEndPoint && !(t is CbNone));
+}
+
+@test
+fn test_channel_binding_tls_end_point_preserves_byte_count() {
+    let bytes: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8];
+    let cb: ChannelBinding = CbTlsServerEndPoint(bytes);
+    match cb {
+        CbTlsServerEndPoint(bs) => assert_eq(bs.len(), 5),
+        _ => panic("expected CbTlsServerEndPoint"),
+    }
+}
+
+// =============================================================================
+// Section 6: Iteration-count constants
+// =============================================================================
+
+@test
+fn test_min_scram_iterations_is_4096() {
+    // RFC 7677 §4 — servers SHOULD use at least 4096 iterations.
+    assert_eq(MIN_SCRAM_ITERATIONS, 4096);
+}
+
+@test
+fn test_max_scram_iterations_is_ten_million() {
+    // CPU-DoS cap aligned with core.security.password_hash.MAX_PBKDF2_ITERATIONS.
+    assert_eq(MAX_SCRAM_ITERATIONS, 10_000_000);
+}
+
+@test
+fn test_max_strictly_greater_than_min() {
+    assert(MIN_SCRAM_ITERATIONS < MAX_SCRAM_ITERATIONS);
+}
+
+@test
+fn test_min_positive() {
+    assert(MIN_SCRAM_ITERATIONS > 0);
+}
+
+fn main() {}
