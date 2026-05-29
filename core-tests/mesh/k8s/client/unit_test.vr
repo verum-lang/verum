@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/mesh/k8s/client/unit_test.vr
+// =============================================================================
+//
+// `core/mesh/k8s/client.vr` — Patch ADT for K8s server-side apply.
+// =============================================================================
+
+mount core.mesh.k8s.client.Patch;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Patch 4-variant ADT
+// =============================================================================
+
+@test
+fn test_patch_strategic_merge_variant() {
+    let p: Patch = Patch.StrategicMerge("{}".to_text());
+    assert(p is Patch.StrategicMerge);
+}
+
+@test
+fn test_patch_json_merge_variant() {
+    let p: Patch = Patch.JsonMerge("{}".to_text());
+    assert(p is Patch.JsonMerge);
+}
+
+@test
+fn test_patch_json_patch_variant() {
+    let p: Patch = Patch.JsonPatch("[]".to_text());
+    assert(p is Patch.JsonPatch);
+}
+
+@test
+fn test_patch_apply_variant() {
+    let p: Patch = Patch.Apply {
+        field_manager: "verum-cli".to_text(),
+        body: "apiVersion: v1".to_text(),
+    };
+    assert(p is Patch.Apply);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_patch_strategic_merge_disjoint() {
+    let p: Patch = Patch.StrategicMerge("x".to_text());
+    assert(!(p is Patch.JsonMerge));
+    assert(!(p is Patch.JsonPatch));
+    assert(!(p is Patch.Apply));
+}
+
+@test
+fn test_patch_json_merge_disjoint() {
+    let p: Patch = Patch.JsonMerge("x".to_text());
+    assert(!(p is Patch.StrategicMerge));
+    assert(!(p is Patch.JsonPatch));
+    assert(!(p is Patch.Apply));
+}
+
+@test
+fn test_patch_json_patch_disjoint() {
+    let p: Patch = Patch.JsonPatch("x".to_text());
+    assert(!(p is Patch.StrategicMerge));
+    assert(!(p is Patch.JsonMerge));
+    assert(!(p is Patch.Apply));
+}
+
+@test
+fn test_patch_apply_disjoint() {
+    let p: Patch = Patch.Apply {
+        field_manager: "x".to_text(),
+        body: "y".to_text(),
+    };
+    assert(!(p is Patch.StrategicMerge));
+    assert(!(p is Patch.JsonMerge));
+    assert(!(p is Patch.JsonPatch));
+}
+
+// =============================================================================
+// Section 3: Scalar payload preservation
+// =============================================================================
+
+@test
+fn test_patch_strategic_merge_payload_round_trip() {
+    let p: Patch = Patch.StrategicMerge("{\"x\":1}".to_text());
+    match p {
+        Patch.StrategicMerge(body) => assert_eq(body, "{\"x\":1}"),
+        _ => panic("expected StrategicMerge"),
+    }
+}
+
+@test
+fn test_patch_json_patch_payload_round_trip() {
+    let p: Patch = Patch.JsonPatch("[{\"op\":\"add\",\"path\":\"/foo\"}]".to_text());
+    match p {
+        Patch.JsonPatch(body) => assert_eq(body, "[{\"op\":\"add\",\"path\":\"/foo\"}]"),
+        _ => panic("expected JsonPatch"),
+    }
+}
+
+fn main() {}
