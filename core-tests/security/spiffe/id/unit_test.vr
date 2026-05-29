@@ -1,0 +1,136 @@
+// =============================================================================
+// core-tests/security/spiffe/id/unit_test.vr
+// =============================================================================
+//
+// `core/security/spiffe/id.vr` —
+//   * SpiffeId record (trust_domain, path)
+//   * SpiffeIdError 7-variant ADT
+// =============================================================================
+
+mount core.security.spiffe.id.{SpiffeId, SpiffeIdError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: SpiffeId record construction
+// =============================================================================
+
+@test
+fn test_spiffe_id_trust_domain_only_record() {
+    let s: SpiffeId = SpiffeId {
+        trust_domain: "example.org".to_text(),
+        path: "".to_text(),
+    };
+    assert_eq(s.trust_domain, "example.org");
+    assert_eq(s.path, "");
+}
+
+@test
+fn test_spiffe_id_with_path_record() {
+    let s: SpiffeId = SpiffeId {
+        trust_domain: "example.org".to_text(),
+        path: "/workload/api".to_text(),
+    };
+    assert_eq(s.trust_domain, "example.org");
+    assert_eq(s.path, "/workload/api");
+}
+
+@test
+fn test_spiffe_id_record_field_independence() {
+    let a: SpiffeId = SpiffeId {
+        trust_domain: "a.example".to_text(),
+        path: "/svc".to_text(),
+    };
+    let b: SpiffeId = SpiffeId {
+        trust_domain: "b.example".to_text(),
+        path: "/svc".to_text(),
+    };
+    assert_eq(a.trust_domain, "a.example");
+    assert_eq(b.trust_domain, "b.example");
+}
+
+// =============================================================================
+// Section 2: SpiffeIdError 7-variant construction
+// =============================================================================
+
+@test
+fn test_spiffe_id_error_empty_variant() {
+    let e: SpiffeIdError = SpiffeIdError.Empty;
+    assert(e is SpiffeIdError.Empty);
+}
+
+@test
+fn test_spiffe_id_error_missing_scheme_variant() {
+    let e: SpiffeIdError = SpiffeIdError.MissingScheme;
+    assert(e is SpiffeIdError.MissingScheme);
+}
+
+@test
+fn test_spiffe_id_error_invalid_scheme_variant() {
+    let e: SpiffeIdError = SpiffeIdError.InvalidScheme("http".to_text());
+    assert(e is SpiffeIdError.InvalidScheme);
+}
+
+@test
+fn test_spiffe_id_error_empty_trust_domain_variant() {
+    let e: SpiffeIdError = SpiffeIdError.EmptyTrustDomain;
+    assert(e is SpiffeIdError.EmptyTrustDomain);
+}
+
+@test
+fn test_spiffe_id_error_invalid_trust_domain_variant() {
+    let e: SpiffeIdError = SpiffeIdError.InvalidTrustDomain {
+        reason: "upper-case".to_text(),
+    };
+    assert(e is SpiffeIdError.InvalidTrustDomain);
+}
+
+@test
+fn test_spiffe_id_error_path_too_long_variant() {
+    let e: SpiffeIdError = SpiffeIdError.PathTooLong { len: 2_048 };
+    assert(e is SpiffeIdError.PathTooLong);
+}
+
+@test
+fn test_spiffe_id_error_invalid_characters_variant() {
+    let e: SpiffeIdError = SpiffeIdError.InvalidCharacters {
+        at: 7,
+        character: 0x20_u8,
+    };
+    assert(e is SpiffeIdError.InvalidCharacters);
+}
+
+// =============================================================================
+// Section 3: SpiffeIdError pairwise disjointness
+// =============================================================================
+
+@test
+fn test_spiffe_id_error_empty_disjoint_from_missing_scheme() {
+    let e: SpiffeIdError = SpiffeIdError.Empty;
+    assert(!(e is SpiffeIdError.MissingScheme));
+}
+
+@test
+fn test_spiffe_id_error_missing_scheme_disjoint_from_invalid_scheme() {
+    let e: SpiffeIdError = SpiffeIdError.MissingScheme;
+    assert(!(e is SpiffeIdError.InvalidScheme));
+}
+
+@test
+fn test_spiffe_id_error_invalid_scheme_disjoint_from_empty() {
+    let e: SpiffeIdError = SpiffeIdError.InvalidScheme("x".to_text());
+    assert(!(e is SpiffeIdError.Empty));
+    assert(!(e is SpiffeIdError.MissingScheme));
+}
+
+@test
+fn test_spiffe_id_error_invalid_trust_domain_disjoint() {
+    let e: SpiffeIdError = SpiffeIdError.InvalidTrustDomain {
+        reason: "x".to_text(),
+    };
+    assert(!(e is SpiffeIdError.Empty));
+    assert(!(e is SpiffeIdError.EmptyTrustDomain));
+    assert(!(e is SpiffeIdError.PathTooLong));
+}
+
+fn main() {}
