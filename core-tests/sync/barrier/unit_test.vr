@@ -126,7 +126,6 @@ fn test_phaser_register_increments_parties() {
 }
 
 @test
-@ignore
 fn test_phaser_register_returns_current_phase() {
     let p = Phaser.new(0);
     // Phase starts at 0; register() returns the phase BEFORE registration.
