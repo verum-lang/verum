@@ -1,0 +1,203 @@
+// =============================================================================
+// core-tests/term/layout/rect/unit_test.vr
+// =============================================================================
+//
+// `core/term/layout/rect.vr` —
+//   * Rect record (x, y, width, height) + .new() + .area / .left / .right /
+//     .top / .bottom / .is_empty
+//   * Margin record (top, right, bottom, left) + uniform / horizontal /
+//     vertical / symmetric / ZERO constant
+//   * Position record (x, y) + .new() / .origin() / .distance()
+// =============================================================================
+
+mount core.term.layout.rect.{Rect, Margin, Position};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Rect construction
+// =============================================================================
+
+@test
+fn test_rect_new_canonical() {
+    let r: Rect = Rect.new(0, 0, 80, 24);
+    assert_eq(r.x, 0);
+    assert_eq(r.y, 0);
+    assert_eq(r.width, 80);
+    assert_eq(r.height, 24);
+}
+
+@test
+fn test_rect_new_clamps_negative_width_to_zero() {
+    let r: Rect = Rect.new(0, 0, -5, 10);
+    assert_eq(r.width, 0);
+    assert_eq(r.height, 10);
+}
+
+@test
+fn test_rect_new_clamps_negative_height_to_zero() {
+    let r: Rect = Rect.new(0, 0, 20, -3);
+    assert_eq(r.width, 20);
+    assert_eq(r.height, 0);
+}
+
+@test
+fn test_rect_direct_record_construction() {
+    let r: Rect = Rect { x: 5, y: 10, width: 30, height: 15 };
+    assert_eq(r.x, 5);
+    assert_eq(r.y, 10);
+    assert_eq(r.width, 30);
+    assert_eq(r.height, 15);
+}
+
+// =============================================================================
+// Section 2: Rect derived properties
+// =============================================================================
+
+@test
+fn test_rect_area_canonical() {
+    let r: Rect = Rect.new(0, 0, 10, 5);
+    assert_eq(r.area(), 50);
+}
+
+@test
+fn test_rect_area_zero_when_empty() {
+    let r: Rect = Rect.new(0, 0, 0, 10);
+    assert_eq(r.area(), 0);
+}
+
+@test
+fn test_rect_left_returns_x() {
+    let r: Rect = Rect.new(7, 3, 10, 10);
+    assert_eq(r.left(), 7);
+}
+
+@test
+fn test_rect_right_returns_x_plus_width() {
+    let r: Rect = Rect.new(7, 3, 10, 10);
+    assert_eq(r.right(), 17);
+}
+
+@test
+fn test_rect_top_returns_y() {
+    let r: Rect = Rect.new(7, 3, 10, 10);
+    assert_eq(r.top(), 3);
+}
+
+@test
+fn test_rect_bottom_returns_y_plus_height() {
+    let r: Rect = Rect.new(7, 3, 10, 4);
+    assert_eq(r.bottom(), 7);
+}
+
+@test
+fn test_rect_is_empty_when_zero_width() {
+    let r: Rect = Rect.new(0, 0, 0, 10);
+    assert(r.is_empty());
+}
+
+@test
+fn test_rect_is_empty_when_zero_height() {
+    let r: Rect = Rect.new(0, 0, 10, 0);
+    assert(r.is_empty());
+}
+
+@test
+fn test_rect_not_empty_when_both_nonzero() {
+    let r: Rect = Rect.new(0, 0, 10, 5);
+    assert(!r.is_empty());
+}
+
+// =============================================================================
+// Section 3: Margin constructors
+// =============================================================================
+
+@test
+fn test_margin_zero_constant() {
+    let m: Margin = Margin.ZERO;
+    assert_eq(m.top, 0);
+    assert_eq(m.right, 0);
+    assert_eq(m.bottom, 0);
+    assert_eq(m.left, 0);
+}
+
+@test
+fn test_margin_uniform_n() {
+    let m: Margin = Margin.uniform(3);
+    assert_eq(m.top, 3);
+    assert_eq(m.right, 3);
+    assert_eq(m.bottom, 3);
+    assert_eq(m.left, 3);
+}
+
+@test
+fn test_margin_horizontal_zeroes_top_bottom() {
+    let m: Margin = Margin.horizontal(5);
+    assert_eq(m.top, 0);
+    assert_eq(m.right, 5);
+    assert_eq(m.bottom, 0);
+    assert_eq(m.left, 5);
+}
+
+@test
+fn test_margin_vertical_zeroes_left_right() {
+    let m: Margin = Margin.vertical(2);
+    assert_eq(m.top, 2);
+    assert_eq(m.right, 0);
+    assert_eq(m.bottom, 2);
+    assert_eq(m.left, 0);
+}
+
+@test
+fn test_margin_symmetric_h_v() {
+    let m: Margin = Margin.symmetric(4, 1);
+    assert_eq(m.top, 1);
+    assert_eq(m.right, 4);
+    assert_eq(m.bottom, 1);
+    assert_eq(m.left, 4);
+}
+
+@test
+fn test_margin_total_horizontal_sum_left_right() {
+    let m: Margin = Margin.symmetric(3, 2);
+    assert_eq(m.total_horizontal(), 6);
+}
+
+@test
+fn test_margin_total_vertical_sum_top_bottom() {
+    let m: Margin = Margin.symmetric(3, 2);
+    assert_eq(m.total_vertical(), 4);
+}
+
+// =============================================================================
+// Section 4: Position
+// =============================================================================
+
+@test
+fn test_position_new_returns_xy() {
+    let p: Position = Position.new(7, 11);
+    assert_eq(p.x, 7);
+    assert_eq(p.y, 11);
+}
+
+@test
+fn test_position_origin_is_zero_zero() {
+    let p: Position = Position.origin();
+    assert_eq(p.x, 0);
+    assert_eq(p.y, 0);
+}
+
+@test
+fn test_position_distance_manhattan() {
+    let a: Position = Position.new(0, 0);
+    let b: Position = Position.new(3, 4);
+    assert_eq(a.distance(&b), 7);
+}
+
+@test
+fn test_position_distance_self_zero() {
+    let p: Position = Position.new(5, 5);
+    assert_eq(p.distance(&p), 0);
+}
+
+fn main() {}
