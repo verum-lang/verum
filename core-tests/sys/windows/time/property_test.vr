@@ -1,0 +1,363 @@
+// =============================================================================
+// core-tests/sys/windows/time/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over the host-safe surface of `core.sys.windows.time`:
+//
+//   * Scaling-relation identities among the time-unit constants
+//     (NANOS_PER_SEC == NANOS_PER_MILLI * MILLIS_PER_SEC, etc.) — drift
+//     in any one constant silently corrupts every cross-unit conversion.
+//   * WindowsDuration arithmetic forms a commutative monoid under `add`
+//     with identity `zero`; `mul` distributes over `add`; `sub` saturates
+//     at zero; cross-scale constructors agree on the nanosecond value.
+//   * The decomposition law: as_secs * NANOS_PER_SEC + subsec_nanos
+//     reconstructs as_nanos for every value.
+//   * from_secs_f64 round-trips on exactly-representable second values.
+//   * WindowsDeadlineTimer.none() reports no deadline and an INFINITE
+//     remaining_ms timeout (the none() path performs no QPC FFI).
+//
+// NOTE — host-safe only. macOS host cannot execute kernel32 FFI, so every
+// QueryPerformanceCounter-backed path (WindowsInstant.now / .elapsed,
+// WindowsStopwatch start/stop/elapsed/lap, WindowsPerfCounter, the
+// after()/at()/is_expired()/remaining() *with* a deadline) is deliberately
+// excluded. Only pure value arithmetic + the none() deadline-timer branch
+// is exercised.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.time.{
+    NANOS_PER_SEC, NANOS_PER_MILLI, NANOS_PER_MICRO,
+    MILLIS_PER_SEC, MICROS_PER_SEC,
+    FILETIME_UNITS_PER_SEC, WINDOWS_EPOCH_OFFSET,
+    WindowsDuration,
+    WindowsDeadlineTimer,
+};
+mount core.sys.windows.kernel32.{INFINITE};
+
+// =============================================================================
+// Property 1 — Scaling-relation identities among the constants
+// =============================================================================
+
+@test
+fn wx_time_prop_nanos_per_sec_factorizations() {
+    // The full scale ladder must stay internally consistent.
+    assert_eq(NANOS_PER_SEC, NANOS_PER_MILLI * MILLIS_PER_SEC);
+    assert_eq(NANOS_PER_SEC, NANOS_PER_MICRO * MICROS_PER_SEC);
+    assert_eq(NANOS_PER_MILLI, NANOS_PER_MICRO * 1_000_u64);
+    assert_eq(MICROS_PER_SEC, MILLIS_PER_SEC * 1_000_u64);
+}
+
+@test
+fn wx_time_prop_filetime_vs_nanos_relation() {
+    // FILETIME counts 100-ns ticks; 100 ns * FILETIME_UNITS_PER_SEC == 1 s.
+    assert_eq(FILETIME_UNITS_PER_SEC * 100_u64, NANOS_PER_SEC);
+}
+
+@test
+fn wx_time_prop_epoch_offset_in_filetime_units() {
+    // WINDOWS_EPOCH_OFFSET is expressed in FILETIME (100-ns) units and must
+    // be an exact whole number of seconds (369 years, no leap fraction here).
+    assert_eq(WINDOWS_EPOCH_OFFSET % FILETIME_UNITS_PER_SEC, 0_u64);
+}
+
+// =============================================================================
+// Property 2 — add is commutative
+// =============================================================================
+
+@test
+fn wx_time_prop_add_commutative() {
+    // Sampled over small, mid, and large-but-non-overflowing nanosecond
+    // values to cover the carry-free and multi-word regimes of u64 add.
+    let mut samples: List<UInt64> = List.new();
+    samples.push(0_u64);
+    samples.push(1_u64);
+    samples.push(1_000_u64);
+    samples.push(1_000_000_u64);
+    samples.push(1_500_000_000_u64);
+    samples.push(987_654_321_u64);
+
+    let mut i = 0;
+    while i < samples.len() {
+        let mut j = 0;
+        while j < samples.len() {
+            let a = WindowsDuration.from_nanos(samples[i]);
+            let b = WindowsDuration.from_nanos(samples[j]);
+            assert_eq(a.add(b).as_nanos(), b.add(a).as_nanos(),
+                      "add must be commutative");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 3 — add is associative
+// =============================================================================
+
+@test
+fn wx_time_prop_add_associative() {
+    let mut samples: List<UInt64> = List.new();
+    samples.push(0_u64);
+    samples.push(7_u64);
+    samples.push(2_500_u64);
+    samples.push(333_000_000_u64);
+    samples.push(1_000_000_000_u64);
+
+    let mut i = 0;
+    while i < samples.len() {
+        let mut j = 0;
+        while j < samples.len() {
+            let mut k = 0;
+            while k < samples.len() {
+                let a = WindowsDuration.from_nanos(samples[i]);
+                let b = WindowsDuration.from_nanos(samples[j]);
+                let c = WindowsDuration.from_nanos(samples[k]);
+                let left = a.add(b).add(c);
+                let right = a.add(b.add(c));
+                assert_eq(left.as_nanos(), right.as_nanos(),
+                          "add must be associative");
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 4 — zero is the additive identity
+// =============================================================================
+
+@test
+fn wx_time_prop_add_zero_identity() {
+    let zero = WindowsDuration.zero();
+    let mut samples: List<UInt64> = List.new();
+    samples.push(0_u64);
+    samples.push(1_u64);
+    samples.push(42_000_u64);
+    samples.push(2_718_281_828_u64);
+
+    let mut i = 0;
+    while i < samples.len() {
+        let d = WindowsDuration.from_nanos(samples[i]);
+        assert_eq(d.add(zero).as_nanos(), d.as_nanos(),
+                  "d + 0 == d");
+        assert_eq(zero.add(d).as_nanos(), d.as_nanos(),
+                  "0 + d == d");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 5 — mul distributes over add:  (a + b) * f == a*f + b*f
+// =============================================================================
+
+@test
+fn wx_time_prop_mul_distributes_over_add() {
+    let mut vals: List<UInt64> = List.new();
+    vals.push(0_u64);
+    vals.push(3_u64);
+    vals.push(1_000_u64);
+    vals.push(1_000_000_u64);
+
+    let mut factors: List<UInt64> = List.new();
+    factors.push(0_u64);
+    factors.push(1_u64);
+    factors.push(2_u64);
+    factors.push(7_u64);
+
+    let mut i = 0;
+    while i < vals.len() {
+        let mut j = 0;
+        while j < vals.len() {
+            let mut k = 0;
+            while k < factors.len() {
+                let a = WindowsDuration.from_nanos(vals[i]);
+                let b = WindowsDuration.from_nanos(vals[j]);
+                let f = factors[k];
+                let lhs = a.add(b).mul(f);
+                let rhs = a.mul(f).add(b.mul(f));
+                assert_eq(lhs.as_nanos(), rhs.as_nanos(),
+                          "(a+b)*f == a*f + b*f");
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 6 — sub saturates at zero whenever b >= a
+// =============================================================================
+
+@test
+fn wx_time_prop_sub_saturates_at_zero() {
+    let mut vals: List<UInt64> = List.new();
+    vals.push(0_u64);
+    vals.push(1_u64);
+    vals.push(500_u64);
+    vals.push(1_000_000_000_u64);
+
+    let mut i = 0;
+    while i < vals.len() {
+        let mut j = 0;
+        while j < vals.len() {
+            let a = WindowsDuration.from_nanos(vals[i]);
+            let b = WindowsDuration.from_nanos(vals[j]);
+            if vals[j] >= vals[i] {
+                // b >= a  ⇒  saturates to exactly zero
+                assert_eq(a.sub(b).as_nanos(), 0_u64,
+                          "sub saturates to zero when b >= a");
+            } else {
+                // b < a  ⇒  exact difference
+                assert_eq(a.sub(b).as_nanos(), vals[i] - vals[j],
+                          "sub yields exact difference when b < a");
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 7 — cross-scale constructors agree on the nanosecond value
+// =============================================================================
+
+@test
+fn wx_time_prop_cross_scale_equivalence() {
+    // n seconds == n*1000 millis == n*1_000_000 micros == n*1e9 nanos
+    let mut n = 0_u64;
+    while n <= 5_u64 {
+        let from_s = WindowsDuration.from_secs(n);
+        let from_ms = WindowsDuration.from_millis(n * 1_000_u64);
+        let from_us = WindowsDuration.from_micros(n * 1_000_000_u64);
+        let from_ns = WindowsDuration.from_nanos(n * 1_000_000_000_u64);
+        assert_eq(from_s.as_nanos(), from_ms.as_nanos());
+        assert_eq(from_s.as_nanos(), from_us.as_nanos());
+        assert_eq(from_s.as_nanos(), from_ns.as_nanos());
+        n = n + 1;
+    }
+}
+
+// =============================================================================
+// Property 8 — decomposition law:
+//   as_secs * NANOS_PER_SEC + subsec_nanos == as_nanos
+// =============================================================================
+
+@test
+fn wx_time_prop_secs_subsec_decomposition() {
+    // Values chosen to span whole-second, sub-second, and mixed regimes.
+    let mut samples: List<UInt64> = List.new();
+    samples.push(0_u64);
+    samples.push(1_u64);
+    samples.push(999_999_999_u64);
+    samples.push(1_000_000_000_u64);
+    samples.push(1_500_000_000_u64);
+    samples.push(3_000_000_001_u64);
+    samples.push(123_456_789_012_u64);
+
+    let mut i = 0;
+    while i < samples.len() {
+        let d = WindowsDuration.from_nanos(samples[i]);
+        let reconstructed = d.as_secs() * NANOS_PER_SEC
+            + (d.subsec_nanos() as UInt64);
+        assert_eq(reconstructed, d.as_nanos(),
+                  "as_secs*NANOS_PER_SEC + subsec_nanos == as_nanos");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 9 — millis decomposition mirrors the nanos decomposition
+// =============================================================================
+
+@test
+fn wx_time_prop_subsec_millis_consistency() {
+    // subsec_millis is subsec_nanos truncated to whole milliseconds.
+    let mut samples: List<UInt64> = List.new();
+    samples.push(0_u64);
+    samples.push(1_500_000_000_u64);
+    samples.push(2_750_000_000_u64);
+    samples.push(999_000_000_u64);
+
+    let mut i = 0;
+    while i < samples.len() {
+        let d = WindowsDuration.from_nanos(samples[i]);
+        let expected = (d.subsec_nanos() as UInt64) / NANOS_PER_MILLI;
+        assert_eq(d.subsec_millis() as UInt64, expected,
+                  "subsec_millis == subsec_nanos / NANOS_PER_MILLI");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 10 — from_secs_f64 round-trips on exactly-representable seconds
+// =============================================================================
+
+@test
+fn wx_time_prop_from_secs_f64_round_trip_exact() {
+    // Small integer + half-second values are exactly representable in f64,
+    // so the float path must agree with the integer constructors.
+    let one = WindowsDuration.from_secs_f64(1.0);
+    assert_eq(one.as_nanos(), 1_000_000_000_u64);
+
+    let three = WindowsDuration.from_secs_f64(3.0);
+    assert_eq(three.as_nanos(), 3_000_000_000_u64);
+
+    let half = WindowsDuration.from_secs_f64(0.5);
+    assert_eq(half.as_nanos(), 500_000_000_u64);
+
+    let zero = WindowsDuration.from_secs_f64(0.0);
+    assert(zero.is_zero());
+}
+
+// =============================================================================
+// Property 11 — mul/div inverse on exact multiples
+// =============================================================================
+
+@test
+fn wx_time_prop_mul_then_div_round_trip() {
+    let mut vals: List<UInt64> = List.new();
+    vals.push(1_u64);
+    vals.push(7_u64);
+    vals.push(1_000_u64);
+    vals.push(1_000_000_u64);
+
+    let mut factors: List<UInt64> = List.new();
+    factors.push(1_u64);
+    factors.push(2_u64);
+    factors.push(11_u64);
+
+    let mut i = 0;
+    while i < vals.len() {
+        let mut k = 0;
+        while k < factors.len() {
+            let d = WindowsDuration.from_nanos(vals[i]);
+            let f = factors[k];
+            // (d * f) / f == d  (no remainder because f divides d*f exactly)
+            assert_eq(d.mul(f).div(f).as_nanos(), d.as_nanos(),
+                      "(d * f) / f == d");
+            k = k + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 12 — WindowsDeadlineTimer.none() invariants (host-safe path)
+// =============================================================================
+
+@test
+fn wx_time_prop_deadline_none_has_no_deadline() {
+    let t = WindowsDeadlineTimer.none();
+    assert(!t.has_deadline(), "none() must report no deadline");
+}
+
+@test
+fn wx_time_prop_deadline_none_remaining_ms_is_infinite() {
+    // The none() branch of remaining_ms returns INFINITE without any QPC FFI.
+    let t = WindowsDeadlineTimer.none();
+    assert_eq(t.remaining_ms(), INFINITE);
+    assert_eq(t.remaining_ms(), 0xFFFFFFFF_u32);
+}

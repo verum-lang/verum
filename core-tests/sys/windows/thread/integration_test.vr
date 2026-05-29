@@ -1,0 +1,192 @@
+// =============================================================================
+// core-tests/sys/windows/thread/integration_test.vr
+// =============================================================================
+//
+// Compositional exercises over the PURE surface of
+// `core.sys.windows.thread`: ADT + constants flowing through List / Maybe /
+// Map containers, sorting / dedup of the Once state set, and match
+// exhaustiveness over WindowsThreadError.
+//
+// HOST-SAFE: no kernel32 FFI. All thread/mutex/condvar/futex operations are
+// deferred (see audit.md §4).
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.thread.{
+    WindowsThreadError,
+    DEFAULT_THREAD_STACK_SIZE,
+    ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE,
+};
+
+// =============================================================================
+// Section 1 — WindowsThreadError in a List, classified by match
+// =============================================================================
+
+fn wx_thread_error_is_recoverable(e: &WindowsThreadError) -> Bool {
+    // Treat "already finished" lifecycle errors as recoverable (no-op),
+    // everything backed by a kernel error code as non-recoverable.
+    match e {
+        WindowsThreadError.AlreadyJoined => true,
+        WindowsThreadError.AlreadyDetached => true,
+        WindowsThreadError.TlsInitFailed => false,
+        WindowsThreadError.CreateFailed { code } => false,
+        WindowsThreadError.JoinFailed { code } => false,
+        WindowsThreadError.SuspendFailed { code } => false,
+        WindowsThreadError.ResumeFailed { code } => false,
+        WindowsThreadError.MutexInitFailed { code } => false,
+        WindowsThreadError.MutexLockFailed { code } => false,
+        WindowsThreadError.CondInitFailed { code } => false,
+        WindowsThreadError.CondWaitFailed { code } => false,
+    }
+}
+
+@test
+fn wx_thread_error_list_classification() {
+    let mut errs: List<WindowsThreadError> = List.new();
+    errs.push(WindowsThreadError.AlreadyJoined);
+    errs.push(WindowsThreadError.CreateFailed { code: 8_u32 });
+    errs.push(WindowsThreadError.AlreadyDetached);
+    errs.push(WindowsThreadError.JoinFailed { code: 6_u32 });
+
+    let mut recoverable = 0;
+    let mut i = 0;
+    while i < errs.len() {
+        if wx_thread_error_is_recoverable(&errs[i]) {
+            recoverable = recoverable + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(recoverable, 2);
+}
+
+// =============================================================================
+// Section 2 — extract codes from code-bearing variants via Maybe
+// =============================================================================
+
+fn wx_thread_error_code_of(e: &WindowsThreadError) -> Maybe<UInt32> {
+    match e {
+        WindowsThreadError.CreateFailed { code } => Maybe.Some(code),
+        WindowsThreadError.JoinFailed { code } => Maybe.Some(code),
+        WindowsThreadError.SuspendFailed { code } => Maybe.Some(code),
+        WindowsThreadError.ResumeFailed { code } => Maybe.Some(code),
+        WindowsThreadError.MutexInitFailed { code } => Maybe.Some(code),
+        WindowsThreadError.MutexLockFailed { code } => Maybe.Some(code),
+        WindowsThreadError.CondInitFailed { code } => Maybe.Some(code),
+        WindowsThreadError.CondWaitFailed { code } => Maybe.Some(code),
+        _ => Maybe.None,
+    }
+}
+
+@test
+fn wx_thread_error_code_extraction_some() {
+    let e = WindowsThreadError.MutexLockFailed { code: 258_u32 };
+    match wx_thread_error_code_of(&e) {
+        Maybe.Some(c) => assert_eq(c, 258_u32),
+        Maybe.None => panic("expected Some(258)"),
+    };
+}
+
+@test
+fn wx_thread_error_code_extraction_none_for_unit() {
+    let e = WindowsThreadError.AlreadyJoined;
+    match wx_thread_error_code_of(&e) {
+        Maybe.Some(_) => panic("unit variant must yield None"),
+        Maybe.None => assert(true),
+    };
+}
+
+// =============================================================================
+// Section 3 — Once state set: sort + dedup invariants
+// =============================================================================
+
+@test
+fn wx_thread_once_states_dedup_preserves_three() {
+    // Insert the three states with duplicates; a dedup over distinct
+    // values must leave exactly three.
+    let mut raw: List<UInt32> = List.new();
+    raw.push(ONCE_COMPLETE);
+    raw.push(ONCE_INIT);
+    raw.push(ONCE_RUNNING);
+    raw.push(ONCE_INIT);
+    raw.push(ONCE_COMPLETE);
+
+    let mut seen: List<UInt32> = List.new();
+    let mut i = 0;
+    while i < raw.len() {
+        let v = raw[i];
+        let mut found = false;
+        let mut k = 0;
+        while k < seen.len() {
+            if seen[k] == v {
+                found = true;
+            }
+            k = k + 1;
+        }
+        if !found {
+            seen.push(v);
+        }
+        i = i + 1;
+    }
+    assert_eq(seen.len(), 3_usize);
+}
+
+@test
+fn wx_thread_once_states_min_max_span() {
+    // INIT is the minimum, COMPLETE is the maximum of the state set.
+    let mut states: List<UInt32> = List.new();
+    states.push(ONCE_RUNNING);
+    states.push(ONCE_COMPLETE);
+    states.push(ONCE_INIT);
+
+    let mut lo = states[0];
+    let mut hi = states[0];
+    let mut i = 1;
+    while i < states.len() {
+        if states[i] < lo { lo = states[i]; }
+        if states[i] > hi { hi = states[i]; }
+        i = i + 1;
+    }
+    assert_eq(lo, ONCE_INIT);
+    assert_eq(hi, ONCE_COMPLETE);
+}
+
+// =============================================================================
+// Section 4 — Map keyed by Once state -> human label
+// =============================================================================
+
+@test
+fn wx_thread_once_state_label_map() {
+    let mut labels: Map<UInt32, Text> = Map.new();
+    labels.insert(ONCE_INIT, "init");
+    labels.insert(ONCE_RUNNING, "running");
+    labels.insert(ONCE_COMPLETE, "complete");
+
+    assert_eq(labels.len(), 3_usize);
+    match labels.get(ONCE_RUNNING) {
+        Maybe.Some(name) => assert_eq(name, "running"),
+        Maybe.None => panic("ONCE_RUNNING key missing"),
+    };
+}
+
+// =============================================================================
+// Section 5 — cross-type composition: stack-size scaling stays power-of-two
+// =============================================================================
+
+@test
+fn wx_thread_stack_size_double_is_2mib() {
+    // Doubling a power-of-two stack reservation stays a power of two.
+    let doubled: USize = DEFAULT_THREAD_STACK_SIZE * 2_usize;
+    assert_eq(doubled, 2097152_usize);
+    assert(doubled != 0_usize && (doubled & (doubled - 1_usize)) == 0_usize);
+}
+
+@test
+fn wx_thread_stack_size_in_maybe_pipeline() {
+    let sz: Maybe<USize> = Maybe.Some(DEFAULT_THREAD_STACK_SIZE);
+    let resolved = match sz {
+        Maybe.Some(v) => v,
+        Maybe.None => 0_usize,
+    };
+    assert_eq(resolved, 1048576_usize);
+}

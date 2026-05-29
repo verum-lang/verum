@@ -73,14 +73,14 @@ public type WindowsTlsError is
 implement Display for WindowsTlsError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            NotInitialized                       => f.write_str("Windows TLS: not initialized"),
-            AlreadyInitialized                   => f.write_str("Windows TLS: already initialized"),
-            AllocationFailed { code, size }      => f.write_str(f"Windows TLS: allocation of {size} bytes failed (code {code})".as_str()),
-            InvalidSlot { slot }                 => f.write_str(f"Windows TLS: invalid slot {slot}".as_str()),
-            StackOverflow { slot }               => f.write_str(f"Windows TLS: stack overflow on slot {slot}".as_str()),
-            StackUnderflow { slot }              => f.write_str(f"Windows TLS: stack underflow on slot {slot}".as_str()),
-            InvalidTcb                           => f.write_str("Windows TLS: invalid thread-control block"),
-            TlsIndexExhausted                    => f.write_str("Windows TLS: TLS index exhausted"),
+            WindowsTlsError.NotInitialized                       => f.write_str("Windows TLS: not initialized"),
+            WindowsTlsError.AlreadyInitialized                   => f.write_str("Windows TLS: already initialized"),
+            WindowsTlsError.AllocationFailed { code, size }      => f.write_str(f"Windows TLS: allocation of {size} bytes failed (code {code})".as_str()),
+            WindowsTlsError.InvalidSlot { slot }                 => f.write_str(f"Windows TLS: invalid slot {slot}".as_str()),
+            WindowsTlsError.StackOverflow { slot }               => f.write_str(f"Windows TLS: stack overflow on slot {slot}".as_str()),
+            WindowsTlsError.StackUnderflow { slot }              => f.write_str(f"Windows TLS: stack underflow on slot {slot}".as_str()),
+            WindowsTlsError.InvalidTcb                           => f.write_str("Windows TLS: invalid thread-control block"),
+            WindowsTlsError.TlsIndexExhausted                    => f.write_str("Windows TLS: TLS index exhausted"),
         }
     }
 }
@@ -88,14 +88,14 @@ implement Display for WindowsTlsError {
 implement Debug for WindowsTlsError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            NotInitialized                       => f.write_str("NotInitialized"),
-            AlreadyInitialized                   => f.write_str("AlreadyInitialized"),
-            AllocationFailed { code, size }      => f.write_str(f"AllocationFailed {{ code: {code}, size: {size} }}".as_str()),
-            InvalidSlot { slot }                 => f.write_str(f"InvalidSlot {{ slot: {slot} }}".as_str()),
-            StackOverflow { slot }               => f.write_str(f"StackOverflow {{ slot: {slot} }}".as_str()),
-            StackUnderflow { slot }              => f.write_str(f"StackUnderflow {{ slot: {slot} }}".as_str()),
-            InvalidTcb                           => f.write_str("InvalidTcb"),
-            TlsIndexExhausted                    => f.write_str("TlsIndexExhausted"),
+            WindowsTlsError.NotInitialized                       => f.write_str("NotInitialized"),
+            WindowsTlsError.AlreadyInitialized                   => f.write_str("AlreadyInitialized"),
+            WindowsTlsError.AllocationFailed { code, size }      => f.write_str(f"AllocationFailed {{ code: {code}, size: {size} }}".as_str()),
+            WindowsTlsError.InvalidSlot { slot }                 => f.write_str(f"InvalidSlot {{ slot: {slot} }}".as_str()),
+            WindowsTlsError.StackOverflow { slot }               => f.write_str(f"StackOverflow {{ slot: {slot} }}".as_str()),
+            WindowsTlsError.StackUnderflow { slot }              => f.write_str(f"StackUnderflow {{ slot: {slot} }}".as_str()),
+            WindowsTlsError.InvalidTcb                           => f.write_str("InvalidTcb"),
+            WindowsTlsError.TlsIndexExhausted                    => f.write_str("TlsIndexExhausted"),
         }
     }
 }
@@ -103,15 +103,15 @@ implement Debug for WindowsTlsError {
 implement Eq for WindowsTlsError {
     fn eq(&self, other: &WindowsTlsError) -> Bool {
         match (self, other) {
-            (NotInitialized,                     NotInitialized)                     => true,
-            (AlreadyInitialized,                 AlreadyInitialized)                 => true,
-            (AllocationFailed { code: ca, size: sa },
-             AllocationFailed { code: cb, size: sb })                                => ca == cb && sa == sb,
-            (InvalidSlot { slot: a },            InvalidSlot { slot: b })            => a == b,
-            (StackOverflow { slot: a },          StackOverflow { slot: b })          => a == b,
-            (StackUnderflow { slot: a },         StackUnderflow { slot: b })         => a == b,
-            (InvalidTcb,                         InvalidTcb)                         => true,
-            (TlsIndexExhausted,                  TlsIndexExhausted)                  => true,
+            (WindowsTlsError.NotInitialized,         WindowsTlsError.NotInitialized)         => true,
+            (WindowsTlsError.AlreadyInitialized,     WindowsTlsError.AlreadyInitialized)     => true,
+            (WindowsTlsError.AllocationFailed { code: ca, size: sa },
+             WindowsTlsError.AllocationFailed { code: cb, size: sb })                        => ca == cb && sa == sb,
+            (WindowsTlsError.InvalidSlot { slot: a },    WindowsTlsError.InvalidSlot { slot: b })    => a == b,
+            (WindowsTlsError.StackOverflow { slot: a },  WindowsTlsError.StackOverflow { slot: b })  => a == b,
+            (WindowsTlsError.StackUnderflow { slot: a }, WindowsTlsError.StackUnderflow { slot: b }) => a == b,
+            (WindowsTlsError.InvalidTcb,             WindowsTlsError.InvalidTcb)             => true,
+            (WindowsTlsError.TlsIndexExhausted,      WindowsTlsError.TlsIndexExhausted)      => true,
             _ => false,
         }
     }
@@ -119,15 +119,18 @@ implement Eq for WindowsTlsError {
 
 implement WindowsTlsError {
     public fn message(&self) -> Text {
+        // Qualified `WindowsTlsError.<Variant>` form — bare names collide
+        // first-wins with sibling error ADTs when loaded from the core
+        // archive (see core-tests/sys/windows/io/audit.md §A).
         match self {
-            NotInitialized => "TLS not initialized for this thread",
-            AlreadyInitialized => "TLS already initialized for this thread",
-            AllocationFailed { code, size } => f"Failed to allocate TLS memory (code={code}, size={size})",
-            InvalidSlot { slot } => f"Invalid context slot index: {slot}",
-            StackOverflow { slot } => f"Context stack overflow at slot {slot}",
-            StackUnderflow { slot } => f"Context stack underflow at slot {slot}",
-            InvalidTcb => "Invalid or corrupted TCB",
-            TlsIndexExhausted => "No more TLS indices available",
+            WindowsTlsError.NotInitialized => "TLS not initialized for this thread",
+            WindowsTlsError.AlreadyInitialized => "TLS already initialized for this thread",
+            WindowsTlsError.AllocationFailed { code, size } => f"Failed to allocate TLS memory (code={code}, size={size})",
+            WindowsTlsError.InvalidSlot { slot } => f"Invalid context slot index: {slot}",
+            WindowsTlsError.StackOverflow { slot } => f"Context stack overflow at slot {slot}",
+            WindowsTlsError.StackUnderflow { slot } => f"Context stack underflow at slot {slot}",
+            WindowsTlsError.InvalidTcb => "Invalid or corrupted TCB",
+            WindowsTlsError.TlsIndexExhausted => "No more TLS indices available",
         }
     }
 

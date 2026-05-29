@@ -1,0 +1,186 @@
+// =============================================================================
+// core-tests/sys/windows/winsock2/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core.sys.windows.winsock2` constants and the
+// WindowsSockaddrIn / WindowsSockaddrIn6 record shapes. No socket FFI.
+//
+// Properties:
+//   * Address families / socket types / protocols / option codes are
+//     pairwise distinct within their class.
+//   * The "no-op on Windows" flags (SOCK_NONBLOCK, SOCK_CLOEXEC,
+//     MSG_DONTWAIT) are all exactly 0 — required for cross-platform
+//     `core.net` to compose: ORing a zero flag must be the identity.
+//   * SO_* option codes live in the 0x1000 Windows range, pairwise distinct.
+//   * sockaddr_in / sockaddr_in6 field assignment is independent
+//     (writing one field leaves the others untouched).
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.winsock2.{
+    AF_INET, AF_INET6,
+    SOCK_STREAM, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_CLOEXEC,
+    IPPROTO_TCP, IPPROTO_UDP,
+    SOL_SOCKET, SOL_TCP,
+    SO_REUSEADDR, SO_KEEPALIVE, SO_BROADCAST, SO_RCVTIMEO, SO_SNDTIMEO,
+    SO_ERROR, SO_RCVBUF, SO_SNDBUF,
+    SHUT_RD, SHUT_WR, SHUT_RDWR,
+    MSG_PEEK, MSG_DONTWAIT,
+    SOCKET_ERROR, INVALID_SOCKET,
+    WindowsSockaddrIn, WindowsSockaddrIn6,
+};
+
+fn distinct(xs: &List<Int>, label: Text) {
+    let mut i = 0;
+    while i < xs.len() {
+        let mut j = i + 1;
+        while j < xs.len() {
+            assert(xs[i] != xs[j], label);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 1 — Address families distinct
+// =============================================================================
+
+@test
+fn wx_winsock2_prop_address_families_distinct() {
+    assert(AF_INET != AF_INET6);
+}
+
+// =============================================================================
+// Property 2 — Real socket types distinct (NONBLOCK/CLOEXEC are no-ops)
+// =============================================================================
+
+@test
+fn wx_winsock2_prop_socket_types_distinct() {
+    assert(SOCK_STREAM != SOCK_DGRAM);
+}
+
+@test
+fn wx_winsock2_prop_noop_flags_are_zero() {
+    // On Windows these have no socket()-type encoding; they MUST be the
+    // additive/bitwise identity so cross-platform call sites compose.
+    assert_eq(SOCK_NONBLOCK, 0);
+    assert_eq(SOCK_CLOEXEC, 0);
+    assert_eq(MSG_DONTWAIT, 0);
+}
+
+@test
+fn wx_winsock2_prop_noop_flag_is_or_identity() {
+    // OR-ing a zero flag into SOCK_STREAM must be the identity.
+    assert_eq(SOCK_STREAM | SOCK_NONBLOCK, SOCK_STREAM);
+    assert_eq(SOCK_STREAM | SOCK_CLOEXEC, SOCK_STREAM);
+}
+
+// =============================================================================
+// Property 3 — Protocols distinct, SOL_TCP aliases IPPROTO_TCP
+// =============================================================================
+
+@test
+fn wx_winsock2_prop_protocols_distinct() {
+    assert(IPPROTO_TCP != IPPROTO_UDP);
+}
+
+@test
+fn wx_winsock2_prop_sol_tcp_aliases_ipproto_tcp() {
+    assert_eq(SOL_TCP, IPPROTO_TCP);
+}
+
+// =============================================================================
+// Property 4 — SO_* option codes pairwise distinct
+// =============================================================================
+
+@test
+fn wx_winsock2_prop_so_options_distinct() {
+    let mut xs: List<Int> = List.new();
+    xs.push(SO_REUSEADDR);
+    xs.push(SO_KEEPALIVE);
+    xs.push(SO_BROADCAST);
+    xs.push(SO_RCVTIMEO);
+    xs.push(SO_SNDTIMEO);
+    xs.push(SO_ERROR);
+    xs.push(SO_RCVBUF);
+    xs.push(SO_SNDBUF);
+    distinct(&xs, "SO_* option codes must be pairwise distinct");
+}
+
+// =============================================================================
+// Property 5 — Shutdown modes are the consecutive 0/1/2 partition
+// =============================================================================
+
+@test
+fn wx_winsock2_prop_shutdown_modes_partition() {
+    let mut xs: List<Int> = List.new();
+    xs.push(SHUT_RD);
+    xs.push(SHUT_WR);
+    xs.push(SHUT_RDWR);
+    distinct(&xs, "SHUT_* must be pairwise distinct");
+    assert_eq(SHUT_RD + SHUT_WR + SHUT_RDWR, 3);
+}
+
+// =============================================================================
+// Property 6 — Error sentinels
+// =============================================================================
+
+@test
+fn wx_winsock2_prop_socket_error_is_neg_one() {
+    assert_eq(SOCKET_ERROR, -1);
+}
+
+@test
+fn wx_winsock2_prop_invalid_socket_is_all_ones() {
+    assert_eq(INVALID_SOCKET, 0xFFFFFFFFFFFFFFFF_u64);
+}
+
+// =============================================================================
+// Property 7 — sockaddr_in field independence
+// =============================================================================
+
+@test
+fn wx_winsock2_prop_sockaddr_in_field_independence() {
+    let sa = WindowsSockaddrIn {
+        family: AF_INET as UInt16,
+        port: 1234_u16,
+        addr: 0x0100007F_u32,
+        zero: 0_u64,
+    };
+    // Each field reads back exactly what was written; no aliasing.
+    assert_eq(sa.family, 2_u16);
+    assert_eq(sa.port, 1234_u16);
+    assert_eq(sa.addr, 0x0100007F_u32);
+    assert_eq(sa.zero, 0_u64);
+}
+
+// =============================================================================
+// Property 8 — sockaddr_in6 16-byte address invariant
+// =============================================================================
+
+@test
+fn wx_winsock2_prop_sockaddr_in6_addr_is_16_bytes() {
+    let mut bytes: List<Byte> = List.new();
+    let mut i = 0;
+    while i < 16 {
+        bytes.push((i as UInt8));
+        i = i + 1;
+    }
+    let sa = WindowsSockaddrIn6 {
+        family: AF_INET6 as UInt16,
+        port: 53_u16,
+        flowinfo: 7_u32,
+        addr: bytes,
+        scope_id: 3_u32,
+    };
+    assert_eq(sa.addr.len(), 16);
+    assert_eq(sa.family, 23_u16);
+    assert_eq(sa.port, 53_u16);
+    assert_eq(sa.flowinfo, 7_u32);
+    assert_eq(sa.scope_id, 3_u32);
+    // Byte payload preserved positionally.
+    assert_eq(sa.addr[0], 0_u8);
+    assert_eq(sa.addr[15], 15_u8);
+}

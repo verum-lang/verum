@@ -1,0 +1,127 @@
+// =============================================================================
+// core-tests/sys/windows/tls/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for the most fragile host-safe invariants of
+// `core.sys.windows.tls`. These guard against silent drift in the
+// bootstrap-kernel ABI constants and the WindowsTlsError discriminant
+// layout. All pins are pure (no kernel32 FFI).
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.tls.{
+    MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH, TCB_MAGIC,
+    DEFAULT_STACK_SIZE, GUARD_PAGE_SIZE,
+    TLS_OUT_OF_INDEXES,
+    WindowsTlsError,
+};
+
+// -----------------------------------------------------------------------------
+// REGRESSION / LOCK-IN: TCB_MAGIC must be exactly the 64-bit little-endian
+// packing of "VERUM_TC" = 0x5645_5255_4D5F_5443 (16 hex digits, 8 bytes).
+//
+// NOTE — DISCREPANCY FOUND: the sibling unit_test.vr pins this constant as
+// `0x5645525545_4D5F_5443_u64` (20 hex digits), which is an 80-bit literal
+// that cannot fit in a UInt64 and carries a spurious extra `45` nibble. The
+// audit.md §2 table repeats the same wrong value. The SOURCE definition in
+// core/sys/windows/tls.vr:49 is `0x5645_5255_4D5F_5443`. This regression pins
+// the source-correct value so the kernel's TCB validation can never silently
+// drift. See audit.md §5.
+// -----------------------------------------------------------------------------
+
+@test
+fn wx_tls_reg_tcb_magic_exact_64bit() {
+    assert_eq(TCB_MAGIC, 0x5645_5255_4D5F_5443_u64);
+}
+
+@test
+fn wx_tls_reg_tcb_magic_byte_decomposition() {
+    // Verify the eight ASCII bytes of "VERUM_TC" individually, big-endian:
+    // V E R U M _ T C  ==  0x56 0x45 0x52 0x55 0x4D 0x5F 0x54 0x43.
+    assert_eq((TCB_MAGIC >> 56) & 0xFF_u64, 0x56_u64);  // 'V'
+    assert_eq((TCB_MAGIC >> 48) & 0xFF_u64, 0x45_u64);  // 'E'
+    assert_eq((TCB_MAGIC >> 40) & 0xFF_u64, 0x52_u64);  // 'R'
+    assert_eq((TCB_MAGIC >> 32) & 0xFF_u64, 0x55_u64);  // 'U'
+    assert_eq((TCB_MAGIC >> 24) & 0xFF_u64, 0x4D_u64);  // 'M'
+    assert_eq((TCB_MAGIC >> 16) & 0xFF_u64, 0x5F_u64);  // '_'
+    assert_eq((TCB_MAGIC >> 8)  & 0xFF_u64, 0x54_u64);  // 'T'
+    assert_eq(TCB_MAGIC         & 0xFF_u64, 0x43_u64);  // 'C'
+}
+
+// -----------------------------------------------------------------------------
+// REGRESSION / LOCK-IN: TLS_OUT_OF_INDEXES is the all-ones u32 sentinel.
+// init_tls_index() returns TlsIndexExhausted iff TlsAlloc() == this value;
+// any drift would make exhaustion-detection silently misfire.
+// -----------------------------------------------------------------------------
+
+@test
+fn wx_tls_reg_out_of_indexes_all_ones() {
+    assert_eq(TLS_OUT_OF_INDEXES, 0xFFFFFFFF_u32);
+}
+
+// -----------------------------------------------------------------------------
+// REGRESSION / LOCK-IN: cross-platform context-system ABI constants. These
+// match the Linux + Darwin TCB layouts; the context-system codegen reserves
+// slot indices in [0, MAX_CONTEXT_SLOTS) and bounds the per-slot push stack
+// at CONTEXT_STACK_DEPTH. Drift corrupts `using [...]` lookups + unwinding.
+// -----------------------------------------------------------------------------
+
+@test
+fn wx_tls_reg_max_context_slots_256() {
+    assert_eq(MAX_CONTEXT_SLOTS, 256);
+}
+
+@test
+fn wx_tls_reg_context_stack_depth_8() {
+    assert_eq(CONTEXT_STACK_DEPTH, 8);
+}
+
+// -----------------------------------------------------------------------------
+// REGRESSION / LOCK-IN: page-geometry constants. GUARD_PAGE_SIZE is one
+// x86_64 page (4 KiB); DEFAULT_STACK_SIZE is the 1 MiB Windows main-thread
+// reservation. create_thread_tls allocates GUARD_PAGE_SIZE + TCB and marks
+// the guard page PAGE_NOACCESS, so the guard size must stay a single page.
+// -----------------------------------------------------------------------------
+
+@test
+fn wx_tls_reg_guard_page_4096() {
+    assert_eq(GUARD_PAGE_SIZE, 4096);
+}
+
+@test
+fn wx_tls_reg_default_stack_1mib() {
+    assert_eq(DEFAULT_STACK_SIZE, 1048576);
+    assert_eq(DEFAULT_STACK_SIZE, 1024 * 1024);
+}
+
+// -----------------------------------------------------------------------------
+// REGRESSION / LOCK-IN: WindowsTlsError discriminant disjointness. The two
+// same-shape `{ slot }` families (InvalidSlot / StackOverflow / StackUnderflow)
+// historically risk tag-collision in match/Eq codegen. Pin that equal payloads
+// across different variant tags never compare equal.
+// -----------------------------------------------------------------------------
+
+@test
+fn wx_tls_reg_slot_variants_tag_disjoint() {
+    let a = WindowsTlsError.InvalidSlot { slot: 1 };
+    let b = WindowsTlsError.StackOverflow { slot: 1 };
+    let c = WindowsTlsError.StackUnderflow { slot: 1 };
+    assert(!(a == b));
+    assert(!(a == c));
+    assert(!(b == c));
+    // ...yet each is reflexive.
+    assert(a == WindowsTlsError.InvalidSlot { slot: 1 });
+    assert(b == WindowsTlsError.StackOverflow { slot: 1 });
+    assert(c == WindowsTlsError.StackUnderflow { slot: 1 });
+}
+
+@test
+fn wx_tls_reg_allocation_failed_both_fields_pinned() {
+    // Both payload fields participate in equality (regression against a
+    // codegen that compares only the first field).
+    let base = WindowsTlsError.AllocationFailed { code: 8_u32, size: 4096_usize };
+    assert(base == WindowsTlsError.AllocationFailed { code: 8_u32, size: 4096_usize });
+    assert(!(base == WindowsTlsError.AllocationFailed { code: 9_u32, size: 4096_usize }));
+    assert(!(base == WindowsTlsError.AllocationFailed { code: 8_u32, size: 2048_usize }));
+}

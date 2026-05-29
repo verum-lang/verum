@@ -127,7 +127,7 @@ mount core.sys.windows.{
 fn test_tls_constants_via_umbrella() {
     assert_eq(MAX_CONTEXT_SLOTS, 256);
     assert_eq(CONTEXT_STACK_DEPTH, 8);
-    assert_eq(TCB_MAGIC, 0x5645525545_4D5F_5443_u64);
+    assert_eq(TCB_MAGIC, 0x5645_5255_4D5F_5443_u64);
     assert_eq(DEFAULT_STACK_SIZE, 1024 * 1024);
     assert_eq(GUARD_PAGE_SIZE, 4096);
 }

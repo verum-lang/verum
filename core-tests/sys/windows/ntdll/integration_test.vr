@@ -1,0 +1,103 @@
+// =============================================================================
+// core-tests/sys/windows/ntdll/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios for `core.sys.windows.ntdll` pure surface —
+// Handle / LargeInteger / IoStatusBlock against List / Maybe / Map.
+// No NT Native API FFI is invoked.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.ntdll.{
+    Handle, LargeInteger, IoStatusBlock,
+    GENERIC_READ, GENERIC_WRITE,
+};
+
+// =============================================================================
+// Section 1 — Handles flowing through a List, filtered by validity
+// =============================================================================
+
+@test
+fn wx_ntdll_int_filter_valid_handles() {
+    let mut hs: List<Handle> = List.new();
+    hs.push(Handle.NULL);
+    hs.push(Handle(7));
+    hs.push(Handle.INVALID);
+    hs.push(Handle(0xCAFE));
+
+    let mut valid = 0;
+    for h in hs.iter() {
+        if h.is_valid() {
+            valid = valid + 1;
+        }
+    }
+    assert_eq(valid, 2);
+}
+
+// =============================================================================
+// Section 2 — Handle inside Maybe
+// =============================================================================
+
+@test
+fn wx_ntdll_int_handle_in_maybe() {
+    let opt: Maybe<Handle> = Maybe.Some(Handle(99));
+    match opt {
+        Maybe.Some(h) => {
+            assert(h.is_valid());
+            assert_eq(h.raw(), 99);
+        }
+        Maybe.None => assert(false, "expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 3 — IoStatusBlock zero-init contract
+// =============================================================================
+
+@test
+fn wx_ntdll_int_io_status_block_zero_init() {
+    let iosb = IoStatusBlock.new();
+    // bytes_transferred() returns the `information` field (Int) — safe.
+    assert_eq(iosb.bytes_transferred(), 0);
+    // Zero-init of the status word is checked via the record field directly.
+    // NOTE: `iosb.status().is_success()` would chain through the single-field
+    // newtype `NtStatus(Int32)` returned by `.status()`, which unboxes to a
+    // bare `Int` at runtime and loses method dispatch (`NtStatus.is_success`
+    // not found on receiver kind `Int`). That is the single-field-newtype
+    // method-return-unboxing defect — pinned in regression_test.vr and
+    // audit.md §B. Here we assert the raw word is zero instead.
+    assert_eq(iosb.status_or_pointer, 0);
+}
+
+// =============================================================================
+// Section 4 — LargeInteger as a Map value
+// =============================================================================
+
+@test
+fn wx_ntdll_int_large_integer_map() {
+    let mut m: Map<Int, LargeInteger> = Map.new();
+    m.insert(1, LargeInteger(-5_i64));
+    m.insert(2, LargeInteger(9223372036854775807_i64));
+    match m.get(&1) {
+        Maybe.Some(v) => assert_eq(v.0, -5_i64),
+        Maybe.None => assert(false, "key 1 missing"),
+    }
+    match m.get(&2) {
+        Maybe.Some(v) => assert_eq(v.0, 9223372036854775807_i64),
+        Maybe.None => assert(false, "key 2 missing"),
+    }
+}
+
+// =============================================================================
+// Section 5 — Access masks OR-combine for a typical open request
+// =============================================================================
+
+@test
+fn wx_ntdll_int_read_write_mask_combination() {
+    let rw = GENERIC_READ | GENERIC_WRITE;
+    // Combined mask must contain both bits and nothing else.
+    assert_eq(rw & GENERIC_READ, GENERIC_READ);
+    assert_eq(rw & GENERIC_WRITE, GENERIC_WRITE);
+    assert_eq(rw, 0xC0000000_u32);
+}

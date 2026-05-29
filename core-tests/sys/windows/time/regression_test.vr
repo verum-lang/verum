@@ -1,0 +1,140 @@
+// =============================================================================
+// core-tests/sys/windows/time/regression_test.vr
+// =============================================================================
+//
+// Pins fragile invariants of `core.sys.windows.time` discovered while
+// authoring the property + integration suites. No reproducible interpreter
+// defect surfaced for the host-safe surface — every WindowsDuration law and
+// the none()-path of WindowsDeadlineTimer behaved correctly under --interp.
+// These are therefore LOCK-IN pins: each guards an exact value or a subtle
+// saturating/short-circuit semantic whose silent drift would corrupt FILETIME
+// conversions or timeout handling.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.time.{
+    NANOS_PER_SEC,
+    FILETIME_UNITS_PER_SEC, WINDOWS_EPOCH_OFFSET,
+    WindowsDuration,
+    WindowsDeadlineTimer,
+};
+mount core.sys.windows.kernel32.{INFINITE};
+
+// =============================================================================
+// NEWTYPE-UNBOX-2 — WindowsDuration produced by `.add()` then read via an
+// intrinsic accessor (`as_millis`) mis-reads.
+// =============================================================================
+//
+// `WindowsDuration is (UInt64)` is a single-field newtype. A value produced by
+// the user `add` body is heap-boxed, but the `as_millis`/`as_secs` intrinsic
+// inline sequence expects an unboxed nanos Int — so `total.add(d).as_millis()`
+// returns the wrong value (observed: the test exits with the raw nanos
+// 500_000_000 instead of 500 ms). Reading `.as_nanos()` (field `.0`) works.
+// Same class as the core Duration unboxing defect
+// (memory: duration_single_field_record_unboxing_2026-05-27). Deep fix is VBC
+// codegen newtype-boxing parity. Pinned until then; integration_test.vr sums
+// raw nanos as the working idiom.
+@ignore("NEWTYPE-UNBOX-2: WindowsDuration.add().as_millis() mis-reads (single-field newtype boxing). See audit.md.")
+@test
+fn wx_time_reg_add_then_as_millis_newtype_unbox() {
+    let a = WindowsDuration.from_millis(100_u64);
+    let b = WindowsDuration.from_millis(400_u64);
+    assert_eq(a.add(b).as_millis(), 500_u64);
+}
+
+// =============================================================================
+// LOCK-IN — the Windows epoch offset is an exact Microsoft-documented value
+// =============================================================================
+
+@test
+fn wx_time_reg_epoch_offset_pinned() {
+    // REGRESSION/LOCK-IN: number of 100-ns FILETIME ticks between
+    // 1601-01-01 and 1970-01-01. Any drift breaks every FILETIME <-> Unix
+    // conversion in realtime_nanos / unix_timestamp.
+    assert_eq(WINDOWS_EPOCH_OFFSET, 116444736000000000_u64);
+}
+
+@test
+fn wx_time_reg_epoch_offset_is_whole_seconds() {
+    // REGRESSION/LOCK-IN: the offset must be a whole number of seconds in
+    // FILETIME units. realtime_nanos relies on this divisibility implicitly.
+    assert_eq(WINDOWS_EPOCH_OFFSET % FILETIME_UNITS_PER_SEC, 0_u64);
+    assert_eq(WINDOWS_EPOCH_OFFSET / FILETIME_UNITS_PER_SEC, 11_644_473_600_u64);
+}
+
+// =============================================================================
+// LOCK-IN — FILETIME unit is exactly 100 ns
+// =============================================================================
+
+@test
+fn wx_time_reg_filetime_unit_is_100ns() {
+    // REGRESSION/LOCK-IN: FILETIME_UNITS_PER_SEC == 10^7 (100-ns ticks).
+    assert_eq(FILETIME_UNITS_PER_SEC, 10_000_000_u64);
+    assert_eq(FILETIME_UNITS_PER_SEC * 100_u64, NANOS_PER_SEC);
+}
+
+// =============================================================================
+// LOCK-IN — sub saturates at zero (must NOT wrap around to ~u64::MAX)
+// =============================================================================
+
+@test
+fn wx_time_reg_sub_saturates_not_wraps() {
+    // REGRESSION/LOCK-IN: sub is documented saturating. If the guard in
+    // sub() regressed to a bare `self.0 - other.0`, an unsigned underflow
+    // would wrap to a near-u64::MAX value instead of clamping to zero.
+    let small = WindowsDuration.from_nanos(30_u64);
+    let big = WindowsDuration.from_nanos(100_u64);
+    assert_eq(small.sub(big).as_nanos(), 0_u64);
+
+    // Equal operands also clamp to zero (boundary of the `>` guard).
+    let eq = WindowsDuration.from_nanos(100_u64);
+    assert_eq(eq.sub(big).as_nanos(), 0_u64);
+
+    // And the result must be far from the wrap-around sentinel.
+    assert(small.sub(big).as_nanos() < 1_u64);
+}
+
+// =============================================================================
+// LOCK-IN — sub boundary: equal values clamp, off-by-one differs by 1
+// =============================================================================
+
+@test
+fn wx_time_reg_sub_boundary_off_by_one() {
+    // REGRESSION/LOCK-IN: sub uses a strict `>` guard, so a == b yields zero
+    // and a == b+1 yields exactly 1 (not 0, not a wrap).
+    let b = WindowsDuration.from_nanos(1_000_u64);
+    let eq = WindowsDuration.from_nanos(1_000_u64);
+    let plus1 = WindowsDuration.from_nanos(1_001_u64);
+    assert_eq(eq.sub(b).as_nanos(), 0_u64);
+    assert_eq(plus1.sub(b).as_nanos(), 1_u64);
+}
+
+// =============================================================================
+// LOCK-IN — DeadlineTimer.none() returns INFINITE remaining_ms via the
+// no-QPC short-circuit branch
+// =============================================================================
+
+@test
+fn wx_time_reg_deadline_none_remaining_ms_infinite() {
+    // REGRESSION/LOCK-IN: the `!self.has_deadline` arm of remaining_ms must
+    // return INFINITE (0xFFFFFFFF) without ever entering the QPC-backed
+    // remaining() path. A regression that dropped the guard would attempt
+    // FFI on a non-Windows host.
+    let t = WindowsDeadlineTimer.none();
+    assert_eq(t.remaining_ms(), INFINITE);
+    assert_eq(t.remaining_ms(), 0xFFFFFFFF_u32);
+    assert(!t.has_deadline());
+}
+
+// =============================================================================
+// LOCK-IN — DeadlineTimer.none() remaining()/deadline() are Maybe.None
+// =============================================================================
+
+@test
+fn wx_time_reg_deadline_none_maybe_none_paths() {
+    // REGRESSION/LOCK-IN: both remaining() and deadline() short-circuit to
+    // Maybe.None on the none() path before any QueryPerformanceCounter call.
+    let t = WindowsDeadlineTimer.none();
+    assert_eq(t.remaining(), Maybe.None);
+    assert_eq(t.deadline(), Maybe.None);
+}

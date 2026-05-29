@@ -1,0 +1,83 @@
+// =============================================================================
+// core-tests/sys/windows/io/regression_test.vr
+// =============================================================================
+//
+// One LOCK-IN test per fragile invariant in `core.sys.windows.io`. These
+// pin values/behaviours that are easy to silently break during refactors
+// of the IOCP bootstrap module. Never delete — they guard re-regression.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.io.{
+    MAX_EVENTS, DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_NS,
+    WindowsIoToken, WindowsIoDriverError,
+};
+
+// LOCK-IN: GetQueuedCompletionStatusEx batch ceiling. Changing this alters
+// the on-stack OVERLAPPED_ENTRY array size in the driver — pin it.
+@test
+fn wx_io_reg_max_events_pinned_256() {
+    assert_eq(MAX_EVENTS, 256);
+}
+
+// LOCK-IN: ms/ns default-timeout constants must stay coherent. A drift
+// here desynchronises the millisecond IOCP poll arg from the nanosecond
+// deadline math elsewhere in the runtime.
+@test
+fn wx_io_reg_timeout_constants_coherent() {
+    assert_eq(DEFAULT_TIMEOUT_MS, 1000_u32);
+    assert_eq(DEFAULT_TIMEOUT_NS, 1_000_000_000);
+    assert_eq(DEFAULT_TIMEOUT_NS / 1_000_000, DEFAULT_TIMEOUT_MS as Int);
+}
+
+// LOCK-IN: both WSA and Win32 connection-refused codes must fold to the
+// same ConnectionRefused variant. ERROR_CONNECTION_REFUSED=1225 and
+// WSAECONNREFUSED=10061 are distinct numbers; the mapping unifies them.
+@test
+fn wx_io_reg_connection_refused_dual_code_unification() {
+    assert_eq(
+        WindowsIoDriverError.from_error_code(1225_u32),
+        WindowsIoDriverError.ConnectionRefused,
+    );
+    assert_eq(
+        WindowsIoDriverError.from_error_code(10061_u32),
+        WindowsIoDriverError.ConnectionRefused,
+    );
+}
+
+// LOCK-IN: ERROR_TIMEOUT(1460) and WSAETIMEDOUT(10060) both fold to TimedOut.
+@test
+fn wx_io_reg_timed_out_dual_code_unification() {
+    assert_eq(WindowsIoDriverError.from_error_code(1460_u32), WindowsIoDriverError.TimedOut);
+    assert_eq(WindowsIoDriverError.from_error_code(10060_u32), WindowsIoDriverError.TimedOut);
+}
+
+// LOCK-IN: the two "pending/incomplete" codes (ERROR_IO_INCOMPLETE=996,
+// ERROR_IO_PENDING=997) must surface as WouldBlock — the retryable signal
+// that drives the IOCP re-arm loop. Misclassifying these stalls async I/O.
+@test
+fn wx_io_reg_pending_codes_are_wouldblock_and_retryable() {
+    let a = WindowsIoDriverError.from_error_code(996_u32);
+    let b = WindowsIoDriverError.from_error_code(997_u32);
+    assert_eq(a, WindowsIoDriverError.WouldBlock);
+    assert_eq(b, WindowsIoDriverError.WouldBlock);
+    assert(a.is_retryable());
+    assert(b.is_retryable());
+}
+
+// LOCK-IN: unknown codes must NOT be dropped — they round-trip through
+// Other { code } so the caller can still log the raw Win32 number.
+@test
+fn wx_io_reg_unknown_code_preserved() {
+    let e = WindowsIoDriverError.from_error_code(7777_u32);
+    assert_eq(e, WindowsIoDriverError.Other { code: 7777_u32, message: "Unknown error" });
+}
+
+// LOCK-IN: token newtype must not collapse the full UInt64 range — the
+// IOCP completion key uses the top bits for the fd encoding.
+@test
+fn wx_io_reg_token_preserves_high_bits() {
+    let t = WindowsIoToken(0x8000_0000_0000_0001_u64);
+    assert_eq(t.0, 0x8000_0000_0000_0001_u64);
+}

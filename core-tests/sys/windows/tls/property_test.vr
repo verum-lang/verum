@@ -1,0 +1,245 @@
+// =============================================================================
+// core-tests/sys/windows/tls/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over the host-safe surface of `core.sys.windows.tls`:
+//
+//   * Pinned constants (MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH, TCB_MAGIC,
+//     DEFAULT_STACK_SIZE, GUARD_PAGE_SIZE) and the re-exported sentinel
+//     TLS_OUT_OF_INDEXES.
+//   * Sentinel pin — TLS_OUT_OF_INDEXES == 0xFFFFFFFF.
+//   * TCB_MAGIC is the little-endian "VERUM_TC" 64-bit packing and is
+//     non-zero (so the guard-page validation can never alias zeroed memory).
+//   * GUARD_PAGE_SIZE / DEFAULT_STACK_SIZE are powers of two (page-aligned).
+//   * The 8 `WindowsTlsError` variants are pairwise distinct under the
+//     module's own `Eq` impl (reflexivity + disjointness lattice).
+//   * `is_retryable()` is uniformly false across the whole error ADT.
+//
+// HOST-SAFE: no function here FFIs into kernel32/Tls*/Fls*/Virtual*. The
+// TLS-index lifecycle, TCB allocation, and ctx_* slot operations all route
+// through kernel32.dll and are deferred (see audit.md §4).
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.tls.{
+    MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH, TCB_MAGIC,
+    DEFAULT_STACK_SIZE, GUARD_PAGE_SIZE,
+    TLS_OUT_OF_INDEXES,
+    WindowsTlsError,
+};
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn wx_tls_is_power_of_two_i(x: Int) -> Bool {
+    x != 0 && (x & (x - 1)) == 0
+}
+
+// =============================================================================
+// Property 1 — Sentinel pins
+// =============================================================================
+
+@test
+fn wx_tls_prop_out_of_indexes_sentinel() {
+    // TLS_OUT_OF_INDEXES is the documented all-ones u32 returned by TlsAlloc
+    // on exhaustion; init_tls_index() compares the TlsAlloc result against it.
+    assert_eq(TLS_OUT_OF_INDEXES, 0xFFFFFFFF_u32);
+}
+
+@test
+fn wx_tls_prop_out_of_indexes_is_max_u32() {
+    // Equivalent characterisation: it is the maximum UInt32 value.
+    assert_eq(TLS_OUT_OF_INDEXES, 4294967295_u32);
+}
+
+// =============================================================================
+// Property 2 — TCB_MAGIC packing
+// =============================================================================
+
+@test
+fn wx_tls_prop_tcb_magic_value() {
+    // "VERUM_TC" packed: bytes 0x56 0x45 0x52 0x55 0x4D 0x5F 0x54 0x43
+    // = 0x5645_5255_4D5F_5443 (exactly 16 hex digits = 64 bits).
+    assert_eq(TCB_MAGIC, 0x5645_5255_4D5F_5443_u64);
+}
+
+@test
+fn wx_tls_prop_tcb_magic_nonzero() {
+    // The bootstrap kernel treats a zeroed magic as "not a TCB"
+    // (cleanup_thread_tls writes magic = 0). Therefore the live magic
+    // MUST be non-zero or a freshly-zeroed page would validate as a TCB.
+    assert(TCB_MAGIC != 0_u64);
+}
+
+@test
+fn wx_tls_prop_tcb_magic_low_byte_is_C() {
+    // Little-endian "VERUM_TC": the lowest 8 bits encode 'C' = 0x43.
+    assert_eq(TCB_MAGIC & 0xFF_u64, 0x43_u64);
+}
+
+@test
+fn wx_tls_prop_tcb_magic_high_byte_is_V() {
+    // The top 8 bits encode 'V' = 0x56.
+    assert_eq((TCB_MAGIC >> 56) & 0xFF_u64, 0x56_u64);
+}
+
+// =============================================================================
+// Property 3 — Size / depth constants
+// =============================================================================
+
+@test
+fn wx_tls_prop_max_context_slots_value() {
+    assert_eq(MAX_CONTEXT_SLOTS, 256);
+}
+
+@test
+fn wx_tls_prop_context_stack_depth_value() {
+    assert_eq(CONTEXT_STACK_DEPTH, 8);
+}
+
+@test
+fn wx_tls_prop_guard_page_is_power_of_two() {
+    // Guard page must be a single hardware page; 4096 = 2^12.
+    assert(wx_tls_is_power_of_two_i(GUARD_PAGE_SIZE));
+    assert_eq(GUARD_PAGE_SIZE, 4096);
+}
+
+@test
+fn wx_tls_prop_default_stack_size_is_power_of_two() {
+    // 1 MiB = 2^20.
+    assert(wx_tls_is_power_of_two_i(DEFAULT_STACK_SIZE));
+    assert_eq(DEFAULT_STACK_SIZE, 1048576);
+}
+
+@test
+fn wx_tls_prop_max_slots_is_power_of_two() {
+    assert(wx_tls_is_power_of_two_i(MAX_CONTEXT_SLOTS));
+}
+
+@test
+fn wx_tls_prop_context_depth_is_power_of_two() {
+    assert(wx_tls_is_power_of_two_i(CONTEXT_STACK_DEPTH));
+}
+
+@test
+fn wx_tls_prop_stack_size_exceeds_guard_page() {
+    // The default stack reservation must dwarf the guard page that
+    // protects it; otherwise the guard would consume the usable stack.
+    assert(DEFAULT_STACK_SIZE > GUARD_PAGE_SIZE);
+}
+
+// =============================================================================
+// Property 4 — WindowsTlsError reflexivity (Eq impl)
+// =============================================================================
+
+@test
+fn wx_tls_prop_error_eq_reflexive_unit_variants() {
+    assert(WindowsTlsError.NotInitialized == WindowsTlsError.NotInitialized);
+    assert(WindowsTlsError.AlreadyInitialized == WindowsTlsError.AlreadyInitialized);
+    assert(WindowsTlsError.InvalidTcb == WindowsTlsError.InvalidTcb);
+    assert(WindowsTlsError.TlsIndexExhausted == WindowsTlsError.TlsIndexExhausted);
+}
+
+@test
+fn wx_tls_prop_error_eq_reflexive_payload_variants() {
+    assert(WindowsTlsError.AllocationFailed { code: 5_u32, size: 64_usize }
+        == WindowsTlsError.AllocationFailed { code: 5_u32, size: 64_usize });
+    assert(WindowsTlsError.InvalidSlot { slot: 42 }
+        == WindowsTlsError.InvalidSlot { slot: 42 });
+    assert(WindowsTlsError.StackOverflow { slot: 3 }
+        == WindowsTlsError.StackOverflow { slot: 3 });
+    assert(WindowsTlsError.StackUnderflow { slot: 3 }
+        == WindowsTlsError.StackUnderflow { slot: 3 });
+}
+
+// =============================================================================
+// Property 5 — WindowsTlsError pairwise distinctness (disjointness lattice)
+// =============================================================================
+
+@test
+fn wx_tls_prop_error_unit_variants_pairwise_distinct() {
+    let mut errs: List<WindowsTlsError> = List.new();
+    errs.push(WindowsTlsError.NotInitialized);
+    errs.push(WindowsTlsError.AlreadyInitialized);
+    errs.push(WindowsTlsError.InvalidTcb);
+    errs.push(WindowsTlsError.TlsIndexExhausted);
+    let mut i = 0;
+    while i < errs.len() {
+        let mut j = i + 1;
+        while j < errs.len() {
+            assert(!(errs[i] == errs[j]),
+                   "WindowsTlsError unit variants must be pairwise distinct");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn wx_tls_prop_error_cross_kind_distinct() {
+    // A unit variant never equals a payload-bearing variant.
+    assert(!(WindowsTlsError.NotInitialized
+        == WindowsTlsError.InvalidSlot { slot: 0 }));
+    assert(!(WindowsTlsError.InvalidTcb
+        == WindowsTlsError.StackOverflow { slot: 0 }));
+    assert(!(WindowsTlsError.TlsIndexExhausted
+        == WindowsTlsError.AllocationFailed { code: 0_u32, size: 0_usize }));
+}
+
+@test
+fn wx_tls_prop_error_invalid_slot_distinct_from_stack_variants() {
+    // Same payload shape ({ slot }), different variant tag — must differ.
+    assert(!(WindowsTlsError.InvalidSlot { slot: 7 }
+        == WindowsTlsError.StackOverflow { slot: 7 }));
+    assert(!(WindowsTlsError.InvalidSlot { slot: 7 }
+        == WindowsTlsError.StackUnderflow { slot: 7 }));
+    assert(!(WindowsTlsError.StackOverflow { slot: 7 }
+        == WindowsTlsError.StackUnderflow { slot: 7 }));
+}
+
+// =============================================================================
+// Property 6 — WindowsTlsError payload sensitivity
+// =============================================================================
+
+@test
+fn wx_tls_prop_error_invalid_slot_payload_sensitive() {
+    assert(!(WindowsTlsError.InvalidSlot { slot: 1 }
+        == WindowsTlsError.InvalidSlot { slot: 2 }));
+}
+
+@test
+fn wx_tls_prop_error_allocation_failed_payload_sensitive() {
+    // Differs in code only.
+    assert(!(WindowsTlsError.AllocationFailed { code: 1_u32, size: 8_usize }
+        == WindowsTlsError.AllocationFailed { code: 2_u32, size: 8_usize }));
+    // Differs in size only.
+    assert(!(WindowsTlsError.AllocationFailed { code: 1_u32, size: 8_usize }
+        == WindowsTlsError.AllocationFailed { code: 1_u32, size: 16_usize }));
+}
+
+@test
+fn wx_tls_prop_error_stack_variants_payload_sensitive() {
+    assert(!(WindowsTlsError.StackOverflow { slot: 0 }
+        == WindowsTlsError.StackOverflow { slot: 1 }));
+    assert(!(WindowsTlsError.StackUnderflow { slot: 0 }
+        == WindowsTlsError.StackUnderflow { slot: 1 }));
+}
+
+// =============================================================================
+// Property 7 — is_retryable() uniform law
+// =============================================================================
+
+@test
+fn wx_tls_prop_error_never_retryable() {
+    // The module documents every TLS error as non-retryable.
+    assert(!WindowsTlsError.NotInitialized.is_retryable());
+    assert(!WindowsTlsError.AlreadyInitialized.is_retryable());
+    assert(!WindowsTlsError.InvalidTcb.is_retryable());
+    assert(!WindowsTlsError.TlsIndexExhausted.is_retryable());
+    assert(!WindowsTlsError.InvalidSlot { slot: 0 }.is_retryable());
+    assert(!WindowsTlsError.StackOverflow { slot: 0 }.is_retryable());
+    assert(!WindowsTlsError.StackUnderflow { slot: 0 }.is_retryable());
+    assert(!WindowsTlsError.AllocationFailed { code: 0_u32, size: 0_usize }.is_retryable());
+}
