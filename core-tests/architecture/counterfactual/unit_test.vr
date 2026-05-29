@@ -1,0 +1,130 @@
+// =============================================================================
+// core-tests/architecture/counterfactual/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/counterfactual.vr` — InvariantStatus + MetricValue.
+// =============================================================================
+
+mount core.architecture.counterfactual.{InvariantStatus, MetricValue};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: InvariantStatus 4-variant ADT
+// =============================================================================
+
+@test
+fn test_invariant_status_holds_both_variant() {
+    let s: InvariantStatus = InvariantStatus.HoldsBoth;
+    assert(s is InvariantStatus.HoldsBoth);
+}
+
+@test
+fn test_invariant_status_holds_base_only_variant() {
+    let s: InvariantStatus = InvariantStatus.HoldsBaseOnly;
+    assert(s is InvariantStatus.HoldsBaseOnly);
+}
+
+@test
+fn test_invariant_status_holds_alt_only_variant() {
+    let s: InvariantStatus = InvariantStatus.HoldsAltOnly;
+    assert(s is InvariantStatus.HoldsAltOnly);
+}
+
+@test
+fn test_invariant_status_holds_neither_variant() {
+    let s: InvariantStatus = InvariantStatus.HoldsNeither;
+    assert(s is InvariantStatus.HoldsNeither);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_invariant_status_holds_both_disjoint() {
+    let s: InvariantStatus = InvariantStatus.HoldsBoth;
+    assert(!(s is InvariantStatus.HoldsBaseOnly));
+    assert(!(s is InvariantStatus.HoldsAltOnly));
+    assert(!(s is InvariantStatus.HoldsNeither));
+}
+
+@test
+fn test_invariant_status_holds_base_only_disjoint() {
+    let s: InvariantStatus = InvariantStatus.HoldsBaseOnly;
+    assert(!(s is InvariantStatus.HoldsBoth));
+    assert(!(s is InvariantStatus.HoldsAltOnly));
+    assert(!(s is InvariantStatus.HoldsNeither));
+}
+
+@test
+fn test_invariant_status_holds_alt_only_disjoint() {
+    let s: InvariantStatus = InvariantStatus.HoldsAltOnly;
+    assert(!(s is InvariantStatus.HoldsBoth));
+    assert(!(s is InvariantStatus.HoldsBaseOnly));
+    assert(!(s is InvariantStatus.HoldsNeither));
+}
+
+@test
+fn test_invariant_status_holds_neither_disjoint() {
+    let s: InvariantStatus = InvariantStatus.HoldsNeither;
+    assert(!(s is InvariantStatus.HoldsBoth));
+    assert(!(s is InvariantStatus.HoldsBaseOnly));
+    assert(!(s is InvariantStatus.HoldsAltOnly));
+}
+
+// =============================================================================
+// Section 3: MetricValue 4-variant ADT
+// =============================================================================
+
+@test
+fn test_metric_value_integer_metric_variant() {
+    let v: MetricValue = MetricValue.IntegerMetric(42);
+    assert(v is MetricValue.IntegerMetric);
+}
+
+@test
+fn test_metric_value_float_metric_variant() {
+    let v: MetricValue = MetricValue.FloatMetric(3.14);
+    assert(v is MetricValue.FloatMetric);
+}
+
+@test
+fn test_metric_value_categorical_metric_variant() {
+    let v: MetricValue = MetricValue.CategoricalMetric("low".to_text());
+    assert(v is MetricValue.CategoricalMetric);
+}
+
+@test
+fn test_metric_value_unknown_metric_variant() {
+    let v: MetricValue = MetricValue.UnknownMetric;
+    assert(v is MetricValue.UnknownMetric);
+}
+
+@test
+fn test_metric_value_unknown_disjoint() {
+    let v: MetricValue = MetricValue.UnknownMetric;
+    assert(!(v is MetricValue.IntegerMetric));
+    assert(!(v is MetricValue.FloatMetric));
+    assert(!(v is MetricValue.CategoricalMetric));
+}
+
+@test
+fn test_metric_value_integer_payload_round_trip() {
+    let v: MetricValue = MetricValue.IntegerMetric(100);
+    match v {
+        MetricValue.IntegerMetric(n) => assert_eq(n, 100),
+        _ => panic("expected IntegerMetric"),
+    }
+}
+
+@test
+fn test_metric_value_categorical_payload_round_trip() {
+    let v: MetricValue = MetricValue.CategoricalMetric("high".to_text());
+    match v {
+        MetricValue.CategoricalMetric(s) => assert_eq(s, "high"),
+        _ => panic("expected CategoricalMetric"),
+    }
+}
+
+fn main() {}
