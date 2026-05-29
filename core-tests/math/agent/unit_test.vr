@@ -1,0 +1,119 @@
+// =============================================================================
+// core-tests/math/agent/unit_test.vr
+// =============================================================================
+//
+// `core/math/agent.vr` — Agent role + EOS token ADT surface.
+//
+// Surface tested:
+//   * AgentRole 4-variant (System / User / Assistant / ToolResult) — fully
+//     qualified `AgentRole.X` everywhere because `System` and `User` collide
+//     with widely-used names per task #17/#39 workaround discipline
+//   * Role alias = AgentRole
+//   * EOS_TOKEN canonical value (2)
+//
+// Tokenizer / BPE / KVCache / Agent protocol surfaces have large state — tested
+// at language-level under `vcs/specs/L2-standard/math/agent/`.
+// =============================================================================
+
+mount core.math.agent.{
+    AgentRole, Role,
+    EOS_TOKEN,
+};
+
+// =============================================================================
+// Section 1: AgentRole 4-variant — fully qualified
+// =============================================================================
+
+@test
+fn test_agent_role_system_variant() {
+    let r: AgentRole = AgentRole.System;
+    assert(r is AgentRole.System);
+}
+
+@test
+fn test_agent_role_user_variant() {
+    let r: AgentRole = AgentRole.User;
+    assert(r is AgentRole.User);
+}
+
+@test
+fn test_agent_role_assistant_variant() {
+    let r: AgentRole = AgentRole.Assistant;
+    assert(r is AgentRole.Assistant);
+}
+
+@test
+fn test_agent_role_tool_result_variant() {
+    let r: AgentRole = AgentRole.ToolResult;
+    assert(r is AgentRole.ToolResult);
+}
+
+// =============================================================================
+// Section 2: AgentRole pairwise disjointness
+// =============================================================================
+
+@test
+fn test_agent_role_system_disjoint_from_user() {
+    let s: AgentRole = AgentRole.System;
+    let u: AgentRole = AgentRole.User;
+    assert(s is AgentRole.System && !(s is AgentRole.User));
+    assert(u is AgentRole.User && !(u is AgentRole.System));
+}
+
+@test
+fn test_agent_role_user_disjoint_from_assistant() {
+    let u: AgentRole = AgentRole.User;
+    let a: AgentRole = AgentRole.Assistant;
+    assert(!(u is AgentRole.Assistant));
+    assert(!(a is AgentRole.User));
+}
+
+@test
+fn test_agent_role_assistant_disjoint_from_tool_result() {
+    let a: AgentRole = AgentRole.Assistant;
+    let t: AgentRole = AgentRole.ToolResult;
+    assert(!(a is AgentRole.ToolResult));
+    assert(!(t is AgentRole.Assistant));
+}
+
+@test
+fn test_agent_role_system_disjoint_from_tool_result() {
+    let s: AgentRole = AgentRole.System;
+    let t: AgentRole = AgentRole.ToolResult;
+    assert(!(s is AgentRole.ToolResult));
+    assert(!(t is AgentRole.System));
+}
+
+// =============================================================================
+// Section 3: Role alias = AgentRole
+// =============================================================================
+
+@test
+fn test_role_alias_accepts_agent_role_system() {
+    // Role is declared as `type Role is AgentRole` — same type, just renamed.
+    let r: Role = AgentRole.System;
+    assert(r is AgentRole.System);
+}
+
+@test
+fn test_role_alias_accepts_agent_role_assistant() {
+    let r: Role = AgentRole.Assistant;
+    assert(r is AgentRole.Assistant);
+}
+
+// =============================================================================
+// Section 4: EOS_TOKEN canonical value
+// =============================================================================
+
+@test
+fn test_eos_token_canonical_value_is_two() {
+    assert_eq(EOS_TOKEN, 2_u32);
+}
+
+@test
+fn test_eos_token_is_non_zero() {
+    // EOS_TOKEN must differ from the typical PAD_TOKEN=0 convention.
+    assert(EOS_TOKEN != 0_u32);
+}
+
+fn main() {}
