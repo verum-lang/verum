@@ -1,0 +1,140 @@
+// =============================================================================
+// core-tests/term/raw/mod/unit_test.vr
+// =============================================================================
+//
+// `core/term/raw/mod.vr` —
+//   * CursorShape 6-variant ADT (DECSCUSR values)
+//   * TerminalSize record (columns, rows, pixel_width, pixel_height)
+// =============================================================================
+
+mount core.term.raw.{CursorShape, TerminalSize};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CursorShape 6-variant
+// =============================================================================
+
+@test
+fn test_cursor_shape_blinking_block_variant() {
+    let s: CursorShape = CursorShape.BlinkingBlock;
+    assert(s is CursorShape.BlinkingBlock);
+}
+
+@test
+fn test_cursor_shape_steady_block_variant() {
+    let s: CursorShape = CursorShape.SteadyBlock;
+    assert(s is CursorShape.SteadyBlock);
+}
+
+@test
+fn test_cursor_shape_blinking_underline_variant() {
+    let s: CursorShape = CursorShape.BlinkingUnderline;
+    assert(s is CursorShape.BlinkingUnderline);
+}
+
+@test
+fn test_cursor_shape_steady_underline_variant() {
+    let s: CursorShape = CursorShape.SteadyUnderline;
+    assert(s is CursorShape.SteadyUnderline);
+}
+
+@test
+fn test_cursor_shape_blinking_bar_variant() {
+    let s: CursorShape = CursorShape.BlinkingBar;
+    assert(s is CursorShape.BlinkingBar);
+}
+
+@test
+fn test_cursor_shape_steady_bar_variant() {
+    let s: CursorShape = CursorShape.SteadyBar;
+    assert(s is CursorShape.SteadyBar);
+}
+
+// =============================================================================
+// Section 2: CursorShape pairwise disjointness
+// =============================================================================
+
+@test
+fn test_cursor_shape_blinking_block_disjoint() {
+    let s: CursorShape = CursorShape.BlinkingBlock;
+    assert(!(s is CursorShape.SteadyBlock));
+    assert(!(s is CursorShape.BlinkingUnderline));
+    assert(!(s is CursorShape.SteadyBar));
+}
+
+@test
+fn test_cursor_shape_steady_block_disjoint() {
+    let s: CursorShape = CursorShape.SteadyBlock;
+    assert(!(s is CursorShape.BlinkingBlock));
+    assert(!(s is CursorShape.SteadyUnderline));
+    assert(!(s is CursorShape.SteadyBar));
+}
+
+@test
+fn test_cursor_shape_blinking_underline_disjoint_from_steady_underline() {
+    let s: CursorShape = CursorShape.BlinkingUnderline;
+    assert(!(s is CursorShape.SteadyUnderline));
+    assert(!(s is CursorShape.BlinkingBlock));
+}
+
+@test
+fn test_cursor_shape_blinking_bar_disjoint_from_steady_bar() {
+    let s: CursorShape = CursorShape.BlinkingBar;
+    assert(!(s is CursorShape.SteadyBar));
+    assert(!(s is CursorShape.BlinkingBlock));
+}
+
+// =============================================================================
+// Section 3: TerminalSize record
+// =============================================================================
+
+@test
+fn test_terminal_size_80x24_no_pixels() {
+    let t: TerminalSize = TerminalSize {
+        columns: 80,
+        rows: 24,
+        pixel_width: Maybe.None,
+        pixel_height: Maybe.None,
+    };
+    assert_eq(t.columns, 80);
+    assert_eq(t.rows, 24);
+    assert(t.pixel_width is Maybe.None);
+    assert(t.pixel_height is Maybe.None);
+}
+
+@test
+fn test_terminal_size_with_pixel_dimensions() {
+    let t: TerminalSize = TerminalSize {
+        columns: 132,
+        rows: 50,
+        pixel_width: Maybe.Some(1056),
+        pixel_height: Maybe.Some(800),
+    };
+    assert_eq(t.columns, 132);
+    assert_eq(t.rows, 50);
+    assert(t.pixel_width is Maybe.Some);
+    assert(t.pixel_height is Maybe.Some);
+}
+
+@test
+fn test_terminal_size_field_independence() {
+    let a: TerminalSize = TerminalSize {
+        columns: 80,
+        rows: 24,
+        pixel_width: Maybe.None,
+        pixel_height: Maybe.None,
+    };
+    let b: TerminalSize = TerminalSize {
+        columns: 200,
+        rows: 60,
+        pixel_width: Maybe.None,
+        pixel_height: Maybe.None,
+    };
+    assert_eq(a.columns, 80);
+    assert_eq(b.columns, 200);
+    assert_eq(a.rows, 24);
+    assert_eq(b.rows, 60);
+}
+
+fn main() {}
