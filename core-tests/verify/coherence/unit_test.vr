@@ -1,0 +1,127 @@
+// =============================================================================
+// core-tests/verify/coherence/unit_test.vr
+// =============================================================================
+//
+// `core/verify/coherence.vr` —
+//   * CoherenceVerdict 3-variant ADT (Decidable | SemiDecidable{bound} |
+//                                     Undecidable{reason})
+//   * coherence_verdict_is_decidable() projection
+//   * coherence_verdict_tag() text-tag projection
+// =============================================================================
+
+mount core.verify.coherence.{
+    CoherenceVerdict,
+    coherence_verdict_is_decidable,
+    coherence_verdict_tag,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CoherenceVerdict 3-variant construction
+// =============================================================================
+
+@test
+fn test_coherence_verdict_decidable_variant() {
+    let v: CoherenceVerdict = CoherenceVerdict.Decidable;
+    assert(v is CoherenceVerdict.Decidable);
+}
+
+@test
+fn test_coherence_verdict_semi_decidable_variant() {
+    let v: CoherenceVerdict = CoherenceVerdict.SemiDecidable {
+        bound: "exp(O(k))".to_text(),
+    };
+    assert(v is CoherenceVerdict.SemiDecidable);
+}
+
+@test
+fn test_coherence_verdict_undecidable_variant() {
+    let v: CoherenceVerdict = CoherenceVerdict.Undecidable {
+        reason: "co-RE".to_text(),
+    };
+    assert(v is CoherenceVerdict.Undecidable);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_coherence_verdict_decidable_disjoint() {
+    let v: CoherenceVerdict = CoherenceVerdict.Decidable;
+    assert(!(v is CoherenceVerdict.SemiDecidable));
+    assert(!(v is CoherenceVerdict.Undecidable));
+}
+
+@test
+fn test_coherence_verdict_semi_decidable_disjoint() {
+    let v: CoherenceVerdict = CoherenceVerdict.SemiDecidable {
+        bound: "x".to_text(),
+    };
+    assert(!(v is CoherenceVerdict.Decidable));
+    assert(!(v is CoherenceVerdict.Undecidable));
+}
+
+@test
+fn test_coherence_verdict_undecidable_disjoint() {
+    let v: CoherenceVerdict = CoherenceVerdict.Undecidable {
+        reason: "x".to_text(),
+    };
+    assert(!(v is CoherenceVerdict.Decidable));
+    assert(!(v is CoherenceVerdict.SemiDecidable));
+}
+
+// =============================================================================
+// Section 3: coherence_verdict_is_decidable() projection
+// =============================================================================
+
+@test
+fn test_is_decidable_true_for_decidable() {
+    let v: CoherenceVerdict = CoherenceVerdict.Decidable;
+    assert(coherence_verdict_is_decidable(v));
+}
+
+@test
+fn test_is_decidable_false_for_semi_decidable() {
+    let v: CoherenceVerdict = CoherenceVerdict.SemiDecidable {
+        bound: "exp".to_text(),
+    };
+    assert(!coherence_verdict_is_decidable(v));
+}
+
+@test
+fn test_is_decidable_false_for_undecidable() {
+    let v: CoherenceVerdict = CoherenceVerdict.Undecidable {
+        reason: "co-RE".to_text(),
+    };
+    assert(!coherence_verdict_is_decidable(v));
+}
+
+// =============================================================================
+// Section 4: coherence_verdict_tag() text projection
+// =============================================================================
+
+@test
+fn test_verdict_tag_decidable_returns_decidable() {
+    let v: CoherenceVerdict = CoherenceVerdict.Decidable;
+    assert_eq(coherence_verdict_tag(v), "Decidable");
+}
+
+@test
+fn test_verdict_tag_semi_decidable_returns_semi_decidable() {
+    let v: CoherenceVerdict = CoherenceVerdict.SemiDecidable {
+        bound: "exp".to_text(),
+    };
+    assert_eq(coherence_verdict_tag(v), "SemiDecidable");
+}
+
+@test
+fn test_verdict_tag_undecidable_returns_undecidable() {
+    let v: CoherenceVerdict = CoherenceVerdict.Undecidable {
+        reason: "co-RE".to_text(),
+    };
+    assert_eq(coherence_verdict_tag(v), "Undecidable");
+}
+
+fn main() {}
