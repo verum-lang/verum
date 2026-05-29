@@ -1,0 +1,50 @@
+// =============================================================================
+// core-tests/net/tls13/named_group/unit_test.vr — RFC 8446 §4.2.7
+// =============================================================================
+//
+// `core/net/tls13/named_group.vr`:
+//
+//   * NamedGroup 8-variant + to_u16 / from_u16 (IANA supported_groups).
+// =============================================================================
+
+mount core.net.tls13.named_group.{NamedGroup};
+
+// =============================================================================
+// Section 1: IANA wire codepoints (RFC 8446 §4.2.7)
+// =============================================================================
+
+@test
+fn test_tls13ng_x25519_001d() { assert_eq(NamedGroup.X25519.to_u16(), 0x001D_u16); }
+
+@test
+fn test_tls13ng_secp256r1_0017() { assert_eq(NamedGroup.Secp256r1.to_u16(), 0x0017_u16); }
+
+@test
+fn test_tls13ng_secp384r1_0018() { assert_eq(NamedGroup.Secp384r1.to_u16(), 0x0018_u16); }
+
+@test
+fn test_tls13ng_secp521r1_0019() { assert_eq(NamedGroup.Secp521r1.to_u16(), 0x0019_u16); }
+
+@test
+fn test_tls13ng_x448_001e() { assert_eq(NamedGroup.X448.to_u16(), 0x001E_u16); }
+
+@test
+fn test_tls13ng_ffdhe2048_0100() { assert_eq(NamedGroup.Ffdhe2048.to_u16(), 0x0100_u16); }
+
+@test
+fn test_tls13ng_ffdhe3072_0101() { assert_eq(NamedGroup.Ffdhe3072.to_u16(), 0x0101_u16); }
+
+@test
+fn test_tls13ng_ffdhe4096_0102() { assert_eq(NamedGroup.Ffdhe4096.to_u16(), 0x0102_u16); }
+
+// =============================================================================
+// Section 2: from_u16
+// =============================================================================
+
+@test
+fn test_tls13ng_from_x25519() { assert(NamedGroup.from_u16(0x001D_u16) is NamedGroup.X25519); }
+
+@test
+fn test_tls13ng_from_secp256r1() { assert(NamedGroup.from_u16(0x0017_u16) is NamedGroup.Secp256r1); }
+
+fn main() {}

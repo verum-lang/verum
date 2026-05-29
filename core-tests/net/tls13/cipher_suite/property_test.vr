@@ -1,0 +1,19 @@
+// =============================================================================
+// core-tests/net/tls13/cipher_suite/property_test.vr — round-trip law
+// =============================================================================
+
+mount core.net.tls13.cipher_suite.{CipherSuite};
+
+@test
+fn property_tls13cs_to_from_round_trip() {
+    // from_u16 ∘ to_u16 == id over all 5 RFC 8446 §B.4 suites.
+    let codes: List<UInt16> = [0x1301_u16, 0x1302_u16, 0x1303_u16, 0x1304_u16, 0x1305_u16];
+    let mut i = 0;
+    while i < codes.len() {
+        let cs = CipherSuite.from_u16(codes[i]);
+        assert_eq(cs.to_u16(), codes[i]);
+        i = i + 1;
+    }
+}
+
+fn main() {}
