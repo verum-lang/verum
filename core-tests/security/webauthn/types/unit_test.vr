@@ -1,0 +1,204 @@
+// =============================================================================
+// core-tests/security/webauthn/types/unit_test.vr
+// =============================================================================
+//
+// `core/security/webauthn/types.vr` —
+//   * AuthenticatorAttachment 3-variant
+//   * UserVerificationRequirement 3-variant
+//   * ResidentKeyRequirement 3-variant
+//   * AttestationConveyance 4-variant
+//   * COSE algorithm identifier constants
+// =============================================================================
+
+mount core.security.webauthn.types.{
+    AuthenticatorAttachment,
+    UserVerificationRequirement,
+    ResidentKeyRequirement,
+    AttestationConveyance,
+    COSE_ALG_ES256,
+    COSE_ALG_EDDSA,
+    COSE_ALG_PS256,
+    COSE_ALG_RS256,
+    COSE_ALG_ES384,
+    COSE_ALG_ES512,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: AuthenticatorAttachment 3-variant
+// =============================================================================
+
+@test
+fn test_authenticator_attachment_platform_variant() {
+    let a: AuthenticatorAttachment = AuthenticatorAttachment.Platform;
+    assert(a is AuthenticatorAttachment.Platform);
+}
+
+@test
+fn test_authenticator_attachment_cross_platform_variant() {
+    let a: AuthenticatorAttachment = AuthenticatorAttachment.CrossPlatform;
+    assert(a is AuthenticatorAttachment.CrossPlatform);
+}
+
+@test
+fn test_authenticator_attachment_any_attachment_variant() {
+    let a: AuthenticatorAttachment = AuthenticatorAttachment.AnyAttachment;
+    assert(a is AuthenticatorAttachment.AnyAttachment);
+}
+
+@test
+fn test_authenticator_attachment_platform_disjoint() {
+    let a: AuthenticatorAttachment = AuthenticatorAttachment.Platform;
+    assert(!(a is AuthenticatorAttachment.CrossPlatform));
+    assert(!(a is AuthenticatorAttachment.AnyAttachment));
+}
+
+// =============================================================================
+// Section 2: UserVerificationRequirement 3-variant
+// =============================================================================
+
+@test
+fn test_uv_required_variant() {
+    let u: UserVerificationRequirement = UserVerificationRequirement.Required;
+    assert(u is UserVerificationRequirement.Required);
+}
+
+@test
+fn test_uv_preferred_variant() {
+    let u: UserVerificationRequirement = UserVerificationRequirement.Preferred;
+    assert(u is UserVerificationRequirement.Preferred);
+}
+
+@test
+fn test_uv_discouraged_variant() {
+    let u: UserVerificationRequirement = UserVerificationRequirement.Discouraged;
+    assert(u is UserVerificationRequirement.Discouraged);
+}
+
+@test
+fn test_uv_required_disjoint() {
+    let u: UserVerificationRequirement = UserVerificationRequirement.Required;
+    assert(!(u is UserVerificationRequirement.Preferred));
+    assert(!(u is UserVerificationRequirement.Discouraged));
+}
+
+// =============================================================================
+// Section 3: ResidentKeyRequirement 3-variant
+// =============================================================================
+
+@test
+fn test_rk_discouraged_variant() {
+    let r: ResidentKeyRequirement = ResidentKeyRequirement.DiscouragedRk;
+    assert(r is ResidentKeyRequirement.DiscouragedRk);
+}
+
+@test
+fn test_rk_preferred_variant() {
+    let r: ResidentKeyRequirement = ResidentKeyRequirement.PreferredRk;
+    assert(r is ResidentKeyRequirement.PreferredRk);
+}
+
+@test
+fn test_rk_required_variant() {
+    let r: ResidentKeyRequirement = ResidentKeyRequirement.RequiredRk;
+    assert(r is ResidentKeyRequirement.RequiredRk);
+}
+
+@test
+fn test_rk_required_disjoint() {
+    let r: ResidentKeyRequirement = ResidentKeyRequirement.RequiredRk;
+    assert(!(r is ResidentKeyRequirement.PreferredRk));
+    assert(!(r is ResidentKeyRequirement.DiscouragedRk));
+}
+
+// =============================================================================
+// Section 4: AttestationConveyance 4-variant
+// =============================================================================
+
+@test
+fn test_attestation_conveyance_none_variant() {
+    let c: AttestationConveyance = AttestationConveyance.NoneConveyance;
+    assert(c is AttestationConveyance.NoneConveyance);
+}
+
+@test
+fn test_attestation_conveyance_indirect_variant() {
+    let c: AttestationConveyance = AttestationConveyance.Indirect;
+    assert(c is AttestationConveyance.Indirect);
+}
+
+@test
+fn test_attestation_conveyance_direct_variant() {
+    let c: AttestationConveyance = AttestationConveyance.Direct;
+    assert(c is AttestationConveyance.Direct);
+}
+
+@test
+fn test_attestation_conveyance_enterprise_variant() {
+    let c: AttestationConveyance = AttestationConveyance.Enterprise;
+    assert(c is AttestationConveyance.Enterprise);
+}
+
+@test
+fn test_attestation_conveyance_direct_disjoint() {
+    let c: AttestationConveyance = AttestationConveyance.Direct;
+    assert(!(c is AttestationConveyance.NoneConveyance));
+    assert(!(c is AttestationConveyance.Indirect));
+    assert(!(c is AttestationConveyance.Enterprise));
+}
+
+// =============================================================================
+// Section 5: COSE algorithm identifiers — RFC 8152 registry values
+// =============================================================================
+
+@test
+fn test_cose_alg_es256_canonical_value() {
+    assert_eq(COSE_ALG_ES256, -7);
+}
+
+@test
+fn test_cose_alg_eddsa_canonical_value() {
+    assert_eq(COSE_ALG_EDDSA, -8);
+}
+
+@test
+fn test_cose_alg_ps256_canonical_value() {
+    assert_eq(COSE_ALG_PS256, -37);
+}
+
+@test
+fn test_cose_alg_rs256_canonical_value() {
+    assert_eq(COSE_ALG_RS256, -257);
+}
+
+@test
+fn test_cose_alg_es384_canonical_value() {
+    assert_eq(COSE_ALG_ES384, -35);
+}
+
+@test
+fn test_cose_alg_es512_canonical_value() {
+    assert_eq(COSE_ALG_ES512, -36);
+}
+
+@test
+fn test_cose_alg_identifiers_pairwise_distinct() {
+    assert(COSE_ALG_ES256 != COSE_ALG_EDDSA);
+    assert(COSE_ALG_ES256 != COSE_ALG_ES384);
+    assert(COSE_ALG_ES256 != COSE_ALG_ES512);
+    assert(COSE_ALG_RS256 != COSE_ALG_PS256);
+    assert(COSE_ALG_ES384 != COSE_ALG_ES512);
+}
+
+@test
+fn test_cose_alg_identifiers_all_negative() {
+    assert(COSE_ALG_ES256 < 0);
+    assert(COSE_ALG_EDDSA < 0);
+    assert(COSE_ALG_PS256 < 0);
+    assert(COSE_ALG_RS256 < 0);
+    assert(COSE_ALG_ES384 < 0);
+    assert(COSE_ALG_ES512 < 0);
+}
+
+fn main() {}
