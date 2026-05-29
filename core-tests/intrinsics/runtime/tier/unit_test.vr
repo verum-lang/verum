@@ -1,0 +1,60 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/tier/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/tier.vr` — VBC tier management intrinsics.
+//
+// Surface tested:
+//   * is_interpreted() — returns true under --interp, false under --aot
+//   * get_tier() — returns canonical tier code: 0=interp, 1=JIT baseline,
+//     2=JIT optimized, 3=AOT
+//
+// tier_promote() is a hint side-effect — observable only via downstream
+// dispatch behavior, so tested at the language-level integration suite under
+// `vcs/specs/L2-standard/intrinsics/runtime/tier/`.
+// =============================================================================
+
+mount core.intrinsics.runtime.tier.{
+    is_interpreted, get_tier,
+};
+
+// =============================================================================
+// Section 1: is_interpreted under --interp
+// =============================================================================
+
+@test
+fn test_is_interpreted_returns_true_under_interp() {
+    // This test runs under `verum test --interp` so the answer is true.
+    assert(is_interpreted());
+}
+
+// =============================================================================
+// Section 2: get_tier returns canonical tier code
+// =============================================================================
+
+@test
+fn test_get_tier_returns_zero_under_interp() {
+    // Tier 0 is the VBC interpreter. Under `verum test --interp` we are at
+    // tier 0.
+    let t = get_tier();
+    assert_eq(t, 0_u8);
+}
+
+@test
+fn test_get_tier_consistent_across_calls() {
+    let a = get_tier();
+    let b = get_tier();
+    assert_eq(a, b);
+}
+
+@test
+fn test_get_tier_matches_is_interpreted() {
+    // get_tier()==0 ⇔ is_interpreted()==true. Cross-check the two intrinsics
+    // for consistency.
+    let interp = is_interpreted();
+    let tier = get_tier();
+    assert(interp);
+    assert_eq(tier, 0_u8);
+}
+
+fn main() {}
