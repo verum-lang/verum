@@ -1,0 +1,217 @@
+// =============================================================================
+// core-tests/math/category_finite/unit_test.vr
+// =============================================================================
+//
+// `core/math/category_finite.vr` — Finite category presentation.
+//
+// Surface tested:
+//   * CatObject 1-field record + cat_object factory
+//   * CatMorphism 3-field record + cat_morphism factory
+//   * IdentityEntry 2-field record + CompositionEntry 3-field record
+//   * FiniteCategory empty_category + add_morphism + declare_identity +
+//     declare_composition + lookup_composition
+// =============================================================================
+
+mount core.math.category_finite.{
+    CatObject, CatMorphism, IdentityEntry, CompositionEntry, FiniteCategory,
+    cat_object, cat_morphism,
+    empty_category, add_morphism, declare_identity, declare_composition,
+    lookup_composition,
+};
+
+// =============================================================================
+// Section 1: CatObject + cat_object factory
+// =============================================================================
+
+@test
+fn test_cat_object_factory_preserves_name() {
+    let o = cat_object("A".to_text());
+    assert_eq(o.name, "A".to_text());
+}
+
+@test
+fn test_cat_object_direct_construction() {
+    let o: CatObject = CatObject { name: "B".to_text() };
+    assert_eq(o.name, "B".to_text());
+}
+
+// =============================================================================
+// Section 2: CatMorphism + cat_morphism factory
+// =============================================================================
+
+@test
+fn test_cat_morphism_factory_preserves_name() {
+    let src = cat_object("A".to_text());
+    let tgt = cat_object("B".to_text());
+    let m = cat_morphism("f".to_text(), src, tgt);
+    assert_eq(m.name, "f".to_text());
+}
+
+// §A — nested record field access (m.source.name) trips cross-module
+// CatObject field-index resolver — sister of journal §A.
+@ignore("[[btree_pattern_match_ref_generic_class]] — nested record field access through CatMorphism.source.name mis-reads. Multi-day codegen fix.")
+@test
+fn test_cat_morphism_preserves_source_name() {
+    let src = cat_object("X".to_text());
+    let tgt = cat_object("Y".to_text());
+    let m = cat_morphism("g".to_text(), src, tgt);
+    assert_eq(m.source.name, "X".to_text());
+}
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — same nested record field access defect through CatMorphism.target.name.")
+@test
+fn test_cat_morphism_preserves_target_name() {
+    let src = cat_object("P".to_text());
+    let tgt = cat_object("Q".to_text());
+    let m = cat_morphism("h".to_text(), src, tgt);
+    assert_eq(m.target.name, "Q".to_text());
+}
+
+// =============================================================================
+// Section 3: IdentityEntry + CompositionEntry direct construction
+// =============================================================================
+
+@test
+fn test_identity_entry_construction() {
+    let ie: IdentityEntry = IdentityEntry {
+        object_name: "A".to_text(),
+        identity_name: "id_A".to_text(),
+    };
+    assert_eq(ie.object_name, "A".to_text());
+    assert_eq(ie.identity_name, "id_A".to_text());
+}
+
+@test
+fn test_composition_entry_construction() {
+    let ce: CompositionEntry = CompositionEntry {
+        g: "g".to_text(),
+        f: "f".to_text(),
+        result: "h".to_text(),
+    };
+    assert_eq(ce.g, "g".to_text());
+    assert_eq(ce.f, "f".to_text());
+    assert_eq(ce.result, "h".to_text());
+}
+
+// =============================================================================
+// Section 4: empty_category state
+// =============================================================================
+
+@test
+fn test_empty_category_no_objects() {
+    let c = empty_category();
+    assert_eq(c.objects.len(), 0);
+}
+
+@test
+fn test_empty_category_no_morphisms() {
+    let c = empty_category();
+    assert_eq(c.morphisms.len(), 0);
+}
+
+@test
+fn test_empty_category_no_identities() {
+    let c = empty_category();
+    assert_eq(c.identities.len(), 0);
+}
+
+@test
+fn test_empty_category_no_composition_entries() {
+    let c = empty_category();
+    assert_eq(c.composition_table.len(), 0);
+}
+
+// =============================================================================
+// Section 5: add_morphism — registers morphism + auto-adds objects
+// =============================================================================
+
+@test
+fn test_add_morphism_increments_morphism_count() {
+    let c = empty_category();
+    let src = cat_object("A".to_text());
+    let tgt = cat_object("B".to_text());
+    let m = cat_morphism("f".to_text(), src, tgt);
+    let c2 = add_morphism(c, m);
+    assert_eq(c2.morphisms.len(), 1);
+}
+
+@test
+fn test_add_morphism_auto_adds_both_objects() {
+    let c = empty_category();
+    let src = cat_object("A".to_text());
+    let tgt = cat_object("B".to_text());
+    let m = cat_morphism("f".to_text(), src, tgt);
+    let c2 = add_morphism(c, m);
+    // 2 distinct objects were referenced.
+    assert_eq(c2.objects.len(), 2);
+}
+
+@test
+fn test_add_two_morphisms_increments_count() {
+    let c = empty_category();
+    let a = cat_object("A".to_text());
+    let b = cat_object("B".to_text());
+    let cc = cat_object("C".to_text());
+    let m1 = cat_morphism("f".to_text(), a, b);
+    let c1 = add_morphism(c, m1);
+    let b2 = cat_object("B".to_text());
+    let m2 = cat_morphism("g".to_text(), b2, cc);
+    let c2 = add_morphism(c1, m2);
+    assert_eq(c2.morphisms.len(), 2);
+}
+
+// =============================================================================
+// Section 6: declare_identity — registers identity-morphism mapping
+// =============================================================================
+
+@test
+fn test_declare_identity_increments_count() {
+    let c = empty_category();
+    let c2 = declare_identity(c, "A".to_text(), "id_A".to_text());
+    assert_eq(c2.identities.len(), 1);
+}
+
+@test
+fn test_declare_two_identities_increments_count() {
+    let c = empty_category();
+    let c1 = declare_identity(c, "A".to_text(), "id_A".to_text());
+    let c2 = declare_identity(c1, "B".to_text(), "id_B".to_text());
+    assert_eq(c2.identities.len(), 2);
+}
+
+// =============================================================================
+// Section 7: declare_composition + lookup_composition
+// =============================================================================
+
+@test
+fn test_declare_composition_increments_table() {
+    let c = empty_category();
+    let c2 = declare_composition(c, "g".to_text(), "f".to_text(), "h".to_text());
+    assert_eq(c2.composition_table.len(), 1);
+}
+
+@test
+fn test_lookup_composition_finds_declared_entry() {
+    let c = empty_category();
+    let c2 = declare_composition(c, "g".to_text(), "f".to_text(), "gf".to_text());
+    let r = lookup_composition(c2, "g".to_text(), "f".to_text());
+    assert_eq(r, "gf".to_text());
+}
+
+@test
+fn test_lookup_composition_missing_entry_returns_empty() {
+    // No declarations made — lookup must return empty Text per source contract.
+    let c = empty_category();
+    let r = lookup_composition(c, "g".to_text(), "f".to_text());
+    assert_eq(r, "".to_text());
+}
+
+@test
+fn test_lookup_composition_unrelated_keys_returns_empty() {
+    let c = empty_category();
+    let c2 = declare_composition(c, "g".to_text(), "f".to_text(), "h".to_text());
+    let r = lookup_composition(c2, "x".to_text(), "y".to_text());
+    assert_eq(r, "".to_text());
+}
+
+fn main() {}
