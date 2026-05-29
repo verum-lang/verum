@@ -1,0 +1,98 @@
+// =============================================================================
+// core-tests/cog/resolve/unit_test.vr
+// =============================================================================
+//
+// `core/cog/resolve.vr` — Cog dependency-solver Bound + VersionRange.
+// =============================================================================
+
+mount core.cog.resolve.{Bound, VersionRange, range_empty, range_full, range_is_empty, range_is_full};
+mount core.base.semver.SemVer;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Bound 3-variant ADT
+// =============================================================================
+
+fn semver_zero() -> SemVer {
+    SemVer { major: 0_u64, minor: 0_u64, patch: 0_u64, pre_release: "".to_text(), build_meta: "".to_text() }
+}
+
+@test
+fn test_bound_unbounded_variant() {
+    let b: Bound = Bound.Unbounded;
+    assert(b is Bound.Unbounded);
+}
+
+@test
+fn test_bound_included_variant() {
+    let b: Bound = Bound.Included(semver_zero());
+    assert(b is Bound.Included);
+}
+
+@test
+fn test_bound_excluded_variant() {
+    let b: Bound = Bound.Excluded(semver_zero());
+    assert(b is Bound.Excluded);
+}
+
+// =============================================================================
+// Section 2: Bound pairwise disjointness
+// =============================================================================
+
+@test
+fn test_bound_unbounded_disjoint() {
+    let b: Bound = Bound.Unbounded;
+    assert(!(b is Bound.Included));
+    assert(!(b is Bound.Excluded));
+}
+
+@test
+fn test_bound_included_excluded_distinct() {
+    let i: Bound = Bound.Included(semver_zero());
+    let e: Bound = Bound.Excluded(semver_zero());
+    assert(!(i is Bound.Excluded));
+    assert(!(e is Bound.Included));
+}
+
+// =============================================================================
+// Section 3: range_empty / range_full + predicates
+// =============================================================================
+
+@test
+fn test_range_empty_constructor() {
+    let r: VersionRange = range_empty();
+    assert_eq(r.intervals.len(), 0);
+}
+
+@test
+fn test_range_empty_is_empty_predicate() {
+    let r: VersionRange = range_empty();
+    assert_eq(range_is_empty(&r), true);
+}
+
+@test
+fn test_range_full_constructor_has_one_interval() {
+    let r: VersionRange = range_full();
+    assert_eq(r.intervals.len(), 1);
+}
+
+@test
+fn test_range_full_is_not_empty() {
+    let r: VersionRange = range_full();
+    assert_eq(range_is_empty(&r), false);
+}
+
+@test
+fn test_range_full_is_full_predicate() {
+    let r: VersionRange = range_full();
+    assert_eq(range_is_full(&r), true);
+}
+
+@test
+fn test_range_empty_is_not_full() {
+    let r: VersionRange = range_empty();
+    assert_eq(range_is_full(&r), false);
+}
+
+fn main() {}
