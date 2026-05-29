@@ -1,0 +1,58 @@
+// =============================================================================
+// core-tests/term/widget/dialog/unit_test.vr
+// =============================================================================
+//
+// `core/term/widget/dialog.vr` — DialogState record + .new() / .with_focus()
+// constructors.
+//
+// DialogButton record left untested — `style: Style` field carries fixed-
+// pattern color/format payload that surfaces a known codegen layout issue.
+// =============================================================================
+
+mount core.term.widget.dialog.DialogState;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: DialogState constructors
+// =============================================================================
+
+@test
+fn test_dialog_state_new_focuses_first_button() {
+    let s: DialogState = DialogState.new();
+    assert_eq(s.focused_button, 0);
+}
+
+@test
+fn test_dialog_state_with_focus_zero() {
+    let s: DialogState = DialogState.with_focus(0);
+    assert_eq(s.focused_button, 0);
+}
+
+@test
+fn test_dialog_state_with_focus_arbitrary() {
+    let s: DialogState = DialogState.with_focus(3);
+    assert_eq(s.focused_button, 3);
+}
+
+@test
+fn test_dialog_state_with_focus_large_index() {
+    let s: DialogState = DialogState.with_focus(99);
+    assert_eq(s.focused_button, 99);
+}
+
+@test
+fn test_dialog_state_direct_record_construction() {
+    let s: DialogState = DialogState { focused_button: 5 };
+    assert_eq(s.focused_button, 5);
+}
+
+@test
+fn test_dialog_state_field_independence() {
+    let a: DialogState = DialogState.with_focus(1);
+    let b: DialogState = DialogState.with_focus(7);
+    assert_eq(a.focused_button, 1);
+    assert_eq(b.focused_button, 7);
+}
+
+fn main() {}
