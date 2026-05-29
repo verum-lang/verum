@@ -183,13 +183,23 @@ it demotes to legacy.
 1. **Codegen (registration ordering):** full-core compile emits legacy
    `MakeVariant` (synthetic id) for `Maybe.Some` because `Maybe`'s
    descriptor isn't yet populated when `time` compiles.
-2. **Runtime (dispatch):** a value built by legacy `MakeVariant` for
-   `Maybe` does not dispatch `.is_some`/`.unwrap_or` — the panic reports
-   `runtime kind Int` (and `alloc_variant` returns a heap *ptr*, so the
-   "Int" classification is itself suspect: either the archived body
-   returns the unboxed payload, or the synthetic-id receiver is
-   mis-classified). `MakeVariantTyped` Maybe values dispatch fine
-   (small-module mirrors pass).
+2. **Return unboxing (the sharper finding):** the panic reports
+   `runtime kind Int`, which (per `method_dispatch.rs:2631`) requires
+   `receiver.is_int()` — a NaN-boxed integer, **not** a heap pointer.
+   Since `alloc_variant` (the `MakeVariant` executor, `interpreter/
+   mod.rs:592`) returns `Value::from_ptr`, a correctly-built Maybe is a
+   *pointer*. Therefore the **archive body of `duration_since` returns
+   the *unboxed* `Int`**, not the `Maybe` — the precompiler applies
+   single-field-record unboxing to the `Maybe<Duration>` return (the
+   §G `Duration`-single-field-unboxing family), collapsing
+   `Maybe.Some(Duration{nanos})` all the way to its scalar. Fresh
+   compilation (small module → `MakeVariantTyped`) does not unbox, so
+   mirrors pass. **Next concrete step:** disassemble the archive's
+   `duration_since` (needs a `.vbca` disassembler CLI or precompiler
+   instrumentation — hence a build) to confirm the return-unboxing and
+   locate the offending pass; the fix is to suppress single-field-record
+   unboxing when the value is a `Maybe`/`Result` payload, not a bare
+   record.
 
 A fresh small-module mirror passes because it gets the typed form; the
 archive (full-core) body gets the legacy form and fails. This is the
