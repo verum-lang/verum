@@ -434,6 +434,61 @@ impl VbcCodegen {
         // would reject leak out.
         let parent_type_id =
             parent_type_name.and_then(|name| self.type_name_to_id.get(name).copied());
+
+        // **Canonical core-ADT fast-path** (Maybe / Result).
+        //
+        // `Maybe` (TypeId 515) and `Result` (TypeId 516) are well-known
+        // built-ins with FIXED canonical TypeIds whose descriptors are
+        // ALWAYS fully populated in the final VBC module. During the
+        // full-core precompile, however, the in-progress `self.types`
+        // snapshot can still hold an empty-`variants` placeholder for
+        // them (Pass-1.5 speculative id allocation) at the moment a
+        // *consuming* module body compiles — e.g. `core/time/instant.vr`
+        // building `Maybe.Some(Duration.from_nanos(...))` before
+        // `core/base/maybe.vr`'s descriptor variants land. The generic
+        // gate below then sees `desc.variants.is_empty()` and DEMOTES to
+        // the legacy synthetic-id `MakeVariant` (`0x8000+tag`).
+        //
+        // That demotion is the root cause of the Maybe-return collapse:
+        // a `Some` built by legacy `MakeVariant` is mis-read by the
+        // runtime — pattern-matched as `None` and method-dispatched as
+        // `runtime kind Int` — because synthetic-id variants are not
+        // recognised as the canonical `Maybe`/`Result` for match + CallM
+        // (only eq/hash/debug/arith handle them). Small single-module
+        // compiles dodge it (the descriptor is populated, so they emit
+        // the typed form and work).
+        //
+        // Fix: for these two canonical types, emit `MakeVariantTyped`
+        // with the FIXED canonical TypeId unconditionally. The final
+        // module always carries their fully-populated descriptors, so
+        // the runtime validator accepts the id, and the (tag,
+        // field_count) the variant-constructor resolution passes is the
+        // canonical layout (None=0/0, Some=1/1, Ok=0/1, Err=1/1). This
+        // closes the whole class of Maybe/Result-returning stdlib
+        // functions, not just `time`. Regression-pinned by the
+        // `core-tests/time/instant` `duration_since` suite.
+        // Gated on the exact canonical (tag, field_count) shapes so a
+        // malformed construction still falls through to the generic
+        // path rather than emitting a typed form the runtime validator
+        // would reject: Maybe = None(0,0) | Some(1,1); Result = Ok(0,1)
+        // | Err(1,1).
+        if let Some(name) = parent_type_name {
+            let canonical = match (name, tag, field_count) {
+                ("Maybe", 0, 0) | ("Maybe", 1, 1) => Some(crate::types::TypeId::MAYBE),
+                ("Result", 0, 1) | ("Result", 1, 1) => Some(crate::types::TypeId::RESULT),
+                _ => None,
+            };
+            if let Some(tid) = canonical {
+                self.ctx.emit(Instruction::MakeVariantTyped {
+                    dst,
+                    type_id: tid.0,
+                    tag,
+                    field_count,
+                });
+                return;
+            }
+        }
+
         let typed_ok = parent_type_id.and_then(|tid| {
             let desc = self.types.iter().find(|d| d.id == tid)?;
             // **MakeVariantTyped survival check** (#168 / TypeId(148)
@@ -26622,18 +26677,85 @@ impl VbcCodegen {
                 }
             }
             InlineSequenceId::InstantDurationSince => {
-                // self.0 - earlier.0 (returns Duration as nanos)
+                // `Instant.duration_since(&self, earlier) -> Maybe<Duration>`.
+                //
+                // `Instant` is a single-field `{nanos: Int}` record carried
+                // UNBOXED (so `args[0]`/`args[1]` are the raw nanos), and
+                // `Duration` is likewise unboxed nanos. The method contract
+                // (core/time/instant.vr) is:
+                //
+                //   if self.nanos >= earlier.nanos {
+                //       Maybe.Some(Duration.from_nanos(self.nanos - earlier.nanos))
+                //   } else { Maybe.None }
+                //
+                // The previous lowering emitted only the bare subtraction —
+                // dropping the `Maybe` wrapper AND the negative-gap → None
+                // semantics — so a caller's `.unwrap_or(...)` / `.is_some()`
+                // / `match` saw a raw `Int` ("method 'unwrap_or' not found
+                // on receiver of runtime kind Int"; `Some` mis-matched as
+                // `None`). Build the canonical typed `Maybe<Duration>`
+                // directly: `MakeVariantTyped(MAYBE, Some=tag 1, 1 field)`
+                // carrying the (unboxed `Duration`) nanos diff, or
+                // `MakeVariantTyped(MAYBE, None=tag 0, 0 fields)`. Pinned by
+                // `core-tests/time/instant` §D.
                 if args.len() >= 2 {
+                    let diff = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::BinaryI {
                         op: BinaryIntOp::Sub,
-                        dst: dest,
+                        dst: diff,
                         a: args[0],
                         b: args[1],
                     });
-                } else {
-                    self.ctx.emit(Instruction::LoadI {
+                    let zero = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: zero, value: 0 });
+                    let nonneg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Ge,
+                        dst: nonneg,
+                        a: diff,
+                        b: zero,
+                    });
+                    let none_label = self.ctx.new_label("dsince_none");
+                    let end_label = self.ctx.new_label("dsince_end");
+                    // diff < 0 → jump to the None branch.
+                    self.ctx
+                        .emit_forward_jump(&none_label, |offset| Instruction::JmpNot {
+                            cond: nonneg,
+                            offset,
+                        });
+                    // Some(Duration(diff))
+                    self.ctx.emit(Instruction::MakeVariantTyped {
                         dst: dest,
-                        value: 0,
+                        type_id: crate::types::TypeId::MAYBE.0,
+                        tag: 1,
+                        field_count: 1,
+                    });
+                    self.ctx.emit(Instruction::SetVariantData {
+                        variant: dest,
+                        field: 0,
+                        value: diff,
+                    });
+                    self.ctx
+                        .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+                    // None
+                    self.ctx.define_label(&none_label);
+                    self.ctx.emit(Instruction::MakeVariantTyped {
+                        dst: dest,
+                        type_id: crate::types::TypeId::MAYBE.0,
+                        tag: 0,
+                        field_count: 0,
+                    });
+                    self.ctx.define_label(&end_label);
+                    self.ctx.free_temp(nonneg);
+                    self.ctx.free_temp(zero);
+                    self.ctx.free_temp(diff);
+                } else {
+                    // Defensive: malformed call → None.
+                    self.ctx.emit(Instruction::MakeVariantTyped {
+                        dst: dest,
+                        type_id: crate::types::TypeId::MAYBE.0,
+                        tag: 0,
+                        field_count: 0,
                     });
                 }
             }

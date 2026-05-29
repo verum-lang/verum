@@ -2491,7 +2491,15 @@ impl VbcCodegen {
             ("Duration.saturating_add", 2, "time_duration_saturating_add"),
             ("Duration.saturating_sub", 2, "time_duration_saturating_sub"),
             ("Duration.subsec_nanos", 1, "time_duration_subsec_nanos"),
-            // Instant impl methods
+            // Instant impl methods. `Instant` is a single-field
+            // `{nanos: Int}` record represented UNBOXED (the generic
+            // `add`/`sub` intercepts below make `Instant ± Duration`
+            // integer arithmetic), so these intrinsics operate on the raw
+            // nanos. `duration_since` returns `Maybe<Duration>` — its
+            // inline sequence (`InstantDurationSince`) builds the canonical
+            // `Maybe` variant directly (see `emit_inline_sequence`), it does
+            // NOT lower to a bare subtraction. Pinned by
+            // `core-tests/time/instant` §D.
             ("Instant.now", 0, "time_instant_now"),
             ("Instant.elapsed", 1, "time_instant_elapsed"),
             ("Instant.duration_since", 2, "time_instant_duration_since"),
