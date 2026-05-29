@@ -1,0 +1,130 @@
+// =============================================================================
+// core-tests/architecture/adjunction/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/adjunction.vr` — categorical-refactoring ADTs.
+// =============================================================================
+
+mount core.architecture.adjunction.{
+    CanonicalAdjunction, RefactoringDirection, AdjunctionVerdict,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CanonicalAdjunction 5-variant ADT
+// =============================================================================
+
+@test
+fn test_canonical_adjunction_inline_extract_variant() {
+    let a: CanonicalAdjunction = CanonicalAdjunction.InlineExtract;
+    assert(a is CanonicalAdjunction.InlineExtract);
+}
+
+@test
+fn test_canonical_adjunction_specialise_generalise_variant() {
+    let a: CanonicalAdjunction = CanonicalAdjunction.SpecialiseGeneralise;
+    assert(a is CanonicalAdjunction.SpecialiseGeneralise);
+}
+
+@test
+fn test_canonical_adjunction_decompose_compose_variant() {
+    let a: CanonicalAdjunction = CanonicalAdjunction.DecomposeCompose;
+    assert(a is CanonicalAdjunction.DecomposeCompose);
+}
+
+@test
+fn test_canonical_adjunction_strengthen_weaken_variant() {
+    let a: CanonicalAdjunction = CanonicalAdjunction.StrengthenWeaken;
+    assert(a is CanonicalAdjunction.StrengthenWeaken);
+}
+
+@test
+fn test_canonical_adjunction_custom_adjunction_variant() {
+    let a: CanonicalAdjunction = CanonicalAdjunction.CustomAdjunction("my-refactor".to_text());
+    assert(a is CanonicalAdjunction.CustomAdjunction);
+}
+
+// =============================================================================
+// Section 2: CanonicalAdjunction pairwise disjointness — selected
+// =============================================================================
+
+@test
+fn test_canonical_adjunction_inline_extract_disjoint() {
+    let a: CanonicalAdjunction = CanonicalAdjunction.InlineExtract;
+    assert(!(a is CanonicalAdjunction.SpecialiseGeneralise));
+    assert(!(a is CanonicalAdjunction.DecomposeCompose));
+    assert(!(a is CanonicalAdjunction.StrengthenWeaken));
+    assert(!(a is CanonicalAdjunction.CustomAdjunction));
+}
+
+@test
+fn test_canonical_adjunction_custom_disjoint_from_canonical() {
+    let a: CanonicalAdjunction = CanonicalAdjunction.CustomAdjunction("x".to_text());
+    assert(!(a is CanonicalAdjunction.InlineExtract));
+    assert(!(a is CanonicalAdjunction.SpecialiseGeneralise));
+    assert(!(a is CanonicalAdjunction.DecomposeCompose));
+    assert(!(a is CanonicalAdjunction.StrengthenWeaken));
+}
+
+// =============================================================================
+// Section 3: RefactoringDirection 2-variant ADT
+// =============================================================================
+
+@test
+fn test_refactoring_direction_forward_variant() {
+    let d: RefactoringDirection = RefactoringDirection.Forward;
+    assert(d is RefactoringDirection.Forward);
+}
+
+@test
+fn test_refactoring_direction_backward_variant() {
+    let d: RefactoringDirection = RefactoringDirection.Backward;
+    assert(d is RefactoringDirection.Backward);
+}
+
+@test
+fn test_refactoring_direction_forward_backward_distinct() {
+    let f: RefactoringDirection = RefactoringDirection.Forward;
+    let b: RefactoringDirection = RefactoringDirection.Backward;
+    assert(!(f is RefactoringDirection.Backward));
+    assert(!(b is RefactoringDirection.Forward));
+}
+
+// =============================================================================
+// Section 4: AdjunctionVerdict 4-variant ADT
+// =============================================================================
+
+@test
+fn test_adjunction_verdict_accepted_variant() {
+    let v: AdjunctionVerdict = AdjunctionVerdict.Accepted;
+    assert(v is AdjunctionVerdict.Accepted);
+}
+
+@test
+fn test_adjunction_verdict_broken_adjoint_pair_variant() {
+    let v: AdjunctionVerdict = AdjunctionVerdict.BrokenAdjointPair;
+    assert(v is AdjunctionVerdict.BrokenAdjointPair);
+}
+
+@test
+fn test_adjunction_verdict_preservation_failure_variant() {
+    let v: AdjunctionVerdict = AdjunctionVerdict.PreservationFailure;
+    assert(v is AdjunctionVerdict.PreservationFailure);
+}
+
+@test
+fn test_adjunction_verdict_gain_claim_failure_variant() {
+    let v: AdjunctionVerdict = AdjunctionVerdict.GainClaimFailure;
+    assert(v is AdjunctionVerdict.GainClaimFailure);
+}
+
+@test
+fn test_adjunction_verdict_accepted_disjoint() {
+    let v: AdjunctionVerdict = AdjunctionVerdict.Accepted;
+    assert(!(v is AdjunctionVerdict.BrokenAdjointPair));
+    assert(!(v is AdjunctionVerdict.PreservationFailure));
+    assert(!(v is AdjunctionVerdict.GainClaimFailure));
+}
+
+fn main() {}
