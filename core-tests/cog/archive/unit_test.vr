@@ -1,0 +1,102 @@
+// =============================================================================
+// core-tests/cog/archive/unit_test.vr
+// =============================================================================
+//
+// `core/cog/archive.vr` — Cog VBC archive format constants.
+// =============================================================================
+
+mount core.cog.archive.{
+    ARCHIVE_VERSION_MAJOR, ARCHIVE_VERSION_MINOR, ARCHIVE_HEADER_SIZE,
+    FLAG_COMPRESSED, FLAG_HAS_DEBUG_INFO, FLAG_HAS_SOURCE_MAP,
+    FLAG_STRIPPED, FLAG_SIGNED,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Archive version + header size
+// =============================================================================
+
+@test
+fn test_archive_version_major_canonical_value() {
+    assert_eq(ARCHIVE_VERSION_MAJOR, 1);
+}
+
+@test
+fn test_archive_version_minor_canonical_value() {
+    assert_eq(ARCHIVE_VERSION_MINOR, 0);
+}
+
+@test
+fn test_archive_header_size_canonical_value() {
+    assert_eq(ARCHIVE_HEADER_SIZE, 32);
+}
+
+// =============================================================================
+// Section 2: Archive flag bits (bit-flag encoding)
+// =============================================================================
+
+@test
+fn test_flag_compressed_canonical_value() {
+    assert_eq(FLAG_COMPRESSED, 0x0001);
+}
+
+@test
+fn test_flag_has_debug_info_canonical_value() {
+    assert_eq(FLAG_HAS_DEBUG_INFO, 0x0002);
+}
+
+@test
+fn test_flag_has_source_map_canonical_value() {
+    assert_eq(FLAG_HAS_SOURCE_MAP, 0x0004);
+}
+
+@test
+fn test_flag_stripped_canonical_value() {
+    assert_eq(FLAG_STRIPPED, 0x0008);
+}
+
+@test
+fn test_flag_signed_canonical_value() {
+    assert_eq(FLAG_SIGNED, 0x0010);
+}
+
+// =============================================================================
+// Section 3: Flag pairwise distinctness — single-bit flags
+// =============================================================================
+
+@test
+fn test_archive_flags_pairwise_distinct() {
+    assert(FLAG_COMPRESSED != FLAG_HAS_DEBUG_INFO);
+    assert(FLAG_HAS_DEBUG_INFO != FLAG_HAS_SOURCE_MAP);
+    assert(FLAG_HAS_SOURCE_MAP != FLAG_STRIPPED);
+    assert(FLAG_STRIPPED != FLAG_SIGNED);
+}
+
+@test
+fn test_archive_flags_no_overlap() {
+    // Single-bit flags must have no overlapping bits set.
+    assert_eq(FLAG_COMPRESSED & FLAG_HAS_DEBUG_INFO, 0);
+    assert_eq(FLAG_COMPRESSED & FLAG_STRIPPED, 0);
+    assert_eq(FLAG_HAS_DEBUG_INFO & FLAG_HAS_SOURCE_MAP, 0);
+    assert_eq(FLAG_STRIPPED & FLAG_SIGNED, 0);
+}
+
+@test
+fn test_archive_flags_full_mask() {
+    // All 5 flags OR'd == 0x1F.
+    let full = FLAG_COMPRESSED | FLAG_HAS_DEBUG_INFO |
+               FLAG_HAS_SOURCE_MAP | FLAG_STRIPPED | FLAG_SIGNED;
+    assert_eq(full, 0x1F);
+}
+
+@test
+fn test_archive_flags_positive() {
+    assert(FLAG_COMPRESSED > 0);
+    assert(FLAG_HAS_DEBUG_INFO > 0);
+    assert(FLAG_HAS_SOURCE_MAP > 0);
+    assert(FLAG_STRIPPED > 0);
+    assert(FLAG_SIGNED > 0);
+}
+
+fn main() {}
