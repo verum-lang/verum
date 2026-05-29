@@ -309,3 +309,23 @@ own module compiled its constructors. Instrumentation
 `resolve_field_index` → `resolve_field_index_impl` wrapper
 (`VERUM_TRACE_FIELDSHIFT` + `VERUM_FIELDSHIFT_FIELD`) is in place to read
 off the exact `(type_name, idx, layout)` at the failing site.
+
+### §8 RESOLUTION 2026-05-29 — CLOSED
+
+Root pinned by precompiler trace (`VERUM_TRACE_FIELDSHIFT`): at stdlib
+precompile `UseAfterFreeError.new` resolved BOTH `expected_gen` and
+`expected_epoch` to slot index **0** via `resolve_field_index`'s
+TypeDescriptor path. That path compared `fd.name.0` (a `ctx.strings`
+StringId) to `field_name_indices[field_name]` (a value from the SEPARATE
+global field-name intern table) — two unrelated id namespaces whose
+numeric coincidence produced a false match at field 0. The `.new` ctor
+therefore wrote `expected_gen`→slot0 then `expected_epoch`→slot0
+(overwrite); the cross-module read (correct idx 0) returned the epoch
+value.
+
+FIX (commit on the active branch): `resolve_field_index` now resolves the
+descriptor path by **field-name STRING comparison** (authoritative);
+the unsound numeric-id match is a guarded fallback only when the
+descriptor string is absent from `ctx.strings`. All 3 previously-`@ignore`'d
+`.new`/`.message`/`.eq` tests here + in `mem/mod` flip GREEN under
+`--interp`. Record-literal path unchanged (no regression).
