@@ -20181,11 +20181,64 @@ impl VbcCodegen {
                         // First try looking up as a variable type
                         let var_type = self.ctx.get_variable_type(&ident.name);
                         // If not found as variable, try as a constant (persists across functions)
-                        let final_type = if var_type == VarTypeKind::Unknown {
+                        let mut final_type = if var_type == VarTypeKind::Unknown {
                             self.ctx.get_constant_type(&ident.name)
                         } else {
                             var_type
                         };
+                        // FLOATCONST-CMP-1 fix: a `public const X: Float = 0.7;`
+                        // imported from ANOTHER module is not in this context's
+                        // `constant_types` map (that map is only populated when
+                        // the const's own module is compiled). But the const
+                        // resolves to a zero-param const-shaped FunctionInfo that
+                        // carries its declared `return_type_name`. Consult it so
+                        // an ordered comparison between two such consts selects
+                        // `CmpF` instead of `CmpI` on the raw float NaN-box bits
+                        // (the latter mis-orders, e.g. 0.7 < 0.85 → false, even
+                        // though `==` against a Float literal works).
+                        if final_type == VarTypeKind::Unknown {
+                            use verum_common::well_known_types::type_names;
+                            let rt_name = self
+                                .ctx
+                                .lookup_function_in_scope(&ident.name)
+                                .filter(|fi| fi.is_const && fi.param_count == 0)
+                                .and_then(|fi| fi.return_type_name.clone())
+                                .or_else(|| {
+                                    let nm = ident.name.as_str();
+                                    let is_const_shaped = !nm.is_empty()
+                                        && nm.chars().all(|c| {
+                                            c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit()
+                                        })
+                                        && nm
+                                            .chars()
+                                            .next()
+                                            .is_some_and(|c| c.is_ascii_uppercase());
+                                    if !is_const_shaped {
+                                        return None;
+                                    }
+                                    let suffix = format!(".{}", nm);
+                                    let mut found: Option<String> = None;
+                                    let mut ambiguous = false;
+                                    for (key, info) in self.ctx.functions.iter() {
+                                        if !key.ends_with(&suffix) || info.param_count != 0 {
+                                            continue;
+                                        }
+                                        if found.is_some() {
+                                            ambiguous = true;
+                                            break;
+                                        }
+                                        found = info.return_type_name.clone();
+                                    }
+                                    if ambiguous { None } else { found }
+                                });
+                            if let Some(rt) = rt_name {
+                                if type_names::is_float_type(&rt) {
+                                    final_type = VarTypeKind::Float;
+                                } else if type_names::is_integer_type(&rt) {
+                                    final_type = VarTypeKind::Int;
+                                }
+                            }
+                        }
                         match final_type {
                             VarTypeKind::Int => Some(TypeKind::Int),
                             VarTypeKind::Float => Some(TypeKind::Float),
