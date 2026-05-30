@@ -67,18 +67,28 @@
    `remaining()` (Maybe.None), and `deadline()` (Maybe.None). Plus an
    `@ignore`'d pin for the NEWTYPE-UNBOX-1 defect below.
 
-## Language defect — WindowsDuration `.add()` then `.as_millis()` mis-reads (NEWTYPE-UNBOX-1)
+## Language defect — Map-retrieved WindowsDuration corrupts in a match arm (NEWTYPE-UNBOX-1)
 
-**Found 2026-05-29.** `WindowsDuration is (UInt64)` is a single-field newtype.
-A value produced by the user `add` body is heap-boxed, but the `as_millis`
-intrinsic inline sequence expects an unboxed nanos `Int` — so
-`d1.add(d2).as_millis()` mis-reads (observed: yields the raw nanos
-`500_000_000` instead of `500`). Reading `.as_nanos()` (field `.0`) works.
-Same class as the core `Duration` unboxing defect (2026-05-27); catalogued as
-**NEWTYPE-UNBOX-1** (`internal/website/docs/stdlib/defect-class-catalogue.md
-§12`). `integration_test.vr::wx_time_int_map_values_sum` sums raw nanos as the
-working idiom; `regression_test.vr` pins the broken `.add().as_millis()` chain
-with `@ignore`.
+**Found 2026-05-29 (root-cause refined 2026-05-30).** `WindowsDuration is
+(UInt64)` is a single-field newtype. Retrieving one from a `Map` and using the
+match-bound value (`d.as_nanos()` or `total.add(d)`) corrupts control flow —
+the test "exits" with the raw inner value (e.g. `100_000_000`) instead of
+completing. **CONFIRMED reproducible in isolation.**
+
+**Closure-dependence (important):** the simpler `a.add(b).as_millis()` form
+does NOT reproduce — it passes in a small import closure. The defect is
+import-closure / collection-retrieval-sensitive (see
+`internal/website/docs/stdlib/defect-class-catalogue.md §12`): an isolated
+1–3-test probe under-counts method candidates and can give a misleading PASS;
+the genuine failure shows up under the full conformance closure (`verum test
+--filter wx_`). This is why `wx_time_int_map_values_sum` failed in the full run
+even though `a.add(b).as_millis()` passes alone.
+
+Same family as the core `Duration` single-field-record unboxing defect
+(2026-05-27). `integration_test.vr::wx_time_int_map_values_sum` and
+`regression_test.vr::wx_time_reg_map_retrieved_newtype_use` both `@ignore` the
+confirmed-failing Map form; the deep fix is VBC codegen newtype boxing parity
++ type-directed dispatch (task #3).
 
 ## 3. Action items deferred (FFI host-unsafe — Windows kernel32 only)
 
