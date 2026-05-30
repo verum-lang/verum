@@ -1,0 +1,57 @@
+// =============================================================================
+// core-tests/net/quic/stream_sm/recv/unit_test.vr — RFC 9000 §3.2
+// =============================================================================
+//
+// `core/net/quic/stream_sm/recv.vr`:
+//
+//   * RecvState 6-variant receive-stream state machine (RFC 9000 §3.2:
+//     Recv → SizeKnown → DataRecvd → DataRead; ResetRecvd → ResetRead).
+// =============================================================================
+
+mount core.net.quic.stream_sm.recv.{RecvState};
+
+// =============================================================================
+// Section 1: the 6 RFC 9000 §3.2 receive states
+// =============================================================================
+
+@test
+fn test_qrecv_recv_variant() { assert(RecvState.Recv is RecvState.Recv); }
+
+@test
+fn test_qrecv_size_known_variant() { assert(RecvState.SizeKnown is RecvState.SizeKnown); }
+
+@test
+fn test_qrecv_data_recvd_variant() { assert(RecvState.DataRecvd is RecvState.DataRecvd); }
+
+@test
+fn test_qrecv_data_read_variant() { assert(RecvState.DataRead is RecvState.DataRead); }
+
+@test
+fn test_qrecv_reset_recvd_variant() { assert(RecvState.ResetRecvd is RecvState.ResetRecvd); }
+
+@test
+fn test_qrecv_reset_read_variant() { assert(RecvState.ResetRead is RecvState.ResetRead); }
+
+// =============================================================================
+// Section 2: disjointness (the data path vs the reset path)
+// =============================================================================
+
+@test
+fn test_qrecv_recv_not_data_recvd() {
+    let s = RecvState.Recv;
+    assert(!(s is RecvState.DataRecvd));
+}
+
+@test
+fn test_qrecv_data_recvd_not_reset_recvd() {
+    let s = RecvState.DataRecvd;
+    assert(!(s is RecvState.ResetRecvd));
+}
+
+@test
+fn test_qrecv_data_read_terminal_not_recv() {
+    let s = RecvState.DataRead;
+    assert(!(s is RecvState.Recv));
+}
+
+fn main() {}

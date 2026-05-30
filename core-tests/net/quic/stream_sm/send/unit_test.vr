@@ -1,0 +1,57 @@
+// =============================================================================
+// core-tests/net/quic/stream_sm/send/unit_test.vr — RFC 9000 §3.1
+// =============================================================================
+//
+// `core/net/quic/stream_sm/send.vr`:
+//
+//   * SendState 6-variant send-stream state machine (RFC 9000 §3.1:
+//     Ready → Send → DataSent → DataRecvd; ResetSent → ResetRecvd).
+// =============================================================================
+
+mount core.net.quic.stream_sm.send.{SendState};
+
+// =============================================================================
+// Section 1: the 6 RFC 9000 §3.1 send states
+// =============================================================================
+
+@test
+fn test_qsend_ready_variant() { assert(SendState.Ready is SendState.Ready); }
+
+@test
+fn test_qsend_send_variant() { assert(SendState.Send is SendState.Send); }
+
+@test
+fn test_qsend_data_sent_variant() { assert(SendState.DataSent is SendState.DataSent); }
+
+@test
+fn test_qsend_data_recvd_variant() { assert(SendState.DataRecvd is SendState.DataRecvd); }
+
+@test
+fn test_qsend_reset_sent_variant() { assert(SendState.ResetSent is SendState.ResetSent); }
+
+@test
+fn test_qsend_reset_recvd_variant() { assert(SendState.ResetRecvd is SendState.ResetRecvd); }
+
+// =============================================================================
+// Section 2: disjointness (data path vs reset path)
+// =============================================================================
+
+@test
+fn test_qsend_ready_not_send() {
+    let s = SendState.Ready;
+    assert(!(s is SendState.Send));
+}
+
+@test
+fn test_qsend_data_sent_not_reset_sent() {
+    let s = SendState.DataSent;
+    assert(!(s is SendState.ResetSent));
+}
+
+@test
+fn test_qsend_data_recvd_terminal_not_ready() {
+    let s = SendState.DataRecvd;
+    assert(!(s is SendState.Ready));
+}
+
+fn main() {}
