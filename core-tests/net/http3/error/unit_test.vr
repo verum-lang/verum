@@ -1,0 +1,52 @@
+// =============================================================================
+// core-tests/net/http3/error/unit_test.vr — RFC 9114 §8.1 (http3 impl)
+// =============================================================================
+//
+// `core/net/http3/error.vr` — the `http3` sibling implementation's error
+// codes. `Http3ErrorCode` wraps the RFC 9114 §8.1 H3_* wire constants.
+// =============================================================================
+
+mount core.net.http3.error.{Http3ErrorCode};
+
+// =============================================================================
+// Section 1: H3 wire codes (RFC 9114 §8.1)
+// =============================================================================
+
+@test
+fn test_http3err_no_error_0x100() { assert_eq(Http3ErrorCode.H3_NO_ERROR, 0x100_u64); }
+
+@test
+fn test_http3err_general_protocol_error_0x101() { assert_eq(Http3ErrorCode.H3_GENERAL_PROTOCOL_ERROR, 0x101_u64); }
+
+@test
+fn test_http3err_internal_error_0x102() { assert_eq(Http3ErrorCode.H3_INTERNAL_ERROR, 0x102_u64); }
+
+@test
+fn test_http3err_stream_creation_error_0x103() { assert_eq(Http3ErrorCode.H3_STREAM_CREATION_ERROR, 0x103_u64); }
+
+@test
+fn test_http3err_closed_critical_stream_0x104() { assert_eq(Http3ErrorCode.H3_CLOSED_CRITICAL_STREAM, 0x104_u64); }
+
+@test
+fn test_http3err_frame_unexpected_0x105() { assert_eq(Http3ErrorCode.H3_FRAME_UNEXPECTED, 0x105_u64); }
+
+@test
+fn test_http3err_frame_error_0x106() { assert_eq(Http3ErrorCode.H3_FRAME_ERROR, 0x106_u64); }
+
+@test
+fn test_http3err_excessive_load_0x107() { assert_eq(Http3ErrorCode.H3_EXCESSIVE_LOAD, 0x107_u64); }
+
+@test
+fn test_http3err_id_error_0x108() { assert_eq(Http3ErrorCode.H3_ID_ERROR, 0x108_u64); }
+
+@test
+fn test_http3err_settings_error_0x109() { assert_eq(Http3ErrorCode.H3_SETTINGS_ERROR, 0x109_u64); }
+
+@test
+fn test_http3err_h3_range_is_0x1xx() {
+    // All H3 codes live in the 0x100-0x1FF block (RFC 9114 §8.1).
+    assert(Http3ErrorCode.H3_NO_ERROR >= 0x100_u64);
+    assert(Http3ErrorCode.H3_SETTINGS_ERROR < 0x200_u64);
+}
+
+fn main() {}
