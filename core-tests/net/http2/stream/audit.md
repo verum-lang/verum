@@ -51,33 +51,38 @@ Evidence (two probes + the multi-step suite):
 
 A stdlib reformulation (`let cur = self.state;` before the match) did **not**
 fix it — confirming the defect is in VBC codegen for the call site, not the
-match shape. Tracked as **MUTSELF-MATCH-1** (catalogue). Fundamental fix is in
-the codegen: an inline `&`-constructed argument must not alias / clobber the
-`&mut self` receiver's storage so the post-call field writeback survives.
+match shape. The trigger is narrow: an inline `&`-constructed **payload-bearing**
+variant arg. Inline **unit** variant args (`&StreamEvent.SendRstStream`) and
+**bound-local** args (`let e = …; fsm.step(&e)`) both persist correctly —
+proven by `test_h2stream_probe_persist_after_bound_event` (GREEN) vs
+`…_after_let_underscore` / `…_after_match_discard` (inline, `@ignore`'d).
 
-**Gated:** the 6 multi-step unit tests + `property_h2stream_closed_rejects_
-every_event` + `regression_h2stream_idle_headers_open_vs_half_closed` are
-`@ignore`'d on MUTSELF-MATCH-1. The single-step transition tests (return-value)
-+ ADT + §5.1.1 id-allocation cover the rest (27 GREEN).
+**Fix discipline (applied):** bind a payload-bearing event to a local before
+passing it to a `&mut self` method — `let e = StreamEvent.X { … }; fsm.step(&e)`.
+With this discipline the **full multi-step FSM suite is GREEN** (open→half-closed
+→closed paths, closed-absorbing, RST-closes); only the two explicit inline-event
+probes stay `@ignore`'d to pin the defect itself. The fundamental codegen fix
+(inline `&`-payload-variant arg must not clobber the `&mut self` receiver
+writeback) remains tracked as **MUTSELF-MATCH-1** (catalogue §13).
 
 ## 4. Action items landed in this branch
 
-* `unit_test.vr` — construction/accessors; every Idle out-edge
-  (return-value validated); StreamState/StreamTransitionError ADT;
-  §5.1.1 id allocation. 6 multi-step tests `@ignore`'d on
-  MUTSELF-MATCH-1.
-* `property_test.vr` — RST-closes from the 5 non-terminal states
-  (parameter-event path), client-id-odd / strictly-increasing,
-  server-id-even (parity-correct seeds). `closed_rejects_every_event`
-  `@ignore`'d on MUTSELF-MATCH-1.
-* `regression_test.vr` — closed-absorbing + id-parity pins;
-  `idle_headers_open_vs_half_closed` (state-after-step) `@ignore`'d.
-* Net: **27 GREEN, 8 `@ignore`'d** under `--interp`.
+* `unit_test.vr` — construction/accessors; every Idle out-edge; the full
+  Open→half-closed→Closed data path + RST + Closed-absorbing (bound-event
+  discipline); StreamState/StreamTransitionError ADT; §5.1.1 id allocation.
+  Plus a GREEN bound-event persistence probe + 2 `@ignore`'d inline-event
+  probes pinning MUTSELF-MATCH-1.
+* `property_test.vr` — RST-closes from the 5 non-terminal states,
+  closed-rejects-every-event (bound setup), client-id-odd /
+  strictly-increasing, server-id-even (parity-correct seeds).
+* `regression_test.vr` — idle-headers open-vs-half-closed (state-after-step),
+  closed-absorbing, id-parity pins.
+* Net: **33 GREEN, 2 `@ignore`'d** (the inline-event MUTSELF-MATCH-1 probes).
 
 ## 5. Action items deferred
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| MUTSELF-MATCH-1 codegen fix — un-gates the 8 multi-step tests | compiler | multi-day (catalogue) |
+| MUTSELF-MATCH-1 codegen fix — un-gates the 2 inline-event probes | compiler | multi-day (catalogue §13) |
 | Flow-control window accounting integration with stream FSM | stdlib + tests | gated on mod.vr |
 | Per-state full event matrix (8×7 exhaustive legality table) | this folder | 2h, gated on MUTSELF-MATCH-1 |

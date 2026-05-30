@@ -70,15 +70,17 @@ fn all_events() -> List<StreamEvent> {
     ]
 }
 
-@ignore("MUTSELF-MATCH-1: multi-step FSM needs persisted self.state across step() calls; inline payload-event step corrupts the writeback. See audit.md §3.1.")
 @test
 fn property_h2stream_closed_rejects_every_event() {
+    // Setup events bound to locals (MUTSELF-MATCH-1 fix discipline, catalogue §13).
     let events = all_events();
+    let e_open = StreamEvent.SendHeaders { end_stream: false };
+    let rst = StreamEvent.SendRstStream;
     let mut i = 0;
     while i < events.len() {
         let mut fsm = StreamFsm.new(1_u32);
-        let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
-        let _ = fsm.step(&StreamEvent.SendRstStream);   // → Closed
+        let _ = fsm.step(&e_open);
+        let _ = fsm.step(&rst);   // → Closed
         match fsm.step(&events[i]) {
             Ok(_)  => panic("Closed must reject all events"),
             Err(e) => assert(e is StreamTransitionError.InvalidTransition),
