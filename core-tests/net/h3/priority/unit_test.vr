@@ -1,0 +1,60 @@
+// =============================================================================
+// core-tests/net/h3/priority/unit_test.vr — RFC 9218 Extensible Priorities
+// =============================================================================
+//
+// `core/net/h3/priority.vr`:
+//
+//   * DEFAULT_URGENCY = 3, MAX_URGENCY = 7 (RFC 9218 §4.1 urgency 0..7).
+//   * PRIORITY_UPDATE_REQUEST / _PUSH frame types (RFC 9218 §7.1).
+// =============================================================================
+
+mount core.net.h3.priority.{
+    DEFAULT_URGENCY, MAX_URGENCY, PRIORITY_UPDATE_REQUEST, PRIORITY_UPDATE_PUSH
+};
+
+// =============================================================================
+// Section 1: urgency (RFC 9218 §4.1)
+// =============================================================================
+
+@test
+fn test_h3prio_default_urgency_3() {
+    // RFC 9218 §4.1: the default urgency is 3 (mid-range of 0..7).
+    assert_eq(DEFAULT_URGENCY, 3_u8);
+}
+
+@test
+fn test_h3prio_max_urgency_7() {
+    // Urgency is a 3-bit value, 0 (highest priority) .. 7 (lowest).
+    assert_eq(MAX_URGENCY, 7_u8);
+}
+
+@test
+fn test_h3prio_default_within_range() {
+    assert(DEFAULT_URGENCY <= MAX_URGENCY);
+}
+
+@test
+fn test_h3prio_max_urgency_fits_3_bits() {
+    assert(MAX_URGENCY <= 7_u8);
+}
+
+// =============================================================================
+// Section 2: PRIORITY_UPDATE frame types (RFC 9218 §7.1)
+// =============================================================================
+
+@test
+fn test_h3prio_update_request_0xf0700() {
+    assert_eq(PRIORITY_UPDATE_REQUEST, 0xF0700_u64);
+}
+
+@test
+fn test_h3prio_update_push_0xf0701() {
+    assert_eq(PRIORITY_UPDATE_PUSH, 0xF0701_u64);
+}
+
+@test
+fn test_h3prio_update_request_push_distinct() {
+    assert(!(PRIORITY_UPDATE_REQUEST == PRIORITY_UPDATE_PUSH));
+}
+
+fn main() {}

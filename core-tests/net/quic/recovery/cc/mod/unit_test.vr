@@ -1,0 +1,59 @@
+// =============================================================================
+// core-tests/net/quic/recovery/cc/mod/unit_test.vr — RFC 9002 §7
+// =============================================================================
+//
+// `core/net/quic/recovery/cc/mod.vr`:
+//
+//   * MAX_DATAGRAM_SIZE = 1200, INITIAL_WINDOW_BYTES = 10×, MIN_WINDOW = 2×,
+//     LOSS_REDUCTION_FACTOR = 1/2 (RFC 9002 §7.2/§7.3.2).
+// =============================================================================
+
+mount core.net.quic.recovery.cc.mod.{
+    MAX_DATAGRAM_SIZE, INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES,
+    LOSS_REDUCTION_FACTOR_NUM, LOSS_REDUCTION_FACTOR_DEN
+};
+
+// =============================================================================
+// Section 1: congestion-window constants (RFC 9002 §7.2)
+// =============================================================================
+
+@test
+fn test_qccmod_max_datagram_1200() {
+    assert_eq(MAX_DATAGRAM_SIZE, 1200_u32);
+}
+
+@test
+fn test_qccmod_initial_window_12000() {
+    // RFC 9002 §7.2: initial window = 10 × max_datagram_size = 12000.
+    assert_eq(INITIAL_WINDOW_BYTES, 12000_u32);
+}
+
+@test
+fn test_qccmod_min_window_2400() {
+    // §7.2: minimum window = 2 × max_datagram_size = 2400.
+    assert_eq(MIN_WINDOW_BYTES, 2400_u32);
+}
+
+@test
+fn test_qccmod_loss_reduction_one_half() {
+    // §7.3.2: on congestion, cwnd is halved (β = 1/2).
+    assert_eq(LOSS_REDUCTION_FACTOR_NUM, 1_u32);
+    assert_eq(LOSS_REDUCTION_FACTOR_DEN, 2_u32);
+}
+
+@test
+fn test_qccmod_initial_is_10x_datagram() {
+    assert_eq(INITIAL_WINDOW_BYTES, 10_u32 * MAX_DATAGRAM_SIZE);
+}
+
+@test
+fn test_qccmod_min_is_2x_datagram() {
+    assert_eq(MIN_WINDOW_BYTES, 2_u32 * MAX_DATAGRAM_SIZE);
+}
+
+@test
+fn test_qccmod_initial_exceeds_min() {
+    assert(INITIAL_WINDOW_BYTES > MIN_WINDOW_BYTES);
+}
+
+fn main() {}
