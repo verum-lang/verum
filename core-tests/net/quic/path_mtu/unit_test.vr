@@ -1,0 +1,59 @@
+// =============================================================================
+// core-tests/net/quic/path_mtu/unit_test.vr — RFC 8899 DPLPMTUD (QUIC §14)
+// =============================================================================
+//
+// `core/net/quic/path_mtu.vr`:
+//
+//   * PLPMTU size constants (BASE/ETHERNET/JUMBO/MAX) + MAX_PROBES +
+//     RAISE_TIMER_SECS (RFC 8899 / RFC 9000 §14).
+// =============================================================================
+
+mount core.net.quic.path_mtu.{
+    BASE_PLPMTU, ETHERNET_PLPMTU, JUMBO_PLPMTU, MAX_PLPMTU,
+    MAX_PROBES, RAISE_TIMER_SECS
+};
+
+// =============================================================================
+// Section 1: PLPMTU size constants (RFC 9000 §14 / RFC 8899)
+// =============================================================================
+
+@test
+fn test_qmtu_base_1200() {
+    // RFC 9000 §14: QUIC requires a minimum path MTU of 1200 bytes.
+    assert_eq(BASE_PLPMTU, 1200);
+}
+
+@test
+fn test_qmtu_ethernet_1452() {
+    // 1500 Ethernet MTU − 20 (IPv4) − 8 (UDP) = 1472; v6 − 40 − 8 = 1452.
+    assert_eq(ETHERNET_PLPMTU, 1452);
+}
+
+@test
+fn test_qmtu_jumbo_9000() { assert_eq(JUMBO_PLPMTU, 9000); }
+
+@test
+fn test_qmtu_max_65527() {
+    // Max UDP payload over IPv6 (65535 − 8).
+    assert_eq(MAX_PLPMTU, 65527);
+}
+
+// =============================================================================
+// Section 2: probe/timer constants + monotonic ladder
+// =============================================================================
+
+@test
+fn test_qmtu_max_probes_3() { assert_eq(MAX_PROBES, 3); }
+
+@test
+fn test_qmtu_raise_timer_600() { assert_eq(RAISE_TIMER_SECS, 600); }
+
+@test
+fn test_qmtu_size_ladder_monotonic() {
+    // BASE < ETHERNET < JUMBO < MAX — the DPLPMTUD search ladder.
+    assert(BASE_PLPMTU < ETHERNET_PLPMTU);
+    assert(ETHERNET_PLPMTU < JUMBO_PLPMTU);
+    assert(JUMBO_PLPMTU < MAX_PLPMTU);
+}
+
+fn main() {}
