@@ -1,0 +1,45 @@
+// =============================================================================
+// core-tests/net/quic/idle_timeout/unit_test.vr — RFC 9000 §10.1
+// =============================================================================
+//
+// `core/net/quic/idle_timeout.vr`:
+//
+//   * IdleTimeoutError 1-variant (AlreadyExpired) + Eq.
+//   * TickResult 2-variant (Active(Duration) / Expired) — the Expired leg
+//     (the connection-MUST-close signal, §10.1).
+// =============================================================================
+
+mount core.net.quic.idle_timeout.{IdleTimeoutError, TickResult};
+
+// =============================================================================
+// Section 1: IdleTimeoutError
+// =============================================================================
+
+@test
+fn test_qidle_already_expired_variant() {
+    let e = IdleTimeoutError.AlreadyExpired;
+    assert(e is IdleTimeoutError.AlreadyExpired);
+}
+
+@test
+fn test_qidle_already_expired_eq_reflexive() {
+    assert_eq(IdleTimeoutError.AlreadyExpired, IdleTimeoutError.AlreadyExpired);
+}
+
+// =============================================================================
+// Section 2: TickResult — Expired (§10.1: caller MUST close the connection)
+// =============================================================================
+
+@test
+fn test_qidle_tick_expired_variant() {
+    let r = TickResult.Expired;
+    assert(r is TickResult.Expired);
+}
+
+@test
+fn test_qidle_tick_expired_not_active() {
+    let r = TickResult.Expired;
+    assert(!(r is TickResult.Active));
+}
+
+fn main() {}
