@@ -1364,9 +1364,24 @@ implement<T> List<T> {
     public fn extend_from_slice(&mut self, slice: &[T])
     where T: Clone
     {
-        self.reserve(slice.len());
-        for item in slice.iter() {
-            self.push(item.clone());
+        // Index-by-value element access (`slice[i].clone()`) rather than
+        // `slice.iter()`.  A `SliceIter` stores the source slice in a
+        // struct field and yields elements via `&self.slice[front]`; that
+        // stored-slice element-REFERENCE derivation is wrong for a
+        // parameter slice whose provenance is NOT a List backing array —
+        // e.g. the FatRef produced by `Text.as_bytes()`.  Passing such a
+        // slice across the call boundary and iterating it SIGSEGVs
+        // (ENCODE-1: `encode_string(field.name.as_bytes(), …)` →
+        // `out.extend_from_slice(input)`).  Direct `slice[i].clone()`
+        // reads the bounds-checked element value by index, which is
+        // provenance-agnostic — same defensive rationale as the `.get(i)`
+        // routing in `starts_with` / `ends_with` / `append` (slice.vr §B.2).
+        let n = slice.len();
+        self.reserve(n);
+        let mut i: Int = 0;
+        while i < n {
+            self.push(slice[i].clone());
+            i = i + 1;
         }
     }
 
