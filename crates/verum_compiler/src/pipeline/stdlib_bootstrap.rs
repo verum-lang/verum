@@ -1541,6 +1541,13 @@ impl<'s> CompilationPipeline<'s> {
         // Import functions and protocols from previously compiled modules
         codegen.import_functions(&self.global_function_registry);
         codegen.import_protocols(&self.global_protocol_registry);
+        // D2b: seed this module's codegen with the field layouts of all
+        // record types compiled in earlier (dependency-ordered) modules,
+        // so cross-module record construction/read resolves positional
+        // field offsets via `type_field_layouts` instead of the
+        // non-positional global-intern fallback. Additive / first-wins —
+        // this module's own declarations (collected just below) always win.
+        codegen.import_type_layouts(&self.global_type_layout_registry);
 
         // Register stdlib intrinsic shortcuts so callers in this module's
         // bodies emit InlineSequence opcodes instead of Calls to the body
@@ -1775,6 +1782,17 @@ impl<'s> CompilationPipeline<'s> {
         let new_protocols = codegen.export_protocols();
         for (name, info) in new_protocols {
             self.global_protocol_registry.entry(name).or_insert(info);
+        }
+
+        // D2b: publish this module's record field layouts into the global
+        // registry so subsequently-compiled modules can resolve its
+        // record types' positional field offsets. First-wins (a type is
+        // declared in exactly one module, so collisions only arise from
+        // sibling sum-type variants sharing a simple name — the
+        // descriptor path, made string-authoritative in the D2 fix,
+        // disambiguates those for registered types).
+        for (name, layout) in codegen.export_type_layouts() {
+            self.global_type_layout_registry.entry(name).or_insert(layout);
         }
 
         Ok((merged_vbc, total_func_count))

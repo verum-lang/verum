@@ -3030,6 +3030,40 @@ impl VbcCodegen {
         self.ctx.export_functions()
     }
 
+    /// Export this module's record field layouts (type-name → declared
+    /// field names in declaration order).  Companion to
+    /// `export_functions`, used by the stdlib bootstrap to build a
+    /// global type-layout registry so a later module's codegen can
+    /// resolve the field offsets of a record type defined in an
+    /// earlier-compiled module.  The map is TypeId-free (pure
+    /// name → positional-field-name list), so importing it cannot
+    /// perturb TypeId allocation or the descriptor tables.
+    pub fn export_type_layouts(&self) -> std::collections::HashMap<String, Vec<String>> {
+        self.type_field_layouts.clone()
+    }
+
+    /// Import record field layouts from a global registry (built by the
+    /// stdlib bootstrap from previously-compiled modules).  **Additive,
+    /// first-wins**: an entry is inserted ONLY when this codegen has no
+    /// layout for that type name yet, so a module's own
+    /// declaration-derived layout is NEVER overwritten.  This closes the
+    /// cross-module global-intern field-index subclass (D2b): without
+    /// it, a body that constructs/reads a record of a type defined in
+    /// another (non-mounted) module falls through `resolve_field_index`
+    /// to the global-intern fallback and writes non-positional indices.
+    /// With the layout present, the `type_field_layouts.get(tn)`
+    /// positional path resolves correctly.
+    pub fn import_type_layouts(
+        &mut self,
+        layouts: &std::collections::HashMap<String, Vec<String>>,
+    ) {
+        for (name, fields) in layouts {
+            self.type_field_layouts
+                .entry(name.clone())
+                .or_insert_with(|| fields.clone());
+        }
+    }
+
     /// Returns inferred variable-to-type-name mappings from the last compiled function.
     ///
 
