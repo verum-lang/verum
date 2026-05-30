@@ -1,0 +1,134 @@
+// =============================================================================
+// core-tests/net/h3/frame/unit_test.vr — RFC 9114 §7.2 / §11.2.1 frames
+// =============================================================================
+//
+// `core/net/h3/frame.vr`:
+//
+//   * FT_* frame-type IANA codepoints (§11.2.1) + SETTING_* parameter ids.
+//   * H3FrameError 3-variant ADT + Eq.
+//   * H3Frame stream-legality predicates (§6.1: control vs request stream).
+// =============================================================================
+
+mount core.net.h3.frame.{
+    H3Frame, H3FrameError,
+    FT_DATA, FT_HEADERS, FT_CANCEL_PUSH, FT_SETTINGS, FT_PUSH_PROMISE,
+    FT_GOAWAY, FT_MAX_PUSH_ID,
+    SETTING_QPACK_MAX_TABLE_CAPACITY, SETTING_MAX_FIELD_SECTION_SIZE,
+    SETTING_QPACK_BLOCKED_STREAMS, SETTING_ENABLE_CONNECT_PROTOCOL,
+    SETTING_H3_DATAGRAM
+};
+
+// =============================================================================
+// Section 1: frame-type codepoints (RFC 9114 §11.2.1)
+// =============================================================================
+
+@test
+fn test_h3frame_ft_data_0() { assert_eq(FT_DATA, 0x00_u64); }
+
+@test
+fn test_h3frame_ft_headers_1() { assert_eq(FT_HEADERS, 0x01_u64); }
+
+@test
+fn test_h3frame_ft_cancel_push_3() { assert_eq(FT_CANCEL_PUSH, 0x03_u64); }
+
+@test
+fn test_h3frame_ft_settings_4() { assert_eq(FT_SETTINGS, 0x04_u64); }
+
+@test
+fn test_h3frame_ft_push_promise_5() { assert_eq(FT_PUSH_PROMISE, 0x05_u64); }
+
+@test
+fn test_h3frame_ft_goaway_7() { assert_eq(FT_GOAWAY, 0x07_u64); }
+
+@test
+fn test_h3frame_ft_max_push_id_d() { assert_eq(FT_MAX_PUSH_ID, 0x0D_u64); }
+
+// =============================================================================
+// Section 2: SETTINGS parameter ids (RFC 9114 §7.2.4.1 + RFC 9220/9297)
+// =============================================================================
+
+@test
+fn test_h3frame_setting_qpack_max_table_capacity_1() { assert_eq(SETTING_QPACK_MAX_TABLE_CAPACITY, 0x01_u64); }
+
+@test
+fn test_h3frame_setting_max_field_section_size_6() { assert_eq(SETTING_MAX_FIELD_SECTION_SIZE, 0x06_u64); }
+
+@test
+fn test_h3frame_setting_qpack_blocked_streams_7() { assert_eq(SETTING_QPACK_BLOCKED_STREAMS, 0x07_u64); }
+
+@test
+fn test_h3frame_setting_enable_connect_protocol_8() { assert_eq(SETTING_ENABLE_CONNECT_PROTOCOL, 0x08_u64); }
+
+@test
+fn test_h3frame_setting_h3_datagram_0x33() { assert_eq(SETTING_H3_DATAGRAM, 0x33_u64); }
+
+// =============================================================================
+// Section 3: H3FrameError ADT
+// =============================================================================
+
+@test
+fn test_h3frame_error_truncated_eq() {
+    assert_eq(H3FrameError.Truncated, H3FrameError.Truncated);
+}
+
+@test
+fn test_h3frame_error_invalid_value_payload() {
+    assert_eq(H3FrameError.InvalidValue("x".into()), H3FrameError.InvalidValue("x".into()));
+}
+
+@test
+fn test_h3frame_error_variants_disjoint() {
+    assert(!(H3FrameError.Truncated == H3FrameError.VarintFailure));
+}
+
+// =============================================================================
+// Section 4: stream-legality predicates (RFC 9114 §6.1 / §7.1)
+// =============================================================================
+
+@test
+fn test_h3frame_settings_legal_on_control() {
+    let f = H3Frame.SettingsFrame([]);
+    assert(f.is_control_stream_legal());
+}
+
+@test
+fn test_h3frame_settings_illegal_on_request() {
+    let f = H3Frame.SettingsFrame([]);
+    assert(!f.is_request_stream_legal());
+}
+
+@test
+fn test_h3frame_data_legal_on_request() {
+    let f = H3Frame.DataFrame([]);
+    assert(f.is_request_stream_legal());
+}
+
+@test
+fn test_h3frame_data_illegal_on_control() {
+    let f = H3Frame.DataFrame([]);
+    assert(!f.is_control_stream_legal());
+}
+
+@test
+fn test_h3frame_goaway_legal_on_control() {
+    assert(H3Frame.GoawayFrame(4_u64).is_control_stream_legal());
+}
+
+@test
+fn test_h3frame_max_push_id_legal_on_control() {
+    assert(H3Frame.MaxPushIdFrame(10_u64).is_control_stream_legal());
+}
+
+@test
+fn test_h3frame_cancel_push_legal_on_control() {
+    assert(H3Frame.CancelPushFrame(0_u64).is_control_stream_legal());
+}
+
+@test
+fn test_h3frame_reserved_legal_on_both() {
+    let f = H3Frame.ReservedFrame { frame_type: 0x21_u64, payload: [] };
+    assert(f.is_control_stream_legal());
+    assert(f.is_request_stream_legal());
+}
+
+fn main() {}
