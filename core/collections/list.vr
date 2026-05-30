@@ -3007,13 +3007,29 @@ implement<T: Eq> Eq for List<T> {
         if self.len != other.len {
             return false;
         }
-        // Direct index-based comparison to avoid iterator type inference issues
-        for i in range(0, self.len) {
-            let a: &T = unsafe { &*self.ptr.offset(i) };
-            let b: &T = unsafe { &*other.ptr.offset(i) };
-            if !(*a == *b) {
-                return false;
+        // Route element reads through `self.get(i)` (runtime-intercepted to
+        // the canonical [len@0, cap@1, backing_ptr@2] layout) rather than the
+        // inline `unsafe { &*self.ptr.offset(i) }` raw-pointer access.  In a
+        // method body codegen resolves `self.ptr` to the heap-object START
+        // (not past `OBJECT_HEADER_SIZE`), so the raw form compared
+        // ObjectHeader bytes and returned `false` for EVERY non-empty list
+        // (LISTEQ-1: `assert_eq([1,2,3], [1,2,3])` failed; empty lists, which
+        // skip the loop, were the only ones that compared equal).  Same
+        // defensive `.get(i)` rationale as `append` / slice.vr §B.2.
+        let n = self.len;
+        let mut i: Int = 0;
+        while i < n {
+            match (self.get(i), other.get(i)) {
+                (Maybe.Some(a), Maybe.Some(b)) => {
+                    if !(a == b) {
+                        return false;
+                    }
+                }
+                _ => {
+                    return false;
+                }
             }
+            i = i + 1;
         }
         true
     }
@@ -3023,12 +3039,20 @@ implement<T: Eq> Eq for List<T> {
         if self.len != other.len {
             return true;
         }
-        for i in range(0, self.len) {
-            let a: &T = unsafe { &*self.ptr.offset(i) };
-            let b: &T = unsafe { &*other.ptr.offset(i) };
-            if !(*a == *b) {
-                return true;
+        let n = self.len;
+        let mut i: Int = 0;
+        while i < n {
+            match (self.get(i), other.get(i)) {
+                (Maybe.Some(a), Maybe.Some(b)) => {
+                    if !(a == b) {
+                        return true;
+                    }
+                }
+                _ => {
+                    return true;
+                }
             }
+            i = i + 1;
         }
         false
     }
