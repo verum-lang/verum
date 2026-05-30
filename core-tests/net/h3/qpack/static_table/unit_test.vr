@@ -1,0 +1,50 @@
+// =============================================================================
+// core-tests/net/h3/qpack/static_table/unit_test.vr — RFC 9204 Appendix A
+// =============================================================================
+//
+// `core/net/h3/qpack/static_table.vr`:
+//
+//   * STATIC_TABLE_SIZE == 99.
+//   * get(index) is 0-indexed (RFC 9204 §3.1, unlike HPACK's 1-indexing);
+//     index < 0 or >= 99 yields None.
+// =============================================================================
+
+mount core.net.h3.qpack.static_table.{STATIC_TABLE_SIZE, get};
+
+// =============================================================================
+// Section 1: table size + 0-indexed bounds (RFC 9204 §3.1)
+// =============================================================================
+
+@test
+fn test_qpackst_size_is_99() {
+    assert_eq(STATIC_TABLE_SIZE, 99);
+}
+
+@test
+fn test_qpackst_index_negative_is_none() {
+    assert(get(-1) is Maybe.None);
+}
+
+@test
+fn test_qpackst_index_0_is_some() {
+    // QPACK is 0-indexed (RFC 9204 §3.1) — index 0 is a valid entry.
+    assert(get(0) is Maybe.Some);
+}
+
+@test
+fn test_qpackst_last_index_98_is_some() {
+    assert(get(98) is Maybe.Some);
+}
+
+@test
+fn test_qpackst_index_99_is_none() {
+    // One past the end (size == 99 → valid 0..=98).
+    assert(get(99) is Maybe.None);
+}
+
+@test
+fn test_qpackst_index_size_is_none() {
+    assert(get(STATIC_TABLE_SIZE) is Maybe.None);
+}
+
+fn main() {}

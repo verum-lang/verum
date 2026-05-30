@@ -1,0 +1,39 @@
+// =============================================================================
+// core-tests/net/quic/recovery/pn_space/unit_test.vr — RFC 9000 §12.3
+// =============================================================================
+//
+// `core/net/quic/recovery/pn_space.vr`:
+//
+//   * PnSpaceKind 3-variant (Initial/Handshake/Application) + as_index
+//     (RFC 9000 §12.3: three separate packet-number spaces).
+// =============================================================================
+
+mount core.net.quic.recovery.pn_space.{PnSpaceKind};
+
+// =============================================================================
+// Section 1: as_index (RFC 9000 §12.3)
+// =============================================================================
+
+@test
+fn test_qpns_initial_index_0() { assert_eq(PnSpaceKind.Initial.as_index(), 0); }
+
+@test
+fn test_qpns_handshake_index_1() { assert_eq(PnSpaceKind.Handshake.as_index(), 1); }
+
+@test
+fn test_qpns_application_index_2() { assert_eq(PnSpaceKind.Application.as_index(), 2); }
+
+@test
+fn test_qpns_indices_pairwise_distinct() {
+    assert(!(PnSpaceKind.Initial.as_index() == PnSpaceKind.Handshake.as_index()));
+    assert(!(PnSpaceKind.Initial.as_index() == PnSpaceKind.Application.as_index()));
+    assert(!(PnSpaceKind.Handshake.as_index() == PnSpaceKind.Application.as_index()));
+}
+
+@test
+fn test_qpns_indices_within_3_spaces() {
+    assert(PnSpaceKind.Initial.as_index() >= 0);
+    assert(PnSpaceKind.Application.as_index() < 3);
+}
+
+fn main() {}
