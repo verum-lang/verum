@@ -1,0 +1,66 @@
+// =============================================================================
+// core-tests/net/quic/recovery/cc/bbr/unit_test.vr — BBR pacing/cwnd gains
+// =============================================================================
+//
+// `core/net/quic/recovery/cc/bbr.vr`:
+//
+//   * BBR gain constants (Cardwell et al. / draft-cardwell-iccrg-bbr):
+//     HIGH_GAIN, DRAIN_GAIN, CRUISE_GAIN, PROBE_UP/DOWN, STARTUP thresholds.
+//   * (Duration-typed window constants are covered separately — NEWTYPE-UNBOX-1.)
+// =============================================================================
+
+mount core.net.quic.recovery.cc.bbr.{
+    HIGH_GAIN, DRAIN_GAIN, CRUISE_GAIN, PROBE_UP_GAIN, PROBE_DOWN_GAIN,
+    STARTUP_FULL_BW_THRESH, STARTUP_FULL_BW_COUNT
+};
+
+// =============================================================================
+// Section 1: gain constants
+// =============================================================================
+
+@test
+fn test_qbbr_high_gain_2_885() {
+    // 2/ln(2) ≈ 2.885 — the startup gain that doubles cwnd each RTT.
+    assert_eq(HIGH_GAIN, 2.885_f64);
+}
+
+@test
+fn test_qbbr_drain_gain_0_346() {
+    // 1/HIGH_GAIN ≈ 0.346 — drains the queue built during startup.
+    assert_eq(DRAIN_GAIN, 0.346_f64);
+}
+
+@test
+fn test_qbbr_cruise_gain_1() { assert_eq(CRUISE_GAIN, 1.0_f64); }
+
+@test
+fn test_qbbr_probe_up_gain_1_25() { assert_eq(PROBE_UP_GAIN, 1.25_f64); }
+
+@test
+fn test_qbbr_probe_down_gain_0_75() { assert_eq(PROBE_DOWN_GAIN, 0.75_f64); }
+
+@test
+fn test_qbbr_startup_full_bw_thresh_1_25() { assert_eq(STARTUP_FULL_BW_THRESH, 1.25_f64); }
+
+@test
+fn test_qbbr_startup_full_bw_count_3() { assert_eq(STARTUP_FULL_BW_COUNT, 3_u32); }
+
+// =============================================================================
+// Section 2: gain relationships
+// =============================================================================
+
+@test
+fn test_qbbr_high_gain_above_cruise() {
+    // Startup probes aggressively (HIGH > CRUISE > DRAIN).
+    assert(HIGH_GAIN > CRUISE_GAIN);
+    assert(CRUISE_GAIN > DRAIN_GAIN);
+}
+
+@test
+fn test_qbbr_probe_gains_straddle_unity() {
+    // ProbeBW cycles above and below the cruise rate.
+    assert(PROBE_UP_GAIN > 1.0_f64);
+    assert(PROBE_DOWN_GAIN < 1.0_f64);
+}
+
+fn main() {}
