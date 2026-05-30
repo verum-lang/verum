@@ -277,3 +277,38 @@ caller sites — deferred to a focused follow-up commit.
 
 1 sampled test (`test_zero_is_zero_nanos`) confirmed green 2026-05-27
 in 27.7s.  4 lock-in `regression_test.vr` tests validated 2026-05-27.
+
+## §H — Duration `+`/`-`/`*`/`/` operators produce WRONG values (pre-existing, 2026-05-30)
+
+The "complete" status above is **FALSE under the current binary** — the
+same stale-green hazard that masked `instant` §D. Running the operator
+suite under `--interp`:
+
+```
+24 passed; 11 failed  (filter `operator`, mixed modules)
+unit_test::test_add_operator              FAILED  AssertionFailed left != right
+unit_test::test_sub_operator_signed       FAILED
+unit_test::test_mul_operator              FAILED
+unit_test::test_div_operator              FAILED
+unit_test::test_add_operator_duration     FAILED
+regression_test::regression_c_sub_operator_returns_signed_result   FAILED
+regression_test::regression_c_mul_operator_negative_scalar_flips_sign FAILED
+```
+
+These fail with `AssertionFailed: left != right` (the operator runs but
+yields a value that does not compare equal to the expected `Duration`),
+**not** a dispatch panic — confirmed PRE-EXISTING (fails identically on
+the pre-§D-fix binary). Root cause is the **§G single-field-record
+boxed-vs-unboxed mismatch**: `Duration.secs(1)` (intrinsic ctor) is an
+**unboxed** nanos `Int`, but `d1 + d2` via the `Add` protocol body
+(`core/time/duration.vr`) heap-**boxes** the result — so `(d1+d2)` and
+the unboxed `Duration.secs(3)` literal are not bit-equal and `assert_eq`
+fails. Same family as `instant` §E and memory
+`[[duration_single_field_record_unboxing_2026-05-27]]`.
+
+A naive codegen fix (classify the unboxed time types as integer-primitive
+in `compile_binary` so `+`/`-` lower to `BinaryI`) was attempted and
+**reverted**: it gained 2 `instant` tests but did not close the Duration
+operator failures and is too broad to ship unverified. The real fix is
+the foundational single-field-record-transparency rework — see
+`core-tests/time/instant/audit.md §E` and task tracker.
