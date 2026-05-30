@@ -1,0 +1,42 @@
+// =============================================================================
+// core-tests/net/quic/stateless_reset/unit_test.vr — RFC 9000 §10.3
+// =============================================================================
+//
+// `core/net/quic/stateless_reset.vr`:
+//
+//   * STATELESS_RESET_MIN_SIZE == 21 (token + 5 bytes minimum, §10.3).
+//   * STATELESS_RESET_RECOMMENDED_SIZE == 59 (43 + 16-byte token).
+// =============================================================================
+
+mount core.net.quic.stateless_reset.{
+    STATELESS_RESET_MIN_SIZE, STATELESS_RESET_RECOMMENDED_SIZE
+};
+
+// =============================================================================
+// Section 1: size constants (RFC 9000 §10.3)
+// =============================================================================
+
+@test
+fn test_qsr_min_size_21() {
+    // RFC 9000 §10.3: a stateless reset is at least 21 bytes (5 + 16-byte token).
+    assert_eq(STATELESS_RESET_MIN_SIZE, 21);
+}
+
+@test
+fn test_qsr_recommended_size_59() {
+    // 43 random bytes + 16-byte reset token.
+    assert_eq(STATELESS_RESET_RECOMMENDED_SIZE, 59);
+}
+
+@test
+fn test_qsr_recommended_exceeds_min() {
+    assert(STATELESS_RESET_RECOMMENDED_SIZE > STATELESS_RESET_MIN_SIZE);
+}
+
+@test
+fn test_qsr_min_size_holds_16_byte_token() {
+    // The minimum must leave room for the 16-byte reset token.
+    assert(STATELESS_RESET_MIN_SIZE >= 16);
+}
+
+fn main() {}

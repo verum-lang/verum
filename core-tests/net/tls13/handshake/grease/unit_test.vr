@@ -1,0 +1,67 @@
+// =============================================================================
+// core-tests/net/tls13/handshake/grease/unit_test.vr — RFC 8701 GREASE
+// =============================================================================
+//
+// `core/net/tls13/handshake/grease.vr`:
+//
+//   * is_grease(code) — true iff code is a reserved 0x?A?A GREASE codepoint
+//     (low byte == high byte, low nibble of each == 0xA).
+//   * pick_grease(entropy) — deterministically maps to one of the 16 GREASE
+//     codepoints (always a GREASE value).
+// =============================================================================
+
+mount core.net.tls13.handshake.grease.{is_grease, pick_grease};
+
+// =============================================================================
+// Section 1: is_grease positive (RFC 8701)
+// =============================================================================
+
+@test
+fn test_tls13grease_0a0a_is_grease() { assert(is_grease(0x0A0A_u16)); }
+
+@test
+fn test_tls13grease_1a1a_is_grease() { assert(is_grease(0x1A1A_u16)); }
+
+@test
+fn test_tls13grease_7a7a_is_grease() { assert(is_grease(0x7A7A_u16)); }
+
+@test
+fn test_tls13grease_fafa_is_grease() { assert(is_grease(0xFAFA_u16)); }
+
+// =============================================================================
+// Section 2: is_grease negative
+// =============================================================================
+
+@test
+fn test_tls13grease_cipher_suite_not_grease() {
+    // 0x1301 (TLS_AES_128_GCM_SHA256) is a real codepoint, not GREASE.
+    assert(!is_grease(0x1301_u16));
+}
+
+@test
+fn test_tls13grease_mismatched_bytes_not_grease() {
+    // lo != hi → not GREASE.
+    assert(!is_grease(0x0A0B_u16));
+}
+
+@test
+fn test_tls13grease_wrong_low_nibble_not_grease() {
+    // lo == hi but low nibble is B, not A → not GREASE.
+    assert(!is_grease(0x0B0B_u16));
+}
+
+// =============================================================================
+// Section 3: pick_grease always yields a GREASE codepoint
+// =============================================================================
+
+@test
+fn test_tls13grease_pick_is_grease() {
+    let entropies: List<UInt64> = [0_u64, 1_u64, 7_u64, 15_u64, 16_u64, 1000_u64, 123456789_u64];
+    let mut i = 0;
+    while i < entropies.len() {
+        assert(is_grease(pick_grease(entropies[i])));
+        i = i + 1;
+    }
+}
+
+fn main() {}
