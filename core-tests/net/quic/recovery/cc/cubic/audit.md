@@ -18,7 +18,7 @@ CUBIC_FAST_CONV_FACTOR=0.85 (§4.7 = (1+β)/2) are RFC 9438 verbatim, with the
 
 ## 3. Language-implementation findings
 
-### §3.1 FLOATCONST-CMP-1 — `<` between two no-suffix `Float` consts mis-compares (OPEN)
+### §3.1 FLOATCONST-CMP-1 — `<` between two no-suffix `Float` consts mis-compares (CLOSED 2026-05-30)
 
 `CUBIC_BETA < CUBIC_FAST_CONV_FACTOR` (0.7 < 0.85) returns **false**, even
 though `assert_eq(CUBIC_BETA, 0.7_f64)` and `assert_eq(CUBIC_FAST_CONV_FACTOR,

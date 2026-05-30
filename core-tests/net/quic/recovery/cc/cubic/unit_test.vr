@@ -43,10 +43,12 @@ fn test_qcubic_fast_conv_below_one() {
     assert(CUBIC_FAST_CONV_FACTOR < 1.0_f64);
 }
 
-@ignore("FLOATCONST-CMP-1: `<` between two no-suffix-declared Float consts mis-compares (0.7 < 0.85 returns false) though both `==` pins pass and `0.85 < 1.0` passes. See audit.md section 3.1.")
 @test
 fn test_qcubic_beta_below_fast_conv() {
-    // β (0.7) < fast-convergence factor (0.85).
+    // β (0.7) < fast-convergence factor (0.85). Regression for FLOATCONST-CMP-1:
+    // an ordered compare between two cross-module no-suffix Float consts must
+    // select CmpF (fixed by the const-return-type fallback in
+    // infer_expr_type_kind — registers/return_type_name).
     assert(CUBIC_BETA < CUBIC_FAST_CONV_FACTOR);
 }
 
