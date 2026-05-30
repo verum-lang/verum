@@ -21,25 +21,31 @@ mount core.sys.windows.time.{
 mount core.sys.windows.kernel32.{INFINITE};
 
 // =============================================================================
-// NEWTYPE-UNBOX-2 — WindowsDuration produced by `.add()` then read via an
-// intrinsic accessor (`as_millis`) mis-reads.
+// NEWTYPE-UNBOX-1 — a Map-retrieved single-field WindowsDuration, used inside
+// the binding match arm, corrupts control flow.
 // =============================================================================
 //
-// `WindowsDuration is (UInt64)` is a single-field newtype. A value produced by
-// the user `add` body is heap-boxed, but the `as_millis`/`as_secs` intrinsic
-// inline sequence expects an unboxed nanos Int — so `total.add(d).as_millis()`
-// returns the wrong value (observed: the test exits with the raw nanos
-// 500_000_000 instead of 500 ms). Reading `.as_nanos()` (field `.0`) works.
-// Same class as the core Duration unboxing defect
-// (memory: duration_single_field_record_unboxing_2026-05-27). Deep fix is VBC
-// codegen newtype-boxing parity. Pinned until then; integration_test.vr sums
-// raw nanos as the working idiom.
-@ignore("NEWTYPE-UNBOX-2: WindowsDuration.add().as_millis() mis-reads (single-field newtype boxing). See audit.md.")
+// `WindowsDuration is (UInt64)` is a single-field newtype. Retrieving one from
+// a `Map` and using the match-bound value (`d.as_nanos()` or `total.add(d)`)
+// corrupts: the test "exits" with the raw inner value (e.g. 100_000_000)
+// instead of completing. CONFIRMED reproducible in isolation. The simpler
+// `a.add(b).as_millis()` form (no Map / single-candidate closure) does NOT
+// reproduce — this defect is import-closure / collection-retrieval-sensitive
+// (see defect-class-catalogue.md §12 "Closure-dependence"). Same family as the
+// core Duration single-field-record unboxing defect (2026-05-27). Deep fix is
+// VBC codegen newtype boxing/unboxing parity (task #3). Pinned until then;
+// integration_test.vr also @ignore's the Map-sum form.
+@ignore("NEWTYPE-UNBOX-1: Map-retrieved WindowsDuration used in a match arm corrupts control flow. See audit.md + catalogue §12.")
 @test
-fn wx_time_reg_add_then_as_millis_newtype_unbox() {
-    let a = WindowsDuration.from_millis(100_u64);
-    let b = WindowsDuration.from_millis(400_u64);
-    assert_eq(a.add(b).as_millis(), 500_u64);
+fn wx_time_reg_map_retrieved_newtype_use() {
+    let mut budget: Map<Text, WindowsDuration> = Map.new();
+    let _ = budget.insert("a", WindowsDuration.from_millis(100_u64));
+    let mut total = WindowsDuration.zero();
+    match budget.get(&"a") {
+        Maybe.Some(d) => total = total.add(d),
+        Maybe.None => assert(false, "a present"),
+    }
+    assert_eq(total.as_millis(), 100_u64);
 }
 
 // =============================================================================
