@@ -1,0 +1,83 @@
+// =============================================================================
+// core-tests/net/http2/settings/unit_test.vr — RFC 7540 §6.5.2 / RFC 9113
+// =============================================================================
+//
+// `core/net/http2/settings.vr`:
+//
+//   * SettingId 6 well-known parameter ids + DEFAULT_* initial values +
+//     MAX/MIN frame-size + window bounds.
+// =============================================================================
+
+mount core.net.http2.settings.{
+    SettingId,
+    DEFAULT_HEADER_TABLE_SIZE, DEFAULT_ENABLE_PUSH,
+    DEFAULT_MAX_CONCURRENT_STREAMS, DEFAULT_INITIAL_WINDOW_SIZE,
+    DEFAULT_MAX_FRAME_SIZE, DEFAULT_MAX_HEADER_LIST_SIZE,
+    MAX_INITIAL_WINDOW_SIZE, MIN_MAX_FRAME_SIZE, MAX_MAX_FRAME_SIZE
+};
+
+// =============================================================================
+// Section 1: SettingId parameter ids (RFC 7540 §6.5.2 / RFC 9113 §6.5)
+// =============================================================================
+
+@test
+fn test_h2set_header_table_size_1() { assert_eq(SettingId.HEADER_TABLE_SIZE, 0x1_u16); }
+
+@test
+fn test_h2set_enable_push_2() { assert_eq(SettingId.ENABLE_PUSH, 0x2_u16); }
+
+@test
+fn test_h2set_max_concurrent_streams_3() { assert_eq(SettingId.MAX_CONCURRENT_STREAMS, 0x3_u16); }
+
+@test
+fn test_h2set_initial_window_size_4() { assert_eq(SettingId.INITIAL_WINDOW_SIZE, 0x4_u16); }
+
+@test
+fn test_h2set_max_frame_size_5() { assert_eq(SettingId.MAX_FRAME_SIZE, 0x5_u16); }
+
+@test
+fn test_h2set_max_header_list_size_6() { assert_eq(SettingId.MAX_HEADER_LIST_SIZE, 0x6_u16); }
+
+// =============================================================================
+// Section 2: default initial values (RFC 7540 §6.5.2)
+// =============================================================================
+
+@test
+fn test_h2set_default_header_table_size_4096() { assert_eq(DEFAULT_HEADER_TABLE_SIZE, 4096_u32); }
+
+@test
+fn test_h2set_default_enable_push_1() { assert_eq(DEFAULT_ENABLE_PUSH, 1_u32); }
+
+@test
+fn test_h2set_default_initial_window_size_65535() { assert_eq(DEFAULT_INITIAL_WINDOW_SIZE, 65535_u32); }
+
+@test
+fn test_h2set_default_max_frame_size_16384() { assert_eq(DEFAULT_MAX_FRAME_SIZE, 16384_u32); }
+
+// =============================================================================
+// Section 3: frame-size + window bounds (RFC 7540 §6.5.2)
+// =============================================================================
+
+@test
+fn test_h2set_min_max_frame_size_16384() {
+    // SETTINGS_MAX_FRAME_SIZE lower bound is 2^14.
+    assert_eq(MIN_MAX_FRAME_SIZE, 16384_u32);
+}
+
+@test
+fn test_h2set_max_max_frame_size_16777215() {
+    // Upper bound is 2^24-1.
+    assert_eq(MAX_MAX_FRAME_SIZE, 16777215_u32);
+}
+
+@test
+fn test_h2set_max_initial_window_size_2pow31_minus_1() {
+    assert_eq(MAX_INITIAL_WINDOW_SIZE, 2147483647_u32);
+}
+
+@test
+fn test_h2set_frame_size_bounds_ordered() {
+    assert(MIN_MAX_FRAME_SIZE < MAX_MAX_FRAME_SIZE);
+}
+
+fn main() {}
