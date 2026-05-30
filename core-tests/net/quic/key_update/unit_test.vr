@@ -1,0 +1,90 @@
+// =============================================================================
+// core-tests/net/quic/key_update/unit_test.vr — RFC 9001 §6.6 AEAD limits
+// =============================================================================
+//
+// `core/net/quic/key_update.vr`:
+//
+//   * confidentiality_limit(&AeadKind) — RFC 9001 §6.6 Table 1 (max protected
+//     packets before a key update is required).
+//   * integrity_limit(&AeadKind) — §6.6 Table 3 (max integrity failures before
+//     keys MUST be discarded).
+// =============================================================================
+
+mount core.net.quic.key_update.{confidentiality_limit, integrity_limit};
+mount core.net.tls13.cipher_suite.{AeadKind};
+
+// =============================================================================
+// Section 1: confidentiality limits (RFC 9001 §6.6 Table 1)
+// =============================================================================
+
+@test
+fn test_qku_conf_aes128gcm_2pow23() {
+    let a = AeadKind.Aes128Gcm;
+    assert_eq(confidentiality_limit(&a), 8388608_u64);   // 2^23
+}
+
+@test
+fn test_qku_conf_aes256gcm_2pow23() {
+    let a = AeadKind.Aes256Gcm;
+    assert_eq(confidentiality_limit(&a), 8388608_u64);   // 2^23
+}
+
+@test
+fn test_qku_conf_chacha20_effectively_unlimited() {
+    let a = AeadKind.ChaCha20Poly1305;
+    assert_eq(confidentiality_limit(&a), 18446744073709551615_u64);   // 2^64-1
+}
+
+@test
+fn test_qku_conf_aes128ccm8_2pow21() {
+    let a = AeadKind.Aes128Ccm8;
+    assert_eq(confidentiality_limit(&a), 2097152_u64);   // 2^21
+}
+
+@test
+fn test_qku_conf_unknown_is_1() {
+    let a = AeadKind.Unknown;
+    assert_eq(confidentiality_limit(&a), 1_u64);
+}
+
+// =============================================================================
+// Section 2: integrity limits (RFC 9001 §6.6 Table 3)
+// =============================================================================
+
+@test
+fn test_qku_integ_aes128gcm_2pow52() {
+    let a = AeadKind.Aes128Gcm;
+    assert_eq(integrity_limit(&a), 4503599627370496_u64);   // 2^52
+}
+
+@test
+fn test_qku_integ_chacha20_2pow36() {
+    let a = AeadKind.ChaCha20Poly1305;
+    assert_eq(integrity_limit(&a), 68719476736_u64);   // 2^36
+}
+
+@test
+fn test_qku_integ_aes128ccm_2pow21() {
+    let a = AeadKind.Aes128Ccm;
+    assert_eq(integrity_limit(&a), 2097152_u64);   // 2^21
+}
+
+@test
+fn test_qku_integ_unknown_is_1() {
+    let a = AeadKind.Unknown;
+    assert_eq(integrity_limit(&a), 1_u64);
+}
+
+// =============================================================================
+// Section 3: safety relationship — confidentiality ≤ integrity for AES-GCM
+// =============================================================================
+
+@test
+fn test_qku_aesgcm_conf_below_integrity() {
+    // For AES-GCM the integrity limit (2^52) vastly exceeds the
+    // confidentiality limit (2^23) — RFC 9001 §6.6.
+    let a = AeadKind.Aes128Gcm;
+    assert(confidentiality_limit(&a) < integrity_limit(&a));
+}
+
+fn main() {}
