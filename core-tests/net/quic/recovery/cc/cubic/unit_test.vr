@@ -1,0 +1,53 @@
+// =============================================================================
+// core-tests/net/quic/recovery/cc/cubic/unit_test.vr — RFC 9438 CUBIC
+// =============================================================================
+//
+// `core/net/quic/recovery/cc/cubic.vr`:
+//
+//   * CUBIC_C = 0.4 (scaling constant), CUBIC_BETA = 0.7 (multiplicative
+//     decrease), CUBIC_FAST_CONV_FACTOR = 0.85 (fast convergence).
+// =============================================================================
+
+mount core.net.quic.recovery.cc.cubic.{CUBIC_C, CUBIC_BETA, CUBIC_FAST_CONV_FACTOR};
+
+// =============================================================================
+// Section 1: RFC 9438 constants
+// =============================================================================
+
+@test
+fn test_qcubic_c_0_4() {
+    // RFC 9438 §4.1: the CUBIC scaling constant C = 0.4.
+    assert_eq(CUBIC_C, 0.4_f64);
+}
+
+@test
+fn test_qcubic_beta_0_7() {
+    // RFC 9438 §4.6: multiplicative decrease factor β = 0.7.
+    assert_eq(CUBIC_BETA, 0.7_f64);
+}
+
+@test
+fn test_qcubic_fast_conv_0_85() {
+    // §4.7: fast-convergence factor = (1 + β)/2 = 0.85.
+    assert_eq(CUBIC_FAST_CONV_FACTOR, 0.85_f64);
+}
+
+@test
+fn test_qcubic_beta_below_one() {
+    // β < 1 — a congestion event reduces the window.
+    assert(CUBIC_BETA < 1.0_f64);
+}
+
+@test
+fn test_qcubic_fast_conv_below_one() {
+    assert(CUBIC_FAST_CONV_FACTOR < 1.0_f64);
+}
+
+@ignore("FLOATCONST-CMP-1: `<` between two no-suffix-declared Float consts mis-compares (0.7 < 0.85 returns false) though both `==` pins pass and `0.85 < 1.0` passes. See audit.md section 3.1.")
+@test
+fn test_qcubic_beta_below_fast_conv() {
+    // β (0.7) < fast-convergence factor (0.85).
+    assert(CUBIC_BETA < CUBIC_FAST_CONV_FACTOR);
+}
+
+fn main() {}
