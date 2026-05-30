@@ -10,15 +10,17 @@ mount core.net.http2.stream.{
 // RFC 7540 §5.1: an idle stream that sends HEADERS without END_STREAM is
 // Open; with END_STREAM it is half-closed (local). Pin both legs so a
 // future edit to the transition table cannot silently swap them.
-@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+// Setup events bound to locals — MUTSELF-MATCH-1 fix discipline (catalogue §13).
 @test
 fn regression_h2stream_idle_headers_open_vs_half_closed() {
     let mut a = StreamFsm.new(1_u32);
-    let _ = a.step(&StreamEvent.SendHeaders { end_stream: false });
+    let e_open = StreamEvent.SendHeaders { end_stream: false };
+    let _ = a.step(&e_open);
     assert_eq(a.state(), StreamState.Open);
 
     let mut b = StreamFsm.new(3_u32);
-    let _ = b.step(&StreamEvent.SendHeaders { end_stream: true });
+    let e_end = StreamEvent.SendHeaders { end_stream: true };
+    let _ = b.step(&e_end);
     assert_eq(b.state(), StreamState.HalfClosedLocal);
 }
 
@@ -26,9 +28,13 @@ fn regression_h2stream_idle_headers_open_vs_half_closed() {
 @test
 fn regression_h2stream_closed_absorbing() {
     let mut fsm = StreamFsm.new(1_u32);
-    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
-    let _ = fsm.step(&StreamEvent.SendRstStream);
-    match fsm.step(&StreamEvent.RecvRstStream) {
+    let e_open = StreamEvent.SendHeaders { end_stream: false };
+    let _ = fsm.step(&e_open);
+    let rst = StreamEvent.SendRstStream;
+    let _ = fsm.step(&rst);
+    assert(fsm.is_terminal());
+    let recv_rst = StreamEvent.RecvRstStream;
+    match fsm.step(&recv_rst) {
         Ok(_)  => panic("closed must reject"),
         Err(e) => assert(e is StreamTransitionError.InvalidTransition),
     }

@@ -43,6 +43,16 @@ fn test_h2stream_idle_not_terminal() {
 
 // --- probes: does the &mut self state mutation persist across step() calls? ---
 
+@test
+fn test_h2stream_probe_persist_after_bound_event() {
+    // Hypothesis: binding the event to a local (vs inline `&Variant{}`) lets
+    // the &mut self writeback persist (MUTSELF-MATCH-1 is inline-arg-specific).
+    let mut fsm = StreamFsm.new(1_u32);
+    let ev = StreamEvent.SendHeaders { end_stream: false };
+    let _ = fsm.step(&ev);
+    assert_eq(fsm.state(), StreamState.Open);
+}
+
 @ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
 @test
 fn test_h2stream_probe_persist_after_let_underscore() {
@@ -120,11 +130,16 @@ fn test_h2stream_idle_recv_push_promise_reserved_remote() {
 // Section 3: Open → half-closed → Closed (data path, §5.1)
 // =============================================================================
 
-@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+// NOTE: setup events are bound to locals before `step` (not passed inline) —
+// see MUTSELF-MATCH-1 (catalogue §13): an inline `&Variant{}` payload arg to a
+// `&mut self` method loses the field writeback, while a `&bound_local` persists.
+// Binding is the fix discipline; the inline form is pinned @ignore'd above.
+
 @test
 fn test_h2stream_open_send_data_end_half_closed_local() {
     let mut fsm = StreamFsm.new(1_u32);
-    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });   // → Open
+    let setup = StreamEvent.SendHeaders { end_stream: false };
+    let _ = fsm.step(&setup);   // → Open
     let ev = StreamEvent.SendData { end_stream: true };
     match fsm.step(&ev) {
         Ok(s)  => assert_eq(s, StreamState.HalfClosedLocal),
@@ -132,11 +147,11 @@ fn test_h2stream_open_send_data_end_half_closed_local() {
     }
 }
 
-@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
 @test
 fn test_h2stream_open_recv_data_end_half_closed_remote() {
     let mut fsm = StreamFsm.new(1_u32);
-    let _ = fsm.step(&StreamEvent.RecvHeaders { end_stream: false });   // → Open
+    let setup = StreamEvent.RecvHeaders { end_stream: false };
+    let _ = fsm.step(&setup);   // → Open
     let ev = StreamEvent.RecvData { end_stream: true };
     match fsm.step(&ev) {
         Ok(s)  => assert_eq(s, StreamState.HalfClosedRemote),
@@ -144,14 +159,16 @@ fn test_h2stream_open_recv_data_end_half_closed_remote() {
     }
 }
 
-@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
 @test
 fn test_h2stream_full_lifecycle_to_closed() {
     // Idle → Open → HalfClosedLocal → Closed.
     let mut fsm = StreamFsm.new(1_u32);
-    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
-    let _ = fsm.step(&StreamEvent.SendData { end_stream: true });
-    match fsm.step(&StreamEvent.RecvData { end_stream: true }) {
+    let e_open = StreamEvent.SendHeaders { end_stream: false };
+    let _ = fsm.step(&e_open);
+    let e_data = StreamEvent.SendData { end_stream: true };
+    let _ = fsm.step(&e_data);
+    let e_recv = StreamEvent.RecvData { end_stream: true };
+    match fsm.step(&e_recv) {
         Ok(s)  => assert_eq(s, StreamState.Closed),
         Err(_) => panic("HalfClosedLocal + RecvData(end) must close"),
     }
@@ -162,12 +179,13 @@ fn test_h2stream_full_lifecycle_to_closed() {
 // Section 4: RST_STREAM and Closed semantics (§5.1)
 // =============================================================================
 
-@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
 @test
 fn test_h2stream_open_send_rst_closes() {
     let mut fsm = StreamFsm.new(1_u32);
-    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
-    match fsm.step(&StreamEvent.SendRstStream) {
+    let setup = StreamEvent.SendHeaders { end_stream: false };
+    let _ = fsm.step(&setup);
+    let rst = StreamEvent.SendRstStream;
+    match fsm.step(&rst) {
         Ok(s)  => assert_eq(s, StreamState.Closed),
         Err(_) => panic("open + SendRstStream must close"),
     }
@@ -177,9 +195,13 @@ fn test_h2stream_open_send_rst_closes() {
 fn test_h2stream_closed_rejects_further_events() {
     // Closed + any event → InvalidTransition (PROTOCOL_ERROR per §5.1).
     let mut fsm = StreamFsm.new(1_u32);
-    let _ = fsm.step(&StreamEvent.SendHeaders { end_stream: false });
-    let _ = fsm.step(&StreamEvent.SendRstStream);   // → Closed
-    match fsm.step(&StreamEvent.SendData { end_stream: false }) {
+    let e_open = StreamEvent.SendHeaders { end_stream: false };
+    let _ = fsm.step(&e_open);
+    let rst = StreamEvent.SendRstStream;
+    let _ = fsm.step(&rst);   // → Closed
+    assert(fsm.is_terminal());
+    let data = StreamEvent.SendData { end_stream: false };
+    match fsm.step(&data) {
         Ok(_)  => panic("closed stream must reject events"),
         Err(e) => assert(e is StreamTransitionError.InvalidTransition),
     }
