@@ -1,0 +1,50 @@
+// =============================================================================
+// core-tests/net/quic/recovery/loss_detection/unit_test.vr — RFC 9002 §6
+// =============================================================================
+//
+// `core/net/quic/recovery/loss_detection.vr`:
+//
+//   * RFC 9002 §6.1 constants: kPacketThreshold=3, kGranularity=1ms,
+//     kTimeThreshold=9/8, MAX_PTO_BACKOFF=8.
+// =============================================================================
+
+mount core.net.quic.recovery.loss_detection.{
+    K_PACKET_THRESHOLD, K_GRANULARITY_US, K_TIME_THRESHOLD_NUM,
+    K_TIME_THRESHOLD_DEN, MAX_PTO_BACKOFF
+};
+
+// =============================================================================
+// Section 1: RFC 9002 §6.1.1/§6.1.2 loss-detection constants
+// =============================================================================
+
+@test
+fn test_qld_packet_threshold_3() {
+    // RFC 9002 §6.1.1: kPacketThreshold RECOMMENDED value is 3.
+    assert_eq(K_PACKET_THRESHOLD, 3_u64);
+}
+
+@test
+fn test_qld_granularity_1ms() {
+    // §6.1.2: kGranularity is 1 millisecond (1000 µs).
+    assert_eq(K_GRANULARITY_US, 1000_u64);
+}
+
+@test
+fn test_qld_time_threshold_9_over_8() {
+    // §6.1.2: kTimeThreshold RECOMMENDED is 9/8.
+    assert_eq(K_TIME_THRESHOLD_NUM, 9_u64);
+    assert_eq(K_TIME_THRESHOLD_DEN, 8_u64);
+}
+
+@test
+fn test_qld_time_threshold_exceeds_one() {
+    // 9/8 > 1 — the threshold expands the RTT window.
+    assert(K_TIME_THRESHOLD_NUM > K_TIME_THRESHOLD_DEN);
+}
+
+@test
+fn test_qld_max_pto_backoff_8() {
+    assert_eq(MAX_PTO_BACKOFF, 8_u32);
+}
+
+fn main() {}
