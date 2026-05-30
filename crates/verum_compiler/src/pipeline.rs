@@ -895,6 +895,16 @@ pub struct CompilationPipeline<'s> {
     /// Only populated in StdlibBootstrap mode.
     global_function_registry: std::collections::HashMap<String, verum_vbc::codegen::FunctionInfo>,
 
+    /// Global record field-layout registry for cross-module field-index
+    /// resolution in stdlib bootstrap (defect D2b).  Accumulates
+    /// `type-name → declared-field-names` (declaration order) across
+    /// modules so a later module's codegen can resolve the positional
+    /// field offsets of a record type defined in an earlier-compiled
+    /// module — instead of falling through `resolve_field_index` to the
+    /// non-positional global-intern fallback.  TypeId-free; only
+    /// populated in StdlibBootstrap mode.
+    global_type_layout_registry: std::collections::HashMap<String, Vec<String>>,
+
     /// Global protocol registry for cross-module protocol default method inheritance.
     /// Accumulates protocol info across modules (e.g., Eq's default ne method).
     /// Only populated in StdlibBootstrap mode.
@@ -1225,6 +1235,7 @@ impl<'s> CompilationPipeline<'s> {
             // Stdlib bootstrap mode fields - empty for normal mode
             stdlib_resolver: None,
             global_function_registry: std::collections::HashMap::new(),
+            global_type_layout_registry: std::collections::HashMap::new(),
             global_protocol_registry: std::collections::HashMap::new(),
             compiled_stdlib_modules: std::collections::HashMap::new(),
             stdlib_warnings: List::new(),
@@ -1341,6 +1352,7 @@ impl<'s> CompilationPipeline<'s> {
             // Stdlib bootstrap mode fields - initialized
             stdlib_resolver: Some(resolver),
             global_function_registry: std::collections::HashMap::new(),
+            global_type_layout_registry: std::collections::HashMap::new(),
             global_protocol_registry: std::collections::HashMap::new(),
             compiled_stdlib_modules: std::collections::HashMap::new(),
             stdlib_warnings: List::new(),
