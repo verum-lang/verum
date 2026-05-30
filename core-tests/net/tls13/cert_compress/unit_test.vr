@@ -1,0 +1,71 @@
+// =============================================================================
+// core-tests/net/tls13/cert_compress/unit_test.vr — RFC 8879
+// =============================================================================
+//
+// `core/net/tls13/cert_compress.vr`:
+//
+//   * CertCompressionAlgorithm (Zlib=1/Brotli=2/Zstd=3/UnknownAlgo) +
+//     to_u16/from_u16 + is_registered.
+//   * HST_COMPRESSED_CERTIFICATE handshake type = 25.
+// =============================================================================
+
+mount core.net.tls13.cert_compress.{CertCompressionAlgorithm, HST_COMPRESSED_CERTIFICATE};
+
+// =============================================================================
+// Section 1: IANA codepoints (RFC 8879 §7.3)
+// =============================================================================
+
+@test
+fn test_tls13cc_zlib_1() { assert_eq(CertCompressionAlgorithm.Zlib.to_u16(), 1_u16); }
+
+@test
+fn test_tls13cc_brotli_2() { assert_eq(CertCompressionAlgorithm.Brotli.to_u16(), 2_u16); }
+
+@test
+fn test_tls13cc_zstd_3() { assert_eq(CertCompressionAlgorithm.Zstd.to_u16(), 3_u16); }
+
+@test
+fn test_tls13cc_compressed_certificate_hst_25() {
+    // RFC 8879 §3: CompressedCertificate handshake message type = 25.
+    assert_eq(HST_COMPRESSED_CERTIFICATE, 25_u8);
+}
+
+// =============================================================================
+// Section 2: from_u16 + Unknown passthrough + is_registered
+// =============================================================================
+
+@test
+fn test_tls13cc_from_2_brotli() {
+    assert(CertCompressionAlgorithm.from_u16(2_u16) is CertCompressionAlgorithm.Brotli);
+}
+
+@test
+fn test_tls13cc_unknown_preserves_codepoint() {
+    let a = CertCompressionAlgorithm.from_u16(0x4242_u16);
+    assert_eq(a.to_u16(), 0x4242_u16);
+}
+
+@test
+fn test_tls13cc_zlib_is_registered() {
+    assert(CertCompressionAlgorithm.Zlib.is_registered());
+}
+
+@test
+fn test_tls13cc_unknown_not_registered() {
+    let a = CertCompressionAlgorithm.from_u16(0x4242_u16);
+    assert(!a.is_registered());
+}
+
+@test
+fn test_tls13cc_round_trip_registered() {
+    // from_u16 ∘ to_u16 == id over the 3 registered algorithms.
+    let codes: List<UInt16> = [1_u16, 2_u16, 3_u16];
+    let mut i = 0;
+    while i < codes.len() {
+        let a = CertCompressionAlgorithm.from_u16(codes[i]);
+        assert_eq(a.to_u16(), codes[i]);
+        i = i + 1;
+    }
+}
+
+fn main() {}
