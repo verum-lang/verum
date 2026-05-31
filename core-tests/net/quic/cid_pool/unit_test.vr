@@ -1,0 +1,96 @@
+// =============================================================================
+// core-tests/net/quic/cid_pool/unit_test.vr — RFC 9000 §5.1 CID management
+// =============================================================================
+//
+// `core/net/quic/cid_pool.vr` connection-ID pool error surface:
+//   * CidPoolError : LimitExceeded(Int) | DuplicateSequence(UInt64)
+//                  | UnknownSequence(UInt64) | RetirePriorRegression
+//                  | PoolExhausted
+//
+// Pure-data ADT coverage: 5-variant constructors, Eq reflexivity, payload
+// preservation + distinctness for the three payload-carrying variants, and
+// pairwise disjointness.  Qualified `Type.Variant` form (BAREVAR-ADT-1).
+// =============================================================================
+
+mount core.net.quic.cid_pool.{CidPoolError};
+
+// =============================================================================
+// Section 1: 5-variant constructors + Eq reflexivity
+// =============================================================================
+
+@test
+fn test_cid_pool_error_limit_exceeded_ctor() {
+    let e: CidPoolError = CidPoolError.LimitExceeded(3);
+    assert(e == CidPoolError.LimitExceeded(3));
+}
+
+@test
+fn test_cid_pool_error_duplicate_sequence_ctor() {
+    let e: CidPoolError = CidPoolError.DuplicateSequence(7_u64);
+    assert(e == CidPoolError.DuplicateSequence(7_u64));
+}
+
+@test
+fn test_cid_pool_error_unknown_sequence_ctor() {
+    let e: CidPoolError = CidPoolError.UnknownSequence(9_u64);
+    assert(e == CidPoolError.UnknownSequence(9_u64));
+}
+
+@test
+fn test_cid_pool_error_retire_prior_regression_ctor() {
+    let e: CidPoolError = CidPoolError.RetirePriorRegression;
+    assert(e == CidPoolError.RetirePriorRegression);
+}
+
+@test
+fn test_cid_pool_error_pool_exhausted_ctor() {
+    let e: CidPoolError = CidPoolError.PoolExhausted;
+    assert(e == CidPoolError.PoolExhausted);
+}
+
+// =============================================================================
+// Section 2: payload preservation + distinctness
+// =============================================================================
+
+@test
+fn test_cid_pool_error_limit_exceeded_payload_preserved() {
+    let e: CidPoolError = CidPoolError.LimitExceeded(42);
+    let n = match e {
+        CidPoolError.LimitExceeded(v) => v,
+        _ => -1,
+    };
+    assert_eq(n, 42);
+}
+
+@test
+fn test_cid_pool_error_duplicate_sequence_payload_preserved() {
+    let e: CidPoolError = CidPoolError.DuplicateSequence(123_u64);
+    let s = match e {
+        CidPoolError.DuplicateSequence(v) => v,
+        _ => 0_u64,
+    };
+    assert_eq(s, 123_u64);
+}
+
+@test
+fn test_cid_pool_error_limit_exceeded_distinct_payload() {
+    assert(CidPoolError.LimitExceeded(1) != CidPoolError.LimitExceeded(2));
+}
+
+@test
+fn test_cid_pool_error_unknown_sequence_distinct_payload() {
+    assert(CidPoolError.UnknownSequence(1_u64) != CidPoolError.UnknownSequence(2_u64));
+}
+
+// =============================================================================
+// Section 3: pairwise disjointness
+// =============================================================================
+
+@test
+fn test_cid_pool_error_variants_pairwise_distinct() {
+    assert(CidPoolError.LimitExceeded(0) != CidPoolError.DuplicateSequence(0_u64));
+    assert(CidPoolError.DuplicateSequence(0_u64) != CidPoolError.UnknownSequence(0_u64));
+    assert(CidPoolError.UnknownSequence(0_u64) != CidPoolError.RetirePriorRegression);
+    assert(CidPoolError.RetirePriorRegression != CidPoolError.PoolExhausted);
+    assert(CidPoolError.PoolExhausted != CidPoolError.LimitExceeded(0));
+}
