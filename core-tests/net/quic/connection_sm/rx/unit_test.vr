@@ -1,0 +1,73 @@
+// =============================================================================
+// core-tests/net/quic/connection_sm/rx/unit_test.vr — RFC 9000/9001 RX errors
+// =============================================================================
+//
+// `core/net/quic/connection_sm/rx.vr`:
+//   * RxError : Truncated | InvalidHeaderForm | UnsupportedVersion(UInt32)
+//             | InvalidCidLength(Int) | VarintFailure | SampleUnavailable
+//             | AeadFailure | UnknownPacketType
+//
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.connection_sm.rx.{RxError};
+
+// §1 unit variants — ctor + Eq reflexivity
+@test
+fn test_rx_error_truncated() {
+    let e: RxError = RxError.Truncated;
+    assert(e == RxError.Truncated);
+}
+@test
+fn test_rx_error_invalid_header_form() {
+    let e: RxError = RxError.InvalidHeaderForm;
+    assert(e == RxError.InvalidHeaderForm);
+}
+@test
+fn test_rx_error_varint_failure() {
+    let e: RxError = RxError.VarintFailure;
+    assert(e == RxError.VarintFailure);
+}
+@test
+fn test_rx_error_sample_unavailable() {
+    let e: RxError = RxError.SampleUnavailable;
+    assert(e == RxError.SampleUnavailable);
+}
+@test
+fn test_rx_error_aead_failure() {
+    let e: RxError = RxError.AeadFailure;
+    assert(e == RxError.AeadFailure);
+}
+@test
+fn test_rx_error_unknown_packet_type() {
+    let e: RxError = RxError.UnknownPacketType;
+    assert(e == RxError.UnknownPacketType);
+}
+
+// §2 payload variants — preservation + distinctness
+@test
+fn test_rx_error_unsupported_version_payload() {
+    let e: RxError = RxError.UnsupportedVersion(0xff00001d_u32);
+    let v = match e { RxError.UnsupportedVersion(x) => x, _ => 0_u32 };
+    assert_eq(v, 0xff00001d_u32);
+}
+@test
+fn test_rx_error_invalid_cid_length_payload() {
+    let e: RxError = RxError.InvalidCidLength(21);
+    let v = match e { RxError.InvalidCidLength(x) => x, _ => -1 };
+    assert_eq(v, 21);
+}
+@test
+fn test_rx_error_unsupported_version_distinct_payload() {
+    assert(RxError.UnsupportedVersion(1_u32) != RxError.UnsupportedVersion(2_u32));
+}
+
+// §3 pairwise disjointness
+@test
+fn test_rx_error_variants_pairwise_distinct() {
+    assert(RxError.Truncated != RxError.InvalidHeaderForm);
+    assert(RxError.InvalidHeaderForm != RxError.VarintFailure);
+    assert(RxError.VarintFailure != RxError.AeadFailure);
+    assert(RxError.AeadFailure != RxError.UnknownPacketType);
+    assert(RxError.UnsupportedVersion(0_u32) != RxError.InvalidCidLength(0));
+}

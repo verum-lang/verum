@@ -1,0 +1,36 @@
+// =============================================================================
+// core-tests/net/quic/connection_sm/keys/unit_test.vr — RFC 9001 key errors
+// =============================================================================
+//
+// `core/net/quic/connection_sm/keys.vr`:
+//   * QuicKeyError : HkdfFailure | BadKeyLength(Int)
+//
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.connection_sm.keys.{QuicKeyError};
+
+@test
+fn test_quic_key_error_hkdf_failure() {
+    let e: QuicKeyError = QuicKeyError.HkdfFailure;
+    assert(e == QuicKeyError.HkdfFailure);
+}
+@test
+fn test_quic_key_error_bad_key_length_ctor() {
+    let e: QuicKeyError = QuicKeyError.BadKeyLength(16);
+    assert(e == QuicKeyError.BadKeyLength(16));
+}
+@test
+fn test_quic_key_error_bad_key_length_payload_preserved() {
+    let e: QuicKeyError = QuicKeyError.BadKeyLength(32);
+    let n = match e { QuicKeyError.BadKeyLength(x) => x, _ => -1 };
+    assert_eq(n, 32);
+}
+@test
+fn test_quic_key_error_bad_key_length_distinct_payload() {
+    assert(QuicKeyError.BadKeyLength(16) != QuicKeyError.BadKeyLength(32));
+}
+@test
+fn test_quic_key_error_variants_distinct() {
+    assert(QuicKeyError.HkdfFailure != QuicKeyError.BadKeyLength(0));
+}
