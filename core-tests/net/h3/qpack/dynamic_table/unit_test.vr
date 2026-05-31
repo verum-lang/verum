@@ -1,0 +1,57 @@
+// =============================================================================
+// core-tests/net/h3/qpack/dynamic_table/unit_test.vr — RFC 9204 §3.2 dyn table
+// =============================================================================
+//
+// `core/net/h3/qpack/dynamic_table.vr`:
+//   * DynamicTableError : CapacityExceedsSettings | EntryTooLarge | EvictionBlocked
+//                       | InvalidAbsIndex | InvalidNameRef | EntryEvicted | RefUnderflow
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.h3.qpack.dynamic_table.{DynamicTableError};
+
+@test
+fn test_dyn_table_error_capacity_exceeds_settings() {
+    let e: DynamicTableError = DynamicTableError.CapacityExceedsSettings;
+    assert(e == DynamicTableError.CapacityExceedsSettings);
+}
+@test
+fn test_dyn_table_error_entry_too_large() {
+    let e: DynamicTableError = DynamicTableError.EntryTooLarge;
+    assert(e == DynamicTableError.EntryTooLarge);
+}
+@test
+fn test_dyn_table_error_eviction_blocked() {
+    let e: DynamicTableError = DynamicTableError.EvictionBlocked;
+    assert(e == DynamicTableError.EvictionBlocked);
+}
+@test
+fn test_dyn_table_error_invalid_abs_index() {
+    let e: DynamicTableError = DynamicTableError.InvalidAbsIndex;
+    assert(e == DynamicTableError.InvalidAbsIndex);
+}
+@test
+fn test_dyn_table_error_invalid_name_ref() {
+    let e: DynamicTableError = DynamicTableError.InvalidNameRef;
+    assert(e == DynamicTableError.InvalidNameRef);
+}
+@test
+fn test_dyn_table_error_entry_evicted() {
+    let e: DynamicTableError = DynamicTableError.EntryEvicted;
+    assert(e == DynamicTableError.EntryEvicted);
+}
+@test
+fn test_dyn_table_error_ref_underflow() {
+    let e: DynamicTableError = DynamicTableError.RefUnderflow;
+    assert(e == DynamicTableError.RefUnderflow);
+}
+@test
+fn test_dyn_table_error_variants_pairwise_distinct() {
+    assert(DynamicTableError.CapacityExceedsSettings != DynamicTableError.EntryTooLarge);
+    assert(DynamicTableError.EntryTooLarge != DynamicTableError.EvictionBlocked);
+    assert(DynamicTableError.EvictionBlocked != DynamicTableError.InvalidAbsIndex);
+    assert(DynamicTableError.InvalidAbsIndex != DynamicTableError.InvalidNameRef);
+    assert(DynamicTableError.InvalidNameRef != DynamicTableError.EntryEvicted);
+    assert(DynamicTableError.EntryEvicted != DynamicTableError.RefUnderflow);
+    assert(DynamicTableError.RefUnderflow != DynamicTableError.CapacityExceedsSettings);
+}

@@ -1,0 +1,35 @@
+// =============================================================================
+// core-tests/net/quic/connection_sm/aead/unit_test.vr — RFC 9001 AEAD errors
+// =============================================================================
+//
+// `core/net/quic/connection_sm/aead.vr`:
+//   * QuicAeadError : BadKeyLength(Int) | AeadFailure  (AeadFailure value-blind).
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.connection_sm.aead.{QuicAeadError};
+
+@test
+fn test_quic_aead_error_bad_key_length_ctor() {
+    let e: QuicAeadError = QuicAeadError.BadKeyLength(16);
+    assert(e == QuicAeadError.BadKeyLength(16));
+}
+@test
+fn test_quic_aead_error_aead_failure() {
+    let e: QuicAeadError = QuicAeadError.AeadFailure;
+    assert(e == QuicAeadError.AeadFailure);
+}
+@test
+fn test_quic_aead_error_bad_key_length_payload_preserved() {
+    let e: QuicAeadError = QuicAeadError.BadKeyLength(32);
+    let n = match e { QuicAeadError.BadKeyLength(x) => x, _ => -1 };
+    assert_eq(n, 32);
+}
+@test
+fn test_quic_aead_error_bad_key_length_distinct_payload() {
+    assert(QuicAeadError.BadKeyLength(16) != QuicAeadError.BadKeyLength(32));
+}
+@test
+fn test_quic_aead_error_variants_distinct() {
+    assert(QuicAeadError.BadKeyLength(0) != QuicAeadError.AeadFailure);
+}
