@@ -1,0 +1,108 @@
+// =============================================================================
+// core-tests/net/quic/lb_cid/unit_test.vr — QUIC-LB connection-ID ADTs
+// =============================================================================
+//
+// `core/net/quic/lb_cid.vr` (draft-ietf-quic-load-balancers):
+//   * LbCidProfile : Profile_8_1 | Profile_12_2 | Profile_16_3 | Profile_20_3
+//     (CID length / server-id byte budgets).
+//   * LbCidError : InvalidServerIdLen { expected, actual } | InvalidConfigByte
+//                | LengthMismatch { expected, actual } | NoMatchingKey
+//
+// Record-payload variants exercise the cross-module field path (CLASS-9/D2b).
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.lb_cid.{LbCidProfile, LbCidError};
+
+// =============================================================================
+// Section 1: LbCidProfile 4-variant (match-based — Eq not assumed)
+// =============================================================================
+
+@test
+fn test_lb_cid_profile_8_1() {
+    let p: LbCidProfile = LbCidProfile.Profile_8_1;
+    let r = match p { LbCidProfile.Profile_8_1 => true, _ => false };
+    assert(r);
+}
+
+@test
+fn test_lb_cid_profile_12_2() {
+    let p: LbCidProfile = LbCidProfile.Profile_12_2;
+    let r = match p { LbCidProfile.Profile_12_2 => true, _ => false };
+    assert(r);
+}
+
+@test
+fn test_lb_cid_profile_16_3() {
+    let p: LbCidProfile = LbCidProfile.Profile_16_3;
+    let r = match p { LbCidProfile.Profile_16_3 => true, _ => false };
+    assert(r);
+}
+
+@test
+fn test_lb_cid_profile_20_3() {
+    let p: LbCidProfile = LbCidProfile.Profile_20_3;
+    let r = match p { LbCidProfile.Profile_20_3 => true, _ => false };
+    assert(r);
+}
+
+// =============================================================================
+// Section 2: LbCidError — unit variants (Eq)
+// =============================================================================
+
+@test
+fn test_lb_cid_error_invalid_config_byte() {
+    let e: LbCidError = LbCidError.InvalidConfigByte;
+    assert(e == LbCidError.InvalidConfigByte);
+}
+
+@test
+fn test_lb_cid_error_no_matching_key() {
+    let e: LbCidError = LbCidError.NoMatchingKey;
+    assert(e == LbCidError.NoMatchingKey);
+}
+
+// =============================================================================
+// Section 3: LbCidError — record-payload variants (Eq + field extraction)
+// =============================================================================
+
+@test
+fn test_lb_cid_error_invalid_server_id_len_ctor() {
+    let e: LbCidError = LbCidError.InvalidServerIdLen { expected: 1, actual: 3 };
+    assert(e == LbCidError.InvalidServerIdLen { expected: 1, actual: 3 });
+}
+
+@test
+fn test_lb_cid_error_invalid_server_id_len_payload_preserved() {
+    let e: LbCidError = LbCidError.InvalidServerIdLen { expected: 5, actual: 7 };
+    let exp = match e {
+        LbCidError.InvalidServerIdLen { expected, actual: _ } => expected,
+        _ => -1,
+    };
+    assert_eq(exp, 5);
+}
+
+@test
+fn test_lb_cid_error_length_mismatch_payload_preserved() {
+    let e: LbCidError = LbCidError.LengthMismatch { expected: 16, actual: 12 };
+    let act = match e {
+        LbCidError.LengthMismatch { expected: _, actual } => actual,
+        _ => -1,
+    };
+    assert_eq(act, 12);
+}
+
+@test
+fn test_lb_cid_error_invalid_server_id_len_distinct_payload() {
+    assert(LbCidError.InvalidServerIdLen { expected: 1, actual: 2 }
+        != LbCidError.InvalidServerIdLen { expected: 1, actual: 3 });
+}
+
+// =============================================================================
+// Section 4: LbCidError pairwise disjointness
+// =============================================================================
+
+@test
+fn test_lb_cid_error_unit_variants_distinct() {
+    assert(LbCidError.InvalidConfigByte != LbCidError.NoMatchingKey);
+}
