@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/net/h3/qpack/decoder/unit_test.vr — RFC 9204 QPACK decode errors
+// =============================================================================
+//
+// `core/net/h3/qpack/decoder.vr`:
+//   * QpackDecodeError : Truncated | InvalidIndex(UInt64) | DynamicTableNotSupported
+//                      | HuffmanError | IntegerError
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.h3.qpack.decoder.{QpackDecodeError};
+
+@test
+fn test_qpack_decode_error_truncated() {
+    let e: QpackDecodeError = QpackDecodeError.Truncated;
+    assert(e == QpackDecodeError.Truncated);
+}
+@test
+fn test_qpack_decode_error_invalid_index_ctor() {
+    let e: QpackDecodeError = QpackDecodeError.InvalidIndex(9_u64);
+    assert(e == QpackDecodeError.InvalidIndex(9_u64));
+}
+@test
+fn test_qpack_decode_error_dynamic_table_not_supported() {
+    let e: QpackDecodeError = QpackDecodeError.DynamicTableNotSupported;
+    assert(e == QpackDecodeError.DynamicTableNotSupported);
+}
+@test
+fn test_qpack_decode_error_huffman_error() {
+    let e: QpackDecodeError = QpackDecodeError.HuffmanError;
+    assert(e == QpackDecodeError.HuffmanError);
+}
+@test
+fn test_qpack_decode_error_integer_error() {
+    let e: QpackDecodeError = QpackDecodeError.IntegerError;
+    assert(e == QpackDecodeError.IntegerError);
+}
+@test
+fn test_qpack_decode_error_invalid_index_distinct_payload() {
+    assert(QpackDecodeError.InvalidIndex(1_u64) != QpackDecodeError.InvalidIndex(2_u64));
+}
+@test
+fn test_qpack_decode_error_variants_pairwise_distinct() {
+    assert(QpackDecodeError.Truncated != QpackDecodeError.DynamicTableNotSupported);
+    assert(QpackDecodeError.DynamicTableNotSupported != QpackDecodeError.HuffmanError);
+    assert(QpackDecodeError.HuffmanError != QpackDecodeError.IntegerError);
+    assert(QpackDecodeError.IntegerError != QpackDecodeError.Truncated);
+}
