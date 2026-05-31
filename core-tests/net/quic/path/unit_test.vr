@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/net/quic/path/unit_test.vr — RFC 9000 §8/§9 path validation ADTs
+// =============================================================================
+//
+// `core/net/quic/path.vr`:
+//   * PathError : AmplificationLimitExceeded | ChallengeTimeout | UnexpectedResponse
+//   * TimerOutcome : NoAction | ShouldReChallenge | Failed
+//
+// (PathState's record-payload variants — `Unvalidated { … }` / `Validating
+// { challenge: [Byte; 8], … }` — are deferred; see audit.md.)
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.path.{PathError, TimerOutcome};
+
+// =============================================================================
+// Section 1: PathError 3-variant (constructors + Eq + disjointness)
+// =============================================================================
+
+@test
+fn test_path_error_amplification_limit_exceeded() {
+    let e: PathError = PathError.AmplificationLimitExceeded;
+    assert(e == PathError.AmplificationLimitExceeded);
+}
+
+@test
+fn test_path_error_challenge_timeout() {
+    let e: PathError = PathError.ChallengeTimeout;
+    assert(e == PathError.ChallengeTimeout);
+}
+
+@test
+fn test_path_error_unexpected_response() {
+    let e: PathError = PathError.UnexpectedResponse;
+    assert(e == PathError.UnexpectedResponse);
+}
+
+@test
+fn test_path_error_variants_pairwise_distinct() {
+    assert(PathError.AmplificationLimitExceeded != PathError.ChallengeTimeout);
+    assert(PathError.ChallengeTimeout != PathError.UnexpectedResponse);
+    assert(PathError.UnexpectedResponse != PathError.AmplificationLimitExceeded);
+}
+
+// =============================================================================
+// Section 2: TimerOutcome 3-variant (match-based — Eq not assumed)
+// =============================================================================
+
+@test
+fn test_timer_outcome_no_action() {
+    let t: TimerOutcome = TimerOutcome.NoAction;
+    let r = match t {
+        TimerOutcome.NoAction        => true,
+        TimerOutcome.ShouldReChallenge => false,
+        TimerOutcome.Failed          => false,
+    };
+    assert(r);
+}
+
+@test
+fn test_timer_outcome_should_rechallenge() {
+    let t: TimerOutcome = TimerOutcome.ShouldReChallenge;
+    let r = match t {
+        TimerOutcome.NoAction        => false,
+        TimerOutcome.ShouldReChallenge => true,
+        TimerOutcome.Failed          => false,
+    };
+    assert(r);
+}
+
+@test
+fn test_timer_outcome_failed() {
+    let t: TimerOutcome = TimerOutcome.Failed;
+    let r = match t {
+        TimerOutcome.NoAction        => false,
+        TimerOutcome.ShouldReChallenge => false,
+        TimerOutcome.Failed          => true,
+    };
+    assert(r);
+}

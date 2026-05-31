@@ -1,0 +1,83 @@
+// =============================================================================
+// core-tests/net/quic/multipath/unit_test.vr — RFC 9000-bis multipath ADTs
+// =============================================================================
+//
+// `core/net/quic/multipath.vr`:
+//   * PathId : { value: UInt64 }
+//   * MultipathError : UnknownPathId(PathId) | DuplicatePathId(PathId)
+//                    | NotNegotiated | AmplificationLimited(PathId) | NoSendablePath
+//
+// Payload variants carry a `PathId` record; discrimination + value extraction
+// are match-based, unit variants use Eq.  Qualified `Type.Variant` form.
+// =============================================================================
+
+mount core.net.quic.multipath.{MultipathError, PathId};
+
+// =============================================================================
+// Section 1: unit variants (Eq) + payload variant discrimination (match)
+// =============================================================================
+
+@test
+fn test_multipath_error_not_negotiated() {
+    let e: MultipathError = MultipathError.NotNegotiated;
+    assert(e == MultipathError.NotNegotiated);
+}
+
+@test
+fn test_multipath_error_no_sendable_path() {
+    let e: MultipathError = MultipathError.NoSendablePath;
+    assert(e == MultipathError.NoSendablePath);
+}
+
+@test
+fn test_multipath_error_unknown_path_id_discriminates() {
+    let e: MultipathError = MultipathError.UnknownPathId(PathId { value: 4_u64 });
+    let is_unknown = match e {
+        MultipathError.UnknownPathId(_) => true,
+        _                               => false,
+    };
+    assert(is_unknown);
+}
+
+@test
+fn test_multipath_error_duplicate_path_id_discriminates() {
+    let e: MultipathError = MultipathError.DuplicatePathId(PathId { value: 2_u64 });
+    let is_dup = match e {
+        MultipathError.DuplicatePathId(_) => true,
+        _                                 => false,
+    };
+    assert(is_dup);
+}
+
+@test
+fn test_multipath_error_amplification_limited_discriminates() {
+    let e: MultipathError = MultipathError.AmplificationLimited(PathId { value: 3_u64 });
+    let is_amp = match e {
+        MultipathError.AmplificationLimited(_) => true,
+        _                                      => false,
+    };
+    assert(is_amp);
+}
+
+// =============================================================================
+// Section 2: PathId payload value preservation
+// =============================================================================
+
+@test
+fn test_multipath_error_unknown_path_id_payload_preserved() {
+    let e: MultipathError = MultipathError.UnknownPathId(PathId { value: 77_u64 });
+    let v = match e {
+        MultipathError.UnknownPathId(pid) => pid.value,
+        _                                 => 0_u64,
+    };
+    assert_eq(v, 77_u64);
+}
+
+// =============================================================================
+// Section 3: unit-variant disjointness
+// =============================================================================
+
+@test
+fn test_multipath_error_not_negotiated_distinct_from_no_sendable() {
+    assert(MultipathError.NotNegotiated != MultipathError.NoSendablePath);
+}
