@@ -437,9 +437,12 @@ fn test_hpack_encoder_construct() {
 // `core/collections/list.vr::extend_from_slice` to index-by-value
 // (`slice[i].clone()`).  See defect-class-catalogue §9.
 //
-// These exercise the RAW codec (`set_huffman(false)`).  The Huffman codec
-// (the `HpackEncoder.new()` default) has a *separate* round-trip mismatch
-// tracked as HPACK-HUFFMAN-1 — see `_round_trip_huffman` gate below.
+// These exercise the RAW codec.  `HpackEncoder.new()` now DEFAULTS to raw
+// (HPACK-HUFFMAN-1 fix: the Tier-0 Huffman codec is unimplemented, and
+// RFC 7541 makes Huffman optional, so the default encoder emits the raw
+// form and round-trips correctly).  The explicit `set_huffman(false)` below
+// is therefore redundant-but-explicit.  The Huffman PATH (`set_huffman(true)`)
+// remains a tracked feature gap — pinned by `_huffman_path_unimplemented`.
 
 @test
 fn test_hpack_encoder_decoder_round_trip_single_header() {
@@ -482,12 +485,36 @@ fn test_hpack_encoder_decoder_round_trip_multiple_headers() {
     }
 }
 
-// HPACK-HUFFMAN-1: the default Huffman codec round-trip mismatches (decoded
-// name != original).  Gated until the huffman.vr encode/decode fix lands.
-@ignore("HPACK-HUFFMAN-1: HpackEncoder huffman_enabled=true round-trip mismatch. Raw path (set_huffman(false)) is green. See audit.md §3.3.")
+// HPACK-HUFFMAN-1 (default-correctness CLOSED): `HpackEncoder.new()` now
+// defaults to the raw codec, so the DEFAULT encoder round-trips correctly
+// without any `set_huffman` call.  This pins that fix.
 @test
-fn test_hpack_encoder_decoder_round_trip_huffman_default() {
+fn test_hpack_encoder_default_is_raw_round_trip() {
+    let mut enc = HpackEncoder.new();   // default: huffman_enabled = false
+    let mut block: List<Byte> = [];
+    let headers: List<HeaderField> = [HeaderField.new("x", "y")];
+    enc.encode(&headers, &mut block);
+    let mut dec = HpackDecoder.new();
+    match dec.decode(block.as_slice()) {
+        Ok(fields) => {
+            assert_eq(fields.len(), 1);
+            assert(fields[0].name == "x");
+            assert(fields[0].value == "y");
+        }
+        Err(_) => panic("default (raw) round-trip must succeed"),
+    }
+}
+
+// HPACK-HUFFMAN-1 (feature gap): the Tier-0 Huffman codec
+// (`core.net.http2.huffman` intrinsics) is unimplemented, so explicitly
+// opting into it via `set_huffman(true)` emits an H-bit literal the decoder
+// cannot reconstruct.  Gated until the codec lands. NOT a default-correctness
+// bug — `HpackEncoder.new()` is raw and correct (test above).
+@ignore("HPACK-HUFFMAN-1: Tier-0 Huffman codec unimplemented; set_huffman(true) emits undecodable output. Default (raw) is green. See audit.md §3.3.")
+@test
+fn test_hpack_encoder_huffman_path_unimplemented() {
     let mut enc = HpackEncoder.new();
+    enc.set_huffman(true);
     let mut block: List<Byte> = [];
     let headers: List<HeaderField> = [HeaderField.new("x", "y")];
     enc.encode(&headers, &mut block);
