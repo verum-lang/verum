@@ -1,0 +1,28 @@
+// =============================================================================
+// core-tests/net/h3/qpack/integer/unit_test.vr — RFC 9204 §4.1.1 QPACK varint
+// =============================================================================
+//
+// `core/net/h3/qpack/integer.vr`:
+//   * IntError : Truncated | Overflow
+//
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.h3.qpack.integer.{IntError};
+
+@test
+fn test_int_error_truncated() {
+    let e: IntError = IntError.Truncated;
+    assert(e == IntError.Truncated);
+}
+
+@test
+fn test_int_error_overflow() {
+    let e: IntError = IntError.Overflow;
+    assert(e == IntError.Overflow);
+}
+
+@test
+fn test_int_error_variants_distinct() {
+    assert(IntError.Truncated != IntError.Overflow);
+}

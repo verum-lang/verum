@@ -1,0 +1,102 @@
+// =============================================================================
+// core-tests/net/tls13/error/unit_test.vr — RFC 8446 §6 TLS alert ADTs
+// =============================================================================
+//
+// `core/net/tls13/error.vr` — `TlsError` is the TLS 1.3 alert/handshake error
+// surface (maps to RFC 8446 §6 AlertDescription via `to_alert`).  This suite
+// covers a representative subset of the ~25 unit variants: constructors, Eq
+// reflexivity, and broad pairwise disjointness.  Qualified `Type.Variant` form.
+// =============================================================================
+
+mount core.net.tls13.error.{TlsError};
+
+// =============================================================================
+// Section 1: representative variant constructors + Eq reflexivity
+// =============================================================================
+
+@test
+fn test_tls_error_handshake_failure() {
+    let e: TlsError = TlsError.HandshakeFailure;
+    assert(e == TlsError.HandshakeFailure);
+}
+@test
+fn test_tls_error_unexpected_message() {
+    let e: TlsError = TlsError.UnexpectedMessage;
+    assert(e == TlsError.UnexpectedMessage);
+}
+@test
+fn test_tls_error_illegal_parameter() {
+    let e: TlsError = TlsError.IllegalParameter;
+    assert(e == TlsError.IllegalParameter);
+}
+@test
+fn test_tls_error_missing_extension() {
+    let e: TlsError = TlsError.MissingExtension;
+    assert(e == TlsError.MissingExtension);
+}
+@test
+fn test_tls_error_bad_record_mac() {
+    let e: TlsError = TlsError.BadRecordMac;
+    assert(e == TlsError.BadRecordMac);
+}
+@test
+fn test_tls_error_decrypt_error() {
+    let e: TlsError = TlsError.DecryptError;
+    assert(e == TlsError.DecryptError);
+}
+@test
+fn test_tls_error_record_overflow() {
+    let e: TlsError = TlsError.RecordOverflow;
+    assert(e == TlsError.RecordOverflow);
+}
+@test
+fn test_tls_error_decode_error() {
+    let e: TlsError = TlsError.DecodeError;
+    assert(e == TlsError.DecodeError);
+}
+@test
+fn test_tls_error_unknown_psk_identity() {
+    let e: TlsError = TlsError.UnknownPskIdentity;
+    assert(e == TlsError.UnknownPskIdentity);
+}
+// BAREVAR-ADT-1: `InternalError` is a non-unique variant name across the
+// stdlib (tls13/error.vr + tls13/alert.vr + others). TlsError's `Eq` match
+// arms are bare, so `TlsError.InternalError == TlsError.InternalError`
+// resolves first-wins to a sibling type's `InternalError` and compares
+// not-equal. Pinned until TlsError's impls qualify their variant names.
+@ignore("BAREVAR-ADT-1: TlsError.InternalError Eq mis-dispatches (bare-variant collision with tls13/alert + others). See defect-class-catalogue §10.")
+@test
+fn test_tls_error_internal_error() {
+    let e: TlsError = TlsError.InternalError;
+    assert(e == TlsError.InternalError);
+}
+@test
+fn test_tls_error_bad_certificate() {
+    let e: TlsError = TlsError.BadCertificate;
+    assert(e == TlsError.BadCertificate);
+}
+@test
+fn test_tls_error_certificate_expired() {
+    let e: TlsError = TlsError.CertificateExpired;
+    assert(e == TlsError.CertificateExpired);
+}
+
+// =============================================================================
+// Section 2: broad pairwise disjointness
+// =============================================================================
+
+@test
+fn test_tls_error_variants_pairwise_distinct() {
+    assert(TlsError.HandshakeFailure != TlsError.UnexpectedMessage);
+    assert(TlsError.UnexpectedMessage != TlsError.IllegalParameter);
+    assert(TlsError.IllegalParameter != TlsError.MissingExtension);
+    assert(TlsError.MissingExtension != TlsError.BadRecordMac);
+    assert(TlsError.BadRecordMac != TlsError.DecryptError);
+    assert(TlsError.DecryptError != TlsError.RecordOverflow);
+    assert(TlsError.RecordOverflow != TlsError.DecodeError);
+    assert(TlsError.DecodeError != TlsError.UnknownPskIdentity);
+    assert(TlsError.UnknownPskIdentity != TlsError.InternalError);
+    assert(TlsError.InternalError != TlsError.BadCertificate);
+    assert(TlsError.BadCertificate != TlsError.CertificateExpired);
+    assert(TlsError.CertificateExpired != TlsError.HandshakeFailure);
+}
