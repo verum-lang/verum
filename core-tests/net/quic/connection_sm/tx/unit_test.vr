@@ -1,0 +1,39 @@
+// =============================================================================
+// core-tests/net/quic/connection_sm/tx/unit_test.vr — RFC 9001 TX errors
+// =============================================================================
+//
+// `core/net/quic/connection_sm/tx.vr`:
+//   * TxError : FrameEncodeFailed | AeadFailed | BufferTooLarge | SampleUnavailable
+//
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.connection_sm.tx.{TxError};
+
+@test
+fn test_tx_error_frame_encode_failed() {
+    let e: TxError = TxError.FrameEncodeFailed;
+    assert(e == TxError.FrameEncodeFailed);
+}
+@test
+fn test_tx_error_aead_failed() {
+    let e: TxError = TxError.AeadFailed;
+    assert(e == TxError.AeadFailed);
+}
+@test
+fn test_tx_error_buffer_too_large() {
+    let e: TxError = TxError.BufferTooLarge;
+    assert(e == TxError.BufferTooLarge);
+}
+@test
+fn test_tx_error_sample_unavailable() {
+    let e: TxError = TxError.SampleUnavailable;
+    assert(e == TxError.SampleUnavailable);
+}
+@test
+fn test_tx_error_variants_pairwise_distinct() {
+    assert(TxError.FrameEncodeFailed != TxError.AeadFailed);
+    assert(TxError.AeadFailed != TxError.BufferTooLarge);
+    assert(TxError.BufferTooLarge != TxError.SampleUnavailable);
+    assert(TxError.SampleUnavailable != TxError.FrameEncodeFailed);
+}
