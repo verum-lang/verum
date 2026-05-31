@@ -1,0 +1,120 @@
+// =============================================================================
+// core-tests/net/quic/address_token/unit_test.vr — RFC 9000 §8.1 address tokens
+// =============================================================================
+//
+// `core/net/quic/address_token.vr`:
+//   * WIRE_VERSION = 1 (address-token wire format version).
+//   * QuicTokenKind : Retry | NewToken  (RFC 9000 §8.1.1 Retry vs §8.1.3 NEW_TOKEN).
+//   * TokenError : 7-variant address-validation failure surface. The AEAD
+//     seal/open failures are value-blind (no oracle for the token key).
+//
+// Pure-data ADT coverage: variant constructors, Eq reflexivity, pairwise
+// disjointness, and the wire-version constant.  Variants are written in the
+// qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.address_token.{TokenError, QuicTokenKind, WIRE_VERSION};
+
+// =============================================================================
+// Section 1: TokenError 7-variant constructors + Eq reflexivity
+// =============================================================================
+
+@test
+fn test_token_error_seal_failure() {
+    let e: TokenError = TokenError.SealFailure;
+    assert(e == TokenError.SealFailure);
+}
+
+@test
+fn test_token_error_open_failure() {
+    let e: TokenError = TokenError.OpenFailure;
+    assert(e == TokenError.OpenFailure);
+}
+
+@test
+fn test_token_error_wrong_key_id() {
+    let e: TokenError = TokenError.WrongKeyId;
+    assert(e == TokenError.WrongKeyId);
+}
+
+@test
+fn test_token_error_malformed() {
+    let e: TokenError = TokenError.Malformed;
+    assert(e == TokenError.Malformed);
+}
+
+@test
+fn test_token_error_expired() {
+    let e: TokenError = TokenError.Expired;
+    assert(e == TokenError.Expired);
+}
+
+@test
+fn test_token_error_wrong_kind() {
+    let e: TokenError = TokenError.WrongKind;
+    assert(e == TokenError.WrongKind);
+}
+
+@test
+fn test_token_error_client_ip_mismatch() {
+    let e: TokenError = TokenError.ClientIpMismatch;
+    assert(e == TokenError.ClientIpMismatch);
+}
+
+// =============================================================================
+// Section 2: TokenError pairwise disjointness (anti-diagonal cycle)
+// =============================================================================
+
+@test
+fn test_token_error_variants_pairwise_distinct() {
+    assert(TokenError.SealFailure != TokenError.OpenFailure);
+    assert(TokenError.OpenFailure != TokenError.WrongKeyId);
+    assert(TokenError.WrongKeyId != TokenError.Malformed);
+    assert(TokenError.Malformed != TokenError.Expired);
+    assert(TokenError.Expired != TokenError.WrongKind);
+    assert(TokenError.WrongKind != TokenError.ClientIpMismatch);
+    assert(TokenError.ClientIpMismatch != TokenError.SealFailure);
+}
+
+@test
+fn test_token_error_seal_distinct_from_all() {
+    assert(TokenError.SealFailure != TokenError.WrongKeyId);
+    assert(TokenError.SealFailure != TokenError.Malformed);
+    assert(TokenError.SealFailure != TokenError.Expired);
+    assert(TokenError.SealFailure != TokenError.WrongKind);
+    assert(TokenError.SealFailure != TokenError.ClientIpMismatch);
+}
+
+// =============================================================================
+// Section 3: QuicTokenKind 2-variant (match-based — Eq not assumed)
+// =============================================================================
+
+@test
+fn test_quic_token_kind_retry() {
+    let k: QuicTokenKind = QuicTokenKind.Retry;
+    let is_retry = match k {
+        QuicTokenKind.Retry    => true,
+        QuicTokenKind.NewToken => false,
+    };
+    assert(is_retry);
+}
+
+@test
+fn test_quic_token_kind_new_token() {
+    let k: QuicTokenKind = QuicTokenKind.NewToken;
+    let is_new = match k {
+        QuicTokenKind.Retry    => false,
+        QuicTokenKind.NewToken => true,
+    };
+    assert(is_new);
+}
+
+// =============================================================================
+// Section 4: WIRE_VERSION constant
+// =============================================================================
+
+@test
+fn test_wire_version_is_1() {
+    // RFC-independent: the token wire-format version byte is pinned at 1.
+    assert_eq(WIRE_VERSION, 1_u8);
+}
