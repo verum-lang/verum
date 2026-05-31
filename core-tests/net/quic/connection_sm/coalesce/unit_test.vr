@@ -1,0 +1,38 @@
+// =============================================================================
+// core-tests/net/quic/connection_sm/coalesce/unit_test.vr — RFC 9000 §12.2
+// =============================================================================
+//
+// `core/net/quic/connection_sm/coalesce.vr`:
+//   * CoalesceError : PacketBuildFailed(Text) | ShortHeaderNotLast
+//                   | MultipleShortHeaders
+//
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.connection_sm.coalesce.{CoalesceError};
+
+@test
+fn test_coalesce_error_packet_build_failed() {
+    let e: CoalesceError = CoalesceError.PacketBuildFailed("bad");
+    assert(e == CoalesceError.PacketBuildFailed("bad"));
+}
+@test
+fn test_coalesce_error_short_header_not_last() {
+    let e: CoalesceError = CoalesceError.ShortHeaderNotLast;
+    assert(e == CoalesceError.ShortHeaderNotLast);
+}
+@test
+fn test_coalesce_error_multiple_short_headers() {
+    let e: CoalesceError = CoalesceError.MultipleShortHeaders;
+    assert(e == CoalesceError.MultipleShortHeaders);
+}
+@test
+fn test_coalesce_error_packet_build_distinct_payload() {
+    assert(CoalesceError.PacketBuildFailed("a") != CoalesceError.PacketBuildFailed("b"));
+}
+@test
+fn test_coalesce_error_variants_pairwise_distinct() {
+    assert(CoalesceError.PacketBuildFailed("x") != CoalesceError.ShortHeaderNotLast);
+    assert(CoalesceError.ShortHeaderNotLast != CoalesceError.MultipleShortHeaders);
+    assert(CoalesceError.MultipleShortHeaders != CoalesceError.PacketBuildFailed("x"));
+}

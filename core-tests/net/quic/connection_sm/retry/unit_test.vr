@@ -1,0 +1,34 @@
+// =============================================================================
+// core-tests/net/quic/connection_sm/retry/unit_test.vr — RFC 9001 §5.8 Retry
+// =============================================================================
+//
+// `core/net/quic/connection_sm/retry.vr`:
+//   * RetryError : MalformedPseudo | IntegrityTagMismatch | KeyDeriveFailed
+//     (IntegrityTagMismatch is value-blind per RFC 9001 §5.8).
+//
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.connection_sm.retry.{RetryError};
+
+@test
+fn test_retry_error_malformed_pseudo() {
+    let e: RetryError = RetryError.MalformedPseudo;
+    assert(e == RetryError.MalformedPseudo);
+}
+@test
+fn test_retry_error_integrity_tag_mismatch() {
+    let e: RetryError = RetryError.IntegrityTagMismatch;
+    assert(e == RetryError.IntegrityTagMismatch);
+}
+@test
+fn test_retry_error_key_derive_failed() {
+    let e: RetryError = RetryError.KeyDeriveFailed;
+    assert(e == RetryError.KeyDeriveFailed);
+}
+@test
+fn test_retry_error_variants_pairwise_distinct() {
+    assert(RetryError.MalformedPseudo != RetryError.IntegrityTagMismatch);
+    assert(RetryError.IntegrityTagMismatch != RetryError.KeyDeriveFailed);
+    assert(RetryError.KeyDeriveFailed != RetryError.MalformedPseudo);
+}
