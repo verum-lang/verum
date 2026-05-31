@@ -9275,12 +9275,36 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// Pattern parallels `get_or_declare_memset` above.
     fn get_or_declare_memcpy(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_memcpy";
-        if let Some(f) = module.get_function(wrapper_name) {
-            return f;
-        }
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
         let bool_type = self.context.bool_type();
+
+        // **Bodyless-declaration fill-in** (AOT int/float f-string fix).
+        //
+        // `define_text_ir_helpers` (and other sites) PRE-DECLARE
+        // `verum_internal_memcpy` with no body so they can emit calls to it
+        // before its definition is materialised. The old early-return here
+        // (`if Some(f) { return f }`) treated such a forward declaration as
+        // "already defined" and never emitted the body — so the linker saw a
+        // bodyless internal function and lowered it to a no-op stub
+        // (`mov x0,#0; ret`). Every caller (`verum_int_to_text` /
+        // `verum_float_to_text`) then "copied" zero bytes, so integer/float
+        // f-string interpolation rendered EMPTY under AOT while the
+        // interpreter (which never touches this path) was correct — a
+        // silent cross-tier divergence. Only early-return when the function
+        // ALREADY HAS A BODY; otherwise fall through and fill the existing
+        // (or freshly-added) declaration with the real body.
+        let wrapper_fn_type =
+            ptr_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
+        let wrapper = match module.get_function(wrapper_name) {
+            Some(f) if f.count_basic_blocks() > 0 => return f,
+            Some(f) => f,
+            None => {
+                let f = module.add_function(wrapper_name, wrapper_fn_type, None);
+                f.set_linkage(verum_llvm::module::Linkage::Internal);
+                f
+            }
+        };
 
         // Declare the underlying intrinsic.
         let intrinsic_name = "llvm.memcpy.p0.p0.i64";
@@ -9296,12 +9320,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let intrinsic_fn = module
             .get_function(intrinsic_name)
             .unwrap_or_else(|| module.add_function(intrinsic_name, intrinsic_fn_type, None));
-
-        // Wrapper signature matches historical libc memcpy.
-        let wrapper_fn_type =
-            ptr_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
-        let wrapper = module.add_function(wrapper_name, wrapper_fn_type, None);
-        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
 
         let entry = self.context.append_basic_block(wrapper, "entry");
         let builder = self.context.create_builder();
