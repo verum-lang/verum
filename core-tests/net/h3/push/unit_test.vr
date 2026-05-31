@@ -1,0 +1,57 @@
+// =============================================================================
+// core-tests/net/h3/push/unit_test.vr — RFC 9114 §4.6 server push errors
+// =============================================================================
+//
+// `core/net/h3/push.vr`:
+//   * PushError : BudgetExhausted { requested: UInt64, limit: UInt64 }
+//              | AlreadyCancelled(UInt64) | ClientGoneAway
+//
+// Record + tuple + unit payload variants — exercises cross-module field path
+// (CLASS-9/D2b). Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.h3.push.{PushError};
+
+@test
+fn test_push_error_budget_exhausted_ctor() {
+    let e: PushError = PushError.BudgetExhausted { requested: 5_u64, limit: 3_u64 };
+    assert(e == PushError.BudgetExhausted { requested: 5_u64, limit: 3_u64 });
+}
+@test
+fn test_push_error_budget_exhausted_payload_preserved() {
+    let e: PushError = PushError.BudgetExhausted { requested: 9_u64, limit: 4_u64 };
+    let req = match e {
+        PushError.BudgetExhausted { requested, limit: _ } => requested,
+        _ => 0_u64,
+    };
+    assert_eq(req, 9_u64);
+}
+@test
+fn test_push_error_budget_exhausted_distinct_payload() {
+    assert(PushError.BudgetExhausted { requested: 5_u64, limit: 3_u64 }
+        != PushError.BudgetExhausted { requested: 6_u64, limit: 3_u64 });
+}
+@test
+fn test_push_error_already_cancelled_ctor() {
+    let e: PushError = PushError.AlreadyCancelled(7_u64);
+    assert(e == PushError.AlreadyCancelled(7_u64));
+}
+@test
+fn test_push_error_already_cancelled_payload_preserved() {
+    let e: PushError = PushError.AlreadyCancelled(42_u64);
+    let v = match e { PushError.AlreadyCancelled(x) => x, _ => 0_u64 };
+    assert_eq(v, 42_u64);
+}
+@test
+fn test_push_error_client_gone_away() {
+    let e: PushError = PushError.ClientGoneAway;
+    assert(e == PushError.ClientGoneAway);
+}
+@test
+fn test_push_error_variants_pairwise_distinct() {
+    assert(PushError.BudgetExhausted { requested: 0_u64, limit: 0_u64 }
+        != PushError.AlreadyCancelled(0_u64));
+    assert(PushError.AlreadyCancelled(0_u64) != PushError.ClientGoneAway);
+    assert(PushError.ClientGoneAway
+        != PushError.BudgetExhausted { requested: 0_u64, limit: 0_u64 });
+}
