@@ -433,6 +433,35 @@ Cumulative round-17 totals: 5 new test files + 4 expanded property
 tests + 2 NEW fundamental defects pinned via 4 @ignore'd tests + 3
 commits + INVENTORY rollup + audit.md for mem/mod.
 
+## Session 2026-05-30/31 — net deep-hierarchy fill + 4 fundamental fixes
+
+**Fundamental compiler/stdlib fixes (committed):**
+- CLASS-9/D2b cross-module record field-index shift CLOSED (TypeId-free
+  type-layout registry; `64607bb8e`). 83 mem/* tests GREEN.
+- TEXT-SMALLSTR/ENCODE-1 CLOSED (`bb4cadb89`) — `List.extend_from_slice`
+  index-loop (root cause was `slice.iter()` element-ref on a non-List FatRef
+  provenance, not a small-string dangle).
+- LISTEQ-1 CLOSED (`3a2a625fe`) — `List<T>` Eq compared ObjectHeader bytes via
+  inline `self.ptr.offset(i)`; routed through the intercepted `.get(i)`.
+  Latent because the suite never used `assert_eq(list,list)`.
+- HPACK-HUFFMAN-1 CLOSED (`ef69cd2e0`) — `HpackEncoder` defaults to raw
+  (RFC 7541 Huffman is optional; the Tier-0 codec is unimplemented — feature).
+
+**New net conformance submodules (15, ~120 @test, all GREEN):**
+- quic: address_token(12), cid_pool(10), pacer(3), path(7), multipath(7),
+  lb_cid(11), connection_sm/{rx(10),tx(5),keys(5),coalesce(5),retry(4)}.
+- tls13: error(15 — TlsError ~25-variant alert + payload variants),
+  handshake/messages(14 — RFC 8446 §4 HandshakeType constants).
+- h3: qpack/integer(3), qpack/instructions(5).
+
+Pattern: variant ctors + Eq reflexivity + payload preservation/distinctness +
+pairwise disjointness + constant pins; qualified `Type.Variant` form. Live
+state machines / crypto / record codecs deferred per each `audit.md` to L2.
+
+**Open deep defects (filed):** ITER-COLLECT-1 (generic `C.from_iter`
+static-protocol dispatch on a type-param — core monomorphization), plus the
+HPACK Huffman codec implementation (257-entry RFC 7541 table).
+
 ## How to update
 
 When you finish a module:
