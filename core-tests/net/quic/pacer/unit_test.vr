@@ -1,0 +1,50 @@
+// =============================================================================
+// core-tests/net/quic/pacer/unit_test.vr — RFC 9002 §7.7 pacing decision ADT
+// =============================================================================
+//
+// `core/net/quic/pacer.vr`:
+//   * PacerDecision : Send | NotYet(Duration)  — a token-bucket pacer returns
+//     `Send` when the bucket has enough tokens, else `NotYet(delay)`.
+//
+// PacerDecision carries no Eq impl, so variant discrimination is match-based.
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.pacer.{PacerDecision};
+mount core.time.duration.{Duration};
+
+@test
+fn test_pacer_decision_send_variant() {
+    let d: PacerDecision = PacerDecision.Send;
+    let is_send = match d {
+        PacerDecision.Send      => true,
+        PacerDecision.NotYet(_) => false,
+    };
+    assert(is_send);
+}
+
+@test
+fn test_pacer_decision_not_yet_variant() {
+    let d: PacerDecision = PacerDecision.NotYet(Duration.from_micros(500));
+    let is_not_yet = match d {
+        PacerDecision.Send      => false,
+        PacerDecision.NotYet(_) => true,
+    };
+    assert(is_not_yet);
+}
+
+@test
+fn test_pacer_decision_send_distinct_from_not_yet() {
+    let s: PacerDecision = PacerDecision.Send;
+    let n: PacerDecision = PacerDecision.NotYet(Duration.from_secs(0));
+    let s_is_send = match s {
+        PacerDecision.Send      => true,
+        PacerDecision.NotYet(_) => false,
+    };
+    let n_is_send = match n {
+        PacerDecision.Send      => true,
+        PacerDecision.NotYet(_) => false,
+    };
+    assert(s_is_send);
+    assert(!n_is_send);
+}
