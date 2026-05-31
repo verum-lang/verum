@@ -1,0 +1,32 @@
+// =============================================================================
+// core-tests/net/quic/crypto/labels/unit_test.vr — RFC 9001 §5.2 Initial secrets
+// =============================================================================
+//
+// `core/net/quic/crypto/labels.vr` Initial-keys length constants
+// (AES-128-GCM per RFC 9001 §5.2 — Initial packets always use AES-128).
+// =============================================================================
+
+mount core.net.quic.crypto.labels.{INITIAL_KEY_LEN, INITIAL_IV_LEN, INITIAL_HP_LEN};
+
+@test
+fn test_initial_key_len_is_16() {
+    // AES-128 key = 16 bytes.
+    assert_eq(INITIAL_KEY_LEN, 16);
+}
+@test
+fn test_initial_iv_len_is_12() {
+    // AEAD nonce = 12 bytes (RFC 9001 §5.3).
+    assert_eq(INITIAL_IV_LEN, 12);
+}
+@test
+fn test_initial_hp_len_is_16() {
+    // AES-128-ECB header-protection key = 16 bytes.
+    assert_eq(INITIAL_HP_LEN, 16);
+}
+@test
+fn test_initial_lens_relationships() {
+    // Key and HP keys are both AES-128 (equal); IV is the shorter GCM nonce.
+    assert(INITIAL_KEY_LEN == INITIAL_HP_LEN);
+    assert(INITIAL_IV_LEN < INITIAL_KEY_LEN);
+    assert(INITIAL_IV_LEN > 0);
+}
