@@ -59,16 +59,22 @@ fn test_tls_error_unknown_psk_identity() {
     let e: TlsError = TlsError.UnknownPskIdentity;
     assert(e == TlsError.UnknownPskIdentity);
 }
-// BAREVAR-ADT-1: `InternalError` is a non-unique variant name across the
-// stdlib (tls13/error.vr + tls13/alert.vr + others). TlsError's `Eq` match
-// arms are bare, so `TlsError.InternalError == TlsError.InternalError`
-// resolves first-wins to a sibling type's `InternalError` and compares
-// not-equal. Pinned until TlsError's impls qualify their variant names.
-@ignore("BAREVAR-ADT-1: TlsError.InternalError Eq mis-dispatches (bare-variant collision with tls13/alert + others). See defect-class-catalogue §10.")
+// InternalError carries a Text detail payload (InternalError(Text)).
 @test
-fn test_tls_error_internal_error() {
-    let e: TlsError = TlsError.InternalError;
-    assert(e == TlsError.InternalError);
+fn test_tls_error_internal_error_payload() {
+    let e: TlsError = TlsError.InternalError("oops");
+    assert(e == TlsError.InternalError("oops"));
+}
+
+@test
+fn test_tls_error_internal_error_distinct_payload() {
+    assert(TlsError.InternalError("a") != TlsError.InternalError("b"));
+}
+
+@test
+fn test_tls_error_io_error_payload() {
+    let e: TlsError = TlsError.IoError("eof");
+    assert(e == TlsError.IoError("eof"));
 }
 @test
 fn test_tls_error_bad_certificate() {
