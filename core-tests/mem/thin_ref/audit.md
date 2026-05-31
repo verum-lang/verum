@@ -329,3 +329,31 @@ the unsound numeric-id match is a guarded fallback only when the
 descriptor string is absent from `ctx.strings`. All 3 previously-`@ignore`'d
 `.new`/`.message`/`.eq` tests here + in `mem/mod` flip GREEN under
 `--interp`. Record-literal path unchanged (no regression).
+
+## §9 D2b RESOLUTION 2026-05-29/31 — stdlib-wide global-intern subclass CLOSED (96%)
+
+The D2 descriptor-collision fix (§8) closed the case where a type WAS
+registered but the StringId numeric comparison mis-matched. A distinct,
+broader subclass remained: at stdlib precompile, per-module VBC codegen
+only knew the field layouts of types declared in its OWN module, so a
+body constructing/reading a record of a type defined in another
+(non-mounted) module fell through `resolve_field_index` to the
+global-intern fallback — writing NON-positional, context-varying indices
+(`AdapterSpecific.adapter` → idx 1/10/149/229 across functions).
+Precompiler tripwire (`VERUM_TRACE_FIELDSHIFT`) measured **~5210** such
+sites stdlib-wide.
+
+FIX (commit 64607bb8e): a `global_type_layout_registry` in the stdlib
+bootstrap, mirroring the existing `global_function_registry` —
+`VbcCodegen::export_type_layouts` / `import_type_layouts` (TypeId-free
+`type-name → declaration-order field names`; import is additive
+first-wins so a module's own layout is never overwritten). Each module's
+codegen is seeded with all earlier (dependency-ordered) modules' layouts,
+so the `type_field_layouts` positional path resolves cross-module fields.
+
+IMPACT: global-intern count **5210 → 225 (−96%)**. Remaining 225 are an
+intra-module forward-reference tail (a type referenced before its own
+module's declaration pass completes) — separate, minor. mem regression
+canaries all GREEN under `--interp` (UAF.new round-trip, capability field
+independence, epoch increment, HeapStats 8-field, mod re-export). No
+TypeId/descriptor tables touched.
