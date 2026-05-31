@@ -1,0 +1,42 @@
+// =============================================================================
+// core-tests/net/quic/stream/unit_test.vr — RFC 9000 §2.1 stream direction
+// =============================================================================
+//
+// `core/net/quic/stream.vr`:
+//   * StreamDirection : Bidirectional | Unidirectional
+//
+// StreamDirection carries no Eq impl, so discrimination is match-based.
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.quic.stream.{StreamDirection};
+
+@test
+fn test_stream_direction_bidirectional() {
+    let d: StreamDirection = StreamDirection.Bidirectional;
+    let r = match d {
+        StreamDirection.Bidirectional  => true,
+        StreamDirection.Unidirectional => false,
+    };
+    assert(r);
+}
+
+@test
+fn test_stream_direction_unidirectional() {
+    let d: StreamDirection = StreamDirection.Unidirectional;
+    let r = match d {
+        StreamDirection.Bidirectional  => false,
+        StreamDirection.Unidirectional => true,
+    };
+    assert(r);
+}
+
+@test
+fn test_stream_direction_distinct() {
+    let a: StreamDirection = StreamDirection.Bidirectional;
+    let b: StreamDirection = StreamDirection.Unidirectional;
+    let a_bidi = match a { StreamDirection.Bidirectional => true, StreamDirection.Unidirectional => false };
+    let b_bidi = match b { StreamDirection.Bidirectional => true, StreamDirection.Unidirectional => false };
+    assert(a_bidi);
+    assert(!b_bidi);
+}
