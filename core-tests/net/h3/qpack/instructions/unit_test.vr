@@ -1,0 +1,39 @@
+// =============================================================================
+// core-tests/net/h3/qpack/instructions/unit_test.vr — RFC 9204 §4.3 QPACK instr
+// =============================================================================
+//
+// `core/net/h3/qpack/instructions.vr`:
+//   * InstrError : Truncated | HuffmanError | IntegerError | UnknownOpcode
+//
+// Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
+// =============================================================================
+
+mount core.net.h3.qpack.instructions.{InstrError};
+
+@test
+fn test_instr_error_truncated() {
+    let e: InstrError = InstrError.Truncated;
+    assert(e == InstrError.Truncated);
+}
+@test
+fn test_instr_error_huffman_error() {
+    let e: InstrError = InstrError.HuffmanError;
+    assert(e == InstrError.HuffmanError);
+}
+@test
+fn test_instr_error_integer_error() {
+    let e: InstrError = InstrError.IntegerError;
+    assert(e == InstrError.IntegerError);
+}
+@test
+fn test_instr_error_unknown_opcode() {
+    let e: InstrError = InstrError.UnknownOpcode;
+    assert(e == InstrError.UnknownOpcode);
+}
+@test
+fn test_instr_error_variants_pairwise_distinct() {
+    assert(InstrError.Truncated != InstrError.HuffmanError);
+    assert(InstrError.HuffmanError != InstrError.IntegerError);
+    assert(InstrError.IntegerError != InstrError.UnknownOpcode);
+    assert(InstrError.UnknownOpcode != InstrError.Truncated);
+}
