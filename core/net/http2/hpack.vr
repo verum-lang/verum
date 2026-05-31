@@ -313,10 +313,21 @@ public type HpackEncoder is {
 }
 
 implement HpackEncoder {
+    // NOTE on the Huffman default (HPACK-HUFFMAN-1):
+    // `huffman_enabled` defaults to **false** — the encoder emits the raw
+    // (non-Huffman) string form.  This is fully RFC 7541 §5.2 compliant:
+    // Huffman coding is OPTIONAL and the H bit signals which form a given
+    // string literal uses, so a decoder accepts both.  The Tier-0 HPACK
+    // Huffman codec (`core.net.http2.huffman`) is currently declared via
+    // runtime intrinsics that are not yet wired, so enabling it would emit
+    // an H-bit-set literal whose body the decoder cannot reconstruct
+    // (round-trip corruption).  Defaulting to raw keeps `HpackEncoder.new()`
+    // correct out of the box; full Huffman encode/decode is a tracked
+    // feature-completion task, NOT a correctness gap (raw is valid wire).
     public fn new() -> HpackEncoder {
         HpackEncoder {
             table: Http2DynamicTable.new(DEFAULT_HEADER_TABLE_SIZE as Int),
-            huffman_enabled: true,
+            huffman_enabled: false,
             pending_resize: Maybe.None,
         }
     }
@@ -324,13 +335,16 @@ implement HpackEncoder {
     public fn with_max_table_size(size: Int) -> HpackEncoder {
         HpackEncoder {
             table: Http2DynamicTable.new(size),
-            huffman_enabled: true,
+            huffman_enabled: false,
             pending_resize: Maybe.None,
         }
     }
 
-    /// Enable / disable Huffman — disabled is useful for testing or
-    /// when trading CPU for wire bandwidth.
+    /// Enable / disable Huffman.  **Note:** the Tier-0 Huffman codec is not
+    /// yet implemented (see the HPACK-HUFFMAN-1 note above), so enabling it
+    /// currently produces output the decoder cannot reconstruct.  Leave it
+    /// disabled (the default) until the codec lands; `set_huffman(false)` is
+    /// always safe and RFC-compliant.
     public fn set_huffman(&mut self, enabled: Bool) {
         self.huffman_enabled = enabled;
     }
