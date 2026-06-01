@@ -6240,6 +6240,34 @@ impl TypeChecker {
                 Ok(())
             }
 
+            // D5 (AOT-INT-PTR-CAST-1) — integer <-> RAW POINTER casts.
+            //
+            // Verum's no-libc systems layer uses raw `*const T` / `*mut T` /
+            // volatile pointers for addresses (e.g. `core.sys.mmio`
+            // `MemoryRegion.start: *const ()` constructed as `0x1000 as
+            // *const ()`, and `self.start as USize` in `.contains`). `as`
+            // between an integer (Int / USize / ISize / sized aliases) and a
+            // raw pointer is the canonical address-arithmetic idiom and must
+            // typecheck on BOTH tiers — pre-fix it passed `--interp` (lenient
+            // VBC cast) but failed `--aot` with `E401: types are not
+            // compatible for casting` (the int->reference arm above did not
+            // cover raw `Pointer`/`VolatilePointer`). The `as` keyword is the
+            // explicit opt-in; emit the same address-safety warning as the
+            // int->reference arm when outside an `@unsafe` block.
+            (Int | Named { .. }, Pointer { .. } | VolatilePointer { .. })
+            | (Pointer { .. } | VolatilePointer { .. }, Int | Named { .. }) => {
+                if !self.in_unsafe_context {
+                    self.emit_diagnostic(
+                        DiagnosticBuilder::warning()
+                            .message(
+                                "casting between integer and raw pointer - ensure a valid address",
+                            )
+                            .build(),
+                    );
+                }
+                Ok(())
+            }
+
             // Reference casts - handled through subtyping
             // &unsafe T → &checked T → &T allowed
             // The opposite direction is forbidden
