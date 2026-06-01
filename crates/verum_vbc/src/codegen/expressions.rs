@@ -15966,7 +15966,15 @@ impl VbcCodegen {
                         && let Some(val_str) = iname.strip_prefix("__const_val_")
                     {
                         let value: i64 = val_str.parse().unwrap_or(0);
-                        self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                        // Large magnitudes (Int.MIN = i64::MIN, …) MUST use the
+                        // constant pool — LoadI's 48-bit inline immediate
+                        // truncates i64::MIN (low 48 bits 0) to 0.
+                        if (i16::MIN as i64..=i16::MAX as i64).contains(&value) {
+                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                        } else {
+                            let const_id = self.ctx.add_const_int(value);
+                            self.ctx.emit(Instruction::LoadK { dst: dest, const_id: const_id.0 });
+                        }
                         return Ok(Some(dest));
                     }
                     // It's a constant - call it to get value
@@ -16025,7 +16033,15 @@ impl VbcCodegen {
                         && let Some(val_str) = iname.strip_prefix("__const_val_")
                     {
                         let value: i64 = val_str.parse().unwrap_or(0);
-                        self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                        // Large magnitudes (Int.MIN = i64::MIN, …) MUST use the
+                        // constant pool — LoadI's 48-bit inline immediate
+                        // truncates i64::MIN (low 48 bits 0) to 0.
+                        if (i16::MIN as i64..=i16::MAX as i64).contains(&value) {
+                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                        } else {
+                            let const_id = self.ctx.add_const_int(value);
+                            self.ctx.emit(Instruction::LoadK { dst: dest, const_id: const_id.0 });
+                        }
                         return Ok(Some(dest));
                     }
                     self.ctx.emit(Instruction::Call {
