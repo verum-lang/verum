@@ -17,6 +17,7 @@
 // =============================================================================
 
 mount core.context.provider.{Provider, LazyProvider, ScopedProvider, has_context};
+mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
 // Section 1: Provider<T> — basic factory + caching contract
@@ -167,4 +168,90 @@ fn test_has_context_returns_false_for_negative_slot() {
 fn test_has_context_returns_false_for_very_high_slot() {
     // Way beyond CONTEXT_SLOT_COUNT.
     assert(!has_context(1000000));
+}
+
+// =============================================================================
+// Section 8: Provider<T>.map / flat_map — functor + monadic composition
+// =============================================================================
+//
+// Eager semantics: `map`/`flat_map` resolve `self` then apply `f`.
+
+@test
+fn test_provider_map_transforms_value() {
+    let mut p = Provider.new(fn() -> Int { 10 });
+    let mut mapped = p.map(fn(x: Int) -> Int { x * 2 });
+    assert_eq(mapped.get(), 20);
+}
+
+@test
+fn test_provider_map_result_is_resolved_eagerly() {
+    let mut p = Provider.new(fn() -> Int { 3 });
+    let mapped = p.map(fn(x: Int) -> Int { x + 1 });
+    // Eager map returns an already-resolved provider.
+    assert(mapped.is_resolved());
+}
+
+@test
+fn test_provider_map_resolves_source() {
+    let mut p = Provider.new(fn() -> Int { 7 });
+    let _ = p.map(fn(x: Int) -> Int { x });
+    // Mapping resolved the source provider as a side effect.
+    assert(p.is_resolved());
+}
+
+@test
+fn test_provider_flat_map_chains_providers() {
+    let mut p = Provider.new(fn() -> Int { 5 });
+    let mut fm = p.flat_map(fn(x: Int) -> Provider<Int> { Provider.of(x + 100) });
+    assert_eq(fm.get(), 105);
+}
+
+@test
+fn test_provider_map_over_of() {
+    let mut p = Provider.of(21);
+    let mut mapped = p.map(fn(x: Int) -> Int { x * 2 });
+    assert_eq(mapped.get(), 42);
+}
+
+// =============================================================================
+// Section 9: ScopedProvider.try_run — fallible body with guaranteed pop
+// =============================================================================
+
+@test
+fn test_scoped_provider_try_run_ok_returns_value() {
+    let sp = ScopedProvider.new(80, 1);
+    let r: Result<Int, Text> = sp.try_run(fn() -> Result<Int, Text> { Result.Ok(7) });
+    match r {
+        Ok(v) => assert_eq(v, 7),
+        Err(_) => panic("expected Ok(7)"),
+    }
+}
+
+@test
+fn test_scoped_provider_try_run_err_propagates() {
+    let sp = ScopedProvider.new(82, 1);
+    let r: Result<Int, Text> = sp.try_run(fn() -> Result<Int, Text> { Result.Err("boom".clone()) });
+    match r {
+        Ok(_) => panic("expected Err"),
+        Err(e) => assert_eq(e, "boom"),
+    }
+}
+
+@test
+fn test_scoped_provider_try_run_pops_slot_on_ok() {
+    let slot = 83;
+    assert(!has_context(slot));
+    let sp = ScopedProvider.new(slot, 1);
+    let _ = sp.try_run(fn() -> Result<Int, Text> { Result.Ok(0) });
+    assert(!has_context(slot));
+}
+
+@test
+fn test_scoped_provider_try_run_pops_slot_on_err() {
+    // The slot must be released even when the body returns Err.
+    let slot = 84;
+    assert(!has_context(slot));
+    let sp = ScopedProvider.new(slot, 1);
+    let _ = sp.try_run(fn() -> Result<Int, Text> { Result.Err("e".clone()) });
+    assert(!has_context(slot));
 }

@@ -17,6 +17,8 @@
 // =============================================================================
 
 mount core.context.standard.{ContextLogLevel};
+mount core.base.maybe.{Maybe};
+mount core.collections.list.List;
 
 // =============================================================================
 // §1 severity is injective — full 6×5/2 = 15 distinct-pair sweep
@@ -178,4 +180,43 @@ fn property_debug_equals_name() {
     assert_eq(f"{ContextLogLevel.Trace:?}", ContextLogLevel.Trace.name());
     assert_eq(f"{ContextLogLevel.Info:?}",  ContextLogLevel.Info.name());
     assert_eq(f"{ContextLogLevel.Fatal:?}", ContextLogLevel.Fatal.name());
+}
+
+// =============================================================================
+// §11 from_severity ∘ severity = identity (round-trip over the 6-level domain)
+// =============================================================================
+
+fn level_domain() -> List<ContextLogLevel> {
+    [
+        ContextLogLevel.Trace,
+        ContextLogLevel.Debug,
+        ContextLogLevel.Info,
+        ContextLogLevel.Warn,
+        ContextLogLevel.Error,
+        ContextLogLevel.Fatal,
+    ]
+}
+
+@test
+fn property_severity_from_severity_round_trip() {
+    // from_severity(l.severity()) yields a level with the same severity.
+    for l in level_domain().iter() {
+        let s = (*l).severity();
+        match ContextLogLevel.from_severity(s) {
+            Maybe.Some(back) => assert_eq(back.severity(), s),
+            Maybe.None => panic("from_severity returned None for a valid ordinal"),
+        }
+    }
+}
+
+@test
+fn property_from_severity_total_on_zero_to_five_only() {
+    // Exactly 0..=5 produce Some; everything else None.
+    let mut n = 0;
+    while n <= 5 {
+        assert(ContextLogLevel.from_severity(n) is Maybe.Some);
+        n = n + 1;
+    }
+    assert(ContextLogLevel.from_severity(6) is Maybe.None);
+    assert(ContextLogLevel.from_severity(-1) is Maybe.None);
 }

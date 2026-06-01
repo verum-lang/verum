@@ -115,6 +115,26 @@ implement ContextLogLevel {
     public fn is_enabled(&self, min_level: ContextLogLevel) -> Bool {
         self.severity() >= min_level.severity()
     }
+
+    /// Inverse of `severity()`: map an ordinal back to a level. Returns
+    /// `Maybe.None` for any out-of-range ordinal, so `severity()` and
+    /// `from_severity()` round-trip on `0..=5`:
+    /// `from_severity(l.severity()) == Some(l)` for every level `l`.
+    ///
+    /// Useful for serialization (e.g. a Prometheus log-level label stored
+    /// as its ordinal). Variants are qualified `ContextLogLevel.<V>` to
+    /// dodge the bare-name first-wins collision with `core.base.log.LogLevel`.
+    public fn from_severity(n: Int) -> Maybe<ContextLogLevel> {
+        match n {
+            0 => Maybe.Some(ContextLogLevel.Trace),
+            1 => Maybe.Some(ContextLogLevel.Debug),
+            2 => Maybe.Some(ContextLogLevel.Info),
+            3 => Maybe.Some(ContextLogLevel.Warn),
+            4 => Maybe.Some(ContextLogLevel.Error),
+            5 => Maybe.Some(ContextLogLevel.Fatal),
+            _ => Maybe.None,
+        }
+    }
 }
 
 implement Eq for ContextLogLevel {
