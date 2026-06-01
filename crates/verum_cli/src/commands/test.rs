@@ -322,7 +322,35 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     let run_one = |t: &Test| (t.name.clone(), run_single_test(t, &test_target_dir, &cfg));
 
     let results: Vec<(Text, TestResult)> = match &pool {
-        Some(p) => p.install(|| active.par_iter().map(|t| run_one(t)).collect()),
+        Some(p) => {
+            // Parallel `--aot`: compile + run each test in its OWN process.
+            //
+            // In-process parallel native codegen is NOT safe. LLVM's
+            // per-process global state — lazily `__cxa_guard_acquire`-
+            // registered codegen (MachineFunction) passes, the pass registry,
+            // `cl::opt` globals — is shared across rayon workers, and driving
+            // it from several threads at once SIGSEGVs in
+            // `callDefaultCtor<*Pass>`, aborting the ENTIRE run (defect-class
+            // catalogue §23). Locks and pass-guard warm-ups were insufficient
+            // (the racing workers aren't *in* codegen). The robust fix is
+            // process isolation: re-invoke ourselves as `verum test --aot
+            // --test-threads 1 --exact --filter <name>` per test (see
+            // `run_aot_subprocess`). Each child owns its LLVM state, so the
+            // parent fans them out fully in parallel with zero shared-state
+            // races. The child matches a single test (`active.len() == 1`) and
+            // runs it in-process, terminating the recursion. Interp stays
+            // in-process (no LLVM, no race).
+            if opts.tier == Tier::Aot && active.len() > 1 {
+                p.install(|| {
+                    active
+                        .par_iter()
+                        .map(|t| (t.name.clone(), run_aot_subprocess(t)))
+                        .collect()
+                })
+            } else {
+                p.install(|| active.par_iter().map(|t| run_one(t)).collect())
+            }
+        }
         None => active.iter().map(|t| run_one(t)).collect(),
     };
 
@@ -762,6 +790,53 @@ struct TestFailure {
     stderr: String,
     exit_code: Option<i32>,
     error: String,
+}
+
+/// Compile + run ONE AOT test in a separate `verum` process.
+///
+/// In-process parallel native codegen is not thread-safe — LLVM's
+/// per-process state (lazily `__cxa_guard`-registered codegen passes,
+/// the pass registry, `cl::opt` globals) is shared across rayon workers
+/// and races into a `callDefaultCtor<*Pass>` SIGSEGV (defect-class
+/// catalogue §23). Re-invoking ourselves with `--test-threads 1 --exact
+/// --filter <name>` gives this test its own process and thus its own
+/// isolated LLVM state; the parent fans these out in parallel for full
+/// throughput with no shared-state race. The child matches exactly one
+/// test, so it runs in-process and does NOT recurse. Pass/fail is read
+/// from the child's exit status; on failure the child's captured output
+/// is surfaced for the failure report.
+fn run_aot_subprocess(test: &Test) -> TestResult {
+    let start = Instant::now();
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("verum"));
+    let out = Command::new(&exe)
+        .arg("test")
+        .arg("--aot")
+        .arg("--test-threads")
+        .arg("1")
+        .arg("--exact")
+        .arg("--filter")
+        .arg(test.name.as_str())
+        .arg("--format")
+        .arg("terse")
+        .output();
+    match out {
+        Ok(o) if o.status.success() => TestResult::Pass {
+            duration: start.elapsed(),
+            stdout: String::new(),
+            stderr: String::new(),
+        },
+        Ok(o) => TestResult::Fail {
+            duration: start.elapsed(),
+            stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
+            exit_code: o.status.code(),
+            error: "AOT compile/run failed in isolated subprocess".to_string(),
+        },
+        Err(e) => TestResult::CompileError {
+            duration: start.elapsed(),
+            error: format!("failed to spawn AOT subprocess: {}", e),
+        },
+    }
 }
 
 fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult {
