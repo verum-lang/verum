@@ -309,6 +309,71 @@ that file is resolved.
 Duration's `Ordering`-returning `cmp`) — closed transitively by
 §3.2's primitive-intercept fix.
 
+### §3.6 Bare-variant Display dispatch in f-strings — CLOSED 2026-06-01 (commit `bf3364e0c`)
+
+§3.3 / §3.3.1 routed `f"{var}"` through the user `Display` impl when the
+placeholder's type could be inferred — but a **bare zero-arity variant
+constructor** placeholder (`f"{Less}"`, `f"{None}"`, `f"{Ok}"`) still
+rendered the Debug-style variant name (`"Less"`) instead of dispatching
+to `Ordering.fmt` => `"<"`.  `try_emit_display_dispatch` calls
+`infer_expr_type_name(expr)`, which returned `None` for a bare variant.
+
+The prior §J attempt scanned only **qualified** `Type.Variant`
+function-table keys (`key.ends_with(".Less")`); but the archive loads
+the qualified `Ordering.Less` entry with `variant_tag = None`, and the
+entry that actually carries `variant_tag` + `parent_type_name` is the
+**bare** `Less` key registered by `register_stdlib_constants` — which
+that scan never consulted.  Fix mirrors `compile_simple_path`'s own
+resolution: consult `lookup_function_in_scope(name)` for
+`variant_tag` + `parent_type_name` FIRST, returning the simple parent
+name; plus a `find_unique_variant_parent_in_type_descriptors` fallback
+for user variants registered only under qualified keys, and parent-name
+normalisation in the dotted scan (the two registrations core ADTs get —
+simple `Ordering` + module-rooted `core.base.ordering.Ordering` — were
+tripping a false-ambiguity bail-out).  Fixes every ADT bare variant in
+f-strings stdlib-wide.  Pinned by `unit_test::test_display_operator_symbols`
++ `regression_test::regression_display_ordering_inline_constructor`
+(136 → 138 GREEN under `--interp`).
+
+### §3.7 `Int.MIN` const = 0 via stale precompiled-stdlib archive — fix landed 2026-06-01
+
+`Int.MIN < 0`, `Ordering.from_int(Int.MIN)`, and every `Int.MIN`
+comparison failed because `Int.MIN` resolved to **0**.  Root cause is
+NOT the literal: `-9223372036854775808` evaluates correctly to `i64::MIN`
+in expression context under the current codegen (verified:
+`-9223372036854775808 < -9_000_000_000_000_000_000` is `true`).  The
+wrong value is **baked into the precompiled stdlib archive**
+(`target/precompiled-stdlib/runtime.vbca`), which is a blake3 cache over
+`core/*.vr` *content* — so codegen fixes never propagate into compiled
+stdlib bodies until a `core/*.vr` edit busts the cache.  The archive's
+`Int.MIN` was compiled by an earlier codegen / bootstrap path that
+mishandled the over-wide `2^63` magnitude.  Fix: redefine
+`core/base/primitives.vr` `Int.MIN = -9223372036854775807 - 1` (canonical
+INT64_MIN spelling — `9223372036854775807` is `i64::MAX`, fits exactly;
+every intermediate stays in range), which both busts the archive cache
+(forcing a rebuild with current codegen) and is robust to any
+over-wide-literal regression.
+
+**Architectural note (load-bearing):** the precompiled archive is stale
+relative to *all* codegen fixes (Display §3.6, char_to_text, ProcessExit,
+…) until some `core/*.vr` edit triggers a rebuild.  Validating a codegen
+fix against stdlib *bodies* (vs test-side code) requires an archive
+rebuild.
+
+### §3.8 Remaining deferred defects (not bare-variant / not Int.MIN)
+
+* **Generic `T.default()` dispatch** — `fn gd<T: Default>() -> T {
+  T.default() }; let o: Ordering = gd(); assert_eq(o, Equal)` fails
+  (`get_default::<Ordering>()` ≠ `Equal`).  `Ordering.default()` direct
+  works; the generic-instantiated protocol-method dispatch resolves
+  wrong.  Pins `unit_test::test_default_generic_context`.
+* **Field-access method-chain on `&T`** — `a.age.cmp(&b.age).then(
+  a.name.cmp(&b.name))` over `&Person` fails, although `Int.cmp`,
+  `Text.cmp`, and `.then()` all pass standalone (§Eq probe).  Same
+  field-access-resolution class as `[[btree_pattern_match_ref_generic_class]]`.
+  Pins `integration_lex_chain_then_secondary_decides` /
+  `integration_lex_chain_then_full_equality` / `test_custom_sort_order`.
+
 ## Action items landed in this branch
 
 * Added canonical `resolve_arg_value` helper to

@@ -77,7 +77,15 @@ fn popcnt<T>(x: T) -> T { @intrinsic("ctpop", x) }
 
 implement Int {
     /// Minimum value (-2^63).
-    public const MIN: Int = -9223372036854775808;
+    //
+    // Defined as `-MAX - 1` rather than the literal `-9223372036854775808`:
+    // the magnitude 2^63 (9223372036854775808) exceeds i64::MAX, so the bare
+    // literal cannot round-trip through a signed-64 value and the const folded
+    // to 0 (INTLIT-OVERFLOW class). 9223372036854775807 is i64::MAX and fits
+    // exactly; `-MAX - 1` yields the true minimum with every intermediate in
+    // range. This is the canonical INT64_MIN spelling (cf. C's
+    // `(-9223372036854775807LL - 1)`).
+    public const MIN: Int = -9223372036854775807 - 1;
 
     /// Maximum value (2^63 - 1).
     public const MAX: Int = 9223372036854775807;
