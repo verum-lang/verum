@@ -994,7 +994,84 @@ impl TypeChecker {
         }
 
         // Register the item type in the environment
-        self.register_imported_item_from_inline_module(&module, item_name)
+        let reg_result = self.register_imported_item_from_inline_module(&module, item_name);
+
+        // Re-export following (umbrella resolution).
+        //
+        // `register_imported_item_from_inline_module` binds `item_name` only
+        // when it is a DIRECT declaration of `module`. When the name is instead
+        // re-exported via a `public mount .sub.{item_name}` (the umbrella
+        // pattern, e.g. `core/sys/mod.vr` re-exporting `extract_bits` from
+        // `core.sys.bitfield`), that function detects the re-export and returns
+        // Ok WITHOUT binding the name — historically deferring to a
+        // registry-backed path that never completed the binding, leaving
+        // `mount core.sys.{extract_bits}` resolving as `E100 unbound variable`
+        // at the use site under strict compilation while the lenient VBC
+        // interpreter masked it via its global function table.
+        //
+        // Complete the binding here by walking the module's own `public mount`
+        // re-export chain to the canonical defining submodule and importing the
+        // item from there. Fully general (no hardcoded stdlib knowledge): works
+        // for any inline module that re-exports any name. Cycle-safe via the
+        // `imported_names` source-dedup guard at the head of this function — a
+        // re-export that loops back to an already-visited (module, source) pair
+        // returns early before recursing again.
+        let already_bound = self.ctx.env.lookup(&name_text).is_some()
+            || self.ctx.type_defs.contains_key(&name_text);
+        if !already_bound {
+            let mut reexport_pairs: Vec<(verum_common::Text, Option<verum_common::Text>)> =
+                Vec::new();
+            if let Some(items) = &module.items {
+                collect_inline_mount_reexports_recursive(
+                    items.as_slice(),
+                    module_name,
+                    &mut reexport_pairs,
+                );
+            }
+            for (target_path, reexp_item) in &reexport_pairs {
+                let item_matches = match reexp_item {
+                    Some(n) => n.as_str() == item_name,
+                    // Glob re-export (`public mount .sub.*`) — attempt the item
+                    // against the target module; a miss is harmless.
+                    None => true,
+                };
+                if !item_matches || target_path.as_str() == module_name {
+                    continue;
+                }
+                // Resolve the target submodule key against `inline_modules`,
+                // tolerating both bare (`core.sys.bitfield`) and cog-prefixed
+                // (`cog.core.sys.bitfield`) key forms.
+                let target_key = if self.inline_modules.contains_key(target_path) {
+                    Some(target_path.clone())
+                } else {
+                    let cog_form =
+                        verum_common::Text::from(format!("cog.{}", target_path.as_str()));
+                    let stripped = verum_common::Text::from(
+                        target_path
+                            .as_str()
+                            .strip_prefix("cog.")
+                            .unwrap_or(target_path.as_str()),
+                    );
+                    if self.inline_modules.contains_key(&cog_form) {
+                        Some(cog_form)
+                    } else if self.inline_modules.contains_key(&stripped) {
+                        Some(stripped)
+                    } else {
+                        None
+                    }
+                };
+                if let Some(target_key) = target_key {
+                    let _ = self.import_item_from_inline_module(target_key.as_str(), item_name);
+                    if self.ctx.env.lookup(&name_text).is_some()
+                        || self.ctx.type_defs.contains_key(&name_text)
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        reg_result
     }
 
     /// Register an imported item from an inline module in the type environment.
@@ -1709,10 +1786,37 @@ impl TypeChecker {
                                     .collect::<std::collections::HashSet<_>>()
                             })
                             .unwrap_or_default();
+                        // Also gather names this inline module re-exports via
+                        // `public mount .sub.{name}`. The inline-module import
+                        // path now follows those re-export chains to the
+                        // canonical defining submodule (see
+                        // `import_item_from_inline_module`), so a re-exported
+                        // name is just as resolvable through the inline path as
+                        // a direct declaration. Counting them here lets the
+                        // umbrella pattern (`mount core.sys.{extract_bits}`)
+                        // resolve under strict compilation instead of falling
+                        // through to the cross-file path that never walked the
+                        // re-export chain.
+                        let inline_reexport_items: std::collections::HashSet<String> = {
+                            let mut pairs: Vec<(verum_common::Text, Option<verum_common::Text>)> =
+                                Vec::new();
+                            if let Some(items) = inline_mod.items.as_ref() {
+                                collect_inline_mount_reexports_recursive(
+                                    items.as_slice(),
+                                    candidate.as_str(),
+                                    &mut pairs,
+                                );
+                            }
+                            pairs
+                                .into_iter()
+                                .filter_map(|(_, n)| n.map(|t| t.as_str().to_string()))
+                                .collect()
+                        };
                         let direct_covers_all = trees.iter().all(|tree| {
                             if let MountTreeKind::Path(p) = &tree.kind {
                                 let want = simple_process_path(p);
                                 inline_direct_items.contains(want.as_str())
+                                    || inline_reexport_items.contains(want.as_str())
                             } else {
                                 true
                             }
@@ -2346,6 +2450,37 @@ impl TypeChecker {
                             // module's qualified name) it surfaces the
                             // descriptor without any source-walk.
                             self.ctx.env.insert(register_name, scheme);
+                        } else if let Some(source_module) = self
+                            .reexport_source_module_for(resolved_module_path.as_str(), item_name)
+                            .filter(|s| s.as_str() != resolved_module_path.as_str())
+                        {
+                            // D1 — umbrella re-export of a free function whose
+                            // descriptor is ABSENT from `metadata.functions`
+                            // (the precompiled function table is keyed by
+                            // declaring module and omits some `pure` leaf fns,
+                            // so `core.sys.bitfield.extract_bits` is missing even
+                            // though the registry AST has it).  The re-export
+                            // chain still tells us the canonical source module;
+                            // recurse into it against the live `ModuleRegistry`,
+                            // whose AST resolves the function via the same
+                            // "AST direct" path a `mount <source>.{item}` uses.
+                            // Cycle-guarded by `imports_in_progress` on the
+                            // distinct (source_module, item) key.
+                            if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+                                eprintln!(
+                                    "[task20] registry recurse: mod='{}' item='{}' -> source='{}'",
+                                    resolved_module_path.as_str(),
+                                    item_name,
+                                    source_module.as_str(),
+                                );
+                            }
+                            let _ = self.import_item_from_module_inner(
+                                &source_module,
+                                item_name,
+                                local_name,
+                                registry,
+                                import_span,
+                            );
                         }
                     }
                     ExportKind::Type | ExportKind::Protocol => self.import_type_export(&*module_info, item_name, register_name, &resolved_module_path, registry, import_span, exported.source_module)?,
@@ -5766,22 +5901,35 @@ impl TypeChecker {
         let reexport_fd = if direct_fd.is_some() {
             None
         } else {
-            metadata
-                .module_reexports
-                .get(&Text::from(module_path))
-                .and_then(|leaves| {
-                    leaves
-                        .iter()
-                        .find(|(local, _)| local == &item_text)
-                        .map(|(_, src)| src.clone())
-                })
-                .and_then(|source_module| {
-                    let qualified = format!("{}.{}", source_module.as_str(), item_name);
-                    metadata
-                        .functions
-                        .get(&Text::from(qualified.as_str()))
-                        .or_else(|| metadata.functions.get(&item_text))
-                })
+            let leaves_opt = metadata.module_reexports.get(&Text::from(module_path));
+            let src_opt = leaves_opt.and_then(|leaves| {
+                leaves
+                    .iter()
+                    .find(|(local, _)| local == &item_text)
+                    .map(|(_, src)| src.clone())
+            });
+            if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+                eprintln!(
+                    "[task20] metadata_reexport: mod='{}' item='{}' reexport_key_present={} leaf_count={} src={:?}",
+                    module_path,
+                    item_name,
+                    leaves_opt.is_some(),
+                    leaves_opt.map(|l| l.len()).unwrap_or(0),
+                    src_opt.as_ref().map(|s| s.as_str().to_string()),
+                );
+            }
+            src_opt.and_then(|source_module| {
+                let qualified = format!("{}.{}", source_module.as_str(), item_name);
+                let q_hit = metadata.functions.get(&Text::from(qualified.as_str()));
+                if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+                    eprintln!(
+                        "[task20] metadata_reexport: qualified='{}' functions_has={}",
+                        qualified,
+                        q_hit.is_some(),
+                    );
+                }
+                q_hit.or_else(|| metadata.functions.get(&item_text))
+            })
         };
 
         let fd = direct_fd.or(reexport_fd)?;
@@ -5820,6 +5968,37 @@ impl TypeChecker {
             }
         };
         Some(scheme)
+    }
+
+    /// Resolve the canonical SOURCE module for `item_name` re-exported by
+    /// `module_path`, using the precompile-captured
+    /// `metadata.module_reexports` chain.  Returns the absolute dotted
+    /// module path of the declaring submodule (e.g. `core.sys` re-exporting
+    /// `extract_bits` → `core.sys.bitfield`), or None when the module does
+    /// not re-export the name.
+    ///
+    /// This is the registry-recursion companion to
+    /// `resolve_function_via_metadata_reexports`: when the re-export source
+    /// is known but `metadata.functions` lacks its descriptor (the
+    /// precompiled function table is keyed by declaring module and may omit
+    /// e.g. `pure` leaf functions), the caller recurses into this source
+    /// module against the live `ModuleRegistry`, whose AST carries the real
+    /// declaration — the same path a direct `mount <source>.{item}` takes.
+    fn reexport_source_module_for(&self, module_path: &str, item_name: &str) -> Option<Text> {
+        let metadata = match &self.core_metadata {
+            Maybe::Some(m) => m,
+            Maybe::None => return None,
+        };
+        let item_text = Text::from(item_name);
+        metadata
+            .module_reexports
+            .get(&Text::from(module_path))
+            .and_then(|leaves| {
+                leaves
+                    .iter()
+                    .find(|(local, _)| local == &item_text)
+                    .map(|(_, src)| src.clone())
+            })
     }
 
     /// - Type: the function type
