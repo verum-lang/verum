@@ -88,3 +88,33 @@ fn property_get_after_of_does_not_run_factory() {
     let v = p.get();
     assert_eq(v, 99);
 }
+
+// =============================================================================
+// §9  map functor law (identity): map(id) preserves the value
+// §10 flat_map ∘ of ≡ map: binding through `Provider.of` equals mapping
+// =============================================================================
+
+@test
+fn property_map_identity_preserves_value() {
+    let mut p = Provider.new(fn() -> Int { 17 });
+    let mut m = p.map(fn(x: Int) -> Int { x });
+    assert_eq(m.get(), 17);
+}
+
+@test
+fn property_map_transforms_value() {
+    let mut p = Provider.new(fn() -> Int { 4 });
+    let mut m = p.map(fn(x: Int) -> Int { x + 1 });
+    assert_eq(m.get(), 5);
+}
+
+@test
+fn property_flat_map_of_equals_map() {
+    // flat_map(|x| Provider.of(g(x))) == map(g)
+    let mut a = Provider.new(fn() -> Int { 2 });
+    let mut viamap = a.map(fn(x: Int) -> Int { x * 10 });
+    let mut b = Provider.new(fn() -> Int { 2 });
+    let mut viaflat = b.flat_map(fn(x: Int) -> Provider<Int> { Provider.of(x * 10) });
+    assert_eq(viamap.get(), viaflat.get());
+    assert_eq(viamap.get(), 20);
+}

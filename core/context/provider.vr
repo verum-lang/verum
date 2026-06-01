@@ -147,6 +147,26 @@ implement<T: Clone> Provider<T> {
     public fn reset(&mut self) {
         self.cached = Maybe.None;
     }
+
+    /// Functor map: resolve this provider and apply `f`, returning a new
+    /// already-resolved `Provider<U>` holding `f(self.get())`.
+    ///
+    /// **Eager semantics.** This resolves `self` (running its factory if
+    /// not yet cached) and applies `f` immediately. A *lazy* variant that
+    /// defers `f` until the derived provider is first accessed requires
+    /// environment-capturing closures (the derived factory would close
+    /// over `self` and `f`); that is tracked as a follow-up. Eager `map`
+    /// is sound and composes; mirror the `Maybe.map` / `Result.map`
+    /// `<U, F: fn(T) -> U>` idiom.
+    public fn map<U: Clone, F: fn(T) -> U>(&mut self, f: F) -> Provider<U> {
+        Provider.of(f(self.get()))
+    }
+
+    /// Monadic bind: resolve this provider, then hand the value to `f`
+    /// which returns the next provider. Eager on `self` (see `map`).
+    public fn flat_map<U: Clone, F: fn(T) -> Provider<U>>(&mut self, f: F) -> Provider<U> {
+        f(self.get())
+    }
 }
 
 /// Lazy context provider — alias for Provider<T> for backwards compatibility.
@@ -196,6 +216,25 @@ implement ScopedProvider<T> {
         // Execute the body
         let result = body();
         // Pop context from the TLS stack (restore to 0 / not-set)
+        env_ctx_end(self.slot_id);
+        result
+    }
+
+    /// Like `run`, but for a fallible body. The context slot is popped
+    /// (`env_ctx_end`) BEFORE the `Result` is returned, so cleanup happens
+    /// on both the `Ok` and `Err` paths — the caller can `?`-propagate the
+    /// error without leaking the provided slot.
+    ///
+    /// ```verum
+    /// let out = ScopedProvider.new(slot, value).try_run(fn() -> Result<R, E> {
+    ///     do_fallible_work()
+    /// })?;   // slot already popped, even if this is Err
+    /// ```
+    public fn try_run<R, E>(&self, body: fn() -> Result<R, E>) -> Result<R, E> {
+        let raw_value: Int = @bitcast(self.value);
+        env_ctx_set(self.slot_id, raw_value);
+        let result = body();
+        // Pop BEFORE returning so the slot is released on Ok and Err alike.
         env_ctx_end(self.slot_id);
         result
     }

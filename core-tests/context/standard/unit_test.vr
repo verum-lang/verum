@@ -346,3 +346,42 @@ fn test_query_result_display_format() {
     assert(s.contains("rows"));
     assert(s.contains("affected"));
 }
+
+// =============================================================================
+// Section 11: ContextLogLevel.from_severity — inverse of severity()
+// =============================================================================
+
+@test
+fn test_from_severity_trace() {
+    match ContextLogLevel.from_severity(0) {
+        Maybe.Some(l) => assert(l is ContextLogLevel.Trace),
+        Maybe.None => panic("expected Some(Trace)"),
+    }
+}
+
+@test
+fn test_from_severity_fatal() {
+    match ContextLogLevel.from_severity(5) {
+        Maybe.Some(l) => assert(l is ContextLogLevel.Fatal),
+        Maybe.None => panic("expected Some(Fatal)"),
+    }
+}
+
+@test
+fn test_from_severity_middle_levels() {
+    match ContextLogLevel.from_severity(2) {
+        Maybe.Some(l) => assert(l is ContextLogLevel.Info),
+        Maybe.None => panic("expected Some(Info)"),
+    }
+    match ContextLogLevel.from_severity(3) {
+        Maybe.Some(l) => assert(l is ContextLogLevel.Warn),
+        Maybe.None => panic("expected Some(Warn)"),
+    }
+}
+
+@test
+fn test_from_severity_out_of_range_is_none() {
+    assert(ContextLogLevel.from_severity(-1) is Maybe.None);
+    assert(ContextLogLevel.from_severity(6) is Maybe.None);
+    assert(ContextLogLevel.from_severity(1000) is Maybe.None);
+}
