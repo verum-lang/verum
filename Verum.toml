@@ -1,0 +1,191 @@
+[cog]
+name = "verum_core_tests"
+version = "0.1.0"
+authors = []
+license = "MIT OR Apache-2.0"
+keywords = []
+categories = []
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"
+
+[dev_dependencies]
+
+[build_dependencies]
+
+[build]
+target = ""
+opt_level = 0
+incremental = false
+lto = false
+panic = "unwind"
+strict_codegen = false
+
+[features]
+default = []
+
+[profile.dev]
+tier = "0"
+verification = "runtime"
+opt_level = 0
+debug = true
+debug_assertions = true
+overflow_checks = true
+lto = false
+incremental = true
+codegen_units = 256
+cbgr_checks = "all"
+
+[profile.release]
+tier = "1"
+verification = "runtime"
+opt_level = 3
+debug = false
+debug_assertions = false
+overflow_checks = false
+lto = true
+incremental = false
+codegen_units = 16
+cbgr_checks = "optimized"
+
+[profile.test]
+tier = "0"
+verification = "runtime"
+opt_level = 0
+debug = true
+debug_assertions = true
+overflow_checks = true
+lto = false
+incremental = true
+codegen_units = 256
+cbgr_checks = "all"
+
+[profile.bench]
+tier = "0"
+verification = "runtime"
+opt_level = 0
+debug = true
+debug_assertions = true
+overflow_checks = true
+lto = false
+incremental = true
+codegen_units = 256
+cbgr_checks = "all"
+
+[lsp]
+enable_cost_hints = true
+validation_mode = "incremental"
+auto_import = true
+format_on_save = false
+
+[registry]
+index = "https://packages.verum.lang"
+
+[llvm]
+
+[optimization]
+level = 0
+size_opt = false
+inline = false
+
+[lto]
+enabled = false
+
+[pgo]
+enabled = false
+
+[cross_compile]
+
+[verify]
+default_strategy = "formal"
+solver_timeout_ms = 10000
+enable_telemetry = true
+persist_stats = true
+fail_on_divergence = true
+profile_slow_functions = true
+
+[verify.modules]
+
+[verify.profiles]
+
+[types]
+dependent = true
+refinement = true
+cubical = true
+higher_kinded = true
+universe_polymorphism = false
+coinductive = true
+quotient = true
+instance_search = true
+coherence_check_depth = 16
+
+[runtime]
+cbgr_mode = "mixed"
+async_scheduler = "work_stealing"
+async_worker_threads = 0
+futures = true
+nurseries = true
+task_stack_size = 0
+heap_policy = "adaptive"
+panic = "unwind"
+
+[codegen]
+tier = "aot"
+mlir_gpu = false
+gpu_backend = "auto"
+monomorphization_cache = true
+proof_erasure = true
+debug_info = "line"
+tail_call_optimization = true
+vectorize = true
+inline_depth = 3
+
+[meta]
+compile_time_functions = true
+quote_syntax = true
+macro_recursion_limit = 128
+reflection = true
+derive = true
+max_stage_level = 2
+
+[protocols]
+coherence = "strict"
+resolution_strategy = "most_specific"
+blanket_impls = true
+higher_kinded_protocols = true
+associated_types = true
+generic_associated_types = true
+
+[context]
+enabled = true
+unresolved_policy = "error"
+negative_constraints = true
+propagation_depth = 32
+
+[safety]
+unsafe_allowed = true
+ffi = true
+ffi_boundary = "strict"
+capability_required = false
+mls_level = "public"
+forbid_stdlib_extern = false
+
+[test]
+differential = false
+property_testing = true
+proptest_cases = 256
+fuzzing = false
+timeout_secs = 60
+parallel = true
+coverage = false
+deny_warnings = false
+
+[debug]
+dap_enabled = true
+step_granularity = "statement"
+inspect_depth = 8
+port = 0
+show_erased_proofs = false

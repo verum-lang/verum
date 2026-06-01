@@ -1,0 +1,299 @@
+// =============================================================================
+// core-tests/database/mysql/wire/frontend/unit_test.vr
+// =============================================================================
+//
+// `core/database/mysql/wire/frontend.vr` — frontend message builders.
+//
+// Surface tested:
+//   * COM_* one-shot builders: com_query / com_ping / com_quit / com_init_db /
+//     com_reset_connection / com_stmt_prepare / com_stmt_close / com_stmt_reset
+//   * ssl_request — 32-byte SSL upgrade packet
+//   * MY_TYPE_* MySQL field-type ID constants
+//   * default_plugin_name → "caching_sha2_password"
+//   * auth_switch_response identity (payload pass-through)
+//
+// StmtParam 9-variant ADT + param_* helpers exercise cross-module record-
+// payload variant tag, sister of journal §A — covered at language level under
+// vcs/specs/L2-standard/database/mysql/wire/.
+// =============================================================================
+
+mount core.database.mysql.wire.frontend.{
+    com_query, com_ping, com_quit, com_init_db, com_reset_connection,
+    com_stmt_prepare, com_stmt_close, com_stmt_reset,
+    ssl_request, auth_switch_response,
+    default_plugin_name,
+    MY_TYPE_TINY, MY_TYPE_SHORT, MY_TYPE_LONG, MY_TYPE_FLOAT, MY_TYPE_DOUBLE,
+    MY_TYPE_NULL, MY_TYPE_LONGLONG, MY_TYPE_VARCHAR, MY_TYPE_VAR_STRING,
+    MY_TYPE_STRING, MY_TYPE_BLOB,
+};
+
+// =============================================================================
+// Section 1: COM_QUERY / COM_PING / COM_QUIT one-byte builders
+// =============================================================================
+
+@test
+fn test_com_query_starts_with_com_query_byte() {
+    let out = com_query(&"SELECT 1;".to_text());
+    // Body: [COM_QUERY=0x03][SQL bytes]
+    assert_eq(out[0], 0x03_u8);
+}
+
+@test
+fn test_com_query_appends_sql_bytes() {
+    let out = com_query(&"OK".to_text());
+    assert_eq(out.len(), 3);
+    assert_eq(out[1], 0x4F_u8);  // 'O'
+    assert_eq(out[2], 0x4B_u8);  // 'K'
+}
+
+@test
+fn test_com_query_empty_sql_yields_single_byte() {
+    let out = com_query(&"".to_text());
+    assert_eq(out.len(), 1);
+    assert_eq(out[0], 0x03_u8);
+}
+
+@test
+fn test_com_ping_is_single_byte_0x0e() {
+    let out = com_ping();
+    assert_eq(out.len(), 1);
+    assert_eq(out[0], 0x0E_u8);
+}
+
+@test
+fn test_com_quit_is_single_byte_0x01() {
+    let out = com_quit();
+    assert_eq(out.len(), 1);
+    assert_eq(out[0], 0x01_u8);
+}
+
+@test
+fn test_com_reset_connection_is_single_byte_0x1f() {
+    let out = com_reset_connection();
+    assert_eq(out.len(), 1);
+    assert_eq(out[0], 0x1F_u8);
+}
+
+// =============================================================================
+// Section 2: COM_INIT_DB
+// =============================================================================
+
+@test
+fn test_com_init_db_starts_with_init_db_byte() {
+    let out = com_init_db(&"test_db".to_text());
+    assert_eq(out[0], 0x02_u8);
+}
+
+@test
+fn test_com_init_db_appends_db_name() {
+    let out = com_init_db(&"hi".to_text());
+    assert_eq(out.len(), 3);
+    assert_eq(out[1], 0x68_u8);  // 'h'
+    assert_eq(out[2], 0x69_u8);  // 'i'
+}
+
+@test
+fn test_com_init_db_empty_db_name_yields_single_byte() {
+    let out = com_init_db(&"".to_text());
+    assert_eq(out.len(), 1);
+}
+
+// =============================================================================
+// Section 3: COM_STMT_PREPARE / CLOSE / RESET
+// =============================================================================
+
+@test
+fn test_com_stmt_prepare_starts_with_0x16() {
+    let out = com_stmt_prepare(&"".to_text());
+    assert_eq(out[0], 0x16_u8);
+}
+
+@test
+fn test_com_stmt_prepare_appends_sql() {
+    let out = com_stmt_prepare(&"X".to_text());
+    assert_eq(out.len(), 2);
+    assert_eq(out[1], 0x58_u8);
+}
+
+@test
+fn test_com_stmt_close_emits_5_bytes() {
+    let out = com_stmt_close(0);
+    // [0x19][stmt_id u32 LE]
+    assert_eq(out.len(), 5);
+    assert_eq(out[0], 0x19_u8);
+}
+
+@test
+fn test_com_stmt_close_emits_statement_id_le() {
+    let out = com_stmt_close(0xCAFEBABE);
+    assert_eq(out[1], 0xBE_u8);
+    assert_eq(out[2], 0xBA_u8);
+    assert_eq(out[3], 0xFE_u8);
+    assert_eq(out[4], 0xCA_u8);
+}
+
+@test
+fn test_com_stmt_reset_emits_5_bytes() {
+    let out = com_stmt_reset(0);
+    assert_eq(out.len(), 5);
+    assert_eq(out[0], 0x1A_u8);
+}
+
+@test
+fn test_com_stmt_reset_emits_statement_id_le() {
+    let out = com_stmt_reset(0x01020304);
+    assert_eq(out[1], 0x04_u8);
+    assert_eq(out[2], 0x03_u8);
+    assert_eq(out[3], 0x02_u8);
+    assert_eq(out[4], 0x01_u8);
+}
+
+// =============================================================================
+// Section 4: ssl_request — 32-byte SSL upgrade packet
+// =============================================================================
+
+@test
+fn test_ssl_request_is_32_bytes() {
+    let out = ssl_request(0x0801, 0x21, 0xFFFFFF);
+    assert_eq(out.len(), 32);
+}
+
+@test
+fn test_ssl_request_capability_flags_le() {
+    let out = ssl_request(0x12345678, 0, 0);
+    assert_eq(out[0], 0x78_u8);
+    assert_eq(out[1], 0x56_u8);
+    assert_eq(out[2], 0x34_u8);
+    assert_eq(out[3], 0x12_u8);
+}
+
+@test
+fn test_ssl_request_character_set_byte_8() {
+    let out = ssl_request(0, 0, 0x21);
+    assert_eq(out[8], 0x21_u8);
+}
+
+@test
+fn test_ssl_request_filler_bytes_zero() {
+    let out = ssl_request(0, 0, 0);
+    // Bytes 9..32 should all be zero (23 reserved bytes).
+    let mut i = 9;
+    while i < 32 {
+        assert_eq(out[i], 0x00_u8);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 5: MY_TYPE_* field-type ID constants
+// =============================================================================
+
+@test
+fn test_my_type_tiny_is_0x01() {
+    assert_eq(MY_TYPE_TINY, 0x01);
+}
+
+@test
+fn test_my_type_short_is_0x02() {
+    assert_eq(MY_TYPE_SHORT, 0x02);
+}
+
+@test
+fn test_my_type_long_is_0x03() {
+    assert_eq(MY_TYPE_LONG, 0x03);
+}
+
+@test
+fn test_my_type_float_is_0x04() {
+    assert_eq(MY_TYPE_FLOAT, 0x04);
+}
+
+@test
+fn test_my_type_double_is_0x05() {
+    assert_eq(MY_TYPE_DOUBLE, 0x05);
+}
+
+@test
+fn test_my_type_null_is_0x06() {
+    assert_eq(MY_TYPE_NULL, 0x06);
+}
+
+@test
+fn test_my_type_longlong_is_0x08() {
+    assert_eq(MY_TYPE_LONGLONG, 0x08);
+}
+
+@test
+fn test_my_type_varchar_is_0x0f() {
+    assert_eq(MY_TYPE_VARCHAR, 0x0F);
+}
+
+@test
+fn test_my_type_var_string_is_0xfd() {
+    assert_eq(MY_TYPE_VAR_STRING, 0xFD);
+}
+
+@test
+fn test_my_type_string_is_0xfe() {
+    assert_eq(MY_TYPE_STRING, 0xFE);
+}
+
+@test
+fn test_my_type_blob_is_0xfc() {
+    assert_eq(MY_TYPE_BLOB, 0xFC);
+}
+
+@test
+fn test_my_type_low_codes_pairwise_distinct() {
+    assert(MY_TYPE_TINY != MY_TYPE_SHORT);
+    assert(MY_TYPE_SHORT != MY_TYPE_LONG);
+    assert(MY_TYPE_LONG != MY_TYPE_FLOAT);
+    assert(MY_TYPE_FLOAT != MY_TYPE_DOUBLE);
+    assert(MY_TYPE_DOUBLE != MY_TYPE_NULL);
+}
+
+@test
+fn test_my_type_text_string_pairwise_distinct() {
+    assert(MY_TYPE_VARCHAR != MY_TYPE_VAR_STRING);
+    assert(MY_TYPE_VAR_STRING != MY_TYPE_STRING);
+    assert(MY_TYPE_VARCHAR != MY_TYPE_STRING);
+}
+
+// =============================================================================
+// Section 6: auth_switch_response identity passthrough
+// =============================================================================
+
+@test
+fn test_auth_switch_response_preserves_byte_count() {
+    let payload: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
+    let out = auth_switch_response(payload.as_slice());
+    assert_eq(out.len(), 4);
+}
+
+@test
+fn test_auth_switch_response_preserves_byte_order() {
+    let payload: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    let out = auth_switch_response(payload.as_slice());
+    assert_eq(out[0], 0xDE_u8);
+    assert_eq(out[1], 0xAD_u8);
+    assert_eq(out[2], 0xBE_u8);
+    assert_eq(out[3], 0xEF_u8);
+}
+
+@test
+fn test_auth_switch_response_empty_yields_empty() {
+    let payload: List<Byte> = [];
+    let out = auth_switch_response(payload.as_slice());
+    assert_eq(out.len(), 0);
+}
+
+// =============================================================================
+// Section 7: default_plugin_name
+// =============================================================================
+
+@test
+fn test_default_plugin_name_is_caching_sha2() {
+    assert_eq(default_plugin_name(), "caching_sha2_password".to_text());
+}
+
+fn main() {}
