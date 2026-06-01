@@ -1,0 +1,134 @@
+// =============================================================================
+// core-tests/runtime/config/property_test.vr
+// =============================================================================
+//
+// Behavioural laws for `core.runtime.config` error surfaces. unit_test.vr
+// pins ADT construction + Eq; this file pins the user-facing TEXT contract
+// (message() / Display / Debug) and the Eq algebra (reflexive / symmetric /
+// payload-sensitive Other).
+//
+// Tests prefixed `cfg_law_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.config.{RuntimeInitError, RuntimeIoError};
+
+// =============================================================================
+// §A  RuntimeInitError.message() — exact user-facing strings
+// =============================================================================
+
+@test
+fn cfg_law_init_error_message_strings() {
+    assert_eq(RuntimeInitError.TlsInitFailed.message(),
+              "Failed to initialize thread-local storage");
+    assert_eq(RuntimeInitError.PlatformNotSupported.message(),
+              "Platform not supported for this runtime configuration");
+    assert_eq(RuntimeInitError.AlreadyInitialized.message(),
+              "Runtime already initialized");
+}
+
+@test
+fn cfg_law_init_error_message_interpolates_payload() {
+    let e = RuntimeInitError.IoDriverInitFailed("io_uring open failed");
+    assert_eq(e.message(),
+              "Failed to initialize I/O driver: io_uring open failed");
+    let x = RuntimeInitError.ExecutorInitFailed("workers exhausted");
+    assert_eq(x.message(),
+              "Failed to initialize executor: workers exhausted");
+}
+
+// §H (nullary-Display dispatch) — see audit.md. f"{e}" on nullary variants
+// (TlsInitFailed/PlatformNotSupported/AlreadyInitialized) falls through to the
+// Debug path, so Display ≠ message() for them. Payload variants format fine.
+@ignore  // audit.md §H — Display dispatch falls through for nullary variants
+@test
+fn cfg_law_init_error_display_equals_message() {
+    // Display delegates to message() — the two must never diverge.
+    let errs = [
+        RuntimeInitError.TlsInitFailed,
+        RuntimeInitError.PlatformNotSupported,
+        RuntimeInitError.AlreadyInitialized,
+        RuntimeInitError.IoDriverInitFailed("x"),
+        RuntimeInitError.ExecutorInitFailed("y"),
+    ];
+    for &e in errs.iter() {
+        assert_eq(f"{e}", e.message());
+    }
+}
+
+// =============================================================================
+// §B  RuntimeIoError.Display — exact strings (POSIX-style lowercase)
+// =============================================================================
+
+@ignore  // audit.md §H — Display dispatch falls through for nullary variants
+@test
+fn cfg_law_io_error_display_strings() {
+    assert_eq(f"{RuntimeIoError.WouldBlock}", "operation would block");
+    assert_eq(f"{RuntimeIoError.Interrupted}", "operation interrupted");
+    assert_eq(f"{RuntimeIoError.InvalidFd}", "invalid file descriptor");
+    assert_eq(f"{RuntimeIoError.PermissionDenied}", "permission denied");
+    assert_eq(f"{RuntimeIoError.ConnectionRefused}", "connection refused");
+    assert_eq(f"{RuntimeIoError.ConnectionReset}", "connection reset");
+    assert_eq(f"{RuntimeIoError.NotConnected}", "not connected");
+    assert_eq(f"{RuntimeIoError.TimedOut}", "operation timed out");
+}
+
+@test
+fn cfg_law_io_error_other_display_includes_code() {
+    assert_eq(f"{RuntimeIoError.Other(42_i32)}", "I/O error (code 42)");
+}
+
+@test
+fn cfg_law_io_error_debug_strings() {
+    assert_eq(f"{RuntimeIoError.WouldBlock:?}", "WouldBlock");
+    assert_eq(f"{RuntimeIoError.TimedOut:?}", "TimedOut");
+    assert_eq(f"{RuntimeIoError.Other(7_i32):?}", "Other(7)");
+}
+
+// =============================================================================
+// §C  RuntimeIoError.Eq algebra
+// =============================================================================
+
+@test
+fn cfg_law_io_error_eq_reflexive() {
+    let errs = [
+        RuntimeIoError.WouldBlock,
+        RuntimeIoError.Interrupted,
+        RuntimeIoError.InvalidFd,
+        RuntimeIoError.PermissionDenied,
+        RuntimeIoError.ConnectionRefused,
+        RuntimeIoError.ConnectionReset,
+        RuntimeIoError.NotConnected,
+        RuntimeIoError.TimedOut,
+    ];
+    for &e in errs.iter() {
+        assert(e == e);
+    }
+}
+
+@test
+fn cfg_law_io_error_other_payload_sensitive() {
+    // audit §D — Other is deliberately payload-sensitive.
+    assert(RuntimeIoError.Other(5_i32) == RuntimeIoError.Other(5_i32));
+    assert(!(RuntimeIoError.Other(5_i32) == RuntimeIoError.Other(6_i32)));
+}
+
+@test
+fn cfg_law_io_error_cross_variant_distinct() {
+    assert(!(RuntimeIoError.WouldBlock == RuntimeIoError.Interrupted));
+    assert(!(RuntimeIoError.TimedOut == RuntimeIoError.ConnectionReset));
+    // Other vs unit always distinct
+    assert(!(RuntimeIoError.Other(0_i32) == RuntimeIoError.WouldBlock));
+}
+
+// =============================================================================
+// §D  RuntimeInitError.Eq — message-payload sensitivity
+// =============================================================================
+
+@test
+fn cfg_law_init_error_message_variant_eq_payload() {
+    assert(RuntimeInitError.IoDriverInitFailed("a")
+        == RuntimeInitError.IoDriverInitFailed("a"));
+    assert(!(RuntimeInitError.IoDriverInitFailed("a")
+        == RuntimeInitError.IoDriverInitFailed("b")));
+}

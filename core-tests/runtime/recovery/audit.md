@@ -67,11 +67,87 @@ This has modulo bias when `2^64 % N != 0`.  For the typical jitter
 range (10ms..5000ms) the bias is negligible (<2^-53) but should be
 documented as a "good enough" approximation.
 
+### §F — `RecoveryRetryPolicy.new` field-write-OOB (REGRESSION, current binary)
+
+**Surface:** `RecoveryRetryPolicy.new(config)` panics under `--interp`:
+
+```
+field write out of bounds: field index 4 (offset 32+8 = 40)
+exceeds object data size 32 type_id=0 type='?'
+backtrace=[RecoveryRetryPolicy.new@pc=33 <- ...]
+```
+
+`RecoveryRetryPolicy` is a 4-field record `{ config, current_attempt,
+total_retries, last_error }` (data size 32 = 4×8). The constructor body
+writes a 5th slot (field index 4). The smoking gun is **`type_id=0
+type='?'`** — the type is *unregistered* in the VBC type-layout table, so
+field writes fall through to the global `intern_field_name` fallback and
+shift out of bounds. This is the documented field-shift codegen class
+([[use_after_free_error_field_shift_2026-05-27]] /
+`enactment_field_access_oob` / `btree_pattern_match_ref_generic_class`).
+
+**Why it matters / regression note:** this folder's `unit_test.vr` was
+marked "all GREEN" in INVENTORY by an earlier session, but on the current
+(May-31) binary the four `RecoveryRetryPolicy.new` unit tests
+(`test_retry_policy_new_initial_state`, `..._should_retry_initially_true`,
+`..._should_retry_zero_max_attempts_false`, `..._public_alias_resolves`)
+**all fail** with this exact panic — verified in isolation
+(`--filter test_retry_policy_new_initial_state` → 0 passed; 1 failed).
+The embedded-stdlib layout registration drifted between binaries. All five
+integration `rcv_it_retry_*`/`rcv_it_next_delay_*` tests and the four unit
+tests are now pinned `@ignore`.
+
+**Fix surface (compiler, needs rebuild):** register `RecoveryRetryPolicy`
+in the archive type-layout table so `compile_record` / `compile_static_
+method_call` resolve its field count by type_id instead of falling through
+to `intern_field_name` global keying. Same root as task #17/#39. **Cannot
+land this session** — concurrent `verum test` sessions + the precompile-
+poisoning hazard forbid a compiler rebuild.
+
+### §G — `InlineRetryPolicy.default()` field-write-OOB
+
+**Surface:** `InlineRetryPolicy.default()` panics `field index 9
+(offset 72+8 = 80) exceeds object data size 72 type_id=0 type='?'`.
+`InlineRetryPolicy` is a 9-field `@repr(C)` record; the `default()` body
+writes a 10th slot. Same `type_id=0` field-shift class as §F. Notably the
+sibling `InlineCircuitBreaker.default()` (also `@repr(C)`, with `[Byte;24]`
++ `[Byte;18]` array fields) **resolves correctly** — confirming the defect
+is per-type layout-registration order, not a blanket `@repr(C)` /
+array-field problem. Pinned `@ignore` (`rcv_it_inline_retry_default_fields`).
+
+### §H — `RecoveryCircuitState` Display dispatch falls through
+
+**Surface:** `f"{RecoveryCircuitState.Closed}"` does **not** yield
+`"closed"` even though `implement Display for RecoveryCircuitState` exists
+(`fmt → write_str("closed"/"open"/"half-open")`). The Debug form
+`f"{x:?}"` → `"RecoveryCircuitState.Closed"` works (verified green:
+`rcv_it_circuit_state_debug`). So `f"{x}"` → `format_display(&x)` is not
+dispatching the user Display impl for this enum under `--interp`. Pinned
+`@ignore` (`rcv_it_circuit_state_display`).
+
+**Scope (now characterised against `config`):** the gap is specific to
+**nullary** enum variants. `config.RuntimeIoError.Other(42)` (payload
+variant) Displays correctly as `"I/O error (code 42)"`, while the nullary
+`RuntimeIoError.WouldBlock` / `RecoveryCircuitState.Closed` fall through.
+`format_display` loses the Display impl on the bare-tag (no heap object /
+no `type_id`) representation of a nullary variant; `format_debug` does not.
+See `core-tests/runtime/config/audit.md §H` for the downstream functional
+consequence (breaks `is_transient_error` on nullary `RuntimeIoError`).
+
+**Fix surface (compiler, needs rebuild):** `format_display` enum dispatch
+in the VBC interpreter / `safe_interpolation.rs` lowering.
+
 ## Action items landed in this branch
 
-* `core-tests/runtime/recovery/unit_test.vr` — 30 unit tests covering
-  4 ADTs + 3 records + 2 smart ctors.
-* `core-tests/runtime/recovery/audit.md` — this file.
+* `core-tests/runtime/recovery/property_test.vr` — 20 algebraic-law tests
+  (backoff Fixed/None/Linear/Exponential schedules, jitter bounds,
+  is_transient_error classifier, RecoveryCircuitState Eq). **All GREEN.**
+* `core-tests/runtime/recovery/integration_test.vr` — 20 cross-method tests
+  (strategy factories/Composed/Clone, CircuitBreakerError, Inline defaults,
+  collections). 13 GREEN; 7 `@ignore` on §F/§G/§H.
+* `core-tests/runtime/recovery/unit_test.vr` — 30 ADT tests; 4 newly
+  `@ignore`d on §F regression.
+* `core-tests/runtime/recovery/audit.md` — this file (§F/§G/§H added).
 
 ## Action items deferred
 

@@ -1,0 +1,310 @@
+// =============================================================================
+// core-tests/runtime/recovery/integration_test.vr
+// =============================================================================
+//
+// Cross-method / cross-type behaviour for `core.runtime.recovery`:
+//   * RecoveryRetryPolicy full lifecycle (new → record_retry → reset)
+//   * next_delay_ms composing backoff × jitter (deterministic via None jitter)
+//   * RuntimeRecoveryStrategy factory payload inspection + Composed nesting
+//   * Clone deep-copy through match
+//   * Display / Debug formatting
+//   * CircuitBreakerError<E> propagation shape
+//   * Inline{CircuitBreaker,RetryPolicy} defaults + name matching
+//   * recovery types inside List / Maybe wrappers
+//
+// All tests prefixed `rcv_it_` — run with `--filter rcv_it_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.recovery.{
+    RuntimeRetryConfig, RecoveryRetryPolicy,
+    RetryPredicate, RecoveryBackoffStrategy, JitterConfig,
+    RecoveryCircuitState, RuntimeRecoveryStrategy,
+    CircuitBreakerError, InlineCircuitBreaker, InlineRetryPolicy,
+};
+
+// =============================================================================
+// DEFECTS surfaced by this suite (see audit.md §F/§G/§H) — pinned @ignore so
+// the green gate stays green until the compiler fix lands + is rebuilt:
+//
+//   §F  RECOVERY-RETRYPOLICY-NEW-OOB — `RecoveryRetryPolicy.new` panics with
+//       "field write out of bounds: field index 4 (offset 32+8=40) exceeds
+//       object data size 32". RecoveryRetryPolicy has 4 fields {config,
+//       current_attempt, total_retries, last_error}; the ctor body writes a
+//       5th slot. This is the order/context-dependent field-shift codegen
+//       class ([[use_after_free_error_field_shift_2026-05-27]] /
+//       enactment_field_access_oob / btree_pattern_match) — the layout
+//       resolves correctly in unit_test.vr (no Inline* imports) but shifts
+//       in this file's wider import context. Fix surface = compiler
+//       (populate_types_from_archive simple-name keying); needs rebuild.
+//
+//   §G  RECOVERY-INLINERETRY-DEFAULT-OOB — `InlineRetryPolicy.default()`
+//       panics "field index 9 (offset 72+8=80) exceeds data size 72".
+//       Same field-shift class. Note InlineCircuitBreaker.default() (a
+//       sibling @repr(C) record) resolves fine — context-dependent.
+//
+//   §H  RECOVERY-CIRCUITSTATE-DISPLAY — `f"{RecoveryCircuitState.Closed}"`
+//       (Display) does not yield "closed" even though the Display impl
+//       exists; `f"{x:?}"` (Debug) works. Display dispatch for this enum
+//       falls through under --interp. Fix surface = format_display enum
+//       dispatch; needs rebuild.
+// =============================================================================
+
+// Helper: deterministic config (Fixed backoff + None jitter).
+fn det_config(max: Int, delay: UInt64) -> RuntimeRetryConfig {
+    RuntimeRetryConfig {
+        max_attempts: max,
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: delay },
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    }
+}
+
+// =============================================================================
+// §1  RecoveryRetryPolicy lifecycle
+// =============================================================================
+
+@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
+@test
+fn rcv_it_retry_lifecycle_exhaustion() {
+    let mut p = RecoveryRetryPolicy.new(det_config(3, 100_u64));
+    assert(p.should_retry());           // 0 < 3
+    p.record_retry(&"err1");
+    assert(p.should_retry());           // 1 < 3
+    p.record_retry(&"err2");
+    assert(p.should_retry());           // 2 < 3
+    p.record_retry(&"err3");
+    assert(!p.should_retry());          // 3 < 3 false
+    assert_eq(p.current_attempt, 3);
+    assert_eq(p.total_retries, 3);
+}
+
+@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
+@test
+fn rcv_it_retry_reset_preserves_total() {
+    let mut p = RecoveryRetryPolicy.new(det_config(5, 100_u64));
+    p.record_retry(&"e1");
+    p.record_retry(&"e2");
+    assert_eq(p.current_attempt, 2);
+    p.reset();
+    assert_eq(p.current_attempt, 0);    // attempt counter reset
+    assert(p.last_error.is_none());     // last_error cleared
+    assert_eq(p.total_retries, 2);      // lifetime counter preserved
+    assert(p.should_retry());           // usable again
+}
+
+@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
+@test
+fn rcv_it_retry_last_error_tracks_latest() {
+    let mut p = RecoveryRetryPolicy.new(det_config(5, 100_u64));
+    p.record_retry(&"first");
+    p.record_retry(&"second");
+    match p.last_error {
+        Maybe.Some(msg) => assert_eq(msg, "second"),
+        Maybe.None => assert(false),
+    }
+}
+
+// =============================================================================
+// §2  next_delay_ms — backoff × jitter composition (deterministic)
+// =============================================================================
+
+@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
+@test
+fn rcv_it_next_delay_fixed_none_jitter() {
+    let p = RecoveryRetryPolicy.new(det_config(3, 100_u64));
+    // Fixed 100 + None jitter ⇒ exactly 100 at attempt 0
+    assert_eq(p.next_delay_ms(), 100_u64);
+}
+
+@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
+@test
+fn rcv_it_next_delay_progresses_with_attempts() {
+    let cfg = RuntimeRetryConfig {
+        max_attempts: 10,
+        backoff: RecoveryBackoffStrategy.Exponential {
+            base_ms: 100_u64, max_ms: 1_000_000_u64, multiplier: 2,
+        },
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    let mut p = RecoveryRetryPolicy.new(cfg);
+    assert_eq(p.next_delay_ms(), 100_u64);    // attempt 0
+    p.record_retry(&"e");
+    assert_eq(p.next_delay_ms(), 200_u64);    // attempt 1
+    p.record_retry(&"e");
+    assert_eq(p.next_delay_ms(), 400_u64);    // attempt 2
+}
+
+// =============================================================================
+// §3  RuntimeRecoveryStrategy factories + Composed
+// =============================================================================
+
+@test
+fn rcv_it_strategy_retry_carries_max_attempts() {
+    let s = RuntimeRecoveryStrategy.retry(8);
+    let n = match s {
+        RuntimeRecoveryStrategy.Retry(cfg) => cfg.max_attempts,
+        _ => -1,
+    };
+    assert_eq(n, 8);
+}
+
+@test
+fn rcv_it_strategy_circuit_breaker_defaults() {
+    let s = RuntimeRecoveryStrategy.circuit_breaker(12);
+    match s {
+        RuntimeRecoveryStrategy.UseBreaker(cfg) => {
+            assert_eq(cfg.failure_threshold as Int, 12);
+            assert_eq(cfg.required_successes as Int, 3);
+            assert_eq(cfg.timeout_ms as Int, 60000);
+        }
+        _ => assert(false),
+    }
+}
+
+@test
+fn rcv_it_strategy_composed_nesting() {
+    let inner: List<RuntimeRecoveryStrategy> = [
+        RuntimeRecoveryStrategy.retry(2),
+        RuntimeRecoveryStrategy.circuit_breaker(5),
+        RuntimeRecoveryStrategy.Supervision,
+    ];
+    let s = RuntimeRecoveryStrategy.Composed(inner);
+    let count = match s {
+        RuntimeRecoveryStrategy.Composed(list) => list.len(),
+        _ => -1,
+    };
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// §4  Clone deep-copy
+// =============================================================================
+
+@test
+fn rcv_it_strategy_clone_preserves_payload() {
+    let s = RuntimeRecoveryStrategy.retry(7);
+    let c = s.clone();
+    let n = match c {
+        RuntimeRecoveryStrategy.Retry(cfg) => cfg.max_attempts,
+        _ => -1,
+    };
+    assert_eq(n, 7);
+}
+
+@test
+fn rcv_it_backoff_clone_preserves_schedule() {
+    let s = RecoveryBackoffStrategy.Exponential {
+        base_ms: 100_u64, max_ms: 9_000_u64, multiplier: 2,
+    };
+    let c = s.clone();
+    assert_eq(c.calculate_delay_ms(3), 800_u64);
+    assert_eq(c.calculate_delay_ms(0), 100_u64);
+}
+
+// =============================================================================
+// §5  Display / Debug
+// =============================================================================
+
+@ignore  // audit.md §H — RecoveryCircuitState Display dispatch falls through
+@test
+fn rcv_it_circuit_state_display() {
+    assert_eq(f"{RecoveryCircuitState.Closed}", "closed");
+    assert_eq(f"{RecoveryCircuitState.Open}", "open");
+    assert_eq(f"{RecoveryCircuitState.HalfOpen}", "half-open");
+}
+
+@test
+fn rcv_it_circuit_state_debug() {
+    assert_eq(f"{RecoveryCircuitState.Closed:?}", "RecoveryCircuitState.Closed");
+    assert_eq(f"{RecoveryCircuitState.HalfOpen:?}", "RecoveryCircuitState.HalfOpen");
+}
+
+@test
+fn rcv_it_strategy_debug() {
+    assert_eq(f"{RuntimeRecoveryStrategy.None:?}", "RuntimeRecoveryStrategy.None");
+    assert_eq(f"{RuntimeRecoveryStrategy.Supervision:?}", "RuntimeRecoveryStrategy.Supervision");
+}
+
+// =============================================================================
+// §6  CircuitBreakerError<E>
+// =============================================================================
+
+@test
+fn rcv_it_cb_error_open() {
+    let e: CircuitBreakerError<Text> = CircuitBreakerError.Open;
+    let is_open = match e {
+        CircuitBreakerError.Open => true,
+        CircuitBreakerError.Failed(_) => false,
+    };
+    assert(is_open);
+}
+
+@test
+fn rcv_it_cb_error_failed_carries_payload() {
+    let e: CircuitBreakerError<Text> = CircuitBreakerError.Failed("upstream 503");
+    let msg = match e {
+        CircuitBreakerError.Open => "<open>",
+        CircuitBreakerError.Failed(m) => m,
+    };
+    assert_eq(msg, "upstream 503");
+}
+
+// =============================================================================
+// §7  Inline defaults
+// =============================================================================
+
+@test
+fn rcv_it_inline_cb_default_fields() {
+    let cb = InlineCircuitBreaker.default();
+    assert_eq(cb.failure_threshold, 5_u16);
+    assert_eq(cb.required_successes, 3_u16);
+    assert_eq(cb.timeout_ms, 60_000_u32);
+    assert_eq(cb.state, 0_u8);
+    assert_eq(cb.name_len, 0_u8);
+}
+
+@test
+fn rcv_it_inline_cb_matches_empty_name() {
+    let cb = InlineCircuitBreaker.default();
+    assert(cb.matches_name(&""));
+    assert(!cb.matches_name(&"payments"));
+}
+
+@ignore  // audit.md §G — InlineRetryPolicy.default field-write-OOB
+@test
+fn rcv_it_inline_retry_default_fields() {
+    let rp = InlineRetryPolicy.default();
+    assert_eq(rp.max_attempts, 3_u16);
+    assert_eq(rp.backoff_type, 2_u8);     // Exponential
+    assert_eq(rp.backoff_base_ms, 100_u16);
+    assert_eq(rp.backoff_max_ms, 5_000_u16);
+    assert_eq(rp.jitter_type, 1_u8);      // Proportional
+    assert_eq(rp.jitter_value, 10_u8);
+}
+
+// =============================================================================
+// §8  Recovery types inside collections / Maybe
+// =============================================================================
+
+@test
+fn rcv_it_strategies_in_list() {
+    let strategies: List<RuntimeRecoveryStrategy> = [
+        RuntimeRecoveryStrategy.None,
+        RuntimeRecoveryStrategy.retry(3),
+        RuntimeRecoveryStrategy.Supervision,
+    ];
+    assert_eq(strategies.len(), 3);
+    assert(strategies.get(0).unwrap() is RuntimeRecoveryStrategy.None);
+    assert(strategies.get(1).unwrap() is RuntimeRecoveryStrategy.Retry);
+}
+
+@test
+fn rcv_it_state_in_maybe() {
+    let m: Maybe<RecoveryCircuitState> = Maybe.Some(RecoveryCircuitState.Open);
+    match m {
+        Maybe.Some(s) => assert(s == RecoveryCircuitState.Open),
+        Maybe.None => assert(false),
+    }
+}
