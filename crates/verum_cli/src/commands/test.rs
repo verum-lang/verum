@@ -36,11 +36,13 @@
 
 use colored::Colorize;
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use verum_common::{List, Text};
+use verum_vbc::module::VbcModule;
 
 use crate::config::Manifest;
 use crate::error::{CliError, Result};
@@ -947,45 +949,36 @@ fn run_test_property(
 
     let start = Instant::now();
 
-    // Compile file → VBC (same shape as run_test_interpret).
-    let source = match std::fs::read_to_string(&test.file) {
-        Ok(s) => s,
-        Err(e) => {
-            return TestResult::CompileError {
-                duration: start.elapsed(),
-                error: format!("read: {}", e),
-            };
-        }
-    };
-    let file_id = FileId::new(0);
-    let parser = VerumParser::new();
-    let lexer = Lexer::new(&source, file_id);
-    let ast = match parser.parse_module(lexer, file_id) {
-        Ok(m) => m,
-        Err(errs) => {
+    // Compile file → VBC (same shape as run_test_interpret), memoised
+    // per file so an N-property file compiles once, not N times.
+    let module = match compiled_test_module(&test.file, CompileKind::Bare, || {
+        let source = std::fs::read_to_string(&test.file).map_err(|e| format!("read: {}", e))?;
+        let file_id = FileId::new(0);
+        let parser = VerumParser::new();
+        let lexer = Lexer::new(&source, file_id);
+        let ast = parser.parse_module(lexer, file_id).map_err(|errs| {
             let joined = errs
                 .iter()
                 .map(|e| format!("{}", e))
                 .collect::<Vec<_>>()
                 .join("\n");
-            return TestResult::CompileError {
-                duration: start.elapsed(),
-                error: format!("parse: {}", joined),
-            };
-        }
-    };
-    let config = CodegenConfig::new("test");
-    let mut codegen = VbcCodegen::with_config(config);
-    let module = match codegen.compile_module(&ast) {
+            format!("parse: {}", joined)
+        })?;
+        let config = CodegenConfig::new("test");
+        let mut codegen = VbcCodegen::with_config(config);
+        let module = codegen
+            .compile_module(&ast)
+            .map_err(|e| format!("codegen: {:?}", e))?;
+        Ok(Arc::new(module))
+    }) {
         Ok(m) => m,
-        Err(e) => {
+        Err(error) => {
             return TestResult::CompileError {
                 duration: start.elapsed(),
-                error: format!("codegen: {:?}", e),
+                error,
             };
         }
     };
-    let module = std::sync::Arc::new(module);
 
     // Replay regression DB seeds first, then draw fresh ones.
     let mut db = load_regression_db();
@@ -1428,71 +1421,135 @@ fn find_and_parse_crate_root(test: &Test) -> Option<List<verum_ast::Item>> {
     Some(module.items)
 }
 
+// --------------------------------------------------------------------
+// Per-file compiled-module cache
+// --------------------------------------------------------------------
+//
+// Every `@test` in a file shares one identical AST, so it lowers to one
+// identical compiled `VbcModule`.  The historical runner recompiled the
+// file — and lazily re-linked the embedded stdlib archive — once *per
+// test*, so an N-test file paid the full stdlib-link cost N times.  For
+// a 143-test module that is ~140 redundant full compilations (measured
+// at ~43 s each for a module that mounts `core.base.*`).
+//
+// `compiled_test_module` memoises the compiled module by
+// (canonical-path, kind).  The first test to reach a given file
+// compiles it while holding that file's slot lock; concurrent same-file
+// tests (the suite runs under rayon's `par_iter`) block on the single
+// slot lock and then reuse the cached `Arc<VbcModule>`.  Distinct files
+// still compile fully in parallel — the outer map lock is held only
+// long enough to fetch-or-create the slot, never across a compile.
+//
+// `kind` distinguishes the two compile entry points the runner uses so
+// each path keeps its exact codegen semantics: `run_test_interpret`
+// goes through `compile_module_with_stdlib` (stdlib-aware + crate-root
+// merge), while `run_test_property` uses the lighter
+// `VbcCodegen::compile_module`.
+//
+// Sharing one module across tests is sound: `VbcModule` carries no
+// interior mutability and the interpreter takes it via `Arc` (read
+// only), so every test still runs in a fresh `Interpreter` over the
+// same immutable bytecode.  A compile *error* is cached too — a file
+// that fails to compile fails identically for all its tests, and we
+// must not pay to rediscover that per test.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum CompileKind {
+    /// `compile_module_with_stdlib` + crate-root merge (interpret path).
+    Stdlib,
+    /// `VbcCodegen::compile_module` (property path).
+    Bare,
+}
+
+type CachedModule = std::result::Result<Arc<VbcModule>, String>;
+
+fn compiled_test_module(
+    file: &Path,
+    kind: CompileKind,
+    build: impl FnOnce() -> CachedModule,
+) -> CachedModule {
+    type Slot = Arc<Mutex<Option<CachedModule>>>;
+    static CACHE: OnceLock<Mutex<HashMap<(PathBuf, CompileKind), Slot>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    // Canonicalise so two spellings of the same path collapse to one
+    // entry; fall back to the raw path if the file can't be resolved.
+    let canon = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let key = (canon, kind);
+
+    // Brief outer-lock window: fetch or create this file's slot.
+    let slot: Slot = {
+        let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        guard
+            .entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(None)))
+            .clone()
+    };
+
+    // Per-file lock: serialises only same-file compilers. Distinct
+    // files proceed concurrently because they hold distinct slots.
+    let mut slot_guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(cached) = slot_guard.as_ref() {
+        return cached.clone();
+    }
+    let built = build();
+    *slot_guard = Some(built.clone());
+    built
+}
+
 fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     use verum_vbc::codegen::CodegenConfig;
     use verum_vbc::interpreter::Interpreter;
 
     let start = Instant::now();
 
-    let source = match std::fs::read_to_string(&test.file) {
-        Ok(s) => s,
-        Err(e) => {
-            return TestResult::CompileError {
-                duration: start.elapsed(),
-                error: format!("read: {}", e),
-            };
-        }
-    };
+    let module = match compiled_test_module(&test.file, CompileKind::Stdlib, || {
+        let source = std::fs::read_to_string(&test.file).map_err(|e| format!("read: {}", e))?;
 
-    let file_id = FileId::new(0);
-    let parser = VerumParser::new();
-    let lexer = Lexer::new(&source, file_id);
-    let mut ast = match parser.parse_module(lexer, file_id) {
-        Ok(m) => m,
-        Err(errs) => {
+        let file_id = FileId::new(0);
+        let parser = VerumParser::new();
+        let lexer = Lexer::new(&source, file_id);
+        let mut ast = parser.parse_module(lexer, file_id).map_err(|errs| {
             let joined = errs
                 .iter()
                 .map(|e| format!("{}", e))
                 .collect::<Vec<_>>()
                 .join("\n");
-            return TestResult::CompileError {
-                duration: start.elapsed(),
-                error: format!("parse: {}", joined),
-            };
-        }
-    };
+            format!("parse: {}", joined)
+        })?;
 
-    // T6.0.4 — tests/ files implicitly mount the cog's crate root
-    // (src/lib.vr or src/main.vr). Cargo / npm conventionally make a
-    // package's tests/ directory have unrestricted access to the
-    // package's public API; Verum aligns: locate the cog manifest by
-    // walking up from the test file, parse the crate root, and
-    // append its items to the test module's item list. Mount-line
-    // boilerplate in test files becomes optional.
-    if let Some(crate_root_items) = find_and_parse_crate_root(test) {
-        // Prepend crate-root items so test items can reference them.
-        let mut merged = crate_root_items;
-        for item in ast.items.iter() {
-            merged.push((*item).clone());
+        // T6.0.4 — tests/ files implicitly mount the cog's crate root
+        // (src/lib.vr or src/main.vr). Cargo / npm conventionally make a
+        // package's tests/ directory have unrestricted access to the
+        // package's public API; Verum aligns: locate the cog manifest by
+        // walking up from the test file, parse the crate root, and
+        // append its items to the test module's item list. Mount-line
+        // boilerplate in test files becomes optional.
+        if let Some(crate_root_items) = find_and_parse_crate_root(test) {
+            // Prepend crate-root items so test items can reference them.
+            let mut merged = crate_root_items;
+            for item in ast.items.iter() {
+                merged.push((*item).clone());
+            }
+            ast.items = merged;
         }
-        ast.items = merged;
-    }
 
-    let config = CodegenConfig::new("test");
-    let module = match verum_compiler::single_module::compile_module_with_stdlib(
-        &ast,
-        config,
-        /* propagate_test_attr = */ true,
-    ) {
+        let config = CodegenConfig::new("test");
+        let module = verum_compiler::single_module::compile_module_with_stdlib(
+            &ast,
+            config,
+            /* propagate_test_attr = */ true,
+        )
+        .map_err(|e| format!("codegen: {:?}", e))?;
+        Ok(Arc::new(module))
+    }) {
         Ok(m) => m,
-        Err(e) => {
+        Err(error) => {
             return TestResult::CompileError {
                 duration: start.elapsed(),
-                error: format!("codegen: {:?}", e),
+                error,
             };
         }
     };
-    let module = Arc::new(module);
 
     // Pick the function to run. Priority:
     //  1. Function whose name matches the test name (for per-@test tests)
@@ -1641,6 +1698,43 @@ struct Test {
     fn_name: Option<String>,
 }
 
+/// Build the suite-relative module path used to qualify a test's name.
+///
+/// `core-tests/mem/capability/unit_test.vr` → `mem/capability/unit_test`.
+/// `tests/foo/bar_test.vr`                  → `foo/bar_test`.
+/// A file directly under the suite root      → just its stem.
+///
+/// Qualification makes test names unique across directories (two
+/// `unit_test.vr` files in different folders no longer collapse to the
+/// same `unit_test::fn` name) and lets `--filter mem/` or
+/// `--filter mem/capability/` scope a run to a subtree. The function leaf
+/// still follows the final `::`, so `--filter <fn>` and function
+/// resolution (which prefers `Test::fn_name`) are unaffected.
+fn module_qualified_prefix(file: &Path) -> String {
+    let comps: Vec<&str> = file
+        .components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect();
+    let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("test");
+    // Anchor on the LAST test-root component so nested suites resolve to
+    // their own suite-relative path.
+    let anchor = comps
+        .iter()
+        .rposition(|c| *c == "core-tests" || *c == "tests");
+    match anchor {
+        // Directory components between the anchor and the file name.
+        Some(i) => {
+            let dirs = &comps[i + 1..comps.len().saturating_sub(1)];
+            if dirs.is_empty() {
+                stem.to_string()
+            } else {
+                format!("{}/{}", dirs.join("/"), stem)
+            }
+        }
+        None => stem.to_string(),
+    }
+}
+
 fn discover_tests(file: &Path) -> Result<List<Test>> {
     let source = std::fs::read_to_string(file)?;
 
@@ -1652,6 +1746,9 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
     if let Ok(module) = parser.parse_module(lexer, file_id) {
         let mut tests = List::new();
         let module_name = file.file_stem().unwrap().to_str().unwrap();
+        // Suite-relative path prefix (`mem/capability/unit_test`) used to
+        // qualify every test name discovered in this file.
+        let name_prefix = module_qualified_prefix(file);
         let has_test_attrs = module.items.iter().any(|item| {
             matches!(&item.kind, ItemKind::Function(f) if f.attributes.iter().any(|a| a.name.as_str() == "test"))
         });
@@ -1688,7 +1785,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                     if !cases.is_empty() {
                         for (idx, args) in cases.into_iter().enumerate() {
                             tests.push(Test {
-                                name: format!("{}::{}[{}]", module_name, func.name, idx).into(),
+                                name: format!("{}::{}[{}]", name_prefix, func.name, idx).into(),
                                 file: file.to_path_buf(),
                                 ignored: is_ignored,
                                 property: property.clone(),
@@ -1698,7 +1795,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                         }
                     } else {
                         tests.push(Test {
-                            name: format!("{}::{}", module_name, func.name).into(),
+                            name: format!("{}::{}", name_prefix, func.name).into(),
                             file: file.to_path_buf(),
                             ignored: is_ignored,
                             property,
@@ -1719,7 +1816,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                     t.contains("@ignore") || t.contains("@ignored")
                 });
                 tests.push(Test {
-                    name: module_name.into(),
+                    name: name_prefix.clone().into(),
                     file: file.to_path_buf(),
                     ignored: is_ignored,
                     property: None,
@@ -1741,8 +1838,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                 if let Some(name) = extract_fn_name(next) {
                     let ignored = l.contains("ignore");
                     tests.push(Test {
-                        name: format!("{}::{}", file.file_stem().unwrap().to_str().unwrap(), name)
-                            .into(),
+                        name: format!("{}::{}", module_qualified_prefix(file), name).into(),
                         file: file.to_path_buf(),
                         ignored,
                         property: None,
@@ -1759,9 +1855,8 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
             t.starts_with("fn main(") || t.starts_with("async fn main(")
         });
         if has_main {
-            let module_name = file.file_stem().unwrap().to_str().unwrap();
             tests.push(Test {
-                name: module_name.into(),
+                name: module_qualified_prefix(file).into(),
                 file: file.to_path_buf(),
                 ignored: false,
                 property: None,
