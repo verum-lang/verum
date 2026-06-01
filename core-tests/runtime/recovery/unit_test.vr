@@ -242,10 +242,9 @@ fn test_retry_config_construction() {
     assert(cfg.max_attempts == 5);
 }
 
-// NOTE: §F regression — `RecoveryRetryPolicy.new` currently panics with a
-// field-write-OOB in the shipped stdlib (type_id=0, the type is unregistered
-// in the layout table so field writes fall through to global interning). This
-// was green in an earlier binary; the May-31 build drifted. See audit.md §F.
+// §F (CLOSED + LIVE on main 1bd782ec1) — `RecoveryRetryPolicy.new` field-write-OOB
+// was rooted in a bare `-> Self` return serialized as USize; fixed in codegen
+// (commit d2ef54aef). These .new tests are un-ignored + green. See audit.md §F.
 @test
 fn test_retry_policy_new_initial_state() {
     let cfg = RuntimeRetryConfig {

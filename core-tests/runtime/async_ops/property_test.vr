@@ -71,15 +71,15 @@ fn ao_law_recovery_error_debug_wraps_message() {
 }
 
 // =============================================================================
-// §C  Opaque-handle newtypes — inner-value extraction (audit §D)
+// §C  Opaque-handle newtypes — inner-value extraction (audit §D) — CLOSED + LIVE
 //
-// These `type X is (Int)` opaque handles are RUNTIME-TRANSPARENT (audit §A:
-// distinctness is typechecker-only). Extracting the inner Int via
-// `match h { X(v) => v }` does NOT round-trip under --interp — the same
-// `__newtype_inner_*` transparent-wrapper access gap seen in sys/common
-// FileDesc. By design these are opaque tokens handed to intrinsics, not
-// inspected; the failing extraction is pinned @ignore as a language-level
-// finding (audit §D), not a usage the module promises.
+// These `type X is (Int)` opaque handles are runtime-transparent (the ctor is a
+// zero-cost pass-through). Extracting the inner Int via `match h { X(v) => v }`
+// used to mis-bind (the bind path emitted GetVariantData{field:0} → nil for a
+// non-pointer scrutinee). FIXED in codegen (commit 85d5ccb54, landed main
+// 1bd782ec1): compile_pattern_bind/test short-circuit transparent newtypes
+// (bind inner directly to scrutinee; always-match). Tests below un-ignored +
+// green on main.
 // =============================================================================
 
 @test

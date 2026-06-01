@@ -24,30 +24,23 @@ mount core.runtime.recovery.{
 };
 
 // =============================================================================
-// DEFECTS surfaced by this suite (see audit.md §F/§G/§H) — pinned @ignore so
-// the green gate stays green until the compiler fix lands + is rebuilt:
+// DEFECTS surfaced by this suite (see audit.md §F/§G/§H) — ALL CLOSED + LIVE on
+// main (commits d2ef54aef + 85d5ccb54, landed at main 1bd782ec1; tests below
+// un-ignored + green):
 //
-//   §F  RECOVERY-RETRYPOLICY-NEW-OOB — `RecoveryRetryPolicy.new` panics with
-//       "field write out of bounds: field index 4 (offset 32+8=40) exceeds
-//       object data size 32". RecoveryRetryPolicy has 4 fields {config,
-//       current_attempt, total_retries, last_error}; the ctor body writes a
-//       5th slot. This is the order/context-dependent field-shift codegen
-//       class ([[use_after_free_error_field_shift_2026-05-27]] /
-//       enactment_field_access_oob / btree_pattern_match) — the layout
-//       resolves correctly in unit_test.vr (no Inline* imports) but shifts
-//       in this file's wider import context. Fix surface = compiler
-//       (populate_types_from_archive simple-name keying); needs rebuild.
+//   §F  RECOVERY-RETRYPOLICY-NEW-OOB — root cause was a bare `-> Self` static
+//       return type serialized as USize (TypeId::PTR aliases USIZE), so
+//       `let p = T.new()` recorded p:USize → field-OOB. FIXED in codegen:
+//       ast_type_to_type_ref_self_aware + compile_record Self-resolution +
+//       current_impl_type_name ctx field. (Also closed env §A EnvTaskId.main
+//       + §G-case-2 ShutdownStrategy.graceful.)
 //
-//   §G  RECOVERY-INLINERETRY-DEFAULT-OOB — `InlineRetryPolicy.default()`
-//       panics "field index 9 (offset 72+8=80) exceeds data size 72".
-//       Same field-shift class. Note InlineCircuitBreaker.default() (a
-//       sibling @repr(C) record) resolves fine — context-dependent.
+//   §G  RECOVERY-INLINERETRY-DEFAULT-OOB — same `Self {}`/`-> Self` class; FIXED
+//       by the §F codegen fix.
 //
-//   §H  RECOVERY-CIRCUITSTATE-DISPLAY — `f"{RecoveryCircuitState.Closed}"`
-//       (Display) does not yield "closed" even though the Display impl
-//       exists; `f"{x:?}"` (Debug) works. Display dispatch for this enum
-//       falls through under --interp. Fix surface = format_display enum
-//       dispatch; needs rebuild.
+//   §H  RECOVERY-CIRCUITSTATE-DISPLAY — nullary-variant Display fell through.
+//       Closed by main's own Display work (bf3364e0c/19bb51b3a/60a440610);
+//       this suite's §H change is redundant-but-harmless atop main.
 // =============================================================================
 
 // Helper: deterministic config (Fixed backoff + None jitter).
