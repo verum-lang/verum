@@ -82,7 +82,6 @@ fn ao_law_recovery_error_debug_wraps_message() {
 // finding (audit §D), not a usage the module promises.
 // =============================================================================
 
-@ignore  // audit §D — transparent opaque-newtype inner extraction gap
 @test
 fn ao_law_join_handle_inner_value() {
     let h = JoinHandleOpaque(42);
@@ -91,7 +90,6 @@ fn ao_law_join_handle_inner_value() {
     assert_eq(inner, 42);
 }
 
-@ignore  // audit §D — transparent opaque-newtype inner extraction gap
 @test
 fn ao_law_executor_handle_inner_value() {
     let h = ExecutorHandle(7);
@@ -99,7 +97,6 @@ fn ao_law_executor_handle_inner_value() {
     assert_eq(inner, 7);
 }
 
-@ignore  // audit §D — transparent opaque-newtype inner extraction gap
 @test
 fn ao_law_future_handle_inner_value() {
     let h = FutureHandle(0);

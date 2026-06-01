@@ -7525,7 +7525,30 @@ impl VbcCodegen {
                 };
 
                 let dst = self.ctx.alloc_temp();
-                let method_id = self.intern_string(method.name.as_str());
+                // **§G case 1 — qualify the `method_id`.**
+                //
+                // The receiver was materialised via `emit_make_variant`,
+                // which may demote to a legacy `MakeVariant` with a
+                // synthetic `type_id` carrying no recoverable type name.
+                // A BARE `method_id` (just `method.name`) then forces
+                // runtime dispatch to recover the receiver type from the
+                // heap header — which fails for the demoted form, so the
+                // dispatcher falls back to a first-suffix-wins bare scan
+                // and picks the WRONG type's same-named method
+                // (`SupervisionStrategy.OneForOne.description()` returned a
+                // sibling type's `description`). The receiver type is
+                // statically known here (`type_name`, the LEFT side of
+                // `Type.Variant`), so intern the QUALIFIED `Type.method`
+                // when that method exists — exactly as the let-bound
+                // Path-receiver and operator-method arms do. Do no harm:
+                // fall back to the bare name when no qualified method is
+                // registered.
+                let qualified_method = format!("{}.{}", type_name, method.name);
+                let method_id = if self.ctx.lookup_function(&qualified_method).is_some() {
+                    self.intern_string(&qualified_method)
+                } else {
+                    self.intern_string(method.name.as_str())
+                };
                 self.ctx.emit(Instruction::CallM {
                     dst,
                     receiver: receiver_reg,
@@ -12476,6 +12499,23 @@ impl VbcCodegen {
                 let dot_name = variant_name.replace("::", ".");
                 let is_heap = variant_name == "Heap";
 
+                // **Transparent-newtype always-match guard** (§D).
+                //
+                // A single-field transparent newtype (`type X is (Int)`,
+                // e.g. the opaque async handles `JoinHandleOpaque`,
+                // `ExecutorHandleOpaque`, …) is a zero-cost pass-through:
+                // `X(42)` IS the unboxed inner Int, no heap object. A
+                // pattern `X(v)` therefore ALWAYS matches the scrutinee
+                // (there is no alternative variant), and emitting `IsVar`
+                // on the non-pointer Int scrutinee would treat it as a
+                // sum-type pointer and dereference at offset 0x18 (SEGV /
+                // mis-match in multi-arm matches). Mirror the `Heap`
+                // always-match handling: load true unconditionally. The
+                // extraction is handled by `compile_pattern_bind`'s sibling
+                // transparent-newtype short-circuit.
+                let is_newtype = self.ctx.newtype_names.contains(&variant_name)
+                    || self.ctx.newtype_names.contains(&dot_name);
+
                 if is_heap {
                     // Heap(inner) is a transparent wrapper — deref and check inner pattern
                     if let Some(verum_ast::VariantPatternData::Tuple(patterns)) = data {
@@ -12501,6 +12541,10 @@ impl VbcCodegen {
                     } else {
                         self.ctx.emit(Instruction::LoadTrue { dst: result });
                     }
+                } else if is_newtype {
+                    // Transparent newtype pattern (§D) — always matches; never
+                    // emit IsVar on the non-pointer inner value.
+                    self.ctx.emit(Instruction::LoadTrue { dst: result });
                 } else {
                     // Check if this "variant" is actually a constant (e.g., EPERM in a match
                     // arm). Constants from imported modules are parsed as Variant patterns
@@ -14120,6 +14164,44 @@ impl VbcCodegen {
                 if let Some(data) = data {
                     match data {
                         VariantPatternData::Tuple(patterns) => {
+                            // **Transparent-newtype extraction short-circuit** (§D).
+                            //
+                            // A single-field transparent newtype
+                            // (`type X is (Int)`, e.g. `JoinHandleOpaque`)
+                            // constructs as a zero-cost pass-through: `X(42)`
+                            // IS the unboxed inner Int, with no heap variant
+                            // object. The general `GetVariantData { field: 0 }`
+                            // path below therefore mis-extracts — its runtime
+                            // handler returns nil for a non-pointer Int
+                            // scrutinee. The inner value simply IS the
+                            // scrutinee, so bind the single inner pattern
+                            // directly to the scrutinee register. Mirrors the
+                            // `Heap(inner)` transparent arm (which derefs a
+                            // real pointer); here the pass-through means no
+                            // deref is needed.
+                            let dot_variant_name = variant_name.replace("::", ".");
+                            let is_newtype = self.ctx.newtype_names.contains(&variant_name)
+                                || self.ctx.newtype_names.contains(&dot_variant_name);
+                            if is_newtype && patterns.len() == 1 {
+                                let inner_pat = &patterns[0];
+                                // Type-tracking parity: surface the newtype's
+                                // declared inner type for the bound ident's
+                                // downstream method dispatch, mirroring the
+                                // payload-type tracking the general arm does.
+                                let inner_ty = self
+                                    .ctx
+                                    .newtype_inner_type
+                                    .get(&variant_name)
+                                    .or_else(|| self.ctx.newtype_inner_type.get(&dot_variant_name))
+                                    .cloned();
+                                let prev_st = self.ctx.match_scrutinee_type.clone();
+                                if let Some(ref t) = inner_ty {
+                                    self.ctx.match_scrutinee_type = Some(t.clone());
+                                }
+                                self.compile_pattern_bind(inner_pat, scrutinee)?;
+                                self.ctx.match_scrutinee_type = prev_st;
+                                return Ok(());
+                            }
                             if is_heap && patterns.len() == 1 {
                                 // Heap(inner) — deref and bind inner pattern
                                 let inner_pat = &patterns[0];
