@@ -4849,15 +4849,8 @@ pub fn lower_instruction<'ctx>(
             let i32_type = ctx.types().i32_type();
             let i64_type = ctx.types().i64_type();
 
-            // Prefer compiled Text.from_char from text.vr
-            let char_to_text_fn = if let Some(f) = module.get_function("Text.from_char") {
-                f
-            } else {
-                let fn_name = "verum_char_to_text";
-                { let fn_type = i64_type.fn_type(&[i32_type.into()], false); super::error::get_or_declare_function(module, fn_name, fn_type) }
-            };
-
-            // Truncate to i32 if needed
+            // Normalise the codepoint to i32 first (a Unicode scalar
+            // fits in 21 bits; Char registers are i32-wide).
             let i32_val = match ch_val {
                 BasicValueEnum::IntValue(v) if v.get_type().get_bit_width() <= 32 => {
                     if v.get_type().get_bit_width() == 32 {
@@ -4875,9 +4868,36 @@ pub fn lower_instruction<'ctx>(
                 _ => i32_type.const_int(0, false),
             };
 
+            // Prefer the compiled `Text.from_char` from text.vr; fall back
+            // to the runtime shim `verum_char_to_text`.  The shim's
+            // canonical ABI is `i64 (i64)` — declared once via the
+            // get-or-declare helper in `llvm/runtime.rs`.  Match it exactly
+            // here so this lazy declaration COALESCES with that single
+            // source of truth instead of registering a conflicting
+            // `i64 (i32)` signature, which the strict-signature checker
+            // flagged on every stdlib AOT compile.  The codepoint is
+            // zero-extended to i64 for the shim; the compiled
+            // `Text.from_char` keeps its own i32 parameter.
+            let (char_to_text_fn, call_arg) =
+                if let Some(f) = module.get_function("Text.from_char") {
+                    (f, i32_val)
+                } else {
+                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+                    let f = super::error::get_or_declare_function(
+                        module,
+                        "verum_char_to_text",
+                        fn_type,
+                    );
+                    let cp_i64 = ctx
+                        .builder()
+                        .build_int_z_extend(i32_val, i64_type, "cp_i64")
+                        .or_llvm_err()?;
+                    (f, cp_i64)
+                };
+
             let result = ctx
                 .builder()
-                .build_call(char_to_text_fn, &[i32_val.into()], "chartotext_result")
+                .build_call(char_to_text_fn, &[call_arg.into()], "chartotext_result")
                 .or_llvm_err()?;
 
             if let Some(ret_val) = result.try_as_basic_value().basic() {
