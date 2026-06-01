@@ -313,7 +313,11 @@ default green-suite gate.
 | `sys/linux/io`           |  140|   75|    0|   35| 0 (live io_uring deferred). 18 unit + 4 property + 4 regression. io_uring SETUP/ENTER/REGISTER constants; SETUP bits 0..=7 consecutive; ENTER flags power-of-two; REGISTER opcode sequence. **partial**. |
 | `sys/linux/syscall`      |  155|   85|    0|   55| 0 (SYS_* numbers per-arch deferred to linux/arch). 23 unit + 5 property + 5 regression. termios ioctls (TIOCGWINSZ=0x5413), fcntl ops (F_GETFD..F_SETFL=1..=4 consecutive), FD_CLOEXEC=1, O_NONBLOCK=0o4000, wait flags (power-of-two), futex ops (PRIVATE = base \| 128). **partial**. |
 | `sys/linux/arch`         |  115|   85|    0|   45| 0 (x86_64 SYS_* gated on target_arch="x86_64" build). 15 unit + 4 property + 3 regression. aarch64 SYS_* numbers (READ=63, WRITE=64, CLOSE=57, OPENAT2=437 universal); consecutive read/write block 62..=67; SYS_FSYNC+1=SYS_FDATASYNC. **partial**. |
-| `sys/linux/mod`          |   60|    0|    0|    0| 0 (umbrella surface — first-pass coverage). 7 unit reachability tests for errno/mem/time/tls constants. **partial**. |
+| `sys/linux/mod`          |   69|  125|   81|   72| 0 (AOT needs Linux target — @cfg(target_os=linux)). **NEW 2026-06-01** — 7 unit + property/integration/regression triad filled: PROT_*/MAP_* single-bit disjointness + ANON≡ANONYMOUS + errno distinct-positive + CLOCK_* distinct; mmap-flag composition + errno classification; cross-platform divergence pins (EAGAIN=11 NOT Darwin 35, MAP_ANON=0x20, CLOCK_MONOTONIC=1, CLOCK_BOOTTIME=7). **131-GREEN --interp** (bundle). **partial** (AOT Linux-runner-deferred). |
+| `sys/linux/bpf/error`    |  195|  201|  191|   23| 0 — 20u + 22p + 14i + 2r. BpfError 8-variant ADT + Display + Eq laws + Result/List funnels + error-class dispatch. **complete** (--interp). |
+| `sys/linux/bpf/map`      |  215|  179|  176|   94| 1 (bpf() CRUD → Linux runner). **NEW 2026-06-01** — 22u + 5p + 6i + 5r. Exhaustive discriminant injectivity over all 30 MapType variants (dense [0,30) wire-tag pin — closes prior deferred-#3 without a generic runner) + MapConfig boundary round-trip + per-variant MapDescriptor preservation; create_map Result shape + value-buffer geometry + percpu count + Maybe lift; **D6** (FileDesc via `==`) + field-drift + high-ordinal dispatch regressions. **131-GREEN --interp** (bundle). **partial**. |
+| `sys/linux/bpf/mod`      |  104|  118|  124|   70| 1 (fn re-exports → Linux runner). **NEW 2026-06-01** — 9u + 6p + 3i + 4r. Umbrella-only surface laws (every re-export constructs/dispatches/round-trips via umbrella path alone) + whole XDP-firewall assembly + **D1** umbrella-resolution + **D6** regressions. Import-aliasing identity limitation observed (dual-import of one canonical type under two names not unified) — documented in audit. **131-GREEN --interp** (bundle). **partial**. |
+| `sys/linux/bpf/program`  |  242|  245|  172|  103| 2 (load_program + attach_* → Linux runner). **NEW 2026-06-01** — 27u + 6p + 8i + 6r. EXHAUSTIVE discriminant injectivity over ALL 32 ProgramType + ALL 40 AttachType variants (dense, ordinal-ordered — note: 40 AttachType, not the 39 the prior audit claimed) + bytecode/descriptor/Link round-trip; load Result shape with verifier/EPERM paths + attach compatibility + Link bookkeeping; **D6** + 3-field no-drift + ordinal-39/31 dispatch regressions. **131-GREEN --interp** (bundle). **partial**. |
 | `sys/process_native`     |  126 | 113 | 152 |  62 | 5 (live native_spawn + native_kill + native_fd_write_all + native_fd_read_chunk all need CI-portable fixture binary; Windows native_spawn deferred to platform crate). **NEW 2026-05-27 round-15 task-3 close-out** — 4 files: 8 unit + 6 property + 6 integration + 2 regression. Pins SpawnResult record construction × every-field projection identity over 8 capture configs (2^3 Bool triples); -1 sentinel disjointness from valid fds; fork(2) pid trichotomy through custom ForkOutcome ADT; SpawnResult × List<SpawnResult> fleet iteration; Result<SpawnResult, Text> error funnel; CaptureMode 4-variant dispatch table; Maybe<SpawnResult> lift. **partial**. |
 | `sys/embedded`           |  192 | 169 | 168 |  76 | 4 (RingBuffer.push/pop semantic round-trip needs MMIO fixture; set_panic_action global-state mutation + embedded_panic dispatch + Custom(handler) invocation all need @cfg(runtime="embedded") build mode). **NEW 2026-05-27 round-15 task-3 close-out** — 4 files: 19 unit + 13 property + 8 integration + 4 regression. StackAllocator bump arithmetic (alignment rounding, sequential allocs, OOM sentinel returns 0, reset semantics) + invariant `used() + remaining() == capacity()` + `remaining` monotone-decreasing + alignment-relative-to-buffer-base contract + OOM-does-NOT-advance-offset defect-class pin + sequential-allocs-sum identity. RingBuffer 7-test empty/full/len/capacity invariants over positive + zero capacities. PanicAction 3-variant exhaustive dispatch. Integration: Maybe<Int> OOM funnel + bootloader struct-table pattern + two-independent-allocators coexistence + List<Int> pointer-collection ascending-order. **partial**. |
 | `sys/no_runtime`         |  191 | 165 | 187 |  93 | 3 (@cfg(runtime="none") build-mode exercise gated on the umbrella mount path; compile-time select! substitution rejection + channels-rejection-on-multi-threaded shapes need @expected-error vcs specs). **NEW 2026-05-27 round-15 task-3 close-out** — 4 files: 18 unit + 13 property + 8 integration + 4 regression. block_on identity over Int/Text/Bool/Int.max/Int.min boundaries; spawn_sync inline-execution identity over 3 function shapes; SyncChannel<T> two-state lifecycle (Empty → Full(T) → Empty via send/recv) + send-on-Full preserves existing (defect pin) + recv-on-Empty is None + N-cycle alternation returns to Empty; NoOpMutex<T> payload-identity sweep over Int domain + lock/unlock preserves value. Integration: SyncChannel producer/consumer pipeline draining List<Int> into accumulator + collecting received back into List + 8-cycle retransmit pattern; NoOpMutex<IntPair> custom-record payload. **complete** under --interp for the user-space surface. |
@@ -462,6 +466,42 @@ state machines / crypto / record codecs deferred per each `audit.md` to L2.
 **Open deep defects (filed):** ITER-COLLECT-1 (generic `C.from_iter`
 static-protocol dispatch on a type-param — core monomorphization), plus the
 HPACK Huffman codec implementation (257-entry RFC 7541 table).
+
+## Session 2026-06-01 — sys/linux/bpf + linux/mod triad fill + 2 fundamental AOT compiler fixes
+
+**Fundamental compiler fixes (committed `3a1057d82`):**
+- **D1 / AOT-UMBRELLA-REEXPORT-1 CLOSED** — `verum_types` import resolution
+  now follows a module's `public mount .sub.{fn}` re-export chain to the
+  canonical submodule and registers from the live `ModuleRegistry` when the
+  precompiled `metadata.functions` table lacks the descriptor (it omits some
+  `pure` leaf fns). Pre-fix `mount core.sys.{extract_bits}` (umbrella) failed
+  `E100 unbound variable` under strict compilation (`check`/`build`/`run`/AOT)
+  while the lenient Tier-0 test harness masked it — the single largest sys AOT
+  failure class (~2000 instances). Validated: umbrella probe resolves;
+  bitfield AOT collapsed 322 unbound → (then) NOT-only errors.
+- **D7 / AOT-NOT-USIZE-1 CLOSED** — bitwise-NOT `!x` on `USize`/`ISize` (+
+  lowercase aliases) rejected under strict typecheck (the integer-alias list
+  lacked the canonical pointer-width names); `core.sys.bitfield` clear ops use
+  `!mask`. 147 errors → fixed. Validated via probe.
+
+**Test triads (committed `44f791e4f`, 131 GREEN `--interp`):** filled
+property/integration/regression for the unit-only `sys/linux/bpf/{map,mod,program}`
++ `sys/linux/mod`. Exhaustive discriminant-injectivity laws over MapType(30) /
+ProgramType(32) / AttachType(40); umbrella-only surface laws; XDP-firewall
+assembly; cross-platform constant divergence pins.
+
+**Defect found + worked around: D6 / NEWTYPE-UNBOX-1 (§12) on FileDesc** —
+field-access `d.fd` unboxes FileDesc→Int, losing type; `.raw()`
+fabricates-on-interp/rejects-on-AOT, `.as_raw()` resolves-on-AOT/panics-on-interp
+(6 ambiguous candidates). Resolved by asserting via the type-aware `==` operator
+(`d.fd == FileDesc(N)`). Import-aliasing identity limitation also observed
+(dual-import of one canonical type under two names not unified).
+
+**AOT status:** D1+D7 unblock the umbrella + NOT classes; a sustained cross-tier
+AOT run was blocked this session by concurrent-session build contention
+corrupting the shared stdlib precompile cache. D2 (parallel-AOT SIGSEGV) was
+already fixed upstream (`f1c0510e3`). D3/D4/D5 catalogued. linux/mod AOT needs a
+Linux target. See `defect-class-catalogue.md` §21/§22.
 
 ## How to update
 
