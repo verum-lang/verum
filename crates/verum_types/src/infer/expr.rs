@@ -6807,6 +6807,43 @@ impl TypeChecker {
                 }
             }
 
+            // D3 (AOT-NEWTYPE-CTOR-1) — a Call whose callee resolved to a
+            // Named TYPE that is actually a transparent-wrapper newtype
+            // (`type X is (T);` / `type X is T;`) is a CONSTRUCTOR call `X(v)`.
+            //
+            // Some stdlib-load paths bind `env[X]` to the TYPE rather than to
+            // the constructor `fn(T) -> X` — notably cfg-gated archive modules
+            // (`@cfg(target_os="macos")` `core.sys.darwin.mach`) whose
+            // synthetic AST never runs the in-source ctor registration, so the
+            // callee lands HERE instead of the `Type::Function` arm and would
+            // otherwise fail `not a function: KernReturn` under `--aot` while
+            // `--interp` (full-stdlib bootstrap binds the ctor) passes.
+            //
+            // Recover the ctor uniformly from the `__newtype_inner_<X>` type
+            // binding (registered alongside every transparent wrapper — it is
+            // also what powers `<X>.0` field access). A non-newtype Named type
+            // has no such key and correctly falls through to NotAFunction.
+            Type::Named { ref path, .. } => {
+                let type_name = path.last_segment_name().to_string();
+                let inner_key = format!("__newtype_inner_{}", type_name);
+                if let Some(inner_ty) = self.ctx.lookup_type(inner_key.as_str()) {
+                    let inner_ty = inner_ty.clone();
+                    if args.len() == 1
+                        && let Some(arg0) = args.get(0)
+                    {
+                        let old_call_context = self.in_call_arg_context;
+                        self.in_call_arg_context = true;
+                        self.check_expr(arg0, &inner_ty)?;
+                        self.in_call_arg_context = old_call_context;
+                        return Ok(InferResult::new(func_ty.clone()));
+                    }
+                }
+                Err(TypeError::NotAFunction {
+                    ty: func_ty.to_text(),
+                    span: func.span,
+                })
+            }
+
             _ => Err(TypeError::NotAFunction {
                 ty: func_ty.to_text(),
                 span: func.span,
