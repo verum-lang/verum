@@ -1,0 +1,89 @@
+// =============================================================================
+// core-tests/runtime/env/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for `core.runtime.env`:
+//   §1  ExecutionTier.overhead_ns CBGR cost contract (15/8/3/0 ns) — must
+//       agree with verum_vbc::cbgr overhead targets + CLAUDE.md "< 15ns".
+//   §2  requires_epoch ⟹ requires_generation tier invariant.
+//   §3  audit.md §A — EnvTaskId.main() field-write-OOB (the wide-record
+//       static-method shadow / field-shift codegen class, task #17/#39).
+//       @ignore until the codegen fix lands + the compiler is rebuilt.
+//
+// Tests prefixed `env_reg_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.env.{ExecutionTier, EnvTaskId};
+
+// =============================================================================
+// §1  CBGR overhead cost contract — these exact values are a performance
+//     contract pinned elsewhere; drift here is a silent perf regression.
+// =============================================================================
+
+@test
+fn env_reg_overhead_contract_values() {
+    assert_eq(ExecutionTier.Tier0_Full.overhead_ns(), 15);
+    assert_eq(ExecutionTier.Tier1_Epoch.overhead_ns(), 8);
+    assert_eq(ExecutionTier.Tier2_Gen.overhead_ns(), 3);
+    assert_eq(ExecutionTier.Tier3_Unchecked.overhead_ns(), 0);
+}
+
+@test
+fn env_reg_overhead_strictly_ordered() {
+    // Strictly decreasing as protection drops — a flat or inverted
+    // ordering would mean the tier ladder lost meaning.
+    assert(ExecutionTier.Tier0_Full.overhead_ns()
+         > ExecutionTier.Tier1_Epoch.overhead_ns());
+    assert(ExecutionTier.Tier1_Epoch.overhead_ns()
+         > ExecutionTier.Tier2_Gen.overhead_ns());
+    assert(ExecutionTier.Tier2_Gen.overhead_ns()
+         > ExecutionTier.Tier3_Unchecked.overhead_ns());
+}
+
+// =============================================================================
+// §2  Tier predicate invariant
+// =============================================================================
+
+@test
+fn env_reg_epoch_implies_generation_all_tiers() {
+    let tiers = [
+        ExecutionTier.Tier0_Full,
+        ExecutionTier.Tier1_Epoch,
+        ExecutionTier.Tier2_Gen,
+        ExecutionTier.Tier3_Unchecked,
+    ];
+    for &t in tiers.iter() {
+        if t.requires_epoch() {
+            assert(t.requires_generation());
+        }
+    }
+}
+
+// =============================================================================
+// §3  audit.md §A — EnvTaskId.main() field-write-OOB
+//
+// EnvTaskId is a 2-field record { id: UInt64, parent_id: Maybe<UInt64> }.
+// `EnvTaskId.main()` dispatches against a same-named static method on a
+// wider record (the field-shift codegen class: btree_pattern_match_ref /
+// enactment_field_access_oob / use_after_free_error_field_shift). The
+// constructor writes field index 2 past the 2-field data size.
+//
+// FIX SURFACE (compiler, requires rebuild): the same static-method
+// return-type-aware dispatch path tracked under task #17/#39. Pinned
+// @ignore so the green suite stays green until the fix lands.
+// =============================================================================
+
+@ignore
+@test
+fn env_reg_task_id_main_is_zero() {
+    let t = EnvTaskId.main();
+    assert_eq(t.id, 0_u64);
+}
+
+@ignore
+@test
+fn env_reg_task_id_main_no_parent() {
+    let t = EnvTaskId.main();
+    assert(t.parent_id is None);
+}

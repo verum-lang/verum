@@ -65,12 +65,55 @@ prevents two different `Other(N)` payloads from being treated as
 equal when only the tag matches.  Pinned by
 `test_runtime_io_error_eq_other_different_code`.
 
+### §H — Display dispatch falls through for NULLARY enum variants (cross-module)
+
+**Surface:** `f"{x}"` (→ `format_display(&x)`) does **not** dispatch the
+user `Display` impl for *nullary* enum variants — it falls through to the
+Debug/variant-name path. It works correctly for variants *with payloads*.
+Empirically, in this module:
+
+| expression | expected | result |
+|---|---|---|
+| `f"{RuntimeIoError.Other(42)}"` (payload) | `I/O error (code 42)` | ✅ correct (`cfg_law_io_error_other_display_includes_code` GREEN) |
+| `f"{RuntimeIoError.WouldBlock}"` (nullary) | `operation would block` | ❌ wrong (`cfg_law_io_error_display_strings` @ignore) |
+| `f"{RuntimeInitError.TlsInitFailed}"` (nullary) | `Failed to…` | ❌ wrong (`cfg_law_init_error_display_equals_message` @ignore) |
+
+`f"{x:?}"` Debug works for nullary variants (`cfg_law_io_error_debug_strings`
+GREEN) and `Eq` / `is` work too — so the gap is specific to `format_display`
+on the bare-tag (no heap object, no `type_id`) representation of a nullary
+variant losing the `Display` impl lookup. Same family as the recovery
+module's §H (`RecoveryCircuitState`).
+
+**DOWNSTREAM FUNCTIONAL BUG (not just a formatting nit):**
+`runtime.recovery.execute_with_retry` does `let error_msg = f"{error}";`
+then `is_transient_error(&error_msg)`. For a nullary `RuntimeIoError`
+(`WouldBlock`, `TimedOut`, `Interrupted`, `ConnectionReset`, …) the broken
+Display yields the Debug form — e.g. `"WouldBlock"` lowercases to
+`"wouldblock"`, which does **not** contain the substring `"would block"`,
+so `is_transient_error` returns **false** and the retry layer silently
+abandons a retriable I/O failure. Pinned by the `@ignore`d
+`cfg_it_transient_io_errors_recognised_by_recovery`; the cross-module
+contract is still verified Display-independently via
+`cfg_it_transient_contract_strings` (GREEN).
+
+**Fix surface (compiler, needs rebuild):** `format_display` must dispatch
+the `Display` impl for nullary variants the way `format_debug` already
+does — give nullary variants a type-tagged representation at the
+interpolation lowering / VBC dispatch site. Tracked as task #6.
+
 ## Action items landed in this branch
 
 * `core-tests/runtime/config/unit_test.vr` — 30 unit tests covering
   RuntimeInitError 6-variant + RuntimeIoError 9-variant + IoHandle/
   IoCompletion records + NoopExecutor/NoopDriver sentinels.
-* `core-tests/runtime/config/audit.md` — this file.
+* `core-tests/runtime/config/property_test.vr` — 11 behavioural-law tests
+  (message() exact strings + interpolation, Display(payload) string, Debug
+  strings, Eq reflexive/payload-sensitive/cross-variant). 9 GREEN; 2
+  `@ignore` on §H (nullary Display).
+* `core-tests/runtime/config/integration_test.vr` — 8 cross-type/cross-module
+  tests (IoCompletion Result wrapping, collections, transient-classifier
+  contract agreement with recovery). 7 GREEN; 1 `@ignore` on §H.
+* `core-tests/runtime/config/audit.md` — this file (§H added).
 
 ## Action items deferred
 

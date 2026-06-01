@@ -1,0 +1,271 @@
+// =============================================================================
+// core-tests/runtime/recovery/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core.runtime.recovery` pure algorithms.
+// Companion to unit_test.vr (ADT construction/disjointness). These tests
+// exercise the BEHAVIOUR the unit tests deliberately skipped:
+//
+//   * RecoveryBackoffStrategy.calculate_delay_ms — the delay schedule
+//   * JitterConfig.apply                          — bounded randomisation
+//   * is_transient_error                          — the retry-classifier
+//   * RecoveryCircuitState                        — Eq laws
+//
+// All tests are prefixed `rcv_law_` so the whole property surface can be
+// run with `verum test --interp --filter rcv_law_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.recovery.{
+    RecoveryBackoffStrategy,
+    JitterConfig,
+    RecoveryCircuitState,
+    is_transient_error,
+};
+
+// =============================================================================
+// §A  Fixed backoff — constant law
+// =============================================================================
+
+@test
+fn rcv_law_fixed_is_constant() {
+    let s = RecoveryBackoffStrategy.Fixed { delay_ms: 250_u64 };
+    let attempts = [0, 1, 2, 5, 10, 100, 1000];
+    for &a in attempts.iter() {
+        assert_eq(s.calculate_delay_ms(a), 250_u64);
+    }
+}
+
+@test
+fn rcv_law_none_is_zero() {
+    let s = RecoveryBackoffStrategy.None;
+    let attempts = [0, 1, 7, 42, 999];
+    for &a in attempts.iter() {
+        assert_eq(s.calculate_delay_ms(a), 0_u64);
+    }
+}
+
+// =============================================================================
+// §B  Linear backoff — base + attempt*increment, capped at max
+// =============================================================================
+
+@test
+fn rcv_law_linear_base_at_zero() {
+    let s = RecoveryBackoffStrategy.Linear {
+        base_ms: 100_u64, increment_ms: 50_u64, max_ms: 100_000_u64,
+    };
+    assert_eq(s.calculate_delay_ms(0), 100_u64);
+}
+
+@test
+fn rcv_law_linear_arithmetic_progression() {
+    let s = RecoveryBackoffStrategy.Linear {
+        base_ms: 100_u64, increment_ms: 50_u64, max_ms: 100_000_u64,
+    };
+    // base + attempt*increment
+    assert_eq(s.calculate_delay_ms(1), 150_u64);
+    assert_eq(s.calculate_delay_ms(2), 200_u64);
+    assert_eq(s.calculate_delay_ms(3), 250_u64);
+    assert_eq(s.calculate_delay_ms(10), 600_u64);
+}
+
+@test
+fn rcv_law_linear_monotone_nondecreasing() {
+    let s = RecoveryBackoffStrategy.Linear {
+        base_ms: 10_u64, increment_ms: 7_u64, max_ms: 1_000_u64,
+    };
+    let mut prev = 0_u64;
+    let mut a = 0;
+    while a < 50 {
+        let cur = s.calculate_delay_ms(a);
+        assert(cur >= prev);
+        prev = cur;
+        a = a + 1;
+    }
+}
+
+@test
+fn rcv_law_linear_capped_at_max() {
+    let s = RecoveryBackoffStrategy.Linear {
+        base_ms: 100_u64, increment_ms: 50_u64, max_ms: 1_000_u64,
+    };
+    // never exceeds max
+    let mut a = 0;
+    while a < 200 {
+        assert(s.calculate_delay_ms(a) <= 1_000_u64);
+        a = a + 1;
+    }
+    // and saturates exactly at max for large attempts
+    assert_eq(s.calculate_delay_ms(1000), 1_000_u64);
+}
+
+// =============================================================================
+// §C  Exponential backoff — base*multiplier^attempt, capped at max
+// =============================================================================
+
+@test
+fn rcv_law_exp_base_at_zero() {
+    let s = RecoveryBackoffStrategy.Exponential {
+        base_ms: 100_u64, max_ms: 1_000_000_u64, multiplier: 2,
+    };
+    assert_eq(s.calculate_delay_ms(0), 100_u64);
+}
+
+@test
+fn rcv_law_exp_doubling() {
+    let s = RecoveryBackoffStrategy.Exponential {
+        base_ms: 100_u64, max_ms: 1_000_000_u64, multiplier: 2,
+    };
+    assert_eq(s.calculate_delay_ms(1), 200_u64);
+    assert_eq(s.calculate_delay_ms(2), 400_u64);
+    assert_eq(s.calculate_delay_ms(3), 800_u64);
+    assert_eq(s.calculate_delay_ms(4), 1_600_u64);
+}
+
+@test
+fn rcv_law_exp_multiplier_three() {
+    let s = RecoveryBackoffStrategy.Exponential {
+        base_ms: 10_u64, max_ms: 1_000_000_u64, multiplier: 3,
+    };
+    assert_eq(s.calculate_delay_ms(1), 30_u64);
+    assert_eq(s.calculate_delay_ms(2), 90_u64);
+    assert_eq(s.calculate_delay_ms(3), 270_u64);
+}
+
+@test
+fn rcv_law_exp_monotone_and_capped() {
+    let s = RecoveryBackoffStrategy.Exponential {
+        base_ms: 100_u64, max_ms: 5_000_u64, multiplier: 2,
+    };
+    let mut prev = 0_u64;
+    let mut a = 0;
+    while a < 40 {
+        let cur = s.calculate_delay_ms(a);
+        assert(cur >= prev);          // monotone non-decreasing
+        assert(cur <= 5_000_u64);     // capped
+        prev = cur;
+        a = a + 1;
+    }
+    // saturated
+    assert_eq(s.calculate_delay_ms(40), 5_000_u64);
+}
+
+@test
+fn rcv_law_exp_factory_multiplier_is_two() {
+    let s = RecoveryBackoffStrategy.exponential(50_u64, 1_000_000_u64);
+    assert_eq(s.calculate_delay_ms(0), 50_u64);
+    assert_eq(s.calculate_delay_ms(1), 100_u64);
+    assert_eq(s.calculate_delay_ms(2), 200_u64);
+}
+
+// =============================================================================
+// §D  JitterConfig.apply — bounds
+// =============================================================================
+
+@test
+fn rcv_law_jitter_none_identity() {
+    let j = JitterConfig.None;
+    let cases = [0_u64, 1_u64, 500_u64, 1_000_u64, 1_000_000_u64];
+    for &d in cases.iter() {
+        assert_eq(j.apply(d), d);
+    }
+}
+
+@test
+fn rcv_law_jitter_full_in_range() {
+    // Full ⇒ uniform in [0, delay].
+    let j = JitterConfig.Full;
+    let mut i = 0;
+    while i < 64 {
+        let v = j.apply(1_000_u64);
+        assert(v <= 1_000_u64);
+        i = i + 1;
+    }
+}
+
+@test
+fn rcv_law_jitter_full_of_zero_is_zero() {
+    let j = JitterConfig.Full;
+    // random_u64() % (0+1) == 0
+    assert_eq(j.apply(0_u64), 0_u64);
+}
+
+@test
+fn rcv_law_jitter_proportional_in_band() {
+    // Proportional(20%) of 1000 ⇒ range=200 ⇒ result ∈ [800, 1200].
+    let j = JitterConfig.Proportional(20_u8);
+    let mut i = 0;
+    while i < 64 {
+        let v = j.apply(1_000_u64);
+        assert(v >= 800_u64);
+        assert(v <= 1_200_u64);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §E  is_transient_error — classifier laws
+// =============================================================================
+
+@test
+fn rcv_law_transient_recognises_canonical_forms() {
+    let transient = [
+        "operation timed out",
+        "request timeout",
+        "connection reset by peer",
+        "connection aborted",
+        "connection refused",
+        "operation would block",
+        "resource temporarily unavailable",
+        "operation interrupted",
+        "try again later",
+    ];
+    for &m in transient.iter() {
+        assert(is_transient_error(&m));
+    }
+}
+
+@test
+fn rcv_law_transient_is_case_insensitive() {
+    assert(is_transient_error(&"TIMED OUT"));
+    assert(is_transient_error(&"Connection RESET"));
+    assert(is_transient_error(&"Would Block"));
+}
+
+@test
+fn rcv_law_transient_rejects_permanent() {
+    let permanent = [
+        "not found",
+        "permission denied",
+        "invalid input",
+        "address already in use",
+        "no such file or directory",
+        "",
+    ];
+    for &m in permanent.iter() {
+        assert(!is_transient_error(&m));
+    }
+}
+
+// =============================================================================
+// §F  RecoveryCircuitState — Eq laws
+// =============================================================================
+
+@test
+fn rcv_law_circuit_state_eq_reflexive() {
+    let states = [
+        RecoveryCircuitState.Closed,
+        RecoveryCircuitState.Open,
+        RecoveryCircuitState.HalfOpen,
+    ];
+    for &s in states.iter() {
+        assert(s == s);
+    }
+}
+
+@test
+fn rcv_law_circuit_state_pairwise_distinct() {
+    assert(RecoveryCircuitState.Closed != RecoveryCircuitState.Open);
+    assert(RecoveryCircuitState.Closed != RecoveryCircuitState.HalfOpen);
+    assert(RecoveryCircuitState.Open != RecoveryCircuitState.HalfOpen);
+}

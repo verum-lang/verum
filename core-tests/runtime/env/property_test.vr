@@ -1,0 +1,186 @@
+// =============================================================================
+// core-tests/runtime/env/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core.runtime.env` pure-data surface,
+// complementing unit_test.vr (which pins ExecutionTier overhead/predicate
+// values + ADT disjointness). Adds:
+//   * ExecutionTier cross-invariant: requires_epoch ⟹ requires_generation
+//   * ExecutionTier overhead ↔ predicate alignment
+//   * RestartStrategy 3-variant laws
+//   * RuntimeRestartPolicy / ParallelismConfig record round-trips
+//   * CpuAffinity.Explicit payload preservation
+//
+// All tests prefixed `env_law_` — run with `--filter env_law_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.env.{
+    ExecutionTier, EnvIsolationLevel, CpuAffinity,
+    RestartStrategy, RuntimeRestartPolicy, ParallelismConfig,
+};
+
+// =============================================================================
+// §A  ExecutionTier — cross-invariant between predicates and overhead
+// =============================================================================
+
+@test
+fn env_law_tier_epoch_implies_generation() {
+    // Any tier that tracks epochs must also track generations.
+    let tiers = [
+        ExecutionTier.Tier0_Full,
+        ExecutionTier.Tier1_Epoch,
+        ExecutionTier.Tier2_Gen,
+        ExecutionTier.Tier3_Unchecked,
+    ];
+    for &t in tiers.iter() {
+        if t.requires_epoch() {
+            assert(t.requires_generation());
+        }
+    }
+}
+
+@test
+fn env_law_tier_zero_overhead_iff_unchecked() {
+    let tiers = [
+        ExecutionTier.Tier0_Full,
+        ExecutionTier.Tier1_Epoch,
+        ExecutionTier.Tier2_Gen,
+        ExecutionTier.Tier3_Unchecked,
+    ];
+    for &t in tiers.iter() {
+        let zero = t.overhead_ns() == 0;
+        let unchecked = t is ExecutionTier.Tier3_Unchecked;
+        assert_eq(zero, unchecked);
+    }
+}
+
+@test
+fn env_law_tier_no_checks_implies_zero_overhead() {
+    // ¬requires_generation ⟹ overhead == 0
+    let tiers = [
+        ExecutionTier.Tier0_Full,
+        ExecutionTier.Tier1_Epoch,
+        ExecutionTier.Tier2_Gen,
+        ExecutionTier.Tier3_Unchecked,
+    ];
+    for &t in tiers.iter() {
+        if !t.requires_generation() {
+            assert_eq(t.overhead_ns(), 0);
+        }
+    }
+}
+
+// =============================================================================
+// §B  RestartStrategy 3-variant
+// =============================================================================
+
+@test
+fn env_law_restart_strategy_variants() {
+    let p: RestartStrategy = RestartStrategy.Permanent;
+    let t: RestartStrategy = RestartStrategy.Transient;
+    let tmp: RestartStrategy = RestartStrategy.Temporary;
+    assert(p is RestartStrategy.Permanent);
+    assert(t is RestartStrategy.Transient);
+    assert(tmp is RestartStrategy.Temporary);
+}
+
+@test
+fn env_law_restart_strategy_pairwise_disjoint() {
+    let p: RestartStrategy = RestartStrategy.Permanent;
+    let t: RestartStrategy = RestartStrategy.Transient;
+    let tmp: RestartStrategy = RestartStrategy.Temporary;
+    assert(!(p is RestartStrategy.Transient) && !(p is RestartStrategy.Temporary));
+    assert(!(t is RestartStrategy.Permanent) && !(t is RestartStrategy.Temporary));
+    assert(!(tmp is RestartStrategy.Permanent) && !(tmp is RestartStrategy.Transient));
+}
+
+// =============================================================================
+// §C  RuntimeRestartPolicy record round-trip
+// =============================================================================
+
+@test
+fn env_law_restart_policy_field_roundtrip() {
+    let policy = RuntimeRestartPolicy {
+        strategy: RestartStrategy.Transient,
+        max_restarts: 5,
+        time_window_secs: 60_u64,
+    };
+    assert(policy.strategy is RestartStrategy.Transient);
+    assert_eq(policy.max_restarts, 5);
+    assert_eq(policy.time_window_secs, 60_u64);
+}
+
+@test
+fn env_law_restart_policy_zero_restarts() {
+    let policy = RuntimeRestartPolicy {
+        strategy: RestartStrategy.Temporary,
+        max_restarts: 0,
+        time_window_secs: 0_u64,
+    };
+    assert_eq(policy.max_restarts, 0);
+}
+
+// =============================================================================
+// §D  ParallelismConfig record round-trip
+// =============================================================================
+
+@test
+fn env_law_parallelism_config_roundtrip() {
+    let cfg = ParallelismConfig {
+        worker_count: 8,
+        affinity: CpuAffinity.Auto,
+    };
+    assert_eq(cfg.worker_count, 8);
+    assert(cfg.affinity is CpuAffinity.Auto);
+}
+
+@test
+fn env_law_parallelism_config_explicit_affinity() {
+    let cfg = ParallelismConfig {
+        worker_count: 4,
+        affinity: CpuAffinity.Explicit(0b1010_u64),
+    };
+    let mask = match cfg.affinity {
+        CpuAffinity.Explicit(m) => m,
+        _ => 0_u64,
+    };
+    assert_eq(mask, 0b1010_u64);
+}
+
+// =============================================================================
+// §E  CpuAffinity.Explicit payload preservation
+// =============================================================================
+
+@test
+fn env_law_cpu_affinity_explicit_preserves_mask() {
+    let masks = [0_u64, 1_u64, 0xFF_u64, 0xFFFF_FFFF_u64];
+    for &expected in masks.iter() {
+        let a = CpuAffinity.Explicit(expected);
+        let got = match a {
+            CpuAffinity.Explicit(m) => m,
+            _ => 999_u64,
+        };
+        assert_eq(got, expected);
+    }
+}
+
+// =============================================================================
+// §F  EnvIsolationLevel — total disjointness
+// =============================================================================
+
+@test
+fn env_law_isolation_levels_distinct() {
+    let levels = [
+        EnvIsolationLevel.Shared,
+        EnvIsolationLevel.SendOnly,
+        EnvIsolationLevel.Full,
+    ];
+    // exactly one variant predicate is true per value
+    for &l in levels.iter() {
+        let n = (if l is EnvIsolationLevel.Shared { 1 } else { 0 })
+              + (if l is EnvIsolationLevel.SendOnly { 1 } else { 0 })
+              + (if l is EnvIsolationLevel.Full { 1 } else { 0 });
+        assert_eq(n, 1);
+    }
+}

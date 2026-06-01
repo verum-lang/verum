@@ -1,0 +1,145 @@
+// =============================================================================
+// core-tests/runtime/config/integration_test.vr
+// =============================================================================
+//
+// Cross-type / cross-module behaviour for `core.runtime.config`:
+//   * IoCompletion wrapping Result<Int, RuntimeIoError>
+//   * config errors inside List / Maybe / Result
+//   * CROSS-MODULE LAW: every transient RuntimeIoError's Display string is
+//     recognised by runtime.recovery.is_transient_error — the retry layer
+//     and the I/O error surface must agree on what "transient" means.
+//
+// Tests prefixed `cfg_it_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.config.{RuntimeInitError, RuntimeIoError, IoHandle, IoCompletion};
+mount core.runtime.recovery.{is_transient_error};
+
+// =============================================================================
+// §1  IoCompletion wrapping a Result
+// =============================================================================
+
+@test
+fn cfg_it_io_completion_success() {
+    let c = IoCompletion {
+        handle: IoHandle { id: 7_u64 },
+        result: Result.Ok(128),
+    };
+    assert_eq(c.handle.id, 7_u64);
+    match c.result {
+        Result.Ok(n) => assert_eq(n, 128),
+        Result.Err(_) => assert(false),
+    }
+}
+
+@test
+fn cfg_it_io_completion_error() {
+    let c = IoCompletion {
+        handle: IoHandle { id: 9_u64 },
+        result: Result.Err(RuntimeIoError.TimedOut),
+    };
+    match c.result {
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert(e == RuntimeIoError.TimedOut),
+    }
+}
+
+// =============================================================================
+// §2  config errors inside collections / Maybe
+// =============================================================================
+
+@test
+fn cfg_it_io_errors_in_list() {
+    let errs: List<RuntimeIoError> = [
+        RuntimeIoError.WouldBlock,
+        RuntimeIoError.TimedOut,
+        RuntimeIoError.Other(13_i32),
+    ];
+    assert_eq(errs.len(), 3);
+    assert(errs.get(1).unwrap() == RuntimeIoError.TimedOut);
+}
+
+@test
+fn cfg_it_init_error_in_maybe() {
+    let m: Maybe<RuntimeInitError> = Maybe.Some(RuntimeInitError.AlreadyInitialized);
+    match m {
+        Maybe.Some(e) => assert(e == RuntimeInitError.AlreadyInitialized),
+        Maybe.None => assert(false),
+    }
+}
+
+// =============================================================================
+// §3  CROSS-MODULE: transient RuntimeIoError Display ↔ recovery classifier
+//
+// recovery.execute_with_retry formats the error with Display, then feeds it
+// to is_transient_error. If a transient I/O error's Display string isn't
+// recognised, the retry layer silently gives up on a retriable failure.
+// =============================================================================
+
+// LIVE Display path — currently broken by §H (nullary-Display dispatch falls
+// through to Debug, so f"{WouldBlock}" yields "WouldBlock" not "operation
+// would block"; is_transient_error("wouldblock") is then false). This is a
+// REAL functional bug: recovery.execute_with_retry does `f"{error}"` then
+// is_transient_error(...), so under §H the retry layer silently abandons
+// transient I/O errors. Pinned @ignore; the contract is verified against the
+// known Display strings in cfg_it_transient_contract_strings below.
+@ignore  // audit.md §H — nullary RuntimeIoError Display ⇒ retry classifier breaks
+@test
+fn cfg_it_transient_io_errors_recognised_by_recovery() {
+    let transient = [
+        RuntimeIoError.WouldBlock,     // "operation would block"
+        RuntimeIoError.Interrupted,    // "operation interrupted"
+        RuntimeIoError.ConnectionRefused, // "connection refused"
+        RuntimeIoError.ConnectionReset,   // "connection reset"
+        RuntimeIoError.TimedOut,          // "operation timed out"
+    ];
+    for &e in transient.iter() {
+        let msg = f"{e}";
+        assert(is_transient_error(&msg));
+    }
+}
+
+// CONTRACT check (Display-dispatch independent): the exact Display strings
+// that config.RuntimeIoError documents for its transient variants MUST be
+// classified transient by recovery.is_transient_error. This pins the
+// cross-module agreement even while §H blocks the live f"{e}" path.
+@test
+fn cfg_it_transient_contract_strings() {
+    let transient_displays = [
+        "operation would block",
+        "operation interrupted",
+        "connection refused",
+        "connection reset",
+        "operation timed out",
+    ];
+    for &s in transient_displays.iter() {
+        assert(is_transient_error(&s));
+    }
+}
+
+@test
+fn cfg_it_permanent_contract_strings() {
+    let permanent_displays = [
+        "invalid file descriptor",
+        "permission denied",
+        "not connected",
+    ];
+    for &s in permanent_displays.iter() {
+        assert(!is_transient_error(&s));
+    }
+}
+
+@test
+fn cfg_it_permanent_io_errors_not_transient() {
+    // Permanent failures must NOT be classified transient (retrying wastes work).
+    let permanent = [
+        RuntimeIoError.InvalidFd,        // "invalid file descriptor"
+        RuntimeIoError.PermissionDenied, // "permission denied"
+        RuntimeIoError.NotConnected,     // "not connected"
+    ];
+    for &e in permanent.iter() {
+        let msg = f"{e}";
+        assert(!is_transient_error(&msg));
+    }
+}
