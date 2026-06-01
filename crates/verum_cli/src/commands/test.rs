@@ -1090,7 +1090,15 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("test");
-    let binary_name = format!("test_{}", stem);
+    // Unique per (test file, test fn) — the output binary, like the merged
+    // source and its `.o`/`.ll`, must not collide across the many test
+    // files that share a stem ("unit_test"), or parallel `par_iter`
+    // workers overwrite each other's binaries (running the wrong / a
+    // half-written executable). See `unique_merged_stem`.
+    let binary_name = format!(
+        "test_{}",
+        unique_merged_stem(&test.file, test.fn_name.as_deref(), stem)
+    );
     let output_path = target_dir.join(&binary_name);
 
     let mut lint_config = verum_compiler::lint::LintConfig::default();
@@ -1325,7 +1333,10 @@ fn synthesise_test_input_with_crate_root(
     };
 
     let stem = test_file.file_stem()?.to_str()?;
-    let merged_path = target_dir.join(format!("test_{}.merged.vr", stem));
+    let merged_path = target_dir.join(format!(
+        "test_{}.merged.vr",
+        unique_merged_stem(test_file, test_fn_name, stem)
+    ));
     if std::fs::create_dir_all(target_dir).is_err() {
         return None;
     }
@@ -1340,6 +1351,29 @@ fn synthesise_test_input_with_crate_root(
     );
     std::fs::write(&merged_path, merged).ok()?;
     Some(merged_path)
+}
+
+/// Per-test-unique stem for the merged source file and every artifact
+/// derived from it (the `test_<stem>` binary, `<stem>.o`, `<stem>.ll`).
+///
+/// Many test files share a `file_stem` — every module's
+/// `unit_test.vr` / `property_test.vr` / … collapses to the same
+/// `"unit_test"` — and the synthetic `main` wraps a *specific* `@test`,
+/// so the merged content differs per test. Keying the merged path on
+/// the bare stem makes parallel `par_iter` workers write the SAME
+/// `target/test/test_unit_test.merged.vr` concurrently; the interleaved
+/// writes corrupt it, and the malformed source lowers to malformed IR
+/// that SIGSEGVs LLVM during `generate_native` — aborting the entire
+/// `verum test --aot` run (0 results from N tests). Folding the full
+/// source path + test-fn into the stem makes every concurrent
+/// compilation target its own files. Deterministic (fixed-key
+/// `DefaultHasher`) so re-runs reuse the same scratch names.
+fn unique_merged_stem(test_file: &Path, test_fn_name: Option<&str>, stem: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    test_file.hash(&mut hasher);
+    test_fn_name.hash(&mut hasher);
+    format!("{}_{:016x}", stem, hasher.finish())
 }
 
 /// Task #16 close — synthetic-main-only fallback when the cog has
@@ -1368,7 +1402,10 @@ fn synthesise_test_main_only(
     let test_fn = test_fn_name?;
     let test_source = std::fs::read_to_string(test_file).ok()?;
     let stem = test_file.file_stem()?.to_str()?;
-    let merged_path = target_dir.join(format!("test_{}.merged.vr", stem));
+    let merged_path = target_dir.join(format!(
+        "test_{}.merged.vr",
+        unique_merged_stem(test_file, test_fn_name, stem)
+    ));
     if std::fs::create_dir_all(target_dir).is_err() {
         return None;
     }

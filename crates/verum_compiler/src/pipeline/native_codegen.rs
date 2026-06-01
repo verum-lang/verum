@@ -834,7 +834,7 @@ impl<'s> CompilationPipeline<'s> {
         // Runtime compilation: LLVM IR provides core runtime (allocator, text, etc.)
         // ALL runtime functions are now pure LLVM IR (platform_ir.rs + tensor_ir.rs + metal_ir.rs).
         // No C compilation needed. We still generate an empty .o for the linker.
-        let runtime_stubs_path = self.generate_runtime_stubs(&build_dir)?;
+        let runtime_stubs_path = self.generate_runtime_stubs(&build_dir, module_name)?;
         let runtime_obj = self.compile_c_file(&runtime_stubs_path, &build_dir)?;
 
         // Metal GPU runtime — now in LLVM IR (metal_ir.rs), no Objective-C compilation needed
@@ -991,8 +991,16 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Generate C runtime stubs for CBGR and stdlib functions
-    pub(super) fn generate_runtime_stubs(&self, temp_dir: &Path) -> Result<PathBuf> {
-        let stubs_path = temp_dir.join("verum_runtime_stubs.c");
+    pub(super) fn generate_runtime_stubs(&self, temp_dir: &Path, tag: &str) -> Result<PathBuf> {
+        // Per-compilation-unique stub path. The C source is a fixed
+        // constant, but the `.c` is written here and `remove_file`d after
+        // linking, and `compile_c_file` derives the `.o` name from this
+        // stem. Under `verum test --aot`'s `par_iter`, a shared
+        // `verum_runtime_stubs.c` / `.o` would be written, clang-compiled,
+        // and deleted by many workers at once — racing into corrupt object
+        // files or missing-source clang errors (sporadic link failures).
+        // Tagging by the unit's module name gives every worker its own.
+        let stubs_path = temp_dir.join(format!("verum_runtime_stubs_{}.c", tag));
 
         // Use the extracted C runtime from verum_codegen
         let stubs_code = verum_codegen::runtime_stubs::RUNTIME_C;
