@@ -773,7 +773,10 @@ fn test_clone_err() {
 fn test_debug_ok() {
     let result: Result<Int, Text> = Result.Ok(42);
     let debug_str = f"{result:?}";
-    assert_eq(debug_str, "Result.Ok(42)");
+    // Debug renders the BARE variant form, matching the impl
+    // (core/base/result.vr fmt_debug writes "Ok(...)") and Rust's
+    // `{:?}` convention — not the qualified "Result.Ok(...)".
+    assert_eq(debug_str, "Ok(42)");
 }
 
 /// Test Debug for Err
