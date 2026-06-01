@@ -4927,9 +4927,29 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                         field_count,
                     })
                 }
-                // Opaque sub-ops (Reserved=0x00, ProcessExit=0x10,
-                // unknown future entries): fall through to the
-                // legacy carrier shape; the dispatch handler reads
+                // ProcessExit (0x10) carries one register operand (the
+                // i64 exit code), encoded with the standard short/long
+                // reg scheme: one byte when the top bit is clear, two
+                // otherwise.  The Tier-0 interpreter reads that byte
+                // inline from the stream at execution time, but the
+                // ahead-of-time AOT lowering consumes the DECODED
+                // `operands`, so the decoder must capture the raw reg
+                // byte(s) here AND advance past them to keep the stream
+                // in sync.  Without this, AOT lowering of any function
+                // ending in ProcessExit (core.base.panic.abort /
+                // .exit_process) failed with "ProcessExit: missing
+                // register operand" and the function was silently
+                // skipped from the native image.
+                Some(ExtendedSubOpcode::ProcessExit) => {
+                    let first = decode_u8(data, offset)?;
+                    let mut operands = vec![first];
+                    if first & 0x80 != 0 {
+                        operands.push(decode_u8(data, offset)?);
+                    }
+                    Ok(Instruction::Extended { sub_op, operands })
+                }
+                // Reserved (0x00) and unknown future sub-ops remain
+                // zero-operand carriers; the dispatch handler reads any
                 // operands from the stream at execution time.
                 _ => Ok(Instruction::Extended {
                     sub_op,
