@@ -267,8 +267,9 @@ impl<'s> CompilationPipeline<'s> {
             .write_to_file(llvm_module, FileType::Object, &obj_path)
             .map_err(|e| anyhow::anyhow!("Failed to write object file: {}", e))?;
 
-        // Generate runtime stubs
-        let runtime_stubs_path = self.generate_runtime_stubs(&build_dir)?;
+        // Generate runtime stubs (tag by module name so parallel test
+        // compilation doesn't race on a shared stub `.c`/`.o`).
+        let runtime_stubs_path = self.generate_runtime_stubs(&build_dir, module_name)?;
         let runtime_obj = self.compile_c_file(&runtime_stubs_path, &build_dir)?;
 
         // Link into executable.  GPU-usage probe (#100): if the
