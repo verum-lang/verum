@@ -192,7 +192,7 @@ fn test_map_descriptor_construction_field_round_trip() {
         value_size: 4_u32,
         max_entries: 1_000_000_u32,
     };
-    assert_eq(d.fd.raw(), 7);
+    assert(d.fd == FileDesc(7));
     assert(d.map_type is MapType.LpmTrie);
     assert_eq(d.key_size, 8_u32);
     assert_eq(d.value_size, 4_u32);

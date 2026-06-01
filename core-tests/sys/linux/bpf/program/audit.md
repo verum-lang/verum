@@ -1,6 +1,6 @@
 # `core.sys.linux.bpf.program` — implementation audit
 
-## Status: **partial** (under `--interp`; ADT + record shape, syscall path deferred)
+## Status: **partial** (full unit + property + integration + regression under `--interp`; AOT pending D1; syscall path deferred to Linux runner)
 
 * Provides:
   * `ProgramType` — 32 variants matching `enum bpf_prog_type` in
@@ -35,11 +35,30 @@
    acceptance), `ProgramDescriptor`, and `Link` (including the
    `link.fd != link.program_fd` invariant).
 
+2. `property_test.vr` — **exhaustive** discriminant-injectivity laws over
+   ALL 32 `ProgramType` variants and ALL 40 `AttachType` variants (each
+   total `match → Int` is injective and dense over `[0, N)`, matching
+   `enum bpf_prog_type` / `enum bpf_attach_type` ordinal order — closes
+   deferred #4 without a generic runner), plus `ProgramBytecode` field
+   round-trip across every program type and `Link` fd/attach preservation
+   across every attach type. (Note: the prior audit said AttachType had
+   39 variants; the source declares 40 — `CgroupInetIngress` … `TraceKprobeMulti`.)
+3. `integration_test.vr` — bytecode assembly via `List<Byte>`,
+   load→`Result<ProgramDescriptor, BpfError>` shape (pure stub) with
+   empty-program/verifier and non-GPL/EPERM rejection paths, an
+   attach-point compatibility predicate, and `Link` bookkeeping through
+   `List` / `Maybe`.
+4. `regression_test.vr` — pins **D6** (`FileDesc.as_raw()` on both
+   descriptor and link fds), no-field-drift through the
+   `ProgramDescriptor { fd, program_type, name: Text }` 3-field record,
+   high-ordinal dispatch (`TraceKprobeMulti` ordinal 39, `Syscall`
+   ordinal 31), and `ProgramBytecode` `List<Byte>` + `Text` field
+   independence.
+
 ## 3. Action items deferred
 
 | # | Defect / gap | Notes |
 |---|---|---|
 | 1 | `load_program` round-trip via bpf() syscall + verifier path | Requires Linux host with bpf() + CAP_BPF.  Deferred to integration suite on a Linux runner. |
 | 2 | `attach_xdp` / `attach_tc` / `attach_cgroup` / `attach_tracepoint` / `attach_kprobe` round-trip | Same gating. |
-| 3 | Compatibility matrix — which AttachType is valid for each ProgramType | The defect class `BpfError.InvalidAttachType` exists, but the type system does not currently encode the valid (ProgramType, AttachType) pairs.  A future refinement type or compile-time table would make invalid pairings unrepresentable.  Tracked here for the language-side type-system work. |
-| 4 | property_test.vr — pairwise distinctness over ProgramType / AttachType | Deferred until the broader stdlib base/protocols/Eq property suite ships a generic property runner. |
+| 3 | Compatibility matrix — which AttachType is valid for each ProgramType | The defect class `BpfError.InvalidAttachType` exists, but the type system does not currently encode the valid (ProgramType, AttachType) pairs.  A future refinement type or compile-time table would make invalid pairings unrepresentable.  Tracked here for the language-side type-system work. The `integration_test.vr` `attach_compatible` predicate is a runtime stand-in. |

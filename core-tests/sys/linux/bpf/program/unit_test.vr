@@ -210,7 +210,7 @@ fn test_program_descriptor_construction_field_round_trip() {
         program_type: ProgramType.Tracepoint,
         name: "syscall_enter".to_text(),
     };
-    assert_eq(d.fd.raw(), 99);
+    assert(d.fd == FileDesc(99));
     assert(d.program_type is ProgramType.Tracepoint);
     assert_eq(d.name, "syscall_enter");
 }
@@ -226,8 +226,8 @@ fn test_link_construction_field_round_trip() {
         program_fd: FileDesc(99),
         attach_type: AttachType.XdpDevmap,
     };
-    assert_eq(link.fd.raw(), 101);
-    assert_eq(link.program_fd.raw(), 99);
+    assert(link.fd == FileDesc(101));
+    assert(link.program_fd == FileDesc(99));
     assert(link.attach_type is AttachType.XdpDevmap);
 }
 
@@ -238,5 +238,5 @@ fn test_link_distinguishes_link_fd_from_program_fd() {
         program_fd: FileDesc(13),
         attach_type: AttachType.CgroupSockOps,
     };
-    assert(link.fd.raw() != link.program_fd.raw());
+    assert(link.fd != link.program_fd);
 }

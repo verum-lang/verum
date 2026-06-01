@@ -1,0 +1,125 @@
+// =============================================================================
+// core-tests/sys/linux/mod/property_test.vr
+// =============================================================================
+//
+// Algebraic / numeric invariants over the Linux V-LLSI constant surface
+// re-exported through `core.sys.linux`. These constants are the ABI the
+// no-libc syscall layer encodes, so the laws here double as ABI pins:
+//
+//   * `PROT_*` are disjoint single-bit flags (composable by OR).
+//   * `MAP_*` placement/visibility flags are distinct.
+//   * errno values are distinct positive small integers.
+//   * `CLOCK_*` ids are a dense distinct enumeration.
+//
+// Mounts use the canonical submodule paths (mirroring `unit_test.vr`) so
+// resolution is identical across tiers. NOTE: AOT validation requires a
+// Linux target — on a non-Linux host the `core.sys.linux.*` modules are
+// `@cfg(target_os = "linux")` and compile only under cross-compilation /
+// a Linux runner (see audit.md). The laws are host-portable as written.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.mem.{
+    PROT_NONE, PROT_READ, PROT_WRITE, PROT_EXEC,
+    MAP_SHARED, MAP_PRIVATE, MAP_FIXED, MAP_ANONYMOUS, MAP_ANON,
+};
+mount core.sys.linux.errno.{EPERM, ENOENT, EAGAIN, ENOMEM, EACCES, EINVAL};
+mount core.sys.linux.time.{
+    CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID,
+    CLOCK_THREAD_CPUTIME_ID, CLOCK_MONOTONIC_RAW, CLOCK_BOOTTIME,
+};
+
+// =============================================================================
+// Property 1 — PROT_* are disjoint single-bit flags
+// =============================================================================
+
+@test
+fn prop_linux_prot_flags_single_bit_disjoint() {
+    // Each protection flag is exactly one bit (or zero for NONE).
+    assert_eq(PROT_NONE, 0);
+    assert_eq(PROT_READ & PROT_WRITE, 0);
+    assert_eq(PROT_READ & PROT_EXEC, 0);
+    assert_eq(PROT_WRITE & PROT_EXEC, 0);
+    // OR-composition is reversible (no overlap lost).
+    let rwx = PROT_READ | PROT_WRITE | PROT_EXEC;
+    assert_eq(rwx & PROT_READ, PROT_READ);
+    assert_eq(rwx & PROT_WRITE, PROT_WRITE);
+    assert_eq(rwx & PROT_EXEC, PROT_EXEC);
+}
+
+@test
+fn prop_linux_prot_values_canonical() {
+    assert_eq(PROT_READ, 0x1);
+    assert_eq(PROT_WRITE, 0x2);
+    assert_eq(PROT_EXEC, 0x4);
+}
+
+// =============================================================================
+// Property 2 — MAP_* flags distinct; ANON aliases ANONYMOUS
+// =============================================================================
+
+@test
+fn prop_linux_map_flags_distinct() {
+    assert(MAP_SHARED != MAP_PRIVATE);
+    assert(MAP_SHARED != MAP_FIXED);
+    assert(MAP_PRIVATE != MAP_FIXED);
+    assert(MAP_FIXED != MAP_ANONYMOUS);
+}
+
+@test
+fn prop_linux_map_anon_aliases_anonymous() {
+    // The short and long spelling MUST denote the same flag.
+    assert_eq(MAP_ANON, MAP_ANONYMOUS);
+    assert_eq(MAP_ANON, 0x20);
+}
+
+@test
+fn prop_linux_map_share_visibility_low_bits() {
+    // SHARED / PRIVATE are the low visibility bits.
+    assert_eq(MAP_SHARED, 0x01);
+    assert_eq(MAP_PRIVATE, 0x02);
+}
+
+// =============================================================================
+// Property 3 — errno values are distinct positive small integers
+// =============================================================================
+
+@test
+fn prop_linux_errno_distinct_positive() {
+    let errs: List<Int> = [EPERM, ENOENT, EAGAIN, ENOMEM, EACCES, EINVAL];
+    let mut i = 0;
+    while i < errs.len() {
+        assert(errs[i] > 0);     // errno is always positive on Linux
+        assert(errs[i] < 256);   // small-integer range
+        let mut j = i + 1;
+        while j < errs.len() {
+            assert(errs[i] != errs[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 4 — CLOCK_* ids form a dense distinct enumeration
+// =============================================================================
+
+@test
+fn prop_linux_clock_ids_distinct() {
+    let clocks: List<Int> = [
+        CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID,
+        CLOCK_THREAD_CPUTIME_ID, CLOCK_MONOTONIC_RAW, CLOCK_BOOTTIME,
+    ];
+    let mut i = 0;
+    while i < clocks.len() {
+        assert(clocks[i] >= 0);
+        let mut j = i + 1;
+        while j < clocks.len() {
+            assert(clocks[i] != clocks[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {}

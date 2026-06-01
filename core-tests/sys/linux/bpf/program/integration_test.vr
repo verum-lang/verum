@@ -1,0 +1,172 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/program/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios for `core.sys.linux.bpf.program`. Kernel load /
+// attach needs a Linux host + CAP_BPF, so we exercise the portable typed
+// surface: bytecode assembly via List<Byte>, the load → Result<descriptor>
+// shape, attach-type/program-type compatibility validation, and Link
+// bookkeeping through Maybe / List.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.program.{
+    ProgramType, AttachType, ProgramBytecode, ProgramDescriptor, Link,
+};
+mount core.sys.linux.bpf.error.BpfError;
+mount core.sys.common.FileDesc;
+
+// Pure stand-in for `load_program`: rejects empty bytecode + non-GPL
+// programs that would need GPL-only helpers, mirroring the verifier's
+// license gate.
+fn fake_load_program(bc: &ProgramBytecode) -> Result<ProgramDescriptor, BpfError> {
+    if bc.insns.len() == 0 {
+        Err(BpfError.VerifierRejected { log: "empty program".to_text() })
+    } else if bc.license != "GPL" && bc.license != "dual BSD/GPL" {
+        Err(BpfError.OsError { errno: 1 })   // EPERM — GPL-only helper without GPL
+    } else {
+        Ok(ProgramDescriptor {
+            fd: FileDesc(50),
+            program_type: bc.program_type,
+            name: bc.name.clone(),
+        })
+    }
+}
+
+// Mirror of the attach-point compatibility rule: XDP programs attach via
+// XDP hooks, cgroup programs via cgroup hooks.
+fn attach_compatible(prog: &ProgramType, attach: &AttachType) -> Bool {
+    match prog {
+        ProgramType.Xdp => match attach {
+            AttachType.XdpDevmap => true,
+            AttachType.XdpCpumap => true,
+            AttachType.XdpDrv => true,
+            _ => false,
+        },
+        ProgramType.CgroupSock => match attach {
+            AttachType.CgroupInetSockCreate => true,
+            AttachType.CgroupInetSockRelease => true,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+// =============================================================================
+// Scenario 1 — bytecode assembly + load round-trip
+// =============================================================================
+
+@test
+fn integration_load_program_ok_preserves_type_and_name() {
+    let mut insns: List<Byte> = List.new();
+    // Two 8-byte `struct bpf_insn` words (content irrelevant to the shape test).
+    let mut k = 0;
+    while k < 16 {
+        insns.push(0_u8);
+        k = k + 1;
+    }
+    let bc = ProgramBytecode {
+        program_type: ProgramType.Xdp,
+        insns: insns,
+        license: "GPL".to_text(),
+        kernel_version: 0_u32,
+        name: "xdp_drop".to_text(),
+    };
+    let r = fake_load_program(&bc);
+    assert(r.is_ok());
+    let d = r.unwrap();
+    assert(d.program_type is ProgramType.Xdp);
+    assert_eq(d.name, "xdp_drop");
+    assert(d.fd == FileDesc(50));
+}
+
+@test
+fn integration_load_empty_program_rejected_by_verifier() {
+    let insns: List<Byte> = List.new();
+    let bc = ProgramBytecode {
+        program_type: ProgramType.SocketFilter,
+        insns: insns,
+        license: "GPL".to_text(),
+        kernel_version: 0_u32,
+        name: "empty".to_text(),
+    };
+    let r = fake_load_program(&bc);
+    assert(r.is_err());
+    match r {
+        Ok(_) => panic("expected VerifierRejected"),
+        Err(e) => match e {
+            BpfError.VerifierRejected { log: _ } => (),
+            _ => panic("expected VerifierRejected variant"),
+        },
+    };
+}
+
+@test
+fn integration_load_non_gpl_program_is_eperm() {
+    let mut insns: List<Byte> = List.new();
+    insns.push(1_u8);
+    let bc = ProgramBytecode {
+        program_type: ProgramType.Kprobe,
+        insns: insns,
+        license: "Proprietary".to_text(),
+        kernel_version: 0_u32,
+        name: "closed".to_text(),
+    };
+    let r = fake_load_program(&bc);
+    assert(r.is_err());
+    match r {
+        Ok(_) => panic("expected EPERM"),
+        Err(e) => assert(e == BpfError.OsError { errno: 1 }),
+    };
+}
+
+// =============================================================================
+// Scenario 2 — attach-point compatibility
+// =============================================================================
+
+@test
+fn integration_xdp_program_compatible_with_xdp_attach() {
+    assert(attach_compatible(&ProgramType.Xdp, &AttachType.XdpDevmap));
+    assert(attach_compatible(&ProgramType.Xdp, &AttachType.XdpDrv));
+}
+
+@test
+fn integration_xdp_program_incompatible_with_cgroup_attach() {
+    assert(!attach_compatible(&ProgramType.Xdp, &AttachType.CgroupInet4Bind));
+}
+
+@test
+fn integration_cgroup_sock_compatible_with_sock_release() {
+    assert(attach_compatible(&ProgramType.CgroupSock, &AttachType.CgroupInetSockRelease));
+}
+
+// =============================================================================
+// Scenario 3 — Link bookkeeping
+// =============================================================================
+
+@test
+fn integration_links_collected_in_list() {
+    let mut links: List<Link> = List.new();
+    links.push(Link { fd: FileDesc(10), program_fd: FileDesc(5), attach_type: AttachType.XdpDevmap });
+    links.push(Link { fd: FileDesc(11), program_fd: FileDesc(5), attach_type: AttachType.XdpCpumap });
+    assert_eq(links.len(), 2);
+    // Both links share the same program fd but hold distinct link fds.
+    assert(links[0].program_fd == links[1].program_fd);
+    assert(links[0].fd != links[1].fd);
+}
+
+@test
+fn integration_link_through_maybe() {
+    let link = Link {
+        fd: FileDesc(99),
+        program_fd: FileDesc(50),
+        attach_type: AttachType.TraceFentry,
+    };
+    let m: Maybe<Link> = Maybe.Some(link);
+    assert(m.is_some());
+    let got = m.unwrap();
+    assert(got.attach_type is AttachType.TraceFentry);
+    assert(got.fd == FileDesc(99));
+}
+
+fn main() {}

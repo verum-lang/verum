@@ -1,0 +1,81 @@
+// =============================================================================
+// core-tests/sys/linux/mod/integration_test.vr
+// =============================================================================
+//
+// The Linux constant surface used the way callers actually use it: composing
+// mmap protection/placement flags, and classifying syscall errno returns.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.mem.{
+    PROT_READ, PROT_WRITE, PROT_EXEC,
+    MAP_PRIVATE, MAP_ANONYMOUS,
+};
+mount core.sys.linux.errno.{EAGAIN, EWOULDBLOCK, ECONNREFUSED, ETIMEDOUT, EPERM, EACCES, ENOENT};
+
+// =============================================================================
+// Scenario 1 — compose mmap flags for an anonymous private RW mapping
+// =============================================================================
+
+@test
+fn integration_anonymous_rw_mapping_flags() {
+    // The canonical "give me zeroed RW memory" request.
+    let prot = PROT_READ | PROT_WRITE;
+    let flags = MAP_PRIVATE | MAP_ANONYMOUS;
+    // prot carries R and W but not X.
+    assert_eq(prot & PROT_READ, PROT_READ);
+    assert_eq(prot & PROT_WRITE, PROT_WRITE);
+    assert_eq(prot & PROT_EXEC, 0);
+    // flags carry PRIVATE and ANON.
+    assert_eq(flags & MAP_PRIVATE, MAP_PRIVATE);
+    assert_eq(flags & MAP_ANONYMOUS, MAP_ANONYMOUS);
+}
+
+@test
+fn integration_executable_mapping_adds_exec_bit() {
+    let prot_rw = PROT_READ | PROT_WRITE;
+    let prot_rwx = prot_rw | PROT_EXEC;
+    // Adding EXEC strictly grows the bitset.
+    assert(prot_rwx > prot_rw);
+    assert_eq(prot_rwx & PROT_EXEC, PROT_EXEC);
+}
+
+// =============================================================================
+// Scenario 2 — errno classification (mirrors errno.is_retryable etc.)
+// =============================================================================
+
+fn is_retryable_errno(e: Int) -> Bool {
+    e == EAGAIN || e == EWOULDBLOCK
+}
+
+fn is_permission_errno(e: Int) -> Bool {
+    e == EPERM || e == EACCES
+}
+
+@test
+fn integration_eagain_classified_retryable() {
+    assert(is_retryable_errno(EAGAIN));
+}
+
+@test
+fn integration_eagain_ewouldblock_same_on_linux() {
+    // On Linux EAGAIN and EWOULDBLOCK share a value; a retry predicate must
+    // accept either spelling.
+    assert_eq(EAGAIN, EWOULDBLOCK);
+    assert(is_retryable_errno(EWOULDBLOCK));
+}
+
+@test
+fn integration_permission_errors_classified() {
+    assert(is_permission_errno(EPERM));
+    assert(is_permission_errno(EACCES));
+    assert(!is_permission_errno(ENOENT));
+}
+
+@test
+fn integration_connection_errors_not_retryable() {
+    assert(!is_retryable_errno(ECONNREFUSED));
+    assert(!is_retryable_errno(ETIMEDOUT));
+}
+
+fn main() {}

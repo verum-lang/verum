@@ -69,7 +69,7 @@ fn test_link_re_exported_from_umbrella() {
         program_fd: FileDesc(2),
         attach_type: AttachType.XdpDevmap,
     };
-    assert_eq(l.fd.raw(), 1);
+    assert(l.fd == FileDesc(1));
 }
 
 @test

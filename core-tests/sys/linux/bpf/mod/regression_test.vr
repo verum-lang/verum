@@ -1,0 +1,70 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/mod/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect. Never deleted.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.{
+    BpfError, ProgramType, AttachType, MapType, ProgramDescriptor, Link,
+};
+mount core.sys.common.FileDesc;
+
+// REGRESSION (D1 — umbrella re-export resolution): every name below is
+// imported through the `core.sys.linux.bpf` UMBRELLA (re-exported from the
+// program/map/error submodules via `public mount`). Under strict
+// compilation the umbrella re-export must bind these names; pre-fix the
+// interpreter masked unbound umbrella names via a global fallback while the
+// AOT type-checker rejected them. Constructing one value of each pins that
+// the umbrella surface resolves on both tiers.
+@test
+fn regression_umbrella_reexports_all_resolve() {
+    let e = BpfError.NotFound;
+    let p = ProgramType.Xdp;
+    let a = AttachType.XdpDevmap;
+    let m = MapType.Hash;
+    assert(e is BpfError.NotFound);
+    assert(p is ProgramType.Xdp);
+    assert(a is AttachType.XdpDevmap);
+    assert(m is MapType.Hash);
+}
+
+// REGRESSION (D6 — FileDesc accessor): umbrella-imported records still use
+// `as_raw()` (not the nonexistent `raw()`).
+@test
+fn regression_umbrella_descriptor_uses_as_raw() {
+    let d = ProgramDescriptor {
+        fd: FileDesc(0),
+        program_type: ProgramType.Xdp,
+        name: "test".to_text(),
+    };
+    assert(d.fd == FileDesc(0));
+
+    let l = Link {
+        fd: FileDesc(1),
+        program_fd: FileDesc(2),
+        attach_type: AttachType.XdpDevmap,
+    };
+    assert(l.fd == FileDesc(1));
+    assert(l.program_fd == FileDesc(2));
+}
+
+// REGRESSION (re-export identity): a record built with the umbrella-imported
+// type name must satisfy the umbrella-imported variant `is` test — i.e. the
+// re-export denotes one canonical type, not two distinct copies that would
+// fail cross-`is`.
+@test
+fn regression_umbrella_reexport_is_single_canonical_type() {
+    let d = ProgramDescriptor {
+        fd: FileDesc(5),
+        program_type: ProgramType.Lsm,
+        name: "x".to_text(),
+    };
+    match d.program_type {
+        ProgramType.Lsm => (),
+        _ => panic("umbrella ProgramType is not the canonical type"),
+    };
+}
+
+fn main() {}

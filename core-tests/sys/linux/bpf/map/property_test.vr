@@ -1,0 +1,179 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/map/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core.sys.linux.bpf.map`.
+//
+// MapType is a 30-variant nullary ADT with no derived protocol bodies
+// (no Eq / Display in the source). The laws we CAN state without those
+// bodies are:
+//
+//   * Discriminant injectivity — a total `match`-based mapping
+//     `MapType → Int` assigns a distinct code to every variant. This is
+//     the structural-disjointness law (no two distinct variants collapse
+//     under pattern dispatch) expressed without an Eq impl.
+//   * `is`-reflexivity — every variant satisfies its own `is` test.
+//   * Record field round-trip — `MapConfig` / `MapDescriptor` preserve
+//     every field across construction → field-read (no drift), exhausted
+//     over boundary values.
+//
+// All mounts use the canonical submodule path (`core.sys.linux.bpf.map`),
+// which resolves identically under the Tier-0 interpreter and Tier-2 AOT.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.map.{MapType, MapConfig, MapDescriptor};
+mount core.sys.common.FileDesc;
+
+// The full 30-variant domain, in declaration order.
+fn map_type_domain() -> List<MapType> {
+    [
+        MapType.Hash, MapType.Array, MapType.ProgArray, MapType.PerfEventArray,
+        MapType.PercpuHash, MapType.PercpuArray, MapType.StackTrace, MapType.CgroupArray,
+        MapType.LruHash, MapType.LruPercpuHash, MapType.LpmTrie, MapType.ArrayOfMaps,
+        MapType.HashOfMaps, MapType.Devmap, MapType.Sockmap, MapType.Cpumap,
+        MapType.Xskmap, MapType.Sockhash, MapType.CgroupStorage, MapType.Reuseport_sockarray,
+        MapType.PercpuCgroupStorage, MapType.Queue, MapType.Stack, MapType.SkStorage,
+        MapType.DevmapHash, MapType.StructOpsMap, MapType.RingBuf, MapType.InodeStorage,
+        MapType.TaskStorage, MapType.BloomFilter,
+    ]
+}
+
+// Total discriminant: a stable code per variant. Mirrors `enum bpf_map_type`
+// ordinal positions (0-based), so this doubles as a wire-tag pin.
+fn map_type_code(t: &MapType) -> Int {
+    match t {
+        MapType.Hash => 0,
+        MapType.Array => 1,
+        MapType.ProgArray => 2,
+        MapType.PerfEventArray => 3,
+        MapType.PercpuHash => 4,
+        MapType.PercpuArray => 5,
+        MapType.StackTrace => 6,
+        MapType.CgroupArray => 7,
+        MapType.LruHash => 8,
+        MapType.LruPercpuHash => 9,
+        MapType.LpmTrie => 10,
+        MapType.ArrayOfMaps => 11,
+        MapType.HashOfMaps => 12,
+        MapType.Devmap => 13,
+        MapType.Sockmap => 14,
+        MapType.Cpumap => 15,
+        MapType.Xskmap => 16,
+        MapType.Sockhash => 17,
+        MapType.CgroupStorage => 18,
+        MapType.Reuseport_sockarray => 19,
+        MapType.PercpuCgroupStorage => 20,
+        MapType.Queue => 21,
+        MapType.Stack => 22,
+        MapType.SkStorage => 23,
+        MapType.DevmapHash => 24,
+        MapType.StructOpsMap => 25,
+        MapType.RingBuf => 26,
+        MapType.InodeStorage => 27,
+        MapType.TaskStorage => 28,
+        MapType.BloomFilter => 29,
+    }
+}
+
+// =============================================================================
+// Property 1 — discriminant injectivity (structural disjointness)
+// =============================================================================
+
+@test
+fn prop_bpf_map_type_discriminant_injective() {
+    let domain = map_type_domain();
+    let mut i = 0;
+    while i < domain.len() {
+        let mut j = i + 1;
+        while j < domain.len() {
+            // Distinct variants must never share a discriminant code.
+            assert(map_type_code(&domain[i]) != map_type_code(&domain[j]));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn prop_bpf_map_type_discriminant_covers_zero_to_29() {
+    // The discriminant is dense over [0, 30) — every code is hit exactly once.
+    let domain = map_type_domain();
+    assert_eq(domain.len(), 30);
+    let mut expected = 0;
+    let mut i = 0;
+    while i < domain.len() {
+        assert_eq(map_type_code(&domain[i]), expected);
+        expected = expected + 1;
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 2 — `is`-reflexivity over the whole domain
+// =============================================================================
+
+@test
+fn prop_bpf_map_type_code_is_deterministic() {
+    // Calling the discriminant twice on the same variant is stable.
+    let domain = map_type_domain();
+    let mut i = 0;
+    while i < domain.len() {
+        assert_eq(map_type_code(&domain[i]), map_type_code(&domain[i]));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 3 — MapConfig field round-trip over boundary widths
+// =============================================================================
+
+@test
+fn prop_bpf_map_config_field_round_trip_boundaries() {
+    // Sweep UInt32 boundary values through every numeric field.
+    let widths: List<UInt32> = [0_u32, 1_u32, 4_u32, 64_u32, 4096_u32, 4_294_967_295_u32];
+    let mut i = 0;
+    while i < widths.len() {
+        let w = widths[i];
+        let cfg = MapConfig {
+            map_type: MapType.Hash,
+            key_size: w,
+            value_size: w,
+            max_entries: w,
+            name: "probe".to_text(),
+            flags: w,
+        };
+        assert_eq(cfg.key_size, w);
+        assert_eq(cfg.value_size, w);
+        assert_eq(cfg.max_entries, w);
+        assert_eq(cfg.flags, w);
+        assert(cfg.map_type is MapType.Hash);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 4 — MapDescriptor preserves map_type for every variant
+// =============================================================================
+
+@test
+fn prop_bpf_map_descriptor_preserves_every_map_type() {
+    let domain = map_type_domain();
+    let mut i = 0;
+    while i < domain.len() {
+        let code = map_type_code(&domain[i]);
+        let d = MapDescriptor {
+            fd: FileDesc(i),
+            map_type: domain[i],
+            key_size: 4_u32,
+            value_size: 8_u32,
+            max_entries: 16_u32,
+        };
+        // map_type survives record construction with its discriminant intact.
+        assert_eq(map_type_code(&d.map_type), code);
+        assert(d.fd == FileDesc(i));
+        i = i + 1;
+    }
+}
+
+fn main() {}

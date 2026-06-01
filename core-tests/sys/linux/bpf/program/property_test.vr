@@ -1,0 +1,245 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/program/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core.sys.linux.bpf.program`.
+//
+//   * ProgramType (32 variants) + AttachType (40 variants) are nullary ADTs
+//     with no derived protocol bodies. Law: a total `match`-based
+//     discriminant is INJECTIVE and DENSE over [0, N) — i.e. the wire tags
+//     match `enum bpf_prog_type` / `enum bpf_attach_type` ordinal order and
+//     no two distinct variants collapse under pattern dispatch.
+//   * ProgramBytecode / ProgramDescriptor / Link records preserve every
+//     field across construction → read.
+//
+// Canonical submodule mount → identical resolution on both tiers.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.program.{
+    ProgramType, AttachType, ProgramBytecode, ProgramDescriptor, Link,
+};
+mount core.sys.common.FileDesc;
+
+fn program_type_domain() -> List<ProgramType> {
+    [
+        ProgramType.Unspec, ProgramType.SocketFilter, ProgramType.Kprobe, ProgramType.SchedCls,
+        ProgramType.SchedAct, ProgramType.Tracepoint, ProgramType.Xdp, ProgramType.PerfEvent,
+        ProgramType.CgroupSkb, ProgramType.CgroupSock, ProgramType.LwtIn, ProgramType.LwtOut,
+        ProgramType.LwtXmit, ProgramType.SockOps, ProgramType.SkSkb, ProgramType.CgroupDevice,
+        ProgramType.SkMsg, ProgramType.RawTracepoint, ProgramType.CgroupSockAddr, ProgramType.LwtSeg6Local,
+        ProgramType.LircMode2, ProgramType.SkReuseport, ProgramType.FlowDissector, ProgramType.CgroupSysctl,
+        ProgramType.RawTracepointWritable, ProgramType.CgroupSockopt, ProgramType.Tracing, ProgramType.StructOps,
+        ProgramType.Ext, ProgramType.Lsm, ProgramType.SkLookup, ProgramType.Syscall,
+    ]
+}
+
+fn program_type_code(t: &ProgramType) -> Int {
+    match t {
+        ProgramType.Unspec => 0,
+        ProgramType.SocketFilter => 1,
+        ProgramType.Kprobe => 2,
+        ProgramType.SchedCls => 3,
+        ProgramType.SchedAct => 4,
+        ProgramType.Tracepoint => 5,
+        ProgramType.Xdp => 6,
+        ProgramType.PerfEvent => 7,
+        ProgramType.CgroupSkb => 8,
+        ProgramType.CgroupSock => 9,
+        ProgramType.LwtIn => 10,
+        ProgramType.LwtOut => 11,
+        ProgramType.LwtXmit => 12,
+        ProgramType.SockOps => 13,
+        ProgramType.SkSkb => 14,
+        ProgramType.CgroupDevice => 15,
+        ProgramType.SkMsg => 16,
+        ProgramType.RawTracepoint => 17,
+        ProgramType.CgroupSockAddr => 18,
+        ProgramType.LwtSeg6Local => 19,
+        ProgramType.LircMode2 => 20,
+        ProgramType.SkReuseport => 21,
+        ProgramType.FlowDissector => 22,
+        ProgramType.CgroupSysctl => 23,
+        ProgramType.RawTracepointWritable => 24,
+        ProgramType.CgroupSockopt => 25,
+        ProgramType.Tracing => 26,
+        ProgramType.StructOps => 27,
+        ProgramType.Ext => 28,
+        ProgramType.Lsm => 29,
+        ProgramType.SkLookup => 30,
+        ProgramType.Syscall => 31,
+    }
+}
+
+fn attach_type_domain() -> List<AttachType> {
+    [
+        AttachType.CgroupInetIngress, AttachType.CgroupInetEgress, AttachType.CgroupInetSockCreate,
+        AttachType.CgroupSockOps, AttachType.SkSkbStreamParser, AttachType.SkSkbStreamVerdict,
+        AttachType.CgroupDeviceA, AttachType.SkMsgVerdict, AttachType.CgroupInet4Bind,
+        AttachType.CgroupInet6Bind, AttachType.CgroupInet4Connect, AttachType.CgroupInet6Connect,
+        AttachType.CgroupInet4PostBind, AttachType.CgroupInet6PostBind, AttachType.CgroupUdp4Sendmsg,
+        AttachType.CgroupUdp6Sendmsg, AttachType.CgroupUdp4Recvmsg, AttachType.CgroupUdp6Recvmsg,
+        AttachType.CgroupSysctl, AttachType.CgroupGetsockopt, AttachType.CgroupSetsockopt,
+        AttachType.TraceRawTp, AttachType.TraceFentry, AttachType.TraceFexit,
+        AttachType.ModifyReturn, AttachType.LsmMac, AttachType.TraceIter,
+        AttachType.CgroupInet4Getpeername, AttachType.CgroupInet6Getpeername, AttachType.CgroupInet4Getsockname,
+        AttachType.CgroupInet6Getsockname, AttachType.XdpDevmap, AttachType.CgroupInetSockRelease,
+        AttachType.XdpCpumap, AttachType.SkLookup, AttachType.XdpDrv,
+        AttachType.SkReuseportSelect, AttachType.SkReuseportSelectOrMigrate, AttachType.PerfEvent,
+        AttachType.TraceKprobeMulti,
+    ]
+}
+
+fn attach_type_code(a: &AttachType) -> Int {
+    match a {
+        AttachType.CgroupInetIngress => 0,
+        AttachType.CgroupInetEgress => 1,
+        AttachType.CgroupInetSockCreate => 2,
+        AttachType.CgroupSockOps => 3,
+        AttachType.SkSkbStreamParser => 4,
+        AttachType.SkSkbStreamVerdict => 5,
+        AttachType.CgroupDeviceA => 6,
+        AttachType.SkMsgVerdict => 7,
+        AttachType.CgroupInet4Bind => 8,
+        AttachType.CgroupInet6Bind => 9,
+        AttachType.CgroupInet4Connect => 10,
+        AttachType.CgroupInet6Connect => 11,
+        AttachType.CgroupInet4PostBind => 12,
+        AttachType.CgroupInet6PostBind => 13,
+        AttachType.CgroupUdp4Sendmsg => 14,
+        AttachType.CgroupUdp6Sendmsg => 15,
+        AttachType.CgroupUdp4Recvmsg => 16,
+        AttachType.CgroupUdp6Recvmsg => 17,
+        AttachType.CgroupSysctl => 18,
+        AttachType.CgroupGetsockopt => 19,
+        AttachType.CgroupSetsockopt => 20,
+        AttachType.TraceRawTp => 21,
+        AttachType.TraceFentry => 22,
+        AttachType.TraceFexit => 23,
+        AttachType.ModifyReturn => 24,
+        AttachType.LsmMac => 25,
+        AttachType.TraceIter => 26,
+        AttachType.CgroupInet4Getpeername => 27,
+        AttachType.CgroupInet6Getpeername => 28,
+        AttachType.CgroupInet4Getsockname => 29,
+        AttachType.CgroupInet6Getsockname => 30,
+        AttachType.XdpDevmap => 31,
+        AttachType.CgroupInetSockRelease => 32,
+        AttachType.XdpCpumap => 33,
+        AttachType.SkLookup => 34,
+        AttachType.XdpDrv => 35,
+        AttachType.SkReuseportSelect => 36,
+        AttachType.SkReuseportSelectOrMigrate => 37,
+        AttachType.PerfEvent => 38,
+        AttachType.TraceKprobeMulti => 39,
+    }
+}
+
+// =============================================================================
+// Property 1 — ProgramType discriminant injective + dense over [0, 32)
+// =============================================================================
+
+@test
+fn prop_bpf_program_type_discriminant_injective() {
+    let domain = program_type_domain();
+    let mut i = 0;
+    while i < domain.len() {
+        let mut j = i + 1;
+        while j < domain.len() {
+            assert(program_type_code(&domain[i]) != program_type_code(&domain[j]));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn prop_bpf_program_type_dense_zero_to_31() {
+    let domain = program_type_domain();
+    assert_eq(domain.len(), 32);
+    let mut expected = 0;
+    let mut i = 0;
+    while i < domain.len() {
+        assert_eq(program_type_code(&domain[i]), expected);
+        expected = expected + 1;
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 2 — AttachType discriminant injective + dense over [0, 40)
+// =============================================================================
+
+@test
+fn prop_bpf_attach_type_discriminant_injective() {
+    let domain = attach_type_domain();
+    let mut i = 0;
+    while i < domain.len() {
+        let mut j = i + 1;
+        while j < domain.len() {
+            assert(attach_type_code(&domain[i]) != attach_type_code(&domain[j]));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn prop_bpf_attach_type_dense_zero_to_39() {
+    let domain = attach_type_domain();
+    assert_eq(domain.len(), 40);
+    let mut expected = 0;
+    let mut i = 0;
+    while i < domain.len() {
+        assert_eq(attach_type_code(&domain[i]), expected);
+        expected = expected + 1;
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 3 — ProgramBytecode field round-trip
+// =============================================================================
+
+@test
+fn prop_bpf_program_bytecode_field_round_trip() {
+    let domain = program_type_domain();
+    let mut i = 0;
+    while i < domain.len() {
+        let insns: List<Byte> = List.new();
+        let bc = ProgramBytecode {
+            program_type: domain[i],
+            insns: insns,
+            license: "GPL".to_text(),
+            kernel_version: 0_u32,
+            name: "prog".to_text(),
+        };
+        assert_eq(program_type_code(&bc.program_type), program_type_code(&domain[i]));
+        assert_eq(bc.license, "GPL");
+        assert_eq(bc.kernel_version, 0_u32);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 4 — Link preserves both fds + attach_type
+// =============================================================================
+
+@test
+fn prop_bpf_link_preserves_fds_and_attach() {
+    let attaches = attach_type_domain();
+    let mut i = 0;
+    while i < attaches.len() {
+        let link = Link {
+            fd: FileDesc(i),
+            program_fd: FileDesc(i + 1000),
+            attach_type: attaches[i],
+        };
+        assert(link.fd == FileDesc(i));
+        assert(link.program_fd == FileDesc(i + 1000));
+        assert_eq(attach_type_code(&link.attach_type), attach_type_code(&attaches[i]));
+        i = i + 1;
+    }
+}
+
+fn main() {}
