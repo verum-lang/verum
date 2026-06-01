@@ -1,0 +1,198 @@
+// =============================================================================
+// core-tests/context/provider/integration_test.vr
+// =============================================================================
+//
+// Cross-type interaction for `core.context.provider`:
+//   * Provider<T> over non-Int carriers (Text, List<Int>, Maybe<Int>,
+//     tuples) — the caching contract must hold for every Clone-able T.
+//   * Provider composed with the OTHER context submodule (standard) —
+//     Provider<ContextLogLevel> proves the lazy-DI wrapper carries a
+//     cross-module enum payload through its cache without tag corruption.
+//   * ScopedProvider.run end-to-end against the ctx_bridge TLS slot:
+//     the value is installed for the body and popped on exit (has_context
+//     transitions true → false across the scope boundary).
+//   * has_context over a range of slots — the runtime predicate is total
+//     over the slot domain (every unprovided slot reads false).
+// =============================================================================
+
+mount core.context.provider.{Provider, LazyProvider, ScopedProvider, has_context};
+mount core.context.standard.{ContextLogLevel};
+mount core.collections.list.List;
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// Section 1: Provider<Text> — caching a heap-allocated carrier
+// =============================================================================
+
+@test
+fn integration_provider_text_caches_value() {
+    let mut p = Provider.new(fn() -> Text { "postgres://localhost/db".clone() });
+    let a = p.get();
+    let b = p.get();
+    assert_eq(a, b);
+    assert(a.contains("postgres"));
+}
+
+@test
+fn integration_provider_text_of_returns_value() {
+    let mut p = Provider.of("hello".clone());
+    assert_eq(p.get(), "hello");
+}
+
+// =============================================================================
+// Section 2: Provider<List<Int>> — providing a collection
+// =============================================================================
+
+@test
+fn integration_provider_list_preserves_contents() {
+    let mut p = Provider.new(fn() -> List<Int> { [1, 2, 3] });
+    let xs = p.get();
+    assert_eq(xs.len(), 3);
+    assert_eq(xs[0], 1);
+    assert_eq(xs[2], 3);
+}
+
+@test
+fn integration_provider_list_idempotent_across_gets() {
+    let mut p = Provider.new(fn() -> List<Int> { [10, 20] });
+    let a = p.get();
+    let b = p.get();
+    assert_eq(a.len(), b.len());
+    assert_eq(a[0], b[0]);
+    assert_eq(a[1], b[1]);
+}
+
+// =============================================================================
+// Section 3: Provider<Maybe<Int>> — provider of an optional
+// =============================================================================
+
+@test
+fn integration_provider_maybe_some_payload() {
+    let mut p = Provider.new(fn() -> Maybe<Int> { Maybe.Some(42) });
+    let v = p.get();
+    match v {
+        Maybe.Some(n) => assert_eq(n, 42),
+        Maybe.None => panic("expected Some(42)"),
+    }
+}
+
+@test
+fn integration_provider_maybe_none_payload() {
+    let mut p: Provider<Maybe<Int>> = Provider.new(fn() -> Maybe<Int> { Maybe.None });
+    let v = p.get();
+    assert(v is Maybe.None);
+}
+
+// =============================================================================
+// Section 4: Provider<ContextLogLevel> — cross-module enum carrier
+// =============================================================================
+//
+// Proves the lazy-DI cache carries a sibling-module sum-type payload
+// without losing its variant tag (the cache is `Maybe<T>` and the get()
+// path round-trips it through Maybe.Some/Maybe.None).
+
+@test
+fn integration_provider_log_level_round_trips_variant() {
+    let mut p = Provider.new(fn() -> ContextLogLevel { ContextLogLevel.Warn });
+    let level = p.get();
+    assert(level is ContextLogLevel.Warn);
+    assert_eq(level.severity(), 3);
+    assert_eq(level.name(), "WARN");
+}
+
+@test
+fn integration_provider_log_level_of_is_resolved() {
+    let p = Provider.of(ContextLogLevel.Fatal);
+    assert(p.is_resolved());
+}
+
+// =============================================================================
+// Section 5: Provider<(Int, Text)> — tuple carrier
+// =============================================================================
+
+@test
+fn integration_provider_tuple_payload() {
+    let mut p = Provider.new(fn() -> (Int, Text) { (7, "seven".clone()) });
+    let pair = p.get();
+    assert_eq(pair.0, 7);
+    assert_eq(pair.1, "seven");
+}
+
+// =============================================================================
+// Section 6: ScopedProvider.run — TLS install/pop round-trip
+// =============================================================================
+//
+// ScopedProvider.run pushes the value into the ctx_bridge slot before the
+// body, pops it after. We use an Int payload (NaN-box-safe; the @bitcast
+// payload-size hazard documented in audit.md §3.4 only bites larger
+// records). The observable contract: the body executes and returns, and
+// the slot is unprovided again afterwards.
+
+@test
+fn integration_scoped_provider_run_executes_body() {
+    let sp = ScopedProvider.new(60, 1);
+    let result = sp.run(fn() -> Int { 12345 });
+    assert_eq(result, 12345);
+}
+
+@test
+fn integration_scoped_provider_run_pops_slot_on_exit() {
+    // Use a high slot id well clear of the compiler-allocated standard range.
+    let slot = 61;
+    assert(!has_context(slot));
+    let sp = ScopedProvider.new(slot, 1);
+    let _ = sp.run(fn() -> Int { 0 });
+    // After run returns, the slot must be unprovided again.
+    assert(!has_context(slot));
+}
+
+// =============================================================================
+// Section 7: has_context — total over the slot domain
+// =============================================================================
+
+@test
+fn integration_has_context_false_across_slot_range() {
+    // In a fresh execution environment, no high slot is provided.
+    let mut slot = 100;
+    while slot < 130 {
+        assert(!has_context(slot));
+        slot = slot + 1;
+    }
+}
+
+// =============================================================================
+// Section 8: LazyProvider<T> alias used through a function boundary
+// =============================================================================
+
+@test
+fn integration_lazy_provider_through_function() {
+    fn build_lazy() -> LazyProvider<Int> {
+        Provider.new(fn() -> Int { 256 })
+    }
+    let mut p = build_lazy();
+    assert(!p.is_resolved());
+    assert_eq(p.get(), 256);
+    assert(p.is_resolved());
+}
+
+// =============================================================================
+// Section 9: Provider as a memoised singleton in a List of providers
+// =============================================================================
+
+@test
+fn integration_list_of_providers_each_caches_independently() {
+    let mut a = Provider.new(fn() -> Int { 1 });
+    let mut b = Provider.new(fn() -> Int { 2 });
+    // Resolve a, leave b unresolved.
+    let _ = a.get();
+    assert(a.is_resolved());
+    assert(!b.is_resolved());
+    // Resolving b does not disturb a.
+    let _ = b.get();
+    assert(a.is_resolved());
+    assert(b.is_resolved());
+}
+
+fn main() {
+    // Tests run via @test discovery.
+}

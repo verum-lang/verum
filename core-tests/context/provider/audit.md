@@ -7,7 +7,21 @@ free fns `get_context<T>` and `has_context`.
 
 Tests: `unit_test.vr` covers each public API surface (factory caching,
 reset, is_resolved, get_ref, ScopedProvider construction, has_context
-in unprovided slots).
+in unprovided slots); `property_test.vr` pins caching idempotence +
+reset semantics; `integration_test.vr` (NEW) exercises Provider over
+Text / List / Maybe / tuple / cross-module `ContextLogLevel` carriers +
+`ScopedProvider.run` TLS install/pop round-trip + `has_context` totality;
+`regression_test.vr` (NEW) pins the historical `Maybe<T>` field-tracking
+defects (the `Unreachable {pc:80/74}` failures in `get`/`get_ref`, the
+`Provider.of` panic-factory soundness bug, `reset` round-trip).
+
+**Conformance status (2026-06-01, interpreter / `--test-threads 1`)**:
+all 21 `integration_test` + `regression_test` @tests GREEN, plus the
+pre-existing `unit_test` (18) + `property_test` (8). The historical
+`Maybe<T>` field-tracking and `ScopedProvider.run` defects that gated this
+module to `regression-only` are **closed** — the module is now **partial**
+(promotes to **complete** once `map`/`flat_map`/`try_run` below land and
+AOT cross-tier is validated).
 
 ## 1. Cross-stdlib usage
 

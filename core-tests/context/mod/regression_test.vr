@@ -1,0 +1,90 @@
+// =============================================================================
+// core-tests/context/mod/regression_test.vr
+// =============================================================================
+//
+// One @test per re-export defect surfaced for the `core.context` umbrella.
+// Kept forever as re-regression guardrails.
+// =============================================================================
+
+mount core.context.*;
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// REGRESSION (mod.vr:99-103 comment): the `standard.vr` module shipped its
+// context types and ContextLogLevel, but `mod.vr` originally had NO
+// `public mount self.standard.*;` line — so `mount core.context.*` did
+// NOT surface ContextLogLevel and user code had to reach in via the
+// direct file path despite the umbrella convention. Closed by adding the
+// re-export. Pin: a `standard`-originated symbol IS reachable via the
+// bare umbrella mount.
+// =============================================================================
+
+@test
+fn regression_umbrella_surfaces_standard_log_level() {
+    let l: ContextLogLevel = ContextLogLevel.Info;
+    assert(l is ContextLogLevel.Info);
+    assert_eq(l.name(), "INFO");
+}
+
+@test
+fn regression_umbrella_surfaces_standard_auth_user() {
+    let u = AuthUser { id: "u".clone(), name: "n".clone(), roles: [] };
+    assert_eq(u.name, "n");
+}
+
+@test
+fn regression_umbrella_surfaces_standard_row_query_result() {
+    let r = Row { columns: [], values: [] };
+    let qr = QueryResult { rows: [r], rows_affected: 0 };
+    assert_eq(qr.rows.len(), 1);
+}
+
+// =============================================================================
+// REGRESSION: the explicit convenience re-exports in mod.vr
+//   public mount self.provider.{Provider, ScopedProvider, LazyProvider,
+//                               get_context, has_context};
+// must all be reachable through the umbrella. A dropped name here breaks
+// every compiler-emitted `provide`/`using` lowering site. Pin each free fn.
+// =============================================================================
+
+@test
+fn regression_umbrella_surfaces_provider_free_fns() {
+    assert(!has_context(220));
+    let v: Maybe<Int> = get_context(221);
+    assert(v is Maybe.None);
+}
+
+// =============================================================================
+// REGRESSION: variant constructors of re-exported sum types must be
+// reachable in qualified form through the umbrella. Pre-fix the
+// scope/error variants collided with sibling modules under bare names;
+// the qualified `Scope.<V>` / `ContextError.<V>` form must route to the
+// context types specifically, even when reached via `core.context.*`.
+// =============================================================================
+
+@test
+fn regression_umbrella_qualified_scope_variants_route_correctly() {
+    // Transient collides with RestartStrategy.Transient in 4 sibling
+    // modules; Request with core.net.http.Request. The qualified form
+    // reached via the umbrella must still produce a Scope value.
+    let t: Scope = Scope.Transient;
+    let r: Scope = Scope.Request;
+    assert(t is Scope.Transient);
+    assert(r is Scope.Request);
+    // And the method dispatches to Scope's impl, not a sibling's.
+    assert_eq(t.name(), "Transient");
+    assert(t.can_depend_on(r));
+}
+
+@test
+fn regression_umbrella_qualified_context_error_variants_route_correctly() {
+    let e: ContextError = ContextError.TypeMismatch {
+        context_name: "C".clone(), expected: "E".clone(), found: "F".clone(),
+    };
+    assert(e is ContextError.TypeMismatch);
+    assert(e.message().contains("expected"));
+}
+
+fn main() {
+    // Tests run via @test discovery.
+}

@@ -1,0 +1,119 @@
+// =============================================================================
+// core-tests/context/mod/property_test.vr
+// =============================================================================
+//
+// The umbrella `core.context.*` mount must deliver FULLY-FUNCTIONAL types,
+// not just resolvable names. We re-prove a representative algebraic law of
+// each re-exported submodule THROUGH the umbrella path — if a re-export
+// dropped a method-table entry or routed to the wrong type, these laws
+// would fail even though construction succeeds.
+// =============================================================================
+
+mount core.context.*;
+mount core.collections.list.List;
+
+// =============================================================================
+// Law 1: Scope.can_depend_on coheres with rank over the full 3×3 domain.
+//   A scope may depend on another iff the dependency's rank is ≤ its own
+//   (longer- or equal-lived). Exhausted over the finite domain.
+// =============================================================================
+
+fn scope_domain() -> List<Scope> {
+    [Scope.Singleton, Scope.Request, Scope.Transient]
+}
+
+@test
+fn property_umbrella_scope_can_depend_on_iff_rank_ge() {
+    for a in scope_domain().iter() {
+        for b in scope_domain().iter() {
+            let allowed = (*a).can_depend_on(*b);
+            let expected = (*a).rank() >= (*b).rank();
+            assert_eq(allowed, expected);
+        }
+    }
+}
+
+@test
+fn property_umbrella_scope_name_injective() {
+    // Distinct scopes have distinct names (exhaustive over the domain).
+    assert(Scope.Singleton.name() != Scope.Request.name());
+    assert(Scope.Request.name() != Scope.Transient.name());
+    assert(Scope.Singleton.name() != Scope.Transient.name());
+}
+
+// =============================================================================
+// Law 2: ContextError Eq is reflexive for every variant, reached via umbrella.
+// =============================================================================
+
+@test
+fn property_umbrella_context_error_eq_reflexive() {
+    let errs: List<ContextError> = [
+        ContextError.NotFound { context_name: "X".clone() },
+        ContextError.NotProvided { context_name: "X".clone(), function_name: "f".clone() },
+        ContextError.TypeMismatch { context_name: "X".clone(), expected: "A".clone(), found: "B".clone() },
+        ContextError.CircularDependency { chain: ["A".clone(), "B".clone()] },
+        ContextError.ScopeViolation {
+            dependent: "a".clone(), dependency: "b".clone(),
+            dependent_scope: "S".clone(), dependency_scope: "R".clone(),
+        },
+    ];
+    for e in errs.iter() {
+        assert(*e == *e);
+    }
+}
+
+// =============================================================================
+// Law 3: ContextLogLevel severity is a strict order embedding, via umbrella.
+//   severity is injective and monotone along the variant ladder.
+// =============================================================================
+
+fn level_ladder() -> List<ContextLogLevel> {
+    [
+        ContextLogLevel.Trace,
+        ContextLogLevel.Debug,
+        ContextLogLevel.Info,
+        ContextLogLevel.Warn,
+        ContextLogLevel.Error,
+        ContextLogLevel.Fatal,
+    ]
+}
+
+@test
+fn property_umbrella_log_level_severity_strictly_increasing() {
+    let ladder = level_ladder();
+    let mut i = 0;
+    while i + 1 < ladder.len() {
+        assert(ladder[i].severity() < ladder[i + 1].severity());
+        i = i + 1;
+    }
+}
+
+@test
+fn property_umbrella_log_level_display_equals_name() {
+    // Display ≡ name() for every level, via the umbrella-reached type.
+    for l in level_ladder().iter() {
+        assert_eq(f"{*l}", (*l).name());
+    }
+}
+
+// =============================================================================
+// Law 4: Provider caching idempotence, via umbrella.
+//   get() is idempotent — repeated calls return clone-equal values and
+//   the provider stays resolved.
+// =============================================================================
+
+@test
+fn property_umbrella_provider_get_idempotent() {
+    let mut p = Provider.new(fn() -> Int { 314 });
+    let a = p.get();
+    let b = p.get();
+    let c = p.get();
+    assert_eq(a, b);
+    assert_eq(b, c);
+    assert_eq(a, 314);
+    assert(p.is_resolved());
+}
+
+fn main() {
+    // Tests run via @test discovery.
+}

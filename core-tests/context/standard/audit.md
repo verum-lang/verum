@@ -99,10 +99,77 @@ labels). Add it and pin the round-trip law in property_test.vr.
 
 **Effort:** ~30 min impl + test.
 
+### §3.5 `Row.get_index` / `Row.get` SIGSEGV — archive-method `Maybe<&T>` return (NEW, HIGH)
+
+Calling `Row.get_index(n)` (or `Row.get(&name)`) from user code and
+consuming the result **SIGSEGVs the compiler** during execution-compile
+(signal 11, hard corruption — not a clean panic). Both methods return
+`Maybe<&Text>` borrowed from `self.values[i].as_ref()`.
+
+Triangulation (each isolated, `--interp --test-threads 1`):
+
+| construct | result |
+|---|---|
+| `Maybe.Some(x).as_ref() is Maybe.Some` | OK |
+| `(xs: List<Maybe<Text>>)[0].as_ref() is Maybe.Some` | OK |
+| LOCAL record `Bag { items }` w/ `at(i){ self.items[i].as_ref() }`, consumed | OK |
+| archive-loaded `Row.get_index(0) is Maybe.Some` | **SIGSEGV** |
+| same via `match` | **SIGSEGV** |
+
+So the trigger is the **cross-module / archive-loaded method-return of a
+reference-bearing ADT** — NOT `Maybe<&T>` per se, NOT List-of-Maybe
+indexing, NOT the `is`-vs-`match` consumer. Same family as
+[[btree_pattern_match_ref_generic_class]] / CLASS-9 / D2 (recent commits
+64607bb8e, 1e75b40ad). `Display for Row` is also affected (it does the
+same `self.values[i].as_ref()`).
+
+Pinned in `regression_test.vr` (`regression_row_get_index_bounds_guarded`,
+`@ignore`'d) and the three `unit_test.vr` `get_index` tests are `@ignore`'d.
+**Verified an `@ignore`'d test never trips the crash** (it is not
+execution-compiled). Fundamental fix is VBC codegen of archive-method
+ref-ADT returns + a compiler rebuild — deferred (the codegen crate is
+actively edited by a concurrent session; rebuild is hazardous this cycle).
+
+### §3.6 `f"{Type.Variant}"` does not dispatch `Display` (NEW, MEDIUM)
+
+A DIRECT variant-constructor in an interpolation placeholder
+(`f"{ContextLogLevel.Info}"`) renders the variant name (`"Info"`) instead
+of the `Display` output (`"INFO"`). Binding first
+(`let l = ContextLogLevel.Info; f"{l}"`) dispatches `Display` correctly.
+`Debug` (`:?`) works in both forms. General (not context-specific) — the
+same enum-`Display`-under-`--interp` regression another session pinned for
+`runtime/*` enums. Pinned `@ignore`'d in `regression_test.vr`
+(`regression_display_direct_ctor_renders_uppercase_name`); the live
+`regression_display_via_bound_var_dispatches` + the rewritten
+`property_display_equals_name` / `test_log_level_display_returns_name` keep
+the `Display` contract covered via the working bound-var idiom.
+Tracked as [[fstring_direct_variant_ctor_display_dispatch]].
+
+### §3.7 Row field-shift on cross-module direct field read (NEW, part of CLASS-9)
+
+Reading `Row`'s own fields (`r.columns` / `r.values`) from USER code (e.g.
+through `mount core.context.*`) panics `field access out of bounds: field
+index 4 ... type='List'` — the archive-loaded record's field index is
+mis-resolved. `AuthUser` fields (`u.id`/`u.name`/`u.roles`) and
+`QueryResult.rows` read correctly, so the shift is type/layout-specific to
+`Row`. `mod/unit_test.vr`'s Row test was reworked to read only
+`qr.rows.len()` (the working path). Same CLASS-9 family as §3.5.
+
+## Conformance status (2026-06-01, interpreter / `--test-threads 1`)
+
+`ContextLogLevel` (severity / name / is_enabled / Eq / Ord / Clone / Debug
+/ Display-via-bound-var), `AuthUser` (has_role / Display), `QueryResult`
+(construction / Display / `.rows`) are GREEN. Blocked + pinned: `Row.get`
+/ `Row.get_index` / `Row` direct field read / `f"{Type.Variant}"` Display.
+Status: **partial** (was `regression-only`).
+
 ## Action items landed in this branch
 
-* `core-tests/context/standard/unit_test.vr` — first surface
-  coverage for ContextLogLevel + data types.
+* `core-tests/context/standard/unit_test.vr` — surface coverage for
+  ContextLogLevel + data types; `get_index` tests `@ignore`'d (§3.5),
+  Display test rewritten to bound-var idiom (§3.6).
+* `core-tests/context/standard/regression_test.vr` (NEW) — pins §3.5,
+  §3.6 with minimal repros + live working-idiom companions.
 * `core-tests/context/standard/audit.md` — this file.
 
 ## Action items deferred

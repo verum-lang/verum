@@ -1,0 +1,155 @@
+// =============================================================================
+// core-tests/context/mod/unit_test.vr
+// =============================================================================
+//
+// Surface coverage for the `core.context` umbrella module. Every public
+// symbol that `mod.vr` promises to re-export under `core.context.*` must
+// be reachable AND usable through the bare umbrella mount — not merely
+// name-resolvable. Companion `integration_test.vr` covers cross-type
+// scenarios; this file pins one reachability+usage @test per re-exported
+// symbol, grouped by originating submodule.
+//
+// mod.vr re-exports (verum.ebnf `mount_stmt`):
+//   public mount self.scope.*;     → Scope, ContextScope
+//   public mount self.error.*;     → ContextError
+//   public mount self.provider.*;  → Provider, ScopedProvider, LazyProvider,
+//                                     get_context, has_context
+//   public mount self.standard.*;  → ContextLogLevel, ContextLogRecord, Row,
+//                                     QueryResult, AuthUser (+ 10 protocols)
+// =============================================================================
+
+mount core.context.*;
+mount core.collections.list.List;
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// Section 1: scope.* — Scope ADT reachable + functional via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_scope_variants_constructible() {
+    let s: Scope = Scope.Singleton;
+    let r: Scope = Scope.Request;
+    let t: Scope = Scope.Transient;
+    assert(s is Scope.Singleton);
+    assert(r is Scope.Request);
+    assert(t is Scope.Transient);
+}
+
+@test
+fn test_umbrella_scope_methods_dispatch() {
+    assert_eq(Scope.Singleton.name(), "Singleton");
+    assert_eq(Scope.Request.rank(), 1);
+    assert(Scope.Transient.can_depend_on(Scope.Singleton));
+}
+
+@test
+fn test_umbrella_context_scope_depth_chain() {
+    let root = ContextScope.root();
+    let child = root.enter();
+    assert_eq(root.current_depth(), 0);
+    assert_eq(child.current_depth(), 1);
+    assert_eq(child.parent(), 0);
+}
+
+// =============================================================================
+// Section 2: error.* — ContextError reachable + functional via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_context_error_construct_and_message() {
+    let e: ContextError = ContextError.NotFound { context_name: "Database".clone() };
+    assert(e is ContextError.NotFound);
+    assert(e.message().contains("Database"));
+}
+
+@test
+fn test_umbrella_context_error_eq_via_umbrella() {
+    let a = ContextError.NotProvided { context_name: "Auth".clone(), function_name: "login".clone() };
+    let b = ContextError.NotProvided { context_name: "Auth".clone(), function_name: "login".clone() };
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 3: provider.* — Provider / ScopedProvider / LazyProvider /
+//             get_context / has_context reachable via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_provider_lazy_get() {
+    let mut p = Provider.new(fn() -> Int { 11 });
+    assert(!p.is_resolved());
+    assert_eq(p.get(), 11);
+}
+
+@test
+fn test_umbrella_provider_of() {
+    let mut p = Provider.of(22);
+    assert(p.is_resolved());
+    assert_eq(p.get(), 22);
+}
+
+@test
+fn test_umbrella_lazy_provider_alias() {
+    let mut p: LazyProvider<Int> = Provider.new(fn() -> Int { 33 });
+    assert_eq(p.get(), 33);
+}
+
+@test
+fn test_umbrella_scoped_provider_new() {
+    let sp = ScopedProvider.new(5, 44);
+    assert_eq(sp.slot_id, 5);
+    assert_eq(sp.value, 44);
+}
+
+@test
+fn test_umbrella_has_context_unprovided_slot() {
+    assert(!has_context(210));
+}
+
+@test
+fn test_umbrella_get_context_unprovided_is_none() {
+    // `get_context<T>` returns Maybe.None for an unprovided slot. Carrier
+    // type fixed by the binding annotation.
+    let v: Maybe<Int> = get_context(211);
+    assert(v is Maybe.None);
+}
+
+// =============================================================================
+// Section 4: standard.* — data types reachable via umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_context_log_level() {
+    let l: ContextLogLevel = ContextLogLevel.Info;
+    assert(l is ContextLogLevel.Info);
+    assert_eq(l.severity(), 2);
+    assert_eq(l.name(), "INFO");
+}
+
+@test
+fn test_umbrella_auth_user_has_role() {
+    let u = AuthUser { id: "u1".clone(), name: "bob".clone(), roles: ["admin".clone()] };
+    let admin = "admin".clone();
+    assert(u.has_role(&admin));
+}
+
+@test
+fn test_umbrella_row_and_query_result() {
+    // Row/QueryResult are archive-loaded. Two current language defects
+    // (both pinned in standard/, CLASS-9 / codegen family) constrain what
+    // we can read from USER code:
+    //   * `Row.get_index(..)` returns `Maybe<&Text>` → archive-method-return
+    //     SIGSEGV ([[archive_method_maybe_ref_return_sigsegv]], §3.5).
+    //   * reading Row's OWN fields (`r.columns`/`r.values`) cross-module
+    //     hits the field-index shift (`field index 4 ... type='List'`).
+    // QueryResult.rows (field 0) DOES round-trip correctly, so we exercise
+    // umbrella reachability via construction + `qr.rows.len()`.
+    let r = Row { columns: ["a".clone()], values: [Maybe.Some("1".clone())] };
+    let qr = QueryResult { rows: [r], rows_affected: 1 };
+    assert_eq(qr.rows.len(), 1);
+}
+
+fn main() {
+    // Tests run via @test discovery.
+}
