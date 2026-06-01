@@ -1173,7 +1173,10 @@ fn test_hash_none_vs_some() {
 fn test_debug_none() {
     let opt: Maybe<Int> = Maybe.None;
     let debug_str = f"{opt:?}";
-    assert_eq(debug_str, "Maybe.None");
+    // Debug renders the BARE variant form, matching the impl
+    // (core/base/maybe.vr fmt_debug writes "None"), Ordering's Debug
+    // ("Less", not "Ordering.Less"), and Rust's `{:?}` convention.
+    assert_eq(debug_str, "None");
 }
 
 /// Test Debug for Some
@@ -1181,7 +1184,7 @@ fn test_debug_none() {
 fn test_debug_some() {
     let opt = Maybe.Some(42);
     let debug_str = f"{opt:?}";
-    assert_eq(debug_str, "Maybe.Some(42)");
+    assert_eq(debug_str, "Some(42)");
 }
 
 // =============================================================================
