@@ -175,7 +175,7 @@ impl IntegerKind {
     /// Get the minimum value for this integer type
     pub fn min_value(&self) -> i128 {
         match self {
-            IntegerKind::Int => i128::MIN, // Approximation for arbitrary precision
+            IntegerKind::Int => i64::MIN as i128, // Verum `Int` is 64-bit (BITS=64)
             IntegerKind::Int8 => i8::MIN as i128,
             IntegerKind::Int16 => i16::MIN as i128,
             IntegerKind::Int32 => i32::MIN as i128,
@@ -200,7 +200,7 @@ impl IntegerKind {
     /// Get the maximum value for this integer type
     pub fn max_value(&self) -> i128 {
         match self {
-            IntegerKind::Int => i128::MAX, // Approximation for arbitrary precision
+            IntegerKind::Int => i64::MAX as i128, // Verum `Int` is 64-bit (BITS=64)
             IntegerKind::Int8 => i8::MAX as i128,
             IntegerKind::Int16 => i16::MAX as i128,
             IntegerKind::Int32 => i32::MAX as i128,

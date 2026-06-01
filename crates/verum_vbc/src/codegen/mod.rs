@@ -4481,6 +4481,31 @@ impl VbcCodegen {
             let new_richer = !ty.variants.is_empty() || !ty.fields.is_empty();
             if existing_empty && new_richer {
                 self.types[idx] = ty;
+            } else if !existing_empty {
+                // The existing descriptor has structure, but it can still be
+                // SHALLOWER than the incoming one: a sum type's variants may
+                // have been registered as Unit placeholders (arity 0, no
+                // fields) by an earlier partial pass, while this registration
+                // carries the real Tuple/Record kinds. The "has any variants →
+                // keep first" rule pinned the Unit shape, so
+                // `emit_make_variant` later emitted a tuple/record
+                // `MakeVariantTyped` against a Unit-shaped descriptor →
+                // field_count-mismatch diagnostics + wrong Debug/printing of
+                // those variants (catalogue §23 / MakeVariantTyped). Measure
+                // structural richness as the total declared payload across all
+                // variants (tuple arity + record fields) plus the type's own
+                // record fields; replace when the incoming descriptor is
+                // strictly richer. Equal richness keeps the first (no change).
+                let richness = |t: &crate::types::TypeDescriptor| -> usize {
+                    t.fields.len()
+                        + t.variants
+                            .iter()
+                            .map(|v| v.arity as usize + v.fields.len())
+                            .sum::<usize>()
+                };
+                if richness(&ty) > richness(existing) {
+                    self.types[idx] = ty;
+                }
             }
             return;
         }
@@ -11305,8 +11330,32 @@ impl VbcCodegen {
                 op: verum_ast::UnOp::Neg,
                 expr: operand,
             } => {
-                // Use checked_neg to handle i64::MIN (which can't be negated)
+                // Negate in i128 so the most-negative literal
+                // `-9223372036854775808` (= -2^63) folds to i64::MIN.
+                // Extracting the operand first yields 2^63 wrapped to
+                // i64::MIN (via `as i64`), and `i64::MIN.checked_neg()`
+                // returns None — which previously dropped `Int.MIN` to
+                // body-compilation and a resolved runtime value of 0.
+                if let ExprKind::Literal(lit) = &operand.kind
+                    && let LiteralKind::Int(int_lit) = &lit.kind
+                {
+                    return i64::try_from(-int_lit.value).ok();
+                }
                 Self::extract_const_literal_value(operand).and_then(|v| v.checked_neg())
+            }
+            // Const-fold integer arithmetic so the canonical INT64_MIN
+            // spelling `-9223372036854775807 - 1` and similar small const
+            // expressions inline as `__const_val_<N>` instead of falling
+            // through to body-compilation (which mis-resolved to 0).
+            ExprKind::Binary { op, left, right } => {
+                let l = Self::extract_const_literal_value(left)?;
+                let r = Self::extract_const_literal_value(right)?;
+                match op {
+                    verum_ast::BinOp::Add => l.checked_add(r),
+                    verum_ast::BinOp::Sub => l.checked_sub(r),
+                    verum_ast::BinOp::Mul => l.checked_mul(r),
+                    _ => None,
+                }
             }
             // Cast expression like `Fd(0) as ValidFd` — extract value through the cast
             ExprKind::Cast { expr: inner, .. } => Self::extract_const_literal_value(inner),
