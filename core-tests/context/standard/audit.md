@@ -178,6 +178,6 @@ Status: **partial** (was `regression-only`).
 |---|---|---|
 | Document LogLevel vs ContextLogLevel distinction | `core/context/standard.vr` doc + website | 10 min |
 | Add `Row` linear-scan note + `get_index` recommendation | `standard.vr` doc | 10 min |
-| Add `ContextLogLevel.from_severity(Int) -> Maybe<...>` + round-trip property | `standard.vr` + tests | 30 min |
+| Add `ContextLogLevel.from_severity(Int) -> Maybe<...>` + round-trip property | `standard.vr` + tests | 30 min | **LANDED** (commit `4c9acaa5a`; 4 unit + 2 property GREEN incl. severity∘from_severity round-trip) |
 | Write property/integration/regression tests for ContextLogLevel | this folder | 1h |
 | Cross-tier validate context protocols (requires `provide`/`using`-aware test harness) | language-level vcs specs | tracked elsewhere |

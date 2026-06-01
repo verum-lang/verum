@@ -118,10 +118,11 @@ and every compiler-emitted `provide` call site.
 
 ## Action items deferred
 
-| Item | Scope | Estimated effort |
-|---|---|---|
-| Add `Provider.map`/`flat_map` | `core/context/provider.vr` + tests | 1h |
-| Add `ScopedProvider.try_run` | same | 30 min |
-| Add `get_context` `Result` overload + caller migration | cross-cutting | 1 day |
-| Fix `@bitcast` payload-size hazard | provider + ctx_bridge + compiler | 2 days |
-| Write property/integration/regression tests once defects above close | this folder | 1 day |
+| Item | Scope | Estimated effort | Status |
+|---|---|---|---|
+| Add `Provider.map`/`flat_map` | `core/context/provider.vr` + tests | 1h | **LANDED** (commit `4c9acaa5a`, eager; 5+2 tests GREEN) |
+| Add `ScopedProvider.try_run` | same | 30 min | **LANDED** (commit `4c9acaa5a`, pops slot on Ok+Err; 4 tests GREEN) |
+| Write property/integration/regression tests | this folder | 1 day | **LANDED** (integration+regression suites GREEN; new-method unit+property added) |
+| Lazy `Provider.map`/`flat_map` (defer `f` until first access) | `core/context/provider.vr` | needs env-capturing closures | deferred (current `map`/`flat_map` are eager) |
+| Add `get_context` `Result` overload + caller migration | cross-cutting | 1 day | deferred (touches compiler-emitted call sites) |
+| Fix `@bitcast` payload-size hazard | provider + ctx_bridge + compiler | 2 days | deferred (codegen) |
