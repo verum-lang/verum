@@ -64,7 +64,6 @@ fn det_config(max: Int, delay: UInt64) -> RuntimeRetryConfig {
 // §1  RecoveryRetryPolicy lifecycle
 // =============================================================================
 
-@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
 @test
 fn rcv_it_retry_lifecycle_exhaustion() {
     let mut p = RecoveryRetryPolicy.new(det_config(3, 100_u64));
@@ -79,7 +78,6 @@ fn rcv_it_retry_lifecycle_exhaustion() {
     assert_eq(p.total_retries, 3);
 }
 
-@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
 @test
 fn rcv_it_retry_reset_preserves_total() {
     let mut p = RecoveryRetryPolicy.new(det_config(5, 100_u64));
@@ -93,7 +91,6 @@ fn rcv_it_retry_reset_preserves_total() {
     assert(p.should_retry());           // usable again
 }
 
-@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
 @test
 fn rcv_it_retry_last_error_tracks_latest() {
     let mut p = RecoveryRetryPolicy.new(det_config(5, 100_u64));
@@ -109,7 +106,6 @@ fn rcv_it_retry_last_error_tracks_latest() {
 // §2  next_delay_ms — backoff × jitter composition (deterministic)
 // =============================================================================
 
-@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
 @test
 fn rcv_it_next_delay_fixed_none_jitter() {
     let p = RecoveryRetryPolicy.new(det_config(3, 100_u64));
@@ -117,7 +113,6 @@ fn rcv_it_next_delay_fixed_none_jitter() {
     assert_eq(p.next_delay_ms(), 100_u64);
 }
 
-@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
 @test
 fn rcv_it_next_delay_progresses_with_attempts() {
     let cfg = RuntimeRetryConfig {
@@ -207,7 +202,6 @@ fn rcv_it_backoff_clone_preserves_schedule() {
 // §5  Display / Debug
 // =============================================================================
 
-@ignore  // audit.md §H — RecoveryCircuitState Display dispatch falls through
 @test
 fn rcv_it_circuit_state_display() {
     assert_eq(f"{RecoveryCircuitState.Closed}", "closed");
@@ -272,7 +266,6 @@ fn rcv_it_inline_cb_matches_empty_name() {
     assert(!cb.matches_name(&"payments"));
 }
 
-@ignore  // audit.md §G — InlineRetryPolicy.default field-write-OOB
 @test
 fn rcv_it_inline_retry_default_fields() {
     let rp = InlineRetryPolicy.default();

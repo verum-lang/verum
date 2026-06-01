@@ -98,6 +98,21 @@ pub struct CodegenContext {
     /// "IoError arity expected 0 found 1" class of stdlib lenient SKIPs.
     pub current_return_type_inner: Option<Vec<String>>,
 
+    /// Concrete type name of the impl block whose method body is
+    /// currently being compiled (e.g. `"RecoveryRetryPolicy"` for a
+    /// method registered under `RecoveryRetryPolicy.new`).  `None` for
+    /// free functions.  Set by `compile_function` from its
+    /// `impl_type_name` argument, cleared by `begin_function` /
+    /// `end_function`.
+    ///
+    /// Unlike `current_return_type_name` (which is temporarily
+    /// overwritten with let-annotation hints around `let x: T = …`
+    /// initializer expressions — see statements.rs), this field stays
+    /// stable for the whole method body, so it is the reliable source
+    /// for resolving a bare `Self { … }` record literal to the concrete
+    /// impl type during `compile_record`.
+    pub current_impl_type_name: Option<String>,
+
     /// Constant pool for current module.
     pub constants: Vec<ConstantEntry>,
 
@@ -1091,6 +1106,7 @@ impl CodegenContext {
             in_function: false,
             return_type: None,
             current_return_type_name: None,
+            current_impl_type_name: None,
             current_return_type_inner: None,
             constants: Vec::new(),
             strings: Vec::new(),
@@ -1887,6 +1903,7 @@ impl CodegenContext {
         self.current_function = Some(name.to_string());
         self.in_function = true;
         self.return_type = return_type;
+        self.current_impl_type_name = None;
         self.suspend_point_count = 0; // Reset for generators
 
         // Allocate parameter registers
@@ -1905,6 +1922,7 @@ impl CodegenContext {
         self.return_type = None;
         self.current_return_type_name = None;
         self.current_return_type_inner = None;
+        self.current_impl_type_name = None;
 
         (
             std::mem::take(&mut self.instructions),

@@ -16976,8 +16976,59 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
 
+        // **`Self { … }` literal resolution** (§F): inside an impl
+        // method body (e.g. a static `new(config) -> Self` returning
+        // `Self { … }`), `format!("{}", path)` yields the literal
+        // string `"Self"`. `"Self"` is never a key in
+        // `type_name_to_id`, so the plain-record path below computes
+        // `type_id = 0`, and the field-index loop falls through to the
+        // global `intern_field_name` fallback — producing
+        // out-of-bounds `SetF` writes ("field write out of bounds:
+        // field index 4 … type_id=0 type='?'").
+        //
+        // Resolve `"Self"` to the concrete impl type so BOTH the
+        // variant/type lookup AND the field-index loop use the real
+        // layout. Priority: (1) the self-receiver type for instance
+        // methods, (2) the enclosing impl's concrete type
+        // (`current_impl_type_name`, stable for static `new`/`default`
+        // returning Self). Only accept a resolved name that is a known
+        // type; otherwise leave it unchanged (do no harm).
+        let raw_path_name = format!("{}", path);
+        let resolved_self_name: Option<String> = if raw_path_name == "Self"
+            || raw_path_name.contains("Self")
+        {
+            let concrete = self
+                .ctx
+                .variable_type_names
+                .get("self")
+                .map(|t| Self::strip_generic_args(t).to_string())
+                .filter(|t| t != "Self")
+                .or_else(|| {
+                    self.ctx
+                        .current_impl_type_name
+                        .as_deref()
+                        .map(|t| Self::strip_generic_args(t).to_string())
+                        .filter(|t| t != "Self")
+                });
+            concrete.and_then(|c| {
+                let candidate = Self::substitute_self_in_type_name(&raw_path_name, &c);
+                let base = Self::strip_generic_args(&candidate);
+                if self.type_name_to_id.contains_key(base)
+                    || self.type_field_layouts.contains_key(base)
+                    || self.type_name_to_id.contains_key(&candidate)
+                    || self.type_field_layouts.contains_key(&candidate)
+                {
+                    Some(candidate)
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        };
+
         // Check if this is a record variant constructor (e.g., Branch { value: 1, left: x, right: y })
-        let variant_name = format!("{}", path);
+        let variant_name = resolved_self_name.clone().unwrap_or(raw_path_name);
         let dot_name = variant_name.replace("::", ".");
         // `descriptor_match` carries the (parent_canonical_name,
         // declared_field_names) extracted from a TypeDescriptor scan when
@@ -17119,7 +17170,7 @@ impl VbcCodegen {
             }
             // For variant records, disambiguation uses the variant's own payload
             // types; the per-field logic mirrors the plain-record path below.
-            let variant_type_name = format!("{}", path);
+            let variant_type_name = variant_name.clone();
             // Field-init order in the source literal need not match the
             // variant's declared payload order. SetVariantData uses a
             // POSITIONAL slot, so emitting `field: i as u32` (raw
@@ -17193,8 +17244,10 @@ impl VbcCodegen {
                 });
                 self.ctx.free_temp(base_reg);
             } else {
-                // Look up TypeId for proper Drop dispatch
-                let type_name = format!("{}", path);
+                // Look up TypeId for proper Drop dispatch.
+                // Use the §F-resolved concrete name when the literal
+                // path was `Self`; otherwise the raw path string.
+                let type_name = variant_name.clone();
                 let type_id_opt = self.type_name_to_id.get(&type_name).copied();
                 let type_id = type_id_opt.map(|id| id.0).unwrap_or(0);
 
@@ -17236,8 +17289,11 @@ impl VbcCodegen {
                 });
             }
 
-            // Use type name from path for field index resolution
-            let type_name = format!("{}", path);
+            // Use type name from path for field index resolution.
+            // §F: when the literal path was `Self`, this is the
+            // resolved concrete impl type so field indices map to the
+            // real layout instead of the global intern fallback.
+            let type_name = variant_name.clone();
 
             for field in fields.iter() {
                 // Root fix for Issue #1 (silent impl-method SKIP with
@@ -19843,16 +19899,42 @@ impl VbcCodegen {
                     && let PathSegment::Name(ident) = &path.segments[0]
                 {
                     let qualified = format!("{}.{}", ident.name, field_name);
-                    if let Some(info) = self.ctx.lookup_function(&qualified)
-                        && info.param_count == 0
-                        && (info.is_const
-                            || info
-                                .intrinsic_name
-                                .as_deref()
-                                .map(|s| s.starts_with("__const_val_"))
-                                .unwrap_or(false))
-                    {
-                        return info.return_type_name.clone();
+                    if let Some(info) = self.ctx.lookup_function(&qualified) {
+                        if info.param_count == 0
+                            && (info.is_const
+                                || info
+                                    .intrinsic_name
+                                    .as_deref()
+                                    .map(|s| s.starts_with("__const_val_"))
+                                    .unwrap_or(false))
+                        {
+                            return info.return_type_name.clone();
+                        }
+                        // §H: nullary enum variant in `Type.Variant`
+                        // form (e.g. `RecoveryCircuitState.Closed`).  Its
+                        // FunctionInfo has `variant_tag: Some(..)` and
+                        // `is_const == false`, so the const gate above
+                        // skips it and the arm used to fall through to
+                        // `None` — making f-string Display dispatch
+                        // (`f"{RecoveryCircuitState.Closed}"`) bail to the
+                        // Debug-style ToString fallback ("Closed") instead
+                        // of routing through the type's `Display.fmt`
+                        // ("closed").  Surface the PARENT sum-type name so
+                        // `try_emit_display_dispatch` finds `<Type>.fmt`.
+                        // Prefer the registered `parent_type_name` (last
+                        // `.`/`:`-separated segment); otherwise the base
+                        // identifier IS the parent type for this
+                        // syntactic form.
+                        if info.variant_tag.is_some() {
+                            if let Some(parent) = info.parent_type_name.as_deref() {
+                                let simple = parent
+                                    .rsplit(|c| c == '.' || c == ':')
+                                    .next()
+                                    .unwrap_or(parent);
+                                return Some(simple.to_string());
+                            }
+                            return Some(ident.name.to_string());
+                        }
                     }
                 }
                 None
