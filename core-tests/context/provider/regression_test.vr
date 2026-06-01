@@ -1,0 +1,134 @@
+// =============================================================================
+// core-tests/context/provider/regression_test.vr
+// =============================================================================
+//
+// One @test per defect surfaced while building (and hardening) the
+// provider suite. Kept forever — these are guardrails against
+// re-regression even after the language-level fix landed.
+// =============================================================================
+
+mount core.context.provider.{Provider, ScopedProvider, has_context};
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// REGRESSION (context/provider audit §pre-fix): `Provider.get` used a
+// `cached.is_none()` + field-assign + re-match shape that tripped the
+// `Maybe<T>` field-tracking gap (same class as `BTreeMap.get` at
+// btree.vr:200). Symptom: `Unreachable { pc: 80 }` — the unreachable
+// arm of the post-store match fired even though the line above had just
+// stored `Maybe.Some(v)`. Closed by extracting via a single `match
+// self.cached.clone()` over qualified `Maybe.Some` / `Maybe.None`.
+//
+// These tests pin: a freshly-constructed Provider resolves its factory
+// exactly once and the cache survives, with NO spurious Unreachable.
+// =============================================================================
+
+@test
+fn regression_provider_get_does_not_hit_unreachable() {
+    // The minimal repro: a new provider whose first get() must take the
+    // Maybe.None arm, run the factory, store Some, and return — without
+    // the post-store match firing its unreachable arm.
+    let mut p = Provider.new(fn() -> Int { 99 });
+    let v = p.get();
+    assert_eq(v, 99);
+}
+
+@test
+fn regression_provider_second_get_takes_some_arm() {
+    // Second get() must take the Maybe.Some arm (cache hit) and return the
+    // cached value, NOT re-run the factory or fall through to unreachable.
+    let mut p = Provider.new(fn() -> Int { 7 });
+    let first = p.get();
+    let second = p.get();
+    assert_eq(first, 7);
+    assert_eq(second, 7);
+}
+
+// =============================================================================
+// REGRESSION: `Provider.get_ref` first pre-fix attempt MOVED self.cached
+// in the discriminator match then tried to borrow it — same
+// `Unreachable {pc:74}` failure mode. Closed by discriminating on
+// `&self.cached` (borrow, not move) then populating, then borrowing the
+// now-Some cache. Pin: get_ref returns a live reference to the cached
+// value and marks the provider resolved.
+// =============================================================================
+
+@test
+fn regression_provider_get_ref_borrows_without_move() {
+    let mut p = Provider.new(fn() -> Int { 21 });
+    let r = p.get_ref();
+    assert_eq(*r, 21);
+    assert(p.is_resolved());
+}
+
+// =============================================================================
+// REGRESSION: `Provider.of(value)` builds an already-resolved provider
+// whose factory is a `panic(...)` thunk that must NEVER be invoked. The
+// pre-fix bare-`Some` cache write resolved to the wrong sibling-variant,
+// so is_resolved() returned false and get() then INVOKED the panic
+// factory. Pin: of() is resolved and get() returns the value without
+// detonating the panic thunk.
+// =============================================================================
+
+@test
+fn regression_provider_of_never_calls_panic_factory() {
+    let mut p = Provider.of(500);
+    // If the cache write had mis-routed, is_resolved() would be false and
+    // the next get() would call the panic factory.
+    assert(p.is_resolved());
+    assert_eq(p.get(), 500);
+}
+
+// =============================================================================
+// REGRESSION: `reset()` writes `self.cached = Maybe.None`. Pre-fix the
+// bare-`None` resolved to a sibling-module variant, leaving the cache in
+// an inconsistent state where is_resolved() still read true. Pin: reset
+// returns the provider to the unresolved state and the next get() repopulates.
+// =============================================================================
+
+@test
+fn regression_provider_reset_round_trip() {
+    let mut p = Provider.new(fn() -> Int { 13 });
+    let _ = p.get();
+    assert(p.is_resolved());
+    p.reset();
+    assert(!p.is_resolved());
+    let again = p.get();
+    assert_eq(again, 13);
+    assert(p.is_resolved());
+}
+
+// =============================================================================
+// REGRESSION: `is_resolved()` matches on `self.cached` with qualified
+// `Maybe.Some(_)` / `Maybe.None`. Pin both polarities so a future
+// bare-name regression (returning the wrong constant) is caught.
+// =============================================================================
+
+@test
+fn regression_provider_is_resolved_both_polarities() {
+    let unresolved: Provider<Int> = Provider.new(fn() -> Int { 0 });
+    assert(!unresolved.is_resolved());
+    let resolved = Provider.of(0);
+    assert(resolved.is_resolved());
+}
+
+// =============================================================================
+// REGRESSION: ScopedProvider.run must pop the ctx_bridge slot even though
+// `@bitcast(self.value)` stores the raw payload. Pin the slot lifecycle
+// with an Int payload (NaN-box-safe). Pre/post: slot unprovided; during:
+// the body runs and returns its result.
+// =============================================================================
+
+@test
+fn regression_scoped_provider_run_slot_lifecycle() {
+    let slot = 70;
+    assert(!has_context(slot));
+    let sp = ScopedProvider.new(slot, 1);
+    let out = sp.run(fn() -> Int { 42 });
+    assert_eq(out, 42);
+    assert(!has_context(slot));
+}
+
+fn main() {
+    // Tests run via @test discovery.
+}

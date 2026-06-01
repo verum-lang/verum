@@ -53,10 +53,35 @@ would conflict with the compiler-side.
 
 **Effort:** ~30 min doc update across `layer.vr` + website docs.
 
+### §3.3 Row direct field read via umbrella hits the CLASS-9 field-shift (NEW)
+
+`test_umbrella_row_and_query_result` originally read `r.columns.len()` /
+`r.values.len()` on an archive-loaded `Row` reached via `core.context.*`;
+that panics `field access out of bounds: field index 4 ... type='List'`
+(the cross-module field-index shift — see `standard/audit.md §3.7`). The
+test was reworked to exercise umbrella reachability via `QueryResult`
+construction + `qr.rows.len()` (the working path). `Row.get_index` is
+likewise blocked (`standard/audit.md §3.5`). No mod-specific defect — these
+are CLASS-9 manifestations surfaced through the umbrella.
+
+## Conformance status (2026-06-01, interpreter / `--test-threads 1`)
+
+`mod` is **partial**: `unit_test.vr` (umbrella reachability of Scope /
+ContextScope / ContextError / Provider / ScopedProvider / LazyProvider /
+get_context / has_context / ContextLogLevel / AuthUser / QueryResult),
+`property_test.vr` (re-exported types retain Scope-hierarchy /
+ContextError-Eq / ContextLogLevel-severity / Provider-idempotence laws via
+the umbrella), `integration_test.vr`, and `regression_test.vr` (the
+`standard.*` re-export gap + qualified-variant routing) are GREEN. The only
+constrained surface is archive-loaded `Row` field/`get_index` access
+(CLASS-9, pinned in `standard/`).
+
 ## Action items landed in this branch
 
 * `core-tests/context/mod/integration_test.vr` — verifies the
   umbrella re-exports.
+* `core-tests/context/mod/{unit,property,regression}_test.vr` (NEW) —
+  umbrella reachability + re-exported-type laws + re-export regressions.
 * `core-tests/context/mod/audit.md` — this file.
 
 ## Action items deferred

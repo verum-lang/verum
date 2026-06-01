@@ -158,9 +158,15 @@ fn property_clone_preserves_severity() {
 
 @test
 fn property_display_equals_name() {
-    assert_eq(f"{ContextLogLevel.Trace}", ContextLogLevel.Trace.name());
-    assert_eq(f"{ContextLogLevel.Info}",  ContextLogLevel.Info.name());
-    assert_eq(f"{ContextLogLevel.Fatal}", ContextLogLevel.Fatal.name());
+    // Bind first — `f"{Type.Variant}"` direct-ctor interpolation does not
+    // dispatch Display ([[fstring_direct_variant_ctor_display_dispatch]],
+    // pinned in regression_test.vr §3.6); the bound-var path dispatches.
+    let t = ContextLogLevel.Trace;
+    let i = ContextLogLevel.Info;
+    let ft = ContextLogLevel.Fatal;
+    assert_eq(f"{t}",  t.name());
+    assert_eq(f"{i}",  i.name());
+    assert_eq(f"{ft}", ft.name());
 }
 
 // =============================================================================
