@@ -123,12 +123,9 @@ fn sv_law_child_status_from_u8_unknown_is_stopped() {
 
 @test
 fn sv_law_supervision_strategy_descriptions() {
-    let a = SupervisionStrategy.OneForOne;
-    let b = SupervisionStrategy.OneForAll;
-    let c = SupervisionStrategy.RestForOne;
-    assert_eq(a.description(), "restart only the failed child");
-    assert_eq(b.description(), "restart all children on any failure");
-    assert_eq(c.description(), "restart failed child and all started after");
+    assert_eq(SupervisionStrategy.OneForOne.description(), "restart only the failed child");
+    assert_eq(SupervisionStrategy.OneForAll.description(), "restart all children on any failure");
+    assert_eq(SupervisionStrategy.RestForOne.description(), "restart failed child and all started after");
 }
 
 @test
