@@ -74,14 +74,12 @@ fn env_reg_epoch_implies_generation_all_tiers() {
 // @ignore so the green suite stays green until the fix lands.
 // =============================================================================
 
-@ignore
 @test
 fn env_reg_task_id_main_is_zero() {
     let t = EnvTaskId.main();
     assert_eq(t.id, 0_u64);
 }
 
-@ignore
 @test
 fn env_reg_task_id_main_no_parent() {
     let t = EnvTaskId.main();

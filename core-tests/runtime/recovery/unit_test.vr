@@ -246,7 +246,6 @@ fn test_retry_config_construction() {
 // field-write-OOB in the shipped stdlib (type_id=0, the type is unregistered
 // in the layout table so field writes fall through to global interning). This
 // was green in an earlier binary; the May-31 build drifted. See audit.md §F.
-@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
 @test
 fn test_retry_policy_new_initial_state() {
     let cfg = RuntimeRetryConfig {
@@ -261,7 +260,6 @@ fn test_retry_policy_new_initial_state() {
     assert(p.last_error is None);
 }
 
-@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
 @test
 fn test_retry_policy_should_retry_initially_true() {
     let cfg = RuntimeRetryConfig {
@@ -275,7 +273,6 @@ fn test_retry_policy_should_retry_initially_true() {
     assert(p.should_retry());
 }
 
-@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
 @test
 fn test_retry_policy_should_retry_zero_max_attempts_false() {
     let cfg = RuntimeRetryConfig {
@@ -289,7 +286,6 @@ fn test_retry_policy_should_retry_zero_max_attempts_false() {
     assert(!p.should_retry());
 }
 
-@ignore  // audit.md §F — RecoveryRetryPolicy.new field-write-OOB
 @test
 fn test_retry_policy_public_alias_resolves() {
     let cfg = RuntimeRetryConfig {

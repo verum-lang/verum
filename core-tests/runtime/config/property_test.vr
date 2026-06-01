@@ -60,7 +60,6 @@ fn cfg_law_init_error_display_equals_message() {
 // §B  RuntimeIoError.Display — exact strings (POSIX-style lowercase)
 // =============================================================================
 
-@ignore  // audit.md §H — Display dispatch falls through for nullary variants
 @test
 fn cfg_law_io_error_display_strings() {
     assert_eq(f"{RuntimeIoError.WouldBlock}", "operation would block");

@@ -8339,11 +8339,17 @@ impl VbcCodegen {
             None
         };
 
-        // Convert return type for method dispatch and list/string register tracking
+        // Convert return type for method dispatch and list/string register tracking.
+        // **Self-aware** so a `fn new(...) -> Self` constructor archives
+        // its return type as the concrete impl type's TypeId, not the
+        // USize/PTR unknown-carrier fallback (see
+        // `ast_type_to_type_ref_self_aware`). Without this the archived
+        // `return_type_name` round-trips to "USize" and `let p =
+        // T.new(...)` loses `p`'s type, breaking field-index resolution.
         let return_type = func
             .return_type
             .as_ref()
-            .map(|ret_ty| self.ast_type_to_type_ref(ret_ty));
+            .map(|ret_ty| self.ast_type_to_type_ref_self_aware(ret_ty, type_name));
 
         let info = FunctionInfo {
             id,
@@ -12011,6 +12017,77 @@ impl VbcCodegen {
         }
     }
 
+    /// Returns true when `ty` is a bare `Self` type — a single-segment
+    /// path whose only segment is `PathSegment::SelfValue`.  Used to
+    /// detect `fn ... -> Self` return shapes so the archived descriptor
+    /// can substitute the concrete impl TypeId (see the return-type
+    /// block in the impl-method body emitter). Reference/pointer
+    /// wrappers around `Self` (`&Self`) are NOT matched here — only the
+    /// owned bare form, which is the constructor-return shape that
+    /// drives the §F/§H field-index defect.
+    fn ast_type_is_bare_self(ty: &verum_ast::ty::Type) -> bool {
+        use verum_ast::ty::{PathSegment, TypeKind};
+        matches!(
+            &ty.kind,
+            TypeKind::Path(path)
+                if path.segments.len() == 1
+                    && matches!(path.segments[0], PathSegment::SelfValue)
+        )
+    }
+
+    /// `Self`-aware variant of [`ast_type_to_type_ref`] for impl-method
+    /// signatures.
+    ///
+    /// The plain `ast_type_to_type_ref` has no notion of the enclosing
+    /// impl type, so a bare `Self` return (encoded as a
+    /// `PathSegment::SelfValue` path) falls through its `TypeKind::Path`
+    /// arm with an empty `type_name`, misses `get_well_known_type_id`,
+    /// and lands on the `TypeId::PTR` "unknown carrier" fallback.
+    /// `TypeId::PTR` aliases `TypeId::USIZE`, so the archive then stores
+    /// the return type of every `fn new(...) -> Self` /
+    /// `fn default() -> Self` static constructor as USize — and
+    /// `archive_ctx_loader`'s `type_ref_simple_name` recovers
+    /// `return_type_name = "USize"`.  Downstream `let p = T.new(...)`
+    /// then records `variable_type_names["p"] = "USize"`, so `p.<field>`
+    /// resolves field indices against USize (no layout) → global
+    /// field-intern fallback → out-of-bounds `GetF` on the correctly
+    /// constructed record.
+    ///
+    /// This wrapper substitutes a bare `Self` (and `&Self` / `&mut Self`
+    /// reference wrappers) with the concrete impl type's `TypeId` so the
+    /// archived `return_type` round-trips to the real type name. Falls
+    /// back to the plain conversion for every other shape (so nested /
+    /// generic / non-Self return types are unchanged).
+    fn ast_type_to_type_ref_self_aware(
+        &self,
+        ty: &verum_ast::ty::Type,
+        self_type_name: &str,
+    ) -> TypeRef {
+        use verum_ast::ty::{PathSegment, TypeKind};
+        match &ty.kind {
+            // Peel reference/pointer wrappers, preserving Self-awareness.
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. }
+            | TypeKind::Pointer { inner, .. } => {
+                self.ast_type_to_type_ref_self_aware(inner, self_type_name)
+            }
+            TypeKind::Path(path) => {
+                // A bare `Self` path resolves to the concrete impl type.
+                let is_bare_self = path.segments.len() == 1
+                    && matches!(path.segments[0], PathSegment::SelfValue);
+                if is_bare_self {
+                    let base = Self::strip_generic_args(self_type_name);
+                    if let Some(tid) = self.get_well_known_type_id(base) {
+                        return TypeRef::Concrete(tid);
+                    }
+                }
+                self.ast_type_to_type_ref(ty)
+            }
+            _ => self.ast_type_to_type_ref(ty),
+        }
+    }
+
     /// Extracts the base type name from an AST Type for method dispatch tracking.
     ///
 
@@ -12465,6 +12542,12 @@ impl VbcCodegen {
             self.ctx
                 .variable_type_names
                 .insert("self".to_string(), type_name.clone());
+            // Stable source for resolving bare `Self { … }` record
+            // literals in this method body (instance OR static methods
+            // like `new`/`default` that return `Self`). Unlike
+            // `current_return_type_name`, this is not perturbed by
+            // let-annotation hints around initializer expressions.
+            self.ctx.current_impl_type_name = Some(type_name.clone());
         }
 
         // Set required contexts from the function's using clause.
@@ -13067,7 +13150,29 @@ impl VbcCodegen {
         // TypeRef::Concrete(PTR).
         if let verum_common::Maybe::Some(ref ret_ty_ast) = func.return_type {
             let resolved_return = self.resolve_field_type_ref(ret_ty_ast, &method_generic_param_map);
-            descriptor.return_type = resolved_return;
+            // **`Self` return → concrete impl-type TypeId** (§F/§H
+            // read-site).  `resolve_field_type_ref` has no notion of the
+            // impl type, so a bare `-> Self` (a `PathSegment::SelfValue`
+            // path) degrades to the `TypeId::PTR` unknown-carrier — which
+            // aliases `TypeId::USIZE`.  The archived descriptor's
+            // `return_type` then round-trips (via
+            // `archive_ctx_loader::type_ref_simple_name`) to
+            // `return_type_name = "USize"`, so `let p = T.new(...)`
+            // records `variable_type_names["p"] = "USize"` and every
+            // `p.<field>` resolves its index against USize (no layout) →
+            // global field-intern fallback → out-of-bounds `GetF` on the
+            // correctly constructed record.  Substitute the concrete
+            // parent TypeId for a bare `Self` return so the archived
+            // return type carries the real type. Only fires when
+            // `parent_tid` is a genuine user/well-known type (not the
+            // `TypeId::UNIT` free-fn fallback).
+            descriptor.return_type = if Self::ast_type_is_bare_self(ret_ty_ast)
+                && parent_tid != TypeId::UNIT
+            {
+                TypeRef::Concrete(parent_tid)
+            } else {
+                resolved_return
+            };
         }
 
         // Extract optimization hints from AST attributes (@inline, @cold, @hot, etc.)
