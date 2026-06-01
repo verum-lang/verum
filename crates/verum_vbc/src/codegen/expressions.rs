@@ -10540,10 +10540,25 @@ impl VbcCodegen {
                         dst: result,
                         value: f,
                     });
-                } else {
+                } else if value >= i16::MIN as i128 && value <= i16::MAX as i128 {
                     self.ctx.emit(Instruction::LoadI {
                         dst: result,
                         value: value as i64,
+                    });
+                } else {
+                    // Large magnitudes (Int.MIN = i64::MIN, Int.MAX =
+                    // i64::MAX, UInt64.MAX, …) must go through the constant
+                    // pool, exactly as the integer-literal path does.
+                    // `LoadI` carries an inline immediate in the 48-bit
+                    // payload range; emitting i64::MIN through it truncates
+                    // (its low 48 bits are 0) and `Int.MIN` silently became
+                    // 0 — breaking every `Int.MIN < x` comparison.  `LoadK`
+                    // round-trips the full i64 (boxed when out of inline
+                    // range).
+                    let const_id = self.ctx.add_const_int(value as i64);
+                    self.ctx.emit(Instruction::LoadK {
+                        dst: result,
+                        const_id: const_id.0,
                     });
                 }
                 return Ok(Some(Some(result)));
@@ -16266,10 +16281,22 @@ impl VbcCodegen {
                             dst: result,
                             value: f,
                         });
-                    } else {
+                    } else if value >= i16::MIN as i128 && value <= i16::MAX as i128 {
                         self.ctx.emit(Instruction::LoadI {
                             dst: result,
                             value: value as i64,
+                        });
+                    } else {
+                        // Large magnitudes (Int.MIN = i64::MIN, Int.MAX, …)
+                        // MUST round-trip via the constant pool: `LoadI`
+                        // carries a 48-bit inline immediate, so i64::MIN
+                        // (low 48 bits = 0) truncated to 0 — `Int.MIN`
+                        // silently became 0 and every `Int.MIN < x`
+                        // comparison broke. Mirrors the integer-literal path.
+                        let const_id = self.ctx.add_const_int(value as i64);
+                        self.ctx.emit(Instruction::LoadK {
+                            dst: result,
+                            const_id: const_id.0,
                         });
                     }
                     return Ok(Some(result));
@@ -19721,6 +19748,27 @@ impl VbcCodegen {
             // Field access: look up field type in type_field_type_names
             ExprKind::Field { expr: base, field } => {
                 let field_name = field.name.to_string();
+                // Qualified variant constructor `Type.Variant` (e.g.
+                // `Ordering.Less`, `ContextLogLevel.Info`) parses as
+                // Field{Path(Type), Variant}.  If `<Type>` declares a
+                // variant named `<field>`, the expression's type IS
+                // `<Type>` — surface it so f-string Display dispatch routes
+                // `f"{Ordering.Less}"` through `Ordering.fmt` => "<"
+                // instead of the Debug-style `ToString` => "Less".  This
+                // is the qualified-form companion to the bare-variant case
+                // handled in the Path arm above.
+                if let ExprKind::Path(bp) = &base.kind
+                    && bp.segments.len() == 1
+                    && let PathSegment::Name(type_ident) = &bp.segments[0]
+                    && self
+                        .find_variant_in_type_descriptors(
+                            type_ident.name.as_str(),
+                            field_name.as_str(),
+                        )
+                        .is_some()
+                {
+                    return Some(type_ident.name.to_string());
+                }
                 // Primary path: the base expression resolves to a known
                 // type, then look the field's static type up in the
                 // codegen-side type → field-name → field-type-name table.
