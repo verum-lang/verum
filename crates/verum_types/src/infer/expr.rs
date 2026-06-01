@@ -2505,6 +2505,21 @@ impl TypeChecker {
                                 | "Int128"
                                 | "UIntSize"
                                 | "IntSize"
+                                // Canonical pointer-width integer names — the
+                                // idiomatic spellings (`USize` / `ISize`) the
+                                // stdlib actually uses (e.g. `core.sys.bitfield`
+                                // applies `!mask` where `mask: USize`). Their
+                                // absence rejected bitwise-NOT on every USize
+                                // value under strict (AOT) typecheck while the
+                                // interpreter accepted it — a cross-tier
+                                // divergence. Mirrors the alias matrix in
+                                // `dispatch_primitive_method`.
+                                | "USize"
+                                | "ISize"
+                                | "Usize"
+                                | "Isize"
+                                | "usize"
+                                | "isize"
                                 | "Byte"
                                 | "U8"
                                 | "U16"
@@ -2516,6 +2531,16 @@ impl TypeChecker {
                                 | "I32"
                                 | "I64"
                                 | "I128"
+                                | "u8"
+                                | "u16"
+                                | "u32"
+                                | "u64"
+                                | "u128"
+                                | "i8"
+                                | "i16"
+                                | "i32"
+                                | "i64"
+                                | "i128"
                         ) || self
                             .protocol_checker
                             .read()
