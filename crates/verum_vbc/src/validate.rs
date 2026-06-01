@@ -1347,6 +1347,12 @@ pub enum VariantLayoutError {
     /// the instruction tried to emit.
     FieldCountMismatch {
         type_id: TypeId,
+        /// Resolved type name (for diagnostics) — identifies which type's
+        /// descriptor disagrees with codegen, so the MakeVariantTyped drift
+        /// can be localized to a concrete ADT instead of an opaque type id.
+        type_name: String,
+        /// Resolved variant name at `tag`.
+        variant_name: String,
         tag: u32,
         expected: u32,
         got: u32,
@@ -1380,14 +1386,16 @@ impl std::fmt::Display for VariantLayoutError {
             ),
             VariantLayoutError::FieldCountMismatch {
                 type_id,
+                type_name,
+                variant_name,
                 tag,
                 expected,
                 got,
             } => write!(
                 f,
-                "MakeVariantTyped: variant tag={} of type_id={:?} expects \
+                "MakeVariantTyped: variant `{}` (tag={}) of `{}` (type_id={:?}) expects \
                  field_count={}, codegen tried to emit field_count={}.",
-                tag, type_id, expected, got,
+                variant_name, tag, type_name, type_id, expected, got,
             ),
         }
     }
@@ -1457,6 +1465,8 @@ pub fn validate_variant_layout(
     if expected != field_count {
         return Err(VariantLayoutError::FieldCountMismatch {
             type_id,
+            type_name: module.get_string(desc.name).unwrap_or("?").to_string(),
+            variant_name: module.get_string(variant.name).unwrap_or("?").to_string(),
             tag,
             expected,
             got: field_count,
@@ -1566,6 +1576,8 @@ mod variant_layout_tests {
         // existing diagnostic machinery with full context.
         let err = VariantLayoutError::FieldCountMismatch {
             type_id: TypeId(0x100),
+            type_name: "TestSum".to_string(),
+            variant_name: "Some".to_string(),
             tag: 1,
             expected: 1,
             got: 2,
