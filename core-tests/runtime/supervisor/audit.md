@@ -79,13 +79,54 @@ carrying the failure that finally triggered the limit.  Diagnostic
 loss: an operator handling the escalation can't see what crashed.
 Recommend: add `last_failure: FailureReason` to the payload.
 
+### §G — Chained method call on a by-value temporary mis-dispatches (--interp)
+
+Surfaced 2026-06-01 while writing property tests. Two forms returned wrong
+results under `--interp`:
+
+* `SupervisionStrategy.OneForOne.description()` — method (`description(self)`,
+  by-value self) called directly on a variant literal.
+* `ShutdownStrategy.graceful().timeout_ms()` — method called on the Self
+  temporary returned by a static factory.
+
+Binding to a `let` first fixes both (verified green):
+
+```verum
+let s = SupervisionStrategy.OneForOne;  s.description()    // ✓
+let g = ShutdownStrategy.graceful();     g.timeout_ms()     // ✓
+```
+
+So method dispatch on a **temporary receiver** (by-value-self variant literal,
+or static-method-returned Self chained) loses correctness; materialising the
+receiver into a local first is the workaround. Related to
+`self_substitution_read_site_2026-05-27`. Fix surface = VBC codegen must
+address/materialise temporary receivers before method dispatch (needs
+rebuild — task #8). All supervisor property tests use the let-bound form.
+
+Minor adjacent note: `assert_eq(<UInt32 value>, 4294967295_u32)` (the decimal
+form of `UInt32.MAX`) compares **unequal** under `--interp`; comparing against
+the named `UInt32.MAX` constant works. Sized-int wide-literal comparison
+quirk (cf. INTLIT-OVERFLOW / the Int32 comparison-routing fix). Tests use
+`UInt32.MAX`.
+
 ## Action items landed in this branch
 
 * `core-tests/runtime/supervisor/unit_test.vr` — 41 unit tests over
   SupervisorId/ChildId + SupervisionStrategy + SupervisorRestartStrategy +
   FailureReason + ChildStatus + EscalationPolicy + ShutdownStrategy +
   SupervisorError.
-* `core-tests/runtime/supervisor/audit.md` — this file.
+* `core-tests/runtime/supervisor/property_test.vr` — 13 law tests, **all
+  GREEN 2026-06-01**: should_restart truth-table LAW over all 7
+  FailureReasons × 3 strategies, is_abnormal classification, ChildStatus
+  to_u8/from_u8 round-trip + is_active + unknown-ordinal fail-safe,
+  SupervisionStrategy description()/disjointness, EscalationPolicy 4-variant,
+  ShutdownStrategy factory/custom/Infinite timeouts. (let-bound per §G.)
+* `core-tests/runtime/supervisor/integration_test.vr` — 8 cross-method tests,
+  **all GREEN**: FailureReason/SupervisorError description() text contract,
+  restart-decision scenarios (Transient/Permanent/Temporary × reasons),
+  ChildStatus lifecycle round-trip via the u8 wire form, ADTs in
+  List/Result.
+* `core-tests/runtime/supervisor/audit.md` — this file (§G added).
 
 ## Action items deferred
 

@@ -1,0 +1,132 @@
+// =============================================================================
+// core-tests/runtime/supervisor/integration_test.vr
+// =============================================================================
+//
+// Cross-method / cross-type behaviour for `core.runtime.supervisor`:
+//   * FailureReason.description() / SupervisorError.description() text contract
+//   * a restart-decision scenario composing SupervisorRestartStrategy ×
+//     FailureReason (the actual supervision decision the runtime makes)
+//   * ChildStatus lifecycle transitions via to_u8/from_u8
+//   * supervisor ADTs inside List / Maybe / Result wrappers
+//
+// Tests prefixed `sv_it_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.supervisor.{
+    SupervisorRestartStrategy, FailureReason, ChildStatus, SupervisorError,
+};
+
+// =============================================================================
+// §1  FailureReason.description() — text contract
+// =============================================================================
+
+@test
+fn sv_it_failure_reason_descriptions() {
+    assert_eq(FailureReason.NormalExit.description(), "normal exit");
+    assert_eq(FailureReason.Timeout.description(), "timeout");
+    assert_eq(FailureReason.Cancelled.description(), "cancelled");
+    assert_eq(FailureReason.Manual.description(), "manual restart");
+    assert_eq(FailureReason.SupervisorShutdown.description(), "supervisor shutdown");
+}
+
+@test
+fn sv_it_failure_reason_payload_descriptions() {
+    assert_eq(FailureReason.ErrorExit("disk full").description(), "error: disk full");
+    assert_eq(FailureReason.Panic("oob").description(), "panic: oob");
+}
+
+// =============================================================================
+// §2  SupervisorError.description() — text contract
+// =============================================================================
+
+@test
+fn sv_it_supervisor_error_descriptions() {
+    assert_eq(SupervisorError.ShuttingDown.description(), "supervisor is shutting down");
+    assert_eq(SupervisorError.ChannelClosed.description(), "supervisor channel closed");
+    assert_eq(SupervisorError.NoParentSupervisor.description(), "no parent supervisor");
+}
+
+@test
+fn sv_it_supervisor_error_payload_descriptions() {
+    assert_eq(SupervisorError.SpawnFailed("no fds").description(), "spawn failed: no fds");
+    assert_eq(SupervisorError.InvalidSpec("empty name").description(), "invalid spec: empty name");
+    assert_eq(SupervisorError.Other("boom").description(), "boom");
+    assert_eq(
+        SupervisorError.TooManyRestarts { count: 5, window_secs: 60_u32 }.description(),
+        "too many restarts: 5 in 60s",
+    );
+}
+
+// =============================================================================
+// §3  Restart-decision scenario (the real supervision decision)
+// =============================================================================
+
+@test
+fn sv_it_restart_decision_transient_worker() {
+    // A Transient worker: restart on crash, leave alone on clean exit.
+    let strat = SupervisorRestartStrategy.Transient;
+    assert(strat.should_restart(&FailureReason.Panic("segfault")));   // crash → restart
+    assert(strat.should_restart(&FailureReason.ErrorExit("e")));      // error → restart
+    assert(strat.should_restart(&FailureReason.Timeout));             // timeout → restart
+    assert(!strat.should_restart(&FailureReason.NormalExit));         // clean → leave
+    assert(!strat.should_restart(&FailureReason.SupervisorShutdown)); // controlled → leave
+}
+
+@test
+fn sv_it_restart_decision_permanent_vs_temporary() {
+    // Permanent always restarts; Temporary never does — even on the same reason.
+    let reason = FailureReason.NormalExit;
+    assert(SupervisorRestartStrategy.Permanent.should_restart(&reason));
+    assert(!SupervisorRestartStrategy.Temporary.should_restart(&FailureReason.Panic("x")));
+}
+
+// =============================================================================
+// §4  ChildStatus lifecycle transitions via the u8 wire form
+// =============================================================================
+
+@test
+fn sv_it_child_status_lifecycle_roundtrip() {
+    // A child moves Starting → Running → Restarting → Failed → Stopped.
+    let lifecycle = [
+        ChildStatus.Starting,
+        ChildStatus.Running,
+        ChildStatus.Restarting,
+        ChildStatus.Failed,
+        ChildStatus.Stopped,
+    ];
+    for s in lifecycle.iter() {
+        // serialise to wire form and back; the ordinal must survive
+        let wire = s.to_u8();
+        assert_eq(ChildStatus.from_u8(wire).to_u8(), wire);
+    }
+}
+
+// =============================================================================
+// §5  supervisor ADTs in collections / wrappers
+// =============================================================================
+
+@test
+fn sv_it_failure_reasons_in_list() {
+    let reasons: List<FailureReason> = [
+        FailureReason.NormalExit,
+        FailureReason.Panic("a"),
+        FailureReason.Timeout,
+    ];
+    assert_eq(reasons.len(), 3);
+    // count abnormal exits
+    let mut abnormal = 0;
+    for r in reasons.iter() {
+        if r.is_abnormal() { abnormal = abnormal + 1; }
+    }
+    assert_eq(abnormal, 2); // Panic + Timeout
+}
+
+@test
+fn sv_it_supervisor_error_in_result() {
+    let r: Result<Int, SupervisorError> = Result.Err(SupervisorError.ShuttingDown);
+    match r {
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert_eq(e.description(), "supervisor is shutting down"),
+    }
+}
