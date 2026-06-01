@@ -503,6 +503,42 @@ corrupting the shared stdlib precompile cache. D2 (parallel-AOT SIGSEGV) was
 already fixed upstream (`f1c0510e3`). D3/D4/D5 catalogued. linux/mod AOT needs a
 Linux target. See `defect-class-catalogue.md` §21/§22.
 
+## Session 2026-06-01 — parallel `verum test --aot` SIGSEGV FULLY closed (2 bugs) + harness path-qualified test names
+
+The parallel `--aot` crash that aborted the WHOLE run (0 results) and kept
+EVERY `core-tests/*` module at `--interp`-only — no module had ever reached
+`complete`, which needs both tiers — had **two independent causes**, both
+now closed (correcting the marker above: `f1c0510e3` is Bug A *only*):
+
+- **Bug A — colliding per-test artifact paths** (`f1c0510e3`): merged
+  `.vr` / output binary / `.o`/`.ll` / runtime-stub were keyed on the test
+  file STEM, which repeats across modules (every `unit_test.vr` → stem
+  `unit_test`); parallel `par_iter` workers clobbered them → corrupt source
+  → malformed IR → SIGSEGV. Fix `unique_merged_stem(test_file, test_fn,
+  stem)`.
+- **Bug B — in-process parallel LLVM codegen is not thread-safe**
+  (`4afde3309`): LLVM lazily registers codegen MachineFunction passes via
+  Itanium `__cxa_guard_acquire`; on arm64 macOS the guards' semaphore
+  wake-path races rayon workers' park/wake → SIGSEGV in
+  `callDefaultCtor<*Pass>` even on UNIQUE files. Three in-process fixes
+  failed (lock around run_passes+emit; lock over the whole LLVM window;
+  serial pass-guard warm-up — a lock can't help, the racing workers aren't
+  IN codegen). **Fixed by per-test SUBPROCESS isolation**:
+  `run_aot_subprocess` re-invokes `verum test --aot --test-threads 1
+  --exact --filter <name>` per test → each compile owns its process + LLVM
+  state → parent fans out fully in parallel, zero shared-state races.
+- **Harness** (`993679a01`): `module_qualified_prefix` qualifies test names
+  (`mem/capability/unit_test::fn`, were colliding `unit_test::fn`), so
+  `--filter mem/` scopes a subtree (and the README's `--filter module::`
+  works).
+
+First post-fix `--aot` baseline (mem `capability`+`cap_audit`+
+`cap_audit_ring`, 173 tests): **125 pass / 48 fail, 0 compiler SIGSEGV**.
+All 48 are **AOT-ITER-1** (catalogue §18) — `for x in …iter()` tests crash
+at runtime on the raw `&unsafe T` iterator-backing-pointer deref (separate
+deep codegen defect; closing it promotes the for-loop tests to `--aot ✓`
+suite-wide). Full root-cause writeup: `defect-class-catalogue.md` §23.
+
 ## How to update
 
 When you finish a module:
