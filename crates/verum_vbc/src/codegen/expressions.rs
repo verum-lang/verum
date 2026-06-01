@@ -648,6 +648,59 @@ impl VbcCodegen {
         None
     }
 
+    /// Resolve a bare zero-arity variant name to the SIMPLE name of the
+    /// unique sum type that declares it, by scanning the authoritative
+    /// type-descriptor table (`self.types`).  Returns `None` when no
+    /// type — or more than one distinct type — declares a *field-less*
+    /// variant with that name.
+    ///
+    /// This is the type-descriptor-backed counterpart to the
+    /// function-table scan in `infer_expr_type_name`.  It catches core
+    /// ADT variants (`Ordering.Less`, `Maybe.None`, …) whose
+    /// function-table constructor entries are registered under
+    /// divergent parent strings — the simple `Ordering` (by
+    /// `register_builtin_variants`) and the module-rooted
+    /// `core.base.ordering.Ordering` (by the archive loader) — which
+    /// makes the raw-string uniqueness test in the function scan report
+    /// a false ambiguity.  The descriptor table records the variant
+    /// under a single canonical owner, so the lookup is unambiguous.
+    ///
+    /// Restricted to field-less variants so it stays consistent with the
+    /// `param_count == 0` gate of the bare-path arm: `Some` / `Ok`
+    /// (which carry payloads) are constructors, not values, and must not
+    /// resolve here.
+    pub(super) fn find_unique_variant_parent_in_type_descriptors(
+        &self,
+        variant_name: &str,
+    ) -> Option<String> {
+        let mut found: Option<String> = None;
+        for type_desc in self.types.iter() {
+            let tn = match self.ctx.strings.get(type_desc.name.0 as usize) {
+                Some(s) => s.as_str(),
+                None => continue,
+            };
+            let tn_simple = tn.rsplit(|c| c == '.' || c == ':').next().unwrap_or(tn);
+            for variant in type_desc.variants.iter() {
+                if !variant.fields.is_empty() {
+                    continue;
+                }
+                let vn = match self.ctx.strings.get(variant.name.0 as usize) {
+                    Some(s) => s.as_str(),
+                    None => continue,
+                };
+                if vn == variant_name {
+                    match &found {
+                        Some(prev) if prev != tn_simple => return None, // ambiguous
+                        Some(_) => {}                                   // same type again
+                        None => found = Some(tn_simple.to_string()),
+                    }
+                    break;
+                }
+            }
+        }
+        found
+    }
+
     pub(super) fn parent_type_from_qualified_name(&self, name: &str) -> Option<String> {
         let last_dot = name.rfind('.');
         let last_colon = name.rfind("::");
@@ -19456,6 +19509,34 @@ impl VbcCodegen {
                             {
                                 return info.return_type_name.clone();
                             }
+                            // Bare-name zero-arity variant constructor.
+                            // `register_stdlib_constants` registers core
+                            // ADT variants (`Less` / `None` / `Ok` / …)
+                            // under their BARE name carrying `variant_tag`
+                            // + `parent_type_name` — the exact entry
+                            // `compile_simple_path` resolves to emit the
+                            // variant *value*.  Consult that same bare
+                            // entry here: the dotted-suffix scan below only
+                            // matches qualified `Type.Variant` keys, and the
+                            // archive's qualified `Ordering.Less` can carry
+                            // `variant_tag: None`, so NEITHER of the lower
+                            // layers sees this one.  Returning the simple
+                            // parent name is exactly what the f-string
+                            // Display-dispatch gate wants, so `f"{Less}"`
+                            // routes through `Ordering.fmt` => "<" instead
+                            // of the Debug-style `ToString` => "Less".
+                            if let Some(info) = self.ctx.lookup_function_in_scope(&ident.name)
+                                && info.variant_tag.is_some()
+                                && let Some(parent) = info.parent_type_name.as_ref()
+                            {
+                                return Some(
+                                    parent
+                                        .rsplit(|c| c == '.' || c == ':')
+                                        .next()
+                                        .unwrap_or(parent)
+                                        .to_string(),
+                                );
+                            }
                             // Zero-arity variant constructor (`Equal` /
                             // `None` / `Less` / `Some` as a bare path) —
                             // surface the parent type so f-string
@@ -19476,7 +19557,28 @@ impl VbcCodegen {
                             // to avoid cross-type collision).  Scan for a
                             // UNIQUE variant whose key ends in
                             // `.<ident>` — uniqueness is the safety gate.
+                            // Core ADTs are registered TWICE: once by
+                            // `register_builtin_variants` under the simple
+                            // parent `Ordering`, and once by the archive
+                            // loader under the module-rooted parent
+                            // `core.base.ordering.Ordering`.  Comparing the
+                            // raw parent strings reports a FALSE ambiguity
+                            // and the lookup returns None — the exact reason
+                            // `f"{Less}"` rendered "Less" (Debug name) rather
+                            // than dispatching to `Ordering.fmt` => "<".
+                            // Normalise every candidate parent to its simple
+                            // (last-segment) name before the uniqueness test
+                            // so the two registrations collapse to one answer.
+                            // The simple name is also exactly what the
+                            // Display-dispatch gate wants (`lookup_function
+                            // ("Ordering.fmt")`).
                             let dot_suffix = format!(".{}", ident.name.as_str());
+                            let simple = |s: &str| -> String {
+                                s.rsplit(|c| c == '.' || c == ':')
+                                    .next()
+                                    .unwrap_or(s)
+                                    .to_string()
+                            };
                             let mut variant_parent: Option<String> = None;
                             let mut ambiguous = false;
                             for (key, info) in self.ctx.functions.iter() {
@@ -19485,17 +19587,32 @@ impl VbcCodegen {
                                     && key.ends_with(&dot_suffix)
                                     && let Some(parent) = info.parent_type_name.as_ref()
                                 {
-                                    if variant_parent.is_some()
-                                        && variant_parent.as_deref() != Some(parent.as_str())
-                                    {
-                                        ambiguous = true;
-                                        break;
+                                    let p = simple(parent);
+                                    match variant_parent.as_ref() {
+                                        Some(prev) if prev != &p => {
+                                            ambiguous = true;
+                                            break;
+                                        }
+                                        Some(_) => {}
+                                        None => variant_parent = Some(p),
                                     }
-                                    variant_parent = Some(parent.clone());
                                 }
                             }
                             if !ambiguous && variant_parent.is_some() {
                                 return variant_parent;
+                            }
+                            // Function-table miss or genuine cross-parent
+                            // ambiguity: consult the type-descriptor table,
+                            // which records each variant under one canonical
+                            // owner.  Catches core ADT variants whose
+                            // constructor entries carry divergent parent
+                            // strings (or none at all).
+                            if let Some(parent) =
+                                self.find_unique_variant_parent_in_type_descriptors(
+                                    ident.name.as_str(),
+                                )
+                            {
+                                return Some(parent);
                             }
                             None
                         }
