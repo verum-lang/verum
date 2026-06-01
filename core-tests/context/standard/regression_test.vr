@@ -36,30 +36,25 @@ fn regression_severity_full_ordinal_ladder() {
 }
 
 // =============================================================================
-// REGRESSION (NEW DEFECT — [[fstring_direct_variant_ctor_display_dispatch]]):
-// `f"{<Type>.<Variant>}"` — a DIRECT variant-constructor in an
-// interpolation placeholder — does NOT dispatch the user `Display` impl;
-// it falls back to the default rendering (the variant name, e.g. "Info"),
-// NOT `Display`'s output ("INFO"). Binding to a variable first
-// (`let l = ContextLogLevel.Info; f"{l}"`) DISPATCHES Display correctly.
+// REGRESSION ([[fstring_direct_variant_ctor_display_dispatch]] — CLOSED
+// 2026-06-01 by commit 19bb51b3a `fix(vbc/codegen): … qualified-variant
+// Display`): `f"{<Type>.<Variant>}"` — a DIRECT variant-constructor in an
+// interpolation placeholder — now DISPATCHES the user `Display` impl.
 //
-// Triangulation (verified 2026-06-01, --interp):
-//   * `let l = ContextLogLevel.Info; assert_eq(f"{l}", "INFO")`   → OK
-//   * `assert_eq(f"{ContextLogLevel.Info}", "INFO")`              → FAIL
-//   * Debug `:?` works in BOTH forms.
+// Pre-fix it fell back to the default rendering (the variant name, e.g.
+// "Info") instead of `Display`'s output ("INFO"); only the bound-var form
+// (`let l = ContextLogLevel.Info; f"{l}"`) dispatched. The codegen fix
+// threads the variant-constructor's type through `infer_expr_type_name`
+// (`Field{Path(Type), Variant}` → `<Type>` when `<Type>` declares that
+// variant), so the interpolation routes through `<Type>.fmt`.
 //
-// Root cause: codegen's `try_emit_display_dispatch` for interpolations
-// (see base/ordering regression task #9) detects `<TypeName>.fmt` at
-// compile time, but for a placeholder whose expr is a bare variant
-// constructor the receiver type is not threaded through, so it emits the
-// generic ToString fast path. General (not context-specific) — the same
-// enum-Display-under-interp regression another session pinned for
-// runtime/* enums. @ignore'd until the codegen fix + rebuild; the live
-// `..._via_bound_var` test below pins the WORKING idiom so Display
-// coverage is preserved. audit.md §3.6.
+// Un-@ignore'd 2026-06-01 after validating on a clean worktree build of
+// HEAD (f64d7e4fc, which includes 19bb51b3a): `f"{ContextLogLevel.Trace}"`
+// → "TRACE" etc. all GREEN. Kept forever as a re-regression guard.
+// Note: the SEPARATE record-variant case (`f"{err}"` for ContextError, a
+// bound var) is NOT closed by this fix — pinned still in error/.
 // =============================================================================
 
-@ignore("[[fstring_direct_variant_ctor_display_dispatch]] — f\"{Type.Variant}\" direct-ctor interpolation does not dispatch user Display (returns variant name, not Display output); f\"{bound_var}\" works. Codegen fix + rebuild. audit.md §3.6.")
 @test
 fn regression_display_direct_ctor_renders_uppercase_name() {
     assert_eq(f"{ContextLogLevel.Trace}", "TRACE");

@@ -130,20 +130,27 @@ execution-compiled). Fundamental fix is VBC codegen of archive-method
 ref-ADT returns + a compiler rebuild — deferred (the codegen crate is
 actively edited by a concurrent session; rebuild is hazardous this cycle).
 
-### §3.6 `f"{Type.Variant}"` does not dispatch `Display` (NEW, MEDIUM)
+### §3.6 `f"{Type.Variant}"` does not dispatch `Display` — **CLOSED 2026-06-01**
 
 A DIRECT variant-constructor in an interpolation placeholder
-(`f"{ContextLogLevel.Info}"`) renders the variant name (`"Info"`) instead
-of the `Display` output (`"INFO"`). Binding first
-(`let l = ContextLogLevel.Info; f"{l}"`) dispatches `Display` correctly.
-`Debug` (`:?`) works in both forms. General (not context-specific) — the
-same enum-`Display`-under-`--interp` regression another session pinned for
-`runtime/*` enums. Pinned `@ignore`'d in `regression_test.vr`
-(`regression_display_direct_ctor_renders_uppercase_name`); the live
-`regression_display_via_bound_var_dispatches` + the rewritten
-`property_display_equals_name` / `test_log_level_display_returns_name` keep
-the `Display` contract covered via the working bound-var idiom.
-Tracked as [[fstring_direct_variant_ctor_display_dispatch]].
+(`f"{ContextLogLevel.Info}"`) rendered the variant name (`"Info"`) instead
+of the `Display` output (`"INFO"`); only the bound-var form dispatched.
+**Closed by commit `19bb51b3a`** (`fix(vbc/codegen): … qualified-variant
+Display`): `infer_expr_type_name` now recognises `Field{Path(Type),
+Variant}` and returns `<Type>` when it declares that variant, so the
+interpolation routes through `<Type>.fmt`. **Validated on a clean worktree
+build of HEAD `f64d7e4fc`** (which includes `19bb51b3a`):
+`f"{ContextLogLevel.Trace}"` → `"TRACE"` etc. GREEN. The pin
+`regression_display_direct_ctor_renders_uppercase_name` was un-`@ignore`'d
+and kept as a re-regression guard. Tracked as
+[[fstring_direct_variant_ctor_display_dispatch]].
+
+NOTE — a SEPARATE, still-open case: `f"{err}"` for a *record-variant* ADT
+(`ContextError`) via a **bound var** still renders the default
+`NotFound(...)` instead of `Display`→`message()` (gate-detection, not the
+direct-ctor inference path). `19bb51b3a` does NOT close it; the 5 error
+Display pins (error/{unit,property,integration}) stay `@ignore`'d — see
+`context/error/audit.md §3.4`.
 
 ### §3.7 Row field-shift on cross-module direct field read (NEW, part of CLASS-9)
 
