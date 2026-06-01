@@ -1734,10 +1734,22 @@ impl VbcCodegen {
                         //  "__const_NAME" — well-known stdlib constant resolved by name
                         if let Some(ref iname) = func_info.intrinsic_name {
                             if let Some(val_str) = iname.strip_prefix("__const_val_") {
-                                // Dynamic constant with encoded value
+                                // Dynamic constant with encoded value. Large
+                                // magnitudes (Int.MIN = i64::MIN, …) MUST go
+                                // through the constant pool — LoadI carries a
+                                // 48-bit inline immediate and truncates
+                                // i64::MIN (low 48 bits 0) to 0.
                                 let value: i64 = val_str.parse().unwrap_or(0);
                                 let dest = self.ctx.alloc_temp();
-                                self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                                if (i16::MIN as i64..=i16::MAX as i64).contains(&value) {
+                                    self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                                } else {
+                                    let const_id = self.ctx.add_const_int(value);
+                                    self.ctx.emit(Instruction::LoadK {
+                                        dst: dest,
+                                        const_id: const_id.0,
+                                    });
+                                }
                                 return Ok(Some(dest));
                             }
                             if let Some(const_name) = iname.strip_prefix("__const_") {
@@ -16310,9 +16322,21 @@ impl VbcCodegen {
                         && let Some(ref iname) = func_info.intrinsic_name
                         && let Some(val_str) = iname.strip_prefix("__const_val_")
                     {
+                        // e.g. `Int.MIN` (= __const_val_-9223372036854775808).
+                        // Large magnitudes MUST use the constant pool — LoadI
+                        // carries a 48-bit inline immediate and truncates
+                        // i64::MIN (low 48 bits 0) to 0.
                         let value: i64 = val_str.parse().unwrap_or(0);
                         let result = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::LoadI { dst: result, value });
+                        if (i16::MIN as i64..=i16::MAX as i64).contains(&value) {
+                            self.ctx.emit(Instruction::LoadI { dst: result, value });
+                        } else {
+                            let const_id = self.ctx.add_const_int(value);
+                            self.ctx.emit(Instruction::LoadK {
+                                dst: result,
+                                const_id: const_id.0,
+                            });
+                        }
                         return Ok(Some(result));
                     }
                 }
