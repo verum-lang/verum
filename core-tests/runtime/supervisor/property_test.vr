@@ -1,0 +1,191 @@
+// =============================================================================
+// core-tests/runtime/supervisor/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.runtime.supervisor`. unit_test.vr pins individual
+// spot-cases; this file pins the relating LAWS:
+//   * should_restart truth table as a property over ALL FailureReasons ×
+//     all SupervisorRestartStrategies
+//   * is_abnormal classification (only NormalExit / SupervisorShutdown normal)
+//   * ChildStatus to_u8/from_u8 round-trip + is_active classification
+//   * SupervisionStrategy / EscalationPolicy description() + disjointness
+//   * ShutdownStrategy factory timeout contract
+//
+// Tests prefixed `sv_law_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.supervisor.{
+    SupervisionStrategy, SupervisorRestartStrategy, FailureReason,
+    ChildStatus, ShutdownStrategy, EscalationPolicy,
+};
+
+// All seven FailureReason values (payload variants carry sample messages).
+fn all_reasons() -> List<FailureReason> {
+    [
+        FailureReason.NormalExit,
+        FailureReason.ErrorExit("disk full"),
+        FailureReason.Panic("index out of bounds"),
+        FailureReason.Timeout,
+        FailureReason.Cancelled,
+        FailureReason.Manual,
+        FailureReason.SupervisorShutdown,
+    ]
+}
+
+// =============================================================================
+// §A  is_abnormal classification — only NormalExit + SupervisorShutdown normal
+// =============================================================================
+
+@test
+fn sv_law_is_abnormal_classification() {
+    for r in all_reasons().iter() {
+        // "controlled exit" = NormalExit | SupervisorShutdown
+        let normal = match r {
+            FailureReason.NormalExit => true,
+            FailureReason.SupervisorShutdown => true,
+            _ => false,
+        };
+        // is_abnormal must be the exact negation of "is a controlled exit"
+        assert_eq(r.is_abnormal(), !normal);
+    }
+}
+
+// =============================================================================
+// §B  should_restart truth table (LAW form, over every reason)
+// =============================================================================
+
+@test
+fn sv_law_should_restart_permanent_always() {
+    for r in all_reasons().iter() {
+        assert(SupervisorRestartStrategy.Permanent.should_restart(r));
+    }
+}
+
+@test
+fn sv_law_should_restart_temporary_never() {
+    for r in all_reasons().iter() {
+        assert(!SupervisorRestartStrategy.Temporary.should_restart(r));
+    }
+}
+
+@test
+fn sv_law_should_restart_transient_iff_abnormal() {
+    for r in all_reasons().iter() {
+        assert_eq(SupervisorRestartStrategy.Transient.should_restart(r), r.is_abnormal());
+    }
+}
+
+// =============================================================================
+// §C  ChildStatus to_u8 / from_u8 round-trip + is_active
+// =============================================================================
+
+@test
+fn sv_law_child_status_u8_roundtrip() {
+    // from_u8(v).to_u8() == v for every canonical ordinal 0..=5
+    let ords = [0_u8, 1_u8, 2_u8, 3_u8, 4_u8, 5_u8];
+    for &v in ords.iter() {
+        assert_eq(ChildStatus.from_u8(v).to_u8(), v);
+    }
+}
+
+@test
+fn sv_law_child_status_to_u8_table() {
+    assert_eq(ChildStatus.Running.to_u8(), 0_u8);
+    assert_eq(ChildStatus.Starting.to_u8(), 1_u8);
+    assert_eq(ChildStatus.Restarting.to_u8(), 2_u8);
+    assert_eq(ChildStatus.Terminated.to_u8(), 3_u8);
+    assert_eq(ChildStatus.Failed.to_u8(), 4_u8);
+    assert_eq(ChildStatus.Stopped.to_u8(), 5_u8);
+}
+
+@test
+fn sv_law_child_status_is_active_classification() {
+    // active = Running | Starting | Restarting
+    assert(ChildStatus.Running.is_active());
+    assert(ChildStatus.Starting.is_active());
+    assert(ChildStatus.Restarting.is_active());
+    assert(!ChildStatus.Terminated.is_active());
+    assert(!ChildStatus.Failed.is_active());
+    assert(!ChildStatus.Stopped.is_active());
+}
+
+@test
+fn sv_law_child_status_from_u8_unknown_is_stopped() {
+    // fail-safe: any out-of-range ordinal coerces to Stopped (5)
+    assert_eq(ChildStatus.from_u8(99_u8).to_u8(), 5_u8);
+    assert_eq(ChildStatus.from_u8(200_u8).to_u8(), 5_u8);
+}
+
+// =============================================================================
+// §D  SupervisionStrategy — description() + disjointness
+// =============================================================================
+
+@test
+fn sv_law_supervision_strategy_descriptions() {
+    let a = SupervisionStrategy.OneForOne;
+    let b = SupervisionStrategy.OneForAll;
+    let c = SupervisionStrategy.RestForOne;
+    assert_eq(a.description(), "restart only the failed child");
+    assert_eq(b.description(), "restart all children on any failure");
+    assert_eq(c.description(), "restart failed child and all started after");
+}
+
+@test
+fn sv_law_supervision_strategy_disjoint() {
+    let a: SupervisionStrategy = SupervisionStrategy.OneForOne;
+    let b: SupervisionStrategy = SupervisionStrategy.OneForAll;
+    let c: SupervisionStrategy = SupervisionStrategy.RestForOne;
+    assert(a is SupervisionStrategy.OneForOne && !(a is SupervisionStrategy.OneForAll));
+    assert(b is SupervisionStrategy.OneForAll && !(b is SupervisionStrategy.RestForOne));
+    assert(c is SupervisionStrategy.RestForOne && !(c is SupervisionStrategy.OneForOne));
+}
+
+// =============================================================================
+// §E  EscalationPolicy 4-variant
+// =============================================================================
+
+@test
+fn sv_law_escalation_policy_variants() {
+    let p = [
+        EscalationPolicy.RestartSubtree,
+        EscalationPolicy.EscalateToParent,
+        EscalationPolicy.Terminate,
+        EscalationPolicy.LogAndIgnore,
+    ];
+    for &x in p.iter() {
+        let n = (if x is EscalationPolicy.RestartSubtree { 1 } else { 0 })
+              + (if x is EscalationPolicy.EscalateToParent { 1 } else { 0 })
+              + (if x is EscalationPolicy.Terminate { 1 } else { 0 })
+              + (if x is EscalationPolicy.LogAndIgnore { 1 } else { 0 });
+        assert_eq(n, 1);
+    }
+}
+
+// =============================================================================
+// §F  ShutdownStrategy factory timeout contract
+// =============================================================================
+
+@test
+fn sv_law_shutdown_strategy_timeouts() {
+    let g = ShutdownStrategy.graceful();
+    assert_eq(g.timeout_ms(), 5000_u32);
+    let b = ShutdownStrategy.brutal();
+    assert_eq(b.timeout_ms(), 100_u32);
+}
+
+@test
+fn sv_law_shutdown_strategy_infinite_is_max() {
+    let inf = ShutdownStrategy.Infinite;
+    // Infinite reports UInt32.MAX — compare against the named constant
+    // rather than the decimal literal to stay robust to literal parsing.
+    assert_eq(inf.timeout_ms(), UInt32.MAX);
+}
+
+@test
+fn sv_law_shutdown_strategy_custom_timeout_preserved() {
+    let g = ShutdownStrategy.Graceful { timeout_ms: 30000_u32 };
+    assert_eq(g.timeout_ms(), 30000_u32);
+    let b = ShutdownStrategy.Brutal { timeout_ms: 50_u32 };
+    assert_eq(b.timeout_ms(), 50_u32);
+}

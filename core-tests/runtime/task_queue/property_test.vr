@@ -1,0 +1,99 @@
+// =============================================================================
+// core-tests/runtime/task_queue/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.runtime.task_queue.StealResult<T>`. unit_test.vr
+// pins the 3 variants + is_success/is_empty/into_option per-case; this file
+// pins the laws relating them across payload types.
+//
+// Tests prefixed `tq_law_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.task_queue.{StealResult};
+
+// =============================================================================
+// §A  Exhaustiveness / mutual exclusion
+// =============================================================================
+
+@test
+fn tq_law_success_is_not_empty() {
+    let s: StealResult<Int> = StealResult.Success(7);
+    assert(s.is_success());
+    assert(!s.is_empty());
+}
+
+@test
+fn tq_law_empty_is_not_success() {
+    let s: StealResult<Int> = StealResult.Empty;
+    assert(s.is_empty());
+    assert(!s.is_success());
+}
+
+@test
+fn tq_law_retry_is_neither() {
+    let s: StealResult<Int> = StealResult.Retry;
+    assert(!s.is_success());
+    assert(!s.is_empty());
+}
+
+// =============================================================================
+// §B  into_option ⟺ is_success
+// =============================================================================
+
+@test
+fn tq_law_into_option_iff_success() {
+    let success: StealResult<Int> = StealResult.Success(1);
+    let empty: StealResult<Int> = StealResult.Empty;
+    let retry: StealResult<Int> = StealResult.Retry;
+    assert(success.into_option().is_some());
+    assert(empty.into_option().is_none());
+    assert(retry.into_option().is_none());
+}
+
+// =============================================================================
+// §C  into_option round-trip across payload types
+// =============================================================================
+
+@test
+fn tq_law_into_option_roundtrip_int() {
+    let values = [0, 1, -5, 999, 1_000_000];
+    for &v in values.iter() {
+        let s: StealResult<Int> = StealResult.Success(v);
+        match s.into_option() {
+            Maybe.Some(got) => assert_eq(got, v),
+            Maybe.None => assert(false),
+        }
+    }
+}
+
+@test
+fn tq_law_into_option_roundtrip_text() {
+    let s: StealResult<Text> = StealResult.Success("task-payload");
+    match s.into_option() {
+        Maybe.Some(got) => assert_eq(got, "task-payload"),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn tq_law_into_option_roundtrip_bool() {
+    let s: StealResult<Bool> = StealResult.Success(true);
+    match s.into_option() {
+        Maybe.Some(got) => assert(got),
+        Maybe.None => assert(false),
+    }
+}
+
+// =============================================================================
+// §D  is_empty / is_success are payload-type-independent for Empty/Retry
+// =============================================================================
+
+@test
+fn tq_law_empty_uniform_across_payload_types() {
+    let e_int: StealResult<Int> = StealResult.Empty;
+    let e_text: StealResult<Text> = StealResult.Empty;
+    let e_bool: StealResult<Bool> = StealResult.Empty;
+    assert(e_int.is_empty() && e_text.is_empty() && e_bool.is_empty());
+    assert(!e_int.is_success() && !e_text.is_success() && !e_bool.is_success());
+}

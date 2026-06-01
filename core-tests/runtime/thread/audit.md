@@ -80,6 +80,10 @@ on a debug build with frame pointers enabled.
 
 * `core-tests/runtime/thread/unit_test.vr` — 22 unit tests covering
   ThreadId / ThreadError / ThreadStackFrame / StackTrace / ThreadBuilder.
+* `core-tests/runtime/thread/property_test.vr` — 6 law tests, **all GREEN
+  2026-06-01**: ThreadId Eq reflexive/symmetric/distinguishing + Copy-value
+  semantics; ThreadError 4-variant exhaustiveness; ThreadError Debug strings
+  (Debug dispatches fine for nullary variants — unlike the §H Display gap).
 * `core-tests/runtime/thread/audit.md` — this file.
 
 ## Action items deferred

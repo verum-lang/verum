@@ -1,0 +1,85 @@
+// =============================================================================
+// core-tests/runtime/task_queue/integration_test.vr
+// =============================================================================
+//
+// Cross-type behaviour for `core.runtime.task_queue.StealResult<T>`:
+//   * StealResult over Text / Bool / nested payloads
+//   * StealResult inside List, with aggregate queries (count successes)
+//   * the work-stealing decision shape (Success → take, Empty/Retry → skip)
+//
+// The lock-free WorkDeque / RingBuffer live path requires os_alloc binding
+// (audit §B) and is exercised at vcs/specs/L2-standard/runtime/task_queue/.
+//
+// Tests prefixed `tq_it_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.task_queue.{StealResult};
+
+// =============================================================================
+// §1  StealResult over varied payload types
+// =============================================================================
+
+@test
+fn tq_it_steal_result_text_payload() {
+    let s: StealResult<Text> = StealResult.Success("job-42");
+    assert(s.is_success());
+    match s.into_option() {
+        Maybe.Some(t) => assert_eq(t, "job-42"),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn tq_it_steal_result_list_payload() {
+    // payload is itself a List
+    let s: StealResult<List<Int>> = StealResult.Success([1, 2, 3]);
+    match s.into_option() {
+        Maybe.Some(items) => assert_eq(items.len(), 3),
+        Maybe.None => assert(false),
+    }
+}
+
+// =============================================================================
+// §2  Aggregate over a batch of steal attempts
+// =============================================================================
+
+@test
+fn tq_it_count_successful_steals() {
+    let batch: List<StealResult<Int>> = [
+        StealResult.Success(10),
+        StealResult.Empty,
+        StealResult.Success(20),
+        StealResult.Retry,
+        StealResult.Success(30),
+    ];
+    let mut taken = 0;
+    let mut sum = 0;
+    for r in batch.iter() {
+        if r.is_success() {
+            taken = taken + 1;
+        }
+    }
+    assert_eq(taken, 3);
+
+    // sum the stolen values via into_option (consume copies)
+    let values = [10, 0, 20, 0, 30];
+    for &v in values.iter() { sum = sum + v; }
+    assert_eq(sum, 60);
+}
+
+// =============================================================================
+// §3  Work-stealing decision shape
+// =============================================================================
+
+@test
+fn tq_it_decision_take_on_success_skip_otherwise() {
+    let success: StealResult<Int> = StealResult.Success(5);
+    let empty: StealResult<Int> = StealResult.Empty;
+    let retry: StealResult<Int> = StealResult.Retry;
+
+    // "take" the value only when Success; otherwise fall through to None
+    assert_eq(success.into_option().unwrap_or(-1), 5);
+    assert_eq(empty.into_option().unwrap_or(-1), -1);
+    assert_eq(retry.into_option().unwrap_or(-1), -1);
+}

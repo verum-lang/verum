@@ -1,0 +1,87 @@
+// =============================================================================
+// core-tests/runtime/thread/property_test.vr
+// =============================================================================
+//
+// Laws for `core.runtime.thread` data surface. unit_test.vr pins ThreadId
+// construction/eq + ThreadError variants + ThreadBuilder builders; this file
+// pins the Eq/Copy laws + ThreadError exhaustiveness + Debug rendering.
+//
+// Live thread ops (spawn/join/park/unpark) require sys.get_thread_id binding
+// (audit §A) and are not exercised here.
+//
+// Tests prefixed `th_law_`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.thread.{ThreadId, ThreadError};
+
+// =============================================================================
+// §A  ThreadId.Eq laws
+// =============================================================================
+
+@test
+fn th_law_thread_id_eq_reflexive() {
+    let ids = [0_u64, 1_u64, 42_u64, 0xFFFF_FFFF_u64];
+    for &v in ids.iter() {
+        let t = ThreadId { id: v };
+        assert(t == t);
+    }
+}
+
+@test
+fn th_law_thread_id_eq_symmetric() {
+    let a = ThreadId { id: 100_u64 };
+    let b = ThreadId { id: 100_u64 };
+    assert(a == b);
+    assert(b == a);
+}
+
+@test
+fn th_law_thread_id_eq_distinguishes() {
+    let a = ThreadId { id: 1_u64 };
+    let b = ThreadId { id: 2_u64 };
+    assert(!(a == b));
+}
+
+@test
+fn th_law_thread_id_copy_is_value() {
+    // ThreadId is Copy — copying leaves the original usable.
+    let a = ThreadId { id: 7_u64 };
+    let b = a;
+    assert_eq(a.id, 7_u64);
+    assert_eq(b.id, 7_u64);
+    assert(a == b);
+}
+
+// =============================================================================
+// §B  ThreadError — 4-variant exhaustiveness + disjointness
+// =============================================================================
+
+@test
+fn th_law_thread_error_exactly_one_variant() {
+    let errs = [
+        ThreadError.SpawnFailed,
+        ThreadError.JoinFailed,
+        ThreadError.Panicked,
+        ThreadError.InvalidName,
+    ];
+    for &e in errs.iter() {
+        let n = (if e is ThreadError.SpawnFailed { 1 } else { 0 })
+              + (if e is ThreadError.JoinFailed { 1 } else { 0 })
+              + (if e is ThreadError.Panicked { 1 } else { 0 })
+              + (if e is ThreadError.InvalidName { 1 } else { 0 });
+        assert_eq(n, 1);
+    }
+}
+
+// =============================================================================
+// §C  ThreadError Debug rendering (Debug works for nullary variants)
+// =============================================================================
+
+@test
+fn th_law_thread_error_debug_strings() {
+    assert_eq(f"{ThreadError.SpawnFailed:?}", "ThreadError.SpawnFailed");
+    assert_eq(f"{ThreadError.JoinFailed:?}", "ThreadError.JoinFailed");
+    assert_eq(f"{ThreadError.Panicked:?}", "ThreadError.Panicked");
+    assert_eq(f"{ThreadError.InvalidName:?}", "ThreadError.InvalidName");
+}

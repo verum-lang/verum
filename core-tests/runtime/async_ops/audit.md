@@ -63,11 +63,35 @@ under --interp today.  Live tests live at
 `vcs/specs/L2-standard/async/` and need the AOT stdlib build to
 land first.  In-scope for this folder: data-only surface coverage.
 
+### §D — Transparent opaque-newtype inner extraction does not round-trip
+
+`type JoinHandleOpaque is (Int)` (and the 12 sibling opaque handles) are
+runtime-TRANSPARENT (see §A: distinctness is typechecker-only). Extracting
+the wrapped Int via `match h { JoinHandleOpaque(v) => v }` does **not**
+round-trip under `--interp`: `JoinHandleOpaque(42)` then matched yields a
+value `!= 42`. This is the same `__newtype_inner_*` transparent-wrapper
+access gap recorded for `sys/common` `FileDesc` (archive-loaded
+transparent-wrapper const-access). By design these handles are opaque
+tokens handed to the runtime intrinsics, never inspected by user code, so
+the gap has no functional impact today — but the inner-extraction surface
+is unsound and pinned `@ignore`:
+`ao_law_{join,executor,future}_handle_inner_value`.
+
+**Fix surface (compiler, needs rebuild):** newtype/tuple-struct inner
+binding in pattern-match codegen must read the wrapped scalar, not the
+header, for transparent single-field wrappers. Shares root with the
+`__newtype_inner` typechecker gap.
+
 ## Action items landed in this branch
 
 * `core-tests/runtime/async_ops/unit_test.vr` — 23 unit tests covering
   opaque-handle construction + cross-type distinctness + AsyncRecoveryError.
-* `core-tests/runtime/async_ops/audit.md` — this file.
+* `core-tests/runtime/async_ops/property_test.vr` — 10 law tests; 7 GREEN
+  (AsyncRecoveryError Eq reflexive/symmetric/payload-sensitive + message
+  round-trip + **record Display==message + Debug** — confirms the §H Display
+  gap is nullary-enum-specific, records dispatch Display fine); 3 `@ignore`
+  on §D (opaque-newtype inner extraction). 2026-06-01.
+* `core-tests/runtime/async_ops/audit.md` — this file (§D added).
 
 ## Action items deferred
 

@@ -73,6 +73,13 @@ docstring should call out that the deque opts out.
 
 * `core-tests/runtime/task_queue/unit_test.vr` — 13 unit tests
   covering StealResult<T> 3-variant + 3 helper predicates.
+* `core-tests/runtime/task_queue/property_test.vr` — 8 law tests
+  (exhaustiveness/mutual-exclusion of is_success/is_empty, into_option ⟺
+  is_success, into_option round-trip across Int/Text/Bool payloads,
+  payload-type-independent Empty/Retry). **All GREEN 2026-06-01.**
+* `core-tests/runtime/task_queue/integration_test.vr` — 4 cross-type tests
+  (Text/List payloads, aggregate over a batch of steal attempts, the
+  work-stealing take/skip decision shape). **All GREEN.**
 * `core-tests/runtime/task_queue/audit.md` — this file.
 
 ## Action items deferred
