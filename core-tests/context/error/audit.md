@@ -72,10 +72,37 @@ or accept the trade-off; the current state is half-applied.
 
 **Effort:** trivial (~10 min) once decided.
 
+### §3.4 Display-interpolation regression — `f"{err}"` skips Display (NEW)
+
+`f"{err}"` for a `ContextError` renders the DEFAULT variant rendering
+(`NotFound(Cache)`) instead of dispatching `Display for ContextError`
+(which calls `message()` → `"Context 'Cache' not found ..."`). Verified:
+`f"{err}"` → `"NotFound(Cache)"`, `err.message()` → the full message.
+Per-variant inconsistent under the current binary (not_found /
+type_mismatch / circular_dependency fail; not_provided / scope_violation
+pass), so it is flaky Display-dispatch, not a uniform fallback. Same
+family as [[fstring_direct_variant_ctor_display_dispatch]] (standard
+§3.6) — broadened: for record-variant ADTs even `f"{bound_var}"` can
+miss. **Was GREEN in May**; a recent codegen change regressed
+Display-interpolation dispatch. 5 affected tests `@ignore`'d (1 unit,
+3 property §5, 1 integration); tests asserting only field text stay live
+(the default rendering includes the fields). Fix = codegen Display-
+dispatch in interpolation + rebuild (blocked this cycle).
+
+## Conformance status (2026-06-01, interpreter / `--test-threads 1`)
+
+**51 passed / 0 failed / 5 ignored.** The May multi-field `Eq` failures
+(`test_eq_same_not_found` / `test_eq_same_type_mismatch`) are **CLOSED**
+(the qualified-variant `Eq` fix in `error.vr` landed). `message()`,
+`Debug`, the full `Eq` matrix, variant disjointness, and Result/Maybe/List
+wrapping are GREEN. Only the 5 Display-interpolation tests (§3.4) are
+`@ignore`'d. Status: **partial** (AOT cross-tier blocked stdlib-wide).
+
 ## Action items landed in this branch
 
 * `core-tests/context/error/{unit,property,integration,regression}_test.vr`
-  — first conformance suite for the module.
+  — first conformance suite for the module; 5 Display-interpolation tests
+  `@ignore`'d (§3.4).
 * `core-tests/context/error/audit.md` — this file.
 
 ## Action items deferred

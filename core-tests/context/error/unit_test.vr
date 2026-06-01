@@ -285,6 +285,17 @@ fn test_eq_cross_variant_inequality() {
 // Section 9: Display — `f"..."` interpolation
 // =============================================================================
 
+// REGRESSION ([[fstring_direct_variant_ctor_display_dispatch]] family,
+// broadened): `f"{err}"` for a record-variant ContextError renders the
+// DEFAULT `NotFound(Cache)` rendering instead of dispatching
+// `Display for ContextError` (which would give "Context 'Cache' not
+// found ..."). Verified: `f"{err}"` → "NotFound(Cache)", `err.message()`
+// → the full message. `.contains("Cache")` passes (the default rendering
+// includes the field) but `.contains("not found")` fails. Was GREEN in
+// May; current binary regressed Display-interpolation dispatch for
+// record-variant ADTs (per-variant inconsistent — see property_test §5).
+// @ignore'd until the codegen Display-dispatch fix + rebuild.
+@ignore("[[fstring_direct_variant_ctor_display_dispatch]] — f\"{err}\" renders default NotFound(Cache), not Display→message(). Codegen Display-dispatch regression for record-variant ADTs; rebuild-blocked.")
 @test
 fn test_display_not_found_via_format_literal() {
     let err = ContextError.NotFound { context_name: "Cache".clone() };

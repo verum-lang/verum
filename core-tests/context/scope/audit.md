@@ -142,6 +142,27 @@ These are pre-existing AOT-pipeline blockers unrelated to `context/`
 but they prevent cross-tier validation of the context tests
 (`--interp` only). Tracked as task #7 in this session's task list.
 
+## Conformance status (2026-06-01, interpreter / `--test-threads 1`)
+
+**62/62 GREEN** (unit + property + integration + regression). The defects
+that gated this module to `regression-only` are **resolved** on the
+current binary:
+
+* §3.1 (bare `Transient`/`Request` cross-module collision) — handled by
+  the `Scope.<Variant>` qualified-form discipline used throughout; no
+  test fails on it.
+* §3.2 (bare-variant method-dispatch corruption — `Singleton.name()`
+  wrong, `can_depend_on` wrong) — **CLOSED**: `Scope.Singleton.name()`
+  returns `"Singleton"`, the full 3×3 `can_depend_on` matrix is correct,
+  `rank()` is 0/1/2, and the `ContextScope` depth chain (incl. the
+  100-deep stress) all pass.
+* §3.3 (task #47 `global_ctors` stub cascade) — no longer observed.
+
+Status: **partial** (interpreter GREEN; AOT cross-tier is blocked
+stdlib-wide — see context.md — by a parallel-codegen LLVM SIGSEGV and a
+`MakeVariantTyped` ABI mismatch that miscompiles unit-variant ADTs, so
+`Scope.Singleton.name()` returns the wrong value under `--aot`).
+
 ## Action items landed in this branch
 
 * `core-tests/context/scope/{unit,property,integration,regression}_test.vr`
