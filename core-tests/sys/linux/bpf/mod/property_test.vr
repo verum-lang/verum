@@ -1,0 +1,118 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/mod/property_test.vr
+// =============================================================================
+//
+// Laws over the `core.sys.linux.bpf` UMBRELLA surface.
+//
+// `core/sys/linux/bpf/mod.vr` re-exports its submodules' public names via
+// `public mount .program.ProgramType;` etc. The contract under test: a
+// caller that imports ONLY through the umbrella path gets a fully-usable
+// surface — every re-exported type constructs, dispatches via `match`/`is`,
+// and round-trips through records — without ever naming a submodule.
+//
+// (We deliberately do NOT dual-import the same type via both the umbrella
+// alias and the submodule path: importing one canonical type under two
+// names makes the checker treat the alias as a distinct type, with record
+// layout drift — that is an import-aliasing limitation, not an umbrella
+// property, and is exercised elsewhere. Here we pin the real contract:
+// umbrella-only imports are self-sufficient.)
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.{
+    ProgramType, AttachType, MapType, ProgramDescriptor, Link,
+};
+mount core.sys.common.FileDesc;
+
+// A discriminant over umbrella-imported ProgramType — total `match` proving
+// the umbrella variants dispatch under pattern matching.
+fn prog_code(t: &ProgramType) -> Int {
+    match t {
+        ProgramType.Unspec => 0,
+        ProgramType.Xdp => 6,
+        ProgramType.Tracing => 26,
+        ProgramType.Syscall => 31,
+        _ => -1,
+    }
+}
+
+// =============================================================================
+// Property 1 — umbrella ProgramType constructs + dispatches under match
+// =============================================================================
+
+@test
+fn prop_umbrella_program_type_dispatches() {
+    assert_eq(prog_code(&ProgramType.Xdp), 6);
+    assert_eq(prog_code(&ProgramType.Syscall), 31);
+    assert_eq(prog_code(&ProgramType.Unspec), 0);
+    assert_eq(prog_code(&ProgramType.Tracing), 26);
+}
+
+@test
+fn prop_umbrella_program_type_is_reflexive() {
+    let p = ProgramType.Xdp;
+    assert(p is ProgramType.Xdp);
+    let s = ProgramType.Syscall;
+    assert(s is ProgramType.Syscall);
+}
+
+// =============================================================================
+// Property 2 — umbrella AttachType constructs + dispatches
+// =============================================================================
+
+@test
+fn prop_umbrella_attach_type_dispatches() {
+    let a = AttachType.XdpDevmap;
+    assert(a is AttachType.XdpDevmap);
+    let last = AttachType.TraceKprobeMulti;
+    assert(last is AttachType.TraceKprobeMulti);
+    let mismatch = match a {
+        AttachType.CgroupInetIngress => true,
+        _ => false,
+    };
+    assert(!mismatch);
+}
+
+// =============================================================================
+// Property 3 — umbrella MapType constructs + dispatches
+// =============================================================================
+
+@test
+fn prop_umbrella_map_type_dispatches() {
+    let m = MapType.RingBuf;
+    assert(m is MapType.RingBuf);
+    let bloom = MapType.BloomFilter;
+    assert(bloom is MapType.BloomFilter);
+}
+
+// =============================================================================
+// Property 4 — umbrella record type round-trips (construct + field read)
+// =============================================================================
+
+@test
+fn prop_umbrella_program_descriptor_round_trips() {
+    let d = ProgramDescriptor {
+        fd: FileDesc(3),
+        program_type: ProgramType.Xdp,
+        name: "u".to_text(),
+    };
+    assert(d.fd == FileDesc(3));
+    assert(d.program_type is ProgramType.Xdp);
+    assert_eq(d.name, "u");
+    assert_eq(prog_code(&d.program_type), 6);
+}
+
+@test
+fn prop_umbrella_link_round_trips() {
+    let l = Link {
+        fd: FileDesc(7),
+        program_fd: FileDesc(3),
+        attach_type: AttachType.XdpDevmap,
+    };
+    assert(l.fd == FileDesc(7));
+    assert(l.program_fd == FileDesc(3));
+    assert(l.fd != l.program_fd);
+    assert(l.attach_type is AttachType.XdpDevmap);
+}
+
+fn main() {}

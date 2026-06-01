@@ -1,0 +1,176 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/map/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios for `core.sys.linux.bpf.map`. The kernel CRUD
+// (`create_map` / `map_lookup` / …) needs a Linux host + CAP_BPF, so we
+// exercise the portable surface through the rest of stdlib instead:
+//
+//   * MapDescriptor funneled through Result<_, BpfError> (the wrapper
+//     return shape) and Maybe.
+//   * List<MapType> aggregation + classification.
+//   * Geometry validation against a descriptor (the size contract the
+//     real `map_lookup` enforces).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.map.{MapType, MapConfig, MapDescriptor};
+mount core.sys.linux.bpf.error.BpfError;
+mount core.sys.common.FileDesc;
+
+// A pure stand-in for `create_map` so the integration shape (config in →
+// Result<descriptor, error> out) is testable off-Linux.
+fn fake_create_map(cfg: &MapConfig) -> Result<MapDescriptor, BpfError> {
+    if cfg.max_entries == 0_u32 {
+        Err(BpfError.OsError { errno: 22 })   // EINVAL — zero-capacity map
+    } else {
+        Ok(MapDescriptor {
+            fd: FileDesc(42),
+            map_type: cfg.map_type,
+            key_size: cfg.key_size,
+            value_size: cfg.value_size,
+            max_entries: cfg.max_entries,
+        })
+    }
+}
+
+// Mirror of the size contract `map_lookup` documents: `value_out.len()`
+// must equal `map.value_size`.
+fn value_buffer_fits(d: &MapDescriptor, buf_len: UInt32) -> Result<(), BpfError> {
+    if buf_len == d.value_size {
+        Ok(())
+    } else {
+        Err(BpfError.SizeMismatch {
+            expected: d.value_size as Int,
+            actual: buf_len as Int,
+        })
+    }
+}
+
+// =============================================================================
+// Scenario 1 — config → Result<descriptor> round-trip
+// =============================================================================
+
+@test
+fn integration_create_map_ok_preserves_geometry() {
+    let cfg = MapConfig {
+        map_type: MapType.LruHash,
+        key_size: 8_u32,
+        value_size: 16_u32,
+        max_entries: 1024_u32,
+        name: "conn_track".to_text(),
+        flags: 0_u32,
+    };
+    let r = fake_create_map(&cfg);
+    assert(r.is_ok());
+    let d = r.unwrap();
+    assert(d.map_type is MapType.LruHash);
+    assert_eq(d.key_size, 8_u32);
+    assert_eq(d.value_size, 16_u32);
+    assert_eq(d.max_entries, 1024_u32);
+    assert(d.fd == FileDesc(42));
+}
+
+@test
+fn integration_create_map_zero_entries_is_einval() {
+    let cfg = MapConfig {
+        map_type: MapType.Array,
+        key_size: 4_u32,
+        value_size: 4_u32,
+        max_entries: 0_u32,
+        name: "bad".to_text(),
+        flags: 0_u32,
+    };
+    let r = fake_create_map(&cfg);
+    assert(r.is_err());
+    match r {
+        Ok(_) => panic("expected EINVAL"),
+        Err(e) => assert(e == BpfError.OsError { errno: 22 }),
+    };
+}
+
+// =============================================================================
+// Scenario 2 — value-buffer geometry contract
+// =============================================================================
+
+@test
+fn integration_value_buffer_exact_fit_ok() {
+    let d = MapDescriptor {
+        fd: FileDesc(3),
+        map_type: MapType.Hash,
+        key_size: 4_u32,
+        value_size: 32_u32,
+        max_entries: 64_u32,
+    };
+    assert(value_buffer_fits(&d, 32_u32).is_ok());
+}
+
+@test
+fn integration_value_buffer_mismatch_reports_sizes() {
+    let d = MapDescriptor {
+        fd: FileDesc(3),
+        map_type: MapType.Hash,
+        key_size: 4_u32,
+        value_size: 32_u32,
+        max_entries: 64_u32,
+    };
+    let r = value_buffer_fits(&d, 16_u32);
+    assert(r.is_err());
+    match r {
+        Ok(_) => panic("expected SizeMismatch"),
+        Err(e) => assert(e == BpfError.SizeMismatch { expected: 32, actual: 16 }),
+    };
+}
+
+// =============================================================================
+// Scenario 3 — List<MapType> aggregation + per-class counting
+// =============================================================================
+
+fn is_per_cpu(t: &MapType) -> Bool {
+    match t {
+        MapType.PercpuHash => true,
+        MapType.PercpuArray => true,
+        MapType.LruPercpuHash => true,
+        MapType.PercpuCgroupStorage => true,
+        _ => false,
+    }
+}
+
+@test
+fn integration_count_percpu_maps_in_list() {
+    let maps: List<MapType> = [
+        MapType.Hash, MapType.PercpuHash, MapType.Array,
+        MapType.PercpuArray, MapType.LruPercpuHash, MapType.RingBuf,
+    ];
+    let mut n = 0;
+    let mut i = 0;
+    while i < maps.len() {
+        if is_per_cpu(&maps[i]) {
+            n = n + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(n, 3);
+}
+
+// =============================================================================
+// Scenario 4 — descriptor through Maybe
+// =============================================================================
+
+@test
+fn integration_descriptor_through_maybe_some() {
+    let d = MapDescriptor {
+        fd: FileDesc(7),
+        map_type: MapType.RingBuf,
+        key_size: 0_u32,
+        value_size: 0_u32,
+        max_entries: 4096_u32,
+    };
+    let m: Maybe<MapDescriptor> = Maybe.Some(d);
+    assert(m.is_some());
+    let got = m.unwrap();
+    assert(got.map_type is MapType.RingBuf);
+    assert_eq(got.max_entries, 4096_u32);
+}
+
+fn main() {}

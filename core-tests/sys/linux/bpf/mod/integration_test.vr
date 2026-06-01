@@ -1,0 +1,124 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/mod/integration_test.vr
+// =============================================================================
+//
+// Whole-subsystem scenario assembled entirely through the
+// `core.sys.linux.bpf` umbrella: load a program, create a map, attach a
+// link — using only umbrella-imported names. Exercises that the umbrella
+// re-export surface is self-sufficient for a realistic eBPF userspace flow
+// (kernel calls are stubbed; the typed data-flow is what we pin).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.{
+    BpfError,
+    ProgramType, AttachType, ProgramBytecode, ProgramDescriptor, Link,
+    MapType, MapConfig, MapDescriptor,
+};
+mount core.sys.common.FileDesc;
+
+// =============================================================================
+// Scenario 1 — XDP firewall: program + LPM-trie map + link, all via umbrella
+// =============================================================================
+
+@test
+fn integration_xdp_firewall_assembly_via_umbrella() {
+    // 1. Program bytecode.
+    let mut insns: List<Byte> = List.new();
+    let mut k = 0;
+    while k < 24 {
+        insns.push(0_u8);
+        k = k + 1;
+    }
+    let bc = ProgramBytecode {
+        program_type: ProgramType.Xdp,
+        insns: insns,
+        license: "GPL".to_text(),
+        kernel_version: 0_u32,
+        name: "xdp_fw".to_text(),
+    };
+    assert(bc.program_type is ProgramType.Xdp);
+    assert_eq(bc.insns.len(), 24);
+
+    // 2. A loaded program descriptor.
+    let prog = ProgramDescriptor {
+        fd: FileDesc(40),
+        program_type: bc.program_type,
+        name: bc.name.clone(),
+    };
+
+    // 3. An LPM-trie blocklist map (IP/CIDR lookups).
+    let map_cfg = MapConfig {
+        map_type: MapType.LpmTrie,
+        key_size: 8_u32,
+        value_size: 1_u32,
+        max_entries: 65536_u32,
+        name: "blocklist".to_text(),
+        flags: 1_u32,   // BPF_F_NO_PREALLOC
+    };
+    let map = MapDescriptor {
+        fd: FileDesc(41),
+        map_type: map_cfg.map_type,
+        key_size: map_cfg.key_size,
+        value_size: map_cfg.value_size,
+        max_entries: map_cfg.max_entries,
+    };
+    assert(map.map_type is MapType.LpmTrie);
+
+    // 4. Attach the program to a NIC via an XDP link.
+    let link = Link {
+        fd: FileDesc(42),
+        program_fd: prog.fd,
+        attach_type: AttachType.XdpDevmap,
+    };
+
+    // The link points back at the loaded program; map is independent.
+    assert(link.program_fd == prog.fd);
+    assert(link.program_fd == FileDesc(40));
+    assert(link.fd != map.fd);
+}
+
+// =============================================================================
+// Scenario 2 — error funnel through the umbrella BpfError
+// =============================================================================
+
+fn umbrella_attach(compatible: Bool) -> Result<Link, BpfError> {
+    if compatible {
+        Ok(Link {
+            fd: FileDesc(7),
+            program_fd: FileDesc(3),
+            attach_type: AttachType.CgroupSockOps,
+        })
+    } else {
+        Err(BpfError.InvalidAttachType {
+            program: "Xdp".to_text(),
+            attach: "CgroupSockOps".to_text(),
+        })
+    }
+}
+
+@test
+fn integration_attach_incompatible_yields_invalid_attach_type() {
+    let r = umbrella_attach(false);
+    assert(r.is_err());
+    match r {
+        Ok(_) => panic("expected InvalidAttachType"),
+        Err(e) => match e {
+            BpfError.InvalidAttachType { program, attach } => {
+                assert_eq(program, "Xdp");
+                assert_eq(attach, "CgroupSockOps");
+            },
+            _ => panic("wrong BpfError variant"),
+        },
+    };
+}
+
+@test
+fn integration_attach_compatible_yields_link() {
+    let r = umbrella_attach(true);
+    assert(r.is_ok());
+    let link = r.unwrap();
+    assert(link.attach_type is AttachType.CgroupSockOps);
+}
+
+fn main() {}

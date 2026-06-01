@@ -1,0 +1,72 @@
+// =============================================================================
+// core-tests/sys/linux/mod/regression_test.vr
+// =============================================================================
+//
+// Cross-platform constant-divergence pins. The Linux V-LLSI layer encodes
+// numeric ABI constants that DIFFER from the Darwin/BSD equivalents; a
+// regression that copies a Darwin value into the Linux table (or vice versa)
+// silently miscompiles every syscall on one platform. These pins lock the
+// Linux-specific values. See `core-tests/sys/darwin/*` for the Darwin
+// counterparts. Divergence table sourced from the round-16 cross-platform
+// catalogue (memory: sys platform conformance).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.errno.{EAGAIN, ENOENT};
+mount core.sys.linux.mem.{MAP_ANON, PROT_READ};
+mount core.sys.linux.time.{CLOCK_MONOTONIC, CLOCK_BOOTTIME};
+mount core.sys.linux.tls.{MAX_CONTEXT_SLOTS, STACK_GUARD_MAGIC};
+
+// REGRESSION: Linux EAGAIN == 11 (Darwin == 35). A drift here breaks
+// non-blocking-IO retry detection on Linux.
+@test
+fn regression_linux_eagain_is_11_not_darwin_35() {
+    assert_eq(EAGAIN, 11);
+    assert(EAGAIN != 35);   // 35 is the Darwin value — must NOT leak here
+}
+
+// REGRESSION: Linux MAP_ANON == 0x20 (Darwin == 0x1000). A drift breaks
+// every anonymous mmap on Linux.
+@test
+fn regression_linux_map_anon_is_0x20_not_darwin_0x1000() {
+    assert_eq(MAP_ANON, 0x20);
+    assert(MAP_ANON != 0x1000);
+}
+
+// REGRESSION: Linux CLOCK_MONOTONIC == 1 (Darwin == 6). A drift makes every
+// monotonic clock read hit the wrong clock id.
+@test
+fn regression_linux_clock_monotonic_is_1_not_darwin_6() {
+    assert_eq(CLOCK_MONOTONIC, 1);
+    assert(CLOCK_MONOTONIC != 6);
+}
+
+// REGRESSION: PROT_READ is the universal POSIX value 1 on both platforms —
+// pin it so a future "harmonisation" edit doesn't accidentally change it.
+@test
+fn regression_linux_prot_read_is_posix_universal_one() {
+    assert_eq(PROT_READ, 1);
+}
+
+// REGRESSION: ENOENT == 2 is POSIX-universal; pin against drift.
+@test
+fn regression_linux_enoent_is_two() {
+    assert_eq(ENOENT, 2);
+}
+
+// REGRESSION: CLOCK_BOOTTIME is Linux-specific (id 7) with no portable
+// Darwin equivalent (Darwin uses CLOCK_MONOTONIC for boot-inclusive time).
+@test
+fn regression_linux_clock_boottime_is_7() {
+    assert_eq(CLOCK_BOOTTIME, 7);
+}
+
+// REGRESSION: cross-platform-invariant TLS constants — MAX_CONTEXT_SLOTS and
+// the stack-guard canary are identical across all V-LLSI targets by design.
+@test
+fn regression_tls_constants_cross_platform_invariant() {
+    assert_eq(MAX_CONTEXT_SLOTS, 256);
+    assert_eq(STACK_GUARD_MAGIC, 0xDEAD_BEEF_CAFE_BABE as USize);
+}
+
+fn main() {}

@@ -1,0 +1,94 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/map/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect. Never deleted — each becomes a guardrail
+// against re-regression.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.map.{MapType, MapConfig, MapDescriptor};
+mount core.sys.common.FileDesc;
+
+// REGRESSION (D6 — cross-tier method-resolution divergence): the original
+// unit tests asserted `d.fd.raw()`. Two cross-tier divergences collide on
+// FileDesc field-value readback (FileDesc is a `(Int)` newtype that unboxes
+// to Int, losing its type at the call site — NEWTYPE-UNBOX-1, catalogue
+// §12):
+//   * `d.fd.raw()` — interp FABRICATES via the int-receiver intercept
+//     (`"raw" => from_i64(v)`); AOT REJECTS (`raw` not a FileDesc method).
+//   * `d.fd.as_raw()` — AOT resolves the real method, but interp PANICS
+//     (`as_raw not found on receiver of runtime kind Int` — 6 ambiguous
+//     `.as_raw` candidates) because the field read unboxed away the type.
+// Resolution: compare descriptors with the type-aware `==` OPERATOR
+// (`d.fd == FileDesc(N)`) — `compile_binary` keeps both operands typed as
+// FileDesc and lowers to a primitive Int compare, sidestepping the unboxed
+// method-dispatch entirely. Tier-agnostic by construction.
+@test
+fn regression_filedesc_value_via_eq_not_method() {
+    let d = MapDescriptor {
+        fd: FileDesc(7),
+        map_type: MapType.Hash,
+        key_size: 4_u32,
+        value_size: 8_u32,
+        max_entries: 1024_u32,
+    };
+    assert(d.fd == FileDesc(7));
+}
+
+// REGRESSION (field-drift class): map_type must survive MapDescriptor
+// construction without index-shift. Past field-access OOB defects (see
+// use_after_free_error_field_shift) had reads land on the wrong slot.
+@test
+fn regression_map_type_no_field_drift_through_descriptor() {
+    let d = MapDescriptor {
+        fd: FileDesc(0),
+        map_type: MapType.LpmTrie,
+        key_size: 8_u32,
+        value_size: 4_u32,
+        max_entries: 1_000_000_u32,
+    };
+    match d.map_type {
+        MapType.LpmTrie => (),
+        _ => panic("map_type drifted through record construction"),
+    };
+    // The numeric fields after map_type must also read back exactly.
+    assert_eq(d.key_size, 8_u32);
+    assert_eq(d.value_size, 4_u32);
+    assert_eq(d.max_entries, 1_000_000_u32);
+}
+
+// REGRESSION (field independence): writing one MapConfig field must not
+// bleed into siblings of the same UInt32 width.
+@test
+fn regression_map_config_fields_independent() {
+    let cfg = MapConfig {
+        map_type: MapType.Array,
+        key_size: 11_u32,
+        value_size: 22_u32,
+        max_entries: 33_u32,
+        name: "indep".to_text(),
+        flags: 44_u32,
+    };
+    assert_eq(cfg.key_size, 11_u32);
+    assert_eq(cfg.value_size, 22_u32);
+    assert_eq(cfg.max_entries, 33_u32);
+    assert_eq(cfg.flags, 44_u32);
+    assert_eq(cfg.name, "indep");
+}
+
+// REGRESSION (high-ordinal variant dispatch): variants near the end of a
+// 30-variant ADT must `match`/`is` correctly — a small-tag truncation bug
+// would alias BloomFilter (ordinal 29) onto a low variant.
+@test
+fn regression_high_ordinal_variant_dispatch() {
+    let t = MapType.BloomFilter;
+    assert(t is MapType.BloomFilter);
+    match t {
+        MapType.Hash => panic("BloomFilter aliased onto Hash"),
+        MapType.BloomFilter => (),
+        _ => panic("BloomFilter matched the wrong arm"),
+    };
+}
+
+fn main() {}

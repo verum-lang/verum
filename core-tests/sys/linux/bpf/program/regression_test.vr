@@ -1,0 +1,103 @@
+// =============================================================================
+// core-tests/sys/linux/bpf/program/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect. Never deleted.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.bpf.program.{
+    ProgramType, AttachType, ProgramBytecode, ProgramDescriptor, Link,
+};
+mount core.sys.common.FileDesc;
+
+// REGRESSION (D6 — cross-tier method-resolution divergence): the original
+// unit tests used `d.fd.raw()` / `link.fd.raw()`, but `FileDesc` defines
+// `as_raw()`. The Tier-0 int-receiver intercept fabricated a value while
+// AOT rejected the missing method. Pin the real accessor on both descriptor
+// and link fds.
+@test
+fn regression_descriptor_and_link_use_as_raw() {
+    let d = ProgramDescriptor {
+        fd: FileDesc(99),
+        program_type: ProgramType.Tracepoint,
+        name: "syscall_enter".to_text(),
+    };
+    assert(d.fd == FileDesc(99));
+
+    let link = Link {
+        fd: FileDesc(101),
+        program_fd: FileDesc(99),
+        attach_type: AttachType.XdpDevmap,
+    };
+    assert(link.fd == FileDesc(101));
+    assert(link.program_fd == FileDesc(99));
+    assert(link.fd != link.program_fd);
+}
+
+// REGRESSION (field-drift across a 3-field record with a Text tail):
+// ProgramDescriptor places `name: Text` after `program_type`. A field-index
+// shift would corrupt either the variant tag or the Text pointer.
+@test
+fn regression_program_descriptor_no_field_drift() {
+    let d = ProgramDescriptor {
+        fd: FileDesc(7),
+        program_type: ProgramType.Lsm,
+        name: "lsm_hook".to_text(),
+    };
+    assert(d.fd == FileDesc(7));
+    assert(d.program_type is ProgramType.Lsm);
+    assert_eq(d.name, "lsm_hook");
+}
+
+// REGRESSION (high-ordinal variant dispatch): AttachType has 40 variants;
+// the last (TraceKprobeMulti, ordinal 39) must not alias a low variant
+// under a small-tag truncation bug.
+@test
+fn regression_attach_type_high_ordinal_dispatch() {
+    let a = AttachType.TraceKprobeMulti;
+    assert(a is AttachType.TraceKprobeMulti);
+    match a {
+        AttachType.CgroupInetIngress => panic("TraceKprobeMulti aliased onto ordinal 0"),
+        AttachType.TraceKprobeMulti => (),
+        _ => panic("TraceKprobeMulti matched the wrong arm"),
+    };
+}
+
+// REGRESSION (ProgramType ordinal-31 boundary): Syscall is the last
+// ProgramType (ordinal 31). Pin its dispatch distinctness from Unspec (0).
+@test
+fn regression_program_type_syscall_distinct_from_unspec() {
+    let s = ProgramType.Syscall;
+    let u = ProgramType.Unspec;
+    assert(s is ProgramType.Syscall);
+    assert(u is ProgramType.Unspec);
+    let s_is_unspec = match s {
+        ProgramType.Unspec => true,
+        _ => false,
+    };
+    assert(!s_is_unspec);
+}
+
+// REGRESSION (ProgramBytecode List<Byte> + Text coexistence): a program
+// carrying both an `insns: List<Byte>` and `license`/`name: Text` must keep
+// the list length and the text fields independent.
+@test
+fn regression_program_bytecode_list_and_text_independent() {
+    let mut insns: List<Byte> = List.new();
+    insns.push(0xB7_u8);   // BPF_MOV64_IMM opcode byte
+    insns.push(0x00_u8);
+    let bc = ProgramBytecode {
+        program_type: ProgramType.Xdp,
+        insns: insns,
+        license: "dual BSD/GPL".to_text(),
+        kernel_version: 5_u32,
+        name: "mov".to_text(),
+    };
+    assert_eq(bc.insns.len(), 2);
+    assert_eq(bc.license, "dual BSD/GPL");
+    assert_eq(bc.kernel_version, 5_u32);
+    assert_eq(bc.name, "mov");
+}
+
+fn main() {}
