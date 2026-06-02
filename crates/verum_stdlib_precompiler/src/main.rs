@@ -54,7 +54,19 @@ fn run() -> Result<()> {
         );
     }
 
-    let cfg = verum_compiler::precompile::PrecompileConfig::for_workspace(&workspace_root)?;
+    let mut cfg = verum_compiler::precompile::PrecompileConfig::for_workspace(&workspace_root)?;
+    // Per-target-dir isolation: when build.rs sets VERUM_PRECOMPILE_OUT_DIR
+    // (to `<target_root>/precompiled-stdlib`), write the archive there
+    // instead of the workspace's default `target/precompiled-stdlib`. This
+    // keeps concurrent builds with distinct CARGO_TARGET_DIRs (e.g. an
+    // isolated `verum` build) from racing on / clobbering a single shared
+    // `runtime.vbca`. The sibling `runtime.core_metadata` follows the
+    // archive's directory automatically (written via `with_extension`).
+    if let Ok(out_dir) = std::env::var("VERUM_PRECOMPILE_OUT_DIR")
+        && !out_dir.is_empty()
+    {
+        cfg.output_path = PathBuf::from(out_dir).join("runtime.vbca");
+    }
     let result = verum_compiler::precompile::precompile_stdlib(&cfg)
         .context("precompile_stdlib failed")?;
 
