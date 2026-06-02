@@ -188,14 +188,21 @@ fn main() {
     //   * STDLIB_RUNTIME_VBC_PATH — `embedded_stdlib_vbc.rs`
     //   * STDLIB_RUNTIME_CORE_METADATA_PATH — `embedded_stdlib_metadata.rs`
     // ========================================================================
-    let precompile_archive = project_root
-        .join("target")
-        .join("precompiled-stdlib")
-        .join("runtime.vbca");
-    let checksum_path = project_root
-        .join("target")
-        .join("precompiled-stdlib")
-        .join("runtime.vbca.checksum");
+    // Per-target-dir isolation (fixes concurrent-build archive clobbering):
+    // derive the ACTIVE target root from OUT_DIR so a build with a distinct
+    // CARGO_TARGET_DIR (e.g. an isolated `verum` build) gets its OWN
+    // precompiled-stdlib archive instead of racing on / clobbering the
+    // shared `<project_root>/target/precompiled-stdlib/runtime.vbca`. For
+    // the default build (no custom target dir) this resolves to exactly
+    // `<project_root>/target`, so concurrent default-target sessions see
+    // ZERO behavior change. Without this, an in-source codegen fix that
+    // re-bakes a correct archive in one target dir can be invisible to a
+    // build embedding the stale archive a sibling build left behind.
+    let precompile_dir = derive_target_root(&out_dir)
+        .unwrap_or_else(|| project_root.join("target"))
+        .join("precompiled-stdlib");
+    let precompile_archive = precompile_dir.join("runtime.vbca");
+    let checksum_path = precompile_dir.join("runtime.vbca.checksum");
 
     // T3: blake3 checksum + auto-refresh.
     //
@@ -245,6 +252,10 @@ fn main() {
                 .current_dir(&project_root)
                 .env("VERUM_NO_AUTO_PRECOMPILE", "1") // prevent recursion
                 .env("CARGO_TARGET_DIR", &nested_target) // belt-and-braces
+                // Direct the archive at THIS build's target root (matches
+                // where we read+embed it below), so isolated builds don't
+                // clobber the shared `<project_root>/target` archive.
+                .env("VERUM_PRECOMPILE_OUT_DIR", &precompile_dir)
                 .status();
             match status {
                 Ok(s) if s.success() => {
@@ -278,10 +289,7 @@ fn main() {
         }
         println!("cargo:rerun-if-changed={}", checksum_path.display());
     }
-    let precompile_metadata = project_root
-        .join("target")
-        .join("precompiled-stdlib")
-        .join("runtime.core_metadata");
+    let precompile_metadata = precompile_dir.join("runtime.core_metadata");
     let runtime_vbc_path = Path::new(&out_dir).join("stdlib_runtime.vbca");
     let runtime_metadata_path = Path::new(&out_dir).join("stdlib_runtime.core_metadata");
     if precompile_archive.is_file() {
@@ -1226,6 +1234,48 @@ const PRECOMPILE_SCHEMA_VERSION: &str =
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].
 /// Stable across runs (sorted iteration), so two build script
 /// invocations on the same `core/` produce the same hex digest.
+/// Derive the active cargo target root from `OUT_DIR`.
+///
+/// `OUT_DIR` has the shape
+/// `<target_root>[/<triple>]/<profile>/build/<pkg-hash>/out`, so the
+/// target root is the directory just above `<profile>`, stepping over
+/// an optional `--target <triple>` directory. Returns `None` when the
+/// shape is unrecognised; callers fall back to `<project_root>/target`.
+///
+/// This isolates the precompiled-stdlib archive per target dir: a build
+/// with a custom `CARGO_TARGET_DIR` gets its own archive instead of
+/// racing on the shared workspace `target/`. For the default build the
+/// result is exactly `<project_root>/target` (verified: `build` sits at
+/// `.../target/<profile>/build/...`, so the dir above `<profile>` is
+/// `.../target`).
+fn derive_target_root(out_dir: &str) -> Option<std::path::PathBuf> {
+    let comps: Vec<std::ffi::OsString> = Path::new(out_dir)
+        .components()
+        .map(|c| c.as_os_str().to_os_string())
+        .collect();
+    // Locate the cargo build-script dir component (`.../build/<pkg>/out`).
+    let build_idx = comps.iter().rposition(|c| c == "build")?;
+    // `build_idx - 1` is `<profile>`; everything strictly above it is
+    // `<target_root>` or `<target_root>/<triple>`. Guard against underflow.
+    if build_idx < 2 {
+        return None;
+    }
+    let mut root = std::path::PathBuf::new();
+    for c in &comps[..build_idx - 1] {
+        root.push(c);
+    }
+    // Step over an optional target-triple directory (e.g.
+    // `aarch64-apple-darwin`): a non-`target` leaf with >=2 dashes.
+    if let Some(name) = root.file_name().and_then(|n| n.to_str())
+        && name != "target"
+        && name.matches('-').count() >= 2
+        && let Some(parent) = root.parent()
+    {
+        return Some(parent.to_path_buf());
+    }
+    Some(root)
+}
+
 /// Used as the cache key for the `runtime.vbca` +
 /// `runtime.core_metadata` artefact pair — when this digest matches
 /// the stored value beside the archive, the artefacts are reused
