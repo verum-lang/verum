@@ -99,36 +99,39 @@ labels). Add it and pin the round-trip law in property_test.vr.
 
 **Effort:** ~30 min impl + test.
 
-### §3.5 `Row.get_index` / `Row.get` SIGSEGV — archive-method `Maybe<&T>` return (NEW, HIGH)
+### §3.5 Archive-loaded `Row` — two facets (NEW, HIGH)
 
-Calling `Row.get_index(n)` (or `Row.get(&name)`) from user code and
-consuming the result **SIGSEGVs the compiler** during execution-compile
-(signal 11, hard corruption — not a clean panic). Both methods return
-`Maybe<&Text>` borrowed from `self.values[i].as_ref()`.
+**Facet #1 — `Row.get_index(n)` / `Row.get(&name)` method-return of
+`Maybe<&Text>` — CLOSED 2026-06-03.** Calling these and consuming the
+result used to SIGSEGV the compiler during execution-compile (both return
+`Maybe<&Text>` borrowed from `self.values[i].as_ref()`). It is **closed**
+by codegen work that landed between 2026-06-01 and `a1293ff52` (the
+record-allocation / `Self {}`-literal / transparent-ref family — same
+class as [[btree_pattern_match_ref_generic_class]] / CLASS-9 / D2).
+Validated GREEN on a build of that codegen: the `get_index(0) is
+Maybe.Some` regression pin **and** the three `unit_test.vr` `get_index`
+tests (which `match` + dereference the `&Text` payload, `assert_eq(*s,
+…)`) all pass. All four were **un-`@ignore`'d**.
 
-Triangulation (each isolated, `--interp --test-threads 1`):
+**Facet #2 — reading `Row`'s OWN fields (`r.columns` / `r.values`) from
+USER code — OPEN (refined 2026-06-03).** This is a DISTINCT defect (it is
+now a clean field-OOB panic, not a SIGSEGV): `field index 4 (offset 40)
+exceeds object data size 16 type='Row'`. ROOT CAUSE: the bare name `Row`
+COLLIDES with the variant `StepResult.Row(reg_start, n_cols)` (defined in
+`core.database.sqlite.native.l4_vdbe.interpreter`). `let r = Row {
+columns, values }` records `variable_type_names["r"] = "StepResult"` (the
+variant's parent), so every later `r.<field>` read resolves the field
+against StepResult's absent layout → a GLOBAL field-intern index (4) →
+OOB. The construction itself is correct (uses the literal path `Row`);
+only the let-binding's recorded type is wrong. NOTE: guarding the
+`extract_expr_type_name`/`infer_expr_type_name` `Record` arms to prefer
+the standalone record type did NOT change the recorded type — the
+"StepResult" assignment originates from a path still being located (the
+`Record`-arm edits are not the operative site). The `mod/unit_test.vr`
+umbrella test works around this by reading only `qr.rows.len()`.
 
-| construct | result |
-|---|---|
-| `Maybe.Some(x).as_ref() is Maybe.Some` | OK |
-| `(xs: List<Maybe<Text>>)[0].as_ref() is Maybe.Some` | OK |
-| LOCAL record `Bag { items }` w/ `at(i){ self.items[i].as_ref() }`, consumed | OK |
-| archive-loaded `Row.get_index(0) is Maybe.Some` | **SIGSEGV** |
-| same via `match` | **SIGSEGV** |
-
-So the trigger is the **cross-module / archive-loaded method-return of a
-reference-bearing ADT** — NOT `Maybe<&T>` per se, NOT List-of-Maybe
-indexing, NOT the `is`-vs-`match` consumer. Same family as
-[[btree_pattern_match_ref_generic_class]] / CLASS-9 / D2 (recent commits
-64607bb8e, 1e75b40ad). `Display for Row` is also affected (it does the
-same `self.values[i].as_ref()`).
-
-Pinned in `regression_test.vr` (`regression_row_get_index_bounds_guarded`,
-`@ignore`'d) and the three `unit_test.vr` `get_index` tests are `@ignore`'d.
-**Verified an `@ignore`'d test never trips the crash** (it is not
-execution-compiled). Fundamental fix is VBC codegen of archive-method
-ref-ADT returns + a compiler rebuild — deferred (the codegen crate is
-actively edited by a concurrent session; rebuild is hazardous this cycle).
+Pinned: none for facet #2 yet (the umbrella test uses the workaround);
+facet #1's four tests are now live.
 
 ### §3.6 `f"{Type.Variant}"` does not dispatch `Display` — **CLOSED 2026-06-01**
 
