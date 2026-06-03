@@ -85,11 +85,17 @@ belongs at the bake/archive layer, not in per-feature codegen.
      `Type::CONST`, then fell through to `MakeVariant(tag =
      intern_string("Type.CONST"))` (garbage tag → variant collision). Now
      probes `::`, `.`, `.suffix`. Fixed.
-   - **(3+4) OPEN** — `register_module_filtered` still doesn't surface
-     PRIMITIVE-type (Int/Float) consts even with `Int`+`Int.MIN` in
-     `wanted`, so `Int.MIN`/`MAX`/`BITS` (~6 tests) aren't green yet. Next:
-     trace which modules it iterates; check if built-in-type consts take a
-     non-module archive path.
+   - **(3) FIXED** — the const DID load (registered `core.base.Int.MIN`,
+     `intrinsic=__const_val_…`, `is_const=true`), but `compile_field_access`'s
+     variant arms (`expressions.rs` ~16349/16373) then `lookup_function`'d
+     it and — since it now resolved — treated the CONST as a variant ctor
+     (`compile_variant_constructor_hinted` → garbage `intern_string` tag).
+     Guarded both arms with `!fi.is_const` so consts fall to the
+     static-const / `__const_val_` resolution. Commit `21477380f`.
+   - **RESULT: FIXED ✓** — 6/6 conformance GREEN; **primitives 257→279
+     (+22 base tests)**. Residual (minor, separate): `f"{Int.MIN}"` f-string
+     interpolation still mis-resolves (the value is correct everywhere
+     else — comparisons, arithmetic, asserts, methods).
 
 3. **4 crashers** (env/iterator SIGSEGV, memory SIGTRAP, log timeout):
    codegen/exec crashes — highest severity. `env` isolated to
