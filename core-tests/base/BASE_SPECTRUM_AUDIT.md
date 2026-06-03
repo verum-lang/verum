@@ -74,9 +74,22 @@ belongs at the bake/archive layer, not in per-feature codegen.
    cross-module refs as string IDs / emit name-deferred Calls so the load
    remap resolves them. High leverage; large; needs re-bake validation.
 
-2. **Const inline-value propagation through the test-compile load path**
-   (Int.MIN + 0.0.to_bits sister): thread `intrinsic_name=__const_val_<N>`
-   through core_metadata / the cached single_module ctx. ~15 tests.
+2. **`Type.CONST` associated-const access** (REFRAMED 2026-06-03 via
+   `--emit-vbc` — NOT truncation; the const access resolved to an UNRELATED
+   variant, e.g. `Int.MIN` → SQL-lexer `KwAll`). A 4-layer chain; layers
+   1+2 FIXED (commit `691fb1043`, **+5 base tests**: ordering/maybe/result):
+   - **(1) harvest miss** — `collect_referenced_function_names`'s `Field`
+     arm never harvested `<base>.<field>`, so `Int.MIN` was absent from the
+     lazy-load `wanted` set. Fixed.
+   - **(2) consumption key mismatch** — `compile_field_access` probed only
+     `Type::CONST`, then fell through to `MakeVariant(tag =
+     intern_string("Type.CONST"))` (garbage tag → variant collision). Now
+     probes `::`, `.`, `.suffix`. Fixed.
+   - **(3+4) OPEN** — `register_module_filtered` still doesn't surface
+     PRIMITIVE-type (Int/Float) consts even with `Int`+`Int.MIN` in
+     `wanted`, so `Int.MIN`/`MAX`/`BITS` (~6 tests) aren't green yet. Next:
+     trace which modules it iterates; check if built-in-type consts take a
+     non-module archive path.
 
 3. **4 crashers** (env/iterator SIGSEGV, memory SIGTRAP, log timeout):
    codegen/exec crashes — highest severity. `env` isolated to
