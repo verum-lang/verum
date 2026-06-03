@@ -219,7 +219,7 @@ fn integration_attenuate_is_idempotent_under_self() {
     let presets: List<UInt16> = [
         CAP_OWNED, CAP_READ_ONLY, CAP_READ_WRITE,
         CAP_BORROW_SHARED, CAP_BORROW_MUT, CAP_ALL,
-    ].to_list();
+    ];
     let mut i = 0;
     while i < presets.len() {
         let p = presets[i];
