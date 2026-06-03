@@ -154,31 +154,21 @@ fn regression_auth_user_has_role_contains_dispatch() {
 }
 
 // =============================================================================
-// REGRESSION (NEW DEFECT — [[archive_method_maybe_ref_return_sigsegv]]):
-// Calling `Row.get_index(n)` and consuming its result SIGSEGVs the compiler
-// during execution-compile (signal 11, hard memory corruption — not a clean
-// panic). `Row` is an ARCHIVE-LOADED stdlib type; `get_index` returns
-// `Maybe<&Text>` borrowed from `self.values[index].as_ref()`.
+// REGRESSION (archive-loaded `Row`, two facets — BOTH CLOSED, see audit §3.5):
 //
-// Minimal triangulation (all under `verum test --interp --test-threads 1`):
-//   * `Maybe.Some(x).as_ref() is Maybe.Some`                       → OK
-//   * `(xs: List<Maybe<Text>>)[0].as_ref() is Maybe.Some`          → OK
-//   * LOCAL record `Bag { items: List<Maybe<Text>> }` with method
-//     `at(i) -> Maybe<&Text> { self.items[i].as_ref() }`, consumed → OK
-//   * ARCHIVE-LOADED `Row.get_index(0) is Maybe.Some`              → SIGSEGV
-//   * ARCHIVE-LOADED `Row.get_index(0)` via `match`               → SIGSEGV
+// Facet #1: `Row.get_index(n)` / `Row.get(&name)` return `Maybe<&Text>`
+// borrowed from `self.values[i].as_ref()`. Calling + consuming them used to
+// SIGSEGV the compiler at execution-compile. Closed by codegen between
+// 2026-06-01 and a1293ff52 (record-alloc / Self-literal / transparent-ref).
 //
-// So the trigger is NOT `Maybe<&T>`, NOT List-of-Maybe indexing, and NOT the
-// `is`-vs-`match` consumer — it is specifically the CROSS-MODULE / archive-
-// loaded method-return of a reference-bearing ADT. Same family as
-// [[btree_pattern_match_ref_generic_class]] / CLASS-9 / D2 cross-module
-// field-layout (recent commits 64607bb8e / 1e75b40ad). Also affects
-// `Row.get(&Text)` and `Display for Row` (both do `self.values[i].as_ref()`).
-//
-// @ignore'd so the file still parses + runs its live tests (an @ignore'd
-// test is never execution-compiled, so it cannot trip the crash — verified).
-// Fundamental fix is VBC codegen of archive-method ref-ADT returns + rebuild;
-// tracked in audit.md §3.5.
+// Facet #2: reading `Row`'s OWN fields (`r.columns` / `r.values`) panicked
+// field-OOB. ROOT CAUSE: the bare name `Row` collides with the variant
+// `StepResult.Row(reg_start, n_cols)` (core.database.sqlite). The let binding
+// was typed `StepResult` (the variant's parent — matched by arg COUNT in
+// `find_variant_parent_type_by_args`), shifting every later `r.<field>` read
+// to a global field-intern index. CLOSED 2026-06-03: that resolver now
+// field-NAME-verifies the variant match (`columns,values` ≠ `reg_start,n_cols`
+// → the literal is the record, not the variant).
 // =============================================================================
 
 @test
@@ -190,6 +180,20 @@ fn regression_row_get_index_bounds_guarded() {
     assert(r.get_index(0) is Maybe.Some);
     assert(r.get_index(1) is Maybe.None);
     assert(r.get_index(-1) is Maybe.None);
+}
+
+// Facet #2 pin: a bare `Row { .. }` literal whose head collides with the
+// `StepResult.Row` variant must be typed as the RECORD, so direct field reads
+// resolve to the record's own layout (columns@0, values@1) — not a global
+// field-intern index. Regresses the field-OOB panic if the collision returns.
+@test
+fn regression_row_direct_field_read_after_collision() {
+    let r = Row {
+        columns: ["name".clone(), "email".clone()],
+        values: [Maybe.Some("alice".clone())],
+    };
+    assert_eq(r.columns.len(), 2);
+    assert_eq(r.values.len(), 1);
 }
 
 // =============================================================================

@@ -136,16 +136,15 @@ fn test_umbrella_auth_user_has_role() {
 
 @test
 fn test_umbrella_row_and_query_result() {
-    // Row/QueryResult are archive-loaded. Two current language defects
-    // (both pinned in standard/, CLASS-9 / codegen family) constrain what
-    // we can read from USER code:
-    //   * `Row.get_index(..)` returns `Maybe<&Text>` → archive-method-return
-    //     SIGSEGV ([[archive_method_maybe_ref_return_sigsegv]], §3.5).
-    //   * reading Row's OWN fields (`r.columns`/`r.values`) cross-module
-    //     hits the field-index shift (`field index 4 ... type='List'`).
-    // QueryResult.rows (field 0) DOES round-trip correctly, so we exercise
-    // umbrella reachability via construction + `qr.rows.len()`.
+    // Row/QueryResult are archive-loaded. Both prior defects are now closed:
+    //   * `Row.get_index(..)` returning `Maybe<&Text>` (§3.5 facet #1), and
+    //   * reading Row's OWN fields (`r.columns`/`r.values`) — the bare-name
+    //     `Row` record vs `StepResult.Row` variant collision that mis-typed
+    //     the binding (§3.5 facet #2).
+    // So exercise umbrella reachability with direct field reads.
     let r = Row { columns: ["a".clone()], values: [Maybe.Some("1".clone())] };
+    assert_eq(r.columns.len(), 1);
+    assert_eq(r.values.len(), 1);
     let qr = QueryResult { rows: [r], rows_affected: 1 };
     assert_eq(qr.rows.len(), 1);
 }
