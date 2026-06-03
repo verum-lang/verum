@@ -72,37 +72,65 @@ or accept the trade-off; the current state is half-applied.
 
 **Effort:** trivial (~10 min) once decided.
 
-### §3.4 Display-interpolation regression — `f"{err}"` skips Display (NEW)
+### §3.4 Display-interpolation regression — `f"{err}"` skips Display — **CLOSED**
 
-`f"{err}"` for a `ContextError` renders the DEFAULT variant rendering
+`f"{err}"` for a `ContextError` rendered the DEFAULT variant rendering
 (`NotFound(Cache)`) instead of dispatching `Display for ContextError`
-(which calls `message()` → `"Context 'Cache' not found ..."`). Verified:
-`f"{err}"` → `"NotFound(Cache)"`, `err.message()` → the full message.
-Per-variant inconsistent under the current binary (not_found /
-type_mismatch / circular_dependency fail; not_provided / scope_violation
-pass), so it is flaky Display-dispatch, not a uniform fallback. Same
-family as [[fstring_direct_variant_ctor_display_dispatch]] (standard
-§3.6) — broadened: for record-variant ADTs even `f"{bound_var}"` can
-miss. **Was GREEN in May**; a recent codegen change regressed
-Display-interpolation dispatch. 5 affected tests `@ignore`'d (1 unit,
-3 property §5, 1 integration); tests asserting only field text stay live
-(the default rendering includes the fields). Fix = codegen Display-
-dispatch in interpolation + rebuild (blocked this cycle).
+(which calls `message()` → `"Context 'Cache' not found ..."`).
+Per-variant inconsistent under the May binary (not_found /
+type_mismatch / circular_dependency failed; not_provided /
+scope_violation passed) — same family as
+[[fstring_direct_variant_ctor_display_dispatch]] (standard §3.6),
+broadened: for record-variant ADTs even `f"{bound_var}"` missed.
 
-## Conformance status (2026-06-01, interpreter / `--test-threads 1`)
+**ROOT CAUSE (found 2026-06-03):** the *variable*'s recorded type was
+the VARIANT, not the enclosing ADT. `let e = ContextError.NotFound {
+... }` was compiled through `extract_expr_type_name` (which
+`compile_let` consults FIRST, before `infer_expr_type_name`); that
+function's `ExprKind::Record` arm keyed on the *bare last* path
+segment via `lookup_function_in_scope` / `find_variant_parent_type_by_args`,
+both of which MISS for record-variant ADTs → it returned `"NotFound"`.
+So `variable_type_names` stored `e: NotFound`, and `f"{e}"` Display
+dispatch looked up the nonexistent `NotFound.fmt`, found no signal, and
+fell back to the default `NotFound(..)` rendering. (The "per-variant
+flaky" appearance was an artifact of which variants happened to collide
+with another type's bare name in the first-wins variant table.)
 
-**51 passed / 0 failed / 5 ignored.** The May multi-field `Eq` failures
+**FIX:** both `extract_expr_type_name` and `infer_expr_type_name`
+(`crates/verum_vbc/src/codegen/expressions.rs`, `ExprKind::Record`
+arms) now resolve the ENCLOSING type from the *qualified* 2nd-to-last
+path segment via `find_variant_in_type_descriptors(type, variant)`
+BEFORE the bare-name fallbacks. For `ContextError.NotFound { ... }`
+that yields `"ContextError"`, so the Display gate finds
+`ContextError.fmt` and routes through `message()`. Validated: trace
+`type='ContextError'` → `lookup_function('ContextError.fmt') => true`
+→ EMITTING; all 5 pins GREEN (`test_display_not_found_via_format_literal`,
+`property_display_equals_message_{not_found,type_mismatch,circular_dependency}`,
+`integration_display_composes_in_larger_message`); 187/0/4 across
+error+standard+scope, zero regressions.
+
+## Conformance status (2026-06-03, interpreter / `--test-threads 1`)
+
+**All GREEN, 0 ignored.** The May multi-field `Eq` failures
 (`test_eq_same_not_found` / `test_eq_same_type_mismatch`) are **CLOSED**
-(the qualified-variant `Eq` fix in `error.vr` landed). `message()`,
-`Debug`, the full `Eq` matrix, variant disjointness, and Result/Maybe/List
-wrapping are GREEN. Only the 5 Display-interpolation tests (§3.4) are
-`@ignore`'d. Status: **partial** (AOT cross-tier blocked stdlib-wide).
+(the qualified-variant `Eq` fix in `error.vr` landed). The 5
+Display-interpolation tests (§3.4) are **CLOSED** (the
+`extract_expr_type_name`/`infer_expr_type_name` qualified-variant-record
+type-resolution fix) and **un-`@ignore`'d**. `message()`, `Debug`, the
+full `Eq` matrix, variant disjointness, Result/Maybe/List wrapping, and
+`f"{err}"` Display interpolation are all GREEN. Status: **complete**
+(interpreter); AOT cross-tier still blocked stdlib-wide.
 
 ## Action items landed in this branch
 
 * `core-tests/context/error/{unit,property,integration,regression}_test.vr`
-  — first conformance suite for the module; 5 Display-interpolation tests
-  `@ignore`'d (§3.4).
+  — first conformance suite for the module; the 5 Display-interpolation
+  tests (§3.4) were `@ignore`'d, then **un-`@ignore`'d** once the codegen
+  fix landed.
+* `crates/verum_vbc/src/codegen/expressions.rs` — §3.4 fix:
+  `extract_expr_type_name` + `infer_expr_type_name` `ExprKind::Record`
+  arms resolve the enclosing type of a qualified variant-record literal
+  via `find_variant_in_type_descriptors`.
 * `core-tests/context/error/audit.md` — this file.
 
 ## Action items deferred
