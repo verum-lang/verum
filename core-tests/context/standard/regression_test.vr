@@ -181,7 +181,6 @@ fn regression_auth_user_has_role_contains_dispatch() {
 // tracked in audit.md §3.5.
 // =============================================================================
 
-@ignore("[[archive_method_maybe_ref_return_sigsegv]] — Row.get_index returns Maybe<&Text> via self.values[i].as_ref(); archive-loaded method-return SIGSEGVs the compiler. Local-record equivalent works. Codegen fix + rebuild required.")
 @test
 fn regression_row_get_index_bounds_guarded() {
     let r = Row {
