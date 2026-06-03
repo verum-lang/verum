@@ -539,6 +539,32 @@ at runtime on the raw `&unsafe T` iterator-backing-pointer deref (separate
 deep codegen defect; closing it promotes the for-loop tests to `--aot ✓`
 suite-wide). Full root-cause writeup: `defect-class-catalogue.md` §23.
 
+## Session 2026-06-03 — mem AOT-ITER-1 mitigation (index-iter) + 4 new defect classes
+
+Attacked the 48 AOT-ITER-1 failures above. Commits `15bfeaceb` + `c321cde54`
++ `b4df86697`; catalogue §27-29 (website `c000200`).
+
+- **AOT-ITER-1 confirmed UNIVERSAL**: probed `List<UInt16>` (primitive) iter
+  under `--aot` — it ALSO SIGSEGVs, so the crash is element-type-independent.
+- **Mitigation**: converted ~36 non-range `for x in coll.iter()` loops across
+  22 mem test files to AOT-safe `let mut i=0; while i<coll.len() { let x =
+  coll[i]; … i=i+1; }` (`*x`→`x`; `let(a,b)=*p`→`=p`). Range loops `0..n` stay.
+  AOT-validated: simple-value, tuple-projection, nested (i/j), record-field,
+  and value-to-ctor patterns all pass `--aot`. Tier badges flip as each file's
+  whole-module AOT compile clears (see below).
+- **AOT-ITER-1 root cause CONFIRMED** (lldb, task #6): `register_types.rs:451`
+  treats `TypeRef::Reference{inner}` as transparent → a `&unsafe T` struct
+  field collapses to its variable-size generic inner, mislaying `ListIter.end`
+  at offset 0x20. Fundamental fix (ref-typed field must be pointer-sized,
+  scoped to field layout) is deep + high-regression — focused-session work.
+- **3 revealed defects fixed** (interp leniency had masked them; AOT strict):
+  `record_revoke` stale 6-arg caps split (stdlib takes 5); `cases` reserved
+  keyword in `for i in 0..cases.len()` (→ `case_list`; CASES-KEYWORD-1, §27);
+  Layout `size`/`align` → `size_`/`align_` field names (`b4df86697`).
+- **2 deep AOT defects newly tracked** (block whole-module AOT compile):
+  QUALVAR-CONSTRUCT-1 / D-AOT-1 (§28, thin_ref/unit) + RECVAR-TUPLE-1 (§29,
+  header/integration). Tasks #7/#8/#9.
+
 ## How to update
 
 When you finish a module:
