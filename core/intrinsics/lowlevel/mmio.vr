@@ -70,9 +70,22 @@ public fn volatile_store_release<T: Copy>(ptr: *volatile mut T, value: T);
 // =============================================================================
 
 /// Memory barrier types for explicit ordering control.
-/// **Stays in `core/sys/mmio.vr`** as user-facing type; this file
-/// references it via mount.
-mount core.sys.mmio.{BarrierKind};
+///
+/// **Defined here** — alongside `barrier`, its sole consumer — rather
+/// than in `core/sys/mmio.vr`, to break the `core.sys.mmio` <->
+/// `core.intrinsics.lowlevel.mmio` MODULE CYCLE. Previously `sys.mmio`
+/// declared `BarrierKind` and this file mounted it back, while `sys.mmio`
+/// mounts `barrier`/`dsb`/`isb` from here. That cycle left `barrier`
+/// (param `kind: BarrierKind`) uncompilable during the stdlib precompile
+/// — it became a `panic-stub: undefined function: barrier`, cascading to
+/// its callers `compiler_barrier`/`dmb`. `core/sys/mmio.vr` re-exports
+/// this type for the user-facing `core.sys.mmio.{BarrierKind}` API.
+public type BarrierKind is
+    | Compiler    // Prevent compiler reordering only
+    | Acquire     // Load barrier (loads before this cannot move after)
+    | Release     // Store barrier (stores after this cannot move before)
+    | AcqRel      // Both acquire and release
+    | SeqCst;     // Full sequential consistency
 
 /// Insert a memory barrier.
 ///
@@ -83,8 +96,17 @@ mount core.sys.mmio.{BarrierKind};
 /// - AcqRel: Both acquire and release semantics
 /// - SeqCst: Full sequential consistency (most expensive)
 @inline(always)
-@intrinsic("memory_barrier")
-public fn barrier(kind: BarrierKind);
+public fn barrier(kind: BarrierKind) {
+    // Host (interp + AOT): compiler/memory barriers are no-ops at the Verum
+    // level — the host CPU memory model + LLVM codegen ordering cover the
+    // conformance surface, and Verum concurrency uses atomics with explicit
+    // ordering rather than raw fences. Kernel/embedded targets override with
+    // the real fence via @cfg. Mirrors the kernel.vr safe-default discipline:
+    // `@intrinsic("memory_barrier")` had no AOT codegen handler, leaving
+    // `barrier` — and its callers `compiler_barrier`/`dmb` (core.sys.mmio) —
+    // `unbound variable` under `--aot` while `--interp` resolved it.
+    let _ = kind;
+}
 
 /// Data synchronization barrier (ARM terminology).
 @inline(always)

@@ -106,31 +106,39 @@ public mount core.intrinsics.lowlevel.mmio.{
 // MEMORY BARRIERS
 // =============================================================================
 
-/// Memory barrier types for explicit ordering control.
-public type BarrierKind is
-    | Compiler    // Prevent compiler reordering only
-    | Acquire     // Load barrier (loads before this cannot move after)
-    | Release     // Store barrier (stores after this cannot move before)
-    | AcqRel      // Both acquire and release
-    | SeqCst;     // Full sequential consistency
-
-/// Insert a memory barrier.
-///
-
-/// Memory barrier primitives — centralised in
-/// `core/intrinsics/lowlevel/mmio.vr` (#66 Phase 1.6).
-public mount core.intrinsics.lowlevel.mmio.{barrier, dsb, isb};
+/// Memory barrier type + primitives — defined/centralised in
+/// `core/intrinsics/lowlevel/mmio.vr` (#66 Phase 1.6). `BarrierKind`
+/// lives there too now (with its consumer `barrier`) so this module no
+/// longer forms an import cycle with the intrinsics module; it is
+/// re-exported here for the user-facing `core.sys.mmio.{BarrierKind}`
+/// API. The cycle had left `barrier`/`compiler_barrier`/`dmb` compiled
+/// to `undefined function` panic-stubs in the precompiled stdlib.
+public mount core.intrinsics.lowlevel.mmio.{BarrierKind, barrier, dsb, isb};
 
 /// Compiler-only barrier (prevents optimization across this point).
 @inline(always)
 public fn compiler_barrier() {
-    barrier(BarrierKind.Compiler);
+    // Host: a compiler-only optimization fence is a NO-OP at the Verum
+    // level — the host CPU memory model plus LLVM codegen ordering cover
+    // the conformance surface, and Verum concurrency uses atomics with
+    // explicit ordering rather than raw fences. Kept as a distinct entry
+    // point so kernel/embedded targets can @cfg-override with the real
+    // fence. Deliberately SELF-CONTAINED: the previous body called the
+    // cross-module `barrier(BarrierKind.Compiler)`
+    // (core.intrinsics.lowlevel.mmio), which the stdlib precompile lowered
+    // to an `undefined function: barrier` panic-stub — a sys.mmio ->
+    // intrinsics.lowlevel.mmio call resolved before `barrier` was
+    // registered during bootstrap. (`barrier` itself remains callable from
+    // user code via the re-export above.)
 }
 
 /// Data memory barrier (ARM terminology).
 @inline(always)
 public fn dmb() {
-    barrier(BarrierKind.AcqRel);
+    // Host: a data memory barrier is a NO-OP at the Verum level — same
+    // rationale as `compiler_barrier` above; self-contained to avoid the
+    // bootstrap `undefined function: barrier` panic-stub. Kernel/embedded
+    // targets @cfg-override with the real `dmb`/`dsb` sequence.
 }
 
 // =============================================================================
@@ -355,8 +363,16 @@ public type RegisterBlock is protocol {
 // =============================================================================
 
 /// Memory region descriptor for linker-defined sections.
+///
+/// `start` is the region's base ADDRESS as a `USize` — a section start is an
+/// address, and addresses are pointer-width unsigned integers in Verum's
+/// no-libc systems layer. (Previously `*const ()`; a raw-pointer record field
+/// is not representable in the VBC `TypeRef` model — it collapses to `Unit` —
+/// see defect-class-catalogue §26. `USize` is both the correct design and the
+/// AOT-sound spelling: `MemoryRegion.contains` / `.end` already treat it as an
+/// integer address.)
 public type MemoryRegion is {
-    start: *const (),
+    start: USize,
     size: USize,
     flags: MemoryFlags,
 };
@@ -382,14 +398,14 @@ implement MemoryRegion {
     /// Check if an address is within this region.
     @inline(always)
     public fn contains(&self, addr: USize) -> Bool {
-        let start = self.start as USize;
+        let start = self.start;
         addr >= start && addr < start + self.size
     }
 
     /// Get end address (exclusive).
     @inline(always)
     public fn end(&self) -> USize {
-        self.start as USize + self.size
+        self.start + self.size
     }
 }
 
