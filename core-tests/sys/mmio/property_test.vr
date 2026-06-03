@@ -174,7 +174,7 @@ fn law_memory_flags_self_or_idempotent() {
 
 fn make_region(base: USize, size: USize) -> MemoryRegion {
     MemoryRegion {
-        start: base as *const (),
+        start: base as USize,
         size: size,
         flags: MemoryFlags.READ,
     }

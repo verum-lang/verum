@@ -198,7 +198,7 @@ fn test_memory_flags_compose_via_or() {
 fn test_memory_region_contains_start_address() {
     let base: USize = 0x4000_0000 as USize;
     let region = MemoryRegion {
-        start: base as *const (),
+        start: base as USize,
         size: 0x1000 as USize,
         flags: MemoryFlags.READ,
     };
@@ -209,7 +209,7 @@ fn test_memory_region_contains_start_address() {
 fn test_memory_region_contains_middle_address() {
     let base: USize = 0x4000_0000 as USize;
     let region = MemoryRegion {
-        start: base as *const (),
+        start: base as USize,
         size: 0x1000 as USize,
         flags: MemoryFlags.READ,
     };
@@ -222,7 +222,7 @@ fn test_memory_region_excludes_end_address() {
     let base: USize = 0x4000_0000 as USize;
     let size: USize = 0x1000 as USize;
     let region = MemoryRegion {
-        start: base as *const (),
+        start: base as USize,
         size: size,
         flags: MemoryFlags.READ,
     };
@@ -233,7 +233,7 @@ fn test_memory_region_excludes_end_address() {
 fn test_memory_region_excludes_address_below_start() {
     let base: USize = 0x4000_1000 as USize;
     let region = MemoryRegion {
-        start: base as *const (),
+        start: base as USize,
         size: 0x1000 as USize,
         flags: MemoryFlags.READ,
     };
@@ -245,9 +245,9 @@ fn test_memory_region_end_equals_start_plus_size() {
     let base: USize = 0x4000_0000 as USize;
     let size: USize = 0x2000 as USize;
     let region = MemoryRegion {
-        start: base as *const (),
+        start: base as USize,
         size: size,
-        flags: MemoryFlags.READ_WRITE_FLAGS(),
+        flags: READ_WRITE_FLAGS(),
     };
     assert_eq(region.end(), base + size);
 }
