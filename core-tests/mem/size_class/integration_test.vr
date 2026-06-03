@@ -36,15 +36,18 @@ fn integration_alloc_request_dispatch_consistent() {
         80, 96, 128,
         256, 512, 1024,
     ];
-    for s in common_sizes.iter() {
-        let bin = size_to_bin(*s);
+    let mut i = 0;
+    while i < common_sizes.len() {
+        let s = common_sizes[i];
+        let bin = size_to_bin(s);
         let bsize = bin_to_size(bin);
         // The chosen bin can fit the requested size.
-        assert(bsize >= *s);
+        assert(bsize >= s);
         // The bin size class is small.
         assert(is_small_size(bsize));
         // The page-kind is Small.
         assert(page_kind_for_bin(bin) is Small);
+        i = i + 1;
     }
 }
 
@@ -173,12 +176,15 @@ fn integration_aligned_size_passthrough_for_standard_alignment() {
         (9, 8), (15, 8), (16, 8), (17, 8), (24, 8),
         (32, 16), (64, 16), (256, 16),
     ];
-    for pair in pairs.iter() {
+    let mut i = 0;
+    while i < pairs.len() {
+        let pair = pairs[i];
         let s: Int = pair.0;
         let a: Int = pair.1;
         let aligned = aligned_size(s, a);
         // For align <= MAX_ALIGN_SIZE=16, returns size unchanged.
         assert_eq(aligned, s);
+        i = i + 1;
     }
 }
 
@@ -193,11 +199,14 @@ fn integration_aligned_size_overhead_for_oversized_alignment() {
         (8, 64), (16, 64), (256, 64),
         (8, 256), (256, 256), (4096, 256),
     ];
-    for pair in pairs.iter() {
+    let mut i = 0;
+    while i < pairs.len() {
+        let pair = pairs[i];
         let s: Int = pair.0;
         let a: Int = pair.1;
         let aligned = aligned_size(s, a);
         assert_eq(aligned, s + a - 1);
+        i = i + 1;
     }
 }
 
@@ -212,12 +221,15 @@ fn integration_round_trip_idempotent_on_canonical_bin_sizes() {
     // the same bin id. This pins the bin-to-size table's lossless
     // round-trip on its canonical entries.
     let probe_sizes: List<Int> = [8, 16, 32, 64, 128, 256, 512, 1024, 2048];
-    for s in probe_sizes.iter() {
-        let bin = size_to_bin(*s);
+    let mut i = 0;
+    while i < probe_sizes.len() {
+        let s = probe_sizes[i];
+        let bin = size_to_bin(s);
         let bin_size = bin_to_size(bin);
         let bin2 = size_to_bin(bin_size);
         // bin2 == bin: the round-trip lands at the same bin id.
         assert_eq(bin2, bin);
+        i = i + 1;
     }
 }
 
@@ -228,10 +240,13 @@ fn integration_size_to_bin_monotonic_over_doubling() {
     // monotonic structure (~12.5% spacing).
     let doublings: List<Int> = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
     let mut prev_bin: Int = -1;
-    for s in doublings.iter() {
-        let bin = size_to_bin(*s);
+    let mut i = 0;
+    while i < doublings.len() {
+        let s = doublings[i];
+        let bin = size_to_bin(s);
         assert(bin >= prev_bin);
         prev_bin = bin;
+        i = i + 1;
     }
 }
 
@@ -248,9 +263,12 @@ fn integration_blocks_per_page_at_least_one_for_small_bins() {
     // are all sub-1024-byte blocks), every page must hold at least one
     // block of the bin's size class.
     let probe_bins: List<Int> = [0, 1, 2, 5, 10, 15, 20, 25, 30];
-    for b in probe_bins.iter() {
-        let blocks = blocks_per_page(*b);
+    let mut i = 0;
+    while i < probe_bins.len() {
+        let b = probe_bins[i];
+        let blocks = blocks_per_page(b);
         assert(blocks >= 1);
+        i = i + 1;
     }
 }
 

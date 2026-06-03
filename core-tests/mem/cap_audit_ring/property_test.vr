@@ -42,10 +42,13 @@ fn law_enable_disable_idempotent() {
 @test
 fn law_recent_bounded_by_n() {
     let sizes: List<Int> = [0, 1, 5, 10, 50, 256, 1000];
-    for n in sizes.iter() {
-        let result = recent(*n);
-        let want = if *n < 0 { 0 } else { *n };
+    let mut i = 0;
+    while i < sizes.len() {
+        let n = sizes[i];
+        let result = recent(n);
+        let want = if n < 0 { 0 } else { n };
         assert(result.len() <= want);
+        i = i + 1;
     }
 }
 
@@ -73,7 +76,7 @@ fn law_disabled_records_short_circuit() {
     record_revoke(
         0x10000000 as UInt64,
         5 as UInt32, 6 as UInt32,
-        0xFF as UInt16, 0 as UInt16,
+        0xFF as UInt16,
         0 as UInt64,
     );
     record_attenuate(
@@ -103,7 +106,7 @@ fn law_recent_zero_always_empty() {
         record_revoke(
             0x10000000 as UInt64,
             1 as UInt32, 2 as UInt32,
-            0 as UInt16, 0 as UInt16,
+            0 as UInt16,
             0 as UInt64,
         );
     }

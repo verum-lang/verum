@@ -36,10 +36,13 @@ fn law_segment_constants_powers_of_two() {
         SMALL_PAGE_SIZE,
         MEDIUM_PAGE_SIZE,
     ];
-    for s in sizes.iter() {
-        assert(*s > 0);
+    let mut i = 0;
+    while i < sizes.len() {
+        let s = sizes[i];
+        assert(s > 0);
         // x is power of 2 ⇔ x & (x-1) == 0
-        assert((*s & (*s - 1)) == 0);
+        assert((s & (s - 1)) == 0);
+        i = i + 1;
     }
 }
 

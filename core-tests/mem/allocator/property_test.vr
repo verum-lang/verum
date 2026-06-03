@@ -23,12 +23,18 @@ mount core.mem.allocator.{
 fn law_align_up_no_shrink_exhaustive() {
     let aligns: List<Int> = [1, 2, 4, 8, 16, 32, 64, 128];
     let sizes: List<Int> = [0, 1, 7, 8, 15, 16, 100, 1000, 65536];
-    for a in aligns.iter() {
-        for s in sizes.iter() {
-            let result = align_up(*s, *a);
-            assert(result >= *s);
-            assert_eq(result % *a, 0);
+    let mut i = 0;
+    while i < aligns.len() {
+        let a = aligns[i];
+        let mut j = 0;
+        while j < sizes.len() {
+            let s = sizes[j];
+            let result = align_up(s, a);
+            assert(result >= s);
+            assert_eq(result % a, 0);
+            j = j + 1;
         }
+        i = i + 1;
     }
 }
 
@@ -36,12 +42,18 @@ fn law_align_up_no_shrink_exhaustive() {
 fn law_align_down_no_grow_exhaustive() {
     let aligns: List<Int> = [1, 2, 4, 8, 16, 32, 64, 128];
     let sizes: List<Int> = [0, 1, 7, 8, 15, 16, 100, 1000, 65536];
-    for a in aligns.iter() {
-        for s in sizes.iter() {
-            let result = align_down(*s, *a);
-            assert(result <= *s);
-            assert_eq(result % *a, 0);
+    let mut i = 0;
+    while i < aligns.len() {
+        let a = aligns[i];
+        let mut j = 0;
+        while j < sizes.len() {
+            let s = sizes[j];
+            let result = align_down(s, a);
+            assert(result <= s);
+            assert_eq(result % a, 0);
+            j = j + 1;
         }
+        i = i + 1;
     }
 }
 
@@ -49,12 +61,18 @@ fn law_align_down_no_grow_exhaustive() {
 fn law_align_up_idempotent() {
     let aligns: List<Int> = [1, 2, 4, 8, 16];
     let sizes: List<Int> = [0, 1, 7, 100, 1000];
-    for a in aligns.iter() {
-        for s in sizes.iter() {
-            let once = align_up(*s, *a);
-            let twice = align_up(once, *a);
+    let mut i = 0;
+    while i < aligns.len() {
+        let a = aligns[i];
+        let mut j = 0;
+        while j < sizes.len() {
+            let s = sizes[j];
+            let once = align_up(s, a);
+            let twice = align_up(once, a);
             assert_eq(twice, once);
+            j = j + 1;
         }
+        i = i + 1;
     }
 }
 
@@ -62,12 +80,18 @@ fn law_align_up_idempotent() {
 fn law_align_down_idempotent() {
     let aligns: List<Int> = [1, 2, 4, 8, 16];
     let sizes: List<Int> = [0, 1, 7, 100, 1000];
-    for a in aligns.iter() {
-        for s in sizes.iter() {
-            let once = align_down(*s, *a);
-            let twice = align_down(once, *a);
+    let mut i = 0;
+    while i < aligns.len() {
+        let a = aligns[i];
+        let mut j = 0;
+        while j < sizes.len() {
+            let s = sizes[j];
+            let once = align_down(s, a);
+            let twice = align_down(once, a);
             assert_eq(twice, once);
+            j = j + 1;
         }
+        i = i + 1;
     }
 }
 

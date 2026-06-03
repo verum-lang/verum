@@ -70,13 +70,15 @@ fn integration_mem_header_view_alignment_power_of_two() {
         1 as UInt32, 2 as UInt32, 4 as UInt32, 8 as UInt32,
         16 as UInt32, 32 as UInt32, 64 as UInt32, 128 as UInt32,
     ];
-    for a in aligns.iter() {
+    let mut i = 0;
+    while i < aligns.len() {
+        let a = aligns[i];
         let v: MemHeaderView = MemHeaderView {
             generation: 1 as UInt32,
             epoch: 0 as UInt16,
             capabilities: 0 as UInt16,
             size: 64 as UInt32,
-            alignment: *a,
+            alignment: a,
             type_id: 0 as UInt32,
             flags: 0 as UInt32,
             ref_count: 1 as UInt32,
@@ -84,6 +86,7 @@ fn integration_mem_header_view_alignment_power_of_two() {
         // Power of 2: x > 0 && (x & (x-1)) == 0
         assert(v.alignment > 0 as UInt32);
         assert((v.alignment & (v.alignment - 1 as UInt32)) == 0 as UInt32);
+        i = i + 1;
     }
 }
 

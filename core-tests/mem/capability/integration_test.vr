@@ -220,8 +220,11 @@ fn integration_attenuate_is_idempotent_under_self() {
         CAP_OWNED, CAP_READ_ONLY, CAP_READ_WRITE,
         CAP_BORROW_SHARED, CAP_BORROW_MUT, CAP_ALL,
     ].to_list();
-    for p in presets.iter() {
-        assert_eq(attenuate(*p, *p), *p);
+    let mut i = 0;
+    while i < presets.len() {
+        let p = presets[i];
+        assert_eq(attenuate(p, p), p);
+        i = i + 1;
     }
 }
 

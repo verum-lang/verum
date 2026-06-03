@@ -55,10 +55,13 @@ fn law_attenuate_idempotent_exhaustive() {
     let bits = all_single_bits();
     for x_int in 0..256 {
         let x: UInt16 = x_int as UInt16;
-        for m in bits.iter() {
-            let once = attenuate(x, *m);
-            let twice = attenuate(once, *m);
+        let mut i = 0;
+        while i < bits.len() {
+            let m = bits[i];
+            let once = attenuate(x, m);
+            let twice = attenuate(once, m);
             assert_eq(twice, once);
+            i = i + 1;
         }
     }
 }
@@ -72,12 +75,18 @@ fn law_attenuate_mask_commutative_exhaustive() {
     let bits = all_single_bits();
     for x_int in 0..256 {
         let x: UInt16 = x_int as UInt16;
-        for m1 in bits.iter() {
-            for m2 in bits.iter() {
-                let lhs = attenuate(x, *m1 & *m2);
-                let rhs = attenuate(attenuate(x, *m1), *m2);
+        let mut i = 0;
+        while i < bits.len() {
+            let m1 = bits[i];
+            let mut j = 0;
+            while j < bits.len() {
+                let m2 = bits[j];
+                let lhs = attenuate(x, m1 & m2);
+                let rhs = attenuate(attenuate(x, m1), m2);
                 assert_eq(lhs, rhs);
+                j = j + 1;
             }
+            i = i + 1;
         }
     }
 }
@@ -91,10 +100,13 @@ fn law_attenuate_monotone_exhaustive() {
     let bits = all_single_bits();
     for x_int in 0..256 {
         let x: UInt16 = x_int as UInt16;
-        for m in bits.iter() {
-            let after = attenuate(x, *m);
+        let mut i = 0;
+        while i < bits.len() {
+            let m = bits[i];
+            let after = attenuate(x, m);
             // Every bit in `after` must have been in `x`
             assert_eq(after & x, after);
+            i = i + 1;
         }
     }
 }
@@ -108,12 +120,15 @@ fn law_remove_capability_idempotent_exhaustive() {
     let bits = all_single_bits();
     for x_int in 0..256 {
         let x: UInt16 = x_int as UInt16;
-        for k in bits.iter() {
-            let once = remove_capability(x, *k);
-            let twice = remove_capability(once, *k);
+        let mut i = 0;
+        while i < bits.len() {
+            let k = bits[i];
+            let once = remove_capability(x, k);
+            let twice = remove_capability(once, k);
             assert_eq(twice, once);
             // After removal, the bit MUST be absent
-            assert_eq(once & *k, 0 as UInt16);
+            assert_eq(once & k, 0 as UInt16);
+            i = i + 1;
         }
     }
 }
@@ -127,8 +142,11 @@ fn law_has_capability_equiv_has_all_for_single_bit_exhaustive() {
     let bits = all_single_bits();
     for x_int in 0..256 {
         let x: UInt16 = x_int as UInt16;
-        for k in bits.iter() {
-            assert_eq(has_capability(x, *k), has_all_capabilities(x, *k));
+        let mut i = 0;
+        while i < bits.len() {
+            let k = bits[i];
+            assert_eq(has_capability(x, k), has_all_capabilities(x, k));
+            i = i + 1;
         }
     }
 }
@@ -147,12 +165,15 @@ fn law_pack_unpack_round_trip_pinned() {
         (0 as UInt16, 0xFF as UInt16),
         (0xFFFF as UInt16, 0 as UInt16),
     ];
-    for case in cases.iter() {
+    let mut i = 0;
+    while i < cases.len() {
+        let case = cases[i];
         let epoch = case.0;
         let caps = case.1;
         let packed = pack_epoch_caps(epoch, caps);
         assert_eq(unpack_epoch(packed), epoch);
         assert_eq(unpack_caps(packed), caps);
+        i = i + 1;
     }
 }
 
@@ -180,13 +201,16 @@ fn law_delegate_respects_monotonic_attenuation() {
         CAP_REVOKE,
         parent,
     ];
-    for r in subsets.iter() {
-        let result = delegate_capability(parent, *r);
+    let mut i = 0;
+    while i < subsets.len() {
+        let r = subsets[i];
+        let result = delegate_capability(parent, r);
         assert(result.is_some());
         let granted = result.unwrap();
-        assert_eq(granted, *r);
+        assert_eq(granted, r);
         // Granted must be ⊆ parent
         assert_eq(granted & parent, granted);
+        i = i + 1;
     }
 }
 
@@ -200,14 +224,17 @@ fn law_revoke_monotone_exhaustive() {
     // Parent must have CAP_REVOKE to revoke at all.
     for x_int in 0..256 {
         let x: UInt16 = (x_int as UInt16) | CAP_REVOKE;
-        for k in bits.iter() {
-            let result = revoke_capability(x, *k);
+        let mut i = 0;
+        while i < bits.len() {
+            let k = bits[i];
+            let result = revoke_capability(x, k);
             assert(result.is_some());
             let after = result.unwrap();
             // No bit added
             assert_eq(after & x, after);
             // The named bit is gone
-            assert_eq(after & *k, 0 as UInt16);
+            assert_eq(after & k, 0 as UInt16);
+            i = i + 1;
         }
     }
 }
@@ -219,12 +246,18 @@ fn law_revoke_monotone_exhaustive() {
 @test
 fn law_de_morgan_8bit_pinned() {
     let bits = all_single_bits();
-    for a in bits.iter() {
-        for b in bits.iter() {
-            let lhs = ~(*a | *b) & CAP_ALL;
-            let rhs = (~*a & ~*b) & CAP_ALL;
+    let mut i = 0;
+    while i < bits.len() {
+        let a = bits[i];
+        let mut j = 0;
+        while j < bits.len() {
+            let b = bits[j];
+            let lhs = ~(a | b) & CAP_ALL;
+            let rhs = (~a & ~b) & CAP_ALL;
             assert_eq(lhs, rhs);
+            j = j + 1;
         }
+        i = i + 1;
     }
 }
 

@@ -61,10 +61,13 @@ fn law_packed_caps_round_trip_pinned() {
         (42 as UInt16, 0xFFFF as UInt16),
         (0 as UInt16, 0xFFFF as UInt16),
     ];
-    for case in cases.iter() {
+    let mut i = 0;
+    while i < cases.len() {
+        let case = cases[i];
         let packed = pack_epoch_caps(case.0, case.1);
         assert_eq(unpack_epoch(packed), case.0);
         assert_eq(unpack_caps(packed), case.1);
+        i = i + 1;
     }
 }
 

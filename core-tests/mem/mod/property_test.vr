@@ -316,17 +316,23 @@ fn law_reexported_align_up_down_idempotence_at_power_of_two() {
     // align_up(x, a) is idempotent when a is a power of 2.
     let aligns: List<USize> = [1 as USize, 2 as USize, 4 as USize, 8 as USize, 64 as USize, 4096 as USize];
     let xs: List<USize> = [0 as USize, 1 as USize, 7 as USize, 64 as USize, 4095 as USize, 8191 as USize];
-    for a in aligns.iter() {
-        for x in xs.iter() {
-            let up = align_up(*x, *a);
-            let up2 = align_up(up, *a);
+    let mut i = 0;
+    while i < aligns.len() {
+        let a = aligns[i];
+        let mut j = 0;
+        while j < xs.len() {
+            let x = xs[j];
+            let up = align_up(x, a);
+            let up2 = align_up(up, a);
             assert_eq(up, up2);   // idempotent
-            assert(up >= *x);     // monotonic up
-            let down = align_down(*x, *a);
-            let down2 = align_down(down, *a);
+            assert(up >= x);     // monotonic up
+            let down = align_down(x, a);
+            let down2 = align_down(down, a);
             assert_eq(down, down2);   // idempotent
-            assert(down <= *x);       // monotonic down
+            assert(down <= x);       // monotonic down
+            j = j + 1;
         }
+        i = i + 1;
     }
 }
 

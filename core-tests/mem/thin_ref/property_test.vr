@@ -23,7 +23,11 @@ mount core.mem.capability.{
 
 @test
 fn law_pack_injective_pinned() {
-    let cases: List<(UInt16, UInt16)> = [
+    // NOTE: local renamed `cases` -> `case_list`: `cases` is a reserved
+    // contextual keyword (lexer `#[token("cases")]`) that the for-range-bound
+    // parser rejects in `0..cases.len()` (works fine as `cases[i]` / while-cond).
+    // See defect-class-catalogue (CASES-KEYWORD-1).
+    let case_list: List<(UInt16, UInt16)> = [
         (0 as UInt16, 0 as UInt16),
         (1 as UInt16, 0 as UInt16),
         (0 as UInt16, 1 as UInt16),
@@ -33,10 +37,10 @@ fn law_pack_injective_pinned() {
         (0xFFFF as UInt16, 0xFFFF as UInt16),
         (0xABCD as UInt16, 0x1234 as UInt16),
     ];
-    for i in 0..cases.len() {
-        for j in 0..cases.len() {
-            let a = cases[i];
-            let b = cases[j];
+    for i in 0..case_list.len() {
+        for j in 0..case_list.len() {
+            let a = case_list[i];
+            let b = case_list[j];
             let packed_a = pack_epoch_caps(a.0, a.1);
             let packed_b = pack_epoch_caps(b.0, b.1);
             if i == j {
@@ -73,10 +77,13 @@ fn law_packed_field_decomposition_pinned() {
         (7 as UInt16, CAP_OWNED),
         (42 as UInt16, CAP_READ),
     ];
-    for case in cases.iter() {
+    let mut i = 0;
+    while i < cases.len() {
+        let case = cases[i];
         let packed = pack_epoch_caps(case.0, case.1);
         let manual: UInt32 = ((case.1 as UInt32) << 16) | (case.0 as UInt32);
         assert_eq(packed, manual);
+        i = i + 1;
     }
 }
 

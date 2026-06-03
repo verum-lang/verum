@@ -118,7 +118,9 @@ fn integration_validation_error_dispatch_by_variant() {
     ];
     let mut gen_seen: Int = 0;
     let mut epoch_seen: Int = 0;
-    for e in errs.iter() {
+    let mut i = 0;
+    while i < errs.len() {
+        let e = errs[i];
         match e {
             MemValidationError.GenerationMismatch { expected: _, actual: _ } => {
                 gen_seen = gen_seen + 1;
@@ -127,6 +129,7 @@ fn integration_validation_error_dispatch_by_variant() {
                 epoch_seen = epoch_seen + 1;
             }
         }
+        i = i + 1;
     }
     assert_eq(gen_seen, 1);
     assert_eq(epoch_seen, 1);
@@ -165,11 +168,14 @@ fn integration_alloc_flags_each_single_bit() {
         FLAG_CAPABILITY, FLAG_ARENA, FLAG_NUMA_PINNED, FLAG_LARGE,
         FLAG_BORROWED,
     ];
-    for f in flag_set.iter() {
+    let mut i = 0;
+    while i < flag_set.len() {
+        let f = flag_set[i];
         // f > 0
-        assert(*f > 0 as UInt32);
+        assert(f > 0 as UInt32);
         // f has exactly one bit set: (f & (f - 1)) == 0
-        assert_eq((*f) & ((*f) - (1 as UInt32)), 0 as UInt32);
+        assert_eq((f) & ((f) - (1 as UInt32)), 0 as UInt32);
+        i = i + 1;
     }
 }
 
