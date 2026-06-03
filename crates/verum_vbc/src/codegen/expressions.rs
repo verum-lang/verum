@@ -18871,6 +18871,31 @@ impl VbcCodegen {
             }
             // Record literal: OSError { code: 2, ... } or variant record: Done { total: 42 }
             ExprKind::Record { path, fields, .. } => {
+                // QUALIFIED variant record literal `Type.Variant { fields }`
+                // (e.g. `ContextError.NotFound { context_name: ... }`): resolve
+                // the ENCLOSING type from the QUALIFIED 2nd-to-last path
+                // segment — unambiguous, and the only channel that works when
+                // the bare-name fallbacks below miss. Without this, `let e =
+                // ContextError.NotFound { ... }` recorded `e: NotFound` (the
+                // variant), so `f"{e}"` Display dispatch looked up the
+                // nonexistent `NotFound.fmt` and fell back to the default
+                // `NotFound(..)` rendering instead of routing through
+                // `ContextError.fmt`. (The lookup_function_in_scope /
+                // find_variant_parent_type_by_args fallbacks key on the bare
+                // last segment and miss for record-variant ADTs.)
+                if path.segments.len() >= 2
+                    && let Some(PathSegment::Name(type_ident)) =
+                        path.segments.get(path.segments.len() - 2)
+                    && let Some(PathSegment::Name(variant_ident)) = path.segments.last()
+                    && self
+                        .find_variant_in_type_descriptors(
+                            type_ident.name.as_str(),
+                            variant_ident.name.as_str(),
+                        )
+                        .is_some()
+                {
+                    return Some(type_ident.name.to_string());
+                }
                 if let Some(PathSegment::Name(ident)) = path.segments.last() {
                     let name = ident.name.to_string();
                     // Check if this is a variant constructor — return parent type name
@@ -19923,8 +19948,41 @@ impl VbcCodegen {
             }
             // Inline record literal: OSError { ... } == other
             ExprKind::Record { path, .. } => {
+                // A record-VARIANT literal `Type.Variant { fields }` (e.g.
+                // `ContextError.NotFound { context_name: ... }`) has the
+                // ENCLOSING type `Type` as its expression type, NOT the
+                // variant. Mirror the `Field` arm + `extract_expr_type_name`:
+                // without this, `let e = ContextError.NotFound { ... }`
+                // recorded `e: NotFound`, so `f"{e}"` Display dispatch looked
+                // up the nonexistent `NotFound.fmt` and fell back to the
+                // default `NotFound(..)` rendering instead of routing through
+                // `ContextError.fmt`. Use the QUALIFIED 2nd-to-last segment as
+                // the candidate type so the variant lookup is unambiguous
+                // (avoids the bare-name first-wins collision).
+                if path.segments.len() >= 2
+                    && let Some(PathSegment::Name(type_ident)) =
+                        path.segments.get(path.segments.len() - 2)
+                    && let Some(PathSegment::Name(variant_ident)) = path.segments.last()
+                    && self
+                        .find_variant_in_type_descriptors(
+                            type_ident.name.as_str(),
+                            variant_ident.name.as_str(),
+                        )
+                        .is_some()
+                {
+                    return Some(type_ident.name.to_string());
+                }
                 if let Some(PathSegment::Name(ident)) = path.segments.last() {
-                    Some(ident.name.to_string())
+                    let name = ident.name.to_string();
+                    // Bare variant `Variant { fields }` (no `Type.` qualifier):
+                    // resolve via the variant constructor's parent type, same
+                    // as `extract_expr_type_name`.
+                    if let Some(func_info) = self.ctx.lookup_function_in_scope(&name)
+                        && let Some(ref parent_type) = func_info.parent_type_name
+                    {
+                        return Some(parent_type.clone());
+                    }
+                    Some(name)
                 } else {
                     None
                 }

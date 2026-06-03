@@ -102,7 +102,6 @@ fn integration_list_context_errors_each_keeps_identity() {
 // `.contains("not found")` fails. (`integration_display_in_error_chain_simulation`
 // below stays live — it asserts only field text, which the default
 // rendering includes.) Codegen Display-dispatch regression; rebuild-blocked.
-@ignore("[[fstring_direct_variant_ctor_display_dispatch]] — f\"{err}\" renders default NotFound(Database), not Display→message(). Codegen Display-dispatch regression; rebuild-blocked.")
 @test
 fn integration_display_composes_in_larger_message() {
     let err = ContextError.NotFound { context_name: "Database".clone() };

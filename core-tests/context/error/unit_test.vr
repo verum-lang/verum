@@ -295,7 +295,6 @@ fn test_eq_cross_variant_inequality() {
 // May; current binary regressed Display-interpolation dispatch for
 // record-variant ADTs (per-variant inconsistent — see property_test §5).
 // @ignore'd until the codegen Display-dispatch fix + rebuild.
-@ignore("[[fstring_direct_variant_ctor_display_dispatch]] — f\"{err}\" renders default NotFound(Cache), not Display→message(). Codegen Display-dispatch regression for record-variant ADTs; rebuild-blocked.")
 @test
 fn test_display_not_found_via_format_literal() {
     let err = ContextError.NotFound { context_name: "Cache".clone() };
