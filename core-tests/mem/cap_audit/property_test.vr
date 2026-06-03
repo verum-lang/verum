@@ -28,8 +28,15 @@ fn all_kinds() -> List<CapEventKind> {
 @test
 fn law_eq_reflexive_exhaustive() {
     let kinds = all_kinds();
-    for k in kinds.iter() {
+    // Index-based access (AOT-safe via the indexing intercept) instead of
+    // `for k in kinds.iter()` — the latter crashes at AOT runtime on the
+    // generic `&unsafe T` iterator deref (AOT-ITER-1, catalogue §18) until
+    // the monomorphization field-type fix lands. Interp-equivalent.
+    let mut i = 0;
+    while i < kinds.len() {
+        let k = kinds[i];
         assert(k.eq(k));
+        i = i + 1;
     }
 }
 
@@ -75,7 +82,12 @@ fn law_bumped_generation_is_revoke_or_gen_bump_only() {
         (CapEventKind.GenBump, true),
         (CapEventKind.EpochAdvance, false),
     ];
-    for case in cases.iter() {
+    // Index-based iteration (AOT-safe) instead of `for case in cases.iter()`,
+    // which crashes at AOT runtime on the generic iterator deref (AOT-ITER-1,
+    // catalogue §18) until the vbc_lowering element-type fix lands. Interp-equivalent.
+    let mut i = 0;
+    while i < cases.len() {
+        let case = cases[i];
         let event = CapEvent.new(
             case.0,
             100 as UInt64,
@@ -84,6 +96,7 @@ fn law_bumped_generation_is_revoke_or_gen_bump_only() {
             0 as UInt64,
         );
         assert_eq(event.bumped_generation(), case.1);
+        i = i + 1;
     }
 }
 
@@ -116,15 +129,19 @@ fn law_constructor_round_trip_pinned() {
 @test
 fn law_seq_zero_marks_uncommitted_exhaustive() {
     let kinds = all_kinds();
-    for k in kinds.iter() {
+    // Index-based iteration (AOT-safe) — see law_eq_reflexive_exhaustive (AOT-ITER-1, §18).
+    let mut i = 0;
+    while i < kinds.len() {
+        let k = kinds[i];
         let event = CapEvent.new(
-            *k,
+            k,
             100 as UInt64,
             5 as UInt32, 6 as UInt32,
             0 as UInt16, 0 as UInt16,
             0 as UInt64,
         );
         assert_eq(event.seq, 0 as UInt64);
+        i = i + 1;
     }
 }
 

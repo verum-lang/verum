@@ -55,7 +55,11 @@ fn regression_bumped_generation_matrix() {
         (CapEventKind.GenBump, true),
         (CapEventKind.EpochAdvance, false),
     ];
-    for case in cases.iter() {
+    // Index-based iteration (AOT-safe) instead of `for case in cases.iter()` —
+    // AOT-ITER-1 (catalogue §18). Interp-equivalent.
+    let mut i = 0;
+    while i < cases.len() {
+        let case = cases[i];
         let event = CapEvent.new(
             case.0,
             100 as UInt64,
@@ -64,6 +68,7 @@ fn regression_bumped_generation_matrix() {
             0 as UInt64,
         );
         assert_eq(event.bumped_generation(), case.1);
+        i = i + 1;
     }
 }
 
