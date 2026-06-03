@@ -46,6 +46,41 @@ fn assert_fails(source: &str) {
     }
 }
 
+// CASES-KEYWORD-1 regression: `cases` is a contextual keyword (proof
+// by-case-analysis) but must remain usable as a plain identifier. The
+// for-range upper-bound parser checks `Token::starts_expr()` to decide
+// whether `0..` has an end expression; before the fix, `Cases` was absent
+// from `starts_expr()`, so `for i in 0..cases.len()` parsed `0..` as a
+// bound-less range and then expected the loop-body `{`, erroring on `cases`.
+#[test]
+fn cases_keyword_as_local_in_for_range_bound() {
+    assert_parses(
+        r#"
+        fn f() {
+            let cases = [1, 2, 3];
+            for i in 0..cases.len() {
+                let _x = cases[i];
+            }
+        }
+    "#,
+    );
+}
+
+#[test]
+fn cases_keyword_as_local_in_inclusive_range_and_index() {
+    assert_parses(
+        r#"
+        fn f() {
+            let cases = [1, 2, 3];
+            for i in 0..=cases.len() {
+                let _y = cases[i];
+            }
+            let _n = cases.len();
+        }
+    "#,
+    );
+}
+
 // =============================================================================
 // 1. CALC PROOFS
 // Grammar: calc_chain = 'calc' , '{' , calc_step , { calc_step } , '}' ;
