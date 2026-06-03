@@ -59,13 +59,16 @@ fn law_bin_dominates_request_pinned() {
         16384, 32768, 65536, 65537,
         100000, 1000000, 5242880,
     ];
-    for s in probes.iter() {
-        let bin = size_to_bin(*s);
+    let mut i = 0;
+    while i < probes.len() {
+        let s = probes[i];
+        let bin = size_to_bin(s);
         // Huge sizes can return BIN_HUGE — exclude those
         if bin < BIN_COUNT {
             let bin_size = bin_to_size(bin);
-            assert(bin_size >= *s);
+            assert(bin_size >= s);
         }
+        i = i + 1;
     }
 }
 
@@ -128,16 +131,19 @@ fn law_small_medium_large_disjoint_pinned() {
         8193, 32768, 65000, 65536,               // medium
         65537, 100000, 1000000, 16777216,        // large
     ];
-    for s in probes.iter() {
-        let small = is_small_size(*s);
-        let medium = is_medium_size(*s);
-        let large = is_large_size(*s);
+    let mut i = 0;
+    while i < probes.len() {
+        let s = probes[i];
+        let small = is_small_size(s);
+        let medium = is_medium_size(s);
+        let large = is_large_size(s);
         // At most one of {small, medium, large} is true for any size in
         // [1, LARGE_SIZE_MAX]
         let count = (if small { 1 } else { 0 })
                   + (if medium { 1 } else { 0 })
                   + (if large { 1 } else { 0 });
         assert_eq(count, 1);
+        i = i + 1;
     }
 }
 
@@ -213,11 +219,17 @@ fn law_aligned_size_no_shrink_exhaustive() {
     // size never returns less than the original.
     let aligns: List<Int> = [1, 2, 4, 8, 16, 32, 64, 128, 256, 4096];
     let sizes: List<Int> = [1, 7, 8, 16, 24, 100, 1024, 65536];
-    for a in aligns.iter() {
-        for s in sizes.iter() {
-            let result = aligned_size(*s, *a);
-            assert(result >= *s);
+    let mut i = 0;
+    while i < aligns.len() {
+        let a = aligns[i];
+        let mut j = 0;
+        while j < sizes.len() {
+            let s = sizes[j];
+            let result = aligned_size(s, a);
+            assert(result >= s);
+            j = j + 1;
         }
+        i = i + 1;
     }
 }
 

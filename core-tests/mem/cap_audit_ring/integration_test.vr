@@ -110,10 +110,13 @@ fn integration_disabled_window_records_not_observable() {
     let events_after_enable = recent(50);
     disable();
     let mut found_disabled_event: Bool = false;
-    for e in events_after_enable.iter() {
+    let mut i = 0;
+    while i < events_after_enable.len() {
+        let e = events_after_enable[i];
         if e.ptr_id == 0x99 as UInt64 {
             found_disabled_event = true;
         }
+        i = i + 1;
     }
     assert(!found_disabled_event);
 }

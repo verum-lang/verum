@@ -405,9 +405,13 @@ fn test_align_down_is_idempotent() {
 @test
 fn test_align_up_never_decreases() {
     // For any non-negative x and power-of-2 a, align_up(x, a) >= x.
+    let aligns: List<Int> = [1, 2, 4, 8, 16, 32, 64];
     for x in 0..100 {
-        for a in [1, 2, 4, 8, 16, 32, 64].iter() {
-            assert(align_up(x, *a) >= x);
+        let mut i = 0;
+        while i < aligns.len() {
+            let a = aligns[i];
+            assert(align_up(x, a) >= x);
+            i = i + 1;
         }
     }
 }
@@ -415,9 +419,13 @@ fn test_align_up_never_decreases() {
 @test
 fn test_align_down_never_increases() {
     // For any non-negative x and power-of-2 a, align_down(x, a) <= x.
+    let aligns: List<Int> = [1, 2, 4, 8, 16, 32, 64];
     for x in 0..100 {
-        for a in [1, 2, 4, 8, 16, 32, 64].iter() {
-            assert(align_down(x, *a) <= x);
+        let mut i = 0;
+        while i < aligns.len() {
+            let a = aligns[i];
+            assert(align_down(x, a) <= x);
+            i = i + 1;
         }
     }
 }

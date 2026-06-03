@@ -150,11 +150,14 @@ fn test_pack_unpack_identity_at_boundaries() {
         (0x8000 as UInt16, 0x8000 as UInt16),       // MSB set on both lanes
         (0x5555 as UInt16, 0xAAAA as UInt16),       // alternating bits
     ];
-    for p in pairs.iter() {
-        let (e, c) = *p;
+    let mut i = 0;
+    while i < pairs.len() {
+        let p = pairs[i];
+        let (e, c) = p;
         let packed = pack_epoch_caps(e, c);
         assert_eq(unpack_epoch(packed), e);
         assert_eq(unpack_caps(packed), c);
+        i = i + 1;
     }
 }
 

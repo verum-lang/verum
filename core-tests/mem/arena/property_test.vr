@@ -89,10 +89,13 @@ fn law_arena_config_default_growth_factor_at_least_100_pct() {
 fn law_arena_config_fixed_initial_eq_max() {
     // fixed(N) creates a non-growable arena: initial_capacity == max_capacity.
     let sizes: List<Int> = [1024, 65536, 1_000_000];
-    for n in sizes.iter() {
-        let c = ArenaConfig.fixed(*n);
-        assert_eq(c.initial_capacity, *n);
-        assert_eq(c.max_capacity, *n);
+    let mut i = 0;
+    while i < sizes.len() {
+        let n = sizes[i];
+        let c = ArenaConfig.fixed(n);
+        assert_eq(c.initial_capacity, n);
+        assert_eq(c.max_capacity, n);
+        i = i + 1;
     }
 }
 

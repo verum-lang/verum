@@ -36,10 +36,13 @@ fn law_live_allocations_count_consistency_pinned() {
 @test
 fn law_current_call_stack_total_function() {
     let skips: List<Int> = [0, 1, 5, 10, 100, 1000];
-    for s in skips.iter() {
-        let stack = current_call_stack(*s);
+    let mut i = 0;
+    while i < skips.len() {
+        let s = skips[i];
+        let stack = current_call_stack(s);
         // .len() must succeed without panic.
         assert(stack.len() >= 0);
+        i = i + 1;
     }
 }
 

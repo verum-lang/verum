@@ -68,8 +68,11 @@ fn regression_live_allocations_count_non_negative() {
 @test
 fn regression_current_call_stack_handles_arbitrary_skip() {
     let skips: List<Int> = [-1, 0, 1, 100, 10000];
-    for s in skips.iter() {
-        let _ = current_call_stack(*s);
+    let mut i = 0;
+    while i < skips.len() {
+        let s = skips[i];
+        let _ = current_call_stack(s);
+        i = i + 1;
     }
     assert(true);
 }

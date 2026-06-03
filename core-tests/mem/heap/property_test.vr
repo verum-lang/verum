@@ -45,9 +45,12 @@ fn law_page_flags_powers_of_two() {
         PAGE_FLAG_HAS_ALIGNED,
         PAGE_FLAG_ZERO_INIT,
     ];
-    for f in flags.iter() {
-        assert(*f > 0 as UInt16);
-        assert((*f & (*f - 1 as UInt16)) == 0 as UInt16);
+    let mut i = 0;
+    while i < flags.len() {
+        let f = flags[i];
+        assert(f > 0 as UInt16);
+        assert((f & (f - 1 as UInt16)) == 0 as UInt16);
+        i = i + 1;
     }
 }
 

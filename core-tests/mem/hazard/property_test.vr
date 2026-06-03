@@ -122,15 +122,21 @@ fn law_estimated_retired_bytes_product_law() {
     // pairs; assert the result is the multiplicative product.
     let counts: List<Int> = [0, 1, 7, 64, 1024];
     let sizes: List<Int> = [0, 1, 64, 128, 4096];
-    for c in counts.iter() {
-        for sz in sizes.iter() {
+    let mut i = 0;
+    while i < counts.len() {
+        let c = counts[i];
+        let mut j = 0;
+        while j < sizes.len() {
+            let sz = sizes[j];
             let s = HazardStats {
                 protected_count: 0,
-                retired_count: *c,
+                retired_count: c,
                 thread_count: 0,
             };
-            assert_eq(s.estimated_retired_bytes(*sz), (*c) * (*sz));
+            assert_eq(s.estimated_retired_bytes(sz), c * sz);
+            j = j + 1;
         }
+        i = i + 1;
     }
 }
 
@@ -138,17 +144,23 @@ fn law_estimated_retired_bytes_product_law() {
 fn law_estimated_retired_bytes_zero_count_is_zero() {
     let s = HazardStats { protected_count: 0, retired_count: 0, thread_count: 0 };
     let sizes: List<Int> = [0, 1, 128, 4096, 1_000_000];
-    for sz in sizes.iter() {
-        assert_eq(s.estimated_retired_bytes(*sz), 0);
+    let mut i = 0;
+    while i < sizes.len() {
+        let sz = sizes[i];
+        assert_eq(s.estimated_retired_bytes(sz), 0);
+        i = i + 1;
     }
 }
 
 @test
 fn law_estimated_retired_bytes_zero_size_is_zero() {
     let counts: List<Int> = [0, 1, 7, 64, 1024];
-    for c in counts.iter() {
-        let s = HazardStats { protected_count: 0, retired_count: *c, thread_count: 0 };
+    let mut i = 0;
+    while i < counts.len() {
+        let c = counts[i];
+        let s = HazardStats { protected_count: 0, retired_count: c, thread_count: 0 };
         assert_eq(s.estimated_retired_bytes(0), 0);
+        i = i + 1;
     }
 }
 

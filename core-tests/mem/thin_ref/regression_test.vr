@@ -87,10 +87,13 @@ fn regression_unpack_inverse_of_pack() {
         (42 as UInt16, CAP_OWNED),
         (7 as UInt16, CAP_READ),
     ];
-    for case in cases.iter() {
+    let mut i = 0;
+    while i < cases.len() {
+        let case = cases[i];
         let packed = pack_epoch_caps(case.0, case.1);
         assert_eq(unpack_epoch(packed), case.0);
         assert_eq(unpack_caps(packed), case.1);
+        i = i + 1;
     }
 }
 
