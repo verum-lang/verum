@@ -189,42 +189,42 @@ implement Signal {
         @cfg(any(target_os = "linux", target_os = "macos"))
         {
             match self {
-                Hup    => 1,
-                Int    => 2,
-                Quit   => 3,
-                Ill    => 4,
-                Abort  => 6,
-                Fpe    => 8,
-                Kill   => 9,
-                Segv   => 11,
-                Pipe   => 13,
-                Alarm  => 14,
-                Term   => 15,
-                Usr1   => {
+                Signal.Hup    => 1,
+                Signal.Int    => 2,
+                Signal.Quit   => 3,
+                Signal.Ill    => 4,
+                Signal.Abort  => 6,
+                Signal.Fpe    => 8,
+                Signal.Kill   => 9,
+                Signal.Segv   => 11,
+                Signal.Pipe   => 13,
+                Signal.Alarm  => 14,
+                Signal.Term   => 15,
+                Signal.Usr1   => {
                     @cfg(target_os = "linux") { 10 }
                     @cfg(target_os = "macos") { 30 }
                 },
-                Usr2   => {
+                Signal.Usr2   => {
                     @cfg(target_os = "linux") { 12 }
                     @cfg(target_os = "macos") { 31 }
                 },
-                Child  => {
+                Signal.Child  => {
                     @cfg(target_os = "linux") { 17 }
                     @cfg(target_os = "macos") { 20 }
                 },
-                Cont   => {
+                Signal.Cont   => {
                     @cfg(target_os = "linux") { 18 }
                     @cfg(target_os = "macos") { 19 }
                 },
-                Stop   => {
+                Signal.Stop   => {
                     @cfg(target_os = "linux") { 19 }
                     @cfg(target_os = "macos") { 17 }
                 },
-                Tstp   => {
+                Signal.Tstp   => {
                     @cfg(target_os = "linux") { 20 }
                     @cfg(target_os = "macos") { 18 }
                 },
-                Winch  => 28,
+                Signal.Winch  => 28,
             }
         }
 
@@ -232,10 +232,10 @@ implement Signal {
         {
             // Windows maps to console control events
             match self {
-                Int   => 0,  // CTRL_C_EVENT
-                Term  => 2,  // CTRL_CLOSE_EVENT
-                Abort => 6,  // Same as Unix for consistency
-                _     => -1, // Unsupported on Windows
+                Signal.Int   => 0,  // CTRL_C_EVENT
+                Signal.Term  => 2,  // CTRL_CLOSE_EVENT
+                Signal.Abort => 6,  // Same as Unix for consistency
+                _            => -1, // Unsupported on Windows
             }
         }
     }
@@ -273,32 +273,36 @@ implement Signal {
 
     /// Get the signal name as a string.
     public fn name(&self) -> Text {
+        // Qualified `Signal.<Variant>` patterns (BAREVAR-ADT discipline): bare
+        // variant names in a `match self` over an archive-loaded ADT drift to
+        // the wrong tag under AOT (and `Int` collides with the primitive type),
+        // returning the wrong string. Qualifying pins the correct Signal tag.
         match self {
-            Hup    => "SIGHUP",
-            Int    => "SIGINT",
-            Quit   => "SIGQUIT",
-            Ill    => "SIGILL",
-            Abort  => "SIGABRT",
-            Fpe    => "SIGFPE",
-            Kill   => "SIGKILL",
-            Segv   => "SIGSEGV",
-            Pipe   => "SIGPIPE",
-            Alarm  => "SIGALRM",
-            Term   => "SIGTERM",
-            Usr1   => "SIGUSR1",
-            Usr2   => "SIGUSR2",
-            Child  => "SIGCHLD",
-            Cont   => "SIGCONT",
-            Stop   => "SIGSTOP",
-            Tstp   => "SIGTSTP",
-            Winch  => "SIGWINCH",
+            Signal.Hup    => "SIGHUP",
+            Signal.Int    => "SIGINT",
+            Signal.Quit   => "SIGQUIT",
+            Signal.Ill    => "SIGILL",
+            Signal.Abort  => "SIGABRT",
+            Signal.Fpe    => "SIGFPE",
+            Signal.Kill   => "SIGKILL",
+            Signal.Segv   => "SIGSEGV",
+            Signal.Pipe   => "SIGPIPE",
+            Signal.Alarm  => "SIGALRM",
+            Signal.Term   => "SIGTERM",
+            Signal.Usr1   => "SIGUSR1",
+            Signal.Usr2   => "SIGUSR2",
+            Signal.Child  => "SIGCHLD",
+            Signal.Cont   => "SIGCONT",
+            Signal.Stop   => "SIGSTOP",
+            Signal.Tstp   => "SIGTSTP",
+            Signal.Winch  => "SIGWINCH",
         }
     }
 
     /// Check if this signal can be caught/handled.
     public fn is_catchable(&self) -> Bool {
         match self {
-            Kill | Stop => false,
+            Signal.Kill | Signal.Stop => false,
             _ => true,
         }
     }
