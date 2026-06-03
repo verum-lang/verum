@@ -73,7 +73,7 @@ fn regression_memory_region_method_dispatch_contains() {
     // `region.contains(addr)` could mis-dispatch. Pinning the
     // healthy post-fix dispatch.
     let region = MemoryRegion {
-        start: 0x1000 as *const (),
+        start: 0x1000 as USize,
         size: 0x1000 as USize,
         flags: MemoryFlags.READ,
     };
@@ -85,7 +85,7 @@ fn regression_memory_region_method_dispatch_contains() {
 @test
 fn regression_memory_region_method_dispatch_end() {
     let region = MemoryRegion {
-        start: 0x4000 as *const (),
+        start: 0x4000 as USize,
         size: 0x1000 as USize,
         flags: MemoryFlags.READ,
     };

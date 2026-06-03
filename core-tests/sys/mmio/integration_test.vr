@@ -101,22 +101,22 @@ fn test_memory_region_contains_in_list() {
     // "which region (if any) contains this?".
     let regions: List<MemoryRegion> = [
         MemoryRegion {
-            start: 0x0000_0000 as *const (),
+            start: 0x0000_0000 as USize,
             size: 0x1000 as USize,
             flags: MemoryFlags.READ,
         },
         MemoryRegion {
-            start: 0x1000 as *const (),
+            start: 0x1000 as USize,
             size: 0x1000 as USize,
             flags: MemoryFlags(MemoryFlags.READ.0 | MemoryFlags.WRITE.0),
         },
         MemoryRegion {
-            start: 0x2000 as *const (),
+            start: 0x2000 as USize,
             size: 0x1000 as USize,
             flags: MemoryFlags(MemoryFlags.READ.0 | MemoryFlags.EXEC.0),
         },
         MemoryRegion {
-            start: 0x3000 as *const (),
+            start: 0x3000 as USize,
             size: 0x1000 as USize,
             flags: MemoryFlags.DMA,
         },
@@ -175,17 +175,17 @@ fn test_memory_region_end_chain() {
     // 0x4000 — every region's `end()` equals the next region's
     // `start`.
     let r0 = MemoryRegion {
-        start: 0x4000 as *const (),
+        start: 0x4000 as USize,
         size: 0x1000 as USize,
         flags: MemoryFlags.READ,
     };
     let r1 = MemoryRegion {
-        start: 0x5000 as *const (),
+        start: 0x5000 as USize,
         size: 0x1000 as USize,
         flags: MemoryFlags.WRITE,
     };
     let r2 = MemoryRegion {
-        start: 0x6000 as *const (),
+        start: 0x6000 as USize,
         size: 0x1000 as USize,
         flags: MemoryFlags.EXEC,
     };
