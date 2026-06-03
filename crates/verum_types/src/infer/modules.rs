@@ -2193,6 +2193,28 @@ impl TypeChecker {
                     false
                 };
                 if !inline_has_export {
+                    // The item is absent from the module's VBC ExportTable,
+                    // but the precompiled typecheck metadata may still carry
+                    // its FREE-FUNCTION descriptor. Some `@inline(always)`
+                    // stdlib free fns are emitted into `metadata.functions`
+                    // yet never registered in the per-module ExportTable —
+                    // e.g. `core.sys.mmio`'s `compiler_barrier`/`dmb`, which
+                    // (unlike `core.sys.bitfield.extract_bits`, which IS in
+                    // its ExportTable) were therefore left UNBOUND here:
+                    // strict `--aot`/`check` early-returned at this gate while
+                    // the lenient `--interp` global fn table masked it
+                    // (`E100 unbound variable: compiler_barrier`). Bind
+                    // straight from metadata before giving up. The descriptor
+                    // probe is dual-keyed (mount path + `core.`-stripped) and
+                    // returns None for anything but a real non-const free fn,
+                    // so types/consts still take the normal early-return.
+                    let bind_name = local_name.unwrap_or(item_name);
+                    if self.ctx.env.lookup(&Text::from(bind_name)).is_none()
+                        && let Some(scheme) = self
+                            .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
+                    {
+                        self.ctx.env.insert(bind_name, scheme);
+                    }
                     return Ok(());
                 }
             }
@@ -5893,7 +5915,29 @@ impl TypeChecker {
         let direct_key = format!("{}.{}", module_path, item_name);
         let direct_fd = metadata
             .functions
-            .get(&Text::from(direct_key.as_str()));
+            .get(&Text::from(direct_key.as_str()))
+            .or_else(|| {
+                // Embedded-stdlib modules are INCONSISTENT about the
+                // leading `core.` segment in their `module ...;` decl:
+                // `core/sys/mmio.vr` declares `module sys.mmio;` so its
+                // descriptors are keyed `sys.mmio.<item>`, whereas
+                // `core/intrinsics/lowlevel/mmio.vr` declares the fully
+                // qualified `module core.intrinsics.lowlevel.mmio;`.
+                // Users always mount via the `core.`-prefixed path
+                // (`mount core.sys.mmio.{compiler_barrier}`), so the
+                // `<module_path>.<item>` key above can miss for the
+                // `module sys.X;` family. Retry with the leading `core.`
+                // stripped so the mount path matches the self-declared
+                // key. (This is what left `core.sys.mmio.{compiler_barrier,
+                // dmb}` — caught additionally in the core.sys.mmio <->
+                // core.intrinsics.lowlevel.mmio BarrierKind/barrier module
+                // cycle — UNBOUND under strict `--aot`/`check` while the
+                // lenient `--interp` global fn table masked it.)
+                module_path.strip_prefix("core.").and_then(|stripped| {
+                    let alt_key = format!("{}.{}", stripped, item_name);
+                    metadata.functions.get(&Text::from(alt_key.as_str()))
+                })
+            });
 
         // Step 2 — re-export chain lookup.  Covers
         // `mount core.base.{replace}` (replace re-exported from
@@ -6308,13 +6352,59 @@ impl TypeChecker {
         // `public mount` re-exports (A re-exports B re-exports A for the same
         // item name) terminate with None instead of blowing the stack.
         let mut visited: std::collections::HashSet<(Text, Text)> = std::collections::HashSet::new();
-        self.resolve_export_kind_with_reexports_inner(
+        if let Some(kind) = self.resolve_export_kind_with_reexports_inner(
             ast,
             item_name,
             current_module_path,
             registry,
             &mut visited,
-        )
+        ) {
+            return Some(kind);
+        }
+
+        // Fallback for directly-declared EMBEDDED-STDLIB free functions.
+        // The embedded stdlib loads with a synthetic `Module` AST that has
+        // no `ItemKind::Function` items, so the AST walk above can't see a
+        // free fn declared directly in `current_module_path`; its export
+        // kind then stays at the export table's default (`Type`) and the
+        // item is wrongly routed to `import_type_export` — leaving it
+        // UNBOUND as a value (e.g. `mount core.sys.mmio.{compiler_barrier,
+        // dmb}` resolved on lenient `--interp` via the global fn table but
+        // failed `E100 unbound variable` under strict `--aot`/`check`).
+        // The precompiled metadata DOES carry the canonical
+        // `<module>.<item>` function descriptor; when present (a non-const
+        // free fn — no parent type) the item is really a Function whose
+        // kind defaulted to Type. Mirrors the direct-key probe in
+        // `resolve_function_via_metadata_reexports`. `core_metadata` only
+        // ever holds stdlib descriptors, so this never misfires on user
+        // modules (whose functions are resolved via their real AST above).
+        if let Maybe::Some(metadata) = &self.core_metadata {
+            let direct_key = format!("{}.{}", current_module_path.as_str(), item_name);
+            // Try the mount-path key, then the `core.`-stripped key — the
+            // embedded stdlib is inconsistent about the leading `core.`
+            // segment in `module ...;` decls (e.g. `module sys.mmio;`),
+            // mirroring the dual probe in
+            // `resolve_function_via_metadata_reexports`.
+            let fd_opt = metadata
+                .functions
+                .get(&Text::from(direct_key.as_str()))
+                .or_else(|| {
+                    current_module_path.as_str().strip_prefix("core.").and_then(
+                        |stripped| {
+                            let alt = format!("{}.{}", stripped, item_name);
+                            metadata.functions.get(&Text::from(alt.as_str()))
+                        },
+                    )
+                });
+            if let Some(fd) = fd_opt
+                && !fd.is_const
+                && matches!(fd.parent_type, Maybe::None)
+            {
+                return Some(verum_modules::ExportKind::Function);
+            }
+        }
+
+        None
     }
 
     /// Inner implementation of resolve_export_kind_with_reexports.
