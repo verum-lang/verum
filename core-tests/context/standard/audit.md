@@ -114,24 +114,36 @@ tests (which `match` + dereference the `&Text` payload, `assert_eq(*s,
 …)`) all pass. All four were **un-`@ignore`'d**.
 
 **Facet #2 — reading `Row`'s OWN fields (`r.columns` / `r.values`) from
-USER code — OPEN (refined 2026-06-03).** This is a DISTINCT defect (it is
-now a clean field-OOB panic, not a SIGSEGV): `field index 4 (offset 40)
-exceeds object data size 16 type='Row'`. ROOT CAUSE: the bare name `Row`
-COLLIDES with the variant `StepResult.Row(reg_start, n_cols)` (defined in
-`core.database.sqlite.native.l4_vdbe.interpreter`). `let r = Row {
-columns, values }` records `variable_type_names["r"] = "StepResult"` (the
-variant's parent), so every later `r.<field>` read resolves the field
-against StepResult's absent layout → a GLOBAL field-intern index (4) →
-OOB. The construction itself is correct (uses the literal path `Row`);
-only the let-binding's recorded type is wrong. NOTE: guarding the
-`extract_expr_type_name`/`infer_expr_type_name` `Record` arms to prefer
-the standalone record type did NOT change the recorded type — the
-"StepResult" assignment originates from a path still being located (the
-`Record`-arm edits are not the operative site). The `mod/unit_test.vr`
-umbrella test works around this by reading only `qr.rows.len()`.
+USER code — CLOSED 2026-06-04.** A DISTINCT defect (clean field-OOB panic,
+not a SIGSEGV): `field index 4 (offset 40) exceeds object data size 16
+type='Row'`. ROOT CAUSE (traced with a `[RECTYPE]` codegen instrument):
+the bare name `Row` is a **3-way collision** — a `Row` PROTOCOL, the
+`core.context.standard.Row` RECORD, and the variant
+`StepResult.Row(reg_start, n_cols)` (`core.database.sqlite.native.l4_vdbe`).
+`let r = Row { columns, values }` recorded `variable_type_names["r"] =
+"StepResult"` because, at `compile_let`'s `extract_expr_type_name` call,
+the record `Row` is **not yet loaded** (lazily loaded only during
+`compile_record`): `type_name_to_id["Row"]` first-wins to the PROTOCOL,
+`type_field_layouts["Row"]` is absent, no Record descriptor named `Row`
+exists in `self.types` — so only `find_variant_parent_type_by_args("Row",
+2)` resolves, and it matches `StepResult.Row` by ARG COUNT alone (2 == 2)
+→ `"StepResult"`. Every later `r.<field>` read then resolved against
+StepResult's absent layout → a GLOBAL field-intern index (4) → OOB.
 
-Pinned: none for facet #2 yet (the umbrella test uses the workaround);
-facet #1's four tests are now live.
+**FIX:** `extract_expr_type_name` now FIELD-NAME-verifies the
+`find_variant_parent_type_by_args` result — it accepts the variant parent
+only when the literal's field NAMES match the variant's declared fields
+(via `find_variant_in_type_descriptors`, whose parent IS loaded). For
+`Row { columns, values }` vs `StepResult.Row(reg_start, n_cols)` the names
+differ → the variant match is rejected → the literal resolves to its own
+record type `Row`. Independent of the record's lazy-load state, and
+regression-safe (legitimate bare record-variant literals still match by
+name; arg-count-only collisions fall through).
+
+Pinned: `regression_row_direct_field_read_after_collision`
+(`regression_test.vr`) + the simplified `mod/unit_test.vr` umbrella test
+(now reads `r.columns`/`r.values` directly). Validated: standard 74/0/0
+(incl. the new pin), error 56/0/0, scope 62/0/0.
 
 ### §3.6 `f"{Type.Variant}"` does not dispatch `Display` — **CLOSED 2026-06-01**
 

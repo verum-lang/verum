@@ -18911,7 +18911,34 @@ impl VbcCodegen {
                         .ctx
                         .find_variant_parent_type_by_args(&name, fields.len())
                     {
-                        return Some(parent_type);
+                        // FIELD-NAME verify: `find_variant_parent_type_by_args`
+                        // matches a same-named variant by arg COUNT only, so a
+                        // bare record literal `Row { columns, values }` is
+                        // wrongly claimed by `StepResult.Row(reg_start, n_cols)`
+                        // (2 == 2) — mis-typing the binding to `StepResult` and
+                        // shifting every later `r.<field>` read to a global
+                        // field-intern index (field-OOB panic). The collision is
+                        // real: a `Row` PROTOCOL wins the first-wins
+                        // `type_name_to_id` slot and the `context.standard.Row`
+                        // RECORD is loaded lazily (absent here), so neither
+                        // type_name_to_id nor type_field_layouts can identify the
+                        // record at this point. Accept the variant parent ONLY
+                        // when the literal's field NAMES match the variant's
+                        // declared fields; otherwise the literal is its own
+                        // record type. The variant's parent was just found, so
+                        // its declared fields ARE resolvable even when the record
+                        // half of the collision is not.
+                        let fields_match = self
+                            .find_variant_in_type_descriptors(&parent_type, &name)
+                            .map(|(_, _, decl)| {
+                                fields
+                                    .iter()
+                                    .all(|fi| decl.iter().any(|d| d == fi.name.as_str()))
+                            })
+                            .unwrap_or(true);
+                        if fields_match {
+                            return Some(parent_type);
+                        }
                     }
                     Some(name)
                 } else {
