@@ -119,11 +119,11 @@ fn test_align_down_below_boundary_rounds_down() {
 @test
 fn test_layout_record_construction() {
     let layout: Layout = Layout {
-        size: 100,
-        align: 8,
+        size_: 100,
+        align_: 8,
     };
-    assert_eq(layout.size, 100);
-    assert_eq(layout.align, 8);
+    assert_eq(layout.size_, 100);
+    assert_eq(layout.align_, 8);
 }
 
 // =============================================================================
