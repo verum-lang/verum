@@ -3042,8 +3042,26 @@ fn harvest_names_in_expr(
                 harvest_names_in_expr(a, out);
             }
         }
-        ExprKind::Field { expr, .. }
-        | ExprKind::OptionalChain { expr, .. }
+        ExprKind::Field { expr, field } => {
+            // Harvest `<base>.<field>` for associated-const access like
+            // `Int.MIN` — mirrors the MethodCall arm's `Type.method`
+            // harvest above. Without this, a `Type.CONST` field access is
+            // NEVER added to the lazy archive load's `wanted` set, so the
+            // const's archive entry is never fetched; the use site then
+            // falls through to the garbage-tag variant-ctor synthesis in
+            // `compile_field_access` (observed: `Int.MIN` resolving to the
+            // unrelated SQL-lexer `KwAll` variant, its tag shifting with
+            // the interned-string layout). Harvest both the qualified
+            // `Type.CONST` form and the bare `CONST` simple alias.
+            if let ExprKind::Path(path) = &expr.kind
+                && let Some(last) = last_path_name(path)
+            {
+                out.insert(format!("{}.{}", last, field.name));
+                out.insert(field.name.to_string());
+            }
+            harvest_names_in_expr(expr, out);
+        }
+        ExprKind::OptionalChain { expr, .. }
         | ExprKind::TupleIndex { expr, .. } => harvest_names_in_expr(expr, out),
         ExprKind::Index { expr, index } => {
             harvest_names_in_expr(expr, out);
