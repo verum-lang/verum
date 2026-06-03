@@ -16414,12 +16414,39 @@ impl VbcCodegen {
                 // Check if this is an associated constant from an implement block
                 // (e.g., Fd.INVALID registered as "Fd::INVALID" with __const_val_N)
                 {
-                    let qualified = format!("{}::{}", type_name, field);
-                    if let Some(func_info) = self.ctx.lookup_function(&qualified)
-                        && func_info.param_count == 0
-                        && let Some(ref iname) = func_info.intrinsic_name
-                        && let Some(val_str) = iname.strip_prefix("__const_val_")
-                    {
+                    // Associated consts are registered under BOTH key forms
+                    // across the codegen/archive paths: `Type::CONST` (e.g.
+                    // `Fd::INVALID`) AND `Type.CONST` (e.g. the archived
+                    // `Int.MIN` fn, baked as "Int.MIN" with a DOT). Probing
+                    // only the `::` form here misses the dot-registered
+                    // primitive consts — they then fell through to the
+                    // variant-ctor synthesis below, which emits
+                    // `MakeVariant(tag = intern_string("Int.MIN"))`: a garbage
+                    // string-id tag that collides with a real variant
+                    // (observed: `Int.MIN` evaluating to the SQL-lexer
+                    // `KwAll`/`KTrunc` variant — the tag shifting with the
+                    // interned-string layout). Probe both forms.
+                    // The archive registers associated consts under the
+                    // FULLY-QUALIFIED `<module>.Type.CONST` (e.g.
+                    // `core.base.primitives.Int.MIN`) plus a bare simple
+                    // alias (`MIN`) — NEVER the `Type.CONST` form. So probe
+                    // `Type::CONST`, `Type.CONST`, AND the `.Type.CONST`
+                    // suffix (unique by construction; `find_function_by_suffix`
+                    // returns None on ambiguity) before the variant fallback.
+                    let qualified_colon = format!("{}::{}", type_name, field);
+                    let qualified_dot = format!("{}.{}", type_name, field);
+                    let suffix_dot = format!(".{}.{}", type_name, field);
+                    let const_val = self
+                        .ctx
+                        .lookup_function(&qualified_colon)
+                        .or_else(|| self.ctx.lookup_function(&qualified_dot))
+                        .or_else(|| self.ctx.find_function_by_suffix(&suffix_dot))
+                        .filter(|fi| fi.param_count == 0)
+                        .and_then(|fi| fi.intrinsic_name.clone())
+                        .and_then(|iname| {
+                            iname.strip_prefix("__const_val_").map(|s| s.to_string())
+                        });
+                    if let Some(val_str) = const_val {
                         // e.g. `Int.MIN` (= __const_val_-9223372036854775808).
                         // Large magnitudes MUST use the constant pool — LoadI
                         // carries a 48-bit inline immediate and truncates
