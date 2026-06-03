@@ -16346,7 +16346,16 @@ impl VbcCodegen {
                 // Use qualified name (TypeName.Variant) to avoid collision with
                 // stdlib variants (e.g., "Empty" colliding with TryRecvError.Empty).
                 let qualified_variant = format!("{}.{}", type_name, field);
-                if let Some(fi) = self.ctx.lookup_function(&qualified_variant).cloned() {
+                // `!fi.is_const` guard: an associated CONST (e.g. `Int.MIN`,
+                // now resolvable here once the lazy load harvests it) is NOT
+                // a variant constructor — without this guard it gets
+                // mis-emitted as a nullary variant (garbage tag → unrelated
+                // variant like `KwAll`/`UpdateRow`). Skip the variant path
+                // for consts so the static-constant / __const_val_ resolution
+                // below handles them.
+                if let Some(fi) = self.ctx.lookup_function(&qualified_variant).cloned()
+                    && !fi.is_const
+                {
                     if let Some(tag) = fi.variant_tag {
                         // The path-resolution branch knows the syntactic
                         // parent (`type_name`) directly — promote to the
@@ -16369,8 +16378,15 @@ impl VbcCodegen {
                         Some(type_name),
                     );
                 }
-                // Fallback: try simple name for non-colliding variants
-                if self.ctx.lookup_function_in_scope(field).is_some() {
+                // Fallback: try simple name for non-colliding variants.
+                // Same `!is_const` guard: the bare simple alias of a
+                // primitive const (`MIN`) is registered first-wins and must
+                // not be mistaken for a variant constructor.
+                if self
+                    .ctx
+                    .lookup_function_in_scope(field)
+                    .is_some_and(|fi| !fi.is_const)
+                {
                     return self.compile_variant_constructor_hinted(
                         field,
                         &verum_common::List::new(),
@@ -16436,15 +16452,35 @@ impl VbcCodegen {
                     let qualified_colon = format!("{}::{}", type_name, field);
                     let qualified_dot = format!("{}.{}", type_name, field);
                     let suffix_dot = format!(".{}.{}", type_name, field);
+                    // Extract the `__const_val_<N>` payload from a candidate
+                    // ONLY if it is a zero-arg inlinable const. CRITICAL: the
+                    // filter is applied PER candidate, not after an `.or_else`
+                    // chain — the wanted-fanout registers the const under
+                    // multiple keys AND a non-const entry may shadow
+                    // `Type.CONST` (e.g. the bare-`.` key), so a chain that
+                    // short-circuits on the first `Some` then filters would
+                    // pick the wrong entry and never reach the qualified
+                    // `.Type.CONST` suffix that resolves the real const.
+                    let extract_const = |fi: &FunctionInfo| -> Option<String> {
+                        if fi.param_count != 0 {
+                            return None;
+                        }
+                        fi.intrinsic_name
+                            .as_ref()
+                            .and_then(|n| n.strip_prefix("__const_val_"))
+                            .map(|s| s.to_string())
+                    };
                     let const_val = self
                         .ctx
                         .lookup_function(&qualified_colon)
-                        .or_else(|| self.ctx.lookup_function(&qualified_dot))
-                        .or_else(|| self.ctx.find_function_by_suffix(&suffix_dot))
-                        .filter(|fi| fi.param_count == 0)
-                        .and_then(|fi| fi.intrinsic_name.clone())
-                        .and_then(|iname| {
-                            iname.strip_prefix("__const_val_").map(|s| s.to_string())
+                        .and_then(extract_const)
+                        .or_else(|| {
+                            self.ctx.lookup_function(&qualified_dot).and_then(extract_const)
+                        })
+                        .or_else(|| {
+                            self.ctx
+                                .find_function_by_suffix(&suffix_dot)
+                                .and_then(extract_const)
                         });
                     if let Some(val_str) = const_val {
                         // e.g. `Int.MIN` (= __const_val_-9223372036854775808).
@@ -17389,7 +17425,37 @@ impl VbcCodegen {
                     .filter(|td| !td.fields.is_empty())
                     .map(|td| td.fields.len() as u32)
                     .or_else(|| self.type_field_count(&type_name))
-                    .unwrap_or(fields.len() as u32);
+                    .unwrap_or(fields.len() as u32)
+                    // **Allocation floor** — the heap object MUST have at
+                    // least as many 8-byte slots as the largest field index
+                    // any `SetF` will write. `compute_field_offset()` places
+                    // writes by the field's position in `type_field_layouts`,
+                    // so the allocation can never be smaller than that layout's
+                    // length; and a base-less record literal initialises every
+                    // declared field, so it can never be smaller than the
+                    // literal's own field count either. Without this floor an
+                    // UNDER-COUNTING descriptor/cache silently under-allocates:
+                    // `core.collections.ListIter<T> { ptr: &unsafe T, end:
+                    // &unsafe T }` resolved to 1 slot (its two `&unsafe T`
+                    // fields were mis-counted), so `New` malloc'd 24+8 bytes
+                    // while `SetF end` (index 1) wrote at offset 24+8 — one
+                    // slot PAST the object. The interpreter tolerates it
+                    // (slots grow lazily); AOT's fixed `verum_checked_malloc`
+                    // does not, so `end`/`ptr` read back garbage and
+                    // `for x in xs.iter()` SIGSEGV'd at Tier-1. Taking the max
+                    // only ever GROWS the allocation, so correctly-counted
+                    // records are unaffected.
+                    .max(
+                        self.type_field_layouts
+                            .get(&type_name)
+                            .map(|f| f.len() as u32)
+                            .unwrap_or(0),
+                    )
+                    .max(if base.is_none() {
+                        fields.len() as u32
+                    } else {
+                        0
+                    });
 
                 self.ctx.emit(Instruction::New {
                     dst: result,
