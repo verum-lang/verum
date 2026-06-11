@@ -273,46 +273,103 @@ green-suite contract and should be triaged first among §C/§E.
 
 ---
 
-## §F — Remaining long tail (post Bug A/B, 2026-06-11) — heterogeneous, NOT one cluster
+## §F — Remaining long tail (post Bug A/B) — precise root causes, 2026-06-11
 
-12 modules still have failures after Bug A/B. They split into distinct
-defects, each its own follow-up:
+After Bug A/B, 12 modules still fail. Each was root-caused this session to
+a **distinct deep defect class** (NOT one cluster). They are documented
+here as actionable specs with reproductions and fix paths. None is a
+simple test bug — every one is a real VBC codegen / interpreter / precompile
+defect. **NB: `crates/verum_vbc/src/codegen/expressions.rs` is under active
+concurrent-session edit (uncommitted WIP + `8d8214d83`), so any fix in that
+file must coordinate with that track.**
 
-- **Bug C — umbrella specific-item re-export under archive lazy-load**
-  (`darwin/mod` 30). `mount core.sys.darwin.{is_retryable}` + call →
-  `undefined function: is_retryable`, but `mount core.sys.darwin.errno.{is_retryable}`
-  (direct) works and `mount core.sys.darwin.*` (glob) works. `is_retryable`
-  is re-exported into the darwin umbrella via `public mount .errno.{…}` and
-  is multi-defined across sibling platform modules, so the specific-item
-  mount neither lazy-loads the re-export target module nor binds the bare
-  name. The 30 "failures" are one compile error (`is_retryable` undefined
-  in `test_umbrella_is_retryable_eintr`) cascading to the whole file.
-  **Lives in the archive lazy-reachability + re-export-metadata path —
-  the same subsystem the concurrent `946f3d787` work touches — so left to
-  that track to avoid collision.**
+### Class 1 — bare record-variant pattern/ctor resolves to a colliding tag at precompile
+Modules: `darwin/io` (1), `darwin/tls` (1), `windows/tls` (1), `signal` (some Eq).
+Repro: `SysTlsError.InvalidSlot{slot:7}.eq(&same)` → **false** (must be true),
+while `SysTlsError.AllocationFailed{code:5}.eq(&same)` → true. VBC evidence:
+in the archived `SysTlsError.eq`, the `AllocationFailed` arm emits
+`IsVar tag=2` (correct) but the `InvalidSlot` arm emits **`IsVar tag=913`**
+(should be 3). Root: `InvalidSlot` is multi-defined (`SysTlsError.InvalidSlot`
+*and* `SysContextError.InvalidSlot`, …). At **precompile** time, when a
+stdlib `Eq` impl body compiles, the bare pattern `InvalidSlot` resolves via
+`lookup_function_in_scope` to the first-wins colliding entry (tag 913)
+because neither the type-descriptor scan (`self.types`) nor the qualified
+`ctx.functions["SysTlsError.InvalidSlot"]` entry is populated for the
+type-being-compiled at that point (STEP 3.6 registers the qualified ctor in
+`global_function_registry` with the correct tag, but it does not reach the
+per-module codegen's pattern resolution for tuple-match inner patterns;
+`match (self, other)` sets `match_scrutinee_type` to the TUPLE, not the
+element type). Qualified **construction** uses the descriptor scan (works:
+tag 3) — so construction and bare-pattern disagree → arm never matches →
+`eq` drops to `_ => false`. Fix paths (tried resolution-site tiers in
+`compile_pattern_test`/`compile_record` — ineffective because both sources
+return None during precompile): (a) seed `global_function_registry`'s
+qualified `Type.Variant` entries into each per-module codegen's
+`ctx.functions` before STEP 4 body compile; or (b) propagate tuple-element
+types into inner patterns' `match_scrutinee_type`; or (c) the documented
+workaround — qualify the variant names in the affected stdlib `Eq`/`match`
+impls (`SysTlsError.InvalidSlot{…}`), as already done for `ContextError`.
 
-- **method-on-newtype dispatch** (`io_engine` 1). `EngineDuration.as_micros()`
-  panics "method not found on receiver of runtime kind `Int`" — the
-  newtype receiver unboxed to `Int` lost its method-table entry; 5
-  candidate `*.as_micros` impls exist. NEWTYPE-UNBOX / method-dispatch
-  family.
+### Class 2 — function-pointer call of a `fn`-typed parameter
+Modules: `no_runtime` (4). Repro: `spawn_sync<T>(task: fn()->T){ task() }`
+called with a bare fn name → `TypeMismatch { expected: "closure", got:
+"non-pointer", operation: "call_closure" }`. Calling a `fn`-typed parameter
+holding a `FuncRef` (NaN-boxed func id, not a heap closure pointer) routes
+to the closure-call path which expects a pointer. Fix: the call-a-value path
+must dispatch on FuncRef vs closure-pointer.
 
-- **runtime assertion failures** (`darwin/io`, `darwin/tls`, `fs_watch`,
-  `windows/tls`, `locking` 2, `signal` 9, plus `file_ops`/`init` 1 each) —
-  `AssertionFailed` at runtime (not compile/resolution). Each needs
-  per-test triage: real stdlib behavior bug vs test-expectation drift vs
-  codegen miscompile.
+### Class 3 — interior mutation through a shared `&self` address-of-field
+Modules: `signal` (flag set/clear, several). `SignalFlag.set(&self)` does
+`atomic_store(&self.value as &mut Int, 1, …)`; `is_set()` then reads 0.
+A method taking `&self` (shared) that mutates a field via an
+`as &mut`-cast address-of-field does not persist to the caller's value —
+the small-record receiver is copied for `&self`, so the store lands on the
+copy. Fix: address-of-field on a by-ref receiver must alias the original
+(or `set` should take `&mut self` / the field be a Cell/atomic cell).
 
-- **codegen/data cluster** (`bitfield` 5, `no_runtime` 6,
-  `windows/ntstatus` 3) — fail in the test bodies' own freshly-compiled
-  code, independent of the archive (bit-op width, etc.; see §C).
+### Class 4 — method-on-unboxed-newtype dispatch loses the receiver type
+Modules: `io_engine` (1), `bitfield` (5), `windows/ntstatus` (1).
+`EngineDuration.as_micros()` / `BitfieldElement<UInt8>.to_bits()` /
+`Int.bitnot()` panic "method not found on receiver of runtime kind `Int`,
+N candidates". The newtype/generic receiver unboxes to `Int` at runtime, so
+runtime-kind dispatch can't pick among same-named impls. `bitfield`'s
+`byte$to_bits` additionally reports "No registered function ends with the
+bare method name" — a generic-method **monomorphization** gap (the mangled
+`byte$to_bits` is never registered). Fix: carry the static receiver type to
+the call site for direct dispatch; register monomorphized generic-method
+names.
+
+### Class 5 — wrong-type method dispatch on collect/Display
+Modules: `init` (1: `Maybe.message` on a Maybe receiver), `signal` (2:
+`FFIAbi.from_iter` on a List collect). A `.collect()` / `.message()` call
+dispatches to the wrong type's method (the receiver's static type is lost or
+mis-inferred). Same receiver-type-tracking family as Class 4.
+
+### Class 6 — record field-OOB / data cluster
+`no_runtime` (1: `IntPair` field index 2 exceeds size-16 object),
+`windows/ntstatus` (2 asserts), `locking` (2 asserts), `fs_watch` (1),
+`file_ops` (1), `darwin/io`/etc. residual asserts — per-test triage needed;
+some are record-layout/codegen, some may be assertion-logic.
+
+### Bug C — umbrella specific-item re-export under archive lazy-load
+Modules: `darwin/mod` (30, one cascading compile error). `mount
+core.sys.darwin.{is_retryable}` + call → `undefined function: is_retryable`,
+but `core.sys.darwin.errno.{is_retryable}` (direct) and `core.sys.darwin.*`
+(glob) both work. `is_retryable` is re-exported into the darwin umbrella via
+`public mount .errno.{…}` and is multi-defined across sibling platform
+modules, so the specific-item mount neither lazy-loads the re-export target
+module nor binds the bare name. **Lives in the archive
+lazy-reachability + re-export-metadata path — the subsystem the concurrent
+`946f3d787` work touches — left to that track to avoid collision.**
 
 ## Cross-tier contract status
 
 Per `core-tests/INVENTORY.md`, the CI contract is "every `@test` passes
 under both `--interp` and `--aot`". For `core/sys` today:
 
-- **interp**: 37/51 modules green; 14 fail + 2 hang, dominated by Bug A.
+- **interp** (post Bug A+B, 2026-06-11): **39/51 modules green**; 12 fail,
+  0 hang (both former TIMEOUTs resolved). Remaining failures = the 6 deep
+  classes + Bug C catalogued in §F, each a separate focused follow-up.
 - **aot**: blocked suite-wide by §D.
 
 The single highest-leverage fix is **Bug A** (two-pass precompile
