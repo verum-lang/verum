@@ -284,6 +284,24 @@ concurrent-session edit (uncommitted WIP + `8d8214d83`), so any fix in that
 file must coordinate with that track.**
 
 ### Class 1 — bare record-variant pattern/ctor resolves to a colliding tag at precompile
+> **PARTIALLY FIXED on branch `sys-tail-fixes2` (commit `475240b96`),
+> pending merge** (blocked: concurrent session holds uncommitted WIP in
+> `codegen/expressions.rs` + `interpreter/.../pattern_matching.rs` — the
+> exact files — so a fast-forward would clobber their work). **darwin/tls
+> 29→30/0 and darwin/io 41→42/0 CLOSED & validated.** Fixes: (1)
+> `compile_pattern_test` `PatternKind::Record` resolves the variant tag via
+> scrutinee-then-impl-`self` type (descriptor scan / imported qualified
+> `Type.Variant`) BEFORE the colliding bare `lookup_function_in_scope`;
+> (2) `compile_record` computes the impl/return-type-scoped tag BEFORE
+> `simple_resolves_to_record` so `Other` in `from_errno`→`DarwinIoDriverError`
+> is the variant, not an untyped `NEW Other` plain record. **`windows/tls`
+> (1) STILL OPEN** — the 2-field `AllocationFailed{code,size}` bind reads
+> `size` from slot 0; `resolve_field_index` got a qualified-`Parent.Variant`
+> branch but `find_variant_in_type_descriptors` returns an empty field list
+> for the *archive-loaded* descriptor in the consuming program (variant
+> field names not carried on archive descriptors) — deeper archive-metadata
+> follow-up.
+
 Modules: `darwin/io` (1), `darwin/tls` (1), `windows/tls` (1), `signal` (some Eq).
 Repro: `SysTlsError.InvalidSlot{slot:7}.eq(&same)` → **false** (must be true),
 while `SysTlsError.AllocationFailed{code:5}.eq(&same)` → true. VBC evidence:
