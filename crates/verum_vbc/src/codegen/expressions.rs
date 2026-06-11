@@ -13321,11 +13321,57 @@ impl VbcCodegen {
                 // Record pattern: Point { x, y } or VariantName { field1, field2 }
                 let type_name = format!("{}", path);
 
-                // Check if this is a variant constructor (record variant pattern)
-                let variant_tag = self
-                    .ctx
-                    .lookup_function_in_scope(&type_name)
-                    .and_then(|info| info.variant_tag)
+                // Check if this is a variant constructor (record variant pattern).
+                //
+                // **Scrutinee/impl-type-scoped FIRST** (bare record-variant
+                // collision fix). A bare record-variant pattern like
+                // `InvalidSlot { slot }` inside `implement Eq for SysTlsError`
+                // must resolve to `SysTlsError.InvalidSlot`. The pre-fix chain
+                // tried `lookup_function_in_scope("InvalidSlot")` FIRST, which
+                // returns whichever same-named variant won the first-wins
+                // registry race (`SysContextError.InvalidSlot`, …) with an
+                // unrelated tag (observed `IsVar tag=913` vs the real 3) — the
+                // arm then never matches and the whole `match` drops to its
+                // tail. A tuple-match `(self, other)` sets
+                // `match_scrutinee_type` to the TUPLE (no variant of this
+                // name), so we also consult the enclosing impl's `self` type.
+                // Each candidate commits only when the variant genuinely
+                // belongs to that type, so this is safe when the pattern names
+                // a different type's variant. The qualified `Type.Variant`
+                // entry imported from `global_function_registry`
+                // (find_variant_by_type_and_name) and the type-descriptor scan
+                // are both authoritative; the bare lookup is the fallback.
+                let is_simple_variant =
+                    !type_name.contains('.') && !type_name.contains("::");
+                let scoped_tag: Option<u32> = if is_simple_variant {
+                    let mut candidates: Vec<String> = Vec::new();
+                    if let Some(st) = self.ctx.match_scrutinee_type.clone() {
+                        candidates.push(st);
+                    }
+                    if let Some(slf) = self.ctx.variable_type_names.get("self").cloned() {
+                        candidates.push(slf);
+                    }
+                    let mut found: Option<u32> = None;
+                    for cand in candidates {
+                        let base = cand.split('<').next().unwrap_or(&cand);
+                        found = self
+                            .find_variant_in_type_descriptors(base, &type_name)
+                            .map(|(t, _, _)| t)
+                            .or_else(|| self.ctx.find_variant_by_type_and_name(base, &type_name));
+                        if found.is_some() {
+                            break;
+                        }
+                    }
+                    found
+                } else {
+                    None
+                };
+                let variant_tag = scoped_tag
+                    .or_else(|| {
+                        self.ctx
+                            .lookup_function_in_scope(&type_name)
+                            .and_then(|info| info.variant_tag)
+                    })
                     .or_else(|| {
                         // Simple name not found (likely in collision set).
                         // Try qualified name via scrutinee type or arg count.
@@ -17327,7 +17373,44 @@ impl VbcCodegen {
             && self.type_field_layouts.get(variant_name.as_str()).is_some_and(|decl| {
                 literal_field_names.iter().all(|n| decl.iter().any(|d| d == n))
             });
-        let variant_tag = if simple_resolves_to_record {
+        // Bare record-variant CONSTRUCTION scoping (mirror of the
+        // record-PATTERN fix), computed BEFORE the simple-resolves-to-record
+        // check so a genuine variant of the enclosing impl/return type WINS
+        // over a colliding plain-record interpretation. A bare literal
+        // `Other { code, message }` built inside `implement
+        // DarwinIoDriverError` (or a fn returning it) is the variant
+        // `DarwinIoDriverError.Other`, even though a sibling type may register
+        // a record-shaped `Other` in `type_field_layouts` (which would
+        // otherwise drive `simple_resolves_to_record` and emit an untyped
+        // `NEW Other` plain record — type_id 0, no variant tag — so a
+        // consumer matching `DarwinIoDriverError.Other { .. }` never matches).
+        // On a descriptor hit we record the descriptor (parent + declared
+        // field order) so the emit + field remap use the right layout. The
+        // qualified `Type.Variant` entry imported from
+        // `global_function_registry` and the type-descriptor scan are both
+        // authoritative.
+        let scoped_tag: Option<u32> = if !path_is_qualified {
+            self.ctx
+                .current_impl_type_name
+                .clone()
+                .or_else(|| self.ctx.current_return_type_name.clone())
+                .and_then(|t| {
+                    let base = Self::strip_generic_args(&t).to_string();
+                    if let Some((tag, parent, decl)) =
+                        self.find_variant_in_type_descriptors(&base, &variant_name)
+                    {
+                        descriptor_match = Some((parent, decl));
+                        Some(tag)
+                    } else {
+                        self.ctx.find_variant_by_type_and_name(&base, &variant_name)
+                    }
+                })
+        } else {
+            None
+        };
+        let variant_tag = if scoped_tag.is_some() {
+            scoped_tag
+        } else if simple_resolves_to_record {
             None
         } else {
             self.ctx
