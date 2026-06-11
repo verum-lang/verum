@@ -585,6 +585,16 @@ pub(in super::super) fn handle_match_tag(
         false
     };
 
+    if std::env::var("VERUM_TRACE_MATCHTAG").is_ok() {
+        let vt = if value.is_ptr() && !value.is_nil() {
+            let p = value.as_ptr::<u8>();
+            if !p.is_null() { unsafe { heap::variant_tag(p) as i64 } } else { -1 }
+        } else if value.is_nil() { -2 } else { -3 };
+        eprintln!(
+            "[matchtag] value_reg={} expected_tag={} value_vtag={} is_ptr={} is_nil={} -> matches={}",
+            value_reg.0, expected_tag, vt, value.is_ptr(), value.is_nil(), matches
+        );
+    }
     state.set_reg(dst, Value::from_bool(matches));
     Ok(DispatchResult::Continue)
 }

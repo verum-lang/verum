@@ -1210,6 +1210,38 @@ pub fn dispatch_loop_table_with_entry_depth(
         state.advance_pc(1);
         state.record_instruction();
 
+        // Opt-in per-instruction trace (VERUM_TRACE_PC=<fn-name-substr>):
+        // prints pc + opcode + classification of r1/r2/r3 for the matching
+        // function, so a same-bytecode/different-result divergence between
+        // two functions is directly observable.
+        if let Ok(ref pcfilter) = std::env::var("VERUM_TRACE_PC") {
+            let fname = state
+                .call_stack
+                .current_function_name(&state.module)
+                .unwrap_or_default();
+            if fname.contains(pcfilter.as_str()) {
+                let cls = |r: u16| -> String {
+                    let v = state.get_reg(Reg(r));
+                    if v.is_nil() { "nil".to_string() }
+                    else if v.is_int() { format!("int({})", v.as_i64()) }
+                    else if v.is_ptr() {
+                        let p = v.as_ptr::<u8>();
+                        if !p.is_null() && (p as usize).is_multiple_of(std::mem::align_of::<super::heap::ObjectHeader>()) {
+                            let h = unsafe { super::heap::ObjectHeader::ref_or_stub(p) };
+                            let vtag = unsafe { super::heap::variant_tag(p) };
+                            format!("ptr(@{:#x} tid={} vtag={})", p as usize, h.type_id.0, vtag)
+                        } else { "ptr(?)".to_string() }
+                    }
+                    else if v.is_bool() { format!("bool({})", v.as_bool()) }
+                    else { "other".to_string() }
+                };
+                eprintln!(
+                    "[pc] {} pc={} op=0x{:02x} | r1={} r2={} r3={}",
+                    fname, pc, opcode_byte, cls(1), cls(2), cls(3)
+                );
+            }
+        }
+
         // Dispatch via table lookup - O(1) array indexing
         let handler = DISPATCH_TABLE[opcode_byte as usize];
         let result = handler(state).map_err(|e| {
