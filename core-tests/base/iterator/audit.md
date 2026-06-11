@@ -113,6 +113,66 @@ scoping.  Mirrors the discipline pinned by tasks #11 / #22 / #24
 Pinned by `core-tests/base/iterator/regression_test.vr` (9 new tests
 spanning both defect classes).
 
+## 4. Crasher root causes — 2026-06-11
+
+The `--interp` crashers (`unit_test`/`property_test`/`protocol_agnostic_test`
+SIGSEGV or timeout) decompose into TWO independent root defects.
+
+### §4.1 Archive lazy-apply bare-leaf fanout explosion — CLOSED (commit `946f3d787`)
+
+ANY code calling a method named like a common stdlib method (`next`, `map`,
+`get`, …) took **~84 seconds to COMPILE** (not execute). The archive-driven
+`ArchiveCtxCache::apply_lazy_with_types` → `SymbolGraph::reachable` BFS seeds
+its transitive closure with bare method names harvested from user code. A bare
+leaf `next` resolves via `leaf_to_qualified` to EVERY type's same-named impl —
+**172** distinct `*.next` bodies in the archive — each of which calls
+`self.iter.next()` (another bare `next` `CallM` edge) and re-fans transitively.
+The closure pulled in ~most of the 585 archive modules; decoding them was the
+84s. Iterator tests (which call `.next()`/`.map()`/etc. densely) timed out.
+
+**Fix**: cap the per-callee bare-leaf fanout in `reachable`
+(`crates/verum_compiler/src/archive_ctx_loader.rs`, `MAX_BARE_LEAF_FANOUT=24`,
+overridable `VERUM_LEAF_FANOUT_CAP`). A high-fanout bare name is a polymorphic
+protocol method resolved at runtime by the receiver's concrete type — whose
+defining module loads independently — so blanket leaf-fanning is redundant for
+correctness and catastrophic for cost. Measured 84730ms→3979ms (21×).
+Regression-safe (maybe/property identical pass/fail cap on vs off).
+
+### §4.2 Cross-module record construction bakes `NEW ()` (untyped) — OPEN
+
+`xs.iter().enumerate()` then `.next()`/`for` → runtime **stack overflow /
+SIGSEGV**. Root: the `Iterator` protocol's default combinators
+(`map`/`filter`/`take`/`zip`/`chain`/`enumerate`/…) construct a DIFFERENT
+generic adapter record (`EnumerateIter<Self>` etc.). When monomorphised onto a
+concrete iterator in another module (e.g. `TextMatches.enumerate` in `core.text`
+constructing `EnumerateIter` from `core.base.iterator`), `compile_record`'s
+`type_name_to_id.get("EnumerateIter")` MISSES → `type_id=0` → `NEW ()
+(fields=2)`. The heap object carries no concrete type, so every later `.next()`
+dispatch fails to recover the receiver type and routes to the lowest-id
+same-named method (`SignalStream.next`) → infinite recursion.
+
+Confirmed via `VERUM_TRACE_RECNEW`: `in_name_to_id=false in_field_layouts=true`
+— the bootstrap shares the type's FIELD LAYOUT cross-module (`import_type_layouts`,
+`crates/verum_vbc/src/codegen/mod.rs:3056`) but is **deliberately TypeId-free**
+(ids are per-module-local; CLASS-9/D2b). 2814 such sites archive-wide
+(EnumerateIter/MapIter/AdapterSpecific/OSError/DerError/Request/…).
+
+Consumer-side recovery doesn't work: `self.types` has no descriptor for the
+cross-module type (only its layout), and the archive linker remaps TypeIds by
+**source-id map, not by name** (`linker.rs`), so a synthetic local descriptor
+would become a DISTINCT type from canonical. The fundamental fix is an
+`external_type_names` cross-module type-reference table — mirror
+`external_function_names` (used for cross-module `Call` remap): codegen records
+`NEW <cross-module-type>` by NAME; the linker resolves external type names to the
+canonical descriptor at merge. Spans codegen + archive format + linker
+(multi-session). Until then iterator-adapter `.next()`/`for`-over-adapters are
+broken at Tier 0/1 (`.collect()`/`.fold()`/native `for x in xs.iter()` work).
+
+Validation requires re-baking the embedded archive: it is blake3-cached over
+`core/**/*.vr` content (`build.rs:173`), so codegen fixes don't reach baked
+bodies on a plain rebuild — `rm target/precompiled-stdlib/runtime.vbca.checksum
+&& touch crates/verum_compiler/build.rs && cargo build` (~12 min).
+
 ## Action items deferred
 
 ### §A `unfold` / `successors` builders + ReduceResult ctors — CLOSED 2026-05-15
