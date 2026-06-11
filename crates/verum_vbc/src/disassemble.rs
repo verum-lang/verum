@@ -409,10 +409,17 @@ fn write_instruction(
             args,
         } => write!(
             out,
-            "CALL_M    {}, {}.{} {}",
+            // `method_id` is a STRING-table index (codegen interns the
+            // method name via `intern_string`), NOT a function id. Print
+            // the interned string; using `func_name` here misreads the
+            // index as a function id and prints whatever function happens
+            // to share that integer (e.g. a random `*.fs_witness_predicate`),
+            // which is actively misleading when debugging dispatch.
+            "CALL_M    {}, {}.{} (m#{}) {}",
             r(dst),
             r(receiver),
-            func_name(module, *method_id),
+            str_name(module, *method_id),
+            method_id,
             reg_range(args)
         ),
         CallClosure { dst, closure, args } => write!(

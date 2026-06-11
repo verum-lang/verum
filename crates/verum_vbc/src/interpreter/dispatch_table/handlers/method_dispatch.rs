@@ -2171,6 +2171,33 @@ pub(in super::super) fn handle_call_method(
     }
 
     if let Some(target_func_id) = found_func_id {
+        // Opt-in dispatch trace (VERUM_TRACE_DISPATCH=1): logs the
+        // resolved target plus the recovered receiver type. Invaluable
+        // for diagnosing CallM mis-dispatch (a bare method name routing
+        // to the wrong type's impl) — the runtime receiver type that the
+        // resolution keyed on is otherwise invisible.
+        if std::env::var("VERUM_TRACE_DISPATCH").is_ok() {
+            let tname = state
+                .module
+                .get_function(target_func_id)
+                .and_then(|f| state.module.strings.get(f.name))
+                .unwrap_or("?");
+            let recv_kind = if is_cbgr_ref(&receiver) { "cbgr" }
+                else if receiver.is_thin_ref() { "thin" }
+                else if receiver.is_ptr() { "ptr" } else { "other" };
+            let dr_tid = if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+                let p = dispatch_receiver.as_ptr::<u8>();
+                if !p.is_null() && (p as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+                    unsafe { heap::ObjectHeader::try_type_id(p).map(|t| t.0).unwrap_or(0) }
+                } else { 0 }
+            } else { 0 };
+            let dr_tname = state.module.get_type(crate::types::TypeId(dr_tid))
+                .and_then(|td| state.module.strings.get(td.name)).unwrap_or("?");
+            eprintln!(
+                "[trace-dispatch] '{}' -> fid={} '{}' | recv_kind={} method_id={} recv_tid={} recv_type='{}'",
+                method_name, target_func_id.0, tname, recv_kind, method_id, dr_tid, dr_tname,
+            );
+        }
         // Store in method dispatch cache keyed by (method_id, receiver_type_id)
         // so distinct receiver types preserve distinct resolutions.
         state.method_cache.insert(cache_key, target_func_id);
