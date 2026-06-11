@@ -1139,13 +1139,55 @@ impl SymbolGraph {
             }
         }
 
+        // **Polymorphic-method fanout cap** (closes the iterator
+        // archive-load blow-up). A bare protocol-method callee such as
+        // `next` / `map` / `clone` / `eq` resolves, in the archive's
+        // `leaf_to_qualified` index, to EVERY type's same-named impl —
+        // 172 distinct `*.next` bodies, each of which calls
+        // `self.iter.next()` (another bare `next` CallM edge) and so
+        // re-fans to all 172 transitively. The naive closure therefore
+        // pulls in nearly the whole archive (585 modules decoded), and
+        // the lazy-apply took ~85s for any user code that merely calls a
+        // method named `next`.
+        //
+        // The fix is grounded in the runtime dispatch model: a bare
+        // method call (`CallM`) is resolved by the RECEIVER's concrete
+        // runtime type (see `method_dispatch::func_id_parent_compatible_
+        // with_receiver`), and that concrete type's defining module is
+        // ALWAYS reached independently — the type is constructed/used,
+        // so its constructor or a qualified edge pulls its module in,
+        // and `register_module_filtered` loads all of the module's impl
+        // methods. Blanket-fanning a bare leaf to every same-named impl
+        // is therefore redundant for correctness and catastrophic for
+        // cost. We cap the per-callee bare-leaf expansion: leaves that
+        // map to more than `MAX_BARE_LEAF_FANOUT` qualifieds are treated
+        // as polymorphic protocol methods and NOT fanned out here —
+        // their needed impl arrives via the receiver type's module.
+        // Low-fanout leaves (e.g. `Text.from_utf8_unchecked`, a unique
+        // helper) keep their precise resolution.
+        let max_bare_leaf_fanout: usize = std::env::var("VERUM_LEAF_FANOUT_CAP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(24);
+        let fan_leaf = |leaf: &str,
+                        reached: &mut HashSet<String>,
+                        queue: &mut VecDeque<String>| {
+            if let Some(matches) = self.leaf_to_qualified.get(leaf) {
+                if matches.len() <= max_bare_leaf_fanout {
+                    for q in matches {
+                        enqueue(q, reached, queue);
+                    }
+                }
+            }
+        };
         while let Some(name) = queue.pop_front() {
             if let Some(idx) = self.qualified_to_module.get(&name) {
                 modules.insert(*idx);
                 if let Some(module_edges) = self.edges.get(idx) {
                     if let Some(callees) = module_edges.get(&name) {
                         for callee in callees {
-                            // Direct qualified resolution.
+                            // Direct qualified resolution — always exact,
+                            // never fans, so it stays unconditional.
                             if self.qualified_to_module.contains_key(callee) {
                                 enqueue(callee, &mut reached, &mut queue);
                             }
@@ -1153,13 +1195,7 @@ impl SymbolGraph {
                             // strings whose receiver type prefix isn't
                             // a module path — `Text.from_utf8_unchecked`
                             // resolves via the leaf_to_qualified index.
-                            if let Some(matches) =
-                                self.leaf_to_qualified.get(callee.as_str())
-                            {
-                                for q in matches {
-                                    enqueue(q, &mut reached, &mut queue);
-                                }
-                            }
+                            fan_leaf(callee.as_str(), &mut reached, &mut queue);
                             // For descriptor-name-promoted forms like
                             // `sys.bitfield.test_bit` whose leaf is
                             // `test_bit`, also try matching the full
@@ -1168,13 +1204,7 @@ impl SymbolGraph {
                             // type prefix.
                             if let Some(dot_pos) = callee.find('.') {
                                 let after_type = &callee[dot_pos + 1..];
-                                if let Some(matches) =
-                                    self.leaf_to_qualified.get(after_type)
-                                {
-                                    for q in matches {
-                                        enqueue(q, &mut reached, &mut queue);
-                                    }
-                                }
+                                fan_leaf(after_type, &mut reached, &mut queue);
                             }
                         }
                     }
@@ -1671,6 +1701,14 @@ impl ArchiveCtxCache {
         // surfaces by construction — no hardcoded entries.
         let graph = self.graph(archive);
         let (reached_qualified, reached_module_idxs) = graph.reachable(&wanted);
+        if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
+            eprintln!(
+                "[reachable] wanted={} reached_qualified={} reached_modules={}",
+                wanted.len(),
+                reached_qualified.len(),
+                reached_module_idxs.len(),
+            );
+        }
         for idx in &reached_module_idxs {
             if let Some(entry) = archive.index.get(*idx as usize) {
                 wanted_module_prefixes.insert(entry.name.clone());

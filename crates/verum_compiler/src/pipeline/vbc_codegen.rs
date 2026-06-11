@@ -425,23 +425,37 @@ impl<'s> CompilationPipeline<'s> {
         // walking is gone entirely.
         let trace_path = std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok();
         let t_user = std::time::Instant::now();
+        macro_rules! step_mark {
+            ($s:expr) => {
+                if trace_path {
+                    eprintln!("[codegen-step] {} (t+{:.1}ms)", $s, t_user.elapsed().as_secs_f64() * 1000.0);
+                }
+            };
+        }
+        step_mark!("collect_protocol_definitions");
         codegen.collect_protocol_definitions(module);
+        step_mark!("collect_non_protocol_declarations");
         codegen
             .collect_non_protocol_declarations(module)
             .map_err(|e| {
                 anyhow::anyhow!("VBC codegen error (user declarations): {}", e)
             })?;
+        step_mark!("mark_user_defined_types");
         codegen.mark_user_defined_types(module);
+        step_mark!("resolve_pending_imports");
         codegen.resolve_pending_imports();
+        step_mark!("compile_pending_default_methods");
         codegen
             .compile_pending_default_methods()
             .map_err(|e| {
                 anyhow::anyhow!("VBC codegen error (default methods): {}", e)
             })?;
         codegen.set_propagate_test_attr(true);
+        step_mark!("compile_module_items");
         codegen
             .compile_module_items(module)
             .map_err(|e| anyhow::anyhow!("VBC codegen error (user bodies): {}", e))?;
+        step_mark!("compile_module_items DONE");
         if trace_path {
             eprintln!(
                 "[compile_ast_to_vbc] user codegen: {:.2}ms",
