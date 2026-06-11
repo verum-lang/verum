@@ -16973,6 +16973,18 @@ impl VbcCodegen {
             }
         }
 
+        // Bug B — FFI-symbol carry-over cache (archive ffi-symbol idx →
+        // consumer-side ffi-symbol idx) for this merge call. Archive
+        // function bodies that issue an FFI call carry a `CallFfi*`
+        // symbol-index operand relative to the ARCHIVE module's
+        // `ffi_symbols` table; the consumer's table is different, so the
+        // FOURTH instruction-rewrite pass below imports each referenced
+        // archive symbol (+ its library / struct layouts) into `self`
+        // and rewrites the operand. Cache keeps the import idempotent
+        // across every body in this archive module.
+        let mut ffi_sym_cache: std::collections::HashMap<u32, u32> =
+            std::collections::HashMap::new();
+
         let mut copied = 0usize;
         for archive_desc in archive_module.functions.iter() {
             let archive_fid = archive_desc.id.0;
@@ -17083,6 +17095,47 @@ impl VbcCodegen {
                 }
             }
 
+            // FOURTH PASS — FFI symbol carry-over + operand remap (Bug B).
+            //
+            // An archive function body that issues an FFI call (e.g.
+            // `sys.darwin.libsystem.safe_full_fsync` → `fcntl`) carries a
+            // `CallFfi*` symbol-index operand relative to the ARCHIVE
+            // module's `ffi_symbols` table. The consuming codegen's table
+            // is different (and usually shorter), so the baked-in index
+            // resolves to the wrong symbol — or, when out of range, fails
+            // at runtime with `FFI symbol not found: FfiSymbolId(N)`. The
+            // three earlier passes remap func/type/const/string ids but
+            // NOT FFI symbols, so without this pass every FFI-backed
+            // stdlib function is uncallable from user / cross-module code.
+            //
+            // Import each referenced archive symbol (dedup by name, plus
+            // its owning library and any `@repr(C)` struct layouts) into
+            // `self`'s FFI tables and rewrite the leading `symbol_idx:u32`
+            // operand to the consumer-side index. All `CallFfi*` sub-ops
+            // lead with `symbol_idx:u32` EXCEPT `CallFfiIndirect` (0x15),
+            // which leads with a function-pointer register. Mirrors the
+            // `CreateCallback` func-id rewrite in `build_module`'s finalize.
+            for instr in instructions.iter_mut() {
+                if let crate::instruction::Instruction::FfiExtended { sub_op, operands } = instr
+                    && matches!(*sub_op, 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x16 | 0x17)
+                    && operands.len() >= 4
+                {
+                    let archive_sym_idx = u32::from_le_bytes([
+                        operands[0],
+                        operands[1],
+                        operands[2],
+                        operands[3],
+                    ]);
+                    if let Some(new_sym_idx) = self.import_archive_ffi_symbol(
+                        archive_module,
+                        archive_sym_idx,
+                        &mut ffi_sym_cache,
+                    ) {
+                        operands[0..4].copy_from_slice(&new_sym_idx.to_le_bytes());
+                    }
+                }
+            }
+
             // Build the new descriptor with codegen-namespace ids /
             // strings. Param + return types pull from the
             // (already-remapped) codegen type table.
@@ -17122,6 +17175,119 @@ impl VbcCodegen {
         }
 
         copied
+    }
+
+    /// Bug B helper — import an FFI symbol referenced by a copied archive
+    /// function body into this codegen's own FFI tables, returning the
+    /// consumer-side `ffi_symbols` index (or `None` if the archive index
+    /// is out of range).
+    ///
+    /// Dedup is by symbol NAME via `ffi_function_map`: a name already
+    /// registered (the user's own `extern fn`, or a previously-imported
+    /// archive symbol) is reused so the consumer keeps a single canonical
+    /// entry per native symbol. This matches `build_module`'s finalize,
+    /// which re-interns each symbol's name from `ffi_function_map` — so an
+    /// imported symbol MUST be registered there or it would serialize
+    /// nameless (`StringId(0)`) and fail `dlsym`.
+    fn import_archive_ffi_symbol(
+        &mut self,
+        archive_module: &crate::module::VbcModule,
+        archive_sym_idx: u32,
+        cache: &mut std::collections::HashMap<u32, u32>,
+    ) -> Option<u32> {
+        if let Some(&cached) = cache.get(&archive_sym_idx) {
+            return Some(cached);
+        }
+        let sym = archive_module.ffi_symbols.get(archive_sym_idx as usize)?.clone();
+        let sym_name = archive_module
+            .strings
+            .get(sym.name)
+            .unwrap_or("")
+            .to_string();
+
+        // Dedup against an already-registered symbol of the same name.
+        if !sym_name.is_empty()
+            && let Some(&existing) = self.ffi_function_map.get(&sym_name)
+        {
+            cache.insert(archive_sym_idx, existing.0);
+            return Some(existing.0);
+        }
+
+        // Resolve + import the owning library, preserving the
+        // cross-platform tag (a `kernel32.dll` symbol stays Windows even
+        // when compiling on macOS, so the runtime loader can skip it).
+        let new_library_idx: i16 = if sym.library_idx >= 0 {
+            if let Some(lib) = archive_module.ffi_libraries.get(sym.library_idx as usize) {
+                let lib_name = archive_module
+                    .strings
+                    .get(lib.name)
+                    .unwrap_or("")
+                    .to_string();
+                if let Some(&lib_id) = self.ffi_library_map.get(&lib_name) {
+                    lib_id.0 as i16
+                } else {
+                    let lib_id = FfiLibraryId(self.ffi_libraries.len() as u16);
+                    let platform = FfiPlatform::from_library_name(&lib_name);
+                    self.ffi_libraries.push(FfiLibrary {
+                        name: StringId(0), // finalize re-interns from ffi_library_map
+                        platform,
+                        required: lib.required,
+                        version: None,
+                    });
+                    self.ffi_library_map.insert(lib_name, lib_id);
+                    lib_id.0 as i16
+                }
+            } else {
+                -1
+            }
+        } else {
+            -1
+        };
+
+        // Import any `@repr(C)` struct layouts the signature references,
+        // remapping the layout indices into the consumer's table.
+        let mut signature = sym.signature.clone();
+        if let Some(ret_layout) = signature.return_layout_idx {
+            signature.return_layout_idx =
+                self.import_archive_ffi_layout(archive_module, ret_layout);
+        }
+        for slot in signature.param_layout_indices.iter_mut() {
+            if let Some(layout_idx) = *slot {
+                *slot = self.import_archive_ffi_layout(archive_module, layout_idx);
+            }
+        }
+
+        let new_idx = self.ffi_symbols.len() as u32;
+        let mut new_sym = sym;
+        new_sym.name = StringId(0); // finalize re-interns from ffi_function_map
+        new_sym.library_idx = new_library_idx;
+        new_sym.signature = signature;
+        self.ffi_symbols.push(new_sym);
+        if !sym_name.is_empty() {
+            self.ffi_function_map
+                .insert(sym_name, FfiSymbolId(new_idx));
+        }
+        cache.insert(archive_sym_idx, new_idx);
+        Some(new_idx)
+    }
+
+    /// Bug B helper — import an archive `@repr(C)` struct layout into this
+    /// codegen's `ffi_layouts`, returning the consumer-side index. Layouts
+    /// are self-contained (absolute offsets/sizes; field "name" slots are
+    /// positional indices, not string lookups), so finalize copies them
+    /// verbatim — we mirror that here with a plain clone+push.
+    fn import_archive_ffi_layout(
+        &mut self,
+        archive_module: &crate::module::VbcModule,
+        archive_layout_idx: u16,
+    ) -> Option<u16> {
+        let layout = archive_module
+            .ffi_layouts
+            .get(archive_layout_idx as usize)?
+            .clone();
+        let new_idx = self.ffi_layouts.len() as u16;
+        self.ffi_layouts.push(layout);
+        Some(new_idx)
     }
 }
 
