@@ -1,5 +1,41 @@
 # core/sys conformance spectrum — 2026-06-11
 
+> ## ✅ PROGRESS UPDATE 2026-06-12 — Class 1 CLOSED & LANDED on main
+>
+> **Class 1 (bare record-variant pattern + construction) is CLOSED and
+> merged to `main`** (`487cef871`, rebased onto the concurrent codegen
+> commits, binary + archive rebuilt). **darwin/tls 29→30/0 and darwin/io
+> 41→42/0**, validated on the live main build. sys interp is now
+> **~41/51 green**.
+>
+> Fix: `compile_pattern_test` `PatternKind::Record` + `compile_record`
+> resolve the variant tag via scrutinee-then-impl-`self` type (descriptor
+> scan / imported qualified `Type.Variant`) BEFORE the colliding bare
+> `lookup_function_in_scope`; the construction scoping runs BEFORE
+> `simple_resolves_to_record` so a real variant beats a plain-record
+> collision. `resolve_field_index` gained a qualified-`Parent.Variant`
+> branch.
+>
+> **Still open** (§F): `windows/tls` (1, archive descriptor carries empty
+> variant field-names → 2-field bind reads slot 0), `signal` (9),
+> `no_runtime` (6, fn-pointer + record-OOB), `bitfield` (5,
+> generic-method monomorphization), `darwin/mod` (30, Bug C umbrella),
+> `windows/ntstatus` (3), `locking` (2), `io_engine`/`init`/`file_ops`/
+> `fs_watch` (1 each). **fn-pointer (Class 2) root cause pinned:**
+> `compile_simple_path` auto-calls 0-arg functions, so a bare function
+> name in value position (`let t = always_true` / `spawn_sync(always_true)`)
+> becomes a call not a func-ref — the proper fix (emit func-ref when an
+> `fn`-type is expected) is central/high-regression and was not attempted
+> under the current heavy concurrency.
+>
+> **⚠️ CONCURRENT REGRESSION (not Class 1):** `linux/bpf/{map,mod,program}`
+> regressed (record-field round-trip `map_config_*` tests fail / one
+> TIMEOUT) between `3858edf52` and `9c641a453` — isolated to the concurrent
+> commit `ae4b3d22a` ("route non-intercepted iterator adapters to custom
+> .next() for-loop"). bpf is GREEN on `3858edf52`+Class1, broken on
+> `9c641a453`+Class1; my Class 1 is in both, so it is not the cause. Flagged
+> for the iterator-adapter track to address.
+
 > ## ✅ POST-FIX UPDATE (2026-06-11, later same day)
 >
 > **Bug A and Bug B are CLOSED** (commits `08ede3518` Bug B + `cee79ec03`
