@@ -17426,7 +17426,76 @@ impl VbcCodegen {
                 // Use the §F-resolved concrete name when the literal
                 // path was `Self`; otherwise the raw path string.
                 let type_name = variant_name.clone();
-                let type_id_opt = self.type_name_to_id.get(&type_name).copied();
+                let mut type_id_opt = self.type_name_to_id.get(&type_name).copied();
+
+                // **Cross-module record-construction TypeId synthesis**
+                // (closes XMOD-RECNEW-UNIT-1 / iterator-adapter `NEW ()`).
+                //
+                // During stdlib bootstrap, a module that constructs a record
+                // whose type is DEFINED in another module — canonical case:
+                // the `Iterator` protocol default combinators monomorphised
+                // onto a concrete iterator, e.g. `ListIter.enumerate`'s
+                // `EnumerateIter { iter: self, index: 0 }` where
+                // `EnumerateIter` lives in `core.base.iterator` — only
+                // receives the cross-module type's FIELD LAYOUT (shared
+                // TypeId-free via `import_type_layouts`), never its TypeId.
+                // `type_name_to_id` therefore misses → `type_id = 0` →
+                // `New { type_id: 0 }` (an untyped `()` heap object). The
+                // header then carries no concrete type, so every later
+                // `.next()` / method dispatch on the value fails to recover
+                // the receiver type and routes to the lowest-id same-named
+                // method (`SignalStream.next`) → infinite recursion / SIGSEGV.
+                //
+                // Fix: when the literal names a record whose LAYOUT is known
+                // but whose id is not, allocate a fresh module-local TypeId
+                // and push a `Record` descriptor under the SAME simple name.
+                // The archive body-merge builds its type-id remap BY NAME
+                // (`merge_archive_function_bodies`: archive `ty.name` →
+                // user-codegen `type_name_to_id[name]`), so this local id is
+                // remapped to the canonical descriptor at load — no
+                // `external_type_names` machinery needed. Mirrors the stub
+                // registration in `generate_*`/`register_archive_type`.
+                if type_id_opt.is_none_or(|id| id.0 == 0) {
+                    let base = Self::strip_generic_args(&type_name).to_string();
+                    if let Some(field_names) =
+                        self.type_field_layouts.get(&base).filter(|f| !f.is_empty()).cloned()
+                        && !self.type_name_to_id.contains_key(&base)
+                        && base
+                            .chars()
+                            .next()
+                            .map(|c| c.is_ascii_uppercase())
+                            .unwrap_or(false)
+                    {
+                        let new_id = self.alloc_user_type_id();
+                        let name_sid =
+                            crate::types::StringId(self.ctx.intern_string_raw(&base));
+                        let fields: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> =
+                            field_names
+                                .iter()
+                                .map(|fname| crate::types::FieldDescriptor {
+                                    name: crate::types::StringId(
+                                        self.ctx.intern_string_raw(fname),
+                                    ),
+                                    // type_ref/offset are irrelevant here:
+                                    // the archive body-merge remaps this
+                                    // descriptor BY NAME, and the canonical
+                                    // cross-module descriptor supplies the
+                                    // real layout. Default = Concrete(UNIT).
+                                    ..Default::default()
+                                })
+                                .collect();
+                        let desc = crate::types::TypeDescriptor {
+                            id: new_id,
+                            name: name_sid,
+                            kind: crate::types::TypeKind::Record,
+                            fields,
+                            ..Default::default()
+                        };
+                        self.type_name_to_id.insert(base.clone(), new_id);
+                        self.push_type_dedupe(desc);
+                        type_id_opt = Some(new_id);
+                    }
+                }
                 let type_id = type_id_opt.map(|id| id.0).unwrap_or(0);
 
                 // **Architectural rule** (closes task #16 consumer side):
