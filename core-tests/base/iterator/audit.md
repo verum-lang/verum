@@ -175,49 +175,72 @@ over `core/**/*.vr` content (`build.rs:173`), so `rm
 target/precompiled-stdlib/runtime.vbca.checksum && touch
 crates/verum_compiler/build.rs && cargo build` (~12-16 min).
 
-### §4.3 `self.iter.next()?` in generic adapters yields `None` — OPEN (deeper)
+### §4.3 `self.iter.next()?` in generic adapters yields `None` — CLOSED (commit `3858edf52`)
 
 With §4.2 fixed, adapter `.next()` dispatch resolves correctly
 (`m.next()` → `EnumerateIter.next`, `recv_type='EnumerateIter'` via
-`VERUM_TRACE_DISPATCH`), and `map`-adapter for-loops yield correct values. But
-`enumerate`/`map` **manual `.next()` chains still yield empty**, because every
-adapter body is `let item = self.iter.next()?; …` and the `?` on a
-**generic-type-param-field** receiver (`self.iter: I`) is broken. Reproduces in
-pure single-file user code: `implement<I> Wrap<I> { fn step(&mut self) ->
-Maybe<Int> { let x = self.inner.next()?; Some(x) } }` returns `None` on the first
-call even for `Counter{n:0,max:3}` — whereas the SAME body with an explicit
-`match self.inner.next() { Some(x) => …, None => … }` works (`Some(0)`).
+`VERUM_TRACE_DISPATCH`). But every adapter body is `let item =
+self.iter.next()?; …`, and the `?` on a **generic-type-param-field** receiver
+(`self.iter: I`) propagated `None` even for a `Some`. Reproduced in pure
+single-file user code: `implement<I> Wrap<I> { fn step(&mut self) -> Maybe<Int>
+{ let x = self.inner.next()?; Some(x) } }` returned `None` on the first call for
+`Counter{n:0,max:3}`; the same body with explicit `match` works.
 
-Two distinct codegen defects found via `--emit-vbc` (compare `?` vs `match`
-lowering of the identical `self.inner.next()` call — bytecode 0000-0002 is
-byte-identical):
+**Root cause** (found via `VERUM_TRACE_MATCHTAG` + a per-instruction
+`VERUM_TRACE_PC` trace — the "byte-identical bytecode, different result" was a
+false lead caused by the **stale script-cache**, see the NOTE below): the `?`
+on a generic-`next()` reaches `compile_try`, whose `extract_expr_type_name`
+returns no Maybe-classifiable base, so `success_tag` defaults to **0** — which
+for `Maybe` is the *None* tag. `IS_VAR(Some, tag=0)` → false → the `?` takes the
+failure path and propagates `None`. (A probe capturing the value confirmed
+`is_some=true` while `?` still returned `None`; the matchtag trace showed
+`expected_tag=0` despite the disassembler printing `tag=1`.)
 
-  1. **success_tag mis-classification** — `compile_try` (`expressions.rs:17938`)
-     classifies the inner type via `extract_expr_type_name`, which returns `None`
-     for `self.inner.next()` (the receiver type is the generic param `I`, and
-     `I.next` isn't a registered fn). Unknown → `success_tag` falls back to **0**,
-     which for `Maybe` is the *None* tag, so `?` tests "is None?" not "is Some?".
-     A naive fix (force `is_maybe` when the inner method is `next`/`next_back`)
-     **regresses** `Result`-returning `.next()?` (result/property 26→25) — the
-     classification must distinguish Maybe-vs-Result for the generic case, not
-     blanket-assume Maybe.
-  2. **success-path payload extraction** — even with the tag corrected, the `?`
-     success path emits `AS_VAR r, val, tag=0` (extracts the *None* variant's
-     payload) where the `match` lowering correctly emits `GET_VDATA val.0`. So a
-     `Some(x)` would yield a garbage payload.
+**Fix**: in `compile_try`, force `Maybe` classification when `?` is applied
+directly to a `next`/`next_back` MethodCall. Every `fn next`/`fn next_back` in
+`core/` that can appear under `?` returns a top-level `Maybe` (the only
+non-Maybe `next`s are RNG `-> UInt64`, never `?`-applied), so the override is
+sound and overrides a mis-resolved Result-shaped base. (`AsVar` extracts the
+success payload positionally — field 0 — so it is correct for both Maybe-Some
+and Result-Ok; no payload-extraction change needed.)
 
-Beyond (1)+(2), the observed first-call result is `None` (failure path taken),
-which is **paradoxical** given the `next()` call bytecode is identical to the
-working `match` version — pointing to a third, interpreter-level divergence in
-how the `?` instruction sequence executes vs `match` (needs instruction-level
-tracing / lldb; not VBC-inspectable). Tracked as ADAPTER-TRY-NEXT-1.
+Validated (cache cleared): stdlib `xs.iter().enumerate()` manual `.next()` loop
+yields `0:10/1:20/2:30`; user generic `Wrap<I>` adapters yield correctly.
+Regression-safe + improvement: base/maybe/property 21/9→22/8, result 26/5,
+ordering 23/3.
 
-Until §4.3 is closed, iterator-adapter `.next()` chains (and `for`-loops routed
-to the custom `.next()` path) yield nothing; `.collect()`/`.fold()` and native
-`for x in xs.iter()` (builtin `IterNew`) remain the working paths. A related
-for-loop misclassification — `is_custom_iterator_type` uses `infer_expr_type_name`
-(no MethodCall arm) so `for p in xs.iter().enumerate()` falls to native `IterNew`
-on the adapter record → SIGSEGV — is the remaining for-loop crasher.
+### §4.4 for-loop over non-intercepted adapters → native `IterNew` SIGSEGV — CLOSED (commit `ae4b3d22a`)
+
+`for p in xs.iter().enumerate()` (and `.take`/`.skip`/`.zip`/`.chain`/…)
+crashed: `is_custom_iterator_type` uses `infer_expr_type_name` (no MethodCall
+arm) → None → the loop falls to native `IterNew`, which maps every non-builtin
+`type_id` to `ITER_TYPE_LIST` and reads the adapter record's fields as a `List`
+`[count,cap,entries_ptr]` header → SIGSEGV. (`map`/`filter`/`fold` are
+runtime-intercepted onto the native blob — eager-collect — so they worked.)
+
+**Fix**: `is_custom_iterator_type` recognizes the non-intercepted adapter
+methods (`enumerate`/`take`/`skip`/`take_while`/`skip_while`/`zip`/`chain`/
+`flat_map`/`flatten`/`scan`/`step_by`/`peekable`/`rev`/`fuse`/`cycle`/`dedup`/
+`windows`/`chunks`/`intersperse`/`map_while`/`inspect`/`copied`/`cloned`) in the
+for-loop iterator position and routes them to `compile_for_custom_iterator`
+(`loop { match it.next() {...} }`), which calls the record's `.next()` —
+correct after §4.3. `map`/`filter`/`fold` stay on the fast native blob path.
+
+Iterator suite (`--interp`): property **SIGSEGV→13/9**, protocol_agnostic
+**SIGSEGV→20/2** (≈33 tests recovered from whole-file crashes); enumerate/take/
+skip for-loops yield correctly. Remaining: integration 4/9 (`.collect()`
+pipelines on adapters), a residual `unit_test` crasher, and the property §M
+range-count residuals — tracked separately.
+
+### NOTE — the script-cache trap (lost ~hours of this session)
+
+`verum run`/`verum test` cache compiled modules in `~/.verum/script-cache`,
+keyed by **blake3 over `.vr` content** — NOT compiler version. So codegen fixes
+do **not** take effect on an unchanged `.vr` source until the cache is cleared
+(`rm -rf ~/.verum/script-cache/*`). Every codegen-fix validation on a fixed repro
+must clear it first; otherwise stale bytecode is served and the fix appears
+inert. This is the same blake3-content-cache pattern as the embedded archive
+(`build.rs:173`).
 
 ## Action items deferred
 
