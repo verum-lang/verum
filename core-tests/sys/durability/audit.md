@@ -1,19 +1,20 @@
 # `core.sys.durability` — implementation audit
 
-## Status: **regression-only** (2026-06-11) — error-funnel tests FAIL: `full_fsync`/`data_only_fsync` stubbed to nil at precompile
+## Status: **complete** (2026-06-11) — 11/11 `--interp` after Bug A + Bug B closed
 
-> **2026-06-11 baseline: 3 pass / 8 fail under `--interp`.** The
-> error-funnel `@test`s below currently FAIL: `full_fsync(FileDesc(-1))`
-> returns `Ok(())` instead of `Err(EBADF)`. Root cause is **Bug A** in
-> `core-tests/sys/SYS_SPECTRUM_AUDIT.md §A`: at stdlib precompile,
-> `sys.common.full_fsync`'s `@cfg`-dispatched cross-module call to
-> `sys.darwin.libsystem.safe_full_fsync` (and `sync_directory`'s calls
-> to `safe_open`/`safe_fsync`/`safe_close`) are stubbed to
-> `LOAD_NIL; RET`, so the wrapper returns `Ok(())`/nil for every input.
-> Verified live on a freshly-baked archive (not a stale-archive
-> artifact). A *fresh user compile* of the same call resolves correctly,
-> so the defect is confined to the archive precompile (two-pass
-> cross-module resolution gap, `CLASS-1`). Fixing Bug A clears all 8.
+> **2026-06-11: 11/11 pass under `--interp`** (commits `cee79ec03` Bug A +
+> `08ede3518` Bug B). The error-funnel `@test`s below now correctly
+> observe `full_fsync(FileDesc(-1))` → `Err(EBADF)`.
+>
+> History (now fixed): these tests had pinned a real live defect — at
+> stdlib precompile, `sys.common.full_fsync`'s `@cfg`-dispatched
+> cross-module call to `sys.darwin.libsystem.safe_full_fsync` (and
+> `sync_directory`'s `safe_open`/`safe_fsync`/`safe_close`) compiled to
+> `LOAD_NIL; RET` (**Bug A** — rooted cross-module call not resolved to
+> the task-#47 unique free-fn stub), and even when un-stubbed the FFI
+> symbol failed to resolve in the consuming module (**Bug B** — archive
+> FFI symbols not carried over on body-merge). Both closed; see
+> `core-tests/sys/SYS_SPECTRUM_AUDIT.md` §A/§B.
 
 * `core.sys.durability` is a thin re-export surface over
   `core.sys.common` — see `core/sys/durability.vr:33-43`. The behaviour

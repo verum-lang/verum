@@ -1,5 +1,33 @@
 # core/sys conformance spectrum — 2026-06-11
 
+> ## ✅ POST-FIX UPDATE (2026-06-11, later same day)
+>
+> **Bug A and Bug B are CLOSED** (commits `08ede3518` Bug B + `cee79ec03`
+> Bug A, landed on `main`; binary + stdlib archive rebuilt). Re-swept on
+> the fixed `main` build:
+>
+> - **`durability` 3/8-fail → 11/11 PASS.**
+> - **`darwin/libsystem` TIMEOUT(hang) → 51/0 PASS** — the hang WAS the
+>   Bug B FFI-symbol failure looping; fixing it un-hung the module.
+> - **`linux/time` TIMEOUT → 20/0 PASS** (un-hung; helped by the
+>   concurrent `946f3d787` lazy-apply-reachability speedup, 84s→4s).
+> - **`signal` 10 → 9 fail** (one FFI-routed case fixed).
+> - No regressions (every previously-green module still green;
+>   `common` 115/0).
+> - Whole-suite load is now ~5s/module (was ~30s) via `946f3d787`.
+>
+> **New module tally: 39/51 leaf modules fully green** (was 37 + 2 hangs).
+> Remaining failures are a **heterogeneous long tail**, NOT one cluster
+> (see §F): `darwin/mod` (30) is **Bug C** (umbrella specific-item
+> re-export under archive lazy-load — OPEN, and in the concurrent
+> session's active `lazy-apply reachability` area, so left to that
+> track); `io_engine` (1) is method-on-newtype dispatch; the remaining
+> singles (`darwin/io`, `darwin/tls`, `fs_watch`, `windows/tls`,
+> `locking`, …) are assorted runtime assertion failures; `bitfield` (5),
+> `no_runtime` (6), `windows/ntstatus` (3), `signal` (9) are the
+> codegen/data cluster. The original root-cause analysis below is
+> retained as the fix record.
+
 Full `--interp` sweep of every `core-tests/sys/**` leaf module (51
 modules, ~2150 `@test`s), run **per-module** (one `verum test --interp
 --filter sys/<m>` process each) so a single interpreter SIGSEGV/hang
@@ -81,7 +109,15 @@ module (constants, ADTs, bit layouts, error enums) passes.
 
 ---
 
-## §A — Bug A: stdlib→stdlib cross-module calls stubbed to `LOAD_NIL` at precompile (PRIMARY)
+## §A — Bug A ✅ CLOSED (`cee79ec03`): stdlib→stdlib cross-module calls stubbed to `LOAD_NIL` at precompile (PRIMARY)
+
+> **Fix:** for a rooted module-path method call (`super.X.Y.fn()`) whose
+> qualified lookups miss, fall back to the bare name **only** when it
+> resolves to a task-#47 globally-unique free-fn stub (stage-3 sentinel
+> id range). A stage-3 stub is the single stdlib-wide definition, so
+> dispatch is unambiguous and `Call(stub_id)` is patched to the real id
+> by name at finalize. `expressions.rs` `compile_method_call`. `full_fsync`
+> now compiles to `CALL safe_full_fsync` (was `LOAD_NIL; RET`).
 
 **The dominant FFI-cluster defect.** During stdlib **precompile**
 (`StdlibBootstrap`), a call from one stdlib module into another stdlib
@@ -151,7 +187,15 @@ interpreter.
 
 ---
 
-## §B — Bug B: archive FFI symbols not carried into the consuming module on body-merge
+## §B — Bug B ✅ CLOSED (`08ede3518`): archive FFI symbols not carried into the consuming module on body-merge
+
+> **Fix:** `merge_archive_function_bodies` now imports each referenced
+> archive `FfiSymbol` (dedup by name via `ffi_function_map`), its owning
+> library, and `@repr(C)` layouts into `self`, then rewrites the leading
+> `symbol_idx:u32` operand of every `CallFfi*` sub-op (except
+> `CallFfiIndirect`). `codegen/mod.rs` `import_archive_ffi_symbol`.
+> Validated: user program calling archive `safe_full_fsync(FileDesc(-1))`
+> returns `Err(EBADF)` (was "FFI symbol not found").
 
 Independent of Bug A, even when a body **does** reach an FFI call, the
 call fails: `merge_archive_function_bodies`
@@ -228,6 +272,40 @@ failure (it wedges the whole-suite run), so these gate the default
 green-suite contract and should be triaged first among §C/§E.
 
 ---
+
+## §F — Remaining long tail (post Bug A/B, 2026-06-11) — heterogeneous, NOT one cluster
+
+12 modules still have failures after Bug A/B. They split into distinct
+defects, each its own follow-up:
+
+- **Bug C — umbrella specific-item re-export under archive lazy-load**
+  (`darwin/mod` 30). `mount core.sys.darwin.{is_retryable}` + call →
+  `undefined function: is_retryable`, but `mount core.sys.darwin.errno.{is_retryable}`
+  (direct) works and `mount core.sys.darwin.*` (glob) works. `is_retryable`
+  is re-exported into the darwin umbrella via `public mount .errno.{…}` and
+  is multi-defined across sibling platform modules, so the specific-item
+  mount neither lazy-loads the re-export target module nor binds the bare
+  name. The 30 "failures" are one compile error (`is_retryable` undefined
+  in `test_umbrella_is_retryable_eintr`) cascading to the whole file.
+  **Lives in the archive lazy-reachability + re-export-metadata path —
+  the same subsystem the concurrent `946f3d787` work touches — so left to
+  that track to avoid collision.**
+
+- **method-on-newtype dispatch** (`io_engine` 1). `EngineDuration.as_micros()`
+  panics "method not found on receiver of runtime kind `Int`" — the
+  newtype receiver unboxed to `Int` lost its method-table entry; 5
+  candidate `*.as_micros` impls exist. NEWTYPE-UNBOX / method-dispatch
+  family.
+
+- **runtime assertion failures** (`darwin/io`, `darwin/tls`, `fs_watch`,
+  `windows/tls`, `locking` 2, `signal` 9, plus `file_ops`/`init` 1 each) —
+  `AssertionFailed` at runtime (not compile/resolution). Each needs
+  per-test triage: real stdlib behavior bug vs test-expectation drift vs
+  codegen miscompile.
+
+- **codegen/data cluster** (`bitfield` 5, `no_runtime` 6,
+  `windows/ntstatus` 3) — fail in the test bodies' own freshly-compiled
+  code, independent of the archive (bit-op width, etc.; see §C).
 
 ## Cross-tier contract status
 
