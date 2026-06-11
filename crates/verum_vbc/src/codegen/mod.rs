@@ -13766,6 +13766,27 @@ impl VbcCodegen {
                     }
                 }
             }
+            // Qualified variant `Parent.Variant`: resolve the field index from
+            // the VARIANT's declared fields via the parent type's descriptor.
+            // `type_field_layouts` keys record-variant fields under the SIMPLE
+            // variant name, which collides across sibling types — e.g.
+            // `SysTlsError.AllocationFailed { code }` vs
+            // `WindowsTlsError.AllocationFailed { code, size }`. First-wins
+            // registers the bare `AllocationFailed` layout as the 1-field
+            // `[code]`, so a 2nd field like `size` mis-resolves (reads slot 0).
+            // The descriptor scan is scoped to the named parent type, so it is
+            // unambiguous. Runs before the simple-name `type_field_layouts`
+            // fallbacks below precisely to beat that collision.
+            if let Some(dot) = tn.rfind('.') {
+                let parent = &tn[..dot];
+                let variant = &tn[dot + 1..];
+                if let Some((_, _, decl)) =
+                    self.find_variant_in_type_descriptors(parent, variant)
+                    && let Some(pos) = decl.iter().position(|f| f == field_name)
+                {
+                    return pos as u32;
+                }
+            }
             // Try exact match first
             if let Some(fields) = self.type_field_layouts.get(tn)
                 && let Some(pos) = fields.iter().position(|f| f == field_name)
