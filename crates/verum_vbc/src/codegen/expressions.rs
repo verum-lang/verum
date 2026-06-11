@@ -11925,6 +11925,58 @@ impl VbcCodegen {
             return false;
         }
 
+        // **Non-intercepted Iterator adapters → custom `.next()` loop**
+        // (closes the `for x in xs.iter().enumerate()` SIGSEGV class).
+        //
+        // The interpreter has TWO iterator systems: native IterNew/IterNext
+        // blobs (List/Map/Set/Array/Range) and the stdlib `Iterator` protocol
+        // records (EnumerateIter/TakeIter/ZipIter/…). A handful of adapters
+        // (`map`/`filter`/`fold`/…) are runtime-intercepted onto the native
+        // blob (eager-collect), but the rest construct a stdlib adapter
+        // RECORD. When such a record flows into a `for`-loop whose iterator
+        // type the codegen couldn't resolve (archive methods carry no
+        // `return_type_name`, so infer/extract return None), it falls to the
+        // native `IterNew`, which maps every non-builtin `type_id` to
+        // `ITER_TYPE_LIST` and then reads the adapter record's fields as a
+        // `List` `[count, cap, entries_ptr]` header → SIGSEGV.
+        //
+        // Route these adapters to `compile_for_custom_iterator` (the
+        // `loop { match it.next() { Some(x)=>…, None=>break } }` form), which
+        // calls the record's own `.next()` — now correct after the
+        // ADAPTER-TRY-NEXT-1 `?` fix. The intercepted adapters
+        // (`map`/`filter`/`fold`/`sum`/…) are deliberately EXCLUDED so they
+        // keep using the fast native blob path.
+        if let ExprKind::MethodCall { method, .. } = &iter.kind
+            && matches!(
+                method.name.as_str(),
+                "enumerate"
+                    | "take"
+                    | "skip"
+                    | "take_while"
+                    | "skip_while"
+                    | "zip"
+                    | "chain"
+                    | "flat_map"
+                    | "flatten"
+                    | "scan"
+                    | "step_by"
+                    | "peekable"
+                    | "rev"
+                    | "fuse"
+                    | "cycle"
+                    | "dedup"
+                    | "windows"
+                    | "chunks"
+                    | "intersperse"
+                    | "map_while"
+                    | "inspect"
+                    | "copied"
+                    | "cloned"
+            )
+        {
+            return true;
+        }
+
         // Generator function calls (fn* syntax) use IterNew/IterNext via gen_register path.
         // compile_call emits GenCreate which marks the result as a gen_register.
         // IterNew detects gen_register and passes the handle through.
