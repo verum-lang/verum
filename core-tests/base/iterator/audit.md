@@ -138,7 +138,7 @@ defining module loads independently — so blanket leaf-fanning is redundant for
 correctness and catastrophic for cost. Measured 84730ms→3979ms (21×).
 Regression-safe (maybe/property identical pass/fail cap on vs off).
 
-### §4.2 Cross-module record construction bakes `NEW ()` (untyped) — OPEN
+### §4.2 Cross-module record construction bakes `NEW ()` (untyped) — CLOSED (commit `8d8214d83`)
 
 `xs.iter().enumerate()` then `.next()`/`for` → runtime **stack overflow /
 SIGSEGV**. Root: the `Iterator` protocol's default combinators
@@ -157,21 +157,67 @@ Confirmed via `VERUM_TRACE_RECNEW`: `in_name_to_id=false in_field_layouts=true`
 (ids are per-module-local; CLASS-9/D2b). 2814 such sites archive-wide
 (EnumerateIter/MapIter/AdapterSpecific/OSError/DerError/Request/…).
 
-Consumer-side recovery doesn't work: `self.types` has no descriptor for the
-cross-module type (only its layout), and the archive linker remaps TypeIds by
-**source-id map, not by name** (`linker.rs`), so a synthetic local descriptor
-would become a DISTINCT type from canonical. The fundamental fix is an
-`external_type_names` cross-module type-reference table — mirror
-`external_function_names` (used for cross-module `Call` remap): codegen records
-`NEW <cross-module-type>` by NAME; the linker resolves external type names to the
-canonical descriptor at merge. Spans codegen + archive format + linker
-(multi-session). Until then iterator-adapter `.next()`/`for`-over-adapters are
-broken at Tier 0/1 (`.collect()`/`.fold()`/native `for x in xs.iter()` work).
+**Fix** (`8d8214d83`): a consumer-side recovery in `compile_record` — when a
+plain-record literal names a type whose LAYOUT is known (`type_field_layouts`)
+but whose id is not (`type_name_to_id` miss), allocate a fresh module-local
+`TypeId` and push a `Record` descriptor under the SAME simple name. This works
+because the archive body-merge builds its type-id remap **BY NAME**
+(`merge_archive_function_bodies`, `codegen/mod.rs:16697-16706`: archive `ty.name`
+→ user-codegen `type_name_to_id[name]`), so the local id is remapped to the
+canonical descriptor at load — no `external_type_names` machinery needed
+(the linker's id→id map was a red herring; the archive-load remap is by-name).
 
-Validation requires re-baking the embedded archive: it is blake3-cached over
-`core/**/*.vr` content (`build.rs:173`), so codegen fixes don't reach baked
-bodies on a plain rebuild — `rm target/precompiled-stdlib/runtime.vbca.checksum
-&& touch crates/verum_compiler/build.rs && cargo build` (~12 min).
+Validated: `xs.iter().map(|x| *x*2)` for-loop now yields correct `2/4/6` (was
+timeout/SIGSEGV); `.next()` on a typed adapter no longer mis-recurses to
+`SignalStream.next`. Regression-safe (base/{maybe,result,ordering}/property
+identical vs pre-fix). Re-bake the embedded archive to ship: it is blake3-cached
+over `core/**/*.vr` content (`build.rs:173`), so `rm
+target/precompiled-stdlib/runtime.vbca.checksum && touch
+crates/verum_compiler/build.rs && cargo build` (~12-16 min).
+
+### §4.3 `self.iter.next()?` in generic adapters yields `None` — OPEN (deeper)
+
+With §4.2 fixed, adapter `.next()` dispatch resolves correctly
+(`m.next()` → `EnumerateIter.next`, `recv_type='EnumerateIter'` via
+`VERUM_TRACE_DISPATCH`), and `map`-adapter for-loops yield correct values. But
+`enumerate`/`map` **manual `.next()` chains still yield empty**, because every
+adapter body is `let item = self.iter.next()?; …` and the `?` on a
+**generic-type-param-field** receiver (`self.iter: I`) is broken. Reproduces in
+pure single-file user code: `implement<I> Wrap<I> { fn step(&mut self) ->
+Maybe<Int> { let x = self.inner.next()?; Some(x) } }` returns `None` on the first
+call even for `Counter{n:0,max:3}` — whereas the SAME body with an explicit
+`match self.inner.next() { Some(x) => …, None => … }` works (`Some(0)`).
+
+Two distinct codegen defects found via `--emit-vbc` (compare `?` vs `match`
+lowering of the identical `self.inner.next()` call — bytecode 0000-0002 is
+byte-identical):
+
+  1. **success_tag mis-classification** — `compile_try` (`expressions.rs:17938`)
+     classifies the inner type via `extract_expr_type_name`, which returns `None`
+     for `self.inner.next()` (the receiver type is the generic param `I`, and
+     `I.next` isn't a registered fn). Unknown → `success_tag` falls back to **0**,
+     which for `Maybe` is the *None* tag, so `?` tests "is None?" not "is Some?".
+     A naive fix (force `is_maybe` when the inner method is `next`/`next_back`)
+     **regresses** `Result`-returning `.next()?` (result/property 26→25) — the
+     classification must distinguish Maybe-vs-Result for the generic case, not
+     blanket-assume Maybe.
+  2. **success-path payload extraction** — even with the tag corrected, the `?`
+     success path emits `AS_VAR r, val, tag=0` (extracts the *None* variant's
+     payload) where the `match` lowering correctly emits `GET_VDATA val.0`. So a
+     `Some(x)` would yield a garbage payload.
+
+Beyond (1)+(2), the observed first-call result is `None` (failure path taken),
+which is **paradoxical** given the `next()` call bytecode is identical to the
+working `match` version — pointing to a third, interpreter-level divergence in
+how the `?` instruction sequence executes vs `match` (needs instruction-level
+tracing / lldb; not VBC-inspectable). Tracked as ADAPTER-TRY-NEXT-1.
+
+Until §4.3 is closed, iterator-adapter `.next()` chains (and `for`-loops routed
+to the custom `.next()` path) yield nothing; `.collect()`/`.fold()` and native
+`for x in xs.iter()` (builtin `IterNew`) remain the working paths. A related
+for-loop misclassification — `is_custom_iterator_type` uses `infer_expr_type_name`
+(no MethodCall arm) so `for p in xs.iter().enumerate()` falls to native `IterNew`
+on the adapter record → SIGSEGV — is the remaining for-loop crasher.
 
 ## Action items deferred
 
