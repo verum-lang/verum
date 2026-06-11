@@ -8405,6 +8405,39 @@ impl VbcCodegen {
                 } else {
                     false
                 };
+                // Bug A fix — rooted cross-module call to a task-#47
+                // globally-unique public free fn (forward reference).
+                //
+                // A call like `super.darwin.libsystem.safe_full_fsync(fd)`
+                // inside `sys.common` whose qualified lookups above all
+                // missed may still target a public free fn that STEP 3.7
+                // (`pre_register_unique_public_free_functions`) registered
+                // by BARE name as a stage-3 stub — its real body compiles
+                // later in topo order. The rooted-path guards deliberately
+                // skip the bare-name fallback to avoid rebinding a
+                // multi-definition name (e.g. `ctx_get`) to the current
+                // module. But a stage-3 stub is, by construction, the ONE
+                // definition of that name across the whole stdlib, so
+                // dispatching to it is unambiguous — and emitting
+                // `Call(stub_id)` is exactly what task #47 intends (the
+                // stub id is patched to the real FunctionId by NAME at
+                // finalize via `emit_missing_stub_descriptors`). Without
+                // this, the call collapses to `LoadNil` and the wrapper
+                // silently returns nil for every input (root cause of the
+                // `full_fsync`/`sync_directory`/umbrella-re-export stubs in
+                // the precompiled stdlib archive).
+                if is_module_ns {
+                    const STAGE3_BASE: u32 = u32::MAX - 0x100_0000;
+                    const STAGE3_WIDTH: u32 = 0x10_0000;
+                    if let Some(info) = self.ctx.lookup_function(&method.name).cloned()
+                        && info.param_count == args.len()
+                        && info.variant_tag.is_none()
+                        && (info.id.0 <= STAGE3_BASE
+                            && info.id.0 >= STAGE3_BASE.saturating_sub(STAGE3_WIDTH))
+                    {
+                        return self.compile_static_method_call(&info, args);
+                    }
+                }
                 if (is_module_ns || is_type_ns) && !receiver_is_known_value {
                     let result = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadNil { dst: result });
