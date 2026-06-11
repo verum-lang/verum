@@ -1,6 +1,19 @@
 # `core.sys.durability` — implementation audit
 
-## Status: **partial** (intent-named surface verified; happy-path round-trip deferred)
+## Status: **regression-only** (2026-06-11) — error-funnel tests FAIL: `full_fsync`/`data_only_fsync` stubbed to nil at precompile
+
+> **2026-06-11 baseline: 3 pass / 8 fail under `--interp`.** The
+> error-funnel `@test`s below currently FAIL: `full_fsync(FileDesc(-1))`
+> returns `Ok(())` instead of `Err(EBADF)`. Root cause is **Bug A** in
+> `core-tests/sys/SYS_SPECTRUM_AUDIT.md §A`: at stdlib precompile,
+> `sys.common.full_fsync`'s `@cfg`-dispatched cross-module call to
+> `sys.darwin.libsystem.safe_full_fsync` (and `sync_directory`'s calls
+> to `safe_open`/`safe_fsync`/`safe_close`) are stubbed to
+> `LOAD_NIL; RET`, so the wrapper returns `Ok(())`/nil for every input.
+> Verified live on a freshly-baked archive (not a stale-archive
+> artifact). A *fresh user compile* of the same call resolves correctly,
+> so the defect is confined to the archive precompile (two-pass
+> cross-module resolution gap, `CLASS-1`). Fixing Bug A clears all 8.
 
 * `core.sys.durability` is a thin re-export surface over
   `core.sys.common` — see `core/sys/durability.vr:33-43`. The behaviour
@@ -8,7 +21,9 @@
   `sync_directory` / `pread` / `pwrite`); this module exists to
   give callers an intent-named import surface.
 * `unit_test.vr` and `property_test.vr` pin the error-funnel
-  semantics on invalid fds across the full fsync family.
+  semantics on invalid fds across the full fsync family. **These
+  currently FAIL** (see baseline note above) — they correctly pin a
+  real, live stdlib defect rather than a passing contract.
 * The **happy-path fsync round-trip** (open + write + full_fsync +
   close + reopen + read back) is **deferred** — same fixture
   requirement as the `file_ops` happy-path round-trip.
