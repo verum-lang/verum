@@ -1548,6 +1548,10 @@ impl<'s> CompilationPipeline<'s> {
         // non-positional global-intern fallback. Additive / first-wins —
         // this module's own declarations (collected just below) always win.
         codegen.import_type_layouts(&self.global_type_layout_registry);
+        // Seed cross-module type aliases (e.g. `IoError → StreamError`)
+        // so a use of an imported alias as a namespace resolves. Additive
+        // / first-wins — this module's own alias decls always win.
+        codegen.import_type_aliases(&self.global_type_alias_registry);
 
         // Register stdlib intrinsic shortcuts so callers in this module's
         // bodies emit InlineSequence opcodes instead of Calls to the body
@@ -1793,6 +1797,13 @@ impl<'s> CompilationPipeline<'s> {
         // disambiguates those for registered types).
         for (name, layout) in codegen.export_type_layouts() {
             self.global_type_layout_registry.entry(name).or_insert(layout);
+        }
+        // Publish this module's type aliases so later modules that mount
+        // and use them resolve the alias (companion to the alias-vs-marker
+        // typechecker fix; without this the embedded @core bodies that use
+        // a cross-module alias as a namespace stay lenient panic-stubs).
+        for (name, target) in codegen.export_type_aliases() {
+            self.global_type_alias_registry.entry(name).or_insert(target);
         }
 
         Ok((merged_vbc, total_func_count))
