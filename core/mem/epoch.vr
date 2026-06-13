@@ -585,6 +585,35 @@ implement EpochCache {
 // =============================================================================
 
 /// Thread-local epoch cache for fast access.
+///
+/// **Scalar-shadow representation** (mirrors the `GLOBAL_EPOCH_COUNTER`
+/// scalar shadow used by `current_epoch` / `reset_for_tests`).  The
+/// thread-local cache state is held in two `@thread_local static mut`
+/// SCALARS rather than a single record-shaped `static mut EpochCache`,
+/// because the Tier-0 VBC interpreter does not cell-back a
+/// record-shaped `static mut` — a `&mut self` method call on
+/// `THREAD_EPOCH_CACHE` read the slot as garbage (observed runtime kind
+/// `Text<small>`), so `cached_epoch()` returned an uninitialised value
+/// that violated the `cached <= current` invariant.  `@thread_local`
+/// SCALAR static-muts ARE cell-backed (direct read/write persists per
+/// thread), so the scalar-shadow form is both correct and fast, and —
+/// being per-thread — needs no atomics on the cache itself.
+///
+/// `TL_CACHED_EPOCH` holds the last-synced global epoch; `TL_CHECKS_SINCE_SYNC`
+/// counts validations since the last reload and triggers a resync every
+/// `DEFAULT_SYNC_INTERVAL` checks.  Pinned by
+/// `core-tests/mem/epoch/{unit,property}_test.vr`.
+@thread_local
+static mut TL_CACHED_EPOCH: UInt64 = 0;
+
+@thread_local
+static mut TL_CHECKS_SINCE_SYNC: Int = 0;
+
+/// Legacy record-shaped cache + accessor, retained for API
+/// compatibility with consumers that construct / inspect an
+/// `EpochCache` value directly.  The thread-local hot path
+/// (`cached_epoch` / `invalidate_epoch_cache`) uses the scalar
+/// shadows above, not this record (see the representation note).
 @thread_local
 static mut THREAD_EPOCH_CACHE: EpochCache = EpochCache {
     cached_epoch: 0,
@@ -599,18 +628,30 @@ public fn get_thread_epoch_cache() -> &mut EpochCache {
 }
 
 /// Get current epoch from thread-local cache.
+///
+/// Returns the cached global epoch, reloading from `current_epoch()`
+/// every `DEFAULT_SYNC_INTERVAL` checks.  The cache always trails the
+/// global epoch, so the returned value is `<= current_epoch()`.
 @inline
 public fn cached_epoch() -> UInt64 {
-    unsafe { THREAD_EPOCH_CACHE.get() }
+    let checks = unsafe { TL_CHECKS_SINCE_SYNC } + 1;
+    if checks >= DEFAULT_SYNC_INTERVAL {
+        unsafe { TL_CACHED_EPOCH = current_epoch(); }
+        unsafe { TL_CHECKS_SINCE_SYNC = 0; }
+    } else {
+        unsafe { TL_CHECKS_SINCE_SYNC = checks; }
+    }
+    unsafe { TL_CACHED_EPOCH }
 }
 
 /// Invalidate thread-local epoch cache.
 ///
 
 /// Should be called from epoch callback to ensure thread sees new epoch.
+/// Forces the next `cached_epoch()` call to reload from `current_epoch()`.
 @inline
 public fn invalidate_epoch_cache() {
-    unsafe { THREAD_EPOCH_CACHE.invalidate() }
+    unsafe { TL_CHECKS_SINCE_SYNC = DEFAULT_SYNC_INTERVAL; }
 }
 
 // =============================================================================
