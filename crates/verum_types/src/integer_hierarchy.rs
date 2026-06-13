@@ -311,6 +311,11 @@ impl IntegerKind {
             // Base unbounded type
             "Int" => Some(IntegerKind::Int),
 
+            // Canonical 64-bit unsigned integer (the unsigned dual of `Int`).
+            // `UInt` is Verum's natural unsigned width (u64), distinct from the
+            // explicitly-sized `UInt64`/`USize` but identical in representation.
+            "UInt" => Some(IntegerKind::UInt64),
+
             // Semantic names (primary)
             "Int8" => Some(IntegerKind::Int8),
             "Int16" => Some(IntegerKind::Int16),
