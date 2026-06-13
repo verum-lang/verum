@@ -30,20 +30,33 @@
 > Remaining `cabi --aot` (15) are **runtime `List.iter()` AOT SIGSEGV**
 > (the documented universal AOT-ITER-1), a separate codegen class.
 >
-> **NEW root cause — Bug C (umbrella re-export under archive load) precisely
-> localised:** `mount core.sys.{MemProt}` (umbrella re-export from
-> `core.sys.common`) loses the type's **impl block** — associated const
-> `MemProt.NONE` synthesises to `Unit`, method `to_unix_flags` → `E400` on
-> `Unit`. The **direct** `mount core.sys.common.{MemProt}` works (imports
-> the impl block). Struct fields ARE carried under umbrella (literal
-> construction + annotated return type both type-check); only the impl
-> block (consts + methods) is dropped. `core.sys` is archive/metadata
-> loaded, so `import_type_export`'s impl-block import goes through the
-> metadata path, which doesn't follow the re-export to the defining
-> module's impl blocks. Repro: `/tmp/mp4.vr`. Drives the bulk of
-> `sys/common --aot` (325+ `field 'read' on Unit`) and `sys/mod` (`Fd`
-> ctor / `InitError` variant). Same root as the §F Bug C item; deep
-> archive-metadata follow-up.
+> 3. **Bug C (umbrella re-export under archive load) — type facet, FIXED.**
+>    `mount core.sys.{MemProt}` (umbrella re-export from `core.sys.common`)
+>    dropped the type's **impl block** — associated const `MemProt.NONE`
+>    synthesised to `Unit`, method `to_unix_flags` → `E400` on `Unit`. The
+>    **direct** `mount core.sys.common.{MemProt}` always worked. Struct
+>    fields ARE carried under the umbrella; only the impl block (consts +
+>    methods) was lost. Root: the registry's umbrella `mod.vr` AST is a
+>    synthetic stub (catalogue §21 / D1), so `import_type_export`'s
+>    AST-based impl-block import never reached `core.sys.common`. Fix:
+>    `import_item_from_module_body`'s `Type|Protocol` arm now resolves the
+>    canonical source via `reexport_source_module_for` (precompiled
+>    `module_reexports` metadata) and recurses `import_item_from_module_inner`
+>    into it — same path a direct mount uses. **`sys/common --aot` 6→72/115**
+>    (325+ `field on Unit` cluster cleared); **`sys/mod --aot` 21→38/39**
+>    (`Fd` ctor resolves; the `sys/mod` umbrella-variant test bugs —
+>    `SysContextError.StackOverflow` used bare though it carries a `{depth}`
+>    payload, `MemProt.Read` vs the `MemProt.READ` const — were also fixed).
+>    `--interp` held (common 115/0, mod 39/0).
+>
+> **Remaining `sys/common --aot` (43)** are deeper AOT-reference classes,
+> NOT Bug C: a record-variant field bound through a `&`-scrutinee `match`
+> (`for v in xs.iter(); match v { …{ slot } => *slot }`) binds by-value
+> under AOT so `*slot` → `Cannot dereference non-reference type: UInt8`
+> (catalogue task; the AOT-ITER-1 §18 reference-path family); plus an
+> `IOVec` `&unsafe Byte` deref and a `Result<Int,OSError>` whole-file
+> cascade in `integration_test`. `sys/mod`'s sole residual is the
+> AOT-ITER-1 `List.iter()` SIGSEGV (§18).
 
 > ## ✅ PROGRESS UPDATE 2026-06-12 — Class 1 CLOSED & LANDED on main
 >
