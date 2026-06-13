@@ -19431,14 +19431,35 @@ impl VbcCodegen {
                 {
                     let name = &ident.name;
                     if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                        // Heap.new(x) / Shared.new(x): return the inner type, not "Heap"/"Shared"
-                        // This ensures field access on Heap<T> resolves T's field positions
+                        // Heap.new(x) / Shared.new(x): return the WRAPPER type
+                        // `Heap<T>` / `Shared<T>` (NOT the bare inner `T`).
+                        //
+                        // Returning the wrapper is required so that wrapper
+                        // METHODS dispatch correctly: `let b = Heap.new(rec);
+                        // b.is_valid()` must resolve to `Heap.is_valid`, and
+                        // `let s = Shared.new(v); s.strong_count()` to
+                        // `Shared.strong_count`.  Pre-fix this returned the
+                        // inner type, so the binding was typed `T` and the
+                        // method call dispatched to `T.is_valid` /
+                        // `T.strong_count` — not found, runtime kind Object
+                        // (the failing `core-tests/mem/allocator/integration_*`
+                        // Heap/Shared wrapper-method tests).  `Heap.new` /
+                        // `Shared.new` DO return a real wrapper record at
+                        // runtime (`Heap { ptr, generation, epoch }`), so the
+                        // wrapper-typed dispatch is sound.
+                        //
+                        // Field access through the wrapper (`b.field`) still
+                        // works because `resolve_field_index` auto-derefs a
+                        // `Heap<T>` / `Shared<T>` receiver to the inner `T`
+                        // when the field is not one of the wrapper's own
+                        // (ptr / generation / epoch) — see the auto-deref arm
+                        // in `resolve_field_index_impl`.
                         if self.is_allocating_wrapper(name.as_str())
                             && method.name.as_str() == "new"
                             && let Some(first_arg) = args.first()
                             && let Some(inner_type) = self.extract_expr_type_name(first_arg)
                         {
-                            return Some(inner_type);
+                            return Some(format!("{}<{}>", name, inner_type));
                         }
                         // Look up the qualified static method to get its return type.
                         //
