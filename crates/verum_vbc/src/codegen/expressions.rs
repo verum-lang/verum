@@ -8059,6 +8059,26 @@ impl VbcCodegen {
                 None
             };
             if let Some(template) = opcode {
+                // Honour a compile-time-constant capacity (the dominant form
+                // `with_capacity(32)`) as a real reservation: a constant in the
+                // encodable `u16` range becomes `NewList`'s `capacity_hint`, so
+                // both the interpreter (`handle_new_list`) and AOT
+                // (`lower_new_list_with_capacity`) report `capacity() >= n` and
+                // avoid reallocation through the first n pushes — the
+                // `with_capacity` contract. A non-constant / out-of-range
+                // capacity keeps the hint at 0 (the heap auto-grows; capacity is
+                // advisory). Only `List` honours the hint here — `NewSet` /
+                // `NewDeque` have no AOT capacity-aware lowering yet, so giving
+                // them a hint would diverge across tiers.
+                let const_cap: u16 = if let ExprKind::Literal(lit) = &args[0].kind
+                    && let LiteralKind::Int(int_lit) = &lit.kind
+                    && int_lit.value >= 1
+                    && int_lit.value <= u16::MAX as i128
+                {
+                    int_lit.value as u16
+                } else {
+                    0
+                };
                 // Evaluate the capacity arg for its side effects
                 // (matches the compiled stdlib's observable behaviour),
                 // then drop it.
@@ -8067,7 +8087,7 @@ impl VbcCodegen {
                 }
                 let dest = self.ctx.alloc_temp();
                 let instr = match template {
-                    Instruction::NewList { .. } => Instruction::NewList { dst: dest , capacity_hint: 0 },
+                    Instruction::NewList { .. } => Instruction::NewList { dst: dest , capacity_hint: const_cap },
                     Instruction::NewSet { .. } => Instruction::NewSet { dst: dest , capacity_hint: 0 },
                     Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest , capacity_hint: 0 },
                     other => other,
