@@ -99,13 +99,22 @@ fn test_umbrella_os_error_constructs_via_umbrella_path() {
 @test
 fn test_umbrella_sys_context_error_construct() {
     // SysContextError is the umbrella-level alias for the context-system
-    // error variant.
-    let _e: SysContextError = SysContextError.StackOverflow;
+    // error variant. `StackOverflow` is a record-style variant carrying a
+    // `depth` payload — construct it fully (a bare `.StackOverflow` is an
+    // unapplied constructor, not a value, and is correctly rejected by the
+    // strict/AOT type checker).
+    let _e: SysContextError = SysContextError.StackOverflow { depth: 64 };
+    // The nullary variant round-trips through the umbrella too.
+    let _t: SysContextError = SysContextError.TlsNotInitialized;
 }
 
 @test
-fn test_umbrella_mem_prot_variant() {
-    let _p: MemProt = MemProt.Read;
+fn test_umbrella_mem_prot_constant() {
+    // `MemProt` is a record (`{ read, write, exec }`), not a sum type — its
+    // canonical values are the associated constants on the impl block, so
+    // the umbrella surface is `MemProt.READ`, not a `.Read` variant.
+    let _p: MemProt = MemProt.READ;
+    assert(_p.read);
 }
 
 @test
