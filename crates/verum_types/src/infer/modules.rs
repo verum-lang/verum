@@ -14134,6 +14134,74 @@ impl TypeChecker {
         // shape. When `skip_static_lookup` is set, prefer
         // `precomputed_recv_ty` (passed in by the chain handler) so
         // later steps see the actual intermediate type.
+        // ── Qualified variant construction: `T.Variant(args...)` ──────────
+        // `Maybe.Some(x)`, `Result.Ok(v)`, `MyEnum.Case(a, b)` are ALWAYS
+        // variant construction, never instance-method dispatch.  When the
+        // enclosing function carries a generic type anywhere in its signature
+        // the bare receiver `T` synthesises to its raw `Variant(...)` shape,
+        // and the call would otherwise fall straight through to a spurious
+        // `no method named 'Variant' found for type 'None(Unit) | Some(T)'`.
+        // Recognise the construction up-front (first chain step only) through
+        // the same arity-aware constructor machinery the bare-name call path
+        // uses, scoped to the receiver's own type so a sibling type sharing
+        // the variant simple-name cannot capture it.
+        if !skip_static_lookup
+            && let ExprKind::Path(path) = &receiver.kind
+            && path.segments.len() == 1
+            && let verum_ast::ty::PathSegment::Name(type_ident) = &path.segments[0]
+        {
+            let recv_type_name = type_ident.name.as_str();
+            let variant_text = verum_common::Text::from(method.name.as_str());
+            let is_variant_of_recv = self
+                .variant_constructor_parents
+                .get(&variant_text)
+                .map(|parents| parents.iter().any(|p| p.as_str() == recv_type_name))
+                .unwrap_or(false);
+            if is_variant_of_recv
+                && let Some(ctor_ty) = self
+                    .try_resolve_variant_constructor_with_arity(
+                        method.name.as_str(),
+                        Some(args.len()),
+                    )
+            {
+                let (params_opt, return_type) = match &ctor_ty {
+                    Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } => (Some(params.clone()), return_type.as_ref().clone()),
+                    other => (None, other.clone()),
+                };
+                // Only accept the resolution when the constructor's parent
+                // type IS the receiver type name — never let `Foo.Bar(x)`
+                // bind to a sibling type that merely shares the variant `Bar`.
+                let parent_matches = match &return_type {
+                    Type::Named { path, .. } => path
+                        .as_ident()
+                        .map(|id| id.name.as_str() == recv_type_name)
+                        .unwrap_or(false),
+                    Type::Generic { name, .. } => name.as_str() == recv_type_name,
+                    _ => false,
+                };
+                if parent_matches {
+                    if let Some(params) = params_opt {
+                        if params.len() == args.len() {
+                            for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                let resolved_param = self.unifier.apply(param_ty);
+                                self.check_expr(arg, &resolved_param)?;
+                            }
+                            let resolved_return = self.unifier.apply(&return_type);
+                            return Ok(InferResult::new(resolved_return));
+                        }
+                    } else if args.is_empty() {
+                        // Unit variant invoked with explicit empty args
+                        // (`T.None()`) — return the constructed value.
+                        return Ok(InferResult::new(self.unifier.apply(&return_type)));
+                    }
+                }
+            }
+        }
+
         let mut context_recv_ty: Option<Type> = None;
         if !skip_static_lookup
             && let ExprKind::Path(path) = &receiver.kind
