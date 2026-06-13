@@ -98,8 +98,15 @@ public const SIZE_CLASSES: [Int; 73] = [
     // Exact small sizes (bins 0-7): 8-byte increments
     8, 16, 24, 32, 40, 48, 56, 64,
 
-    // Exponential sizes with 12.5% spacing (bins 8-72)
-    // Each group of 4 bins spans one power of 2
+    // Exponential sizes, 4 bins per octave (bins 8-72).
+    // Each group of 4 bins spans one power of 2, evenly spaced by
+    // group_base/4. Consecutive ratios run 1.25 (group start) → 1.125
+    // (group end), so worst-case internal fragmentation is ~20% at a
+    // group-start bin and the documented 12.5% is the best-case (group-end)
+    // spacing. (A tighter ≤12.5% worst case would need 8 bins per octave /
+    // a 3-bit mantissa, doubling BIN_COUNT and per-page metadata — the
+    // 4-per-octave point trades that for fewer size classes.)
+    // Pinned by core-tests/mem/size_class/property_test.vr §F.
 
     // 64-128 range (bins 8-11)
     80, 96, 112, 128,

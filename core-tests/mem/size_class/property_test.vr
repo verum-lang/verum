@@ -14,7 +14,16 @@
 //   §E  is_small ⊕ is_medium ⊕ is_large ⊕ is_huge_size is total-but-overlapping
 //       (huge is a SUPERSET of large/medium/small distinctions — pinned
 //        by the predicate definitions in the source)
-//   §F  fragmentation_percent ≤ 13% across the table (mimalloc 12.5% spec)
+//   §F  fragmentation_percent worst-case characterisation across the table.
+//       SIZE_CLASSES is a 4-bins-per-octave (2-bit-mantissa) table: within
+//       each power-of-two group the four bins are evenly spaced by
+//       group_base/4, so consecutive ratios run from 1.25 (group start) down
+//       to 1.125 (group end). The "12.5%" figure is therefore the BEST-case
+//       (group-end) spacing, not a universal bound — worst-case internal
+//       fragmentation for a request landing just above a bin floor is ~20%
+//       at every group-start bin (e.g. req 129 → bin 160 wastes 31/160 ≈
+//       19.4%). §F pins BOTH facets: the table-wide worst case ≤ 20%, and
+//       the group-end bins achieving the documented ≤ 12.5%.
 //   §G  page_kind_for_bin is monotone-by-tier
 //   §H  aligned_size(s, a) ≥ s for all a > 0
 // =============================================================================
@@ -163,23 +172,45 @@ fn law_huge_threshold_overlaps_large_pinned() {
 // =============================================================================
 
 @test
-fn law_fragmentation_below_13_percent_across_table() {
+fn law_fragmentation_worst_case_across_table() {
     // For each bin, the worst-case fragmentation is at the size just
-    // above the previous bin's top (smallest request → largest waste).
-    let mut b: Int = 1;
+    // above the previous bin's top (smallest request → largest waste):
+    //   frag = (SIZE_CLASSES[b] - (SIZE_CLASSES[b-1] + 1)) * 100 / SIZE_CLASSES[b]
+    //
+    // For the exponential region (b ≥ 8) the bins are 4-per-octave, so
+    // SIZE_CLASSES[b] ≤ 1.25 * SIZE_CLASSES[b-1] (equality exactly at every
+    // group-start bin: 80→… 128→160, 256→320, …). That caps waste/allocated
+    // strictly below (S - 0.8·S)/S = 20%. Pin the universal upper bound at
+    // 20% (the integer-floored frag never reaches it but approaches it for
+    // large groups, e.g. bin 68: 524287/2621440 ≈ 19.99%).
+    let mut b: Int = 8;
     while b < BIN_COUNT {
         let prev_size = bin_to_size(b - 1);
         let just_above = prev_size + 1;
         let frag = fragmentation_percent(just_above, b);
-        // 12.5% spec + 1% integer-rounding slack.  Bin 8 (size 80,
-        // prev 64) is the actual worst case at (80-65)/80 = 18.75%.
-        // The exact mimalloc spec covers bins ≥ 9 (post-exponential
-        // start); the early small-exact bins have higher worst-case
-        // because exact-bin spacing is not 12.5%.
-        if b >= 9 {
-            assert(frag <= 13);
-        }
+        assert(frag <= 20);
         b = b + 1;
+    }
+}
+
+// §F (second facet) — the documented 12.5% spacing IS achieved, but only at
+// the group-END bins (every 4th exponential bin: 11, 15, 19, …, 71), where
+// SIZE_CLASSES[b] = 1.125 * SIZE_CLASSES[b-1]. There the just-above-floor
+// request wastes (S - 0.888·S - 1)/S ≈ 11.1% < 12.5%. This pins the
+// best-case spacing claim so a future table edit that breaks the 1.125
+// group-end ratio is caught.
+@test
+fn law_fragmentation_group_end_bins_meet_12_5_percent() {
+    // Group-end bins are 11, 15, 19, … i.e. b ≥ 11 with (b - 11) % 4 == 0,
+    // up to bin 71 (bin 72 is the final singleton 4M–5M band).
+    let mut b: Int = 11;
+    while b <= 71 {
+        let prev_size = bin_to_size(b - 1);
+        let just_above = prev_size + 1;
+        let frag = fragmentation_percent(just_above, b);
+        // 12.5% spec; integer-floored worst case here is 11%.
+        assert(frag <= 13);
+        b = b + 4;
     }
 }
 
