@@ -6959,9 +6959,20 @@ impl TypeChecker {
             TypeScheme::mono(type_info_ty.clone()),
         );
 
-        // UInt - unsigned integer
-        let uint_ty = Type::Generic {
-            name: verum_common::Text::from("UInt"),
+        // UInt - canonical unsigned integer (64-bit, the unsigned dual of
+        // `Int`). MUST be a distinct `Type::Named`, NOT a `Type::Generic`
+        // reflection placeholder: it is a real integer type used pervasively
+        // at the FFI boundary (`CULong is (UInt)`, `core/sys/cabi.vr`) and in
+        // arithmetic. Registering it as `Generic` made `extract_integer_kind`
+        // and `check_cast`'s `(Int | Named, Int | Named)` arm both miss it, so
+        // `X as UInt` was wrongly rejected with E401. Mirrors the `UInt64` /
+        // `USize` registrations below; codegen + `well_known_types` already
+        // map `"UInt"` to a 64-bit unsigned integer.
+        let uint_ty = Type::Named {
+            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                "UInt",
+                Span::default(),
+            )),
             args: List::new(),
         };
         self.ctx
