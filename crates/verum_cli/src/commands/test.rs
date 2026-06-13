@@ -1020,31 +1020,16 @@ fn run_test_property(
         RunnerConfig, Seed, load_regression_db, record_regression, run_property,
         save_regression_db, seeds_for,
     };
-    use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 
     let start = Instant::now();
 
-    // Compile file → VBC (same shape as run_test_interpret), memoised
-    // per file so an N-property file compiles once, not N times.
-    let module = match compiled_test_module(&test.file, CompileKind::Bare, || {
-        let source = std::fs::read_to_string(&test.file).map_err(|e| format!("read: {}", e))?;
-        let file_id = FileId::new(0);
-        let parser = VerumParser::new();
-        let lexer = Lexer::new(&source, file_id);
-        let ast = parser.parse_module(lexer, file_id).map_err(|errs| {
-            let joined = errs
-                .iter()
-                .map(|e| format!("{}", e))
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("parse: {}", joined)
-        })?;
-        let config = CodegenConfig::new("test");
-        let mut codegen = VbcCodegen::with_config(config);
-        let module = codegen
-            .compile_module(&ast)
-            .map_err(|e| format!("codegen: {:?}", e))?;
-        Ok(Arc::new(module))
+    // Compile file → VBC through the SAME stdlib-aware path as
+    // `run_test_interpret`, memoised per file (shared `CompileKind::Stdlib`
+    // cache) so an N-property file — or a file mixing @test and @property —
+    // compiles exactly once.  This unification fixes the prior
+    // archive-const codegen miss (see `build_stdlib_test_module`).
+    let module = match compiled_test_module(&test.file, CompileKind::Stdlib, || {
+        build_stdlib_test_module(test)
     }) {
         Ok(m) => m,
         Err(error) => {
@@ -1552,11 +1537,13 @@ fn find_and_parse_crate_root(test: &Test) -> Option<List<verum_ast::Item>> {
 // still compile fully in parallel — the outer map lock is held only
 // long enough to fetch-or-create the slot, never across a compile.
 //
-// `kind` distinguishes the two compile entry points the runner uses so
-// each path keeps its exact codegen semantics: `run_test_interpret`
-// goes through `compile_module_with_stdlib` (stdlib-aware + crate-root
-// merge), while `run_test_property` uses the lighter
-// `VbcCodegen::compile_module`.
+// `kind` is retained as a cache-key discriminant for forward
+// extensibility, but both runner entry points (`run_test_interpret`
+// for @test and `run_test_property` for @property) now compile through
+// the single stdlib-aware `build_stdlib_test_module`
+// (`compile_module_with_stdlib` + crate-root merge), so they share the
+// `CompileKind::Stdlib` slot and a mixed @test/@property file compiles
+// exactly once.
 //
 // Sharing one module across tests is sound: `VbcModule` carries no
 // interior mutability and the interpreter takes it via `Arc` (read
@@ -1566,10 +1553,10 @@ fn find_and_parse_crate_root(test: &Test) -> Option<List<verum_ast::Item>> {
 // must not pay to rediscover that per test.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum CompileKind {
-    /// `compile_module_with_stdlib` + crate-root merge (interpret path).
+    /// `compile_module_with_stdlib` + crate-root merge — the canonical
+    /// (and currently only) test-compile path for both @test and
+    /// @property.
     Stdlib,
-    /// `VbcCodegen::compile_module` (property path).
-    Bare,
 }
 
 type CachedModule = std::result::Result<Arc<VbcModule>, String>;
@@ -1608,51 +1595,75 @@ fn compiled_test_module(
     built
 }
 
-fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
+// Compile a test file to a stdlib-aware `VbcModule`.
+//
+// This is the single canonical test-compile entry point: it parses the
+// source, merges the cog crate-root (T6.0.4), and lowers through
+// `compile_module_with_stdlib` so the embedded stdlib archive's full
+// const/function surface is registered in codegen context (via
+// `apply_lazy_with_types`).  BOTH `run_test_interpret` (@test) and
+// `run_test_property` (@property) route through here so the two paths
+// share identical codegen semantics AND the same per-file compile cache
+// (`CompileKind::Stdlib`).
+//
+// Historical defect (fixed): `run_test_property` previously used the
+// bare `VbcCodegen::compile_module`, which skips the archive load.  A
+// stdlib const reachable only through the archive (e.g.
+// `core.mem.capability.CAP_EXECUTE`, referenced from a non-DCE'd helper
+// inside a `@property` file) then failed codegen with
+// `UndefinedVariable("CAP_EXECUTE")` even though the same code compiled
+// cleanly as an `@test`.  Unifying on `compile_module_with_stdlib`
+// closes that whole class.
+fn build_stdlib_test_module(test: &Test) -> CachedModule {
     use verum_vbc::codegen::CodegenConfig;
+
+    let source = std::fs::read_to_string(&test.file).map_err(|e| format!("read: {}", e))?;
+
+    let file_id = FileId::new(0);
+    let parser = VerumParser::new();
+    let lexer = Lexer::new(&source, file_id);
+    let mut ast = parser.parse_module(lexer, file_id).map_err(|errs| {
+        let joined = errs
+            .iter()
+            .map(|e| format!("{}", e))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("parse: {}", joined)
+    })?;
+
+    // T6.0.4 — tests/ files implicitly mount the cog's crate root
+    // (src/lib.vr or src/main.vr). Cargo / npm conventionally make a
+    // package's tests/ directory have unrestricted access to the
+    // package's public API; Verum aligns: locate the cog manifest by
+    // walking up from the test file, parse the crate root, and
+    // append its items to the test module's item list. Mount-line
+    // boilerplate in test files becomes optional.
+    if let Some(crate_root_items) = find_and_parse_crate_root(test) {
+        // Prepend crate-root items so test items can reference them.
+        let mut merged = crate_root_items;
+        for item in ast.items.iter() {
+            merged.push((*item).clone());
+        }
+        ast.items = merged;
+    }
+
+    let config = CodegenConfig::new("test");
+    let module = verum_compiler::single_module::compile_module_with_stdlib(
+        &ast,
+        config,
+        /* propagate_test_attr = */ true,
+    )
+    .map_err(|e| format!("codegen: {:?}", e))?;
+    Ok(Arc::new(module))
+}
+
+fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     use verum_vbc::interpreter::Interpreter;
 
     let start = Instant::now();
 
     let module = match compiled_test_module(&test.file, CompileKind::Stdlib, || {
-        let source = std::fs::read_to_string(&test.file).map_err(|e| format!("read: {}", e))?;
-
-        let file_id = FileId::new(0);
-        let parser = VerumParser::new();
-        let lexer = Lexer::new(&source, file_id);
-        let mut ast = parser.parse_module(lexer, file_id).map_err(|errs| {
-            let joined = errs
-                .iter()
-                .map(|e| format!("{}", e))
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("parse: {}", joined)
-        })?;
-
-        // T6.0.4 — tests/ files implicitly mount the cog's crate root
-        // (src/lib.vr or src/main.vr). Cargo / npm conventionally make a
-        // package's tests/ directory have unrestricted access to the
-        // package's public API; Verum aligns: locate the cog manifest by
-        // walking up from the test file, parse the crate root, and
-        // append its items to the test module's item list. Mount-line
-        // boilerplate in test files becomes optional.
-        if let Some(crate_root_items) = find_and_parse_crate_root(test) {
-            // Prepend crate-root items so test items can reference them.
-            let mut merged = crate_root_items;
-            for item in ast.items.iter() {
-                merged.push((*item).clone());
-            }
-            ast.items = merged;
-        }
-
-        let config = CodegenConfig::new("test");
-        let module = verum_compiler::single_module::compile_module_with_stdlib(
-            &ast,
-            config,
-            /* propagate_test_attr = */ true,
-        )
-        .map_err(|e| format!("codegen: {:?}", e))?;
-        Ok(Arc::new(module))
+        build_stdlib_test_module(test)
     }) {
         Ok(m) => m,
         Err(error) => {

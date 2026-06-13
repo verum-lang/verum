@@ -219,12 +219,37 @@ impl Generator {
                     _ => None,
                 });
                 match name {
-                    Some("Nat") | Some("U8") | Some("U16") | Some("U32") | Some("U64") => {
-                        Generator::Nat
+                    // ---- unsigned, width-aware ----
+                    // Verum's canonical names are `UIntN`; the short
+                    // `UN` spellings are accepted aliases.  Each maps to
+                    // the exact value range of its width so generated
+                    // inputs respect the type's domain — critical for
+                    // bit-packing / round-trip laws (e.g.
+                    // `mem.capability.pack_epoch_caps` over `UInt16`),
+                    // which would spuriously fail if fed out-of-width
+                    // values (or, pre-fix, degrade to `Fallback`→unit and
+                    // test nothing).
+                    Some("UInt8") | Some("U8") => Generator::IntRange { lo: 0, hi: 0xFF },
+                    Some("UInt16") | Some("U16") => Generator::IntRange { lo: 0, hi: 0xFFFF },
+                    Some("UInt32") | Some("U32") => {
+                        Generator::IntRange { lo: 0, hi: 0xFFFF_FFFF }
                     }
-                    Some("I8") | Some("I16") | Some("I32") | Some("I64") | Some("Int") => {
-                        Generator::Int
+                    // 64-bit unsigned (and pointer-width USize) exceed
+                    // i64; clamp the upper bound to i64::MAX. The VBC Int
+                    // value model is signed, so this is the representable
+                    // non-negative domain.
+                    Some("UInt64") | Some("U64") | Some("USize") | Some("Nat") => {
+                        Generator::IntRange { lo: 0, hi: i64::MAX }
                     }
+                    // ---- signed, width-aware ----
+                    Some("Int8") | Some("I8") => Generator::IntRange { lo: -128, hi: 127 },
+                    Some("Int16") | Some("I16") => {
+                        Generator::IntRange { lo: -32768, hi: 32767 }
+                    }
+                    Some("Int32") | Some("I32") => {
+                        Generator::IntRange { lo: -2_147_483_648, hi: 2_147_483_647 }
+                    }
+                    Some("Int64") | Some("I64") | Some("ISize") | Some("Int") => Generator::Int,
                     Some("Bool") => Generator::Bool,
                     Some("Byte") => Generator::IntRange { lo: 0, hi: 255 },
                     Some("Float") | Some("F32") | Some("F64") => Generator::Float,
@@ -922,11 +947,24 @@ pub fn run_property(
         );
     }
 
-    // Resolve VBC FunctionId by name.
+    // Resolve VBC FunctionId by name. The stdlib-aware compile path
+    // (`compile_module_with_stdlib`) promotes a test function's stored
+    // descriptor name to `<source_module>.<fn_name>` (precompiler
+    // descriptor-name promotion, commit 53c7d5448) — e.g. a file
+    // declaring `module property_test;` stores
+    // `property_test.prop_pack_unpack_round_trip`. Match either the exact
+    // stored name OR its leaf (last dotted segment) so the lookup is
+    // robust to that promotion, mirroring `run_test_interpret`'s
+    // `leaf_matches`. Without the leaf fallback every @property under the
+    // unified stdlib compile path failed with "not found in compiled VBC".
+    let leaf_matches = |stored: Option<&str>| -> bool {
+        let Some(s) = stored else { return false };
+        s == prop.name.as_str() || s.rsplit('.').next() == Some(prop.name.as_str())
+    };
     let fid: FunctionId = match module
         .functions
         .iter()
-        .find(|f| module.get_string(f.name) == Some(prop.name.as_str()))
+        .find(|f| leaf_matches(module.get_string(f.name)))
         .map(|f| f.id)
     {
         Some(id) => id,
