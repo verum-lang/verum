@@ -7791,12 +7791,43 @@ impl VbcCodegen {
                         }
                     }
                     if !hits.is_empty() {
-                        // Shallowest first; alphabetical as deterministic
-                        // tiebreak among same-depth hits.
+                        // Tie-break ranking among re-export candidates:
+                        //   1. shallowest hit (fewest dots = closest sibling),
+                        //   2. MODULE-parent before TYPE-parent,
+                        //   3. alphabetical (deterministic).
+                        //
+                        // Rule 2 disambiguates a const re-exported from a
+                        // submodule (`core.mem.header.HEADER_SIZE`, where
+                        // `header` is a module) from a same-named
+                        // TYPE-ASSOCIATED const at the same depth
+                        // (`core.mem.MemSegment.HEADER_SIZE`, where
+                        // `MemSegment` is a type).  An umbrella
+                        // `mount core.mem.{HEADER_SIZE}` re-exports the
+                        // module-level const (via `core/mem/mod.vr`'s
+                        // `public mount .header.{HEADER_SIZE}`), NOT the
+                        // type-associated one.  Without rule 2 the pure
+                        // alphabetical tie-break picked `MemSegment` (`M` <
+                        // `h`) and `HEADER_SIZE` silently imported the
+                        // wrong value.  Verum convention — modules are
+                        // lower_snake_case, types are CapitalCase — makes
+                        // the parent segment's leading case an exact
+                        // module-vs-type discriminator.
+                        let parent_is_module = |k: &str| -> bool {
+                            let segs: Vec<&str> = k.split('.').collect();
+                            segs.len() >= 2
+                                && segs[segs.len() - 2]
+                                    .chars()
+                                    .next()
+                                    .map(|c| c.is_ascii_lowercase())
+                                    .unwrap_or(false)
+                        };
                         hits.sort_by(|a, b| {
                             let da = a.matches('.').count();
                             let db = b.matches('.').count();
-                            da.cmp(&db).then_with(|| a.cmp(b))
+                            da.cmp(&db)
+                                // module-parent (true) ranks before type-parent (false)
+                                .then_with(|| parent_is_module(b).cmp(&parent_is_module(a)))
+                                .then_with(|| a.cmp(b))
                         });
                         if let Some(func_info) =
                             self.ctx.lookup_function(&hits[0]).cloned()
@@ -13774,6 +13805,43 @@ impl VbcCodegen {
 
     fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> u32 {
         if let Some(tn) = type_name {
+            // **Allocating-wrapper field auto-deref** (Heap<T> / Shared<T>).
+            //
+            // A binding produced by `Heap.new(x)` / `Shared.new(x)` is typed
+            // with the WRAPPER type (`Heap<T>`) so wrapper METHODS dispatch
+            // (`b.is_valid()` → `Heap.is_valid`).  Field access on such a
+            // binding (`b.field`), however, almost always targets the
+            // POINTEE `T` — the wrapper's own fields are just the CBGR triple
+            // (`ptr` / `generation` / `epoch`).  Resolve `field_name` against
+            // the inner `T` whenever it is NOT one of the wrapper's own
+            // fields, so `b.a0` reaches `MediumPayload.a0` while `self.ptr`
+            // inside a Heap method still resolves against Heap.  Without this
+            // the field would miss the wrapper descriptor and fall through to
+            // the global field-name interner (wrong offset).
+            if let Some(lt) = tn.find('<') {
+                let wrapper_base = &tn[..lt];
+                if self.is_allocating_wrapper(wrapper_base)
+                    && let Some(inner) = Self::extract_element_type(tn)
+                {
+                    // Is `field_name` one of the wrapper's OWN fields?
+                    let is_wrapper_field = self
+                        .type_name_to_id
+                        .get(wrapper_base)
+                        .and_then(|&tid| self.types.iter().find(|t| t.id == tid))
+                        .map(|td| {
+                            td.fields.iter().any(|fd| {
+                                self.ctx
+                                    .strings
+                                    .get(fd.name.0 as usize)
+                                    .is_some_and(|s| s == field_name)
+                            })
+                        })
+                        .unwrap_or(false);
+                    if !is_wrapper_field {
+                        return self.resolve_field_index_impl(Some(&inner), field_name);
+                    }
+                }
+            }
             // **Architectural rule** (closes task #16 consumer side):
             // resolve field index from the canonical TypeDescriptor's
             // own field list BEFORE consulting `type_field_layouts`.
