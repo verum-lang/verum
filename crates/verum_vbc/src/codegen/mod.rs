@@ -1114,6 +1114,31 @@ impl VbcCodegen {
     /// "List<LexToken>" → Some("LexToken"), "Map<Text, Int>" → Some("Text"),
     /// "LexToken" → None (not a generic type).
     pub fn extract_element_type(type_name: &str) -> Option<String> {
+        // Array / slice form `[T]` or `[T; N]` (produced by
+        // `extract_type_name_from_ast` for `TypeKind::Array`/`Slice`).
+        // Strip the brackets and any `; N` size suffix to recover the
+        // element type `T`. Indexing such a type (`arr[i]`) yields `T`,
+        // so this is the element-type the Index arm of
+        // `infer_expr_type_name` needs to resolve field offsets on
+        // `arr[i].field` correctly.
+        if let Some(rest) = type_name.strip_prefix('[')
+            && let Some(inner) = rest.strip_suffix(']')
+        {
+            let elem = match inner.find(';') {
+                Some(semi) => inner[..semi].trim(),
+                None => inner.trim(),
+            };
+            if elem.is_empty() {
+                return None;
+            }
+            let is_bare_generic =
+                elem.len() <= 2 && elem.chars().all(|c| c.is_ascii_uppercase());
+            return if is_bare_generic {
+                None
+            } else {
+                Some(elem.to_string())
+            };
+        }
         let start = type_name.find('<')?;
         let end = type_name.rfind('>')?;
         if start + 1 >= end {
@@ -7493,6 +7518,32 @@ impl VbcCodegen {
                 let qualified_verum = full_path.join(".");
                 let qualified_rust = full_path.join("::");
 
+                // [diag] gated const-collision resolution trace.
+                if std::env::var("VERUM_TRACE_CONST_RESOLVE").is_ok()
+                    && std::env::var("VERUM_TRACE_CONST_RESOLVE")
+                        .map(|w| func_name.contains(&w) || w == "*" )
+                        .unwrap_or(false)
+                {
+                    let suffix = format!(".{}", func_name);
+                    let mut keys: Vec<String> = self
+                        .ctx
+                        .functions
+                        .keys()
+                        .filter(|k| k.ends_with(&suffix) || **k == func_name)
+                        .cloned()
+                        .collect();
+                    keys.sort();
+                    eprintln!(
+                        "[const-resolve] mount func='{}' qualified_verum='{}' alias='{}' scope={:?}\n  registered keys matching: {:?}\n  bare lookup -> id {:?}",
+                        func_name,
+                        qualified_verum,
+                        alias_name,
+                        self.ctx.current_source_module,
+                        keys,
+                        self.ctx.functions.get(&func_name).map(|f| f.id.0),
+                    );
+                }
+
                 // Architectural rule: an explicit `mount X.Y.{name}` /
                 // `mount X.Y.name as alias` is an authoritative binding —
                 // the user named the function they want, so it MUST win
@@ -11107,8 +11158,35 @@ impl VbcCodegen {
         let constants = std::mem::take(&mut self.pending_constants);
 
         for (name, expr, queued_source_module) in constants {
-            // Get the pre-registered function info
-            let func_info = match self.ctx.lookup_function(&name) {
+            // Get the pre-registered function info.
+            //
+            // **Cross-module same-simple-name const disambiguation.**
+            // When two modules declare a const with the same simple name
+            // — e.g. `core.mem.allocator.SIZE_CLASSES: [Int; 11]` vs
+            // `core.mem.size_class.SIZE_CLASSES: [Int; 73]` —
+            // `register_constant_with_value` assigns each its OWN
+            // `FunctionId` and registers it under BOTH the bare simple
+            // name (first-wins) and its module-qualified name.  A bare
+            // `lookup_function(&name)` here returns the SAME first-wins
+            // entry for BOTH pending bodies, so both compiled bodies land
+            // on one `FunctionId`; `push_function_dedup` then keeps only
+            // one, and the loser's qualified archive descriptor (e.g.
+            // `core.mem.allocator.SIZE_CLASSES`) never makes it into the
+            // archive at all — so a downstream
+            // `mount core.mem.allocator.{SIZE_CLASSES}` can't resolve it
+            // and silently reads the other module's table.  Prefer the
+            // source-module-qualified entry so each module's const keeps
+            // its own id + body + qualified name.
+            let qualified_name: Option<String> = queued_source_module
+                .as_deref()
+                .filter(|m| !m.is_empty() && *m != "main")
+                .filter(|_| !name.contains('.') && !name.contains("::"))
+                .map(|m| format!("{}.{}", m, name));
+            let func_info = match qualified_name
+                .as_deref()
+                .and_then(|q| self.ctx.lookup_function(q))
+                .or_else(|| self.ctx.lookup_function(&name))
+            {
                 Some(info) => info.clone(),
                 None => continue, // Skip if not found (shouldn't happen)
             };
@@ -14547,6 +14625,19 @@ impl VbcCodegen {
             }
             TypeKind::Slice(inner) => {
                 format!("[{}]", Self::extract_type_name_from_ast(inner))
+            }
+            // Fixed array `[T; N]` — render as `[T]` (the size is irrelevant
+            // for type-name / element-type resolution; `extract_element_type`
+            // strips the brackets to recover `T`).  Without this arm the
+            // catch-all `{:?}`-Debug fallback produced a garbage name like
+            // "Array { element: Ty", so a `static mut R: [T; N]`'s
+            // `static_mut_type_names` entry was unusable: `R[i].field` then
+            // inferred a `None` receiver type and `resolve_field_index` fell
+            // through to the global field-name interner, returning a WRONG
+            // slot index (cap_audit_ring's `slot.state` read the wrong field
+            // → garbage seq → SIGSEGV at scale).
+            TypeKind::Array { element, .. } => {
+                format!("[{}]", Self::extract_type_name_from_ast(element))
             }
             TypeKind::DynProtocol { bounds, .. } => {
                 // dyn Protocol → "dyn:Protocol" for dispatch tracking
