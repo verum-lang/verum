@@ -1,5 +1,50 @@
 # core/sys conformance spectrum — 2026-06-11
 
+> ## ✅ PROGRESS UPDATE 2026-06-13 — AOT type-error spectrum: TWO fundamental fixes LANDED
+>
+> The §D "AOT stdlib module resolution broken suite-wide" theory is
+> **obsolete** — `mount`ing a stdlib submodule under `--aot` now compiles.
+> The real `--aot` blocker is that **AOT type-checking is strict where the
+> interpreter is lenient**: many tests pass `--interp` (and the lenient
+> test harness) but fail `--aot` on genuine type errors. Two of those
+> error classes are now **root-caused and fixed on `main`**:
+>
+> 1. **`UInt` mis-registered as `Type::Generic`** (commit: types/env +
+>    integer_hierarchy). The canonical 64-bit unsigned integer `UInt`
+>    (pervasive at the FFI boundary: `CULong is (UInt)`, `core/sys/cabi.vr`)
+>    was registered as a reflection-style `Type::Generic` placeholder, not
+>    a real integer `Type::Named` like `UInt64`/`USize`. Result: `X as UInt`
+>    → `check_cast(Int, Generic{UInt})` matched no arm → `E401`.
+>    **`cabi --aot` 6→32/50.**
+>
+> 2. **Qualified variant construction `T.Variant(args)` under generic
+>    signatures** (commit: types/infer/modules.rs). `Maybe.Some(x)` /
+>    `Result.Ok(v)` failed `E400: no method named '<Variant>' found for
+>    type '<variant>'` whenever the enclosing function carried ANY generic
+>    type in its signature — the bare receiver `T` synthesised to its raw
+>    `Variant(...)` shape and routed to instance-method dispatch, which has
+>    no variant-ctor recognition. Fix recognises `Path(TypeName).Variant(args)`
+>    in the method path, scoped to the receiver type. **`cabi --aot` 32→35/50;
+>    `--interp` held 50/50; `base/primitives` 279→281 (no regressions).**
+>
+> Remaining `cabi --aot` (15) are **runtime `List.iter()` AOT SIGSEGV**
+> (the documented universal AOT-ITER-1), a separate codegen class.
+>
+> **NEW root cause — Bug C (umbrella re-export under archive load) precisely
+> localised:** `mount core.sys.{MemProt}` (umbrella re-export from
+> `core.sys.common`) loses the type's **impl block** — associated const
+> `MemProt.NONE` synthesises to `Unit`, method `to_unix_flags` → `E400` on
+> `Unit`. The **direct** `mount core.sys.common.{MemProt}` works (imports
+> the impl block). Struct fields ARE carried under umbrella (literal
+> construction + annotated return type both type-check); only the impl
+> block (consts + methods) is dropped. `core.sys` is archive/metadata
+> loaded, so `import_type_export`'s impl-block import goes through the
+> metadata path, which doesn't follow the re-export to the defining
+> module's impl blocks. Repro: `/tmp/mp4.vr`. Drives the bulk of
+> `sys/common --aot` (325+ `field 'read' on Unit`) and `sys/mod` (`Fd`
+> ctor / `InitError` variant). Same root as the §F Bug C item; deep
+> archive-metadata follow-up.
+
 > ## ✅ PROGRESS UPDATE 2026-06-12 — Class 1 CLOSED & LANDED on main
 >
 > **Class 1 (bare record-variant pattern + construction) is CLOSED and
