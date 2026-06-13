@@ -2505,7 +2505,45 @@ impl TypeChecker {
                             );
                         }
                     }
-                    ExportKind::Type | ExportKind::Protocol => self.import_type_export(&*module_info, item_name, register_name, &resolved_module_path, registry, import_span, exported.source_module)?,
+                    ExportKind::Type | ExportKind::Protocol => {
+                        self.import_type_export(&*module_info, item_name, register_name, &resolved_module_path, registry, import_span, exported.source_module)?;
+                        // Bug C (type facet) — umbrella re-export of a TYPE
+                        // whose defining module's IMPL BLOCK (associated
+                        // consts + methods) would otherwise be dropped. The
+                        // registry's umbrella `mod.vr` AST is a synthetic stub
+                        // (see catalogue §21 / D1), so the AST-based impl-block
+                        // import inside `import_type_export` finds nothing —
+                        // e.g. `mount core.sys.{MemProt}` registered the record
+                        // fields (from the global pre-pass) but lost
+                        // `MemProt.NONE` (→ inferred `Unit`) and
+                        // `MemProt.to_unix_flags()`. Mirror the D1 free-fn fix:
+                        // resolve the canonical source module via the
+                        // precompiled `module_reexports` metadata and recurse
+                        // into it against the live registry — the same path a
+                        // direct `mount <source>.{Type}` uses, which carries the
+                        // full impl block. Idempotent (type re-registration is a
+                        // no-op overwrite); cycle-guarded by `imports_in_progress`.
+                        if let Some(source_module) = self
+                            .reexport_source_module_for(resolved_module_path.as_str(), item_name)
+                            .filter(|s| s.as_str() != resolved_module_path.as_str())
+                        {
+                            if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+                                eprintln!(
+                                    "[task20] type registry recurse: mod='{}' item='{}' -> source='{}'",
+                                    resolved_module_path.as_str(),
+                                    item_name,
+                                    source_module.as_str(),
+                                );
+                            }
+                            let _ = self.import_item_from_module_inner(
+                                &source_module,
+                                item_name,
+                                local_name,
+                                registry,
+                                import_span,
+                            );
+                        }
+                    }
                     ExportKind::Const | ExportKind::Static => {
                         if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
                             eprintln!(
