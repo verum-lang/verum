@@ -789,6 +789,58 @@ impl TypeChecker {
                 args: call_args,
                 ..
             } => {
+                // Bidirectional qualified variant construction: `Result.Ok(v)`,
+                // `Maybe.Some(x)`, any `T.Variant(args)` checked against a known
+                // Result/Maybe-shaped expected type. The synth path
+                // (`infer_method_call_inner_impl`) resolves the constructor but
+                // returns the `Generic{Result,[T,E]}` form, which fails to unify
+                // with the *expanded* `Variant{Ok:T, Err:E}` form the function
+                // return type / let-annotation carries — so two qualified ctors
+                // in one if/else (`Result.Err(..)` + `Result.Ok(())`) mismatch
+                // even though each works in isolation. Mirror the bidirectional
+                // bare-name Call arm: bind the argument(s) against the expected
+                // variant's payload and return the expected type directly.
+                if let ExprKind::Path(path) = &receiver.kind
+                    && path.segments.len() == 1
+                    && let Some(verum_ast::ty::PathSegment::Name(type_ident)) =
+                        path.segments.first()
+                {
+                    let recv_type_name = type_ident.name.as_str();
+                    let variant_text = Text::from(method.name.as_str());
+                    let is_variant_of_recv = self
+                        .variant_constructor_parents
+                        .get(&variant_text)
+                        .map(|parents| {
+                            parents.iter().any(|p| p.as_str() == recv_type_name)
+                        })
+                        .unwrap_or(false);
+                    if is_variant_of_recv {
+                        let resolved_expected = self.unifier.apply(expected);
+                        let expanded =
+                            self.expand_generic_to_variant(&resolved_expected);
+                        if let Type::Variant(variants) = &expanded
+                            && let Some(payload_ty) =
+                                variants.get(method.name.as_str())
+                        {
+                            let payload_ty = payload_ty.clone();
+                            // Single positional payload (`Result.Ok(v)`,
+                            // `Result.Err(e)`, `Maybe.Some(x)`, and the explicit
+                            // `Result.Ok(())` unit form): bind the one argument
+                            // against the expected variant payload and return the
+                            // expected type. Record-style payloads arrive as a
+                            // `Record` expr (a different arm), and multi-arg /
+                            // arity-mismatched calls fall through to the synth
+                            // path which type-checks them in full — so only the
+                            // single-arg case short-circuits here.
+                            if call_args.len() == 1
+                                && !matches!(payload_ty, Type::Record(_))
+                            {
+                                self.check_expr(&call_args[0], &payload_ty)?;
+                                return Ok(InferResult::new(expected.clone()));
+                            }
+                        }
+                    }
+                }
                 // Check if receiver is a path expression to a protocol name
                 if let ExprKind::Path(path) = &receiver.kind {
                     if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first() {
