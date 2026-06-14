@@ -49,14 +49,32 @@
 >    payload, `MemProt.Read` vs the `MemProt.READ` const — were also fixed).
 >    `--interp` held (common 115/0, mod 39/0).
 >
-> **Remaining `sys/common --aot` (43)** are deeper AOT-reference classes,
-> NOT Bug C: a record-variant field bound through a `&`-scrutinee `match`
-> (`for v in xs.iter(); match v { …{ slot } => *slot }`) binds by-value
-> under AOT so `*slot` → `Cannot dereference non-reference type: UInt8`
-> (catalogue task; the AOT-ITER-1 §18 reference-path family); plus an
-> `IOVec` `&unsafe Byte` deref and a `Result<Int,OSError>` whole-file
-> cascade in `integration_test`. `sys/mod`'s sole residual is the
-> AOT-ITER-1 `List.iter()` SIGSEGV (§18).
+> 4. **Match-field-binding deref + qualified-ctor bidirectional (2026-06-14).**
+>    Two more `sys/common --aot` classes closed:
+>    - **Match fields bind BY VALUE**, even through a `&`-scrutinee
+>      (`match v { …{ slot } => … }` where `v: &T`) — confirmed by the
+>      stdlib's own `match self { …{ slot } => {slot} }` idiom. The test's
+>      `*slot` deref of the by-value binding was a **test bug**, correctly
+>      rejected by both strict tiers (`Cannot dereference non-reference
+>      type: UInt8`) and only surviving under the lenient harness. Fixed in
+>      `common/property_test.vr` → the `deref UInt8` whole-file cascade
+>      cleared.
+>    - **Qualified `Result.Ok/Err` in multi-branch** (`if … { Result.Err(..) }
+>      else { Result.Ok(()) }`) returned the `Generic{Result,[T,E]}` form
+>      from the synth path, which failed to unify with the expanded
+>      `Variant{Ok,Err}` form the return type carries (`expected
+>      Ok(Unit)|Err(..) found Result<_,..>`). Completed the §35 QUALVAR fix
+>      with a bidirectional `check_expr` MethodCall arm. Cleared the 14
+>      `Result`-type-mismatch integration failures.
+>    **`sys/common --aot` 6→82/115.**
+>
+> **Remaining `sys/common --aot` (33) are now ALL the AOT-ITER-1 §18
+> `List.iter()` SIGSEGV** (`process terminated by signal`) — the by-reference
+> iterator codegen defect (`ListIter<T> { ptr,end: &unsafe T }` generic
+> layout / `T.size` offset mismatch under AOT monomorphization). The entire
+> type-error spectrum for `sys/common` is now cleared; the residual is a
+> single deep codegen class. `sys/mod`'s sole residual is the same §18
+> `List.iter()` SIGSEGV.
 
 > ## ✅ PROGRESS UPDATE 2026-06-12 — Class 1 CLOSED & LANDED on main
 >
