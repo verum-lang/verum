@@ -431,17 +431,23 @@ fn law_sys_context_error_eq_reflexive() {
     for v in variants.iter() {
         // Construct an independent clone of the same shape and assert
         // structural equality.
+        // Match-pattern field bindings bind BY VALUE (not by reference),
+        // even when the scrutinee is a `&T` borrow — `slot`/`depth` are
+        // already the field values, so they are used directly (no deref).
+        // This mirrors the stdlib's own `match self { …{ slot } => … }`
+        // idiom; a spurious `*slot` is correctly rejected by the strict /
+        // AOT type checker.
         let copy = match v {
             SysContextError.SlotNotFound { slot } =>
-                SysContextError.SlotNotFound { slot: *slot },
+                SysContextError.SlotNotFound { slot: slot },
             SysContextError.SlotOverflow { slot } =>
-                SysContextError.SlotOverflow { slot: *slot },
+                SysContextError.SlotOverflow { slot: slot },
             SysContextError.StackOverflow { depth } =>
-                SysContextError.StackOverflow { depth: *depth },
+                SysContextError.StackOverflow { depth: depth },
             SysContextError.TlsNotInitialized =>
                 SysContextError.TlsNotInitialized,
             SysContextError.InvalidSlot { slot } =>
-                SysContextError.InvalidSlot { slot: *slot },
+                SysContextError.InvalidSlot { slot: slot },
         };
         assert((*v).eq(&copy));
     }
