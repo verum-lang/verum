@@ -7787,7 +7787,21 @@ impl VbcCodegen {
             {
                 if let PathSegment::Name(ident) = &path.segments[0] {
                     let name = ident.name.to_string();
-                    if self.ctx.get_var_reg(&name).is_ok() {
+                    // A `static mut` / `@thread_local` binding is a VALUE
+                    // receiver (instance dispatch on its stored value), not a
+                    // static type namespace — even when the binding name is
+                    // CapitalCase (e.g. `CURRENT_HEAP.as_mut()`).  Pre-fix the
+                    // bare uppercase shape routed it to static-method dispatch
+                    // (`CURRENT_HEAP` treated as a type), so the receiver was
+                    // never `TlsGet`-loaded and `.as_mut()` mis-dispatched
+                    // against the name-as-string (`Text<small>`), surfacing as
+                    // "method 'as_mut' not found on receiver of runtime kind
+                    // Text<small>".  This blocked `get_heap()` /
+                    // `get_segment_stats()` and every observer that reaches a
+                    // record-typed thread-local via a method call.
+                    if self.ctx.get_var_reg(&name).is_ok()
+                        || self.ctx.is_thread_local(&name).is_some()
+                    {
                         None
                     } else {
                         Some(name)
@@ -8358,7 +8372,15 @@ impl VbcCodegen {
             // This avoids "undefined variable: sys" / "undefined variable: IoError" errors.
             if !parts.is_empty() {
                 let first = &parts[0];
-                let is_module_ns = first == "super"
+                // A single-segment `static mut` / `@thread_local` receiver is
+                // a value, never a module/type namespace — keep it out of both
+                // the module-ns stub path and the type-ns path so it reaches
+                // the value-receiver instance dispatch below (see the matching
+                // guard on `static_receiver_type` above).
+                let first_is_thread_local =
+                    parts.len() == 1 && self.ctx.is_thread_local(first).is_some();
+                let is_module_ns = !first_is_thread_local
+                    && (first == "super"
                     || first == "cog"
                     || first == "."
                     || (first
@@ -8367,7 +8389,7 @@ impl VbcCodegen {
                         .map(|c| c.is_lowercase())
                         .unwrap_or(false)
                         && self.ctx.get_var_reg(first).is_err()
-                        && !is_type_name(first));
+                        && !is_type_name(first)));
                 // Also treat uppercase names as type namespaces if they have qualified
                 // functions registered (e.g., IoError.WouldBlock, IoError.from_errno).
                 // Resolve type aliases first so `type IoError is StreamError;` callers
@@ -8377,6 +8399,7 @@ impl VbcCodegen {
                 // "undefined variable: IoError" lenient skip.
                 let resolved_first = self.resolve_type_alias(first);
                 let is_type_ns = !is_module_ns
+                    && !first_is_thread_local
                     && first
                         .chars()
                         .next()
@@ -10456,8 +10479,21 @@ impl VbcCodegen {
         // this, a `mount`-imported free function whose simple name matches
         // the method (e.g. `stdout`, `stderr`, `len`) silently shadows
         // method dispatch on the local.
-        let receiver_is_local_value =
-            !is_type_name(&type_name) && self.ctx.registers.contains(&type_name);
+        //
+        // A `static mut` / `@thread_local` binding (e.g. `CURRENT_HEAP`,
+        // `GLOBAL_HAZARD_DOMAIN`) is ALSO a value receiver — its storage is
+        // a TLS slot, not a register, so `registers.contains` misses it.
+        // Pre-fix the bare CapitalCase shape fell through to static-method
+        // dispatch, which emitted `LoadK "<NAME>"` (the name as a string)
+        // as the receiver → `.as_mut()` / `.scan_hazards()` / … then failed
+        // with "method not found on receiver of runtime kind Text<small>".
+        // This blocked every observer that reaches a record-typed static-mut
+        // through a method call (get_heap, hazard_stats, get_segment_stats).
+        // `is_thread_local` is the authoritative static-mut registry (every
+        // `static mut`/`@thread_local` is registered there at decl time).
+        let receiver_is_local_value = !is_type_name(&type_name)
+            && (self.ctx.registers.contains(&type_name)
+                || self.ctx.is_thread_local(&type_name).is_some());
         if receiver_is_local_value {
             return Ok(None);
         }
