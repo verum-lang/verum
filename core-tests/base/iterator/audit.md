@@ -343,3 +343,85 @@ Tracked as a follow-up: the bidirectional expected-type plumbing
 needs to flow through the method-chain iterative typing
 (`infer_method_chain_iterative` in modules.rs).  Separate from §3.1
 but mechanically similar.
+
+---
+
+## Session 2026-06-19 — escaping-stack-ref UAF FIXED (`&*p ≡ p` fold) + 2 residual defects root-caused
+
+### §4.5 `&*p ≡ p` raw-pointer fold — CLOSED (commit on main)
+
+**Root cause** (traced via `VERUM_TRACE_CBGRGEN`): `ListIter::next`'s
+`let item = &*self.ptr; … Maybe.Some(item)` compiled the inner `*self.ptr`
+to a register holding a COPY of the loaded pointee, then wrapped that
+ephemeral stack temp in a CBGR register-ref encoding `next`'s frame
+`abs_index`.  When the frame's `pop_frame` bumped slot generations the ref
+dangled → "CBGR use-after-free detected: expected generation 2, found 4"
+on the 2nd `next()` (the gen-2 ref into the recycled slot).  The fail slot
+(abs_index 22) lived in `next`'s OWN frame (base 19, range 19..29) and was
+bumped twice by frame push/pop, NOT by DropRef — the DropRef-over-bump
+hypothesis was wrong.
+
+**Fix**: `compile_unary` now folds `&*p` / `&mut *p` to `p` when `p` is a
+raw pointer (`&unsafe T` / `*const T` / `*mut T`), returning the heap-anchored
+pointer directly.  Gated on side-effect-free Path/Field operands so the
+non-pointer fall-through (`&*heap_box`, cbgr-ref reborrow) recompiles
+idempotently.  **Net:** property 13→19 pass, regression 8→9, integration
+4→6; basic 13/13 + protocol_agnostic 20/22 unchanged; zero regressions.
+Manual `while let Some(x)=it.next()` loops now correct (sum=15).
+
+### §4.6 RESIDUAL-A: `collect()` return-type inference → `FFIAbi.from_iter` mis-dispatch (OPEN, deep)
+
+`collect<C: FromIterator<Self.Item>>(self) -> C { C.from_iter(self) }`.  With
+`let combined: List<Int> = xs.iter()…​.collect();` the annotation type must
+bind `C = List<Int>` so `C.from_iter` → `List.from_iter`.  Instead the
+unresolved `C` (type-param-as-namespace) resolves to `FFIAbi` (a fabricated
+fallback — FFIAbi has NO FromIterator impl in core/) → runtime panic
+"method 'FFIAbi.from_iter' not found … 8 candidate(s): Text/List/Map/Set/…".
+Blocks ~12 property+integration tests, BUT NOT all `.collect()` sites — the
+generic body's `C` resolves CORRECTLY for some shapes (e.g.
+`arr.iter().map(|x| *x*2).collect()` in `protocol_agnostic::test_collect_to_list`
+passes today) and mis-resolves to `FFIAbi` for others (chain / zip / range).
+The C-resolution is therefore CONTEXT-DEPENDENT, not uniformly broken.
+
+**Call-site-rewrite approach TRIED and REVERTED this session.**  Added a
+`current_collect_target` ctx field (the un-unwrapped annotation base, since
+`current_return_type_name` unwraps `List<Int>`→`Int`) threaded around the
+`compile_let` RHS, and a `collect()` intercept in `compile_method_call`
+rewriting `iter.collect()` → `<Base>.from_iter(iter)` (modelled on the
+`into()`→`From::from` arm).  Result: property 19→21, integration 6→12, but
+**protocol_agnostic 20→19 — regressed `test_collect_to_list`**: the rewrite
+emits `Instruction::Call{func_id: List.from_iter}` against the GENERIC
+(un-monomorphised) `from_iter`, so its inner `for item in iter` over the
+generic param `I` fails to dispatch `MapIter<ListIter>::next` and silently
+yields a 0-length list.  Curiously `MapIter<Chain<…>>` / `MapIter<Rev<…>>`
+DO iterate via that path — only `MapIter<ListIter>` collapses to 0.  A
+silent-empty on the common `list.iter().map().collect()` pattern is WORSE
+than the loud FFIAbi panic on rarer shapes, so the intercept was reverted.
+
+**The correct fix is the generic body, not the call site**: the call-site
+`Call{func_id}` bypasses monomorphisation, which is exactly what makes the
+generic `collect` body work where it does.  Two real fix surfaces: (a) make
+the generic `collect<C>(self)->C{C.from_iter(self)}` resolve `C` from the
+return-type-directed expected type at monomorphisation time (so `C.from_iter`
+binds `List.from_iter` for ALL shapes, not just the lucky ones); and/or
+(b) close the `for item in iter` over a generic `I` param defect where
+`I=MapIter<ListIter>` yields 0 (a monomorphisation-keying collision distinct
+from the adapter-for-loop routing fixed in §33/bug#4).  Both are deeper than
+a call-site rewrite.
+
+### §4.7 RESIDUAL-B: range arithmetic assertions (OPEN)
+
+`integration_range_sum`, `integration_range_product_for_factorial`,
+`law_range_inclusive_count_includes_endpoint`, `law_take_plus_skip_recovers_original`
+fail with `AssertionFailed: left != right`.  Likely tied to the documented
+RangeInclusive `.next()` field-layout intercept defect
+(range_inclusive_codegen_intercept) — `NewRange{inclusive:true}` heap object
+layout `[current,end,inclusive]` mismatches the stdlib RangeInclusive
+`{current,end,done}` declared layout.  Separate from §4.6.
+
+### NOTE: `Counter` name-collision red herring
+
+Early repros using `type Counter is {n:Int}` produced garbage field reads —
+NOT a codegen defect: `Counter` shadows stdlib `core/metrics/instrument.vr`
+`public type Counter` (different layout).  Always use a unique type name in
+scratch repros; a `<Stdlib>{…}` literal silently binds the stdlib layout.
