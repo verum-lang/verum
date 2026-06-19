@@ -15212,7 +15212,23 @@ fn lower_call_method<'ctx>(
                 // / kernel32 / ntdll symbol is not a valid method-dispatch
                 // target.  See #90 for the original miscompile (`Hasher.write`
                 // → libSystem `write(fd, buf, count)`).
-                if llvm_fn_candidate.count_basic_blocks() == 0 {
+                //
+                // BUT: a Verum-side method may be declare-only at THIS point
+                // when its body is lowered later in the same archive-merge
+                // pass (forward reference — caller `push_back` lowered before
+                // callee `grow`). Rejecting it on a zero LLVM basic-block
+                // count drops the call (→ the callee is uncalled → DCE'd →
+                // absent), which is the systemic AOT collection-mutation
+                // null-deref defect (deque/heap/lru/map/btree `grow`/`insert`
+                // /`reallocate`, List `resize_buffer`). Distinguish a real
+                // Verum function (has a VBC bytecode body) from a true FFI
+                // extern (no body) via the VBC descriptor — NOT the
+                // lowering-order-dependent LLVM block count.
+                let is_verum_body = vbc_mod
+                    .functions
+                    .get(entry.index)
+                    .map_or(false, |fd| fd.bytecode_length > 0);
+                if llvm_fn_candidate.count_basic_blocks() == 0 && !is_verum_body {
                     continue;
                 }
                 let pc = llvm_fn_candidate.count_params() as u32;
@@ -15258,27 +15274,39 @@ fn lower_call_method<'ctx>(
                 || !str_method_compilable);
         if !skip_text_method {
             if let Some(candidate) = ctx.get_module().get_function(&method_name_str) {
-                // Reject bodyless FFI externs (declare-only, no body).
-                if candidate.count_basic_blocks() > 0 {
-                    resolved_func_name = Some(method_name_str.clone());
-                    // Look up return type from VBC function table (O(1) via index)
-                    if let Some(index) = ctx.func_name_index() {
-                        if let Some(entry) = index.find_by_name(&method_name_str) {
-                            if let Some(func_desc) =
-                                ctx.vbc_module().and_then(|m| m.functions.get(entry.index))
-                            {
-                                resolved_return_type = Some(func_desc.return_type.clone());
-                            }
-                        }
-                    } else if let Some(vbc_mod) = ctx.vbc_module() {
-                        for func_desc in &vbc_mod.functions {
-                            let fname = vbc_mod.get_string(func_desc.name).unwrap_or("");
-                            if fname == method_name_str {
-                                resolved_return_type = Some(func_desc.return_type.clone());
-                                break;
-                            }
+                // Resolve the return type AND determine whether this is a
+                // real Verum function (has a VBC bytecode body) in one VBC
+                // descriptor lookup.
+                let mut vbc_has_body = false;
+                if let Some(index) = ctx.func_name_index() {
+                    if let Some(entry) = index.find_by_name(&method_name_str) {
+                        if let Some(func_desc) =
+                            ctx.vbc_module().and_then(|m| m.functions.get(entry.index))
+                        {
+                            resolved_return_type = Some(func_desc.return_type.clone());
+                            vbc_has_body = func_desc.bytecode_length > 0;
                         }
                     }
+                } else if let Some(vbc_mod) = ctx.vbc_module() {
+                    for func_desc in &vbc_mod.functions {
+                        let fname = vbc_mod.get_string(func_desc.name).unwrap_or("");
+                        if fname == method_name_str {
+                            resolved_return_type = Some(func_desc.return_type.clone());
+                            vbc_has_body = func_desc.bytecode_length > 0;
+                            break;
+                        }
+                    }
+                }
+                // Accept a real Verum function even when it is declare-only at
+                // THIS point — its body is lowered later in the same merge
+                // pass (forward reference: caller lowered before callee). Only
+                // a true FFI extern (no VBC body) is rejected. Using the LLVM
+                // basic-block count alone dropped forward-referenced mutators
+                // (`grow`/`reallocate`/`resize_buffer`), the systemic AOT
+                // collection null-deref defect. See the matching fix in
+                // Strategy 2.
+                if candidate.count_basic_blocks() > 0 || vbc_has_body {
+                    resolved_func_name = Some(method_name_str.clone());
                 }
             }
         }
