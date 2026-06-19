@@ -3586,6 +3586,60 @@ impl VbcCodegen {
             };
             eprintln!("[unary-ref] op={:?} inner.kind={}", op, kind_name);
         }
+
+        // `&*p` / `&mut *p` where `p` is a raw pointer (`&unsafe T`,
+        // `*const T`, `*mut T`) is the identity `&*p ≡ p`: dereferencing a
+        // pointer and immediately re-borrowing yields the SAME heap address.
+        //
+        // The generic path below would instead compile the inner `*p` to a
+        // register holding a COPY of the loaded pointee value, then wrap
+        // that ephemeral stack temp in a CBGR register-ref encoding the
+        // method-frame's abs_index.  When the frame's `pop_frame` bumps slot
+        // generations the ref dangles, surfacing as a "CBGR use-after-free
+        // detected: expected generation N, found N+2" panic on the next
+        // dereference.  Observed in `ListIter::next`
+        // (`let item = &*self.ptr; … Maybe.Some(item)`): the returned `&T`
+        // escaped `next`'s frame and `find`/`fold`/`position`/… dereferenced
+        // it after a later `next()` call had recycled slot 22.
+        //
+        // Fold to the pointer directly.  Gate on a side-effect-free operand
+        // (`Path`/`Field` chains) so the fall-through — when `p` is NOT a raw
+        // pointer (e.g. `&*heap_box`, `&*cbgr_ref` reborrow, which rely on the
+        // generic Deref emitting `cbgr_deref_source`) — recompiles `p`
+        // idempotently.  The runtime raw-pointer mark is set by
+        // `compile_field_access` for `&unsafe T` / `*const T` / `*mut T`
+        // fields (and by `compile_cast` for `… as &unsafe T`), and survives
+        // `Self`-receiver resolution, making compile-then-check the reliable
+        // detector that a static type-name probe cannot match.
+        if matches!(
+            op,
+            UnOp::Ref
+                | UnOp::RefMut
+                | UnOp::RefChecked
+                | UnOp::RefCheckedMut
+                | UnOp::RefUnsafe
+                | UnOp::RefUnsafeMut
+        ) && let ExprKind::Unary {
+            op: UnOp::Deref,
+            expr: ptr_expr,
+        } = &inner.kind
+            && matches!(ptr_expr.kind, ExprKind::Path(_) | ExprKind::Field { .. })
+        {
+            let ptr_reg = self
+                .compile_expr(ptr_expr)?
+                .or_internal("&*p: pointer operand has no value")?;
+            if self.ctx.is_raw_pointer(ptr_reg) {
+                // `&*p ≡ p` — `ptr_reg` already holds the heap-anchored
+                // pointer, which is the exact `&T` the surrounding code
+                // expects and which survives every frame boundary.
+                return Ok(Some(ptr_reg));
+            }
+            // Not a raw pointer: drop this probe and fall through to the
+            // generic path, which recompiles the inner `Deref` from scratch
+            // (idempotent for the gated Path/Field operands).
+            self.ctx.free_temp(ptr_reg);
+        }
+
         // `&arr[range]` / `&mut arr[range]` — slice-borrow.
         //
 
