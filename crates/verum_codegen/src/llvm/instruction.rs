@@ -16430,6 +16430,15 @@ fn lower_call_method<'ctx>(
             }
             // Mark Maybe<&T> returns from compiled list/deque functions.
             // The payload is a raw pointer that needs auto-deref in unwrap/match.
+            //
+            // CRITICAL (task #11): only mark when the method ACTUALLY returns
+            // a borrowed-reference payload (`Maybe<&T>`). `List.get`/`first`/
+            // `last` return `Maybe<T>` BY VALUE (`Maybe.Some(*self.ptr.offset(i))`
+            // dereferences), so marking them ref-payload makes the match/unwrap
+            // auto-deref the *value* (e.g. an Int) as a pointer → SIGSEGV (the
+            // heap/lru/map blocker: `BinaryHeap.peek → data.first` crashed).
+            // Distinguish via the resolved return type: `Maybe<&T>` is an
+            // Instantiated type whose argument is a `TypeRef::Reference`.
             if matches!(
                 bare_method,
                 "get" | "get_mut" | "first" | "last" | "front" | "back" | "peek" | "min" | "max"
@@ -16439,7 +16448,15 @@ fn lower_call_method<'ctx>(
                 || func_name.starts_with("BTreeMap.")
                 || func_name.starts_with("BTreeSet."))
             {
-                ctx.mark_ref_payload_register(dst.0);
+                let returns_ref_payload = match &resolved_return_type {
+                    Some(TypeRef::Instantiated { args, .. }) => args
+                        .iter()
+                        .any(|a| matches!(a, TypeRef::Reference { .. })),
+                    _ => false,
+                };
+                if returns_ref_payload {
+                    ctx.mark_ref_payload_register(dst.0);
+                }
             }
             // Text methods: re-mark return types after set_register() clears
             // the RegisterTypeMap. Phase 2 removed legacy HashSets, so
