@@ -76,7 +76,7 @@ fn law_mul_identity_one() {
     }
 }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@ignore("INTRINSIC-NESTED-CALL-DISPATCH-1 — nested intrinsic free-fn call mis-dispatch: mul(*a, add(*b,*c)) with iterator-derefed args returns a+b+c (outer `mul` computed as `add`). Single-literal mul(1000,add(1000,1000)) folds correctly; only the runtime-dispatched deref path fails. See audit.md §2.6, task #5.")
 @test
 fn law_mul_distributes_over_add() {
     for a in small().iter() {
@@ -256,7 +256,6 @@ fn law_checked_mul_some_iff_safe() {
 // Comparison coherence
 // -----------------------------------------------------------------------------
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn law_min_max_coherent() {
     for a in samples().iter() {

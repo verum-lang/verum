@@ -2227,6 +2227,29 @@ impl VbcCodegen {
             }
         }
 
+        // Tuple structural equality — compare ELEMENT-WISE rather than
+        // routing the whole-tuple `Pack` pointers through `CmpG`.
+        //
+        // TUPLE-EQ-AOT (core-tests/net/addr/audit.md §3.5.1): under AOT,
+        // `lower_cmp_generic`'s pointer-pointer branch misclassifies a
+        // tuple `Pack` pointer as a `Text` object and runs strcmp on it,
+        // so `tupleA == tupleB` returns a bogus, consistently-`true`
+        // result (interp does structural compare and is correct). Tuple
+        // ELEMENTS are stored as i64 values, so per-element `CmpG` hits
+        // the value-compare path on both tiers — never the broken
+        // pointer branch. We trigger when a tuple literal fixes the
+        // arity; `==`/`!=` are type-checked so both operands share it.
+        // This is tier-agnostic (interp keeps passing) and strictly more
+        // correct than the whole-tuple CmpG it replaces.
+        if matches!(op, BinOp::Eq | BinOp::Ne)
+            && let Some(arity) = Self::tuple_eq_arity(left, right)
+        {
+            self.emit_tuple_elementwise_eq(dest, left_reg, right_reg, arity, op == BinOp::Ne);
+            self.ctx.free_temp(left_reg);
+            self.ctx.free_temp(right_reg);
+            return Ok(Some(dest));
+        }
+
         // Emit appropriate instruction based on operator
         match op {
             // Arithmetic - use type-appropriate instruction
@@ -15377,6 +15400,104 @@ impl VbcCodegen {
     // ==================== Collections ====================
 
     /// Compiles a tuple expression.
+    /// Tuple-comparison arity for `==` / `!=`, or `None` if neither
+    /// operand is a non-empty tuple literal. A tuple literal on either
+    /// side fixes the arity for both, since `==`/`!=` are type-checked
+    /// (both operands have the same tuple type). Used to gate the
+    /// element-wise structural-equality lowering that sidesteps
+    /// TUPLE-EQ-AOT (audit §3.5.1).
+    fn tuple_eq_arity(left: &Expr, right: &Expr) -> Option<usize> {
+        if let ExprKind::Tuple(elems) = &left.kind {
+            if !elems.is_empty() {
+                return Some(elems.len());
+            }
+        }
+        if let ExprKind::Tuple(elems) = &right.kind {
+            if !elems.is_empty() {
+                return Some(elems.len());
+            }
+        }
+        None
+    }
+
+    /// Emit element-wise structural equality of two `arity`-element
+    /// tuples held in `left_reg` / `right_reg` into `dest`. `Unpack`s
+    /// both into consecutive registers, compares each pair with `CmpG`
+    /// (element values are i64 — the correct value-compare path on both
+    /// tiers), AND-reduces the results, and negates for `!=`.
+    fn emit_tuple_elementwise_eq(
+        &mut self,
+        dest: Reg,
+        left_reg: Reg,
+        right_reg: Reg,
+        arity: usize,
+        negate: bool,
+    ) {
+        // Consecutive landing registers for each Unpack (mirror
+        // compile_tuple's alloc_fresh discipline).
+        let l_start = self.ctx.registers.alloc_fresh();
+        for _ in 1..arity {
+            self.ctx.registers.alloc_fresh();
+        }
+        self.ctx.emit(Instruction::Unpack {
+            dst_start: l_start,
+            tuple: left_reg,
+            count: arity as u8,
+        });
+        let r_start = self.ctx.registers.alloc_fresh();
+        for _ in 1..arity {
+            self.ctx.registers.alloc_fresh();
+        }
+        self.ctx.emit(Instruction::Unpack {
+            dst_start: r_start,
+            tuple: right_reg,
+            count: arity as u8,
+        });
+
+        // acc = (l[0] == r[0]); acc &= (l[i] == r[i]) for i in 1..arity.
+        let acc = if negate { self.ctx.alloc_temp() } else { dest };
+        self.ctx.emit(Instruction::CmpG {
+            eq: true,
+            dst: acc,
+            a: l_start,
+            b: r_start,
+            protocol_id: 0,
+        });
+        for i in 1..arity as u16 {
+            let tmp = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::CmpG {
+                eq: true,
+                dst: tmp,
+                a: Reg(l_start.0 + i),
+                b: Reg(r_start.0 + i),
+                protocol_id: 0,
+            });
+            self.ctx.emit(Instruction::Bitwise {
+                op: BitwiseOp::And,
+                dst: acc,
+                a: acc,
+                b: tmp,
+            });
+            self.ctx.free_temp(tmp);
+        }
+        if negate {
+            // Logical negation as `acc == 0`. `Instruction::Not` is a
+            // BITWISE complement at Tier-1 (`!0 == -1`, `!1 == -2`),
+            // which is non-boolean; comparing against a 0 literal yields
+            // a clean 0/1 on both tiers.
+            let zero = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI { dst: zero, value: 0 });
+            self.ctx.emit(Instruction::CmpI {
+                op: CompareOp::Eq,
+                dst: dest,
+                a: acc,
+                b: zero,
+            });
+            self.ctx.free_temp(zero);
+            self.ctx.free_temp(acc);
+        }
+    }
+
     fn compile_tuple(&mut self, elements: &verum_common::List<Expr>) -> CodegenResult<Option<Reg>> {
         if elements.is_empty() {
             // Unit type
@@ -24928,6 +25049,48 @@ impl VbcCodegen {
                         dst: dest,
                         a: args[0],
                         b: args[1],
+                    });
+                }
+
+            // Integer comparisons — emit CmpI (boolean result).  Without
+            // these arms the comparison intrinsics (`eq`/`ne`/`lt`/`le`/`gt`/
+            // `ge`, registry strategy DirectOpcode(EqI..GeI)) fell through to
+            // the `_ => LoadNil` fallback, so the stdlib wrappers compiled to
+            // a nil-returning stub.  (INTRINSIC-WRAPPER-3-DEFECTS §B)
+            Opcode::EqI
+                if args.len() >= 2 => {
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Eq, dst: dest, a: args[0], b: args[1],
+                    });
+                }
+            Opcode::NeI
+                if args.len() >= 2 => {
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Ne, dst: dest, a: args[0], b: args[1],
+                    });
+                }
+            Opcode::LtI
+                if args.len() >= 2 => {
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Lt, dst: dest, a: args[0], b: args[1],
+                    });
+                }
+            Opcode::LeI
+                if args.len() >= 2 => {
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Le, dst: dest, a: args[0], b: args[1],
+                    });
+                }
+            Opcode::GtI
+                if args.len() >= 2 => {
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Gt, dst: dest, a: args[0], b: args[1],
+                    });
+                }
+            Opcode::GeI
+                if args.len() >= 2 => {
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Ge, dst: dest, a: args[0], b: args[1],
                     });
                 }
 
