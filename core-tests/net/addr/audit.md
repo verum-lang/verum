@@ -130,17 +130,30 @@ whole-tuple compare is corrupted. The defect generalises to **every
 non-Text heap-object `==`** (tuples, and likely records/other
 aggregates) under AOT.
 
-**Fix approach (fundamental):** add a structural-eq runtime
-`verum_value_eq(a, b)` mirroring the interpreter's structural `CmpG`
-path (`verum_vbc .../string_helpers.rs:688` Array/List compare +
-heap-object header arity): identity fast-path → both-Text strcmp
-(gate the existing strcmp behind `verum_is_text_object`,
-`runtime.rs:4204`) → both-objects-same-arity element-wise recursive
-`verum_value_eq` via `lower_unpack_element` → else `false`. Route the
-pointer-pointer branch (and the `verum_generic_eq` path) through it.
-**Pointer-identity alone is insufficient** — `self.octets == (0,0,0,0)`
-compares distinct-address but content-equal tuples, so element-wise
-structural comparison is required.
+**FIX LANDED (2026-06-20, validated both tiers).** The heap object
+header is NOT initialised by `lower_pack` (`emit_checked_malloc` only
+mallocs), so a runtime structural-eq cannot read the arity from the
+header. Instead the fix is at **VBC codegen** where the arity is
+statically known: `compile_binary` now intercepts `==` / `!=` whose
+operands are tuples (arity fixed by a tuple-literal operand — `==`/`!=`
+are type-checked so both sides share it) and emits **element-wise**
+comparison — `Unpack` both tuples into consecutive registers, `CmpG`
+each pair (tuple ELEMENTS are i64 values → the correct value-compare
+path on both tiers, never the broken whole-tuple pointer branch),
+bitwise-AND the results, and for `!=` negate via `acc == 0` (a literal
+0 + `CmpI Eq`, since `Instruction::Not` is a *bitwise* complement at
+Tier-1: `!0 == -1`). Tier-agnostic (interp stays 138/138) and strictly
+more correct than the whole-tuple `CmpG` it replaces. See
+`verum_vbc .../codegen/expressions.rs` (`tuple_eq_arity` +
+`emit_tuple_elementwise_eq`).
+
+**Result:** the 8 tuple-eq tests below flipped GREEN under `--aot`
+(`is_unspecified`/`is_broadcast` Ipv4 + `is_loopback`/`is_unspecified`
+Ipv6 + their negated/disjoint/property dependents); 0 regressions;
+AOT 95→**103/138**. The whole-pointer `lower_cmp_generic` Text-strcmp
+branch (`instruction.rs:29374`) remains latent for non-tuple non-Text
+heap objects (records compared whole) — tracked for the structural
+`verum_value_eq` follow-up; tuples no longer reach it.
 
 Failures pinned: `is_unspecified` / `is_broadcast` (Ipv4) and the
 Ipv6 `is_unspecified` / `is_loopback` all use `self.octets == (..)`
@@ -206,13 +219,15 @@ root-cause under LLVM.
 | Construction / field accessors | ~30 | ✓ | ✓ |
 | Scalar predicates (`is_loopback`/`is_private`/`is_multicast`) | ~20 | ✓ | ✓ |
 | `to_u32`/`from_u32` round-trip | 8 | ✓ | ✓ |
-| Tuple-eq predicates (`is_unspecified`/`is_broadcast`) | ~10 | ✓ | ✗ §3.5.1 |
+| Tuple-eq predicates (`is_unspecified`/`is_broadcast`) | ~10 | ✓ | ✓ §3.5.1 (FIXED) |
 | Display rendering | 10 | ✓ | ✗ §3.5.2 |
 | Parse (v4/v6/socket) | ~23 | ✓ | ✗ §3.5.4 |
 | Debug (`:?`) | 0 (removed) | ✓ | ✗ §3.5.3 |
 
-The pure-data 95/138 that pass AOT are the construction, scalar
-predicate, accessor, `to_u32`, and `AddrParseError` Eq surface.
+After the TUPLE-EQ-AOT fix (§3.5.1), AOT is **103/138**. The 35
+remaining Tier-1 failures are Display rendering (§3.5.2) + parse
+(§3.5.4). The 103 that pass both tiers are construction, scalar +
+tuple-eq predicates, accessors, `to_u32`, and `AddrParseError` Eq.
 
 ## 4. Action items landed in this branch
 
@@ -250,12 +265,18 @@ predicate, accessor, `to_u32`, and `AddrParseError` Eq surface.
   intentionally deferred until PRELUDE-FREEFN (task #2) lands.
 * **Four AOT defect classes root-caused** with minimal reproducers
   (tasks #2–#5) — see §3.5. Tier-0: 139/139 green. Tier-1: 95/138.
+* **TUPLE-EQ-AOT FIXED** (§3.5.1) — `compile_binary` now lowers tuple
+  `==`/`!=` element-wise in VBC codegen (`tuple_eq_arity` +
+  `emit_tuple_elementwise_eq`), bypassing the `lower_cmp_generic`
+  pointer-pointer Text-strcmp misclassification. 8 tuple-eq predicate
+  tests flipped GREEN under `--aot`; Tier-0 still 138/138; Tier-1
+  95→**103/138**; 0 regressions.
 
 ## 5. Action items deferred
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| **TUPLE-EQ-AOT** (task #4) — tuple `==` always true under AOT | `verum_codegen` (tuple Eq / value materialization) | high-value, focused codegen fix |
+| ~~**TUPLE-EQ-AOT** (task #4)~~ — **CLOSED 2026-06-20**: tuple `==`/`!=` now lowered element-wise in VBC codegen; AOT 95→103/138, 0 regressions. (Latent: whole-record `==` still hits the Text-strcmp branch — follow-up `verum_value_eq`.) | done | ✅ |
 | **DISP-EMPTY-AOT** (task #3) — f-string Display of user types → empty under AOT | `verum_codegen` (ToString→Display dispatch) | high-value, stdlib-wide |
 | **PRELUDE-FREEFN** (task #2) — prelude concrete free fns not captured into metadata `module_reexports`, unbound bare under AOT/run | `precompile.rs::scan_module_reexports` + `verum_types new_with_core` | medium; precompile capture + type-env registration |
 | **PARSE-AOT** (task #5) — v4/v6/socket parse text-codegen diverges under AOT | `verum_codegen` (Text split/slice/chars) | partly downstream of #4 |
