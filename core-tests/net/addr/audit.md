@@ -116,16 +116,31 @@ Under AOT, `tupleA == tupleB` returns `true` even for **distinct**
 tuples (interp is correct). Minimal repro: `(127,0,0,1) == (0,0,0,0)`
 prints `true` under `verum build`, `false` under `--interp`.
 
-Codegen path: a tuple is neither float/text/primitive, so the VBC
-emits `CmpG` (generic equality, `verum_vbc .../expressions.rs:2382`);
-the LLVM `lower_cmp_generic` (`verum_codegen .../instruction.rs:29165`)
-routes to `verum_generic_eq` (`runtime.rs:4366`), which returns `1`
-only on raw pointer identity or Text-strcmp, else `0`. AOT returning
-`true` for distinct tuples ⇒ both operands resolve to the **same**
-pointer/representation (tuple literals fold to a shared address, or
-the per-element payload is dropped from the compared value — note
-field reads still work, since `is_loopback`'s `octets.0 == 127`
-**passes** AOT; only the whole-tuple compare collapses).
+**Exact root cause (located 2026-06-20):** a tuple literal compiles to
+VBC `Pack` → LLVM `runtime.lower_pack` returns a heap **pointer**
+(`instruction.rs:3866`). `a == b` emits `CmpG` →
+`lower_cmp_generic` (`instruction.rs:29165`). Its
+`lhs.is_pointer_value() && rhs.is_pointer_value()` branch
+(`instruction.rs:29374`) **unconditionally assumes both pointers are
+`Text` objects** and runs `verum_text_get_ptr` + `strcmp`. A tuple
+pointer is thus misread as a Text and strcmp'd over garbage, returning
+a bogus (consistently `true`) result. Field reads are unaffected
+(`is_loopback`'s `octets.0 == 127` **passes** AOT) — only the
+whole-tuple compare is corrupted. The defect generalises to **every
+non-Text heap-object `==`** (tuples, and likely records/other
+aggregates) under AOT.
+
+**Fix approach (fundamental):** add a structural-eq runtime
+`verum_value_eq(a, b)` mirroring the interpreter's structural `CmpG`
+path (`verum_vbc .../string_helpers.rs:688` Array/List compare +
+heap-object header arity): identity fast-path → both-Text strcmp
+(gate the existing strcmp behind `verum_is_text_object`,
+`runtime.rs:4204`) → both-objects-same-arity element-wise recursive
+`verum_value_eq` via `lower_unpack_element` → else `false`. Route the
+pointer-pointer branch (and the `verum_generic_eq` path) through it.
+**Pointer-identity alone is insufficient** — `self.octets == (0,0,0,0)`
+compares distinct-address but content-equal tuples, so element-wise
+structural comparison is required.
 
 Failures pinned: `is_unspecified` / `is_broadcast` (Ipv4) and the
 Ipv6 `is_unspecified` / `is_loopback` all use `self.octets == (..)`
