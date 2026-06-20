@@ -425,3 +425,53 @@ Early repros using `type Counter is {n:Int}` produced garbage field reads —
 NOT a codegen defect: `Counter` shadows stdlib `core/metrics/instrument.vr`
 `public type Counter` (different layout).  Always use a unique type name in
 scratch repros; a `<Stdlib>{…}` literal silently binds the stdlib layout.
+
+### §4.8 RESIDUAL-C ROOT CAUSE: combinator `&T`-element deref returns identity (find/fold/position hang+wrong) (OPEN, deep)
+
+**This is the root cause behind the find/fold/position combinator failures AND
+the `MapIter<ListIter>` collect-0 behaviour** — confirmed by bytecode + PC trace
+2026-06-19/20.
+
+Mechanism, end to end:
+1. `it.next()` on a **direct local** receiver is **natively intercepted**
+   (no `ListIter.next` bytecode runs — confirmed: `VERUM_TRACE_PC=ListIter.next`
+   fires ZERO times for `let mut it=…; it.next()`), returning the element
+   **value** (e.g. `10`). This is why manual loops and `for x in xs` work.
+2. Reached via a combinator (`find`/`fold`/`position` call `self.next()`) or a
+   `&mut ListIter` parameter, the real stdlib `ListIter.next` **bytecode** runs.
+   `List.iter()` correctly sets `ptr = self.data` (interior data pointer), and
+   `next` returns `Maybe.Some(&*self.ptr)` = the interior `&T` pointer (after the
+   §4.5 `&*p` fold, `&*self.ptr` IS just `self.ptr`, a raw pointer — correct).
+3. The consumer's `*x` (x bound from `Some(x)`, `x: &Int`) compiles to a GENERIC
+   `DEREF` opcode, NOT the typed scalar deref (`FfiExtended DerefRaw size=8`),
+   because the match-arm binding `x` is not resolved to the primitive-pointee
+   type `&Int` at the deref site (it comes from `GET_VDATA` of a generic
+   `Maybe<&Self.Item>`). `handle_deref` (cbgr.rs ~247) then takes the `else`
+   identity branch — the interior data pointer is not a registered
+   `cbgr_allocation` at `ptr-32`, so it is returned UNCHANGED instead of reading
+   the 8-byte scalar. `Display`/`to_text` of that pointer renders the CONTAINING
+   List (`*x` → `[10,20,30]` instead of `10`); after `offset(1)` it renders the
+   raw pointer-as-int. Wrong values → assertion failures; in `find`'s
+   `while let Some(x)=self.next()` the misread drives the loop state and it
+   HANGS.
+
+**Why it only bites combinators:** `handle_deref`'s identity-for-heap-object
+`else` branch is CORRECT for `&Variant` (so `match *self` preserves the variant),
+but WRONG for a `&primitive` interior element pointer, which must read the scalar.
+The runtime cannot distinguish the two from the `Value::from_ptr` alone; the
+codegen knows (`x: &Int`) but doesn't thread that type to the `*x` deref site.
+
+**Real fix surfaces (both non-trivial):**
+- (A, surgical) Type-directed deref: resolve the `Some(x)` binding's type to
+  `&Int` from `it.next()`'s `Maybe<&Self.Item>` return type so `*x` emits the
+  `typed_primitive_pointee_deref` FfiExtended DerefRaw (size = `T.size`) for
+  primitive pointees. Only touches the primitive-pointee path; `&Record`/`&Variant`
+  keep the sound identity deref. Requires match-arm-binding type propagation from
+  a generic protocol-method return type.
+- (B, architectural) Make element `&T` self-describing at runtime (ThinRef /
+  CBGR-tracked element refs) so `handle_deref` reads the scalar without a static
+  type hint — touches the core iterator reference representation.
+
+This is the long-standing "&T into collection" hard problem (see MEMORY). The
+native-intercept layer masks it for the 80% direct-loop case; combinators and
+`collect` over adapter chains are the exposed 20%.
