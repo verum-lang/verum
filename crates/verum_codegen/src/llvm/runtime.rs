@@ -1635,6 +1635,36 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let tag_val = i32_type.const_int(tag as u64, false);
         builder.build_store(tag_ptr, tag_val).or_llvm_err()?;
 
+        // Make the variant SELF-DESCRIBING for structural equality
+        // (`verum_generic_eq`): record the data-region byte count
+        // (`tag(8) + field_count*8` = total_size - OBJECT_HEADER_SIZE)
+        // in the ObjectHeader `size` field @ offset 12 (u32). Without
+        // this, two distinct `Maybe.Some(x)` heap objects compared via
+        // `==` (which lowers to CmpG → verum_generic_eq) fall through to
+        // the identity/Text-only fast paths and report "not equal". A
+        // 0-field `None` is only 32 bytes (no payload slot), so the
+        // comparator MUST bound its read to exactly this many bytes —
+        // hence storing it here. AOT previously left it zero (the
+        // surrounding `memset`), and nothing on the AOT path reads it
+        // (allocation metadata lives in the CBGR header at ptr-32), so
+        // populating it is side-effect-free beyond enabling the compare.
+        let data_size = 8 + (field_count as u64 * VALUE_SIZE);
+        // SAFETY: in-bounds GEP into the ObjectHeader; offset 12 is the
+        // `size: u32` field, within the always-present 24-byte header.
+        let size_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    self.context.i8_type(),
+                    variant_ptr,
+                    &[i64_type.const_int(12, false)],
+                    "variant_size_ptr",
+                )
+                .or_llvm_err()?
+        };
+        builder
+            .build_store(size_ptr, i32_type.const_int(data_size, false))
+            .or_llvm_err()?;
+
         Ok(variant_ptr)
     }
 
@@ -4382,10 +4412,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
         let func = super::error::get_or_declare_function(module, "verum_generic_eq", fn_type);
 
+        let i32_type = ctx.i32_type();
+        let i8_type = ctx.i8_type();
+
         let entry = ctx.append_basic_block(func, "entry");
         let check_text = ctx.append_basic_block(func, "check_text");
         let check_b_text = ctx.append_basic_block(func, "check_b_text");
         let do_strcmp = ctx.append_basic_block(func, "do_strcmp");
+        // Structural-variant comparison blocks (task #10).
+        let variant_check = ctx.append_basic_block(func, "variant_check");
+        let variant_hdr = ctx.append_basic_block(func, "variant_hdr");
+        let loop_header = ctx.append_basic_block(func, "loop_header");
+        let loop_body = ctx.append_basic_block(func, "loop_body");
         let ret_eq = ctx.append_basic_block(func, "ret_eq");
         let ret_neq = ctx.append_basic_block(func, "ret_neq");
 
@@ -4413,7 +4451,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_return(Some(&i64_type.const_int(1, false)))
             .or_llvm_err()?;
 
-        // check_text: is a a Text object?
+        // check_text: is a a Text object?  (if a is not Text it may be a
+        // variant/record heap object — fall to the structural path
+        // instead of giving up.)
         builder.position_at_end(check_text);
         let a_is_text = builder
             .build_call(is_text_fn, &[a.into()], "a_text")
@@ -4421,7 +4461,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .basic_value_or("call returned void")?
             .into_int_value();
         builder
-            .build_conditional_branch(a_is_text, check_b_text, ret_neq)
+            .build_conditional_branch(a_is_text, check_b_text, variant_check)
             .or_llvm_err()?;
 
         // check_b_text: is b also a Text object?
@@ -4468,7 +4508,90 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?;
         builder.build_return(Some(&result)).or_llvm_err()?;
 
-        // ret_neq: different non-text values
+        // ============================================================
+        // variant_check (task #10): `a` is NOT Text. Structurally
+        // compare `a` and `b` when both are self-describing heap objects
+        // (variants/records carry their data-size in ObjectHeader.size
+        // @12). Guarded so raw integers / mismatched / non-described
+        // objects fall through to `ret_neq` (the prior behaviour) — no
+        // crashes, no false positives.
+        // ============================================================
+        builder.position_at_end(variant_check);
+        let min_ptr = i64_type.const_int(0x10000000, false);
+        let max_ptr = i64_type.const_int(0x7FFFFFFFFFFF, false);
+        let align_mask = i64_type.const_int(0xF, false);
+        // a is a valid 16-aligned heap pointer?
+        let a_lo = builder.build_int_compare(verum_llvm::IntPredicate::UGE, a, min_ptr, "a_lo").or_llvm_err()?;
+        let a_hi = builder.build_int_compare(verum_llvm::IntPredicate::ULE, a, max_ptr, "a_hi").or_llvm_err()?;
+        let a_am = builder.build_and(a, align_mask, "a_am").or_llvm_err()?;
+        let a_al = builder.build_int_compare(verum_llvm::IntPredicate::EQ, a_am, i64_type.const_zero(), "a_al").or_llvm_err()?;
+        let a_r = builder.build_and(a_lo, a_hi, "a_r").or_llvm_err()?;
+        let a_ok = builder.build_and(a_r, a_al, "a_ok").or_llvm_err()?;
+        // b is a valid 16-aligned heap pointer?
+        let b_lo = builder.build_int_compare(verum_llvm::IntPredicate::UGE, b, min_ptr, "b_lo").or_llvm_err()?;
+        let b_hi = builder.build_int_compare(verum_llvm::IntPredicate::ULE, b, max_ptr, "b_hi").or_llvm_err()?;
+        let b_am = builder.build_and(b, align_mask, "b_am").or_llvm_err()?;
+        let b_al = builder.build_int_compare(verum_llvm::IntPredicate::EQ, b_am, i64_type.const_zero(), "b_al").or_llvm_err()?;
+        let b_r = builder.build_and(b_lo, b_hi, "b_r").or_llvm_err()?;
+        let b_ok = builder.build_and(b_r, b_al, "b_ok").or_llvm_err()?;
+        let both_ok = builder.build_and(a_ok, b_ok, "both_heap").or_llvm_err()?;
+        builder.build_conditional_branch(both_ok, variant_hdr, ret_neq).or_llvm_err()?;
+
+        // variant_hdr: read ObjectHeader {type_id@0, size@12} of both and
+        // gate on a self-describing, equal-shaped object.
+        builder.position_at_end(variant_hdr);
+        let a_obj = builder.build_int_to_ptr(a, ptr_type, "a_obj").or_llvm_err()?;
+        let b_obj = builder.build_int_to_ptr(b, ptr_type, "b_obj").or_llvm_err()?;
+        // size @ 12 (u32) → i64
+        let a_size_p = unsafe { builder.build_in_bounds_gep(i8_type, a_obj, &[i64_type.const_int(12, false)], "a_size_p").or_llvm_err()? };
+        let b_size_p = unsafe { builder.build_in_bounds_gep(i8_type, b_obj, &[i64_type.const_int(12, false)], "b_size_p").or_llvm_err()? };
+        let a_size32 = builder.build_load(i32_type, a_size_p, "a_size32").or_llvm_err()?.into_int_value();
+        let b_size32 = builder.build_load(i32_type, b_size_p, "b_size32").or_llvm_err()?.into_int_value();
+        let a_size = builder.build_int_z_extend(a_size32, i64_type, "a_size").or_llvm_err()?;
+        let b_size = builder.build_int_z_extend(b_size32, i64_type, "b_size").or_llvm_err()?;
+        // type_id @ 0 (u32)
+        let a_tid = builder.build_load(i32_type, a_obj, "a_tid").or_llvm_err()?.into_int_value();
+        let b_tid = builder.build_load(i32_type, b_obj, "b_tid").or_llvm_err()?.into_int_value();
+        // Guards: size!=0 && size<=4096 && size_a==size_b && tid_a==tid_b.
+        let sz_nz = builder.build_int_compare(verum_llvm::IntPredicate::NE, a_size, i64_type.const_zero(), "sz_nz").or_llvm_err()?;
+        let sz_bnd = builder.build_int_compare(verum_llvm::IntPredicate::ULE, a_size, i64_type.const_int(4096, false), "sz_bnd").or_llvm_err()?;
+        let sz_eq = builder.build_int_compare(verum_llvm::IntPredicate::EQ, a_size, b_size, "sz_eq").or_llvm_err()?;
+        let tid_eq = builder.build_int_compare(verum_llvm::IntPredicate::EQ, a_tid, b_tid, "tid_eq").or_llvm_err()?;
+        let g1 = builder.build_and(sz_nz, sz_bnd, "g1").or_llvm_err()?;
+        let g2 = builder.build_and(sz_eq, tid_eq, "g2").or_llvm_err()?;
+        let shape_ok = builder.build_and(g1, g2, "shape_ok").or_llvm_err()?;
+        // Loop counter on the stack (mem2reg lifts it).
+        let i_slot = builder.build_alloca(i64_type, "i_slot").or_llvm_err()?;
+        builder.build_store(i_slot, i64_type.const_zero()).or_llvm_err()?;
+        let n_slots = builder.build_right_shift(a_size, i64_type.const_int(3, false), false, "n_slots").or_llvm_err()?;
+        builder.build_conditional_branch(shape_ok, loop_header, ret_neq).or_llvm_err()?;
+
+        // loop_header: i >= n_slots ? all-equal : compare next slot.
+        builder.position_at_end(loop_header);
+        let i_cur = builder.build_load(i64_type, i_slot, "i_cur").or_llvm_err()?.into_int_value();
+        let done = builder.build_int_compare(verum_llvm::IntPredicate::UGE, i_cur, n_slots, "done").or_llvm_err()?;
+        builder.build_conditional_branch(done, ret_eq, loop_body).or_llvm_err()?;
+
+        // loop_body: recursively compare data slot i of both objects.
+        builder.position_at_end(loop_body);
+        let i_b = builder.build_load(i64_type, i_slot, "i_b").or_llvm_err()?.into_int_value();
+        let byte_off = builder.build_int_mul(i_b, i64_type.const_int(8, false), "byte_off").or_llvm_err()?;
+        let slot_off = builder.build_int_add(byte_off, i64_type.const_int(Self::OBJECT_HEADER_SIZE, false), "slot_off").or_llvm_err()?;
+        let a_slot_p = unsafe { builder.build_in_bounds_gep(i8_type, a_obj, &[slot_off], "a_slot_p").or_llvm_err()? };
+        let b_slot_p = unsafe { builder.build_in_bounds_gep(i8_type, b_obj, &[slot_off], "b_slot_p").or_llvm_err()? };
+        let a_slot = builder.build_load(i64_type, a_slot_p, "a_slot").or_llvm_err()?.into_int_value();
+        let b_slot = builder.build_load(i64_type, b_slot_p, "b_slot").or_llvm_err()?.into_int_value();
+        let rec = builder
+            .build_call(func, &[a_slot.into(), b_slot.into()], "rec_eq")
+            .or_llvm_err()?
+            .basic_value_or("recursive verum_generic_eq returned void")?
+            .into_int_value();
+        let rec_zero = builder.build_int_compare(verum_llvm::IntPredicate::EQ, rec, i64_type.const_zero(), "rec_zero").or_llvm_err()?;
+        let i_next = builder.build_int_add(i_b, i64_type.const_int(1, false), "i_next").or_llvm_err()?;
+        builder.build_store(i_slot, i_next).or_llvm_err()?;
+        builder.build_conditional_branch(rec_zero, ret_neq, loop_header).or_llvm_err()?;
+
+        // ret_neq: different non-text, non-structural values
         builder.position_at_end(ret_neq);
         builder
             .build_return(Some(&i64_type.const_zero()))
