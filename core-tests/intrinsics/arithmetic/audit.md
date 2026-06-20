@@ -74,35 +74,62 @@ entries to the identical `InlineSequence(Overflowing*)` strategy.  **GREEN**
 binary).  Pinned by `regression_overflowing_*` (now un-ignorable once the
 remaining `overflowing_neg/shl/shr` land — see §3.1).
 
-### 2.5 BLOCKER — INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 (task #4, OPEN, CRITICAL)
+### 2.5 BLOCKER — three distinct wrapper defects (task #4, OPEN)
 
-The `checked_neg`/`checked_abs` fix is correct at the source/codegen level but
-**cannot be validated under `--interp` via the stdlib wrapper** because the
-generic free-function intrinsic wrappers in `core/intrinsics/arithmetic.vr`
-resolve to the **precompiled-stdlib archive** (`runtime.vbca`) bodies, and those
-bodies are unreliable:
+The `@ignore`d wrappers were initially assumed to be one "stale archive" bug.
+Direct archive-body inspection (`verum_vbc` `dump_arch_fn` helper) +
+`VERUM_TRACE_CALLS` proved that hypothesis WRONG — the archive bodies are mostly
+correct.  The failures split into **three independent root causes**:
 
-* `eq/ne/lt/le/gt/ge`, `is_power_of_two` → `nil`
-* `checked_rem` → always `None`
-* `saturating_add`/`saturating_sub` (binary, Int) → `nil`
-* `checked_neg`/`checked_abs(Int.MIN)` → `Some` (width bug, not picked up by archive)
-* `mul`/`add` free-fn → WRONG value for some inputs (the triple-nested
-  `law_mul_distributes_over_add` fails) while the `*`/`+` operators are correct
+**(A) Bare-name collision — `checked_neg`, `checked_abs`.**
+Despite `mount core.intrinsics.arithmetic.{checked_neg}`, the call resolves to
+`core.math.checked.checked_neg(a: Int64) -> CheckedResult<Int64>`
+(`func_id 13693`), which returns `CheckedResult.Overflow` — **not** `Maybe.None`
+— so `is None` is false. The explicit mount does not win over a same-named
+function elsewhere in stdlib. (The intrinsics `checked_neg` archive body is in
+fact correct — `ArithExtended{CheckedNeg, [1,0,64,1]}` — i.e. the
+ARITH-CHECKEDNEG-WIDTH-1 fix *did* land; it is simply never reached.)
 
-**Controls that isolate the defect to the archive path:**
-* a direct `@intrinsic(...)` in user code → correct;
-* a fresh user-defined `fn f<T>(x: T) { @intrinsic(...) }` → correct;
-* only the archived stdlib generic wrappers are wrong.
+**(B) Lenient `LoadNil` stubs — `eq`, `is_power_of_two`, `checked_rem`.**
+Archived body is `LoadNil; Mov; Ret`. `checked_rem` and `is_power_of_two` have
+no registry entry (`lookup_intrinsic → None → LoadNil`) — fixable with registry
+entries (cf. the `overflowing_*` aliases). `eq` HAS a registry entry
+(`DirectOpcode(EqI)`) yet is still stubbed → a precompiler / `IntrinsicCodegen`
+gap for Bool-returning generic `DirectOpcode` wrappers.
 
-The archive is also **non-deterministic w.r.t. codegen version**: the committed
-binary's archive had working `eq`/`is_power_of_two` but broken
-`checked_neg(MIN)`; a forced regen (`rm -rf target/precompile-bootstrap` +
-`rm runtime.vbca*`) flips which wrappers break.  Root cause is in the
-precompile → archive → consumer-side monomorphization pipeline (suspected:
-lenient nil/panic stubbing of Bool/Maybe-returning generic wrappers, plus
-width-byte loss when re-encoding `ArithExtended` for archived generics). This is
-the single highest-leverage fix gating interp-green intrinsic coverage.  All the
-affected tests are pinned `@ignore` referencing task #4.
+**(C) Correct body, wrong runtime result — `saturating_add`/`saturating_sub`.**
+Archived body is correct (`ArithExtended{SaturatingAdd, [2,0,1,64,1]}`,
+width=64 signed=1) yet the **called** wrapper returns `nil`, while a **direct**
+`@intrinsic("saturating_add", …)` with the byte-identical instruction returns
+`Int.MAX`. `checked_add` (sub_op 0, 3 operands, no width) works; `saturating_add`
+(sub_op 48, 5 operands incl. width/signed) does not → suspect `ArithExtended`
+operand-length framing / width-byte handling when executed as a called archive
+body vs a freshly-emitted instruction.
+
+**Controls (all three):** a direct `@intrinsic(...)` works; a fresh user-defined
+`fn f<T>(x:T){@intrinsic(...)}` works; only the stdlib wrapper path fails.
+
+Each is a separate fundamental fix; all affected tests are pinned `@ignore`
+referencing task #4.
+
+### 2.6 INTRINSIC-NESTED-CALL-DISPATCH-1 (task #5, OPEN) — codegen
+
+`mul(*a, add(*b, *c))` over iterator-derefed `Int`s returns `*a + *b + *c` —
+the **outer `mul` is computed as `add`** (the inner intrinsic's identity leaks
+to the outer call). `a=b=c=-1000` → `-3000` instead of `2_000_000`; the
+non-nested `add(mul(a,b), mul(a,c))` is correct. A single-literal
+`mul(1000, add(1000,1000))` const-folds correctly, so only the runtime-
+dispatched nested-call-with-deref path is affected. Pinned `@ignore`:
+`property_test.vr::law_mul_distributes_over_add`.
+
+### Fixed this branch (additional)
+
+* **Comparison wrappers `eq/ne/lt/le/gt/ge`** — `emit_intrinsic_direct_opcode`
+  (`codegen/expressions.rs`) had no arm for the `EqI/NeI/LtI/LeI/GtI/GeI`
+  DirectOpcodes, so they fell to `_ => LoadNil` and the stdlib wrappers compiled
+  to nil-returning stubs. Added `CmpI`-emitting arms. **GREEN** (also un-blocked
+  `assert_eq`-driven property tests, e.g. `law_mul_distributes` for positive
+  operands, `law_min_max_coherent`).
 
 ## 3. Defects OPEN (ranked) — ARITH-MISSING-INTRINSICS-1
 

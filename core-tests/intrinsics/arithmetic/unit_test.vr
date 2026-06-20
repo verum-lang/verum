@@ -369,35 +369,27 @@ fn test_saturating_add_i32_clamps() {
 // Section 6: Comparison
 // =============================================================================
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_eq_true() { assert_eq(eq(5, 5), true); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_eq_false() { assert_eq(eq(5, 6), false); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_ne_true() { assert_eq(ne(5, 6), true); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_lt_true() { assert_eq(lt(3, 7), true); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_lt_false_when_equal() { assert_eq(lt(7, 7), false); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_le_when_equal() { assert_eq(le(7, 7), true); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_gt_true() { assert_eq(gt(7, 3), true); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_ge_when_equal() { assert_eq(ge(7, 7), true); }
 
