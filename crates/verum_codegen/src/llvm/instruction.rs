@@ -29202,6 +29202,40 @@ fn lower_cmp_generic<'ctx>(
     let lhs = ctx.get_register(a.0)?;
     let rhs = ctx.get_register(b.0)?;
 
+    // ============================================================
+    // task #10: VARIANT / enum / record structural equality.
+    // `Maybe`/`Result`/enum/record `==` must compare tag + payloads,
+    // not object identity. Without this, two distinct `Maybe.Some(30)`
+    // heap objects compare unequal under AOT (every `assert_eq` on a
+    // Maybe return). The CmpG operands here reach this fn before the
+    // int/pointer/fallback branches below could mis-handle them, so
+    // route an EQ on a variant-marked register straight through
+    // `verum_generic_eq` (which now does the structural compare).
+    // ============================================================
+    if eq && (ctx.is_variant_register(a.0) || ctx.is_variant_register(b.0)) {
+        let i64_type = ctx.types().i64_type();
+        let la = as_i64(ctx, lhs, "veq_a")?;
+        let lb = as_i64(ctx, rhs, "veq_b")?;
+        let fty = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let module = ctx.get_module();
+        let geq = module
+            .get_function("verum_generic_eq")
+            .unwrap_or_else(|| module.add_function("verum_generic_eq", fty, None));
+        let r = ctx
+            .builder()
+            .build_call(geq, &[la.into(), lb.into()], "veq_call")
+            .or_llvm_err()?
+            .basic_value_or("verum_generic_eq: no value")?
+            .into_int_value();
+        let res = ctx
+            .builder()
+            .build_int_compare(IntPredicate::NE, r, i64_type.const_zero(), "veq_ne")
+            .or_llvm_err()?;
+        ctx.set_register(dst.0, res.into());
+        ctx.mark_bool_register(dst.0);
+        return Ok(());
+    }
+
     // String registers now hold Text* pointers (i64 → pointer to {ptr, len, cap}).
     // Extract the char* from text->ptr (offset 0) before calling strcmp.
     let a_is_str = ctx.is_string_register(a.0) || ctx.is_text_register(a.0);
@@ -29448,8 +29482,26 @@ fn lower_cmp_generic<'ctx>(
         let zero_i32 = i32_type.const_zero();
 
         if eq {
+            // Route pointer EQUALITY through `verum_generic_eq`, which
+            // handles Text (strcmp internally) AND variant/record heap
+            // objects (structural compare via ObjectHeader.size). The
+            // bare strcmp above is only correct for Text — for a
+            // `Maybe`/enum/record it mis-reads the object as a string and
+            // reports garbage (task #10: `Maybe == Maybe` always false
+            // under AOT).
+            let _ = (cmp_int, zero_i32);
+            let geq_ty = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+            let generic_eq_fn = module
+                .get_function("verum_generic_eq")
+                .unwrap_or_else(|| module.add_function("verum_generic_eq", geq_ty, None));
+            let eqres = ctx
+                .builder()
+                .build_call(generic_eq_fn, &[lhs_i64.into(), rhs_i64.into()], "ptr_generic_eq")
+                .or_llvm_err()?
+                .basic_value_or("verum_generic_eq: no value")?
+                .into_int_value();
             ctx.builder()
-                .build_int_compare(IntPredicate::EQ, cmp_int, zero_i32, "streq")
+                .build_int_compare(IntPredicate::NE, eqres, i64_type.const_zero(), "geq_ne")
                 .or_llvm_err()?
                 .into()
         } else {
