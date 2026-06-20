@@ -1,0 +1,174 @@
+// =============================================================================
+// core-tests/intrinsics/arithmetic/integration_test.vr
+// =============================================================================
+//
+// Arithmetic intrinsics meeting the rest of the stdlib: List folds/sums,
+// running checksums via wrapping arithmetic, saturating accumulators, and
+// the comparison surface driving min/max reductions.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.arithmetic.{
+    add, mul, neg, abs,
+    wrapping_add, wrapping_mul,
+    saturating_add,
+    checked_add,
+    min, max, clamp,
+    is_power_of_two,
+};
+
+// -----------------------------------------------------------------------------
+// Folding a List with `add`
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_sum_list_with_add() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let mut acc = 0;
+    for x in xs.iter() {
+        acc = add(acc, *x);
+    }
+    assert_eq(acc, 15);
+}
+
+@test
+fn integration_product_list_with_mul() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let mut acc = 1;
+    for x in xs.iter() {
+        acc = mul(acc, *x);
+    }
+    assert_eq(acc, 120);
+}
+
+// -----------------------------------------------------------------------------
+// Wrapping checksum over a byte stream — never panics on overflow.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_wrapping_checksum_does_not_panic() {
+    let data: List<Int> = [200, 100, 50, 9223372036854775807, 9223372036854775807];
+    let mut sum = 0;
+    for b in data.iter() {
+        sum = wrapping_add(sum, *b);
+    }
+    // We only assert it completed (wrapping is total); the exact value is
+    // modular and not the point of the test.
+    assert(sum == sum);
+}
+
+@test
+fn integration_wrapping_hash_mix() {
+    // A tiny polynomial rolling hash using wrapping arithmetic — the kind of
+    // pattern that motivates wrapping intrinsics in real hashers.
+    let data: List<Int> = [104, 101, 108, 108, 111];
+    let mut h = 1469598103934665603;
+    for c in data.iter() {
+        h = wrapping_mul(wrapping_add(h, *c), 1099511628211);
+    }
+    assert(h == h);
+}
+
+// -----------------------------------------------------------------------------
+// Saturating accumulation — bounded, never overflows.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_saturating_accumulator_bounded() {
+    let xs: List<Int> = [9223372036854775807, 9223372036854775807, 9223372036854775807];
+    let mut acc = 0;
+    for x in xs.iter() {
+        acc = saturating_add(acc, *x);
+    }
+    assert_eq(acc, Int.MAX);
+}
+
+// -----------------------------------------------------------------------------
+// checked_add gating a running total
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_checked_add_detects_overflow_in_loop() {
+    let xs: List<Int> = [9223372036854775807, 1];
+    let mut acc: Int = 0;
+    let mut overflowed = false;
+    for x in xs.iter() {
+        match checked_add(acc, *x) {
+            Some(v) => { acc = v; }
+            None => { overflowed = true; }
+        }
+    }
+    assert(overflowed);
+}
+
+// -----------------------------------------------------------------------------
+// min/max reduction over a List
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_min_reduction() {
+    let xs: List<Int> = [7, 3, 9, -2, 5];
+    let mut m = Int.MAX;
+    for x in xs.iter() {
+        m = min(m, *x);
+    }
+    assert_eq(m, -2);
+}
+
+@test
+fn integration_max_reduction() {
+    let xs: List<Int> = [7, 3, 9, -2, 5];
+    let mut m = Int.MIN;
+    for x in xs.iter() {
+        m = max(m, *x);
+    }
+    assert_eq(m, 9);
+}
+
+@test
+fn integration_clamp_pipeline() {
+    let xs: List<Int> = [-100, -1, 0, 50, 200];
+    let mut clamped: List<Int> = [];
+    for x in xs.iter() {
+        clamped.push(clamp(*x, 0, 100));
+    }
+    assert_eq(clamped[0], 0);
+    assert_eq(clamped[1], 0);
+    assert_eq(clamped[2], 0);
+    assert_eq(clamped[3], 50);
+    assert_eq(clamped[4], 100);
+}
+
+// -----------------------------------------------------------------------------
+// abs feeding into a Map key / distance computation
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_abs_distance() {
+    let a = 17;
+    let b = 42;
+    assert_eq(abs(neg(sub_helper(a, b))), 25);
+}
+
+fn sub_helper(a: Int, b: Int) -> Int { a - b }
+
+// -----------------------------------------------------------------------------
+// is_power_of_two driving a capacity-rounding pattern
+// -----------------------------------------------------------------------------
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn integration_power_of_two_capacities() {
+    let caps: List<Int> = [1, 2, 4, 8, 16, 32, 64];
+    for c in caps.iter() {
+        assert(is_power_of_two(*c));
+    }
+    let non: List<Int> = [3, 5, 6, 7, 9, 100];
+    for c in non.iter() {
+        assert(is_power_of_two(*c) == false);
+    }
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

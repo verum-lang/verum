@@ -1,0 +1,209 @@
+// =============================================================================
+// core-tests/intrinsics/arithmetic/regression_test.vr
+// =============================================================================
+//
+// One @test per past / present defect in `core/intrinsics/arithmetic.vr`.
+// Tests are kept forever — once the underlying defect is fixed they become
+// re-regression guards.  Tests pinning a still-open defect carry `@ignore`
+// with a pointer into `audit.md` and the task tracker.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.arithmetic.{
+    checked_neg, checked_abs,
+    saturating_add, saturating_sub,
+    wrapping_div, wrapping_rem, wrapping_abs,
+    overflowing_add, overflowing_sub, overflowing_mul, overflowing_neg,
+    widening_mul, carrying_add, borrowing_sub,
+    checked_shl, checked_shr, checked_next_power_of_two,
+    ilog10, leading_sign_bits,
+    saturating_div,
+};
+
+// -----------------------------------------------------------------------------
+// ARITH-CHECKEDNEG-WIDTH-1 (FIXED) — checked_neg / checked_abs of i64 MIN
+//
+// The generic free-function forms of `checked_neg` / `checked_abs` use the
+// ArithExtended(CheckedNeg/CheckedAbs) strategy, whose interpreter handler
+// reads `dst, src, width:u8, signed:u8`.  Codegen's emit_intrinsic_arith_
+// extended had NO arm for CheckedNeg/CheckedAbs, so they fell through to the
+// generic `_` fallback that emitted only `[dst, src]` — the interpreter then
+// read the following instruction's bytes as `width`/`signed`, producing a
+// garbage width.  `checked_neg(Int.MIN)` returned `Some` instead of `None`.
+//
+// FIX (this branch): explicit CheckedNeg|CheckedAbs arm emitting
+// width=64, signed=1 (the generic Int default).
+// -----------------------------------------------------------------------------
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 (#4) — fix is correct at source (validated via direct @intrinsic + fresh user-defined generic wrapper, both green); blocked under --interp because the stdlib wrapper resolves to the precompiled archive body. Un-ignore once the archive/monomorph pipeline is fixed.")
+@test
+fn regression_checked_neg_i64_min_is_none() {
+    assert(checked_neg(Int.MIN) is None);
+}
+
+@test
+fn regression_checked_neg_non_min_is_some() {
+    assert(checked_neg(42) is Some(-42));
+}
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 (#4) — fix is correct at source (validated via direct @intrinsic + fresh user-defined generic wrapper, both green); blocked under --interp because the stdlib wrapper resolves to the precompiled archive body. Un-ignore once the archive/monomorph pipeline is fixed.")
+@test
+fn regression_checked_abs_i64_min_is_none() {
+    assert(checked_abs(Int.MIN) is None);
+}
+
+@test
+fn regression_checked_abs_non_min_is_some() {
+    assert(checked_abs(-42) is Some(42));
+}
+
+// -----------------------------------------------------------------------------
+// ARITH-WRAPPER-STALE-1 — generic saturating_* via the stdlib wrapper
+//
+// `saturating_add(Int.MAX, 5)` returned `nil` through the stdlib wrapper even
+// though the direct `@intrinsic("saturating_add", …)` evaluates correctly to
+// Int.MAX.  Root cause: the precompiled-stdlib archive (runtime.vbca) carried
+// stale wrapper bodies; crates/ codegen changes don't alter the blake3 of
+// core/ content so the embedded archive was not refreshed.  FIX path: force
+// archive regeneration on build.  These pin the wrapper-path correctness.
+// -----------------------------------------------------------------------------
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 (#4) — fix is correct at source (validated via direct @intrinsic + fresh user-defined generic wrapper, both green); blocked under --interp because the stdlib wrapper resolves to the precompiled archive body. Un-ignore once the archive/monomorph pipeline is fixed.")
+@test
+fn regression_saturating_add_wrapper_clamps() {
+    assert_eq(saturating_add(Int.MAX, 5), Int.MAX);
+}
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 (#4) — fix is correct at source (validated via direct @intrinsic + fresh user-defined generic wrapper, both green); blocked under --interp because the stdlib wrapper resolves to the precompiled archive body. Un-ignore once the archive/monomorph pipeline is fixed.")
+@test
+fn regression_saturating_sub_wrapper_clamps() {
+    assert_eq(saturating_sub(Int.MIN, 5), Int.MIN);
+}
+
+// -----------------------------------------------------------------------------
+// ARITH-MISSING-INTRINSICS-1 — intrinsics that resolve to nil (OPEN)
+//
+// The following arithmetic intrinsics evaluate to `nil` even via a direct
+// @intrinsic call: no registry entry / no interpreter+LLVM implementation.
+// Each pin documents the expected semantics so the fix is verifiable.
+// Pinned @ignore until the registry entries + dispatch arms land.
+// Tracked: task ARITH-MISSING-INTRINSICS-1, audit.md §3.
+// -----------------------------------------------------------------------------
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_overflowing_add_overflows() {
+    let (_r, o) = overflowing_add(Int.MAX, 1);
+    assert_eq(o, true);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_overflowing_sub_no_overflow() {
+    let (r, o) = overflowing_sub(10, 4);
+    assert_eq(r, 6);
+    assert_eq(o, false);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_overflowing_mul_overflows() {
+    let (_r, o) = overflowing_mul(Int.MAX, 2);
+    assert_eq(o, true);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_overflowing_neg_min_overflows() {
+    let (_r, o) = overflowing_neg(Int.MIN);
+    assert_eq(o, true);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_wrapping_div_basic() {
+    assert_eq(wrapping_div(7, 2), 3);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_wrapping_div_min_by_neg_one_wraps() {
+    // Documented: T.MIN / -1 wraps to T.MIN instead of panicking.
+    assert_eq(wrapping_div(Int.MIN, -1), Int.MIN);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_wrapping_rem_basic() {
+    assert_eq(wrapping_rem(7, 2), 1);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_wrapping_abs_basic() {
+    assert_eq(wrapping_abs(-5), 5);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_widening_mul_u64() {
+    // 0xFFFFFFFF * 0xFFFFFFFF = 0xFFFFFFFE00000001 (fits in one u64, hi=0).
+    let (lo, hi) = widening_mul(0xFFFFFFFF as UInt64, 0xFFFFFFFF as UInt64);
+    assert_eq(lo, 0xFFFFFFFE00000001 as UInt64);
+    assert_eq(hi, 0 as UInt64);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_carrying_add_carry_out() {
+    let (_s, c) = carrying_add(Int.MAX, 1, false);
+    assert_eq(c, true);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_borrowing_sub_borrow_out() {
+    let (_d, b) = borrowing_sub(0, 1, false);
+    assert_eq(b, true);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_checked_shl_in_range() {
+    assert(checked_shl(1 as Int, 3 as UInt32) is Some(8));
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_checked_shr_in_range() {
+    assert(checked_shr(256 as Int, 4 as UInt32) is Some(16));
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_checked_next_power_of_two() {
+    assert(checked_next_power_of_two(5) is Some(8));
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_ilog10_basic() {
+    assert_eq(ilog10(1000), 3);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_leading_sign_bits_zero() {
+    // 0 has 63 leading sign bits (all bits above the sign are 0).
+    assert_eq(leading_sign_bits(0 as Int), 63);
+}
+
+@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@test
+fn regression_saturating_div_basic() {
+    assert_eq(saturating_div(20, 5), 4);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

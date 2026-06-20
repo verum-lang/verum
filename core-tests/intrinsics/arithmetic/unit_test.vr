@@ -1,0 +1,442 @@
+// =============================================================================
+// core-tests/intrinsics/arithmetic/unit_test.vr
+// =============================================================================
+//
+// API-surface coverage for `core/intrinsics/arithmetic.vr` — the arithmetic
+// intrinsics that map directly to LLVM/CPU instructions.
+//
+// One @test per public function / behavioural axis.  Grouped by the source
+// module's own section banners.  Defects discovered while building this file
+// are pinned in `regression_test.vr` and ranked in `audit.md`.
+//
+// NOTE on widths: the *generic* `wrapping_*` / `saturating_*` / `checked_*`
+// forms are 64-bit-natural by design (VBC integer values are untyped i64 at
+// runtime — width is a static-only concept).  Narrow-width semantics are
+// covered by the dedicated `*_u8` / `*_i8` / `*_u32` … type-specific
+// intrinsics, which carry their width in the bytecode.  This file tests the
+// generic forms at `Int` (i64) width and the type-specific forms at their
+// native width.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.arithmetic.{
+    add, sub, mul, div, rem, neg, abs, abs_signed, signum,
+    checked_add, checked_sub, checked_mul, checked_div, checked_rem,
+    checked_neg, checked_abs,
+    checked_add_u64, checked_sub_u64, checked_mul_u64,
+    add_overflow, sub_overflow, mul_overflow,
+    wrapping_add, wrapping_sub, wrapping_mul, wrapping_neg,
+    wrapping_shl, wrapping_shr,
+    wrapping_add_u8, wrapping_sub_u8, wrapping_add_i8, wrapping_sub_i8,
+    wrapping_neg_i8, wrapping_add_u32, wrapping_sub_u32,
+    wrapping_shl_u32, wrapping_shr_u32,
+    saturating_add, saturating_sub, saturating_mul,
+    saturating_neg, saturating_abs,
+    saturating_add_u8, saturating_sub_u8, saturating_mul_u8,
+    saturating_add_u16, saturating_add_u32, saturating_add_i32,
+    eq, ne, lt, le, gt, ge, min, max, clamp,
+    ilog2, is_power_of_two,
+};
+
+// =============================================================================
+// Section 1: Basic arithmetic
+// =============================================================================
+
+@test
+fn test_add_basic() { assert_eq(add(2, 3), 5); }
+
+@test
+fn test_add_negative() { assert_eq(add(-7, 4), -3); }
+
+@test
+fn test_sub_basic() { assert_eq(sub(10, 4), 6); }
+
+@test
+fn test_sub_to_negative() { assert_eq(sub(4, 10), -6); }
+
+@test
+fn test_mul_basic() { assert_eq(mul(6, 7), 42); }
+
+@test
+fn test_mul_by_zero() { assert_eq(mul(99, 0), 0); }
+
+@test
+fn test_div_exact() { assert_eq(div(20, 5), 4); }
+
+@test
+fn test_div_truncates_toward_zero() { assert_eq(div(7, 2), 3); }
+
+@test
+fn test_div_negative_truncates_toward_zero() { assert_eq(div(-7, 2), -3); }
+
+@test
+fn test_rem_basic() { assert_eq(rem(20, 6), 2); }
+
+@test
+fn test_rem_sign_follows_dividend() { assert_eq(rem(-7, 3), -1); }
+
+@test
+fn test_neg_positive() { assert_eq(neg(5), -5); }
+
+@test
+fn test_neg_negative() { assert_eq(neg(-5), 5); }
+
+@test
+fn test_abs_negative() { assert_eq(abs(-9), 9); }
+
+@test
+fn test_abs_positive_is_identity() { assert_eq(abs(9), 9); }
+
+@test
+fn test_abs_signed_matches_abs() { assert_eq(abs_signed(-12), 12); }
+
+@test
+fn test_signum_negative() { assert_eq(signum(-3), -1); }
+
+@test
+fn test_signum_zero() { assert_eq(signum(0), 0); }
+
+@test
+fn test_signum_positive() { assert_eq(signum(42), 1); }
+
+// =============================================================================
+// Section 2: Checked arithmetic (returns Maybe<T>)
+// =============================================================================
+
+@test
+fn test_checked_add_ok() { assert(checked_add(2, 3) is Some(5)); }
+
+@test
+fn test_checked_add_overflow_is_none() {
+    // i64 MAX + 1 overflows.
+    assert(checked_add(Int.MAX, 1) is None);
+}
+
+@test
+fn test_checked_sub_ok() { assert(checked_sub(10, 4) is Some(6)); }
+
+@test
+fn test_checked_sub_underflow_is_none() {
+    assert(checked_sub(Int.MIN, 1) is None);
+}
+
+@test
+fn test_checked_mul_ok() { assert(checked_mul(6, 7) is Some(42)); }
+
+@test
+fn test_checked_mul_overflow_is_none() {
+    assert(checked_mul(Int.MAX, 2) is None);
+}
+
+@test
+fn test_checked_div_ok() { assert(checked_div(20, 5) is Some(4)); }
+
+@test
+fn test_checked_div_by_zero_is_none() {
+    assert(checked_div(5, 0) is None);
+}
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_checked_rem_ok() { assert(checked_rem(20, 6) is Some(2)); }
+
+@test
+fn test_checked_rem_by_zero_is_none() {
+    assert(checked_rem(7, 0) is None);
+}
+
+@test
+fn test_checked_neg_ok() { assert(checked_neg(5) is Some(-5)); }
+
+// REGRESSION (ARITH-CHECKEDNEG-WIDTH-1): checked_neg of i64 MIN must be None —
+// |Int.MIN| is unrepresentable.  Previously returned Some because the generic
+// CheckedNeg path emitted no width/signed bytes (garbage width).
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_checked_neg_min_is_none() {
+    assert(checked_neg(Int.MIN) is None);
+}
+
+@test
+fn test_checked_abs_ok() { assert(checked_abs(-5) is Some(5)); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_checked_abs_min_is_none() {
+    assert(checked_abs(Int.MIN) is None);
+}
+
+// --- UInt64-specific checked arithmetic ---
+
+@test
+fn test_checked_add_u64_ok() {
+    assert(checked_add_u64(2 as UInt64, 3 as UInt64) is Some(5));
+}
+
+@test
+fn test_checked_sub_u64_underflow_is_none() {
+    // Unsigned: 0 - 1 underflows.
+    assert(checked_sub_u64(0 as UInt64, 1 as UInt64) is None);
+}
+
+@test
+fn test_checked_mul_u64_ok() {
+    assert(checked_mul_u64(6 as UInt64, 7 as UInt64) is Some(42));
+}
+
+// =============================================================================
+// Section 3: Overflow-checked arithmetic (returns (T, Bool))
+// =============================================================================
+
+@test
+fn test_add_overflow_no_overflow() {
+    let (r, o) = add_overflow(2, 3);
+    assert_eq(r, 5);
+    assert_eq(o, false);
+}
+
+@test
+fn test_add_overflow_overflows() {
+    let (_r, o) = add_overflow(Int.MAX, 1);
+    assert_eq(o, true);
+}
+
+@test
+fn test_sub_overflow_no_overflow() {
+    let (r, o) = sub_overflow(10, 4);
+    assert_eq(r, 6);
+    assert_eq(o, false);
+}
+
+@test
+fn test_mul_overflow_no_overflow() {
+    let (r, o) = mul_overflow(6, 7);
+    assert_eq(r, 42);
+    assert_eq(o, false);
+}
+
+@test
+fn test_mul_overflow_overflows() {
+    let (_r, o) = mul_overflow(Int.MAX, 2);
+    assert_eq(o, true);
+}
+
+// =============================================================================
+// Section 4: Wrapping arithmetic (modular)
+// =============================================================================
+
+@test
+fn test_wrapping_add_no_wrap() { assert_eq(wrapping_add(2, 3), 5); }
+
+@test
+fn test_wrapping_add_wraps_at_i64_max() {
+    assert_eq(wrapping_add(Int.MAX, 1), Int.MIN);
+}
+
+@test
+fn test_wrapping_sub_wraps_at_i64_min() {
+    assert_eq(wrapping_sub(Int.MIN, 1), Int.MAX);
+}
+
+@test
+fn test_wrapping_mul_no_wrap() { assert_eq(wrapping_mul(6, 7), 42); }
+
+@test
+fn test_wrapping_neg_min_is_min() {
+    // -Int.MIN wraps back to Int.MIN.
+    assert_eq(wrapping_neg(Int.MIN), Int.MIN);
+}
+
+@test
+fn test_wrapping_shl_basic() { assert_eq(wrapping_shl(1, 4 as UInt32), 16); }
+
+@test
+fn test_wrapping_shr_basic() { assert_eq(wrapping_shr(256, 4 as UInt32), 16); }
+
+// --- Type-specific wrapping (width-aware) ---
+
+@test
+fn test_wrapping_add_u8_wraps() {
+    assert_eq(wrapping_add_u8(250 as UInt8, 10 as UInt8), 4 as UInt8);
+}
+
+@test
+fn test_wrapping_sub_u8_wraps() {
+    assert_eq(wrapping_sub_u8(2 as UInt8, 5 as UInt8), 253 as UInt8);
+}
+
+@test
+fn test_wrapping_add_i8_wraps() {
+    assert_eq(wrapping_add_i8(127 as Int8, 1 as Int8), -128 as Int8);
+}
+
+@test
+fn test_wrapping_sub_i8_wraps() {
+    assert_eq(wrapping_sub_i8(-128 as Int8, 1 as Int8), 127 as Int8);
+}
+
+@test
+fn test_wrapping_neg_i8_min_is_min() {
+    assert_eq(wrapping_neg_i8(-128 as Int8), -128 as Int8);
+}
+
+@test
+fn test_wrapping_add_u32_wraps() {
+    assert_eq(wrapping_add_u32(0xFFFFFFFF as UInt32, 1 as UInt32), 0 as UInt32);
+}
+
+@test
+fn test_wrapping_sub_u32_wraps() {
+    assert_eq(wrapping_sub_u32(0 as UInt32, 1 as UInt32), 0xFFFFFFFF as UInt32);
+}
+
+@test
+fn test_wrapping_shl_u32_truncates() {
+    // Shift that would overflow 32 bits wraps within u32.
+    assert_eq(wrapping_shl_u32(1 as UInt32, 4 as UInt32), 16 as UInt32);
+}
+
+@test
+fn test_wrapping_shr_u32_basic() {
+    assert_eq(wrapping_shr_u32(256 as UInt32, 4 as UInt32), 16 as UInt32);
+}
+
+// =============================================================================
+// Section 5: Saturating arithmetic (clamps at MIN/MAX)
+// =============================================================================
+
+@test
+fn test_saturating_add_no_clamp() { assert_eq(saturating_add(2, 3), 5); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_saturating_add_clamps_at_i64_max() {
+    assert_eq(saturating_add(Int.MAX, 5), Int.MAX);
+}
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_saturating_sub_clamps_at_i64_min() {
+    assert_eq(saturating_sub(Int.MIN, 5), Int.MIN);
+}
+
+@test
+fn test_saturating_mul_no_clamp() { assert_eq(saturating_mul(6, 7), 42); }
+
+@test
+fn test_saturating_neg_min_clamps_to_max() {
+    assert_eq(saturating_neg(Int.MIN), Int.MAX);
+}
+
+@test
+fn test_saturating_abs_min_clamps_to_max() {
+    assert_eq(saturating_abs(Int.MIN), Int.MAX);
+}
+
+// --- Type-specific saturating (width-aware) ---
+
+@test
+fn test_saturating_add_u8_clamps() {
+    assert_eq(saturating_add_u8(250 as UInt8, 10 as UInt8), 255 as UInt8);
+}
+
+@test
+fn test_saturating_sub_u8_clamps_to_zero() {
+    assert_eq(saturating_sub_u8(2 as UInt8, 5 as UInt8), 0 as UInt8);
+}
+
+@test
+fn test_saturating_mul_u8_clamps() {
+    assert_eq(saturating_mul_u8(200 as UInt8, 2 as UInt8), 255 as UInt8);
+}
+
+@test
+fn test_saturating_add_u16_clamps() {
+    assert_eq(saturating_add_u16(65530 as UInt16, 10 as UInt16), 65535 as UInt16);
+}
+
+@test
+fn test_saturating_add_u32_clamps() {
+    assert_eq(saturating_add_u32(0xFFFFFFF0 as UInt32, 0x20 as UInt32), 0xFFFFFFFF as UInt32);
+}
+
+@test
+fn test_saturating_add_i32_clamps() {
+    assert_eq(saturating_add_i32(2147483647 as Int32, 1 as Int32), 2147483647 as Int32);
+}
+
+// =============================================================================
+// Section 6: Comparison
+// =============================================================================
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_eq_true() { assert_eq(eq(5, 5), true); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_eq_false() { assert_eq(eq(5, 6), false); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_ne_true() { assert_eq(ne(5, 6), true); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_lt_true() { assert_eq(lt(3, 7), true); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_lt_false_when_equal() { assert_eq(lt(7, 7), false); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_le_when_equal() { assert_eq(le(7, 7), true); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_gt_true() { assert_eq(gt(7, 3), true); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_ge_when_equal() { assert_eq(ge(7, 7), true); }
+
+@test
+fn test_min_basic() { assert_eq(min(3, 7), 3); }
+
+@test
+fn test_min_negative() { assert_eq(min(-3, -7), -7); }
+
+@test
+fn test_max_basic() { assert_eq(max(3, 7), 7); }
+
+@test
+fn test_clamp_above_range() { assert_eq(clamp(10, 0, 5), 5); }
+
+@test
+fn test_clamp_below_range() { assert_eq(clamp(-3, 0, 5), 0); }
+
+@test
+fn test_clamp_in_range_is_identity() { assert_eq(clamp(3, 0, 5), 3); }
+
+// =============================================================================
+// Section 7: Integer utilities
+// =============================================================================
+
+@test
+fn test_ilog2_power_of_two() { assert_eq(ilog2(8), 3); }
+
+@test
+fn test_ilog2_non_power_of_two_floors() { assert_eq(ilog2(15), 3); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_is_power_of_two_true() { assert(is_power_of_two(16)); }
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn test_is_power_of_two_false() { assert(is_power_of_two(15) == false); }
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

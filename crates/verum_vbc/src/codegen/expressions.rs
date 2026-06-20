@@ -29031,6 +29031,29 @@ impl VbcCodegen {
                     self.ctx.emit(Instruction::LoadNil { dst: dest });
                 }
             }
+            // Checked unary signed (checked_neg / checked_abs) — these read
+            // `dst, src, width:u8, signed:u8` in the interpreter
+            // (`arith_extended.rs::CheckedNeg/CheckedAbs`).  Without an
+            // explicit arm they fell through to the generic `_` fallback,
+            // which emitted only `[dst, src]` and left the interpreter
+            // reading the NEXT instruction's bytes as `width`/`signed` —
+            // producing a garbage width so `checked_neg(Int.MIN)` returned
+            // `Some` instead of `None`.  Match the documented generic
+            // contract: the bodyless generic form is 64-bit signed (`Int`);
+            // narrow widths route through the type-specific intrinsics.
+            ArithSubOpcode::CheckedNeg | ArithSubOpcode::CheckedAbs => {
+                if !args.is_empty() {
+                    let mut operands = encode_regs_to_bytes(dest, &[args[0]]);
+                    operands.push(64); // width: 64-bit (generic Int default)
+                    operands.push(1); // signed: true
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
             // Saturating operations - need width/signed bytes in the encoding
             ArithSubOpcode::SaturatingAdd
             | ArithSubOpcode::SaturatingSub
