@@ -291,10 +291,19 @@ pub const fn object_field_offset(field_index: u64) -> u64 {
 // declared field order so codegen and runtime cannot disagree on layout.
 // ----------------------------------------------------------------------------
 
-/// `List<T>` field layout: `{ ptr, len, cap }`.
-pub const LIST_PTR_OFFSET: u64 = object_field_offset(0); // 24
-pub const LIST_LEN_OFFSET: u64 = object_field_offset(1); // 32
-pub const LIST_CAP_OFFSET: u64 = object_field_offset(2); // 40
+/// `List<T>` field layout: `{ len, cap, ptr }` — matches the stdlib
+/// `core/collections/list.vr` declaration (`len` slot0, `cap` slot1,
+/// `ptr` slot2) AND the Tier-0 interpreter (`*data_ptr.add(2)` for the
+/// backing pointer). The previous `{ ptr, len, cap }` ordering here was
+/// stale drift: AOT intercepts (lower_list_push/pop/grow, all via these
+/// constants) put `ptr` at slot0, but the compiled stdlib archive bodies
+/// (`List.get` = `*self.ptr.offset(i)`) read `self.ptr` at its declared
+/// slot2 → read the `cap` field as a pointer → SIGSEGV. Realigning the
+/// constants makes AOT intercepts agree with archive bodies and interp
+/// (task #11 layer 2).
+pub const LIST_LEN_OFFSET: u64 = object_field_offset(0); // 24
+pub const LIST_CAP_OFFSET: u64 = object_field_offset(1); // 32
+pub const LIST_PTR_OFFSET: u64 = object_field_offset(2); // 40
 /// Total `List<T>` object size: header + 3 fields = 48 bytes.
 pub const LIST_OBJECT_SIZE: u64 = OBJECT_HEADER_SIZE + 3 * VALUE_SLOT_SIZE;
 
@@ -610,18 +619,20 @@ mod tests {
         assert_eq!(object_field_offset(1), OBJECT_HEADER_SIZE + VALUE_SLOT_SIZE);
         assert_eq!(object_field_offset(2), OBJECT_HEADER_SIZE + 2 * VALUE_SLOT_SIZE);
 
-        // List<T> { ptr, len, cap }: declared order matches index 0/1/2.
-        assert_eq!(LIST_PTR_OFFSET, object_field_offset(0));
-        assert_eq!(LIST_LEN_OFFSET, object_field_offset(1));
-        assert_eq!(LIST_CAP_OFFSET, object_field_offset(2));
+        // List<T> { len, cap, ptr }: declared order (matches stdlib +
+        // interp). `ptr` is slot 2 (task #11 layer-2 realignment).
+        assert_eq!(LIST_LEN_OFFSET, object_field_offset(0));
+        assert_eq!(LIST_CAP_OFFSET, object_field_offset(1));
+        assert_eq!(LIST_PTR_OFFSET, object_field_offset(2));
         // Object size = header + 3 slot widths.
         assert_eq!(LIST_OBJECT_SIZE, OBJECT_HEADER_SIZE + 3 * VALUE_SLOT_SIZE);
         assert_eq!(LIST_OBJECT_SIZE, 48);
 
-        // Map<K, V> uses the same 3-slot projection.
-        assert_eq!(MAP_ENTRIES_OFFSET, LIST_PTR_OFFSET);
-        assert_eq!(MAP_LEN_OFFSET, LIST_LEN_OFFSET);
-        assert_eq!(MAP_CAP_OFFSET, LIST_CAP_OFFSET);
+        // Map<K, V> C-runtime projection { entries, len, cap } still uses
+        // the legacy slot order (lower_new_map hardcodes it) — its
+        // realignment to the declared { len, cap, entries } is tracked
+        // separately (task #11 Map sub-fix). len/cap happen to coincide
+        // with List's old slots, so only entries differs.
         assert_eq!(MAP_HEADER_SIZE, LIST_OBJECT_SIZE);
 
         // Set<T>: same 3-slot stride, different field semantics.
