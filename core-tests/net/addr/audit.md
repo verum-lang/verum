@@ -95,6 +95,110 @@ the impl-method-dispatch codegen failure documented at
 
 Effort to add language-level fix: multi-day, gated on #75.
 
+## 3.5 Cross-tier `--aot` audit — 2026-06-20 (clean run)
+
+`net/addr` was historically validated under `--interp` only; the net
+module page declared "Cross-tier `--aot` validation deferred". This
+session ran the full suite under `--aot` in a quiesced environment to
+enumerate the genuine codegen defects. **Result: 95 passed / 43 failed
+/ 138 total.** (An earlier contended run reported garbage — concurrent
+`cargo build` + `~/.verum/script-cache` wipes caused compile races and
+CPU-starvation timeouts. Always run `--aot` measurements with a quiet
+machine.)
+
+The 43 genuine AOT failures partition into **four** language-level
+codegen / type-resolution defect classes — each surfaced by this
+folder's tests, each with a minimal standalone reproducer:
+
+### §3.5.1 TUPLE-EQ-AOT — tuple `==` always returns `true` (task #4)
+
+Under AOT, `tupleA == tupleB` returns `true` even for **distinct**
+tuples (interp is correct). Minimal repro: `(127,0,0,1) == (0,0,0,0)`
+prints `true` under `verum build`, `false` under `--interp`.
+
+Codegen path: a tuple is neither float/text/primitive, so the VBC
+emits `CmpG` (generic equality, `verum_vbc .../expressions.rs:2382`);
+the LLVM `lower_cmp_generic` (`verum_codegen .../instruction.rs:29165`)
+routes to `verum_generic_eq` (`runtime.rs:4366`), which returns `1`
+only on raw pointer identity or Text-strcmp, else `0`. AOT returning
+`true` for distinct tuples ⇒ both operands resolve to the **same**
+pointer/representation (tuple literals fold to a shared address, or
+the per-element payload is dropped from the compared value — note
+field reads still work, since `is_loopback`'s `octets.0 == 127`
+**passes** AOT; only the whole-tuple compare collapses).
+
+Failures pinned: `is_unspecified` / `is_broadcast` (Ipv4) and the
+Ipv6 `is_unspecified` / `is_loopback` all use `self.octets == (..)`
+/ `self.segments == (..)`. Signature: **positive** assertions pass,
+**negated** (`!is_X`) assertions fail (because the wrong-`true` flips
+the negation). Direct hits: `test_is_not_unspecified_localhost`,
+`test_is_not_broadcast_subnet_max`, `test_ipv6_is_not_loopback_other`,
+`test_ipv6_is_not_unspecified_one`, `prop_unspecified_unique`,
+`prop_multicast_disjoint_broadcast`, both
+`integration_ip_addr_*_loopback_and_unspecified_disjoint`.
+
+### §3.5.2 DISP-EMPTY-AOT — f-string Display of user types → empty (task #3)
+
+Under AOT, `f"{x}"` where `x` is any user/stdlib type with a `Display`
+impl produces an **empty** string; primitives (`f"{42}"`) work.
+Isolated repro: a `type Tag is {n:Int}` whose `Display::fmt` is just
+`f.write_str("LITERAL")` prints `a=[]` under AOT vs `a=[LITERAL]`
+under interp. The VBC→LLVM `ToString`/InterpolatedString lowering
+does not dispatch to the user `Display::fmt` (or discards its `Text`
+result) for non-primitive operands — same family as the
+`Text.to_text` AOT zero-stub.
+
+Failures pinned: all of Section 23 (`test_*_display_*`, 10 tests).
+Renders `Ipv4Addr`/`Ipv6Addr`/`IpAddr`/`SocketAddr` as `""` under AOT.
+
+### §3.5.3 PRELUDE-FREEFN — prelude free fns unbound under AOT/run (task #2)
+
+`f"{x:?}"` lowers to the prelude free fn `format_debug(&x)`, which is
+**unbound** at type-check (`E100: unbound variable: format_debug`)
+under both AOT test compilation and standalone `verum run`. A single
+`:?` test poisons the **entire** test file's AOT compile — masking
+every other test in the file (an earlier run showed all 115 unit
+tests "failing" from one `:?`). Root cause: the precompiled metadata's
+`module_reexports["core.prelude"]` captures only the `super.base.*`
+glob (with the glob-root `core.base` as source, so even those don't
+resolve to their submodule functions); the prelude's **concrete**
+named mounts (`super.text.format.format_debug`,
+`super.io.read_to_string`, …) are not captured at all, despite
+`precompile.rs::scan_module_reexports`'s `Path`-arm that should
+capture them. The lazy type-env (`new_with_core`) therefore never
+binds the bare names. **Mitigation applied here:** the suite avoids
+`:?` (Display is tested via ToString instead) so the file's other
+AOT tests can compile — see Section 23 note. A consumer-side
+type-env registration was prototyped (`register_prelude_free_
+functions_from_metadata`) but the precompile-capture side must land
+first; reverted pending that.
+
+### §3.5.4 PARSE-AOT — Ipv4/Ipv6/SocketAddr parse diverges (task #5)
+
+`Ipv4Addr.parse` / `Ipv6Addr.parse` / `SocketAddr.parse` produce
+wrong results under AOT (interp correct) — ~23 of the 43 failures.
+The parse code leans on `Text.split`/`.slice`/`.rfind`/`.chars` +
+`List` indexing + `[0;8]` arrays + tuple destructuring; the §3.1/§3.2
+interp-era workarounds (#78/#79) do not hold under AOT, and some
+failures are downstream of TUPLE-EQ-AOT (parse builds an address,
+then a predicate compares tuples). Needs per-primitive text-codegen
+root-cause under LLVM.
+
+### Pass/fail summary (`--aot`, 2026-06-20)
+
+| Class | Count | Tier-0 | Tier-1 (AOT) |
+|---|---:|---|---|
+| Construction / field accessors | ~30 | ✓ | ✓ |
+| Scalar predicates (`is_loopback`/`is_private`/`is_multicast`) | ~20 | ✓ | ✓ |
+| `to_u32`/`from_u32` round-trip | 8 | ✓ | ✓ |
+| Tuple-eq predicates (`is_unspecified`/`is_broadcast`) | ~10 | ✓ | ✗ §3.5.1 |
+| Display rendering | 10 | ✓ | ✗ §3.5.2 |
+| Parse (v4/v6/socket) | ~23 | ✓ | ✗ §3.5.4 |
+| Debug (`:?`) | 0 (removed) | ✓ | ✗ §3.5.3 |
+
+The pure-data 95/138 that pass AOT are the construction, scalar
+predicate, accessor, `to_u32`, and `AddrParseError` Eq surface.
+
 ## 4. Action items landed in this branch
 
 * `core-tests/net/addr/unit_test.vr` — 95 unit tests covering
@@ -112,13 +216,34 @@ Effort to add language-level fix: multi-day, gated on #75.
   AddrParseError 3×3 disjointness matrix.
 * `core-tests/net/addr/audit.md` — this file.
 
+### Session 2026-06-20 — cross-tier `--aot` close-out
+
+* **Test bug fixed** — `test_ipv6_is_not_link_local_fe90` asserted
+  `0xfe90` is NOT link-local, but `fe80::/10` spans `fe80..=febf`
+  (top 10 bits `1111111010`), so `0xfe90` **is** link-local. The
+  source impl `(seg0 & 0xFFC0) == 0xFE80` is correct per RFC 4291
+  §2.5.6. Replaced with three boundary tests (`fe90` in-block,
+  `fec0` above, `fe40` below).
+* **Display coverage added** (Section 23, 10 tests) — Ipv4 dotted-
+  decimal, Ipv6 uncompressed lowercase-hex groups, IpAddr forward,
+  SocketAddrV4 `ip:port`, SocketAddrV6 bracketed `[ip]:port`.
+  Tier-0 green; pins DISP-EMPTY-AOT (§3.5.2) on Tier-1.
+* **`:?` Debug test removed** — it lowered to the prelude free fn
+  `format_debug`, unbound under AOT, poisoning the whole file's
+  Tier-1 compile (§3.5.3). Removing it recovered ~68 unit tests
+  under `--aot` (27 → 95 passing). Debug-format coverage is
+  intentionally deferred until PRELUDE-FREEFN (task #2) lands.
+* **Four AOT defect classes root-caused** with minimal reproducers
+  (tasks #2–#5) — see §3.5. Tier-0: 139/139 green. Tier-1: 95/138.
+
 ## 5. Action items deferred
 
 | Item | Scope | Estimated effort |
 |---|---|---|
+| **TUPLE-EQ-AOT** (task #4) — tuple `==` always true under AOT | `verum_codegen` (tuple Eq / value materialization) | high-value, focused codegen fix |
+| **DISP-EMPTY-AOT** (task #3) — f-string Display of user types → empty under AOT | `verum_codegen` (ToString→Display dispatch) | high-value, stdlib-wide |
+| **PRELUDE-FREEFN** (task #2) — prelude concrete free fns not captured into metadata `module_reexports`, unbound bare under AOT/run | `precompile.rs::scan_module_reexports` + `verum_types new_with_core` | medium; precompile capture + type-env registration |
+| **PARSE-AOT** (task #5) — v4/v6/socket parse text-codegen diverges under AOT | `verum_codegen` (Text split/slice/chars) | partly downstream of #4 |
 | `ToSocketAddrs` protocol coverage (host:port DNS path) | this folder | gated on DNS mock harness (vcs/specs/L2-standard/net/) |
-| Eq/Hash/Display for IpAddr / SocketAddrV4/V6 — currently
-  defined but conformance suite doesn't exercise `Map<IpAddr, _>`
-  lookup | this folder | 1h once Map dispatch class closes |
-| Display round-trip ∀a. parse(a.to_string()) == Ok(a) | this folder | 4h (relies on Display impl coverage in core/text/format/) |
+| Display round-trip ∀a. parse(a.to_string()) == Ok(a) | this folder | gated on #3 + #5 |
 | Sister coverage for `core.net.{cidr,ipv6_canonical,dns,link_header}` | sister folders | tracked as separate INVENTORY rows |
