@@ -16815,14 +16815,36 @@ impl VbcCodegen {
         // refer to a function defined in this module, the local
         // definition takes precedence so the Tier-1 per-module remap
         // still routes the call to the correct local body.
+        // **Task #47 — cross-module Call id-collision fix.** Build a
+        // SEPARATE external-only id→qualified-name map. A cross-module
+        // call's preserved precompile-global func_id can COLLIDE with a
+        // local function's contiguous archive id (the precompile remaps
+        // local calls to 0..N but leaves cross-module ids untouched —
+        // both land in the low range). When that happens, the local-first
+        // `archive_id_to_name` above maps the id to the WRONG local
+        // function and Tier-1 of `map_function` routes the cross-module
+        // call there (live failure: `Deque.reallocate`'s call to
+        // `core.base.memory.realloc`, func_id=4, dispatched to the local
+        // `AdjacencyList.add_edge` also at archive id 4 → SIGSEGV).
+        // `external_function_names` is the authoritative precompile record
+        // of "this func_id, in this module's bodies, is a cross-module
+        // call to NAME"; resolving it by its QUALIFIED name (which is
+        // unambiguous — it disambiguates same-leaf collisions too) before
+        // the Tier-1 local remap restores interpreter/AOT parity (the
+        // interpreter resolves the same id against its flat merged module
+        // and reaches `realloc`).
+        let mut archive_external_id_to_name: HashMap<u32, String> =
+            HashMap::with_capacity(archive_module.external_function_names.len());
         for (fid, sid) in archive_module.external_function_names.iter() {
-            archive_id_to_name.entry(fid.0).or_insert_with(|| {
-                archive_module
-                    .strings
-                    .get(*sid)
-                    .map(|s| s.to_string())
-                    .unwrap_or_default()
-            });
+            let nm = archive_module
+                .strings
+                .get(*sid)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if !nm.is_empty() {
+                archive_external_id_to_name.insert(fid.0, nm.clone());
+            }
+            archive_id_to_name.entry(fid.0).or_insert(nm);
         }
         if std::env::var("VERUM_TRACE_ARCHIVE_FUNCS").is_ok() && archive_module.name.contains("text") {
             eprintln!(
@@ -16858,6 +16880,7 @@ impl VbcCodegen {
             types: &type_id_remap,
             consts: &const_id_remap,
             archive_id_to_name: &archive_id_to_name,
+            archive_external_id_to_name: &archive_external_id_to_name,
             ctx_func_by_name: &ctx_func_by_name,
             archive_func_by_name: &archive_func_by_name_snapshot,
         };
@@ -17392,6 +17415,14 @@ struct ArchiveBodyRemap<'a> {
     /// archive module's `functions` table. Used by `map_function`'s
     /// name-based fallback when the per-module remap misses.
     archive_id_to_name: &'a std::collections::HashMap<u32, String>,
+    /// **Task #47** — external-ONLY id→qualified-name map (built from
+    /// `archive_module.external_function_names`, no local-function
+    /// entries). Consulted by `map_function` BEFORE the Tier-1 local
+    /// remap so a cross-module Call whose preserved func_id collides
+    /// with a local function's archive id resolves to the real
+    /// (cross-module) target by qualified name instead of the colliding
+    /// local body.
+    archive_external_id_to_name: &'a std::collections::HashMap<u32, String>,
     /// User-codegen `ctx.functions` projected to name → FunctionId.
     /// Used by `map_function` to recover a cross-module Call target
     /// when the archive id isn't covered by the per-module remap.
@@ -17431,6 +17462,51 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
             let s3 = id <= STAGE3_STUB_BASE && id >= STAGE3_STUB_BASE - STUB_RANGE_WIDTH;
             s1 || s2 || s3
         };
+        // **Tier 0 (task #47) — cross-module Call by qualified name.**
+        // `external_function_names` is the precompile's authoritative
+        // record that `src`, in THIS module's bodies, is a cross-module
+        // call to a specific qualified name. Its preserved func_id can
+        // COLLIDE with a local function's contiguous archive id (the
+        // precompile remaps local calls to 0..N but leaves cross-module
+        // ids in the same low range) — so the Tier-1 per-module remap
+        // below would route it to the WRONG local body (live failure:
+        // `Deque.reallocate`'s `realloc` call, func_id=4, dispatched to
+        // the local `AdjacencyList.add_edge` also at archive id 4). The
+        // qualified name is unambiguous (it disambiguates same-leaf
+        // collisions across modules too), so resolving it here first
+        // restores interpreter/AOT parity. Only genuine cross-module ids
+        // land in `archive_external_id_to_name` (the precompile's
+        // collection gate skips in-module ids), so this never shadows a
+        // legitimate local call. A name that doesn't resolve user-side
+        // falls through to the existing tiers rather than guessing.
+        // `external_function_names` is the precompile's authoritative
+        // record of the cross-module callee for `src` (qualified when the
+        // callee was registered qualified, bare when it was registered
+        // under its simple name — e.g. the raw-pointer `is_null` free fn
+        // that `Deque.reallocate` / `List.resize_buffer` call). Resolving
+        // that recorded name — whether qualified or bare — ahead of the
+        // colliding Tier-1 local id is correct by construction: the
+        // precompile only records ids it determined were cross-module
+        // (its collection gate skips in-module ids), so this never
+        // shadows a legitimate local call.
+        if let Some(name) = self.archive_external_id_to_name.get(&src.0) {
+            if let Some(&fid) = self.ctx_func_by_name.get(name) {
+                if !is_stub_id(fid.0) {
+                    if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                        eprintln!("[remap-fallback] tier0-xmod OK src={} → name={:?} → user_fid={} (ctx)", src.0, name, fid.0);
+                    }
+                    return fid;
+                }
+            }
+            if let Some(&fid) = self.archive_func_by_name.get(name) {
+                if !is_stub_id(fid.0) {
+                    if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                        eprintln!("[remap-fallback] tier0-xmod OK src={} → name={:?} → user_fid={} (archive-wide)", src.0, name, fid.0);
+                    }
+                    return fid;
+                }
+            }
+        }
         // Tier 1: per-module remap (archive function ids whose body
         // lives in *this* archive module).
         if let Some(&fid) = self.funcs.get(&src.0) {
