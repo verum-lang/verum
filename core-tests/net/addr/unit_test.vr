@@ -412,9 +412,23 @@ fn test_ipv6_is_link_local_fe80() {
     assert(Ipv6Addr.new(0xfe80, 0, 0, 0, 0, 0, 0, 1).is_link_local());
 }
 
+// RFC 4291 §2.5.6: link-local is fe80::/10, i.e. top 10 bits == 1111111010.
+// That block spans fe80..=febf, so 0xfe90 (within the block) IS link-local.
 @test
-fn test_ipv6_is_not_link_local_fe90() {
-    assert(!Ipv6Addr.new(0xfe90, 0, 0, 0, 0, 0, 0, 1).is_link_local());
+fn test_ipv6_is_link_local_fe90_in_block() {
+    assert(Ipv6Addr.new(0xfe90, 0, 0, 0, 0, 0, 0, 1).is_link_local());
+}
+
+// 0xfec0 starts the next /10 block (top 10 bits 1111111011) -> NOT link-local.
+@test
+fn test_ipv6_is_not_link_local_fec0_above_block() {
+    assert(!Ipv6Addr.new(0xfec0, 0, 0, 0, 0, 0, 0, 1).is_link_local());
+}
+
+// 0xfe40 sits below the block (top 10 bits 1111111001) -> NOT link-local.
+@test
+fn test_ipv6_is_not_link_local_fe40_below_block() {
+    assert(!Ipv6Addr.new(0xfe40, 0, 0, 0, 0, 0, 0, 1).is_link_local());
 }
 
 @test
@@ -787,4 +801,72 @@ fn test_addr_parse_error_disjoint_format_vs_port() {
 @test
 fn test_addr_parse_error_disjoint_octet_vs_port() {
     assert(!(AddrParseError.InvalidOctet == AddrParseError.InvalidPort));
+}
+
+// =============================================================================
+// Section 23: Display / Debug — text rendering of every address type
+// =============================================================================
+// Ipv4Addr Display/Debug render dotted-decimal (`a.b.c.d`); Ipv6Addr
+// renders the eight 16-bit groups in lowercase hex separated by `:`
+// (NOT RFC 5952 `::`-compressed — that canonical form lives in
+// `core.net.ipv6_canonical`). IpAddr forwards to the active variant.
+// SocketAddrV4/V6 append `:port`. Display == Debug for all of these
+// (the Display impl delegates to fmt_debug).
+
+@test
+fn test_ipv4_display_dotted_decimal() {
+    assert_eq(f"{Ipv4Addr.new(127, 0, 0, 1)}", "127.0.0.1");
+}
+
+@test
+fn test_ipv4_display_max_octets() {
+    assert_eq(f"{Ipv4Addr.new(255, 255, 255, 255)}", "255.255.255.255");
+}
+
+@test
+fn test_ipv4_display_unspecified() {
+    assert_eq(f"{Ipv4Addr.unspecified()}", "0.0.0.0");
+}
+
+@test
+fn test_ipv4_debug_matches_display() {
+    assert_eq(f"{Ipv4Addr.new(10, 0, 0, 5):?}", "10.0.0.5");
+}
+
+@test
+fn test_ipv6_display_localhost_uncompressed() {
+    assert_eq(f"{Ipv6Addr.localhost()}", "0:0:0:0:0:0:0:1");
+}
+
+@test
+fn test_ipv6_display_unspecified_uncompressed() {
+    assert_eq(f"{Ipv6Addr.unspecified()}", "0:0:0:0:0:0:0:0");
+}
+
+@test
+fn test_ipv6_display_hex_lowercase() {
+    assert_eq(f"{Ipv6Addr.new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)}",
+              "2001:db8:0:0:0:0:0:1");
+}
+
+@test
+fn test_ip_addr_v4_display_forwards() {
+    assert_eq(f"{IpAddr.v4(192, 168, 1, 1)}", "192.168.1.1");
+}
+
+@test
+fn test_ip_addr_v6_display_forwards() {
+    assert_eq(f"{IpAddr.v6(0, 0, 0, 0, 0, 0, 0, 1)}", "0:0:0:0:0:0:0:1");
+}
+
+@test
+fn test_socket_addr_v4_display_ip_port() {
+    let sa = SocketAddrV4.new(Ipv4Addr.new(192, 168, 1, 1), 8080);
+    assert_eq(f"{sa}", "192.168.1.1:8080");
+}
+
+@test
+fn test_socket_addr_v6_display_ip_port() {
+    let sa = SocketAddrV6.new(Ipv6Addr.localhost(), 443, 0, 0);
+    assert_eq(f"{sa}", "[0:0:0:0:0:0:0:1]:443");
 }
