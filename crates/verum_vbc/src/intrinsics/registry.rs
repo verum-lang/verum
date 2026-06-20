@@ -3146,6 +3146,58 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         mlir_op: Some("llvm.intr.smul.with.overflow"),
         doc: "Multiply with overflow check, returns (result, overflow_flag)",
     },
+    // --- `overflowing_*` aliases ---------------------------------------------
+    // `core/intrinsics/arithmetic.vr` documents `overflowing_add` et al. as
+    // returning the same `(result, overflow_flag)` tuple as `add_overflow`.
+    // They previously had no registry entry, so `lookup_intrinsic` returned
+    // None and `compile_intrinsic_call` emitted `LoadNil` (→ `nil` result).
+    // Wire them to the identical InlineSequence strategy. (ARITH-MISSING-
+    // INTRINSICS-1 §3.1)
+    Intrinsic {
+        name: "overflowing_add",
+        category: IntrinsicCategory::Overflow,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+            IntrinsicHint::MultiReturn,
+        ],
+        param_count: 2,
+        return_count: 2,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::OverflowingAdd),
+        mlir_op: Some("llvm.intr.sadd.with.overflow"),
+        doc: "Add returning (result, overflow_flag) — alias for add_overflow",
+    },
+    Intrinsic {
+        name: "overflowing_sub",
+        category: IntrinsicCategory::Overflow,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+            IntrinsicHint::MultiReturn,
+        ],
+        param_count: 2,
+        return_count: 2,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::OverflowingSub),
+        mlir_op: Some("llvm.intr.ssub.with.overflow"),
+        doc: "Subtract returning (result, overflow_flag) — alias for sub_overflow",
+    },
+    Intrinsic {
+        name: "overflowing_mul",
+        category: IntrinsicCategory::Overflow,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+            IntrinsicHint::MultiReturn,
+        ],
+        param_count: 2,
+        return_count: 2,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::OverflowingMul),
+        mlir_op: Some("llvm.intr.smul.with.overflow"),
+        doc: "Multiply returning (result, overflow_flag) — alias for mul_overflow",
+    },
     // =========================================================================
     // Saturating Arithmetic
     // =========================================================================

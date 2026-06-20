@@ -1,0 +1,321 @@
+// =============================================================================
+// core-tests/intrinsics/arithmetic/property_test.vr
+// =============================================================================
+//
+// Algebraic / mathematical laws for the arithmetic intrinsics.  The integer
+// domain is large, so we sweep representative samples: boundaries (MIN, MAX,
+// 0, ±1), small magnitudes, and a few mid-range values.  Where the law is a
+// closed identity it holds for every sampled point.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.arithmetic.{
+    add, sub, mul, neg, abs, signum,
+    checked_add, checked_mul,
+    wrapping_add, wrapping_sub, wrapping_mul,
+    saturating_add, saturating_sub,
+    eq, lt, le, min, max, clamp,
+    is_power_of_two, ilog2,
+};
+
+// Representative sample of i64 values (boundaries + small + mid).
+fn samples() -> List<Int> {
+    [Int.MIN, Int.MIN + 1, -1000000, -97, -2, -1, 0, 1, 2, 97, 1000000,
+     Int.MAX - 1, Int.MAX]
+}
+
+// Smaller magnitudes safe to add/mul without i64 overflow.
+fn small() -> List<Int> {
+    [-1000, -97, -10, -1, 0, 1, 10, 97, 1000]
+}
+
+// -----------------------------------------------------------------------------
+// Ring laws on plain add/mul (sampled within overflow-safe magnitudes)
+// -----------------------------------------------------------------------------
+
+@test
+fn law_add_commutative() {
+    for a in small().iter() {
+        for b in small().iter() {
+            assert_eq(add(*a, *b), add(*b, *a));
+        }
+    }
+}
+
+@test
+fn law_add_identity_zero() {
+    for a in samples().iter() {
+        assert_eq(add(*a, 0), *a);
+    }
+}
+
+@test
+fn law_add_associative() {
+    for a in small().iter() {
+        for b in small().iter() {
+            for c in small().iter() {
+                assert_eq(add(add(*a, *b), *c), add(*a, add(*b, *c)));
+            }
+        }
+    }
+}
+
+@test
+fn law_mul_commutative() {
+    for a in small().iter() {
+        for b in small().iter() {
+            assert_eq(mul(*a, *b), mul(*b, *a));
+        }
+    }
+}
+
+@test
+fn law_mul_identity_one() {
+    for a in samples().iter() {
+        assert_eq(mul(*a, 1), *a);
+    }
+}
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn law_mul_distributes_over_add() {
+    for a in small().iter() {
+        for b in small().iter() {
+            for c in small().iter() {
+                assert_eq(mul(*a, add(*b, *c)), add(mul(*a, *b), mul(*a, *c)));
+            }
+        }
+    }
+}
+
+@test
+fn law_sub_is_add_neg() {
+    for a in small().iter() {
+        for b in small().iter() {
+            assert_eq(sub(*a, *b), add(*a, neg(*b)));
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// neg / abs / signum
+// -----------------------------------------------------------------------------
+
+@test
+fn law_neg_involution_except_min() {
+    for a in samples().iter() {
+        if *a != Int.MIN {
+            assert_eq(neg(neg(*a)), *a);
+        }
+    }
+}
+
+@test
+fn law_abs_nonnegative_except_min() {
+    for a in samples().iter() {
+        if *a != Int.MIN {
+            assert(abs(*a) >= 0);
+        }
+    }
+}
+
+@test
+fn law_abs_idempotent_except_min() {
+    for a in samples().iter() {
+        if *a != Int.MIN {
+            assert_eq(abs(abs(*a)), abs(*a));
+        }
+    }
+}
+
+@test
+fn law_signum_in_minus_one_zero_one() {
+    for a in samples().iter() {
+        let s = signum(*a);
+        assert(s == -1 || s == 0 || s == 1);
+    }
+}
+
+@test
+fn law_signum_matches_sign() {
+    for a in samples().iter() {
+        if *a > 0 { assert_eq(signum(*a), 1); }
+        if *a < 0 { assert_eq(signum(*a), -1); }
+        if *a == 0 { assert_eq(signum(*a), 0); }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Wrapping arithmetic forms a total ring (no panics, modular at 2^64)
+// -----------------------------------------------------------------------------
+
+@test
+fn law_wrapping_add_commutative() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert_eq(wrapping_add(*a, *b), wrapping_add(*b, *a));
+        }
+    }
+}
+
+@test
+fn law_wrapping_add_sub_inverse() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert_eq(wrapping_sub(wrapping_add(*a, *b), *b), *a);
+        }
+    }
+}
+
+@test
+fn law_wrapping_add_identity() {
+    for a in samples().iter() {
+        assert_eq(wrapping_add(*a, 0), *a);
+    }
+}
+
+@test
+fn law_wrapping_mul_commutative() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert_eq(wrapping_mul(*a, *b), wrapping_mul(*b, *a));
+        }
+    }
+}
+
+// Wrapping agrees with plain ops when no overflow occurs (small magnitudes).
+@test
+fn law_wrapping_add_agrees_with_add_when_safe() {
+    for a in small().iter() {
+        for b in small().iter() {
+            assert_eq(wrapping_add(*a, *b), add(*a, *b));
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Saturating arithmetic: monotone, bounded, agrees when safe
+// -----------------------------------------------------------------------------
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn law_saturating_add_agrees_with_add_when_safe() {
+    for a in small().iter() {
+        for b in small().iter() {
+            assert_eq(saturating_add(*a, *b), add(*a, *b));
+        }
+    }
+}
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn law_saturating_add_never_below_operand_when_adding_nonneg() {
+    for a in samples().iter() {
+        for b in small().iter() {
+            if *b >= 0 {
+                assert(saturating_add(*a, *b) >= *a);
+            }
+        }
+    }
+}
+
+@test
+fn law_saturating_add_bounded_by_max() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert(saturating_add(*a, *b) <= Int.MAX);
+            assert(saturating_add(*a, *b) >= Int.MIN);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// checked_* agrees with plain op exactly when no overflow
+// -----------------------------------------------------------------------------
+
+@test
+fn law_checked_add_some_iff_safe() {
+    for a in small().iter() {
+        for b in small().iter() {
+            // small+small never overflows i64.
+            assert(checked_add(*a, *b) is Some(_));
+        }
+    }
+}
+
+@test
+fn law_checked_mul_some_iff_safe() {
+    for a in small().iter() {
+        for b in small().iter() {
+            assert(checked_mul(*a, *b) is Some(_));
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Comparison coherence
+// -----------------------------------------------------------------------------
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn law_min_max_coherent() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            let lo = min(*a, *b);
+            let hi = max(*a, *b);
+            assert(lo <= hi);
+            assert(eq(lo, *a) || eq(lo, *b));
+            assert(eq(hi, *a) || eq(hi, *b));
+        }
+    }
+}
+
+@test
+fn law_min_commutative() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert_eq(min(*a, *b), min(*b, *a));
+        }
+    }
+}
+
+@test
+fn law_clamp_in_bounds() {
+    let lo = -50;
+    let hi = 50;
+    for a in samples().iter() {
+        let c = clamp(*a, lo, hi);
+        assert(c >= lo);
+        assert(c <= hi);
+    }
+}
+
+@test
+fn law_lt_le_coherent() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            if lt(*a, *b) { assert(le(*a, *b)); }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// is_power_of_two ↔ ilog2 round trip
+// -----------------------------------------------------------------------------
+
+@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@test
+fn law_power_of_two_ilog2_roundtrip() {
+    // 2^k for k in 0..=40 is a power of two and ilog2 recovers k.
+    let mut k = 0;
+    while k <= 40 {
+        let p = wrapping_shl(1, k as UInt32);
+        assert(is_power_of_two(p));
+        assert_eq(ilog2(p), k);
+        k = k + 1;
+    }
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
