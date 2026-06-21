@@ -393,6 +393,17 @@ pub struct CodegenContext {
     /// This enables the context system to work correctly: functions that require
     /// contexts can access them via method calls on the context type name.
     pub required_contexts: HashSet<String>,
+
+    /// Simple names brought into scope by an EXPLICIT `mount X.Y.{name}` /
+    /// `mount X.Y.fn as alias` (every site that calls
+    /// `register_function_authoritative`).  Used by bare-name call
+    /// resolution to prefer the user's explicitly-mounted target over an
+    /// unmounted same-simple-name function from another module that an
+    /// arg-type overload match would otherwise select (INTRINSIC-MOUNT-
+    /// COLLISION: `mount core.intrinsics.arithmetic.{saturating_add}` was
+    /// losing to `core.math.checked.saturating_add(Int64,Int64)` when the
+    /// argument was a typed `Int`).
+    pub explicit_mount_names: HashSet<String>,
     /// Context alias map: alias → context type name (e.g., "db" → "Database").
     /// Populated from `using [db: Database]` or `using [Database as db]`.
     pub context_aliases: HashMap<String, String>,
@@ -1139,6 +1150,7 @@ impl CodegenContext {
             typed_array_vars: HashMap::new(),
             try_recover_depth: 0,
             required_contexts: HashSet::new(),
+            explicit_mount_names: HashSet::new(),
             context_aliases: HashMap::new(),
             active_pattern_cache: HashMap::new(),
             thread_local_vars: HashMap::new(),
@@ -1157,6 +1169,7 @@ impl CodegenContext {
             typed_array_vars: HashMap::new(),
             byte_array_vars: HashSet::new(),
             required_contexts: HashSet::new(),
+            explicit_mount_names: HashSet::new(),
             context_aliases: HashMap::new(),
             active_pattern_cache: HashMap::new(),
             thread_local_vars: HashMap::new(),
@@ -2179,6 +2192,10 @@ impl CodegenContext {
         // (the only key the arity-aware lookup probes).
         let alt_key = format!("{}#{}", name, info.param_count);
         self.functions.insert(alt_key, info.clone());
+        // Record that this simple name was explicitly mounted, so bare-name
+        // call resolution can prefer this user-chosen target over an
+        // unmounted same-name function selected by arg-type overload.
+        self.explicit_mount_names.insert(name.clone());
         self.functions.insert(name, info)
     }
 

@@ -35,7 +35,6 @@ mount core.intrinsics.arithmetic.{
 // width=64, signed=1 (the generic Int default).
 // -----------------------------------------------------------------------------
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 (#4) — fix is correct at source (validated via direct @intrinsic + fresh user-defined generic wrapper, both green); blocked under --interp because the stdlib wrapper resolves to the precompiled archive body. Un-ignore once the archive/monomorph pipeline is fixed.")
 @test
 fn regression_checked_neg_i64_min_is_none() {
     assert(checked_neg(Int.MIN) is None);
@@ -46,7 +45,6 @@ fn regression_checked_neg_non_min_is_some() {
     assert(checked_neg(42) is Some(-42));
 }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 (#4) — fix is correct at source (validated via direct @intrinsic + fresh user-defined generic wrapper, both green); blocked under --interp because the stdlib wrapper resolves to the precompiled archive body. Un-ignore once the archive/monomorph pipeline is fixed.")
 @test
 fn regression_checked_abs_i64_min_is_none() {
     assert(checked_abs(Int.MIN) is None);
@@ -68,13 +66,11 @@ fn regression_checked_abs_non_min_is_some() {
 // archive regeneration on build.  These pin the wrapper-path correctness.
 // -----------------------------------------------------------------------------
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 (#4) — fix is correct at source (validated via direct @intrinsic + fresh user-defined generic wrapper, both green); blocked under --interp because the stdlib wrapper resolves to the precompiled archive body. Un-ignore once the archive/monomorph pipeline is fixed.")
 @test
 fn regression_saturating_add_wrapper_clamps() {
     assert_eq(saturating_add(Int.MAX, 5), Int.MAX);
 }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 (#4) — fix is correct at source (validated via direct @intrinsic + fresh user-defined generic wrapper, both green); blocked under --interp because the stdlib wrapper resolves to the precompiled archive body. Un-ignore once the archive/monomorph pipeline is fixed.")
 @test
 fn regression_saturating_sub_wrapper_clamps() {
     assert_eq(saturating_sub(Int.MIN, 5), Int.MIN);
