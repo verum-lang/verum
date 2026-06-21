@@ -74,7 +74,27 @@ entries to the identical `InlineSequence(Overflowing*)` strategy.  **GREEN**
 binary).  Pinned by `regression_overflowing_*` (now un-ignorable once the
 remaining `overflowing_neg/shl/shr` land — see §3.1).
 
-### 2.5 BLOCKER — three distinct wrapper defects (task #4, OPEN)
+### 2.5 — wrapper defects: (A)+(C) FIXED, (B) open (task #4 / #3)
+
+**UPDATE (2026-06-21): defects (A) and (C) below are CLOSED.** Direct
+`VERUM_TRACE_PC` proved they were the *same* bug — a bare-name collision with
+`core.math.checked` — not "operand framing"/"stale archive". `core/math/checked.vr`
+exports a large bare-name surface (`checked_*`, `saturating_*`, `wrapping_*`,
+`widening_mul`) that collides with `core/intrinsics/arithmetic.vr`. Resolution
+ranked candidates by argument type, so a typed `Int` arg (e.g. `Int.MAX`) made
+the unmounted concrete `core.math.checked.saturating_add(Int64,Int64)` win over
+the mounted generic intrinsics fn — **despite the explicit mount**.
+
+**FIX (commit 051a0e74d):** `CodegenContext.explicit_mount_names` +
+`type_aware_lookup` mount-preference — an explicit `mount X.{name}` now owns the
+bare slot, beating arg-type overload. Plus `SaturatingNeg`/`SaturatingAbs` width
+arm in `emit_intrinsic_arith_extended` (the mount fix exposed they were
+`LoadNil`-masked by the collision). `checked_neg/abs(Int.MIN)→None` and
+`saturating_add/sub/neg/abs` clamp correctly. Un-ignored.
+
+Remaining open below: only **(B)** and **(D)**.
+
+#### Historical breakdown (for reference)
 
 The `@ignore`d wrappers were initially assumed to be one "stale archive" bug.
 Direct archive-body inspection (`verum_vbc` `dump_arch_fn` helper) +
