@@ -115,26 +115,22 @@ fn regression_overflowing_neg_min_overflows() {
     assert_eq(o, true);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
 @test
 fn regression_wrapping_div_basic() {
     assert_eq(wrapping_div(7, 2), 3);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
 @test
 fn regression_wrapping_div_min_by_neg_one_wraps() {
     // Documented: T.MIN / -1 wraps to T.MIN instead of panicking.
     assert_eq(wrapping_div(Int.MIN, -1), Int.MIN);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
 @test
 fn regression_wrapping_rem_basic() {
     assert_eq(wrapping_rem(7, 2), 1);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
 @test
 fn regression_wrapping_abs_basic() {
     assert_eq(wrapping_abs(-5), 5);
