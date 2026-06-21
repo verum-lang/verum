@@ -151,7 +151,6 @@ fn test_checked_neg_ok() { assert(checked_neg(5) is Some(-5)); }
 // REGRESSION (ARITH-CHECKEDNEG-WIDTH-1): checked_neg of i64 MIN must be None —
 // |Int.MIN| is unrepresentable.  Previously returned Some because the generic
 // CheckedNeg path emitted no width/signed bytes (garbage width).
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_checked_neg_min_is_none() {
     assert(checked_neg(Int.MIN) is None);
@@ -160,7 +159,6 @@ fn test_checked_neg_min_is_none() {
 @test
 fn test_checked_abs_ok() { assert(checked_abs(-5) is Some(5)); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_checked_abs_min_is_none() {
     assert(checked_abs(Int.MIN) is None);
@@ -308,13 +306,11 @@ fn test_wrapping_shr_u32_basic() {
 @test
 fn test_saturating_add_no_clamp() { assert_eq(saturating_add(2, 3), 5); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_saturating_add_clamps_at_i64_max() {
     assert_eq(saturating_add(Int.MAX, 5), Int.MAX);
 }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn test_saturating_sub_clamps_at_i64_min() {
     assert_eq(saturating_sub(Int.MIN, 5), Int.MIN);

@@ -4721,7 +4721,32 @@ impl VbcCodegen {
                         .map(|info| (k.clone(), info.clone()))
                 })
                 .collect();
-            if arity_matches.len() <= 1 {
+            // **Explicit-mount preference** (INTRINSIC-MOUNT-COLLISION).
+            // If the user explicitly `mount`ed this simple name, their chosen
+            // target owns the bare slot (`register_function_authoritative`).
+            // Honour it over arg-type overload ranking — otherwise an
+            // UNMOUNTED same-simple-name fn with a concrete-typed signature
+            // (e.g. `core.math.checked.saturating_add(Int64, Int64)`) wins
+            // over the mounted generic `core.intrinsics.arithmetic.
+            // saturating_add<T>` whenever an argument is a typed `Int`,
+            // dispatching the wrong body. Strictly gated on
+            // `explicit_mount_names`, so non-mounted resolution is unchanged.
+            let mount_preferred: Option<(String, FunctionInfo)> =
+                if self.ctx.explicit_mount_names.contains(&func_name) {
+                    self.ctx
+                        .functions
+                        .get(&func_name)
+                        .filter(|b| b.param_names.first().is_none_or(|n| n != "self"))
+                        .and_then(|b| {
+                            arity_matches.iter().find(|(_, i)| i.id == b.id)
+                        })
+                        .map(|(k, i)| (k.clone(), i.clone()))
+                } else {
+                    None
+                };
+            if mount_preferred.is_some() {
+                mount_preferred
+            } else if arity_matches.len() <= 1 {
                 None // 0 → no help; 1 → bare lookup gives the same answer
             } else {
                 // Multiple candidates — try to pick by argument type.
@@ -29204,7 +29229,10 @@ impl VbcCodegen {
             // `Some` instead of `None`.  Match the documented generic
             // contract: the bodyless generic form is 64-bit signed (`Int`);
             // narrow widths route through the type-specific intrinsics.
-            ArithSubOpcode::CheckedNeg | ArithSubOpcode::CheckedAbs => {
+            ArithSubOpcode::CheckedNeg
+            | ArithSubOpcode::CheckedAbs
+            | ArithSubOpcode::SaturatingNeg
+            | ArithSubOpcode::SaturatingAbs => {
                 if !args.is_empty() {
                     let mut operands = encode_regs_to_bytes(dest, &[args[0]]);
                     operands.push(64); // width: 64-bit (generic Int default)

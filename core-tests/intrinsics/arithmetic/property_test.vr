@@ -197,7 +197,6 @@ fn law_wrapping_add_agrees_with_add_when_safe() {
 // Saturating arithmetic: monotone, bounded, agrees when safe
 // -----------------------------------------------------------------------------
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn law_saturating_add_agrees_with_add_when_safe() {
     for a in small().iter() {
@@ -207,7 +206,6 @@ fn law_saturating_add_agrees_with_add_when_safe() {
     }
 }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
 @test
 fn law_saturating_add_never_below_operand_when_adding_nonneg() {
     for a in samples().iter() {
