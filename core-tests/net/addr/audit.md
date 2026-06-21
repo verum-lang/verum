@@ -171,13 +171,30 @@ Under AOT, `f"{x}"` where `x` is any user/stdlib type with a `Display`
 impl produces an **empty** string; primitives (`f"{42}"`) work.
 Isolated repro: a `type Tag is {n:Int}` whose `Display::fmt` is just
 `f.write_str("LITERAL")` prints `a=[]` under AOT vs `a=[LITERAL]`
-under interp. The VBC→LLVM `ToString`/InterpolatedString lowering
-does not dispatch to the user `Display::fmt` (or discards its `Text`
-result) for non-primitive operands — same family as the
-`Text.to_text` AOT zero-stub.
+under interp.
+
+**Refined root cause (2026-06-21).** The f-string Display *dispatch*
+is CORRECT — `try_emit_display_dispatch` fires for the user type
+(trace `EMITTING for 'Tag', Formatter.new id=…`) and inlines
+`buf := Text.new(); fmt := Formatter{buffer:&mut buf};
+Type.fmt(x,&mut fmt); result := buf`. The empty result is the
+`Type.fmt` body's `f.write_str(...)` failing to persist into `buf`
+under AOT — the **same defect** as the `&mut Text` mutation crash:
+`fn append(t:&mut Text){ t.push_str("XYZ") }` SIGSEGVs under AOT
+(`exit 139`, `_platform_memmove` writing to address `0x0`), because
+`Text.new()` yields a null buffer and `push_str`'s grow→reallocate
+sets `self.ptr` but the writeback **through `&mut self` does not
+persist on AOT**, so the next write dereferences a stale NULL ptr.
+This is the documented **"AOT collection/Text mutation-body
+reallocation-writeback null-deref"** class (cf. `Deque.push_back →
+grow → reallocate sets self.data, then ptr_write reads NULL 0x0`).
+Repro: `/tmp/disp_min.vr` (empty), `/tmp/mutbuf.vr` (SIGSEGV).
 
 Failures pinned: all of Section 23 (`test_*_display_*`, 10 tests).
 Renders `Ipv4Addr`/`Ipv6Addr`/`IpAddr`/`SocketAddr` as `""` under AOT.
+**Shares its root with §3.5.4 PARSE-AOT** — both need the deep
+CBGR/codegen fix that persists a reallocated `self.ptr` through
+`&mut self` in AOT mutation bodies (multi-day, stdlib-wide).
 
 ### §3.5.3 PRELUDE-FREEFN — prelude free fns unbound under AOT/run (task #2)
 
@@ -203,14 +220,18 @@ first; reverted pending that.
 
 ### §3.5.4 PARSE-AOT — Ipv4/Ipv6/SocketAddr parse diverges (task #5)
 
-`Ipv4Addr.parse` / `Ipv6Addr.parse` / `SocketAddr.parse` produce
-wrong results under AOT (interp correct) — ~23 of the 43 failures.
-The parse code leans on `Text.split`/`.slice`/`.rfind`/`.chars` +
-`List` indexing + `[0;8]` arrays + tuple destructuring; the §3.1/§3.2
-interp-era workarounds (#78/#79) do not hold under AOT, and some
-failures are downstream of TUPLE-EQ-AOT (parse builds an address,
-then a predicate compares tuples). Needs per-primitive text-codegen
-root-cause under LLVM.
+`Ipv4Addr.parse` / `Ipv6Addr.parse` / `SocketAddr.parse` **SIGSEGV**
+under AOT (interp correct) — ~23 of the failures. **Refined
+2026-06-21:** `test_parse_ipv4_localhost` AOT terminates by signal
+(SIGSEGV), NOT an assertion divergence. The parse builds `Text`/`List`
+values via mutation (`split`/`slice`/`push`), hitting the **same**
+"AOT mutation-body reallocation-writeback-through-`&mut self`
+null-deref" class as §3.5.2 — a grow/reallocate sets `self.ptr` but
+the writeback doesn't persist on AOT → write to stale NULL ptr
+(minimal shared repro `/tmp/mutbuf.vr`). NOT a separate text-parsing
+bug; it is the umbrella AOT `&mut self` mutation-writeback defect.
+(The §3.1/§3.2 interp-era `&parts[i]`/`map_err` workarounds are
+unrelated and orthogonal.)
 
 ### Pass/fail summary (`--aot`, 2026-06-20)
 
@@ -277,9 +298,8 @@ tuple-eq predicates, accessors, `to_u32`, and `AddrParseError` Eq.
 | Item | Scope | Estimated effort |
 |---|---|---|
 | ~~**TUPLE-EQ-AOT** (task #4)~~ — **CLOSED 2026-06-20**: tuple `==`/`!=` now lowered element-wise in VBC codegen; AOT 95→103/138, 0 regressions. (Latent: whole-record `==` still hits the Text-strcmp branch — follow-up `verum_value_eq`.) | done | ✅ |
-| **DISP-EMPTY-AOT** (task #3) — f-string Display of user types → empty under AOT | `verum_codegen` (ToString→Display dispatch) | high-value, stdlib-wide |
+| **AOT `&mut self` mutation-writeback null-deref** (tasks #3 + #5, shared root) — a grow/reallocate in a `&mut self` body sets `self.ptr` but the writeback doesn't persist on AOT → next write hits stale NULL (`_platform_memmove`@0x0). Covers **DISP-EMPTY-AOT** (Formatter `write_str` → empty; dispatch itself is correct) AND **PARSE-AOT** (v4/v6/socket parse SIGSEGV; Text/List build via mutation). Repros: `/tmp/disp_min.vr`, `/tmp/mutbuf.vr`. | core CBGR/`verum_codegen` mutation-body lowering | high-value, **stdlib-wide**, multi-day (deep) |
 | **PRELUDE-FREEFN** (task #2) — prelude concrete free fns not captured into metadata `module_reexports`, unbound bare under AOT/run | `precompile.rs::scan_module_reexports` + `verum_types new_with_core` | medium; precompile capture + type-env registration |
-| **PARSE-AOT** (task #5) — v4/v6/socket parse text-codegen diverges under AOT | `verum_codegen` (Text split/slice/chars) | partly downstream of #4 |
 | `ToSocketAddrs` protocol coverage (host:port DNS path) | this folder | gated on DNS mock harness (vcs/specs/L2-standard/net/) |
 | Display round-trip ∀a. parse(a.to_string()) == Ok(a) | this folder | gated on #3 + #5 |
 | Sister coverage for `core.net.{cidr,ipv6_canonical,dns,link_header}` | sister folders | tracked as separate INVENTORY rows |
