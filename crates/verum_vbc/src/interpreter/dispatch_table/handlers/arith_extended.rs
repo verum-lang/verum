@@ -632,6 +632,52 @@ pub(in super::super) fn handle_arith_extended(
             Ok(DispatchResult::Continue)
         }
 
+        Some(ArithSubOpcode::WrappingDiv) => {
+            let dst = read_reg(state)?;
+            let a_reg = read_reg(state)?;
+            let b_reg = read_reg(state)?;
+            let width = read_u8(state)?;
+            let signed = read_u8(state)? != 0;
+
+            let a = state.get_reg(a_reg).as_i64();
+            let b = state.get_reg(b_reg).as_i64();
+            if b == 0 {
+                return Err(InterpreterError::DivisionByZero);
+            }
+            let result = wrapping_div(a, b, width, signed);
+            state.set_reg(dst, Value::from_i64(result));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(ArithSubOpcode::WrappingRem) => {
+            let dst = read_reg(state)?;
+            let a_reg = read_reg(state)?;
+            let b_reg = read_reg(state)?;
+            let width = read_u8(state)?;
+            let signed = read_u8(state)? != 0;
+
+            let a = state.get_reg(a_reg).as_i64();
+            let b = state.get_reg(b_reg).as_i64();
+            if b == 0 {
+                return Err(InterpreterError::DivisionByZero);
+            }
+            let result = wrapping_rem(a, b, width, signed);
+            state.set_reg(dst, Value::from_i64(result));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(ArithSubOpcode::WrappingAbs) => {
+            let dst = read_reg(state)?;
+            let src_reg = read_reg(state)?;
+            let width = read_u8(state)?;
+            let signed = read_u8(state)? != 0;
+
+            let src = state.get_reg(src_reg).as_i64();
+            let result = wrapping_abs(src, width, signed);
+            state.set_reg(dst, Value::from_i64(result));
+            Ok(DispatchResult::Continue)
+        }
+
         // ================================================================
         // Bit Counting Operations (0x50-0x5F)
         // ================================================================

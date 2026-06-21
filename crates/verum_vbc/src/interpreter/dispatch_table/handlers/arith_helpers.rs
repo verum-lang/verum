@@ -91,6 +91,52 @@ pub(super) fn wrapping_neg(a: i64, width: u8, signed: bool) -> i64 {
     }
 }
 
+/// Wrapping division. Caller must reject `b == 0` (DivisionByZero) before
+/// calling. Unlike non-wrapping `div`, the signed `T::MIN / -1` pair wraps to
+/// `T::MIN` instead of trapping (modular semantics).
+#[inline(always)]
+pub(super) fn wrapping_div(a: i64, b: i64, width: u8, signed: bool) -> i64 {
+    let mask = type_mask(width);
+    if signed {
+        let av = sign_extend((a as u64) & mask, width, mask);
+        let bv = sign_extend((b as u64) & mask, width, mask);
+        sign_extend((av.wrapping_div(bv) as u64) & mask, width, mask)
+    } else {
+        let av = (a as u64) & mask;
+        let bv = (b as u64) & mask;
+        (av.wrapping_div(bv) & mask) as i64
+    }
+}
+
+/// Wrapping remainder. Caller must reject `b == 0`. The signed `T::MIN % -1`
+/// pair wraps to `0` instead of trapping.
+#[inline(always)]
+pub(super) fn wrapping_rem(a: i64, b: i64, width: u8, signed: bool) -> i64 {
+    let mask = type_mask(width);
+    if signed {
+        let av = sign_extend((a as u64) & mask, width, mask);
+        let bv = sign_extend((b as u64) & mask, width, mask);
+        sign_extend((av.wrapping_rem(bv) as u64) & mask, width, mask)
+    } else {
+        let av = (a as u64) & mask;
+        let bv = (b as u64) & mask;
+        (av.wrapping_rem(bv) & mask) as i64
+    }
+}
+
+/// Wrapping absolute value. `T::MIN` wraps to `T::MIN` (its `|·|` is
+/// unrepresentable). Unsigned values are already non-negative.
+#[inline(always)]
+pub(super) fn wrapping_abs(a: i64, width: u8, signed: bool) -> i64 {
+    let mask = type_mask(width);
+    if signed {
+        let av = sign_extend((a as u64) & mask, width, mask);
+        sign_extend((av.wrapping_abs() as u64) & mask, width, mask)
+    } else {
+        (a as u64 & mask) as i64
+    }
+}
+
 /// Wrapping left shift with shift amount mod width.
 /// If signed=true, sign-extends the result.
 #[inline(always)]

@@ -6569,6 +6569,15 @@ pub enum ArithSubOpcode {
 
     /// Format: `dst:reg, a:reg, b:reg, width:u8`
     WrappingShr = 0x45,
+    /// Wrapping division. Format `dst, a, b, width, signed`. Caller traps
+    /// `b == 0`; `T::MIN / -1` wraps to `T::MIN`.
+    WrappingDiv = 0x46,
+    /// Wrapping remainder. Format `dst, a, b, width, signed`. Caller traps
+    /// `b == 0`; `T::MIN % -1` wraps to `0`.
+    WrappingRem = 0x47,
+    /// Wrapping absolute value. Format `dst, src, width, signed`. `T::MIN`
+    /// wraps to `T::MIN`.
+    WrappingAbs = 0x48,
 
     // ========================================================================
     // Bit Counting Operations (0x50-0x5F) - Leading/trailing zeros, popcount
@@ -6971,6 +6980,9 @@ impl ArithSubOpcode {
             0x43 => Some(Self::WrappingNeg),
             0x44 => Some(Self::WrappingShl),
             0x45 => Some(Self::WrappingShr),
+            0x46 => Some(Self::WrappingDiv),
+            0x47 => Some(Self::WrappingRem),
+            0x48 => Some(Self::WrappingAbs),
             // Bit Counting Operations
             0x50 => Some(Self::Clz),
             0x51 => Some(Self::Ctz),
@@ -7095,6 +7107,9 @@ impl ArithSubOpcode {
             Self::WrappingNeg       => m!("WRAPPING_NEG",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=1),
             Self::WrappingShl       => m!("WRAPPING_SHL",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=2),
             Self::WrappingShr       => m!("WRAPPING_SHR",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::WrappingDiv       => m!("WRAPPING_DIV",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::WrappingRem       => m!("WRAPPING_REM",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::WrappingAbs       => m!("WRAPPING_ABS",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=1),
 
             // ===== Bit Counting (0x50-0x5F) =====
             Self::Clz               => m!("CLZ",                BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=1),

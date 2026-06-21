@@ -3411,6 +3411,39 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         mlir_op: Some("arith.shrsi"),
         doc: "Wrapping shift right",
     },
+    // --- wrapping div / rem / abs (ARITH-MISSING-INTRINSICS-1 §3.2) ----------
+    // Width-aware ArithExtended ops: panic on `b == 0`, but `T::MIN / -1`
+    // wraps to `T::MIN` and `T::MIN % -1` wraps to `0` (modular, no trap).
+    Intrinsic {
+        name: "wrapping_div",
+        category: IntrinsicCategory::Wrapping,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::WrappingDiv),
+        mlir_op: None,
+        doc: "Wrapping division (T::MIN / -1 wraps to T::MIN)",
+    },
+    Intrinsic {
+        name: "wrapping_rem",
+        category: IntrinsicCategory::Wrapping,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::WrappingRem),
+        mlir_op: None,
+        doc: "Wrapping remainder (T::MIN % -1 wraps to 0)",
+    },
+    Intrinsic {
+        name: "wrapping_abs",
+        category: IntrinsicCategory::Wrapping,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::WrappingAbs),
+        mlir_op: None,
+        doc: "Wrapping absolute value (T::MIN wraps to T::MIN)",
+    },
     // =========================================================================
     // Type-Specific Wrapping Arithmetic
     // =========================================================================

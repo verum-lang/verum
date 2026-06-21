@@ -29232,7 +29232,8 @@ impl VbcCodegen {
             ArithSubOpcode::CheckedNeg
             | ArithSubOpcode::CheckedAbs
             | ArithSubOpcode::SaturatingNeg
-            | ArithSubOpcode::SaturatingAbs => {
+            | ArithSubOpcode::SaturatingAbs
+            | ArithSubOpcode::WrappingAbs => {
                 if !args.is_empty() {
                     let mut operands = encode_regs_to_bytes(dest, &[args[0]]);
                     operands.push(64); // width: 64-bit (generic Int default)
@@ -29270,7 +29271,9 @@ impl VbcCodegen {
             | ArithSubOpcode::WrappingMul
             | ArithSubOpcode::WrappingNeg
             | ArithSubOpcode::WrappingShl
-            | ArithSubOpcode::WrappingShr => {
+            | ArithSubOpcode::WrappingShr
+            | ArithSubOpcode::WrappingDiv
+            | ArithSubOpcode::WrappingRem => {
                 // Default to 64-bit signed for generic wrapping operations
                 if args.len() >= 2 {
                     let mut operands = encode_regs_to_bytes(dest, &[args[0], args[1]]);
