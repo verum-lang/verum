@@ -796,6 +796,37 @@ impl<'s> CompilationPipeline<'s> {
             root.unwrap_or(immediate_dir.clone())
         };
 
+        // The stdlib `core` cog must never be eager-loaded as a user
+        // project.  In `Normal` mode `core` is provided by the embedded
+        // precompiled archive (+ on-demand loading), so `mount core.*`
+        // already resolves without compiling core's source.  Eager-loading
+        // it here pulls EVERY core module body into the compilation unit —
+        // including modules unreachable from the entry point — and native
+        // codegen then aborts on the first undefined stdlib leaf function
+        // (`sha512_digest`, `fs_current_dir`, `equiv_inv_coherence_law`, …).
+        //
+        // This is precisely why `verum test --aot` failed suite-wide: the
+        // harness writes its merged test file into `<cog>/target/test/`,
+        // which for the `core` cog lands *inside* core, so the project walk
+        // above resolves to the core root and drags in the whole stdlib.
+        // The identical mounts compiled cleanly via `verum run/build --aot`
+        // on a file OUTSIDE the cog.  `StdlibBootstrap` (which PRODUCES the
+        // archive from core's source) does not take this path, so it is
+        // unaffected.
+        if matches!(self.build_mode, BuildMode::Normal) {
+            let manifest = input_dir.join("verum.toml");
+            if manifest.exists()
+                && let Ok(cfg) = crate::linker_config::ProjectConfig::load_from_file(&manifest)
+                && cfg.cog.name == "core"
+            {
+                info!(
+                    "Skipping eager project-load of the stdlib `core` cog at {} — served from the precompiled archive",
+                    input_dir.display()
+                );
+                return Ok(());
+            }
+        }
+
         // Only treat as a project if there's a mod.vr in the directory
         let mod_file = input_dir.join("mod.vr");
         if !mod_file.exists() {
