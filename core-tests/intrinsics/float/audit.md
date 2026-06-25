@@ -17,6 +17,15 @@ trig / rounding functions dispatch via `MathExtendedOpcode` (≈2ns).  Tests pin
 exact-representable points (`sqrt(4)=2`, `sin(0)=0`, `log(1)=0`, …) so equality
 holds without tolerance.
 
+## Tier summary
+
+* **Interp: 85/85 GREEN** (7 `@ignore` for the §3 open defects).
+* **AOT: 70/85** — 15 failures are a pre-existing AOT-codegen cluster
+  (`FLOAT-AOT-LIBM-1`, task #21): `fneg`/`fms` (the `PolyNeg` AOT path doesn't
+  negate floats) and the libm-backed `hypot`/`cbrt`/`expm1`/`log1p`/`powi`
+  (no/incorrect AOT lowering).  Not this branch's wiring — revealed by the new
+  tests.
+
 ## 1. What is verified GREEN (interp)
 
 * **Elementary** — sqrt, cbrt, exp, exp2, expm1, log, log1p, log2, log10, pow,
@@ -115,5 +124,7 @@ in a `.vr` body needs care — or via dedicated classify `MathSubOpcode`s.
 * Full float test suite (unit/property/integration/regression).
 
 **Deferred (tracked)**
-* FLOAT-ROUNDMODES-1 (#18), FLOAT-MINMAX-1 (#19), FLOAT-CLASSIFY-1 (#20).
-* AOT cross-tier sweep (after the interp surface stabilises).
+* FLOAT-ROUNDMODES-1 (#18), FLOAT-MINMAX-1 (#19), FLOAT-CLASSIFY-1 (#20) —
+  interp-level nil (need new opcodes).
+* FLOAT-AOT-LIBM-1 (#21) — AOT-only: `fneg`/`fms` (PolyNeg float arm) +
+  `hypot`/`cbrt`/`expm1`/`log1p`/`powi` (libm AOT lowering).  Interp green.
