@@ -238,6 +238,93 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(obj_ptr)
     }
 
+    /// Lower NewList with an honoured capacity hint.
+    ///
+    /// `List.with_capacity(n)` is a capacity *guarantee* (matching every
+    /// mainstream `Vec::with_capacity`): immediately after construction
+    /// `capacity() >= n`, and the first `n` pushes provoke no reallocation.
+    /// The zero-hint `lower_new_list` defers all allocation to the first push
+    /// (doubling growth), so `capacity()` would report the runtime default
+    /// instead of `n` — diverging from the Tier-0 interpreter
+    /// (`handle_new_list`, which already honours the hint) and breaking the
+    /// `with_capacity` contract.
+    ///
+    /// The backing array is a plain `verum_internal_calloc(cap, 8)` block —
+    /// exactly the shape `verum_list_grow` produces — so a later grow simply
+    /// `memcpy`s out of it and `calloc`s a doubled block. No special
+    /// allocation header is required on this path.
+    pub fn lower_new_list_with_capacity(
+        &self,
+        builder: &Builder<'ctx>,
+        module: &Module<'ctx>,
+        capacity: u64,
+    ) -> Result<PointerValue<'ctx>> {
+        let i64_type = self.context.i64_type();
+
+        // Allocate + zero the list object header (ptr=0, len=0, cap=0).
+        let obj_size = i64_type.const_int(LIST_OBJECT_SIZE, false);
+        let obj_ptr = self.emit_checked_malloc(builder, module, obj_size, "list_obj_cap")?;
+        let memset_fn = self.get_or_declare_memset(module)?;
+        let zero_byte = self.context.i32_type().const_int(0, false);
+        builder
+            .build_call(
+                memset_fn,
+                &[obj_ptr.into(), zero_byte.into(), obj_size.into()],
+                "clear_obj_cap",
+            )
+            .or_llvm_err()?;
+
+        // calloc(capacity, 8) for the backing array of NaN-boxed i64 slots.
+        let cap_val = i64_type.const_int(capacity, false);
+        let calloc_ty = self
+            .context
+            .ptr_type(AddressSpace::default())
+            .fn_type(&[i64_type.into(), i64_type.into()], false);
+        let calloc_fn =
+            super::error::get_or_declare_function(module, "verum_internal_calloc", calloc_ty);
+        let backing = builder
+            .build_call(
+                calloc_fn,
+                &[cap_val.into(), i64_type.const_int(8, false).into()],
+                "list_cap_backing",
+            )
+            .or_llvm_err()?
+            .basic_value_or("verum_internal_calloc returned void")?
+            .into_pointer_value();
+        let backing_i64 = builder
+            .build_ptr_to_int(backing, i64_type, "list_cap_backing_i64")
+            .or_llvm_err()?;
+
+        // Store ptr = backing, cap = capacity (len stays 0 from the memset).
+        let i8_type = self.context.i8_type();
+        // SAFETY: GEP into the list object header at the fixed data-pointer offset.
+        let ptr_slot = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    i8_type,
+                    obj_ptr,
+                    &[i64_type.const_int(LIST_PTR_OFFSET, false)],
+                    "list_cap_ptr_slot",
+                )
+                .or_llvm_err()?
+        };
+        builder.build_store(ptr_slot, backing_i64).or_llvm_err()?;
+        // SAFETY: GEP into the list object header at the fixed capacity offset.
+        let cap_slot = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    i8_type,
+                    obj_ptr,
+                    &[i64_type.const_int(LIST_CAP_OFFSET, false)],
+                    "list_cap_cap_slot",
+                )
+                .or_llvm_err()?
+        };
+        builder.build_store(cap_slot, cap_val).or_llvm_err()?;
+
+        Ok(obj_ptr)
+    }
+
     /// Lower ListPush instruction.
     ///
 
