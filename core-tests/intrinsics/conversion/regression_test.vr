@@ -1,0 +1,84 @@
+// =============================================================================
+// core-tests/intrinsics/conversion/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core/intrinsics/conversion.vr`.  Each pin is the exact
+// repro that returned `nil` / the wrong shape before the fix.  See `audit.md`.
+//
+// Root cause (all closed): the conversion intrinsics were fully implemented at
+// the codegen/interp/LLVM levels (InlineSequenceId::{Sext,Zext,Fpext,Fptrunc,
+// IntTrunc,F*ToBits} + ArithSubOpcode::F*{To,From}Bits) but were UNREACHABLE
+// from the intrinsic surface:
+//   * `sext`/`zext`/`fpext`/`fptrunc`/`trunc` aliased to names with no registry
+//     entry (the real entries are width-typed: `i32_to_i64`, `u32_to_u64`,
+//     `f32_to_f64`, `f64_to_f32`, `i64_to_i32`) → `lookup_intrinsic` → None → nil.
+//   * the `f*_to_bits`/`f*_from_bits` wrappers called `@intrinsic("bitcast")`
+//     (unregistered) instead of their dedicated `@intrinsic("f64_to_bits")` …
+//   * `to_le`/`to_be`/`from_le`/`from_be` aliased to `to_le_bytes`/`to_be_bytes`
+//     → returned a `[Byte; 8]` instead of the endianness-converted `T`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.conversion.{
+    sext, zext,
+    f64_to_bits, f64_from_bits, f32_to_bits, f32_from_bits,
+    to_le, to_be, from_le, from_be,
+};
+
+// CONV-BITCAST-FLOATBITS-1: was nil (wrapper called unregistered "bitcast").
+@test
+fn regression_f64_to_bits_was_nil() {
+    assert_eq(f64_to_bits(1.0), 0x3FF0000000000000 as UInt64);
+}
+
+@test
+fn regression_f64_from_bits_was_nil() {
+    assert_eq(f64_from_bits(0x4000000000000000 as UInt64), 2.0);
+}
+
+@test
+fn regression_f32_to_bits_was_nil() {
+    assert_eq(f32_to_bits(1.0 as Float32), 0x3F800000 as UInt32);
+}
+
+@test
+fn regression_f32_from_bits_was_nil() {
+    assert_eq(f32_from_bits(0x40000000 as UInt32), 2.0 as Float32);
+}
+
+// CONV-INTWIDTH-1: sext/zext aliased to non-existent names → nil.
+@test
+fn regression_sext_was_nil() {
+    assert_eq(sext(-1), -1);
+}
+
+@test
+fn regression_zext_was_nil() {
+    assert_eq(zext(0xFF as UInt8), 255);
+}
+
+// CONV-ENDIAN-ALIAS-1: to_le/to_be/from_le/from_be returned bytes, not T.
+@test
+fn regression_to_le_returns_value_not_bytes() {
+    // Pre-fix this returned [0x34, 0x12, 0, 0, 0, 0, 0, 0]; now identity on LE.
+    assert_eq(to_le(0x1234 as UInt64), 0x1234 as UInt64);
+}
+
+@test
+fn regression_to_be_swaps_not_bytes() {
+    assert_eq(to_be(0x1234 as UInt64), 0x3412000000000000 as UInt64);
+}
+
+@test
+fn regression_from_be_inverts_to_be() {
+    let x: UInt64 = 0xCAFEBABEDEADBEEF as UInt64;
+    assert_eq(from_be(to_be(x)), x);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

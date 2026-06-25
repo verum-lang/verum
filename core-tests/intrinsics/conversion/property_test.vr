@@ -1,0 +1,137 @@
+// =============================================================================
+// core-tests/intrinsics/conversion/property_test.vr
+// =============================================================================
+//
+// Round-trip / inverse laws for the conversion intrinsics.  Conversions come in
+// inverse pairs (to_bits/from_bits, to_le/from_le, to_*_bytes/from_*_bytes,
+// int→float→int), and the round trip is the identity over the sampled domain.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.conversion.{
+    int_to_float, float_to_int,
+    f64_to_bits, f64_from_bits, f32_to_bits, f32_from_bits,
+    to_le_bytes_4, from_le_bytes_4, to_be_bytes_4, from_be_bytes_4,
+    to_le_bytes_8, from_le_bytes_8,
+    to_le, to_be, from_le, from_be,
+};
+
+fn int_samples() -> List<Int> {
+    [0, 1, -1, 2, -2, 127, -128, 255, 256, 65535, 1000000, -1000000]
+}
+
+fn u64_samples() -> List<UInt64> {
+    [0 as UInt64, 1 as UInt64, 255 as UInt64, 0x1234 as UInt64,
+     0xFFFFFFFF as UInt64, 0xDEADBEEFCAFEBABE as UInt64,
+     0x8000000000000000 as UInt64, 0xFFFFFFFFFFFFFFFF as UInt64]
+}
+
+fn float_samples() -> List<Float64> {
+    [0.0, 1.0, -1.0, 0.5, 2.0, 3.141592653589793, -2.718281828, 1024.0, -0.125]
+}
+
+// -----------------------------------------------------------------------------
+// IEEE-754 bits round-trip: from_bits ∘ to_bits = id
+// -----------------------------------------------------------------------------
+
+@test
+fn law_f64_bits_round_trip() {
+    for x in float_samples().iter() {
+        assert_eq(f64_from_bits(f64_to_bits(*x)), *x);
+    }
+}
+
+@test
+fn law_f32_bits_round_trip() {
+    // Values exactly representable in f32 survive the narrow round trip.
+    let f32_exact: List<Float32> = [0.0 as Float32, 1.0 as Float32, -1.0 as Float32,
+                                    0.5 as Float32, 2.0 as Float32, 1024.0 as Float32];
+    for x in f32_exact.iter() {
+        assert_eq(f32_from_bits(f32_to_bits(*x)), *x);
+    }
+}
+
+@test
+fn law_f64_bits_zero_preserved() {
+    assert_eq(f64_to_bits(0.0), 0 as UInt64);
+}
+
+// -----------------------------------------------------------------------------
+// int → float → int round-trip (for magnitudes exactly representable in f64)
+// -----------------------------------------------------------------------------
+
+@test
+fn law_int_float_round_trip() {
+    for x in int_samples().iter() {
+        assert_eq(float_to_int(int_to_float(*x)), *x);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Byte round-trips: from_*_bytes ∘ to_*_bytes = id
+// -----------------------------------------------------------------------------
+
+@test
+fn law_le_bytes_4_round_trip() {
+    let vals: List<Int> = [0, 1, 255, 256, 0x0A0B0C0D, 0x7FFFFFFF];
+    for v in vals.iter() {
+        assert_eq(from_le_bytes_4(to_le_bytes_4(*v)), *v);
+    }
+}
+
+@test
+fn law_be_bytes_4_round_trip() {
+    let vals: List<Int> = [0, 1, 255, 256, 0x0A0B0C0D, 0x7FFFFFFF];
+    for v in vals.iter() {
+        assert_eq(from_be_bytes_4(to_be_bytes_4(*v)), *v);
+    }
+}
+
+@test
+fn law_le_bytes_8_round_trip() {
+    let vals: List<Int> = [0, 1, 0x1122334455667788, 1000000000000];
+    for v in vals.iter() {
+        assert_eq(from_le_bytes_8(to_le_bytes_8(*v)), *v);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Endianness round-trips: from_le ∘ to_le = id, from_be ∘ to_be = id
+// -----------------------------------------------------------------------------
+
+@test
+fn law_to_from_le_round_trip() {
+    for x in u64_samples().iter() {
+        assert_eq(from_le(to_le(*x)), *x);
+    }
+}
+
+@test
+fn law_to_from_be_round_trip() {
+    for x in u64_samples().iter() {
+        assert_eq(from_be(to_be(*x)), *x);
+    }
+}
+
+@test
+fn law_to_le_is_identity_on_le_target() {
+    for x in u64_samples().iter() {
+        assert_eq(to_le(*x), *x);
+    }
+}
+
+@test
+fn law_to_be_then_to_be_is_identity() {
+    // to_be = bswap on LE; bswap is its own inverse.
+    for x in u64_samples().iter() {
+        assert_eq(to_be(to_be(*x)), *x);
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
