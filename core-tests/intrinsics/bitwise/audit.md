@@ -38,6 +38,11 @@ the canonical names rather than relying on the intercept.
 
 ## 1. What is verified GREEN (interp + AOT)
 
+**Both tiers via the test harness:** interp **127/127**, AOT **127/127**
+(`verum test --aot`).  AOT was unblocked by the systemic `load_project_modules`
+fix (§2 SYSTEMIC-AOT-EAGER-CORE-1).
+
+
 * **Logical** — `bitand` `bitor` `bitxor` `bitnot` (incl. involution, De
   Morgan, distributivity, idempotence/identity/annihilator laws).
 * **Shifts** — `shl`, `shr` (arithmetic), `lshr` (logical/zero-fill),
@@ -109,6 +114,25 @@ bit-reverse; `bswap` is its own inverse, so applying it to `bitreverse(x)`
 cancels the byte-order flip and leaves the per-byte bit-reverse.  Composed from
 two existing unary opcodes — no new dispatch arm on either tier.
 
+### SYSTEMIC-AOT-EAGER-CORE-1 — `verum test --aot` compiled the whole `core` crate
+
+Not a bitwise defect, but the blocker that kept this (and every other)
+`core-tests` suite from passing under `--aot`.  `load_project_modules`
+(`crates/verum_compiler/src/pipeline/loading.rs`) walks up to the first
+`verum.toml` and eager-loads **all** sibling `.vr` files of that cog.  The test
+harness writes its merged file into `core/target/test/` — inside the `core`
+cog — so the walk resolved to the core root and pulled **every** core module
+body (including ones unreachable from the test) into native codegen, which then
+aborted on the first undefined stdlib leaf function (`sha512_digest`,
+`fs_current_dir`, `equiv_inv_coherence_law`, …).  `verum run/build --aot` of the
+same mounts on a file *outside* the cog compiled cleanly in ~15s.
+
+**Fix**: in `BuildMode::Normal`, skip eager project-loading when the project
+root is the stdlib `core` cog (`[cog] name == "core"`) — core is served by the
+embedded precompiled archive, so `mount core.*` resolves without compiling
+core's source.  Bitwise AOT suite: 0/127 (4407s, all undefined-fn aborts) →
+**127/127 GREEN (322s)**.
+
 ## 3. Defects OPEN
 
 None specific to this module.  The cross-cutting
@@ -151,4 +175,7 @@ expressions in `property_test.vr`; it is not re-pinned in this suite.
 * BITWISE-SHIFT-LSHR-ASHR-1 — register `lshr`/`ashr`; add `Ushr` emit arm.
 * BITWISE-CLZ-CTZ-WIDTH-1 — width-aware `ClzU32`/`CtzU32` sequences.
 * BITWISE-BYTE-SWAP-BITS-1 — `ByteSwapBits` = `bswap ∘ bitreverse`.
+* SYSTEMIC-AOT-EAGER-CORE-1 — `load_project_modules` no longer eager-loads the
+  stdlib `core` cog; unblocks `--aot` for the whole `core-tests` suite.
 * Full bitwise test suite (unit/property/integration/regression).
+* **Both tiers GREEN via `verum test`: interp 127/127, AOT 127/127.**
