@@ -303,10 +303,28 @@ pub enum InlineSequenceId {
     Ctz,
     /// popcnt: population count
     Popcnt,
+    /// clz_u32: count leading zeros at 32-bit width — `clz64(x) - 32`.
+    /// The 32-bit value is zero-extended in the i64 register, so the top
+    /// 32 leading zeros are an artefact of the carrier width; subtracting
+    /// 32 recovers the true 32-bit leading-zero count (and `clz64(0)=64`
+    /// → `32`, the correct width-32 result for zero).
+    ClzU32,
+    /// ctz_u32: count trailing zeros at 32-bit width — `ctz64(x | (1<<32))`.
+    /// Setting the guard bit at position 32 caps the count at 32 for the
+    /// all-zero low word (`ctz64(0)=64` would be wrong) while leaving any
+    /// genuine low-32 trailing-zero run (≤31) unchanged.
+    CtzU32,
     /// ilog2: integer log base 2 (63 - clz)
     Ilog2,
     /// bswap: byte swap
     Bswap,
+    /// byte_swap_bits: reverse the bit order WITHIN each byte, leaving byte
+    /// positions unchanged.  Identity: `byte_swap_bits = bswap ∘ bitreverse`
+    /// (a full bit-reverse is a byte-order reverse composed with a
+    /// per-byte bit-reverse; `bswap` is its own inverse, so applying it to
+    /// `bitreverse(x)` cancels the byte-order flip and leaves the per-byte
+    /// bit-reverse).
+    ByteSwapBits,
     /// rotate_left: bit rotation
     RotateLeft,
     /// rotate_right: bit rotation
@@ -2898,6 +2916,20 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Reverse bits",
     },
     Intrinsic {
+        name: "byte_swap_bits",
+        category: IntrinsicCategory::BitManip,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ByteSwapBits),
+        mlir_op: None,
+        doc: "Reverse the bit order within each byte (byte positions unchanged)",
+    },
+    Intrinsic {
         name: "rotate_left",
         category: IntrinsicCategory::BitManip,
         hints: &[
@@ -3024,9 +3056,9 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline],
         param_count: 1,
         return_count: 1,
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Clz),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ClzU32),
         mlir_op: Some("llvm.intr.ctlz"),
-        doc: "Count leading zeros (u32)",
+        doc: "Count leading zeros (u32, width-correct)",
     },
     Intrinsic {
         name: "ctz_u64",
@@ -3044,9 +3076,9 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline],
         param_count: 1,
         return_count: 1,
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Ctz),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CtzU32),
         mlir_op: Some("llvm.intr.cttz"),
-        doc: "Count trailing zeros (u32)",
+        doc: "Count trailing zeros (u32, width-correct)",
     },
     Intrinsic {
         name: "popcnt_u64",
@@ -5141,6 +5173,109 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::DirectOpcode(Opcode::Shr),
         mlir_op: Some("arith.shrsi"),
         doc: "Generic arithmetic shift right",
+    },
+    // LLVM-canonical bitwise names.
+    //
+    // The `core/intrinsics/bitwise.vr` BODIES are the authoritative dispatch
+    // surface (see docs/architecture/intrinsic-dispatch-contract.md) and they
+    // spell the logical operators with their LLVM/MLIR canonical names —
+    // `@intrinsic("and"/"or"/"xor"/"not"/"lshr"/"ashr", …)`.  The semantic
+    // wrapper names above (`bitand` …) only ever resolved via the bare-name
+    // call-site intercept, so a wrapper without an intercept arm (e.g.
+    // `bitnot` → body `@intrinsic("not")`) fell through to `LoadNil`.  These
+    // entries make the body path resolve independently of the intercept and
+    // add the previously-missing logical (`lshr` → `Ushr`) and arithmetic
+    // (`ashr` → `Shr`) right shifts.  Cross-tier: interp handlers
+    // `handle_band/bor/bxor/bnot/ushr/shr` + LLVM `BitwiseOp::*` already exist.
+    Intrinsic {
+        name: "and",
+        category: IntrinsicCategory::BitManip,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::DirectOpcode(Opcode::Band),
+        mlir_op: Some("arith.andi"),
+        doc: "Bitwise AND (LLVM-canonical name for `bitand`)",
+    },
+    Intrinsic {
+        name: "or",
+        category: IntrinsicCategory::BitManip,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::DirectOpcode(Opcode::Bor),
+        mlir_op: Some("arith.ori"),
+        doc: "Bitwise OR (LLVM-canonical name for `bitor`)",
+    },
+    Intrinsic {
+        name: "xor",
+        category: IntrinsicCategory::BitManip,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::DirectOpcode(Opcode::Bxor),
+        mlir_op: Some("arith.xori"),
+        doc: "Bitwise XOR (LLVM-canonical name for `bitxor`)",
+    },
+    Intrinsic {
+        name: "not",
+        category: IntrinsicCategory::BitManip,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::DirectOpcode(Opcode::Bnot),
+        mlir_op: Some("arith.noti"),
+        doc: "Bitwise NOT (LLVM-canonical name for `bitnot`)",
+    },
+    Intrinsic {
+        name: "lshr",
+        category: IntrinsicCategory::BitManip,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::DirectOpcode(Opcode::Ushr),
+        mlir_op: Some("arith.shrui"),
+        doc: "Logical (zero-filling) shift right",
+    },
+    Intrinsic {
+        name: "ashr",
+        category: IntrinsicCategory::BitManip,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::DirectOpcode(Opcode::Shr),
+        mlir_op: Some("arith.shrsi"),
+        doc: "Arithmetic (sign-extending) shift right",
     },
     // Type-specific arithmetic intrinsics
     Intrinsic {

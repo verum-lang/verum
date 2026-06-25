@@ -1,0 +1,160 @@
+// =============================================================================
+// core-tests/intrinsics/bitwise/integration_test.vr
+// =============================================================================
+//
+// Cross-cutting usage of the bitwise intrinsics in the small algorithms that
+// actually consume them across the stdlib: bit-flag sets, endianness
+// round-trips, hash-mixing rotations, bitfield extraction, and power-of-two
+// classification.  These exercise the intrinsics in combination rather than
+// in isolation.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.bitwise.{
+    bitand, bitor, bitxor, bitnot,
+    shl, lshr,
+    rotl,
+    clz, ctz, popcnt,
+    bswap,
+};
+
+// --- Bit-flag set algebra ------------------------------------------------------
+
+fn flag(n: UInt32) -> UInt64 { shl(1 as UInt64, n) }
+
+@test
+fn flag_set_and_test() {
+    let read = flag(0 as UInt32);
+    let write = flag(1 as UInt32);
+    let exec = flag(2 as UInt32);
+    let perms = bitor(bitor(read, write), exec);
+    // all three present
+    assert_eq(bitand(perms, read), read);
+    assert_eq(bitand(perms, write), write);
+    assert_eq(bitand(perms, exec), exec);
+    assert_eq(popcnt(perms), 3);
+}
+
+@test
+fn flag_clear() {
+    let read = flag(0 as UInt32);
+    let write = flag(1 as UInt32);
+    let perms = bitor(read, write);
+    // clear the write bit: perms & ~write
+    let mask = bitnot(write);
+    let cleared = bitand(perms, mask);
+    assert_eq(cleared, read);
+    assert_eq(bitand(cleared, write), 0 as UInt64);
+}
+
+@test
+fn flag_toggle() {
+    let a = flag(3 as UInt32);
+    let zero: UInt64 = 0 as UInt64;
+    let on = bitxor(zero, a);
+    assert_eq(on, a);
+    let off = bitxor(on, a);
+    assert_eq(off, 0 as UInt64);
+}
+
+// --- Endianness round-trip -----------------------------------------------------
+
+@test
+fn endian_round_trip() {
+    let host: UInt64 = 0x0011223344556677 as UInt64;
+    let swapped = bswap(host);
+    assert_eq(swapped, 0x7766554433221100 as UInt64);
+    // bswap is its own inverse → round-trip recovers the host value
+    assert_eq(bswap(swapped), host);
+}
+
+// --- Bitfield extraction -------------------------------------------------------
+
+// Extract `width` bits starting at `offset` (LSB = 0).
+fn extract(value: UInt64, offset: UInt32, mask: UInt64) -> UInt64 {
+    let shifted = lshr(value, offset);
+    bitand(shifted, mask)
+}
+
+@test
+fn bitfield_extract_bytes() {
+    let packed: UInt64 = 0xAABBCCDD as UInt64;
+    let byte_mask: UInt64 = 0xFF as UInt64;
+    assert_eq(extract(packed, 0 as UInt32, byte_mask), 0xDD as UInt64);
+    assert_eq(extract(packed, 8 as UInt32, byte_mask), 0xCC as UInt64);
+    assert_eq(extract(packed, 16 as UInt32, byte_mask), 0xBB as UInt64);
+    assert_eq(extract(packed, 24 as UInt32, byte_mask), 0xAA as UInt64);
+}
+
+// --- Rotation-based hash mixing ------------------------------------------------
+
+// A tiny rotate-xor mixing step (shape used by rolling hashes / nanoid).
+fn mix(state: UInt64, input: UInt64) -> UInt64 {
+    let rotated = rotl(state, 13 as UInt32);
+    bitxor(rotated, input)
+}
+
+@test
+fn hash_mix_is_input_sensitive() {
+    let s0: UInt64 = 0x9E3779B97F4A7C15 as UInt64;
+    let h1 = mix(s0, 1 as UInt64);
+    let h2 = mix(s0, 2 as UInt64);
+    // Different inputs from the same state must diverge.
+    assert(h1 != h2);
+}
+
+@test
+fn hash_mix_round_trip_recoverable() {
+    // mix is invertible: input = mix(state, input) ^ rotl(state, 13)
+    let state: UInt64 = 0xDEADBEEFCAFEBABE as UInt64;
+    let input: UInt64 = 0x1234567890ABCDEF as UInt64;
+    let mixed = mix(state, input);
+    let rotated = rotl(state, 13 as UInt32);
+    assert_eq(bitxor(mixed, rotated), input);
+}
+
+// --- Power-of-two classification via clz/ctz -----------------------------------
+
+// A value is a power of two iff it has exactly one set bit.
+fn is_pow2(x: UInt64) -> Bool {
+    popcnt(x) == 1
+}
+
+@test
+fn power_of_two_detection() {
+    assert(is_pow2(1 as UInt64));
+    assert(is_pow2(2 as UInt64));
+    assert(is_pow2(0x8000000000000000 as UInt64));
+    assert(!is_pow2(0 as UInt64));
+    assert(!is_pow2(3 as UInt64));
+    assert(!is_pow2(0xFF as UInt64));
+}
+
+@test
+fn log2_of_power_of_two_via_ctz() {
+    // For a power of two, ctz gives the exponent.
+    let exps: List<UInt32> = [0 as UInt32, 1 as UInt32, 8 as UInt32, 31 as UInt32, 63 as UInt32];
+    for e in exps.iter() {
+        let p = shl(1 as UInt64, *e);
+        assert_eq(ctz(p) as UInt32, *e);
+    }
+}
+
+@test
+fn highest_bit_index_via_clz() {
+    // For a power of two, 63 - clz gives the exponent (bit index).
+    let exps: List<UInt32> = [0 as UInt32, 1 as UInt32, 8 as UInt32, 31 as UInt32, 63 as UInt32];
+    for e in exps.iter() {
+        let p = shl(1 as UInt64, *e);
+        let idx = 63 - clz(p);
+        assert_eq(idx as UInt32, *e);
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -869,6 +869,30 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
+            // Width-correct count variants — the width adjustment (`- 32` /
+            // guard bit) is applied in the authoritative VBC inline-sequence
+            // emission (`codegen/expressions.rs`).  This MLIR path emits the
+            // base count intrinsic (same approximation precedent as `Ilog2`).
+            InlineSequenceId::ClzU32 => self.emit(MlirOp {
+                name: "llvm.intr.ctlz".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "is_zero_poison".to_string(),
+                    value: MlirAttrValue::Bool(false),
+                }],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CtzU32 => self.emit(MlirOp {
+                name: "llvm.intr.cttz".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "is_zero_poison".to_string(),
+                    value: MlirAttrValue::Bool(false),
+                }],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::Popcnt => self.emit(MlirOp {
                 name: "llvm.intr.ctpop".to_string(),
                 attrs: vec![],
@@ -1254,6 +1278,16 @@ impl IntrinsicLowering {
 
             // Bit manipulation extensions
             InlineSequenceId::Bitreverse => self.emit(MlirOp {
+                name: "llvm.intr.bitreverse".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            // byte_swap_bits = bswap ∘ bitreverse; the authoritative
+            // composition is emitted as VBC in `codegen/expressions.rs`.
+            // This MLIR path emits the bit-reverse component.
+            InlineSequenceId::ByteSwapBits => self.emit(MlirOp {
                 name: "llvm.intr.bitreverse".to_string(),
                 attrs: vec![],
                 result_types: vec![MlirType::I64],

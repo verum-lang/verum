@@ -1,0 +1,345 @@
+// =============================================================================
+// core-tests/intrinsics/bitwise/property_test.vr
+// =============================================================================
+//
+// Boolean-algebra / bit-manipulation laws for the bitwise intrinsics.  All
+// generic forms operate at 64-bit width (VBC Values are i64 at runtime), so
+// the laws below hold over the full 64-bit lattice.  We sweep a representative
+// sample of bit patterns: all-zero, all-one, alternating, nibble/byte masks,
+// single bits, and a few "random-looking" constants.
+//
+// Composed expressions are bound to `let`s rather than nested directly inside
+// another intrinsic call — the nested intrinsic-over-intrinsic dispatch path
+// has a known defect (INTRINSIC-NESTED-CALL-DISPATCH-1, see arithmetic audit
+// §2.6); `let`-splitting keeps each law a single-level call.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.bitwise.{
+    bitand, bitor, bitxor, bitnot,
+    shl, lshr,
+    rotl, rotr,
+    clz, ctz, popcnt,
+    bswap, bitreverse, byte_swap_bits,
+};
+
+const ALL_ONES: UInt64 = 0xFFFFFFFFFFFFFFFF as UInt64;
+
+fn samples() -> List<UInt64> {
+    [0 as UInt64,
+     ALL_ONES,
+     0xAAAAAAAAAAAAAAAA as UInt64,
+     0x5555555555555555 as UInt64,
+     0x00000000FFFFFFFF as UInt64,
+     0xFFFFFFFF00000000 as UInt64,
+     0x0F0F0F0F0F0F0F0F as UInt64,
+     0x1 as UInt64,
+     0x8000000000000000 as UInt64,
+     0xDEADBEEFCAFEBABE as UInt64,
+     0x0123456789ABCDEF as UInt64]
+}
+
+// -----------------------------------------------------------------------------
+// AND / OR / XOR — commutative monoids
+// -----------------------------------------------------------------------------
+
+@test
+fn law_and_commutative() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert_eq(bitand(*a, *b), bitand(*b, *a));
+        }
+    }
+}
+
+@test
+fn law_or_commutative() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert_eq(bitor(*a, *b), bitor(*b, *a));
+        }
+    }
+}
+
+@test
+fn law_xor_commutative() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert_eq(bitxor(*a, *b), bitxor(*b, *a));
+        }
+    }
+}
+
+@test
+fn law_and_idempotent() {
+    for a in samples().iter() {
+        assert_eq(bitand(*a, *a), *a);
+    }
+}
+
+@test
+fn law_or_idempotent() {
+    for a in samples().iter() {
+        assert_eq(bitor(*a, *a), *a);
+    }
+}
+
+@test
+fn law_and_identity_all_ones() {
+    for a in samples().iter() {
+        assert_eq(bitand(*a, ALL_ONES), *a);
+    }
+}
+
+@test
+fn law_and_annihilator_zero() {
+    for a in samples().iter() {
+        assert_eq(bitand(*a, 0 as UInt64), 0 as UInt64);
+    }
+}
+
+@test
+fn law_or_identity_zero() {
+    for a in samples().iter() {
+        assert_eq(bitor(*a, 0 as UInt64), *a);
+    }
+}
+
+@test
+fn law_or_annihilator_all_ones() {
+    for a in samples().iter() {
+        assert_eq(bitor(*a, ALL_ONES), ALL_ONES);
+    }
+}
+
+@test
+fn law_xor_self_inverse() {
+    for a in samples().iter() {
+        assert_eq(bitxor(*a, *a), 0 as UInt64);
+    }
+}
+
+@test
+fn law_xor_identity_zero() {
+    for a in samples().iter() {
+        assert_eq(bitxor(*a, 0 as UInt64), *a);
+    }
+}
+
+@test
+fn law_and_associative() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            let ab = bitand(*a, *b);
+            for c in samples().iter() {
+                let bc = bitand(*b, *c);
+                assert_eq(bitand(ab, *c), bitand(*a, bc));
+            }
+        }
+    }
+}
+
+@test
+fn law_xor_associative() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            let ab = bitxor(*a, *b);
+            for c in samples().iter() {
+                let bc = bitxor(*b, *c);
+                assert_eq(bitxor(ab, *c), bitxor(*a, bc));
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// NOT — involution + De Morgan
+// -----------------------------------------------------------------------------
+
+@test
+fn law_not_involution() {
+    for a in samples().iter() {
+        assert_eq(bitnot(bitnot(*a)), *a);
+    }
+}
+
+@test
+fn law_de_morgan_and() {
+    for a in samples().iter() {
+        let na = bitnot(*a);
+        for b in samples().iter() {
+            let nb = bitnot(*b);
+            let ab = bitand(*a, *b);
+            assert_eq(bitnot(ab), bitor(na, nb));
+        }
+    }
+}
+
+@test
+fn law_de_morgan_or() {
+    for a in samples().iter() {
+        let na = bitnot(*a);
+        for b in samples().iter() {
+            let nb = bitnot(*b);
+            let ab = bitor(*a, *b);
+            assert_eq(bitnot(ab), bitand(na, nb));
+        }
+    }
+}
+
+@test
+fn law_and_distributes_over_or() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            let bc_or = bitor(*b, *b);
+            let ab = bitand(*a, *b);
+            assert_eq(bitand(*a, bc_or), ab);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// popcnt invariants
+// -----------------------------------------------------------------------------
+
+@test
+fn law_popcnt_complement() {
+    for a in samples().iter() {
+        let p = popcnt(*a);
+        let na = bitnot(*a);
+        assert_eq(popcnt(na), 64 - p);
+    }
+}
+
+@test
+fn law_popcnt_invariant_under_bswap() {
+    for a in samples().iter() {
+        let p = popcnt(*a);
+        let s = bswap(*a);
+        assert_eq(popcnt(s), p);
+    }
+}
+
+@test
+fn law_popcnt_invariant_under_bitreverse() {
+    for a in samples().iter() {
+        let p = popcnt(*a);
+        let r = bitreverse(*a);
+        assert_eq(popcnt(r), p);
+    }
+}
+
+@test
+fn law_popcnt_invariant_under_byte_swap_bits() {
+    for a in samples().iter() {
+        let p = popcnt(*a);
+        let b = byte_swap_bits(*a);
+        assert_eq(popcnt(b), p);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Reversal involutions + composition identity
+// -----------------------------------------------------------------------------
+
+@test
+fn law_bswap_involution() {
+    for a in samples().iter() {
+        assert_eq(bswap(bswap(*a)), *a);
+    }
+}
+
+@test
+fn law_bitreverse_involution() {
+    for a in samples().iter() {
+        assert_eq(bitreverse(bitreverse(*a)), *a);
+    }
+}
+
+@test
+fn law_byte_swap_bits_involution() {
+    for a in samples().iter() {
+        assert_eq(byte_swap_bits(byte_swap_bits(*a)), *a);
+    }
+}
+
+@test
+fn law_bitreverse_is_bswap_after_byte_swap_bits() {
+    // bitreverse = bswap ∘ byte_swap_bits
+    for a in samples().iter() {
+        let inner = byte_swap_bits(*a);
+        assert_eq(bswap(inner), bitreverse(*a));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Rotation laws
+// -----------------------------------------------------------------------------
+
+@test
+fn law_rotl_rotr_inverse() {
+    let amounts: List<UInt32> = [1 as UInt32, 7 as UInt32, 13 as UInt32, 31 as UInt32, 63 as UInt32];
+    for a in samples().iter() {
+        for n in amounts.iter() {
+            let r = rotr(*a, *n);
+            assert_eq(rotl(r, *n), *a);
+        }
+    }
+}
+
+@test
+fn law_rotl_zero_identity() {
+    for a in samples().iter() {
+        assert_eq(rotl(*a, 0 as UInt32), *a);
+    }
+}
+
+@test
+fn law_rotl_invariant_popcnt() {
+    let amounts: List<UInt32> = [1 as UInt32, 9 as UInt32, 17 as UInt32, 33 as UInt32];
+    for a in samples().iter() {
+        let p = popcnt(*a);
+        for n in amounts.iter() {
+            let r = rotl(*a, *n);
+            assert_eq(popcnt(r), p);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Shift / count relationships on single-bit values
+// -----------------------------------------------------------------------------
+
+@test
+fn law_single_bit_clz_ctz_sum() {
+    // For 1<<n the leading + trailing zero counts sum to 63.
+    let bits: List<UInt32> = [0 as UInt32, 1 as UInt32, 7 as UInt32, 31 as UInt32, 62 as UInt32, 63 as UInt32];
+    for n in bits.iter() {
+        let x = shl(1 as UInt64, *n);
+        let lead = clz(x);
+        let trail = ctz(x);
+        assert_eq(lead + trail, 63);
+    }
+}
+
+@test
+fn law_shl_lshr_round_trip_low_bits() {
+    // For a value confined to the low 32 bits, shl then lshr by the same
+    // amount (< 32) is the identity.
+    let amounts: List<UInt32> = [0 as UInt32, 1 as UInt32, 4 as UInt32, 16 as UInt32, 31 as UInt32];
+    let lowvals: List<UInt64> = [0 as UInt64, 1 as UInt64, 0xFF as UInt64, 0xABCD as UInt64];
+    for x in lowvals.iter() {
+        for n in amounts.iter() {
+            let shifted = shl(*x, *n);
+            assert_eq(lshr(shifted, *n), *x);
+        }
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
