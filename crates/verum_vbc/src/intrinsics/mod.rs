@@ -140,6 +140,11 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
             "round" => "round_f64",
             "fabs" => "abs_f64",
             "abs" => "abs_signed",
+            // Float negation routes to the polymorphic `neg` (ArithSubOpcode
+            // PolyNeg dispatches int-vs-float by operand type), so `fneg` and
+            // the `fms = fma(a, b, -c)` helper that calls it negate floats
+            // correctly.  `"fneg"` had no registry entry → nil.
+            "fneg" => "neg",
             "copysign" => "copysign_f64",
             "fmod" => "fmod_f64",
             "minnum" => "minnum_f64",

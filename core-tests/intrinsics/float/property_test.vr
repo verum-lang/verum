@@ -1,0 +1,173 @@
+// =============================================================================
+// core-tests/intrinsics/float/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for the float intrinsics.  We sweep exact-representable
+// samples and use only identities that hold WITHOUT rounding error (sign
+// algebra, min/max lattice, floor/ceil bracketing, pow at small integer
+// exponents, fma with a zero addend).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.float.{
+    sqrt, pow, fma, fabs, fneg, copysign, minnum, maxnum, floor, ceil, trunc,
+};
+
+fn samples() -> List<Float> {
+    [0.0, 1.0, -1.0, 2.0, -2.0, 0.5, -0.5, 3.0, -3.0, 16.0, -16.0, 100.0, -7.0]
+}
+
+// -----------------------------------------------------------------------------
+// Sign algebra
+// -----------------------------------------------------------------------------
+
+@test
+fn law_fneg_involution() {
+    for x in samples().iter() {
+        assert_eq(fneg(fneg(*x)), *x);
+    }
+}
+
+@test
+fn law_fabs_idempotent() {
+    for x in samples().iter() {
+        let a = fabs(*x);
+        assert_eq(fabs(a), a);
+    }
+}
+
+@test
+fn law_fabs_of_neg_equals_fabs() {
+    for x in samples().iter() {
+        assert_eq(fabs(fneg(*x)), fabs(*x));
+    }
+}
+
+@test
+fn law_fabs_nonnegative() {
+    for x in samples().iter() {
+        assert(fabs(*x) >= 0.0);
+    }
+}
+
+@test
+fn law_copysign_magnitude_preserved() {
+    for x in samples().iter() {
+        // copysign keeps |x|, takes sign of the second arg.
+        assert_eq(fabs(copysign(*x, 1.0)), fabs(*x));
+        assert_eq(copysign(*x, 1.0), fabs(*x));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// min / max lattice
+// -----------------------------------------------------------------------------
+
+@test
+fn law_minnum_le_maxnum() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert(minnum(*a, *b) <= maxnum(*a, *b));
+        }
+    }
+}
+
+@test
+fn law_min_max_sum_invariant() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            // {min, max} is a permutation of {a, b}.
+            assert_eq(minnum(*a, *b) + maxnum(*a, *b), *a + *b);
+        }
+    }
+}
+
+@test
+fn law_minnum_commutative() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert_eq(minnum(*a, *b), minnum(*b, *a));
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Rounding bracketing
+// -----------------------------------------------------------------------------
+
+@test
+fn law_floor_le_ceil() {
+    for x in samples().iter() {
+        assert(floor(*x) <= ceil(*x));
+    }
+}
+
+@test
+fn law_floor_of_integer_is_self() {
+    for x in samples().iter() {
+        // every sample is integer-valued except ±0.5
+        let f = floor(*x);
+        assert(f <= *x);
+        assert(*x - f < 1.0);
+    }
+}
+
+@test
+fn law_trunc_magnitude_le() {
+    for x in samples().iter() {
+        assert(fabs(trunc(*x)) <= fabs(*x));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// pow / fma / sqrt
+// -----------------------------------------------------------------------------
+
+@test
+fn law_pow_zero_is_one() {
+    for x in samples().iter() {
+        if *x != 0.0 {
+            assert_eq(pow(*x, 0.0), 1.0);
+        }
+    }
+}
+
+@test
+fn law_pow_one_is_identity() {
+    for x in samples().iter() {
+        assert_eq(pow(*x, 1.0), *x);
+    }
+}
+
+@test
+fn law_pow_two_is_square() {
+    for x in samples().iter() {
+        assert_eq(pow(*x, 2.0), *x * *x);
+    }
+}
+
+@test
+fn law_fma_zero_addend_is_product() {
+    for a in samples().iter() {
+        for b in samples().iter() {
+            assert_eq(fma(*a, *b, 0.0), *a * *b);
+        }
+    }
+}
+
+@test
+fn law_sqrt_of_square_nonneg() {
+    for x in samples().iter() {
+        let sq = *x * *x;
+        let r = sqrt(sq);
+        assert_eq(r, fabs(*x));
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

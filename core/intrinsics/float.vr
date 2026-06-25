@@ -95,7 +95,11 @@ public fn round<T>(x: T) -> T { @intrinsic("round", x) }
 public fn roundeven<T>(x: T) -> T { @intrinsic("roundeven", x) }
 
 /// Truncate toward zero
-public fn trunc<T>(x: T) -> T { @intrinsic("trunc", x) }
+// Routes to the dedicated `trunc_f64` (round toward zero) rather than the bare
+// `"trunc"` name, which is owned by the integer-truncation intrinsic
+// (`conversion.itrunc`).  The generic float value is f64 at runtime, so the
+// f64 form is width-correct for both Float32 and Float64 callers.
+public fn trunc<T>(x: T) -> T { @intrinsic("trunc_f64", x) }
 
 /// Round to nearest integer
 public fn nearbyint<T>(x: T) -> T { @intrinsic("nearbyint", x) }
@@ -363,11 +367,15 @@ public fn infinity() -> Float { @intrinsic("f64_infinity") }
 /// Generic NaN (Float64)
 public fn nan() -> Float { @intrinsic("f64_nan") }
 
-/// Machine epsilon for Float64
-public fn epsilon() -> Float { @intrinsic("f64_epsilon") }
+// These are plain IEEE-754 double constants — there is no need for a dedicated
+// intrinsic (the `f64_epsilon` / `f64_min_positive` / `f64_max` names were never
+// registered, so the @intrinsic form returned nil).  Returning the literal is
+// the canonical, const-foldable form.
+/// Machine epsilon for Float64 (2^-52)
+public fn epsilon() -> Float { 2.220446049250313e-16 }
 
-/// Smallest positive normal Float64
-public fn min_positive() -> Float { @intrinsic("f64_min_positive") }
+/// Smallest positive normal Float64 (2^-1022)
+public fn min_positive() -> Float { 2.2250738585072014e-308 }
 
 /// Largest finite Float64
-public fn max_float() -> Float { @intrinsic("f64_max") }
+public fn max_float() -> Float { 1.7976931348623157e308 }
