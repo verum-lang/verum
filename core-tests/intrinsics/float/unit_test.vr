@@ -1,0 +1,244 @@
+// =============================================================================
+// core-tests/intrinsics/float/unit_test.vr
+// =============================================================================
+//
+// API-surface coverage for `core/intrinsics/float.vr` — IEEE-754 float
+// intrinsics that map to LLVM/libm: elementary functions, rounding, fused
+// multiply-add, sign/comparison, trig, hyperbolic, classification, and special
+// values.  Tests use exact-representable points (sqrt(4)=2, sin(0)=0, …) so
+// equality holds without tolerance.  Deep defects are pinned in
+// `regression_test.vr` and ranked in `audit.md`.
+//
+// Runtime model: VBC floats are IEEE f64 (Float32 widens to f64 at runtime), so
+// the generic forms are f64-natural; `_f32`/`_f64` carry their width.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.float.{
+    sqrt, cbrt, exp, exp2, expm1, log, log1p, log2, log10, pow, powi, hypot,
+    floor, ceil, round, trunc,
+    fma, fms, copysign, fabs, fneg, minnum, maxnum, fmod,
+    sin, cos, tan, asin, acos, atan, atan2,
+    sinh, cosh, tanh,
+    is_nan, is_inf, is_finite, is_normal, is_infinite,
+    infinity, nan, epsilon, min_positive, max_float,
+};
+
+// -----------------------------------------------------------------------------
+// SECTION 1 — Elementary functions
+// -----------------------------------------------------------------------------
+
+@test
+fn sqrt_perfect_square() { assert_eq(sqrt(4.0), 2.0); }
+
+@test
+fn sqrt_zero() { assert_eq(sqrt(0.0), 0.0); }
+
+@test
+fn cbrt_perfect_cube() { assert_eq(cbrt(27.0), 3.0); }
+
+@test
+fn exp_zero_is_one() { assert_eq(exp(0.0), 1.0); }
+
+@test
+fn exp2_three_is_eight() { assert_eq(exp2(3.0), 8.0); }
+
+@test
+fn expm1_zero() { assert_eq(expm1(0.0), 0.0); }
+
+@test
+fn log_one_is_zero() { assert_eq(log(1.0), 0.0); }
+
+@test
+fn log1p_zero() { assert_eq(log1p(0.0), 0.0); }
+
+@test
+fn log2_eight_is_three() { assert_eq(log2(8.0), 3.0); }
+
+@test
+fn log10_thousand_is_three() { assert_eq(log10(1000.0), 3.0); }
+
+@test
+fn pow_two_ten() { assert_eq(pow(2.0, 10.0), 1024.0); }
+
+@test
+fn powi_two_cubed() { assert_eq(powi(2.0, 3), 8.0); }
+
+@test
+fn hypot_three_four_five() { assert_eq(hypot(3.0, 4.0), 5.0); }
+
+// -----------------------------------------------------------------------------
+// SECTION 2 — Rounding
+// -----------------------------------------------------------------------------
+
+@test
+fn floor_positive() { assert_eq(floor(2.7), 2.0); }
+
+@test
+fn floor_negative() { assert_eq(floor(-2.1), -3.0); }
+
+@test
+fn ceil_positive() { assert_eq(ceil(2.1), 3.0); }
+
+@test
+fn ceil_negative() { assert_eq(ceil(-2.7), -2.0); }
+
+@test
+fn round_half_up() { assert_eq(round(2.5), 3.0); }
+
+@test
+fn trunc_toward_zero_positive() { assert_eq(trunc(2.9), 2.0); }
+
+@test
+fn trunc_toward_zero_negative() { assert_eq(trunc(-2.9), -2.0); }
+
+// -----------------------------------------------------------------------------
+// SECTION 3 — Fused multiply-add / -subtract
+// -----------------------------------------------------------------------------
+
+@test
+fn fma_basic() { assert_eq(fma(2.0, 3.0, 4.0), 10.0); }
+
+@test
+fn fms_basic() { assert_eq(fms(2.0, 3.0, 4.0), 2.0); }
+
+// -----------------------------------------------------------------------------
+// SECTION 4 — Sign / comparison
+// -----------------------------------------------------------------------------
+
+@test
+fn copysign_negative() { assert_eq(copysign(3.0, -1.0), -3.0); }
+
+@test
+fn copysign_positive() { assert_eq(copysign(-3.0, 1.0), 3.0); }
+
+@test
+fn fabs_negative() { assert_eq(fabs(-5.0), 5.0); }
+
+@test
+fn fabs_positive() { assert_eq(fabs(5.0), 5.0); }
+
+@test
+fn fneg_positive() { assert_eq(fneg(5.0), -5.0); }
+
+@test
+fn fneg_negative() { assert_eq(fneg(-5.0), 5.0); }
+
+@test
+fn minnum_basic() { assert_eq(minnum(2.0, 3.0), 2.0); }
+
+@test
+fn maxnum_basic() { assert_eq(maxnum(2.0, 3.0), 3.0); }
+
+@test
+fn fmod_basic() { assert_eq(fmod(7.0, 3.0), 1.0); }
+
+// -----------------------------------------------------------------------------
+// SECTION 5 — Trigonometry
+// -----------------------------------------------------------------------------
+
+@test
+fn sin_zero() { assert_eq(sin(0.0), 0.0); }
+
+@test
+fn cos_zero() { assert_eq(cos(0.0), 1.0); }
+
+@test
+fn tan_zero() { assert_eq(tan(0.0), 0.0); }
+
+@test
+fn asin_zero() { assert_eq(asin(0.0), 0.0); }
+
+@test
+fn acos_one() { assert_eq(acos(1.0), 0.0); }
+
+@test
+fn atan_zero() { assert_eq(atan(0.0), 0.0); }
+
+@test
+fn atan2_quarter_pi() { assert_eq(atan2(1.0, 1.0), 0.7853981633974483); }
+
+// -----------------------------------------------------------------------------
+// SECTION 6 — Hyperbolic
+// -----------------------------------------------------------------------------
+
+@test
+fn sinh_zero() { assert_eq(sinh(0.0), 0.0); }
+
+@test
+fn cosh_zero() { assert_eq(cosh(0.0), 1.0); }
+
+@test
+fn tanh_zero() { assert_eq(tanh(0.0), 0.0); }
+
+// -----------------------------------------------------------------------------
+// SECTION 7 — Classification
+// -----------------------------------------------------------------------------
+
+@test
+fn is_nan_true() { assert(is_nan(nan())); }
+
+@test
+fn is_nan_false() { assert(!is_nan(1.0)); }
+
+@test
+fn is_inf_true() { assert(is_inf(infinity())); }
+
+@test
+fn is_inf_false() { assert(!is_inf(1.0)); }
+
+@test
+fn is_infinite_alias() { assert(is_infinite(infinity())); }
+
+@test
+fn is_finite_true() { assert(is_finite(1.0)); }
+
+@test
+fn is_finite_false_inf() { assert(!is_finite(infinity())); }
+
+@test
+fn is_finite_false_nan() { assert(!is_finite(nan())); }
+
+@test
+fn is_normal_true() { assert(is_normal(1.0)); }
+
+// -----------------------------------------------------------------------------
+// SECTION 8 — Special values / constants
+// -----------------------------------------------------------------------------
+
+@test
+fn nan_is_nan() { assert(is_nan(nan())); }
+
+@test
+fn infinity_is_inf() { assert(is_inf(infinity())); }
+
+@test
+fn infinity_greater_than_max() { assert(infinity() > max_float()); }
+
+@test
+fn epsilon_is_positive_and_tiny() {
+    assert(epsilon() > 0.0);
+    assert(epsilon() < 0.001);
+    // 1.0 + epsilon must be distinguishable from 1.0
+    assert(1.0 + epsilon() > 1.0);
+}
+
+@test
+fn min_positive_is_positive_and_tiny() {
+    assert(min_positive() > 0.0);
+    assert(min_positive() < epsilon());
+}
+
+@test
+fn max_float_is_large_and_finite() {
+    assert(max_float() > 1.0);
+    assert(is_finite(max_float()));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

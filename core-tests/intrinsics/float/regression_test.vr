@@ -1,0 +1,112 @@
+// =============================================================================
+// core-tests/intrinsics/float/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core/intrinsics/float.vr`.  Tests pinning a CLOSED
+// defect are normal `@test` PASS-GUARDs; tests pinning a STILL-OPEN defect
+// carry `@ignore` with a pointer into `audit.md` + the task tracker.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.float.{
+    trunc, fneg, fms, epsilon, min_positive, max_float,
+    roundeven, rint, nearbyint, minimum, maximum,
+    is_subnormal, is_sign_negative, is_sign_positive,
+    nan, infinity,
+};
+
+// -----------------------------------------------------------------------------
+// CLOSED — pass guards
+// -----------------------------------------------------------------------------
+
+// FLOAT-TRUNC-COLLISION-1: float `trunc` shared the bare `"trunc"` intrinsic
+// name with integer `conversion.itrunc`; it returned the input unchanged
+// (identity) instead of truncating.  Now routes to `trunc_f64`.
+@test
+fn regression_trunc_truncates_not_identity() {
+    assert_eq(trunc(2.9), 2.0);
+    assert_eq(trunc(-2.9), -2.0);
+}
+
+// FLOAT-FNEG-1: `fneg` had no registry entry → nil (and `fms`, which negates
+// its third operand via `fneg`, produced garbage).  Now aliased to the
+// polymorphic `neg` (PolyNeg, float-aware).
+@test
+fn regression_fneg_was_nil() {
+    assert_eq(fneg(5.0), -5.0);
+}
+
+@test
+fn regression_fms_was_garbage() {
+    // fms(a,b,c) = a*b - c = 2*3 - 4 = 2
+    assert_eq(fms(2.0, 3.0, 4.0), 2.0);
+}
+
+// FLOAT-CONSTS-1: epsilon/min_positive/max_float used unregistered
+// `@intrinsic("f64_epsilon")` etc. → nil.  Now plain IEEE-754 literals.
+@test
+fn regression_float_constants_were_nil() {
+    assert(epsilon() > 0.0);
+    assert(min_positive() > 0.0);
+    assert(max_float() > 1.0);
+    assert(infinity() > max_float());
+}
+
+// -----------------------------------------------------------------------------
+// OPEN — @ignore pins
+// -----------------------------------------------------------------------------
+
+@ignore("FLOAT-ROUNDMODES-1 — roundeven/rint/nearbyint resolve to nil; need round-half-to-even MathSubOpcode. audit.md §3, task #18.")
+@test
+fn regression_roundeven_round_half_to_even() {
+    assert_eq(roundeven(2.5), 2.0);
+    assert_eq(roundeven(3.5), 4.0);
+}
+
+@ignore("FLOAT-ROUNDMODES-1 — rint resolves to nil. audit.md §3, task #18.")
+@test
+fn regression_rint_round_to_nearest_even() {
+    assert_eq(rint(2.5), 2.0);
+}
+
+@ignore("FLOAT-ROUNDMODES-1 — nearbyint resolves to nil. audit.md §3, task #18.")
+@test
+fn regression_nearbyint_round_to_nearest_even() {
+    assert_eq(nearbyint(0.5), 0.0);
+}
+
+@ignore("FLOAT-MINMAX-1 — minimum/maximum (IEEE 754-2019, NaN-propagating) resolve to nil. audit.md §3, task #19.")
+@test
+fn regression_minimum_maximum() {
+    assert_eq(minimum(2.0, 3.0), 2.0);
+    assert_eq(maximum(2.0, 3.0), 3.0);
+}
+
+@ignore("FLOAT-CLASSIFY-1 — is_subnormal resolves to nil. audit.md §3, task #20.")
+@test
+fn regression_is_subnormal() {
+    assert(!is_subnormal(1.0));
+    assert(is_subnormal(min_positive() / 2.0));
+}
+
+@ignore("FLOAT-CLASSIFY-1 — is_sign_negative resolves to nil. audit.md §3, task #20.")
+@test
+fn regression_is_sign_negative() {
+    assert(is_sign_negative(-1.0));
+    assert(!is_sign_negative(1.0));
+}
+
+@ignore("FLOAT-CLASSIFY-1 — is_sign_positive resolves to nil. audit.md §3, task #20.")
+@test
+fn regression_is_sign_positive() {
+    assert(is_sign_positive(1.0));
+    assert(!is_sign_positive(-1.0));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,105 @@
+// =============================================================================
+// core-tests/intrinsics/float/integration_test.vr
+// =============================================================================
+//
+// Cross-cutting usage of the float intrinsics in the small numeric kernels that
+// consume them: vector geometry (hypot/sqrt), Horner polynomial evaluation
+// (fma), and saturating/clamping with the min/max + sign family.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.float.{
+    sqrt, hypot, fma, fabs, fneg, copysign, minnum, maxnum, floor, pow, exp, log,
+};
+
+// --- Vector geometry ----------------------------------------------------------
+
+fn length2d(x: Float, y: Float) -> Float { hypot(x, y) }
+
+@test
+fn vector_length_3_4_5() {
+    assert_eq(length2d(3.0, 4.0), 5.0);
+}
+
+@test
+fn vector_length_via_sqrt_matches_hypot() {
+    let x = 6.0;
+    let y = 8.0;
+    let viahyp = hypot(x, y);
+    let viasqrt = sqrt(x * x + y * y);
+    assert_eq(viahyp, viasqrt);
+    assert_eq(viahyp, 10.0);
+}
+
+// --- Horner polynomial evaluation via fma -------------------------------------
+
+// Evaluate 2x^3 + 3x^2 + 4x + 5 at x using Horner's method with fma.
+fn horner(x: Float) -> Float {
+    let mut acc = 2.0;
+    acc = fma(acc, x, 3.0);
+    acc = fma(acc, x, 4.0);
+    acc = fma(acc, x, 5.0);
+    acc
+}
+
+@test
+fn horner_at_two() {
+    // 2*8 + 3*4 + 4*2 + 5 = 16 + 12 + 8 + 5 = 41
+    assert_eq(horner(2.0), 41.0);
+}
+
+@test
+fn horner_at_zero_is_constant() {
+    assert_eq(horner(0.0), 5.0);
+}
+
+// --- Clamp via min/max --------------------------------------------------------
+
+fn clampf(x: Float, lo: Float, hi: Float) -> Float {
+    maxnum(lo, minnum(x, hi))
+}
+
+@test
+fn clamp_within_range() {
+    assert_eq(clampf(5.0, 0.0, 10.0), 5.0);
+}
+
+@test
+fn clamp_below_and_above() {
+    assert_eq(clampf(-3.0, 0.0, 10.0), 0.0);
+    assert_eq(clampf(42.0, 0.0, 10.0), 10.0);
+}
+
+// --- Sign-magnitude composition -----------------------------------------------
+
+@test
+fn copysign_reconstructs_value() {
+    let v = -7.5;
+    let mag = fabs(v);
+    let neg = fneg(mag);
+    assert_eq(copysign(mag, v), neg);
+    assert_eq(copysign(mag, v), v);
+}
+
+// --- exp/log inverse on an exact point ----------------------------------------
+
+@test
+fn exp_log_inverse_at_one() {
+    // log(exp(0)) = log(1) = 0
+    assert_eq(log(exp(0.0)), 0.0);
+}
+
+@test
+fn pow_matches_repeated_exp_log() {
+    // 2^3 via pow == 8
+    assert_eq(pow(2.0, 3.0), 8.0);
+    assert_eq(floor(pow(2.0, 3.0)), 8.0);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
