@@ -6622,7 +6622,8 @@ impl VbcCodegen {
             // arith / bitwise / unary-shape names.
             "add" | "sub" | "mul" | "div" | "rem"
             | "neg"
-            | "bitand" | "bitor" | "bitxor" | "shl" | "shr"
+            | "bitand" | "bitor" | "bitxor" | "bitnot"
+            | "shl" | "shr" | "lshr" | "ashr"
             | "clamp" | "signum" | "abs_signed" => {
                 if let Some(intrinsic_info) = lookup_intrinsic(name)
                     && args.len() == intrinsic_info.intrinsic.param_count as usize
@@ -25153,6 +25154,19 @@ impl VbcCodegen {
                         b: args[1],
                     });
                 }
+            // Logical (zero-filling) right shift — `lshr` registry entry.
+            // Without this arm `DirectOpcode(Ushr)` fell to the `_ => LoadNil`
+            // fallback even though the opcode + interp handler (`handle_ushr`)
+            // + LLVM lowering (`BitwiseOp::Ushr`) all exist.
+            Opcode::Ushr
+                if args.len() >= 2 => {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::Ushr,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                }
 
             // Integer comparisons — emit CmpI (boolean result).  Without
             // these arms the comparison intrinsics (`eq`/`ne`/`lt`/`le`/`gt`/
@@ -25764,6 +25778,47 @@ impl VbcCodegen {
             InlineSequenceId::Ctz => {
                 self.emit_arith_extended_unary(ArithSubOpcode::Ctz, args, dest);
             }
+            // clz at 32-bit width: clz64(x) - 32.  The 32-bit operand is
+            // zero-extended in the i64 register so the high 32 bits are
+            // always zero; the generic 64-bit clz over-counts by exactly 32.
+            InlineSequenceId::ClzU32 => {
+                let clz_tmp = self.ctx.alloc_temp();
+                self.emit_arith_extended_unary(ArithSubOpcode::Clz, args, clz_tmp);
+                let thirty_two = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: thirty_two,
+                    value: 32,
+                });
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Sub,
+                    dst: dest,
+                    a: clz_tmp,
+                    b: thirty_two,
+                });
+                self.ctx.free_temp(thirty_two);
+                self.ctx.free_temp(clz_tmp);
+            }
+            // ctz at 32-bit width: ctz64(x | (1<<32)).  The guard bit caps
+            // the result at 32 for an all-zero low word; any real trailing
+            // run in the low 32 bits is ≤31 and dominates the guard bit.
+            InlineSequenceId::CtzU32 => {
+                let guard = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: guard,
+                    value: 1i64 << 32,
+                });
+                let masked = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Bitwise {
+                    op: BitwiseOp::Or,
+                    dst: masked,
+                    a: args[0],
+                    b: guard,
+                });
+                let masked_args = [masked];
+                self.emit_arith_extended_unary(ArithSubOpcode::Ctz, &masked_args, dest);
+                self.ctx.free_temp(masked);
+                self.ctx.free_temp(guard);
+            }
             InlineSequenceId::Ilog2 => {
                 // ilog2(x) = 63 - clz(x)
                 let clz_tmp = self.ctx.alloc_temp();
@@ -25792,6 +25847,18 @@ impl VbcCodegen {
             // Bit reverse
             InlineSequenceId::Bitreverse => {
                 self.emit_arith_extended_unary(ArithSubOpcode::BitReverse, args, dest);
+            }
+
+            // byte_swap_bits = bswap(bitreverse(x)) — reverse bits within each
+            // byte, byte positions unchanged.  Composed from the two existing
+            // unary bit-manip opcodes, so it lowers identically on Tier-0 and
+            // Tier-1 with no new dispatch arm.
+            InlineSequenceId::ByteSwapBits => {
+                let rev_tmp = self.ctx.alloc_temp();
+                self.emit_arith_extended_unary(ArithSubOpcode::BitReverse, args, rev_tmp);
+                let rev_args = [rev_tmp];
+                self.emit_arith_extended_unary(ArithSubOpcode::Bswap, &rev_args, dest);
+                self.ctx.free_temp(rev_tmp);
             }
 
             // Rotation - binary operations

@@ -24,9 +24,13 @@
 
 mount core.prelude.*;
 mount core.intrinsics.bitwise.{
+    bitand, bitor, bitxor, bitnot,
+    lshr, ashr,
     clz, ctz, popcnt,
+    clz_u32, ctz_u32,
     clz_u64, ctz_u64, popcnt_u64,
     rotl, rotr, fshl, fshr,
+    byte_swap_bits,
 };
 
 // -----------------------------------------------------------------------------
@@ -190,6 +194,63 @@ fn regression_fshl_u64_equivalent_to_direct_rotate_left_when_hi_eq_lo() {
     let via_fshl: UInt64 = fshl(x, x, n);
     let via_rotate: Int = @intrinsic("rotate_left", x, n);
     assert_eq(via_fshl as Int, via_rotate);
+}
+
+// -----------------------------------------------------------------------------
+// §C — wrapper/body canonical-name + missing-shift + width defects
+//      (BITWISE-CANONICAL-NAME-1, -SHIFT-LSHR-ASHR-1, -CLZ-CTZ-WIDTH-1,
+//       -BYTE-SWAP-BITS-1; all CLOSED — see audit.md §2).
+//
+// Each pin is the exact repro that returned `nil` / a wrong width before the
+// fix.  They are normal `@test` PASS-GUARDs (the defects are closed), kept
+// here to lock the dispatch shapes against reappearance.
+// -----------------------------------------------------------------------------
+
+// BITWISE-CANONICAL-NAME-1: `bitnot` had no call-site intercept and its body
+// `@intrinsic("not", x)` was unregistered → `nil`.
+@test
+fn regression_bitnot_was_nil() {
+    assert_eq(bitnot(0 as UInt64), 0xFFFFFFFFFFFFFFFF as UInt64);
+}
+
+// The body path is now authoritative — verify the logical binaries resolve via
+// their canonical names too (not just the intercept).
+@test
+fn regression_logical_canonical_names() {
+    assert_eq(bitand(0xFF as UInt64, 0x0F as UInt64), 0x0F as UInt64);
+    assert_eq(bitor(0xF0 as UInt64, 0x0F as UInt64), 0xFF as UInt64);
+    assert_eq(bitxor(0xFF as UInt64, 0x0F as UInt64), 0xF0 as UInt64);
+}
+
+// BITWISE-SHIFT-LSHR-ASHR-1: both shifts had no registry entry → `nil`.
+@test
+fn regression_lshr_was_nil() {
+    assert_eq(lshr(0x8000000000000000 as UInt64, 63 as UInt32), 1 as UInt64);
+}
+
+@test
+fn regression_ashr_was_nil() {
+    assert_eq(ashr(-256, 4 as UInt32), -16);
+}
+
+// BITWISE-CLZ-CTZ-WIDTH-1: `clz_u32(1)` returned the 64-bit count (63).
+@test
+fn regression_clz_u32_width() {
+    assert_eq(clz_u32(1 as UInt32), 31);
+    assert_eq(clz_u32(0 as UInt32), 32);
+}
+
+@test
+fn regression_ctz_u32_width() {
+    assert_eq(ctz_u32(0 as UInt32), 32);
+    assert_eq(ctz_u32(0x80000000 as UInt32), 31);
+}
+
+// BITWISE-BYTE-SWAP-BITS-1: `byte_swap_bits` was unregistered → `nil`.
+@test
+fn regression_byte_swap_bits_was_nil() {
+    assert_eq(byte_swap_bits(0x01 as UInt64), 0x80 as UInt64);
+    assert_eq(byte_swap_bits(0x0F as UInt64), 0xF0 as UInt64);
 }
 
 // =============================================================================

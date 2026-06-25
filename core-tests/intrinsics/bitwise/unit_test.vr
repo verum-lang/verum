@@ -1,0 +1,387 @@
+// =============================================================================
+// core-tests/intrinsics/bitwise/unit_test.vr
+// =============================================================================
+//
+// API-surface coverage for `core/intrinsics/bitwise.vr` — the bitwise
+// intrinsics that map directly to LLVM/CPU instructions.
+//
+// One @test per public function / behavioural axis, grouped by the source
+// module's own section banners.  Defects discovered while building this file
+// are pinned in `regression_test.vr` and ranked in `audit.md`.
+//
+// NOTE on widths: VBC integer Values are untyped i64 at runtime, so the
+// *generic* forms (`clz`/`ctz`/`popcnt`/`bswap`/`bitreverse`/`bitnot`) are
+// 64-bit-natural by design (same rule as `intrinsics/arithmetic`).  The
+// type-specific `_u32` / `_u64` forms carry their width in the bytecode and
+// are tested at their native width.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.bitwise.{
+    bitand, bitor, bitxor, bitnot,
+    shl, shr, lshr, ashr,
+    rotl, rotr, fshl, fshr,
+    clz, ctz, popcnt, leading_ones, trailing_ones,
+    clz_u32, ctz_u32, popcnt_u32, clz_u64, ctz_u64, popcnt_u64,
+    bswap, bitreverse, byte_swap_bits,
+};
+
+// -----------------------------------------------------------------------------
+// SECTION 1 — Logical operations
+// -----------------------------------------------------------------------------
+
+@test
+fn bitand_masks_low_nibble() {
+    assert_eq(bitand(0xFF as UInt64, 0x0F as UInt64), 0x0F as UInt64);
+}
+
+@test
+fn bitand_disjoint_is_zero() {
+    assert_eq(bitand(0xF0 as UInt64, 0x0F as UInt64), 0 as UInt64);
+}
+
+@test
+fn bitand_identity_all_ones() {
+    assert_eq(bitand(0xDEADBEEF as UInt64, 0xFFFFFFFFFFFFFFFF as UInt64), 0xDEADBEEF as UInt64);
+}
+
+@test
+fn bitor_combines_nibbles() {
+    assert_eq(bitor(0xF0 as UInt64, 0x0F as UInt64), 0xFF as UInt64);
+}
+
+@test
+fn bitor_identity_zero() {
+    assert_eq(bitor(0xCAFE as UInt64, 0 as UInt64), 0xCAFE as UInt64);
+}
+
+@test
+fn bitxor_toggles_bits() {
+    assert_eq(bitxor(0xFF as UInt64, 0x0F as UInt64), 0xF0 as UInt64);
+}
+
+@test
+fn bitxor_self_is_zero() {
+    assert_eq(bitxor(0x123456789ABCDEF0 as UInt64, 0x123456789ABCDEF0 as UInt64), 0 as UInt64);
+}
+
+@test
+fn bitnot_zero_is_all_ones() {
+    assert_eq(bitnot(0 as UInt64), 0xFFFFFFFFFFFFFFFF as UInt64);
+}
+
+@test
+fn bitnot_all_ones_is_zero() {
+    assert_eq(bitnot(0xFFFFFFFFFFFFFFFF as UInt64), 0 as UInt64);
+}
+
+@test
+fn bitnot_is_involution() {
+    let x: UInt64 = 0xA5A5A5A5A5A5A5A5 as UInt64;
+    assert_eq(bitnot(bitnot(x)), x);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 2 — Shift operations
+// -----------------------------------------------------------------------------
+
+@test
+fn shl_basic() {
+    assert_eq(shl(1 as UInt64, 4 as UInt32), 16 as UInt64);
+}
+
+@test
+fn shl_to_msb() {
+    assert_eq(shl(1 as UInt64, 63 as UInt32), 0x8000000000000000 as UInt64);
+}
+
+@test
+fn shl_by_zero_is_identity() {
+    assert_eq(shl(0xFF as UInt64, 0 as UInt32), 0xFF as UInt64);
+}
+
+@test
+fn shr_positive_arithmetic() {
+    assert_eq(shr(0xFF as UInt64, 4 as UInt32), 0x0F as UInt64);
+}
+
+@test
+fn lshr_zero_fills_from_msb() {
+    // Logical shift: top bit becomes a 1 in the low position, not sign-extended.
+    assert_eq(lshr(0x8000000000000000 as UInt64, 63 as UInt32), 1 as UInt64);
+}
+
+@test
+fn lshr_basic() {
+    assert_eq(lshr(0xFF as UInt64, 4 as UInt32), 0x0F as UInt64);
+}
+
+@test
+fn lshr_all_ones() {
+    assert_eq(lshr(0xFFFFFFFFFFFFFFFF as UInt64, 60 as UInt32), 0xF as UInt64);
+}
+
+@test
+fn ashr_sign_extends_negative() {
+    assert_eq(ashr(-256, 4 as UInt32), -16);
+}
+
+@test
+fn ashr_negative_one_is_stable() {
+    assert_eq(ashr(-1, 5 as UInt32), -1);
+}
+
+@test
+fn ashr_positive_matches_lshr() {
+    assert_eq(ashr(256, 4 as UInt32), 16);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 3 — Rotation operations
+// -----------------------------------------------------------------------------
+
+@test
+fn rotl_basic() {
+    assert_eq(rotl(1 as UInt64, 4 as UInt32), 16 as UInt64);
+}
+
+@test
+fn rotl_msb_wraps_to_lsb() {
+    assert_eq(rotl(0x8000000000000000 as UInt64, 1 as UInt32), 1 as UInt64);
+}
+
+@test
+fn rotr_basic() {
+    assert_eq(rotr(8 as UInt64, 3 as UInt32), 1 as UInt64);
+}
+
+@test
+fn rotr_lsb_wraps_to_msb() {
+    assert_eq(rotr(1 as UInt64, 1 as UInt32), 0x8000000000000000 as UInt64);
+}
+
+@test
+fn rotl_zero_amount_is_identity() {
+    assert_eq(rotl(0xDEADBEEF as UInt64, 0 as UInt32), 0xDEADBEEF as UInt64);
+}
+
+@test
+fn fshl_distinct_halves() {
+    // high 64 bits of (hi:lo << 4) = (hi << 4) | (lo >> 60)
+    let hi: UInt64 = 0xAAAAAAAAAAAAAAAA as UInt64;
+    let lo: UInt64 = 0x5555555555555555 as UInt64;
+    assert_eq(fshl(hi, lo, 4 as UInt32), 0xAAAAAAAAAAAAAAA5 as UInt64);
+}
+
+@test
+fn fshr_distinct_halves() {
+    // low 64 bits of (hi:lo >> 4) = (hi << 60) | (lo >> 4)
+    let hi: UInt64 = 0xAAAAAAAAAAAAAAAA as UInt64;
+    let lo: UInt64 = 0x5555555555555555 as UInt64;
+    assert_eq(fshr(hi, lo, 4 as UInt32), 0xA555555555555555 as UInt64);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 4 — Bit counting (generic, 64-bit width)
+// -----------------------------------------------------------------------------
+
+@test
+fn clz_one() {
+    assert_eq(clz(1 as UInt64), 63);
+}
+
+@test
+fn clz_zero_is_full_width() {
+    assert_eq(clz(0 as UInt64), 64);
+}
+
+@test
+fn clz_msb_set_is_zero() {
+    assert_eq(clz(0x8000000000000000 as UInt64), 0);
+}
+
+@test
+fn ctz_basic() {
+    assert_eq(ctz(8 as UInt64), 3);
+}
+
+@test
+fn ctz_zero_is_full_width() {
+    assert_eq(ctz(0 as UInt64), 64);
+}
+
+@test
+fn ctz_odd_is_zero() {
+    assert_eq(ctz(1 as UInt64), 0);
+}
+
+@test
+fn popcnt_byte() {
+    assert_eq(popcnt(0xFF as UInt64), 8);
+}
+
+@test
+fn popcnt_zero() {
+    assert_eq(popcnt(0 as UInt64), 0);
+}
+
+@test
+fn popcnt_all_ones() {
+    assert_eq(popcnt(0xFFFFFFFFFFFFFFFF as UInt64), 64);
+}
+
+@test
+fn leading_ones_partial() {
+    assert_eq(leading_ones(0xF000000000000000 as UInt64), 4);
+}
+
+@test
+fn leading_ones_all() {
+    assert_eq(leading_ones(0xFFFFFFFFFFFFFFFF as UInt64), 64);
+}
+
+@test
+fn leading_ones_none() {
+    assert_eq(leading_ones(0 as UInt64), 0);
+}
+
+@test
+fn trailing_ones_partial() {
+    assert_eq(trailing_ones(0xFF as UInt64), 8);
+}
+
+@test
+fn trailing_ones_all() {
+    assert_eq(trailing_ones(0xFFFFFFFFFFFFFFFF as UInt64), 64);
+}
+
+@test
+fn trailing_ones_none() {
+    assert_eq(trailing_ones(0 as UInt64), 0);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 4b — Type-specific bit counting (native width)
+// -----------------------------------------------------------------------------
+
+@test
+fn clz_u32_one() {
+    assert_eq(clz_u32(1 as UInt32), 31);
+}
+
+@test
+fn clz_u32_zero_is_32() {
+    assert_eq(clz_u32(0 as UInt32), 32);
+}
+
+@test
+fn clz_u32_all_ones_is_zero() {
+    assert_eq(clz_u32(0xFFFFFFFF as UInt32), 0);
+}
+
+@test
+fn clz_u32_msb_is_zero() {
+    assert_eq(clz_u32(0x80000000 as UInt32), 0);
+}
+
+@test
+fn ctz_u32_basic() {
+    assert_eq(ctz_u32(8 as UInt32), 3);
+}
+
+@test
+fn ctz_u32_zero_is_32() {
+    assert_eq(ctz_u32(0 as UInt32), 32);
+}
+
+@test
+fn ctz_u32_msb_is_31() {
+    assert_eq(ctz_u32(0x80000000 as UInt32), 31);
+}
+
+@test
+fn popcnt_u32_all_ones() {
+    assert_eq(popcnt_u32(0xFFFFFFFF as UInt32), 32);
+}
+
+@test
+fn clz_u64_one() {
+    assert_eq(clz_u64(1 as UInt64), 63);
+}
+
+@test
+fn ctz_u64_basic() {
+    assert_eq(ctz_u64(8 as UInt64), 3);
+}
+
+@test
+fn popcnt_u64_nibble() {
+    assert_eq(popcnt_u64(0xF as UInt64), 4);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 5 — Bit manipulation
+// -----------------------------------------------------------------------------
+
+@test
+fn bswap_reverses_byte_order() {
+    assert_eq(bswap(0x0102030405060708 as UInt64), 0x0807060504030201 as UInt64);
+}
+
+@test
+fn bswap_is_involution() {
+    let x: UInt64 = 0xDEADBEEFCAFEBABE as UInt64;
+    assert_eq(bswap(bswap(x)), x);
+}
+
+@test
+fn bitreverse_one_to_msb() {
+    assert_eq(bitreverse(1 as UInt64), 0x8000000000000000 as UInt64);
+}
+
+@test
+fn bitreverse_msb_to_one() {
+    assert_eq(bitreverse(0x8000000000000000 as UInt64), 1 as UInt64);
+}
+
+@test
+fn bitreverse_is_involution() {
+    let x: UInt64 = 0x123456789ABCDEF0 as UInt64;
+    assert_eq(bitreverse(bitreverse(x)), x);
+}
+
+@test
+fn byte_swap_bits_low_byte() {
+    // 0x01 = 0b0000_0001 → reverse within byte → 0b1000_0000 = 0x80
+    assert_eq(byte_swap_bits(0x01 as UInt64), 0x80 as UInt64);
+}
+
+@test
+fn byte_swap_bits_high_to_low() {
+    assert_eq(byte_swap_bits(0x80 as UInt64), 0x01 as UInt64);
+}
+
+@test
+fn byte_swap_bits_nibble() {
+    // 0x0F = 0b0000_1111 → 0b1111_0000 = 0xF0
+    assert_eq(byte_swap_bits(0x0F as UInt64), 0xF0 as UInt64);
+}
+
+@test
+fn byte_swap_bits_full_byte_is_stable() {
+    assert_eq(byte_swap_bits(0xFF as UInt64), 0xFF as UInt64);
+}
+
+@test
+fn byte_swap_bits_is_involution() {
+    let x: UInt64 = 0xDEADBEEFCAFEBABE as UInt64;
+    assert_eq(byte_swap_bits(byte_swap_bits(x)), x);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

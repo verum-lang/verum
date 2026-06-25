@@ -511,6 +511,12 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::Clz => self.emit_clz(args),
             InlineSequenceId::Ilog2 => self.emit_clz(args), // ilog2 = 63 - clz, close enough for codegen
             InlineSequenceId::Ctz => self.emit_ctz(args),
+            // Width-correct count variants — the `- 32` / guard-bit adjustment
+            // is applied in the authoritative `codegen/expressions.rs`
+            // inline-sequence emission.  This intermediate-IR path emits the
+            // base 64-bit op (same approximation precedent as `Ilog2 => clz`).
+            InlineSequenceId::ClzU32 => self.emit_clz(args),
+            InlineSequenceId::CtzU32 => self.emit_ctz(args),
             InlineSequenceId::Popcnt => self.emit_popcnt(args),
             InlineSequenceId::Bswap => self.emit_bswap(args),
             InlineSequenceId::RotateLeft => self.emit_rotate_left(args),
@@ -571,6 +577,10 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::AtanhF64 => self.emit_math_extended(MathSubOpcode::AtanhF64, args),
             // Bit manipulation
             InlineSequenceId::Bitreverse => self.emit_bitreverse(args),
+            // byte_swap_bits = bswap ∘ bitreverse; the authoritative
+            // composition is emitted in `codegen/expressions.rs`.  This
+            // intermediate-IR path emits the bit-reverse component.
+            InlineSequenceId::ByteSwapBits => self.emit_bitreverse(args),
             // Conversion
             InlineSequenceId::IntToFloat => self.emit_int_to_float(args),
             InlineSequenceId::FloatToInt => self.emit_float_to_int(args),

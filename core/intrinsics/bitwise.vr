@@ -110,10 +110,14 @@ public fn trailing_ones<T>(x: T) -> Int {
 }
 
 // --- Type-specific bit counting ---
+// The `_u32` forms are width-correct: VBC integer Values are i64 at
+// runtime, so the generic `ctlz`/`cttz` count over all 64 bits.  The
+// dedicated `clz_u32`/`ctz_u32` intrinsics adjust for the 32-bit carrier
+// (`clz64(x) - 32` and `ctz64(x | 1<<32)` respectively).
 /// Count leading zeros for UInt32
-public fn clz_u32(x: UInt32) -> Int { @intrinsic("ctlz", x) }
+public fn clz_u32(x: UInt32) -> Int { @intrinsic("clz_u32", x) }
 /// Count trailing zeros for UInt32
-public fn ctz_u32(x: UInt32) -> Int { @intrinsic("cttz", x) }
+public fn ctz_u32(x: UInt32) -> Int { @intrinsic("ctz_u32", x) }
 /// Population count for UInt32
 public fn popcnt_u32(x: UInt32) -> Int { @intrinsic("ctpop", x) }
 /// Count leading zeros for UInt64
