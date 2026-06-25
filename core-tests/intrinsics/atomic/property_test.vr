@@ -1,0 +1,137 @@
+// =============================================================================
+// core-tests/intrinsics/atomic/property_test.vr
+// =============================================================================
+//
+// Operational laws for the atomic intrinsics.  A single-threaded test cannot
+// observe inter-thread ordering, but it CAN pin the per-operation value
+// semantics (the read-modify-write result + the returned previous value),
+// which is what these laws exercise over a live atomic cell.  The cell is the
+// backing word of a 1-element `List<UInt64>` (`as_mut_ptr`).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.atomic.{
+    atomic_store_u64, atomic_load_u64,
+    atomic_fetch_add_u64, atomic_fetch_sub_u64,
+    atomic_fetch_and_u64, atomic_fetch_or_u64, atomic_fetch_xor_u64,
+    atomic_exchange_u64, atomic_cas_u64,
+    ORDERING_SEQ_CST,
+};
+
+// -----------------------------------------------------------------------------
+// store / load round-trip
+// -----------------------------------------------------------------------------
+
+@test
+fn law_store_load_round_trip() {
+    let vals: List<UInt64> = [0 as UInt64, 1 as UInt64, 0xFF as UInt64,
+                              0xDEADBEEF as UInt64, 0xFFFFFFFFFFFFFFFF as UInt64];
+    for v in vals.iter() {
+        let mut buf: List<UInt64> = [0 as UInt64];
+        let p = buf.as_mut_ptr() as *const UInt64;
+        atomic_store_u64(p, *v, ORDERING_SEQ_CST);
+        assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), *v);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// fetch-ops: return the PREVIOUS value, then apply the op
+// -----------------------------------------------------------------------------
+
+// The initial cell value is installed with `atomic_store` rather than relying
+// on the `List` literal reaching the raw backing through `as_mut_ptr` — every
+// op below is then a pure store → read-modify-write → load round-trip on the
+// same atomic word.
+
+@test
+fn law_fetch_add_returns_prev_and_accumulates() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    atomic_store_u64(p, 100 as UInt64, ORDERING_SEQ_CST);
+    let prev = atomic_fetch_add_u64(p, 23 as UInt64, ORDERING_SEQ_CST);
+    assert_eq(prev, 100 as UInt64);
+    assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), 123 as UInt64);
+}
+
+@test
+fn law_fetch_sub_returns_prev_and_subtracts() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    atomic_store_u64(p, 100 as UInt64, ORDERING_SEQ_CST);
+    let prev = atomic_fetch_sub_u64(p, 30 as UInt64, ORDERING_SEQ_CST);
+    assert_eq(prev, 100 as UInt64);
+    assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), 70 as UInt64);
+}
+
+@test
+fn law_fetch_and() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    atomic_store_u64(p, 0xF0 as UInt64, ORDERING_SEQ_CST);
+    atomic_fetch_and_u64(p, 0x3F as UInt64, ORDERING_SEQ_CST);
+    assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), 0x30 as UInt64);
+}
+
+@test
+fn law_fetch_or() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    atomic_store_u64(p, 0xF0 as UInt64, ORDERING_SEQ_CST);
+    atomic_fetch_or_u64(p, 0x0F as UInt64, ORDERING_SEQ_CST);
+    assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), 0xFF as UInt64);
+}
+
+@test
+fn law_fetch_xor() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    atomic_store_u64(p, 0xFF as UInt64, ORDERING_SEQ_CST);
+    atomic_fetch_xor_u64(p, 0x0F as UInt64, ORDERING_SEQ_CST);
+    assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), 0xF0 as UInt64);
+}
+
+// -----------------------------------------------------------------------------
+// exchange: returns previous, installs new
+// -----------------------------------------------------------------------------
+
+@test
+fn law_exchange_returns_prev() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    atomic_store_u64(p, 7 as UInt64, ORDERING_SEQ_CST);
+    let old = atomic_exchange_u64(p, 99 as UInt64, ORDERING_SEQ_CST);
+    assert_eq(old, 7 as UInt64);
+    assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), 99 as UInt64);
+}
+
+// -----------------------------------------------------------------------------
+// compare-and-swap: (observed, succeeded)
+// -----------------------------------------------------------------------------
+
+@test
+fn law_cas_success_swaps() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    atomic_store_u64(p, 5 as UInt64, ORDERING_SEQ_CST);
+    let (observed, ok) = atomic_cas_u64(p, 5 as UInt64, 50 as UInt64, ORDERING_SEQ_CST, ORDERING_SEQ_CST);
+    assert_eq(observed, 5 as UInt64);
+    assert(ok);
+    assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), 50 as UInt64);
+}
+
+@test
+fn law_cas_failure_leaves_value() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    atomic_store_u64(p, 5 as UInt64, ORDERING_SEQ_CST);
+    let (observed, ok) = atomic_cas_u64(p, 999 as UInt64, 0 as UInt64, ORDERING_SEQ_CST, ORDERING_SEQ_CST);
+    assert_eq(observed, 5 as UInt64);
+    assert(!ok);
+    assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), 5 as UInt64);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

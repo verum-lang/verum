@@ -1,0 +1,88 @@
+// =============================================================================
+// core-tests/intrinsics/atomic/integration_test.vr
+// =============================================================================
+//
+// Atomic intrinsics in the small concurrency primitives they back: an atomic
+// counter (fetch_add loop), a CAS-based lock flag (try-acquire / release), and
+// width coverage across u32 / i64.  Single-threaded, so this pins the value
+// semantics of the read-modify-write sequences rather than inter-thread
+// visibility.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.atomic.{
+    atomic_load_u64, atomic_store_u64, atomic_fetch_add_u64, atomic_cas_u64,
+    atomic_load_u32, atomic_store_u32, atomic_fetch_add_u32,
+    atomic_load_i64, atomic_store_i64, atomic_fetch_add_i64,
+    ORDERING_SEQ_CST, ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
+};
+
+// --- Atomic counter -----------------------------------------------------------
+
+@test
+fn atomic_counter_accumulates() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    atomic_store_u64(p, 0 as UInt64, ORDERING_RELAXED);
+    let mut i = 0;
+    while i < 10 {
+        atomic_fetch_add_u64(p, 1 as UInt64, ORDERING_RELAXED);
+        i = i + 1;
+    }
+    assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), 10 as UInt64);
+}
+
+// --- CAS-based lock flag ------------------------------------------------------
+
+// try_acquire: 0 (free) -> 1 (held); returns whether we won the lock.
+fn try_acquire(p: *const UInt64) -> Bool {
+    let (_, ok) = atomic_cas_u64(p, 0 as UInt64, 1 as UInt64, ORDERING_ACQUIRE, ORDERING_RELAXED);
+    ok
+}
+
+fn release(p: *const UInt64) {
+    atomic_store_u64(p, 0 as UInt64, ORDERING_RELEASE);
+}
+
+@test
+fn cas_lock_acquire_release_cycle() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    release(p); // install the "free" (0) state through the atomic word
+    // first acquire wins
+    assert(try_acquire(p));
+    // second acquire fails while held
+    assert(!try_acquire(p));
+    // release, then re-acquire succeeds
+    release(p);
+    assert(try_acquire(p));
+}
+
+// --- Width coverage -----------------------------------------------------------
+
+@test
+fn atomic_u32_round_trip() {
+    let mut buf: List<UInt32> = [0 as UInt32];
+    let p = buf.as_mut_ptr() as *const UInt32;
+    atomic_store_u32(p, 0xCAFE as UInt32, ORDERING_SEQ_CST);
+    assert_eq(atomic_load_u32(p, ORDERING_SEQ_CST), 0xCAFE as UInt32);
+    let prev = atomic_fetch_add_u32(p, 1 as UInt32, ORDERING_SEQ_CST);
+    assert_eq(prev, 0xCAFE as UInt32);
+    assert_eq(atomic_load_u32(p, ORDERING_SEQ_CST), 0xCAFF as UInt32);
+}
+
+@test
+fn atomic_i64_round_trip() {
+    let mut buf: List<Int64> = [0 as Int64];
+    let p = buf.as_mut_ptr() as *const Int64;
+    atomic_store_i64(p, -42 as Int64, ORDERING_SEQ_CST);
+    assert_eq(atomic_load_i64(p, ORDERING_SEQ_CST), -42 as Int64);
+    atomic_fetch_add_i64(p, 50 as Int64, ORDERING_SEQ_CST);
+    assert_eq(atomic_load_i64(p, ORDERING_SEQ_CST), 8 as Int64);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

@@ -1,0 +1,59 @@
+// =============================================================================
+// core-tests/intrinsics/atomic/regression_test.vr
+// =============================================================================
+//
+// Pinned behaviour for `core/intrinsics/atomic.vr`: the ORDERING_* constant
+// values, fence callability, and the CAS return shape `(observed, succeeded)`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.atomic.{
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL, ORDERING_SEQ_CST,
+    atomic_fence, compiler_fence,
+    atomic_store_u64, atomic_load_u64, atomic_cas_u64,
+};
+
+// The ordering constants form the strength ladder 0..4 the typed intrinsics
+// consume (the `*_u8` ordering operand).
+@test
+fn regression_ordering_constant_values() {
+    assert_eq(ORDERING_RELAXED, 0 as UInt8);
+    assert_eq(ORDERING_ACQUIRE, 1 as UInt8);
+    assert_eq(ORDERING_RELEASE, 2 as UInt8);
+    assert_eq(ORDERING_ACQ_REL, 3 as UInt8);
+    assert_eq(ORDERING_SEQ_CST, 4 as UInt8);
+}
+
+// Fences are observable only across threads; here we pin that they are wired
+// (callable without trapping / returning nil) at every ordering.
+@test
+fn regression_fences_are_callable() {
+    atomic_fence(ORDERING_ACQUIRE);
+    atomic_fence(ORDERING_RELEASE);
+    atomic_fence(ORDERING_SEQ_CST);
+    compiler_fence(ORDERING_ACQ_REL);
+    compiler_fence(ORDERING_SEQ_CST);
+    assert(true);
+}
+
+// CAS returns a `(observed_value, succeeded)` pair — pin the shape on both
+// the success and failure path.
+@test
+fn regression_cas_returns_observed_and_flag() {
+    let mut buf: List<UInt64> = [0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    atomic_store_u64(p, 11 as UInt64, ORDERING_SEQ_CST);
+    let (obs_ok, ok) = atomic_cas_u64(p, 11 as UInt64, 22 as UInt64, ORDERING_SEQ_CST, ORDERING_SEQ_CST);
+    assert_eq(obs_ok, 11 as UInt64);
+    assert(ok);
+    let (obs_fail, bad) = atomic_cas_u64(p, 11 as UInt64, 33 as UInt64, ORDERING_SEQ_CST, ORDERING_SEQ_CST);
+    assert_eq(obs_fail, 22 as UInt64);
+    assert(!bad);
+    assert_eq(atomic_load_u64(p, ORDERING_SEQ_CST), 22 as UInt64);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
