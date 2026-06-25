@@ -485,22 +485,48 @@ fn extract_method_signature_from_type(
 fn convert_variant_case(variant: &VariantDescriptor, module: &VbcModule) -> VariantCase {
     let name = get_string(&module.strings, variant.name);
 
-    let payload = variant.payload.as_ref().map(|type_ref| {
-        // Convert the payload type to the appropriate format
-        match type_ref {
-            TypeRef::Tuple(elems) => {
-                // Tuple variant: extract element types
-                let type_names: List<Text> =
-                    elems.iter().map(|t| type_ref_to_text(t, module)).collect();
-                VariantPayload::Tuple(type_names)
-            }
-            _ => {
-                // Single type payload - treat as single-element tuple
-                let type_name = type_ref_to_text(type_ref, module);
-                VariantPayload::Tuple(List::from(vec![type_name]))
-            }
-        }
-    });
+    // Record-style variant payload (`V { a: T, b: U }`): preserve the NAMED
+    // fields as a `Record` payload so record-style patterns and construction
+    // resolve by field name under AOT.  Previously every payload fell to the
+    // `Tuple` branch below, dropping the field names — the loaded variant then
+    // looked like a positional tuple `(T, U)`, breaking record patterns
+    // (RECVAR-TUPLE-1) and degrading the parent enum to `Type::Named` instead
+    // of `Type::Variant`, so `E.V { .. }` construction mis-typed as the variant
+    // rather than the enum (QUALVAR-CONSTRUCT-1).  The VBC descriptor already
+    // carries the named fields in `variant.fields`; mirror the record-TYPE
+    // conversion above.
+    let payload: Option<VariantPayload> =
+        if matches!(variant.kind, verum_vbc::types::VariantKind::Record)
+            && !variant.fields.is_empty()
+        {
+            let fields: List<FieldDescriptor> = variant
+                .fields
+                .iter()
+                .map(|f| FieldDescriptor {
+                    name: get_string(&module.strings, f.name),
+                    ty: type_ref_to_text(&f.type_ref, module),
+                    is_public: f.visibility == verum_vbc::types::Visibility::Public,
+                })
+                .collect();
+            Some(VariantPayload::Record(fields))
+        } else {
+            variant.payload.as_ref().map(|type_ref| {
+                // Convert the payload type to the appropriate format
+                match type_ref {
+                    TypeRef::Tuple(elems) => {
+                        // Tuple variant: extract element types
+                        let type_names: List<Text> =
+                            elems.iter().map(|t| type_ref_to_text(t, module)).collect();
+                        VariantPayload::Tuple(type_names)
+                    }
+                    _ => {
+                        // Single type payload - treat as single-element tuple
+                        let type_name = type_ref_to_text(type_ref, module);
+                        VariantPayload::Tuple(List::from(vec![type_name]))
+                    }
+                }
+            })
+        };
 
     VariantCase {
         name,
