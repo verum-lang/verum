@@ -325,6 +325,14 @@ pub enum InlineSequenceId {
     /// `bitreverse(x)` cancels the byte-order flip and leaves the per-byte
     /// bit-reverse).
     ByteSwapBits,
+    /// null_ptr: load the null pointer (integer 0).  The previous
+    /// `DirectOpcode(LoadI)` strategy had no immediate to load, so it fell
+    /// through to `LoadNil`.
+    NullPtr,
+    /// ptr_is_null: `ptr == 0`.  The previous `DirectOpcode(EqI)` strategy
+    /// was a binary compare invoked with a single operand (the pointer), so
+    /// it fell through to `LoadNil`; this synthesises the `0` operand.
+    PtrIsNull,
     /// rotate_left: bit rotation
     RotateLeft,
     /// rotate_right: bit rotation
@@ -1580,7 +1588,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 1, // ptr
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::EqI), // compare with 0 (null)
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrIsNull), // ptr == 0
         mlir_op: Some("llvm.icmp eq"),
         doc: "Check if pointer is null",
     },
@@ -1594,7 +1602,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 1, // ptr
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::EqI), // compare with 0 (null)
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrIsNull), // ptr == 0
         mlir_op: Some("llvm.icmp eq"),
         doc: "Check if pointer is null (alias for ptr_is_null)",
     },
@@ -1609,7 +1617,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 0,
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::LoadI), // load 0
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::NullPtr), // load 0
         mlir_op: Some("llvm.mlir.null"),
         doc: "Get null pointer",
     },
@@ -1624,7 +1632,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 0,
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::LoadI), // load 0
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::NullPtr), // load 0
         mlir_op: Some("llvm.mlir.null"),
         doc: "Get null pointer (alias for null_ptr)",
     },
@@ -1639,7 +1647,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 0,
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::LoadI), // load 0
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::NullPtr), // load 0
         mlir_op: Some("llvm.mlir.null"),
         doc: "Get null mutable pointer",
     },

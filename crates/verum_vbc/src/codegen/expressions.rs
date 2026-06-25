@@ -25861,6 +25861,29 @@ impl VbcCodegen {
                 self.ctx.free_temp(rev_tmp);
             }
 
+            // null_ptr() — load the null pointer (integer 0).
+            InlineSequenceId::NullPtr => {
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+            // ptr_is_null(ptr) — `ptr == 0`.  Synthesise the 0 operand the
+            // binary compare needs (the registry's DirectOpcode(EqI) form was
+            // invoked with only the pointer operand → LoadNil).
+            InlineSequenceId::PtrIsNull => {
+                if let Some(&ptr) = args.first() {
+                    let zero = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: zero, value: 0 });
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Eq,
+                        dst: dest,
+                        a: ptr,
+                        b: zero,
+                    });
+                    self.ctx.free_temp(zero);
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
             // Rotation - binary operations
             InlineSequenceId::RotateLeft => {
                 self.emit_arith_extended_binary(ArithSubOpcode::RotateLeft, args, dest);

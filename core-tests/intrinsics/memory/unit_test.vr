@@ -1,0 +1,102 @@
+// =============================================================================
+// core-tests/intrinsics/memory/unit_test.vr
+// =============================================================================
+//
+// API-surface coverage for the VALUE-LEVEL subset of `core/intrinsics/memory.vr`
+// — the operations that are exercisable without fabricating a raw allocation:
+// in-place swap/replace, bit reinterpretation (transmute), the null-pointer
+// sentinel, and zero-initialisation.
+//
+// The RAW-pointer surface (ptr_read/write/offset, memcpy/memset/memcmp, slices,
+// ptr_is_aligned, ptr_to_ref) requires a live allocation to test safely; it is
+// covered by the `base/memory` + `mem/*` suites and tracked for a dedicated
+// allocation-based harness (audit.md §3, task MEM-RAWPTR-HARNESS-1).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.memory.{
+    swap, replace, transmute, null_ptr, null_ptr_mut, ptr_is_null, zeroed,
+};
+
+// -----------------------------------------------------------------------------
+// SECTION 1 — In-place swap / replace
+// -----------------------------------------------------------------------------
+
+@test
+fn swap_exchanges_values() {
+    let mut x = 1;
+    let mut y = 2;
+    swap(&mut x, &mut y);
+    assert_eq(x, 2);
+    assert_eq(y, 1);
+}
+
+@test
+fn swap_is_involution() {
+    let mut x = 10;
+    let mut y = 20;
+    swap(&mut x, &mut y);
+    swap(&mut x, &mut y);
+    assert_eq(x, 10);
+    assert_eq(y, 20);
+}
+
+@test
+fn replace_returns_old_and_sets_new() {
+    let mut a = 10;
+    let old = replace(&mut a, 99);
+    assert_eq(old, 10);
+    assert_eq(a, 99);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 2 — Bit reinterpretation (transmute)
+// -----------------------------------------------------------------------------
+
+@test
+fn transmute_uint_to_int_same_bits() {
+    let r: Int = transmute(42 as UInt64);
+    assert_eq(r, 42);
+}
+
+@test
+fn transmute_int_round_trip() {
+    let x: Int = 0x0123456789ABCDEF;
+    let u: UInt64 = transmute(x);
+    let back: Int = transmute(u);
+    assert_eq(back, x);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 3 — Null pointer sentinel
+// -----------------------------------------------------------------------------
+
+@test
+fn null_ptr_is_null() {
+    let p: *const Int = null_ptr();
+    assert(ptr_is_null(p));
+}
+
+@test
+fn null_ptr_mut_is_null() {
+    let p: *mut Int = null_ptr_mut();
+    assert(ptr_is_null(p));
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 4 — Zero initialisation
+// -----------------------------------------------------------------------------
+
+@test
+fn zeroed_int_is_zero() {
+    let z: Int = zeroed();
+    assert_eq(z, 0);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
