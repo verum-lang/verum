@@ -421,6 +421,7 @@ impl Token {
                     | TokenKind::Super     // super.module.path expression
                     | TokenKind::Cog     // crate.module.path expression
                     | TokenKind::Result   // result keyword used as identifier
+                    | TokenKind::Cases    // `cases` used as identifier (e.g. local var in `0..cases.len()`) — CASES-KEYWORD-1
                     | TokenKind::Try      // try expression
                     | TokenKind::Forall   // quantifier expression
                     | TokenKind::Exists   // quantifier expression
