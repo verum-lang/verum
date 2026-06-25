@@ -3049,9 +3049,20 @@ pub fn lower_instruction<'ctx>(
             type_hint,
         } => lower_len(ctx, *dst, *arr, *type_hint),
 
-        Instruction::NewList { dst, .. } => {
+        Instruction::NewList { dst, capacity_hint } => {
             let runtime = RuntimeLowering::new(ctx.llvm_context());
-            let list_ptr = runtime.lower_new_list(ctx.builder(), ctx.get_module())?;
+            // Honour `List.with_capacity(n)` as a capacity guarantee, matching
+            // the Tier-0 interpreter's `handle_new_list`. A zero hint keeps the
+            // lazy first-push allocation.
+            let list_ptr = if *capacity_hint > 0 {
+                runtime.lower_new_list_with_capacity(
+                    ctx.builder(),
+                    ctx.get_module(),
+                    *capacity_hint as u64,
+                )?
+            } else {
+                runtime.lower_new_list(ctx.builder(), ctx.get_module())?
+            };
             ctx.set_register(dst.0, list_ptr.into());
             ctx.mark_list_register(dst.0);
             Ok(())
@@ -10436,6 +10447,81 @@ fn lower_call<'ctx>(
             .build_call(lock_fn, &[ptr_val.into()], "")
             .or_llvm_err()?;
         ctx.set_register(dst.0, i64_type.const_int(0, false).into());
+        return Ok(());
+    }
+
+    // ============================================================
+    // Text.from_utf8_unchecked / Text.from_utf8_lossy → AOT body.
+    //
+    // These two stdlib factories are registered as EMPTY stub
+    // functions in the VBC archive (see `verum_vbc::codegen::mod`
+    // CLASS-1 pre-registration list) on the contract that "LLVM
+    // lowering intercepts calls by name and routes to runtime
+    // functions". The interpreter honours that contract via
+    // `text_static_runtime.rs::from_utf8_*`, but the AOT path had no
+    // matching intercept — so lowering the empty stub body left the
+    // entry block terminator-less, `cleanup_orphan_blocks_in_function`
+    // appended `unreachable`, and every AOT caller of `Text.from(text)`
+    // (which the VBC codegen rewrites to `AsBytes` + this call) trapped
+    // with `brk #1`. This block closes the contract for the AOT tier.
+    //
+    // ABI: the single argument is a `&[Byte]` slice produced by `AsBytes`
+    // — a `Pack` object `[24-byte header][ptr:i64][len:i64]`. We read the
+    // (ptr, len) pair and route through the canonical `verum_text_alloc`
+    // text constructor, which copies `len` bytes into a fresh, NUL-
+    // terminated allocation (same primitive `Bool→Text` / parse paths
+    // use). `from_utf8_lossy` shares this byte-copy: for already-valid
+    // UTF-8 (the overwhelming case, and all inputs that flow from
+    // `Text.from`/`AsBytes`) it is identical to the interpreter's
+    // `String::from_utf8_lossy` result.
+    if (func_name == "Text.from_utf8_unchecked" || func_name == "Text.from_utf8_lossy")
+        && args.count >= 1
+    {
+        let i64_type = ctx.types().i64_type();
+        let ptr_type = ctx.types().ptr_type();
+        let module = ctx.get_module();
+
+        // The slice argument is a pointer to the Pack object.
+        let slice_val = ctx.get_register(args.start.0)?;
+        let slice_i64 = as_i64(ctx, slice_val, "futf8_slice_i64")?;
+        let slice_ptr = ctx
+            .builder()
+            .build_int_to_ptr(slice_i64, ptr_type, "futf8_slice_ptr")
+            .or_llvm_err()?;
+
+        // Pack layout: element 0 = data ptr (i64), element 1 = len (i64).
+        let runtime = RuntimeLowering::new(ctx.llvm_context());
+        let data_ptr_i64 = runtime.lower_unpack_element(ctx.builder(), slice_ptr, 0)?;
+        let len_i64 = runtime.lower_unpack_element(ctx.builder(), slice_ptr, 1)?;
+        let data_ptr = ctx
+            .builder()
+            .build_int_to_ptr(data_ptr_i64, ptr_type, "futf8_data_ptr")
+            .or_llvm_err()?;
+
+        // verum_text_alloc(ptr, len, cap) -> i64 Text handle. cap=0 → the
+        // constructor sizes the copy to `len` exactly.
+        let alloc_ty =
+            i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
+        let text_alloc_fn =
+            super::error::get_or_declare_function(module, "verum_text_alloc", alloc_ty);
+        let result = ctx
+            .builder()
+            .build_call(
+                text_alloc_fn,
+                &[
+                    data_ptr.into(),
+                    len_i64.into(),
+                    i64_type.const_zero().into(),
+                ],
+                "futf8_text",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .unwrap_or_else(|| i64_type.const_zero().into());
+        ctx.set_register(dst.0, result);
+        ctx.mark_text_register(dst.0);
+        ctx.mark_owned_text_register(dst.0);
         return Ok(());
     }
 
