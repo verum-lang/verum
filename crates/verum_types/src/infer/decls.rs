@@ -227,7 +227,18 @@ impl TypeChecker {
 
         // For record types, Named types are still needed for bidirectional inference.
         // We determine the approach based on whether this is a variant type.
-        let is_variant_type = matches!(&type_decl.body, verum_ast::decl::TypeDeclBody::Variant(_));
+        //
+        // ALIAS-VS-MARKER (see `variant_decl_alias_target`): a bare
+        // `type X is <ExistingType>;` parses as a one-variant sum but is
+        // really a transparent alias. Reroute it to an alias body so the
+        // rest of registration — and every downstream use — sees the aliased
+        // type instead of a degenerate `X(Unit)` sum.
+        let alias_override_body: Option<verum_ast::decl::TypeDeclBody> = self
+            .variant_decl_alias_target(type_decl)
+            .map(verum_ast::decl::TypeDeclBody::Alias);
+        let effective_body: &verum_ast::decl::TypeDeclBody =
+            alias_override_body.as_ref().unwrap_or(&type_decl.body);
+        let is_variant_type = matches!(effective_body, verum_ast::decl::TypeDeclBody::Variant(_));
         let use_type_vars = is_variant_type;
 
         for param in &type_decl.generics {
@@ -268,8 +279,11 @@ impl TypeChecker {
         }
 
         // For simple type aliases, register the type in the environment
-        // More complex types (records, variants) are handled during type checking
-        match &type_decl.body {
+        // More complex types (records, variants) are handled during type checking.
+        // NB: `effective_body` — not `type_decl.body` — so a bare
+        // `type X is <ExistingType>;` rerouted above is registered as the
+        // alias it actually is.
+        match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
                 // Register the type alias in the type context
                 let resolved_type = self.ast_to_type(aliased_type)?;
@@ -608,6 +622,82 @@ impl TypeChecker {
         // registration attempts (e.g., when a dependency like List wasn't available initially).
 
         Ok(())
+    }
+
+    /// ALIAS-VS-MARKER disambiguation.
+    ///
+    /// `type X is Y;` parses as a one-variant sum `{ Y }` because the
+    /// recursive-descent parser has no symbol table — `looks_like_variant`
+    /// (verum_fast_parser) cannot tell a fresh marker name (`type
+    /// SemaphoreError is Closed;`) from a reference to an existing type
+    /// (`type Port is UInt16;`, `type ValidationError is MemValidationError;`).
+    /// The parser deliberately defaults the bare form to a sum (task #13,
+    /// marker-error idiom).
+    ///
+    /// At this (semantic) layer the symbol table DOES exist, so we can
+    /// recover the author's intent: when the sole nullary variant's name
+    /// resolves to an already-registered type, the declaration is a
+    /// transparent type ALIAS, not a degenerate sum. Pre-fix the sum
+    /// interpretation surfaced under strict checking (AOT) as
+    /// `expected 'UInt16(Unit)'` / `expected 'MemValidationError(Unit)'`
+    /// type-mismatches at every use of the alias, while interpreter
+    /// leniency masked it.
+    ///
+    /// Discovery is purely registration-driven (NO hardcoded stdlib/primitive
+    /// name lists — see crate CLAUDE.md): a name is an existing type iff
+    /// `lookup_type` returns a rich (`Variant`/`Record`), `Named`, or scalar
+    /// entry. Fresh marker names return `None` and keep sum semantics.
+    ///
+    /// Returns the synthetic AST alias target (`Path(Y)`) on a hit.
+    fn variant_decl_alias_target(
+        &self,
+        type_decl: &verum_ast::TypeDecl,
+    ) -> Option<verum_ast::ty::Type> {
+        use verum_ast::decl::TypeDeclBody;
+        let TypeDeclBody::Variant(variants) = &type_decl.body else {
+            return None;
+        };
+        // Exactly one variant, and it must be a bare nullary marker shape:
+        // no payload, no GADT generics/where, no HIT path-endpoints, no
+        // attributes. Anything richer is an intentional sum.
+        if variants.len() != 1 {
+            return None;
+        }
+        let v = &variants[0];
+        if v.data.is_some()
+            || !v.generic_params.is_empty()
+            || v.where_clause.is_some()
+            || v.path_endpoints.is_some()
+            || !v.attributes.is_empty()
+        {
+            return None;
+        }
+        let target = v.name.name.as_str();
+        // A self-named single variant (`type Closed is Closed;`) is a genuine
+        // (if degenerate) marker — never collapse it to a self-alias.
+        if target == type_decl.name.name.as_str() {
+            return None;
+        }
+        let is_existing_type = matches!(
+            self.ctx.lookup_type(target),
+            Option::Some(
+                Type::Variant(_)
+                    | Type::Record(_)
+                    | Type::Named { .. }
+                    | Type::Int
+                    | Type::Float
+                    | Type::Bool
+                    | Type::Char
+                    | Type::Text
+            )
+        );
+        if !is_existing_type {
+            return None;
+        }
+        Some(verum_ast::ty::Type {
+            kind: verum_ast::ty::TypeKind::Path(verum_ast::ty::Path::single(v.name.clone())),
+            span: v.span,
+        })
     }
 
     /// Register a sum (variant/enum) type declaration body.
@@ -2225,7 +2315,17 @@ impl TypeChecker {
         use verum_ast::ty::Path;
         use verum_common::Text;
 
-        match &type_decl.body {
+        // ALIAS-VS-MARKER (see `variant_decl_alias_target`): keep the
+        // second (resolution) pass in lock-step with the first so a bare
+        // `type X is <ExistingType>;` resolves as the alias it is, not as a
+        // degenerate `X(Unit)` sum.
+        let alias_override_body: Option<TypeDeclBody> = self
+            .variant_decl_alias_target(type_decl)
+            .map(TypeDeclBody::Alias);
+        let effective_body: &TypeDeclBody =
+            alias_override_body.as_ref().unwrap_or(&type_decl.body);
+
+        match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
                 let resolved_type = self.ast_to_type(aliased_type)?;
                 // Register as alias for proper resolution (stores resolved type)

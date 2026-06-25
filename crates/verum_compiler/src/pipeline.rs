@@ -905,6 +905,17 @@ pub struct CompilationPipeline<'s> {
     /// populated in StdlibBootstrap mode.
     global_type_layout_registry: std::collections::HashMap<String, Vec<String>>,
 
+    /// Global type-alias registry (`alias name → base type name`) for
+    /// cross-module alias resolution.  Populated as each module compiles
+    /// (via `codegen.export_type_aliases()`) and seeded into the next
+    /// module's codegen (`import_type_aliases`), so a module that `mount`s
+    /// and uses an alias defined elsewhere (`IoError.from_os` where
+    /// `type IoError is StreamError;`) resolves it instead of dropping the
+    /// body to a lenient panic-stub.  Name → name; TypeId-free; only
+    /// populated in StdlibBootstrap mode.  Mirrors
+    /// `global_type_layout_registry`.
+    global_type_alias_registry: std::collections::HashMap<String, String>,
+
     /// Global protocol registry for cross-module protocol default method inheritance.
     /// Accumulates protocol info across modules (e.g., Eq's default ne method).
     /// Only populated in StdlibBootstrap mode.
@@ -1236,6 +1247,7 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_resolver: None,
             global_function_registry: std::collections::HashMap::new(),
             global_type_layout_registry: std::collections::HashMap::new(),
+            global_type_alias_registry: std::collections::HashMap::new(),
             global_protocol_registry: std::collections::HashMap::new(),
             compiled_stdlib_modules: std::collections::HashMap::new(),
             stdlib_warnings: List::new(),
@@ -1353,6 +1365,7 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_resolver: Some(resolver),
             global_function_registry: std::collections::HashMap::new(),
             global_type_layout_registry: std::collections::HashMap::new(),
+            global_type_alias_registry: std::collections::HashMap::new(),
             global_protocol_registry: std::collections::HashMap::new(),
             compiled_stdlib_modules: std::collections::HashMap::new(),
             stdlib_warnings: List::new(),

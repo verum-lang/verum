@@ -471,6 +471,17 @@ pub struct VbcCodegen {
     /// For simple aliases like `type MyInt = Int`, we store `Int`.
     type_aliases: std::collections::HashMap<String, String>,
 
+    /// Names this module declares as a CONCRETE type (a non-alias body:
+    /// a multi-variant sum, a record, or a single marker whose name is
+    /// NOT an existing type). Such a name must be immune to any
+    /// cross-module alias imported into this codegen — generic names
+    /// (`Value`, `Layout`, `Target`, …) are aliases in one module and
+    /// real types in another; without this guard a propagated
+    /// `type Value is U64;` (math/internal) would shadow sqlite's own
+    /// `Value` enum and drop its functions to lenient panic-stubs.
+    /// Consulted first by `resolve_type_alias`.
+    local_concrete_types: std::collections::HashSet<String>,
+
     /// Context name → ContextRef ID mapping for context string table.
     /// Enables context name resolution from opaque ContextRef IDs.
     context_name_to_id: std::collections::HashMap<String, u32>,
@@ -936,12 +947,73 @@ impl VbcCodegen {
     /// Resolves a type name through the type alias chain.
     ///
 
+    /// If `type_decl` is a type alias — either an explicit
+    /// `type X is Y<…>;` alias body, or a transparent `type X is Y;`
+    /// marker that the parser lowered to a single nullary variant whose
+    /// name `Y` is an existing type — returns the base type name `Y`.
+    ///
+    /// Mirrors `verum_types`' `variant_decl_alias_target` so VBC codegen
+    /// agrees with the typechecker: `type IoError is StreamError;` is an
+    /// alias, not a one-variant enum. Genuine markers (`type Closed is
+    /// Closed;`, or a name that is not a known type) return `None`.
+    fn declared_alias_target_name(
+        &self,
+        type_decl: &verum_ast::decl::TypeDecl,
+    ) -> Option<String> {
+        use verum_ast::decl::TypeDeclBody;
+        match &type_decl.body {
+            // Explicit alias body (e.g. `type IoResult<T> is Result<T, …>;`).
+            TypeDeclBody::Alias(target) => self.extract_base_type_name(target),
+            // Single bare nullary variant lowered from `type X is Y;`.
+            TypeDeclBody::Variant(variants) => {
+                if variants.len() != 1 {
+                    return None;
+                }
+                let v = &variants[0];
+                // Anything richer than a bare marker is an intentional sum.
+                if v.data.is_some()
+                    || !v.generic_params.is_empty()
+                    || v.where_clause.is_some()
+                    || v.path_endpoints.is_some()
+                    || !v.attributes.is_empty()
+                {
+                    return None;
+                }
+                let target = v.name.name.as_str();
+                // A self-named single variant (`type Closed is Closed;`) is
+                // a genuine (degenerate) marker — never a self-alias.
+                if target == type_decl.name.name.as_str() {
+                    return None;
+                }
+                // Only an alias when the marker name is an existing type:
+                // a same/earlier-module declared type, or a primitive.
+                use verum_common::well_known_types::type_names;
+                let known = self.type_name_to_id.contains_key(target)
+                    || type_names::is_primitive_value_type(target)
+                    || type_names::is_numeric_type(target);
+                if !known {
+                    return None;
+                }
+                Some(target.to_string())
+            }
+            _ => None,
+        }
+    }
+
     /// If `type_name` is a type alias, returns the base type name.
     /// Otherwise, returns the original name.
     ///
 
     /// Handles alias chains: if A → B and B → C, resolving A returns C.
     pub fn resolve_type_alias(&self, type_name: &str) -> String {
+        // A type this module declares concretely is never an alias here,
+        // even if a cross-module alias of the same generic name (`Value`,
+        // `Layout`, `Target`, …) was imported into `type_aliases`. Local
+        // declaration wins — otherwise the import shadows the real type
+        // and its members fail to resolve.
+        if self.local_concrete_types.contains(type_name) {
+            return type_name.to_string();
+        }
         let mut current = type_name.to_string();
         let mut iterations = 0;
         const MAX_ITERATIONS: usize = 10; // Prevent infinite loops
@@ -1403,6 +1475,7 @@ impl VbcCodegen {
             protocol_registry: std::collections::HashMap::new(),
             // Type alias registry for method resolution
             type_aliases: std::collections::HashMap::new(),
+            local_concrete_types: std::collections::HashSet::new(),
             // Context name registry for ContextRef string table
             context_name_to_id: std::collections::HashMap::new(),
             context_names: Vec::new(),
@@ -3061,6 +3134,35 @@ impl VbcCodegen {
             self.type_field_layouts
                 .entry(name.clone())
                 .or_insert_with(|| fields.clone());
+        }
+    }
+
+    /// Export this module's resolved type-alias map (`alias name → base
+    /// type name`) into a global registry so a later module's codegen can
+    /// resolve a cross-module alias used as a namespace — e.g.
+    /// `IoError.from_os` where `type IoError is StreamError;` lives in
+    /// `core/io` and is `mount`-ed into `core/net/tcp`. The bake compiles
+    /// each stdlib module in its own codegen, and `type_aliases` (unlike
+    /// `ctx.functions`) does not accumulate cross-module; this registry is
+    /// the alias analogue of `export_type_layouts`'s D2b layout registry.
+    /// Pure name → name; TypeId-free.
+    pub fn export_type_aliases(&self) -> std::collections::HashMap<String, String> {
+        self.type_aliases.clone()
+    }
+
+    /// Import type aliases from a global registry (built by the stdlib
+    /// bootstrap from previously-compiled modules). **Additive, first-wins**:
+    /// an entry is inserted ONLY when this codegen has no alias for that
+    /// name yet, so a module's own declaration-derived alias is never
+    /// overwritten.
+    pub fn import_type_aliases(
+        &mut self,
+        aliases: &std::collections::HashMap<String, String>,
+    ) {
+        for (name, target) in aliases {
+            self.type_aliases
+                .entry(name.clone())
+                .or_insert_with(|| target.clone());
         }
     }
 
@@ -5167,6 +5269,41 @@ impl VbcCodegen {
                 if !self.type_name_to_id.contains_key(&type_name) {
                     let type_id = self.alloc_user_type_id();
                     self.type_name_to_id.insert(type_name, type_id);
+                }
+            }
+        }
+
+        // **Type-alias pre-registration** (companion to the verum_types
+        // alias-vs-marker fix). Records `alias name → base type name` in
+        // `type_aliases` for every alias/transparent-marker type decl in
+        // this module, GLOBALLY here in the declaration pre-pass: the
+        // map persists across this module's compile and is published to
+        // the bootstrap's global alias registry (mirroring the D2b
+        // type-layout registry) so a later module that `mount`s the alias
+        // and uses it as a namespace (`IoError.from_os` where
+        // `type IoError is StreamError;`) resolves the path head through
+        // `resolve_type_alias` → `StreamError.from_os` instead of failing
+        // ("undefined variable: IoError") and dropping to a lenient
+        // panic-stub. Runs AFTER the TypeId pre-alloc loop so same-module
+        // alias targets are already in `type_name_to_id`.
+        for item in module.items.iter() {
+            if !self.should_compile_item(item) {
+                continue;
+            }
+            if let ItemKind::Type(type_decl) = &item.kind {
+                match self.declared_alias_target_name(type_decl) {
+                    Some(target) => {
+                        self.type_aliases
+                            .entry(type_decl.name.name.to_string())
+                            .or_insert(target);
+                    }
+                    // A concrete type declared by THIS module — record it
+                    // so an imported cross-module alias of the same name
+                    // cannot shadow it in `resolve_type_alias`.
+                    None => {
+                        self.local_concrete_types
+                            .insert(type_decl.name.name.to_string());
+                    }
                 }
             }
         }

@@ -8087,8 +8087,34 @@ impl TypeChecker {
             let type_name = type_ident.name.as_str();
             let variant_name = variant_ident.name.as_str();
 
-            // Look up the type to see if it's a variant type
-            if let Option::Some(ty) = self.ctx.lookup_type(type_name).cloned()
+            // Look up the type to see if it's a variant type.
+            //
+            // QUALVAR-CONSTRUCT-1: a direct `lookup_type` can miss a
+            // cross-module *imported* enum — the import binds a `Named`
+            // placeholder under the unqualified key, and that placeholder
+            // shadows the lazy-loadable rich `Type::Variant`. When the
+            // direct lookup is not already a Variant, route through
+            // `resolve_type_name`, which triggers the stdlib lazy-load
+            // (`ensure_stdlib_type_loaded`) and materializes the real
+            // variant set the same way the matching `let e: E = …`
+            // annotation does. Without this, a direct record-variant
+            // CONSTRUCTION `E.Variant { … }` of an imported enum fell
+            // through to the generic handler and was mis-typed as the
+            // variant `E.Variant` instead of the enclosing enum `E`,
+            // surfacing under strict/AOT checking as
+            // `expected 'RevocationError', found 'RevocationError.Internal'`.
+            let resolved_variant_ty: Option<Type> = {
+                let direct = self.ctx.lookup_type(type_name).cloned();
+                if matches!(direct, Option::Some(Type::Variant(_))) {
+                    direct
+                } else {
+                    match self.resolve_type_name(type_name, expr.span) {
+                        Ok(t) if matches!(t, Type::Variant(_)) => Option::Some(t),
+                        _ => direct,
+                    }
+                }
+            };
+            if let Option::Some(ty) = resolved_variant_ty
                 && let Type::Variant(variants) = &ty
             {
                 // It's a variant type! Look up the specific variant
@@ -8167,6 +8193,32 @@ impl TypeChecker {
                         return Ok(InferResult::new(ty));
                     }
                 }
+            }
+
+            // QUALVAR-CONSTRUCT-1 fallback. The rich `Type::Variant` body
+            // could not be materialized above — for a cross-module imported
+            // enum the unqualified key holds a `Type::Named` placeholder that
+            // shadows the lazy body and survives even `resolve_type_name`.
+            // But the FIRST path segment still resolves to that enclosing
+            // type, and the type of an `E.Variant { … }` record-variant
+            // construction IS the enclosing enum `E`, regardless of whether
+            // its fields can be checked here. Yield `E` so the expression
+            // unifies with a matching `let e: E = …` annotation, instead of
+            // falling through to the generic record handler, which mis-types
+            // the literal as the variant `E.Variant`. Field VALUES are still
+            // inferred best-effort to surface gross errors. Restricted to a
+            // `Named` enclosing type: a fully-resolved `Variant`/`Record`
+            // reaching here is a genuine bad-variant/bad-field error that the
+            // block above already reported and must not be masked.
+            if let Option::Some(enclosing @ Type::Named { .. }) =
+                self.ctx.lookup_type(type_name).cloned()
+            {
+                for field_init in fields {
+                    if let Some(ref value_expr) = field_init.value {
+                        let _ = self.infer_expr(value_expr, InferMode::Synth);
+                    }
+                }
+                return Ok(InferResult::new(enclosing));
             }
         }
 
