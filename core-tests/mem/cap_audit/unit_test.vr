@@ -279,7 +279,7 @@ fn test_bumped_generation_kind_driven_not_diff_driven() {
 }
 
 // =============================================================================
-// Section 5: CapEvent epoch_at_event field independence
+// Section 5: CapEvent timestamp_ns field independence
 // =============================================================================
 
 @test
@@ -293,7 +293,7 @@ fn test_cap_event_new_records_epoch_at_event() {
         0 as UInt16, 0 as UInt16,
         0xDEAD_BEEF as UInt64,
     );
-    assert_eq(event.epoch_at_event, 0xDEAD_BEEF as UInt64);
+    assert_eq(event.timestamp_ns, 0xDEAD_BEEF as UInt64);
 }
 
 @test
@@ -320,8 +320,8 @@ fn test_cap_event_new_independent_fields_no_cross_contamination() {
     assert_eq(b.generation_before, 20 as UInt32);
     assert_eq(a.capabilities_before, 0x00FF as UInt16);
     assert_eq(b.capabilities_before, 0xFF00 as UInt16);
-    assert_eq(a.epoch_at_event, 100 as UInt64);
-    assert_eq(b.epoch_at_event, 200 as UInt64);
+    assert_eq(a.timestamp_ns, 100 as UInt64);
+    assert_eq(b.timestamp_ns, 200 as UInt64);
 }
 
 // =============================================================================

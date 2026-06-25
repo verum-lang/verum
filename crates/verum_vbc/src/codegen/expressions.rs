@@ -7835,7 +7835,21 @@ impl VbcCodegen {
             {
                 if let PathSegment::Name(ident) = &path.segments[0] {
                     let name = ident.name.to_string();
-                    if self.ctx.get_var_reg(&name).is_ok() {
+                    // A `static mut` / `@thread_local` binding is a VALUE
+                    // receiver (instance dispatch on its stored value), not a
+                    // static type namespace — even when the binding name is
+                    // CapitalCase (e.g. `CURRENT_HEAP.as_mut()`).  Pre-fix the
+                    // bare uppercase shape routed it to static-method dispatch
+                    // (`CURRENT_HEAP` treated as a type), so the receiver was
+                    // never `TlsGet`-loaded and `.as_mut()` mis-dispatched
+                    // against the name-as-string (`Text<small>`), surfacing as
+                    // "method 'as_mut' not found on receiver of runtime kind
+                    // Text<small>".  This blocked `get_heap()` /
+                    // `get_segment_stats()` and every observer that reaches a
+                    // record-typed thread-local via a method call.
+                    if self.ctx.get_var_reg(&name).is_ok()
+                        || self.ctx.is_thread_local(&name).is_some()
+                    {
                         None
                     } else {
                         Some(name)
@@ -8426,7 +8440,15 @@ impl VbcCodegen {
             // This avoids "undefined variable: sys" / "undefined variable: IoError" errors.
             if !parts.is_empty() {
                 let first = &parts[0];
-                let is_module_ns = first == "super"
+                // A single-segment `static mut` / `@thread_local` receiver is
+                // a value, never a module/type namespace — keep it out of both
+                // the module-ns stub path and the type-ns path so it reaches
+                // the value-receiver instance dispatch below (see the matching
+                // guard on `static_receiver_type` above).
+                let first_is_thread_local =
+                    parts.len() == 1 && self.ctx.is_thread_local(first).is_some();
+                let is_module_ns = !first_is_thread_local
+                    && (first == "super"
                     || first == "cog"
                     || first == "."
                     || (first
@@ -8435,7 +8457,7 @@ impl VbcCodegen {
                         .map(|c| c.is_lowercase())
                         .unwrap_or(false)
                         && self.ctx.get_var_reg(first).is_err()
-                        && !is_type_name(first));
+                        && !is_type_name(first)));
                 // Also treat uppercase names as type namespaces if they have qualified
                 // functions registered (e.g., IoError.WouldBlock, IoError.from_errno).
                 // Resolve type aliases first so `type IoError is StreamError;` callers
@@ -8445,6 +8467,7 @@ impl VbcCodegen {
                 // "undefined variable: IoError" lenient skip.
                 let resolved_first = self.resolve_type_alias(first);
                 let is_type_ns = !is_module_ns
+                    && !first_is_thread_local
                     && first
                         .chars()
                         .next()
@@ -10524,8 +10547,21 @@ impl VbcCodegen {
         // this, a `mount`-imported free function whose simple name matches
         // the method (e.g. `stdout`, `stderr`, `len`) silently shadows
         // method dispatch on the local.
-        let receiver_is_local_value =
-            !is_type_name(&type_name) && self.ctx.registers.contains(&type_name);
+        //
+        // A `static mut` / `@thread_local` binding (e.g. `CURRENT_HEAP`,
+        // `GLOBAL_HAZARD_DOMAIN`) is ALSO a value receiver — its storage is
+        // a TLS slot, not a register, so `registers.contains` misses it.
+        // Pre-fix the bare CapitalCase shape fell through to static-method
+        // dispatch, which emitted `LoadK "<NAME>"` (the name as a string)
+        // as the receiver → `.as_mut()` / `.scan_hazards()` / … then failed
+        // with "method not found on receiver of runtime kind Text<small>".
+        // This blocked every observer that reaches a record-typed static-mut
+        // through a method call (get_heap, hazard_stats, get_segment_stats).
+        // `is_thread_local` is the authoritative static-mut registry (every
+        // `static mut`/`@thread_local` is registered there at decl time).
+        let receiver_is_local_value = !is_type_name(&type_name)
+            && (self.ctx.registers.contains(&type_name)
+                || self.ctx.is_thread_local(&type_name).is_some());
         if receiver_is_local_value {
             return Ok(None);
         }
@@ -19597,14 +19633,35 @@ impl VbcCodegen {
                 {
                     let name = &ident.name;
                     if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                        // Heap.new(x) / Shared.new(x): return the inner type, not "Heap"/"Shared"
-                        // This ensures field access on Heap<T> resolves T's field positions
+                        // Heap.new(x) / Shared.new(x): return the WRAPPER type
+                        // `Heap<T>` / `Shared<T>` (NOT the bare inner `T`).
+                        //
+                        // Returning the wrapper is required so that wrapper
+                        // METHODS dispatch correctly: `let b = Heap.new(rec);
+                        // b.is_valid()` must resolve to `Heap.is_valid`, and
+                        // `let s = Shared.new(v); s.strong_count()` to
+                        // `Shared.strong_count`.  Pre-fix this returned the
+                        // inner type, so the binding was typed `T` and the
+                        // method call dispatched to `T.is_valid` /
+                        // `T.strong_count` — not found, runtime kind Object
+                        // (the failing `core-tests/mem/allocator/integration_*`
+                        // Heap/Shared wrapper-method tests).  `Heap.new` /
+                        // `Shared.new` DO return a real wrapper record at
+                        // runtime (`Heap { ptr, generation, epoch }`), so the
+                        // wrapper-typed dispatch is sound.
+                        //
+                        // Field access through the wrapper (`b.field`) still
+                        // works because `resolve_field_index` auto-derefs a
+                        // `Heap<T>` / `Shared<T>` receiver to the inner `T`
+                        // when the field is not one of the wrapper's own
+                        // (ptr / generation / epoch) — see the auto-deref arm
+                        // in `resolve_field_index_impl`.
                         if self.is_allocating_wrapper(name.as_str())
                             && method.name.as_str() == "new"
                             && let Some(first_arg) = args.first()
                             && let Some(inner_type) = self.extract_expr_type_name(first_arg)
                         {
-                            return Some(inner_type);
+                            return Some(format!("{}<{}>", name, inner_type));
                         }
                         // Look up the qualified static method to get its return type.
                         //

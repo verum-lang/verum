@@ -68,6 +68,8 @@ Attenuate narrows caps WITHOUT bumping generation. Pinned by
 |---|---|---|---|
 | 1 | Missing test coverage for `core/mem/cap_audit.vr` | `core-tests/mem/cap_audit/{unit,property,integration,regression}_test.vr` | New 4-file suite; ~530 LOC total. |
 | 2 | Missing `audit.md` for `core-tests/mem/cap_audit/` | This file. |
+| 3 | **`epoch_at_event` test bug (2026-06-19)** — `test_cap_event_new_records_epoch_at_event` + `test_cap_event_new_independent_fields_no_cross_contamination` read `event.epoch_at_event`, which is NOT a field of `CapEvent` (the field is `timestamp_ns`). The bare name resolved leniently to a wrong slot, returning a contaminated value, so the asserts compared garbage (`38/2`). | Test (`unit_test.vr §5`) | Pointed the reads at `timestamp_ns`. **cap_audit now 40/0.** |
+| 4 | **Language defect surfaced** — lenient unknown-field resolution returns a wrong slot instead of a hard error, which is what let #3 fail silently rather than at compile time. | `crates/verum_vbc` field-index resolution | Tracked (not fixed here): an unknown record field should be a compile error, not a slot-interner fallback. |
 
 ## 5. Action items deferred
 

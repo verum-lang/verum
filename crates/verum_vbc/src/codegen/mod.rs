@@ -1186,6 +1186,31 @@ impl VbcCodegen {
     /// "List<LexToken>" → Some("LexToken"), "Map<Text, Int>" → Some("Text"),
     /// "LexToken" → None (not a generic type).
     pub fn extract_element_type(type_name: &str) -> Option<String> {
+        // Array / slice form `[T]` or `[T; N]` (produced by
+        // `extract_type_name_from_ast` for `TypeKind::Array`/`Slice`).
+        // Strip the brackets and any `; N` size suffix to recover the
+        // element type `T`. Indexing such a type (`arr[i]`) yields `T`,
+        // so this is the element-type the Index arm of
+        // `infer_expr_type_name` needs to resolve field offsets on
+        // `arr[i].field` correctly.
+        if let Some(rest) = type_name.strip_prefix('[')
+            && let Some(inner) = rest.strip_suffix(']')
+        {
+            let elem = match inner.find(';') {
+                Some(semi) => inner[..semi].trim(),
+                None => inner.trim(),
+            };
+            if elem.is_empty() {
+                return None;
+            }
+            let is_bare_generic =
+                elem.len() <= 2 && elem.chars().all(|c| c.is_ascii_uppercase());
+            return if is_bare_generic {
+                None
+            } else {
+                Some(elem.to_string())
+            };
+        }
         let start = type_name.find('<')?;
         let end = type_name.rfind('>')?;
         if start + 1 >= end {
@@ -7630,6 +7655,32 @@ impl VbcCodegen {
                 let qualified_verum = full_path.join(".");
                 let qualified_rust = full_path.join("::");
 
+                // [diag] gated const-collision resolution trace.
+                if std::env::var("VERUM_TRACE_CONST_RESOLVE").is_ok()
+                    && std::env::var("VERUM_TRACE_CONST_RESOLVE")
+                        .map(|w| func_name.contains(&w) || w == "*" )
+                        .unwrap_or(false)
+                {
+                    let suffix = format!(".{}", func_name);
+                    let mut keys: Vec<String> = self
+                        .ctx
+                        .functions
+                        .keys()
+                        .filter(|k| k.ends_with(&suffix) || **k == func_name)
+                        .cloned()
+                        .collect();
+                    keys.sort();
+                    eprintln!(
+                        "[const-resolve] mount func='{}' qualified_verum='{}' alias='{}' scope={:?}\n  registered keys matching: {:?}\n  bare lookup -> id {:?}",
+                        func_name,
+                        qualified_verum,
+                        alias_name,
+                        self.ctx.current_source_module,
+                        keys,
+                        self.ctx.functions.get(&func_name).map(|f| f.id.0),
+                    );
+                }
+
                 // Architectural rule: an explicit `mount X.Y.{name}` /
                 // `mount X.Y.name as alias` is an authoritative binding —
                 // the user named the function they want, so it MUST win
@@ -7877,12 +7928,43 @@ impl VbcCodegen {
                         }
                     }
                     if !hits.is_empty() {
-                        // Shallowest first; alphabetical as deterministic
-                        // tiebreak among same-depth hits.
+                        // Tie-break ranking among re-export candidates:
+                        //   1. shallowest hit (fewest dots = closest sibling),
+                        //   2. MODULE-parent before TYPE-parent,
+                        //   3. alphabetical (deterministic).
+                        //
+                        // Rule 2 disambiguates a const re-exported from a
+                        // submodule (`core.mem.header.HEADER_SIZE`, where
+                        // `header` is a module) from a same-named
+                        // TYPE-ASSOCIATED const at the same depth
+                        // (`core.mem.MemSegment.HEADER_SIZE`, where
+                        // `MemSegment` is a type).  An umbrella
+                        // `mount core.mem.{HEADER_SIZE}` re-exports the
+                        // module-level const (via `core/mem/mod.vr`'s
+                        // `public mount .header.{HEADER_SIZE}`), NOT the
+                        // type-associated one.  Without rule 2 the pure
+                        // alphabetical tie-break picked `MemSegment` (`M` <
+                        // `h`) and `HEADER_SIZE` silently imported the
+                        // wrong value.  Verum convention — modules are
+                        // lower_snake_case, types are CapitalCase — makes
+                        // the parent segment's leading case an exact
+                        // module-vs-type discriminator.
+                        let parent_is_module = |k: &str| -> bool {
+                            let segs: Vec<&str> = k.split('.').collect();
+                            segs.len() >= 2
+                                && segs[segs.len() - 2]
+                                    .chars()
+                                    .next()
+                                    .map(|c| c.is_ascii_lowercase())
+                                    .unwrap_or(false)
+                        };
                         hits.sort_by(|a, b| {
                             let da = a.matches('.').count();
                             let db = b.matches('.').count();
-                            da.cmp(&db).then_with(|| a.cmp(b))
+                            da.cmp(&db)
+                                // module-parent (true) ranks before type-parent (false)
+                                .then_with(|| parent_is_module(b).cmp(&parent_is_module(a)))
+                                .then_with(|| a.cmp(b))
                         });
                         if let Some(func_info) =
                             self.ctx.lookup_function(&hits[0]).cloned()
@@ -11244,8 +11326,35 @@ impl VbcCodegen {
         let constants = std::mem::take(&mut self.pending_constants);
 
         for (name, expr, queued_source_module) in constants {
-            // Get the pre-registered function info
-            let func_info = match self.ctx.lookup_function(&name) {
+            // Get the pre-registered function info.
+            //
+            // **Cross-module same-simple-name const disambiguation.**
+            // When two modules declare a const with the same simple name
+            // — e.g. `core.mem.allocator.SIZE_CLASSES: [Int; 11]` vs
+            // `core.mem.size_class.SIZE_CLASSES: [Int; 73]` —
+            // `register_constant_with_value` assigns each its OWN
+            // `FunctionId` and registers it under BOTH the bare simple
+            // name (first-wins) and its module-qualified name.  A bare
+            // `lookup_function(&name)` here returns the SAME first-wins
+            // entry for BOTH pending bodies, so both compiled bodies land
+            // on one `FunctionId`; `push_function_dedup` then keeps only
+            // one, and the loser's qualified archive descriptor (e.g.
+            // `core.mem.allocator.SIZE_CLASSES`) never makes it into the
+            // archive at all — so a downstream
+            // `mount core.mem.allocator.{SIZE_CLASSES}` can't resolve it
+            // and silently reads the other module's table.  Prefer the
+            // source-module-qualified entry so each module's const keeps
+            // its own id + body + qualified name.
+            let qualified_name: Option<String> = queued_source_module
+                .as_deref()
+                .filter(|m| !m.is_empty() && *m != "main")
+                .filter(|_| !name.contains('.') && !name.contains("::"))
+                .map(|m| format!("{}.{}", m, name));
+            let func_info = match qualified_name
+                .as_deref()
+                .and_then(|q| self.ctx.lookup_function(q))
+                .or_else(|| self.ctx.lookup_function(&name))
+            {
                 Some(info) => info.clone(),
                 None => continue, // Skip if not found (shouldn't happen)
             };
@@ -13833,6 +13942,43 @@ impl VbcCodegen {
 
     fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> u32 {
         if let Some(tn) = type_name {
+            // **Allocating-wrapper field auto-deref** (Heap<T> / Shared<T>).
+            //
+            // A binding produced by `Heap.new(x)` / `Shared.new(x)` is typed
+            // with the WRAPPER type (`Heap<T>`) so wrapper METHODS dispatch
+            // (`b.is_valid()` → `Heap.is_valid`).  Field access on such a
+            // binding (`b.field`), however, almost always targets the
+            // POINTEE `T` — the wrapper's own fields are just the CBGR triple
+            // (`ptr` / `generation` / `epoch`).  Resolve `field_name` against
+            // the inner `T` whenever it is NOT one of the wrapper's own
+            // fields, so `b.a0` reaches `MediumPayload.a0` while `self.ptr`
+            // inside a Heap method still resolves against Heap.  Without this
+            // the field would miss the wrapper descriptor and fall through to
+            // the global field-name interner (wrong offset).
+            if let Some(lt) = tn.find('<') {
+                let wrapper_base = &tn[..lt];
+                if self.is_allocating_wrapper(wrapper_base)
+                    && let Some(inner) = Self::extract_element_type(tn)
+                {
+                    // Is `field_name` one of the wrapper's OWN fields?
+                    let is_wrapper_field = self
+                        .type_name_to_id
+                        .get(wrapper_base)
+                        .and_then(|&tid| self.types.iter().find(|t| t.id == tid))
+                        .map(|td| {
+                            td.fields.iter().any(|fd| {
+                                self.ctx
+                                    .strings
+                                    .get(fd.name.0 as usize)
+                                    .is_some_and(|s| s == field_name)
+                            })
+                        })
+                        .unwrap_or(false);
+                    if !is_wrapper_field {
+                        return self.resolve_field_index_impl(Some(&inner), field_name);
+                    }
+                }
+            }
             // **Architectural rule** (closes task #16 consumer side):
             // resolve field index from the canonical TypeDescriptor's
             // own field list BEFORE consulting `type_field_layouts`.
@@ -14684,6 +14830,19 @@ impl VbcCodegen {
             }
             TypeKind::Slice(inner) => {
                 format!("[{}]", Self::extract_type_name_from_ast(inner))
+            }
+            // Fixed array `[T; N]` — render as `[T]` (the size is irrelevant
+            // for type-name / element-type resolution; `extract_element_type`
+            // strips the brackets to recover `T`).  Without this arm the
+            // catch-all `{:?}`-Debug fallback produced a garbage name like
+            // "Array { element: Ty", so a `static mut R: [T; N]`'s
+            // `static_mut_type_names` entry was unusable: `R[i].field` then
+            // inferred a `None` receiver type and `resolve_field_index` fell
+            // through to the global field-name interner, returning a WRONG
+            // slot index (cap_audit_ring's `slot.state` read the wrong field
+            // → garbage seq → SIGSEGV at scale).
+            TypeKind::Array { element, .. } => {
+                format!("[{}]", Self::extract_type_name_from_ast(element))
             }
             TypeKind::DynProtocol { bounds, .. } => {
                 // dyn Protocol → "dyn:Protocol" for dispatch tracking
