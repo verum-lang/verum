@@ -1294,6 +1294,30 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
+            // null_ptr() — the null pointer is the integer 0.
+            InlineSequenceId::NullPtr => self.emit(MlirOp {
+                name: "arith.constant".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "value".to_string(),
+                    value: MlirAttrValue::Integer(0),
+                }],
+                result_types: vec![MlirType::I64],
+                operands: vec![],
+                region: None,
+            }),
+            // ptr_is_null(ptr) — integer compare-equal against 0.  (The
+            // authoritative VBC emission in codegen/expressions.rs materialises
+            // the 0 operand; this GPU-path op carries the eq predicate.)
+            InlineSequenceId::PtrIsNull => self.emit(MlirOp {
+                name: "arith.cmpi".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "predicate".to_string(),
+                    value: MlirAttrValue::String("eq".to_string()),
+                }],
+                result_types: vec![MlirType::I1],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Type conversions
             InlineSequenceId::IntToFloat => self.emit(MlirOp {

@@ -1,0 +1,54 @@
+// =============================================================================
+// core-tests/intrinsics/memory/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core/intrinsics/memory.vr` (value-level subset).
+// CLOSED defects are PASS-GUARDs; the raw-pointer surface that needs a live
+// allocation to test is tracked in `audit.md` §3 (MEM-RAWPTR-HARNESS-1), not
+// pinned here (an `@ignore` body would still need a fabricated pointer).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.memory.{
+    null_ptr, null_ptr_mut, ptr_is_null, swap, replace, transmute,
+};
+
+// MEM-NULLPTR-1: null_ptr / ptr_is_null returned nil.  The registry strategies
+// were `DirectOpcode(LoadI)` (no immediate to load) and `DirectOpcode(EqI)` (a
+// binary compare invoked with a single operand), both of which fell through to
+// `LoadNil`.  Now `null_ptr` loads 0 and `ptr_is_null` materialises the `0`
+// operand for the compare.
+@test
+fn regression_null_ptr_is_null_was_nil() {
+    let p: *const Int = null_ptr();
+    assert(ptr_is_null(p));
+}
+
+@test
+fn regression_null_ptr_mut_is_null_was_nil() {
+    let p: *mut Int = null_ptr_mut();
+    assert(ptr_is_null(p));
+}
+
+// Sanity: the value-level ops that already worked stay working.
+@test
+fn regression_swap_replace_transmute_still_work() {
+    let mut x = 3;
+    let mut y = 7;
+    swap(&mut x, &mut y);
+    assert_eq(x, 7);
+    assert_eq(y, 3);
+    let old = replace(&mut x, 100);
+    assert_eq(old, 7);
+    assert_eq(x, 100);
+    let t: Int = transmute(255 as UInt64);
+    assert_eq(t, 255);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
