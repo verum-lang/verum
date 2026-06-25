@@ -1,0 +1,107 @@
+// =============================================================================
+// core-tests/intrinsics/conversion/integration_test.vr
+// =============================================================================
+//
+// Cross-cutting usage of the conversion intrinsics in the small algorithms that
+// consume them: IEEE-754 field extraction, integer serialisation, and
+// network-byte-order (big-endian) round-trips.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.conversion.{
+    int_to_float, float_to_int,
+    f64_to_bits, f64_from_bits,
+    to_be_bytes_4, from_be_bytes_4,
+    to_le_bytes_8, from_le_bytes_8,
+    to_be, from_be,
+};
+mount core.intrinsics.bitwise.{ lshr, bitand };
+
+// --- IEEE-754 field extraction via f64_to_bits --------------------------------
+
+fn sign_bit(x: Float64) -> UInt64 {
+    let bits = f64_to_bits(x);
+    lshr(bits, 63 as UInt32)
+}
+
+@test
+fn ieee_sign_bit() {
+    assert_eq(sign_bit(1.0), 0 as UInt64);
+    assert_eq(sign_bit(-1.0), 1 as UInt64);
+    assert_eq(sign_bit(0.0), 0 as UInt64);
+}
+
+fn exponent_field(x: Float64) -> UInt64 {
+    let bits = f64_to_bits(x);
+    let shifted = lshr(bits, 52 as UInt32);
+    bitand(shifted, 0x7FF as UInt64)
+}
+
+@test
+fn ieee_exponent_of_one() {
+    // 1.0 has biased exponent 1023 (0x3FF).
+    assert_eq(exponent_field(1.0), 0x3FF as UInt64);
+}
+
+@test
+fn ieee_exponent_of_two() {
+    // 2.0 has biased exponent 1024 (0x400).
+    assert_eq(exponent_field(2.0), 0x400 as UInt64);
+}
+
+@test
+fn ieee_reconstruct_from_bits() {
+    // Manually assemble the bit pattern for 1.0 and decode it.
+    let one_bits: UInt64 = 0x3FF0000000000000 as UInt64;
+    assert_eq(f64_from_bits(one_bits), 1.0);
+}
+
+// --- Integer serialisation (round-trip through a byte buffer) ------------------
+
+@test
+fn serialize_u64_le_round_trip() {
+    let value = 0x1122334455667788;
+    let bytes = to_le_bytes_8(value);
+    // least-significant byte first
+    assert_eq(bytes[0], 0x88 as Byte);
+    assert_eq(bytes[7], 0x11 as Byte);
+    assert_eq(from_le_bytes_8(bytes), value);
+}
+
+// --- Network byte order (big-endian) ------------------------------------------
+
+@test
+fn network_order_round_trip() {
+    // htonl/ntohl-style: host → big-endian → host.
+    let host: UInt64 = 0x0000000012345678 as UInt64;
+    let net = to_be(host);
+    assert_eq(from_be(net), host);
+}
+
+@test
+fn be_bytes_are_network_order() {
+    let port: Int = 8080; // 0x1F90
+    let b = to_be_bytes_4(port);
+    // big-endian: most-significant byte first
+    assert_eq(b[2], 0x1F as Byte);
+    assert_eq(b[3], 0x90 as Byte);
+    assert_eq(from_be_bytes_4(b), port);
+}
+
+// --- int/float interplay ------------------------------------------------------
+
+@test
+fn float_floor_via_truncation() {
+    // float_to_int truncates toward zero — combined with sign handling this
+    // backs floor/ceil in the numeric layer.
+    assert_eq(float_to_int(int_to_float(7) + 0.99), 7);
+    assert_eq(float_to_int(int_to_float(-7) - 0.99), -7);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -84,18 +84,30 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
             // Type conversion intrinsics
             "sitofp" | "uitofp" => "int_to_float",
             "fptosi" | "fptoui" => "float_to_int",
-            "fpext" => "fpext",
-            "fptrunc" => "fptrunc",
-            "sext" => "sext",
-            "zext" => "zext",
-            "trunc" => "int_trunc",
+            // Integer/float width conversions resolve to the dedicated
+            // width-typed registry entries.  The generic `sext`/`zext`/…
+            // names previously aliased to themselves — names with NO registry
+            // entry — so `lookup_intrinsic` returned None and the wrappers
+            // lowered to `nil`.  At the i64/f64 runtime these are no-op `Mov`s
+            // (widening preserves the value); the width in the target entry's
+            // name is irrelevant to the emitted sequence.
+            "fpext" => "f32_to_f64",
+            "fptrunc" => "f64_to_f32",
+            "sext" => "i32_to_i64",
+            "zext" => "u32_to_u64",
+            "trunc" => "i64_to_i32",
             "bitcast" => "bitcast",
             "to_le_bytes" | "to_ne_bytes" => "to_le_bytes",
             "to_be_bytes" => "to_be_bytes",
             "from_le_bytes" | "from_ne_bytes" => "from_le_bytes",
             "from_be_bytes" => "from_be_bytes",
-            "to_le" | "from_le" => "to_le_bytes",
-            "to_be" | "from_be" => "to_be_bytes",
+            // Endianness conversions return T (NOT a byte array — the prior
+            // alias to `to_le_bytes` was a defect).  On a little-endian target
+            // `to_le`/`from_le` are no-ops (identity `Mov`, reusing the
+            // value-preserving `u32_to_u64` zero-extend sequence) and
+            // `to_be`/`from_be` are a byte swap.
+            "to_le" | "from_le" => "u32_to_u64",
+            "to_be" | "from_be" => "bswap",
             // Float math intrinsics (generic → f64 default)
             "sqrt" => "sqrt_f64",
             "cbrt" => "cbrt_f64",

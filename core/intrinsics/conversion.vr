@@ -152,11 +152,15 @@ public fn from_be<T>(x: T) -> T { @intrinsic("from_be", x) }
 /// Convert integer to byte array (alias for to_ne_bytes)
 public fn int_to_bytes<T, const N: USize>(x: T) -> [Byte; N] { @intrinsic("to_ne_bytes", x) }
 
+// These route to the dedicated width-typed bit-reinterpret intrinsics rather
+// than the generic `bitcast`: a Float Value is NaN-boxed in the Tier-0
+// interpreter (its bits are NOT directly the IEEE encoding), so the reinterpret
+// is a real opcode (`ArithSubOpcode::F{32,64}{To,From}Bits`), not a no-op move.
 /// Float32 to bits (reinterpret as UInt32)
-public fn f32_to_bits(x: Float32) -> UInt32 { @intrinsic("bitcast", x) }
+public fn f32_to_bits(x: Float32) -> UInt32 { @intrinsic("f32_to_bits", x) }
 /// Float32 from bits (reinterpret UInt32 as Float32)
-public fn f32_from_bits(x: UInt32) -> Float32 { @intrinsic("bitcast", x) }
+public fn f32_from_bits(x: UInt32) -> Float32 { @intrinsic("f32_from_bits", x) }
 /// Float64 to bits (reinterpret as UInt64)
-public fn f64_to_bits(x: Float64) -> UInt64 { @intrinsic("bitcast", x) }
+public fn f64_to_bits(x: Float64) -> UInt64 { @intrinsic("f64_to_bits", x) }
 /// Float64 from bits (reinterpret UInt64 as Float64)
-public fn f64_from_bits(x: UInt64) -> Float64 { @intrinsic("bitcast", x) }
+public fn f64_from_bits(x: UInt64) -> Float64 { @intrinsic("f64_from_bits", x) }

@@ -1,0 +1,238 @@
+// =============================================================================
+// core-tests/intrinsics/conversion/unit_test.vr
+// =============================================================================
+//
+// API-surface coverage for `core/intrinsics/conversion.vr` — type-conversion
+// intrinsics that map to LLVM/CPU instructions: int↔float, integer width
+// changes, bit reinterpretation, byte layouts, and endianness.
+//
+// Runtime model: VBC integer Values are i64, floats are IEEE f64 (a Float
+// Value's raw 64 bits ARE its IEEE bits).  Integer *width* is a static-only
+// concept (same rule as arithmetic/bitwise), so the generic widening
+// conversions (`sext`/`zext`) are identity at i64 and the byte/bits helpers
+// carry their width in the intrinsic name.  Defects are pinned in
+// `regression_test.vr` and ranked in `audit.md`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.conversion.{
+    int_to_float, uint_to_float, float_to_int, float_to_uint,
+    sext, zext,
+    f32_to_bits, f32_from_bits, f64_to_bits, f64_from_bits,
+    to_le_bytes_2, to_le_bytes_4, to_le_bytes_8,
+    to_be_bytes_2, to_be_bytes_4, to_be_bytes_8,
+    from_le_bytes_2, from_le_bytes_4, from_le_bytes_8,
+    from_be_bytes_2, from_be_bytes_4, from_be_bytes_8,
+    to_le, to_be, from_le, from_be,
+};
+
+// -----------------------------------------------------------------------------
+// SECTION 1 — Integer / Float conversions
+// -----------------------------------------------------------------------------
+
+@test
+fn int_to_float_positive() {
+    assert_eq(int_to_float(42), 42.0);
+}
+
+@test
+fn int_to_float_negative() {
+    assert_eq(int_to_float(-7), -7.0);
+}
+
+@test
+fn int_to_float_zero() {
+    assert_eq(int_to_float(0), 0.0);
+}
+
+@test
+fn uint_to_float_basic() {
+    assert_eq(uint_to_float(255 as UInt64), 255.0);
+}
+
+@test
+fn float_to_int_truncates_positive() {
+    assert_eq(float_to_int(3.7), 3);
+}
+
+@test
+fn float_to_int_truncates_toward_zero_negative() {
+    assert_eq(float_to_int(-3.7), -3);
+}
+
+@test
+fn float_to_int_exact() {
+    assert_eq(float_to_int(5.0), 5);
+}
+
+@test
+fn float_to_uint_truncates() {
+    assert_eq(float_to_uint(7.9), 7 as UInt64);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 2 — Integer width (widening = identity at i64)
+// -----------------------------------------------------------------------------
+
+@test
+fn sext_negative_preserved() {
+    assert_eq(sext(-1), -1);
+}
+
+@test
+fn sext_positive_preserved() {
+    assert_eq(sext(127), 127);
+}
+
+@test
+fn zext_byte() {
+    assert_eq(zext(0xFF as UInt8), 255);
+}
+
+@test
+fn zext_zero() {
+    assert_eq(zext(0 as UInt8), 0);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 3 — IEEE 754 bit reinterpretation
+// -----------------------------------------------------------------------------
+
+@test
+fn f64_to_bits_one() {
+    assert_eq(f64_to_bits(1.0), 0x3FF0000000000000 as UInt64);
+}
+
+@test
+fn f64_to_bits_zero() {
+    assert_eq(f64_to_bits(0.0), 0 as UInt64);
+}
+
+@test
+fn f64_to_bits_two() {
+    assert_eq(f64_to_bits(2.0), 0x4000000000000000 as UInt64);
+}
+
+@test
+fn f64_from_bits_one() {
+    assert_eq(f64_from_bits(0x3FF0000000000000 as UInt64), 1.0);
+}
+
+@test
+fn f64_bits_round_trip() {
+    let x: Float64 = 3.141592653589793;
+    assert_eq(f64_from_bits(f64_to_bits(x)), x);
+}
+
+@test
+fn f32_to_bits_one() {
+    assert_eq(f32_to_bits(1.0 as Float32), 0x3F800000 as UInt32);
+}
+
+@test
+fn f32_from_bits_one() {
+    assert_eq(f32_from_bits(0x3F800000 as UInt32), 1.0 as Float32);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 4 — Byte conversions (width-specific)
+// -----------------------------------------------------------------------------
+
+@test
+fn to_le_bytes_4_order() {
+    let b = to_le_bytes_4(0x01020304);
+    assert_eq(b[0], 0x04 as Byte);
+    assert_eq(b[1], 0x03 as Byte);
+    assert_eq(b[2], 0x02 as Byte);
+    assert_eq(b[3], 0x01 as Byte);
+}
+
+@test
+fn to_be_bytes_4_order() {
+    let b = to_be_bytes_4(0x01020304);
+    assert_eq(b[0], 0x01 as Byte);
+    assert_eq(b[1], 0x02 as Byte);
+    assert_eq(b[2], 0x03 as Byte);
+    assert_eq(b[3], 0x04 as Byte);
+}
+
+@test
+fn to_le_bytes_2_order() {
+    let b = to_le_bytes_2(0x0102);
+    assert_eq(b[0], 0x02 as Byte);
+    assert_eq(b[1], 0x01 as Byte);
+}
+
+@test
+fn to_le_bytes_8_order() {
+    let b = to_le_bytes_8(0x0102030405060708);
+    assert_eq(b[0], 0x08 as Byte);
+    assert_eq(b[7], 0x01 as Byte);
+}
+
+@test
+fn from_le_bytes_4_round_trip() {
+    let b = to_le_bytes_4(0x0A0B0C0D);
+    assert_eq(from_le_bytes_4(b), 0x0A0B0C0D);
+}
+
+@test
+fn from_be_bytes_4_round_trip() {
+    let b = to_be_bytes_4(0x0A0B0C0D);
+    assert_eq(from_be_bytes_4(b), 0x0A0B0C0D);
+}
+
+@test
+fn from_le_bytes_8_round_trip() {
+    let b = to_le_bytes_8(0x1122334455667788);
+    assert_eq(from_le_bytes_8(b), 0x1122334455667788);
+}
+
+@test
+fn le_be_byte_order_is_reversed() {
+    let le = to_le_bytes_4(0x01020304);
+    let be = to_be_bytes_4(0x01020304);
+    assert_eq(le[0], be[3]);
+    assert_eq(le[1], be[2]);
+    assert_eq(le[2], be[1]);
+    assert_eq(le[3], be[0]);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 5 — Endianness (returns T, not bytes)
+// -----------------------------------------------------------------------------
+
+@test
+fn to_le_is_identity_on_le_target() {
+    assert_eq(to_le(0x1234 as UInt64), 0x1234 as UInt64);
+}
+
+@test
+fn from_le_is_identity_on_le_target() {
+    assert_eq(from_le(0x1234 as UInt64), 0x1234 as UInt64);
+}
+
+@test
+fn to_be_swaps_bytes_on_le_target() {
+    assert_eq(to_be(0x1234 as UInt64), 0x3412000000000000 as UInt64);
+}
+
+@test
+fn to_be_from_be_round_trip() {
+    let x: UInt64 = 0xDEADBEEFCAFEBABE as UInt64;
+    assert_eq(from_be(to_be(x)), x);
+}
+
+@test
+fn to_le_from_le_round_trip() {
+    let x: UInt64 = 0xDEADBEEFCAFEBABE as UInt64;
+    assert_eq(from_le(to_le(x)), x);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
