@@ -28,13 +28,17 @@ failure `observed` is the current value and the cell is unchanged.
 
 ## Tier summary
 
-* **Interp: 30/30 GREEN.**
-* **AOT: 16/30** — the 14 failures are exactly the operational tests that drive
-  atomic ops through a `List.as_mut_ptr()` raw pointer (even store/load).  The
-  `MemoryOrder` ADT + ORDERING constants + fences pass.  Root cause is the AOT
-  raw-pointer / `List`-backing path (same family as `CONV-AOT-BYTEARRAY-1` and
-  `MEM-RAWPTR-HARNESS-1`), not the atomic ops — interp drives the identical code
-  green.  Tracked: `ATOMIC-AOT-RAWPTR-1` (task #25).
+* **Both tiers: 25/30.**  The full **operational** surface (store/load,
+  fetch-`{add,sub,and,or,xor}`, exchange, compare-and-swap, fences, counter,
+  CAS lock) now passes on **both interp and AOT** — `ATOMIC-AOT-RAWPTR-1` is
+  FIXED (the `as_ptr`/`as_mut_ptr` Unslice intercept no longer mis-reads a
+  `List` backing pointer; commit `8ead81c3a`).  AOT operational 16→25.
+* **5 failing** = the `MemoryOrder` `strength_label` match tests, regressed on
+  BOTH tiers by a separate **context-dependent match-dispatch drift**
+  (`ATOMIC-STRENGTH-MATCH-DRIFT`, task #26): `match` on `MemoryOrder` returns
+  the wrong arm only when the full `unit_test.vr` (many `is`/`match` over the
+  same archive enum) compiles together — minimal/sub-combinations pass, and
+  `is` works.  Surfaced by the archive regen; independent of the `as_ptr` fix.
 
 ## 1. What is verified GREEN (interp; AOT = the non-pointer subset)
 
@@ -99,8 +103,14 @@ value contract only.
   audit) over a live cell — load/store/fetch-ops/exchange/CAS/fences across
   widths, both tiers.
 
+**Fixed**
+* ATOMIC-AOT-RAWPTR-1 (#25) — operational atomic ops via `List.as_mut_ptr` now
+  work on both tiers (the `as_ptr`/`as_mut_ptr` Unslice intercept fix,
+  `8ead81c3a`).
+
 **Deferred (tracked)**
-* ATOMIC-AOT-RAWPTR-1 (#25) — operational atomic ops via `List.as_mut_ptr` fail
-  under AOT (AOT raw-pointer/`List`-backing path; interp green).
+* ATOMIC-STRENGTH-MATCH-DRIFT (#26) — `match` on `MemoryOrder` returns the wrong
+  arm in the full-file context (regressed the 5 strength tests, both tiers;
+  archive-regen-surfaced, separate from the as_ptr fix).
 * MEM-LIST-LITERAL-PTR-1 (#24) — `List` literal vs `as_mut_ptr` backing.
 * Inter-thread ordering conformance (concurrency suite, out of scope here).
