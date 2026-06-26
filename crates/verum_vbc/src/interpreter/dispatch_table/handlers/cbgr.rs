@@ -567,6 +567,28 @@ pub(in super::super) fn handle_drop_ref(
             };
 
             if let Some((drop_fn_id, reg_count, _bytecode_offset)) = drop_info {
+                if std::env::var("VERUM_TRACE_DROPFN").is_ok() {
+                    let tn = if type_id.0 >= crate::types::TypeId::FIRST_USER {
+                        state
+                            .module
+                            .types
+                            .get((type_id.0 - crate::types::TypeId::FIRST_USER) as usize)
+                            .and_then(|td| state.module.strings.get(td.name))
+                            .unwrap_or("?")
+                    } else {
+                        "<builtin>"
+                    };
+                    let dfn = state
+                        .module
+                        .functions
+                        .get(drop_fn_id as usize)
+                        .and_then(|f| state.module.strings.get(f.name))
+                        .unwrap_or("?");
+                    eprintln!(
+                        "[DROPFN] type='{}' (id={}) drop_fn_id={} resolves_to='{}'",
+                        tn, type_id.0, drop_fn_id, dfn
+                    );
+                }
                 // Set return_pc to the CURRENT DropRef instruction.
                 // After drop() returns, we'll re-execute DropRef with a cleared register.
                 // Subtract the instruction size to re-execute this instruction
