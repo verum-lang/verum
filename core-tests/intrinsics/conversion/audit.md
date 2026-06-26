@@ -27,10 +27,10 @@ dedicated intrinsics, not to the generic `bitcast`.
 ## Tier summary
 
 * **Interp: 60/60 GREEN.**
-* **AOT: 41/60** — the 19 failures are TWO pre-existing AOT-codegen defect
-  clusters (NOT this branch's wiring; revealed for the first time by these
-  tests): `CONV-AOT-F32BITS-1` (f32 bit-reinterpret returns 0) and
-  `CONV-AOT-BYTEARRAY-1` (`[Byte; N]` byte-conversion SIGSEGV).  See §3.
+* **AOT: 52/60** — `CONV-AOT-BYTEARRAY-1` is now FIXED (see §2); the remaining
+  failures are the `CONV-AOT-F32BITS-1` f32/f64-bits cluster (§3) plus the
+  occasionally-flaky endianness round-trip (`network_order_round_trip` — passes
+  in isolation; AOT parallel non-determinism, not a contract gap).
 
 ## 1. What is verified GREEN (interp + AOT)
 
@@ -94,13 +94,24 @@ AOT **Float32** handling — the `1.0 as Float32` cast / f32 parameter flow
 produces a zero/garbage float before the intrinsic runs.  The f64 forms work on
 both tiers.  Tracked: task #16.
 
-### CONV-AOT-BYTEARRAY-1 — `to/from_*_bytes` `[Byte; N]` SIGSEGV under AOT
+### CONV-AOT-BYTEARRAY-1 — `to/from_*_bytes` `[Byte; N]` SIGSEGV under AOT  ✅ FIXED
 
-Interp is correct; AOT SIGSEGVs (exit 139) on any `to_le_bytes_N(x)[i]` /
-`from_*_bytes_N` use.  Pre-existing AOT-codegen defect in fixed-size `[Byte; N]`
-construction/indexing for the byte-conversion intrinsics — these intrinsics and
-their `.vr` wrappers are unchanged by this branch; the new tests simply exercise
-the AOT path for the first time.  Tracked: task #17.
+Interp was correct; AOT SIGSEGV'd (exit 139) on any `to_le_bytes_N(x)[i]` /
+`from_*_bytes_N(arr)` use.  **Root cause** (a general AOT defect, not specific
+to byte conversions): AOT `GetE` dispatches on compile-time register marks
+(`is_list`/`is_slice`), and a byte-element collection that flowed across a
+function boundary was mis-marked — `List<U8>`/`List<I8>` as a *slice* (i8 stride
+/ offset-24 ptr) and `[T; N]` (`TypeRef::Array`) as *unmarked* (raw branch →
+deref of the list-object header).  A `List<U8>`/`[Byte; N]` is actually an
+i64-strided LIST OBJECT (proven by a local `[UInt8;4]` reading `4,3,2,1` via the
+is_list path); true `&[U8]` slices are a separate `Pack`/`TypeRef::Slice`
+representation marked at their own sites.
+
+**Fix** (`crates/verum_codegen/src/llvm`): mark `List<*>` (incl. byte element)
+AND `[T; N]` as list registers in BOTH `mark_register_from_return_type`
+(returns) and the parameter-marking loop in `vbc_lowering` (arguments).
+Conversion AOT 41→52; all `to_*_bytes`/`from_*_bytes` produce + consume tests
+pass.  Also unblocks every `fn … -> [T; N]` / `fn(List<U8>)` across the stdlib.
 
 * **`bitcast<S, D>` (generic, `unsafe`)** — no registry entry; resolves to `nil`.
   The runtime cannot recover the static `S`/`D` sizes, and the generic
