@@ -9059,7 +9059,38 @@ impl VbcCodegen {
 
         // Handle slice methods that map to intrinsics via CbgrExtended opcodes
         // These are commonly called on slices like: slice.as_ptr(), slice.len(), etc.
-        if method.name == "as_ptr" && args.is_empty() {
+        //
+        // The `Unslice` lowering below extracts the data pointer from a SLICE
+        // fat-pointer.  It must NOT fire for object-backed collections (e.g.
+        // `List<T>`) whose own `as_ptr`/`as_mut_ptr` read a backing-pointer
+        // FIELD (`self.ptr` at LIST_PTR_OFFSET): blindly Unslicing the list
+        // OBJECT pointer mis-reads its 24-byte header and yields a bad pointer
+        // (interp tolerated it; AOT SIGSEGV'd on every `ptr_*`/`atomic_*`
+        // through it — CONV-AOT/ATOMIC-AOT raw-ptr crashes).  So when the
+        // receiver is a non-slice type that defines its own `as_ptr` method,
+        // fall through to the normal method dispatch (which calls it and reads
+        // the field correctly).  Slices / fat-refs / unknown-typed receivers
+        // keep the `Unslice` fast path.
+        let receiver_defines_own_ptr_method = {
+            self.extract_expr_type_name(receiver)
+                .map(|tn| VbcCodegen::strip_generic_args(&tn).to_string())
+                .filter(|base| !base.is_empty())
+                .map(|base| {
+                    let is_slice_like = base.starts_with('[') || base == "Slice";
+                    !is_slice_like
+                        && (self
+                            .ctx
+                            .lookup_function(&format!("{}.as_ptr", base))
+                            .is_some()
+                            || self
+                                .ctx
+                                .lookup_function(&format!("{}.as_mut_ptr", base))
+                                .is_some())
+                })
+                .unwrap_or(false)
+        };
+
+        if method.name == "as_ptr" && args.is_empty() && !receiver_defines_own_ptr_method {
             // slice.as_ptr() -> extract pointer from fat pointer using Unslice
             let result = self.ctx.alloc_temp();
             // Encode operands: [dst] [src] - simple encoding for short register indices
@@ -9084,7 +9115,7 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
-        if method.name == "as_mut_ptr" && args.is_empty() {
+        if method.name == "as_mut_ptr" && args.is_empty() && !receiver_defines_own_ptr_method {
             // slice.as_mut_ptr() -> extract mutable pointer from fat pointer (same opcode)
             let result = self.ctx.alloc_temp();
             let mut operands = Vec::with_capacity(4);
