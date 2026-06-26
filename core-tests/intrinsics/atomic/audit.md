@@ -28,17 +28,19 @@ failure `observed` is the current value and the cell is unchanged.
 
 ## Tier summary
 
-* **Both tiers: 25/30.**  The full **operational** surface (store/load,
-  fetch-`{add,sub,and,or,xor}`, exchange, compare-and-swap, fences, counter,
-  CAS lock) now passes on **both interp and AOT** — `ATOMIC-AOT-RAWPTR-1` is
-  FIXED (the `as_ptr`/`as_mut_ptr` Unslice intercept no longer mis-reads a
-  `List` backing pointer; commit `8ead81c3a`).  AOT operational 16→25.
-* **5 failing** = the `MemoryOrder` `strength_label` match tests, regressed on
-  BOTH tiers by a separate **context-dependent match-dispatch drift**
-  (`ATOMIC-STRENGTH-MATCH-DRIFT`, task #26): `match` on `MemoryOrder` returns
-  the wrong arm only when the full `unit_test.vr` (many `is`/`match` over the
-  same archive enum) compiles together — minimal/sub-combinations pass, and
-  `is` works.  Surfaced by the archive regen; independent of the `as_ptr` fix.
+* **Interp: 30/30 GREEN.**  The `MemoryOrder` `strength_label` match tests are
+  FIXED — they were a TEST-HARNESS false negative (`HARNESS-FIDELITY` #26):
+  stale `core/target/test/*.merged.vr` artifacts had been baked into the
+  embedded archive, so the runner's leaf-name lookup executed a STALE duplicate
+  of each `@test` fn (outdated `match`-on-`MemoryOrder` bytecode → wrong arm).
+  Fixed by excluding `target/` from the archive precompile + preferring the
+  `is_test=true` fn in the runner (commit `9af98308c`).  The language was always
+  correct (`verum run` passed throughout).
+* **AOT: 25/30.**  Operational store/load, fetch-`{add,sub,and,or,xor}`,
+  exchange, fences pass both tiers (`ATOMIC-AOT-RAWPTR-1` FIXED, `8ead81c3a`).
+  The 5 AOT failures are all **`atomic_cas`** (`ATOMIC-CAS-AOT`, task #28): the
+  `(observed, succeeded)` tuple-return / `cmpxchg` lowering is wrong under AOT
+  (CAS passes on interp).  Separate from #26 and the as_ptr fix.
 
 ## 1. What is verified GREEN (interp; AOT = the non-pointer subset)
 
@@ -107,10 +109,13 @@ value contract only.
 * ATOMIC-AOT-RAWPTR-1 (#25) — operational atomic ops via `List.as_mut_ptr` now
   work on both tiers (the `as_ptr`/`as_mut_ptr` Unslice intercept fix,
   `8ead81c3a`).
+* HARNESS-FIDELITY (#26) — stale `core/target/test/` artifacts baked into the
+  archive shadowed the fresh `@test` fns; the 5 strength tests now pass on
+  interp (30/30).  Fix: exclude `target/` from the precompile walk + prefer
+  `is_test=true` in the runner (`9af98308c`).
 
 **Deferred (tracked)**
-* ATOMIC-STRENGTH-MATCH-DRIFT (#26) — `match` on `MemoryOrder` returns the wrong
-  arm in the full-file context (regressed the 5 strength tests, both tiers;
-  archive-regen-surfaced, separate from the as_ptr fix).
+* ATOMIC-CAS-AOT (#28) — `atomic_cas` `(observed, succeeded)` tuple-return fails
+  under AOT (5 tests; passes on interp).
 * MEM-LIST-LITERAL-PTR-1 (#24) — `List` literal vs `as_mut_ptr` backing.
 * Inter-thread ordering conformance (concurrency suite, out of scope here).
