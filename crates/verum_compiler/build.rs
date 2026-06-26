@@ -910,6 +910,17 @@ fn collect_vr_files(dir: &Path, root: &Path, files: &mut Vec<(String, Vec<u8>)>)
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
+                // Skip build-artifact directories. `core/target/test/` holds
+                // `*.merged.vr` files synthesized by the test harness
+                // (`synthesise_test_main_only`); baking them into the stdlib
+                // archive injects DUPLICATE function definitions (module path
+                // `core.target.test.*`) that shadow the fresh `@test` fns by
+                // leaf-name lookup with STALE bytecode — the root of
+                // HARNESS-FIDELITY #26 (e.g. atomic `match`-on-MemoryOrder
+                // returning the wrong arm). They are never stdlib sources.
+                if path.file_name().is_some_and(|n| n == "target") {
+                    continue;
+                }
                 collect_vr_files(&path, root, files);
             } else if path.extension().is_some_and(|e| e == "vr") {
                 let relative = path

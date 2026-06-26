@@ -1705,10 +1705,27 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
         let Some(s) = stored else { return false; };
         s == "main" || s.rsplit('.').next() == Some("main")
     };
+    // HARNESS-FIDELITY (#26): a module can contain DUPLICATE functions with
+    // the same leaf name — the freshly-compiled `@test` fn (is_test=true)
+    // AND a STALE copy baked in from `core/target/test/` synthesized test
+    // artifacts of a previous run (module path `core.target.test.*`,
+    // is_test=false). The stale copy carries outdated bytecode (e.g. a
+    // `match` on an archive enum compiled against old variant tags), so
+    // executing it yields wrong results — a harness-only FALSE NEGATIVE that
+    // does not reproduce under `verum run`. Prefer the fresh `is_test=true`
+    // match so the runner always executes the function it just compiled;
+    // fall back to any leaf match (entry points without the test attr) and
+    // finally to `main`.
     let fid_opt = module
         .functions
         .iter()
-        .find(|vf| leaf_matches(module.get_string(vf.name)))
+        .find(|vf| vf.is_test && leaf_matches(module.get_string(vf.name)))
+        .or_else(|| {
+            module
+                .functions
+                .iter()
+                .find(|vf| leaf_matches(module.get_string(vf.name)))
+        })
         .or_else(|| {
             module
                 .functions
