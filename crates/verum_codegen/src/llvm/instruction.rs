@@ -26761,29 +26761,46 @@ fn mark_register_from_return_type<'ctx>(
             ctx.mark_list_register(reg);
         }
         TypeRef::Instantiated { base, args } if *base == TypeId::LIST => {
-            // List<U8> / List<I8> are byte slices — use i8 stride in GetE
-            let is_byte_list = args.len() == 1
-                && matches!(
-                    &args[0],
-                    TypeRef::Concrete(tid) if *tid == TypeId::U8 || *tid == TypeId::I8
-                );
-            if is_byte_list {
-                ctx.mark_slice_register(reg);
-            } else {
-                ctx.mark_list_register(reg);
-                // Store element type args for GetE propagation.
-                // E.g., List<List<Int>> stores [Instantiated{LIST,[INT]}] so GetE
-                // can mark the element as list_register.
-                if !args.is_empty() {
-                    ctx.set_generic_type_args(reg, args.clone());
-                }
-                // Check if this is List<Text> to propagate string tracking through GetE
-                if args.len() == 1 {
-                    if let TypeRef::Concrete(elem_tid) = &args[0] {
-                        if *elem_tid == TypeId::TEXT {
-                            ctx.mark_string_list_register(reg);
-                        }
+            // A `List<U8>` / `List<I8>` value is a LIST OBJECT (NewList /
+            // ListPush — i64-strided backing), NOT a byte slice.  Marking it
+            // as a slice sent GetE down the `is_slice` branch (offset-24 ptr +
+            // i8 stride), which mis-reads a returned byte list and SIGSEGVs
+            // when the value flows back from a function call (CONV-AOT-
+            // BYTEARRAY-1 / the to_*_bytes intrinsics, atomic List backings,
+            // every `fn … -> List<U8>`).  True byte slices (`&[U8]` from
+            // `as_bytes` etc.) are a distinct `Pack` representation marked at
+            // their own creation sites, not via this `List<T>` return path —
+            // so every `List<T>`, byte-element or not, is a plain list here.
+            ctx.mark_list_register(reg);
+            // Store element type args for GetE propagation.
+            // E.g., List<List<Int>> stores [Instantiated{LIST,[INT]}] so GetE
+            // can mark the element as list_register.
+            if !args.is_empty() {
+                ctx.set_generic_type_args(reg, args.clone());
+            }
+            // Check if this is List<Text> to propagate string tracking through GetE
+            if args.len() == 1 {
+                if let TypeRef::Concrete(elem_tid) = &args[0] {
+                    if *elem_tid == TypeId::TEXT {
+                        ctx.mark_string_list_register(reg);
                     }
+                }
+            }
+        }
+        // A fixed-size array `[T; N]` is represented as a LIST OBJECT at
+        // runtime (built via NewList / ListPush, i64-strided backing — same as
+        // a `List<T>`).  Without this arm a `[T; N]` value returned from a
+        // function was left unmarked, so GetE fell to the raw branch
+        // (`data_ptr = arr_ptr`) and dereferenced the list OBJECT header as
+        // element data → garbage / SIGSEGV.  Backs `to_*_bytes` (`[Byte; N]`)
+        // and every `fn … -> [T; N]`.  (A dynamic `&[T]` slice is a distinct
+        // `Pack` representation marked at its own creation site.)
+        TypeRef::Array { element, .. } => {
+            ctx.mark_list_register(reg);
+            ctx.set_generic_type_args(reg, vec![(**element).clone()]);
+            if let TypeRef::Concrete(elem_tid) = element.as_ref() {
+                if *elem_tid == TypeId::TEXT {
+                    ctx.mark_string_list_register(reg);
                 }
             }
         }
