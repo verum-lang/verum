@@ -435,6 +435,27 @@ impl VbcCodegen {
         let parent_type_id =
             parent_type_name.and_then(|name| self.type_name_to_id.get(name).copied());
 
+        if std::env::var("VERUM_TRACE_MKVAR").is_ok()
+            && let Some(pn) = parent_type_name
+        {
+            let desc_info = parent_type_id
+                .and_then(|t| self.types.iter().find(|d| d.id == t))
+                .map(|d| {
+                    (
+                        self.ctx
+                            .strings
+                            .get(d.name.0 as usize)
+                            .cloned()
+                            .unwrap_or_default(),
+                        d.variants.len(),
+                    )
+                });
+            eprintln!(
+                "[MKVAR] parent='{}' tag={} fc={} type_name_to_id={:?} desc_at_id=(name,nvariants)={:?}",
+                pn, tag, field_count, parent_type_id, desc_info
+            );
+        }
+
         // **Canonical core-ADT fast-path** (Maybe / Result).
         //
         // `Maybe` (TypeId 515) and `Result` (TypeId 516) are well-known
