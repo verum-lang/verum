@@ -2812,17 +2812,25 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         ctx.mark_slice_register(reg);
                     }
                     TypeRef::Instantiated { base, args } if *base == TypeId::LIST => {
-                        // List<U8> / List<I8> used as byte slice representation
-                        let is_byte_list = args.len() == 1
-                            && matches!(
-                                &args[0],
-                                TypeRef::Concrete(tid) if *tid == TypeId::U8 || *tid == TypeId::I8
-                            );
-                        if is_byte_list {
-                            ctx.mark_slice_register(reg);
-                        } else {
-                            ctx.mark_list_register(reg);
+                        // A `List<T>` parameter is a LIST OBJECT (i64-strided),
+                        // including `List<U8>`/`List<I8>` — NOT a byte slice.
+                        // Marking byte lists as slices sent GetE down the
+                        // i8/offset-24 slice path and SIGSEGV'd when reading a
+                        // byte-list argument (the consume side of CONV-AOT-
+                        // BYTEARRAY-1: `from_*_bytes`, every `fn(List<U8>)`).
+                        // True `&[U8]` slices arrive as `TypeRef::Slice`.
+                        ctx.mark_list_register(reg);
+                        if !args.is_empty() {
+                            ctx.set_generic_type_args(reg, args.clone());
                         }
+                    }
+                    // A fixed-size array `[T; N]` parameter is a LIST OBJECT at
+                    // runtime (same as `List<T>`); without this arm it was left
+                    // unmarked and GetE dereferenced the list header → SIGSEGV
+                    // reading a `[Byte; N]` argument (`from_*_bytes`).
+                    TypeRef::Array { element, .. } => {
+                        ctx.mark_list_register(reg);
+                        ctx.set_generic_type_args(reg, vec![(**element).clone()]);
                     }
                     TypeRef::Concrete(tid) if *tid == TypeId::LIST => {
                         ctx.mark_list_register(reg);
