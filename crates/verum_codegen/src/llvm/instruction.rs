@@ -17939,6 +17939,13 @@ fn lower_math_extended<'ctx>(
         MathSubOpcode::IsFiniteF64 | MathSubOpcode::IsFiniteF32 => {
             return lower_is_finite_f64(ctx, operands);
         }
+        MathSubOpcode::IsSubnormalF64 => return lower_is_subnormal_f64(ctx, operands),
+        MathSubOpcode::IsSignNegativeF64 => {
+            return lower_is_signbit_f64(ctx, operands, true);
+        }
+        MathSubOpcode::IsSignPositiveF64 => {
+            return lower_is_signbit_f64(ctx, operands, false);
+        }
         _ => {}
     }
 
@@ -18086,6 +18093,80 @@ fn lower_is_finite_f64<'ctx>(
     let result = ctx
         .builder()
         .build_int_z_extend(is_finite, ctx.types().i64_type(), "is_finite_i64")
+        .or_llvm_err()?;
+    ctx.set_register(dst, result.into());
+    Ok(())
+}
+
+/// `is_subnormal(x)`: `0 < |x| < MIN_POSITIVE_NORMAL`. A subnormal has a zero
+/// biased exponent and a non-zero mantissa, equivalently a magnitude strictly
+/// between zero and the smallest normal (`f64::MIN_POSITIVE`). (FLOAT-CLASSIFY-1)
+fn lower_is_subnormal_f64<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    operands: &[u8],
+) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "issubnormal_src")?;
+    let f64_ty = ctx.types().f64_type();
+    let abs_val = build_round_intrinsic(ctx, "llvm.fabs.f64", "fabs_sub", a)?;
+    let zero = f64_ty.const_float(0.0);
+    let min_normal = f64_ty.const_float(f64::MIN_POSITIVE);
+    let gt_zero = ctx
+        .builder()
+        .build_float_compare(FloatPredicate::OGT, abs_val, zero, "sub_gt0")
+        .or_llvm_err()?;
+    let lt_min = ctx
+        .builder()
+        .build_float_compare(FloatPredicate::OLT, abs_val, min_normal, "sub_ltmin")
+        .or_llvm_err()?;
+    let is_sub = ctx
+        .builder()
+        .build_and(gt_zero, lt_min, "is_subnormal")
+        .or_llvm_err()?;
+    let result = ctx
+        .builder()
+        .build_int_z_extend(is_sub, ctx.types().i64_type(), "is_subnormal_i64")
+        .or_llvm_err()?;
+    ctx.set_register(dst, result.into());
+    Ok(())
+}
+
+/// `is_sign_negative(x)` / `is_sign_positive(x)`: inspect the IEEE-754 sign bit
+/// (bit 63) directly, so `-0.0` and `-NaN` correctly report negative.
+/// `want_negative` selects which predicate. (FLOAT-CLASSIFY-1)
+fn lower_is_signbit_f64<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    operands: &[u8],
+    want_negative: bool,
+) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    // Raw IEEE bits (as_i64 bit-casts a FloatValue to i64).
+    let bits = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "signbit_bits")?;
+    let i64_ty = ctx.types().i64_type();
+    let sign_mask = i64_ty.const_int(0x8000_0000_0000_0000u64, false);
+    let masked = ctx
+        .builder()
+        .build_and(bits, sign_mask, "signbit_masked")
+        .or_llvm_err()?;
+    let zero = i64_ty.const_int(0, false);
+    let pred = if want_negative {
+        verum_llvm::IntPredicate::NE
+    } else {
+        verum_llvm::IntPredicate::EQ
+    };
+    let cmp = ctx
+        .builder()
+        .build_int_compare(pred, masked, zero, "signbit_cmp")
+        .or_llvm_err()?;
+    let result = ctx
+        .builder()
+        .build_int_z_extend(cmp, i64_ty, "signbit_i64")
         .or_llvm_err()?;
     ctx.set_register(dst, result.into());
     Ok(())

@@ -7556,6 +7556,12 @@ pub enum MathSubOpcode {
     IsInfF64 = 0x61,
     /// is_finite(x) - Check if finite (F64).
     IsFiniteF64 = 0x62,
+    /// is_subnormal(x) - Check if subnormal/denormal (F64). (FLOAT-CLASSIFY-1)
+    IsSubnormalF64 = 0x63,
+    /// is_sign_negative(x) - Check sign bit set, incl. -0.0/-NaN (F64).
+    IsSignNegativeF64 = 0x64,
+    /// is_sign_positive(x) - Check sign bit clear, incl. +0.0/+NaN (F64).
+    IsSignPositiveF64 = 0x65,
 
     // ========================================================================
     // Classification F32 (0x68-0x6F)
@@ -7773,6 +7779,9 @@ impl MathSubOpcode {
             0x60 => Some(Self::IsNanF64),
             0x61 => Some(Self::IsInfF64),
             0x62 => Some(Self::IsFiniteF64),
+            0x63 => Some(Self::IsSubnormalF64),
+            0x64 => Some(Self::IsSignNegativeF64),
+            0x65 => Some(Self::IsSignPositiveF64),
             // Classification F32
             0x68 => Some(Self::IsNanF32),
             0x69 => Some(Self::IsInfF32),
@@ -7907,6 +7916,9 @@ impl MathSubOpcode {
             Self::IsNanF64    => m!("IS_NAN_F64",    Classification, F64, 1, "llvm.is.fpclass.f64", None),
             Self::IsInfF64    => m!("IS_INF_F64",    Classification, F64, 1, "llvm.is.fpclass.f64", None),
             Self::IsFiniteF64 => m!("IS_FINITE_F64", Classification, F64, 1, "llvm.is.fpclass.f64", None),
+            Self::IsSubnormalF64    => m!("IS_SUBNORMAL_F64",    Classification, F64, 1, "llvm.is.fpclass.f64", None),
+            Self::IsSignNegativeF64 => m!("IS_SIGN_NEGATIVE_F64", Classification, F64, 1, "llvm.is.fpclass.f64", None),
+            Self::IsSignPositiveF64 => m!("IS_SIGN_POSITIVE_F64", Classification, F64, 1, "llvm.is.fpclass.f64", None),
             Self::IsNanF32    => m!("IS_NAN_F32",    Classification, F32, 1, "llvm.is.fpclass.f32", None),
             Self::IsInfF32    => m!("IS_INF_F32",    Classification, F32, 1, "llvm.is.fpclass.f32", None),
             Self::IsFiniteF32 => m!("IS_FINITE_F32", Classification, F32, 1, "llvm.is.fpclass.f32", None),

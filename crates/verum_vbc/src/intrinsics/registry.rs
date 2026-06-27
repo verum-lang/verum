@@ -6815,6 +6815,51 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Check if f64 is NaN",
     },
     Intrinsic {
+        // FLOAT-CLASSIFY-1 — three predicates that were nil. Emit the
+        // dedicated MathExtended classification opcodes (interp handlers +
+        // AOT special-case lowering in verum_codegen).
+        name: "is_subnormal_f64",
+        category: IntrinsicCategory::Math,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::IsSubnormalF64),
+        mlir_op: None,
+        doc: "Check if f64 is subnormal",
+    },
+    Intrinsic {
+        name: "is_sign_negative_f64",
+        category: IntrinsicCategory::Math,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::IsSignNegativeF64),
+        mlir_op: None,
+        doc: "Check if f64 sign bit is set",
+    },
+    Intrinsic {
+        name: "is_sign_positive_f64",
+        category: IntrinsicCategory::Math,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::IsSignPositiveF64),
+        mlir_op: None,
+        doc: "Check if f64 sign bit is clear",
+    },
+    Intrinsic {
         name: "is_infinite_f64",
         category: IntrinsicCategory::Math,
         hints: &[

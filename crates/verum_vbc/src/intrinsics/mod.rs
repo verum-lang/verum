@@ -205,6 +205,10 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
             "is_finite" => "is_finite_f64",
             // is_normal doesn't have a dedicated entry - use is_finite as approximation
             "is_normal" => "is_finite_f64",
+            // FLOAT-CLASSIFY-1 — subnormal + sign predicates (were nil).
+            "is_subnormal" => "is_subnormal_f64",
+            "is_sign_negative" => "is_sign_negative_f64",
+            "is_sign_positive" => "is_sign_positive_f64",
             // Float special values (these exist in registry)
             "f64_infinity" | "infinity" => "f64_infinity",
             "f64_neg_infinity" => "f64_neg_infinity",
