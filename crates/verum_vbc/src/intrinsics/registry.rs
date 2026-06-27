@@ -4263,6 +4263,38 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Get target architecture (0-4)",
     },
     Intrinsic {
+        // Complement of `is_debug`. Without an entry it resolved to nil
+        // (PLATFORM-META-NIL — same class as CONTROL-EXPECT-NIL).
+        name: "is_release",
+        category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval],
+        param_count: 0,
+        return_count: 1,
+        strategy: CodegenStrategy::CompileTimeConstant,
+        mlir_op: Some("llvm.mlir.constant"),
+        doc: "Check if release mode",
+    },
+    Intrinsic {
+        name: "target_pointer_width",
+        category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval],
+        param_count: 0,
+        return_count: 1,
+        strategy: CodegenStrategy::CompileTimeConstant,
+        mlir_op: Some("llvm.mlir.constant"),
+        doc: "Target pointer width in bits (e.g. 64)",
+    },
+    Intrinsic {
+        name: "target_is_little_endian",
+        category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval],
+        param_count: 0,
+        return_count: 1,
+        strategy: CodegenStrategy::CompileTimeConstant,
+        mlir_op: Some("llvm.mlir.constant"),
+        doc: "Whether the target is little-endian",
+    },
+    Intrinsic {
         name: "num_cpus",
         category: IntrinsicCategory::Platform,
         hints: &[],

@@ -29247,6 +29247,40 @@ impl VbcCodegen {
                     value: arch_code,
                 });
             }
+            "is_release" => {
+                // Mirror of `is_debug` (which reports debug mode in the VBC
+                // interpreter): release is its complement. Without this case
+                // `is_release()` resolved to nil (CONTROL/PLATFORM-NIL class).
+                self.ctx.emit(Instruction::LoadFalse { dst: dest });
+            }
+            "target_pointer_width" => {
+                // Pointer width in BITS for the target. The existing platform
+                // intrinsics use host `#[cfg]` for the interpreter path.
+                #[cfg(target_pointer_width = "64")]
+                let width: i64 = 64;
+                #[cfg(target_pointer_width = "32")]
+                let width: i64 = 32;
+                #[cfg(not(any(
+                    target_pointer_width = "64",
+                    target_pointer_width = "32"
+                )))]
+                let width: i64 = 64;
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: width,
+                });
+            }
+            "target_is_little_endian" => {
+                #[cfg(target_endian = "little")]
+                let little: bool = true;
+                #[cfg(target_endian = "big")]
+                let little: bool = false;
+                if little {
+                    self.ctx.emit(Instruction::LoadTrue { dst: dest });
+                } else {
+                    self.ctx.emit(Instruction::LoadFalse { dst: dest });
+                }
+            }
             "num_cpus" => {
                 // Return actual CPU count at compile time
                 let cpus = std::thread::available_parallelism()

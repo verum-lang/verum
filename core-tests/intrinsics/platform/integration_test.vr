@@ -1,0 +1,69 @@
+// =============================================================================
+// core-tests/intrinsics/platform/integration_test.vr
+// =============================================================================
+//
+// The platform meta intrinsics in realistic compile-time-dispatch patterns:
+// deriving byte widths, branching on endianness / OS, and debug guards.
+// =============================================================================
+
+mount core.intrinsics.platform.{
+    target_pointer_width, target_is_little_endian, target_os, is_debug
+};
+
+// =============================================================================
+// Pointer width → byte width
+// =============================================================================
+
+@test
+fn integration_pointer_byte_width_consistency() {
+    let bits: Int = target_pointer_width() as Int;
+    let bytes: Int = bits / 8;
+    // Round-trips: a pointer is a whole number of bytes.
+    assert_eq(bytes * 8, bits);
+    assert(bytes == 8 || bytes == 4);
+}
+
+// =============================================================================
+// Endianness-driven branch
+// =============================================================================
+
+@test
+fn integration_endianness_branch() {
+    let tag: Int = if target_is_little_endian() { 1 } else { 0 };
+    assert(tag == 0 || tag == 1);
+    // All currently-supported Verum targets are little-endian.
+    assert_eq(tag, 1);
+}
+
+// =============================================================================
+// OS dispatch (compile-time `target_os` switch)
+// =============================================================================
+
+@test
+fn integration_os_dispatch_resolves() {
+    let os: Int = target_os() as Int;
+    let name_len: Int =
+        if os == 1 { 5 }        // "linux"
+        else if os == 2 { 5 }   // "macos"
+        else if os == 3 { 7 }   // "windows"
+        else if os == 4 { 4 }   // "wasm"
+        else { 7 };             // "unknown"
+    assert(name_len > 0);
+}
+
+// =============================================================================
+// Debug-guard pattern
+// =============================================================================
+
+@test
+fn integration_debug_guard_executes() {
+    // The canonical `if is_debug() { extra validation }` guard.
+    let mut checks: Int = 0;
+    if is_debug() {
+        checks = checks + 1;
+    }
+    // Interpreter reports debug mode, so the guard body runs exactly once.
+    assert_eq(checks, 1);
+}
+
+fn main() {}
