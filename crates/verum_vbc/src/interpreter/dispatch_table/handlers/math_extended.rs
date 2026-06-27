@@ -470,6 +470,15 @@ pub(in super::super) fn handle_math_extended(
             state.set_reg(dst, Value::from_f64(x.trunc()));
             Ok(DispatchResult::Continue)
         }
+        Some(MathSubOpcode::RoundEvenF64) => {
+            // Round to nearest integer, ties to even (banker's rounding) —
+            // backs roundeven / rint / nearbyint. (FLOAT-ROUNDMODES-1)
+            let dst = read_reg(state)?;
+            let src = read_reg(state)?;
+            let x = state.get_reg(src).as_f64();
+            state.set_reg(dst, Value::from_f64(x.round_ties_even()));
+            Ok(DispatchResult::Continue)
+        }
 
         // ================================================================
         // Rounding F32 (0x50-0x57)

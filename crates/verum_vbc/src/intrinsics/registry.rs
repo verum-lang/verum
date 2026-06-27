@@ -4005,6 +4005,22 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Round to nearest",
     },
     Intrinsic {
+        // Round to nearest integer, ties to even. Backs roundeven / rint /
+        // nearbyint (all ties-to-even in the default rounding mode).
+        name: "roundeven_f64",
+        category: IntrinsicCategory::Math,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::RoundEvenF64),
+        mlir_op: Some("math.roundeven"),
+        doc: "Round to nearest integer, ties to even",
+    },
+    Intrinsic {
         name: "abs_f64",
         category: IntrinsicCategory::Math,
         hints: &[

@@ -56,26 +56,26 @@ fn regression_float_constants_were_nil() {
 // OPEN — @ignore pins
 // -----------------------------------------------------------------------------
 
-@ignore("FLOAT-ROUNDMODES-1 — roundeven/rint/nearbyint resolve to nil; need round-half-to-even MathSubOpcode. audit.md §3, task #18.")
+// FLOAT-ROUNDMODES-1 FIXED (#18): RoundEvenF64 opcode (round-ties-to-even)
+// backs roundeven/rint/nearbyint on both tiers.
 @test
 fn regression_roundeven_round_half_to_even() {
     assert_eq(roundeven(2.5), 2.0);
     assert_eq(roundeven(3.5), 4.0);
 }
 
-@ignore("FLOAT-ROUNDMODES-1 — rint resolves to nil. audit.md §3, task #18.")
 @test
 fn regression_rint_round_to_nearest_even() {
     assert_eq(rint(2.5), 2.0);
 }
 
-@ignore("FLOAT-ROUNDMODES-1 — nearbyint resolves to nil. audit.md §3, task #18.")
 @test
 fn regression_nearbyint_round_to_nearest_even() {
     assert_eq(nearbyint(0.5), 0.0);
 }
 
-@ignore("FLOAT-MINMAX-1 — minimum/maximum (IEEE 754-2019, NaN-propagating) resolve to nil. audit.md §3, task #19.")
+// FLOAT-MINMAX-1 FIXED (#19): minimum/maximum aliased to min_f64/max_f64
+// (MinnumF64/MaxnumF64 opcodes).
 @test
 fn regression_minimum_maximum() {
     assert_eq(minimum(2.0, 3.0), 2.0);

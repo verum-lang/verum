@@ -138,6 +138,17 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
             "floor" => "floor_f64",
             "ceil" => "ceil_f64",
             "round" => "round_f64",
+            // IEEE 754 min/max — `minimum`/`maximum` had no entry (→ nil).
+            // Route to the existing min_f64/max_f64 (MinnumF64/MaxnumF64
+            // opcodes + interp handlers). (FLOAT-MINMAX-1)
+            "minimum" => "min_f64",
+            "maximum" => "max_f64",
+            // Round-ties-to-even family — all three are ties-to-even in the
+            // default rounding mode; route to the new roundeven_f64
+            // (RoundEvenF64 opcode). (FLOAT-ROUNDMODES-1)
+            "roundeven" => "roundeven_f64",
+            "rint" => "roundeven_f64",
+            "nearbyint" => "roundeven_f64",
             "fabs" => "abs_f64",
             "abs" => "abs_signed",
             // Float negation routes to the polymorphic `neg` (ArithSubOpcode
