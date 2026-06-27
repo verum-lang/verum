@@ -7201,8 +7201,15 @@ impl TypeChecker {
         reg!("text_to_int", List::from_iter([Type::Text]), Type::Int);
 
         // ---- Runtime ----
-        reg!("target_os", List::new(), Type::Text);
-        reg!("target_arch", List::new(), Type::Text);
+        // NOTE: `target_os` / `target_arch` are intentionally NOT registered
+        // here. They are stdlib meta intrinsics declared in
+        // `core/intrinsics/platform.vr` as `-> UInt8` (compile-time OS/arch
+        // CODES, not name strings), and the @intrinsic-registration pass makes
+        // that declaration authoritative. A stale `() -> Text` shadow here
+        // (from the era when they returned OS-name strings) made the strict
+        // type-checker reject `target_os() as Int` with E401 under AOT
+        // (PLATFORM-AOT-META-TYPE) — and hardcoding stdlib return types in the
+        // compiler violates the no-stdlib-knowledge rule (see crate CLAUDE.md).
         reg!("is_debug", List::new(), Type::Bool);
         reg!("is_release", List::new(), Type::Bool);
         reg!("has_feature", List::from_iter([Type::Text]), Type::Bool);
