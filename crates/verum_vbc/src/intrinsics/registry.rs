@@ -5909,6 +5909,23 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Zero-extend u32 to u64",
     },
     Intrinsic {
+        // Branch-hint identity. `likely`/`unlikely`/`expect` all lower to
+        // `@intrinsic("expect", value, expected)` and must return `value`
+        // UNCHANGED (the `expected` arg is an optimiser hint only). Without a
+        // registry entry the name resolved to None → LoadNil → every
+        // likely/unlikely/expect returned `nil` (CONTROL-EXPECT-NIL). Reuse
+        // the identity-Mov-of-arg0 inline sequence (same as Bitcast/Sext):
+        // it emits `Mov dst, args[0]`, ignoring the extra hint operand.
+        name: "expect",
+        category: IntrinsicCategory::Control,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Bitcast),
+        mlir_op: Some("llvm.expect"),
+        doc: "Branch hint: returns the first argument unchanged (second is the expected-value hint)",
+    },
+    Intrinsic {
         name: "f32_to_f64",
         category: IntrinsicCategory::Conversion,
         hints: &[
