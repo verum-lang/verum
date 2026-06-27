@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/intrinsics/platform/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/platform.vr` — compile-time platform-detection meta
+// intrinsics + the cycle-counter primitives.
+//
+// These are `CompileTimeConstant` intrinsics: the value is materialised at
+// codegen time from the build target. Tests assert INVARIANTS (ranges, type,
+// stability) rather than host-specific magic numbers wherever portability
+// allows; the interpreter-specific contract (`is_debug` true / `is_release`
+// false) is pinned directly.
+// =============================================================================
+
+mount core.intrinsics.platform.{
+    is_debug, is_release, target_os, target_arch,
+    target_pointer_width, target_is_little_endian, rdtsc
+};
+
+// =============================================================================
+// Section 1: Build-mode flags
+// =============================================================================
+
+@test
+fn test_is_debug_true_in_interp() {
+    // The VBC interpreter always reports debug mode.
+    assert(is_debug());
+}
+
+@test
+fn test_is_release_false_in_interp() {
+    // Complement of is_debug under the interpreter. Pre-fix this returned nil.
+    assert(!is_release());
+}
+
+// =============================================================================
+// Section 2: Target description
+// =============================================================================
+
+@test
+fn test_target_pointer_width_is_word_class() {
+    // 32- or 64-bit; Verum's supported targets are 64-bit.
+    let w: Int = target_pointer_width() as Int;
+    assert(w == 64 || w == 32);
+}
+
+@test
+fn test_target_is_little_endian() {
+    // All currently-supported Verum targets (x86_64 / aarch64 / wasm) are
+    // little-endian. Pre-fix this returned nil.
+    assert(target_is_little_endian());
+}
+
+@test
+fn test_target_os_in_valid_range() {
+    // OS codes: 0=unknown … 4=wasm (see platform.vr).
+    let os: Int = target_os() as Int;
+    assert(os >= 0);
+    assert(os <= 4);
+}
+
+@test
+fn test_target_arch_in_valid_range() {
+    // Arch codes: 0=unknown … 4=wasm32.
+    let a: Int = target_arch() as Int;
+    assert(a >= 0);
+    assert(a <= 4);
+}
+
+// =============================================================================
+// Section 3: Cycle counter
+// =============================================================================
+
+@test
+fn test_rdtsc_callable() {
+    let _t: UInt64 = rdtsc();
+    assert(true);
+}
+
+fn main() {}

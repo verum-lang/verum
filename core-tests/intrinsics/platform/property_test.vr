@@ -1,0 +1,82 @@
+// =============================================================================
+// core-tests/intrinsics/platform/property_test.vr
+// =============================================================================
+//
+// Invariants of the platform meta intrinsics: build-mode complementarity,
+// determinism (compile-time constants are stable across calls), valid ranges,
+// and cycle-counter monotonicity.
+// =============================================================================
+
+mount core.intrinsics.platform.{
+    is_debug, is_release, target_os, target_arch,
+    target_pointer_width, target_is_little_endian, rdtsc
+};
+
+// =============================================================================
+// Section 1: Build-mode complementarity
+// =============================================================================
+
+@test
+fn property_debug_release_are_complementary() {
+    // Exactly one of {debug, release} holds.
+    assert(is_debug() != is_release());
+}
+
+// =============================================================================
+// Section 2: Determinism — compile-time constants are stable
+// =============================================================================
+
+@test
+fn property_target_descriptors_are_stable() {
+    // Each meta intrinsic is a compile-time constant: repeated evaluation must
+    // return the same value.
+    assert_eq(target_os() as Int, target_os() as Int);
+    assert_eq(target_arch() as Int, target_arch() as Int);
+    assert_eq(target_pointer_width() as Int, target_pointer_width() as Int);
+    assert_eq(is_debug(), is_debug());
+    assert_eq(target_is_little_endian(), target_is_little_endian());
+}
+
+// =============================================================================
+// Section 3: Pointer-width invariants
+// =============================================================================
+
+@test
+fn property_pointer_width_is_byte_multiple() {
+    let w: Int = target_pointer_width() as Int;
+    // A word is a whole number of 8-bit bytes, and at least a 32-bit word.
+    assert(w % 8 == 0);
+    assert(w >= 32);
+    assert(w <= 128);
+}
+
+// =============================================================================
+// Section 4: Code ranges
+// =============================================================================
+
+@test
+fn property_os_and_arch_codes_bounded() {
+    let os: Int = target_os() as Int;
+    let arch: Int = target_arch() as Int;
+    assert(os >= 0 && os <= 4);
+    assert(arch >= 0 && arch <= 4);
+}
+
+// =============================================================================
+// Section 5: rdtsc monotonicity
+// =============================================================================
+
+@test
+fn property_rdtsc_non_decreasing() {
+    // The cycle counter never runs backwards across sequential reads.
+    let mut prev: UInt64 = rdtsc();
+    let mut i: Int = 0;
+    while i < 32 {
+        let now: UInt64 = rdtsc();
+        assert(now >= prev);
+        prev = now;
+        i = i + 1;
+    }
+}
+
+fn main() {}

@@ -1,0 +1,42 @@
+// =============================================================================
+// core-tests/intrinsics/platform/regression_test.vr
+// =============================================================================
+//
+// Defect pins for `core/intrinsics/platform.vr`.
+// =============================================================================
+
+mount core.intrinsics.platform.{
+    is_release, target_pointer_width, target_is_little_endian
+};
+
+// =============================================================================
+// PLATFORM-META-NIL — three meta intrinsics returned `nil`
+// =============================================================================
+//
+// `target_pointer_width`, `target_is_little_endian`, and `is_release` were
+// missing BOTH a registry entry AND an `emit_intrinsic_compile_time_constant`
+// case, so they resolved to `LoadNil` → `nil` (while the neighbouring
+// `is_debug` / `target_os` / `target_arch` worked). Fixed by adding both.
+// These pins fail loudly (`nil` fails numeric/boolean assertions) on regress.
+
+@test
+fn regression_target_pointer_width_not_nil() {
+    // A `nil` would not satisfy a numeric comparison.
+    let w: Int = target_pointer_width() as Int;
+    assert(w >= 32);
+}
+
+@test
+fn regression_target_is_little_endian_not_nil() {
+    // `nil` is not truthy; supported targets are little-endian.
+    assert(target_is_little_endian());
+}
+
+@test
+fn regression_is_release_not_nil() {
+    // Pre-fix `is_release()` was `nil`; now a real Bool (false under interp).
+    let r: Bool = is_release();
+    assert(!r);
+}
+
+fn main() {}
