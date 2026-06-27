@@ -6,6 +6,7 @@
 // =============================================================================
 
 mount core.intrinsics.control.{IntrinsicSourceLocation, IntrinsicPanicInfo};
+mount core.intrinsics.control.{ likely, unlikely, expect, nop, assume, debug_assert, random_float, random_u64 };
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -110,6 +111,75 @@ fn test_intrinsic_panic_info_field_independence() {
     };
     assert_eq(a.message, "fail-a");
     assert_eq(b.message, "fail-b");
+}
+
+// =============================================================================
+// Section 3: Branch-hint intrinsics — `likely` / `unlikely` / `expect`
+// =============================================================================
+
+@test
+fn test_likely_returns_condition() {
+    assert(likely(true));
+    assert(!likely(false));
+}
+
+@test
+fn test_unlikely_returns_condition() {
+    assert(unlikely(true));
+    assert(!unlikely(false));
+}
+
+@test
+fn test_expect_returns_value_not_hint() {
+    // expect(value, hint) -> value; the hint is advisory only.
+    assert_eq(expect(42, 0), 42);
+    assert_eq(expect(0, 42), 0);
+}
+
+@test
+fn test_expect_text_value() {
+    assert_eq(expect("yes", "no"), "yes");
+}
+
+// =============================================================================
+// Section 4: No-op / hint primitives are callable and return normally
+// =============================================================================
+
+@test
+fn test_nop_callable() {
+    nop();
+    assert(true);
+}
+
+@test
+fn test_assume_true_callable() {
+    assume(true);
+    assert(true);
+}
+
+@test
+fn test_debug_assert_true_callable() {
+    debug_assert(true, "holds");
+    assert(true);
+}
+
+// =============================================================================
+// Section 5: Randomness primitives
+// =============================================================================
+
+@test
+fn test_random_float_unit_interval() {
+    let r: Float = random_float();
+    assert(r >= 0.0);
+    assert(r < 1.0);
+}
+
+@test
+fn test_random_u64_callable() {
+    // Just exercising the call path; value-distribution is checked in
+    // property_test (`random_u64_varies`).
+    let _x: UInt64 = random_u64();
+    assert(true);
 }
 
 fn main() {}

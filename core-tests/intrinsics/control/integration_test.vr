@@ -1,0 +1,108 @@
+// =============================================================================
+// core-tests/intrinsics/control/integration_test.vr
+// =============================================================================
+//
+// The branch-hint intrinsics are SEMANTICALLY TRANSPARENT: they may steer the
+// optimiser but must never change a program's result. These tests drive them
+// through realistic control flow and assert the computation is identical to
+// the un-hinted form.
+// =============================================================================
+
+mount core.intrinsics.control.{ likely, unlikely, expect, nop };
+
+// =============================================================================
+// `likely` as a loop-continue hint
+// =============================================================================
+
+@test
+fn integration_likely_in_hot_loop_sum() {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    // The loop-continue branch is overwhelmingly taken — the canonical
+    // `likely` use site. The sum must still be 0+1+…+99 = 4950.
+    while likely(i < 100) {
+        sum = sum + i;
+        i = i + 1;
+    }
+    assert_eq(sum, 4950);
+}
+
+// =============================================================================
+// `expect` as a value hint inside arithmetic
+// =============================================================================
+
+// CONTROL-EXPECT-GENERIC-ARITH (#30): generic `expect<T>` returns the value
+// with a mis-tagged (boxed/NaN-tagged) representation that prints/compares
+// correctly but breaks ARITHMETIC on the result — `acc + expect(i*i, 0)`
+// accumulates garbage (0x7fff…), while `acc + (i*i)` is correct. Non-generic
+// `likely`/`unlikely` are unaffected. Pinned until the generic intrinsic-return
+// unboxing lands.
+@ignore("CONTROL-EXPECT-GENERIC-ARITH #30: expect<T> result mis-tagged, arithmetic on it yields garbage")
+@test
+fn integration_expect_hint_preserves_arithmetic() {
+    let mut acc: Int = 0;
+    let mut i: Int = 0;
+    while i < 10 {
+        // Hint "usually 0", real value i*i — the result must use the value.
+        let x: Int = expect(i * i, 0);
+        acc = acc + x;
+        i = i + 1;
+    }
+    assert_eq(acc, 285); // 0²+1²+…+9²
+}
+
+// =============================================================================
+// `unlikely` as a rare-branch hint
+// =============================================================================
+
+@test
+fn integration_unlikely_error_branch_still_fires() {
+    let mut taken: Int = 0;
+    let mut i: Int = 0;
+    while i < 50 {
+        // The "error" branch is rare but MUST still execute when its
+        // condition holds.
+        if unlikely(i == 25) {
+            taken = taken + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(taken, 1);
+}
+
+// =============================================================================
+// `nop` interspersed has no observable effect
+// =============================================================================
+
+@test
+fn integration_nop_does_not_perturb_result() {
+    let mut p: Int = 1;
+    let mut i: Int = 1;
+    while i <= 6 {
+        nop();
+        p = p * i;
+        nop();
+        i = i + 1;
+    }
+    assert_eq(p, 720); // 6!
+}
+
+// =============================================================================
+// Combined: likely + expect together in one kernel
+// =============================================================================
+
+@test
+fn integration_combined_hints_count_evens() {
+    let mut evens: Int = 0;
+    let mut i: Int = 0;
+    while likely(i < 64) {
+        let is_even: Bool = expect((i % 2) == 0, true);
+        if is_even {
+            evens = evens + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(evens, 32);
+}
+
+fn main() {}

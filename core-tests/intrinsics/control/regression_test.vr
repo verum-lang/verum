@@ -1,0 +1,75 @@
+// =============================================================================
+// core-tests/intrinsics/control/regression_test.vr
+// =============================================================================
+//
+// Defect pins for `core/intrinsics/control.vr`.
+// =============================================================================
+
+mount core.intrinsics.control.{ likely, unlikely, expect, nop, assume, debug_assert };
+
+// =============================================================================
+// CONTROL-EXPECT-NIL — likely/unlikely/expect returned `nil`
+// =============================================================================
+//
+// `likely` / `unlikely` / `expect` all lower to `@intrinsic("expect", …)`.
+// That name had NO registry entry, so `lookup_intrinsic` returned `None`,
+// codegen emitted `LoadNil`, and every branch-hint call evaluated to `nil`
+// instead of passing its operand through.  Fixed by registering `expect`
+// with the identity-Mov-of-arg0 inline sequence (the hint operand is
+// ignored).  These pins fail loudly (`nil != value`) if that regresses.
+
+@test
+fn regression_expect_not_nil_int() {
+    // Pre-fix: expect(123, 0) == nil → this assert_eq failed.
+    assert_eq(expect(123, 0), 123);
+}
+
+@test
+fn regression_likely_not_nil() {
+    // Pre-fix: likely(true) == nil → `assert(likely(true))` failed
+    // (nil is not truthy).
+    assert(likely(true));
+    assert(!likely(false));
+}
+
+@test
+fn regression_unlikely_not_nil() {
+    assert(unlikely(true));
+    assert(!unlikely(false));
+}
+
+@test
+fn regression_expect_chain_preserves_value() {
+    // Nested hints must still collapse to the original value.
+    let v: Int = expect(expect(expect(55, 0), 1), 2);
+    assert_eq(v, 55);
+}
+
+// =============================================================================
+// Callable no-op / hint primitives — must not trap or corrupt control flow
+// =============================================================================
+
+@test
+fn regression_nop_is_callable() {
+    nop();
+    nop();
+    // Reaching here proves nop() returned normally.
+    assert(true);
+}
+
+@test
+fn regression_assume_true_is_noop() {
+    // `assume(true)` is a sound optimiser hint (UB only if the condition is
+    // false, which we never pass). It must return normally.
+    assume(true);
+    assert(true);
+}
+
+@test
+fn regression_debug_assert_true_passes() {
+    // A satisfied debug assertion is a no-op.
+    debug_assert(true, "should hold");
+    assert(true);
+}
+
+fn main() {}

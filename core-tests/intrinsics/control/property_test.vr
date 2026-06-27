@@ -1,0 +1,125 @@
+// =============================================================================
+// core-tests/intrinsics/control/property_test.vr
+// =============================================================================
+//
+// Value-semantics / algebraic laws for the control-flow intrinsics that
+// produce an observable value:
+//
+//   * Branch hints — `likely` / `unlikely` / `expect` are IDENTITY on their
+//     primary operand (the hint operand is an optimiser hint only and must
+//     never change the returned value).
+//   * `random_float` is confined to the half-open unit interval `[0.0, 1.0)`.
+//   * `random_u64` produces varying output (not a frozen constant).
+//
+// The terminating intrinsics (`trap`/`unreachable`/`panic`/`abort`) diverge
+// (`Never`) and cannot be value-tested in a passing run — see `audit.md`.
+// =============================================================================
+
+mount core.intrinsics.control.{ likely, unlikely, expect, random_float, random_u64 };
+
+// =============================================================================
+// Section 1: Branch-hint identity — `likely` / `unlikely`
+// =============================================================================
+
+@test
+fn property_likely_returns_input() {
+    // likely(c) == c for both truth values (it is `expect(c, true)`).
+    assert(likely(true));
+    assert(!likely(false));
+}
+
+@test
+fn property_unlikely_returns_input() {
+    // unlikely(c) == c for both truth values (it is `expect(c, false)`).
+    assert(unlikely(true));
+    assert(!unlikely(false));
+}
+
+@test
+fn property_likely_unlikely_agree_on_value() {
+    // Same input → same output regardless of which hint direction is used.
+    assert_eq(likely(true), unlikely(true));
+    assert_eq(likely(false), unlikely(false));
+}
+
+// =============================================================================
+// Section 2: `expect<T>` identity over value/hint pairs
+// =============================================================================
+
+@test
+fn property_expect_int_identity_over_values() {
+    let vals: List<Int> = [0, 1, -1, 42, 1000000, -999999, 2147483647];
+    let mut i: Int = 0;
+    while i < vals.len() {
+        let v: Int = vals[i];
+        // The hint operand must NOT influence the result.
+        assert_eq(expect(v, 0), v);
+        assert_eq(expect(v, 999), v);
+        assert_eq(expect(v, v), v);
+        i = i + 1;
+    }
+}
+
+@test
+fn property_expect_bool_identity() {
+    assert_eq(expect(true, false), true);
+    assert_eq(expect(false, true), false);
+    assert_eq(expect(true, true), true);
+    assert_eq(expect(false, false), false);
+}
+
+@test
+fn property_expect_text_identity() {
+    assert_eq(expect("hello", "world"), "hello");
+    assert_eq(expect("", "x"), "");
+}
+
+@test
+fn property_expect_hint_is_irrelevant() {
+    // Three different hints, identical value → identical results.
+    let a: Int = expect(7, -1);
+    let b: Int = expect(7, 0);
+    let c: Int = expect(7, 12345);
+    assert_eq(a, 7);
+    assert_eq(b, 7);
+    assert_eq(c, 7);
+    assert_eq(a, b);
+    assert_eq(b, c);
+}
+
+// =============================================================================
+// Section 3: `random_float` — unit-interval invariant
+// =============================================================================
+
+@test
+fn property_random_float_in_unit_interval() {
+    let mut i: Int = 0;
+    while i < 128 {
+        let r: Float = random_float();
+        assert(r >= 0.0);
+        assert(r < 1.0);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 4: `random_u64` — non-constant output
+// =============================================================================
+
+@test
+fn property_random_u64_varies() {
+    // Draw several samples; assert they are not ALL identical. The
+    // probability of 8 independent u64 draws colliding is ~2^-448.
+    let s0: UInt64 = random_u64();
+    let mut differs: Bool = false;
+    let mut i: Int = 0;
+    while i < 8 {
+        if random_u64() != s0 {
+            differs = true;
+        }
+        i = i + 1;
+    }
+    assert(differs);
+}
+
+fn main() {}
