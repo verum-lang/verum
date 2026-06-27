@@ -82,21 +82,18 @@ fn regression_minimum_maximum() {
     assert_eq(maximum(2.0, 3.0), 3.0);
 }
 
-@ignore("FLOAT-CLASSIFY-1 — is_subnormal resolves to nil. audit.md §3, task #20.")
 @test
 fn regression_is_subnormal() {
     assert(!is_subnormal(1.0));
     assert(is_subnormal(min_positive() / 2.0));
 }
 
-@ignore("FLOAT-CLASSIFY-1 — is_sign_negative resolves to nil. audit.md §3, task #20.")
 @test
 fn regression_is_sign_negative() {
     assert(is_sign_negative(-1.0));
     assert(!is_sign_negative(1.0));
 }
 
-@ignore("FLOAT-CLASSIFY-1 — is_sign_positive resolves to nil. audit.md §3, task #20.")
 @test
 fn regression_is_sign_positive() {
     assert(is_sign_positive(1.0));

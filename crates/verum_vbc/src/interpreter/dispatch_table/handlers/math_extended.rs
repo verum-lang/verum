@@ -697,6 +697,27 @@ pub(in super::super) fn handle_math_extended(
             state.set_reg(dst, Value::from_bool(x.is_finite()));
             Ok(DispatchResult::Continue)
         }
+        Some(MathSubOpcode::IsSubnormalF64) => {
+            let dst = read_reg(state)?;
+            let src = read_reg(state)?;
+            let x = state.get_reg(src).as_f64();
+            state.set_reg(dst, Value::from_bool(x.is_subnormal()));
+            Ok(DispatchResult::Continue)
+        }
+        Some(MathSubOpcode::IsSignNegativeF64) => {
+            let dst = read_reg(state)?;
+            let src = read_reg(state)?;
+            let x = state.get_reg(src).as_f64();
+            state.set_reg(dst, Value::from_bool(x.is_sign_negative()));
+            Ok(DispatchResult::Continue)
+        }
+        Some(MathSubOpcode::IsSignPositiveF64) => {
+            let dst = read_reg(state)?;
+            let src = read_reg(state)?;
+            let x = state.get_reg(src).as_f64();
+            state.set_reg(dst, Value::from_bool(x.is_sign_positive()));
+            Ok(DispatchResult::Continue)
+        }
 
         // ================================================================
         // Classification F32 (0x70-0x77)
