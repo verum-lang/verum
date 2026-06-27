@@ -17961,6 +17961,12 @@ fn lower_math_extended<'ctx>(
         MathSubOpcode::HypotF64 | MathSubOpcode::HypotF32 => {
             return lower_hypot_f64(ctx, operands);
         }
+        // powi(base: f64, exp: i32) → @llvm.powi.f64.i32 (a REAL intrinsic, but
+        // the exponent is i32 — the generic binary-f64 dispatch would coerce it
+        // to f64 and mis-call). (FLOAT-AOT-LIBM-1.)
+        MathSubOpcode::PowiF64 | MathSubOpcode::PowiF32 => {
+            return lower_powi_f64(ctx, operands);
+        }
         _ => {}
     }
 
@@ -18079,6 +18085,36 @@ fn lower_hypot_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -
     let sum = ctx.builder().build_float_add(aa, bb, "hypot_sum").or_llvm_err()?;
     let r = build_round_intrinsic(ctx, "llvm.sqrt.f64", "hypot_sqrt", sum)?;
     ctx.set_register(dst, r.into());
+    Ok(())
+}
+
+/// `powi(base, exp)` → `@llvm.powi.f64.i32`. The exponent is a true integer
+/// (Int32), so it must be passed as i32 — the generic binary-f64 dispatch would
+/// coerce it to f64 and call a non-existent `llvm.powi.f64.f64`. (FLOAT-AOT-LIBM-1.)
+fn lower_powi_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -> Result<()> {
+    if operands.len() < 3 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let base = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "powi_base")?;
+    let exp_i64 = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "powi_exp")?;
+    let f64_ty = ctx.types().f64_type();
+    let i32_ty = ctx.types().i32_type();
+    let exp_i32 = ctx
+        .builder()
+        .build_int_truncate(exp_i64, i32_ty, "powi_exp32")
+        .or_llvm_err()?;
+    let fn_type = f64_ty.fn_type(&[f64_ty.into(), i32_ty.into()], false);
+    let module = ctx.get_module();
+    let func = module
+        .get_function("llvm.powi.f64.i32")
+        .unwrap_or_else(|| module.add_function("llvm.powi.f64.i32", fn_type, None));
+    let result = ctx
+        .builder()
+        .build_call(func, &[base.into(), exp_i32.into()], "powi")
+        .or_llvm_err()?
+        .basic_value_or_else(|| "powi: expected return value".to_string())?;
+    ctx.set_register(dst, result);
     Ok(())
 }
 
