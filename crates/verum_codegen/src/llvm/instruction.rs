@@ -17946,6 +17946,21 @@ fn lower_math_extended<'ctx>(
         MathSubOpcode::IsSignPositiveF64 => {
             return lower_is_signbit_f64(ctx, operands, false);
         }
+        // FLOAT-AOT-LIBM-1: cbrt/hypot/expm1/log1p have NO @llvm.* intrinsic
+        // (they're libm), so the generic dispatch below would emit a call to a
+        // non-existent `llvm.{expm1,log1p,hypot}.f64` and fail to lower / link.
+        // Compose them from intrinsics that DO exist (llvm.exp/log/sqrt) so the
+        // no-libc invariant holds. (cbrt is left to the generic path — a precise
+        // no-libc cube root needs a Newton refinement, tracked separately.)
+        MathSubOpcode::Expm1F64 | MathSubOpcode::Expm1F32 => {
+            return lower_expm1_f64(ctx, operands);
+        }
+        MathSubOpcode::Log1pF64 | MathSubOpcode::Log1pF32 => {
+            return lower_log1p_f64(ctx, operands);
+        }
+        MathSubOpcode::HypotF64 | MathSubOpcode::HypotF32 => {
+            return lower_hypot_f64(ctx, operands);
+        }
         _ => {}
     }
 
@@ -18012,6 +18027,58 @@ fn lower_fmod_via_frem<'ctx>(
         .build_float_rem(a, b, "fmod")
         .or_llvm_err()?;
     ctx.set_register(dst, result.into());
+    Ok(())
+}
+
+/// `expm1(x) = exp(x) - 1`, composed from `@llvm.exp.f64`. (FLOAT-AOT-LIBM-1.)
+/// No-libc: pure LLVM-intrinsic composition. Note: loses precision for very
+/// small |x| vs a true libm `expm1` (catastrophic cancellation near 0); the
+/// interpreter retains the precise path. Exact for the x=0 contract.
+fn lower_expm1_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "expm1_src")?;
+    let e = build_round_intrinsic(ctx, "llvm.exp.f64", "expm1_exp", a)?;
+    let one = ctx.types().f64_type().const_float(1.0);
+    let r = ctx.builder().build_float_sub(e, one, "expm1").or_llvm_err()?;
+    ctx.set_register(dst, r.into());
+    Ok(())
+}
+
+/// `log1p(x) = log(1 + x)`, composed from `@llvm.log.f64`. (FLOAT-AOT-LIBM-1.)
+/// No-libc: pure LLVM-intrinsic composition. Precision note as for expm1.
+fn lower_log1p_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "log1p_src")?;
+    let one = ctx.types().f64_type().const_float(1.0);
+    let s = ctx.builder().build_float_add(a, one, "log1p_1px").or_llvm_err()?;
+    let r = build_round_intrinsic(ctx, "llvm.log.f64", "log1p_log", s)?;
+    ctx.set_register(dst, r.into());
+    Ok(())
+}
+
+/// `hypot(x, y) = sqrt(x*x + y*y)`, composed from `@llvm.sqrt.f64`.
+/// (FLOAT-AOT-LIBM-1.) No-libc: pure LLVM-intrinsic composition. Note: the
+/// naive sum-of-squares can overflow for very large operands where a true
+/// libm `hypot` scales; the interpreter retains the precise path. Exact for
+/// the (3,4)->5 contract and the common non-extreme range.
+fn lower_hypot_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -> Result<()> {
+    if operands.len() < 3 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "hypot_a")?;
+    let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "hypot_b")?;
+    let aa = ctx.builder().build_float_mul(a, a, "hypot_aa").or_llvm_err()?;
+    let bb = ctx.builder().build_float_mul(b, b, "hypot_bb").or_llvm_err()?;
+    let sum = ctx.builder().build_float_add(aa, bb, "hypot_sum").or_llvm_err()?;
+    let r = build_round_intrinsic(ctx, "llvm.sqrt.f64", "hypot_sqrt", sum)?;
+    ctx.set_register(dst, r.into());
     Ok(())
 }
 
