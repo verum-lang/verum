@@ -7460,6 +7460,10 @@ pub enum MathSubOpcode {
     RoundF64 = 0x42,
     /// trunc(x) - Round toward zero (F64).
     TruncF64 = 0x43,
+    /// roundeven(x) - Round to nearest integer, ties to even (F64).
+    /// Backs `roundeven` / `rint` / `nearbyint` (all round-ties-to-even in
+    /// the default rounding mode). (FLOAT-ROUNDMODES-1)
+    RoundEvenF64 = 0x44,
 
     // ========================================================================
     // Rounding F32 (0x48-0x4F)
@@ -7741,6 +7745,7 @@ impl MathSubOpcode {
             0x41 => Some(Self::CeilF64),
             0x42 => Some(Self::RoundF64),
             0x43 => Some(Self::TruncF64),
+            0x44 => Some(Self::RoundEvenF64),
             // Rounding F32
             0x48 => Some(Self::FloorF32),
             0x49 => Some(Self::CeilF32),
@@ -7874,6 +7879,7 @@ impl MathSubOpcode {
             Self::CeilF64   => m!("CEIL_F64",   Rounding,      F64, 1, "llvm.ceil.f64",   Some("math.ceil")),
             Self::RoundF64  => m!("ROUND_F64",  Rounding,      F64, 1, "llvm.round.f64",  Some("math.round")),
             Self::TruncF64  => m!("TRUNC_F64",  Rounding,      F64, 1, "llvm.trunc.f64",  Some("math.trunc")),
+            Self::RoundEvenF64 => m!("ROUNDEVEN_F64", Rounding, F64, 1, "llvm.roundeven.f64", Some("math.roundeven")),
             Self::FloorF32  => m!("FLOOR_F32",  Rounding,      F32, 1, "llvm.floor.f32",  Some("math.floor")),
             Self::CeilF32   => m!("CEIL_F32",   Rounding,      F32, 1, "llvm.ceil.f32",   Some("math.ceil")),
             Self::RoundF32  => m!("ROUND_F32",  Rounding,      F32, 1, "llvm.round.f32",  Some("math.round")),
