@@ -15716,8 +15716,17 @@ impl VbcCodegen {
             verum_ast::ArrayExpr::List(elements) => {
                 let result = self.ctx.alloc_temp();
 
-                // Create list
-                self.ctx.emit(Instruction::NewList { dst: result , capacity_hint: 0 });
+                // Create list with the literal's exact element count as the
+                // capacity hint so the backing buffer is allocated EAGERLY
+                // (calloc, via lower_new_list_with_capacity) rather than lazily
+                // on first push. The lazy path (capacity_hint=0 → header-only,
+                // then verum_list_grow on push) leaves the PTR field (offset 40)
+                // null until the first grow, and under AOT the grow/realloc path
+                // is unreliable — so `[100].as_mut_ptr()` saw a stale/null
+                // backing pointer (MEM-LIST-LITERAL-PTR-1 #24). Pre-sizing makes
+                // the buffer present and the elements visible immediately.
+                let cap_hint = elements.len().min(u16::MAX as usize) as u16;
+                self.ctx.emit(Instruction::NewList { dst: result , capacity_hint: cap_hint });
 
                 // Push all elements
                 for elem in elements.iter() {
