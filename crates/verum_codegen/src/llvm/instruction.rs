@@ -22753,23 +22753,51 @@ fn coerce_value<'ctx>(
             }
         }
         BTE::FloatType(target_float) => {
+            let f64_ty = ctx.types().f64_type();
             match val {
-                BVE::FloatValue(f) => Ok(f.into()),
+                BVE::FloatValue(f) => {
+                    // Coerce between float WIDTHS. Passing a double where a `float`
+                    // is expected (or vice versa) is an ABI mismatch that silently
+                    // yields garbage — `f32_to_bits` received its f64 argument in a
+                    // `float` (f32) parameter and read 0 (CONV-AOT-F32BITS-1 #16).
+                    // fptrunc to narrow (f64→f32), fpext to widen (f32→f64).
+                    if f.get_type() == target_float {
+                        Ok(f.into())
+                    } else if f.get_type() == f64_ty {
+                        Ok(ctx
+                            .builder()
+                            .build_float_trunc(f, target_float, name)
+                            .or_llvm_err()?
+                            .into())
+                    } else {
+                        Ok(ctx
+                            .builder()
+                            .build_float_ext(f, target_float, name)
+                            .or_llvm_err()?
+                            .into())
+                    }
+                }
                 BVE::IntValue(i) => {
-                    // Check if this is a float stored as i64 (internal representation)
-                    // vs an actual integer being coerced to float.
-                    // Heuristic: if the i64 value fits in a small int range AND
-                    // it's not from a known float-producing instruction, use sitofp.
-                    // For internal float storage, use bitcast.
-                    //
-
-                    // Since we can't easily distinguish at this point, we use bitcast
-                    // as the default (preserves existing behavior for float registers).
-                    // For explicit coercion, use the CvtIF instruction path instead.
-                    Ok(ctx
+                    // The i64 register holds a float's BIT PATTERN (internal
+                    // representation). Recover it with a same-width bitcast to f64,
+                    // then fptrunc if the target is the narrower f32. A direct
+                    // `bitcast i64 -> float` is an illegal size-mismatched cast
+                    // (64 vs 32 bits) — the previous code emitted exactly that for
+                    // every Float32 parameter.
+                    let as_f64 = ctx
                         .builder()
-                        .build_bit_cast(i, target_float, name)
-                        .or_llvm_err()?)
+                        .build_bit_cast(i, f64_ty, name)
+                        .or_llvm_err()?
+                        .into_float_value();
+                    if target_float == f64_ty {
+                        Ok(as_f64.into())
+                    } else {
+                        Ok(ctx
+                            .builder()
+                            .build_float_trunc(as_f64, target_float, name)
+                            .or_llvm_err()?
+                            .into())
+                    }
                 }
                 _ => Ok(target_float.const_float(0.0).into()),
             }
@@ -25786,7 +25814,16 @@ fn lower_atomic_cas<'ctx>(
         )
         .map_err(|e| LlvmLoweringError::internal(format!("Failed to build cmpxchg: {}", e)))?;
 
-    // Extract the old value (first element of the returned struct)
+    // cmpxchg returns { iN observed, i1 succeeded }. The Verum signature is
+    // `atomic_cas(...) -> (T, Bool)`, so BOTH must be returned, packed into a
+    // 2-slot heap tuple `(observed, succeeded)` — matching the interpreter
+    // (system.rs allocates a TUPLE object holding (old, success)) and the
+    // `build_overflowing_tuple` value/flag pattern. The previous code returned
+    // only `observed` as a bare int, so user `let (got, ok) = atomic_cas(...)`
+    // destructured a non-tuple → garbage / wrong field reads (ATOMIC-CAS-AOT #28).
+    let i64_type = ctx.types().i64_type();
+
+    // slot 0: observed (old value), zero-extended to i64
     let old_value = ctx
         .builder()
         .build_extract_value(cmpxchg, 0, "cas_old")
@@ -25794,10 +25831,7 @@ fn lower_atomic_cas<'ctx>(
             LlvmLoweringError::internal(format!("Failed to extract cmpxchg result: {}", e))
         })?
         .into_int_value();
-
-    // Zero-extend to i64 for register storage if needed
-    let i64_type = ctx.types().i64_type();
-    let result = if size < 8 {
+    let observed = if size < 8 {
         ctx.builder()
             .build_int_z_extend(old_value, i64_type, "cas_old_ext")
             .map_err(|e| {
@@ -25807,7 +25841,38 @@ fn lower_atomic_cas<'ctx>(
         old_value
     };
 
-    ctx.set_register(dst.0, result.into());
+    // slot 1: succeeded flag (i1) zero-extended to i64
+    let success = ctx
+        .builder()
+        .build_extract_value(cmpxchg, 1, "cas_ok")
+        .map_err(|e| {
+            LlvmLoweringError::internal(format!("Failed to extract cmpxchg flag: {}", e))
+        })?
+        .into_int_value();
+    let succeeded = ctx
+        .builder()
+        .build_int_z_extend(success, i64_type, "cas_ok_ext")
+        .map_err(|e| {
+            LlvmLoweringError::internal(format!("Failed to extend cmpxchg flag: {}", e))
+        })?;
+
+    // Pack (observed, succeeded) into a REAL tuple OBJECT via lower_pack: a
+    // 24-byte OBJECT_HEADER followed by two 8-byte slots at offsets 24 and 32.
+    // This MUST match `lower_unpack_element` (which reads OBJECT_HEADER_SIZE +
+    // i*8) — the lowering the caller's `let (got, ok) = atomic_cas(...)` uses to
+    // destructure the result. A bare 16-byte malloc with fields at 0/8 (the
+    // earlier attempt) is read past its end at offsets 24/32 → garbage
+    // (ATOMIC-CAS-AOT #28).
+    let module = ctx.get_module();
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    let tuple_ptr = runtime.lower_pack(ctx.builder(), module, &[observed, succeeded])?;
+    let tuple_int = ctx
+        .builder()
+        .build_ptr_to_int(tuple_ptr, i64_type, "cas_tuple_ptr")
+        .map_err(|e| {
+            LlvmLoweringError::internal(format!("Failed to ptr_to_int cas tuple: {}", e))
+        })?;
+    ctx.set_register(dst.0, tuple_int.into());
     Ok(())
 }
 
