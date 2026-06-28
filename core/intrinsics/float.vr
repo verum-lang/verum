@@ -114,11 +114,12 @@ public fn rint<T>(x: T) -> T { @intrinsic("rint", x) }
 /// Fused multiply-add (a * b + c with single rounding)
 public fn fma<T>(a: T, b: T, c: T) -> T { @intrinsic("fma", a, b, c) }
 
-/// Fused multiply-subtract (a * b - c with single rounding)
-public fn fms<T>(a: T, b: T, c: T) -> T { @intrinsic("fma", a, b, neg(c)) }
-
-// Helper for fms
-fn neg<T>(x: T) -> T { @intrinsic("fneg", x) }
+/// Fused multiply-subtract (a * b - c with single rounding).
+/// Uses `fneg` (not a bare `@intrinsic("fneg")` helper) so the negation is
+/// lowered through the typed float-negate path on both tiers — a raw
+/// `@intrinsic("fneg")` routes through the polymorphic PolyNeg, which
+/// integer-negates the float bit pattern under AOT. (FLOAT-AOT-FNEG-1)
+public fn fms<T>(a: T, b: T, c: T) -> T { @intrinsic("fma", a, b, fneg(c)) }
 
 // =============================================================================
 // SECTION 4: Sign and Comparison
