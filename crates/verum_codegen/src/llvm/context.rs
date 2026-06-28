@@ -1961,6 +1961,20 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.element_stride_registers.remove(&reg);
         self.obj_register_types.remove(&reg);
         self.gete_element_ptrs.remove(&reg);
+        // VALUE-REPRESENTATION CONSISTENCY (canonical contract): a register's
+        // type-marks must reflect ITS CURRENT VALUE — every store resets them,
+        // and the producer re-marks afterwards. These five sets were omitted
+        // from the reset, so a mark from a PRIOR value (e.g. a heap/variant
+        // temp whose register is later reused for a scalar return) LEAKED onto
+        // the new value. Downstream `lower_to_string`/dispatch/GetE then read
+        // the stale mark and routed a native scalar (raw i64) through the
+        // boxed-value formatter — misreading it as a heap pointer → SIGSEGV
+        // (e.g. `f"{f(Variant(x))}"`). Reset them too so the contract holds.
+        self.variant_registers.remove(&reg);
+        self.heap_alloc_registers.remove(&reg);
+        self.gen_registers.remove(&reg);
+        self.map_list_value_registers.remove(&reg);
+        self.map_string_value_registers.remove(&reg);
         // owned_text cleared by reg_types.clear(reg) above — prevents Ret handler from
         // freeing a register that now holds a non-text value after VBC temp register reuse.
 
@@ -2172,25 +2186,57 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                     .copied()
                     .unwrap_or(BasicTypeEnum::IntType(i64_ty));
                 match existing_ty {
-                    BasicTypeEnum::PointerType(ptr_ty) => {
-                        // Existing alloca is `alloca ptr`.  Coerce the i64
-                        // value to ptr and store; preserve ptr-typed alloca.
-                        let i64_int = match i64_value {
-                            BasicValueEnum::IntValue(iv) => iv,
-                            _ => unreachable!(
-                                "i64_value must be IntValue after coercion above"
-                            ),
-                        };
-                        let v_ptr = self
+                    BasicTypeEnum::PointerType(_ptr_ty) => {
+                        // The register previously held a POINTER (a variant /
+                        // heap object / list / text) but is now being reused
+                        // for a genuine i64 SCALAR — e.g. an `Int` return
+                        // value flowing into the same VBC register that just
+                        // held an inline-constructed variant argument
+                        // (`CALL r0, f [r2]` reuses r0 = the variant slot).
+                        //
+                        // The previous code inttoptr'd the i64 into the ptr
+                        // alloca and KEPT the ptr declared type. That made
+                        // every downstream consumer LOAD the scalar as a
+                        // pointer and mishandle it: an `Int` return formatted
+                        // in an f-string (`f"{f(Variant(x))}"`) was treated as
+                        // a heap Text pointer → `verum_text_concat(99)` →
+                        // SIGSEGV. (The Float and default arms below correctly
+                        // RESET the register to i64; only this arm didn't —
+                        // the asymmetry was the bug.)
+                        //
+                        // Fix — RECREATE a fresh i64 alloca for the scalar era
+                        // and store the i64 directly. The old ptr alloca keeps
+                        // ONLY ptr stores and the new i64 alloca keeps ONLY
+                        // i64 stores, so BOTH stay mem2reg-promotable (no
+                        // mixed-type stores → no #96 SimplifyCFG SIGBUS, which
+                        // is exactly why the old code coerced instead of
+                        // re-typing in place). Consumers now load the scalar
+                        // as i64 and treat it as the Int it is. Subsequent
+                        // i64 stores see the i64 type and hit the `_` arm
+                        // (no repeated recreation).
+                        let entry = self
+                            .function
+                            .get_first_basic_block()
+                            .expect("function must have entry block");
+                        let saved_block = self.builder.get_insert_block();
+                        if let Some(first_instr) = entry.get_first_instruction() {
+                            self.builder.position_before(&first_instr);
+                        } else {
+                            self.builder.position_at_end(entry);
+                        }
+                        let fresh = self
                             .builder
-                            .build_int_to_ptr(
-                                i64_int,
-                                ptr_ty,
-                                &format!("r{}_i64_to_ptr", reg),
+                            .build_alloca(
+                                BasicTypeEnum::IntType(i64_ty),
+                                &format!("r{}_i64", reg),
                             )
-                            .expect("inttoptr should not fail");
-                        let _ = self.builder.build_store(existing_ptr, v_ptr);
-                        // Don't change alloca_register_types — keep ptr.
+                            .expect("alloca should not fail");
+                        if let Some(block) = saved_block {
+                            self.builder.position_at_end(block);
+                        }
+                        self.alloca_registers.insert(reg, fresh);
+                        self.alloca_register_types.insert(reg, i64_ty.into());
+                        let _ = self.builder.build_store(fresh, i64_value);
                     }
                     BasicTypeEnum::FloatType(_) => {
                         // Existing alloca is `alloca double`.  i64-into-f64
