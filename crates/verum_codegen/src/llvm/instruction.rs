@@ -17967,6 +17967,11 @@ fn lower_math_extended<'ctx>(
         MathSubOpcode::PowiF64 | MathSubOpcode::PowiF32 => {
             return lower_powi_f64(ctx, operands);
         }
+        // cbrt has no @llvm.* intrinsic. Compose it no-libc: pow(|x|,1/3) seed +
+        // Newton refinement, then copysign. (FLOAT-AOT-LIBM-1.)
+        MathSubOpcode::CbrtF64 | MathSubOpcode::CbrtF32 => {
+            return lower_cbrt_f64(ctx, operands);
+        }
         _ => {}
     }
 
@@ -18114,6 +18119,65 @@ fn lower_powi_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) ->
         .build_call(func, &[base.into(), exp_i32.into()], "powi")
         .or_llvm_err()?
         .basic_value_or_else(|| "powi: expected return value".to_string())?;
+    ctx.set_register(dst, result);
+    Ok(())
+}
+
+/// `cbrt(x)` — no @llvm.cbrt intrinsic exists, so compose it no-libc:
+/// seed `r = pow(|x|, 1/3)` (@llvm.pow.f64), refine with 3 Newton iterations
+/// `r = (2r + |x|/r²)/3` (converges to the nearest f64 — exact for perfect
+/// cubes), then `copysign(r, x)` to restore the sign (cbrt is odd). `x == 0`
+/// is guarded (Newton would divide r²=0). (FLOAT-AOT-LIBM-1.)
+fn lower_cbrt_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let x = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "cbrt_x")?;
+    let f64_ty = ctx.types().f64_type();
+    let ax = build_round_intrinsic(ctx, "llvm.fabs.f64", "cbrt_ax", x)?;
+    let bin_ty = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
+    let third = f64_ty.const_float(1.0_f64 / 3.0_f64);
+    let module = ctx.get_module();
+    let pow_fn = module
+        .get_function("llvm.pow.f64")
+        .unwrap_or_else(|| module.add_function("llvm.pow.f64", bin_ty, None));
+    let mut r = ctx
+        .builder()
+        .build_call(pow_fn, &[ax.into(), third.into()], "cbrt_seed")
+        .or_llvm_err()?
+        .basic_value_or_else(|| "cbrt: pow return".to_string())?
+        .into_float_value();
+    let two = f64_ty.const_float(2.0);
+    let three_c = f64_ty.const_float(3.0);
+    for _ in 0..3 {
+        let r2 = ctx.builder().build_float_mul(r, r, "cbrt_r2").or_llvm_err()?;
+        let axr2 = ctx.builder().build_float_div(ax, r2, "cbrt_axr2").or_llvm_err()?;
+        let two_r = ctx.builder().build_float_mul(two, r, "cbrt_2r").or_llvm_err()?;
+        let sum = ctx.builder().build_float_add(two_r, axr2, "cbrt_sum").or_llvm_err()?;
+        r = ctx.builder().build_float_div(sum, three_c, "cbrt_iter").or_llvm_err()?;
+    }
+    let module2 = ctx.get_module();
+    let cs_fn = module2
+        .get_function("llvm.copysign.f64")
+        .unwrap_or_else(|| module2.add_function("llvm.copysign.f64", bin_ty, None));
+    let signed = ctx
+        .builder()
+        .build_call(cs_fn, &[r.into(), x.into()], "cbrt_signed")
+        .or_llvm_err()?
+        .basic_value_or_else(|| "cbrt: copysign return".to_string())?
+        .into_float_value();
+    let zero = f64_ty.const_float(0.0);
+    let is_zero = ctx
+        .builder()
+        .build_float_compare(FloatPredicate::OEQ, ax, zero, "cbrt_iszero")
+        .or_llvm_err()?;
+    let x_bv: BasicValueEnum = x.into();
+    let signed_bv: BasicValueEnum = signed.into();
+    let result = ctx
+        .builder()
+        .build_select(is_zero, x_bv, signed_bv, "cbrt_result")
+        .or_llvm_err()?;
     ctx.set_register(dst, result);
     Ok(())
 }
