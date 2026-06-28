@@ -4305,9 +4305,28 @@ impl VbcCodegen {
     /// `alloc_user_type_id` calls don't collide.
     pub fn register_archive_type(
         &mut self,
-        ty: crate::types::TypeDescriptor,
+        mut ty: crate::types::TypeDescriptor,
         simple_name: String,
     ) {
+        // TYPE-ID-COLLISION-1 (#27) FUNDAMENTAL FIX. Archive type ids are
+        // MODULE-LOCAL: every `.vr` module numbers its own types starting from
+        // `FIRST_USER`, so two DISTINCT types from different modules carry the
+        // SAME id. Registering both at that id makes `push_type_dedupe` treat
+        // them as one and overwrite one descriptor with the other → the wrong
+        // `drop_fn` / variant layout is used → an intermittent `into_inner`
+        // panic and `MakeVariantTyped` field-count mismatches under AOT. The
+        // same hazard re-homes a user type onto a reserved semantic id
+        // (512..1024). When this id is already claimed by a DIFFERENT-named
+        // type, allocate a fresh, globally-unique user id for this one. Every
+        // consumer — the per-module merge remap (`type_id_remap`), field-type
+        // lookups, drop/variant dispatch — resolves a type BY NAME via
+        // `type_name_to_id`, so rerouting this type's instructions to the new id
+        // is automatic; nothing depends on the module-local numeric id.
+        if !self.type_name_to_id.contains_key(&simple_name)
+            && self.type_name_to_id.values().any(|id| id.0 == ty.id.0)
+        {
+            ty.id = self.alloc_user_type_id();
+        }
         // Bump next_type_id past this archive id so future user-type
         // allocations stay disjoint.
         let id_val = ty.id.0;
