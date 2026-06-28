@@ -330,6 +330,24 @@ impl VbcCodegen {
                         None
                     }
                 }
+                // Canonical primitive annotations (`Int`, `Float`, `Bool`,
+                // `Char`, `Text`, `Unit`) parse to DEDICATED `TypeKind`
+                // variants — NOT `TypeKind::Path` — so they previously fell
+                // through to `_ => None`, silently dropping the declared type.
+                // When the RHS inferred to a different kind, that inferred kind
+                // won, e.g. `let a: Int = expect(7, 0)` recorded `a` as Float
+                // (the generic `expect<T>` return infers Float) and then
+                // mis-dispatched `a + 3` to float arithmetic — reinterpreting
+                // the Int NaN-box bits as an f64 NaN, yielding garbage
+                // (CONTROL-EXPECT-GENERIC-ARITH #30). Map the canonical
+                // primitives explicitly so the declared annotation wins, as the
+                // `let x: T = expr` contract documents.
+                TypeKind::Int => Some(VarTypeKind::Int),
+                TypeKind::Float => Some(VarTypeKind::Float),
+                TypeKind::Bool => Some(VarTypeKind::Bool),
+                TypeKind::Char => Some(VarTypeKind::Char),
+                TypeKind::Text => Some(VarTypeKind::Text),
+                TypeKind::Unit => Some(VarTypeKind::Unit),
                 _ => None,
             });
 
