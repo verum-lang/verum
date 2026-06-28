@@ -2070,6 +2070,20 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                     // `alloca double` + `store double` + `load double` is a clean pattern
                     // that SROA/mem2reg promotes to SSA f64 registers.
                     let f64_type = self.types.f64_type();
+                    // Widen a 32-bit `float` (e.g. a `Float32` function parameter, whose
+                    // signature LLVM type is `float`) to f64 BEFORE storing into the
+                    // always-f64 register slot. A raw `store float` into an `alloca double`
+                    // writes only 4 bytes; the matching `load double` then reads 4
+                    // UNINITIALIZED bytes, so the recovered value is a denormal/garbage
+                    // double — `f32_to_bits(1.0)` saw ~0 and fptrunc'd to 0
+                    // (CONV-AOT-F32BITS-1 #16). fpext is the value-preserving widen.
+                    let v = if v.get_type() == self.types.f32_type() {
+                        self.builder
+                            .build_float_ext(v, f64_type, "f32_widen_reg")
+                            .expect("fpext f32->f64 should not fail")
+                    } else {
+                        v
+                    };
                     if let Some(&existing_ptr) = self.alloca_registers.get(&reg) {
                         let _ = self.builder.build_store(existing_ptr, v);
                     } else {
