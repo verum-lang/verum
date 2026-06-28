@@ -31,13 +31,13 @@ fn integration_likely_in_hot_loop_sum() {
 // `expect` as a value hint inside arithmetic
 // =============================================================================
 
-// CONTROL-EXPECT-GENERIC-ARITH (#30): generic `expect<T>` returns the value
-// with a mis-tagged (boxed/NaN-tagged) representation that prints/compares
-// correctly but breaks ARITHMETIC on the result — `acc + expect(i*i, 0)`
-// accumulates garbage (0x7fff…), while `acc + (i*i)` is correct. Non-generic
-// `likely`/`unlikely` are unaffected. Pinned until the generic intrinsic-return
-// unboxing lands.
-@ignore("CONTROL-EXPECT-GENERIC-ARITH #30: expect<T> result mis-tagged, arithmetic on it yields garbage")
+// CONTROL-EXPECT-GENERIC-ARITH (#30) FIXED: the value `expect<T>` returns is
+// correct (native Int) — the bug was that `let x: Int = expect(...)` DROPPED the
+// `Int` annotation in compile_let (canonical primitives parse to dedicated
+// `TypeKind` variants, not `TypeKind::Path`, and were not matched), so x was
+// recorded with expect's Float-inferred type and `acc + x` mis-dispatched to
+// float arithmetic (reinterpreting Int NaN-box bits as an f64 NaN). The
+// annotation is now honored, so `acc + x` is integer arithmetic.
 @test
 fn integration_expect_hint_preserves_arithmetic() {
     let mut acc: Int = 0;
