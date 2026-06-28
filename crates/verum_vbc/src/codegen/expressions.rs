@@ -5763,6 +5763,29 @@ impl VbcCodegen {
                 Ok(Some(None))
             }
 
+            // FLOAT-AOT-FNEG-1: `fneg`/`fabs` are always-float intrinsics whose
+            // stdlib bodies route through the polymorphic PolyNeg/PolyAbs, whose
+            // AOT lowering integer-ops the float bit pattern (type erased to i64
+            // at the opcode). Emit the dedicated, typed `UnaryF` op directly
+            // (interp: float_arith.rs; AOT: build_float_neg / @llvm.fabs.f64 —
+            // both NaN-correct). Call-site analogue of the `-x` operator's typed
+            // dispatch (compile_unary). Covers BOTH user calls and stdlib
+            // internal fneg/fabs uses (sinh, is_finite, fms, …).
+            "fneg" | "fabs" if args.len() == 1 => {
+                let src = self
+                    .compile_expr(&args[0])?
+                    .or_internal("fneg/fabs arg has no value")?;
+                let dst = self.ctx.alloc_temp();
+                let op = if name == "fneg" {
+                    crate::instruction::UnaryFloatOp::Neg
+                } else {
+                    crate::instruction::UnaryFloatOp::Abs
+                };
+                self.ctx.emit(Instruction::UnaryF { op, dst, src });
+                self.ctx.free_temp(src);
+                Ok(Some(Some(dst)))
+            }
+
             "panic" => {
                 // Static-message fast path: when the argument is a bare
                 // Text literal (or `&"..."` reference to one), intern

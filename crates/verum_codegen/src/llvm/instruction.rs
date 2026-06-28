@@ -1992,20 +1992,11 @@ pub fn lower_instruction<'ctx>(
                     .build_float_neg(src_val, "fneg")
                     .or_llvm_err()?,
                 UnaryFloatOp::Abs => {
-                    // Requires fabs intrinsic - for now just negate and select
-                    let neg_val = ctx
-                        .builder()
-                        .build_float_neg(src_val, "fneg")
-                        .or_llvm_err()?;
-                    let zero = ctx.types().f64_type().const_float(0.0);
-                    let is_neg = ctx
-                        .builder()
-                        .build_float_compare(FloatPredicate::OLT, src_val, zero, "is_neg")
-                        .or_llvm_err()?;
-                    ctx.builder()
-                        .build_select(is_neg, neg_val, src_val, "fabs")
-                        .or_llvm_err()?
-                        .into_float_value()
+                    // @llvm.fabs.f64 clears the sign bit — correct for -0.0 and
+                    // NaN (the previous negate+select returned NaN with wrong
+                    // sign-handling and broke is_finite(NaN) once fabs routes
+                    // here). (FLOAT-AOT-FNEG-1)
+                    build_round_intrinsic(ctx, "llvm.fabs.f64", "fabs", src_val)?
                 }
                 _ => {
                     // Other float unary ops (sqrt, sin, cos, etc.) require intrinsics
