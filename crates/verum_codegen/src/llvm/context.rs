@@ -1130,8 +1130,15 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     }
 
     /// Get all heap allocation registers (for drop cleanup at function exit).
+    ///
+    /// DETERMINISM: `heap_alloc_registers` is a HashSet (random per-instance
+    /// seed). The returned registers drive the emission order of dealloc calls
+    /// in the function epilogue; sort by register number so the cleanup IR is
+    /// byte-identical across compilations (see owned_text_registers).
     pub fn heap_alloc_registers(&self) -> Vec<u16> {
-        self.heap_alloc_registers.iter().copied().collect()
+        let mut regs: Vec<u16> = self.heap_alloc_registers.iter().copied().collect();
+        regs.sort_unstable();
+        regs
     }
 
     /// Get all owned text registers (for cleanup at function exit).
