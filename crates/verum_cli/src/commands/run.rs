@@ -29,6 +29,13 @@ pub fn execute(
     bin: Option<Text>,
     args: List<Text>,
 ) -> Result<()> {
+    // Install the embedded scripting-engine compiler hook up front — on the
+    // main thread, before any interpreter is created or run — so a host
+    // program's very first `script_engine_eval` can never race the lazy
+    // install (the per-interpret-phase install can be concurrent with the host
+    // starting). Idempotent.
+    verum_compiler::api::ensure_scripting_compiler_installed();
+
     // Determine compilation tier. Apply CLI feature overrides so
     // `--tier`, `-Z codegen.tier=...`, etc. are respected here as well.
     let manifest_dir = Manifest::find_manifest_dir()?;

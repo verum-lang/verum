@@ -3075,6 +3075,13 @@ fn run_command(cli: Cli) -> Result<()> {
             feature_overrides,
             permission_flags,
         } => {
+            // Install the embedded scripting-engine compiler hook up front — on
+            // the main thread, before any source is compiled or interpreted —
+            // so a host program's first `script_engine_eval` (core.script) can
+            // never race the per-interpret-phase lazy install. Covers every run
+            // variant (file / project / -e / stdin). Idempotent.
+            verum_compiler::api::ensure_scripting_compiler_installed();
+
  // Tier resolution precedence:
  // 1. `--interp` / `--aot` shortcuts on the Run command
  // 2. `--tier` from LanguageFeatureOverrides
