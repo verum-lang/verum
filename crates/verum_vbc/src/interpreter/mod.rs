@@ -120,8 +120,8 @@ pub use permission::{
 };
 // Embedded scripting engine — Rust backing for the `core.script` stdlib API.
 pub use script_engine::{
-    compiler_hook_installed, install_compiler_hook, CompilerHook, ScriptEngine, ScriptError,
-    ScriptOutcome, ScriptValueOwned, ScriptWorld,
+    compiler_hook_installed, install_compiler_hook, CompilerHook, ScriptCaps, ScriptEngine,
+    ScriptError, ScriptOutcome, ScriptValueOwned, ScriptWorld,
 };
 
 /// Executes a function using table-based dispatch.
