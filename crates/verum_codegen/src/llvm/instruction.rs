@@ -16686,6 +16686,104 @@ fn op_reg(operands: &[u8], idx: usize) -> u16 {
     0
 }
 
+/// Read the `width` (bits) and `signed` immediates that follow `num_regs`
+/// register operands in an ArithExtended operand stream
+/// (`[reg…][width:1b][signed:1b]`). Width-aware wrapping / saturating / checked
+/// intrinsics encode the element width + signedness here so the AOT lowering can
+/// truncate / clamp / overflow-check at the CORRECT width — e.g.
+/// `wrapping_add_i8` must wrap at 8 bits, not 64. The previous code ignored
+/// these bytes and computed everything at i64, so every width-specific
+/// overflow-aware intrinsic was wrong under AOT (saturating wrapped instead of
+/// clamping; wrapping didn't sign-extend). Defaults to (64, signed) when absent.
+fn read_width_signed(operands: &[u8], num_regs: usize) -> (u8, bool) {
+    let mut pos = 0usize;
+    for _ in 0..num_regs {
+        if read_reg_varlen(operands, &mut pos).is_err() {
+            return (64, true);
+        }
+    }
+    let width = operands.get(pos).copied().unwrap_or(64);
+    let signed = operands
+        .get(pos + 1)
+        .copied()
+        .map(|b| b != 0)
+        .unwrap_or(true);
+    (width, signed)
+}
+
+/// Wrapping finalizer: truncate an i64 result to `width` bits then re-extend to
+/// i64 (sign-extend if `signed`, else zero-extend). Makes the result agree with
+/// `x as IntW` so `wrapping_add_i8(127,1)` yields -128 (not 128). No-op at >=64.
+fn apply_int_width<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    value: verum_llvm::values::IntValue<'ctx>,
+    width: u8,
+    signed: bool,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    if width == 0 || width >= 64 {
+        return Ok(value);
+    }
+    let i64_type = ctx.types().i64_type();
+    if signed {
+        // Sign-extend from `width` bits via shifts (robust i64-only path):
+        // (v << (64-width)) >>a (64-width). E.g. wrapping_add_i8(127,1)=128
+        // → (128<<56)=0x8000…0000 → ashr 56 = -128.
+        let sh = i64_type.const_int((64 - width) as u64, false);
+        let shifted = ctx
+            .builder()
+            .build_left_shift(value, sh, "w_shl")
+            .or_llvm_err()?;
+        ctx.builder()
+            .build_right_shift(shifted, sh, true, "w_ashr")
+            .or_llvm_err()
+    } else {
+        // Zero-extend from `width` bits: v & ((1<<width)-1).
+        let mask = i64_type.const_int((1u64 << width) - 1, false);
+        ctx.builder().build_and(value, mask, "w_mask").or_llvm_err()
+    }
+}
+
+/// Saturating finalizer: clamp an i64 `value` to the representable range of an
+/// integer of `width` bits + signedness. Inputs to saturating add/sub are
+/// width-sized, so `a OP b` fits i64 and is simply clamped here. Signed
+/// comparisons are correct because all clamp bounds and the value lie within
+/// i64's signed range for width <= 32. No-op at >=64.
+fn saturate_to_width<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    value: verum_llvm::values::IntValue<'ctx>,
+    width: u8,
+    signed: bool,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    if width == 0 || width >= 64 {
+        return Ok(value);
+    }
+    let i64_type = ctx.types().i64_type();
+    let (min_v, max_v): (i64, i64) = if signed {
+        (-(1i64 << (width - 1)), (1i64 << (width - 1)) - 1)
+    } else {
+        (0, (1i64 << width) - 1)
+    };
+    let max_c = i64_type.const_int(max_v as u64, true);
+    let min_c = i64_type.const_int(min_v as u64, true);
+    let gt_max = ctx
+        .builder()
+        .build_int_compare(IntPredicate::SGT, value, max_c, "sat_gt_max")
+        .or_llvm_err()?;
+    let capped = ctx
+        .builder()
+        .build_select(gt_max, max_c, value, "sat_cap_max")
+        .or_llvm_err()?
+        .into_int_value();
+    let lt_min = ctx
+        .builder()
+        .build_int_compare(IntPredicate::SLT, capped, min_c, "sat_lt_min")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_select(lt_min, min_c, capped, "sat_cap_min")
+        .or_llvm_err()
+        .map(|v| v.into_int_value())
+}
+
 fn lower_arith_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     sub_op: u8,
@@ -16828,6 +16926,7 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
+            let (width, signed) = read_width_signed(operands, 3);
             let dst = op_reg(operands, 0);
             let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
@@ -16835,6 +16934,7 @@ fn lower_arith_extended<'ctx>(
                 .builder()
                 .build_int_add(a, b, "wrap_add")
                 .or_llvm_err()?;
+            let result = apply_int_width(ctx, result, width, signed)?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -16842,6 +16942,7 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
+            let (width, signed) = read_width_signed(operands, 3);
             let dst = op_reg(operands, 0);
             let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
@@ -16849,6 +16950,7 @@ fn lower_arith_extended<'ctx>(
                 .builder()
                 .build_int_sub(a, b, "wrap_sub")
                 .or_llvm_err()?;
+            let result = apply_int_width(ctx, result, width, signed)?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -16856,6 +16958,7 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
+            let (width, signed) = read_width_signed(operands, 3);
             let dst = op_reg(operands, 0);
             let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
@@ -16863,6 +16966,7 @@ fn lower_arith_extended<'ctx>(
                 .builder()
                 .build_int_mul(a, b, "wrap_mul")
                 .or_llvm_err()?;
+            let result = apply_int_width(ctx, result, width, signed)?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -16870,12 +16974,64 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
+            let (width, signed) = read_width_signed(operands, 2);
             let dst = op_reg(operands, 0);
             let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let result = ctx
                 .builder()
                 .build_int_neg(a, "wrap_neg")
                 .or_llvm_err()?;
+            let result = apply_int_width(ctx, result, width, signed)?;
+            ctx.set_register(dst, result.into());
+            Ok(())
+        }
+        // wrapping_div / wrapping_rem: i64 (Int) modular division. These had NO
+        // AOT handler (fell through to a no-op), so they were wrong under AOT.
+        // i64::MIN OP -1 overflows (LLVM sdiv/srem is UB there) → div wraps to
+        // i64::MIN, rem to 0. Divide-by-zero is guarded to avoid UB (→ 0).
+        Some(ArithSubOpcode::WrappingDiv) | Some(ArithSubOpcode::WrappingRem) => {
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let is_rem = matches!(sub, Some(ArithSubOpcode::WrappingRem));
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
+            let i64_type = ctx.types().i64_type();
+            let i64_min = i64_type.const_int(0x8000_0000_0000_0000_u64, true);
+            let neg_one = i64_type.const_int(u64::MAX, true);
+            let zero = i64_type.const_zero();
+            let a_min = ctx.builder().build_int_compare(IntPredicate::EQ, a, i64_min, "wdr_amin").or_llvm_err()?;
+            let b_neg1 = ctx.builder().build_int_compare(IntPredicate::EQ, b, neg_one, "wdr_bn1").or_llvm_err()?;
+            let is_ovf = ctx.builder().build_and(a_min, b_neg1, "wdr_ovf").or_llvm_err()?;
+            let b_zero = ctx.builder().build_int_compare(IntPredicate::EQ, b, zero, "wdr_bz").or_llvm_err()?;
+            let unsafe_div = ctx.builder().build_or(is_ovf, b_zero, "wdr_unsafe").or_llvm_err()?;
+            let safe_b = ctx.builder()
+                .build_select(unsafe_div, i64_type.const_int(1, false), b, "wdr_safeb")
+                .or_llvm_err()?.into_int_value();
+            let computed = if is_rem {
+                ctx.builder().build_int_signed_rem(a, safe_b, "wrap_rem").or_llvm_err()?
+            } else {
+                ctx.builder().build_int_signed_div(a, safe_b, "wrap_div").or_llvm_err()?
+            };
+            let ovf_val = if is_rem { zero } else { i64_min };
+            let r1 = ctx.builder().build_select(is_ovf, ovf_val, computed, "wdr_r1").or_llvm_err()?.into_int_value();
+            let result = ctx.builder().build_select(b_zero, zero, r1, "wdr_res").or_llvm_err()?.into_int_value();
+            ctx.set_register(dst, result.into());
+            Ok(())
+        }
+        // wrapping_abs: |a| with i64::MIN → i64::MIN (negation wraps naturally).
+        Some(ArithSubOpcode::WrappingAbs) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let i64_type = ctx.types().i64_type();
+            let zero = i64_type.const_zero();
+            let neg_a = ctx.builder().build_int_neg(a, "wabs_neg").or_llvm_err()?;
+            let is_neg = ctx.builder().build_int_compare(IntPredicate::SLT, a, zero, "wabs_isneg").or_llvm_err()?;
+            let result = ctx.builder().build_select(is_neg, neg_a, a, "wrap_abs").or_llvm_err()?.into_int_value();
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17061,10 +17217,18 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
+            let (width, signed) = read_width_signed(operands, 3);
             let dst = op_reg(operands, 0);
             let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
-            let result = build_binary_intrinsic(ctx, "llvm.sadd.sat.i64", a, b, "sat_add")?;
+            let result = if width >= 64 {
+                let intr = if signed { "llvm.sadd.sat.i64" } else { "llvm.uadd.sat.i64" };
+                build_binary_intrinsic(ctx, intr, a, b, "sat_add")?
+            } else {
+                // width-sized inputs → a+b fits i64; clamp to [min_W, max_W].
+                let sum = ctx.builder().build_int_add(a, b, "sat_add_raw").or_llvm_err()?;
+                saturate_to_width(ctx, sum, width, signed)?
+            };
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17072,10 +17236,17 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
+            let (width, signed) = read_width_signed(operands, 3);
             let dst = op_reg(operands, 0);
             let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
-            let result = build_binary_intrinsic(ctx, "llvm.ssub.sat.i64", a, b, "sat_sub")?;
+            let result = if width >= 64 {
+                let intr = if signed { "llvm.ssub.sat.i64" } else { "llvm.usub.sat.i64" };
+                build_binary_intrinsic(ctx, intr, a, b, "sat_sub")?
+            } else {
+                let diff = ctx.builder().build_int_sub(a, b, "sat_sub_raw").or_llvm_err()?;
+                saturate_to_width(ctx, diff, width, signed)?
+            };
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17084,10 +17255,46 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
+            let (width, signed) = read_width_signed(operands, 3);
             let dst = op_reg(operands, 0);
             let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let i64_type = ctx.types().i64_type();
+            if width < 64 {
+                // width-sized inputs: full product in i128 (no overflow), then
+                // clamp to [min_W, max_W] (both fit i64, sign-extended to i128).
+                let i128_type = ctx.llvm_context().custom_width_int_type(128);
+                let (a128, b128) = if signed {
+                    (
+                        ctx.builder().build_int_s_extend(a, i128_type, "smw_a").or_llvm_err()?,
+                        ctx.builder().build_int_s_extend(b, i128_type, "smw_b").or_llvm_err()?,
+                    )
+                } else {
+                    (
+                        ctx.builder().build_int_z_extend(a, i128_type, "smw_a").or_llvm_err()?,
+                        ctx.builder().build_int_z_extend(b, i128_type, "smw_b").or_llvm_err()?,
+                    )
+                };
+                let prod = ctx.builder().build_int_mul(a128, b128, "smw_prod").or_llvm_err()?;
+                let (min_v, max_v): (i64, i64) = if signed {
+                    (-(1i64 << (width - 1)), (1i64 << (width - 1)) - 1)
+                } else {
+                    (0, (1i64 << width) - 1)
+                };
+                let max128 = ctx.builder()
+                    .build_int_s_extend(i64_type.const_int(max_v as u64, true), i128_type, "smw_max")
+                    .or_llvm_err()?;
+                let min128 = ctx.builder()
+                    .build_int_s_extend(i64_type.const_int(min_v as u64, true), i128_type, "smw_min")
+                    .or_llvm_err()?;
+                let gt = ctx.builder().build_int_compare(IntPredicate::SGT, prod, max128, "smw_gt").or_llvm_err()?;
+                let capped = ctx.builder().build_select(gt, max128, prod, "smw_cap").or_llvm_err()?.into_int_value();
+                let lt = ctx.builder().build_int_compare(IntPredicate::SLT, capped, min128, "smw_lt").or_llvm_err()?;
+                let clamped = ctx.builder().build_select(lt, min128, capped, "smw_clamp").or_llvm_err()?.into_int_value();
+                let result = ctx.builder().build_int_truncate(clamped, i64_type, "smw_trunc").or_llvm_err()?;
+                ctx.set_register(dst, result.into());
+                return Ok(());
+            }
             // Use smul.with.overflow to detect overflow
             let ovf_result = build_overflow_intrinsic(
                 ctx,
@@ -22385,40 +22592,18 @@ fn build_overflowing_tuple<'ctx>(
         .builder()
         .build_int_z_extend(flag.into_int_value(), i64_ty, &format!("{}_flag_ext", name))
         .or_llvm_err()?;
-    // Allocate 2-element tuple: malloc(16)
-    let ptr_type = ctx.types().ptr_type();
-    let fn_type = ptr_type.fn_type(&[i64_ty.into()], false);
-        let alloc_fn = super::error::get_or_declare_function(module, "verum_alloc", fn_type);
-    let tuple_ptr = ctx
-        .builder()
-        .build_call(
-            alloc_fn,
-            &[i64_ty.const_int(16, false).into()],
-            &format!("{}_tuple", name),
-        )
-        .or_llvm_err()?
-                    .basic_value_or("verum_alloc: expected return value")?
-        .into_pointer_value();
-    // Store value at offset 0
-    ctx.builder()
-        .build_store(tuple_ptr, val.into_int_value())
-        .or_llvm_err()?;
-    // Store flag at offset 1 (8 bytes)
-    // SAFETY: GEP into the 16-byte result pair {value, flag} to write the success/failure flag at field 1 (offset 8)
-    let flag_slot = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(
-                i64_ty,
-                tuple_ptr,
-                &[i64_ty.const_int(1, false)],
-                &format!("{}_flag_slot", name),
-            )
-            .or_llvm_err()?
-    };
-    ctx.builder()
-        .build_store(flag_slot, flag_i64)
-        .or_llvm_err()?;
-    // Return pointer as i64
+    // Pack [value, overflow_flag] into a proper tuple OBJECT via lower_pack
+    // (24-byte OBJECT_HEADER + slots@24/32) so the `let (v, o) = …` destructure
+    // (Unpack, which reads OBJECT_HEADER_SIZE + i*8) finds the fields. The
+    // previous code wrote a bare verum_alloc(16) with fields at offset 0/8,
+    // which Unpack read 24 bytes past the header → garbage value + flag (the
+    // exact defect fixed for atomic_cas, #28).
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    let tuple_ptr = runtime.lower_pack(
+        ctx.builder(),
+        &module,
+        &[val.into_int_value(), flag_i64],
+    )?;
     let ptr_val = ctx
         .builder()
         .build_ptr_to_int(tuple_ptr, i64_ty, &format!("{}_ptr", name))
