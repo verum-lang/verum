@@ -10510,9 +10510,30 @@ pub enum ExtendedSubOpcode {
     /// scripts in the same world). Format: `[0x1F][0x37][reg:name][reg:value]`.
     ScriptSetInt = 0x37,
 
-    /// Script writes a `Text` into the shared-global table (shared BY
-    /// REFERENCE within a world). Format: `[0x1F][0x38][reg:name][reg:value]`.
+    /// Script writes a `Text` into the shared-global table (visible to other
+    /// scripts in the same world). Format: `[0x1F][0x38][reg:name][reg:value]`.
     ScriptSetText = 0x38,
+
+    // Float / Bool completions of the host<->script value exchange.
+    /// Host sets a `Bool` global. Format: `[0x1F][0x39][reg:engine][reg:name][reg:value]`.
+    ScriptEngineSetGlobalBool = 0x39,
+
+    /// Host sets a `Float` global. Format: `[0x1F][0x3A][reg:engine][reg:name][reg:value]`.
+    ScriptEngineSetGlobalFloat = 0x3A,
+
+    /// Script reads a `Bool` global. Format: `[0x1F][0x3B][reg:dst][reg:name]`.
+    ScriptGlobalBool = 0x3B,
+
+    /// Script reads a `Float` global. Format: `[0x1F][0x3C][reg:dst][reg:name]`.
+    ScriptGlobalFloat = 0x3C,
+
+    /// Script writes a `Bool` into the shared-global table.
+    /// Format: `[0x1F][0x3D][reg:name][reg:value]`.
+    ScriptSetBool = 0x3D,
+
+    /// Script writes a `Float` into the shared-global table.
+    /// Format: `[0x1F][0x3E][reg:name][reg:value]`.
+    ScriptSetFloat = 0x3E,
 }
 
 impl ExtendedSubOpcode {
@@ -10548,6 +10569,12 @@ impl ExtendedSubOpcode {
             0x36 => Some(Self::ScriptWorldFree),
             0x37 => Some(Self::ScriptSetInt),
             0x38 => Some(Self::ScriptSetText),
+            0x39 => Some(Self::ScriptEngineSetGlobalBool),
+            0x3A => Some(Self::ScriptEngineSetGlobalFloat),
+            0x3B => Some(Self::ScriptGlobalBool),
+            0x3C => Some(Self::ScriptGlobalFloat),
+            0x3D => Some(Self::ScriptSetBool),
+            0x3E => Some(Self::ScriptSetFloat),
             _ => None,
         }
     }
@@ -10588,6 +10615,12 @@ impl ExtendedSubOpcode {
             Self::ScriptWorldFree => "EXT_SCRIPT_WORLD_FREE",
             Self::ScriptSetInt => "EXT_SCRIPT_SET_INT",
             Self::ScriptSetText => "EXT_SCRIPT_SET_TEXT",
+            Self::ScriptEngineSetGlobalBool => "EXT_SCRIPT_ENGINE_SET_GLOBAL_BOOL",
+            Self::ScriptEngineSetGlobalFloat => "EXT_SCRIPT_ENGINE_SET_GLOBAL_FLOAT",
+            Self::ScriptGlobalBool => "EXT_SCRIPT_GLOBAL_BOOL",
+            Self::ScriptGlobalFloat => "EXT_SCRIPT_GLOBAL_FLOAT",
+            Self::ScriptSetBool => "EXT_SCRIPT_SET_BOOL",
+            Self::ScriptSetFloat => "EXT_SCRIPT_SET_FLOAT",
         }
     }
 }

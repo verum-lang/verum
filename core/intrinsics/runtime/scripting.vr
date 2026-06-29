@@ -71,8 +71,10 @@ public fn script_engine_eval(engine: RawScriptEngine, source: Text) -> RawScript
 @intrinsic("script_outcome_is_ok")
 public fn script_outcome_is_ok(outcome: RawScriptOutcome) -> Bool;
 
-/// Dynamic-kind tag of the outcome's value:
-/// `0`=Unit, `1`=Bool, `2`=Int, `3`=Float, `4`=other.
+/// Dynamic-kind tag of the outcome's value. Canonical `ScriptValue` tag,
+/// shared with `script_global_kind`:
+/// `0`=Nil, `1`=Bool, `2`=Int, `3`=Float, `4`=Text, `5`=List, `6`=Map,
+/// `7`=other/opaque.
 @intrinsic("script_outcome_kind")
 public fn script_outcome_kind(outcome: RawScriptOutcome) -> Int;
 
@@ -133,8 +135,18 @@ public fn script_engine_set_global_int(engine: RawScriptEngine, name: Text, valu
 @intrinsic("script_engine_set_global_text")
 public fn script_engine_set_global_text(engine: RawScriptEngine, name: Text, value: Text);
 
-/// Script: the dynamic-kind tag of a host global
-/// (`0`=Nil, `1`=Bool, `2`=Int, `3`=Float, `4`=Text); `0` if absent.
+/// Host: set a `Bool` global on an engine.
+@intrinsic("script_engine_set_global_bool")
+public fn script_engine_set_global_bool(engine: RawScriptEngine, name: Text, value: Bool);
+
+/// Host: set a `Float` global on an engine.
+@intrinsic("script_engine_set_global_float")
+public fn script_engine_set_global_float(engine: RawScriptEngine, name: Text, value: Float);
+
+/// Script: the dynamic-kind tag of a host/shared global (canonical
+/// `ScriptValue` tag, see `script_outcome_kind`):
+/// `0`=Nil, `1`=Bool, `2`=Int, `3`=Float, `4`=Text, `5`=List, `6`=Map,
+/// `7`=other; `0` if absent.
 @intrinsic("script_global_kind")
 public fn script_global_kind(name: Text) -> Int;
 
@@ -145,6 +157,14 @@ public fn script_global_int(name: Text) -> Int;
 /// Script: read a host global as `Text` (empty if absent).
 @intrinsic("script_global_text")
 public fn script_global_text(name: Text) -> Text;
+
+/// Script: read a host global as `Bool` (`false` if absent or not a Bool).
+@intrinsic("script_global_bool")
+public fn script_global_bool(name: Text) -> Bool;
+
+/// Script: read a host global as `Float` (`0.0` if absent or not a Float).
+@intrinsic("script_global_float")
+public fn script_global_float(name: Text) -> Float;
 
 // =============================================================================
 // SECTION 7: Host-Function Callbacks
@@ -191,7 +211,15 @@ public fn script_world_free(world: RawScriptWorld);
 @intrinsic("script_set_int")
 public fn script_set_int(name: Text, value: Int);
 
-/// Script: write a `Text` into the shared-global table — shared BY REFERENCE
-/// with other scripts in the same world (zero-copy).
+/// Script: write a `Text` into the shared-global table (visible to other
+/// scripts in the same world).
 @intrinsic("script_set_text")
 public fn script_set_text(name: Text, value: Text);
+
+/// Script: write a `Bool` into the shared-global table.
+@intrinsic("script_set_bool")
+public fn script_set_bool(name: Text, value: Bool);
+
+/// Script: write a `Float` into the shared-global table.
+@intrinsic("script_set_float")
+public fn script_set_float(name: Text, value: Float);

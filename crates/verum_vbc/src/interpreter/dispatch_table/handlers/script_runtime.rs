@@ -283,6 +283,38 @@ pub(in super::super) fn handle_script_engine_set_global_text(
     Ok(DispatchResult::Continue)
 }
 
+/// `script_engine_set_global_bool(engine, name, value)`.
+pub(in super::super) fn handle_script_engine_set_global_bool(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let engine_reg = read_reg(state)?;
+    let name = read_name_arg(state)?;
+    let value_reg = read_reg(state)?;
+    let value = state.get_reg(value_reg).as_bool();
+    let ptr = state.get_reg(engine_reg).as_ptr::<ScriptEngine>() as *mut ScriptEngine;
+    if !ptr.is_null() {
+        // SAFETY: see `handle_script_engine_set_global_int`.
+        unsafe { (*ptr).set_global(name, ScriptValueOwned::Bool(value)) };
+    }
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_engine_set_global_float(engine, name, value)`.
+pub(in super::super) fn handle_script_engine_set_global_float(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let engine_reg = read_reg(state)?;
+    let name = read_name_arg(state)?;
+    let value_reg = read_reg(state)?;
+    let value = state.get_reg(value_reg).as_f64();
+    let ptr = state.get_reg(engine_reg).as_ptr::<ScriptEngine>() as *mut ScriptEngine;
+    if !ptr.is_null() {
+        // SAFETY: see `handle_script_engine_set_global_int`.
+        unsafe { (*ptr).set_global(name, ScriptValueOwned::Float(value)) };
+    }
+    Ok(DispatchResult::Continue)
+}
+
 /// `script_global_kind(name) -> Int` — the dynamic-kind tag of a host global
 /// (`0` if absent): 0=Nil,1=Bool,2=Int,3=Float,4=Text/other.
 pub(in super::super) fn handle_script_global_kind(
@@ -290,13 +322,16 @@ pub(in super::super) fn handle_script_global_kind(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let name = read_name_arg(state)?;
-    let kind: i64 = match state.host_globals.get(&name) {
+    // Canonical ScriptValue kind tag (see ScriptValueOwned::kind).
+    let value = state.host_globals.get(&name).copied();
+    let kind: i64 = match value {
         None => 0,
         Some(v) if v.is_unit() || v.is_nil() => 0,
         Some(v) if v.is_bool() => 1,
         Some(v) if v.is_int() => 2,
         Some(v) if v.is_float() => 3,
-        Some(_) => 4,
+        Some(v) if state.read_text(v).is_some() => 4,
+        Some(_) => 7,
     };
     state.set_reg(dst, Value::from_i64(kind));
     Ok(DispatchResult::Continue)
@@ -330,6 +365,36 @@ pub(in super::super) fn handle_script_global_text(
             state.set_reg(dst, empty);
         }
     }
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_global_bool(name) -> Bool` — a host global as Bool (`false` if absent).
+pub(in super::super) fn handle_script_global_bool(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let name = read_name_arg(state)?;
+    let v = state
+        .host_globals
+        .get(&name)
+        .map(|v| v.as_bool())
+        .unwrap_or(false);
+    state.set_reg(dst, Value::from_bool(v));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_global_float(name) -> Float` — a host global as Float (`0.0` if absent).
+pub(in super::super) fn handle_script_global_float(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let name = read_name_arg(state)?;
+    let v = state
+        .host_globals
+        .get(&name)
+        .map(|v| v.as_f64())
+        .unwrap_or(0.0);
+    state.set_reg(dst, Value::from_f64(v));
     Ok(DispatchResult::Continue)
 }
 

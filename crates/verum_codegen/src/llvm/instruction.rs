@@ -3102,6 +3102,23 @@ pub fn lower_instruction<'ctx>(
                     ctx.set_generic_type_args(src, type_args.clone());
                     current = src;
                 }
+            } else if ctx.is_float_register(val.0) {
+                // A float-element list (e.g. a let-bound `[1.5, 2.5]` literal):
+                // stamp the element type so the IterNew → IterNext → Deref chain
+                // recovers an f64 instead of the raw i64 bits. Mirrors the
+                // fn-return path (mark_register_from_return_type stamps
+                // `List<Float>`'s generic_type_args); the literal / ListPush path
+                // had no such stamp, so a let-bound float list iterated with `*x`
+                // read i64 (`law_f32_bits_round_trip` uses a let-bound
+                // `List<Float32>`; the fn-return `float_samples()` path was
+                // already covered). FLOAT and F32 share the float register mark.
+                let type_args = vec![TypeRef::Concrete(TypeId::FLOAT)];
+                ctx.set_generic_type_args(list.0, type_args.clone());
+                let mut current = list.0;
+                while let Some(src) = ctx.get_refmut_source(current) {
+                    ctx.set_generic_type_args(src, type_args.clone());
+                    current = src;
+                }
             }
             Ok(())
         }
@@ -3970,11 +3987,46 @@ pub fn lower_instruction<'ctx>(
 
         Instruction::Deref { dst, ref_reg } => {
             let val = ctx.get_register(ref_reg.0)?;
+            // A `List<Float>` element flows through the iterator chain as an i64
+            // register *marked float* (mark_register_from_return_type stamps the
+            // IterNext dst from the list's generic_type_args). `*x` must preserve
+            // that float-ness; otherwise the deref result is a bare i64 (the raw
+            // IEEE-754 bits) and a downstream `assert_eq(f64_value, *x)` /
+            // `f64_to_bits(*x)` compares an f64 against raw bits and fails
+            // (conversion `*_bits` + float `fma` property laws iterate floats).
+            // Mirror the Mov / GradStop float-mark propagation.
+            // Two sources tell us the pointee is float: (1) the iterator chain
+            // marked ref_reg float (the fn-return `List<Float>` path, where
+            // mark_register_from_return_type stamps the element); (2) the deref
+            // *result* is consumed as a float downstream (CmpF/BinaryF →
+            // prescan_float). Source (2) covers let-bound list literals built via
+            // the bulk NewTypedArray fill path, which never stamps the element
+            // type — so the iterator chain can't mark ref_reg. Same prescan
+            // re-mark idiom GetVariantData uses for extracted float fields.
+            let ref_is_float = ctx.is_float_register(ref_reg.0)
+                || ctx.is_prescan_float_register(dst.0);
+
+            if std::env::var("VERUM_TRACE_DEREF").is_ok() {
+                eprintln!(
+                    "[aot-deref] r{} pass={} genptr={} struct_val={} ref_float={}",
+                    ref_reg.0,
+                    ctx.is_pass_through_ref(ref_reg.0),
+                    ctx.is_generic_ptr_register(ref_reg.0),
+                    val.is_struct_value(),
+                    ref_is_float
+                );
+            }
 
             // Pass-through ref: Ref on a primitive just copied the value.
             // Deref should also pass through (VBC: &x for primitives is just x).
             if ctx.is_pass_through_ref(ref_reg.0) {
-                ctx.set_register(dst.0, val);
+                if ref_is_float {
+                    let f = as_f64(ctx, val, "deref_pass_f64")?;
+                    ctx.set_register(dst.0, f.into());
+                    ctx.mark_float_register(dst.0);
+                } else {
+                    ctx.set_register(dst.0, val);
+                }
                 return Ok(());
             }
 
@@ -4049,12 +4101,24 @@ pub fn lower_instruction<'ctx>(
                 // Non-struct value (IntValue as heap pointer or PointerValue) in alloca mode.
                 // Convert to pointer and load through it.
                 let ptr = as_ptr(ctx, val, "deref_ptr")?;
-                let i64_type = ctx.types().i64_type();
-                let loaded = ctx
-                    .builder()
-                    .build_load(i64_type, ptr, "deref_load")
-                    .or_llvm_err()?;
-                ctx.set_register(dst.0, loaded);
+                if ref_is_float {
+                    // Float pointee: load 8 bytes as f64 so the result register
+                    // carries the actual IEEE double, then mark it float.
+                    let f64_type = ctx.types().f64_type();
+                    let loaded = ctx
+                        .builder()
+                        .build_load(f64_type, ptr, "deref_load_f64")
+                        .or_llvm_err()?;
+                    ctx.set_register(dst.0, loaded);
+                    ctx.mark_float_register(dst.0);
+                } else {
+                    let i64_type = ctx.types().i64_type();
+                    let loaded = ctx
+                        .builder()
+                        .build_load(i64_type, ptr, "deref_load")
+                        .or_llvm_err()?;
+                    ctx.set_register(dst.0, loaded);
+                }
             }
             Ok(())
         }
@@ -22022,7 +22086,13 @@ fn lower_extended<'ctx>(
         | Some(ExtendedSubOpcode::ScriptWorldEval)
         | Some(ExtendedSubOpcode::ScriptWorldFree)
         | Some(ExtendedSubOpcode::ScriptSetInt)
-        | Some(ExtendedSubOpcode::ScriptSetText) => {
+        | Some(ExtendedSubOpcode::ScriptSetText)
+        | Some(ExtendedSubOpcode::ScriptEngineSetGlobalBool)
+        | Some(ExtendedSubOpcode::ScriptEngineSetGlobalFloat)
+        | Some(ExtendedSubOpcode::ScriptGlobalBool)
+        | Some(ExtendedSubOpcode::ScriptGlobalFloat)
+        | Some(ExtendedSubOpcode::ScriptSetBool)
+        | Some(ExtendedSubOpcode::ScriptSetFloat) => {
             ctx.emit_unimplemented_sub_op("Extended", sub_op);
             Ok(())
         }

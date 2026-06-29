@@ -4425,7 +4425,79 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
             crate::instruction::ExtendedSubOpcode::ScriptSetText,
         ),
         mlir_op: None,
-        doc: "Script: write a Text into the shared-global table (shared by ref)",
+        doc: "Script: write a Text into the shared-global table",
+    },
+    Intrinsic {
+        name: "script_engine_set_global_bool",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 3, // engine, name, value
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineSetGlobalBool,
+        ),
+        mlir_op: None,
+        doc: "Host: set a Bool global on a script engine",
+    },
+    Intrinsic {
+        name: "script_engine_set_global_float",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 3, // engine, name, value
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineSetGlobalFloat,
+        ),
+        mlir_op: None,
+        doc: "Host: set a Float global on a script engine",
+    },
+    Intrinsic {
+        name: "script_global_bool",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1, // name
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptGlobalBool,
+        ),
+        mlir_op: None,
+        doc: "Script: read a host global as Bool",
+    },
+    Intrinsic {
+        name: "script_global_float",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1, // name
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptGlobalFloat,
+        ),
+        mlir_op: None,
+        doc: "Script: read a host global as Float",
+    },
+    Intrinsic {
+        name: "script_set_bool",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // name, value
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptSetBool,
+        ),
+        mlir_op: None,
+        doc: "Script: write a Bool into the shared-global table",
+    },
+    Intrinsic {
+        name: "script_set_float",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // name, value
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptSetFloat,
+        ),
+        mlir_op: None,
+        doc: "Script: write a Float into the shared-global table",
     },
     Intrinsic {
         name: "debug_assert",

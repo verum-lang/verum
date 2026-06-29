@@ -20,8 +20,9 @@
 // Drop, each outcome at the end of `eval`).  No second VM, heap, or sandbox
 // is introduced — `Engine` drives the same VBC interpreter the host runs on.
 //
-// Phase 0 marshals scalar return values (Unit/Bool/Int/Float).  Text/List/Map
-// values and host-function registration land in subsequent phases.
+// Scalars (Unit/Bool/Int/Float) and Text marshal fully; host-function
+// callbacks, sandboxing, and a shared World are wired.  `List`/`Map` return
+// values still surface as `Unknown` pending structural marshaling.
 //
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
@@ -41,8 +42,8 @@ mount core.intrinsics.runtime.scripting.*;
 
 /// A value returned by a script, marshaled into the host.
 ///
-/// Phase 0 covers the scalar kinds; `Unknown` stands in for heap objects
-/// (Text/List/Map/references) whose richer marshaling arrives in Phase 1.
+/// Scalars and `Text` marshal fully; `Unknown` stands in for heap objects
+/// (`List`/`Map`/references) whose structural marshaling lands next.
 public type ScriptValue is
     | Nil
     | Bool(Bool)
@@ -95,6 +96,18 @@ implement Engine {
     /// `script_global_text(name)`).
     public fn set_text(&self, name: Text, value: Text) {
         script_engine_set_global_text(self.raw, name, value);
+    }
+
+    /// Set a `Bool` global the next `eval` can read (via the script-side
+    /// `script_global_bool(name)`).
+    public fn set_bool(&self, name: Text, value: Bool) {
+        script_engine_set_global_bool(self.raw, name, value);
+    }
+
+    /// Set a `Float` global the next `eval` can read (via the script-side
+    /// `script_global_float(name)`).
+    public fn set_float(&self, name: Text, value: Float) {
+        script_engine_set_global_float(self.raw, name, value);
     }
 
     /// Register a host `fn(Int) -> Int` callback that scripts can call by name
