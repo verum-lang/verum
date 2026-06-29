@@ -4981,7 +4981,9 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 // ops (engine, name, value).
                 Some(ExtendedSubOpcode::ScriptEngineEval)
                 | Some(ExtendedSubOpcode::ScriptEngineSetGlobalInt)
-                | Some(ExtendedSubOpcode::ScriptEngineSetGlobalText) => {
+                | Some(ExtendedSubOpcode::ScriptEngineSetGlobalText)
+                | Some(ExtendedSubOpcode::ScriptEngineRegister)
+                | Some(ExtendedSubOpcode::ScriptHostCallInt) => {
                     let operands = decode_extended_reg_operands(data, offset, 3)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }

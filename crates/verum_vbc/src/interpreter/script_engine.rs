@@ -37,9 +37,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use crate::module::VbcModule;
+use crate::module::FunctionId;
 use crate::value::Value;
 
-use super::state::InterpreterConfig;
+use super::state::{HostCallContext, InterpreterConfig};
 use super::Interpreter;
 
 /// An installable source→VBC compiler.
@@ -129,6 +130,9 @@ impl std::error::Error for ScriptError {}
 pub struct ScriptEngine {
     config: InterpreterConfig,
     globals: HashMap<String, ScriptValueOwned>,
+    /// Host functions the host registered for scripts to call back into,
+    /// by name → host-module FunctionId.
+    host_fns: HashMap<String, FunctionId>,
     cancel: Arc<AtomicBool>,
     last_stdout: String,
 }
@@ -151,9 +155,16 @@ impl ScriptEngine {
         Self {
             config,
             globals: HashMap::new(),
+            host_fns: HashMap::new(),
             cancel,
             last_stdout: String::new(),
         }
+    }
+
+    /// Register a host function (by host-module [`FunctionId`]) that scripts
+    /// can call back into via the `script_host_call_*` intrinsics.
+    pub fn register(&mut self, name: impl Into<String>, func_id: FunctionId) {
+        self.host_fns.insert(name.into(), func_id);
     }
 
     /// Create a sandboxed engine with resource limits.  Each limit is `0` for
@@ -387,6 +398,24 @@ impl ScriptEngine {
     /// `ScriptOutcome { error: Some(_), .. }`.  This is the form the scripting
     /// intrinsics use, since the host reads success/failure through accessors.
     pub fn eval_to_outcome(&mut self, source: &str) -> ScriptOutcome {
+        self.eval_to_outcome_with_host(source, 0)
+    }
+
+    /// Like [`eval_to_outcome`](Self::eval_to_outcome) but installs a host
+    /// re-entry context: `host_state_addr` is the address of the host
+    /// interpreter's `InterpreterState`, so the script's `script_host_call_*`
+    /// intrinsics can call back into the host functions registered via
+    /// [`register`](Self::register).  Pass `0` for no host re-entry.
+    ///
+    /// # Safety contract
+    /// `host_state_addr`, when non-zero, must point to a live `InterpreterState`
+    /// that stays valid for the whole run — which holds when the caller is the
+    /// `script_engine_eval` intrinsic handler (the host is paused there).
+    pub fn eval_to_outcome_with_host(
+        &mut self,
+        source: &str,
+        host_state_addr: usize,
+    ) -> ScriptOutcome {
         let module = match self.compile(source) {
             Ok(m) => m,
             Err(error) => {
@@ -397,7 +426,7 @@ impl ScriptEngine {
                 };
             }
         };
-        self.run_to_outcome(module, "main", &[])
+        self.run_with_host(module, "main", &[], host_state_addr)
     }
 
     /// Run `entry` from a compiled `module`, marshaling its result into an
@@ -408,6 +437,18 @@ impl ScriptEngine {
         module: Arc<VbcModule>,
         entry: &str,
         args: &[Value],
+    ) -> ScriptOutcome {
+        self.run_with_host(module, entry, args, 0)
+    }
+
+    /// [`run_to_outcome`](Self::run_to_outcome) with a host re-entry context
+    /// (see [`eval_to_outcome_with_host`](Self::eval_to_outcome_with_host)).
+    fn run_with_host(
+        &mut self,
+        module: Arc<VbcModule>,
+        entry: &str,
+        args: &[Value],
+        host_state_addr: usize,
     ) -> ScriptOutcome {
         let func_id = match module
             .find_function_by_name(entry)
@@ -432,6 +473,15 @@ impl ScriptEngine {
                 };
             }
         };
+        // Install the host-function bridge so the script's `script_host_call_*`
+        // intrinsics can call back into the host's registered functions.
+        if host_state_addr != 0 || !self.host_fns.is_empty() {
+            interp.state.host_call_ctx = Some(HostCallContext {
+                host_state_addr,
+                host_fns: self.host_fns.clone(),
+            });
+        }
+
         // Seed host-provided globals into the script interpreter so the
         // script can read them via the `script_global_*` intrinsics.
         for (name, owned) in &self.globals {
@@ -646,6 +696,44 @@ mod tests {
         let missing = engine
             .eval_to_outcome("fn main() -> Int { @intrinsic(\"script_global_int\", \"nope\") }");
         assert_eq!(missing.as_int(), 0);
+    }
+
+    /// Full vertical slice of host-function callbacks: a host program defines
+    /// `double`, registers it, and evals a script that calls it back via
+    /// `script_host_call_int` — the call re-enters the host interpreter,
+    /// runs `double(21)`, and marshals 42 back into the script.
+    #[test]
+    fn script_calls_registered_host_function() {
+        let hook = lite_hook();
+        install_compiler_hook(hook.clone());
+
+        let host_src = r#"
+            fn double(x: Int) -> Int { x * 2 }
+            fn main() -> Int {
+                let e = @intrinsic("script_engine_new");
+                @intrinsic("script_engine_register", e, "double", double);
+                let o = @intrinsic("script_engine_eval", e,
+                    "fn main() -> Int { @intrinsic(\"script_host_call_int\", \"double\", 21) }");
+                let n = @intrinsic("script_outcome_as_int", o);
+                @intrinsic("script_outcome_free", o);
+                @intrinsic("script_engine_free", e);
+                n
+            }
+        "#;
+
+        let module = Arc::new(hook(host_src).expect("host program should compile"));
+        let func_id = module
+            .find_function_by_unique_bare_suffix("main")
+            .expect("host main exists");
+        let mut interp = Interpreter::new(module);
+        let result = interp
+            .execute_function(func_id)
+            .expect("host program should run");
+        assert_eq!(
+            result.as_i64(),
+            42,
+            "script's host call double(21) must re-enter the host and return 42"
+        );
     }
 
     #[test]
