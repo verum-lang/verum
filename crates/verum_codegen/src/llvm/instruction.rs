@@ -17054,59 +17054,15 @@ fn lower_arith_extended<'ctx>(
             // i64::MIN = 0x8000_0000_0000_0000 — the sole input that
             // overflows neg / abs.  Sign-extend the constant by passing
             // `true` so LLVM treats it as the canonical negative literal.
+            // checked_* return Maybe<T>: None on overflow, Some(result)
+            // otherwise — NOT a panic (that is the unchecked/`expect` path).
             let i64_min = i64_type.const_int(0x8000_0000_0000_0000_u64, true);
             let is_min = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, a, i64_min, "checked_unary_min")
                 .or_llvm_err()?;
-            let entry_bb = ctx
-                .builder()
-                .get_insert_block()
-                .or_internal("no insert block")?;
-            let current_fn = entry_bb
-                .get_parent()
-                .or_internal("block has no parent function")?;
-            let ok_bb = ctx
-                .llvm_context()
-                .append_basic_block(current_fn, "checked_unary_ok");
-            let panic_bb = ctx
-                .llvm_context()
-                .append_basic_block(current_fn, "checked_unary_panic");
-            let merge_bb = ctx
-                .llvm_context()
-                .append_basic_block(current_fn, "checked_unary_merge");
-            ctx.builder()
-                .build_conditional_branch(is_min, panic_bb, ok_bb)
-                .or_llvm_err()?;
-            // Panic path — call runtime trap; control flow doesn't
-            // reach the merge from here.
-            ctx.builder().position_at_end(panic_bb);
-            let module = ctx.get_module();
-            let void_ty = ctx.llvm_context().void_type();
-            let panic_fn_ty = void_ty.fn_type(&[], false);
-            let panic_fn = module
-                .get_function("verum_internal_overflow_panic")
-                .unwrap_or_else(|| {
-                    let f = module.add_function(
-                        "verum_internal_overflow_panic",
-                        panic_fn_ty,
-                        None,
-                    );
-                    f.add_attribute(
-                        verum_llvm::attributes::AttributeLoc::Function,
-                        ctx.llvm_context()
-                            .create_string_attribute("noreturn", ""),
-                    );
-                    f
-                });
-            ctx.builder()
-                .build_call(panic_fn, &[], "")
-                .or_llvm_err()?;
-            ctx.builder()
-                .build_unreachable()
-                .or_llvm_err()?;
-            // OK path — compute the operation, branch to merge.
-            ctx.builder().position_at_end(ok_bb);
+            // Compute the wrapping result (only observed when !is_min, so the
+            // i64::MIN wrap-around is harmless — it is wrapped to None below).
             let computed = match sub {
                 Some(ArithSubOpcode::CheckedNeg) => ctx
                     .builder()
@@ -17129,11 +17085,13 @@ fn lower_arith_extended<'ctx>(
                         .into_int_value()
                 }
             };
-            ctx.builder()
-                .build_unconditional_branch(merge_bb)
-                .or_llvm_err()?;
-            ctx.builder().position_at_end(merge_bb);
-            ctx.set_register(dst, computed.into());
+            // Wrap as Maybe<Int>: None when is_min (overflow), else Some(computed).
+            let label = match sub {
+                Some(ArithSubOpcode::CheckedNeg) => "checked_neg",
+                _ => "checked_abs",
+            };
+            let result = build_maybe_int_wrap(ctx, computed, is_min, label)?;
+            ctx.set_register(dst, result);
             Ok(())
         }
         // ==== Saturating unary: clamp i64::MIN to i64::MAX ====
