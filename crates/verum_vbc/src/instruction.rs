@@ -10410,6 +10410,79 @@ pub enum ExtendedSubOpcode {
     /// dedicated VBC instruction, not a soft convention layered over
     /// FFI calls.
     ProcessExit = 0x10,
+
+    // ========================================================================
+    // Embedded scripting engine (0x20-0x2F) — backing for `core.script`.
+    // ========================================================================
+    // These dispatch to `dispatch_table::handlers::script_runtime`, which
+    // drives the in-process `ScriptEngine` (a thin wrapper over the VBC
+    // interpreter; no second VM).  Value-returning ops carry their
+    // destination register FIRST in the operand block, then their argument
+    // registers (see `expressions.rs::emit_intrinsic_instructions`).
+    /// Create a script engine. Format: `[0x1F][0x20][reg:dst]`.
+    /// Returns an opaque `*const Byte` handle to a host-owned `ScriptEngine`.
+    ScriptEngineNew = 0x20,
+
+    /// Destroy a script engine. Format: `[0x1F][0x21][reg:engine]`.
+    ScriptEngineFree = 0x21,
+
+    /// Compile + run a source string on an engine.
+    /// Format: `[0x1F][0x22][reg:dst][reg:engine][reg:src_text]`.
+    /// Returns an opaque `*const Byte` handle to a host-owned `ScriptOutcome`.
+    ScriptEngineEval = 0x22,
+
+    /// Whether an outcome succeeded. Format: `[0x1F][0x23][reg:dst][reg:outcome]`.
+    ScriptOutcomeIsOk = 0x23,
+
+    /// An outcome value's dynamic-kind tag.
+    /// Format: `[0x1F][0x24][reg:dst][reg:outcome]`.
+    ScriptOutcomeKind = 0x24,
+
+    /// An outcome value as `Int`. Format: `[0x1F][0x25][reg:dst][reg:outcome]`.
+    ScriptOutcomeAsInt = 0x25,
+
+    /// An outcome value as `Float`. Format: `[0x1F][0x26][reg:dst][reg:outcome]`.
+    ScriptOutcomeAsFloat = 0x26,
+
+    /// An outcome value as `Bool`. Format: `[0x1F][0x27][reg:dst][reg:outcome]`.
+    ScriptOutcomeAsBool = 0x27,
+
+    /// Destroy an outcome. Format: `[0x1F][0x28][reg:outcome]`.
+    ScriptOutcomeFree = 0x28,
+
+    /// An outcome value as `Text`. Format: `[0x1F][0x29][reg:dst][reg:outcome]`.
+    ScriptOutcomeAsText = 0x29,
+
+    /// An outcome's error message as `Text` (empty if none).
+    /// Format: `[0x1F][0x2A][reg:dst][reg:outcome]`.
+    ScriptOutcomeError = 0x2A,
+
+    /// An outcome's captured stdout as `Text`.
+    /// Format: `[0x1F][0x2B][reg:dst][reg:outcome]`.
+    ScriptOutcomeStdout = 0x2B,
+
+    /// Create a sandboxed engine with resource limits (memory, instructions,
+    /// time-ms; 0 = unlimited per dimension).
+    /// Format: `[0x1F][0x2C][reg:dst][reg:mem][reg:instr][reg:time]`.
+    ScriptEngineNewSandboxed = 0x2C,
+
+    /// Host sets an `Int` global on an engine (read by the next script run).
+    /// Format: `[0x1F][0x2D][reg:engine][reg:name][reg:value]`.
+    ScriptEngineSetGlobalInt = 0x2D,
+
+    /// Host sets a `Text` global on an engine.
+    /// Format: `[0x1F][0x2E][reg:engine][reg:name][reg:value]`.
+    ScriptEngineSetGlobalText = 0x2E,
+
+    /// Script reads a host global's dynamic-kind tag.
+    /// Format: `[0x1F][0x2F][reg:dst][reg:name]`.
+    ScriptGlobalKind = 0x2F,
+
+    /// Script reads a host global as `Int`. Format: `[0x1F][0x30][reg:dst][reg:name]`.
+    ScriptGlobalInt = 0x30,
+
+    /// Script reads a host global as `Text`. Format: `[0x1F][0x31][reg:dst][reg:name]`.
+    ScriptGlobalText = 0x31,
 }
 
 impl ExtendedSubOpcode {
@@ -10420,6 +10493,24 @@ impl ExtendedSubOpcode {
             0x00 => Some(Self::Reserved),
             0x01 => Some(Self::MakeVariantTyped),
             0x10 => Some(Self::ProcessExit),
+            0x20 => Some(Self::ScriptEngineNew),
+            0x21 => Some(Self::ScriptEngineFree),
+            0x22 => Some(Self::ScriptEngineEval),
+            0x23 => Some(Self::ScriptOutcomeIsOk),
+            0x24 => Some(Self::ScriptOutcomeKind),
+            0x25 => Some(Self::ScriptOutcomeAsInt),
+            0x26 => Some(Self::ScriptOutcomeAsFloat),
+            0x27 => Some(Self::ScriptOutcomeAsBool),
+            0x28 => Some(Self::ScriptOutcomeFree),
+            0x29 => Some(Self::ScriptOutcomeAsText),
+            0x2A => Some(Self::ScriptOutcomeError),
+            0x2B => Some(Self::ScriptOutcomeStdout),
+            0x2C => Some(Self::ScriptEngineNewSandboxed),
+            0x2D => Some(Self::ScriptEngineSetGlobalInt),
+            0x2E => Some(Self::ScriptEngineSetGlobalText),
+            0x2F => Some(Self::ScriptGlobalKind),
+            0x30 => Some(Self::ScriptGlobalInt),
+            0x31 => Some(Self::ScriptGlobalText),
             _ => None,
         }
     }
@@ -10435,6 +10526,24 @@ impl ExtendedSubOpcode {
             Self::Reserved => "EXT_RESERVED",
             Self::MakeVariantTyped => "EXT_MAKE_VARIANT_TYPED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
+            Self::ScriptEngineNew => "EXT_SCRIPT_ENGINE_NEW",
+            Self::ScriptEngineFree => "EXT_SCRIPT_ENGINE_FREE",
+            Self::ScriptEngineEval => "EXT_SCRIPT_ENGINE_EVAL",
+            Self::ScriptOutcomeIsOk => "EXT_SCRIPT_OUTCOME_IS_OK",
+            Self::ScriptOutcomeKind => "EXT_SCRIPT_OUTCOME_KIND",
+            Self::ScriptOutcomeAsInt => "EXT_SCRIPT_OUTCOME_AS_INT",
+            Self::ScriptOutcomeAsFloat => "EXT_SCRIPT_OUTCOME_AS_FLOAT",
+            Self::ScriptOutcomeAsBool => "EXT_SCRIPT_OUTCOME_AS_BOOL",
+            Self::ScriptOutcomeFree => "EXT_SCRIPT_OUTCOME_FREE",
+            Self::ScriptOutcomeAsText => "EXT_SCRIPT_OUTCOME_AS_TEXT",
+            Self::ScriptOutcomeError => "EXT_SCRIPT_OUTCOME_ERROR",
+            Self::ScriptOutcomeStdout => "EXT_SCRIPT_OUTCOME_STDOUT",
+            Self::ScriptEngineNewSandboxed => "EXT_SCRIPT_ENGINE_NEW_SANDBOXED",
+            Self::ScriptEngineSetGlobalInt => "EXT_SCRIPT_ENGINE_SET_GLOBAL_INT",
+            Self::ScriptEngineSetGlobalText => "EXT_SCRIPT_ENGINE_SET_GLOBAL_TEXT",
+            Self::ScriptGlobalKind => "EXT_SCRIPT_GLOBAL_KIND",
+            Self::ScriptGlobalInt => "EXT_SCRIPT_GLOBAL_INT",
+            Self::ScriptGlobalText => "EXT_SCRIPT_GLOBAL_TEXT",
         }
     }
 }

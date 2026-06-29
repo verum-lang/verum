@@ -107,6 +107,10 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // Make the embedded scripting engine able to compile scripts at
+        // runtime (core.script / script_engine_eval). Idempotent.
+        crate::api::ensure_scripting_compiler_installed();
+
         // Step 2: Create VBC interpreter with runtime config from [runtime]
         let mut interpreter = VbcInterpreter::new(vbc_module);
         {
@@ -265,6 +269,10 @@ impl<'s> CompilationPipeline<'s> {
         // the next invocation of an unchanged script can skip parse +
         // typecheck + verify + codegen entirely.
         self.session.record_compiled_vbc(vbc_module.clone());
+
+        // Make the embedded scripting engine able to compile scripts at
+        // runtime (core.script / script_engine_eval). Idempotent.
+        crate::api::ensure_scripting_compiler_installed();
 
         // Step 2: Create VBC interpreter with runtime config from [runtime]
         let mut interpreter = VbcInterpreter::new(vbc_module);

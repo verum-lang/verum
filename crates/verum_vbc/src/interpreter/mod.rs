@@ -68,6 +68,7 @@ pub mod kernel;
 pub mod permission;
 pub mod reactor;
 mod registers;
+pub mod script_engine;
 mod stack;
 mod state;
 pub mod tensor;
@@ -117,6 +118,11 @@ pub use permission::{
     PermissionDecision, PermissionRouter, PermissionRouterStats, PermissionScope,
     PermissionTargetId,
 };
+// Embedded scripting engine — Rust backing for the `core.script` stdlib API.
+pub use script_engine::{
+    compiler_hook_installed, install_compiler_hook, CompilerHook, ScriptEngine, ScriptError,
+    ScriptOutcome, ScriptValueOwned,
+};
 
 /// Executes a function using table-based dispatch.
 ///
@@ -157,6 +163,24 @@ pub fn execute_table(
     state: &mut InterpreterState,
     func_id: FunctionId,
 ) -> InterpreterResult<Value> {
+    execute_table_with_args(state, func_id, &[])
+}
+
+/// Like [`execute_table`] but seeds `args` into the entry frame's first
+/// registers before the dispatch loop runs.
+///
+/// This is the canonical host-call prologue: it pushes exactly **one** frame
+/// (call-stack + register file, kept in sync the same way [`execute_table`]
+/// does) and copies the arguments into the slots the callee reads its
+/// parameters from.  `Interpreter::execute_function_with_args` is the public
+/// wrapper.  Passing `&[]` recovers the original no-arg behaviour, so
+/// [`execute_table`] simply delegates here — there is one frame-setup path,
+/// not two.
+pub fn execute_table_with_args(
+    state: &mut InterpreterState,
+    func_id: FunctionId,
+    args: &[Value],
+) -> InterpreterResult<Value> {
     use crate::instruction::Reg;
 
     // Check if module is interpretable (V-LLSI architecture check)
@@ -179,9 +203,10 @@ pub fn execute_table(
         .module
         .get_function(func_id)
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
-    // Push initial frame
-    let reg_count = func.register_count;
-    let _base = state.call_stack.push_frame(
+    // Push initial frame — large enough for both the callee's own registers
+    // and any host-supplied arguments.
+    let reg_count = func.register_count.max(args.len() as u16);
+    let base = state.call_stack.push_frame(
         func_id,
         reg_count,
         0, // No return pc for initial call
@@ -190,6 +215,12 @@ pub fn execute_table(
 
     // Allocate registers
     state.registers.push_frame(reg_count);
+
+    // Seed arguments into the frame's first registers (param slots), using the
+    // same base the dispatch loop reads from.
+    for (i, arg) in args.iter().enumerate() {
+        state.registers.set(base, Reg(i as u16), *arg);
+    }
 
     // Run table-based dispatch loop
     dispatch_table::dispatch_loop_table(state)
@@ -355,6 +386,21 @@ impl Interpreter {
         execute_table(&mut self.state, func_id)
     }
 
+    /// Executes a function as a fresh entry point, seeding `args` into its
+    /// parameter registers.
+    ///
+    /// Unlike [`call`](Self::call) — which is the re-entrant call path used
+    /// while already executing bytecode — this is the host-facing entry used
+    /// to invoke a script function from Rust with arguments.  It pushes a
+    /// single correctly-sized frame (see [`execute_table_with_args`]).
+    pub fn execute_function_with_args(
+        &mut self,
+        func_id: FunctionId,
+        args: &[Value],
+    ) -> InterpreterResult<Value> {
+        execute_table_with_args(&mut self.state, func_id, args)
+    }
+
     /// Executes the main function (function 0) if it exists.
     ///
 
@@ -506,6 +552,40 @@ impl Interpreter {
     // =========================================================================
     // Value Creation API (for host-side value construction)
     // =========================================================================
+
+    /// Reads a Verum `Text` value back into an owned `String`, or `None` if
+    /// `value` is not text.
+    ///
+    /// The inverse of [`alloc_string`](Self::alloc_string): it handles the
+    /// inline small-string form and the heap form this interpreter produces
+    /// (`TypeId(0x0001)` object whose payload is `[len: u64][utf8 bytes]`).
+    /// Used by the scripting engine to marshal a script's `Text` result out of
+    /// the (about-to-be-dropped) script interpreter into the host.
+    pub fn read_text(&self, value: Value) -> Option<String> {
+        if value.is_small_string() {
+            return Some(value.as_small_string().as_str().to_string());
+        }
+        if value.is_nil() || !value.is_ptr() {
+            return None;
+        }
+        let ptr = value.as_ptr::<u8>();
+        if ptr.is_null() {
+            return None;
+        }
+        // SAFETY: a non-null pointer-tagged Value points at an `ObjectHeader`.
+        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        if header.type_id != crate::types::TypeId(0x0001) {
+            return None; // not a heap Text — caller marshals it as "other"
+        }
+        // SAFETY: a Text object's payload is `[len:u64][bytes]`, exactly what
+        // `alloc_string` writes; `len` is bounded by the allocation.
+        unsafe {
+            let data = ptr.add(heap::OBJECT_HEADER_SIZE);
+            let len = *(data as *const u64) as usize;
+            let bytes = std::slice::from_raw_parts(data.add(8), len);
+            Some(String::from_utf8_lossy(bytes).into_owned())
+        }
+    }
 
     /// Allocates a string on the interpreter heap and returns it as a Value.
     pub fn alloc_string(&mut self, s: &str) -> InterpreterResult<Value> {

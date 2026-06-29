@@ -219,6 +219,63 @@ pub(in super::super) fn handle_extended(
             }
             Err(InterpreterError::ProcessExit(code))
         }
+        // Embedded scripting engine (0x20-0x2F) — `core.script`. The handlers
+        // live in `script_runtime` to keep this dispatcher focused; each reads
+        // its own operands (dest-first for value-returning ops).
+        Some(ExtendedSubOpcode::ScriptEngineNew) => {
+            super::script_runtime::handle_script_engine_new(state)
+        }
+        Some(ExtendedSubOpcode::ScriptEngineFree) => {
+            super::script_runtime::handle_script_engine_free(state)
+        }
+        Some(ExtendedSubOpcode::ScriptEngineEval) => {
+            super::script_runtime::handle_script_engine_eval(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeIsOk) => {
+            super::script_runtime::handle_script_outcome_is_ok(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeKind) => {
+            super::script_runtime::handle_script_outcome_kind(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeAsInt) => {
+            super::script_runtime::handle_script_outcome_as_int(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeAsFloat) => {
+            super::script_runtime::handle_script_outcome_as_float(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeAsBool) => {
+            super::script_runtime::handle_script_outcome_as_bool(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeFree) => {
+            super::script_runtime::handle_script_outcome_free(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeAsText) => {
+            super::script_runtime::handle_script_outcome_as_text(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeError) => {
+            super::script_runtime::handle_script_outcome_error(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeStdout) => {
+            super::script_runtime::handle_script_outcome_stdout(state)
+        }
+        Some(ExtendedSubOpcode::ScriptEngineNewSandboxed) => {
+            super::script_runtime::handle_script_engine_new_sandboxed(state)
+        }
+        Some(ExtendedSubOpcode::ScriptEngineSetGlobalInt) => {
+            super::script_runtime::handle_script_engine_set_global_int(state)
+        }
+        Some(ExtendedSubOpcode::ScriptEngineSetGlobalText) => {
+            super::script_runtime::handle_script_engine_set_global_text(state)
+        }
+        Some(ExtendedSubOpcode::ScriptGlobalKind) => {
+            super::script_runtime::handle_script_global_kind(state)
+        }
+        Some(ExtendedSubOpcode::ScriptGlobalInt) => {
+            super::script_runtime::handle_script_global_int(state)
+        }
+        Some(ExtendedSubOpcode::ScriptGlobalText) => {
+            super::script_runtime::handle_script_global_text(state)
+        }
         None => Err(InterpreterError::NotImplemented {
             feature: "Extended sub-opcode",
             opcode: Some(Opcode::Extended),

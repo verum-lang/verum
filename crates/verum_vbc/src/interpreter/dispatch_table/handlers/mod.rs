@@ -175,6 +175,8 @@ pub(super) mod char_extended;
 pub(super) mod cubical;
 pub(super) mod extended;
 pub(super) mod ffi_extended;
+// Embedded scripting engine (Extended sub-ops 0x20-0x2F) — `core.script`.
+pub(super) mod script_runtime;
 pub(super) mod gpu;
 pub(super) mod log_extended;
 pub(super) mod math_extended;

@@ -386,6 +386,13 @@ pub struct InterpreterState {
     /// Loaded modules (for cross-module calls).
     pub modules: HashMap<String, Arc<VbcModule>>,
 
+    /// Host-provided global values, keyed by name — the data-exchange channel
+    /// for the embedded scripting engine (`core.script`).  The engine seeds
+    /// these from the host before a script runs and reads back any the script
+    /// wrote afterwards; scripts access them via the `script_global_*`
+    /// intrinsics.  Empty for ordinary (non-scripted) execution.
+    pub host_globals: HashMap<String, Value>,
+
     /// Register file.
     pub registers: RegisterFile,
 
@@ -2545,6 +2552,7 @@ impl InterpreterState {
         Self {
             module,
             modules,
+            host_globals: HashMap::new(),
             registers: RegisterFile::new(),
             call_stack: CallStack::with_max_depth(config.max_stack_depth),
             heap: Heap::with_threshold(config.max_heap_size),
