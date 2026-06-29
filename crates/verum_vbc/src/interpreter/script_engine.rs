@@ -127,12 +127,54 @@ impl std::error::Error for ScriptError {}
 /// semantics — the safest and simplest isolation).  Phase 2 will optionally
 /// hold a persistent interpreter so multiple scripts share one CBGR heap for
 /// zero-copy interop.
+/// Capability grants for a sandboxed script — the object-capability / WASI
+/// posture: a sandboxed script has NO ambient authority for file, network or
+/// process operations unless the host explicitly grants it. Enforced through
+/// the interpreter's `PermissionRouter` (which gates `FileSystem` / `Network` /
+/// `Process` scopes); pure compute, memory and stdout are always allowed.
+#[derive(Debug, Clone, Copy)]
+pub struct ScriptCaps {
+    /// Allow file-system access.
+    pub file_io: bool,
+    /// Allow network access.
+    pub network: bool,
+    /// Allow process / environment operations (spawn, exit, env vars).
+    pub process: bool,
+}
+
+impl ScriptCaps {
+    /// All authority granted (the default for a plain `Engine`).
+    pub fn permissive() -> Self {
+        Self {
+            file_io: true,
+            network: true,
+            process: true,
+        }
+    }
+
+    /// No ambient authority (the default for a sandboxed engine).
+    pub fn restricted() -> Self {
+        Self {
+            file_io: false,
+            network: false,
+            process: false,
+        }
+    }
+
+    /// Whether every capability is granted (no gating needed).
+    fn is_permissive(&self) -> bool {
+        self.file_io && self.network && self.process
+    }
+}
+
 pub struct ScriptEngine {
     config: InterpreterConfig,
     globals: HashMap<String, ScriptValueOwned>,
     /// Host functions the host registered for scripts to call back into,
     /// by name → host-module FunctionId.
     host_fns: HashMap<String, FunctionId>,
+    /// Capability grants enforced on each run (see [`ScriptCaps`]).
+    caps: ScriptCaps,
     cancel: Arc<AtomicBool>,
     last_stdout: String,
 }
@@ -156,9 +198,28 @@ impl ScriptEngine {
             config,
             globals: HashMap::new(),
             host_fns: HashMap::new(),
+            caps: ScriptCaps::permissive(),
             cancel,
             last_stdout: String::new(),
         }
+    }
+
+    /// Grant file-system access to a sandboxed engine (chainable).
+    pub fn allow_file_io(mut self) -> Self {
+        self.caps.file_io = true;
+        self
+    }
+
+    /// Grant network access to a sandboxed engine (chainable).
+    pub fn allow_network(mut self) -> Self {
+        self.caps.network = true;
+        self
+    }
+
+    /// Grant process / environment access to a sandboxed engine (chainable).
+    pub fn allow_process(mut self) -> Self {
+        self.caps.process = true;
+        self
     }
 
     /// Register a host function (by host-module [`FunctionId`]) that scripts
@@ -174,9 +235,14 @@ impl ScriptEngine {
     /// `InstructionLimitExceeded` / `OutOfMemory` / `Timeout`, surfaced as a
     /// failed [`ScriptOutcome`].
     ///
-    /// This is the WASI-style "no ambient authority by default" posture at the
-    /// resource layer; capability gating (file / network / process) layers on
-    /// via the interpreter's `PermissionRouter` in a later step.
+    /// This is the WASI-style "no ambient authority by default" posture: the
+    /// sandboxed engine enforces both resource limits AND capability gating —
+    /// file / network / process operations are DENIED unless re-granted via
+    /// [`allow_file_io`](Self::allow_file_io) / [`allow_network`] /
+    /// [`allow_process`]. Pure compute, memory and stdout always work.
+    ///
+    /// [`allow_network`]: Self::allow_network
+    /// [`allow_process`]: Self::allow_process
     pub fn sandboxed(memory_limit: usize, instruction_limit: u64, time_limit_ms: u64) -> Self {
         let mut config = InterpreterConfig::default();
         if memory_limit > 0 {
@@ -188,7 +254,9 @@ impl ScriptEngine {
         if time_limit_ms > 0 {
             config.timeout_ms = time_limit_ms;
         }
-        Self::with_config(config)
+        let mut engine = Self::with_config(config);
+        engine.caps = ScriptCaps::restricted();
+        engine
     }
 
     /// Compile `source` into a self-contained, runnable module.
@@ -479,6 +547,24 @@ impl ScriptEngine {
             interp.state.host_call_ctx = Some(HostCallContext {
                 host_state_addr,
                 host_fns: self.host_fns.clone(),
+            });
+        }
+
+        // Capability gating (object-capability / WASI posture): a sandboxed
+        // engine denies file / network / process authority unless granted. The
+        // interpreter's PermissionRouter enforces this at the FFI / syscall /
+        // process sites; pure compute, memory and stdout are unaffected.
+        if !self.caps.is_permissive() {
+            let caps = self.caps;
+            interp.state.set_permission_policy(move |scope, _target| {
+                use crate::interpreter::permission::PermissionDecision::{Allow, Deny};
+                use crate::interpreter::permission::PermissionScope;
+                match scope {
+                    PermissionScope::FileSystem if !caps.file_io => Deny,
+                    PermissionScope::Network if !caps.network => Deny,
+                    PermissionScope::Process if !caps.process => Deny,
+                    _ => Allow,
+                }
             });
         }
 
@@ -885,6 +971,29 @@ mod tests {
             world.get_shared("counter"),
             Some(ScriptValueOwned::Int(41))
         ));
+    }
+
+    #[test]
+    fn sandbox_denies_process_capability() {
+        install_compiler_hook(lite_hook());
+
+        // A sandboxed engine has no ambient authority: the Process capability
+        // (here, `exit`) is denied, so the script traps instead of running it.
+        let mut sandboxed = ScriptEngine::sandboxed(0, 0, 0);
+        let denied =
+            sandboxed.eval_to_outcome("fn main() { @intrinsic(\"verum.process.exit\", 0) }");
+        assert!(
+            !denied.is_ok(),
+            "sandboxed script must be denied the Process (exit) capability"
+        );
+
+        // (The grant path can't be unit-tested here: a permitted `exit` would
+        // terminate the test process. The deny path proves the gate is wired.)
+
+        // A sandboxed script that touches no gated capability runs fine.
+        let ok = sandboxed.eval_to_outcome("fn main() -> Int { 2 + 3 }");
+        assert!(ok.is_ok());
+        assert_eq!(ok.as_int(), 5);
     }
 
     #[test]
