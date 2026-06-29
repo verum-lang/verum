@@ -97,6 +97,13 @@ implement Engine {
         script_engine_set_global_text(self.raw, name, value);
     }
 
+    /// Register a host `fn(Int) -> Int` callback that scripts can call by name
+    /// (via the script-side `script_host_call_int(name, arg)`). The callback
+    /// runs on the host, so it sees the host's state.
+    public fn register(&self, name: Text, f: fn(Int) -> Int) {
+        script_engine_register(self.raw, name, f);
+    }
+
     /// Compile and run `source` (entry `main`), returning its marshaled value
     /// or an error message.  The intermediate outcome handle is freed before
     /// return.

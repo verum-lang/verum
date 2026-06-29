@@ -276,6 +276,12 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptGlobalText) => {
             super::script_runtime::handle_script_global_text(state)
         }
+        Some(ExtendedSubOpcode::ScriptEngineRegister) => {
+            super::script_runtime::handle_script_engine_register(state)
+        }
+        Some(ExtendedSubOpcode::ScriptHostCallInt) => {
+            super::script_runtime::handle_script_host_call_int(state)
+        }
         None => Err(InterpreterError::NotImplemented {
             feature: "Extended sub-opcode",
             opcode: Some(Opcode::Extended),

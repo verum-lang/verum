@@ -379,6 +379,22 @@ impl Default for GpuContext {
 /// This structure holds all runtime state for executing VBC bytecode.
 /// It is designed for single-threaded execution but can be cloned
 /// for multi-threaded scenarios.
+/// The host-function bridge a running script uses to call back into its host.
+///
+/// Host functions execute **re-entrantly on the host interpreter's state**
+/// (via `call_function_sync`), so they see the host's module, heap and globals.
+/// The host is paused inside the `script_engine_eval` intrinsic for the whole
+/// nested run, so its state stays valid throughout.
+pub struct HostCallContext {
+    /// Address of the host interpreter's `InterpreterState` (`0` = no host
+    /// re-entry available).  Stored as `usize` rather than `*mut` so
+    /// `InterpreterState`'s thread-safety profile is unchanged; cast back at
+    /// the call site under the validity invariant above.
+    pub host_state_addr: usize,
+    /// Functions the host registered on the engine: name → host-module id.
+    pub host_fns: HashMap<String, crate::module::FunctionId>,
+}
+
 pub struct InterpreterState {
     /// Current module being executed.
     pub module: Arc<VbcModule>,
@@ -392,6 +408,12 @@ pub struct InterpreterState {
     /// wrote afterwards; scripts access them via the `script_global_*`
     /// intrinsics.  Empty for ordinary (non-scripted) execution.
     pub host_globals: HashMap<String, Value>,
+
+    /// Host-function bridge for a running script (`core.script`): lets the
+    /// script call back into functions the host registered on the engine.
+    /// `Some` only while a script runs that was launched with a host context;
+    /// `None` for ordinary execution.
+    pub host_call_ctx: Option<HostCallContext>,
 
     /// Register file.
     pub registers: RegisterFile,
@@ -2553,6 +2575,7 @@ impl InterpreterState {
             module,
             modules,
             host_globals: HashMap::new(),
+            host_call_ctx: None,
             registers: RegisterFile::new(),
             call_stack: CallStack::with_max_depth(config.max_stack_depth),
             heap: Heap::with_threshold(config.max_heap_size),

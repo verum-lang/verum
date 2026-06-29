@@ -10483,6 +10483,16 @@ pub enum ExtendedSubOpcode {
 
     /// Script reads a host global as `Text`. Format: `[0x1F][0x31][reg:dst][reg:name]`.
     ScriptGlobalText = 0x31,
+
+    /// Host registers a callback function on an engine (a `fn(Int)->Int`
+    /// closure value) under a name.
+    /// Format: `[0x1F][0x32][reg:engine][reg:name][reg:fn]`.
+    ScriptEngineRegister = 0x32,
+
+    /// Script calls a host-registered `Int -> Int` function by name,
+    /// re-entering the host interpreter.
+    /// Format: `[0x1F][0x33][reg:dst][reg:name][reg:arg]`.
+    ScriptHostCallInt = 0x33,
 }
 
 impl ExtendedSubOpcode {
@@ -10511,6 +10521,8 @@ impl ExtendedSubOpcode {
             0x2F => Some(Self::ScriptGlobalKind),
             0x30 => Some(Self::ScriptGlobalInt),
             0x31 => Some(Self::ScriptGlobalText),
+            0x32 => Some(Self::ScriptEngineRegister),
+            0x33 => Some(Self::ScriptHostCallInt),
             _ => None,
         }
     }
@@ -10544,6 +10556,8 @@ impl ExtendedSubOpcode {
             Self::ScriptGlobalKind => "EXT_SCRIPT_GLOBAL_KIND",
             Self::ScriptGlobalInt => "EXT_SCRIPT_GLOBAL_INT",
             Self::ScriptGlobalText => "EXT_SCRIPT_GLOBAL_TEXT",
+            Self::ScriptEngineRegister => "EXT_SCRIPT_ENGINE_REGISTER",
+            Self::ScriptHostCallInt => "EXT_SCRIPT_HOST_CALL_INT",
         }
     }
 }

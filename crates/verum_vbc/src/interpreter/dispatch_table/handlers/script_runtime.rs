@@ -30,6 +30,7 @@ use super::bytecode_io::read_reg;
 use super::path_ops_runtime::extract_string_if_text;
 use super::string_helpers::alloc_string_value;
 use crate::interpreter::script_engine::{ScriptEngine, ScriptOutcome, ScriptValueOwned};
+use crate::module::FunctionId;
 use crate::value::Value;
 
 /// Read an opaque outcome handle from a register, erroring on null.
@@ -86,10 +87,16 @@ pub(in super::super) fn handle_script_engine_eval(
     let source =
         super::path_ops_runtime::extract_string_if_text(state, &src_val).unwrap_or_default();
 
+    // Pass the host interpreter's state address so the script can call back
+    // into host-registered functions (it re-enters this same state). The host
+    // is paused here for the whole nested run, so the address stays valid.
+    let host_addr = state as *mut InterpreterState as usize;
+
     // SAFETY: `engine_ptr` is a live `Box<ScriptEngine>` handle. The nested
-    // evaluation runs on its own interpreter state, distinct from `state`, so
-    // there is no aliasing of the host frame.
-    let outcome = unsafe { (*engine_ptr).eval_to_outcome(&source) };
+    // evaluation runs on its own interpreter state, distinct from `state`;
+    // host-function callbacks re-enter `state` transactionally via
+    // `call_function_sync` (see `handle_script_host_call_int`).
+    let outcome = unsafe { (*engine_ptr).eval_to_outcome_with_host(&source, host_addr) };
     let outcome_ptr = Box::into_raw(Box::new(outcome));
     state.set_reg(dst, Value::from_ptr(outcome_ptr as *mut u8));
     Ok(DispatchResult::Continue)
@@ -323,5 +330,87 @@ pub(in super::super) fn handle_script_global_text(
             state.set_reg(dst, empty);
         }
     }
+    Ok(DispatchResult::Continue)
+}
+
+// =============================================================================
+// Host-function callbacks (Phase 1): a script calls back into functions the
+// host registered on the engine. The host function runs RE-ENTRANTLY on the
+// host interpreter's state (call_function_sync), so it sees the host's module,
+// heap and globals. Int -> Int signature for now.
+// =============================================================================
+
+/// Extract the underlying `FunctionId` from a function value — either a
+/// zero-capture closure (the form a bare `fn` argument compiles to) or a bare
+/// function reference.
+fn function_id_of(v: &Value) -> Option<FunctionId> {
+    if v.is_ptr() && !v.is_nil() {
+        let ptr = v.as_ptr::<u8>();
+        if ptr.is_null() {
+            return None;
+        }
+        // SAFETY: a pointer-tagged non-null function value is a closure object
+        // whose header carries (func_id, capture_count) at the canonical offset.
+        let (raw_fid, _captures) = unsafe { crate::interpreter::heap::closure_header(ptr) };
+        return Some(FunctionId(raw_fid));
+    }
+    None
+}
+
+/// `script_engine_register(engine, name, fn)` — host registers a callback.
+pub(in super::super) fn handle_script_engine_register(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let engine_reg = read_reg(state)?;
+    let name = read_name_arg(state)?;
+    let fn_reg = read_reg(state)?;
+    let func_id = function_id_of(&state.get_reg(fn_reg));
+    let ptr = state.get_reg(engine_reg).as_ptr::<ScriptEngine>() as *mut ScriptEngine;
+    if !ptr.is_null() {
+        if let Some(fid) = func_id {
+            // SAFETY: `ptr` is a live `Box<ScriptEngine>` handle.
+            unsafe { (*ptr).register(name, fid) };
+        }
+    }
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_host_call_int(name, arg) -> Int` — call a host-registered Int->Int
+/// function, re-entering the host interpreter.
+pub(in super::super) fn handle_script_host_call_int(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let name = read_name_arg(state)?;
+    let arg_reg = read_reg(state)?;
+    let arg = state.get_reg(arg_reg).as_i64();
+
+    // Resolve the host function + host state from the script's bridge.
+    let resolved = state.host_call_ctx.as_ref().and_then(|ctx| {
+        if ctx.host_state_addr == 0 {
+            return None;
+        }
+        ctx.host_fns.get(&name).map(|fid| (ctx.host_state_addr, *fid))
+    });
+
+    let result = match resolved {
+        Some((addr, fid)) => {
+            // SAFETY: `addr` points to the live host `InterpreterState` — the
+            // host is paused inside `script_engine_eval` for the whole nested
+            // run — and is a DISTINCT object from `state` (the script interp),
+            // so this does not alias the script's `&mut`. The host function
+            // runs transactionally (push frame → run → pop), leaving the host
+            // state consistent on return.
+            let host_state =
+                unsafe { &mut *(addr as *mut InterpreterState) };
+            let host_arg = Value::from_i64(arg);
+            match super::super::call_function_sync(host_state, fid, &[host_arg]) {
+                Ok(v) => v.as_i64(),
+                Err(_) => 0,
+            }
+        }
+        None => 0,
+    };
+    state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }

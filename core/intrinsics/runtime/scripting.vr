@@ -145,3 +145,20 @@ public fn script_global_int(name: Text) -> Int;
 /// Script: read a host global as `Text` (empty if absent).
 @intrinsic("script_global_text")
 public fn script_global_text(name: Text) -> Text;
+
+// =============================================================================
+// SECTION 7: Host-Function Callbacks
+// =============================================================================
+// The host registers `fn(Int) -> Int` callbacks on an engine; scripts call
+// them by name. The callback runs re-entrantly on the host interpreter, so it
+// sees the host's state. (Richer signatures + shared-world callbacks are a
+// later-phase feature.)
+
+/// Host: register a `fn(Int) -> Int` callback on an engine under `name`.
+@intrinsic("script_engine_register")
+public fn script_engine_register(engine: RawScriptEngine, name: Text, f: fn(Int) -> Int);
+
+/// Script: call a host-registered `Int -> Int` function by name (`0` if the
+/// name is not registered).
+@intrinsic("script_host_call_int")
+public fn script_host_call_int(name: Text, arg: Int) -> Int;

@@ -4339,6 +4339,30 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Script: read a host global as Text",
     },
     Intrinsic {
+        name: "script_engine_register",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 3, // engine, name, fn
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineRegister,
+        ),
+        mlir_op: None,
+        doc: "Host: register a fn(Int)->Int callback on a script engine",
+    },
+    Intrinsic {
+        name: "script_host_call_int",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // name, arg
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptHostCallInt,
+        ),
+        mlir_op: None,
+        doc: "Script: call a host-registered Int->Int function by name",
+    },
+    Intrinsic {
         name: "debug_assert",
         category: IntrinsicCategory::Control,
         hints: &[IntrinsicHint::Cold],
