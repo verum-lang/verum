@@ -3102,8 +3102,11 @@ pub fn lower_instruction<'ctx>(
                     ctx.set_generic_type_args(src, type_args.clone());
                     current = src;
                 }
-            } else if ctx.is_float_register(val.0) {
+            } else if ctx.is_float_register(val.0) || ctx.is_prescan_float_register(val.0) {
                 // A float-element list (e.g. a let-bound `[1.5, 2.5]` literal):
+                // accept the prescan float mark too — a pooled `LoadK(Float)`
+                // element is prescan-float but may not be runtime-marked at push
+                // time, so `is_float_register` alone misses it.
                 // stamp the element type so the IterNew → IterNext → Deref chain
                 // recovers an f64 instead of the raw i64 bits. Mirrors the
                 // fn-return path (mark_register_from_return_type stamps
@@ -4005,17 +4008,6 @@ pub fn lower_instruction<'ctx>(
             // re-mark idiom GetVariantData uses for extracted float fields.
             let ref_is_float = ctx.is_float_register(ref_reg.0)
                 || ctx.is_prescan_float_register(dst.0);
-
-            if std::env::var("VERUM_TRACE_DEREF").is_ok() {
-                eprintln!(
-                    "[aot-deref] r{} pass={} genptr={} struct_val={} ref_float={}",
-                    ref_reg.0,
-                    ctx.is_pass_through_ref(ref_reg.0),
-                    ctx.is_generic_ptr_register(ref_reg.0),
-                    val.is_struct_value(),
-                    ref_is_float
-                );
-            }
 
             // Pass-through ref: Ref on a primitive just copied the value.
             // Deref should also pass through (VBC: &x for primitives is just x).
@@ -18248,6 +18240,12 @@ fn lower_fma_via_f64<'ctx>(
     let c = as_f64(ctx, ctx.get_register(op_reg(operands, 3))?, "fma_c")?;
     let result = build_ternary_intrinsic_f64(ctx, "llvm.fma.f64", "fma", a, b, c)?;
     ctx.set_register(dst, result);
+    // Mark the fma result float so a downstream CmpG / assert_eq compares it via
+    // fcmp — lower_cmp_generic's float branch is gated on BOTH operands being
+    // float-marked. Without this, `a*b == -0.0` vs the fma's `+0.0` (it adds the
+    // +0.0 addend: -0.0 + +0.0 = +0.0) mismatch by raw bits even though
+    // +0.0 == -0.0. Closes float law_fma_zero_addend_is_product.
+    ctx.mark_float_register(dst);
     Ok(())
 }
 
@@ -22092,7 +22090,13 @@ fn lower_extended<'ctx>(
         | Some(ExtendedSubOpcode::ScriptGlobalBool)
         | Some(ExtendedSubOpcode::ScriptGlobalFloat)
         | Some(ExtendedSubOpcode::ScriptSetBool)
-        | Some(ExtendedSubOpcode::ScriptSetFloat) => {
+        | Some(ExtendedSubOpcode::ScriptSetFloat)
+        | Some(ExtendedSubOpcode::ScriptOutcomeListLen)
+        | Some(ExtendedSubOpcode::ScriptOutcomeListElemKind)
+        | Some(ExtendedSubOpcode::ScriptOutcomeListElemInt)
+        | Some(ExtendedSubOpcode::ScriptOutcomeListElemFloat)
+        | Some(ExtendedSubOpcode::ScriptOutcomeListElemBool)
+        | Some(ExtendedSubOpcode::ScriptOutcomeListElemText) => {
             ctx.emit_unimplemented_sub_op("Extended", sub_op);
             Ok(())
         }
@@ -30009,6 +30013,19 @@ fn lower_cmp_generic<'ctx>(
                 .or_llvm_err()?;
             cmp64.into()
         }
+    } else if ctx.is_float_register(a.0) && ctx.is_float_register(b.0) {
+        // Float equality uses fcmp (IEEE), not a raw-bit compare: +0.0 and -0.0
+        // are distinct bit patterns but equal values, and the int branch below
+        // would compare the raw i64 bits. Matches the interpreter's Eq and the
+        // `==` operator (CmpF). `assert_eq` lowers to CmpG, so this is its float
+        // path — closes float `law_fma_zero_addend` (a*b == -0.0 vs fma's +0.0).
+        let la = as_f64(ctx, lhs, "cmpg_fa")?;
+        let lb = as_f64(ctx, rhs, "cmpg_fb")?;
+        let pred = if eq { FloatPredicate::OEQ } else { FloatPredicate::ONE };
+        ctx.builder()
+            .build_float_compare(pred, la, lb, "cmpg_feq")
+            .or_llvm_err()?
+            .into()
     } else if lhs.is_int_value() && rhs.is_int_value() {
         let mut lhs_int = lhs.into_int_value();
         let mut rhs_int = rhs.into_int_value();

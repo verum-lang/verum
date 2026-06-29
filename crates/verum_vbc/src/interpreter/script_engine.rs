@@ -380,8 +380,10 @@ pub enum ScriptValueOwned {
     Float(f64),
     /// UTF-8 text, copied out of the script heap.
     Text(String),
-    /// A heap object not yet structurally marshaled (Map/record). Tags 5 (List)
-    /// and 6 (Map) are reserved in the kind contract for structural marshaling.
+    /// A list, structurally marshaled (elements copied out of the script heap).
+    List(Vec<ScriptValueOwned>),
+    /// A heap object not yet structurally marshaled (Map/record). Tag 6 (Map)
+    /// is reserved in the kind contract for structural marshaling.
     Other,
 }
 
@@ -397,6 +399,7 @@ impl ScriptValueOwned {
             ScriptValueOwned::Int(_) => 2,
             ScriptValueOwned::Float(_) => 3,
             ScriptValueOwned::Text(_) => 4,
+            ScriptValueOwned::List(_) => 5,
             ScriptValueOwned::Other => 7,
         }
     }
@@ -453,6 +456,57 @@ impl ScriptOutcome {
     pub fn as_text(&self) -> &str {
         match &self.value {
             ScriptValueOwned::Text(s) => s,
+            _ => "",
+        }
+    }
+
+    /// The number of elements when the value is a `List` (valid when
+    /// [`kind`](Self::kind) is `5`); `0` otherwise.
+    pub fn list_len(&self) -> i64 {
+        match &self.value {
+            ScriptValueOwned::List(items) => items.len() as i64,
+            _ => 0,
+        }
+    }
+
+    /// The `i`-th list element, or `None` if the value isn't a list / out of range.
+    fn list_elem(&self, i: i64) -> Option<&ScriptValueOwned> {
+        match &self.value {
+            ScriptValueOwned::List(items) if i >= 0 => items.get(i as usize),
+            _ => None,
+        }
+    }
+
+    /// The canonical kind tag of the `i`-th list element (`0` if absent).
+    pub fn list_elem_kind(&self, i: i64) -> i64 {
+        self.list_elem(i).map(|e| e.kind()).unwrap_or(0)
+    }
+
+    /// The `i`-th list element as `Int` (`0` if absent or not an Int).
+    pub fn list_elem_int(&self, i: i64) -> i64 {
+        match self.list_elem(i) {
+            Some(ScriptValueOwned::Int(n)) => *n,
+            _ => 0,
+        }
+    }
+
+    /// The `i`-th list element as `Float` (`0.0` if absent or not a Float).
+    pub fn list_elem_float(&self, i: i64) -> f64 {
+        match self.list_elem(i) {
+            Some(ScriptValueOwned::Float(f)) => *f,
+            _ => 0.0,
+        }
+    }
+
+    /// The `i`-th list element as `Bool` (`false` if absent or not a Bool).
+    pub fn list_elem_bool(&self, i: i64) -> bool {
+        matches!(self.list_elem(i), Some(ScriptValueOwned::Bool(true)))
+    }
+
+    /// The `i`-th list element as text (`""` if absent or not Text).
+    pub fn list_elem_text(&self, i: i64) -> &str {
+        match self.list_elem(i) {
+            Some(ScriptValueOwned::Text(s)) => s,
             _ => "",
         }
     }
@@ -620,7 +674,11 @@ impl ScriptEngine {
 /// `Text` on the script heap.  The inverse of [`extract_owned`].
 fn build_value(interp: &mut Interpreter, owned: &ScriptValueOwned) -> Value {
     match owned {
-        ScriptValueOwned::Nil | ScriptValueOwned::Other => Value::unit(),
+        // Seeding a host `List` INTO a script (heap reconstruction) is not yet
+        // wired; reading a script's `List` out (extract_owned) is.
+        ScriptValueOwned::Nil | ScriptValueOwned::Other | ScriptValueOwned::List(_) => {
+            Value::unit()
+        }
         ScriptValueOwned::Bool(b) => Value::from_bool(*b),
         ScriptValueOwned::Int(i) => Value::from_i64(*i),
         ScriptValueOwned::Float(f) => Value::from_f64(*f),
@@ -756,6 +814,13 @@ fn extract_owned(interp: &Interpreter, value: Value) -> ScriptValueOwned {
         ScriptValueOwned::Float(value.as_f64())
     } else if let Some(s) = interp.read_text(value) {
         ScriptValueOwned::Text(s)
+    } else if let Some(items) = interp.state.list_elements(value) {
+        ScriptValueOwned::List(
+            items
+                .into_iter()
+                .map(|elem| extract_owned(interp, elem))
+                .collect(),
+        )
     } else {
         ScriptValueOwned::Other
     }
@@ -888,6 +953,31 @@ mod tests {
             2,
             "sandboxed engine + outcome_kind must survive the round-trip"
         );
+    }
+
+    #[test]
+    fn script_returns_list_extracts_structurally() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        // No `-> List<Int>` annotation: the lite/script compile path has no
+        // stdlib, so `List` isn't a known type name there — the array literal
+        // is what marshals (a runtime List object) regardless.
+        let out = engine.eval_to_outcome("fn main() { [10, 20, 30] }");
+        assert!(out.is_ok(), "list script: {:?}", out.error);
+        assert_eq!(out.kind(), 5, "List kind tag");
+        match &out.value {
+            ScriptValueOwned::List(items) => {
+                assert_eq!(items.len(), 3, "three elements");
+                assert!(matches!(items[0], ScriptValueOwned::Int(10)));
+                assert!(matches!(items[1], ScriptValueOwned::Int(20)));
+                assert!(matches!(items[2], ScriptValueOwned::Int(30)));
+            }
+            other => panic!("expected List, got {other:?}"),
+        }
+        // The indexed accessors (used by the .vr marshaling layer) agree.
+        assert_eq!(out.list_len(), 3);
+        assert_eq!(out.list_elem_kind(0), 2, "element is Int");
+        assert_eq!(out.list_elem_int(1), 20);
     }
 
     #[test]

@@ -309,6 +309,24 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptGlobalFloat) => {
             super::script_runtime::handle_script_global_float(state)
         }
+        Some(ExtendedSubOpcode::ScriptOutcomeListLen) => {
+            super::script_runtime::handle_script_outcome_list_len(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeListElemKind) => {
+            super::script_runtime::handle_script_outcome_list_elem_kind(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeListElemInt) => {
+            super::script_runtime::handle_script_outcome_list_elem_int(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeListElemFloat) => {
+            super::script_runtime::handle_script_outcome_list_elem_float(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeListElemBool) => {
+            super::script_runtime::handle_script_outcome_list_elem_bool(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeListElemText) => {
+            super::script_runtime::handle_script_outcome_list_elem_text(state)
+        }
         None => Err(InterpreterError::NotImplemented {
             feature: "Extended sub-opcode",
             opcode: Some(Opcode::Extended),

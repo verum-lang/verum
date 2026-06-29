@@ -190,6 +190,89 @@ pub(in super::super) fn handle_script_outcome_as_text(
     Ok(DispatchResult::Continue)
 }
 
+/// `script_outcome_list_len(outcome) -> Int`.
+pub(in super::super) fn handle_script_outcome_list_len(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let ptr = read_outcome_ptr(state)?;
+    // SAFETY: `ptr` is a non-null live `Box<ScriptOutcome>` handle.
+    let len = unsafe { (*ptr).list_len() };
+    state.set_reg(dst, Value::from_i64(len));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_outcome_list_elem_kind(outcome, idx) -> Int`.
+pub(in super::super) fn handle_script_outcome_list_elem_kind(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let ptr = read_outcome_ptr(state)?;
+    let idx = read_reg(state)?;
+    let i = state.get_reg(idx).as_i64();
+    // SAFETY: see `handle_script_outcome_list_len`.
+    let k = unsafe { (*ptr).list_elem_kind(i) };
+    state.set_reg(dst, Value::from_i64(k));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_outcome_list_elem_int(outcome, idx) -> Int`.
+pub(in super::super) fn handle_script_outcome_list_elem_int(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let ptr = read_outcome_ptr(state)?;
+    let idx = read_reg(state)?;
+    let i = state.get_reg(idx).as_i64();
+    // SAFETY: see `handle_script_outcome_list_len`.
+    let v = unsafe { (*ptr).list_elem_int(i) };
+    state.set_reg(dst, Value::from_i64(v));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_outcome_list_elem_float(outcome, idx) -> Float`.
+pub(in super::super) fn handle_script_outcome_list_elem_float(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let ptr = read_outcome_ptr(state)?;
+    let idx = read_reg(state)?;
+    let i = state.get_reg(idx).as_i64();
+    // SAFETY: see `handle_script_outcome_list_len`.
+    let v = unsafe { (*ptr).list_elem_float(i) };
+    state.set_reg(dst, Value::from_f64(v));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_outcome_list_elem_bool(outcome, idx) -> Bool`.
+pub(in super::super) fn handle_script_outcome_list_elem_bool(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let ptr = read_outcome_ptr(state)?;
+    let idx = read_reg(state)?;
+    let i = state.get_reg(idx).as_i64();
+    // SAFETY: see `handle_script_outcome_list_len`.
+    let v = unsafe { (*ptr).list_elem_bool(i) };
+    state.set_reg(dst, Value::from_bool(v));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_outcome_list_elem_text(outcome, idx) -> Text`.
+pub(in super::super) fn handle_script_outcome_list_elem_text(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let ptr = read_outcome_ptr(state)?;
+    let idx = read_reg(state)?;
+    let i = state.get_reg(idx).as_i64();
+    // SAFETY: see `handle_script_outcome_list_len`.
+    let text = unsafe { (*ptr).list_elem_text(i).to_string() };
+    let value = alloc_string_value(state, &text)?;
+    state.set_reg(dst, value);
+    Ok(DispatchResult::Continue)
+}
+
 /// `script_outcome_error(outcome) -> Text`. The error message, or empty.
 pub(in super::super) fn handle_script_outcome_error(
     state: &mut InterpreterState,

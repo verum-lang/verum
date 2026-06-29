@@ -4981,7 +4981,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptSetInt)
                 | Some(ExtendedSubOpcode::ScriptSetText)
                 | Some(ExtendedSubOpcode::ScriptSetBool)
-                | Some(ExtendedSubOpcode::ScriptSetFloat) => {
+                | Some(ExtendedSubOpcode::ScriptSetFloat)
+                | Some(ExtendedSubOpcode::ScriptOutcomeListLen) => {
                     let operands = decode_extended_reg_operands(data, offset, 2)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
@@ -4994,7 +4995,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptEngineSetGlobalFloat)
                 | Some(ExtendedSubOpcode::ScriptEngineRegister)
                 | Some(ExtendedSubOpcode::ScriptHostCallInt)
-                | Some(ExtendedSubOpcode::ScriptWorldEval) => {
+                | Some(ExtendedSubOpcode::ScriptWorldEval)
+                | Some(ExtendedSubOpcode::ScriptOutcomeListElemKind)
+                | Some(ExtendedSubOpcode::ScriptOutcomeListElemInt)
+                | Some(ExtendedSubOpcode::ScriptOutcomeListElemFloat)
+                | Some(ExtendedSubOpcode::ScriptOutcomeListElemBool)
+                | Some(ExtendedSubOpcode::ScriptOutcomeListElemText) => {
                     let operands = decode_extended_reg_operands(data, offset, 3)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
@@ -7997,14 +8003,17 @@ mod tests {
         // even before they have a dedicated typed variant. The decoder
         // intentionally returns operands=vec![] because operand bytes
         // are consumed by the sub-op-specific handler at execution time.
+        // 0x7F is an as-yet-undefined sub-op (the defined scripting ops occupy
+        // up to 0x44); pick an unassigned byte so this exercises the generic
+        // carrier rather than a typed sub-op's operand decode.
         let instr = Instruction::Extended {
-            sub_op: 0x42,
+            sub_op: 0x7F,
             operands: vec![],
         };
         let mut encoded = Vec::new();
         encode_instruction(&instr, &mut encoded);
-        // Wire format: [0x1F (Extended)] [0x42 (sub_op)]
-        assert_eq!(encoded, vec![0x1F, 0x42]);
+        // Wire format: [0x1F (Extended)] [0x7F (sub_op)]
+        assert_eq!(encoded, vec![0x1F, 0x7F]);
 
         let mut offset = 0;
         let decoded = decode_instruction(&encoded, &mut offset).expect("decode");
