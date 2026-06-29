@@ -1718,16 +1718,19 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         | TypeId::TEXT
                         | TypeId::PTR
                         | TypeId::NEVER
-                        | TypeId::U8
-                        | TypeId::I8
-                        | TypeId::U16
-                        | TypeId::I16
-                        | TypeId::U32
-                        | TypeId::I32
                         | TypeId::U64
                         | TypeId::F32 => func_desc.return_type.clone(),
+                        // Narrow integer returns (I8/U8/I16/U16/I32/U32) use the
+                        // i64 register model rather than their native LLVM width.
+                        // The body's `apply_int_width` already sign/zero-extends
+                        // the value WITHIN i64; declaring an i8/i16/i32 return
+                        // truncates that to the narrow width, and the caller then
+                        // re-widens via `zext` — which is WRONG for signed narrow
+                        // returns (e.g. wrapping_add_i8(127,1) = -128 → i8 0x80 →
+                        // zext → 128 ≠ -128). Returning i64 preserves the value
+                        // for both signed (sext'd) and unsigned (masked) widths.
                         _ => {
-                            // User-defined type — represent as i64 (heap pointer)
+                            // Narrow ints + user-defined types → i64
                             TypeRef::Concrete(TypeId::INT)
                         }
                     }
