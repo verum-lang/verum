@@ -821,12 +821,23 @@ impl RegisterTypeMap {
     }
 
     /// Get all registers holding owned text (for cleanup at function exit).
+    ///
+    /// DETERMINISM: `self.types` is a HashMap (random per-instance seed →
+    /// non-deterministic iteration order). The returned registers drive the
+    /// emission order of `verum_text_free` calls in the function epilogue, so
+    /// an unsorted result makes the emitted LLVM IR differ run-to-run — the
+    /// root of the flaky AOT test suite (the failing-test SET changed each
+    /// run). Sort by register number so the cleanup IR is byte-identical
+    /// across compilations of the same source.
     pub fn owned_text_registers(&self) -> Vec<u16> {
-        self.types
+        let mut regs: Vec<u16> = self
+            .types
             .iter()
             .filter(|(_, ty)| ty.is_owned_text())
             .map(|(&reg, _)| reg)
-            .collect()
+            .collect();
+        regs.sort_unstable();
+        regs
     }
 
     // ========================================================================
