@@ -12617,6 +12617,12 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_ptr_to_int(some_ptr, i64_type, "some_int")
                     .or_llvm_err()?;
+                // lower_make_variant emits a malloc + null-check that SPLITS the
+                // block; the edge into merge comes from the CURRENT block
+                // (variant_ok), not some_bb. Using some_bb in the phi makes
+                // phi-elimination write the value into a dead pred → merge reads
+                // a stale register (the payload) instead of the Maybe pointer.
+                let some_pred_bb = ctx.builder().get_insert_block().unwrap_or(some_bb);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
                     .or_llvm_err()?;
@@ -12627,16 +12633,17 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_ptr_to_int(none_ptr, i64_type, "none_int")
                     .or_llvm_err()?;
+                let none_pred_bb = ctx.builder().get_insert_block().unwrap_or(none_bb);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
                     .or_llvm_err()?;
-                // Merge with phi
+                // Merge with phi (real predecessors after the variant splits)
                 ctx.builder().position_at_end(merge_bb);
                 let phi = ctx
                     .builder()
                     .build_phi(i64_type, "first_result")
                     .or_llvm_err()?;
-                phi.add_incoming(&[(&some_int, some_bb), (&none_int, none_bb)]);
+                phi.add_incoming(&[(&some_int, some_pred_bb), (&none_int, none_pred_bb)]);
                 ctx.set_register(dst.0, phi.as_basic_value());
                 return Ok(());
             }
@@ -12734,6 +12741,9 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_ptr_to_int(some_ptr, i64_type, "some_int")
                     .or_llvm_err()?;
+                // lower_make_variant splits the block (malloc null-check); the
+                // edge into merge is from the CURRENT block, not some_bb.
+                let some_pred_bb = ctx.builder().get_insert_block().unwrap_or(some_bb);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
                     .or_llvm_err()?;
@@ -12744,16 +12754,17 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_ptr_to_int(none_ptr, i64_type, "none_int")
                     .or_llvm_err()?;
+                let none_pred_bb = ctx.builder().get_insert_block().unwrap_or(none_bb);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
                     .or_llvm_err()?;
-                // Merge with phi
+                // Merge with phi (real predecessors after the variant splits)
                 ctx.builder().position_at_end(merge_bb);
                 let phi = ctx
                     .builder()
                     .build_phi(i64_type, "last_result")
                     .or_llvm_err()?;
-                phi.add_incoming(&[(&some_int, some_bb), (&none_int, none_bb)]);
+                phi.add_incoming(&[(&some_int, some_pred_bb), (&none_int, none_pred_bb)]);
                 ctx.set_register(dst.0, phi.as_basic_value());
                 return Ok(());
             }
