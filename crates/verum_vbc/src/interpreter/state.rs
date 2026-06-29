@@ -2743,6 +2743,88 @@ impl InterpreterState {
         }
     }
 
+    /// Read a Verum `List` value into its element `Value`s, or `None` if `val`
+    /// is not a list.
+    ///
+    /// This mirrors the authoritative read in `handle_array_len` /
+    /// `handle_get_element` (memory_collections.rs): it first normalizes the
+    /// value through the three reference shapes Verum may hand back — an encoded
+    /// CBGR register-ref, a `ThinRef`, and a tracked mutable pointer — then reads
+    /// a `TypeId::LIST` object. A list's header is three `Value` slots
+    /// `[len, cap, backing]`; the backing buffer is itself a heap object, so its
+    /// elements are `Value`s starting at `backing + OBJECT_HEADER_SIZE`. Used by
+    /// the scripting engine to marshal a script's `List` result structurally.
+    pub fn list_elements(&self, mut val: Value) -> Option<Vec<Value>> {
+        use crate::interpreter::heap::OBJECT_HEADER_SIZE;
+
+        // --- normalize references (see the handle_array_len preamble) ---
+        // Encoded CBGR register-ref: an inline int below -(1<<32) whose decoded
+        // absolute register index is small.
+        if val.is_inline_int() {
+            let encoded = val.as_i64();
+            if encoded < -(1i64 << 32) {
+                // Inlined from cbgr_helpers::{decode_cbgr_ref,is_cbgr_ref}, which
+                // are module-private to the dispatch handlers.
+                const CBGR_MUTABLE_BIT: u32 = 0x8000_0000;
+                const CBGR_REF_ABS_INDEX_MAX: u32 = 1 << 24;
+                let raw = -(encoded + 1);
+                let abs_index = ((raw & 0xFFFF_FFFF) as u32) & !CBGR_MUTABLE_BIT;
+                if abs_index <= CBGR_REF_ABS_INDEX_MAX {
+                    val = self.registers.get_absolute(abs_index);
+                }
+            }
+        }
+        if val.is_thin_ref() {
+            let tr = val.as_thin_ref();
+            if tr.ptr.is_null() {
+                return None;
+            }
+            // SAFETY: a ThinRef addresses a `Value` in memory.
+            val = unsafe { *(tr.ptr as *const Value) };
+        }
+        if val.is_ptr() && !val.is_nil() {
+            let addr = val.as_ptr::<u8>() as usize;
+            if self.cbgr_mutable_ptrs.contains(&addr) {
+                // SAFETY: addresses tracked in `cbgr_mutable_ptrs` point at a `Value`.
+                val = unsafe { *(addr as *const Value) };
+            }
+        }
+
+        // --- read the list object ---
+        if val.is_nil() || !val.is_ptr() {
+            return None;
+        }
+        let ptr = val.as_ptr::<u8>();
+        if ptr.is_null() {
+            return None;
+        }
+        // SAFETY: a non-null pointer-tagged Value addresses an ObjectHeader.
+        let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
+        if header.type_id != crate::types::TypeId::LIST {
+            return None;
+        }
+        // SAFETY: a LIST header is `[len, cap, backing]` as 3 Value slots; the
+        // backing is a heap object whose Value elements follow its own header.
+        unsafe {
+            let data_ptr = ptr.add(OBJECT_HEADER_SIZE) as *const Value;
+            let len = (*data_ptr).as_i64();
+            if !(0..=(1i64 << 30)).contains(&len) {
+                return None;
+            }
+            let len = len as usize;
+            let backing = (*data_ptr.add(2)).as_ptr::<u8>();
+            if backing.is_null() {
+                return if len == 0 { Some(Vec::new()) } else { None };
+            }
+            let mut out = Vec::with_capacity(len);
+            for i in 0..len {
+                let elem = *(backing.add(OBJECT_HEADER_SIZE + i * 8) as *const Value);
+                out.push(elem);
+            }
+            Some(out)
+        }
+    }
+
     /// Gets a function descriptor by ID from the current module.
     pub fn get_function(&self, id: FunctionId) -> Option<&crate::module::FunctionDescriptor> {
         self.module.get_function(id)

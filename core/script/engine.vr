@@ -20,9 +20,9 @@
 // Drop, each outcome at the end of `eval`).  No second VM, heap, or sandbox
 // is introduced — `Engine` drives the same VBC interpreter the host runs on.
 //
-// Scalars (Unit/Bool/Int/Float) and Text marshal fully; host-function
-// callbacks, sandboxing, and a shared World are wired.  `List`/`Map` return
-// values still surface as `Unknown` pending structural marshaling.
+// Scalars (Unit/Bool/Int/Float), Text, and List marshal fully; host-function
+// callbacks, sandboxing, and a shared World are wired.  `Map` return values
+// still surface as `Unknown` pending structural marshaling.
 //
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
@@ -42,14 +42,16 @@ mount core.intrinsics.runtime.scripting.*;
 
 /// A value returned by a script, marshaled into the host.
 ///
-/// Scalars and `Text` marshal fully; `Unknown` stands in for heap objects
-/// (`List`/`Map`/references) whose structural marshaling lands next.
+/// Scalars, `Text`, and `List` marshal fully; `Unknown` stands in for the
+/// remaining heap objects (`Map`/records/references). A nested list's inner
+/// elements that are themselves lists surface as `Unknown` (one level).
 public type ScriptValue is
     | Nil
     | Bool(Bool)
     | Int(Int)
     | Float(Float)
     | Text(Text)
+    | List(List<ScriptValue>)
     | Unknown;
 
 /// The result of evaluating a script. `Err` carries the failure message.
@@ -198,9 +200,39 @@ fn marshal_outcome(outcome: RawScriptOutcome) -> ScriptValue {
         ScriptValue.Float(script_outcome_as_float(outcome))
     } else if kind == 4 {
         ScriptValue.Text(script_outcome_as_text(outcome))
+    } else if kind == 5 {
+        ScriptValue.List(marshal_list(outcome))
     } else if kind == 0 {
         ScriptValue.Nil
     } else {
         ScriptValue.Unknown
     }
+}
+
+/// Rebuild a `List<ScriptValue>` from a list outcome, element by element. Each
+/// element's own kind tag selects the typed accessor; a nested list (kind 5)
+/// surfaces as `Unknown` (single-level marshaling).
+fn marshal_list(outcome: RawScriptOutcome) -> List<ScriptValue> {
+    let len = script_outcome_list_len(outcome);
+    let mut items: List<ScriptValue> = List.new();
+    let mut i = 0;
+    while i < len {
+        let k = script_outcome_list_elem_kind(outcome, i);
+        let elem = if k == 1 {
+            ScriptValue.Bool(script_outcome_list_elem_bool(outcome, i))
+        } else if k == 2 {
+            ScriptValue.Int(script_outcome_list_elem_int(outcome, i))
+        } else if k == 3 {
+            ScriptValue.Float(script_outcome_list_elem_float(outcome, i))
+        } else if k == 4 {
+            ScriptValue.Text(script_outcome_list_elem_text(outcome, i))
+        } else if k == 0 {
+            ScriptValue.Nil
+        } else {
+            ScriptValue.Unknown
+        };
+        items.push(elem);
+        i = i + 1;
+    }
+    items
 }

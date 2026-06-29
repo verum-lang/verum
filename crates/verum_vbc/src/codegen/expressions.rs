@@ -4317,14 +4317,6 @@ impl VbcCodegen {
                     None
                 };
 
-                if std::env::var("VERUM_TRACE_DEREF").is_ok() {
-                    eprintln!(
-                        "[vbc-deref] inner_type={:?} is_heap={} typed={}",
-                        inner_type,
-                        is_heap_deref,
-                        typed_deref.is_some()
-                    );
-                }
                 if let Some((sub_op, size)) = typed_deref {
                     let mut operands = Vec::<u8>::with_capacity(5);
                     Self::write_reg(&mut operands, dest.0);

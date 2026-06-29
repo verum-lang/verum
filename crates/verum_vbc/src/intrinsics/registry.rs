@@ -4500,6 +4500,78 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Script: write a Float into the shared-global table",
     },
     Intrinsic {
+        name: "script_outcome_list_len",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1, // outcome
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeListLen,
+        ),
+        mlir_op: None,
+        doc: "Host: element count of a List outcome value",
+    },
+    Intrinsic {
+        name: "script_outcome_list_elem_kind",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // outcome, idx
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeListElemKind,
+        ),
+        mlir_op: None,
+        doc: "Host: kind tag of List element i",
+    },
+    Intrinsic {
+        name: "script_outcome_list_elem_int",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // outcome, idx
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeListElemInt,
+        ),
+        mlir_op: None,
+        doc: "Host: List element i as Int",
+    },
+    Intrinsic {
+        name: "script_outcome_list_elem_float",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // outcome, idx
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeListElemFloat,
+        ),
+        mlir_op: None,
+        doc: "Host: List element i as Float",
+    },
+    Intrinsic {
+        name: "script_outcome_list_elem_bool",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // outcome, idx
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeListElemBool,
+        ),
+        mlir_op: None,
+        doc: "Host: List element i as Bool",
+    },
+    Intrinsic {
+        name: "script_outcome_list_elem_text",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // outcome, idx
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeListElemText,
+        ),
+        mlir_op: None,
+        doc: "Host: List element i as Text",
+    },
+    Intrinsic {
         name: "debug_assert",
         category: IntrinsicCategory::Control,
         hints: &[IntrinsicHint::Cold],

@@ -10534,6 +10534,25 @@ pub enum ExtendedSubOpcode {
     /// Script writes a `Float` into the shared-global table.
     /// Format: `[0x1F][0x3E][reg:name][reg:value]`.
     ScriptSetFloat = 0x3E,
+
+    // Structural marshaling of a `List` outcome value.
+    /// Element count of a list outcome. Format: `[0x1F][0x3F][reg:dst][reg:outcome]`.
+    ScriptOutcomeListLen = 0x3F,
+
+    /// Kind tag of list element `i`. Format: `[0x1F][0x40][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeListElemKind = 0x40,
+
+    /// List element `i` as `Int`. Format: `[0x1F][0x41][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeListElemInt = 0x41,
+
+    /// List element `i` as `Float`. Format: `[0x1F][0x42][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeListElemFloat = 0x42,
+
+    /// List element `i` as `Bool`. Format: `[0x1F][0x43][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeListElemBool = 0x43,
+
+    /// List element `i` as `Text`. Format: `[0x1F][0x44][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeListElemText = 0x44,
 }
 
 impl ExtendedSubOpcode {
@@ -10575,6 +10594,12 @@ impl ExtendedSubOpcode {
             0x3C => Some(Self::ScriptGlobalFloat),
             0x3D => Some(Self::ScriptSetBool),
             0x3E => Some(Self::ScriptSetFloat),
+            0x3F => Some(Self::ScriptOutcomeListLen),
+            0x40 => Some(Self::ScriptOutcomeListElemKind),
+            0x41 => Some(Self::ScriptOutcomeListElemInt),
+            0x42 => Some(Self::ScriptOutcomeListElemFloat),
+            0x43 => Some(Self::ScriptOutcomeListElemBool),
+            0x44 => Some(Self::ScriptOutcomeListElemText),
             _ => None,
         }
     }
@@ -10621,6 +10646,12 @@ impl ExtendedSubOpcode {
             Self::ScriptGlobalFloat => "EXT_SCRIPT_GLOBAL_FLOAT",
             Self::ScriptSetBool => "EXT_SCRIPT_SET_BOOL",
             Self::ScriptSetFloat => "EXT_SCRIPT_SET_FLOAT",
+            Self::ScriptOutcomeListLen => "EXT_SCRIPT_OUTCOME_LIST_LEN",
+            Self::ScriptOutcomeListElemKind => "EXT_SCRIPT_OUTCOME_LIST_ELEM_KIND",
+            Self::ScriptOutcomeListElemInt => "EXT_SCRIPT_OUTCOME_LIST_ELEM_INT",
+            Self::ScriptOutcomeListElemFloat => "EXT_SCRIPT_OUTCOME_LIST_ELEM_FLOAT",
+            Self::ScriptOutcomeListElemBool => "EXT_SCRIPT_OUTCOME_LIST_ELEM_BOOL",
+            Self::ScriptOutcomeListElemText => "EXT_SCRIPT_OUTCOME_LIST_ELEM_TEXT",
         }
     }
 }
