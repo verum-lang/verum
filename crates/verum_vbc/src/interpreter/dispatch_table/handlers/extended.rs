@@ -282,6 +282,18 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptHostCallInt) => {
             super::script_runtime::handle_script_host_call_int(state)
         }
+        Some(ExtendedSubOpcode::ScriptWorldNew) => {
+            super::script_runtime::handle_script_world_new(state)
+        }
+        Some(ExtendedSubOpcode::ScriptWorldEval) => {
+            super::script_runtime::handle_script_world_eval(state)
+        }
+        Some(ExtendedSubOpcode::ScriptWorldFree) => {
+            super::script_runtime::handle_script_world_free(state)
+        }
+        Some(ExtendedSubOpcode::ScriptSetInt) | Some(ExtendedSubOpcode::ScriptSetText) => {
+            super::script_runtime::handle_script_set_value(state)
+        }
         None => Err(InterpreterError::NotImplemented {
             feature: "Extended sub-opcode",
             opcode: Some(Opcode::Extended),

@@ -29,7 +29,7 @@ use super::super::DispatchResult;
 use super::bytecode_io::read_reg;
 use super::path_ops_runtime::extract_string_if_text;
 use super::string_helpers::alloc_string_value;
-use crate::interpreter::script_engine::{ScriptEngine, ScriptOutcome, ScriptValueOwned};
+use crate::interpreter::script_engine::{ScriptEngine, ScriptOutcome, ScriptValueOwned, ScriptWorld};
 use crate::module::FunctionId;
 use crate::value::Value;
 
@@ -412,5 +412,86 @@ pub(in super::super) fn handle_script_host_call_int(
         None => 0,
     };
     state.set_reg(dst, Value::from_i64(result));
+    Ok(DispatchResult::Continue)
+}
+
+// =============================================================================
+// Shared-world (P2): zero-copy interop. A persistent world interpreter whose
+// heap + shared-global table outlive each eval, so scripts share data by
+// reference.
+// =============================================================================
+
+/// `script_world_new() -> RawScriptWorld`.
+pub(in super::super) fn handle_script_world_new(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let world = Box::into_raw(Box::new(ScriptWorld::new()));
+    state.set_reg(dst, Value::from_ptr(world as *mut u8));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_world_eval(world, src: Text) -> RawScriptOutcome`. Runs `src` on the
+/// world's PERSISTENT interpreter (shared heap + shared-global table).
+pub(in super::super) fn handle_script_world_eval(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let world_reg = read_reg(state)?;
+    let src_reg = read_reg(state)?;
+    let world_ptr = state.get_reg(world_reg).as_ptr::<ScriptWorld>() as *mut ScriptWorld;
+    if world_ptr.is_null() {
+        return Err(InterpreterError::NullPointer);
+    }
+    let src_val = state.get_reg(src_reg);
+    let source = extract_string_if_text(state, &src_val).unwrap_or_default();
+    // SAFETY: `world_ptr` is a live `Box<ScriptWorld>` handle. Its interpreter
+    // is distinct from `state`, so no aliasing.
+    let outcome = unsafe { (*world_ptr).eval(&source) };
+    let outcome_ptr = Box::into_raw(Box::new(outcome));
+    state.set_reg(dst, Value::from_ptr(outcome_ptr as *mut u8));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_world_free(world)`. Drops the world box.
+pub(in super::super) fn handle_script_world_free(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let reg = read_reg(state)?;
+    let ptr = state.get_reg(reg).as_ptr::<ScriptWorld>() as *mut ScriptWorld;
+    if !ptr.is_null() {
+        // SAFETY: from `Box::into_raw` in `handle_script_world_new`, freed once.
+        unsafe { drop(Box::from_raw(ptr)) };
+    }
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_set_int(name, value)` / `script_set_text(name, value)` — a script
+/// writes a value into the current interpreter's shared-global table. The RAW
+/// `Value` is stored (its tag carries the type), so a `Text`/heap value is
+/// shared BY REFERENCE with other scripts in the same world (zero-copy).
+pub(in super::super) fn handle_script_set_value(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let name = read_name_arg(state)?;
+    let value_reg = read_reg(state)?;
+    let value = state.get_reg(value_reg);
+    // Raw store for reads within the SAME eval.
+    state.host_globals.insert(name.clone(), value);
+    // Owned snapshot for cross-eval persistence (a `ScriptWorld` reads these
+    // back). Captured NOW, while the heap value is valid — it does not survive
+    // the eval's frame teardown. `read_text` is the canonical Text reader.
+    let owned = if let Some(s) = state.read_text(value) {
+        ScriptValueOwned::Text(s)
+    } else if value.is_bool() {
+        ScriptValueOwned::Bool(value.as_bool())
+    } else if value.is_int() {
+        ScriptValueOwned::Int(value.as_i64())
+    } else if value.is_float() {
+        ScriptValueOwned::Float(value.as_f64())
+    } else {
+        ScriptValueOwned::Other
+    };
+    state.shared_writes.insert(name, owned);
     Ok(DispatchResult::Continue)
 }

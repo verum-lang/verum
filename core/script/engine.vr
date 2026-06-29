@@ -126,6 +126,51 @@ implement Drop for Engine {
 }
 
 // =============================================================================
+// World — zero-copy interop between scripts (P2)
+// =============================================================================
+
+/// A shared world for interop between scripts.  Scripts run in the same world
+/// share data through its persistent shared table: a value one script writes
+/// via `script_set_int` / `script_set_text` is read by another via
+/// `script_global_int` / `script_global_text`.  The table persists across
+/// evals, so scripts cooperate over shared state.
+///
+/// (The full zero-overhead tier links cooperating scripts into one module via
+/// the runtime linker so large structures are shared truly by-reference, with
+/// CBGR keeping the shared references safe — the differentiator copy-at-the-
+/// boundary engines like Wasm/BEAM/V8 cannot offer. Scalars and Text share
+/// correctly today through the table.)
+public type World is {
+    raw: RawScriptWorld,
+};
+
+implement World {
+    /// Create an empty shared world.
+    public fn new() -> World {
+        World { raw: script_world_new() }
+    }
+
+    /// Compile and run `source` (entry `main`) on the world's persistent
+    /// interpreter.  The world heap + shared table carry over from prior evals.
+    public fn eval(&self, source: Text) -> ScriptResult {
+        let outcome = script_world_eval(self.raw, source);
+        let result = if script_outcome_is_ok(outcome) {
+            ScriptResult.Ok(marshal_outcome(outcome))
+        } else {
+            ScriptResult.Err(script_outcome_error(outcome))
+        };
+        script_outcome_free(outcome);
+        result
+    }
+}
+
+implement Drop for World {
+    fn drop(&mut self) {
+        script_world_free(self.raw);
+    }
+}
+
+// =============================================================================
 // Internal: outcome -> ScriptValue
 // =============================================================================
 

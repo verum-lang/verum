@@ -39,5 +39,5 @@ module core.script;
 public module engine;
 
 // Re-export the primary surface so callers can
-// `mount core.script.{Engine, ScriptValue, ScriptResult};`.
-public mount engine.{Engine, ScriptValue, ScriptResult};
+// `mount core.script.{Engine, World, ScriptValue, ScriptResult};`.
+public mount engine.{Engine, World, ScriptValue, ScriptResult};

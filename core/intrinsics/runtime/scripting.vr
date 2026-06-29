@@ -162,3 +162,36 @@ public fn script_engine_register(engine: RawScriptEngine, name: Text, f: fn(Int)
 /// name is not registered).
 @intrinsic("script_host_call_int")
 public fn script_host_call_int(name: Text, arg: Int) -> Int;
+
+// =============================================================================
+// SECTION 8: Shared World (P2) — interop between scripts
+// =============================================================================
+// A `World` carries a persistent shared table across evals, so scripts running
+// in the same world cooperate over shared data (the full zero-overhead tier
+// links cooperating scripts into one module via the runtime linker so large
+// structures share truly by-reference, CBGR-safe).
+
+/// Opaque handle to a host-owned persistent `ScriptWorld`.
+public type RawScriptWorld is (*const Byte);
+
+/// Create a persistent shared world.
+@intrinsic("script_world_new")
+public fn script_world_new() -> RawScriptWorld;
+
+/// Compile and run `source` on a world's persistent interpreter (shared heap).
+@intrinsic("script_world_eval")
+public fn script_world_eval(world: RawScriptWorld, source: Text) -> RawScriptOutcome;
+
+/// Destroy a shared world.
+@intrinsic("script_world_free")
+public fn script_world_free(world: RawScriptWorld);
+
+/// Script: write an `Int` into the shared-global table (visible to other
+/// scripts in the same world).
+@intrinsic("script_set_int")
+public fn script_set_int(name: Text, value: Int);
+
+/// Script: write a `Text` into the shared-global table — shared BY REFERENCE
+/// with other scripts in the same world (zero-copy).
+@intrinsic("script_set_text")
+public fn script_set_text(name: Text, value: Text);
