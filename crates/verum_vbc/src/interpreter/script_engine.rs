@@ -75,12 +75,31 @@ pub fn compiler_hook_installed() -> bool {
 fn compile_via_hook(source: &str) -> Result<VbcModule, ScriptError> {
     // Clone the Arc out under the read lock so compilation (which may be slow)
     // does not hold the global lock.
-    let hook = {
-        let slot = COMPILER_HOOK
-            .read()
-            .map_err(|_| ScriptError::Internal("compiler hook lock poisoned".to_string()))?;
-        slot.clone()
-    };
+    //
+    // The host toolchain installs the hook before scripts run, but on a cold
+    // first eval that install can still be racing on another thread (the host
+    // interpreter starts as the install is committed). Briefly spin for it
+    // rather than spuriously reporting the compiler as unavailable; if no hook
+    // is ever installed (e.g. a stripped AOT binary), this falls through to
+    // `CompilerUnavailable` after a bounded wait.
+    let mut hook = None;
+    for attempt in 0..2_000u32 {
+        {
+            let slot = COMPILER_HOOK
+                .read()
+                .map_err(|_| ScriptError::Internal("compiler hook lock poisoned".to_string()))?;
+            if slot.is_some() {
+                hook = slot.clone();
+                break;
+            }
+        }
+        // Back off from a tight spin after the first handful of tries.
+        if attempt < 64 {
+            std::thread::yield_now();
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
     match hook {
         Some(h) => h(source).map_err(ScriptError::Compile),
         None => Err(ScriptError::CompilerUnavailable),

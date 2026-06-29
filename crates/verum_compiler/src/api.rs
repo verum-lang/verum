@@ -1154,6 +1154,50 @@ pub fn compile_to_vbc(source: &str) -> Result<verum_vbc::VbcModule, CompilationE
     })
 }
 
+/// Compile a Verum **script** to a self-contained, runnable VBC module WITH the
+/// embedded standard library linked — the compiler behind the `core.script`
+/// engine. Unlike [`compile_to_vbc`] (a minimal, stdlib-free compile used by the
+/// integration harness), this links the embedded stdlib archive so scripts can
+/// use `List` / `Map` / collections and their combinators (`map`, `fold`,
+/// `filter`, `sum`, …).
+///
+/// It uses `single_module::compile_module_with_stdlib` — the single source of
+/// truth for stdlib-aware codegen that the test runner and `verum run` use. The
+/// linker pulls in only the archive symbols the script references; process-wide
+/// caches (archive decode + symbol graph) make repeat compiles cheap.
+///
+/// NOTE: this path runs parse → stdlib-linked codegen; it does not run macro
+/// expansion, so `@`-macros in scripts are not expanded (the common scripting
+/// surface — values, control flow, stdlib methods — needs none).
+pub fn compile_script_to_vbc(source: &str) -> Result<verum_vbc::VbcModule, CompilationError> {
+    use verum_ast::FileId;
+    use verum_lexer::Lexer;
+    use verum_vbc::codegen::CodegenConfig;
+
+    let file_id = FileId::new(0);
+    let lexer = Lexer::new(source, file_id);
+    let parser = verum_fast_parser::VerumParser::new();
+    let ast = parser.parse_module(lexer, file_id).map_err(|errs| {
+        let first = errs
+            .iter()
+            .next()
+            .map(|e| format!("{:?}", e))
+            .unwrap_or_default();
+        CompilationError::new(
+            CompilationErrorKind::ParseError,
+            format!("parse error: {first}"),
+        )
+    })?;
+
+    crate::single_module::compile_module_with_stdlib(&ast, CodegenConfig::new("script"), false)
+        .map_err(|e| {
+            CompilationError::new(
+                CompilationErrorKind::CodegenError,
+                format!("VBC codegen error: {e}"),
+            )
+        })
+}
+
 static SCRIPTING_HOOK_INIT: std::sync::Once = std::sync::Once::new();
 
 /// Install the process-wide source→VBC compiler hook that backs the embedded
@@ -1168,7 +1212,7 @@ static SCRIPTING_HOOK_INIT: std::sync::Once = std::sync::Once::new();
 pub fn ensure_scripting_compiler_installed() {
     SCRIPTING_HOOK_INIT.call_once(|| {
         verum_vbc::interpreter::install_compiler_hook(std::sync::Arc::new(|src: &str| {
-            compile_to_vbc(src).map_err(|e| e.to_string())
+            compile_script_to_vbc(src).map_err(|e| e.to_string())
         }));
     });
 }
