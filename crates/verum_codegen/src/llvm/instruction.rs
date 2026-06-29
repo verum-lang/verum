@@ -21991,6 +21991,34 @@ fn lower_extended<'ctx>(
             ctx.mark_variant_register(dst_reg);
             Ok(())
         }
+        // Embedded scripting (`core.script`) is interpreter-tier only: the
+        // engine compiles + runs scripts via the in-process VBC interpreter,
+        // which a native binary reaches through the runtime rather than LLVM
+        // IR (the intrinsics carry `mlir_op: None`). Emit the standard
+        // unimplemented marker so any accidental AOT emission degrades
+        // gracefully instead of miscompiling. Listed explicitly so adding a
+        // new Extended sub-op still trips the exhaustiveness check.
+        Some(ExtendedSubOpcode::ScriptEngineNew)
+        | Some(ExtendedSubOpcode::ScriptEngineFree)
+        | Some(ExtendedSubOpcode::ScriptEngineEval)
+        | Some(ExtendedSubOpcode::ScriptOutcomeIsOk)
+        | Some(ExtendedSubOpcode::ScriptOutcomeKind)
+        | Some(ExtendedSubOpcode::ScriptOutcomeAsInt)
+        | Some(ExtendedSubOpcode::ScriptOutcomeAsFloat)
+        | Some(ExtendedSubOpcode::ScriptOutcomeAsBool)
+        | Some(ExtendedSubOpcode::ScriptOutcomeFree)
+        | Some(ExtendedSubOpcode::ScriptOutcomeAsText)
+        | Some(ExtendedSubOpcode::ScriptOutcomeError)
+        | Some(ExtendedSubOpcode::ScriptOutcomeStdout)
+        | Some(ExtendedSubOpcode::ScriptEngineNewSandboxed)
+        | Some(ExtendedSubOpcode::ScriptEngineSetGlobalInt)
+        | Some(ExtendedSubOpcode::ScriptEngineSetGlobalText)
+        | Some(ExtendedSubOpcode::ScriptGlobalKind)
+        | Some(ExtendedSubOpcode::ScriptGlobalInt)
+        | Some(ExtendedSubOpcode::ScriptGlobalText) => {
+            ctx.emit_unimplemented_sub_op("Extended", sub_op);
+            Ok(())
+        }
         None => {
             ctx.emit_unimplemented_sub_op("Extended", sub_op);
             Ok(())

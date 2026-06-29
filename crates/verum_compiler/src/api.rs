@@ -1154,6 +1154,25 @@ pub fn compile_to_vbc(source: &str) -> Result<verum_vbc::VbcModule, CompilationE
     })
 }
 
+static SCRIPTING_HOOK_INIT: std::sync::Once = std::sync::Once::new();
+
+/// Install the process-wide source→VBC compiler hook that backs the embedded
+/// scripting engine (`core.script`), so a host program can compile and run
+/// Verum scripts at runtime via `script_engine_eval`.
+///
+/// `verum_vbc`'s scripting engine lives *below* this crate and so cannot call
+/// the compiler directly; this inverts that dependency by installing
+/// [`compile_to_vbc`] as the engine's compiler.  Idempotent — the interpret
+/// entry points call it unconditionally before running user code, and only
+/// the first call installs the hook.
+pub fn ensure_scripting_compiler_installed() {
+    SCRIPTING_HOOK_INIT.call_once(|| {
+        verum_vbc::interpreter::install_compiler_hook(std::sync::Arc::new(|src: &str| {
+            compile_to_vbc(src).map_err(|e| e.to_string())
+        }));
+    });
+}
+
 /// Run full compilation pipeline.
 ///
 

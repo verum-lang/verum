@@ -113,6 +113,9 @@ pub enum IntrinsicCategory {
     Logging,
     /// Regular expressions and text processing.
     Regex,
+    /// Embedded scripting engine: compile + run Verum scripts at runtime
+    /// (`core.script`). Backed by the VBC interpreter via `script_runtime`.
+    Scripting,
 }
 
 /// Hints for intrinsic optimization.
@@ -4105,6 +4108,235 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ),
         mlir_op: Some("verum.process.exit"),
         doc: "Terminate the process with the given exit code",
+    },
+    // ========================================================================
+    // Embedded scripting engine (`core.script`) — Extended sub-ops 0x20-0x2F.
+    // All dispatch to `interpreter::dispatch_table::handlers::script_runtime`,
+    // which drives an in-process `ScriptEngine` (a thin wrapper over the VBC
+    // interpreter). Interpreter-tier only for now: the AOT/MLIR lowering of
+    // `ExtendedSubOp` returns None, so a stripped AOT binary degrades to
+    // "source compilation unavailable" rather than mis-lowering.
+    // ========================================================================
+    Intrinsic {
+        name: "script_engine_new",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 0,
+        return_count: 1, // RawScriptEngine handle
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineNew,
+        ),
+        mlir_op: None,
+        doc: "Create a new embedded script engine",
+    },
+    Intrinsic {
+        name: "script_engine_free",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1, // engine handle
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineFree,
+        ),
+        mlir_op: None,
+        doc: "Destroy an embedded script engine",
+    },
+    Intrinsic {
+        name: "script_engine_eval",
+        category: IntrinsicCategory::Scripting,
+        hints: &[
+            IntrinsicHint::Alloc,
+            IntrinsicHint::SideEffect,
+            IntrinsicHint::IoEffect,
+            IntrinsicHint::MayTrap,
+        ],
+        param_count: 2, // engine, source: Text
+        return_count: 1, // RawScriptOutcome handle
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineEval,
+        ),
+        mlir_op: None,
+        doc: "Compile and run a Verum source string on an engine",
+    },
+    Intrinsic {
+        name: "script_outcome_is_ok",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1, // outcome handle
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeIsOk,
+        ),
+        mlir_op: None,
+        doc: "Whether a script outcome succeeded",
+    },
+    Intrinsic {
+        name: "script_outcome_kind",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeKind,
+        ),
+        mlir_op: None,
+        doc: "Dynamic-kind tag of a script outcome's value",
+    },
+    Intrinsic {
+        name: "script_outcome_as_int",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeAsInt,
+        ),
+        mlir_op: None,
+        doc: "A script outcome's value as Int",
+    },
+    Intrinsic {
+        name: "script_outcome_as_float",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeAsFloat,
+        ),
+        mlir_op: None,
+        doc: "A script outcome's value as Float",
+    },
+    Intrinsic {
+        name: "script_outcome_as_bool",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeAsBool,
+        ),
+        mlir_op: None,
+        doc: "A script outcome's value as Bool",
+    },
+    Intrinsic {
+        name: "script_outcome_free",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeFree,
+        ),
+        mlir_op: None,
+        doc: "Destroy a script outcome",
+    },
+    Intrinsic {
+        name: "script_outcome_as_text",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1, // host Text
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeAsText,
+        ),
+        mlir_op: None,
+        doc: "A script outcome's value as Text",
+    },
+    Intrinsic {
+        name: "script_outcome_error",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1, // host Text
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeError,
+        ),
+        mlir_op: None,
+        doc: "A script outcome's error message as Text",
+    },
+    Intrinsic {
+        name: "script_outcome_stdout",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1, // host Text
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeStdout,
+        ),
+        mlir_op: None,
+        doc: "A script outcome's captured stdout as Text",
+    },
+    Intrinsic {
+        name: "script_engine_new_sandboxed",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 3, // memory_limit, instruction_limit, time_limit_ms
+        return_count: 1, // RawScriptEngine handle
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineNewSandboxed,
+        ),
+        mlir_op: None,
+        doc: "Create a sandboxed script engine with resource limits",
+    },
+    Intrinsic {
+        name: "script_engine_set_global_int",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 3, // engine, name, value
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineSetGlobalInt,
+        ),
+        mlir_op: None,
+        doc: "Host: set an Int global on a script engine",
+    },
+    Intrinsic {
+        name: "script_engine_set_global_text",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 3, // engine, name, value
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineSetGlobalText,
+        ),
+        mlir_op: None,
+        doc: "Host: set a Text global on a script engine",
+    },
+    Intrinsic {
+        name: "script_global_kind",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1, // name
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptGlobalKind,
+        ),
+        mlir_op: None,
+        doc: "Script: dynamic-kind tag of a host global",
+    },
+    Intrinsic {
+        name: "script_global_int",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1, // name
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptGlobalInt,
+        ),
+        mlir_op: None,
+        doc: "Script: read a host global as Int",
+    },
+    Intrinsic {
+        name: "script_global_text",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 1, // name
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptGlobalText,
+        ),
+        mlir_op: None,
+        doc: "Script: read a host global as Text",
     },
     Intrinsic {
         name: "debug_assert",

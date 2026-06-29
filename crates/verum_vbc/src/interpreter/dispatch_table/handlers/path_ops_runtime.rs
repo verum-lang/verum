@@ -236,7 +236,13 @@ fn read_field0(receiver: &Value) -> Option<Value> {
     Some(v)
 }
 
-fn extract_string_if_text(state: &InterpreterState, v: &Value) -> Option<String> {
+/// Extract an owned `String` from a `Value` that holds Verum `Text`
+/// (small-string-inline or heap-backed), or `None` if it isn't text.
+///
+/// Shared with `script_runtime` (the `core.script` engine reads a script's
+/// source `Text` argument through this) — kept in one place rather than
+/// re-implemented per handler.
+pub(super) fn extract_string_if_text(state: &InterpreterState, v: &Value) -> Option<String> {
     if v.is_small_string() {
         return Some(extract_string(v, state));
     }

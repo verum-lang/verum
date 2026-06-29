@@ -25064,18 +25064,28 @@ impl VbcCodegen {
                 self.emit_intrinsic_math_extended(*sub_op, args, dest);
             }
             CodegenStrategy::ExtendedSubOp(sub_op) => {
-                // `[0x1F][sub_op:u8][operand_regs…]` — operand bytes are
-                // the encoded argument registers in declaration order.
-                // For `verum.process.exit(code)` that is one register;
-                // future extended primitives can carry more.
-                let mut operands: Vec<u8> = Vec::with_capacity(args.len() * 2);
-                for r in args {
+                // `[0x1F][sub_op:u8][operand_regs…]` — operand bytes are the
+                // encoded registers in declaration order.  Value-returning
+                // extended primitives (e.g. the `core.script` scripting
+                // intrinsics) carry their destination register FIRST, then the
+                // argument registers; divergent / no-return ones
+                // (e.g. `process_exit`) carry only the argument registers.
+                // Each sub-op's interpreter handler knows its own operand
+                // layout, so this stays a single generic emit path.
+                let mut operands: Vec<u8> = Vec::with_capacity((args.len() + 1) * 2);
+                let push_reg = |operands: &mut Vec<u8>, r: Reg| {
                     if r.0 < 128 {
                         operands.push(r.0 as u8);
                     } else {
                         operands.push(0x80 | ((r.0 >> 8) as u8));
                         operands.push(r.0 as u8);
                     }
+                };
+                if intrinsic.return_count > 0 {
+                    push_reg(&mut operands, dest);
+                }
+                for r in args {
+                    push_reg(&mut operands, *r);
                 }
                 self.ctx.emit(Instruction::Extended {
                     sub_op: sub_op.to_byte(),

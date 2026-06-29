@@ -1,0 +1,751 @@
+//! # Embedded scripting engine — Rust backing for `core.script`
+//!
+//! This is the runtime that backs Verum's standard-library scripting API
+//! (`core.script.Engine`).  It lets a Verum **host** application compile and
+//! execute Verum **scripts** at runtime, in-process — the capability a game
+//! engine gets from embedding Lua, but using Verum's own VBC interpreter.
+//!
+//! ## Reuse-first: this module introduces no second VM
+//!
+//! Every heavyweight capability is delegated to machinery that already exists
+//! in this crate; the engine is a thin orchestration layer:
+//!
+//! | Concern                | Reused primitive                                |
+//! |------------------------|-------------------------------------------------|
+//! | source → VBC           | installed [`CompilerHook`] (full pipeline, or    |
+//! |                        | the lite `VbcCodegen` path)                      |
+//! | execution + heap       | [`Interpreter`] / [`InterpreterState`]           |
+//! | resource limits        | [`InterpreterConfig`] (fuel / timeout / mem)     |
+//! | cooperative abort      | `InterpreterConfig::cancel_flag`                 |
+//! | capability sandbox     | `PermissionRouter` (wired in Phase 1)            |
+//! | cross-script interop   | shared CBGR heap + `VbcLinker` (Phase 2)         |
+//!
+//! ## Crate-layer note (dependency inversion)
+//!
+//! `verum_vbc` sits *below* `verum_compiler`, so it cannot call the full
+//! source→VBC pipeline (`verum_compiler::api::compile_to_vbc`) directly.  The
+//! dependency is inverted through [`install_compiler_hook`]: `verum_compiler`
+//! installs the full pipeline at startup (the same path the REPL already
+//! uses).  When no hook is installed — e.g. a stripped AOT binary that ships
+//! no compiler — source evaluation degrades gracefully to
+//! [`ScriptError::CompilerUnavailable`], while execution of already-compiled
+//! modules keeps working.  This is exactly the "scripting at the
+//! interpretation level for now" boundary: principled, not a workaround.
+
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
+
+use crate::module::VbcModule;
+use crate::value::Value;
+
+use super::state::InterpreterConfig;
+use super::Interpreter;
+
+/// An installable source→VBC compiler.
+///
+/// The hook takes Verum source text and returns a fully-compiled, runnable
+/// [`VbcModule`] (stdlib linked) or a human-readable error string.  It is
+/// `Send + Sync` so a single host process can drive scripting from any thread.
+pub type CompilerHook = Arc<dyn Fn(&str) -> Result<VbcModule, String> + Send + Sync>;
+
+/// Process-global compiler hook (dependency inversion across the crate layer).
+static COMPILER_HOOK: RwLock<Option<CompilerHook>> = RwLock::new(None);
+
+/// Install the process-wide source→VBC compiler used by [`ScriptEngine`].
+///
+/// `verum_compiler` calls this once at startup with the full pipeline.  Tests
+/// and embedders may install a lighter compiler.  Last writer wins.
+pub fn install_compiler_hook(hook: CompilerHook) {
+    if let Ok(mut slot) = COMPILER_HOOK.write() {
+        *slot = Some(hook);
+    }
+}
+
+/// Whether a source→VBC compiler is available in this process.
+///
+/// Hosts can probe this to decide between source-eval and precompiled-module
+/// execution (the latter never needs a compiler).
+pub fn compiler_hook_installed() -> bool {
+    COMPILER_HOOK.read().map(|s| s.is_some()).unwrap_or(false)
+}
+
+/// Compile `source` through the installed hook.
+fn compile_via_hook(source: &str) -> Result<VbcModule, ScriptError> {
+    // Clone the Arc out under the read lock so compilation (which may be slow)
+    // does not hold the global lock.
+    let hook = {
+        let slot = COMPILER_HOOK
+            .read()
+            .map_err(|_| ScriptError::Internal("compiler hook lock poisoned".to_string()))?;
+        slot.clone()
+    };
+    match hook {
+        Some(h) => h(source).map_err(ScriptError::Compile),
+        None => Err(ScriptError::CompilerUnavailable),
+    }
+}
+
+/// Errors surfaced by the scripting engine.
+#[derive(Debug, Clone)]
+pub enum ScriptError {
+    /// No source→VBC compiler is installed in this process (see
+    /// [`install_compiler_hook`]).  Precompiled-module execution is unaffected.
+    CompilerUnavailable,
+    /// The script failed to compile; carries the compiler's message.
+    Compile(String),
+    /// The requested entry function does not exist in the compiled script.
+    EntryNotFound(String),
+    /// The script trapped at runtime (panic, limit exceeded, CBGR violation…).
+    Runtime(String),
+    /// Internal engine error (e.g. a poisoned lock).
+    Internal(String),
+}
+
+impl std::fmt::Display for ScriptError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScriptError::CompilerUnavailable => {
+                write!(f, "source compilation is unavailable (no compiler hook installed)")
+            }
+            ScriptError::Compile(msg) => write!(f, "script compilation failed: {msg}"),
+            ScriptError::EntryNotFound(name) => write!(f, "script entry function not found: {name}"),
+            ScriptError::Runtime(msg) => write!(f, "script runtime error: {msg}"),
+            ScriptError::Internal(msg) => write!(f, "scripting engine internal error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ScriptError {}
+
+/// An isolated script-execution world.
+///
+/// Each engine owns its [`InterpreterConfig`] (resource limits + cancel flag),
+/// a host-side global table, and the captured stdout of the most recent run.
+/// In Phase 0 every run executes on a fresh [`Interpreter`] (Lua-`dostring`
+/// semantics — the safest and simplest isolation).  Phase 2 will optionally
+/// hold a persistent interpreter so multiple scripts share one CBGR heap for
+/// zero-copy interop.
+pub struct ScriptEngine {
+    config: InterpreterConfig,
+    globals: HashMap<String, ScriptValueOwned>,
+    cancel: Arc<AtomicBool>,
+    last_stdout: String,
+}
+
+impl ScriptEngine {
+    /// Create an engine with default limits (permissive).
+    pub fn new() -> Self {
+        Self::with_config(InterpreterConfig::default())
+    }
+
+    /// Create an engine with explicit limits.
+    ///
+    /// The engine wires its own cancel flag into the config so [`interrupt`]
+    /// works regardless of what the caller passed.
+    ///
+    /// [`interrupt`]: ScriptEngine::interrupt
+    pub fn with_config(mut config: InterpreterConfig) -> Self {
+        let cancel = Arc::new(AtomicBool::new(false));
+        config.cancel_flag = Some(cancel.clone());
+        Self {
+            config,
+            globals: HashMap::new(),
+            cancel,
+            last_stdout: String::new(),
+        }
+    }
+
+    /// Create a sandboxed engine with resource limits.  Each limit is `0` for
+    /// "unlimited" on that dimension.  These reuse the interpreter's existing
+    /// fuel / heap / timeout enforcement (`InterpreterConfig`) — no new
+    /// sandbox machinery: a runaway script aborts with
+    /// `InstructionLimitExceeded` / `OutOfMemory` / `Timeout`, surfaced as a
+    /// failed [`ScriptOutcome`].
+    ///
+    /// This is the WASI-style "no ambient authority by default" posture at the
+    /// resource layer; capability gating (file / network / process) layers on
+    /// via the interpreter's `PermissionRouter` in a later step.
+    pub fn sandboxed(memory_limit: usize, instruction_limit: u64, time_limit_ms: u64) -> Self {
+        let mut config = InterpreterConfig::default();
+        if memory_limit > 0 {
+            config.max_heap_size = memory_limit;
+        }
+        if instruction_limit > 0 {
+            config.max_instructions = instruction_limit;
+        }
+        if time_limit_ms > 0 {
+            config.timeout_ms = time_limit_ms;
+        }
+        Self::with_config(config)
+    }
+
+    /// Compile `source` into a self-contained, runnable module.
+    ///
+    /// Requires an installed [`CompilerHook`]; otherwise returns
+    /// [`ScriptError::CompilerUnavailable`].
+    pub fn compile(&self, source: &str) -> Result<Arc<VbcModule>, ScriptError> {
+        compile_via_hook(source).map(Arc::new)
+    }
+
+    /// Compile and run `source`, executing its `main` function.
+    ///
+    /// Returns `main`'s value; the script's captured stdout is available via
+    /// [`last_stdout`](ScriptEngine::last_stdout).
+    pub fn eval(&mut self, source: &str) -> Result<Value, ScriptError> {
+        let module = self.compile(source)?;
+        self.run(module, "main", &[])
+    }
+
+    /// Run `entry` from an already-compiled `module` with `args`.
+    ///
+    /// A fresh interpreter is created per call (Phase 0 isolation).  Stdout is
+    /// captured into the engine and overwritten on each run.
+    pub fn run(
+        &mut self,
+        module: Arc<VbcModule>,
+        entry: &str,
+        args: &[Value],
+    ) -> Result<Value, ScriptError> {
+        // Codegen registers functions under their fully-qualified name
+        // (e.g. `script.main`).  `find_function_by_name` only suffix-matches
+        // when the query itself contains a dot, so fall back to the unique
+        // bare-suffix lookup for plain entry names like `main`.
+        let func_id = module
+            .find_function_by_name(entry)
+            .or_else(|| module.find_function_by_unique_bare_suffix(entry))
+            .ok_or_else(|| ScriptError::EntryNotFound(entry.to_string()))?;
+
+        // Reuse the proven REPL execution path: build an interpreter with this
+        // engine's limits, then call the entry. No second VM, heap, or sandbox.
+        let mut interp = Interpreter::try_new_with_config(module, self.config.clone())
+            .map_err(|e| ScriptError::Runtime(format!("{e:?}")))?;
+
+        let result = interp
+            .execute_function_with_args(func_id, args)
+            .map_err(|e| ScriptError::Runtime(format!("{e:?}")));
+
+        // Capture stdout regardless of success so hosts can inspect partial
+        // output from a script that trapped.
+        self.last_stdout = interp.state.get_stdout().to_string();
+        result
+    }
+
+    /// The stdout captured from the most recent [`eval`](ScriptEngine::eval) or
+    /// [`run`](ScriptEngine::run).
+    pub fn last_stdout(&self) -> &str {
+        &self.last_stdout
+    }
+
+    /// Set a host-provided global the next script run can read (via the
+    /// `script_global_*` intrinsics).  Overwrites any previous value.
+    pub fn set_global(&mut self, name: impl Into<String>, value: ScriptValueOwned) {
+        self.globals.insert(name.into(), value);
+    }
+
+    /// Read a global — either one the host set, or one a script wrote during
+    /// its run (available after the run completes).
+    pub fn get_global(&self, name: &str) -> Option<ScriptValueOwned> {
+        self.globals.get(name).cloned()
+    }
+
+    /// Request cooperative interruption of a running script (thread-safe).
+    pub fn interrupt(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+
+    /// Clear a pending interrupt so the engine can be reused.
+    pub fn clear_interrupt(&self) {
+        self.cancel.store(false, Ordering::SeqCst);
+    }
+
+    /// Whether an interrupt is currently pending.
+    pub fn is_interrupted(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+
+    /// Read-only access to this engine's interpreter configuration.
+    pub fn config(&self) -> &InterpreterConfig {
+        &self.config
+    }
+
+    /// Mutable access to this engine's interpreter configuration (e.g. to
+    /// tighten limits between runs).
+    pub fn config_mut(&mut self) -> &mut InterpreterConfig {
+        &mut self.config
+    }
+}
+
+impl Default for ScriptEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A script's return value marshaled into an owned host representation.
+///
+/// Phase 1 covers scalars + `Text`; `Other` stands in for heap objects
+/// (List/Map/records) whose structural marshaling lands later.  Marshaling to
+/// an *owned* form (rather than a borrowed interpreter `Value`) is required
+/// because the script runs on a throwaway interpreter whose heap is freed once
+/// the run returns — a borrowed `Text` / heap pointer would dangle.
+#[derive(Debug, Clone)]
+pub enum ScriptValueOwned {
+    /// Unit / no meaningful value.
+    Nil,
+    /// Boolean.
+    Bool(bool),
+    /// 64-bit integer.
+    Int(i64),
+    /// 64-bit float.
+    Float(f64),
+    /// UTF-8 text, copied out of the script heap.
+    Text(String),
+    /// A heap object not yet structurally marshaled (List/Map/record).
+    Other,
+}
+
+/// The result of running a script: its (owned) return value, captured stdout,
+/// and an optional error.  Boxed behind an opaque handle by the `core.script`
+/// intrinsics and read back through accessors.
+pub struct ScriptOutcome {
+    /// The script entry's return value (meaningful only when [`is_ok`] is true).
+    ///
+    /// [`is_ok`]: ScriptOutcome::is_ok
+    pub value: ScriptValueOwned,
+    /// The error, if the script failed to compile or trapped.
+    pub error: Option<ScriptError>,
+    /// Everything the script wrote to stdout during the run.
+    pub stdout: String,
+}
+
+impl ScriptOutcome {
+    /// Whether the script completed successfully.
+    pub fn is_ok(&self) -> bool {
+        self.error.is_none()
+    }
+
+    /// A small tag describing [`value`](Self::value)'s kind, for the host's
+    /// marshaling layer: `0`=Nil, `1`=Bool, `2`=Int, `3`=Float, `4`=Text,
+    /// `5`=other heap object.
+    pub fn kind(&self) -> i64 {
+        match &self.value {
+            ScriptValueOwned::Nil => 0,
+            ScriptValueOwned::Bool(_) => 1,
+            ScriptValueOwned::Int(_) => 2,
+            ScriptValueOwned::Float(_) => 3,
+            ScriptValueOwned::Text(_) => 4,
+            ScriptValueOwned::Other => 5,
+        }
+    }
+
+    /// The value as an integer (valid when [`kind`](Self::kind) is `2`).
+    pub fn as_int(&self) -> i64 {
+        match &self.value {
+            ScriptValueOwned::Int(i) => *i,
+            _ => 0,
+        }
+    }
+
+    /// The value as a float (valid when [`kind`](Self::kind) is `3`).
+    pub fn as_float(&self) -> f64 {
+        match &self.value {
+            ScriptValueOwned::Float(f) => *f,
+            _ => 0.0,
+        }
+    }
+
+    /// The value as a bool (valid when [`kind`](Self::kind) is `1`).
+    pub fn as_bool(&self) -> bool {
+        matches!(&self.value, ScriptValueOwned::Bool(true))
+    }
+
+    /// The value as text (valid when [`kind`](Self::kind) is `4`); `""` otherwise.
+    pub fn as_text(&self) -> &str {
+        match &self.value {
+            ScriptValueOwned::Text(s) => s,
+            _ => "",
+        }
+    }
+
+    /// The error message, if the script failed to compile or trapped.
+    pub fn error_message(&self) -> Option<String> {
+        self.error.as_ref().map(|e| e.to_string())
+    }
+
+    /// The script's captured stdout.
+    pub fn stdout(&self) -> &str {
+        &self.stdout
+    }
+}
+
+impl ScriptEngine {
+    /// Compile and run `source` (entry `main`), packaging the result, captured
+    /// stdout, and any error into a [`ScriptOutcome`].
+    ///
+    /// Never returns `Err`: a compile/runtime failure becomes
+    /// `ScriptOutcome { error: Some(_), .. }`.  This is the form the scripting
+    /// intrinsics use, since the host reads success/failure through accessors.
+    pub fn eval_to_outcome(&mut self, source: &str) -> ScriptOutcome {
+        let module = match self.compile(source) {
+            Ok(m) => m,
+            Err(error) => {
+                return ScriptOutcome {
+                    value: ScriptValueOwned::Nil,
+                    error: Some(error),
+                    stdout: String::new(),
+                };
+            }
+        };
+        self.run_to_outcome(module, "main", &[])
+    }
+
+    /// Run `entry` from a compiled `module`, marshaling its result into an
+    /// owned [`ScriptOutcome`] *before* the script interpreter (and its heap)
+    /// is dropped — so a `Text` / heap result is copied out, not left dangling.
+    pub fn run_to_outcome(
+        &mut self,
+        module: Arc<VbcModule>,
+        entry: &str,
+        args: &[Value],
+    ) -> ScriptOutcome {
+        let func_id = match module
+            .find_function_by_name(entry)
+            .or_else(|| module.find_function_by_unique_bare_suffix(entry))
+        {
+            Some(f) => f,
+            None => {
+                return ScriptOutcome {
+                    value: ScriptValueOwned::Nil,
+                    error: Some(ScriptError::EntryNotFound(entry.to_string())),
+                    stdout: String::new(),
+                };
+            }
+        };
+        let mut interp = match Interpreter::try_new_with_config(module, self.config.clone()) {
+            Ok(i) => i,
+            Err(e) => {
+                return ScriptOutcome {
+                    value: ScriptValueOwned::Nil,
+                    error: Some(ScriptError::Runtime(format!("{e:?}"))),
+                    stdout: String::new(),
+                };
+            }
+        };
+        // Seed host-provided globals into the script interpreter so the
+        // script can read them via the `script_global_*` intrinsics.
+        for (name, owned) in &self.globals {
+            let v = build_value(&mut interp, owned);
+            interp.state.host_globals.insert(name.clone(), v);
+        }
+
+        let result = interp.execute_function_with_args(func_id, args);
+        let stdout = interp.state.get_stdout().to_string();
+        self.last_stdout = stdout.clone();
+
+        // Read back globals (including any the script wrote) into owned form
+        // while the interpreter — and its heap — is still alive.
+        let read_back: Vec<(String, ScriptValueOwned)> = interp
+            .state
+            .host_globals
+            .iter()
+            .map(|(name, v)| (name.clone(), extract_owned(&interp, *v)))
+            .collect();
+        for (name, owned) in read_back {
+            self.globals.insert(name, owned);
+        }
+
+        match result {
+            Ok(value) => ScriptOutcome {
+                value: extract_owned(&interp, value),
+                error: None,
+                stdout,
+            },
+            Err(e) => ScriptOutcome {
+                value: ScriptValueOwned::Nil,
+                error: Some(ScriptError::Runtime(format!("{e:?}"))),
+                stdout,
+            },
+        }
+    }
+}
+
+/// Build a script-interpreter `Value` from an owned host value, allocating any
+/// `Text` on the script heap.  The inverse of [`extract_owned`].
+fn build_value(interp: &mut Interpreter, owned: &ScriptValueOwned) -> Value {
+    match owned {
+        ScriptValueOwned::Nil | ScriptValueOwned::Other => Value::unit(),
+        ScriptValueOwned::Bool(b) => Value::from_bool(*b),
+        ScriptValueOwned::Int(i) => Value::from_i64(*i),
+        ScriptValueOwned::Float(f) => Value::from_f64(*f),
+        ScriptValueOwned::Text(s) => interp.alloc_string(s).unwrap_or_else(|_| Value::unit()),
+    }
+}
+
+/// Marshal a script-interpreter `Value` into an owned [`ScriptValueOwned`],
+/// copying any heap text out while `interp` (and its heap) is still alive.
+fn extract_owned(interp: &Interpreter, value: Value) -> ScriptValueOwned {
+    if value.is_unit() || value.is_nil() {
+        ScriptValueOwned::Nil
+    } else if value.is_bool() {
+        ScriptValueOwned::Bool(value.as_bool())
+    } else if value.is_int() {
+        ScriptValueOwned::Int(value.as_i64())
+    } else if value.is_float() {
+        ScriptValueOwned::Float(value.as_f64())
+    } else if let Some(s) = interp.read_text(value) {
+        ScriptValueOwned::Text(s)
+    } else {
+        ScriptValueOwned::Other
+    }
+}
+
+#[cfg(all(test, feature = "codegen"))]
+mod tests {
+    use super::*;
+    use crate::codegen::{CodegenConfig, VbcCodegen};
+    use verum_ast::FileId;
+    use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
+
+    /// A lightweight source→VBC hook for tests: parse + bare codegen (no
+    /// stdlib link).  Sufficient for arithmetic scripts that touch no stdlib.
+    fn lite_hook() -> CompilerHook {
+        Arc::new(|source: &str| {
+            let file_id = FileId::new(0);
+            let lexer = Lexer::new(source, file_id);
+            let parser = VerumParser::new();
+            let module = parser
+                .parse_module(lexer, file_id)
+                .map_err(|errs| format!("parse error: {:?}", errs.first()))?;
+            let mut codegen = VbcCodegen::with_config(CodegenConfig::new("script_test"));
+            codegen
+                .compile_module(&module)
+                .map_err(|e| format!("codegen error: {e:?}"))
+        })
+    }
+
+    #[test]
+    fn eval_runs_main_and_returns_value() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        let result = engine
+            .eval("fn main() -> Int { 20 + 22 }")
+            .expect("eval should succeed");
+        assert!(result.is_int());
+        assert_eq!(result.as_i64(), 42);
+    }
+
+    #[test]
+    fn run_named_function_with_args() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        let module = engine
+            .compile("fn add(a: Int, b: Int) -> Int { a + b }")
+            .expect("compile should succeed");
+        let r = engine
+            .run(module, "add", &[Value::from_i64(3), Value::from_i64(4)])
+            .expect("run should succeed");
+        assert_eq!(r.as_i64(), 7);
+    }
+
+    #[test]
+    fn missing_entry_is_reported() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        let err = engine
+            .eval("fn other() -> Int { 1 }")
+            .expect_err("eval should fail: no main");
+        assert!(matches!(err, ScriptError::EntryNotFound(_)));
+    }
+
+    #[test]
+    fn outcome_classifies_and_extracts_value() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        let outcome = engine.eval_to_outcome("fn main() -> Int { 7 * 6 }");
+        assert!(outcome.is_ok());
+        assert_eq!(outcome.kind(), 2, "Int kind tag");
+        assert_eq!(outcome.as_int(), 42);
+
+        let failed = engine.eval_to_outcome("fn other() -> Int { 1 }");
+        assert!(!failed.is_ok());
+        assert!(failed.error.is_some());
+    }
+
+    #[test]
+    fn text_result_marshals_to_owned_string() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+
+        // Heap text (> 6 bytes) — exercises the heap reader; the string is
+        // copied out before the script interpreter's heap is freed.
+        let heap = engine.eval_to_outcome("fn main() -> Text { \"hello from the script\" }");
+        assert!(heap.is_ok());
+        assert_eq!(heap.kind(), 4, "Text kind tag");
+        assert_eq!(heap.as_text(), "hello from the script");
+
+        // Inline small string (<= 6 bytes).
+        let small = engine.eval_to_outcome("fn main() -> Text { \"hi\" }");
+        assert_eq!(small.kind(), 4);
+        assert_eq!(small.as_text(), "hi");
+    }
+
+    /// Exercises the Phase-1 intrinsics through a serialization round-trip:
+    /// the 4-register `script_engine_new_sandboxed` decode (new operand count)
+    /// plus `script_outcome_kind`. Regression for the same decode-arm class as
+    /// the eval round-trip test.
+    #[test]
+    fn phase1_sandboxed_and_kind_survive_roundtrip() {
+        let hook = lite_hook();
+        install_compiler_hook(hook.clone());
+
+        let outer = r#"
+            fn main() -> Int {
+                let e = @intrinsic("script_engine_new_sandboxed", 0, 1000000, 0);
+                let o = @intrinsic("script_engine_eval", e, "fn main() -> Int { 100 + 23 }");
+                let k = @intrinsic("script_outcome_kind", o);
+                @intrinsic("script_outcome_free", o);
+                @intrinsic("script_engine_free", e);
+                k
+            }
+        "#;
+
+        let module = hook(outer).expect("host program should compile");
+        let bytes = crate::serialize::serialize_module(&module).expect("serialize");
+        let module = Arc::new(crate::deserialize::deserialize_module(&bytes).expect("deserialize"));
+        let func_id = module
+            .find_function_by_unique_bare_suffix("main")
+            .expect("host main exists");
+        let mut interp = Interpreter::new(module);
+        let result = interp
+            .execute_function(func_id)
+            .expect("host program should run");
+        // The inner script returns Int 123 → kind tag 2.
+        assert_eq!(
+            result.as_i64(),
+            2,
+            "sandboxed engine + outcome_kind must survive the round-trip"
+        );
+    }
+
+    #[test]
+    fn host_to_script_global_exchange() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        engine.set_global("limit", ScriptValueOwned::Int(99));
+
+        // The script reads the host-seeded Int global and returns it.
+        let got = engine.eval_to_outcome(
+            "fn main() -> Int { @intrinsic(\"script_global_int\", \"limit\") }",
+        );
+        assert!(got.is_ok());
+        assert_eq!(got.as_int(), 99, "script must read the host-set Int global");
+
+        // An absent global reads as 0.
+        let missing = engine
+            .eval_to_outcome("fn main() -> Int { @intrinsic(\"script_global_int\", \"nope\") }");
+        assert_eq!(missing.as_int(), 0);
+    }
+
+    #[test]
+    fn sandbox_instruction_limit_aborts_runaway_script() {
+        install_compiler_hook(lite_hook());
+
+        // A 5k-instruction cap aborts a script that would otherwise loop ~1M
+        // times — the limit is enforced by the interpreter's existing fuel
+        // counter, surfaced as a failed outcome.
+        let mut bounded = ScriptEngine::sandboxed(0, 5_000, 0);
+        let runaway = bounded
+            .eval_to_outcome("fn main() -> Int { let mut i = 0; while i < 1000000 { i = i + 1 } i }");
+        assert!(
+            !runaway.is_ok(),
+            "runaway script must hit the 5k instruction limit"
+        );
+
+        // The same shape, well under the cap and under default limits, runs.
+        let mut unbounded = ScriptEngine::new();
+        let ok = unbounded
+            .eval_to_outcome("fn main() -> Int { let mut i = 0; while i < 1000 { i = i + 1 } i }");
+        assert!(ok.is_ok(), "bounded script should succeed");
+        assert_eq!(ok.as_int(), 1000);
+    }
+
+    /// Full vertical slice through the VBC `@intrinsic` surface: a host
+    /// program creates an engine, evaluates a nested script via the
+    /// `script_*` Extended sub-ops, marshals the result back, and frees the
+    /// handles — exactly the path `core.script` will wrap, but exercised
+    /// without a stdlib rebuild.
+    #[test]
+    fn end_to_end_eval_via_intrinsics() {
+        let hook = lite_hook();
+        install_compiler_hook(hook.clone());
+
+        let outer = r#"
+            fn main() -> Int {
+                let e = @intrinsic("script_engine_new");
+                let o = @intrinsic("script_engine_eval", e, "fn main() -> Int { 7 * 6 }");
+                let n = @intrinsic("script_outcome_as_int", o);
+                @intrinsic("script_outcome_free", o);
+                @intrinsic("script_engine_free", e);
+                n
+            }
+        "#;
+
+        let module = Arc::new(hook(outer).expect("host program should compile"));
+        let func_id = module
+            .find_function_by_unique_bare_suffix("main")
+            .expect("host main exists");
+        let mut interp = Interpreter::new(module);
+        let result = interp
+            .execute_function(func_id)
+            .expect("host program should run");
+        assert_eq!(
+            result.as_i64(),
+            42,
+            "nested script `7 * 6` should marshal back through the outcome handle"
+        );
+    }
+
+    /// Same vertical slice, but the host module is serialized and deserialized
+    /// before running — the path the stdlib actually takes (archive store +
+    /// linker decode→re-encode).  Regression for the Extended-sub-op
+    /// operand-loss bug: an in-memory run (above) passes even when the decoder
+    /// drops the script-op operands, because it never round-trips; this test
+    /// fails unless the decoder reads + advances past them.
+    #[test]
+    fn end_to_end_eval_survives_serialization_roundtrip() {
+        let hook = lite_hook();
+        install_compiler_hook(hook.clone());
+
+        let outer = r#"
+            fn main() -> Int {
+                let e = @intrinsic("script_engine_new");
+                let o = @intrinsic("script_engine_eval", e, "fn main() -> Int { 7 * 6 }");
+                let n = @intrinsic("script_outcome_as_int", o);
+                @intrinsic("script_outcome_free", o);
+                @intrinsic("script_engine_free", e);
+                n
+            }
+        "#;
+
+        let module = hook(outer).expect("host program should compile");
+        // Round-trip through (de)serialization before running.
+        let bytes = crate::serialize::serialize_module(&module).expect("serialize");
+        let module = crate::deserialize::deserialize_module(&bytes).expect("deserialize");
+        let module = Arc::new(module);
+
+        let func_id = module
+            .find_function_by_unique_bare_suffix("main")
+            .expect("host main exists");
+        let mut interp = Interpreter::new(module);
+        let result = interp
+            .execute_function(func_id)
+            .expect("host program should run");
+        assert_eq!(
+            result.as_i64(),
+            42,
+            "script-op operands must survive serialization round-trip"
+        );
+    }
+}

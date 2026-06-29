@@ -4948,6 +4948,48 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     }
                     Ok(Instruction::Extended { sub_op, operands })
                 }
+                // Embedded scripting sub-ops (0x20-0x2F, `core.script`) carry
+                // register operands (dest-first for value-returning ops). Like
+                // ProcessExit, decode them here so the operands survive the
+                // archive round-trip and reach the dispatch handler intact.
+                // Counts mirror the emit in
+                // `codegen::expressions::emit_intrinsic_instructions`:
+                //   new / engine_free / outcome_free → 1 reg,
+                //   outcome accessors (is_ok/kind/as_*) → 2 regs (dst, outcome),
+                //   eval → 3 regs (dst, engine, source).
+                Some(ExtendedSubOpcode::ScriptEngineNew)
+                | Some(ExtendedSubOpcode::ScriptEngineFree)
+                | Some(ExtendedSubOpcode::ScriptOutcomeFree) => {
+                    let operands = decode_extended_reg_operands(data, offset, 1)?;
+                    Ok(Instruction::Extended { sub_op, operands })
+                }
+                Some(ExtendedSubOpcode::ScriptOutcomeIsOk)
+                | Some(ExtendedSubOpcode::ScriptOutcomeKind)
+                | Some(ExtendedSubOpcode::ScriptOutcomeAsInt)
+                | Some(ExtendedSubOpcode::ScriptOutcomeAsFloat)
+                | Some(ExtendedSubOpcode::ScriptOutcomeAsBool)
+                | Some(ExtendedSubOpcode::ScriptOutcomeAsText)
+                | Some(ExtendedSubOpcode::ScriptOutcomeError)
+                | Some(ExtendedSubOpcode::ScriptOutcomeStdout)
+                | Some(ExtendedSubOpcode::ScriptGlobalKind)
+                | Some(ExtendedSubOpcode::ScriptGlobalInt)
+                | Some(ExtendedSubOpcode::ScriptGlobalText) => {
+                    let operands = decode_extended_reg_operands(data, offset, 2)?;
+                    Ok(Instruction::Extended { sub_op, operands })
+                }
+                // 3 regs: eval (dst, engine, source) and the host set-global
+                // ops (engine, name, value).
+                Some(ExtendedSubOpcode::ScriptEngineEval)
+                | Some(ExtendedSubOpcode::ScriptEngineSetGlobalInt)
+                | Some(ExtendedSubOpcode::ScriptEngineSetGlobalText) => {
+                    let operands = decode_extended_reg_operands(data, offset, 3)?;
+                    Ok(Instruction::Extended { sub_op, operands })
+                }
+                // 4 regs: dst, mem, instr, time.
+                Some(ExtendedSubOpcode::ScriptEngineNewSandboxed) => {
+                    let operands = decode_extended_reg_operands(data, offset, 4)?;
+                    Ok(Instruction::Extended { sub_op, operands })
+                }
                 // Reserved (0x00) and unknown future sub-ops remain
                 // zero-operand carriers; the dispatch handler reads any
                 // operands from the stream at execution time.
@@ -5550,6 +5592,33 @@ fn decode_extended_operands(data: &[u8], offset: &mut usize) -> VbcResult<Vec<u8
     let bytes = data[*offset..*offset + len].to_vec();
     *offset += len;
     Ok(bytes)
+}
+
+/// Decode `n` register operands of a generic `Opcode::Extended` sub-op,
+/// capturing their raw short/long bytes and advancing the stream.
+///
+/// `Instruction::Extended` carries operands with NO length prefix — the sub-op
+/// alone determines the count (see the encoder in `encode_instruction`).  So,
+/// like the `ProcessExit` arm, any sub-op that carries register operands must
+/// decode them explicitly here: this both advances the stream past them and
+/// preserves them across the archive decode→re-encode round-trip (and for AOT
+/// lowering / disassembly).  Each register is one byte in short form, or two
+/// bytes when the high bit of the first byte is set (the same scheme the
+/// codegen emits).
+fn decode_extended_reg_operands(
+    data: &[u8],
+    offset: &mut usize,
+    n: usize,
+) -> VbcResult<Vec<u8>> {
+    let mut operands = Vec::with_capacity(n * 2);
+    for _ in 0..n {
+        let first = decode_u8(data, offset)?;
+        operands.push(first);
+        if first & 0x80 != 0 {
+            operands.push(decode_u8(data, offset)?);
+        }
+    }
+    Ok(operands)
 }
 
 /// Decodes a TypeRef.
@@ -7928,6 +7997,48 @@ mod tests {
         let decoded = decode_instruction(&encoded, &mut offset).expect("decode");
         assert_eq!(offset, encoded.len());
         assert_eq!(decoded, instr);
+    }
+
+    #[test]
+    fn test_extended_script_subops_operands_roundtrip() {
+        // Regression: scripting Extended sub-ops (0x20-0x2F) carry register
+        // operands with NO length prefix, so the decoder must read the right
+        // number of registers per sub-op AND advance the stream. Without this
+        // the operands are dropped and the stream desyncs when a module
+        // round-trips through the archive / linker (decode→re-encode) — which
+        // is exactly how the stdlib reaches a host program. Operand counts
+        // mirror the codegen emit: new/engine_free/outcome_free=1,
+        // outcome accessors=2 (dst, outcome), eval=3 (dst, engine, source).
+
+        // 3-reg: script_engine_eval — explicit wire-format pin.
+        let eval = Instruction::Extended {
+            sub_op: ExtendedSubOpcode::ScriptEngineEval.to_byte(),
+            operands: vec![3, 4, 5],
+        };
+        let mut encoded = Vec::new();
+        encode_instruction(&eval, &mut encoded);
+        assert_eq!(encoded, vec![0x1F, 0x22, 3, 4, 5]);
+        let mut offset = 0;
+        let decoded = decode_instruction(&encoded, &mut offset).expect("decode eval");
+        assert_eq!(offset, encoded.len(), "decoder must consume all operand bytes");
+        assert_eq!(decoded, eval, "eval operands must survive the round-trip");
+
+        // 2-reg accessor and 1-reg lifecycle ops.
+        test_roundtrip(&Instruction::Extended {
+            sub_op: ExtendedSubOpcode::ScriptOutcomeAsInt.to_byte(),
+            operands: vec![7, 9],
+        });
+        test_roundtrip(&Instruction::Extended {
+            sub_op: ExtendedSubOpcode::ScriptEngineNew.to_byte(),
+            operands: vec![2],
+        });
+        // Long-form register (>= 128) is two bytes (0x80|high, low); the
+        // decoder's per-register short/long handling must still round-trip.
+        // Here outcome-reg 300 = [0x81, 0x2C], dst-reg 5 = [5].
+        test_roundtrip(&Instruction::Extended {
+            sub_op: ExtendedSubOpcode::ScriptOutcomeIsOk.to_byte(),
+            operands: vec![5, 0x81, 0x2C],
+        });
     }
 
     #[test]
