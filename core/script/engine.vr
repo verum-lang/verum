@@ -1,0 +1,141 @@
+// =============================================================================
+// core/script/engine.vr - Embedded Scripting Engine (ergonomic API)
+// =============================================================================
+// Layer: Stdlib (4)
+// Dependencies: core.intrinsics.runtime.scripting
+//
+// The user-facing API for embedding Verum as a scripting language inside a
+// Verum host application — the capability a game engine gets from embedding
+// Lua, built on Verum's own VBC interpreter.
+//
+//   let engine = Engine.new();
+//   match engine.eval("fn main() -> Int { 7 * 6 }") {
+//       ScriptResult.Ok(ScriptValue.Int(n)) => print(f"script returned {n}"),
+//       ScriptResult.Err => print("script failed"),
+//       _ => {},
+//   };
+//
+// This is a thin, safe veneer over the `script_*` intrinsics: it owns the
+// engine/outcome handles and frees them deterministically (the engine via
+// Drop, each outcome at the end of `eval`).  No second VM, heap, or sandbox
+// is introduced — `Engine` drives the same VBC interpreter the host runs on.
+//
+// Phase 0 marshals scalar return values (Unit/Bool/Int/Float).  Text/List/Map
+// values and host-function registration land in subsequent phases.
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LApp,
+    lifecycle: Lifecycle.Theorem("v0.1")
+)
+module core.script.engine;
+
+mount core.intrinsics.runtime.scripting.*;
+
+// =============================================================================
+// Values crossing the host <-> script boundary
+// =============================================================================
+
+/// A value returned by a script, marshaled into the host.
+///
+/// Phase 0 covers the scalar kinds; `Unknown` stands in for heap objects
+/// (Text/List/Map/references) whose richer marshaling arrives in Phase 1.
+public type ScriptValue is
+    | Nil
+    | Bool(Bool)
+    | Int(Int)
+    | Float(Float)
+    | Text(Text)
+    | Unknown;
+
+/// The result of evaluating a script. `Err` carries the failure message.
+public type ScriptResult is
+    | Ok(ScriptValue)
+    | Err(Text);
+
+// =============================================================================
+// Engine
+// =============================================================================
+
+/// An isolated script-execution world.  Owns a host-side `ScriptEngine`
+/// handle; freed automatically when the `Engine` goes out of scope.
+public type Engine is {
+    raw: RawScriptEngine,
+};
+
+implement Engine {
+    /// Create an engine with default (permissive) limits.
+    public fn new() -> Engine {
+        Engine { raw: script_engine_new() }
+    }
+
+    /// Create a sandboxed engine with resource limits (each `0` = unlimited):
+    /// `memory_limit` bytes, `instruction_limit` fuel, `time_limit_ms`
+    /// wall-clock. A script that exceeds a limit fails with an error outcome.
+    public fn sandboxed(
+        memory_limit: USize,
+        instruction_limit: UInt64,
+        time_limit_ms: UInt64,
+    ) -> Engine {
+        Engine {
+            raw: script_engine_new_sandboxed(memory_limit, instruction_limit, time_limit_ms),
+        }
+    }
+
+    /// Set an `Int` global the next `eval` can read (via the script-side
+    /// `script_global_int(name)`). The host's channel for passing data in.
+    public fn set_int(&self, name: Text, value: Int) {
+        script_engine_set_global_int(self.raw, name, value);
+    }
+
+    /// Set a `Text` global the next `eval` can read (via the script-side
+    /// `script_global_text(name)`).
+    public fn set_text(&self, name: Text, value: Text) {
+        script_engine_set_global_text(self.raw, name, value);
+    }
+
+    /// Compile and run `source` (entry `main`), returning its marshaled value
+    /// or an error message.  The intermediate outcome handle is freed before
+    /// return.
+    public fn eval(&self, source: Text) -> ScriptResult {
+        let outcome = script_engine_eval(self.raw, source);
+        let result = if script_outcome_is_ok(outcome) {
+            ScriptResult.Ok(marshal_outcome(outcome))
+        } else {
+            ScriptResult.Err(script_outcome_error(outcome))
+        };
+        script_outcome_free(outcome);
+        result
+    }
+}
+
+implement Drop for Engine {
+    fn drop(&mut self) {
+        script_engine_free(self.raw);
+    }
+}
+
+// =============================================================================
+// Internal: outcome -> ScriptValue
+// =============================================================================
+
+/// Map a successful outcome's value to a `ScriptValue` using its kind tag.
+fn marshal_outcome(outcome: RawScriptOutcome) -> ScriptValue {
+    let kind = script_outcome_kind(outcome);
+    if kind == 1 {
+        ScriptValue.Bool(script_outcome_as_bool(outcome))
+    } else if kind == 2 {
+        ScriptValue.Int(script_outcome_as_int(outcome))
+    } else if kind == 3 {
+        ScriptValue.Float(script_outcome_as_float(outcome))
+    } else if kind == 4 {
+        ScriptValue.Text(script_outcome_as_text(outcome))
+    } else if kind == 0 {
+        ScriptValue.Nil
+    } else {
+        ScriptValue.Unknown
+    }
+}
