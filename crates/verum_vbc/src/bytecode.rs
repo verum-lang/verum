@@ -4976,8 +4976,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptGlobalKind)
                 | Some(ExtendedSubOpcode::ScriptGlobalInt)
                 | Some(ExtendedSubOpcode::ScriptGlobalText)
+                | Some(ExtendedSubOpcode::ScriptGlobalBool)
+                | Some(ExtendedSubOpcode::ScriptGlobalFloat)
                 | Some(ExtendedSubOpcode::ScriptSetInt)
-                | Some(ExtendedSubOpcode::ScriptSetText) => {
+                | Some(ExtendedSubOpcode::ScriptSetText)
+                | Some(ExtendedSubOpcode::ScriptSetBool)
+                | Some(ExtendedSubOpcode::ScriptSetFloat) => {
                     let operands = decode_extended_reg_operands(data, offset, 2)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
@@ -4986,6 +4990,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 Some(ExtendedSubOpcode::ScriptEngineEval)
                 | Some(ExtendedSubOpcode::ScriptEngineSetGlobalInt)
                 | Some(ExtendedSubOpcode::ScriptEngineSetGlobalText)
+                | Some(ExtendedSubOpcode::ScriptEngineSetGlobalBool)
+                | Some(ExtendedSubOpcode::ScriptEngineSetGlobalFloat)
                 | Some(ExtendedSubOpcode::ScriptEngineRegister)
                 | Some(ExtendedSubOpcode::ScriptHostCallInt)
                 | Some(ExtendedSubOpcode::ScriptWorldEval) => {

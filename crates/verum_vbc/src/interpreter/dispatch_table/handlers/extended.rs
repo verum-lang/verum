@@ -291,8 +291,23 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptWorldFree) => {
             super::script_runtime::handle_script_world_free(state)
         }
-        Some(ExtendedSubOpcode::ScriptSetInt) | Some(ExtendedSubOpcode::ScriptSetText) => {
+        Some(ExtendedSubOpcode::ScriptSetInt)
+        | Some(ExtendedSubOpcode::ScriptSetText)
+        | Some(ExtendedSubOpcode::ScriptSetBool)
+        | Some(ExtendedSubOpcode::ScriptSetFloat) => {
             super::script_runtime::handle_script_set_value(state)
+        }
+        Some(ExtendedSubOpcode::ScriptEngineSetGlobalBool) => {
+            super::script_runtime::handle_script_engine_set_global_bool(state)
+        }
+        Some(ExtendedSubOpcode::ScriptEngineSetGlobalFloat) => {
+            super::script_runtime::handle_script_engine_set_global_float(state)
+        }
+        Some(ExtendedSubOpcode::ScriptGlobalBool) => {
+            super::script_runtime::handle_script_global_bool(state)
+        }
+        Some(ExtendedSubOpcode::ScriptGlobalFloat) => {
+            super::script_runtime::handle_script_global_float(state)
         }
         None => Err(InterpreterError::NotImplemented {
             feature: "Extended sub-opcode",

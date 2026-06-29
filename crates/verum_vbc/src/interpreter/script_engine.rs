@@ -380,8 +380,26 @@ pub enum ScriptValueOwned {
     Float(f64),
     /// UTF-8 text, copied out of the script heap.
     Text(String),
-    /// A heap object not yet structurally marshaled (List/Map/record).
+    /// A heap object not yet structurally marshaled (Map/record). Tags 5 (List)
+    /// and 6 (Map) are reserved in the kind contract for structural marshaling.
     Other,
+}
+
+impl ScriptValueOwned {
+    /// The canonical `ScriptValue` kind tag — the single source of truth shared
+    /// by `script_outcome_kind` and `script_global_kind`:
+    /// `0`=Nil, `1`=Bool, `2`=Int, `3`=Float, `4`=Text, `5`=List, `6`=Map,
+    /// `7`=other/opaque.
+    pub fn kind(&self) -> i64 {
+        match self {
+            ScriptValueOwned::Nil => 0,
+            ScriptValueOwned::Bool(_) => 1,
+            ScriptValueOwned::Int(_) => 2,
+            ScriptValueOwned::Float(_) => 3,
+            ScriptValueOwned::Text(_) => 4,
+            ScriptValueOwned::Other => 7,
+        }
+    }
 }
 
 /// The result of running a script: its (owned) return value, captured stdout,
@@ -404,18 +422,10 @@ impl ScriptOutcome {
         self.error.is_none()
     }
 
-    /// A small tag describing [`value`](Self::value)'s kind, for the host's
-    /// marshaling layer: `0`=Nil, `1`=Bool, `2`=Int, `3`=Float, `4`=Text,
-    /// `5`=other heap object.
+    /// The canonical `ScriptValue` kind tag of [`value`](Self::value), for the
+    /// host's marshaling layer. See [`ScriptValueOwned::kind`].
     pub fn kind(&self) -> i64 {
-        match &self.value {
-            ScriptValueOwned::Nil => 0,
-            ScriptValueOwned::Bool(_) => 1,
-            ScriptValueOwned::Int(_) => 2,
-            ScriptValueOwned::Float(_) => 3,
-            ScriptValueOwned::Text(_) => 4,
-            ScriptValueOwned::Other => 5,
-        }
+        self.value.kind()
     }
 
     /// The value as an integer (valid when [`kind`](Self::kind) is `2`).
@@ -897,6 +907,27 @@ mod tests {
         let missing = engine
             .eval_to_outcome("fn main() -> Int { @intrinsic(\"script_global_int\", \"nope\") }");
         assert_eq!(missing.as_int(), 0);
+    }
+
+    /// The host<->script value exchange is complete over every scalar: Float
+    /// and Bool round-trip just like Int and Text.
+    #[test]
+    fn host_to_script_float_bool_exchange() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        engine.set_global("ratio", ScriptValueOwned::Float(1.5));
+        engine.set_global("flag", ScriptValueOwned::Bool(true));
+
+        let f = engine.eval_to_outcome(
+            "fn main() -> Float { @intrinsic(\"script_global_float\", \"ratio\") }",
+        );
+        assert_eq!(f.kind(), 3, "Float kind tag");
+        assert!((f.as_float() - 1.5).abs() < 1e-9, "script reads host Float");
+
+        let b = engine
+            .eval_to_outcome("fn main() -> Bool { @intrinsic(\"script_global_bool\", \"flag\") }");
+        assert_eq!(b.kind(), 1, "Bool kind tag");
+        assert!(b.as_bool(), "script reads host Bool");
     }
 
     /// Full vertical slice of host-function callbacks: a host program defines
