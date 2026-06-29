@@ -10493,6 +10493,26 @@ pub enum ExtendedSubOpcode {
     /// re-entering the host interpreter.
     /// Format: `[0x1F][0x33][reg:dst][reg:name][reg:arg]`.
     ScriptHostCallInt = 0x33,
+
+    // Shared-world (P2): a persistent interpreter where scripts share data by
+    // reference (zero-copy) through the shared-global table.
+    /// Create a persistent shared world. Format: `[0x1F][0x34][reg:dst]`.
+    ScriptWorldNew = 0x34,
+
+    /// Compile + run a script on a world's persistent interpreter.
+    /// Format: `[0x1F][0x35][reg:dst][reg:world][reg:src]`.
+    ScriptWorldEval = 0x35,
+
+    /// Destroy a shared world. Format: `[0x1F][0x36][reg:world]`.
+    ScriptWorldFree = 0x36,
+
+    /// Script writes an `Int` into the shared-global table (visible to other
+    /// scripts in the same world). Format: `[0x1F][0x37][reg:name][reg:value]`.
+    ScriptSetInt = 0x37,
+
+    /// Script writes a `Text` into the shared-global table (shared BY
+    /// REFERENCE within a world). Format: `[0x1F][0x38][reg:name][reg:value]`.
+    ScriptSetText = 0x38,
 }
 
 impl ExtendedSubOpcode {
@@ -10523,6 +10543,11 @@ impl ExtendedSubOpcode {
             0x31 => Some(Self::ScriptGlobalText),
             0x32 => Some(Self::ScriptEngineRegister),
             0x33 => Some(Self::ScriptHostCallInt),
+            0x34 => Some(Self::ScriptWorldNew),
+            0x35 => Some(Self::ScriptWorldEval),
+            0x36 => Some(Self::ScriptWorldFree),
+            0x37 => Some(Self::ScriptSetInt),
+            0x38 => Some(Self::ScriptSetText),
             _ => None,
         }
     }
@@ -10558,6 +10583,11 @@ impl ExtendedSubOpcode {
             Self::ScriptGlobalText => "EXT_SCRIPT_GLOBAL_TEXT",
             Self::ScriptEngineRegister => "EXT_SCRIPT_ENGINE_REGISTER",
             Self::ScriptHostCallInt => "EXT_SCRIPT_HOST_CALL_INT",
+            Self::ScriptWorldNew => "EXT_SCRIPT_WORLD_NEW",
+            Self::ScriptWorldEval => "EXT_SCRIPT_WORLD_EVAL",
+            Self::ScriptWorldFree => "EXT_SCRIPT_WORLD_FREE",
+            Self::ScriptSetInt => "EXT_SCRIPT_SET_INT",
+            Self::ScriptSetText => "EXT_SCRIPT_SET_TEXT",
         }
     }
 }

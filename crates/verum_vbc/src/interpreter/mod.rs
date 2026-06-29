@@ -121,7 +121,7 @@ pub use permission::{
 // Embedded scripting engine — Rust backing for the `core.script` stdlib API.
 pub use script_engine::{
     compiler_hook_installed, install_compiler_hook, CompilerHook, ScriptEngine, ScriptError,
-    ScriptOutcome, ScriptValueOwned,
+    ScriptOutcome, ScriptValueOwned, ScriptWorld,
 };
 
 /// Executes a function using table-based dispatch.
@@ -562,29 +562,7 @@ impl Interpreter {
     /// Used by the scripting engine to marshal a script's `Text` result out of
     /// the (about-to-be-dropped) script interpreter into the host.
     pub fn read_text(&self, value: Value) -> Option<String> {
-        if value.is_small_string() {
-            return Some(value.as_small_string().as_str().to_string());
-        }
-        if value.is_nil() || !value.is_ptr() {
-            return None;
-        }
-        let ptr = value.as_ptr::<u8>();
-        if ptr.is_null() {
-            return None;
-        }
-        // SAFETY: a non-null pointer-tagged Value points at an `ObjectHeader`.
-        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
-        if header.type_id != crate::types::TypeId(0x0001) {
-            return None; // not a heap Text — caller marshals it as "other"
-        }
-        // SAFETY: a Text object's payload is `[len:u64][bytes]`, exactly what
-        // `alloc_string` writes; `len` is bounded by the allocation.
-        unsafe {
-            let data = ptr.add(heap::OBJECT_HEADER_SIZE);
-            let len = *(data as *const u64) as usize;
-            let bytes = std::slice::from_raw_parts(data.add(8), len);
-            Some(String::from_utf8_lossy(bytes).into_owned())
-        }
+        self.state.read_text(value)
     }
 
     /// Allocates a string on the interpreter heap and returns it as a Value.

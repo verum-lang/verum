@@ -4959,7 +4959,9 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 //   eval → 3 regs (dst, engine, source).
                 Some(ExtendedSubOpcode::ScriptEngineNew)
                 | Some(ExtendedSubOpcode::ScriptEngineFree)
-                | Some(ExtendedSubOpcode::ScriptOutcomeFree) => {
+                | Some(ExtendedSubOpcode::ScriptOutcomeFree)
+                | Some(ExtendedSubOpcode::ScriptWorldNew)
+                | Some(ExtendedSubOpcode::ScriptWorldFree) => {
                     let operands = decode_extended_reg_operands(data, offset, 1)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
@@ -4973,7 +4975,9 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptOutcomeStdout)
                 | Some(ExtendedSubOpcode::ScriptGlobalKind)
                 | Some(ExtendedSubOpcode::ScriptGlobalInt)
-                | Some(ExtendedSubOpcode::ScriptGlobalText) => {
+                | Some(ExtendedSubOpcode::ScriptGlobalText)
+                | Some(ExtendedSubOpcode::ScriptSetInt)
+                | Some(ExtendedSubOpcode::ScriptSetText) => {
                     let operands = decode_extended_reg_operands(data, offset, 2)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
@@ -4983,7 +4987,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptEngineSetGlobalInt)
                 | Some(ExtendedSubOpcode::ScriptEngineSetGlobalText)
                 | Some(ExtendedSubOpcode::ScriptEngineRegister)
-                | Some(ExtendedSubOpcode::ScriptHostCallInt) => {
+                | Some(ExtendedSubOpcode::ScriptHostCallInt)
+                | Some(ExtendedSubOpcode::ScriptWorldEval) => {
                     let operands = decode_extended_reg_operands(data, offset, 3)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }

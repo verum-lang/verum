@@ -532,6 +532,121 @@ fn build_value(interp: &mut Interpreter, owned: &ScriptValueOwned) -> Value {
     }
 }
 
+/// A persistent shared-world for **zero-copy interop between scripts** (P2).
+///
+/// Unlike [`ScriptEngine`] — which runs each script on a throwaway interpreter,
+/// so heaps don't outlive a run — a `ScriptWorld` holds ONE persistent
+/// interpreter. Its heap and its shared-global table survive across evals, so
+/// scripts running in the same world share data structures **by reference**: a
+/// `Text` / `List` / `Map` one script stores in the shared table is read by
+/// another as the SAME heap object — no copy, no serialization — with CBGR
+/// generation/epoch checks catching any stale reference at ~1ns. This is the
+/// interop tier that copy-at-the-boundary engines (Wasm, BEAM, V8 isolates)
+/// cannot offer; CBGR is what makes the shared reference safe.
+pub struct ScriptWorld {
+    /// The world's persistent shared table — the source of truth for data
+    /// shared between scripts, in owned form. Each `eval` runs on a FRESH
+    /// interpreter (so module-local string-constant resolution is never
+    /// corrupted by reuse) seeded from this table; what a script writes via
+    /// `script_set_*` is captured back into it. Scalars + Text share reliably.
+    /// (A future tier links scripts into one module via `VbcLinker` and runs
+    /// them on one heap, so large structures can be shared truly by-reference
+    /// — the zero-overhead interop tier the runtime linker already enables.)
+    shared: HashMap<String, ScriptValueOwned>,
+    config: InterpreterConfig,
+}
+
+impl ScriptWorld {
+    /// Create an empty world.
+    pub fn new() -> Self {
+        Self {
+            shared: HashMap::new(),
+            config: InterpreterConfig::default(),
+        }
+    }
+
+    /// Read a value the world currently holds in its shared table.
+    pub fn get_shared(&self, name: &str) -> Option<ScriptValueOwned> {
+        self.shared.get(name).cloned()
+    }
+
+    /// Compile and run `source` (entry `main`) in the world. The shared table
+    /// is seeded into the script before the run and updated from it after, so a
+    /// script sees what earlier scripts shared and can share its own.
+    pub fn eval(&mut self, source: &str) -> ScriptOutcome {
+        let module = match compile_via_hook(source) {
+            Ok(m) => Arc::new(m),
+            Err(error) => {
+                return ScriptOutcome {
+                    value: ScriptValueOwned::Nil,
+                    error: Some(error),
+                    stdout: String::new(),
+                };
+            }
+        };
+        let func_id = match module
+            .find_function_by_name("main")
+            .or_else(|| module.find_function_by_unique_bare_suffix("main"))
+        {
+            Some(f) => f,
+            None => {
+                return ScriptOutcome {
+                    value: ScriptValueOwned::Nil,
+                    error: Some(ScriptError::EntryNotFound("main".to_string())),
+                    stdout: String::new(),
+                };
+            }
+        };
+
+        let mut interp = match Interpreter::try_new_with_config(module, self.config.clone()) {
+            Ok(i) => i,
+            Err(e) => {
+                return ScriptOutcome {
+                    value: ScriptValueOwned::Nil,
+                    error: Some(ScriptError::Runtime(format!("{e:?}"))),
+                    stdout: String::new(),
+                };
+            }
+        };
+
+        // Seed the shared table into the script's readable globals.
+        for (name, owned) in &self.shared {
+            let v = build_value(&mut interp, owned);
+            interp.state.host_globals.insert(name.clone(), v);
+        }
+
+        let result = interp.execute_function_with_args(func_id, &[]);
+        let stdout = interp.state.get_stdout().to_string();
+
+        // Persist what the script wrote — owned snapshots captured AT WRITE TIME
+        // (the raw heap values do not survive the eval's frame teardown).
+        let writes: Vec<(String, ScriptValueOwned)> =
+            interp.state.shared_writes.drain().collect();
+        for (name, owned) in writes {
+            self.shared.insert(name, owned);
+        }
+
+        match result {
+            Ok(value) => ScriptOutcome {
+                value: extract_owned(&interp, value),
+                error: None,
+                stdout,
+            },
+            Err(e) => ScriptOutcome {
+                value: ScriptValueOwned::Nil,
+                error: Some(ScriptError::Runtime(format!("{e:?}"))),
+                stdout,
+            },
+        }
+    }
+}
+
+impl Default for ScriptWorld {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Marshal a script-interpreter `Value` into an owned [`ScriptValueOwned`],
 /// copying any heap text out while `interp` (and its heap) is still alive.
 fn extract_owned(interp: &Interpreter, value: Value) -> ScriptValueOwned {
@@ -734,6 +849,42 @@ mod tests {
             42,
             "script's host call double(21) must re-enter the host and return 42"
         );
+    }
+
+    /// P2: scripts in one `ScriptWorld` share data through its persistent
+    /// shared table — script B reads the Int and script C the Text that script
+    /// A stored, and the host can read the table directly.
+    #[test]
+    fn world_shares_data_between_scripts() {
+        install_compiler_hook(lite_hook());
+        let mut world = ScriptWorld::new();
+
+        // Script A shares an Int and a Text into the world.
+        let a = world.eval(
+            "fn main() { @intrinsic(\"script_set_int\", \"counter\", 41); \
+             @intrinsic(\"script_set_text\", \"greeting\", \"shared text value\") }",
+        );
+        assert!(a.is_ok(), "script A should run: {:?}", a.error);
+
+        // Script B reads the Int script A shared.
+        let b = world.eval("fn main() -> Int { @intrinsic(\"script_global_int\", \"counter\") + 1 }");
+        assert_eq!(b.as_int(), 42, "script B must see script A's shared Int");
+
+        // Script C reads the Text script A shared.
+        let c =
+            world.eval("fn main() -> Text { @intrinsic(\"script_global_text\", \"greeting\") }");
+        assert_eq!(c.kind(), 4, "shared value is Text");
+        assert_eq!(
+            c.as_text(),
+            "shared text value",
+            "script C must read script A's shared Text"
+        );
+
+        // The host can also read the world's shared table directly.
+        assert!(matches!(
+            world.get_shared("counter"),
+            Some(ScriptValueOwned::Int(41))
+        ));
     }
 
     #[test]

@@ -415,6 +415,13 @@ pub struct InterpreterState {
     /// `None` for ordinary execution.
     pub host_call_ctx: Option<HostCallContext>,
 
+    /// Owned snapshots of the values a script wrote via `script_set_*`,
+    /// captured AT WRITE TIME (while the heap value is valid). A `ScriptWorld`
+    /// reads these back after the eval to persist them across script runs —
+    /// reading them from the raw `host_globals` table afterwards would be too
+    /// late (a heap `Text` does not survive the eval's frame teardown).
+    pub shared_writes: HashMap<String, crate::interpreter::script_engine::ScriptValueOwned>,
+
     /// Register file.
     pub registers: RegisterFile,
 
@@ -2576,6 +2583,7 @@ impl InterpreterState {
             modules,
             host_globals: HashMap::new(),
             host_call_ctx: None,
+            shared_writes: HashMap::new(),
             registers: RegisterFile::new(),
             call_stack: CallStack::with_max_depth(config.max_stack_depth),
             heap: Heap::with_threshold(config.max_heap_size),
@@ -2703,6 +2711,36 @@ impl InterpreterState {
     /// Gets a loaded module by name.
     pub fn get_module(&self, name: &str) -> Option<&Arc<VbcModule>> {
         self.modules.get(name)
+    }
+
+    /// Reads a Verum `Text` value into an owned `String`, or `None` if it isn't
+    /// text. Handles the inline small-string form and the heap form
+    /// (`TypeId(0x0001)`, payload `[len:u64][utf8 bytes]`). This is the
+    /// canonical reader the scripting engine uses to capture a script's `Text`
+    /// while it is still valid.
+    pub fn read_text(&self, value: Value) -> Option<String> {
+        if value.is_small_string() {
+            return Some(value.as_small_string().as_str().to_string());
+        }
+        if value.is_nil() || !value.is_ptr() {
+            return None;
+        }
+        let ptr = value.as_ptr::<u8>();
+        if ptr.is_null() {
+            return None;
+        }
+        // SAFETY: a non-null pointer-tagged Value points at an `ObjectHeader`.
+        let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
+        if header.type_id != crate::types::TypeId(0x0001) {
+            return None;
+        }
+        // SAFETY: a Text object's payload is `[len:u64][bytes]` (see alloc_string).
+        unsafe {
+            let data = ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE);
+            let len = *(data as *const u64) as usize;
+            let bytes = std::slice::from_raw_parts(data.add(8), len);
+            Some(String::from_utf8_lossy(bytes).into_owned())
+        }
     }
 
     /// Gets a function descriptor by ID from the current module.

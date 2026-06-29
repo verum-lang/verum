@@ -4363,6 +4363,71 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Script: call a host-registered Int->Int function by name",
     },
     Intrinsic {
+        name: "script_world_new",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 0,
+        return_count: 1, // RawScriptWorld
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptWorldNew,
+        ),
+        mlir_op: None,
+        doc: "Create a persistent shared world for zero-copy script interop",
+    },
+    Intrinsic {
+        name: "script_world_eval",
+        category: IntrinsicCategory::Scripting,
+        hints: &[
+            IntrinsicHint::Alloc,
+            IntrinsicHint::SideEffect,
+            IntrinsicHint::IoEffect,
+            IntrinsicHint::MayTrap,
+        ],
+        param_count: 2, // world, source
+        return_count: 1, // RawScriptOutcome
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptWorldEval,
+        ),
+        mlir_op: None,
+        doc: "Run a script on a world's persistent interpreter (shared heap)",
+    },
+    Intrinsic {
+        name: "script_world_free",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptWorldFree,
+        ),
+        mlir_op: None,
+        doc: "Destroy a shared world",
+    },
+    Intrinsic {
+        name: "script_set_int",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // name, value
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptSetInt,
+        ),
+        mlir_op: None,
+        doc: "Script: write an Int into the shared-global table",
+    },
+    Intrinsic {
+        name: "script_set_text",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // name, value
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptSetText,
+        ),
+        mlir_op: None,
+        doc: "Script: write a Text into the shared-global table (shared by ref)",
+    },
+    Intrinsic {
         name: "debug_assert",
         category: IntrinsicCategory::Control,
         hints: &[IntrinsicHint::Cold],

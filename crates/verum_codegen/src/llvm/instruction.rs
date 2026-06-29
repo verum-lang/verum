@@ -22017,7 +22017,12 @@ fn lower_extended<'ctx>(
         | Some(ExtendedSubOpcode::ScriptGlobalInt)
         | Some(ExtendedSubOpcode::ScriptGlobalText)
         | Some(ExtendedSubOpcode::ScriptEngineRegister)
-        | Some(ExtendedSubOpcode::ScriptHostCallInt) => {
+        | Some(ExtendedSubOpcode::ScriptHostCallInt)
+        | Some(ExtendedSubOpcode::ScriptWorldNew)
+        | Some(ExtendedSubOpcode::ScriptWorldEval)
+        | Some(ExtendedSubOpcode::ScriptWorldFree)
+        | Some(ExtendedSubOpcode::ScriptSetInt)
+        | Some(ExtendedSubOpcode::ScriptSetText) => {
             ctx.emit_unimplemented_sub_op("Extended", sub_op);
             Ok(())
         }
