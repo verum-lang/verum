@@ -1,0 +1,147 @@
+// =============================================================================
+// core/intrinsics/runtime/scripting.vr - Embedded Scripting Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: VBC interpreter (Tier 0)
+//
+// Low-level intrinsics that expose the in-process scripting engine to Verum
+// code.  They are the binding surface beneath the ergonomic `core.script`
+// API (Engine / Script / Value); user code should prefer `core.script`.
+//
+// The engine is a thin wrapper over the VBC interpreter — compiling a Verum
+// source string and running it on a fresh interpreter, sharing no second VM,
+// heap, or sandbox.  See `crates/verum_vbc/src/interpreter/script_engine.rs`
+// and `.../dispatch_table/handlers/script_runtime.rs`.
+//
+// Tier note: source evaluation requires an installed compiler hook (present
+// whenever `verum_compiler` is linked — the CLI, the REPL, and any host app
+// that embeds the compiler).  In a stripped AOT binary with no compiler the
+// engine reports "source compilation unavailable" rather than mis-lowering.
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1")
+)
+module core.intrinsics.runtime.scripting;
+
+// =============================================================================
+// SECTION 1: Opaque Handles
+// =============================================================================
+// Host-owned, heap-allocated Rust objects surfaced to Verum as opaque
+// pointers (same pattern as the async runtime's Raw*Opaque handles).  Each is
+// created by an intrinsic and must be released by the matching `*_free`
+// intrinsic exactly once — the `core.script` wrappers do this from Drop.
+
+/// Opaque handle to a host-owned `ScriptEngine`.
+public type RawScriptEngine is (*const Byte);
+
+/// Opaque handle to a host-owned `ScriptOutcome` (a script's result + stdout).
+public type RawScriptOutcome is (*const Byte);
+
+// =============================================================================
+// SECTION 2: Engine Lifecycle
+// =============================================================================
+
+/// Create a new embedded script engine with default (permissive) limits.
+@intrinsic("script_engine_new")
+public fn script_engine_new() -> RawScriptEngine;
+
+/// Destroy a script engine. The handle must not be used afterwards.
+@intrinsic("script_engine_free")
+public fn script_engine_free(engine: RawScriptEngine);
+
+// =============================================================================
+// SECTION 3: Evaluation
+// =============================================================================
+
+/// Compile and run `source` (entry `main`) on `engine`, returning an opaque
+/// outcome handle carrying the result value, captured stdout, and any error.
+@intrinsic("script_engine_eval")
+public fn script_engine_eval(engine: RawScriptEngine, source: Text) -> RawScriptOutcome;
+
+// =============================================================================
+// SECTION 4: Outcome Inspection
+// =============================================================================
+
+/// Whether the script succeeded (no compile/runtime error).
+@intrinsic("script_outcome_is_ok")
+public fn script_outcome_is_ok(outcome: RawScriptOutcome) -> Bool;
+
+/// Dynamic-kind tag of the outcome's value:
+/// `0`=Unit, `1`=Bool, `2`=Int, `3`=Float, `4`=other.
+@intrinsic("script_outcome_kind")
+public fn script_outcome_kind(outcome: RawScriptOutcome) -> Int;
+
+/// The outcome's value as `Int` (valid when `kind == 2`).
+@intrinsic("script_outcome_as_int")
+public fn script_outcome_as_int(outcome: RawScriptOutcome) -> Int;
+
+/// The outcome's value as `Float` (valid when `kind == 3`).
+@intrinsic("script_outcome_as_float")
+public fn script_outcome_as_float(outcome: RawScriptOutcome) -> Float;
+
+/// The outcome's value as `Bool` (valid when `kind == 1`).
+@intrinsic("script_outcome_as_bool")
+public fn script_outcome_as_bool(outcome: RawScriptOutcome) -> Bool;
+
+/// The outcome's value as `Text` (valid when `kind == 4`); empty otherwise.
+@intrinsic("script_outcome_as_text")
+public fn script_outcome_as_text(outcome: RawScriptOutcome) -> Text;
+
+/// The outcome's error message as `Text` (empty when the script succeeded).
+@intrinsic("script_outcome_error")
+public fn script_outcome_error(outcome: RawScriptOutcome) -> Text;
+
+/// The outcome's captured stdout as `Text`.
+@intrinsic("script_outcome_stdout")
+public fn script_outcome_stdout(outcome: RawScriptOutcome) -> Text;
+
+/// Destroy an outcome handle. The handle must not be used afterwards.
+@intrinsic("script_outcome_free")
+public fn script_outcome_free(outcome: RawScriptOutcome);
+
+// =============================================================================
+// SECTION 5: Sandboxed Engine
+// =============================================================================
+
+/// Create a sandboxed engine with resource limits (each `0` = unlimited):
+/// `memory_limit` bytes, `instruction_limit` fuel, `time_limit_ms` wall-clock.
+/// A script that exceeds a limit aborts and yields a failed outcome.
+@intrinsic("script_engine_new_sandboxed")
+public fn script_engine_new_sandboxed(
+    memory_limit: USize,
+    instruction_limit: UInt64,
+    time_limit_ms: UInt64,
+) -> RawScriptEngine;
+
+// =============================================================================
+// SECTION 6: Host <-> Script Data Exchange
+// =============================================================================
+// The host seeds typed globals on an engine; the next script run reads them
+// via the `script_global_*` intrinsics (full host-function callbacks are a
+// shared-world / later-phase feature).
+
+/// Host: set an `Int` global on an engine (visible to the next script run).
+@intrinsic("script_engine_set_global_int")
+public fn script_engine_set_global_int(engine: RawScriptEngine, name: Text, value: Int);
+
+/// Host: set a `Text` global on an engine.
+@intrinsic("script_engine_set_global_text")
+public fn script_engine_set_global_text(engine: RawScriptEngine, name: Text, value: Text);
+
+/// Script: the dynamic-kind tag of a host global
+/// (`0`=Nil, `1`=Bool, `2`=Int, `3`=Float, `4`=Text); `0` if absent.
+@intrinsic("script_global_kind")
+public fn script_global_kind(name: Text) -> Int;
+
+/// Script: read a host global as `Int` (`0` if absent or not an Int).
+@intrinsic("script_global_int")
+public fn script_global_int(name: Text) -> Int;
+
+/// Script: read a host global as `Text` (empty if absent).
+@intrinsic("script_global_text")
+public fn script_global_text(name: Text) -> Text;

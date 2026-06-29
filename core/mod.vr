@@ -403,6 +403,12 @@ public module mesh;
 // re-export common Actic helpers in a follow-up.
 public module action;
 
+// Embedded scripting — Verum-as-a-scripting-language for host applications.
+// A host program compiles and runs Verum scripts at runtime, in-process, on
+// the same VBC interpreter it runs on (the capability a game engine gets from
+// embedding Lua). Backed by core.intrinsics.runtime.scripting.
+public module script;
+
 // =============================================================================
 // Layer A: Verification + Logic Foundations (Depends on: math, base, smt)
 // =============================================================================

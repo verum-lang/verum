@@ -1,0 +1,43 @@
+// =============================================================================
+// core/script/mod.vr — Embedded scripting surface for Verum host applications
+// =============================================================================
+// Layer: Standard Library / Scripting
+// =============================================================================
+//
+// Verum-as-a-scripting-language: a host Verum program can compile and run
+// Verum scripts at runtime, in-process, on the same VBC interpreter it runs
+// on — the capability a game engine gets from embedding Lua, with no second
+// VM, heap, or sandbox.
+//
+//   mount core.script.{Engine, ScriptValue, ScriptResult};
+//
+//   let engine = Engine.new();
+//   match engine.eval(user_script) {
+//       ScriptResult.Ok(ScriptValue.Int(n)) => use_result(n),
+//       ScriptResult.Err => report_failure(),
+//       _ => {},
+//   };
+//
+// Source evaluation runs whenever a compiler is linked into the process (the
+// CLI, the REPL, and any host embedding `verum_compiler`).  This is the
+// "scripting at the interpretation level" tier; precompiled-archive scripts,
+// host functions, capability sandboxing, and zero-copy cross-script interop
+// build on this foundation in later phases.
+//
+// Backed by `core.intrinsics.runtime.scripting` and, in the runtime,
+// `crates/verum_vbc/src/interpreter/script_engine.rs`.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LApp,
+    lifecycle: Lifecycle.Theorem("v0.1")
+)
+module core.script;
+
+/// Ergonomic engine API: `Engine`, `ScriptValue`, `ScriptResult`.
+public module engine;
+
+// Re-export the primary surface so callers can
+// `mount core.script.{Engine, ScriptValue, ScriptResult};`.
+public mount engine.{Engine, ScriptValue, ScriptResult};

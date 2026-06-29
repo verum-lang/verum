@@ -75,3 +75,7 @@ public mount io.*;
 /// memcmp/strlen/strcmp + scalar load/store (i32/i64/byte).  Migrated
 /// from `core/mem/raw_ops.vr` (#64 Phase 1.4).
 public mount mem_raw.*;
+
+/// Embedded scripting engine — compile + run Verum scripts at runtime on the
+/// VBC interpreter.  Backs the ergonomic `core.script` API.
+public mount scripting.*;
