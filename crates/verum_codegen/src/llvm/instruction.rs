@@ -22530,6 +22530,13 @@ fn build_maybe_int_wrap<'ctx>(
         .builder()
         .build_ptr_to_int(some_ptr, i64_ty, &format!("{}_some_int", label))
         .or_llvm_err()?;
+    // CRITICAL: lower_make_variant emits a malloc + OOM null-check that SPLITS
+    // the block (appends variant_oom/variant_ok). The edge into merge therefore
+    // originates from the CURRENT insert block (variant_ok), NOT some_bb. Using
+    // the stale some_bb in the phi makes phi-elimination insert the value copy
+    // into the wrong (dead) predecessor, so the merge reads a stale register
+    // (the payload value) instead of the Maybe pointer. Capture the true pred.
+    let some_pred_bb = ctx.builder().get_insert_block().unwrap_or(some_bb);
     ctx.builder()
         .build_unconditional_branch(merge_bb)
         .or_llvm_err()?;
@@ -22541,17 +22548,19 @@ fn build_maybe_int_wrap<'ctx>(
         .builder()
         .build_ptr_to_int(none_ptr, i64_ty, &format!("{}_none_int", label))
         .or_llvm_err()?;
+    let none_pred_bb = ctx.builder().get_insert_block().unwrap_or(none_bb);
     ctx.builder()
         .build_unconditional_branch(merge_bb)
         .or_llvm_err()?;
 
-    // Merge: phi node selects Some/None.
+    // Merge: phi node selects Some/None — incoming blocks are the REAL
+    // predecessors after the variant allocations split their blocks.
     ctx.builder().position_at_end(merge_bb);
     let phi = ctx
         .builder()
         .build_phi(i64_ty, &format!("{}_result", label))
         .or_llvm_err()?;
-    phi.add_incoming(&[(&some_int, some_bb), (&none_int, none_bb)]);
+    phi.add_incoming(&[(&some_int, some_pred_bb), (&none_int, none_pred_bb)]);
     Ok(phi.as_basic_value())
 }
 
