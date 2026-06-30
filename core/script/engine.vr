@@ -232,6 +232,12 @@ fn marshal_map_side(outcome: RawScriptOutcome, i: Int, is_key: Bool) -> ScriptVa
     } else if k == 4 {
         let t = if is_key { script_outcome_map_key_text(outcome, i) } else { script_outcome_map_value_text(outcome, i) };
         ScriptValue.Text(t)
+    } else if (k == 5) || (k == 6) {
+        // Nested List/Map: recurse on a sub-outcome handle.
+        let sub = if is_key { script_outcome_map_key_sub(outcome, i) } else { script_outcome_map_value_sub(outcome, i) };
+        let nested = marshal_outcome(sub);
+        script_outcome_free(sub);
+        nested
     } else if k == 0 {
         ScriptValue.Nil
     } else {
@@ -254,8 +260,8 @@ fn marshal_map(outcome: RawScriptOutcome) -> List<(ScriptValue, ScriptValue)> {
 }
 
 /// Rebuild a `List<ScriptValue>` from a list outcome, element by element. Each
-/// element's own kind tag selects the typed accessor; a nested list (kind 5)
-/// surfaces as `Unknown` (single-level marshaling).
+/// element's own kind tag selects the typed accessor; a nested `List`/`Map`
+/// element recurses through a sub-outcome handle (arbitrary depth).
 fn marshal_list(outcome: RawScriptOutcome) -> List<ScriptValue> {
     let len = script_outcome_list_len(outcome);
     let mut items: List<ScriptValue> = List.new();
@@ -270,6 +276,12 @@ fn marshal_list(outcome: RawScriptOutcome) -> List<ScriptValue> {
             ScriptValue.Float(script_outcome_list_elem_float(outcome, i))
         } else if k == 4 {
             ScriptValue.Text(script_outcome_list_elem_text(outcome, i))
+        } else if (k == 5) || (k == 6) {
+            // Nested List/Map: recurse on a sub-outcome handle.
+            let sub = script_outcome_list_elem_sub(outcome, i);
+            let nested = marshal_outcome(sub);
+            script_outcome_free(sub);
+            nested
         } else if k == 0 {
             ScriptValue.Nil
         } else {

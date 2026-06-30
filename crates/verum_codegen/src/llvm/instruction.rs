@@ -22107,7 +22107,10 @@ fn lower_extended<'ctx>(
         | Some(ExtendedSubOpcode::ScriptOutcomeMapValueInt)
         | Some(ExtendedSubOpcode::ScriptOutcomeMapValueFloat)
         | Some(ExtendedSubOpcode::ScriptOutcomeMapValueBool)
-        | Some(ExtendedSubOpcode::ScriptOutcomeMapValueText) => {
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapValueText)
+        | Some(ExtendedSubOpcode::ScriptOutcomeListElemSub)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapKeySub)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapValueSub) => {
             ctx.emit_unimplemented_sub_op("Extended", sub_op);
             Ok(())
         }

@@ -10577,6 +10577,15 @@ pub enum ExtendedSubOpcode {
     ScriptOutcomeMapValueBool = 0x4E,
     /// Entry `i`'s value as `Text`. `[0x1F][0x4F][reg:dst][reg:outcome][reg:idx]`.
     ScriptOutcomeMapValueText = 0x4F,
+
+    // Nested-collection marshaling: wrap a nested List/Map element in a fresh
+    // outcome handle so the host marshaler recurses to arbitrary depth.
+    /// List element `i` as a sub-outcome handle. `[0x1F][0x50][dst][outcome][idx]`.
+    ScriptOutcomeListElemSub = 0x50,
+    /// Map entry `i`'s key as a sub-outcome handle. `[0x1F][0x51][dst][outcome][idx]`.
+    ScriptOutcomeMapKeySub = 0x51,
+    /// Map entry `i`'s value as a sub-outcome handle. `[0x1F][0x52][dst][outcome][idx]`.
+    ScriptOutcomeMapValueSub = 0x52,
 }
 
 impl ExtendedSubOpcode {
@@ -10635,6 +10644,9 @@ impl ExtendedSubOpcode {
             0x4D => Some(Self::ScriptOutcomeMapValueFloat),
             0x4E => Some(Self::ScriptOutcomeMapValueBool),
             0x4F => Some(Self::ScriptOutcomeMapValueText),
+            0x50 => Some(Self::ScriptOutcomeListElemSub),
+            0x51 => Some(Self::ScriptOutcomeMapKeySub),
+            0x52 => Some(Self::ScriptOutcomeMapValueSub),
             _ => None,
         }
     }
@@ -10698,6 +10710,9 @@ impl ExtendedSubOpcode {
             Self::ScriptOutcomeMapValueFloat => "EXT_SCRIPT_OUTCOME_MAP_VALUE_FLOAT",
             Self::ScriptOutcomeMapValueBool => "EXT_SCRIPT_OUTCOME_MAP_VALUE_BOOL",
             Self::ScriptOutcomeMapValueText => "EXT_SCRIPT_OUTCOME_MAP_VALUE_TEXT",
+            Self::ScriptOutcomeListElemSub => "EXT_SCRIPT_OUTCOME_LIST_ELEM_SUB",
+            Self::ScriptOutcomeMapKeySub => "EXT_SCRIPT_OUTCOME_MAP_KEY_SUB",
+            Self::ScriptOutcomeMapValueSub => "EXT_SCRIPT_OUTCOME_MAP_VALUE_SUB",
         }
     }
 }

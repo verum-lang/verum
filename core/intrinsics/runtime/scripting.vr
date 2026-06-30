@@ -292,3 +292,13 @@ public fn script_outcome_map_value_float(outcome: RawScriptOutcome, i: Int) -> F
 public fn script_outcome_map_value_bool(outcome: RawScriptOutcome, i: Int) -> Bool;
 @intrinsic("script_outcome_map_value_text")
 public fn script_outcome_map_value_text(outcome: RawScriptOutcome, i: Int) -> Text;
+
+// Nested-collection marshaling: a List/Map element that is itself a List
+// (kind 5) or Map (kind 6) is wrapped in a fresh sub-outcome handle the host
+// recurses on with `marshal_outcome`, then frees with `script_outcome_free`.
+@intrinsic("script_outcome_list_elem_sub")
+public fn script_outcome_list_elem_sub(outcome: RawScriptOutcome, i: Int) -> RawScriptOutcome;
+@intrinsic("script_outcome_map_key_sub")
+public fn script_outcome_map_key_sub(outcome: RawScriptOutcome, i: Int) -> RawScriptOutcome;
+@intrinsic("script_outcome_map_value_sub")
+public fn script_outcome_map_value_sub(outcome: RawScriptOutcome, i: Int) -> RawScriptOutcome;
