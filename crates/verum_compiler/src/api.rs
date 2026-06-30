@@ -1170,32 +1170,29 @@ pub fn compile_to_vbc(source: &str) -> Result<verum_vbc::VbcModule, CompilationE
 /// expansion, so `@`-macros in scripts are not expanded (the common scripting
 /// surface — values, control flow, stdlib methods — needs none).
 pub fn compile_script_to_vbc(source: &str) -> Result<verum_vbc::VbcModule, CompilationError> {
-    use verum_ast::FileId;
-    use verum_lexer::Lexer;
-    use verum_vbc::codegen::CodegenConfig;
+    use crate::pipeline::CompilationPipeline;
+    use crate::{CompilerOptions, Session};
 
-    let file_id = FileId::new(0);
-    let lexer = Lexer::new(source, file_id);
-    let parser = verum_fast_parser::VerumParser::new();
-    let ast = parser.parse_module(lexer, file_id).map_err(|errs| {
-        let first = errs
-            .iter()
-            .next()
-            .map(|e| format!("{:?}", e))
-            .unwrap_or_default();
+    // Route the script through the FULL pipeline frontend — including
+    // `phase_type_check`'s stdlib type setup + inference — then codegen, but
+    // without executing it. This is what gives scripts the same type inference
+    // `verum run` programs get: array-literal-as-`List`, closure parameter /
+    // deref inference (`|acc, x| acc + *x`), and generic stdlib construction
+    // (`Map.new()`). `new_interpreter` selects NormalBuild + the embedded
+    // `LazyEmbedded` stdlib metadata that `phase_type_check` consumes.
+    let options = CompilerOptions {
+        input: std::path::PathBuf::from("<script>"),
+        ..Default::default()
+    };
+    let mut session = Session::new(options);
+    let mut pipeline = CompilationPipeline::new_interpreter(&mut session);
+    let vbc = pipeline.compile_string_to_vbc(source).map_err(|e| {
         CompilationError::new(
-            CompilationErrorKind::ParseError,
-            format!("parse error: {first}"),
+            CompilationErrorKind::CodegenError,
+            format!("script compilation failed: {e}"),
         )
     })?;
-
-    crate::single_module::compile_module_with_stdlib(&ast, CodegenConfig::new("script"), false)
-        .map_err(|e| {
-            CompilationError::new(
-                CompilationErrorKind::CodegenError,
-                format!("VBC codegen error: {e}"),
-            )
-        })
+    Ok((*vbc).clone())
 }
 
 static SCRIPTING_HOOK_INIT: std::sync::Once = std::sync::Once::new();

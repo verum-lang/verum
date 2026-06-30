@@ -100,6 +100,42 @@ impl<'s> CompilationPipeline<'s> {
         Ok(())
     }
 
+    /// Compile an in-memory source string to a runnable `VbcModule` through the
+    /// FULL frontend — including `phase_type_check`'s stdlib type setup and type
+    /// inference — but WITHOUT executing it.
+    ///
+    /// This is the compiler the embedded scripting engine (`core.script`) uses:
+    /// routing scripts through `phase_type_check` (the same path `verum run`
+    /// takes) is what gives them array-literal-as-`List` typing, closure
+    /// parameter / deref inference (`|acc, x| acc + *x`), and generic stdlib
+    /// construction (`Map.new()`) — none of which the codegen-only
+    /// `single_module::compile_module_with_stdlib` path can resolve.
+    pub fn compile_string_to_vbc(
+        &mut self,
+        source: &str,
+    ) -> Result<std::sync::Arc<verum_vbc::module::VbcModule>> {
+        // Frontend (mirrors `run_interpreter`'s essential pre-execution phases).
+        self.load_stdlib_modules()?;
+        let temp_path = PathBuf::from("<script>");
+        let file_id = self
+            .session
+            .load_source_string(source, temp_path.clone())
+            .context("Failed to load script source")?;
+        let mut module = self.phase_parse(file_id)?;
+        if std::env::var("VERUM_FULL_STDLIB").is_err() {
+            self.clear_non_compilable_stdlib_modules(Some(&module));
+        }
+        self.phase_safety_gate(&module)?;
+        self.phase_type_check(&module)?;
+        self.apply_resolved_call_targets(&mut module);
+        self.phase_cbgr_analysis(&module)?;
+
+        // Codegen: AST → VBC with the embedded stdlib archive linked.
+        let vbc = self.compile_ast_to_vbc(&module)?;
+        self.session.record_compiled_vbc(vbc.clone());
+        Ok(vbc)
+    }
+
     // compile_core + parse_stdlib_module_files + register_stdlib_types_globally
     // + compile_core_module_from_ast + is_forward_reference_to_later_module
     // + merge_stdlib_vbc_modules + build_stdlib_archive extracted to
