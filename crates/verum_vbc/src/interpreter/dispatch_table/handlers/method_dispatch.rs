@@ -5224,17 +5224,16 @@ pub(super) fn dispatch_primitive_method(
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let mut entries_data =
-                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let mut entries_data: *mut Value;
 
                     // Cap=0 guard: Map.new() that ran through the stdlib body
                     // (rather than the static-constructor intercept) returns
-                    // `cap: 0` and a null entries pointer. The resize path
-                    // multiplies cap by 2 — that's still zero, and `hash %
-                    // capacity` then divides by zero. Bootstrap the backing
-                    // array on first insert instead of relying on the static
-                    // constructor having allocated.
+                    // `cap: 0` and a non-pointer `entries` slot. This MUST run
+                    // before reading the `entries` slot — reading slot 2 as a
+                    // pointer on a cap==0 fresh map aborts with "Expected
+                    // pointer". The resize path also multiplies cap by 2 (still
+                    // zero) and `hash % capacity` would divide by zero — so
+                    // bootstrap the backing array on first insert.
                     if capacity == 0 {
                         const BOOTSTRAP_CAP: usize = 16;
                         let new_entries =
@@ -5254,6 +5253,12 @@ pub(super) fn dispatch_primitive_method(
                             *header_ptr.add(1) = Value::from_i64(BOOTSTRAP_CAP as i64);
                             *header_ptr.add(2) = Value::from_ptr(new_entries_ptr);
                         }
+                    } else {
+                        // Backing already allocated (static-constructor intercept
+                        // or a prior bootstrap): slot 2 is a real pointer.
+                        let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
+                        entries_data =
+                            unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     }
 
                     // Resize if load factor >= 75%
