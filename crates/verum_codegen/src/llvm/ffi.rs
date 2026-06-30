@@ -495,12 +495,17 @@ impl<'ctx> FfiLowering<'ctx> {
     ) -> Result<PointerValue<'ctx>> {
         self.stats.raw_ptr_ops += 1;
 
-        let i8_type = self.context.i8_type();
+        // Element-scaled pointer arithmetic. `ptr_offset`/`ptr_add` index by
+        // ELEMENT, not byte; every List/slice backing slot is an 8-byte
+        // NaN-boxed `Value`, so GEP over `i64` advances exactly one slot per unit
+        // `offset` (matches the interpreter's `offset * 8` and the registry
+        // contract "ptr + count * 8"). A raw i8/byte GEP under-advanced by 8x —
+        // `ptr_offset(p, 1)` read mid-slot garbage instead of element 1.
+        let i64_type = self.context.i64_type();
 
-        // Use GEP with i8 element type for byte-level pointer arithmetic
         let result = unsafe {
             builder
-                .build_gep(i8_type, ptr, &[offset], "ptr_add")
+                .build_gep(i64_type, ptr, &[offset], "ptr_add")
                 .or_llvm_err()?
         };
 
@@ -521,11 +526,13 @@ impl<'ctx> FfiLowering<'ctx> {
             .build_int_neg(offset, "neg_offset")
             .or_llvm_err()?;
 
-        let i8_type = self.context.i8_type();
+        // Element-scaled (see lower_ptr_add): i64 GEP advances one 8-byte slot
+        // per unit, so `ptr_sub(p, 1)` steps back exactly one element.
+        let i64_type = self.context.i64_type();
 
         let result = unsafe {
             builder
-                .build_gep(i8_type, ptr, &[neg_offset], "ptr_sub")
+                .build_gep(i64_type, ptr, &[neg_offset], "ptr_sub")
                 .or_llvm_err()?
         };
 

@@ -1098,17 +1098,25 @@ pub(in super::super) fn handle_ffi_extended(
             let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
             let offset = state.get_reg(offset_reg).as_i64();
 
+            // Element-scaled: ptr_offset/ptr_add index by ELEMENT, not byte.
+            // Every List/slice backing slot is an 8-byte NaN-boxed Value, so
+            // scale the element count to a byte offset (matches the AOT i64 GEP
+            // and the registry contract "ptr + count * 8"). A raw byte add here
+            // under-advanced by 8x — ptr_offset(p, 1) read mid-slot garbage.
+            let byte_offset = offset.checked_mul(8).ok_or(InterpreterError::IntegerOverflow {
+                operation: "PtrAdd",
+            })?;
+
             // SECURITY: `ptr.add(offset)` uses wrapping arithmetic on the raw
             // address, which can wrap around the address space when `offset`
             // is attacker-controlled, producing an arbitrary pointer. Use
-            // `checked_add_signed`/`checked_sub` on the address bits and
-            // return an error on overflow.
+            // checked arithmetic on the address bits and fail on overflow.
             let addr = ptr as usize;
-            let new_addr = if offset >= 0 {
-                addr.checked_add(offset as usize)
+            let new_addr = if byte_offset >= 0 {
+                addr.checked_add(byte_offset as usize)
             } else {
-                // offset is negative; subtract its absolute value from addr
-                let abs = (offset as i128).unsigned_abs() as usize;
+                // negative; subtract its absolute value from addr
+                let abs = (byte_offset as i128).unsigned_abs() as usize;
                 addr.checked_sub(abs)
             };
             let new_addr = new_addr.ok_or(InterpreterError::IntegerOverflow {
@@ -1129,14 +1137,20 @@ pub(in super::super) fn handle_ffi_extended(
             let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
             let offset = state.get_reg(offset_reg).as_i64();
 
+            // Element-scaled (see PtrAdd): scale the element count to a byte
+            // offset over 8-byte NaN-boxed slots.
+            let byte_offset = offset.checked_mul(8).ok_or(InterpreterError::IntegerOverflow {
+                operation: "PtrSub",
+            })?;
+
             // SECURITY: raw pointer `.sub`/`.add` wrap around the address
             // space with an attacker-controlled offset. Perform checked
             // arithmetic on the integer address and fail on overflow.
             let addr = ptr as usize;
-            let new_addr = if offset >= 0 {
-                addr.checked_sub(offset as usize)
+            let new_addr = if byte_offset >= 0 {
+                addr.checked_sub(byte_offset as usize)
             } else {
-                let abs = (offset as i128).unsigned_abs() as usize;
+                let abs = (byte_offset as i128).unsigned_abs() as usize;
                 addr.checked_add(abs)
             };
             let new_addr = new_addr.ok_or(InterpreterError::IntegerOverflow {
