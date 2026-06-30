@@ -30013,19 +30013,6 @@ fn lower_cmp_generic<'ctx>(
                 .or_llvm_err()?;
             cmp64.into()
         }
-    } else if ctx.is_float_register(a.0) && ctx.is_float_register(b.0) {
-        // Float equality uses fcmp (IEEE), not a raw-bit compare: +0.0 and -0.0
-        // are distinct bit patterns but equal values, and the int branch below
-        // would compare the raw i64 bits. Matches the interpreter's Eq and the
-        // `==` operator (CmpF). `assert_eq` lowers to CmpG, so this is its float
-        // path — closes float `law_fma_zero_addend` (a*b == -0.0 vs fma's +0.0).
-        let la = as_f64(ctx, lhs, "cmpg_fa")?;
-        let lb = as_f64(ctx, rhs, "cmpg_fb")?;
-        let pred = if eq { FloatPredicate::OEQ } else { FloatPredicate::ONE };
-        ctx.builder()
-            .build_float_compare(pred, la, lb, "cmpg_feq")
-            .or_llvm_err()?
-            .into()
     } else if lhs.is_int_value() && rhs.is_int_value() {
         let mut lhs_int = lhs.into_int_value();
         let mut rhs_int = rhs.into_int_value();
