@@ -5215,6 +5215,75 @@ pub(super) fn dispatch_primitive_method(
                     }
                     return Ok(Some(Value::from_bool(found)));
                 }
+                "resize" if is_map => {
+                    // Map.resize(new_cap). The stdlib `resize` body installs a
+                    // RAW `alloc_zeroed` Slot buffer (no ObjectHeader), which is
+                    // incompatible with the layout every Map intercept
+                    // (new/insert/get/len) uses — a heap-object backing whose
+                    // (key, value) Value pairs follow OBJECT_HEADER_SIZE. So a
+                    // map resized through the stdlib body (e.g. via `Map.from`)
+                    // reads back empty. Intercept it to grow into the intercept
+                    // layout instead, rehashing the existing entries.
+                    let caller_base = state.reg_base();
+                    let new_cap_arg =
+                        state.registers.get(caller_base, Reg(args.start.0)).as_i64();
+                    let new_cap = (new_cap_arg.max(1) as usize).next_power_of_two();
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let old_cap = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
+
+                    let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
+                    state.record_allocation();
+                    let new_entries_ptr = new_entries.as_ptr() as *mut u8;
+                    let new_entries_data =
+                        unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    for i in 0..(new_cap * 2) {
+                        unsafe {
+                            *new_entries_data.add(i) = Value::unit();
+                        }
+                    }
+
+                    // Rehash existing intercept-layout entries (skip empties).
+                    if old_cap > 0 {
+                        let old_entries_val = unsafe { *header_ptr.add(2) };
+                        if old_entries_val.is_ptr() && !old_entries_val.is_nil() {
+                            let old_entries_ptr = old_entries_val.as_ptr::<u8>();
+                            if !old_entries_ptr.is_null() {
+                                let old_entries_data = unsafe {
+                                    old_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                                };
+                                for i in 0..old_cap {
+                                    let old_key = unsafe { *old_entries_data.add(i * 2) };
+                                    if old_key.is_unit() {
+                                        continue;
+                                    }
+                                    let old_val =
+                                        unsafe { *old_entries_data.add(i * 2 + 1) };
+                                    let h = value_hash(old_key);
+                                    let mut ni = h % new_cap;
+                                    loop {
+                                        if unsafe {
+                                            (*new_entries_data.add(ni * 2)).is_unit()
+                                        } {
+                                            unsafe {
+                                                *new_entries_data.add(ni * 2) = old_key;
+                                                *new_entries_data.add(ni * 2 + 1) = old_val;
+                                            }
+                                            break;
+                                        }
+                                        ni = (ni + 1) % new_cap;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Install the new backing (count is unchanged — same entries).
+                    unsafe {
+                        *header_ptr.add(1) = Value::from_i64(new_cap as i64);
+                        *header_ptr.add(2) = Value::from_ptr(new_entries_ptr);
+                    }
+                    return Ok(Some(Value::unit()));
+                }
                 "insert" if is_map => {
                     // Map.insert(key, value) -> Maybe<V>
                     // Returns Some(old_value) if key existed, None otherwise
