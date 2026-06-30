@@ -401,8 +401,9 @@ pub enum ScriptValueOwned {
     Text(String),
     /// A list, structurally marshaled (elements copied out of the script heap).
     List(Vec<ScriptValueOwned>),
-    /// A heap object not yet structurally marshaled (Map/record). Tag 6 (Map)
-    /// is reserved in the kind contract for structural marshaling.
+    /// A map, structurally marshaled as (key, value) pairs.
+    Map(Vec<(ScriptValueOwned, ScriptValueOwned)>),
+    /// A heap object not yet structurally marshaled (record/reference).
     Other,
 }
 
@@ -419,6 +420,7 @@ impl ScriptValueOwned {
             ScriptValueOwned::Float(_) => 3,
             ScriptValueOwned::Text(_) => 4,
             ScriptValueOwned::List(_) => 5,
+            ScriptValueOwned::Map(_) => 6,
             ScriptValueOwned::Other => 7,
         }
     }
@@ -526,6 +528,74 @@ impl ScriptOutcome {
     pub fn list_elem_text(&self, i: i64) -> &str {
         match self.list_elem(i) {
             Some(ScriptValueOwned::Text(s)) => s,
+            _ => "",
+        }
+    }
+
+    /// The number of entries when the value is a `Map` (kind `6`); `0` otherwise.
+    pub fn map_len(&self) -> i64 {
+        match &self.value {
+            ScriptValueOwned::Map(entries) => entries.len() as i64,
+            _ => 0,
+        }
+    }
+
+    /// The `i`-th map entry as a `(key, value)` pair, or `None`.
+    fn map_pair(&self, i: i64) -> Option<&(ScriptValueOwned, ScriptValueOwned)> {
+        match &self.value {
+            ScriptValueOwned::Map(entries) if i >= 0 => entries.get(i as usize),
+            _ => None,
+        }
+    }
+
+    /// Canonical kind tag of entry `i`'s key / value (`0` if absent).
+    pub fn map_key_kind(&self, i: i64) -> i64 {
+        self.map_pair(i).map(|(k, _)| k.kind()).unwrap_or(0)
+    }
+    pub fn map_value_kind(&self, i: i64) -> i64 {
+        self.map_pair(i).map(|(_, v)| v.kind()).unwrap_or(0)
+    }
+
+    /// Entry `i`'s key / value as a typed scalar (default if absent / wrong type).
+    pub fn map_key_int(&self, i: i64) -> i64 {
+        match self.map_pair(i) {
+            Some((ScriptValueOwned::Int(n), _)) => *n,
+            _ => 0,
+        }
+    }
+    pub fn map_value_int(&self, i: i64) -> i64 {
+        match self.map_pair(i) {
+            Some((_, ScriptValueOwned::Int(n))) => *n,
+            _ => 0,
+        }
+    }
+    pub fn map_key_float(&self, i: i64) -> f64 {
+        match self.map_pair(i) {
+            Some((ScriptValueOwned::Float(f), _)) => *f,
+            _ => 0.0,
+        }
+    }
+    pub fn map_value_float(&self, i: i64) -> f64 {
+        match self.map_pair(i) {
+            Some((_, ScriptValueOwned::Float(f))) => *f,
+            _ => 0.0,
+        }
+    }
+    pub fn map_key_bool(&self, i: i64) -> bool {
+        matches!(self.map_pair(i), Some((ScriptValueOwned::Bool(true), _)))
+    }
+    pub fn map_value_bool(&self, i: i64) -> bool {
+        matches!(self.map_pair(i), Some((_, ScriptValueOwned::Bool(true))))
+    }
+    pub fn map_key_text(&self, i: i64) -> &str {
+        match self.map_pair(i) {
+            Some((ScriptValueOwned::Text(s), _)) => s,
+            _ => "",
+        }
+    }
+    pub fn map_value_text(&self, i: i64) -> &str {
+        match self.map_pair(i) {
+            Some((_, ScriptValueOwned::Text(s))) => s,
             _ => "",
         }
     }
@@ -693,11 +763,12 @@ impl ScriptEngine {
 /// `Text` on the script heap.  The inverse of [`extract_owned`].
 fn build_value(interp: &mut Interpreter, owned: &ScriptValueOwned) -> Value {
     match owned {
-        // Seeding a host `List` INTO a script (heap reconstruction) is not yet
-        // wired; reading a script's `List` out (extract_owned) is.
-        ScriptValueOwned::Nil | ScriptValueOwned::Other | ScriptValueOwned::List(_) => {
-            Value::unit()
-        }
+        // Seeding a host `List`/`Map` INTO a script (heap reconstruction) is not
+        // yet wired; reading them OUT (extract_owned) is.
+        ScriptValueOwned::Nil
+        | ScriptValueOwned::Other
+        | ScriptValueOwned::List(_)
+        | ScriptValueOwned::Map(_) => Value::unit(),
         ScriptValueOwned::Bool(b) => Value::from_bool(*b),
         ScriptValueOwned::Int(i) => Value::from_i64(*i),
         ScriptValueOwned::Float(f) => Value::from_f64(*f),
@@ -838,6 +909,13 @@ fn extract_owned(interp: &Interpreter, value: Value) -> ScriptValueOwned {
             items
                 .into_iter()
                 .map(|elem| extract_owned(interp, elem))
+                .collect(),
+        )
+    } else if let Some(pairs) = interp.state.map_entries(value) {
+        ScriptValueOwned::Map(
+            pairs
+                .into_iter()
+                .map(|(k, v)| (extract_owned(interp, k), extract_owned(interp, v)))
                 .collect(),
         )
     } else {

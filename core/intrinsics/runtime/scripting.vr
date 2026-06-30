@@ -255,3 +255,40 @@ public fn script_outcome_list_elem_bool(outcome: RawScriptOutcome, i: Int) -> Bo
 /// Host: list element `i` as `Text` (valid when its kind is `4`).
 @intrinsic("script_outcome_list_elem_text")
 public fn script_outcome_list_elem_text(outcome: RawScriptOutcome, i: Int) -> Text;
+
+// =============================================================================
+// SECTION 10: Structural marshaling of a `Map` outcome value
+// =============================================================================
+// When a script returns a `Map` (`script_outcome_kind == 6`), these navigate
+// its entries as `(key, value)` pairs by index; each side's own kind tag
+// selects which typed accessor to read.
+
+/// Host: entry count of a `Map` outcome value (`0` if not a map).
+@intrinsic("script_outcome_map_len")
+public fn script_outcome_map_len(outcome: RawScriptOutcome) -> Int;
+
+/// Host: kind tag of entry `i`'s key / value (canonical `ScriptValue` tag).
+@intrinsic("script_outcome_map_key_kind")
+public fn script_outcome_map_key_kind(outcome: RawScriptOutcome, i: Int) -> Int;
+@intrinsic("script_outcome_map_value_kind")
+public fn script_outcome_map_value_kind(outcome: RawScriptOutcome, i: Int) -> Int;
+
+/// Host: entry `i`'s key as a typed scalar.
+@intrinsic("script_outcome_map_key_int")
+public fn script_outcome_map_key_int(outcome: RawScriptOutcome, i: Int) -> Int;
+@intrinsic("script_outcome_map_key_float")
+public fn script_outcome_map_key_float(outcome: RawScriptOutcome, i: Int) -> Float;
+@intrinsic("script_outcome_map_key_bool")
+public fn script_outcome_map_key_bool(outcome: RawScriptOutcome, i: Int) -> Bool;
+@intrinsic("script_outcome_map_key_text")
+public fn script_outcome_map_key_text(outcome: RawScriptOutcome, i: Int) -> Text;
+
+/// Host: entry `i`'s value as a typed scalar.
+@intrinsic("script_outcome_map_value_int")
+public fn script_outcome_map_value_int(outcome: RawScriptOutcome, i: Int) -> Int;
+@intrinsic("script_outcome_map_value_float")
+public fn script_outcome_map_value_float(outcome: RawScriptOutcome, i: Int) -> Float;
+@intrinsic("script_outcome_map_value_bool")
+public fn script_outcome_map_value_bool(outcome: RawScriptOutcome, i: Int) -> Bool;
+@intrinsic("script_outcome_map_value_text")
+public fn script_outcome_map_value_text(outcome: RawScriptOutcome, i: Int) -> Text;

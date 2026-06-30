@@ -10553,6 +10553,30 @@ pub enum ExtendedSubOpcode {
 
     /// List element `i` as `Text`. Format: `[0x1F][0x44][reg:dst][reg:outcome][reg:idx]`.
     ScriptOutcomeListElemText = 0x44,
+
+    // Structural marshaling of a `Map` outcome value (entries as key/value pairs).
+    /// Entry count of a map outcome. Format: `[0x1F][0x45][reg:dst][reg:outcome]`.
+    ScriptOutcomeMapLen = 0x45,
+    /// Kind tag of entry `i`'s key. Format: `[0x1F][0x46][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeMapKeyKind = 0x46,
+    /// Entry `i`'s key as `Int`. `[0x1F][0x47][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeMapKeyInt = 0x47,
+    /// Entry `i`'s key as `Float`. `[0x1F][0x48][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeMapKeyFloat = 0x48,
+    /// Entry `i`'s key as `Bool`. `[0x1F][0x49][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeMapKeyBool = 0x49,
+    /// Entry `i`'s key as `Text`. `[0x1F][0x4A][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeMapKeyText = 0x4A,
+    /// Kind tag of entry `i`'s value. `[0x1F][0x4B][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeMapValueKind = 0x4B,
+    /// Entry `i`'s value as `Int`. `[0x1F][0x4C][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeMapValueInt = 0x4C,
+    /// Entry `i`'s value as `Float`. `[0x1F][0x4D][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeMapValueFloat = 0x4D,
+    /// Entry `i`'s value as `Bool`. `[0x1F][0x4E][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeMapValueBool = 0x4E,
+    /// Entry `i`'s value as `Text`. `[0x1F][0x4F][reg:dst][reg:outcome][reg:idx]`.
+    ScriptOutcomeMapValueText = 0x4F,
 }
 
 impl ExtendedSubOpcode {
@@ -10600,6 +10624,17 @@ impl ExtendedSubOpcode {
             0x42 => Some(Self::ScriptOutcomeListElemFloat),
             0x43 => Some(Self::ScriptOutcomeListElemBool),
             0x44 => Some(Self::ScriptOutcomeListElemText),
+            0x45 => Some(Self::ScriptOutcomeMapLen),
+            0x46 => Some(Self::ScriptOutcomeMapKeyKind),
+            0x47 => Some(Self::ScriptOutcomeMapKeyInt),
+            0x48 => Some(Self::ScriptOutcomeMapKeyFloat),
+            0x49 => Some(Self::ScriptOutcomeMapKeyBool),
+            0x4A => Some(Self::ScriptOutcomeMapKeyText),
+            0x4B => Some(Self::ScriptOutcomeMapValueKind),
+            0x4C => Some(Self::ScriptOutcomeMapValueInt),
+            0x4D => Some(Self::ScriptOutcomeMapValueFloat),
+            0x4E => Some(Self::ScriptOutcomeMapValueBool),
+            0x4F => Some(Self::ScriptOutcomeMapValueText),
             _ => None,
         }
     }
@@ -10652,6 +10687,17 @@ impl ExtendedSubOpcode {
             Self::ScriptOutcomeListElemFloat => "EXT_SCRIPT_OUTCOME_LIST_ELEM_FLOAT",
             Self::ScriptOutcomeListElemBool => "EXT_SCRIPT_OUTCOME_LIST_ELEM_BOOL",
             Self::ScriptOutcomeListElemText => "EXT_SCRIPT_OUTCOME_LIST_ELEM_TEXT",
+            Self::ScriptOutcomeMapLen => "EXT_SCRIPT_OUTCOME_MAP_LEN",
+            Self::ScriptOutcomeMapKeyKind => "EXT_SCRIPT_OUTCOME_MAP_KEY_KIND",
+            Self::ScriptOutcomeMapKeyInt => "EXT_SCRIPT_OUTCOME_MAP_KEY_INT",
+            Self::ScriptOutcomeMapKeyFloat => "EXT_SCRIPT_OUTCOME_MAP_KEY_FLOAT",
+            Self::ScriptOutcomeMapKeyBool => "EXT_SCRIPT_OUTCOME_MAP_KEY_BOOL",
+            Self::ScriptOutcomeMapKeyText => "EXT_SCRIPT_OUTCOME_MAP_KEY_TEXT",
+            Self::ScriptOutcomeMapValueKind => "EXT_SCRIPT_OUTCOME_MAP_VALUE_KIND",
+            Self::ScriptOutcomeMapValueInt => "EXT_SCRIPT_OUTCOME_MAP_VALUE_INT",
+            Self::ScriptOutcomeMapValueFloat => "EXT_SCRIPT_OUTCOME_MAP_VALUE_FLOAT",
+            Self::ScriptOutcomeMapValueBool => "EXT_SCRIPT_OUTCOME_MAP_VALUE_BOOL",
+            Self::ScriptOutcomeMapValueText => "EXT_SCRIPT_OUTCOME_MAP_VALUE_TEXT",
         }
     }
 }

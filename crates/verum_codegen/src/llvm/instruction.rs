@@ -22096,7 +22096,18 @@ fn lower_extended<'ctx>(
         | Some(ExtendedSubOpcode::ScriptOutcomeListElemInt)
         | Some(ExtendedSubOpcode::ScriptOutcomeListElemFloat)
         | Some(ExtendedSubOpcode::ScriptOutcomeListElemBool)
-        | Some(ExtendedSubOpcode::ScriptOutcomeListElemText) => {
+        | Some(ExtendedSubOpcode::ScriptOutcomeListElemText)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapLen)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapKeyKind)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapKeyInt)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapKeyFloat)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapKeyBool)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapKeyText)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapValueKind)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapValueInt)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapValueFloat)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapValueBool)
+        | Some(ExtendedSubOpcode::ScriptOutcomeMapValueText) => {
             ctx.emit_unimplemented_sub_op("Extended", sub_op);
             Ok(())
         }

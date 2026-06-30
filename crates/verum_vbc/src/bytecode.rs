@@ -4982,7 +4982,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptSetText)
                 | Some(ExtendedSubOpcode::ScriptSetBool)
                 | Some(ExtendedSubOpcode::ScriptSetFloat)
-                | Some(ExtendedSubOpcode::ScriptOutcomeListLen) => {
+                | Some(ExtendedSubOpcode::ScriptOutcomeListLen)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapLen) => {
                     let operands = decode_extended_reg_operands(data, offset, 2)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
@@ -5000,7 +5001,17 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptOutcomeListElemInt)
                 | Some(ExtendedSubOpcode::ScriptOutcomeListElemFloat)
                 | Some(ExtendedSubOpcode::ScriptOutcomeListElemBool)
-                | Some(ExtendedSubOpcode::ScriptOutcomeListElemText) => {
+                | Some(ExtendedSubOpcode::ScriptOutcomeListElemText)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapKeyKind)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapKeyInt)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapKeyFloat)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapKeyBool)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapKeyText)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapValueKind)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapValueInt)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapValueFloat)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapValueBool)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapValueText) => {
                     let operands = decode_extended_reg_operands(data, offset, 3)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }

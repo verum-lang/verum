@@ -327,6 +327,39 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptOutcomeListElemText) => {
             super::script_runtime::handle_script_outcome_list_elem_text(state)
         }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapLen) => {
+            super::script_runtime::handle_script_outcome_map_len(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapKeyKind) => {
+            super::script_runtime::handle_script_outcome_map_key_kind(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapKeyInt) => {
+            super::script_runtime::handle_script_outcome_map_key_int(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapKeyFloat) => {
+            super::script_runtime::handle_script_outcome_map_key_float(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapKeyBool) => {
+            super::script_runtime::handle_script_outcome_map_key_bool(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapKeyText) => {
+            super::script_runtime::handle_script_outcome_map_key_text(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapValueKind) => {
+            super::script_runtime::handle_script_outcome_map_value_kind(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapValueInt) => {
+            super::script_runtime::handle_script_outcome_map_value_int(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapValueFloat) => {
+            super::script_runtime::handle_script_outcome_map_value_float(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapValueBool) => {
+            super::script_runtime::handle_script_outcome_map_value_bool(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapValueText) => {
+            super::script_runtime::handle_script_outcome_map_value_text(state)
+        }
         None => Err(InterpreterError::NotImplemented {
             feature: "Extended sub-opcode",
             opcode: Some(Opcode::Extended),
