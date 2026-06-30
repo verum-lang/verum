@@ -555,9 +555,31 @@ pub(in super::super) fn handle_script_global_kind(
         Some(v) if v.is_int() => 2,
         Some(v) if v.is_float() => 3,
         Some(v) if state.read_text(v).is_some() => 4,
+        Some(v) if state.list_elements(v).is_some() => 5,
+        Some(v) if state.map_entries(v).is_some() => 6,
         Some(_) => 7,
     };
     state.set_reg(dst, Value::from_i64(kind));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_global_list(name) -> List` / `script_global_map(name) -> Map` — a
+/// host global as a heap collection (reconstructed into this script's heap by
+/// `build_value` during seeding). Returns the value as-is; absent → Unit (the
+/// caller should gate on `script_global_kind == 5/6`). Shared handler because a
+/// reconstructed List/Map is already the right heap object — only the `.vr`
+/// return type differs.
+pub(in super::super) fn handle_script_global_value(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let name = read_name_arg(state)?;
+    let v = state
+        .host_globals
+        .get(&name)
+        .copied()
+        .unwrap_or_else(Value::unit);
+    state.set_reg(dst, v);
     Ok(DispatchResult::Continue)
 }
 
@@ -769,18 +791,10 @@ pub(in super::super) fn handle_script_set_value(
     state.host_globals.insert(name.clone(), value);
     // Owned snapshot for cross-eval persistence (a `ScriptWorld` reads these
     // back). Captured NOW, while the heap value is valid — it does not survive
-    // the eval's frame teardown. `read_text` is the canonical Text reader.
-    let owned = if let Some(s) = state.read_text(value) {
-        ScriptValueOwned::Text(s)
-    } else if value.is_bool() {
-        ScriptValueOwned::Bool(value.as_bool())
-    } else if value.is_int() {
-        ScriptValueOwned::Int(value.as_i64())
-    } else if value.is_float() {
-        ScriptValueOwned::Float(value.as_f64())
-    } else {
-        ScriptValueOwned::Other
-    };
+    // the eval's frame teardown. `extract_owned` captures scalars, Text, List,
+    // and Map (to arbitrary depth), so a script can share a structured value,
+    // not only a scalar.
+    let owned = crate::interpreter::script_engine::extract_owned(state, value);
     state.shared_writes.insert(name, owned);
     Ok(DispatchResult::Continue)
 }
