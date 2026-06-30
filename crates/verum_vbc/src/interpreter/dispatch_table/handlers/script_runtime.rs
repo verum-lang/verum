@@ -370,6 +370,50 @@ pub(in super::super) fn handle_script_outcome_map_value_text(
     map_entry_text_accessor(state, |o, i| o.map_value_text(i).to_string())
 }
 
+// --- Nested-collection marshaling: sub-handle accessors ---
+//
+// When an element of a List/Map is itself a List (kind 5) or Map (kind 6), the
+// flat typed accessors can't read it. These wrap the owned nested value in a
+// fresh `ScriptOutcome` box and hand back its opaque handle, so the host's
+// `.vr` marshaler recurses (`marshal_outcome` on the sub-handle) to arbitrary
+// depth and frees it with `script_outcome_free`.
+
+/// Shared body: read (outcome, idx), clone the selected nested value via `f`,
+/// box it as a new outcome handle, and store the handle in `dst`.
+fn sub_outcome_accessor(
+    state: &mut InterpreterState,
+    f: impl FnOnce(&ScriptOutcome, i64) -> ScriptValueOwned,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let ptr = read_outcome_ptr(state)?;
+    let idx = read_reg(state)?;
+    let i = state.get_reg(idx).as_i64();
+    // SAFETY: `ptr` is a non-null live `Box<ScriptOutcome>` handle.
+    let sub_value = unsafe { f(&*ptr, i) };
+    let sub = Box::into_raw(Box::new(ScriptOutcome::from_value(sub_value)));
+    state.set_reg(dst, Value::from_ptr(sub as *mut u8));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_outcome_list_elem_sub(outcome, i) -> RawScriptOutcome`.
+pub(in super::super) fn handle_script_outcome_list_elem_sub(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    sub_outcome_accessor(state, |o, i| o.list_elem_owned(i))
+}
+/// `script_outcome_map_key_sub(outcome, i) -> RawScriptOutcome`.
+pub(in super::super) fn handle_script_outcome_map_key_sub(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    sub_outcome_accessor(state, |o, i| o.map_key_owned(i))
+}
+/// `script_outcome_map_value_sub(outcome, i) -> RawScriptOutcome`.
+pub(in super::super) fn handle_script_outcome_map_value_sub(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    sub_outcome_accessor(state, |o, i| o.map_value_owned(i))
+}
+
 /// `script_outcome_error(outcome) -> Text`. The error message, or empty.
 pub(in super::super) fn handle_script_outcome_error(
     state: &mut InterpreterState,

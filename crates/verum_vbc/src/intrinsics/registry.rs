@@ -4704,6 +4704,42 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Host: Map entry i's value as Text",
     },
     Intrinsic {
+        name: "script_outcome_list_elem_sub",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // outcome, idx
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeListElemSub,
+        ),
+        mlir_op: None,
+        doc: "Host: List element i as a sub-outcome handle (nested marshaling)",
+    },
+    Intrinsic {
+        name: "script_outcome_map_key_sub",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeMapKeySub,
+        ),
+        mlir_op: None,
+        doc: "Host: Map entry i's key as a sub-outcome handle (nested marshaling)",
+    },
+    Intrinsic {
+        name: "script_outcome_map_value_sub",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptOutcomeMapValueSub,
+        ),
+        mlir_op: None,
+        doc: "Host: Map entry i's value as a sub-outcome handle (nested marshaling)",
+    },
+    Intrinsic {
         name: "debug_assert",
         category: IntrinsicCategory::Control,
         hints: &[IntrinsicHint::Cold],

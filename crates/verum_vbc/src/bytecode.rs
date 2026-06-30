@@ -5011,7 +5011,10 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptOutcomeMapValueInt)
                 | Some(ExtendedSubOpcode::ScriptOutcomeMapValueFloat)
                 | Some(ExtendedSubOpcode::ScriptOutcomeMapValueBool)
-                | Some(ExtendedSubOpcode::ScriptOutcomeMapValueText) => {
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapValueText)
+                | Some(ExtendedSubOpcode::ScriptOutcomeListElemSub)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapKeySub)
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapValueSub) => {
                     let operands = decode_extended_reg_operands(data, offset, 3)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }

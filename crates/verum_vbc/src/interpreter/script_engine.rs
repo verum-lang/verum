@@ -452,6 +452,35 @@ impl ScriptOutcome {
         self.value.kind()
     }
 
+    /// Wrap a bare value in an outcome. Used for sub-handles when marshaling
+    /// nested collections: each nested `List`/`Map` element becomes its own
+    /// outcome the host's recursive marshaler reads with the same accessors,
+    /// so nesting works to arbitrary depth.
+    pub fn from_value(value: ScriptValueOwned) -> Self {
+        Self {
+            value,
+            error: None,
+            stdout: String::new(),
+        }
+    }
+
+    /// Clone the `i`-th list element's owned value (Nil if absent / not a list).
+    pub fn list_elem_owned(&self, i: i64) -> ScriptValueOwned {
+        self.list_elem(i).cloned().unwrap_or(ScriptValueOwned::Nil)
+    }
+
+    /// Clone the `i`-th map entry's key / value (Nil if absent / not a map).
+    pub fn map_key_owned(&self, i: i64) -> ScriptValueOwned {
+        self.map_pair(i)
+            .map(|(k, _)| k.clone())
+            .unwrap_or(ScriptValueOwned::Nil)
+    }
+    pub fn map_value_owned(&self, i: i64) -> ScriptValueOwned {
+        self.map_pair(i)
+            .map(|(_, v)| v.clone())
+            .unwrap_or(ScriptValueOwned::Nil)
+    }
+
     /// The value as an integer (valid when [`kind`](Self::kind) is `2`).
     pub fn as_int(&self) -> i64 {
         match &self.value {

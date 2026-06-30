@@ -360,6 +360,15 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptOutcomeMapValueText) => {
             super::script_runtime::handle_script_outcome_map_value_text(state)
         }
+        Some(ExtendedSubOpcode::ScriptOutcomeListElemSub) => {
+            super::script_runtime::handle_script_outcome_list_elem_sub(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapKeySub) => {
+            super::script_runtime::handle_script_outcome_map_key_sub(state)
+        }
+        Some(ExtendedSubOpcode::ScriptOutcomeMapValueSub) => {
+            super::script_runtime::handle_script_outcome_map_value_sub(state)
+        }
         None => Err(InterpreterError::NotImplemented {
             feature: "Extended sub-opcode",
             opcode: Some(Opcode::Extended),
