@@ -42,9 +42,9 @@ mount core.intrinsics.runtime.scripting.*;
 
 /// A value returned by a script, marshaled into the host.
 ///
-/// Scalars, `Text`, and `List` marshal fully; `Unknown` stands in for the
-/// remaining heap objects (`Map`/records/references). A nested list's inner
-/// elements that are themselves lists surface as `Unknown` (one level).
+/// Scalars, `Text`, `List`, and `Map` marshal fully; `Unknown` stands in for
+/// records / references. Nested collection elements that are themselves
+/// collections surface as `Unknown` (one level).
 public type ScriptValue is
     | Nil
     | Bool(Bool)
@@ -52,6 +52,7 @@ public type ScriptValue is
     | Float(Float)
     | Text(Text)
     | List(List<ScriptValue>)
+    | Map(List<(ScriptValue, ScriptValue)>)
     | Unknown;
 
 /// The result of evaluating a script. `Err` carries the failure message.
@@ -202,11 +203,54 @@ fn marshal_outcome(outcome: RawScriptOutcome) -> ScriptValue {
         ScriptValue.Text(script_outcome_as_text(outcome))
     } else if kind == 5 {
         ScriptValue.List(marshal_list(outcome))
+    } else if kind == 6 {
+        ScriptValue.Map(marshal_map(outcome))
     } else if kind == 0 {
         ScriptValue.Nil
     } else {
         ScriptValue.Unknown
     }
+}
+
+/// Build a `ScriptValue` for a map key/value from its kind tag plus the typed
+/// accessors. Reused for both sides of an entry via a leading `is_key` flag.
+fn marshal_map_side(outcome: RawScriptOutcome, i: Int, is_key: Bool) -> ScriptValue {
+    let k = if is_key {
+        script_outcome_map_key_kind(outcome, i)
+    } else {
+        script_outcome_map_value_kind(outcome, i)
+    };
+    if k == 1 {
+        let b = if is_key { script_outcome_map_key_bool(outcome, i) } else { script_outcome_map_value_bool(outcome, i) };
+        ScriptValue.Bool(b)
+    } else if k == 2 {
+        let n = if is_key { script_outcome_map_key_int(outcome, i) } else { script_outcome_map_value_int(outcome, i) };
+        ScriptValue.Int(n)
+    } else if k == 3 {
+        let f = if is_key { script_outcome_map_key_float(outcome, i) } else { script_outcome_map_value_float(outcome, i) };
+        ScriptValue.Float(f)
+    } else if k == 4 {
+        let t = if is_key { script_outcome_map_key_text(outcome, i) } else { script_outcome_map_value_text(outcome, i) };
+        ScriptValue.Text(t)
+    } else if k == 0 {
+        ScriptValue.Nil
+    } else {
+        ScriptValue.Unknown
+    }
+}
+
+/// Rebuild a map's `(key, value)` pairs from a map outcome, entry by entry.
+fn marshal_map(outcome: RawScriptOutcome) -> List<(ScriptValue, ScriptValue)> {
+    let len = script_outcome_map_len(outcome);
+    let mut entries: List<(ScriptValue, ScriptValue)> = List.new();
+    let mut i = 0;
+    while i < len {
+        let key = marshal_map_side(outcome, i, true);
+        let value = marshal_map_side(outcome, i, false);
+        entries.push((key, value));
+        i = i + 1;
+    }
+    entries
 }
 
 /// Rebuild a `List<ScriptValue>` from a list outcome, element by element. Each

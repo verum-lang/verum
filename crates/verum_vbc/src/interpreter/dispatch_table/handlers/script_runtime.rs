@@ -273,6 +273,103 @@ pub(in super::super) fn handle_script_outcome_list_elem_text(
     Ok(DispatchResult::Continue)
 }
 
+// --- Map outcome accessors (entries as key/value pairs) ---
+
+/// `script_outcome_map_len(outcome) -> Int`.
+pub(in super::super) fn handle_script_outcome_map_len(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let ptr = read_outcome_ptr(state)?;
+    // SAFETY: `ptr` is a non-null live `Box<ScriptOutcome>` handle.
+    let len = unsafe { (*ptr).map_len() };
+    state.set_reg(dst, Value::from_i64(len));
+    Ok(DispatchResult::Continue)
+}
+
+/// Shared body for the 3-reg `(outcome, idx)` map key/value accessors: reads the
+/// outcome ptr + index, calls `f`, stores its `Value` in `dst`.
+fn map_entry_accessor(
+    state: &mut InterpreterState,
+    f: impl FnOnce(&ScriptOutcome, i64) -> Value,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let ptr = read_outcome_ptr(state)?;
+    let idx = read_reg(state)?;
+    let i = state.get_reg(idx).as_i64();
+    // SAFETY: `ptr` is a non-null live `Box<ScriptOutcome>` handle.
+    let v = unsafe { f(&*ptr, i) };
+    state.set_reg(dst, v);
+    Ok(DispatchResult::Continue)
+}
+
+/// Shared body for the 3-reg map key/value Text accessors.
+fn map_entry_text_accessor(
+    state: &mut InterpreterState,
+    f: impl FnOnce(&ScriptOutcome, i64) -> String,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let ptr = read_outcome_ptr(state)?;
+    let idx = read_reg(state)?;
+    let i = state.get_reg(idx).as_i64();
+    // SAFETY: `ptr` is a non-null live `Box<ScriptOutcome>` handle.
+    let text = unsafe { f(&*ptr, i) };
+    let value = alloc_string_value(state, &text)?;
+    state.set_reg(dst, value);
+    Ok(DispatchResult::Continue)
+}
+
+pub(in super::super) fn handle_script_outcome_map_key_kind(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    map_entry_accessor(state, |o, i| Value::from_i64(o.map_key_kind(i)))
+}
+pub(in super::super) fn handle_script_outcome_map_value_kind(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    map_entry_accessor(state, |o, i| Value::from_i64(o.map_value_kind(i)))
+}
+pub(in super::super) fn handle_script_outcome_map_key_int(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    map_entry_accessor(state, |o, i| Value::from_i64(o.map_key_int(i)))
+}
+pub(in super::super) fn handle_script_outcome_map_value_int(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    map_entry_accessor(state, |o, i| Value::from_i64(o.map_value_int(i)))
+}
+pub(in super::super) fn handle_script_outcome_map_key_float(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    map_entry_accessor(state, |o, i| Value::from_f64(o.map_key_float(i)))
+}
+pub(in super::super) fn handle_script_outcome_map_value_float(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    map_entry_accessor(state, |o, i| Value::from_f64(o.map_value_float(i)))
+}
+pub(in super::super) fn handle_script_outcome_map_key_bool(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    map_entry_accessor(state, |o, i| Value::from_bool(o.map_key_bool(i)))
+}
+pub(in super::super) fn handle_script_outcome_map_value_bool(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    map_entry_accessor(state, |o, i| Value::from_bool(o.map_value_bool(i)))
+}
+pub(in super::super) fn handle_script_outcome_map_key_text(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    map_entry_text_accessor(state, |o, i| o.map_key_text(i).to_string())
+}
+pub(in super::super) fn handle_script_outcome_map_value_text(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    map_entry_text_accessor(state, |o, i| o.map_value_text(i).to_string())
+}
+
 /// `script_outcome_error(outcome) -> Text`. The error message, or empty.
 pub(in super::super) fn handle_script_outcome_error(
     state: &mut InterpreterState,
