@@ -40,7 +40,7 @@ use crate::module::VbcModule;
 use crate::module::FunctionId;
 use crate::value::Value;
 
-use super::state::{HostCallContext, InterpreterConfig};
+use super::state::{HostCallContext, InterpreterConfig, InterpreterState};
 use super::Interpreter;
 
 /// An installable source→VBC compiler.
@@ -767,7 +767,7 @@ impl ScriptEngine {
             .state
             .host_globals
             .iter()
-            .map(|(name, v)| (name.clone(), extract_owned(&interp, *v)))
+            .map(|(name, v)| (name.clone(), extract_owned(&interp.state, *v)))
             .collect();
         for (name, owned) in read_back {
             self.globals.insert(name, owned);
@@ -775,7 +775,7 @@ impl ScriptEngine {
 
         match result {
             Ok(value) => ScriptOutcome {
-                value: extract_owned(&interp, value),
+                value: extract_owned(&interp.state, value),
                 error: None,
                 stdout,
             },
@@ -788,21 +788,121 @@ impl ScriptEngine {
     }
 }
 
-/// Build a script-interpreter `Value` from an owned host value, allocating any
-/// `Text` on the script heap.  The inverse of [`extract_owned`].
+/// Build a script-interpreter `Value` from an owned host value, reconstructing
+/// `Text` / `List` / `Map` on the script heap. The inverse of [`extract_owned`]:
+/// lets a host seed structured globals INTO a script (and a `ScriptWorld` share
+/// `List`/`Map` between scripts by value).
 fn build_value(interp: &mut Interpreter, owned: &ScriptValueOwned) -> Value {
     match owned {
-        // Seeding a host `List`/`Map` INTO a script (heap reconstruction) is not
-        // yet wired; reading them OUT (extract_owned) is.
-        ScriptValueOwned::Nil
-        | ScriptValueOwned::Other
-        | ScriptValueOwned::List(_)
-        | ScriptValueOwned::Map(_) => Value::unit(),
+        ScriptValueOwned::Nil | ScriptValueOwned::Other => Value::unit(),
         ScriptValueOwned::Bool(b) => Value::from_bool(*b),
         ScriptValueOwned::Int(i) => Value::from_i64(*i),
         ScriptValueOwned::Float(f) => Value::from_f64(*f),
         ScriptValueOwned::Text(s) => interp.alloc_string(s).unwrap_or_else(|_| Value::unit()),
+        ScriptValueOwned::List(items) => build_list_value(interp, items),
+        ScriptValueOwned::Map(entries) => build_map_value(interp, entries),
     }
+}
+
+/// Reconstruct a `List` heap object (`[len, cap, backing]`, elements as Values
+/// after the backing's header) — inverse of `InterpreterState::list_elements`.
+fn build_list_value(interp: &mut Interpreter, items: &[ScriptValueOwned]) -> Value {
+    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
+    use crate::types::TypeId;
+    const VSIZE: usize = std::mem::size_of::<Value>();
+    let len = items.len();
+    let cap = len.max(1);
+    let obj = match interp.state.heap.alloc(TypeId::LIST, 3 * VSIZE) {
+        Ok(o) => o,
+        Err(_) => return Value::unit(),
+    };
+    interp.state.record_allocation();
+    let backing = match interp.state.heap.alloc_array(TypeId::LIST, cap) {
+        Ok(b) => b,
+        Err(_) => return Value::unit(),
+    };
+    interp.state.record_allocation();
+    let backing_ptr = backing.as_ptr() as *mut u8;
+    // Build each element first (a nested element may itself allocate; the heap
+    // is append-only so `backing_ptr` stays valid) and store it.
+    for (i, item) in items.iter().enumerate() {
+        let ev = build_value(interp, item);
+        // SAFETY: i < cap; backing has cap Value slots after its header.
+        unsafe { *(backing_ptr.add(OBJECT_HEADER_SIZE + i * VSIZE) as *mut Value) = ev };
+    }
+    let obj_ptr = obj.as_ptr() as *mut u8;
+    // SAFETY: a LIST object has 3 Value slots after its header.
+    unsafe {
+        let data = obj_ptr.add(OBJECT_HEADER_SIZE) as *mut Value;
+        *data = Value::from_i64(len as i64);
+        *data.add(1) = Value::from_i64(cap as i64);
+        *data.add(2) = Value::from_ptr(backing_ptr);
+    }
+    Value::from_ptr(obj_ptr)
+}
+
+/// Reconstruct a `Map` heap object (`[count, cap, entries]`; entries backing
+/// holds (key, value) Value pairs by open addressing, empty slot = Unit key) —
+/// inverse of `InterpreterState::map_entries`, matching the `Map.insert`
+/// intercept's layout. Source keys are already unique (they came from a real
+/// map), so no dedup probe is needed.
+fn build_map_value(
+    interp: &mut Interpreter,
+    entries: &[(ScriptValueOwned, ScriptValueOwned)],
+) -> Value {
+    use crate::interpreter::dispatch_table::handlers::memory_collections::value_hash;
+    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
+    use crate::types::TypeId;
+    const VSIZE: usize = std::mem::size_of::<Value>();
+    // Power-of-two capacity keeping the load factor under 75%.
+    let count = entries.len();
+    let mut cap = 16usize;
+    while cap < count * 2 {
+        cap *= 2;
+    }
+    let obj = match interp.state.heap.alloc(TypeId::MAP, 4 * VSIZE) {
+        Ok(o) => o,
+        Err(_) => return Value::unit(),
+    };
+    interp.state.record_allocation();
+    let entries_obj = match interp.state.heap.alloc_array(TypeId::UNIT, cap * 2) {
+        Ok(e) => e,
+        Err(_) => return Value::unit(),
+    };
+    interp.state.record_allocation();
+    let entries_ptr = entries_obj.as_ptr() as *mut u8;
+    let entries_data = unsafe { entries_ptr.add(OBJECT_HEADER_SIZE) as *mut Value };
+    for i in 0..(cap * 2) {
+        unsafe { *entries_data.add(i) = Value::unit() };
+    }
+    let mut live = 0usize;
+    for (k_owned, v_owned) in entries {
+        let key = build_value(interp, k_owned);
+        let val = build_value(interp, v_owned);
+        let mut idx = value_hash(key) % cap;
+        loop {
+            // SAFETY: idx < cap; entries backing has cap (key,value) pairs.
+            if unsafe { (*entries_data.add(idx * 2)).is_unit() } {
+                unsafe {
+                    *entries_data.add(idx * 2) = key;
+                    *entries_data.add(idx * 2 + 1) = val;
+                }
+                live += 1;
+                break;
+            }
+            idx = (idx + 1) % cap;
+        }
+    }
+    let obj_ptr = obj.as_ptr() as *mut u8;
+    // SAFETY: a MAP object has 4 Value slots after its header.
+    unsafe {
+        let data = obj_ptr.add(OBJECT_HEADER_SIZE) as *mut Value;
+        *data = Value::from_i64(live as i64);
+        *data.add(1) = Value::from_i64(cap as i64);
+        *data.add(2) = Value::from_ptr(entries_ptr);
+        *data.add(3) = Value::from_i64(0); // tombstones
+    }
+    Value::from_ptr(obj_ptr)
 }
 
 /// A persistent shared-world for **zero-copy interop between scripts** (P2).
@@ -901,7 +1001,7 @@ impl ScriptWorld {
 
         match result {
             Ok(value) => ScriptOutcome {
-                value: extract_owned(&interp, value),
+                value: extract_owned(&interp.state, value),
                 error: None,
                 stdout,
             },
@@ -921,8 +1021,12 @@ impl Default for ScriptWorld {
 }
 
 /// Marshal a script-interpreter `Value` into an owned [`ScriptValueOwned`],
-/// copying any heap text out while `interp` (and its heap) is still alive.
-fn extract_owned(interp: &Interpreter, value: Value) -> ScriptValueOwned {
+/// copying any heap text/structure out while the interpreter heap is still
+/// alive. Takes the `InterpreterState` directly (rather than `&Interpreter`) so
+/// it is reusable from dispatch handlers — e.g. `script_set_*`, which only holds
+/// `&mut InterpreterState`. `read_text` / `list_elements` / `map_entries` all
+/// live on the state, so nothing here needs the full interpreter.
+pub(crate) fn extract_owned(state: &InterpreterState, value: Value) -> ScriptValueOwned {
     if value.is_unit() || value.is_nil() {
         ScriptValueOwned::Nil
     } else if value.is_bool() {
@@ -931,20 +1035,20 @@ fn extract_owned(interp: &Interpreter, value: Value) -> ScriptValueOwned {
         ScriptValueOwned::Int(value.as_i64())
     } else if value.is_float() {
         ScriptValueOwned::Float(value.as_f64())
-    } else if let Some(s) = interp.read_text(value) {
+    } else if let Some(s) = state.read_text(value) {
         ScriptValueOwned::Text(s)
-    } else if let Some(items) = interp.state.list_elements(value) {
+    } else if let Some(items) = state.list_elements(value) {
         ScriptValueOwned::List(
             items
                 .into_iter()
-                .map(|elem| extract_owned(interp, elem))
+                .map(|elem| extract_owned(state, elem))
                 .collect(),
         )
-    } else if let Some(pairs) = interp.state.map_entries(value) {
+    } else if let Some(pairs) = state.map_entries(value) {
         ScriptValueOwned::Map(
             pairs
                 .into_iter()
-                .map(|(k, v)| (extract_owned(interp, k), extract_owned(interp, v)))
+                .map(|(k, v)| (extract_owned(state, k), extract_owned(state, v)))
                 .collect(),
         )
     } else {

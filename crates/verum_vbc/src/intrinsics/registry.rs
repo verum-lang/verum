@@ -4416,6 +4416,54 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Script: write an Int into the shared-global table",
     },
     Intrinsic {
+        name: "script_global_list",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1, // name
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptGlobalList,
+        ),
+        mlir_op: None,
+        doc: "Host: read a host global as a List (reconstructed on the script heap)",
+    },
+    Intrinsic {
+        name: "script_global_map",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptGlobalMap,
+        ),
+        mlir_op: None,
+        doc: "Host: read a host global as a Map (reconstructed on the script heap)",
+    },
+    Intrinsic {
+        name: "script_set_list",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2, // name, value
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptSetList,
+        ),
+        mlir_op: None,
+        doc: "Script: share a List into the world/host table",
+    },
+    Intrinsic {
+        name: "script_set_map",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2,
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptSetMap,
+        ),
+        mlir_op: None,
+        doc: "Script: share a Map into the world/host table",
+    },
+    Intrinsic {
         name: "script_set_text",
         category: IntrinsicCategory::Scripting,
         hints: &[IntrinsicHint::SideEffect],

@@ -224,6 +224,22 @@ public fn script_set_bool(name: Text, value: Bool);
 @intrinsic("script_set_float")
 public fn script_set_float(name: Text, value: Float);
 
+// Heap-collection globals (host→script seeding / script→world sharing). The
+// host (or an earlier script) seeds a `List`/`Map`; `build_value` reconstructs
+// it on this script's heap, and these read it back as a native collection. The
+// element type is the caller's — inferred from the binding, as with `List.new`.
+@intrinsic("script_global_list")
+public fn script_global_list<T>(name: Text) -> List<T>;
+@intrinsic("script_global_map")
+public fn script_global_map<K, V>(name: Text) -> Map<K, V>;
+
+/// Script: share a `List` / `Map` into the world/host table (read back by the
+/// host or another script via `script_global_list` / `script_global_map`).
+@intrinsic("script_set_list")
+public fn script_set_list<T>(name: Text, value: List<T>);
+@intrinsic("script_set_map")
+public fn script_set_map<K, V>(name: Text, value: Map<K, V>);
+
 // =============================================================================
 // SECTION 9: Structural marshaling of a `List` outcome value
 // =============================================================================

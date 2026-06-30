@@ -10586,6 +10586,16 @@ pub enum ExtendedSubOpcode {
     ScriptOutcomeMapKeySub = 0x51,
     /// Map entry `i`'s value as a sub-outcome handle. `[0x1F][0x52][dst][outcome][idx]`.
     ScriptOutcomeMapValueSub = 0x52,
+
+    // Host↔script seeding of heap collections (build_value reconstruction).
+    /// A host global as a `List`. `[0x1F][0x53][reg:dst][reg:name]`.
+    ScriptGlobalList = 0x53,
+    /// A host global as a `Map`. `[0x1F][0x54][reg:dst][reg:name]`.
+    ScriptGlobalMap = 0x54,
+    /// Script shares a `List` to the world/host. `[0x1F][0x55][reg:name][reg:value]`.
+    ScriptSetList = 0x55,
+    /// Script shares a `Map` to the world/host. `[0x1F][0x56][reg:name][reg:value]`.
+    ScriptSetMap = 0x56,
 }
 
 impl ExtendedSubOpcode {
@@ -10647,6 +10657,10 @@ impl ExtendedSubOpcode {
             0x50 => Some(Self::ScriptOutcomeListElemSub),
             0x51 => Some(Self::ScriptOutcomeMapKeySub),
             0x52 => Some(Self::ScriptOutcomeMapValueSub),
+            0x53 => Some(Self::ScriptGlobalList),
+            0x54 => Some(Self::ScriptGlobalMap),
+            0x55 => Some(Self::ScriptSetList),
+            0x56 => Some(Self::ScriptSetMap),
             _ => None,
         }
     }
@@ -10713,6 +10727,10 @@ impl ExtendedSubOpcode {
             Self::ScriptOutcomeListElemSub => "EXT_SCRIPT_OUTCOME_LIST_ELEM_SUB",
             Self::ScriptOutcomeMapKeySub => "EXT_SCRIPT_OUTCOME_MAP_KEY_SUB",
             Self::ScriptOutcomeMapValueSub => "EXT_SCRIPT_OUTCOME_MAP_VALUE_SUB",
+            Self::ScriptGlobalList => "EXT_SCRIPT_GLOBAL_LIST",
+            Self::ScriptGlobalMap => "EXT_SCRIPT_GLOBAL_MAP",
+            Self::ScriptSetList => "EXT_SCRIPT_SET_LIST",
+            Self::ScriptSetMap => "EXT_SCRIPT_SET_MAP",
         }
     }
 }

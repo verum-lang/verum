@@ -276,6 +276,9 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptGlobalText) => {
             super::script_runtime::handle_script_global_text(state)
         }
+        Some(ExtendedSubOpcode::ScriptGlobalList) | Some(ExtendedSubOpcode::ScriptGlobalMap) => {
+            super::script_runtime::handle_script_global_value(state)
+        }
         Some(ExtendedSubOpcode::ScriptEngineRegister) => {
             super::script_runtime::handle_script_engine_register(state)
         }
@@ -294,7 +297,9 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptSetInt)
         | Some(ExtendedSubOpcode::ScriptSetText)
         | Some(ExtendedSubOpcode::ScriptSetBool)
-        | Some(ExtendedSubOpcode::ScriptSetFloat) => {
+        | Some(ExtendedSubOpcode::ScriptSetFloat)
+        | Some(ExtendedSubOpcode::ScriptSetList)
+        | Some(ExtendedSubOpcode::ScriptSetMap) => {
             super::script_runtime::handle_script_set_value(state)
         }
         Some(ExtendedSubOpcode::ScriptEngineSetGlobalBool) => {

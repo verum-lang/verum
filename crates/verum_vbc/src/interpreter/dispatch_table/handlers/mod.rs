@@ -134,7 +134,7 @@ pub(super) mod panic_runtime;
 pub(super) mod debug;
 
 // Memory + Collections (0x60-0x6F, 0xC7-0xCF, 0xDD)
-pub(super) mod memory_collections;
+pub(crate) mod memory_collections;
 
 // CBGR references (0x70-0x78)
 pub(super) mod cbgr;
