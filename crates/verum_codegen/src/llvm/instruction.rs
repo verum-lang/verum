@@ -2161,8 +2161,12 @@ pub fn lower_instruction<'ctx>(
                     .build_int_compare(pred, cmp_int, zero_i32, "strcmp_cmp")
                     .or_llvm_err()?
             } else {
-                let lhs = as_i64(ctx, ctx.get_register(a.0)?, "lhs")?;
-                let rhs = as_i64(ctx, ctx.get_register(b.0)?, "rhs")?;
+                // task #41: deref a lone scalar `&T` reference operand so we
+                // compare pointee values, not value-vs-pointer.
+                let lhs_raw = deref_if_lone_ref(ctx, a.0, b.0, "cmpi_lhs")?;
+                let lhs = as_i64(ctx, lhs_raw, "lhs")?;
+                let rhs_raw = deref_if_lone_ref(ctx, b.0, a.0, "cmpi_rhs")?;
+                let rhs = as_i64(ctx, rhs_raw, "rhs")?;
 
                 ctx.builder()
                     .build_int_compare(pred, lhs, rhs, "icmp")
@@ -12247,7 +12251,26 @@ fn lower_call_method<'ctx>(
             "contains" if args.count == 1 => {
                 // Inline linear scan: iterate backing array, compare with value
                 let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
-                let search_val = as_i64(ctx, ctx.get_register(args.start.0)?, "search_val")?;
+                // task #41: `contains`/`index_of`'s value param is ALWAYS `&T`
+                // (list/deque/heap/btree — see core/collections/*.vr), so the search
+                // operand is a reference address. Deref it to scan for the pointee
+                // VALUE against the backing elements, not the address (the
+                // interpreter auto-derefs; without this every AOT contains/index_of
+                // over a scalar returns false/-1). Guard int/ptr to avoid the
+                // ARM-backend SIGSEGV on a non-address value.
+                let search_val = {
+                    let raw = ctx.get_register(args.start.0)?;
+                    if raw.is_pointer_value() || raw.is_int_value() {
+                        let sptr = as_ptr(ctx, raw, "search_ptr")?;
+                        let i64t = ctx.types().i64_type();
+                        ctx.builder()
+                            .build_load(i64t, sptr, "search_deref")
+                            .or_llvm_err()?
+                            .into_int_value()
+                    } else {
+                        as_i64(ctx, raw, "search_val")?
+                    }
+                };
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
@@ -12387,7 +12410,26 @@ fn lower_call_method<'ctx>(
             "index_of" if args.count == 1 => {
                 // Same as contains but returns index or -1
                 let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
-                let search_val = as_i64(ctx, ctx.get_register(args.start.0)?, "search_val")?;
+                // task #41: `contains`/`index_of`'s value param is ALWAYS `&T`
+                // (list/deque/heap/btree — see core/collections/*.vr), so the search
+                // operand is a reference address. Deref it to scan for the pointee
+                // VALUE against the backing elements, not the address (the
+                // interpreter auto-derefs; without this every AOT contains/index_of
+                // over a scalar returns false/-1). Guard int/ptr to avoid the
+                // ARM-backend SIGSEGV on a non-address value.
+                let search_val = {
+                    let raw = ctx.get_register(args.start.0)?;
+                    if raw.is_pointer_value() || raw.is_int_value() {
+                        let sptr = as_ptr(ctx, raw, "search_ptr")?;
+                        let i64t = ctx.types().i64_type();
+                        ctx.builder()
+                            .build_load(i64t, sptr, "search_deref")
+                            .or_llvm_err()?
+                            .into_int_value()
+                    } else {
+                        as_i64(ctx, raw, "search_val")?
+                    }
+                };
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
@@ -29909,6 +29951,36 @@ fn lower_load_const<'ctx>(
     Ok(())
 }
 
+/// task #41: deref a scalar `&T` reference operand when it is the LONE reference
+/// in a comparison (the other operand is a value), so CmpI / lower_cmp_generic
+/// compare pointee VALUES, not value-vs-pointer. Matches the interpreter, which
+/// auto-derefs a CBGR-ref operand at CmpI/CmpG runtime. No-op otherwise (both
+/// refs, or neither — so pointer==pointer and value==value are unaffected).
+fn deref_if_lone_ref<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    reg: u16,
+    other: u16,
+    name: &str,
+) -> Result<BasicValueEnum<'ctx>> {
+    // task #41: deref a lone scalar `&T` ref operand. GUARD (post-isolation): only
+    // deref when the register's value is a genuine pointer/int address — a marked
+    // reg that has been reused for a non-address SSA value (or whose LLVM value is
+    // not int/ptr) must NOT be inttoptr+loaded (that emits IR the ARM backend
+    // SIGSEGVs on, seen via rebaked stdlib funcs; eqref, a direct arg, is fine).
+    if ctx.is_ref_param_register(reg) && !ctx.is_ref_param_register(other) {
+        let raw = ctx.get_register(reg)?;
+        if raw.is_pointer_value() || raw.is_int_value() {
+            let ptr = as_ptr(ctx, raw, name)?;
+            let i64_type = ctx.types().i64_type();
+            ctx.builder().build_load(i64_type, ptr, name).or_llvm_err()
+        } else {
+            ctx.get_register(reg)
+        }
+    } else {
+        ctx.get_register(reg)
+    }
+}
+
 fn lower_cmp_generic<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     eq: bool,
@@ -29918,8 +29990,11 @@ fn lower_cmp_generic<'ctx>(
 ) -> Result<()> {
     // After monomorphization, operands are concrete types.
     // Lower as direct comparison based on operand types.
-    let lhs = ctx.get_register(a.0)?;
-    let rhs = ctx.get_register(b.0)?;
+    // task #41: deref a lone scalar `&T` reference operand so we compare pointee
+    // values, not value-vs-pointer (only scalar-ref params are marked, so
+    // variant/string/struct comparisons are unaffected).
+    let lhs = deref_if_lone_ref(ctx, a.0, b.0, "cmpg_lhs")?;
+    let rhs = deref_if_lone_ref(ctx, b.0, a.0, "cmpg_rhs")?;
 
     // ============================================================
     // task #10: VARIANT / enum / record structural equality.

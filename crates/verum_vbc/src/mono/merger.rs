@@ -31,6 +31,7 @@ use crate::types::{StringId, TypeId, TypeRef};
 use super::graph::InstantiationRequest;
 use super::resolver::{MonomorphizationResolver, ResolvedSpecialization};
 use super::specializer::SpecializedFunction;
+use super::substitution::TypeSubstitution;
 
 // ============================================================================
 // Merge Error
@@ -345,6 +346,31 @@ impl ModuleMerger {
                     .bytecode
                     .extend_from_slice(&stdlib.bytecode[start..end]);
 
+                // task #41: the StdlibPrecompiled resolution carries no params, so
+                // reconstruct them: find the GENERIC stdlib func by
+                // request.function_id (same id-space validate_cache uses) and
+                // substitute its type params with the request's concrete type args.
+                // A generic `value: &T` param (Reference{Generic(T)} after the
+                // scalar-`&` un-strip) becomes Reference{Concrete(scalar)}, which the
+                // AOT param loop marks — enabling the lone-`&scalar` deref in
+                // e.g. Deque<Int>.contains(&value).
+                let stdlib_params = stdlib
+                    .functions
+                    .iter()
+                    .find(|f| f.id == request.function_id)
+                    .map(|f| {
+                        let subst = TypeSubstitution::from_function(f, &request.type_args);
+                        f.params
+                            .iter()
+                            .map(|p| {
+                                let mut np = p.clone();
+                                np.type_ref = subst.apply(&p.type_ref);
+                                np
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
                 // Create function descriptor for specialization
                 let new_func = FunctionDescriptor {
                     id: FunctionId(output.functions.len() as u32),
@@ -353,6 +379,7 @@ impl ModuleMerger {
                     bytecode_length: *bytecode_length,
                     register_count: *register_count,
                     is_generic: false, // Specialized - no longer generic
+                    params: stdlib_params,
                     ..Default::default()
                 };
 
@@ -391,6 +418,9 @@ impl ModuleMerger {
                 locals_count: specialized.locals_count,
                 max_stack: specialized.max_stack,
                 is_generic: false,
+                // task #41: expose the substituted param descriptors so the AOT
+                // param loop can mark scalar `&T` ref params of specialized funcs.
+                params: specialized.params,
                 ..Default::default()
             };
 
@@ -989,6 +1019,8 @@ impl IncrementalMerger {
             locals_count: specialized.locals_count,
             max_stack: specialized.max_stack,
             is_generic: false,
+            // task #41: expose the substituted param descriptors (see above).
+            params: specialized.params,
             ..Default::default()
         };
 

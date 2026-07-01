@@ -189,6 +189,16 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Registers that hold float values (for correct ToString dispatch: float vs int).
     float_registers: std::collections::HashSet<u16>,
 
+    /// Parameter registers whose declared type is a scalar `&T` reference (task #41).
+    /// A comparison (`a == b`) with exactly one such operand must compare the
+    /// pointee VALUE, not value-vs-pointer: the interpreter auto-derefs a CBGR-ref
+    /// operand at CmpI/CmpG runtime, but the AOT stores a scalar `&T` param as a
+    /// raw pointer indistinguishable from an Int, so CmpI / lower_cmp_generic
+    /// consult this set to deref the lone reference operand before comparing.
+    /// (Only scalar pointees — Int/Float/Bool/sized-ints — are marked; &Text /
+    /// &List / &Map keep their existing string/list/map handling.)
+    ref_param_registers: std::collections::HashSet<u16>,
+
     /// Pre-scanned float registers: registers that VBC BinaryF/UnaryF/CmpF/LoadK(Float)
     /// will use. Unlike float_registers, these are NOT cleared by set_register().
     /// (Migrated to reg_types — prescan_float flag)
@@ -680,6 +690,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             text_registers: std::collections::HashSet::new(),
             bool_registers: std::collections::HashSet::new(),
             float_registers: std::collections::HashSet::new(),
+            ref_param_registers: std::collections::HashSet::new(),
 
             variant_float_fields: std::collections::HashSet::new(),
             list_registers: std::collections::HashSet::new(),
@@ -779,6 +790,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             text_registers: std::collections::HashSet::new(),
             bool_registers: std::collections::HashSet::new(),
             float_registers: std::collections::HashSet::new(),
+            ref_param_registers: std::collections::HashSet::new(),
 
             variant_float_fields: std::collections::HashSet::new(),
             list_registers: std::collections::HashSet::new(),
@@ -1337,6 +1349,16 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Check if a register holds a float value.
     pub fn is_float_register(&self, reg: u16) -> bool {
         self.float_registers.contains(&reg)
+    }
+
+    /// Mark a parameter register as a scalar `&T` reference (task #41).
+    pub fn mark_ref_param_register(&mut self, reg: u16) {
+        self.ref_param_registers.insert(reg);
+    }
+
+    /// True if `reg` holds a scalar `&T` reference parameter (task #41).
+    pub fn is_ref_param_register(&self, reg: u16) -> bool {
+        self.ref_param_registers.contains(&reg)
     }
 
     /// Mark a variant register field as containing a float value.
@@ -1950,6 +1972,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.text_registers.remove(&reg);
         self.bool_registers.remove(&reg);
         self.float_registers.remove(&reg);
+        self.ref_param_registers.remove(&reg);
         self.list_registers.remove(&reg);
         self.chan_registers.remove(&reg);
         self.range_registers.remove(&reg);

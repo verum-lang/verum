@@ -39,6 +39,13 @@ pub struct SpecializedFunction {
     pub max_stack: u16,
     /// New constants added during specialization.
     pub new_constants: Vec<Constant>,
+    /// task #41: substituted param descriptors — the generic descriptor's params
+    /// with type params resolved to concretes (Reference{Generic(T)} →
+    /// Reference{Concrete(Int)}). The merger writes these onto the specialized
+    /// FunctionDescriptor so the AOT param loop can mark scalar `&T` ref params
+    /// (e.g. Deque<Int>.contains's `value: &Int`); without this the specialized
+    /// descriptor has empty params and the AOT can't deref a lone `&scalar`.
+    pub params: smallvec::SmallVec<[crate::module::ParamDescriptor; 4]>,
 }
 
 // ============================================================================
@@ -379,12 +386,26 @@ impl<'a> BytecodeSpecializer<'a> {
 
         self.stats.bytes_output = output.len();
 
+        // task #41: carry the substituted param descriptors so the merged
+        // specialized FunctionDescriptor exposes them to the AOT param loop
+        // (Reference{Generic(T)} → Reference{Concrete(Int)} via the substitution).
+        let params = func
+            .params
+            .iter()
+            .map(|p| {
+                let mut np = p.clone();
+                np.type_ref = self.substitution.apply(&p.type_ref);
+                np
+            })
+            .collect();
+
         Ok(SpecializedFunction {
             bytecode: output,
             register_count: func.register_count,
             locals_count: func.locals_count,
             max_stack: func.max_stack,
             new_constants: std::mem::take(&mut self.new_constants),
+            params,
         })
     }
 
@@ -1628,6 +1649,7 @@ mod tests {
             locals_count: 2,
             max_stack: 8,
             new_constants: vec![],
+            params: Default::default(),
         };
         assert_eq!(sf.bytecode.len(), 2);
         assert_eq!(sf.register_count, 4);
