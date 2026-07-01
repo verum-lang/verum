@@ -63,6 +63,13 @@ public fn script_engine_free(engine: RawScriptEngine);
 @intrinsic("script_engine_eval")
 public fn script_engine_eval(engine: RawScriptEngine, source: Text) -> RawScriptOutcome;
 
+/// Compile `source` and run its named `fn_name` entry (rather than `main`) — the
+/// host "call a script function" primitive. Arguments flow through the shared
+/// globals (`script_engine_set_global_*` before the call; `script_global_*`
+/// inside the entry); the marshaled result comes back in the outcome handle.
+@intrinsic("script_engine_call")
+public fn script_engine_call(engine: RawScriptEngine, source: Text, fn_name: Text) -> RawScriptOutcome;
+
 // =============================================================================
 // SECTION 4: Outcome Inspection
 // =============================================================================

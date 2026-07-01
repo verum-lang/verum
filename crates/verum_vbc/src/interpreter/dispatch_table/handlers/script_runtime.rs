@@ -102,6 +102,40 @@ pub(in super::super) fn handle_script_engine_eval(
     Ok(DispatchResult::Continue)
 }
 
+/// `script_engine_call(engine, source, fn_name) -> RawScriptOutcome` — compile
+/// `source` and run its named `fn_name` entry (rather than `main`), so a host
+/// can invoke a script's individual functions. Args flow through the shared
+/// globals (`set_*` before, `script_global_*` inside).
+pub(in super::super) fn handle_script_engine_call(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let engine_reg = read_reg(state)?;
+    let src_reg = read_reg(state)?;
+    let fn_reg = read_reg(state)?;
+
+    let engine_ptr = state.get_reg(engine_reg).as_ptr::<ScriptEngine>() as *mut ScriptEngine;
+    if engine_ptr.is_null() {
+        return Err(InterpreterError::NullPointer);
+    }
+    let src_val = state.get_reg(src_reg);
+    let source =
+        super::path_ops_runtime::extract_string_if_text(state, &src_val).unwrap_or_default();
+    let fn_val = state.get_reg(fn_reg);
+    let fn_name =
+        super::path_ops_runtime::extract_string_if_text(state, &fn_val).unwrap_or_default();
+
+    let host_addr = state as *mut InterpreterState as usize;
+
+    // SAFETY: `engine_ptr` is a live `Box<ScriptEngine>` handle; see
+    // `handle_script_engine_eval` for the host-re-entry safety contract.
+    let outcome =
+        unsafe { (*engine_ptr).call_named_with_host(&source, &fn_name, host_addr) };
+    let outcome_ptr = Box::into_raw(Box::new(outcome));
+    state.set_reg(dst, Value::from_ptr(outcome_ptr as *mut u8));
+    Ok(DispatchResult::Continue)
+}
+
 /// `script_outcome_is_ok(outcome) -> Bool`.
 pub(in super::super) fn handle_script_outcome_is_ok(
     state: &mut InterpreterState,

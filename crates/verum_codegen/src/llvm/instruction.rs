@@ -22063,6 +22063,7 @@ fn lower_extended<'ctx>(
         Some(ExtendedSubOpcode::ScriptEngineNew)
         | Some(ExtendedSubOpcode::ScriptEngineFree)
         | Some(ExtendedSubOpcode::ScriptEngineEval)
+        | Some(ExtendedSubOpcode::ScriptEngineCall)
         | Some(ExtendedSubOpcode::ScriptOutcomeIsOk)
         | Some(ExtendedSubOpcode::ScriptOutcomeKind)
         | Some(ExtendedSubOpcode::ScriptOutcomeAsInt)

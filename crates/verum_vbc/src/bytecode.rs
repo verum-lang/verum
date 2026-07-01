@@ -5022,8 +5022,10 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let operands = decode_extended_reg_operands(data, offset, 3)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
-                // 4 regs: dst, mem, instr, time.
-                Some(ExtendedSubOpcode::ScriptEngineNewSandboxed) => {
+                // 4 regs: dst, mem, instr, time (sandboxed) / dst, engine,
+                // source, fn_name (named call).
+                Some(ExtendedSubOpcode::ScriptEngineNewSandboxed)
+                | Some(ExtendedSubOpcode::ScriptEngineCall) => {
                     let operands = decode_extended_reg_operands(data, offset, 4)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }

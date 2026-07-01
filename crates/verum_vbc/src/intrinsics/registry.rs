@@ -4159,6 +4159,23 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Compile and run a Verum source string on an engine",
     },
     Intrinsic {
+        name: "script_engine_call",
+        category: IntrinsicCategory::Scripting,
+        hints: &[
+            IntrinsicHint::Alloc,
+            IntrinsicHint::SideEffect,
+            IntrinsicHint::IoEffect,
+            IntrinsicHint::MayTrap,
+        ],
+        param_count: 3, // engine, source: Text, fn_name: Text
+        return_count: 1, // RawScriptOutcome handle
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineCall,
+        ),
+        mlir_op: None,
+        doc: "Compile source and run a named entry (not main) on an engine",
+    },
+    Intrinsic {
         name: "script_outcome_is_ok",
         category: IntrinsicCategory::Scripting,
         hints: &[IntrinsicHint::SideEffect],
