@@ -161,6 +161,46 @@ implement Engine {
         script_outcome_free(outcome);
         result
     }
+
+    /// Merge two scripts into a persistent [`Session`] with a SHARED heap — the
+    /// zero-copy interop tier. Functions invoked through `session.call` share
+    /// data by reference across calls (what one stores, a later one reads),
+    /// which copy-at-the-boundary engines can't do; CBGR keeps it safe.
+    public fn link2(&self, source_a: Text, source_b: Text) -> Session {
+        Session { raw: script_engine_link2(self.raw, source_a, source_b) }
+    }
+}
+
+// =============================================================================
+// Session — zero-copy interop tier (persistent linked scripts)
+// =============================================================================
+
+/// A persistent session over two linked scripts sharing one heap. Obtain one
+/// from [`Engine.link2`]; run functions on it with `call`. State (globals, heap)
+/// written by an earlier `call` is visible to later ones — shared by reference.
+public type Session is {
+    raw: RawScriptSession,
+};
+
+implement Session {
+    /// Run `fn_name` on the session, returning its marshaled value or an error.
+    /// Shares state with earlier calls on the same session.
+    public fn call(&self, fn_name: Text) -> ScriptResult {
+        let outcome = script_session_call(self.raw, fn_name);
+        let result = if script_outcome_is_ok(outcome) {
+            ScriptResult.Ok(marshal_outcome(outcome))
+        } else {
+            ScriptResult.Err(script_outcome_error(outcome))
+        };
+        script_outcome_free(outcome);
+        result
+    }
+}
+
+implement Drop for Session {
+    fn drop(&mut self) {
+        script_session_free(self.raw);
+    }
 }
 
 implement Drop for Engine {

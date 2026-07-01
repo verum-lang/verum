@@ -4193,6 +4193,47 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Compile source and run a named entry with positional list args",
     },
     Intrinsic {
+        name: "script_engine_link2",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect, IntrinsicHint::MayTrap],
+        param_count: 3, // engine, source_a, source_b
+        return_count: 1, // RawScriptSession handle
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineLink2,
+        ),
+        mlir_op: None,
+        doc: "Merge two scripts into a persistent session (zero-copy interop)",
+    },
+    Intrinsic {
+        name: "script_session_call",
+        category: IntrinsicCategory::Scripting,
+        hints: &[
+            IntrinsicHint::Alloc,
+            IntrinsicHint::SideEffect,
+            IntrinsicHint::IoEffect,
+            IntrinsicHint::MayTrap,
+        ],
+        param_count: 2, // session, fn_name
+        return_count: 1, // RawScriptOutcome handle
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptSessionCall,
+        ),
+        mlir_op: None,
+        doc: "Run a named function on a persistent session (shared heap)",
+    },
+    Intrinsic {
+        name: "script_session_free",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1, // session
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptSessionFree,
+        ),
+        mlir_op: None,
+        doc: "Free a persistent session handle",
+    },
+    Intrinsic {
         name: "script_outcome_is_ok",
         category: IntrinsicCategory::Scripting,
         hints: &[IntrinsicHint::SideEffect],

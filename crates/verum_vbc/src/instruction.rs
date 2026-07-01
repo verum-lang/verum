@@ -10603,6 +10603,14 @@ pub enum ExtendedSubOpcode {
     /// Named entry call with positional args from a list.
     /// `[0x1F][0x58][reg:dst][reg:engine][reg:source][reg:fn_name][reg:args]`.
     ScriptEngineCallArgs = 0x58,
+
+    // Zero-copy interop tier: a persistent linked session (shared heap).
+    /// Merge two scripts + open a session. `[0x1F][0x59][dst][engine][srcA][srcB]`.
+    ScriptEngineLink2 = 0x59,
+    /// Run a named fn on a session. `[0x1F][0x5A][reg:dst][reg:session][reg:fn]`.
+    ScriptSessionCall = 0x5A,
+    /// Free a session handle. `[0x1F][0x5B][reg:session]`.
+    ScriptSessionFree = 0x5B,
 }
 
 impl ExtendedSubOpcode {
@@ -10670,6 +10678,9 @@ impl ExtendedSubOpcode {
             0x56 => Some(Self::ScriptSetMap),
             0x57 => Some(Self::ScriptEngineCall),
             0x58 => Some(Self::ScriptEngineCallArgs),
+            0x59 => Some(Self::ScriptEngineLink2),
+            0x5A => Some(Self::ScriptSessionCall),
+            0x5B => Some(Self::ScriptSessionFree),
             _ => None,
         }
     }
@@ -10742,6 +10753,9 @@ impl ExtendedSubOpcode {
             Self::ScriptSetMap => "EXT_SCRIPT_SET_MAP",
             Self::ScriptEngineCall => "EXT_SCRIPT_ENGINE_CALL",
             Self::ScriptEngineCallArgs => "EXT_SCRIPT_ENGINE_CALL_ARGS",
+            Self::ScriptEngineLink2 => "EXT_SCRIPT_ENGINE_LINK2",
+            Self::ScriptSessionCall => "EXT_SCRIPT_SESSION_CALL",
+            Self::ScriptSessionFree => "EXT_SCRIPT_SESSION_FREE",
         }
     }
 }

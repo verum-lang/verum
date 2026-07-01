@@ -29,7 +29,9 @@ use super::super::DispatchResult;
 use super::bytecode_io::read_reg;
 use super::path_ops_runtime::extract_string_if_text;
 use super::string_helpers::alloc_string_value;
-use crate::interpreter::script_engine::{ScriptEngine, ScriptOutcome, ScriptValueOwned, ScriptWorld};
+use crate::interpreter::script_engine::{
+    ScriptEngine, ScriptError, ScriptOutcome, ScriptSession, ScriptValueOwned, ScriptWorld,
+};
 use crate::module::FunctionId;
 use crate::value::Value;
 
@@ -171,6 +173,82 @@ pub(in super::super) fn handle_script_engine_call_args(
     };
     let outcome_ptr = Box::into_raw(Box::new(outcome));
     state.set_reg(dst, Value::from_ptr(outcome_ptr as *mut u8));
+    Ok(DispatchResult::Continue)
+}
+
+// --- Zero-copy interop tier: a persistent linked ScriptSession ---
+
+/// `script_engine_link2(engine, source_a, source_b) -> RawScriptSession` —
+/// merge two scripts into one module and open a persistent session over them
+/// (shared heap). Returns a null handle on compile/link failure.
+pub(in super::super) fn handle_script_engine_link2(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let engine_reg = read_reg(state)?;
+    let a_reg = read_reg(state)?;
+    let b_reg = read_reg(state)?;
+
+    let engine_ptr = state.get_reg(engine_reg).as_ptr::<ScriptEngine>() as *mut ScriptEngine;
+    if engine_ptr.is_null() {
+        return Err(InterpreterError::NullPointer);
+    }
+    let a_val = state.get_reg(a_reg);
+    let src_a =
+        super::path_ops_runtime::extract_string_if_text(state, &a_val).unwrap_or_default();
+    let b_val = state.get_reg(b_reg);
+    let src_b =
+        super::path_ops_runtime::extract_string_if_text(state, &b_val).unwrap_or_default();
+
+    // SAFETY: `engine_ptr` is a live `Box<ScriptEngine>` handle.
+    let handle = match unsafe { (*engine_ptr).link2(&src_a, &src_b) } {
+        Ok(session) => Box::into_raw(Box::new(session)) as *mut u8,
+        Err(_) => std::ptr::null_mut(),
+    };
+    state.set_reg(dst, Value::from_ptr(handle));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_session_call(session, fn_name) -> RawScriptOutcome` — run `fn_name`
+/// on the persistent session (state written by earlier calls is visible).
+pub(in super::super) fn handle_script_session_call(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let session_reg = read_reg(state)?;
+    let fn_reg = read_reg(state)?;
+
+    let session_ptr =
+        state.get_reg(session_reg).as_ptr::<ScriptSession>() as *mut ScriptSession;
+    let fn_val = state.get_reg(fn_reg);
+    let fn_name =
+        super::path_ops_runtime::extract_string_if_text(state, &fn_val).unwrap_or_default();
+
+    let outcome = if session_ptr.is_null() {
+        ScriptOutcome {
+            value: ScriptValueOwned::Nil,
+            error: Some(ScriptError::Runtime("null session (link failed)".to_string())),
+            stdout: String::new(),
+        }
+    } else {
+        // SAFETY: non-null `session_ptr` is a live `Box<ScriptSession>` handle.
+        unsafe { (*session_ptr).call(&fn_name) }
+    };
+    let outcome_ptr = Box::into_raw(Box::new(outcome));
+    state.set_reg(dst, Value::from_ptr(outcome_ptr as *mut u8));
+    Ok(DispatchResult::Continue)
+}
+
+/// `script_session_free(session)` — drop the session box.
+pub(in super::super) fn handle_script_session_free(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let session_reg = read_reg(state)?;
+    let ptr = state.get_reg(session_reg).as_ptr::<ScriptSession>() as *mut ScriptSession;
+    if !ptr.is_null() {
+        // SAFETY: `ptr` originates from `Box::into_raw` in handle_script_engine_link2.
+        unsafe { drop(Box::from_raw(ptr)) };
+    }
     Ok(DispatchResult::Continue)
 }
 
