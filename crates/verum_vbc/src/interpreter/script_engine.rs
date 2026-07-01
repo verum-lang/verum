@@ -1145,6 +1145,84 @@ mod tests {
         assert_eq!(r.as_i64(), 7);
     }
 
+    // --- P2 zero-copy foundation: link N scripts into one module + heap ---
+
+    /// Two independently-compiled scripts merge (via `VbcLinker`) into ONE
+    /// module whose functions run on ONE interpreter — a single shared heap.
+    /// This is the substrate for zero-copy cross-script interop: objects one
+    /// script's function creates live in the same heap another script reads.
+    #[test]
+    fn linker_merges_two_scripts_into_one_module() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        let a = engine.compile("fn a_fn() -> Int { 10 }").expect("compile a");
+        let b = engine.compile("fn b_fn() -> Int { 20 }").expect("compile b");
+        let mut linker = crate::linker::VbcLinker::new("aarch64-apple-darwin");
+        linker.add_user_module((*a).clone()).expect("add a");
+        linker.add_user_module((*b).clone()).expect("add b");
+        let merged = Arc::new(linker.finalize());
+        let ra = engine.run(merged.clone(), "a_fn", &[]).expect("run a_fn");
+        let rb = engine.run(merged.clone(), "b_fn", &[]).expect("run b_fn");
+        assert_eq!(ra.as_i64(), 10, "script A's function in the merged module");
+        assert_eq!(rb.as_i64(), 20, "script B's function in the merged module");
+    }
+
+    /// Zero-copy substrate: run two linked scripts' functions on ONE persistent
+    /// interpreter. What `store` writes, `load` reads back — the heap and the
+    /// shared table survive across calls, so data is shared by reference (no
+    /// serialization, no boundary copy) — the thing copy-at-the-boundary engines
+    /// (Wasm, BEAM, V8 isolates) cannot offer. CBGR keeps the shared ref safe.
+    #[test]
+    fn linked_scripts_share_one_heap_across_calls() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        let a = engine
+            .compile("fn store() -> Int { @intrinsic(\"script_set_int\", \"x\", 99); 0 }")
+            .expect("compile a");
+        let b = engine
+            .compile("fn load() -> Int { @intrinsic(\"script_global_int\", \"x\") }")
+            .expect("compile b");
+        let mut linker = crate::linker::VbcLinker::new("aarch64-apple-darwin");
+        linker.add_user_module((*a).clone()).expect("add a");
+        linker.add_user_module((*b).clone()).expect("add b");
+        let merged = Arc::new(linker.finalize());
+        // ONE persistent interpreter — host_globals + heap survive across calls.
+        let mut interp = Interpreter::new(merged.clone());
+        let store_fn = merged
+            .find_function_by_name("store")
+            .or_else(|| merged.find_function_by_unique_bare_suffix("store"))
+            .expect("store fn");
+        let load_fn = merged
+            .find_function_by_name("load")
+            .or_else(|| merged.find_function_by_unique_bare_suffix("load"))
+            .expect("load fn");
+        interp
+            .execute_function_with_args(store_fn, &[])
+            .expect("run store");
+        let r = interp
+            .execute_function_with_args(load_fn, &[])
+            .expect("run load");
+        assert_eq!(r.as_i64(), 99, "load reads store's write — shared persistent state");
+    }
+
+    /// A direct cross-script CALL (script B calling a function DEFINED in script
+    /// A) needs an extern/forward declaration: the compiler resolves calls
+    /// within a module, so `helper()` is undefined when B is compiled alone.
+    /// The linker merges DEFINED functions (see the tests above); wiring
+    /// cross-script SYMBOL resolution (extern decls) is the next P2 step.
+    #[test]
+    fn cross_script_call_needs_extern_decl() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        let err = engine
+            .compile("fn entry() -> Int { helper() + 1 }")
+            .expect_err("undefined cross-script fn must not compile standalone");
+        assert!(
+            matches!(err, ScriptError::Compile(_)),
+            "expected a compile error for the undefined cross-script call, got {err:?}"
+        );
+    }
+
     #[test]
     fn missing_entry_is_reported() {
         install_compiler_hook(lite_hook());
