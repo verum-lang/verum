@@ -286,6 +286,37 @@ impl ScriptEngine {
         compile_via_hook(source).map(Arc::new)
     }
 
+    /// Merge two scripts into ONE module and open a persistent
+    /// [`ScriptSession`] over it — the **zero-copy interop tier**. Both scripts'
+    /// functions run on one interpreter (one heap), so a value one function
+    /// stores, another reads back BY REFERENCE — no boundary copy, the thing
+    /// copy-at-the-boundary engines (Wasm/BEAM/V8) can't offer; CBGR keeps the
+    /// shared reference safe. Sharing goes through the shared globals / heap
+    /// (`script_set_*` / `script_global_*`); a direct cross-script CALL still
+    /// needs an extern declaration.
+    pub fn link2(&mut self, source_a: &str, source_b: &str) -> Result<ScriptSession, ScriptError> {
+        let a = self.compile(source_a)?;
+        let b = self.compile(source_b)?;
+        // Tier-0 (interpreter) linking: the merged module runs on THIS host, so
+        // the linker's cfg-variant key is the host triple. This is interpreter
+        // linking, not AOT IR emission — the target-triple codegen rule does not
+        // apply here.
+        let mut linker = crate::linker::VbcLinker::new(host_link_triple());
+        linker
+            .add_user_module((*a).clone())
+            .map_err(|e| ScriptError::Compile(format!("link: {e:?}")))?;
+        linker
+            .add_user_module((*b).clone())
+            .map_err(|e| ScriptError::Compile(format!("link: {e:?}")))?;
+        let merged = Arc::new(linker.finalize());
+        let interp = Interpreter::try_new_with_config(merged.clone(), self.config.clone())
+            .map_err(|e| ScriptError::Runtime(format!("{e:?}")))?;
+        Ok(ScriptSession {
+            interp,
+            module: merged,
+        })
+    }
+
     /// Compile and run `source`, executing its `main` function.
     ///
     /// Returns `main`'s value; the script's captured stdout is available via
@@ -377,6 +408,71 @@ impl ScriptEngine {
 impl Default for ScriptEngine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The host's triple for interpreter-side (Tier-0) linking — host IS the
+/// execution target here. It only picks `@cfg`-variant function bodies, which
+/// scripts rarely carry, so this is a best-effort classification, not an AOT
+/// codegen decision (which must read the module's target triple).
+fn host_link_triple() -> &'static str {
+    if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            "aarch64-apple-darwin"
+        } else {
+            "x86_64-apple-darwin"
+        }
+    } else if cfg!(target_os = "windows") {
+        "x86_64-pc-windows-msvc"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64-unknown-linux-gnu"
+    } else {
+        "x86_64-unknown-linux-gnu"
+    }
+}
+
+/// A persistent session over a linked set of scripts — the zero-copy interop
+/// tier (see [`ScriptEngine::link2`]). Its interpreter, heap, and shared-global
+/// table survive across [`call`](ScriptSession::call)s, so a value one call
+/// stores is read back by a later call BY REFERENCE.
+pub struct ScriptSession {
+    interp: Interpreter,
+    module: Arc<VbcModule>,
+}
+
+impl ScriptSession {
+    /// Invoke `fn_name` on the persistent interpreter, marshaling its result
+    /// into an owned [`ScriptOutcome`]. Globals / heap written by an earlier
+    /// call are visible here — that is the zero-copy sharing.
+    pub fn call(&mut self, fn_name: &str) -> ScriptOutcome {
+        let func_id = match self
+            .module
+            .find_function_by_name(fn_name)
+            .or_else(|| self.module.find_function_by_unique_bare_suffix(fn_name))
+        {
+            Some(f) => f,
+            None => {
+                return ScriptOutcome {
+                    value: ScriptValueOwned::Nil,
+                    error: Some(ScriptError::EntryNotFound(fn_name.to_string())),
+                    stdout: String::new(),
+                };
+            }
+        };
+        let result = self.interp.execute_function_with_args(func_id, &[]);
+        let stdout = self.interp.state.get_stdout().to_string();
+        match result {
+            Ok(value) => ScriptOutcome {
+                value: extract_owned(&self.interp.state, value),
+                error: None,
+                stdout,
+            },
+            Err(e) => ScriptOutcome {
+                value: ScriptValueOwned::Nil,
+                error: Some(ScriptError::Runtime(format!("{e:?}"))),
+                stdout,
+            },
+        }
     }
 }
 
@@ -1221,6 +1317,25 @@ mod tests {
             matches!(err, ScriptError::Compile(_)),
             "expected a compile error for the undefined cross-script call, got {err:?}"
         );
+    }
+
+    /// The user-facing zero-copy tier: `link2` merges two scripts into one
+    /// persistent session; `store`'s write is read back by a later `load` call
+    /// on the same session — data shared by reference, no copy.
+    #[test]
+    fn script_session_shares_state_zero_copy() {
+        install_compiler_hook(lite_hook());
+        let mut engine = ScriptEngine::new();
+        let mut session = engine
+            .link2(
+                "fn store() -> Int { @intrinsic(\"script_set_int\", \"x\", 99); 0 }",
+                "fn load() -> Int { @intrinsic(\"script_global_int\", \"x\") }",
+            )
+            .expect("link2 should succeed");
+        let _ = session.call("store");
+        let out = session.call("load");
+        assert!(out.is_ok(), "load call ok");
+        assert_eq!(out.as_int(), 99, "load reads store's write via the shared session");
     }
 
     #[test]
