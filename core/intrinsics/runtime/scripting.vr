@@ -75,6 +75,25 @@ public fn script_engine_call(engine: RawScriptEngine, source: Text, fn_name: Tex
 @intrinsic("script_engine_call_args")
 public fn script_engine_call_args<T>(engine: RawScriptEngine, source: Text, fn_name: Text, args: List<T>) -> RawScriptOutcome;
 
+/// Opaque handle to a persistent linked session (zero-copy interop tier).
+public type RawScriptSession is (*const Byte);
+
+/// Merge two scripts into ONE module and open a persistent session over them:
+/// both scripts' functions run on one interpreter (one heap), so a value one
+/// call stores another reads back BY REFERENCE — no boundary copy, safe under
+/// CBGR. Null handle on compile/link failure.
+@intrinsic("script_engine_link2")
+public fn script_engine_link2(engine: RawScriptEngine, source_a: Text, source_b: Text) -> RawScriptSession;
+
+/// Run `fn_name` on the persistent session; state written by earlier calls is
+/// visible (the zero-copy sharing).
+@intrinsic("script_session_call")
+public fn script_session_call(session: RawScriptSession, fn_name: Text) -> RawScriptOutcome;
+
+/// Free a session handle.
+@intrinsic("script_session_free")
+public fn script_session_free(session: RawScriptSession);
+
 // =============================================================================
 // SECTION 4: Outcome Inspection
 // =============================================================================

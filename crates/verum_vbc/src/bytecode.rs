@@ -4961,7 +4961,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptEngineFree)
                 | Some(ExtendedSubOpcode::ScriptOutcomeFree)
                 | Some(ExtendedSubOpcode::ScriptWorldNew)
-                | Some(ExtendedSubOpcode::ScriptWorldFree) => {
+                | Some(ExtendedSubOpcode::ScriptWorldFree)
+                | Some(ExtendedSubOpcode::ScriptSessionFree) => {
                     let operands = decode_extended_reg_operands(data, offset, 1)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
@@ -5018,14 +5019,16 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptOutcomeMapValueText)
                 | Some(ExtendedSubOpcode::ScriptOutcomeListElemSub)
                 | Some(ExtendedSubOpcode::ScriptOutcomeMapKeySub)
-                | Some(ExtendedSubOpcode::ScriptOutcomeMapValueSub) => {
+                | Some(ExtendedSubOpcode::ScriptOutcomeMapValueSub)
+                | Some(ExtendedSubOpcode::ScriptSessionCall) => {
                     let operands = decode_extended_reg_operands(data, offset, 3)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
                 // 4 regs: dst, mem, instr, time (sandboxed) / dst, engine,
                 // source, fn_name (named call).
                 Some(ExtendedSubOpcode::ScriptEngineNewSandboxed)
-                | Some(ExtendedSubOpcode::ScriptEngineCall) => {
+                | Some(ExtendedSubOpcode::ScriptEngineCall)
+                | Some(ExtendedSubOpcode::ScriptEngineLink2) => {
                     let operands = decode_extended_reg_operands(data, offset, 4)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
