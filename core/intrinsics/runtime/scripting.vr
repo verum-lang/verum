@@ -85,6 +85,12 @@ public type RawScriptSession is (*const Byte);
 @intrinsic("script_engine_link2")
 public fn script_engine_link2(engine: RawScriptEngine, source_a: Text, source_b: Text) -> RawScriptSession;
 
+/// Merge N scripts (a list of sources) into a persistent session — the
+/// zero-copy tier generalized to a whole set (e.g. loading many plugins into
+/// one shared world).
+@intrinsic("script_engine_link")
+public fn script_engine_link(engine: RawScriptEngine, sources: List<Text>) -> RawScriptSession;
+
 /// Run `fn_name` on the persistent session; state written by earlier calls is
 /// visible (the zero-copy sharing).
 @intrinsic("script_session_call")

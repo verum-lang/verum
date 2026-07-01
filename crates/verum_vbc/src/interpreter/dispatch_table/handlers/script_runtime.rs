@@ -209,6 +209,36 @@ pub(in super::super) fn handle_script_engine_link2(
     Ok(DispatchResult::Continue)
 }
 
+/// `script_engine_link(engine, sources: List<Text>) -> RawScriptSession` — merge
+/// N scripts into a persistent session (the zero-copy tier for a whole set).
+pub(in super::super) fn handle_script_engine_link(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let engine_reg = read_reg(state)?;
+    let sources_reg = read_reg(state)?;
+
+    let engine_ptr = state.get_reg(engine_reg).as_ptr::<ScriptEngine>() as *mut ScriptEngine;
+    if engine_ptr.is_null() {
+        return Err(InterpreterError::NullPointer);
+    }
+    let sources_val = state.get_reg(sources_reg);
+    let source_values = state.list_elements(sources_val).unwrap_or_default();
+    let sources: Vec<String> = source_values
+        .iter()
+        .filter_map(|v| state.read_text(*v))
+        .collect();
+    let source_refs: Vec<&str> = sources.iter().map(|s| s.as_str()).collect();
+
+    // SAFETY: `engine_ptr` is a live `Box<ScriptEngine>` handle.
+    let handle = match unsafe { (*engine_ptr).link_n(&source_refs) } {
+        Ok(session) => Box::into_raw(Box::new(session)) as *mut u8,
+        Err(_) => std::ptr::null_mut(),
+    };
+    state.set_reg(dst, Value::from_ptr(handle));
+    Ok(DispatchResult::Continue)
+}
+
 /// `script_session_call(session, fn_name) -> RawScriptOutcome` — run `fn_name`
 /// on the persistent session (state written by earlier calls is visible).
 pub(in super::super) fn handle_script_session_call(

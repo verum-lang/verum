@@ -295,19 +295,28 @@ impl ScriptEngine {
     /// (`script_set_*` / `script_global_*`); a direct cross-script CALL still
     /// needs an extern declaration.
     pub fn link2(&mut self, source_a: &str, source_b: &str) -> Result<ScriptSession, ScriptError> {
-        let a = self.compile(source_a)?;
-        let b = self.compile(source_b)?;
+        self.link_n(&[source_a, source_b])
+    }
+
+    /// Merge N scripts into one persistent [`ScriptSession`] over a shared heap
+    /// — the zero-copy interop tier for a whole set of scripts (e.g. loading
+    /// many plugin scripts into one shared world). All of them run on one
+    /// interpreter, so they share data by reference.
+    pub fn link_n(&mut self, sources: &[&str]) -> Result<ScriptSession, ScriptError> {
+        if sources.is_empty() {
+            return Err(ScriptError::Compile("link: no sources".to_string()));
+        }
         // Tier-0 (interpreter) linking: the merged module runs on THIS host, so
         // the linker's cfg-variant key is the host triple. This is interpreter
         // linking, not AOT IR emission — the target-triple codegen rule does not
         // apply here.
         let mut linker = crate::linker::VbcLinker::new(host_link_triple());
-        linker
-            .add_user_module((*a).clone())
-            .map_err(|e| ScriptError::Compile(format!("link: {e:?}")))?;
-        linker
-            .add_user_module((*b).clone())
-            .map_err(|e| ScriptError::Compile(format!("link: {e:?}")))?;
+        for src in sources {
+            let m = self.compile(src)?;
+            linker
+                .add_user_module((*m).clone())
+                .map_err(|e| ScriptError::Compile(format!("link: {e:?}")))?;
+        }
         let merged = Arc::new(linker.finalize());
         let interp = Interpreter::try_new_with_config(merged.clone(), self.config.clone())
             .map_err(|e| ScriptError::Runtime(format!("{e:?}")))?;

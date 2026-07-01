@@ -10611,6 +10611,9 @@ pub enum ExtendedSubOpcode {
     ScriptSessionCall = 0x5A,
     /// Free a session handle. `[0x1F][0x5B][reg:session]`.
     ScriptSessionFree = 0x5B,
+    /// Merge N scripts (a list of sources) into a session.
+    /// `[0x1F][0x5C][reg:dst][reg:engine][reg:sources]`.
+    ScriptEngineLink = 0x5C,
 }
 
 impl ExtendedSubOpcode {
@@ -10681,6 +10684,7 @@ impl ExtendedSubOpcode {
             0x59 => Some(Self::ScriptEngineLink2),
             0x5A => Some(Self::ScriptSessionCall),
             0x5B => Some(Self::ScriptSessionFree),
+            0x5C => Some(Self::ScriptEngineLink),
             _ => None,
         }
     }
@@ -10756,6 +10760,7 @@ impl ExtendedSubOpcode {
             Self::ScriptEngineLink2 => "EXT_SCRIPT_ENGINE_LINK2",
             Self::ScriptSessionCall => "EXT_SCRIPT_SESSION_CALL",
             Self::ScriptSessionFree => "EXT_SCRIPT_SESSION_FREE",
+            Self::ScriptEngineLink => "EXT_SCRIPT_ENGINE_LINK",
         }
     }
 }
