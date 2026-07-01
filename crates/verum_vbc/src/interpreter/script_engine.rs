@@ -691,6 +691,21 @@ impl ScriptEngine {
         fn_name: &str,
         host_state_addr: usize,
     ) -> ScriptOutcome {
+        self.call_named_args_with_host(source, fn_name, &[], host_state_addr)
+    }
+
+    /// [`call_named_with_host`](Self::call_named_with_host) passing positional
+    /// `args` to the entry as its function parameters (rather than routing them
+    /// through the shared globals). Scalar args (`Int` / `Float` / `Bool`) are
+    /// self-contained `Value`s and cross to the fresh script interpreter safely;
+    /// the caller marshals the host's argument list into `args`.
+    pub fn call_named_args_with_host(
+        &mut self,
+        source: &str,
+        fn_name: &str,
+        args: &[Value],
+        host_state_addr: usize,
+    ) -> ScriptOutcome {
         let module = match self.compile(source) {
             Ok(m) => m,
             Err(error) => {
@@ -701,7 +716,7 @@ impl ScriptEngine {
                 };
             }
         };
-        self.run_with_host(module, fn_name, &[], host_state_addr)
+        self.run_with_host(module, fn_name, args, host_state_addr)
     }
 
     /// Run `entry` from a compiled `module`, marshaling its result into an

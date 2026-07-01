@@ -4176,6 +4176,23 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Compile source and run a named entry (not main) on an engine",
     },
     Intrinsic {
+        name: "script_engine_call_args",
+        category: IntrinsicCategory::Scripting,
+        hints: &[
+            IntrinsicHint::Alloc,
+            IntrinsicHint::SideEffect,
+            IntrinsicHint::IoEffect,
+            IntrinsicHint::MayTrap,
+        ],
+        param_count: 4, // engine, source, fn_name, args: List
+        return_count: 1, // RawScriptOutcome handle
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineCallArgs,
+        ),
+        mlir_op: None,
+        doc: "Compile source and run a named entry with positional list args",
+    },
+    Intrinsic {
         name: "script_outcome_is_ok",
         category: IntrinsicCategory::Scripting,
         hints: &[IntrinsicHint::SideEffect],

@@ -136,6 +136,44 @@ pub(in super::super) fn handle_script_engine_call(
     Ok(DispatchResult::Continue)
 }
 
+/// `script_engine_call_args(engine, source, fn_name, args) -> RawScriptOutcome`
+/// — like `script_engine_call` but passing the `args` list's elements as the
+/// entry's positional parameters (scalars cross to the fresh script interpreter
+/// directly). The host builds `args` as a `List`.
+pub(in super::super) fn handle_script_engine_call_args(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let engine_reg = read_reg(state)?;
+    let src_reg = read_reg(state)?;
+    let fn_reg = read_reg(state)?;
+    let args_reg = read_reg(state)?;
+
+    let engine_ptr = state.get_reg(engine_reg).as_ptr::<ScriptEngine>() as *mut ScriptEngine;
+    if engine_ptr.is_null() {
+        return Err(InterpreterError::NullPointer);
+    }
+    let src_val = state.get_reg(src_reg);
+    let source =
+        super::path_ops_runtime::extract_string_if_text(state, &src_val).unwrap_or_default();
+    let fn_val = state.get_reg(fn_reg);
+    let fn_name =
+        super::path_ops_runtime::extract_string_if_text(state, &fn_val).unwrap_or_default();
+    let args_val = state.get_reg(args_reg);
+    let arg_values = state.list_elements(args_val).unwrap_or_default();
+
+    let host_addr = state as *mut InterpreterState as usize;
+
+    // SAFETY: `engine_ptr` is a live `Box<ScriptEngine>` handle; see
+    // `handle_script_engine_eval` for the host-re-entry safety contract.
+    let outcome = unsafe {
+        (*engine_ptr).call_named_args_with_host(&source, &fn_name, &arg_values, host_addr)
+    };
+    let outcome_ptr = Box::into_raw(Box::new(outcome));
+    state.set_reg(dst, Value::from_ptr(outcome_ptr as *mut u8));
+    Ok(DispatchResult::Continue)
+}
+
 /// `script_outcome_is_ok(outcome) -> Bool`.
 pub(in super::super) fn handle_script_outcome_is_ok(
     state: &mut InterpreterState,

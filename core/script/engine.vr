@@ -148,6 +148,19 @@ implement Engine {
         script_outcome_free(outcome);
         result
     }
+
+    /// Compile `source` and invoke `fn_name` with positional `args` passed as
+    /// its parameters (scalars). Returns its marshaled value or an error.
+    public fn call_args<T>(&self, source: Text, fn_name: Text, args: List<T>) -> ScriptResult {
+        let outcome = script_engine_call_args(self.raw, source, fn_name, args);
+        let result = if script_outcome_is_ok(outcome) {
+            ScriptResult.Ok(marshal_outcome(outcome))
+        } else {
+            ScriptResult.Err(script_outcome_error(outcome))
+        };
+        script_outcome_free(outcome);
+        result
+    }
 }
 
 implement Drop for Engine {

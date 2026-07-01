@@ -234,6 +234,9 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptEngineCall) => {
             super::script_runtime::handle_script_engine_call(state)
         }
+        Some(ExtendedSubOpcode::ScriptEngineCallArgs) => {
+            super::script_runtime::handle_script_engine_call_args(state)
+        }
         Some(ExtendedSubOpcode::ScriptOutcomeIsOk) => {
             super::script_runtime::handle_script_outcome_is_ok(state)
         }
