@@ -133,6 +133,21 @@ implement Engine {
         script_outcome_free(outcome);
         result
     }
+
+    /// Compile `source` and invoke a specific `fn_name` (instead of `main`),
+    /// returning its marshaled value or an error. Pass arguments beforehand with
+    /// the `set_*` methods (the entry reads them via `script_global_*`). Lets a
+    /// host drive a script's individual functions, not only its entry point.
+    public fn call(&self, source: Text, fn_name: Text) -> ScriptResult {
+        let outcome = script_engine_call(self.raw, source, fn_name);
+        let result = if script_outcome_is_ok(outcome) {
+            ScriptResult.Ok(marshal_outcome(outcome))
+        } else {
+            ScriptResult.Err(script_outcome_error(outcome))
+        };
+        script_outcome_free(outcome);
+        result
+    }
 }
 
 implement Drop for Engine {

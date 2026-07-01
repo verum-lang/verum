@@ -679,6 +679,31 @@ impl ScriptEngine {
         self.run_with_host(module, "main", &[], host_state_addr)
     }
 
+    /// Compile `source` and run its `fn_name` entry (rather than `main`) with a
+    /// host re-entry context — the "call a named script function" embedding
+    /// primitive. Arguments are passed through the shared-global table (the host
+    /// `set_*`s them before the call; the entry reads them via `script_global_*`)
+    /// and the result comes back marshaled in the [`ScriptOutcome`], so a host
+    /// can drive a script's individual functions, not only its `main`.
+    pub fn call_named_with_host(
+        &mut self,
+        source: &str,
+        fn_name: &str,
+        host_state_addr: usize,
+    ) -> ScriptOutcome {
+        let module = match self.compile(source) {
+            Ok(m) => m,
+            Err(error) => {
+                return ScriptOutcome {
+                    value: ScriptValueOwned::Nil,
+                    error: Some(error),
+                    stdout: String::new(),
+                };
+            }
+        };
+        self.run_with_host(module, fn_name, &[], host_state_addr)
+    }
+
     /// Run `entry` from a compiled `module`, marshaling its result into an
     /// owned [`ScriptOutcome`] *before* the script interpreter (and its heap)
     /// is dropped — so a `Text` / heap result is copied out, not left dangling.

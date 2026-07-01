@@ -10596,6 +10596,10 @@ pub enum ExtendedSubOpcode {
     ScriptSetList = 0x55,
     /// Script shares a `Map` to the world/host. `[0x1F][0x56][reg:name][reg:value]`.
     ScriptSetMap = 0x56,
+
+    /// Compile + run a named entry (not `main`): host calls a script function.
+    /// `[0x1F][0x57][reg:dst][reg:engine][reg:source][reg:fn_name]`.
+    ScriptEngineCall = 0x57,
 }
 
 impl ExtendedSubOpcode {
@@ -10661,6 +10665,7 @@ impl ExtendedSubOpcode {
             0x54 => Some(Self::ScriptGlobalMap),
             0x55 => Some(Self::ScriptSetList),
             0x56 => Some(Self::ScriptSetMap),
+            0x57 => Some(Self::ScriptEngineCall),
             _ => None,
         }
     }
@@ -10731,6 +10736,7 @@ impl ExtendedSubOpcode {
             Self::ScriptGlobalMap => "EXT_SCRIPT_GLOBAL_MAP",
             Self::ScriptSetList => "EXT_SCRIPT_SET_LIST",
             Self::ScriptSetMap => "EXT_SCRIPT_SET_MAP",
+            Self::ScriptEngineCall => "EXT_SCRIPT_ENGINE_CALL",
         }
     }
 }
