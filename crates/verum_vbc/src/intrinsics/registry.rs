@@ -4205,6 +4205,18 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Merge two scripts into a persistent session (zero-copy interop)",
     },
     Intrinsic {
+        name: "script_engine_link",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect, IntrinsicHint::MayTrap],
+        param_count: 2, // engine, sources: List<Text>
+        return_count: 1, // RawScriptSession handle
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineLink,
+        ),
+        mlir_op: None,
+        doc: "Merge N scripts (a source list) into a persistent session",
+    },
+    Intrinsic {
         name: "script_session_call",
         category: IntrinsicCategory::Scripting,
         hints: &[

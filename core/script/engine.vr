@@ -169,6 +169,13 @@ implement Engine {
     public fn link2(&self, source_a: Text, source_b: Text) -> Session {
         Session { raw: script_engine_link2(self.raw, source_a, source_b) }
     }
+
+    /// Merge a whole list of scripts into one persistent [`Session`] with a
+    /// shared heap — the zero-copy tier for a set of scripts (e.g. loading many
+    /// plugin scripts into one shared world).
+    public fn link(&self, sources: List<Text>) -> Session {
+        Session { raw: script_engine_link(self.raw, sources) }
+    }
 }
 
 // =============================================================================
