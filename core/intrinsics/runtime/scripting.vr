@@ -70,6 +70,11 @@ public fn script_engine_eval(engine: RawScriptEngine, source: Text) -> RawScript
 @intrinsic("script_engine_call")
 public fn script_engine_call(engine: RawScriptEngine, source: Text, fn_name: Text) -> RawScriptOutcome;
 
+/// Like `script_engine_call` but passes the `args` list's elements as the
+/// entry's positional parameters (rather than via the shared globals).
+@intrinsic("script_engine_call_args")
+public fn script_engine_call_args<T>(engine: RawScriptEngine, source: Text, fn_name: Text, args: List<T>) -> RawScriptOutcome;
+
 // =============================================================================
 // SECTION 4: Outcome Inspection
 // =============================================================================

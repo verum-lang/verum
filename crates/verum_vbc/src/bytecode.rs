@@ -5029,6 +5029,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let operands = decode_extended_reg_operands(data, offset, 4)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
+                // 5 regs: dst, engine, source, fn_name, args (named call w/ args).
+                Some(ExtendedSubOpcode::ScriptEngineCallArgs) => {
+                    let operands = decode_extended_reg_operands(data, offset, 5)?;
+                    Ok(Instruction::Extended { sub_op, operands })
+                }
                 // Reserved (0x00) and unknown future sub-ops remain
                 // zero-operand carriers; the dispatch handler reads any
                 // operands from the stream at execution time.

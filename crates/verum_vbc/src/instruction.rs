@@ -10600,6 +10600,9 @@ pub enum ExtendedSubOpcode {
     /// Compile + run a named entry (not `main`): host calls a script function.
     /// `[0x1F][0x57][reg:dst][reg:engine][reg:source][reg:fn_name]`.
     ScriptEngineCall = 0x57,
+    /// Named entry call with positional args from a list.
+    /// `[0x1F][0x58][reg:dst][reg:engine][reg:source][reg:fn_name][reg:args]`.
+    ScriptEngineCallArgs = 0x58,
 }
 
 impl ExtendedSubOpcode {
@@ -10666,6 +10669,7 @@ impl ExtendedSubOpcode {
             0x55 => Some(Self::ScriptSetList),
             0x56 => Some(Self::ScriptSetMap),
             0x57 => Some(Self::ScriptEngineCall),
+            0x58 => Some(Self::ScriptEngineCallArgs),
             _ => None,
         }
     }
@@ -10737,6 +10741,7 @@ impl ExtendedSubOpcode {
             Self::ScriptSetList => "EXT_SCRIPT_SET_LIST",
             Self::ScriptSetMap => "EXT_SCRIPT_SET_MAP",
             Self::ScriptEngineCall => "EXT_SCRIPT_ENGINE_CALL",
+            Self::ScriptEngineCallArgs => "EXT_SCRIPT_ENGINE_CALL_ARGS",
         }
     }
 }
