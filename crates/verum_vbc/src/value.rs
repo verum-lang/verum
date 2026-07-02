@@ -851,6 +851,16 @@ impl Value {
         (self.0 & 0xFFF8_0000_0000_0000) != 0x7FF8_0000_0000_0000
     }
 
+    /// True for a NaN-boxed float — the `TAG_NAN` value `from_f64(NaN)` produces.
+    /// `is_float()` deliberately returns false for it (it collides with the tag
+    /// prefix), yet `as_f64()` decodes it back to NaN; this predicate bridges the
+    /// two for callers that must classify a NaN as a float (e.g. value
+    /// marshaling, which otherwise mis-files a script's NaN result as opaque).
+    #[inline]
+    pub fn is_nan_float(&self) -> bool {
+        self.tag() == Some(TAG_NAN as u8)
+    }
+
     /// Returns true if this value is a tagged value (not a pure float).
     #[inline]
     pub fn is_tagged(&self) -> bool {

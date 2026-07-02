@@ -1178,7 +1178,10 @@ pub(crate) fn extract_owned(state: &InterpreterState, value: Value) -> ScriptVal
         ScriptValueOwned::Bool(value.as_bool())
     } else if value.is_int() {
         ScriptValueOwned::Int(value.as_i64())
-    } else if value.is_float() {
+    } else if value.is_float() || value.is_nan_float() {
+        // `is_nan_float` catches `from_f64(NaN)` (a script returning 0.0/0.0,
+        // sqrt(-1.0), …), which `is_float()` excludes but `as_f64()` decodes —
+        // otherwise a NaN result mis-marshals as `Unknown`.
         ScriptValueOwned::Float(value.as_f64())
     } else if let Some(s) = state.read_text(value) {
         ScriptValueOwned::Text(s)
