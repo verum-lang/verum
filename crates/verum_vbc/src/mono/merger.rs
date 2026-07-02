@@ -354,22 +354,31 @@ impl ModuleMerger {
                 // scalar-`&` un-strip) becomes Reference{Concrete(scalar)}, which the
                 // AOT param loop marks — enabling the lone-`&scalar` deref in
                 // e.g. Deque<Int>.contains(&value).
-                let stdlib_params = stdlib
+                // task #39/#35: also reconstruct the substituted return type so the
+                // AOT can float-mark the call result of a generic stdlib fn.
+                let (stdlib_params, stdlib_return_type) = stdlib
                     .functions
                     .iter()
                     .find(|f| f.id == request.function_id)
                     .map(|f| {
                         let subst = TypeSubstitution::from_function(f, &request.type_args);
-                        f.params
+                        let params = f
+                            .params
                             .iter()
                             .map(|p| {
                                 let mut np = p.clone();
                                 np.type_ref = subst.apply(&p.type_ref);
                                 np
                             })
-                            .collect()
+                            .collect();
+                        (params, subst.apply(&f.return_type))
                     })
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| {
+                        (
+                            Default::default(),
+                            crate::types::TypeRef::Concrete(crate::types::TypeId::UNIT),
+                        )
+                    });
 
                 // Create function descriptor for specialization
                 let new_func = FunctionDescriptor {
@@ -380,6 +389,7 @@ impl ModuleMerger {
                     register_count: *register_count,
                     is_generic: false, // Specialized - no longer generic
                     params: stdlib_params,
+                    return_type: stdlib_return_type,
                     ..Default::default()
                 };
 
@@ -421,6 +431,8 @@ impl ModuleMerger {
                 // task #41: expose the substituted param descriptors so the AOT
                 // param loop can mark scalar `&T` ref params of specialized funcs.
                 params: specialized.params,
+                // task #39/#35: expose the substituted return type for float-marking.
+                return_type: specialized.return_type,
                 ..Default::default()
             };
 
@@ -1021,6 +1033,8 @@ impl IncrementalMerger {
             is_generic: false,
             // task #41: expose the substituted param descriptors (see above).
             params: specialized.params,
+            // task #39/#35: expose the substituted return type for float-marking.
+            return_type: specialized.return_type,
             ..Default::default()
         };
 

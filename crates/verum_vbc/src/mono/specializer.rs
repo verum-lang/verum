@@ -46,6 +46,14 @@ pub struct SpecializedFunction {
     /// (e.g. Deque<Int>.contains's `value: &Int`); without this the specialized
     /// descriptor has empty params and the AOT can't deref a lone `&scalar`.
     pub params: smallvec::SmallVec<[crate::module::ParamDescriptor; 4]>,
+    /// task #39/#35: substituted return type — the generic descriptor's
+    /// return_type with type params resolved (T → Float64/Float32/…). The merger
+    /// writes it onto the specialized FunctionDescriptor so the AOT can
+    /// float-mark the call result (mark_register_from_return_type). Without it a
+    /// generic `fn fma<T>(...) -> T` monomorphized to Float64 loses the float
+    /// mark, so a downstream assert_eq/CmpG compares raw bits (e.g. +0.0 vs
+    /// -0.0 signed-zero) instead of via fcmp and fails at Tier-1 only.
+    pub return_type: crate::types::TypeRef,
 }
 
 // ============================================================================
@@ -398,6 +406,9 @@ impl<'a> BytecodeSpecializer<'a> {
                 np
             })
             .collect();
+        // task #39/#35: substitute the return type so the merged descriptor lets
+        // the AOT float-mark the call result of a generic fn returning T.
+        let return_type = self.substitution.apply(&func.return_type);
 
         Ok(SpecializedFunction {
             bytecode: output,
@@ -406,6 +417,7 @@ impl<'a> BytecodeSpecializer<'a> {
             max_stack: func.max_stack,
             new_constants: std::mem::take(&mut self.new_constants),
             params,
+            return_type,
         })
     }
 
@@ -1650,6 +1662,7 @@ mod tests {
             max_stack: 8,
             new_constants: vec![],
             params: Default::default(),
+            return_type: crate::types::TypeRef::Concrete(crate::types::TypeId::UNIT),
         };
         assert_eq!(sf.bytecode.len(), 2);
         assert_eq!(sf.register_count, 4);

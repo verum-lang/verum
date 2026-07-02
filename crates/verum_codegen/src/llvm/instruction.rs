@@ -11681,6 +11681,26 @@ fn lower_call<'ctx>(
         ctx.set_register(dst.0, ret_val);
         // Track register types based on function return type
         mark_register_from_return_type(ctx, dst.0, &func_desc.return_type);
+        // task #39/#35: a generic fn returning a bare type param T (e.g.
+        // `fn fma<T>(...) -> T`, `fn passthru<T>(x: T) -> T`) reuses the generic
+        // descriptor at Tier-1, so `return_type` is Generic(T) and the mark above
+        // can't classify it. If the return type equals a param's type (the same
+        // T) and the matching arg register is float-marked, propagate the float
+        // mark to the result so a downstream CmpG/assert_eq compares via fcmp —
+        // fixes signed-zero cases like law_fma_zero_addend (fma(a,b,+0.0) yields
+        // +0.0 while a*b yields -0.0; both are float and +0.0 == -0.0 under fcmp
+        // but differ bitwise).
+        if matches!(func_desc.return_type, TypeRef::Generic(_)) {
+            let arg_regs: Vec<u16> = args.iter().map(|r| r.0).collect();
+            for (i, p) in func_desc.params.iter().enumerate() {
+                if p.type_ref == func_desc.return_type
+                    && arg_regs.get(i).is_some_and(|&r| ctx.is_float_register(r))
+                {
+                    ctx.mark_float_register(dst.0);
+                    break;
+                }
+            }
+        }
         // Name-based fallback: VBC may assign non-semantic TypeIds to
         // compiled stdlib types, so mark_register_from_return_type misses
         // them. Detect from function name prefix as fallback.
@@ -30110,6 +30130,42 @@ fn lower_cmp_generic<'ctx>(
                 .build_int_s_extend(cmp_int, i64_type, "strcmp_ext")
                 .or_llvm_err()?;
             cmp64.into()
+        }
+    } else if ctx.is_float_register(a.0) || ctx.is_float_register(b.0) {
+        // task #39/#35: a float operand may arrive as an i64 register (its float
+        // bits, e.g. from a call result whose float mark survived but whose LLVM
+        // value is i64) — the int branch below would bit-compare it, so +0.0 (an
+        // fma's +0.0 addend) != -0.0 (a*b) even though they are equal floats.
+        // `==`/Ord compare same-type operands, so if EITHER side is float-marked
+        // BOTH are floats: bitcast both to f64 (as_f64) and use fcmp. Closes
+        // float law_fma_zero_addend and generic-fn-return float comparisons.
+        let la = as_f64(ctx, lhs, "cmpf_a")?;
+        let lb = as_f64(ctx, rhs, "cmpf_b")?;
+        if eq {
+            ctx.builder()
+                .build_float_compare(FloatPredicate::OEQ, la, lb, "geq_fm")
+                .or_llvm_err()?
+                .into()
+        } else {
+            let lt = ctx
+                .builder()
+                .build_float_compare(FloatPredicate::OLT, la, lb, "lt_fm")
+                .or_llvm_err()?;
+            let gt = ctx
+                .builder()
+                .build_float_compare(FloatPredicate::OGT, la, lb, "gt_fm")
+                .or_llvm_err()?;
+            let i64_type = ctx.types().i64_type();
+            let neg_one = i64_type.const_int((-1i64) as u64, true);
+            let zero = i64_type.const_int(0, false);
+            let one = i64_type.const_int(1, false);
+            let gt_val = ctx
+                .builder()
+                .build_select(gt, one, zero, "gt_sel_fm")
+                .or_llvm_err()?;
+            ctx.builder()
+                .build_select(lt, neg_one, gt_val.into_int_value(), "ord_sel_fm")
+                .or_llvm_err()?
         }
     } else if lhs.is_int_value() && rhs.is_int_value() {
         let mut lhs_int = lhs.into_int_value();
