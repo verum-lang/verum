@@ -2719,25 +2719,67 @@ impl InterpreterState {
     /// canonical reader the scripting engine uses to capture a script's `Text`
     /// while it is still valid.
     pub fn read_text(&self, value: Value) -> Option<String> {
+        use crate::interpreter::heap::{ObjectHeader, OBJECT_HEADER_SIZE};
+        use crate::types::TypeId;
         if value.is_small_string() {
             return Some(value.as_small_string().as_str().to_string());
         }
-        if value.is_nil() || !value.is_ptr() {
+        // FatRef-encoded Text — `Text.from_utf8_unchecked` and struct-literal
+        // Text builders produce a `FatRef { ptr = bytes, metadata = byte_len }`
+        // with NO ObjectHeader. Recognized with the same `len <= 1_000_000`
+        // heuristic as the canonical `is_heap_string`, so every Text-reading
+        // site agrees (previously such Text marshaled as `Unknown` / `Int`).
+        if value.is_fat_ref() {
+            let fr = value.as_fat_ref();
+            let p = fr.ptr();
+            let len = fr.len();
+            if p.is_null() || len > 1_000_000 {
+                return None;
+            }
+            // SAFETY: a FatRef Text addresses `len` bytes at `p`.
+            let bytes = unsafe { std::slice::from_raw_parts(p as *const u8, len as usize) };
+            return Some(String::from_utf8_lossy(bytes).into_owned());
+        }
+        if value.is_nil() || !value.is_ptr() || value.is_boxed_int() {
             return None;
         }
         let ptr = value.as_ptr::<u8>();
-        if ptr.is_null() {
+        if ptr.is_null() || !(ptr as usize).is_multiple_of(std::mem::align_of::<ObjectHeader>()) {
             return None;
         }
-        // SAFETY: a non-null pointer-tagged Value points at an `ObjectHeader`.
-        let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
-        if header.type_id != crate::types::TypeId(0x0001) {
+        // SAFETY: a non-null, aligned pointer-tagged Value points at an ObjectHeader.
+        let header = unsafe { &*(ptr as *const ObjectHeader) };
+        // TypeId::TEXT (4, the `{ptr,len,cap}` builder produced by stdlib Text
+        // methods) and TypeId(0x0001) (the `[len:u64][bytes]` concat/alloc form).
+        if header.type_id != TypeId::TEXT && header.type_id != TypeId(0x0001) {
             return None;
         }
-        // SAFETY: a Text object's payload is `[len:u64][bytes]` (see alloc_string).
+        // SAFETY: header validated; both Text payload layouts are read below.
         unsafe {
-            let data = ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE);
+            let data = ptr.add(OBJECT_HEADER_SIZE);
+            // Builder layout: a 24-byte payload whose first two Values are
+            // `{ bytes_ptr | Nil, byte_len : Int }` (mirrors text_value_bytes_and_len).
+            if header.size as usize == 24 {
+                let f0 = *(data as *const Value);
+                let f1 = *((data as *const Value).add(1));
+                if (f0.is_ptr() || f0.is_nil()) && f1.is_int() {
+                    let len = f1.as_i64().max(0) as usize;
+                    if f0.is_nil() || len == 0 {
+                        return Some(String::new());
+                    }
+                    let bp = f0.as_ptr::<u8>();
+                    if bp.is_null() {
+                        return Some(String::new());
+                    }
+                    let bytes = std::slice::from_raw_parts(bp, len);
+                    return Some(String::from_utf8_lossy(bytes).into_owned());
+                }
+            }
+            // Canonical layout: `[len:u64][bytes]` (see alloc_string).
             let len = *(data as *const u64) as usize;
+            if len > (1usize << 30) {
+                return None;
+            }
             let bytes = std::slice::from_raw_parts(data.add(8), len);
             Some(String::from_utf8_lossy(bytes).into_owned())
         }
