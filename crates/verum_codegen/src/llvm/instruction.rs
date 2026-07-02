@@ -12263,6 +12263,102 @@ fn lower_call_method<'ctx>(
     //  contains (needs Eq), index_of (needs Eq)
     // (C) Text-specific: join (uses verum_string_join C stub)
     // (D) Simple inline: first, last, clear
+    // task #40: Deque.contains ring-buffer scan. The compiled @Deque.contains does
+    // `self.get(i).expect() == value` (value: &T); under AOT the archive-compiled
+    // body does NOT deref the &T value param (the #41 scalar-&-param deref isn't
+    // applied to archive/specialized Deque methods), so it compares element-vs-
+    // pointer and always returns false. Scan the ring buffer directly, deref'ing
+    // the search value like List.contains: the element at logical index i is
+    // `data[(head + i) & (cap - 1)]` (cap is always a power of two).
+    let is_deque_method =
+        ctx.is_deque_register(receiver.0) || method_name_str.starts_with("Deque.");
+    if is_deque_method && bare_method_early == "contains" && args.count == 1 {
+        let deque_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "dq_ptr")?;
+        let i64_type = ctx.types().i64_type();
+        let i8_type = ctx.types().i8_type();
+        let ptr_type = ctx.types().ptr_type();
+        // Deref the &T search value (guard int/ptr to avoid the ARM-backend SIGSEGV
+        // on a non-address value — same guard as List.contains).
+        let search_val = {
+            let raw = ctx.get_register(args.start.0)?;
+            if raw.is_pointer_value() || raw.is_int_value() {
+                let sptr = as_ptr(ctx, raw, "dq_search_ptr")?;
+                ctx.builder()
+                    .build_load(i64_type, sptr, "dq_search_deref")
+                    .or_llvm_err()?
+                    .into_int_value()
+            } else {
+                as_i64(ctx, raw, "dq_search_val")?
+            }
+        };
+        // Load head / len / cap / data from the Deque object (NewG layout).
+        let head_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, deque_ptr, &[i64_type.const_int(super::runtime::DEQUE_HEAD_OFFSET, false)], "dq_head_slot")
+                .or_llvm_err()?
+        };
+        let head = ctx.builder().build_load(i64_type, head_slot, "dq_head").or_llvm_err()?.into_int_value();
+        let len_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, deque_ptr, &[i64_type.const_int(super::runtime::DEQUE_LEN_OFFSET, false)], "dq_len_slot")
+                .or_llvm_err()?
+        };
+        let len = ctx.builder().build_load(i64_type, len_slot, "dq_len").or_llvm_err()?.into_int_value();
+        let cap_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, deque_ptr, &[i64_type.const_int(super::runtime::DEQUE_CAP_OFFSET, false)], "dq_cap_slot")
+                .or_llvm_err()?
+        };
+        let cap = ctx.builder().build_load(i64_type, cap_slot, "dq_cap").or_llvm_err()?.into_int_value();
+        let data_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, deque_ptr, &[i64_type.const_int(super::runtime::DEQUE_DATA_OFFSET, false)], "dq_data_slot")
+                .or_llvm_err()?
+        };
+        let data_i64 = ctx.builder().build_load(i64_type, data_slot, "dq_data_i64").or_llvm_err()?.into_int_value();
+        let data_ptr = ctx.builder().build_int_to_ptr(data_i64, ptr_type, "dq_data_ptr").or_llvm_err()?;
+        // mask = cap - 1 (cap is a power of two, so (head + i) & mask == (head + i) mod cap)
+        let mask = ctx.builder().build_int_sub(cap, i64_type.const_int(1, false), "dq_mask").or_llvm_err()?;
+        let current_fn = ctx.function();
+        let entry_bb = ctx.builder().get_insert_block().or_internal("no insert block")?;
+        let loop_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_loop");
+        let body_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_body");
+        let inc_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_inc");
+        let found_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_found");
+        let not_found_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_not_found");
+        let merge_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_merge");
+        ctx.builder().build_unconditional_branch(loop_bb).or_llvm_err()?;
+        ctx.builder().position_at_end(loop_bb);
+        let phi_i = ctx.builder().build_phi(i64_type, "dq_i").or_llvm_err()?;
+        let i_val = phi_i.as_basic_value().into_int_value();
+        let cmp_done = ctx.builder().build_int_compare(IntPredicate::SLT, i_val, len, "dq_cmp_done").or_llvm_err()?;
+        ctx.builder().build_conditional_branch(cmp_done, body_bb, not_found_bb).or_llvm_err()?;
+        ctx.builder().position_at_end(body_bb);
+        let hpi = ctx.builder().build_int_add(head, i_val, "dq_hpi").or_llvm_err()?;
+        let phys = ctx.builder().build_and(hpi, mask, "dq_phys").or_llvm_err()?;
+        // SAFETY: GEP into the ring buffer at the physical index; phys is masked to [0, cap)
+        let elem_ptr = unsafe {
+            ctx.builder().build_in_bounds_gep(i64_type, data_ptr, &[phys], "dq_elem_ptr").or_llvm_err()?
+        };
+        let elem = ctx.builder().build_load(i64_type, elem_ptr, "dq_elem").or_llvm_err()?.into_int_value();
+        let cmp_eq = ctx.builder().build_int_compare(IntPredicate::EQ, elem, search_val, "dq_cmp_eq").or_llvm_err()?;
+        ctx.builder().build_conditional_branch(cmp_eq, found_bb, inc_bb).or_llvm_err()?;
+        ctx.builder().position_at_end(inc_bb);
+        let i_next = ctx.builder().build_int_add(i_val, i64_type.const_int(1, false), "dq_i_next").or_llvm_err()?;
+        ctx.builder().build_unconditional_branch(loop_bb).or_llvm_err()?;
+        phi_i.add_incoming(&[(&i64_type.const_zero(), entry_bb), (&i_next, inc_bb)]);
+        ctx.builder().position_at_end(found_bb);
+        ctx.builder().build_unconditional_branch(merge_bb).or_llvm_err()?;
+        ctx.builder().position_at_end(not_found_bb);
+        ctx.builder().build_unconditional_branch(merge_bb).or_llvm_err()?;
+        ctx.builder().position_at_end(merge_bb);
+        let phi_result = ctx.builder().build_phi(i64_type, "dq_contains_result").or_llvm_err()?;
+        phi_result.add_incoming(&[(&i64_type.const_int(1, false), found_bb), (&i64_type.const_zero(), not_found_bb)]);
+        ctx.set_register(dst.0, phi_result.as_basic_value());
+        ctx.mark_bool_register(dst.0);
+        return Ok(());
+    }
+
     // pop goes through compiled list.vr (returns Maybe<T> properly).
     // len/is_empty go through compiled list.vr via Strategy 1/2.
     let is_list_method = ctx.is_list_register(receiver.0) || method_name_str.starts_with("List.");
