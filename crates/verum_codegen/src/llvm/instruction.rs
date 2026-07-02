@@ -11647,21 +11647,21 @@ fn lower_call<'ctx>(
             let raw_val = ctx.get_register(r.0)?;
             if let Some(expected_meta) = param_types.get(i) {
                 if let Some(expected_ty) = meta_type_to_basic(*expected_meta) {
-                    // Implicit Int→Float coercion: when callee expects f64
-                    // but argument is a non-float i64 register, use sitofp
-                    // (signed int to float point) instead of bitcast.
-                    if let BasicTypeEnum::FloatType(ft) = expected_ty {
-                        if let BasicValueEnum::IntValue(iv) = raw_val {
-                            if !ctx.is_float_register(r.0) {
-                                // Real integer → float conversion
-                                return Ok(ctx
-                                    .builder()
-                                    .build_signed_int_to_float(iv, ft, &format!("arg{}_itof", i))
-                                    .or_llvm_err()?
-                                    .into());
-                            }
-                        }
-                    }
+                    // task #35: i64 → float param must BITCAST (recover the IEEE-754
+                    // bits), NOT sitofp. A value reaching a float param is a float
+                    // held in an i64 register — e.g. `f32_to_bits(*e)` / `f64_to_bits(*e)`
+                    // where `*e` is an iter-deref'd `List<Float>`/`List<Float32>`
+                    // element that never got float-marked: the iterator chain marks
+                    // only fn-return list elements, and the prescan_float pass marks
+                    // only CmpF/BinaryF operands — neither covers a value consumed
+                    // solely as a call argument. sitofp would treat the float bits as
+                    // an integer (0x4000000000000000 → 4.6e18 → f32 0x5E800000),
+                    // corrupting every `*_to_bits` round trip (law_f32/f64_bits_round_trip).
+                    // coerce_value bitcasts i64→f64 (+fptrunc for f32) — the correct
+                    // reinterpretation, and the SAME path the float-marked case already
+                    // took. A genuine Int passed to a Float param is not a supported
+                    // Verum coercion (the interpreter yields garbage for it too), so no
+                    // correct program depends on the removed sitofp path.
                     let coerced =
                         coerce_value(ctx, raw_val, expected_ty, &format!("arg{}_coerce", i))?;
                     Ok(coerced.into())
