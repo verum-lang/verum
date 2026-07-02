@@ -20,9 +20,10 @@
 // Drop, each outcome at the end of `eval`).  No second VM, heap, or sandbox
 // is introduced — `Engine` drives the same VBC interpreter the host runs on.
 //
-// Scalars (Unit/Bool/Int/Float), Text, and List marshal fully; host-function
-// callbacks, sandboxing, and a shared World are wired.  `Map` return values
-// still surface as `Unknown` pending structural marshaling.
+// Scalars (Unit/Bool/Int/Float), Text, List, and Map marshal fully and to
+// arbitrary nesting depth, in BOTH directions (host<->script); host-function
+// callbacks, sandboxing, a shared World, named-function calls, and a zero-copy
+// linked Session are all wired.
 //
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
@@ -42,9 +43,9 @@ mount core.intrinsics.runtime.scripting.*;
 
 /// A value returned by a script, marshaled into the host.
 ///
-/// Scalars, `Text`, `List`, and `Map` marshal fully; `Unknown` stands in for
-/// records / references. Nested collection elements that are themselves
-/// collections surface as `Unknown` (one level).
+/// Scalars, `Text`, `List`, and `Map` marshal fully, and nested collections
+/// recurse to arbitrary depth. `Unknown` stands in only for records /
+/// references (and any future kind not yet mapped).
 public type ScriptValue is
     | Nil
     | Bool(Bool)
@@ -66,7 +67,9 @@ public type ScriptResult is
 
 /// An isolated script-execution world.  Owns a host-side `ScriptEngine`
 /// handle; freed automatically when the `Engine` goes out of scope.
-public type Engine is {
+// `affine`: an Engine uniquely owns a boxed native handle freed by its Drop, so
+// it must be move-only — copying it would free the same handle twice.
+public type affine Engine is {
     raw: RawScriptEngine,
 };
 
@@ -185,7 +188,8 @@ implement Engine {
 /// A persistent session over two linked scripts sharing one heap. Obtain one
 /// from [`Engine.link2`]; run functions on it with `call`. State (globals, heap)
 /// written by an earlier `call` is visible to later ones — shared by reference.
-public type Session is {
+// `affine` (move-only): uniquely owns a boxed native session freed by its Drop.
+public type affine Session is {
     raw: RawScriptSession,
 };
 
@@ -231,7 +235,8 @@ implement Drop for Engine {
 /// CBGR keeping the shared references safe — the differentiator copy-at-the-
 /// boundary engines like Wasm/BEAM/V8 cannot offer. Scalars and Text share
 /// correctly today through the table.)
-public type World is {
+// `affine` (move-only): uniquely owns a boxed native world freed by its Drop.
+public type affine World is {
     raw: RawScriptWorld,
 };
 

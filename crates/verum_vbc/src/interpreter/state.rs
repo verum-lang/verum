@@ -2820,6 +2820,18 @@ impl InterpreterState {
             if backing.is_null() {
                 return if len == 0 { Some(Vec::new()) } else { None };
             }
+            // The header `len` is not trusted past the backing's real
+            // allocation: the backing's `ObjectHeader.size` is the payload byte
+            // count (`element_count * size_of::<Value>()`; see alloc_array), so
+            // clamp `len` to it. A len/backing mismatch (a corrupt or crafted
+            // LIST object) would otherwise read out of bounds.
+            let backing_elems = {
+                let bh = &*(backing as *const crate::interpreter::heap::ObjectHeader);
+                bh.size as usize / std::mem::size_of::<Value>()
+            };
+            if len > backing_elems {
+                return None;
+            }
             let mut out = Vec::with_capacity(len);
             for i in 0..len {
                 let elem = *(backing.add(OBJECT_HEADER_SIZE + i * 8) as *const Value);
@@ -2867,9 +2879,17 @@ impl InterpreterState {
             if entries_ptr.is_null() {
                 return Some(Vec::new());
             }
+            // Clamp `capacity` to the entries backing's real allocation (it holds
+            // `cap * 2` Values): the header `cap` is untrusted, so never iterate
+            // past the backing's own `ObjectHeader.size` (payload byte count).
+            let max_pairs = {
+                let eh = &*(entries_ptr as *const crate::interpreter::heap::ObjectHeader);
+                (eh.size as usize / std::mem::size_of::<Value>()) / 2
+            };
+            let cap = (capacity as usize).min(max_pairs);
             let entries_data = entries_ptr.add(OBJECT_HEADER_SIZE) as *const Value;
             let mut out = Vec::new();
-            for i in 0..(capacity as usize) {
+            for i in 0..cap {
                 let key = *entries_data.add(i * 2);
                 if key.is_unit() {
                     continue; // empty slot

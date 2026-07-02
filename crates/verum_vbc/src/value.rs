@@ -888,7 +888,9 @@ impl Value {
     /// On x86-64/ARM64, user-space addresses have bits 47-63 all-zero.
     #[inline]
     pub fn is_boxed_int(&self) -> bool {
-        self.tag() == Some(TAG_POINTER as u8) && (self.0 & BOXED_INT_MARKER) == BOXED_INT_MARKER // Both bits 47 and 46 must be set
+        self.tag() == Some(TAG_POINTER as u8)
+            && (self.0 & BOXED_INT_MARKER) == BOXED_INT_MARKER // bits 47 and 46 set
+            && (self.0 & FAT_REF_SUB_MARKER) == 0 // bit 45 clear: a FatRef sets 47|46|45 and must NOT be misread as a boxed int (mirrors is_thin_ref/is_generator, which require the higher sub-marker bit clear)
     }
 
     /// Returns true if this is an integer (inline or boxed).

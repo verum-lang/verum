@@ -1,6 +1,6 @@
 //! Interpreter handlers for the embedded scripting engine (`core.script`).
 //!
-//! These back the `Script*` sub-ops of [`ExtendedSubOpcode`] (0x20–0x2F),
+//! These back the `Script*` sub-ops of [`ExtendedSubOpcode`] (0x20–0x5C),
 //! dispatched from [`super::extended::handle_extended`].  They are a thin
 //! marshaling layer over [`ScriptEngine`] / [`ScriptOutcome`]: they read
 //! operand registers, (un)box opaque host-owned handles, and write results

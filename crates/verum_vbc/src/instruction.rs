@@ -10412,7 +10412,7 @@ pub enum ExtendedSubOpcode {
     ProcessExit = 0x10,
 
     // ========================================================================
-    // Embedded scripting engine (0x20-0x2F) — backing for `core.script`.
+    // Embedded scripting engine (0x20-0x5C) — backing for `core.script`.
     // ========================================================================
     // These dispatch to `dispatch_table::handlers::script_runtime`, which
     // drives the in-process `ScriptEngine` (a thin wrapper over the VBC

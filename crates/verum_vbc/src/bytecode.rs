@@ -4948,7 +4948,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     }
                     Ok(Instruction::Extended { sub_op, operands })
                 }
-                // Embedded scripting sub-ops (0x20-0x2F, `core.script`) carry
+                // Embedded scripting sub-ops (0x20-0x5C, `core.script`) carry
                 // register operands (dest-first for value-returning ops). Like
                 // ProcessExit, decode them here so the operands survive the
                 // archive round-trip and reach the dispatch handler intact.
@@ -8052,7 +8052,7 @@ mod tests {
 
     #[test]
     fn test_extended_script_subops_operands_roundtrip() {
-        // Regression: scripting Extended sub-ops (0x20-0x2F) carry register
+        // Regression: scripting Extended sub-ops (0x20-0x5C) carry register
         // operands with NO length prefix, so the decoder must read the right
         // number of registers per sub-op AND advance the stream. Without this
         // the operands are dropped and the stream desyncs when a module

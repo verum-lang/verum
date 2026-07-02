@@ -19,10 +19,10 @@
 //   };
 //
 // Source evaluation runs whenever a compiler is linked into the process (the
-// CLI, the REPL, and any host embedding `verum_compiler`).  This is the
-// "scripting at the interpretation level" tier; precompiled-archive scripts,
-// host functions, capability sandboxing, and zero-copy cross-script interop
-// build on this foundation in later phases.
+// CLI, the REPL, and any host embedding `verum_compiler`).  Host functions,
+// capability sandboxing, named-function calls, and a zero-copy linked Session
+// for cross-script interop are all implemented on this foundation; only
+// precompiled-archive (`.vbca`) scripts remain a later phase.
 //
 // Backed by `core.intrinsics.runtime.scripting` and, in the runtime,
 // `crates/verum_vbc/src/interpreter/script_engine.rs`.
@@ -39,5 +39,6 @@ module core.script;
 public module engine;
 
 // Re-export the primary surface so callers can
-// `mount core.script.{Engine, World, ScriptValue, ScriptResult};`.
-public mount engine.{Engine, World, ScriptValue, ScriptResult};
+// `mount core.script.{Engine, Session, World, ScriptValue, ScriptResult};`.
+// `Session` is included so the return type of `Engine.link`/`link2` is nameable.
+public mount engine.{Engine, Session, World, ScriptValue, ScriptResult};
