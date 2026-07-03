@@ -902,6 +902,10 @@ impl ScriptEngine {
             interp.state.host_globals.insert(name.clone(), v);
         }
 
+        // Capture the script's stdout into the interpreter's buffer (off by
+        // default) so the host can retrieve it via `Engine.stdout()` /
+        // `ScriptOutcome.stdout` — an embedded engine owns the script's output.
+        interp.state.capture_output = true;
         let result = interp.execute_function_with_args(func_id, args);
         let stdout = interp.state.get_stdout().to_string();
         self.last_stdout = stdout.clone();

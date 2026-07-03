@@ -22067,6 +22067,7 @@ fn lower_extended<'ctx>(
         | Some(ExtendedSubOpcode::ScriptEngineCallArgs)
         | Some(ExtendedSubOpcode::ScriptEngineLink2)
         | Some(ExtendedSubOpcode::ScriptEngineLink)
+        | Some(ExtendedSubOpcode::ScriptEngineStdout)
         | Some(ExtendedSubOpcode::ScriptSessionCall)
         | Some(ExtendedSubOpcode::ScriptSessionFree)
         | Some(ExtendedSubOpcode::ScriptOutcomeIsOk)

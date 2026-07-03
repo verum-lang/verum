@@ -10614,6 +10614,8 @@ pub enum ExtendedSubOpcode {
     /// Merge N scripts (a list of sources) into a session.
     /// `[0x1F][0x5C][reg:dst][reg:engine][reg:sources]`.
     ScriptEngineLink = 0x5C,
+    /// The engine's most-recent-run captured stdout. `[0x1F][0x5D][dst][engine]`.
+    ScriptEngineStdout = 0x5D,
 }
 
 impl ExtendedSubOpcode {
@@ -10685,6 +10687,7 @@ impl ExtendedSubOpcode {
             0x5A => Some(Self::ScriptSessionCall),
             0x5B => Some(Self::ScriptSessionFree),
             0x5C => Some(Self::ScriptEngineLink),
+            0x5D => Some(Self::ScriptEngineStdout),
             _ => None,
         }
     }
@@ -10761,6 +10764,7 @@ impl ExtendedSubOpcode {
             Self::ScriptSessionCall => "EXT_SCRIPT_SESSION_CALL",
             Self::ScriptSessionFree => "EXT_SCRIPT_SESSION_FREE",
             Self::ScriptEngineLink => "EXT_SCRIPT_ENGINE_LINK",
+            Self::ScriptEngineStdout => "EXT_SCRIPT_ENGINE_STDOUT",
         }
     }
 }

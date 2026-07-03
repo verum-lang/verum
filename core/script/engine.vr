@@ -179,6 +179,13 @@ implement Engine {
     public fn link(&self, sources: List<Text>) -> Session {
         Session { raw: script_engine_link(self.raw, sources) }
     }
+
+    /// The text this engine's most recent `eval` / `call` wrote to stdout
+    /// (empty before any run). Read it right after an `eval`/`call` to capture
+    /// a script's printed output — the `ScriptResult` carries only the value.
+    public fn stdout(&self) -> Text {
+        script_engine_stdout(self.raw)
+    }
 }
 
 // =============================================================================

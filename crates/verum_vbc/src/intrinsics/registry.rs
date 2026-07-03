@@ -4217,6 +4217,18 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Merge N scripts (a source list) into a persistent session",
     },
     Intrinsic {
+        name: "script_engine_stdout",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 1, // engine
+        return_count: 1, // Text
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineStdout,
+        ),
+        mlir_op: None,
+        doc: "Host: stdout captured during the engine's most recent run",
+    },
+    Intrinsic {
         name: "script_session_call",
         category: IntrinsicCategory::Scripting,
         hints: &[

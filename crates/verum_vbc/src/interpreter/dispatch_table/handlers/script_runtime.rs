@@ -240,6 +240,25 @@ pub(in super::super) fn handle_script_engine_link(
     Ok(DispatchResult::Continue)
 }
 
+/// `script_engine_stdout(engine) -> Text` — the stdout captured during the
+/// engine's most recent `eval`/`call` (empty before any run, or for a bad
+/// handle). Surfaces the otherwise-unreachable captured output — the `.vr`
+/// `eval`/`call` free the outcome (which carries stdout) without exposing it.
+pub(in super::super) fn handle_script_engine_stdout(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let engine_reg = read_reg(state)?;
+    let out = match checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+        // SAFETY: a validated, live `Box<ScriptEngine>` handle.
+        Ok(ptr) => unsafe { (*ptr).last_stdout().to_string() },
+        Err(_) => String::new(),
+    };
+    let value = alloc_string_value(state, &out)?;
+    state.set_reg(dst, value);
+    Ok(DispatchResult::Continue)
+}
+
 /// `script_session_call(session, fn_name) -> RawScriptOutcome` — run `fn_name`
 /// on the persistent session (state written by earlier calls is visible).
 pub(in super::super) fn handle_script_session_call(

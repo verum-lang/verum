@@ -91,6 +91,12 @@ public fn script_engine_link2(engine: RawScriptEngine, source_a: Text, source_b:
 @intrinsic("script_engine_link")
 public fn script_engine_link(engine: RawScriptEngine, sources: List<Text>) -> RawScriptSession;
 
+/// The stdout captured during the engine's most recent `eval` / `call`
+/// (empty before any run). The captured output is otherwise unreachable, since
+/// `eval`/`call` free the outcome that carries it.
+@intrinsic("script_engine_stdout")
+public fn script_engine_stdout(engine: RawScriptEngine) -> Text;
+
 /// Run `fn_name` on the persistent session; state written by earlier calls is
 /// visible (the zero-copy sharing).
 @intrinsic("script_session_call")
