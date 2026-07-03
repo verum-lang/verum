@@ -8250,7 +8250,11 @@ impl VbcCodegen {
                 let instr = match template {
                     Instruction::NewList { .. } => Instruction::NewList { dst: dest , capacity_hint: const_cap },
                     Instruction::NewSet { .. } => Instruction::NewSet { dst: dest , capacity_hint: 0 },
-                    Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest , capacity_hint: 0 },
+                    // task #40: honour the capacity hint for Deque. The AOT NewDeque
+                    // lowering reserves the backing via Deque.new()+Deque.reallocate(
+                    // next_pow2(hint)) so `Deque.with_capacity(n).capacity() >= n`; the
+                    // interpreter's NewDeque already reserves a default capacity.
+                    Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest , capacity_hint: const_cap },
                     other => other,
                 };
                 self.ctx.emit(instr);

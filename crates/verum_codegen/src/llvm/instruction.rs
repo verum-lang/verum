@@ -5051,7 +5051,7 @@ pub fn lower_instruction<'ctx>(
         // explicit AOT lowering. NewDeque is emitted by the VBC codegen for
         // `Deque.new()` and `Deque.with_capacity(n)` (the capacity arg has
         // already been dropped at the VBC level — heap auto-grows).
-        Instruction::NewDeque { dst, .. } => {
+        Instruction::NewDeque { dst, capacity_hint } => {
             // Deque.new() is intercepted by the VBC codegen (see
             // verum_vbc/src/codegen/expressions.rs) so it emits the
             // NewDeque opcode rather than a function Call. That
@@ -5065,7 +5065,41 @@ pub fn lower_instruction<'ctx>(
             // value rather than a bare i64 0 that LLVM rejects during
             // codegen.
             let module = ctx.get_module();
-            if let Some(new_fn) = module.get_function("Deque.new") {
+            let new_fn = module.get_function("Deque.new");
+            let realloc_fn = module.get_function("Deque.reallocate");
+            // task #40: honour a compile-time capacity hint (from
+            // `Deque.with_capacity(n)`) by reserving the backing up front, so
+            // `Deque.with_capacity(n).capacity() >= n` holds on AOT. Route through
+            // `Deque.new()` + `Deque.reallocate(next_pow2(n))` rather than the
+            // compiled `Deque.with_capacity`: with_capacity is ALWAYS intercepted at
+            // the VBC level (→ NewDeque) so it is never monomorphised and calling it
+            // by bare name allocates a wrong size (→ NULL → panic). `reallocate` IS
+            // properly compiled (push_back reaches it in-context) and both allocate
+            // the backing + set `cap`; the ring buffer requires a power-of-two cap.
+            if *capacity_hint > 0
+                && let (Some(new_fn), Some(realloc_fn)) = (new_fn, realloc_fn)
+            {
+                let deque = ctx
+                    .builder()
+                    .build_call(new_fn, &[], "deque_new")
+                    .or_llvm_err()?
+                    .basic_value_or("Deque.new should return value")?;
+                ctx.set_register(dst.0, deque);
+                let i64_type = ctx.types().i64_type();
+                let deque_self = as_i64(ctx, deque, "deque_self")?;
+                let cap = (*capacity_hint as u64).next_power_of_two();
+                let cap_val = i64_type.const_int(cap, false);
+                ctx.builder()
+                    .build_call(
+                        realloc_fn,
+                        &[deque_self.into(), cap_val.into()],
+                        "deque_reserve",
+                    )
+                    .or_llvm_err()?;
+                ctx.mark_deque_register(dst.0);
+                return Ok(());
+            }
+            if let Some(new_fn) = new_fn {
                 let result = ctx
                     .builder()
                     .build_call(new_fn, &[], "deque_new")
