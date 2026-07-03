@@ -21557,6 +21557,18 @@ impl VbcCodegen {
             }
             ExprKind::Paren(inner) => self.infer_expr_type_kind(inner),
             ExprKind::Unary { op: _, expr: inner } => self.infer_expr_type_kind(inner),
+            // task #42: a container-index element (e.g. `fs[0]` for fs: List<Float>).
+            // extract_expr_type_name resolves the Index to its element type name; map
+            // that to a TypeKind so a downstream `f"{fs[i]}"` types the element — else
+            // it falls to the mark-dependent ToString and prints raw bits under AOT.
+            ExprKind::Index { .. } => match self.extract_expr_type_name(expr)?.as_str() {
+                "Float" | "Float64" | "Float32" => Some(TypeKind::Float),
+                "Text" => Some(TypeKind::Text),
+                "Char" => Some(TypeKind::Char),
+                "Bool" => Some(TypeKind::Bool),
+                "Int" | "Int64" | "Int32" | "UInt64" | "Byte" | "USize" => Some(TypeKind::Int),
+                _ => None,
+            },
             ExprKind::Binary {
                 op, left, right, ..
             } => {
