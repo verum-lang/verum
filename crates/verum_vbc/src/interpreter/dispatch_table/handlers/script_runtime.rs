@@ -30,7 +30,8 @@ use super::bytecode_io::read_reg;
 use super::path_ops_runtime::extract_string_if_text;
 use super::string_helpers::alloc_string_value;
 use crate::interpreter::script_engine::{
-    ScriptEngine, ScriptError, ScriptOutcome, ScriptSession, ScriptValueOwned, ScriptWorld,
+    HandleMagic, ScriptEngine, ScriptError, ScriptOutcome, ScriptSession, ScriptValueOwned,
+    ScriptWorld,
 };
 use crate::module::FunctionId;
 use crate::value::Value;
@@ -49,14 +50,36 @@ fn read_outcome_ptr(
 /// `Int`) must be rejected — otherwise `as_ptr` masks it to an attacker-chosen
 /// address and the caller dereferences (or frees) that address. This closes the
 /// arbitrary-address read/write/free primitive on the whole handle surface.
-/// (Type-confusion between two *real* handle pointers is a separate, weaker
-/// hazard; a magic-word/generational table is the follow-up for that.)
+/// For the typed persistent handles (Engine/Session/World), prefer
+/// [`checked_typed_handle_ptr`], which additionally rejects a wrong-type or
+/// freed handle via its magic word.
 fn checked_handle_ptr<T>(value: crate::value::Value) -> InterpreterResult<*mut T> {
     if !value.is_ptr() || value.is_nil() {
         return Err(InterpreterError::NullPointer);
     }
     let ptr = value.as_ptr::<T>();
     if ptr.is_null() {
+        return Err(InterpreterError::NullPointer);
+    }
+    Ok(ptr)
+}
+
+/// Like [`checked_handle_ptr`] but for a typed handle that carries a
+/// [`HandleMagic`] word at offset 0: after the pointer-tag check, reads the
+/// magic and rejects the handle unless it equals `T::MAGIC`. This closes the
+/// residual type-confusion (a real handle of the wrong type — e.g. an `Engine`
+/// passed where a `Session` is expected) and, because a freed handle's magic is
+/// zeroed on free, best-effort double-free / use-after-free.
+fn checked_typed_handle_ptr<T: HandleMagic>(
+    value: crate::value::Value,
+) -> InterpreterResult<*mut T> {
+    let ptr = checked_handle_ptr::<T>(value)?;
+    // SAFETY: `ptr` is non-null and pointer-tag-validated, so it addresses a
+    // heap object of at least 8 bytes (a boxed handle, or an interpreter object
+    // with a 24-byte ObjectHeader); reading its first u64 (the magic, kept at
+    // offset 0 by `#[repr(C)]`) is in-bounds.
+    let magic = unsafe { *(ptr as *const u64) };
+    if magic != T::MAGIC {
         return Err(InterpreterError::NullPointer);
     }
     Ok(ptr)
@@ -79,11 +102,15 @@ pub(in super::super) fn handle_script_engine_free(
     let engine_reg = read_reg(state)?;
     // Validate it's actually a handle pointer before freeing — a non-pointer
     // (e.g. a script passing `free(1)`) must not be turned into a wild free.
-    if let Ok(ptr) = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
         // SAFETY: `ptr` originates from `Box::into_raw` in
         // `handle_script_engine_new` and is freed exactly once (the
-        // `core.script` `Engine` wrapper's Drop).
-        unsafe { drop(Box::from_raw(ptr)) };
+        // `core.script` `Engine` wrapper's Drop). Zero the magic first so a
+        // double-free's second deref is rejected by `checked_typed_handle_ptr`.
+        unsafe {
+            (*ptr).invalidate();
+            drop(Box::from_raw(ptr));
+        }
     }
     Ok(DispatchResult::Continue)
 }
@@ -97,7 +124,7 @@ pub(in super::super) fn handle_script_engine_eval(
     let engine_reg = read_reg(state)?;
     let src_reg = read_reg(state)?;
 
-    let engine_ptr = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
+    let engine_ptr = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
     let src_val = state.get_reg(src_reg);
     let source =
         super::path_ops_runtime::extract_string_if_text(state, &src_val).unwrap_or_default();
@@ -129,7 +156,7 @@ pub(in super::super) fn handle_script_engine_call(
     let src_reg = read_reg(state)?;
     let fn_reg = read_reg(state)?;
 
-    let engine_ptr = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
+    let engine_ptr = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
     let src_val = state.get_reg(src_reg);
     let source =
         super::path_ops_runtime::extract_string_if_text(state, &src_val).unwrap_or_default();
@@ -161,7 +188,7 @@ pub(in super::super) fn handle_script_engine_call_args(
     let fn_reg = read_reg(state)?;
     let args_reg = read_reg(state)?;
 
-    let engine_ptr = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
+    let engine_ptr = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
     let src_val = state.get_reg(src_reg);
     let source =
         super::path_ops_runtime::extract_string_if_text(state, &src_val).unwrap_or_default();
@@ -196,7 +223,7 @@ pub(in super::super) fn handle_script_engine_link2(
     let a_reg = read_reg(state)?;
     let b_reg = read_reg(state)?;
 
-    let engine_ptr = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
+    let engine_ptr = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
     let a_val = state.get_reg(a_reg);
     let src_a =
         super::path_ops_runtime::extract_string_if_text(state, &a_val).unwrap_or_default();
@@ -222,7 +249,7 @@ pub(in super::super) fn handle_script_engine_link(
     let engine_reg = read_reg(state)?;
     let sources_reg = read_reg(state)?;
 
-    let engine_ptr = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
+    let engine_ptr = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg))?;
     let sources_val = state.get_reg(sources_reg);
     let source_values = state.list_elements(sources_val).unwrap_or_default();
     let sources: Vec<String> = source_values
@@ -249,7 +276,7 @@ pub(in super::super) fn handle_script_engine_stdout(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let engine_reg = read_reg(state)?;
-    let out = match checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+    let out = match checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
         // SAFETY: a validated, live `Box<ScriptEngine>` handle.
         Ok(ptr) => unsafe { (*ptr).last_stdout().to_string() },
         Err(_) => String::new(),
@@ -267,7 +294,7 @@ pub(in super::super) fn handle_script_engine_last_error(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let engine_reg = read_reg(state)?;
-    let msg = match checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+    let msg = match checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
         // SAFETY: a validated, live `Box<ScriptEngine>` handle.
         Ok(ptr) => unsafe { (*ptr).last_error().to_string() },
         Err(_) => String::new(),
@@ -285,7 +312,7 @@ pub(in super::super) fn handle_script_engine_last_error_kind(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let engine_reg = read_reg(state)?;
-    let code = match checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+    let code = match checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
         // SAFETY: a validated, live `Box<ScriptEngine>` handle.
         Ok(ptr) => unsafe { (*ptr).last_error_kind() },
         Err(_) => 0,
@@ -303,7 +330,7 @@ pub(in super::super) fn handle_script_session_call(
     let session_reg = read_reg(state)?;
     let fn_reg = read_reg(state)?;
 
-    let session_ptr = checked_handle_ptr::<ScriptSession>(state.get_reg(session_reg))
+    let session_ptr = checked_typed_handle_ptr::<ScriptSession>(state.get_reg(session_reg))
         .unwrap_or(std::ptr::null_mut());
     let fn_val = state.get_reg(fn_reg);
     let fn_name =
@@ -329,9 +356,13 @@ pub(in super::super) fn handle_script_session_free(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let session_reg = read_reg(state)?;
-    if let Ok(ptr) = checked_handle_ptr::<ScriptSession>(state.get_reg(session_reg)) {
+    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptSession>(state.get_reg(session_reg)) {
         // SAFETY: `ptr` originates from `Box::into_raw` in handle_script_engine_link2.
-        unsafe { drop(Box::from_raw(ptr)) };
+        // Zero the magic first so a double-free's second deref is rejected.
+        unsafe {
+            (*ptr).invalidate();
+            drop(Box::from_raw(ptr));
+        }
     }
     Ok(DispatchResult::Continue)
 }
@@ -715,7 +746,7 @@ pub(in super::super) fn handle_script_engine_set_global_int(
     let name = read_name_arg(state)?;
     let value_reg = read_reg(state)?;
     let value = state.get_reg(value_reg).as_i64();
-    if let Ok(ptr) = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
         // SAFETY: `ptr` is a live `Box<ScriptEngine>` handle.
         unsafe { (*ptr).set_global(name, ScriptValueOwned::Int(value)) };
     }
@@ -731,7 +762,7 @@ pub(in super::super) fn handle_script_engine_set_global_text(
     let value_reg = read_reg(state)?;
     let value_val = state.get_reg(value_reg);
     let text = extract_string_if_text(state, &value_val).unwrap_or_default();
-    if let Ok(ptr) = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
         // SAFETY: see `handle_script_engine_set_global_int`.
         unsafe { (*ptr).set_global(name, ScriptValueOwned::Text(text)) };
     }
@@ -746,7 +777,7 @@ pub(in super::super) fn handle_script_engine_set_global_bool(
     let name = read_name_arg(state)?;
     let value_reg = read_reg(state)?;
     let value = state.get_reg(value_reg).as_bool();
-    if let Ok(ptr) = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
         // SAFETY: see `handle_script_engine_set_global_int`.
         unsafe { (*ptr).set_global(name, ScriptValueOwned::Bool(value)) };
     }
@@ -761,7 +792,7 @@ pub(in super::super) fn handle_script_engine_set_global_float(
     let name = read_name_arg(state)?;
     let value_reg = read_reg(state)?;
     let value = state.get_reg(value_reg).as_f64();
-    if let Ok(ptr) = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
         // SAFETY: see `handle_script_engine_set_global_int`.
         unsafe { (*ptr).set_global(name, ScriptValueOwned::Float(value)) };
     }
@@ -905,7 +936,7 @@ pub(in super::super) fn handle_script_engine_register(
     let name = read_name_arg(state)?;
     let fn_reg = read_reg(state)?;
     let func_id = function_id_of(&state.get_reg(fn_reg));
-    if let Ok(ptr) = checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
         if let Some(fid) = func_id {
             // SAFETY: `ptr` is a live `Box<ScriptEngine>` handle.
             unsafe { (*ptr).register(name, fid) };
@@ -978,7 +1009,7 @@ pub(in super::super) fn handle_script_world_eval(
     let dst = read_reg(state)?;
     let world_reg = read_reg(state)?;
     let src_reg = read_reg(state)?;
-    let world_ptr = checked_handle_ptr::<ScriptWorld>(state.get_reg(world_reg))?;
+    let world_ptr = checked_typed_handle_ptr::<ScriptWorld>(state.get_reg(world_reg))?;
     let src_val = state.get_reg(src_reg);
     let source = extract_string_if_text(state, &src_val).unwrap_or_default();
     // SAFETY: `world_ptr` is a live `Box<ScriptWorld>` handle. Its interpreter
@@ -994,9 +1025,13 @@ pub(in super::super) fn handle_script_world_free(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let reg = read_reg(state)?;
-    if let Ok(ptr) = checked_handle_ptr::<ScriptWorld>(state.get_reg(reg)) {
+    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptWorld>(state.get_reg(reg)) {
         // SAFETY: from `Box::into_raw` in `handle_script_world_new`, freed once.
-        unsafe { drop(Box::from_raw(ptr)) };
+        // Zero the magic first so a double-free's second deref is rejected.
+        unsafe {
+            (*ptr).invalidate();
+            drop(Box::from_raw(ptr));
+        }
     }
     Ok(DispatchResult::Continue)
 }

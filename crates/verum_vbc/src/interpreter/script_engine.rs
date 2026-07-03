@@ -202,7 +202,49 @@ impl ScriptCaps {
     }
 }
 
+/// A boxed script handle that carries a type-unique magic word as its first
+/// field (`#[repr(C)]`, offset 0). A handle deref reads offset 0 and compares it
+/// to the expected `MAGIC` before trusting the pointer — rejecting a wrong-type
+/// handle (a `Session` passed where an `Engine` is expected) or a freed one
+/// (whose magic was zeroed). Defense-in-depth beyond `checked_handle_ptr`'s
+/// pointer-tag check, closing the residual raw-`@intrinsic` type-confusion /
+/// double-free. Reading offset 0 is always in-bounds: any pointer-tagged value a
+/// script can pass addresses a heap object of at least 8 bytes (a boxed handle,
+/// or an interpreter object with a 24-byte `ObjectHeader`).
+pub trait HandleMagic {
+    /// The type's unique, high-entropy magic. High byte `0x53` keeps it clear of
+    /// any interpreter `ObjectHeader`'s first 8 bytes (a small type-id + size).
+    const MAGIC: u64;
+    /// Zero the magic so a later deref rejects this freed handle (best-effort
+    /// double-free / use-after-free detection).
+    fn invalidate(&mut self);
+}
+
+impl HandleMagic for ScriptEngine {
+    const MAGIC: u64 = 0x53435F454E470001; // "SC_ENG\0\x01"
+    fn invalidate(&mut self) {
+        self.magic = 0;
+    }
+}
+impl HandleMagic for ScriptSession {
+    const MAGIC: u64 = 0x53435F5345530002; // "SC_SES\0\x02"
+    fn invalidate(&mut self) {
+        self.magic = 0;
+    }
+}
+impl HandleMagic for ScriptWorld {
+    const MAGIC: u64 = 0x53435F574F520003; // "SC_WOR\0\x03"
+    fn invalidate(&mut self) {
+        self.magic = 0;
+    }
+}
+
+#[repr(C)]
 pub struct ScriptEngine {
+    /// Type-unique magic word at offset 0 (see [`HandleMagic`]) — a handle deref
+    /// reads it to reject a wrong-type or freed handle before trusting the
+    /// pointer. MUST stay the first field for the offset-0 read to be valid.
+    magic: u64,
     config: InterpreterConfig,
     globals: HashMap<String, ScriptValueOwned>,
     /// Host functions the host registered for scripts to call back into,
@@ -238,6 +280,7 @@ impl ScriptEngine {
         let cancel = Arc::new(AtomicBool::new(false));
         config.cancel_flag = Some(cancel.clone());
         Self {
+            magic: <Self as HandleMagic>::MAGIC,
             config,
             globals: HashMap::new(),
             host_fns: HashMap::new(),
@@ -365,6 +408,7 @@ impl ScriptEngine {
         let interp = Interpreter::try_new_with_config(merged.clone(), self.config.clone())
             .map_err(|e| ScriptError::Runtime(format!("{e:?}")))?;
         Ok(ScriptSession {
+            magic: <ScriptSession as HandleMagic>::MAGIC,
             interp,
             module: merged,
         })
@@ -502,7 +546,10 @@ fn host_link_triple() -> &'static str {
 /// tier (see [`ScriptEngine::link2`]). Its interpreter, heap, and shared-global
 /// table survive across [`call`](ScriptSession::call)s, so a value one call
 /// stores is read back by a later call BY REFERENCE.
+#[repr(C)]
 pub struct ScriptSession {
+    /// Type-unique magic at offset 0 (see [`HandleMagic`]) — MUST stay first.
+    magic: u64,
     interp: Interpreter,
     module: Arc<VbcModule>,
 }
@@ -1127,7 +1174,10 @@ fn build_map_value(
 /// generation/epoch checks catching any stale reference at ~1ns. This is the
 /// interop tier that copy-at-the-boundary engines (Wasm, BEAM, V8 isolates)
 /// cannot offer; CBGR is what makes the shared reference safe.
+#[repr(C)]
 pub struct ScriptWorld {
+    /// Type-unique magic at offset 0 (see [`HandleMagic`]) — MUST stay first.
+    magic: u64,
     /// The world's persistent shared table — the source of truth for data
     /// shared between scripts, in owned form. Each `eval` runs on a FRESH
     /// interpreter (so module-local string-constant resolution is never
@@ -1144,6 +1194,7 @@ impl ScriptWorld {
     /// Create an empty world.
     pub fn new() -> Self {
         Self {
+            magic: <ScriptWorld as HandleMagic>::MAGIC,
             shared: HashMap::new(),
             config: InterpreterConfig::default(),
         }
