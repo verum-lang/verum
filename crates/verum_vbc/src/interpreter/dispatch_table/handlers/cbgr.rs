@@ -423,6 +423,44 @@ pub(in super::super) fn handle_chk_ref(
     Ok(DispatchResult::Continue)
 }
 
+/// Non-trapping reference validation — the `cbgr_validate<T>(&T) -> Bool`
+/// backend (`SystemSubOpcode::CbgrValidateBool`).  Mirrors the checks of
+/// `handle_chk_ref` but REPORTS the verdict instead of panicking, which is
+/// the shape the stdlib declaration promises (`-> Bool`).  Classification:
+///   * nil → false (no referent)
+///   * register-encoded CBGR ref → generation-check verdict
+///   * heap pointer with a tracked AllocationHeader → !FREED verdict
+///   * any other live pointer/value → true (Tier 0 only hands out live
+///     objects; untracked ≠ dangling in the interpreter)
+pub(in super::super) fn validate_ref_bool(state: &mut InterpreterState, ref_val: Value) -> bool {
+    if ref_val.is_nil() {
+        return false;
+    }
+    if is_cbgr_ref(&ref_val) {
+        let (abs_index, generation) = decode_cbgr_ref(ref_val.as_i64());
+        return validate_cbgr_generation(state, abs_index, generation).is_ok();
+    }
+    if ref_val.is_ptr() {
+        let ptr = ref_val.as_ptr::<u8>();
+        if ptr.is_null() {
+            return false;
+        }
+        let ptr_addr = ptr as usize;
+        let header_addr =
+            ptr_addr.wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
+        if state.cbgr_allocations.contains(&header_addr) {
+            // SAFETY: header liveness established via cbgr_allocations.
+            let flags = unsafe {
+                *((header_addr + verum_common::layout::ALLOCATION_HEADER_FLAGS_OFFSET as usize)
+                    as *const u32)
+            };
+            return flags & verum_common::cbgr::flags::FREED == 0;
+        }
+        return true;
+    }
+    true
+}
+
 /// RefChecked (0x75) - Create Tier 1 checked reference.
 ///
 

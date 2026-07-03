@@ -3516,6 +3516,20 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
+            InlineSequenceId::PtrSubSeq => {
+                // Element-scaled pointer subtraction — same GEP shape; the
+                // negative walk is the VBC/LLVM layer's business.
+                self.emit(MlirOp {
+                    name: "llvm.getelementptr".to_string(),
+                    attrs: vec![MlirAttr {
+                        name: "elem_type".to_string(),
+                        value: MlirAttrValue::Type(MlirType::I64),
+                    }],
+                    result_types: vec![MlirType::Ptr],
+                    operands: operands.to_vec(),
+                    region: None,
+                })
+            }
             // CBGR allocation intrinsics
             InlineSequenceId::CbgrAlloc => self.emit(MlirOp {
                 name: "verum.cbgr_alloc".to_string(),
@@ -3542,6 +3556,36 @@ impl IntrinsicLowering {
                 name: "verum.cbgr_realloc".to_string(),
                 attrs: vec![],
                 result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            // Public CBGR bridge + non-trapping validate — 1:1 with the
+            // registry's mlir_op names.
+            InlineSequenceId::CbgrAllocateUser => self.emit(MlirOp {
+                name: "verum.cbgr_allocate".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CbgrDeallocUser => self.emit(MlirOp {
+                name: "verum.cbgr_deallocate".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CbgrReallocUser => self.emit(MlirOp {
+                name: "verum.cbgr_realloc_user".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CbgrValidateBool => self.emit(MlirOp {
+                name: "verum.cbgr.validate".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I1],
                 operands: operands.to_vec(),
                 region: None,
             }),

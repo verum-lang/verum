@@ -1096,11 +1096,28 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::Swap => self.emit_swap(args),
             InlineSequenceId::Replace => self.emit_replace(args),
             InlineSequenceId::PtrOffset => self.emit_ptr_offset(args),
+            // ptr_sub shares the ptr_offset MIR shape (negative walk is the
+            // VBC/LLVM layer's business).
+            InlineSequenceId::PtrSubSeq => self.emit_ptr_offset(args),
             // CBGR allocation intrinsics - delegate to general alloc paths
             InlineSequenceId::CbgrAlloc => self.emit_alloc(args),
             InlineSequenceId::CbgrAllocZeroed => self.emit_alloc_zeroed(args),
             InlineSequenceId::CbgrDealloc => self.emit_dealloc(args),
             InlineSequenceId::CbgrRealloc => self.emit_realloc(args),
+            // Public CBGR bridge + non-trapping validate.  The VBC codegen
+            // (`expressions.rs`) emits these as FfiExtended 0xA5-0xA8 and is
+            // the authoritative path; this MIR-level emitter maps them onto
+            // the closest existing MIR shapes so MIR consumers see the same
+            // allocation/copy semantics (user-bridge alignment defaults to 8
+            // at this layer — the MIR path has no align operand for them).
+            InlineSequenceId::CbgrAllocateUser => self.emit_alloc(args),
+            InlineSequenceId::CbgrDeallocUser => self.emit_dealloc(args),
+            InlineSequenceId::CbgrReallocUser => self.emit_realloc(args),
+            InlineSequenceId::CbgrValidateBool => {
+                // No dedicated MIR op for reference validation; the VBC
+                // interpreter / LLVM arms own the semantics.
+                None
+            }
             // Memory comparison
             InlineSequenceId::MemcmpBytes => self.emit_memcmp(args),
             // CBGR header access

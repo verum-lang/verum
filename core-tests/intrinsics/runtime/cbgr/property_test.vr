@@ -87,10 +87,13 @@ fn law_every_requested_byte_is_writable_size_sweep() {
     for n in sizes.iter() {
         let p = cbgr_allocate(*n, 8);
         assert(p != 0);
-        // First and last byte of the requested extent.
+        // First and last byte of the requested extent, checked
+        // SEQUENTIALLY — for n == 1 they are the same byte, so a
+        // store-both-then-check-both order would overwrite the first
+        // marker (a test-side aliasing bug found by its own first run).
         store_byte(p, 1);
-        store_byte(p + *n - 1, 2);
         assert_eq(load_byte(p), 1);
+        store_byte(p + *n - 1, 2);
         assert_eq(load_byte(p + *n - 1), 2);
         cbgr_deallocate(p);
     }

@@ -1092,13 +1092,20 @@ fn try_dispatch_intrinsic_by_name(
     // gate at `is_intrinsic_stub` admits qualified-form stubs, strip
     // the module prefix off any `__*_raw`-shaped name so the existing
     // per-name arms still fire.
-    let normalized: String = if let Some(idx) = func_name.rfind('.') {
-        let suffix = &func_name[idx + 1..];
-        if suffix.starts_with("__") && suffix.ends_with("_raw") {
-            suffix.to_string()
-        } else {
-            func_name.clone()
-        }
+    // Take the bare last segment for EVERY module-qualified name (not just
+    // the `__*_raw` shape): the registry and every @intrinsic("…") key are
+    // bare, so the per-name arms below are keyed bare — a qualified
+    // `core.intrinsics.runtime.mem_raw.load_byte` call previously fell past
+    // every arm into the reduced suffix-matcher duplicate (which lacks most
+    // ops) and then into the declaration stub.  `llvm.*` names are the one
+    // dotted FAMILY matched whole ("llvm.sqrt.f64"), so they keep their
+    // qualification.  The gate above already guarantees the callee is an
+    // @intrinsic-tagged stub, so bare-suffix matching cannot capture a real
+    // user function.
+    let normalized: String = if func_name.starts_with("llvm.") {
+        func_name.clone()
+    } else if let Some(idx) = func_name.rfind('.') {
+        func_name[idx + 1..].to_string()
     } else {
         func_name.clone()
     };
@@ -2469,8 +2476,42 @@ fn try_dispatch_intrinsic_by_name(
             Ok(Some(Value::from_i64(dst)))
         }
 
+        // --- Kernel-boundary time (bodyless decls in runtime/time.vr;
+        //     sleep_ms/sleep_ns/realtime_nanos had no registry entries, so
+        //     calls produced nil: sleeps returned instantly and the
+        //     wall-clock reads failed every sanity window) ---
+        "sleep_ms" => {
+            let ms = get_i64_arg(state, 0);
+            if ms > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+            }
+            Ok(Some(Value::unit()))
+        }
+        "sleep_ns" => {
+            let ns = get_i64_arg(state, 0);
+            if ns > 0 {
+                std::thread::sleep(std::time::Duration::from_nanos(ns as u64));
+            }
+            Ok(Some(Value::unit()))
+        }
+        "realtime_nanos" => {
+            let ns = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as i64)
+                .unwrap_or(0);
+            Ok(Some(Value::from_i64(ns)))
+        }
+
         // --- Raw byte/word load/store ---
-        "__load_byte" => {
+        // Both spellings dispatch here: the canonical intrinsic keys from
+        // `core/intrinsics/runtime/mem_raw.vr` (`load_byte`, `store_byte`,
+        // …) AND the legacy underscore-prefixed aliases.  The #64 Phase 1.4
+        // migration renamed the .vr keys but left this table matching only
+        // the `__`-names — so every canonical call fell through to the .vr
+        // stub bodies (`{ 0 }`) and the whole raw byte/word surface was
+        // silently inert under the interpreter (loads returned 0, stores
+        // did nothing) while AOT lowered to real machine ops.
+        "__load_byte" | "load_byte" => {
             let addr = get_i64_arg(state, 0);
             if addr != 0 {
                 let val = unsafe { *(addr as *const u8) };
@@ -2479,7 +2520,7 @@ fn try_dispatch_intrinsic_by_name(
                 Ok(Some(Value::from_i64(0)))
             }
         }
-        "__store_byte" => {
+        "__store_byte" | "store_byte" => {
             let addr = get_i64_arg(state, 0);
             let val = get_i64_arg(state, 1) as u8;
             if addr != 0 {
@@ -2489,7 +2530,7 @@ fn try_dispatch_intrinsic_by_name(
             }
             Ok(Some(Value::from_i64(0)))
         }
-        "__load_i64" => {
+        "__load_i64" | "load_i64" => {
             let addr = get_i64_arg(state, 0);
             if addr != 0 {
                 let val = unsafe { *(addr as *const i64) };
@@ -2498,7 +2539,7 @@ fn try_dispatch_intrinsic_by_name(
                 Ok(Some(Value::from_i64(0)))
             }
         }
-        "__store_i64" => {
+        "__store_i64" | "store_i64" => {
             let addr = get_i64_arg(state, 0);
             let val = get_i64_arg(state, 1);
             if addr != 0 {
@@ -2508,7 +2549,7 @@ fn try_dispatch_intrinsic_by_name(
             }
             Ok(Some(Value::from_i64(0)))
         }
-        "__load_i32" => {
+        "__load_i32" | "load_i32" => {
             let addr = get_i64_arg(state, 0);
             if addr != 0 {
                 let val = unsafe { *(addr as *const i32) };
@@ -2517,7 +2558,7 @@ fn try_dispatch_intrinsic_by_name(
                 Ok(Some(Value::from_i64(0)))
             }
         }
-        "__store_i32" => {
+        "__store_i32" | "store_i32" => {
             let addr = get_i64_arg(state, 0);
             let val = get_i64_arg(state, 1) as i32;
             if addr != 0 {

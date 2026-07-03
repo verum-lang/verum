@@ -1095,7 +1095,7 @@ pub(in super::super) fn handle_ffi_extended(
             let ptr_reg = read_reg(state)?;
             let offset_reg = read_reg(state)?;
 
-            let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
+            let addr = value_as_addr(state.get_reg(ptr_reg));
             let offset = state.get_reg(offset_reg).as_i64();
 
             // Element-scaled: ptr_offset/ptr_add index by ELEMENT, not byte.
@@ -1111,7 +1111,6 @@ pub(in super::super) fn handle_ffi_extended(
             // address, which can wrap around the address space when `offset`
             // is attacker-controlled, producing an arbitrary pointer. Use
             // checked arithmetic on the address bits and fail on overflow.
-            let addr = ptr as usize;
             let new_addr = if byte_offset >= 0 {
                 addr.checked_add(byte_offset as usize)
             } else {
@@ -1134,7 +1133,7 @@ pub(in super::super) fn handle_ffi_extended(
             let ptr_reg = read_reg(state)?;
             let offset_reg = read_reg(state)?;
 
-            let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
+            let addr = value_as_addr(state.get_reg(ptr_reg));
             let offset = state.get_reg(offset_reg).as_i64();
 
             // Element-scaled (see PtrAdd): scale the element count to a byte
@@ -1146,7 +1145,6 @@ pub(in super::super) fn handle_ffi_extended(
             // SECURITY: raw pointer `.sub`/`.add` wrap around the address
             // space with an attacker-controlled offset. Perform checked
             // arithmetic on the integer address and fail on overflow.
-            let addr = ptr as usize;
             let new_addr = if byte_offset >= 0 {
                 addr.checked_sub(byte_offset as usize)
             } else {
@@ -1168,8 +1166,8 @@ pub(in super::super) fn handle_ffi_extended(
             let ptr1_reg = read_reg(state)?;
             let ptr2_reg = read_reg(state)?;
 
-            let ptr1 = state.get_reg(ptr1_reg).as_ptr::<u8>();
-            let ptr2 = state.get_reg(ptr2_reg).as_ptr::<u8>();
+            let ptr1 = value_as_addr(state.get_reg(ptr1_reg));
+            let ptr2 = value_as_addr(state.get_reg(ptr2_reg));
 
             let diff = (ptr1 as isize) - (ptr2 as isize);
             state.set_reg(dst, Value::from_i64(diff as i64));
@@ -1182,8 +1180,8 @@ pub(in super::super) fn handle_ffi_extended(
             let dst = read_reg(state)?;
             let ptr_reg = read_reg(state)?;
 
-            let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
-            let is_null = ptr.is_null();
+            let addr = value_as_addr(state.get_reg(ptr_reg));
+            let is_null = addr == 0;
             state.set_reg(dst, Value::from_bool(is_null));
             Ok(DispatchResult::Continue)
         }
@@ -3128,12 +3126,295 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
+        // =================================================================
+        // Allocator-internal realloc (0xA4) — the 4-arg
+        // `cbgr_realloc(ptr, old_size, new_size, align)` form used by
+        // `core/mem/allocator.vr`.  Mirrors the CbgrAlloc conventions:
+        // fresh raw allocation via std::alloc, min(old, new) bytes copied,
+        // result packaged as `Ok((ptr, generation, epoch))`.  The old
+        // block is intentionally NOT freed (same leak-over-double-free
+        // policy as CbgrDealloc above).
+        //
+        // HISTORY: this sub-op used to be EMITTED as 0x63 — which decodes
+        // as PtrAdd — so every inline-sequence reallocation either
+        // SIGSEGV'd (interpreter, operand mismatch) or silently computed
+        // `ptr + old_size` (AOT).  See the SystemSubOpcode::CbgrRealloc
+        // doc comment.
+        // =================================================================
+        Some(SystemSubOpcode::CbgrRealloc) => {
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let old_size_reg = read_reg(state)?;
+            let new_size_reg = read_reg(state)?;
+            let align_reg = read_reg(state)?;
+            let old_ptr = state.get_reg(ptr_reg).as_integer_compatible();
+            let old_size = state.get_reg(old_size_reg).as_integer_compatible();
+            let new_size = state.get_reg(new_size_reg).as_integer_compatible();
+            let raw_align = state.get_reg(align_reg).as_integer_compatible();
+            const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
+            if new_size <= 0 || new_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
+                let err_val = super::method_dispatch::make_result_variant(
+                    state,
+                    verum_common::well_known_types::result_error_tag(),
+                    Value::nil(),
+                )?;
+                state.set_reg(dst, err_val);
+                return Ok(DispatchResult::Continue);
+            }
+            let size = new_size as usize;
+            let align: usize = (raw_align as usize).next_power_of_two().max(8);
+            let layout = match std::alloc::Layout::from_size_align(size, align)
+                .or_else(|_| std::alloc::Layout::from_size_align(size, 8))
+            {
+                Ok(layout) => layout,
+                Err(_) => {
+                    state.set_reg(dst, Value::nil());
+                    return Ok(DispatchResult::Continue);
+                }
+            };
+            // SAFETY: non-zero size and valid alignment by construction.
+            let ptr = unsafe { std::alloc::alloc(layout) };
+            if ptr.is_null() {
+                state.set_reg(dst, Value::nil());
+                return Ok(DispatchResult::Continue);
+            }
+            // Preserve min(old, new) bytes from the previous block.
+            if old_ptr != 0 && old_size > 0 {
+                let copy = (old_size.min(new_size)) as usize;
+                // SAFETY: caller-supplied old block; the copy length is
+                // bounded by both the old and the fresh allocation sizes.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(old_ptr as *const u8, ptr, copy);
+                }
+            }
+            state.cbgr_allocations.insert(ptr as usize);
+            let generation = 1i64;
+            let epoch = state.cbgr_epoch as i64;
+            let tuple_size = 3 * std::mem::size_of::<Value>();
+            let tuple_obj =
+                state
+                    .heap
+                    .alloc_with_init(crate::types::TypeId::TUPLE, tuple_size, |_data| {})?;
+            let tuple_data = tuple_obj.data_ptr() as *mut Value;
+            unsafe {
+                std::ptr::write(tuple_data.add(0), Value::from_i64(ptr as i64));
+                std::ptr::write(tuple_data.add(1), Value::from_i64(generation));
+                std::ptr::write(tuple_data.add(2), Value::from_i64(epoch));
+            }
+            let tuple_val = Value::from_ptr(tuple_obj.as_ptr());
+            let ok_val = super::method_dispatch::make_result_variant(
+                state,
+                verum_common::well_known_types::result_success_tag(),
+                tuple_val,
+            )?;
+            state.set_reg(dst, ok_val);
+            Ok(DispatchResult::Continue)
+        }
+
+        // =================================================================
+        // Public CBGR bridge (0xA5-0xA7) — the user-pointer API declared
+        // in `core/intrinsics/runtime/cbgr.vr`.  The interpreter mirrors
+        // the AOT runtime's 32-byte AllocationHeader model EXACTLY
+        // (`verum_common::layout::ALLOCATION_HEADER_*`: size@0 u32,
+        // alignment@4 u32, generation@8 u32, epoch@12 u16, type_id@16,
+        // flags@20 u32, reserved@24) so `ChkRef`, `cbgr_get_generation`
+        // and use-after-free flagging observe identical semantics on both
+        // tiers.  The reserved word stores {base_offset:u32, total:u32}
+        // making each allocation fully self-describing — deallocation
+        // reconstructs the exact Layout with no side tables.
+        // =================================================================
+        Some(SystemSubOpcode::CbgrAllocateUser) => {
+            let dst = read_reg(state)?;
+            let size_reg = read_reg(state)?;
+            let align_reg = read_reg(state)?;
+            let raw_size = state.get_reg(size_reg).as_integer_compatible();
+            let raw_align = state.get_reg(align_reg).as_integer_compatible();
+            let user = cbgr_user_allocate(state, raw_size, raw_align);
+            state.set_reg(dst, Value::from_i64(user));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(SystemSubOpcode::CbgrDeallocUser) => {
+            let _dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let user = state.get_reg(ptr_reg).as_integer_compatible();
+            cbgr_user_deallocate(state, user);
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(SystemSubOpcode::CbgrReallocUser) => {
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let new_size_reg = read_reg(state)?;
+            let user = state.get_reg(ptr_reg).as_integer_compatible();
+            let new_size = state.get_reg(new_size_reg).as_integer_compatible();
+            let result = cbgr_user_realloc(state, user, new_size);
+            state.set_reg(dst, Value::from_i64(result));
+            Ok(DispatchResult::Continue)
+        }
+
+        // `cbgr_validate<T>(&T) -> Bool` — non-trapping validation.
+        Some(SystemSubOpcode::CbgrValidateBool) => {
+            let dst = read_reg(state)?;
+            let ref_reg = read_reg(state)?;
+            let ref_val = state.get_reg(ref_reg);
+            let verdict = super::cbgr::validate_ref_bool(state, ref_val);
+            state.set_reg(dst, Value::from_bool(verdict));
+            Ok(DispatchResult::Continue)
+        }
+
         // Unimplemented sub-opcodes
         _ => Err(InterpreterError::NotImplemented {
             feature: "ffi_extended sub-opcode",
             opcode: None,
         }),
     }
+}
+
+// ==============================================================
+// Address extraction for the pointer-arithmetic family
+// ==============================================================
+
+/// Raw addresses legitimately arrive EITHER pointer-tagged
+/// (`Value::from_ptr` — heap views, `as_mut_ptr` results) OR int-tagged
+/// (`cbgr_allocate` bridge addresses, `as *const T` casts of integer
+/// expressions, mem_raw `Int` pointers).  The atomic handlers already use
+/// this dual pattern (#37); pre-fix the `PtrAdd`/`PtrSub`/`PtrDiff`/
+/// `PtrIsNull` family used `as_ptr()` alone, which decodes an int-tagged
+/// address as NULL — so `ptr_add(p, 1)` on a cast pointer produced address
+/// 8 and every downstream atomic/deref through it null-faulted.
+fn value_as_addr(v: Value) -> usize {
+    if v.is_ptr() {
+        v.as_ptr::<u8>() as usize
+    } else {
+        v.as_i64() as usize
+    }
+}
+
+// ==============================================================
+// Public CBGR bridge helpers (header-model allocation)
+// ==============================================================
+
+/// Allocate `size` bytes prefixed by a 32-byte AllocationHeader, honouring
+/// `align` (power-of-two, ≤ 4096) for the USER pointer.  Returns the user
+/// address or 0.  Mirrors the AOT `verum_cbgr_allocate` model; the header's
+/// reserved word stores `{base_offset: u32, total: u32}` so every block is
+/// self-describing — dealloc/realloc reconstruct the exact Layout with no
+/// side tables (this is also what lets the interpreter FREE bridge memory
+/// instead of the leak-over-double-free policy the internal CbgrDealloc op
+/// is forced into).
+fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, raw_align: i64) -> i64 {
+    use verum_common::layout as l;
+    const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
+    let hdr = l::ALLOCATION_HEADER_SIZE as usize;
+    if raw_size <= 0 || raw_size > MAX_ALLOC || raw_align < 0 || raw_align > 4096 {
+        return 0;
+    }
+    let size = raw_size as usize;
+    let align = (raw_align.max(1) as usize).next_power_of_two().max(8);
+    // Slack budget so the user pointer can be re-aligned past the header.
+    let total = size + hdr + align;
+    let layout = match std::alloc::Layout::from_size_align(total, 8) {
+        Ok(layout) => layout,
+        Err(_) => return 0,
+    };
+    // SAFETY: total is non-zero and the alignment is valid by construction.
+    // Zero-initialised so uninitialised reads behave deterministically under
+    // the interpreter (AOT inherits its runtime allocator's behaviour).
+    let base = unsafe { std::alloc::alloc_zeroed(layout) };
+    if base.is_null() {
+        return 0;
+    }
+    let base_addr = base as usize;
+    let user = (base_addr + hdr + align - 1) & !(align - 1);
+    let header_addr = user - hdr;
+    // SAFETY: `[header_addr, user + size)` lies inside `[base, base + total)`
+    // by construction of the slack budget above.
+    unsafe {
+        *((header_addr + l::ALLOCATION_HEADER_SIZE_OFFSET as usize) as *mut u32) = size as u32;
+        *((header_addr + l::ALLOCATION_HEADER_ALIGNMENT_OFFSET as usize) as *mut u32) =
+            align as u32;
+        *((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *mut u32) = 1;
+        *((header_addr + l::ALLOCATION_HEADER_EPOCH_OFFSET as usize) as *mut u16) =
+            state.cbgr_epoch as u16;
+        *((header_addr + l::ALLOCATION_HEADER_FLAGS_OFFSET as usize) as *mut u32) = 0;
+        *((header_addr + l::ALLOCATION_HEADER_RESERVED_OFFSET as usize) as *mut u32) =
+            (header_addr - base_addr) as u32;
+        *((header_addr + l::ALLOCATION_HEADER_RESERVED_OFFSET as usize + 4) as *mut u32) =
+            total as u32;
+    }
+    state.cbgr_allocations.insert(header_addr);
+    user as i64
+}
+
+/// Free a `cbgr_user_allocate` block.  Defensive no-op on 0, on unknown
+/// pointers, and on double-free (the tracked-set removal is the gate).
+fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
+    use verum_common::layout as l;
+    let hdr = l::ALLOCATION_HEADER_SIZE as usize;
+    if user <= 0 || (user as usize) < hdr {
+        return;
+    }
+    let header_addr = user as usize - hdr;
+    if !state.cbgr_allocations.remove(&header_addr) {
+        return;
+    }
+    // SAFETY: liveness gated by the tracked-set removal above; the header
+    // fields were written by `cbgr_user_allocate`.
+    unsafe {
+        let flags_ptr = (header_addr + l::ALLOCATION_HEADER_FLAGS_OFFSET as usize) as *mut u32;
+        *flags_ptr |= verum_common::cbgr::flags::FREED;
+        let base_offset = *((header_addr + l::ALLOCATION_HEADER_RESERVED_OFFSET as usize)
+            as *const u32) as usize;
+        let total = *((header_addr + l::ALLOCATION_HEADER_RESERVED_OFFSET as usize + 4)
+            as *const u32) as usize;
+        if total > 0 && base_offset <= header_addr {
+            let base = (header_addr - base_offset) as *mut u8;
+            if let Ok(layout) = std::alloc::Layout::from_size_align(total, 8) {
+                std::alloc::dealloc(base, layout);
+            }
+        }
+    }
+}
+
+/// Reallocate a bridge allocation to `new_size`, preserving
+/// `min(old, new)` bytes.  Returns the new user pointer, or 0 with the
+/// original allocation untouched on failure.
+fn cbgr_user_realloc(state: &mut InterpreterState, user: i64, new_size: i64) -> i64 {
+    use verum_common::layout as l;
+    let hdr = l::ALLOCATION_HEADER_SIZE as usize;
+    if user <= 0 || new_size <= 0 || (user as usize) < hdr {
+        return 0;
+    }
+    let user_addr = user as usize;
+    let header_addr = user_addr - hdr;
+    if !state.cbgr_allocations.contains(&header_addr) {
+        return 0;
+    }
+    // SAFETY: header liveness established via cbgr_allocations.
+    let (old_size, align) = unsafe {
+        (
+            *((header_addr + l::ALLOCATION_HEADER_SIZE_OFFSET as usize) as *const u32) as i64,
+            *((header_addr + l::ALLOCATION_HEADER_ALIGNMENT_OFFSET as usize) as *const u32) as i64,
+        )
+    };
+    let new_user = cbgr_user_allocate(state, new_size, align);
+    if new_user == 0 {
+        return 0;
+    }
+    let copy = old_size.min(new_size) as usize;
+    if copy > 0 {
+        // SAFETY: both blocks are live; the length is bounded by both sizes.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                user_addr as *const u8,
+                new_user as usize as *mut u8,
+                copy,
+            );
+        }
+    }
+    cbgr_user_deallocate(state, user);
+    new_user
 }
 
 // ==============================================================

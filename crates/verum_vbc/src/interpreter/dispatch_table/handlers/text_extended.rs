@@ -72,109 +72,66 @@ pub(in super::super) fn handle_text_extended(
                 }
             }
         }
+        // The parse / render / byte-len handlers below were small-string-only
+        // STUBS until 2026-07-03: any heap/builder Text — and any `&Text`
+        // argument, which is what the declared signatures take — fell into
+        // the `else` branch and answered 0/nil; IntToText/FloatToText
+        // TRUNCATED every result to 6 characters to fit the small-string
+        // box; and the parsers returned a raw Int/Float where the stdlib
+        // signatures promise `Maybe<…>`.  They now use the canonical
+        // machinery: `string_helpers::extract_string` (CBGR-deref + all
+        // three Text representations), `alloc_string_value` (small OR heap
+        // result, no truncation), and the `make_maybe`/`make_some`/
+        // `make_none` variant builders.
         Some(TextSubOpcode::ParseInt) => {
-            // Parse integer from Text
             let text_reg = read_reg(state)?;
             let text = state.get_reg(text_reg);
-
-            if text.is_small_string() {
-                let small = text.as_small_string();
-                let s = small.as_str();
-                if let Ok(n) = s.trim().parse::<i64>() {
-                    state.set_reg(dst, Value::from_i64(n));
-                } else {
-                    // Parse error - return 0 (or could return error value)
-                    state.set_reg(dst, Value::from_i64(0));
-                }
-            } else {
-                state.set_reg(dst, Value::from_i64(0));
-            }
+            let s = super::string_helpers::extract_string(&text, state);
+            // Full-string parse: surrounding whitespace tolerated, any
+            // other trailing garbage is None.
+            let parsed = s.trim().parse::<i64>().ok();
+            let result = super::method_dispatch::make_maybe_int(state, parsed)?;
+            state.set_reg(dst, result);
         }
         Some(TextSubOpcode::ParseFloat) => {
-            // Parse float from Text
             let text_reg = read_reg(state)?;
             let text = state.get_reg(text_reg);
-
-            if text.is_small_string() {
-                let small = text.as_small_string();
-                let s = small.as_str();
-                if let Ok(f) = s.trim().parse::<f64>() {
-                    state.set_reg(dst, Value::from_f64(f));
-                } else {
-                    // Parse error - return 0.0
-                    state.set_reg(dst, Value::from_f64(0.0));
-                }
-            } else {
-                state.set_reg(dst, Value::from_f64(0.0));
-            }
+            let s = super::string_helpers::extract_string(&text, state);
+            let result = match s.trim().parse::<f64>() {
+                Ok(f) => super::method_dispatch::make_some_value(state, Value::from_f64(f))?,
+                Err(_) => super::method_dispatch::make_none_value(state)?,
+            };
+            state.set_reg(dst, result);
         }
         Some(TextSubOpcode::IntToText) => {
-            // Convert integer to Text
             let value_reg = read_reg(state)?;
-            let value = state.get_reg(value_reg);
-            let n = value.as_i64();
-
-            // Format as string
+            let n = state.get_reg(value_reg).as_i64();
             let s = format!("{}", n);
-            // Use small string if possible (up to 6 chars)
-            if let Some(small) = Value::from_small_string(&s) {
-                state.set_reg(dst, small);
-            } else {
-                // Truncate for small string (numbers up to 6 digits)
-                let truncated = if s.len() > 6 { &s[..6] } else { &s };
-                state.set_reg(
-                    dst,
-                    Value::from_small_string(truncated).unwrap_or(Value::nil()),
-                );
-            }
+            let text_val = super::string_helpers::alloc_string_value(state, &s)?;
+            state.set_reg(dst, text_val);
         }
         Some(TextSubOpcode::FloatToText) => {
-            // Convert float to Text
             let value_reg = read_reg(state)?;
-            let value = state.get_reg(value_reg);
-            let f = value.as_f64();
-
-            // Format as string (compact representation)
-            let s = if f.fract() == 0.0 && f.abs() < 1e6 {
-                format!("{:.0}", f)
-            } else {
-                format!("{:.6}", f)
-            };
-            // Use small string if possible
-            if let Some(small) = Value::from_small_string(&s) {
-                state.set_reg(dst, small);
-            } else {
-                // Truncate for small string
-                let truncated = if s.len() > 6 { &s[..6] } else { &s };
-                state.set_reg(
-                    dst,
-                    Value::from_small_string(truncated).unwrap_or(Value::nil()),
-                );
-            }
+            let f = state.get_reg(value_reg).as_f64();
+            // Rust's shortest-round-trip rendering ("1.5", "-0.25") — the
+            // canonical form text_parse_float accepts back verbatim.
+            let s = format!("{}", f);
+            let text_val = super::string_helpers::alloc_string_value(state, &s)?;
+            state.set_reg(dst, text_val);
         }
         Some(TextSubOpcode::ByteLen) => {
-            // Get Text length in bytes
             let text_reg = read_reg(state)?;
             let text = state.get_reg(text_reg);
-
-            let len = if text.is_small_string() {
-                text.as_small_string().len()
-            } else {
-                0
-            };
-            state.set_reg(dst, Value::from_i64(len as i64));
+            let s = super::string_helpers::extract_string(&text, state);
+            state.set_reg(dst, Value::from_i64(s.len() as i64));
         }
         Some(TextSubOpcode::CharLen) => {
-            // Get Text length in characters
+            // Get Text length in characters — canonical extraction, same
+            // small-string-only-stub history as ByteLen above.
             let text_reg = read_reg(state)?;
             let text = state.get_reg(text_reg);
-
-            let len = if text.is_small_string() {
-                text.as_small_string().as_str().chars().count()
-            } else {
-                0
-            };
-            state.set_reg(dst, Value::from_i64(len as i64));
+            let s = super::string_helpers::extract_string(&text, state);
+            state.set_reg(dst, Value::from_i64(s.chars().count() as i64));
         }
         Some(TextSubOpcode::IsEmpty) => {
             // Check if Text is empty

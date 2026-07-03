@@ -5630,6 +5630,49 @@ pub enum SystemSubOpcode {
     /// drop) Action #2.
     CSecureZero = 0xA3,
 
+    /// Reallocate an allocator-internal CBGR allocation.
+    ///
+
+    /// Format: `dst:reg, ptr:reg, old_size:reg, new_size:reg, align:reg`
+    /// Returns: new pointer (raw; the stdlib allocator wrapper packages
+    /// the Result tuple on top, mirroring `CbgrAlloc`).
+    ///
+
+    /// HISTORY: `cbgr_realloc`'s inline sequence used to emit sub-op
+    /// 0x63 — which is `PtrAdd`.  Every reallocation therefore computed
+    /// `ptr + old_size` instead of reallocating (interp: garbage operand
+    /// decode → SIGSEGV; AOT: silent pointer-add).  The 0x60-0x62 stub
+    /// collision was fixed for alloc/dealloc (see the 0xA0-0xA2 block
+    /// comment in `expressions.rs`) but realloc was missed.
+    CbgrRealloc = 0xA4,
+
+    /// Public CBGR bridge (`core/intrinsics/runtime/cbgr.vr`): allocate
+    /// `size` bytes with a 32-byte AllocationHeader prefix; returns the
+    /// USER pointer (header + 32) as a plain Int address, or 0.
+    ///
+
+    /// Format: `dst:reg, size:reg, align:reg`
+    /// AOT: `verum_cbgr_allocate(size)`; interpreter mirrors the same
+    /// header layout (`verum_common::layout::ALLOCATION_HEADER_*`).
+    CbgrAllocateUser = 0xA5,
+
+    /// Public CBGR bridge: free a `CbgrAllocateUser` allocation.
+    /// No-op on 0.  Format: `dst:reg, ptr:reg`
+    CbgrDeallocUser = 0xA6,
+
+    /// Public CBGR bridge: reallocate to `new_size`, preserving
+    /// `min(old, new)` bytes (old size read from the AllocationHeader).
+    /// Returns the new user pointer or 0.
+    /// Format: `dst:reg, ptr:reg, new_size:reg`
+    CbgrReallocUser = 0xA7,
+
+    /// `cbgr_validate<T>(&T) -> Bool` — non-trapping reference
+    /// validation.  Unlike `ChkRef` (which PANICS on an invalid
+    /// reference and writes nothing), this writes the verdict as a
+    /// Bool into `dst` — the shape the stdlib declaration promises.
+    /// Format: `dst:reg, ref:reg`
+    CbgrValidateBool = 0xA8,
+
     // ========================================================================
     // Synchronization Primitives (0xB0-0xBF)
     // ========================================================================
@@ -6025,6 +6068,11 @@ impl SystemSubOpcode {
             0xA1 => Some(Self::CbgrAllocZeroed),
             0xA2 => Some(Self::CbgrDealloc),
             0xA3 => Some(Self::CSecureZero),
+            0xA4 => Some(Self::CbgrRealloc),
+            0xA5 => Some(Self::CbgrAllocateUser),
+            0xA6 => Some(Self::CbgrDeallocUser),
+            0xA7 => Some(Self::CbgrReallocUser),
+            0xA8 => Some(Self::CbgrValidateBool),
             // Synchronization Primitives
             0xB0 => Some(Self::FutexWait),
             0xB1 => Some(Self::FutexWake),
@@ -6174,6 +6222,11 @@ impl SystemSubOpcode {
             Self::CbgrAllocZeroed        => m!("CBGR_ALLOC_ZEROED",          CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
             Self::CbgrDealloc            => m!("CBGR_DEALLOC",               CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=true),
             Self::CSecureZero            => m!("FFI_C_SECURE_ZERO",          CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::CbgrRealloc            => m!("CBGR_REALLOC",               CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::CbgrAllocateUser       => m!("CBGR_ALLOCATE_USER",         CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::CbgrDeallocUser        => m!("CBGR_DEALLOC_USER",          CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=true),
+            Self::CbgrReallocUser        => m!("CBGR_REALLOC_USER",          CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::CbgrValidateBool       => m!("CBGR_VALIDATE_BOOL",         CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== Synchronization Primitives (0xB0-0xBF) =====
             Self::FutexWait              => m!("SYNC_FUTEX_WAIT",            SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),

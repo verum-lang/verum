@@ -100,7 +100,13 @@ public unsafe fn cbgr_deallocate(user_ptr: Int);
 
 /// Reallocate a CBGR allocation to `new_size` bytes.  Preserves
 /// `min(old, new)` bytes; returns new user pointer or 0 on failure.
-@intrinsic("cbgr_realloc")
+///
+/// Intrinsic key is `cbgr_realloc_user` (not `cbgr_realloc`): the bare
+/// name is the allocator-internal 4-arg form in `core/mem/allocator.vr`,
+/// and the two used to COLLIDE at the name-keyed registry — this 2-arg
+/// bridge picked up the 4-arg inline sequence, which decoded garbage
+/// operands and crashed the interpreter.
+@intrinsic("cbgr_realloc_user")
 public unsafe fn cbgr_realloc(user_ptr: Int, new_size: Int) -> Int;
 
 /// Validate that `user_ptr`'s generation+epoch match the expected

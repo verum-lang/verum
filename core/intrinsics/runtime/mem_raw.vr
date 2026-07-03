@@ -143,13 +143,21 @@ public fn strcmp(a: Int, b: Int) -> Int {
 // Raw byte load/store intrinsics
 // =============================================================================
 
+// NOTE (2026-07-03): these leaf load/store declarations are BODYLESS on
+// purpose.  The interpreter's per-name dispatch gate
+// (`calls.rs`: `bytecode_length == 0 || (<= 1 && @intrinsic)`) only
+// intercepts empty/stub bodies — the previous `{ 0 }` placeholder bodies
+// compiled to MORE than one byte, so the bodies always won and the entire
+// byte/word surface (and every fallback body above that bottoms out in
+// these leaves) silently returned 0 / stored nothing on Tier 0.
+
 /// Load a single byte from memory address.
 @intrinsic("load_byte")
-public fn load_byte(addr: Int) -> Int { 0 }
+public fn load_byte(addr: Int) -> Int;
 
 /// Store a single byte to memory address.
 @intrinsic("store_byte")
-public fn store_byte(addr: Int, value: Int) -> Int { 0 }
+public fn store_byte(addr: Int, value: Int) -> Int;
 
 /// Backwards-compatible private aliases — internal call sites in this
 /// module (memcpy/memset/memcmp/strlen/strcmp fallbacks) keep using
@@ -159,16 +167,16 @@ fn __store_byte(addr: Int, value: Int) -> Int { store_byte(addr, value) }
 
 /// Load an i64 from memory address.
 @intrinsic("load_i64")
-public fn load_i64(addr: Int) -> Int { 0 }
+public fn load_i64(addr: Int) -> Int;
 
 /// Store an i64 to memory address.
 @intrinsic("store_i64")
-public fn store_i64(addr: Int, value: Int) -> Int { 0 }
+public fn store_i64(addr: Int, value: Int) -> Int;
 
 /// Load an i32 from memory address.
 @intrinsic("load_i32")
-public fn load_i32(addr: Int) -> Int { 0 }
+public fn load_i32(addr: Int) -> Int;
 
 /// Store an i32 to memory address.
 @intrinsic("store_i32")
-public fn store_i32(addr: Int, value: Int) -> Int { 0 }
+public fn store_i32(addr: Int, value: Int) -> Int;

@@ -36,7 +36,10 @@ fn law_parse_int_of_int_to_text_is_identity() {
     for x in xs.iter() {
         let rendered = int_to_text(*x);
         let back = text_parse_int(&rendered);
-        assert(back is Some(*x));
+        // NOTE: `is Some(*x)` is not valid — a deref is an expression, not
+        // a pattern (a bare name would BIND, not compare).  Structural
+        // equality on the Maybe value is the correct spelling.
+        assert_eq(back, Maybe.Some(*x));
     }
 }
 

@@ -16143,6 +16143,21 @@ impl VbcCodegen {
         }
         // Unknown identifier — most commonly an unconstrained generic parameter
         // (`T.size` inside an `implement<T>` block). One NaN-boxed slot.
+        //
+        // TYPEINFO-USERTYPE-SIZE-1 instrumentation: a NAMED user record that
+        // reaches this fallback is a resolution miss, not a generic param —
+        // surface every such site under VERUM_TRACE_TYPEPROP.
+        if std::env::var("VERUM_TRACE_TYPEPROP").is_ok() {
+            eprintln!(
+                "[TYPEPROP] fallback-8 for type='{}' field='{}' (layouts_len={} has_key={} known_type_id={}) fn={:?}",
+                type_name,
+                field,
+                self.type_field_layouts.len(),
+                self.type_field_layouts.contains_key(type_name),
+                self.type_name_to_id.contains_key(type_name),
+                self.ctx.current_function
+            );
+        }
         Some(match field {
             "size" | "stride" | "alignment" => TypePropertyValue::Int(8),
             _ => return None,
@@ -25725,6 +25740,26 @@ impl VbcCodegen {
                 }
             }
 
+            // ptr_sub: same shape as PtrOffset but the count SUBTRACTS —
+            // SystemSubOpcode::PtrSub (0x64) does the checked negative walk.
+            InlineSequenceId::PtrSubSeq => {
+                if args.len() >= 2 {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, args[0].0);
+                    Self::write_reg(&mut operands, args[1].0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x64, // PtrSub
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: args[0],
+                    });
+                }
+            }
+
             // Checked arithmetic - returns Maybe<T> via ArithExtended sub-opcodes
             // Uses ArithExtended (0xBD) with ArithSubOpcode::Checked* values
             InlineSequenceId::CheckedAdd
@@ -26480,7 +26515,13 @@ impl VbcCodegen {
                 self.ctx.free_temp(byte_reg);
             }
 
-            // Char operations
+            // Char classification / case conversion — route to the
+            // CharExtended (0xCA) Unicode sub-ops.  These arms previously
+            // emitted FFI library calls to `verum_char_*` symbols that are
+            // DEFINED NOWHERE (not in the interpreter process, not in the
+            // AOT runtime emitters) — the calls resolved to nothing and the
+            // whole char surface returned garbage/nil while a complete
+            // handler family sat unused in `handlers/char_extended.rs`.
             InlineSequenceId::CharIsAlphabetic
             | InlineSequenceId::CharIsNumeric
             | InlineSequenceId::CharIsWhitespace
@@ -26488,21 +26529,40 @@ impl VbcCodegen {
             | InlineSequenceId::CharIsUppercase
             | InlineSequenceId::CharIsLowercase
             | InlineSequenceId::CharToUppercase
-            | InlineSequenceId::CharToLowercase
-            | InlineSequenceId::CharEncodeUtf8
-            | InlineSequenceId::CharEscapeDebug => {
+            | InlineSequenceId::CharToLowercase => {
+                use crate::instruction::CharSubOpcode;
+                let sub = match seq_id {
+                    InlineSequenceId::CharIsAlphabetic => CharSubOpcode::IsAlphabeticUnicode,
+                    InlineSequenceId::CharIsNumeric => CharSubOpcode::IsNumericUnicode,
+                    InlineSequenceId::CharIsWhitespace => CharSubOpcode::IsWhitespaceUnicode,
+                    InlineSequenceId::CharIsControl => CharSubOpcode::IsControlUnicode,
+                    InlineSequenceId::CharIsUppercase => CharSubOpcode::IsUppercaseUnicode,
+                    InlineSequenceId::CharIsLowercase => CharSubOpcode::IsLowercaseUnicode,
+                    InlineSequenceId::CharToUppercase => CharSubOpcode::ToUppercaseUnicode,
+                    InlineSequenceId::CharToLowercase => CharSubOpcode::ToLowercaseUnicode,
+                    _ => CharSubOpcode::IsAlphabeticUnicode,
+                };
+                if !args.is_empty() {
+                    let mut operands: Vec<u8> = Vec::with_capacity(4);
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, args[0].0);
+                    self.ctx.emit(Instruction::CharExtended {
+                        sub_op: sub as u8,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // No CharSubOpcode exists for these two yet — they still emit
+            // the (unimplemented) library-call route; tracked in the text
+            // suite audit.  utf8 encode is exercised via integration tests
+            // pinned @ignore until a sub-op lands.
+            InlineSequenceId::CharEncodeUtf8 | InlineSequenceId::CharEscapeDebug => {
                 let func_name = match seq_id {
-                    InlineSequenceId::CharIsAlphabetic => "verum_char_is_alphabetic",
-                    InlineSequenceId::CharIsNumeric => "verum_char_is_numeric",
-                    InlineSequenceId::CharIsWhitespace => "verum_char_is_whitespace",
-                    InlineSequenceId::CharIsControl => "verum_char_is_control",
-                    InlineSequenceId::CharIsUppercase => "verum_char_is_uppercase",
-                    InlineSequenceId::CharIsLowercase => "verum_char_is_lowercase",
-                    InlineSequenceId::CharToUppercase => "verum_char_to_uppercase",
-                    InlineSequenceId::CharToLowercase => "verum_char_to_lowercase",
                     InlineSequenceId::CharEncodeUtf8 => "verum_char_encode_utf8",
-                    InlineSequenceId::CharEscapeDebug => "verum_char_escape_debug",
-                    _ => "verum_char_is_alphabetic",
+                    _ => "verum_char_escape_debug",
                 };
                 self.emit_intrinsic_library_call(func_name, args, dest)?;
             }
@@ -26692,29 +26752,37 @@ impl VbcCodegen {
                 self.emit_intrinsic_library_call("verum_utf8_decode_char", args, dest)?;
             }
 
-            InlineSequenceId::TextParseInt => {
-                // Parse integer from text
-                self.emit_intrinsic_library_call("verum_text_parse_int", args, dest)?;
-            }
-
-            InlineSequenceId::TextParseFloat => {
-                // Parse float from text
-                self.emit_intrinsic_library_call("verum_text_parse_float", args, dest)?;
-            }
-
-            InlineSequenceId::IntToText => {
-                // Convert integer to text
-                self.emit_intrinsic_library_call("verum_int_to_text", args, dest)?;
-            }
-
-            InlineSequenceId::FloatToText => {
-                // Convert float to text
-                self.emit_intrinsic_library_call("verum_float_to_text", args, dest)?;
-            }
-
-            InlineSequenceId::TextByteLen => {
-                // Get byte length of Text
-                self.emit_intrinsic_library_call("verum_text_byte_len", args, dest)?;
+            // Text parse / render / byte-length — route to the TextExtended
+            // (canonical) sub-ops whose interpreter handlers already exist in
+            // `handlers/text_extended.rs`.  These arms previously emitted FFI
+            // library calls to `verum_text_*` symbols that are defined
+            // nowhere (same ghost-symbol drift as the char block above; the
+            // AsBytes arm below was the one member of the family already
+            // routed correctly).
+            InlineSequenceId::TextParseInt
+            | InlineSequenceId::TextParseFloat
+            | InlineSequenceId::IntToText
+            | InlineSequenceId::FloatToText
+            | InlineSequenceId::TextByteLen => {
+                use crate::instruction::TextSubOpcode;
+                let sub = match seq_id {
+                    InlineSequenceId::TextParseInt => TextSubOpcode::ParseInt,
+                    InlineSequenceId::TextParseFloat => TextSubOpcode::ParseFloat,
+                    InlineSequenceId::IntToText => TextSubOpcode::IntToText,
+                    InlineSequenceId::FloatToText => TextSubOpcode::FloatToText,
+                    _ => TextSubOpcode::ByteLen,
+                };
+                if !args.is_empty() {
+                    let mut operands: Vec<u8> = Vec::with_capacity(4);
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, args[0].0);
+                    self.ctx.emit(Instruction::TextExtended {
+                        sub_op: sub as u8,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
             }
 
             InlineSequenceId::TextAsBytes => {
@@ -27667,9 +27735,20 @@ impl VbcCodegen {
                 self.emit_intrinsic_math_extended(MathSubOpcode::PowF32, args, dest);
             }
             InlineSequenceId::CharIsAlphanumeric => {
-                // char_is_alphanumeric(ch) - check if char is letter or digit
-                // In interpreter mode, approximate: emit library call
-                self.emit_intrinsic_library_call("verum_char_is_alphanumeric", args, dest)?;
+                // Route to the CharExtended Unicode handler (see the char
+                // classification block above — same ghost-symbol history).
+                use crate::instruction::CharSubOpcode;
+                if !args.is_empty() {
+                    let mut operands: Vec<u8> = Vec::with_capacity(4);
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, args[0].0);
+                    self.ctx.emit(Instruction::CharExtended {
+                        sub_op: CharSubOpcode::IsAlphanumericUnicode as u8,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
             }
             InlineSequenceId::Rdtsc => {
                 // Read timestamp counter - use monotonic nanos as approximation
@@ -29081,7 +29160,60 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, arg.0);
                 }
                 self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x63, // CbgrRealloc
+                    // 0xA4 = SystemSubOpcode::CbgrRealloc.  This used to emit
+                    // the legacy 0x63 — which decodes as PtrAdd: every
+                    // reallocation computed `ptr + old_size` instead of
+                    // reallocating (interp SIGSEGV on operand-count mismatch,
+                    // AOT silent pointer-add).  Same legacy-stub collision
+                    // family as the 0x60-0x62 note above; realloc was missed
+                    // by that fix.
+                    sub_op: 0xA4, // CbgrRealloc
+                    operands,
+                });
+            }
+            // Public CBGR bridge (user-pointer API) + non-trapping validate —
+            // see the SystemSubOpcode 0xA5-0xA8 doc comments.
+            InlineSequenceId::CbgrAllocateUser => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0xA5, // CbgrAllocateUser
+                    operands,
+                });
+            }
+            InlineSequenceId::CbgrDeallocUser => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0xA6, // CbgrDeallocUser
+                    operands,
+                });
+            }
+            InlineSequenceId::CbgrReallocUser => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0xA7, // CbgrReallocUser
+                    operands,
+                });
+            }
+            InlineSequenceId::CbgrValidateBool => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0xA8, // CbgrValidateBool
                     operands,
                 });
             }

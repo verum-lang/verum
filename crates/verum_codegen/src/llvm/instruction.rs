@@ -25034,6 +25034,155 @@ fn lower_ffi_extended<'ctx>(
         }
 
         // ================================================================
+        // Allocator-internal realloc (0xA4) + public CBGR bridge
+        // (0xA5-0xA8).  All route through the `verum_cbgr_*` runtime
+        // functions (declared/bodied in `runtime.rs`), which implement the
+        // 32-byte AllocationHeader model — the interpreter mirrors the
+        // same layout, so both tiers observe identical semantics.
+        // Pre-fix: CbgrRealloc was emitted as sub-op 0x63 (= PtrAdd!) so
+        // AOT reallocation silently computed `ptr + old_size`; the bridge
+        // sub-ops did not exist at all.
+        // ================================================================
+        Some(SystemSubOpcode::CbgrRealloc) => {
+            // Format: dst, ptr, old_size, new_size, align — old_size/align
+            // are carried for the VBC contract; the runtime reads the real
+            // old size from the AllocationHeader.
+            if operands.len() < 4 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let new_size_reg = op_reg(operands, 3);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let realloc_fn = module.get_function("verum_cbgr_realloc").unwrap_or_else(|| {
+                let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+                module.add_function("verum_cbgr_realloc", fn_ty, None)
+            });
+            let ptr_val = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_realloc_ptr")?;
+            let new_size = as_i64(ctx, ctx.get_register(new_size_reg)?, "cbgr_realloc_size")?;
+            let new_ptr = ctx
+                .builder()
+                .build_call(realloc_fn, &[ptr_val.into(), new_size.into()], "cbgr_realloc")
+                .or_llvm_err()?
+                .basic_value_or("cbgr_realloc returned no value")?;
+            // Raw-pointer return convention, matching the CbgrAlloc arm —
+            // the stdlib allocator wrapper packages the Result on top.
+            ctx.set_register(dst, new_ptr);
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::CbgrAllocateUser) => {
+            // Format: dst, size, align — the runtime allocate takes only
+            // the size; alignment beyond the header's natural 8/16 is a
+            // documented bridge limitation (see cbgr.vr audit).
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let size_reg = op_reg(operands, 1);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let alloc_fn = module.get_function("verum_cbgr_allocate").unwrap_or_else(|| {
+                let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
+                module.add_function("verum_cbgr_allocate", fn_ty, None)
+            });
+            let size_val = as_i64(ctx, ctx.get_register(size_reg)?, "cbgr_user_size")?;
+            let ptr = ctx
+                .builder()
+                .build_call(alloc_fn, &[size_val.into()], "cbgr_user_ptr")
+                .or_llvm_err()?
+                .basic_value_or("cbgr_allocate returned no value")?;
+            // The bridge returns a plain Int address — convert so downstream
+            // integer arithmetic (`p + i`, `p % align`) sees an i64.
+            let as_int = ctx
+                .builder()
+                .build_ptr_to_int(ptr.into_pointer_value(), i64_ty, "cbgr_user_addr")
+                .or_llvm_err()?;
+            ctx.set_register(dst, as_int.into());
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::CbgrDeallocUser) => {
+            // Format: dst, ptr
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let _dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let dealloc_fn = module
+                .get_function("verum_cbgr_deallocate")
+                .unwrap_or_else(|| {
+                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
+                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
+                });
+            let ptr_val = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_user_dealloc_ptr")?;
+            ctx.builder()
+                .build_call(dealloc_fn, &[ptr_val.into()], "")
+                .or_llvm_err()?;
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::CbgrReallocUser) => {
+            // Format: dst, ptr, new_size
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let new_size_reg = op_reg(operands, 2);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let realloc_fn = module.get_function("verum_cbgr_realloc").unwrap_or_else(|| {
+                let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+                module.add_function("verum_cbgr_realloc", fn_ty, None)
+            });
+            let ptr_val = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_user_realloc_ptr")?;
+            let new_size = as_i64(ctx, ctx.get_register(new_size_reg)?, "cbgr_user_realloc_size")?;
+            let new_ptr = ctx
+                .builder()
+                .build_call(
+                    realloc_fn,
+                    &[ptr_val.into(), new_size.into()],
+                    "cbgr_user_realloc",
+                )
+                .or_llvm_err()?
+                .basic_value_or("cbgr_realloc returned no value")?;
+            let as_int = ctx
+                .builder()
+                .build_ptr_to_int(new_ptr.into_pointer_value(), i64_ty, "cbgr_user_realloc_addr")
+                .or_llvm_err()?;
+            ctx.set_register(dst, as_int.into());
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::CbgrValidateBool) => {
+            // Format: dst, ref.  Tier-2 semantics: an AOT reference that
+            // reaches this op is compiler-checked; the residual dynamic
+            // question is null-ness.  (Full generational validation is the
+            // interpreter's Tier-0 job — see handlers/cbgr.rs.)
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let ref_reg = op_reg(operands, 1);
+            let ptr = as_ptr(ctx, ctx.get_register(ref_reg)?, "cbgr_validate_ref")?;
+            let is_null = ffi.lower_ptr_is_null(ctx.builder(), ptr)?;
+            let one = is_null.get_type().const_int(1, false);
+            let live = ctx
+                .builder()
+                .build_xor(is_null, one, "cbgr_validate_live")
+                .or_llvm_err()?;
+            ctx.set_register(dst, live.into());
+            Ok(())
+        }
+
+        // ================================================================
         // Synchronization Primitives (0xB0-0xB2)
         // ================================================================
         // Route through the existing `verum_futex_wait` /

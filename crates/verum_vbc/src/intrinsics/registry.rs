@@ -846,6 +846,14 @@ pub enum InlineSequenceId {
     CbgrDealloc,
     /// cbgr_realloc: reallocate CBGR-tracked memory
     CbgrRealloc,
+    /// cbgr_allocate (public bridge): header-model allocation → user ptr
+    CbgrAllocateUser,
+    /// cbgr_deallocate (public bridge): free a user-ptr allocation
+    CbgrDeallocUser,
+    /// cbgr_realloc_user (public bridge): header-model realloc → user ptr
+    CbgrReallocUser,
+    /// cbgr_validate: non-trapping reference validation → Bool
+    CbgrValidateBool,
     /// memcmp_bytes: compare memory regions byte-by-byte
     MemcmpBytes,
     /// get_header_from_ptr: get CBGR allocation header from pointer
@@ -1044,6 +1052,8 @@ pub enum InlineSequenceId {
     Replace,
     /// ptr_offset: element-scaled pointer arithmetic (ptr + count * 8)
     PtrOffset,
+    /// ptr_sub: subtract unsigned element count from a pointer
+    PtrSubSeq,
 }
 
 /// Complete intrinsic definition.
@@ -1521,6 +1531,43 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrOffset),
         mlir_op: Some("llvm.getelementptr"),
         doc: "Offset mutable pointer by element count",
+    },
+    // `ptr_add` / `ptr_sub` (the UNSIGNED-count spellings of ptr_offset,
+    // declared in `core/intrinsics/memory.vr` Section 3) had NO entries —
+    // every call fell into the declaration body's unresolved-@intrinsic
+    // fallback and produced nil, which downstream atomic/deref consumers
+    // saw as a null pointer (probe: `ptr_add(p, 1)` → nil → AtomicStore
+    // NullPointer; atomic_load's lenient null path returned 0, making the
+    // failure look like a wrong VALUE instead of a wrong POINTER).
+    Intrinsic {
+        name: "ptr_add",
+        category: IntrinsicCategory::Memory,
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::Pure,
+            IntrinsicHint::Generic,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 2, // ptr, count
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrOffset),
+        mlir_op: Some("llvm.getelementptr"),
+        doc: "Add unsigned element count to pointer (ptr_offset spelling)",
+    },
+    Intrinsic {
+        name: "ptr_sub",
+        category: IntrinsicCategory::Memory,
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::Pure,
+            IntrinsicHint::Generic,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 2, // ptr, count
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrSubSeq),
+        mlir_op: Some("llvm.getelementptr"),
+        doc: "Subtract unsigned element count from pointer",
     },
     // =========================================================================
     // Memory Lifecycle Intrinsics
@@ -4929,9 +4976,13 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Generic],
         param_count: 1,  // reference
         return_count: 1, // bool
-        strategy: CodegenStrategy::DirectOpcode(Opcode::ChkRef),
+        // NOT DirectOpcode(ChkRef): ChkRef validates-or-PANICS and writes
+        // no result, so `let ok = cbgr_validate(&x)` read an unset register
+        // (nil → false for every live reference).  CbgrValidateBool runs
+        // the same validation non-trapping and writes the Bool verdict.
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrValidateBool),
         mlir_op: Some("verum.cbgr.validate"),
-        doc: "Validate CBGR reference",
+        doc: "Validate CBGR reference (non-trapping; returns Bool)",
     },
     Intrinsic {
         name: "cbgr_current_epoch",
@@ -11395,7 +11446,46 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         return_count: 1, // Result<(ptr, generation, epoch)>
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrRealloc),
         mlir_op: Some("verum.cbgr_realloc"),
-        doc: "Reallocate CBGR-tracked memory",
+        doc: "Reallocate CBGR-tracked memory (allocator-internal 4-arg form)",
+    },
+    // =========================================================================
+    // Public CBGR bridge (core/intrinsics/runtime/cbgr.vr, #67 Phase 3
+    // Tier A).  Pre-fix these names had NO entries: the bridge existed only
+    // as link-surface declarations, calls compiled to nothing useful, and
+    // the bridge's realloc key collided with the internal 4-arg entry
+    // above.  The bridge is the USER-POINTER API — AOT lowers to the
+    // `verum_cbgr_*` runtime functions; the interpreter mirrors the same
+    // 32-byte AllocationHeader model.
+    // =========================================================================
+    Intrinsic {
+        name: "cbgr_allocate",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 2,  // size, align
+        return_count: 1, // user ptr (Int) or 0
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrAllocateUser),
+        mlir_op: Some("verum.cbgr_allocate"),
+        doc: "Allocate CBGR-tracked memory; returns user pointer (0 on failure)",
+    },
+    Intrinsic {
+        name: "cbgr_deallocate",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1, // user ptr
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrDeallocUser),
+        mlir_op: Some("verum.cbgr_deallocate"),
+        doc: "Free a cbgr_allocate allocation; no-op on 0",
+    },
+    Intrinsic {
+        name: "cbgr_realloc_user",
+        category: IntrinsicCategory::Cbgr,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 2,  // user ptr, new_size
+        return_count: 1, // new user ptr (Int) or 0
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrReallocUser),
+        mlir_op: Some("verum.cbgr_realloc_user"),
+        doc: "Reallocate a cbgr_allocate allocation preserving min(old, new) bytes",
     },
     Intrinsic {
         name: "memcmp_bytes",

@@ -8857,8 +8857,47 @@ pub(super) fn dispatch_array_method(
 
     // Handle pointer extraction methods for ALL array types (including byte arrays)
     if method == "as_mut_ptr" || method == "as_ptr" {
-        // Return a pointer to the start of the data section
-        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
+        // LIST-ASPTR-HEADER-1: a LIST / BYTE_LIST object is
+        // `[ObjectHeader | len | cap | backing_ptr]` — the elements live in
+        // a SEPARATE backing allocation (`[ObjectHeader | elements…]`, see
+        // `get_array_element`).  Only plain ARRAY objects store elements
+        // inline after the header.  Pre-fix this arm returned
+        // `ptr + OBJECT_HEADER_SIZE` for every array-shaped receiver, which
+        // for a List is the address of its `len` FIELD: every raw-pointer
+        // consumer (atomic ops, memcpy, ptr_read) silently addressed the
+        // {len, cap, backing_ptr} record — and a write through it corrupted
+        // the object (NullPointerAt on the next indexed access).  The
+        // defect was masked by store→load round-trip tests, which are
+        // self-consistent wherever the pointer lands.
+        if header.type_id.is_list_like() {
+            let slots = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+            let backing = unsafe { (*slots.add(2)).as_ptr::<u8>() };
+            if std::env::var("VERUM_TRACE_ASPTR").is_ok() {
+                // Diagnostic: raw slot bits + decoded backing for the
+                // LIST-ASPTR-HEADER-1 investigation.
+                let raw: [u64; 3] = unsafe {
+                    [
+                        (*slots.add(0)).bits(),
+                        (*slots.add(1)).bits(),
+                        (*slots.add(2)).bits(),
+                    ]
+                };
+                eprintln!(
+                    "[ASPTR] type_id={:?} len_bits={:#x} cap_bits={:#x} ptr_bits={:#x} backing={:p}",
+                    header.type_id, raw[0], raw[1], raw[2], backing
+                );
+            }
+            if backing.is_null() {
+                // len == 0 with no allocation yet: a null element pointer
+                // is the honest answer — there is no dereferenceable
+                // element.  (`ptr_is_null` lets callers detect this.)
+                return Ok(Some(Value::from_ptr(std::ptr::null_mut::<u8>())));
+            }
+            let elems = unsafe { backing.add(heap::OBJECT_HEADER_SIZE) as *mut u8 };
+            return Ok(Some(Value::from_ptr(elems)));
+        }
+        // Inline-element arrays: data really does start right after the header.
+        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut u8 };
         return Ok(Some(Value::from_ptr(data_ptr)));
     }
 
