@@ -249,6 +249,9 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptEngineLastError) => {
             super::script_runtime::handle_script_engine_last_error(state)
         }
+        Some(ExtendedSubOpcode::ScriptEngineLastErrorKind) => {
+            super::script_runtime::handle_script_engine_last_error_kind(state)
+        }
         Some(ExtendedSubOpcode::ScriptSessionCall) => {
             super::script_runtime::handle_script_session_call(state)
         }

@@ -102,6 +102,11 @@ public fn script_engine_stdout(engine: RawScriptEngine) -> Text;
 @intrinsic("script_engine_last_error")
 public fn script_engine_last_error(engine: RawScriptEngine) -> Text;
 
+/// Numeric kind of the engine's most recent failure: 0 none, 1 compile,
+/// 2 runtime, 3 entry-not-found, 4 compiler-unavailable, 5 internal.
+@intrinsic("script_engine_last_error_kind")
+public fn script_engine_last_error_kind(engine: RawScriptEngine) -> Int;
+
 /// Run `fn_name` on the persistent session; state written by earlier calls is
 /// visible (the zero-copy sharing).
 @intrinsic("script_session_call")

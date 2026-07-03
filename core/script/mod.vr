@@ -41,4 +41,4 @@ public module engine;
 // Re-export the primary surface so callers can
 // `mount core.script.{Engine, Session, World, ScriptValue, ScriptResult};`.
 // `Session` is included so the return type of `Engine.link`/`link2` is nameable.
-public mount engine.{Engine, Session, World, ScriptValue, ScriptResult};
+public mount engine.{Engine, Session, World, ScriptValue, ScriptResult, ErrorKind};

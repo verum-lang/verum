@@ -4990,7 +4990,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptSetList)
                 | Some(ExtendedSubOpcode::ScriptSetMap)
                 | Some(ExtendedSubOpcode::ScriptEngineStdout)
-                | Some(ExtendedSubOpcode::ScriptEngineLastError) => {
+                | Some(ExtendedSubOpcode::ScriptEngineLastError)
+                | Some(ExtendedSubOpcode::ScriptEngineLastErrorKind) => {
                     let operands = decode_extended_reg_operands(data, offset, 2)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }

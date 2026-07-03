@@ -277,6 +277,23 @@ pub(in super::super) fn handle_script_engine_last_error(
     Ok(DispatchResult::Continue)
 }
 
+/// `script_engine_last_error_kind(engine) -> Int` — the numeric kind of the
+/// engine's most recent failure (0 none / 1 compile / 2 runtime / 3 not-found /
+/// 4 unavailable / 5 internal), so a host can branch without parsing the message.
+pub(in super::super) fn handle_script_engine_last_error_kind(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let engine_reg = read_reg(state)?;
+    let code = match checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+        // SAFETY: a validated, live `Box<ScriptEngine>` handle.
+        Ok(ptr) => unsafe { (*ptr).last_error_kind() },
+        Err(_) => 0,
+    };
+    state.set_reg(dst, Value::from_i64(code));
+    Ok(DispatchResult::Continue)
+}
+
 /// `script_session_call(session, fn_name) -> RawScriptOutcome` — run `fn_name`
 /// on the persistent session (state written by earlier calls is visible).
 pub(in super::super) fn handle_script_session_call(

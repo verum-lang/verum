@@ -122,6 +122,22 @@ pub enum ScriptError {
     Internal(String),
 }
 
+impl ScriptError {
+    /// A stable numeric kind for host branching (see `Engine.last_error_kind`):
+    /// `1` = compile, `2` = runtime (panic / limit / CBGR trap), `3` = entry not
+    /// found, `4` = compiler unavailable, `5` = internal. `0` (no error) is
+    /// produced by the engine, never here.
+    pub fn kind_code(&self) -> i64 {
+        match self {
+            ScriptError::Compile(_) => 1,
+            ScriptError::Runtime(_) => 2,
+            ScriptError::EntryNotFound(_) => 3,
+            ScriptError::CompilerUnavailable => 4,
+            ScriptError::Internal(_) => 5,
+        }
+    }
+}
+
 impl std::fmt::Display for ScriptError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -196,10 +212,14 @@ pub struct ScriptEngine {
     caps: ScriptCaps,
     cancel: Arc<AtomicBool>,
     last_stdout: String,
-    /// The message of the most recent failure whose diagnostic would otherwise
-    /// be lost — currently `link`/`link2` (which return a null session on
-    /// compile/link failure). Read via `Engine.last_error()`.
+    /// The message of the most recent failed `eval`/`call`/`link` (empty if
+    /// none). For link this is otherwise lost behind the null-session path; for
+    /// eval/call it mirrors `ScriptResult.Err`. Read via `Engine.last_error()`.
     last_error: String,
+    /// The kind code of that same failure (see [`ScriptError::kind_code`]) —
+    /// `0` = none, so a host can branch (retry a limit trap, report a compile
+    /// error…) without parsing the message. Read via `Engine.last_error_kind()`.
+    last_error_kind: i64,
 }
 
 impl ScriptEngine {
@@ -225,6 +245,7 @@ impl ScriptEngine {
             cancel,
             last_stdout: String::new(),
             last_error: String::new(),
+            last_error_kind: 0,
         }
     }
 
@@ -313,9 +334,16 @@ impl ScriptEngine {
         // real compile/link error would be lost. `Engine.last_error()` reads it.
         let result = self.link_n_impl(sources);
         if let Err(ref e) = result {
-            self.last_error = e.to_string();
+            self.record_error(e);
         }
         result
+    }
+
+    /// Remember `err` as the engine's last error (message + kind) so
+    /// `Engine.last_error()` / `Engine.last_error_kind()` can report it.
+    fn record_error(&mut self, err: &ScriptError) {
+        self.last_error = err.to_string();
+        self.last_error_kind = err.kind_code();
     }
 
     fn link_n_impl(&mut self, sources: &[&str]) -> Result<ScriptSession, ScriptError> {
@@ -396,6 +424,13 @@ impl ScriptEngine {
     /// otherwise hide behind a generic "null session" error.
     pub fn last_error(&self) -> &str {
         &self.last_error
+    }
+
+    /// The kind code of the most recent failed run (`0` if none) — see
+    /// [`ScriptError::kind_code`]. Lets a host branch on compile vs runtime vs
+    /// limit without parsing [`last_error`](Self::last_error)'s message.
+    pub fn last_error_kind(&self) -> i64 {
+        self.last_error_kind
     }
 
     /// Set a host-provided global the next script run can read (via the
@@ -794,17 +829,20 @@ impl ScriptEngine {
         source: &str,
         host_state_addr: usize,
     ) -> ScriptOutcome {
-        let module = match self.compile(source) {
-            Ok(m) => m,
-            Err(error) => {
-                return ScriptOutcome {
-                    value: ScriptValueOwned::Nil,
-                    error: Some(error),
-                    stdout: String::new(),
-                };
-            }
+        let outcome = match self.compile(source) {
+            Ok(module) => self.run_with_host(module, "main", &[], host_state_addr),
+            Err(error) => ScriptOutcome {
+                value: ScriptValueOwned::Nil,
+                error: Some(error),
+                stdout: String::new(),
+            },
         };
-        self.run_with_host(module, "main", &[], host_state_addr)
+        // Record compile/runtime failures so `Engine.last_error[_kind]()` work
+        // for eval as well as link.
+        if let Some(e) = &outcome.error {
+            self.record_error(e);
+        }
+        outcome
     }
 
     /// Compile `source` and run its `fn_name` entry (rather than `main`) with a
@@ -834,17 +872,18 @@ impl ScriptEngine {
         args: &[Value],
         host_state_addr: usize,
     ) -> ScriptOutcome {
-        let module = match self.compile(source) {
-            Ok(m) => m,
-            Err(error) => {
-                return ScriptOutcome {
-                    value: ScriptValueOwned::Nil,
-                    error: Some(error),
-                    stdout: String::new(),
-                };
-            }
+        let outcome = match self.compile(source) {
+            Ok(module) => self.run_with_host(module, fn_name, args, host_state_addr),
+            Err(error) => ScriptOutcome {
+                value: ScriptValueOwned::Nil,
+                error: Some(error),
+                stdout: String::new(),
+            },
         };
-        self.run_with_host(module, fn_name, args, host_state_addr)
+        if let Some(e) = &outcome.error {
+            self.record_error(e);
+        }
+        outcome
     }
 
     /// Run `entry` from a compiled `module`, marshaling its result into an

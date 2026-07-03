@@ -4241,6 +4241,18 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Host: message of the engine's most recent link/link2 failure",
     },
     Intrinsic {
+        name: "script_engine_last_error_kind",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,  // engine
+        return_count: 1, // Int
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineLastErrorKind,
+        ),
+        mlir_op: None,
+        doc: "Host: numeric kind of the engine's most recent failure",
+    },
+    Intrinsic {
         name: "script_session_call",
         category: IntrinsicCategory::Scripting,
         hints: &[

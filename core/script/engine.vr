@@ -61,6 +61,16 @@ public type ScriptResult is
     | Ok(ScriptValue)
     | Err(Text);
 
+/// The category of a script failure, so a host can branch (retry a resource
+/// limit, report a compile error, …) without parsing the message text.
+public type ErrorKind is
+    | NoError
+    | Compile
+    | Runtime
+    | NotFound
+    | Unavailable
+    | Internal;
+
 // =============================================================================
 // Engine
 // =============================================================================
@@ -192,6 +202,26 @@ implement Engine {
     /// reports a generic error; read this for the actual reason.
     public fn last_error(&self) -> Text {
         script_engine_last_error(self.raw)
+    }
+
+    /// The [`ErrorKind`] of the engine's most recent failed `eval`/`call`/`link`
+    /// (`NoError` if the last run succeeded) — pairs with `last_error()`'s
+    /// message so a host can branch on the category.
+    public fn last_error_kind(&self) -> ErrorKind {
+        let code = script_engine_last_error_kind(self.raw);
+        if code == 1 {
+            ErrorKind.Compile
+        } else if code == 2 {
+            ErrorKind.Runtime
+        } else if code == 3 {
+            ErrorKind.NotFound
+        } else if code == 4 {
+            ErrorKind.Unavailable
+        } else if code == 5 {
+            ErrorKind.Internal
+        } else {
+            ErrorKind.NoError
+        }
     }
 }
 
