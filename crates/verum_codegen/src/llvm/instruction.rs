@@ -18955,24 +18955,19 @@ fn lower_text_extended<'ctx>(
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
             let f64_ty = ctx.types().f64_type();
-            // Use compiled Text.from_float from text.vr (pure Verum, no C runtime).
-            let to_text_fn = module.get_function("Text.from_float").unwrap_or_else(|| {
-                // Safety fallback: declare C function if text.vr somehow didn't compile
-                let fn_type = ptr_ty.fn_type(&[f64_ty.into()], false);
-                module.add_function("verum_float_to_text", fn_type, None)
-            });
-            let coerced = coerce_value(
-                ctx,
-                val,
-                to_text_fn.get_type().get_param_types()[0]
-                    .try_into()
-                    .ok()
-                    .or_internal("param type conversion failed")?,
-                "float_coerce",
-            )?;
+            // task #36: use the C snprintf-based `verum_float_to_text` (the same path
+            // `lower_to_string` takes), NOT the compiled `Text.from_float` — under AOT
+            // the latter truncates a float to its integer part (e.g. 3.5 → "3"),
+            // which corrupted a typed f-string interpolation of a Float value. as_f64
+            // bitcasts an i64-stored float back to f64 (identity for a native f64).
+            let _ = ptr_ty;
+            let fn_type = i64_ty.fn_type(&[f64_ty.into()], false);
+            let to_text_fn =
+                super::error::get_or_declare_function(module, "verum_float_to_text", fn_type);
+            let f64_val = as_f64(ctx, val, "float_to_text_f64")?;
             let result = ctx
                 .builder()
-                .build_call(to_text_fn, &[coerced.into()], "float_to_text")
+                .build_call(to_text_fn, &[f64_val.into()], "float_to_text")
                 .or_llvm_err()?
                     .basic_value_or("FloatToText: expected return value")?;
             // Normalize pointer return to i64
