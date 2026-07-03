@@ -11939,14 +11939,27 @@ fn lower_call_method<'ctx>(
                         .build_switch(type_id_val, default_bb, &cases)
                         .or_llvm_err()?;
 
-                    // Default: return 0
+                    // Default: an unmatched type_id means the receiver is a
+                    // primitive / Copy type (Int/Float/Bool/…) whose Clone impl is
+                    // not one of the heap-registered ones in the switch. task #40:
+                    // for `clone`, a Copy value's identity clone is its own value —
+                    // and for a scalar `&T` the already-loaded `type_id_val`
+                    // (= *receiver) IS that value — so return it instead of 0, which
+                    // corrupted `list[i].clone()` in `Deque.from_list` (→ crash) and
+                    // every generic `T: Clone` over a primitive (returned 0). Other
+                    // protocol methods keep the 0 default.
                     ctx.builder().position_at_end(default_bb);
                     ctx.builder()
                         .build_unconditional_branch(merge_bb)
                         .or_llvm_err()?;
 
+                    let default_val: BasicValueEnum<'ctx> = if method_name == "clone" {
+                        type_id_val.into()
+                    } else {
+                        i64_type.const_zero().into()
+                    };
                     let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
-                    incoming.push((i64_type.const_zero().into(), default_bb));
+                    incoming.push((default_val, default_bb));
 
                     for (bb, fname) in &case_blocks {
                         ctx.builder().position_at_end(*bb);
