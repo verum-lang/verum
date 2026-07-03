@@ -31,12 +31,32 @@ compiler-internal (literal lowering) and not user-callable; audited, not
 unit-tested.  Candidate cleanup: mark `@internal` or move it out of the
 public surface.
 
-### Initial suite run (pre-fix): 21/48
+### CHAR/TEXT-GHOST-SYMBOLS-1 + TEXT-HANDLER-STUBS-1 — FIXED (d31878ee8)
 
-The first interpreter run failed 27/48 — triaged into the char-intrinsic
-wiring class (results pending the current rebuild; failures will be pinned
-in regression_test.vr with defect ids once classified against the fixed
-binary).
+First run: 21/48.  Root causes, both closed:
+
+* **Ghost FFI symbols** — the VBC emitter lowered every char
+  classification/conversion and text parse/render/byte-len intrinsic to an
+  FFI library call against `verum_char_*` / `verum_text_*` symbols that are
+  defined NOWHERE (not in the interpreter process, not in the AOT runtime
+  emitters), while complete handler families sat unused in
+  `handlers/char_extended.rs` (full Unicode set) and
+  `handlers/text_extended.rs`.  Rerouted to `CharExtended` /
+  `TextExtended` sub-ops.
+* **Small-string-only handler stubs** — the TextExtended parse/render/len
+  handlers handled ONLY the ≤6-byte inline representation: any heap or
+  builder Text — and any `&Text` argument, i.e. the declared parameter
+  type — answered 0/nil; `int_to_text`/`float_to_text` TRUNCATED results
+  to six characters; the parsers returned a raw Int where the signature
+  promises `Maybe<Int>`.  Rewritten on the canonical machinery
+  (`string_helpers::extract_string` — CBGR-deref + all three Text
+  representations, `alloc_string_value`, `make_maybe`/`make_some`/
+  `make_none`).
+
+Post-fix: 48/48 interp.  A third finding from the same run: `is Some(*x)`
+is not a valid pattern (a deref is an expression) — the parse error took
+the WHOLE property file down and surfaced as 8 individual test failures;
+the law now uses structural `assert_eq(back, Maybe.Some(*x))`.
 
 ## 2. Cross-stdlib usage
 
@@ -68,4 +88,6 @@ binary).
 **Deferred (tracked)**
 * task #15 cleanup (re-export shims + sqlite mount repoint + repo guard).
 * `text_from_static` signature honesty.
-* Classify + pin the 27 first-run failures against the rebuilt binary.
+* `char_encode_utf8` / `char_escape_debug` sub-ops (still library-call
+  ghosts; integration tests for encode pass via the CharExtended
+  `EncodeUtf8` MIR route — verify AOT).
