@@ -259,6 +259,24 @@ pub(in super::super) fn handle_script_engine_stdout(
     Ok(DispatchResult::Continue)
 }
 
+/// `script_engine_last_error(engine) -> Text` — the message of the engine's
+/// most recent `link`/`link2` failure (empty otherwise). Recovers the real
+/// compile/link diagnostic the null-session path would otherwise hide.
+pub(in super::super) fn handle_script_engine_last_error(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let engine_reg = read_reg(state)?;
+    let msg = match checked_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+        // SAFETY: a validated, live `Box<ScriptEngine>` handle.
+        Ok(ptr) => unsafe { (*ptr).last_error().to_string() },
+        Err(_) => String::new(),
+    };
+    let value = alloc_string_value(state, &msg)?;
+    state.set_reg(dst, value);
+    Ok(DispatchResult::Continue)
+}
+
 /// `script_session_call(session, fn_name) -> RawScriptOutcome` — run `fn_name`
 /// on the persistent session (state written by earlier calls is visible).
 pub(in super::super) fn handle_script_session_call(

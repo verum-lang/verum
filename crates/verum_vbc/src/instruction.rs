@@ -10616,6 +10616,8 @@ pub enum ExtendedSubOpcode {
     ScriptEngineLink = 0x5C,
     /// The engine's most-recent-run captured stdout. `[0x1F][0x5D][dst][engine]`.
     ScriptEngineStdout = 0x5D,
+    /// The engine's most-recent link/link2 error message. `[0x1F][0x5E][dst][engine]`.
+    ScriptEngineLastError = 0x5E,
 }
 
 impl ExtendedSubOpcode {
@@ -10688,6 +10690,7 @@ impl ExtendedSubOpcode {
             0x5B => Some(Self::ScriptSessionFree),
             0x5C => Some(Self::ScriptEngineLink),
             0x5D => Some(Self::ScriptEngineStdout),
+            0x5E => Some(Self::ScriptEngineLastError),
             _ => None,
         }
     }
@@ -10765,6 +10768,7 @@ impl ExtendedSubOpcode {
             Self::ScriptSessionFree => "EXT_SCRIPT_SESSION_FREE",
             Self::ScriptEngineLink => "EXT_SCRIPT_ENGINE_LINK",
             Self::ScriptEngineStdout => "EXT_SCRIPT_ENGINE_STDOUT",
+            Self::ScriptEngineLastError => "EXT_SCRIPT_ENGINE_LAST_ERROR",
         }
     }
 }

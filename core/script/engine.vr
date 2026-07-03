@@ -186,6 +186,13 @@ implement Engine {
     public fn stdout(&self) -> Text {
         script_engine_stdout(self.raw)
     }
+
+    /// The real compile/link diagnostic of the most recent `link`/`link2`
+    /// failure (empty otherwise). A failed link yields a Session whose `call`
+    /// reports a generic error; read this for the actual reason.
+    public fn last_error(&self) -> Text {
+        script_engine_last_error(self.raw)
+    }
 }
 
 // =============================================================================

@@ -196,6 +196,10 @@ pub struct ScriptEngine {
     caps: ScriptCaps,
     cancel: Arc<AtomicBool>,
     last_stdout: String,
+    /// The message of the most recent failure whose diagnostic would otherwise
+    /// be lost — currently `link`/`link2` (which return a null session on
+    /// compile/link failure). Read via `Engine.last_error()`.
+    last_error: String,
 }
 
 impl ScriptEngine {
@@ -220,6 +224,7 @@ impl ScriptEngine {
             caps: ScriptCaps::permissive(),
             cancel,
             last_stdout: String::new(),
+            last_error: String::new(),
         }
     }
 
@@ -303,6 +308,17 @@ impl ScriptEngine {
     /// many plugin scripts into one shared world). All of them run on one
     /// interpreter, so they share data by reference.
     pub fn link_n(&mut self, sources: &[&str]) -> Result<ScriptSession, ScriptError> {
+        // Remember the diagnostic — a link failure otherwise surfaces only as a
+        // null session and a generic "null session" error at call time, so the
+        // real compile/link error would be lost. `Engine.last_error()` reads it.
+        let result = self.link_n_impl(sources);
+        if let Err(ref e) = result {
+            self.last_error = e.to_string();
+        }
+        result
+    }
+
+    fn link_n_impl(&mut self, sources: &[&str]) -> Result<ScriptSession, ScriptError> {
         if sources.is_empty() {
             return Err(ScriptError::Compile("link: no sources".to_string()));
         }
@@ -373,6 +389,13 @@ impl ScriptEngine {
     /// [`run`](ScriptEngine::run).
     pub fn last_stdout(&self) -> &str {
         &self.last_stdout
+    }
+
+    /// The message of the most recent `link`/`link2` failure (empty if none) —
+    /// the real compile/link diagnostic that the null-session path would
+    /// otherwise hide behind a generic "null session" error.
+    pub fn last_error(&self) -> &str {
+        &self.last_error
     }
 
     /// Set a host-provided global the next script run can read (via the

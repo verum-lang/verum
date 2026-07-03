@@ -4229,6 +4229,18 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Host: stdout captured during the engine's most recent run",
     },
     Intrinsic {
+        name: "script_engine_last_error",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
+        param_count: 1, // engine
+        return_count: 1, // Text
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineLastError,
+        ),
+        mlir_op: None,
+        doc: "Host: message of the engine's most recent link/link2 failure",
+    },
+    Intrinsic {
         name: "script_session_call",
         category: IntrinsicCategory::Scripting,
         hints: &[

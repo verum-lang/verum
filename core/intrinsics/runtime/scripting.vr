@@ -97,6 +97,11 @@ public fn script_engine_link(engine: RawScriptEngine, sources: List<Text>) -> Ra
 @intrinsic("script_engine_stdout")
 public fn script_engine_stdout(engine: RawScriptEngine) -> Text;
 
+/// The message of the engine's most recent `link`/`link2` failure (empty
+/// otherwise) — the real compile/link diagnostic the null-session path hides.
+@intrinsic("script_engine_last_error")
+public fn script_engine_last_error(engine: RawScriptEngine) -> Text;
+
 /// Run `fn_name` on the persistent session; state written by earlier calls is
 /// visible (the zero-copy sharing).
 @intrinsic("script_session_call")
