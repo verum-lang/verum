@@ -601,8 +601,14 @@ implement<T> Deque<T> {
     where T: Clone
     {
         let mut d = Deque.with_capacity(list.len());
-        for i in range(0, list.len()) {
-            d.push_back(list[i].clone());
+        // Iterate by reference (`&T`) rather than by index. A generic
+        // `list[i].clone()` receiver is an Index expression whose element type
+        // isn't inferred as the type parameter `T`, so under AOT `.clone()`
+        // mis-resolves to a wrong concrete `Deque.clone(value)` and SIGSEGVs; a
+        // loop variable `x: &T` is a type-parameter receiver that routes through
+        // the `dyn:Clone.clone` protocol dispatch correctly.
+        for x in list.iter() {
+            d.push_back(x.clone());
         }
         d
     }
