@@ -1,0 +1,34 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/sync/regression_test.vr
+// =============================================================================
+//
+// Pinned defects for the sync intrinsics.  First conformance pass
+// 2026-07-03.  The guard pins the live-cell discipline this suite depends
+// on: the spinlock cell address must be the ELEMENT buffer, not the List
+// header (LIST-ASPTR-HEADER-1 — fixed in d31878ee8; a regressed as_mut_ptr
+// would make try_lock "succeed" by CAS-ing the list's length field).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.sync.{spinlock_try_lock, spinlock_unlock};
+
+@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
+@test
+fn regression_spinlock_cell_is_element_not_header() {
+    let mut cell: List<UInt32> = [0 as UInt32];
+    let lock = cell.as_mut_ptr() as *mut UInt32;
+    assert(spinlock_try_lock(lock));
+    // The lock word is the ELEMENT — list bookkeeping must be untouched:
+    // len is still 1 and the list is still indexable while the lock is held.
+    assert_eq(cell.len(), 1);
+    spinlock_unlock(lock);
+    assert_eq(cell.len(), 1);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

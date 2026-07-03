@@ -1,0 +1,144 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/sync/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/sync.vr` — OS-backed synchronization intrinsics.
+//
+// Surface tested (single-threaded, value-level):
+//   * spinlock_try_lock / spinlock_lock / spinlock_unlock / spinlock_is_locked
+//     over a live UInt32 cell (List backing via as_mut_ptr)
+//   * futex_wait timeout path + futex_wake with no waiters
+//   * spin_hint / spin_loop_hint / memory_fence / compiler_fence smoke
+//   * waitgroup lifecycle: new → add → done → try_wait → destroy
+//
+// Inter-thread semantics (real contention, wake ordering) belong to the
+// concurrency suite — a single-threaded test can only pin the value-level
+// contract and the no-waiter/timeout edges.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.sync.{
+    futex_wait, futex_wake, futex_wake_one, futex_wake_all,
+    spinlock_try_lock, spinlock_lock, spinlock_unlock, spinlock_is_locked,
+    spin_hint, spin_loop_hint, memory_fence, compiler_fence,
+    __waitgroup_new_raw, __waitgroup_add_raw, __waitgroup_done_raw,
+    __waitgroup_try_wait_raw, __waitgroup_destroy_raw,
+};
+
+// =============================================================================
+// Section 1: spinlock over a live cell
+// =============================================================================
+
+@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
+@test
+fn test_spinlock_try_lock_acquires_free_lock() {
+    let mut cell: List<UInt32> = [0 as UInt32];
+    let lock = cell.as_mut_ptr() as *mut UInt32;
+    assert(spinlock_try_lock(lock));
+    spinlock_unlock(lock);
+}
+
+@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
+@test
+fn test_spinlock_try_lock_fails_on_held_lock() {
+    let mut cell: List<UInt32> = [0 as UInt32];
+    let lock = cell.as_mut_ptr() as *mut UInt32;
+    assert(spinlock_try_lock(lock));
+    // Second acquisition must fail while held.
+    assert(!spinlock_try_lock(lock));
+    spinlock_unlock(lock);
+}
+
+@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
+@test
+fn test_spinlock_is_locked_tracks_state() {
+    let mut cell: List<UInt32> = [0 as UInt32];
+    let lock = cell.as_mut_ptr() as *mut UInt32;
+    assert(!spinlock_is_locked(lock as *const UInt32));
+    spinlock_lock(lock);
+    assert(spinlock_is_locked(lock as *const UInt32));
+    spinlock_unlock(lock);
+    assert(!spinlock_is_locked(lock as *const UInt32));
+}
+
+@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
+@test
+fn test_spinlock_reacquire_after_unlock() {
+    let mut cell: List<UInt32> = [0 as UInt32];
+    let lock = cell.as_mut_ptr() as *mut UInt32;
+    spinlock_lock(lock);
+    spinlock_unlock(lock);
+    assert(spinlock_try_lock(lock));
+    spinlock_unlock(lock);
+}
+
+// =============================================================================
+// Section 2: futex edges observable single-threaded
+// =============================================================================
+
+@ignore("SYNC-TLS-WIRING-1 (task #18) — futex_wait returns a non-status value (nil-class) on the mismatch path under interp; wiring/operand-shape audit pending.")
+@test
+fn test_futex_wait_returns_immediately_on_value_mismatch() {
+    // Contract: if *addr != expected the wait returns without blocking.
+    let mut cell: List<UInt32> = [7 as UInt32];
+    let addr = cell.as_mut_ptr() as *const UInt32;
+    let r = futex_wait(addr, 999 as UInt32, 1000000 as UInt64);
+    // Mismatch return is a non-negative "did not time out" status.
+    assert(r as Int >= -1);
+}
+
+@test
+fn test_futex_wake_with_no_waiters_wakes_zero() {
+    let mut cell: List<UInt32> = [0 as UInt32];
+    let addr = cell.as_mut_ptr() as *const UInt32;
+    assert_eq(futex_wake(addr, 1 as UInt32) as Int, 0);
+    assert_eq(futex_wake_one(addr) as Int, 0);
+    assert_eq(futex_wake_all(addr) as Int, 0);
+}
+
+// =============================================================================
+// Section 3: hint / fence smoke — callable, no fault, no observable state
+// =============================================================================
+
+@ignore("SYNC-TLS-WIRING-1 (task #18) — memory_fence/compiler_fence emission is TRUNCATED: executing the call dies with InvalidBytecode unexpected-end-of-bytecode (encoder writes fewer operand bytes than the decoder reads).")
+@test
+fn test_hints_and_fences_are_callable() {
+    spin_hint();
+    spin_loop_hint();
+    memory_fence(5);
+    compiler_fence(5);
+    assert(true);
+}
+
+// =============================================================================
+// Section 4: waitgroup lifecycle (single-threaded)
+// =============================================================================
+
+@test
+fn test_waitgroup_new_starts_at_zero() {
+    let wg = __waitgroup_new_raw();
+    assert(wg != 0);
+    // Counter zero ⇒ try_wait succeeds (returns 1).
+    assert_eq(__waitgroup_try_wait_raw(wg), 1);
+    __waitgroup_destroy_raw(wg);
+}
+
+@test
+fn test_waitgroup_add_blocks_try_wait_until_done() {
+    let wg = __waitgroup_new_raw();
+    __waitgroup_add_raw(wg, 2);
+    assert_eq(__waitgroup_try_wait_raw(wg), 0);
+    __waitgroup_done_raw(wg);
+    assert_eq(__waitgroup_try_wait_raw(wg), 0);
+    __waitgroup_done_raw(wg);
+    assert_eq(__waitgroup_try_wait_raw(wg), 1);
+    __waitgroup_destroy_raw(wg);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

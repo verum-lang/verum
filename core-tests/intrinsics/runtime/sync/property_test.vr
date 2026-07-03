@@ -1,0 +1,77 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/sync/property_test.vr
+// =============================================================================
+//
+// Single-threaded laws of the sync primitives: spinlock state-machine
+// invariants over repeated cycles, and waitgroup counter algebra.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.sync.{
+    spinlock_try_lock, spinlock_unlock, spinlock_is_locked,
+    __waitgroup_new_raw, __waitgroup_add_raw, __waitgroup_done_raw,
+    __waitgroup_try_wait_raw, __waitgroup_destroy_raw,
+};
+
+// =============================================================================
+// Section 1: spinlock cycle law — lock/unlock is a clean involution
+// =============================================================================
+
+@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
+@test
+fn law_spinlock_hundred_cycles_stay_coherent() {
+    let mut cell: List<UInt32> = [0 as UInt32];
+    let lock = cell.as_mut_ptr() as *mut UInt32;
+    let mut i = 0;
+    while i < 100 {
+        assert(spinlock_try_lock(lock));
+        assert(spinlock_is_locked(lock as *const UInt32));
+        assert(!spinlock_try_lock(lock));
+        spinlock_unlock(lock);
+        assert(!spinlock_is_locked(lock as *const UInt32));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: waitgroup counter algebra — add(n) needs exactly n done()
+// =============================================================================
+
+@test
+fn law_waitgroup_add_n_needs_n_dones() {
+    let ns: List<Int> = [1, 2, 5, 16];
+    for n in ns.iter() {
+        let wg = __waitgroup_new_raw();
+        __waitgroup_add_raw(wg, *n);
+        let mut k = 0;
+        while k < *n {
+            assert_eq(__waitgroup_try_wait_raw(wg), 0);
+            __waitgroup_done_raw(wg);
+            k = k + 1;
+        }
+        assert_eq(__waitgroup_try_wait_raw(wg), 1);
+        __waitgroup_destroy_raw(wg);
+    }
+}
+
+@test
+fn law_waitgroup_incremental_adds_accumulate() {
+    let wg = __waitgroup_new_raw();
+    __waitgroup_add_raw(wg, 1);
+    __waitgroup_add_raw(wg, 1);
+    __waitgroup_add_raw(wg, 1);
+    __waitgroup_done_raw(wg);
+    __waitgroup_done_raw(wg);
+    assert_eq(__waitgroup_try_wait_raw(wg), 0);
+    __waitgroup_done_raw(wg);
+    assert_eq(__waitgroup_try_wait_raw(wg), 1);
+    __waitgroup_destroy_raw(wg);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

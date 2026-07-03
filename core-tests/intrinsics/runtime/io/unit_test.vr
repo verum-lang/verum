@@ -1,0 +1,77 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/io/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/io.vr` — I/O engine (kqueue/epoll/IOCP) +
+// socket-option intrinsics.
+//
+// Surface tested (no sockets, value-level lifecycle):
+//   * io_engine_new / io_engine_destroy — engine handle lifecycle
+//   * io_poll with zero timeout on an empty engine — returns 0 (no events)
+//   * io_is_ready on an unregistered fd — 0
+//
+// Socket-option intrinsics and async_accept/read/write need live fds —
+// exercised by the net suites (core-tests/net/*); see audit.md.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.io.{
+    __io_engine_new_raw, __io_engine_destroy_raw,
+    __io_poll_raw, __io_is_ready_raw,
+};
+
+// =============================================================================
+// Section 1: engine lifecycle
+// =============================================================================
+
+@test
+fn test_engine_new_returns_handle() {
+    let engine = __io_engine_new_raw(16);
+    assert(engine != 0);
+    __io_engine_destroy_raw(engine);
+}
+
+@test
+fn test_engine_destroy_returns_cleanly() {
+    let engine = __io_engine_new_raw(8);
+    let r = __io_engine_destroy_raw(engine);
+    // Destroy reports non-negative status.
+    assert(r >= 0);
+}
+
+@test
+fn test_two_engines_are_distinct() {
+    let a = __io_engine_new_raw(4);
+    let b = __io_engine_new_raw(4);
+    assert(a != b);
+    __io_engine_destroy_raw(a);
+    __io_engine_destroy_raw(b);
+}
+
+// =============================================================================
+// Section 2: empty-engine poll
+// =============================================================================
+
+@test
+fn test_poll_empty_engine_zero_timeout_returns_zero() {
+    let engine = __io_engine_new_raw(16);
+    let n = __io_poll_raw(engine, 8, 0);
+    assert_eq(n, 0);
+    __io_engine_destroy_raw(engine);
+}
+
+@test
+fn test_is_ready_unregistered_fd_is_zero() {
+    let engine = __io_engine_new_raw(16);
+    // fd 999 was never submitted; readiness must be 0.
+    assert_eq(__io_is_ready_raw(engine, 999, 1), 0);
+    __io_engine_destroy_raw(engine);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

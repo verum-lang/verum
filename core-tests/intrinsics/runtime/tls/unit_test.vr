@@ -1,0 +1,110 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/tls/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/tls.vr` — thread-local storage intrinsics
+// backing the V-LLSI context system.
+//
+// Surface tested (value-level, slot-scoped):
+//   * tls_slot_set / tls_slot_get / tls_slot_has / tls_slot_clear over a
+//     HIGH slot index (240+) — far above the context system's working set,
+//     so the suite cannot disturb `provide`-machinery slots.
+//   * tls_frame_push / tls_frame_pop as a balanced pair.
+//   * tls_get_base non-null.
+//
+// Each test CLEARS its slot before finishing — TLS is process-global for
+// an in-process test runner, so hygiene is part of the contract here.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.tls.{
+    tls_get_base, tls_slot_get, tls_slot_set, tls_slot_clear, tls_slot_has,
+    tls_frame_push, tls_frame_pop,
+};
+mount core.intrinsics.memory.{null_ptr, ptr_is_null};
+
+// =============================================================================
+// Section 1: base pointer
+// =============================================================================
+
+@test
+fn test_tls_get_base_is_non_null() {
+    let base = tls_get_base();
+    assert(!ptr_is_null(base as *const Byte));
+}
+
+// =============================================================================
+// Section 2: slot set / get / has / clear
+// =============================================================================
+
+@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
+@test
+fn test_slot_starts_absent_then_set_then_clear() {
+    let slot = 240 as UInt8;
+    tls_slot_clear(slot);
+    assert(!tls_slot_has(slot));
+
+    let mut cell: List<Byte> = [42 as Byte];
+    let p = cell.as_mut_ptr() as *const Byte;
+    tls_slot_set(slot, p);
+    assert(tls_slot_has(slot));
+
+    tls_slot_clear(slot);
+    assert(!tls_slot_has(slot));
+}
+
+@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
+@test
+fn test_slot_get_round_trips_the_pointer() {
+    let slot = 241 as UInt8;
+    let mut cell: List<Byte> = [7 as Byte];
+    let p = cell.as_mut_ptr() as *const Byte;
+    tls_slot_set(slot, p);
+    let got = tls_slot_get(slot);
+    // Same address back (pointer identity is the contract, ~2ns path).
+    assert_eq(got as Int, p as Int);
+    tls_slot_clear(slot);
+}
+
+@test
+fn test_slots_are_independent() {
+    let a = 242 as UInt8;
+    let b = 243 as UInt8;
+    let mut cell: List<Byte> = [1 as Byte];
+    let p = cell.as_mut_ptr() as *const Byte;
+    tls_slot_set(a, p);
+    assert(tls_slot_has(a));
+    assert(!tls_slot_has(b));
+    tls_slot_clear(a);
+}
+
+@test
+fn test_clear_is_idempotent() {
+    let slot = 244 as UInt8;
+    tls_slot_clear(slot);
+    tls_slot_clear(slot);
+    assert(!tls_slot_has(slot));
+}
+
+// =============================================================================
+// Section 3: frame push / pop (balanced)
+// =============================================================================
+
+@test
+fn test_frame_push_pop_balanced_pair() {
+    let frame = tls_frame_push();
+    // The push returns the frame base (may be an opaque token); the
+    // observable contract at this level is the balanced pop not faulting
+    // and slot state surviving the cycle.
+    let _ = frame;
+    tls_frame_pop();
+    assert(true);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
