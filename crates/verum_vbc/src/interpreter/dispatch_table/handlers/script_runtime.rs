@@ -799,6 +799,27 @@ pub(in super::super) fn handle_script_engine_set_global_float(
     Ok(DispatchResult::Continue)
 }
 
+/// `script_engine_set_global_value(engine, name, value)` — set ANY value (a
+/// `List`, `Map`, nested collection, or scalar) as a host global, marshaled via
+/// `extract_owned`. The host's channel for passing structured data in; the
+/// script reads it via `script_global_list` / `script_global_map`.
+pub(in super::super) fn handle_script_engine_set_global_value(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let engine_reg = read_reg(state)?;
+    let name = read_name_arg(state)?;
+    let value_reg = read_reg(state)?;
+    let value = state.get_reg(value_reg);
+    // Marshal the host value into an owned form (its borrow of `state` ends here,
+    // before the engine deref below) — reuses the same deep marshaler as results.
+    let owned = crate::interpreter::script_engine::extract_owned(state, value);
+    if let Ok(ptr) = checked_typed_handle_ptr::<ScriptEngine>(state.get_reg(engine_reg)) {
+        // SAFETY: see `handle_script_engine_set_global_int`.
+        unsafe { (*ptr).set_global(name, owned) };
+    }
+    Ok(DispatchResult::Continue)
+}
+
 /// `script_global_kind(name) -> Int` — the dynamic-kind tag of a host global
 /// (`0` if absent): 0=Nil,1=Bool,2=Int,3=Float,4=Text/other.
 pub(in super::super) fn handle_script_global_kind(

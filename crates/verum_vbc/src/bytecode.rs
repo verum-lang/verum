@@ -5002,6 +5002,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(ExtendedSubOpcode::ScriptEngineSetGlobalText)
                 | Some(ExtendedSubOpcode::ScriptEngineSetGlobalBool)
                 | Some(ExtendedSubOpcode::ScriptEngineSetGlobalFloat)
+                | Some(ExtendedSubOpcode::ScriptEngineSetGlobalValue)
                 | Some(ExtendedSubOpcode::ScriptEngineRegister)
                 | Some(ExtendedSubOpcode::ScriptHostCallInt)
                 | Some(ExtendedSubOpcode::ScriptWorldEval)

@@ -4426,6 +4426,18 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Host: set a Text global on a script engine",
     },
     Intrinsic {
+        name: "script_engine_set_global_value",
+        category: IntrinsicCategory::Scripting,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 3, // engine, name, value
+        return_count: 0,
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ScriptEngineSetGlobalValue,
+        ),
+        mlir_op: None,
+        doc: "Host: set any value (List/Map/nested/scalar) as a script global",
+    },
+    Intrinsic {
         name: "script_global_kind",
         category: IntrinsicCategory::Scripting,
         hints: &[IntrinsicHint::SideEffect],

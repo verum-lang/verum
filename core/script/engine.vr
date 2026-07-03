@@ -126,6 +126,19 @@ implement Engine {
         script_engine_set_global_float(self.raw, name, value);
     }
 
+    /// Set a `List` global the next `eval` can read (via the script-side
+    /// `script_global_list(name)`) — the host's channel for passing a whole
+    /// collection in. The list is marshaled into the script's world.
+    public fn set_list<T>(&self, name: Text, value: List<T>) {
+        script_engine_set_global_value(self.raw, name, value);
+    }
+
+    /// Set a `Map` global the next `eval` can read (via the script-side
+    /// `script_global_map(name)`).
+    public fn set_map<K, V>(&self, name: Text, value: Map<K, V>) {
+        script_engine_set_global_value(self.raw, name, value);
+    }
+
     /// Register a host `fn(Int) -> Int` callback that scripts can call by name
     /// (via the script-side `script_host_call_int(name, arg)`). The callback
     /// runs on the host, so it sees the host's state.

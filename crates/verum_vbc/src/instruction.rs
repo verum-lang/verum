@@ -10620,6 +10620,9 @@ pub enum ExtendedSubOpcode {
     ScriptEngineLastError = 0x5E,
     /// The engine's most-recent failure kind code. `[0x1F][0x5F][dst][engine]`.
     ScriptEngineLastErrorKind = 0x5F,
+    /// Host: set ANY value (List/Map/nested/scalar) as a global.
+    /// `[0x1F][0x60][reg:engine][reg:name][reg:value]`.
+    ScriptEngineSetGlobalValue = 0x60,
 }
 
 impl ExtendedSubOpcode {
@@ -10694,6 +10697,7 @@ impl ExtendedSubOpcode {
             0x5D => Some(Self::ScriptEngineStdout),
             0x5E => Some(Self::ScriptEngineLastError),
             0x5F => Some(Self::ScriptEngineLastErrorKind),
+            0x60 => Some(Self::ScriptEngineSetGlobalValue),
             _ => None,
         }
     }
@@ -10773,6 +10777,7 @@ impl ExtendedSubOpcode {
             Self::ScriptEngineStdout => "EXT_SCRIPT_ENGINE_STDOUT",
             Self::ScriptEngineLastError => "EXT_SCRIPT_ENGINE_LAST_ERROR",
             Self::ScriptEngineLastErrorKind => "EXT_SCRIPT_ENGINE_LAST_ERROR_KIND",
+            Self::ScriptEngineSetGlobalValue => "EXT_SCRIPT_ENGINE_SET_GLOBAL_VALUE",
         }
     }
 }
