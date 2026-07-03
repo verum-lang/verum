@@ -1735,6 +1735,22 @@ pub(crate) fn value_hash(v: Value) -> usize {
         return hash as usize;
     }
 
+    // Boxed ints (|v| >= 2^47) store a global-table INDEX in their bits, not the
+    // value, so two equal large ints created at different times have different
+    // bits. Hash by the decoded value so a map lookup on a large-int key hits
+    // (inline ints — |v| < 2^47 — encode the value in their bits directly and
+    // are handled by the raw-bits path below; the two ranges are disjoint, so
+    // there is no cross-encoding collision).
+    if v.is_boxed_int() {
+        let n = v.as_i64();
+        let mut hash = FNV_OFFSET;
+        for byte in n.to_le_bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        return hash as usize;
+    }
+
     // For all other values, hash the raw bits
     let bits = v.to_bits();
     let mut hash = FNV_OFFSET;
@@ -1757,6 +1773,14 @@ pub(crate) fn value_eq(a: Value, b: Value) -> bool {
     // Fast path: identical bits (covers small strings, ints, bools, same-address pointers)
     if a.to_bits() == b.to_bits() {
         return true;
+    }
+
+    // Boxed ints compare by decoded value, not by their global-table index bits
+    // (which differ for equal large ints created at different times) — pairs
+    // with the boxed-int arm in `value_hash` so the (hash, eq) contract holds
+    // for large-int map keys.
+    if a.is_boxed_int() && b.is_boxed_int() {
+        return a.as_i64() == b.as_i64();
     }
 
     // Heap string comparison: two different allocations may hold the same content
