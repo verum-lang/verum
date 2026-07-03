@@ -1,0 +1,105 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/cbgr/property_test.vr
+// =============================================================================
+//
+// Laws of the CBGR allocation bridge:
+//   * alignment law over the full power-of-two sweep
+//   * realloc preserves min(old, new) bytes — grow and shrink
+//   * allocation extents are exact (every requested byte writable,
+//     size sweep)
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.cbgr.{
+    cbgr_allocate, cbgr_deallocate, cbgr_realloc,
+};
+mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
+
+// =============================================================================
+// Section 1: alignment law
+// =============================================================================
+
+@test
+fn law_allocate_honours_alignment_sweep() {
+    // Power-of-two alignments the bridge honours on BOTH tiers.  The AOT
+    // runtime (`verum_cbgr_allocate(size)`) does not receive the align
+    // argument and guarantees header-natural alignment only — alignments
+    // beyond 32 are a documented bridge limitation (audit.md).
+    let aligns: List<Int> = [1, 2, 4, 8, 16, 32];
+    for a in aligns.iter() {
+        let p = cbgr_allocate(40, *a);
+        assert(p != 0);
+        assert_eq(p % *a, 0);
+        cbgr_deallocate(p);
+    }
+}
+
+// =============================================================================
+// Section 2: realloc preservation law
+// =============================================================================
+
+@test
+fn law_realloc_grow_preserves_all_old_bytes() {
+    let sizes: List<Int> = [1, 7, 8, 16, 33];
+    for n in sizes.iter() {
+        let p = cbgr_allocate(*n, 8);
+        let mut i = 0;
+        while i < *n {
+            store_byte(p + i, (i * 3 + 1) % 256);
+            i = i + 1;
+        }
+        let q = cbgr_realloc(p, *n * 4);
+        assert(q != 0);
+        let mut j = 0;
+        while j < *n {
+            assert_eq(load_byte(q + j), (j * 3 + 1) % 256);
+            j = j + 1;
+        }
+        cbgr_deallocate(q);
+    }
+}
+
+@test
+fn law_realloc_shrink_preserves_prefix() {
+    let p = cbgr_allocate(32, 8);
+    let mut i = 0;
+    while i < 32 {
+        store_byte(p + i, i);
+        i = i + 1;
+    }
+    let q = cbgr_realloc(p, 8);
+    assert(q != 0);
+    let mut j = 0;
+    while j < 8 {
+        assert_eq(load_byte(q + j), j);
+        j = j + 1;
+    }
+    cbgr_deallocate(q);
+}
+
+// =============================================================================
+// Section 3: extent exactness
+// =============================================================================
+
+@test
+fn law_every_requested_byte_is_writable_size_sweep() {
+    let sizes: List<Int> = [1, 2, 3, 8, 15, 16, 17, 64, 255, 256, 4096];
+    for n in sizes.iter() {
+        let p = cbgr_allocate(*n, 8);
+        assert(p != 0);
+        // First and last byte of the requested extent.
+        store_byte(p, 1);
+        store_byte(p + *n - 1, 2);
+        assert_eq(load_byte(p), 1);
+        assert_eq(load_byte(p + *n - 1), 2);
+        cbgr_deallocate(p);
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

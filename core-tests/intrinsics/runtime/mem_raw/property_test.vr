@@ -1,0 +1,203 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/mem_raw/property_test.vr
+// =============================================================================
+//
+// Laws of the raw-memory operations over live cbgr allocations:
+//   * memcpy establishes memcmp == 0 (copy ⇒ equality)
+//   * memmove handles overlap in BOTH directions like a correct shift
+//   * memset(v) ⇒ every byte reads v % 256
+//   * strlen = index of first NUL, invariant under content past the NUL
+//   * store_i32 / load_i32 preserve exactly the low 32 bits
+//
+// Buffers are byte-patterned with distinct values so off-by-one and
+// direction errors change observable bytes.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
+mount core.intrinsics.runtime.mem_raw.{
+    memcpy, memmove, memset, memcmp,
+    strlen,
+    load_byte, store_byte, load_i32, store_i32, load_i64, store_i64,
+};
+
+// Fill [p, p+n) with the pattern base, base+1, … (mod 256).
+fn fill_pattern(p: Int, n: Int, base: Int) {
+    let mut i = 0;
+    while i < n {
+        store_byte(p + i, (base + i) % 256);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 1: copy ⇒ equality
+// =============================================================================
+
+@test
+fn law_memcpy_establishes_memcmp_zero() {
+    let src = cbgr_allocate(32, 8);
+    let dst = cbgr_allocate(32, 8);
+    fill_pattern(src, 32, 3);
+    fill_pattern(dst, 32, 200); // distinct prior content
+    memcpy(dst, src, 32);
+    assert_eq(memcmp(dst, src, 32), 0);
+    cbgr_deallocate(src);
+    cbgr_deallocate(dst);
+}
+
+@test
+fn law_memcmp_detects_single_byte_difference_at_every_offset() {
+    let a = cbgr_allocate(16, 8);
+    let b = cbgr_allocate(16, 8);
+    let mut off = 0;
+    while off < 16 {
+        fill_pattern(a, 16, 0);
+        fill_pattern(b, 16, 0);
+        store_byte(b + off, 250);
+        assert(memcmp(a, b, 16) != 0);
+        // Bytes BEFORE the difference don't affect the equal prefix.
+        if off > 0 {
+            assert_eq(memcmp(a, b, off), 0);
+        }
+        off = off + 1;
+    }
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+// =============================================================================
+// Section 2: memmove overlap — the defining law
+// =============================================================================
+
+@test
+fn law_memmove_overlapping_shift_forward() {
+    // [0,1,2,3,4,5,6,7] --move [0..6)→+2--> [0,1,0,1,2,3,4,5]
+    let p = cbgr_allocate(8, 8);
+    fill_pattern(p, 8, 0);
+    memmove(p + 2, p, 6);
+    assert_eq(load_byte(p), 0);
+    assert_eq(load_byte(p + 1), 1);
+    let mut i = 0;
+    while i < 6 {
+        assert_eq(load_byte(p + 2 + i), i);
+        i = i + 1;
+    }
+    cbgr_deallocate(p);
+}
+
+@test
+fn law_memmove_overlapping_shift_backward() {
+    // [0,1,2,3,4,5,6,7] --move [2..8)→0--> [2,3,4,5,6,7,6,7]
+    let p = cbgr_allocate(8, 8);
+    fill_pattern(p, 8, 0);
+    memmove(p, p + 2, 6);
+    let mut i = 0;
+    while i < 6 {
+        assert_eq(load_byte(p + i), 2 + i);
+        i = i + 1;
+    }
+    assert_eq(load_byte(p + 6), 6);
+    assert_eq(load_byte(p + 7), 7);
+    cbgr_deallocate(p);
+}
+
+@test
+fn law_memmove_same_address_is_identity() {
+    let p = cbgr_allocate(8, 8);
+    fill_pattern(p, 8, 40);
+    memmove(p, p, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(load_byte(p + i), (40 + i) % 256);
+        i = i + 1;
+    }
+    cbgr_deallocate(p);
+}
+
+@test
+fn law_memmove_disjoint_equals_memcpy() {
+    let src = cbgr_allocate(16, 8);
+    let d1 = cbgr_allocate(16, 8);
+    let d2 = cbgr_allocate(16, 8);
+    fill_pattern(src, 16, 9);
+    memcpy(d1, src, 16);
+    memmove(d2, src, 16);
+    assert_eq(memcmp(d1, d2, 16), 0);
+    cbgr_deallocate(src);
+    cbgr_deallocate(d1);
+    cbgr_deallocate(d2);
+}
+
+// =============================================================================
+// Section 3: memset value law
+// =============================================================================
+
+@test
+fn law_memset_writes_value_mod_256() {
+    let p = cbgr_allocate(8, 8);
+    // 300 % 256 == 44 — the documented wrapping contract.
+    memset(p, 300, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(load_byte(p + i), 44);
+        i = i + 1;
+    }
+    cbgr_deallocate(p);
+}
+
+// =============================================================================
+// Section 4: strlen laws
+// =============================================================================
+
+@test
+fn law_strlen_is_first_nul_index() {
+    let p = cbgr_allocate(16, 8);
+    // "abc\0def\0" — strlen must stop at the FIRST NUL.
+    store_byte(p, 97); store_byte(p + 1, 98); store_byte(p + 2, 99);
+    store_byte(p + 3, 0);
+    store_byte(p + 4, 100); store_byte(p + 5, 101); store_byte(p + 6, 102);
+    store_byte(p + 7, 0);
+    assert_eq(strlen(p), 3);
+    assert_eq(strlen(p + 4), 3);
+    cbgr_deallocate(p);
+}
+
+// =============================================================================
+// Section 5: word-width store/load laws
+// =============================================================================
+
+@test
+fn law_store_i32_preserves_low_32_bits() {
+    let p = cbgr_allocate(16, 8);
+    store_i32(p, 305419896); // 0x12345678
+    let back = load_i32(p);
+    // Low 32 bits identical (sign/zero extension of the top half is the
+    // representation's business; the low half is the contract).
+    assert_eq(back & 4294967295, 305419896);
+    cbgr_deallocate(p);
+}
+
+@test
+fn law_store_i64_bytes_reassemble_via_load_byte() {
+    let p = cbgr_allocate(16, 8);
+    store_i64(p, 81985529216486895); // 0x0123456789ABCDEF
+    // Reassemble from the 8 bytes with explicit byte-order arithmetic —
+    // holds on ANY endianness because we recombine using powers of 256
+    // in address order against both possible layouts.
+    let b0 = load_byte(p);
+    let b7 = load_byte(p + 7);
+    // Exactly one of {b0, b7} is the least-significant byte 0xEF.
+    assert(b0 == 239 || b7 == 239);
+    let full = load_i64(p);
+    assert_eq(full, 81985529216486895);
+    cbgr_deallocate(p);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

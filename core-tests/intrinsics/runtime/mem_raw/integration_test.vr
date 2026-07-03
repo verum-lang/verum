@@ -1,0 +1,119 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/mem_raw/integration_test.vr
+// =============================================================================
+//
+// Raw-memory ops meeting the rest of the stdlib: C strings built from Text
+// bytes, allocation sizes derived from type properties, and the
+// little-endian byte-order contract cross-checked against the platform
+// intrinsics.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
+mount core.intrinsics.runtime.mem_raw.{
+    memcpy, memcmp, strlen, load_byte, store_byte, store_i64,
+};
+mount core.intrinsics.runtime.text.{text_as_bytes, text_byte_len};
+mount core.intrinsics.platform.{target_is_little_endian};
+
+// Copy a Text's UTF-8 bytes into a fresh NUL-terminated C allocation.
+fn to_c_string(t: &Text) -> Int {
+    let bytes = text_as_bytes(t);
+    let n = bytes.len();
+    let p = cbgr_allocate(n + 1, 8);
+    let mut i = 0;
+    while i < n {
+        store_byte(p + i, bytes[i] as Int);
+        i = i + 1;
+    }
+    store_byte(p + n, 0);
+    p
+}
+
+// =============================================================================
+// Section 1: Text → C string round trip
+// =============================================================================
+
+@test
+fn integration_c_string_from_text_has_text_byte_len() {
+    let t = "hello";
+    let p = to_c_string(&t);
+    assert_eq(strlen(p), text_byte_len(&t));
+    cbgr_deallocate(p);
+}
+
+@test
+fn integration_c_string_multibyte_utf8_length_is_bytes_not_chars() {
+    let t = "héllo"; // 6 bytes, 5 chars
+    let p = to_c_string(&t);
+    assert_eq(strlen(p), 6);
+    cbgr_deallocate(p);
+}
+
+@test
+fn integration_two_c_strings_from_same_text_are_memcmp_equal() {
+    let t = "verum";
+    let a = to_c_string(&t);
+    let b = to_c_string(&t);
+    assert_eq(memcmp(a, b, text_byte_len(&t) + 1), 0);
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+// =============================================================================
+// Section 2: allocation sized by type properties
+// =============================================================================
+
+@test
+fn integration_allocation_sized_by_type_stride() {
+    // A 4-element Int64 buffer sized with the type property — write the
+    // last byte of the buffer to prove the extent is real.
+    let n = 4;
+    let p = cbgr_allocate(n * Int64.stride, Int64.alignment);
+    assert(p != 0);
+    store_byte(p + n * Int64.stride - 1, 42);
+    assert_eq(load_byte(p + n * Int64.stride - 1), 42);
+    cbgr_deallocate(p);
+}
+
+// =============================================================================
+// Section 3: byte-order contract against the platform intrinsic
+// =============================================================================
+
+@test
+fn integration_store_i64_byte_order_matches_platform_endianness() {
+    let p = cbgr_allocate(8, 8);
+    store_i64(p, 81985529216486895); // 0x0123456789ABCDEF
+    let lsb_first = load_byte(p) == 239; // 0xEF at the lowest address?
+    assert_eq(lsb_first, target_is_little_endian());
+    cbgr_deallocate(p);
+}
+
+// =============================================================================
+// Section 4: memcpy across allocations with mixed op interleaving
+// =============================================================================
+
+@test
+fn integration_copy_then_mutate_source_leaves_copy_intact() {
+    let src = cbgr_allocate(8, 8);
+    let dst = cbgr_allocate(8, 8);
+    let mut i = 0;
+    while i < 8 {
+        store_byte(src + i, i + 1);
+        i = i + 1;
+    }
+    memcpy(dst, src, 8);
+    // Mutating the source afterwards must not affect the copy.
+    store_byte(src, 99);
+    assert_eq(load_byte(dst), 1);
+    cbgr_deallocate(src);
+    cbgr_deallocate(dst);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

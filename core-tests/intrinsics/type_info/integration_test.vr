@@ -1,0 +1,134 @@
+// =============================================================================
+// core-tests/intrinsics/type_info/integration_test.vr
+// =============================================================================
+//
+// Type-information properties meeting the rest of the stdlib: pointer
+// element arithmetic scaled by T.stride, size-guarded transmute, f-string
+// rendering, and the generic-type layout model used by `cbgr_allocate` /
+// `ptr_write` consumers.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.memory.{transmute, ptr_add};
+mount core.intrinsics.atomic.{atomic_load_u64, atomic_store_u64, ORDERING_SEQ_CST};
+
+// =============================================================================
+// Section 1: T.stride is the pointer element scale
+//
+// `ptr_add(p, n)` advances by n ELEMENTS (n * T.stride bytes) — the
+// 2026-07-01 element-scale fix (#38).  UInt64.stride == 8 must agree with
+// the interpreter's NaN-boxed slot width and the AOT i64 GEP scale, on a
+// live List backing.
+// =============================================================================
+
+@test
+fn integration_stride_matches_pointer_element_scale() {
+    assert_eq(UInt64.stride, 8);
+    // Store-first discipline: raw cells are written through the pointer
+    // before being read back, so the test is representation-agnostic —
+    // the interpreter's NaN-boxed element encoding and AOT's raw i64
+    // slots both round-trip.  (Reading a LITERAL element through the raw
+    // view would observe the tier's representation, not the value.)
+    let mut buf: List<UInt64> = [0 as UInt64, 0 as UInt64, 0 as UInt64];
+    let p = buf.as_mut_ptr() as *const UInt64;
+    let p1 = ptr_add(p, 1);
+    let p2 = ptr_add(p, 2);
+    atomic_store_u64(p1, 22 as UInt64, ORDERING_SEQ_CST);
+    atomic_store_u64(p2, 33 as UInt64, ORDERING_SEQ_CST);
+    // Element-scale law: the three element addresses are distinct cells —
+    // each read returns exactly what was stored at ITS offset.
+    assert_eq(atomic_load_u64(p1, ORDERING_SEQ_CST), 22 as UInt64);
+    assert_eq(atomic_load_u64(p2, ORDERING_SEQ_CST), 33 as UInt64);
+}
+
+// =============================================================================
+// Section 2: size-equality-guarded transmute
+//
+// `transmute<S, D>` is only meaningful when S.size == D.size; the property
+// surface is what callers use to guard it.
+// =============================================================================
+
+@test
+fn integration_size_equal_transmute_round_trip() {
+    assert_eq(Int.size, UInt64.size);
+    let u: UInt64 = transmute(-1);
+    let back: Int = transmute(u);
+    assert_eq(back, -1);
+}
+
+@ignore("MEM-TRANSMUTE-FLOAT-1 (task #13) — interp transmute<Float, UInt64> is identity over the NaN-boxed value, no bit reinterpret; blocked on VBC-GENERIC-INSTANTIATION-1 (task #14: generic dst type invisible at the @intrinsic arm). Use f64_to_bits for the portable form.")
+@test
+fn integration_size_equal_float_bits_transmute() {
+    assert_eq(Float64.size, UInt64.size);
+    let bits: UInt64 = transmute(1.0);
+    // IEEE-754: 1.0 == 0x3FF0000000000000.
+    assert_eq(bits, 4607182418800017408 as UInt64);
+}
+
+// =============================================================================
+// Section 3: T.name / T.size render in f-strings (Text integration)
+// =============================================================================
+
+@test
+fn integration_name_and_size_in_fstring() {
+    assert_eq(f"{Int.name}:{Int.size}", "Int:8");
+    assert_eq(f"{Char.name}/{Char.bits}", "Char/32");
+}
+
+@test
+fn integration_name_concatenates_as_text() {
+    let label = Int.name + "!";
+    assert_eq(label, "Int!");
+}
+
+// =============================================================================
+// Section 4: generic-type layout model (shallow record-slot semantics)
+//
+// The VBC layout model: a record's size is `num_fields * 8` NaN-boxed slots
+// regardless of type arguments — `List<T>` is a 3-field header {len, cap,
+// ptr} → 24; `Maybe<T>` is a boxed immediate → 8.  Pinned so allocator-style
+// consumers (`cbgr_allocate(T.size, T.alignment)`) stay layout-correct.
+// =============================================================================
+
+@test
+fn integration_generic_type_layout_model() {
+    assert_eq(List<Int>.size, 24);
+    assert_eq(List<Int>.alignment, 8);
+    assert_eq(Maybe<Int>.size, 8);
+}
+
+@test
+fn integration_generic_layout_is_argument_independent() {
+    // The shallow slot model: the same head type has the same layout for
+    // any type argument.
+    assert_eq(List<Int>.size, List<Bool>.size);
+    assert_eq(Maybe<Int>.size, Maybe<Text>.size);
+}
+
+// =============================================================================
+// Section 5: T.bits drives bit-manipulation
+// =============================================================================
+
+@test
+fn integration_bits_drive_sign_bit_mask() {
+    let sign_bit = 1 << (Int32.bits - 1);
+    assert_eq(sign_bit, 2147483648);
+    let top = 1 << (Int64.bits - 1);
+    assert_eq(top, Int64.min);
+}
+
+@test
+fn integration_max_from_bits_shift() {
+    // (1 << (bits-1)) - 1 reproduces T.max for narrow signed types.
+    assert_eq((1 << (Int8.bits - 1)) - 1, Int8.max);
+    assert_eq((1 << (Int16.bits - 1)) - 1, Int16.max);
+    assert_eq((1 << (Int32.bits - 1)) - 1, Int32.max);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,36 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/cbgr/regression_test.vr
+// =============================================================================
+//
+// Pinned defects for the CBGR intrinsics.  First conformance pass 2026-07-03.
+// The guard below pins the documented null contract of the deallocator —
+// the "free(NULL) crashes" regression class that breaks every consumer
+// dropping an empty container.
+// =============================================================================
+
+mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
+
+@test
+fn regression_deallocate_null_documented_noop() {
+    cbgr_deallocate(0);
+    // Reaching this line is the assertion.
+    assert(true);
+}
+
+@test
+fn regression_allocate_then_deallocate_then_fresh_allocate() {
+    // A dealloc must not poison the allocator for subsequent allocations.
+    let a = cbgr_allocate(32, 8);
+    cbgr_deallocate(a);
+    let b = cbgr_allocate(32, 8);
+    assert(b != 0);
+    cbgr_deallocate(b);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

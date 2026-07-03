@@ -1,0 +1,115 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/time/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/time.vr` — kernel-boundary time intrinsics.
+//
+// Surface tested:
+//   * monotonic_nanos() — high-resolution monotonic clock
+//   * realtime_secs() / realtime_nanos() — wall-clock time
+//   * num_cpus() — CPU core count
+//   * sleep_ms(ms) / sleep_ns(ns) — blocking sleep
+//
+// Wall-clock assertions use wide sanity bounds (a date window, not exact
+// values) so the suite is deterministic on any healthy host.
+// =============================================================================
+
+mount core.intrinsics.runtime.time.{
+    monotonic_nanos, realtime_secs, realtime_nanos, num_cpus, sleep_ms, sleep_ns,
+};
+
+// =============================================================================
+// Section 1: monotonic_nanos
+// =============================================================================
+
+@test
+fn test_monotonic_nanos_is_positive() {
+    let t = monotonic_nanos();
+    assert(t > 0 as UInt64);
+}
+
+@test
+fn test_monotonic_nanos_non_decreasing() {
+    let a = monotonic_nanos();
+    let b = monotonic_nanos();
+    assert(b >= a);
+}
+
+// =============================================================================
+// Section 2: realtime_secs / realtime_nanos
+// =============================================================================
+
+@test
+fn test_realtime_secs_in_sane_epoch_window() {
+    // 2020-01-01 (1577836800) < now < 2100-01-01 (4102444800): a host with a
+    // clock outside this window is broken in ways this suite can't help.
+    let s = realtime_secs();
+    assert(s > 1577836800);
+    assert(s < 4102444800);
+}
+
+@test
+fn test_realtime_nanos_in_sane_epoch_window() {
+    let ns = realtime_nanos();
+    // Same window in nanoseconds.
+    assert(ns > 1577836800000000000 as UInt64);
+    assert(ns < 4102444800000000000 as UInt64);
+}
+
+@test
+fn test_realtime_nanos_coheres_with_realtime_secs() {
+    // The two clocks read the same wall time: nanos/1e9 within 2 seconds of
+    // secs (allowing one tick between the reads).
+    let s = realtime_secs();
+    let ns = realtime_nanos();
+    let ns_as_secs = (ns / 1000000000 as UInt64) as Int;
+    let diff = ns_as_secs - s;
+    assert(diff >= -2);
+    assert(diff <= 2);
+}
+
+// =============================================================================
+// Section 3: num_cpus
+// =============================================================================
+
+@test
+fn test_num_cpus_at_least_one() {
+    assert(num_cpus() >= 1);
+}
+
+@test
+fn test_num_cpus_sane_upper_bound() {
+    // 4096 logical cores is beyond any host this suite runs on; a larger
+    // answer means garbage, not hardware.
+    assert(num_cpus() <= 4096);
+}
+
+@test
+fn test_num_cpus_deterministic() {
+    assert_eq(num_cpus(), num_cpus());
+}
+
+// =============================================================================
+// Section 4: sleep_ms / sleep_ns
+// =============================================================================
+
+@test
+fn test_sleep_ms_returns() {
+    // The zero-duration sleep must return promptly and not fault.
+    sleep_ms(0 as UInt64);
+    assert(true);
+}
+
+@test
+fn test_sleep_ns_returns() {
+    sleep_ns(100 as UInt64);
+    assert(true);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

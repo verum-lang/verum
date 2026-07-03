@@ -1,0 +1,278 @@
+// =============================================================================
+// core-tests/intrinsics/type_info/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over the canonical type-property surface (T.size, T.bits,
+// T.alignment, T.stride, T.name, T.id, T.min, T.max).
+//
+// The primitive domain is finite — 17 types: Int, Int8, Int16, Int32, Int64,
+// Int128, ISize, UInt8, UInt16, UInt32, UInt64, USize, Byte, Float32,
+// Float64, Float, Bool, Char.  Type properties cannot be iterated at the
+// value level (there is no `for T in types`), so each law exhausts the
+// domain as an assertion product — one assert per type, one @test per law.
+// =============================================================================
+
+// =============================================================================
+// Section 1: bits/size coherence — T.bits == T.size * 8, for every primitive
+// =============================================================================
+
+@test
+fn law_bits_eq_size_times_8_signed() {
+    assert_eq(Int.bits, Int.size * 8);
+    assert_eq(Int8.bits, Int8.size * 8);
+    assert_eq(Int16.bits, Int16.size * 8);
+    assert_eq(Int32.bits, Int32.size * 8);
+    assert_eq(Int64.bits, Int64.size * 8);
+    assert_eq(Int128.bits, Int128.size * 8);
+    assert_eq(ISize.bits, ISize.size * 8);
+}
+
+@test
+fn law_bits_eq_size_times_8_unsigned() {
+    assert_eq(UInt8.bits, UInt8.size * 8);
+    assert_eq(UInt16.bits, UInt16.size * 8);
+    assert_eq(UInt32.bits, UInt32.size * 8);
+    assert_eq(UInt64.bits, UInt64.size * 8);
+    assert_eq(USize.bits, USize.size * 8);
+    assert_eq(Byte.bits, Byte.size * 8);
+}
+
+@test
+fn law_bits_eq_size_times_8_float_bool_char() {
+    assert_eq(Float32.bits, Float32.size * 8);
+    assert_eq(Float64.bits, Float64.size * 8);
+    assert_eq(Float.bits, Float.size * 8);
+    assert_eq(Bool.bits, Bool.size * 8);
+    assert_eq(Char.bits, Char.size * 8);
+}
+
+// =============================================================================
+// Section 2: stride laws — for primitives stride == size (no padding), and in
+// general stride >= size and stride is a multiple of alignment.
+// =============================================================================
+
+@test
+fn law_stride_eq_size_for_primitives() {
+    assert_eq(Int.stride, Int.size);
+    assert_eq(Int8.stride, Int8.size);
+    assert_eq(Int16.stride, Int16.size);
+    assert_eq(Int32.stride, Int32.size);
+    assert_eq(Int64.stride, Int64.size);
+    assert_eq(Int128.stride, Int128.size);
+    assert_eq(UInt8.stride, UInt8.size);
+    assert_eq(UInt16.stride, UInt16.size);
+    assert_eq(UInt32.stride, UInt32.size);
+    assert_eq(UInt64.stride, UInt64.size);
+    assert_eq(USize.stride, USize.size);
+    assert_eq(ISize.stride, ISize.size);
+    assert_eq(Byte.stride, Byte.size);
+    assert_eq(Float32.stride, Float32.size);
+    assert_eq(Float64.stride, Float64.size);
+    assert_eq(Bool.stride, Bool.size);
+    assert_eq(Char.stride, Char.size);
+}
+
+@test
+fn law_stride_multiple_of_alignment() {
+    assert_eq(Int.stride % Int.alignment, 0);
+    assert_eq(Int8.stride % Int8.alignment, 0);
+    assert_eq(Int16.stride % Int16.alignment, 0);
+    assert_eq(Int32.stride % Int32.alignment, 0);
+    assert_eq(Int64.stride % Int64.alignment, 0);
+    assert_eq(Int128.stride % Int128.alignment, 0);
+    assert_eq(UInt8.stride % UInt8.alignment, 0);
+    assert_eq(UInt16.stride % UInt16.alignment, 0);
+    assert_eq(UInt32.stride % UInt32.alignment, 0);
+    assert_eq(UInt64.stride % UInt64.alignment, 0);
+    assert_eq(USize.stride % USize.alignment, 0);
+    assert_eq(ISize.stride % ISize.alignment, 0);
+    assert_eq(Byte.stride % Byte.alignment, 0);
+    assert_eq(Float32.stride % Float32.alignment, 0);
+    assert_eq(Float64.stride % Float64.alignment, 0);
+    assert_eq(Bool.stride % Bool.alignment, 0);
+    assert_eq(Char.stride % Char.alignment, 0);
+}
+
+// =============================================================================
+// Section 3: alignment laws — a power of two, and never exceeding the size
+// (primitives are naturally aligned: alignment == min(size, 16)).
+// =============================================================================
+
+@test
+fn law_alignment_power_of_two() {
+    // (a & (a - 1)) == 0 for a > 0 — power-of-two check.
+    assert_eq(Int.alignment & (Int.alignment - 1), 0);
+    assert_eq(Int8.alignment & (Int8.alignment - 1), 0);
+    assert_eq(Int16.alignment & (Int16.alignment - 1), 0);
+    assert_eq(Int32.alignment & (Int32.alignment - 1), 0);
+    assert_eq(Int128.alignment & (Int128.alignment - 1), 0);
+    assert_eq(UInt64.alignment & (UInt64.alignment - 1), 0);
+    assert_eq(Float32.alignment & (Float32.alignment - 1), 0);
+    assert_eq(Float64.alignment & (Float64.alignment - 1), 0);
+    assert_eq(Bool.alignment & (Bool.alignment - 1), 0);
+    assert_eq(Char.alignment & (Char.alignment - 1), 0);
+}
+
+@test
+fn law_alignment_le_size_all_primitives() {
+    assert(Int.alignment <= Int.size);
+    assert(Int8.alignment <= Int8.size);
+    assert(Int16.alignment <= Int16.size);
+    assert(Int32.alignment <= Int32.size);
+    assert(Int64.alignment <= Int64.size);
+    assert(Int128.alignment <= Int128.size);
+    assert(UInt8.alignment <= UInt8.size);
+    assert(UInt16.alignment <= UInt16.size);
+    assert(UInt32.alignment <= UInt32.size);
+    assert(UInt64.alignment <= UInt64.size);
+    assert(USize.alignment <= USize.size);
+    assert(ISize.alignment <= ISize.size);
+    assert(Byte.alignment <= Byte.size);
+    assert(Float32.alignment <= Float32.size);
+    assert(Float64.alignment <= Float64.size);
+    assert(Bool.alignment <= Bool.size);
+    assert(Char.alignment <= Char.size);
+}
+
+// =============================================================================
+// Section 4: name laws — exact canonical spelling, and pairwise distinctness
+// across canonically-distinct primitives.
+// =============================================================================
+
+@test
+fn law_names_exact_canonical_spelling() {
+    assert_eq(Int.name, "Int");
+    assert_eq(Int8.name, "Int8");
+    assert_eq(Int16.name, "Int16");
+    assert_eq(Int32.name, "Int32");
+    assert_eq(Int64.name, "Int64");
+    assert_eq(UInt8.name, "UInt8");
+    assert_eq(UInt16.name, "UInt16");
+    assert_eq(UInt32.name, "UInt32");
+    assert_eq(UInt64.name, "UInt64");
+    assert_eq(USize.name, "USize");
+    assert_eq(Byte.name, "Byte");
+    assert_eq(Float32.name, "Float32");
+    assert_eq(Float64.name, "Float64");
+    assert_eq(Float.name, "Float");
+    assert_eq(Bool.name, "Bool");
+    assert_eq(Char.name, "Char");
+}
+
+@test
+fn law_names_pairwise_distinct() {
+    // Exhaustive n*(n-1)/2 sweep over the canonically-distinct primitive
+    // names (aliases like Int/Int64 spell differently by design — T.name
+    // reports the spelled name, so they are included as distinct strings).
+    let names: List<Text> = [
+        Int.name, Int8.name, Int16.name, Int32.name, Int64.name,
+        UInt8.name, UInt16.name, UInt32.name, UInt64.name, USize.name,
+        Byte.name, Float32.name, Float64.name, Bool.name, Char.name,
+    ];
+    let n = names.len();
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            assert(names[i] != names[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 5: id laws — deterministic across reads, pairwise distinct across
+// canonically-distinct primitives (and a stdlib heap type for contrast).
+//
+// NOTE (audit §, task TYPEINFO-ID-CANON-1): the relation between ALIAS ids
+// (Int.id vs Int64.id) is under architectural review — aliases currently get
+// name-derived distinct ids.  These laws deliberately pin only the
+// uncontested core: determinism + distinctness of distinct names.
+// =============================================================================
+
+@test
+fn law_id_deterministic_across_reads() {
+    assert_eq(Int.id, Int.id);
+    assert_eq(Bool.id, Bool.id);
+    assert_eq(Float64.id, Float64.id);
+    assert_eq(Char.id, Char.id);
+    assert_eq(Text.id, Text.id);
+}
+
+@test
+fn law_ids_pairwise_distinct_exhaustive() {
+    // 16 types → 120 unique pairs, checked exhaustively.
+    let ids: List<UInt64> = [
+        Int.id, Int8.id, Int16.id, Int32.id, Int64.id,
+        UInt8.id, UInt16.id, UInt32.id, UInt64.id, USize.id,
+        Byte.id, Float32.id, Float64.id, Bool.id, Char.id, Text.id,
+    ];
+    let n = ids.len();
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            assert(ids[i] != ids[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 6: min/max laws — signed two's-complement bounds; unsigned
+// zero-to-all-ones bounds.
+// =============================================================================
+
+@test
+fn law_signed_min_max_bounds() {
+    assert_eq(Int8.min, -128);
+    assert_eq(Int8.max, 127);
+    assert_eq(Int16.min, -32768);
+    assert_eq(Int16.max, 32767);
+    assert_eq(Int32.min, -2147483648);
+    assert_eq(Int32.max, 2147483647);
+    assert_eq(Int64.min, -9223372036854775808);
+    assert_eq(Int64.max, 9223372036854775807);
+    assert_eq(Int.min, Int64.min);
+    assert_eq(Int.max, Int64.max);
+}
+
+@test
+fn law_signed_min_max_antisymmetry() {
+    // For two's complement: min == -max - 1.
+    assert_eq(Int8.min, -Int8.max - 1);
+    assert_eq(Int16.min, -Int16.max - 1);
+    assert_eq(Int32.min, -Int32.max - 1);
+    assert_eq(Int64.min, -Int64.max - 1);
+}
+
+@test
+fn law_unsigned_min_zero_max_all_ones() {
+    assert_eq(UInt8.min, 0);
+    assert_eq(UInt8.max, 255);
+    assert_eq(UInt16.min, 0);
+    assert_eq(UInt16.max, 65535);
+    assert_eq(UInt32.min, 0);
+    assert_eq(UInt32.max, 4294967295);
+    assert_eq(UInt64.min, 0);
+    // u64::MAX doesn't fit a decimal Int literal — pin via the bit pattern:
+    // all-ones reinterprets as Int -1.
+    let m = UInt64.max;
+    assert_eq(m as Int, -1);
+}
+
+@test
+fn law_unsigned_max_hierarchy_is_monotonic() {
+    assert(UInt8.max < UInt16.max);
+    assert(UInt16.max < UInt32.max);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

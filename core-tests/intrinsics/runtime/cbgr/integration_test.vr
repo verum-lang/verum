@@ -1,0 +1,82 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/cbgr/integration_test.vr
+// =============================================================================
+//
+// The CBGR allocation bridge meeting the raw-memory ops and the reference
+// system: allocations flowing through memcpy pipelines, and cbgr_validate
+// on references crossing call boundaries.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.cbgr.{
+    cbgr_allocate, cbgr_deallocate, cbgr_realloc, cbgr_validate,
+};
+mount core.intrinsics.runtime.mem_raw.{
+    memcpy, memcmp, memset, load_byte, store_byte,
+};
+
+fn validate_through_call(r: &Int) -> Bool {
+    cbgr_validate(r)
+}
+
+// =============================================================================
+// Section 1: allocation → fill → copy → realloc → compare pipeline
+// =============================================================================
+
+@test
+fn integration_alloc_fill_copy_realloc_pipeline() {
+    let src = cbgr_allocate(16, 8);
+    let mut i = 0;
+    while i < 16 {
+        store_byte(src + i, 100 + i);
+        i = i + 1;
+    }
+    let dst = cbgr_allocate(16, 8);
+    memcpy(dst, src, 16);
+    assert_eq(memcmp(src, dst, 16), 0);
+    // Growing the copy must not disturb its contents.
+    let grown = cbgr_realloc(dst, 64);
+    assert_eq(memcmp(src, grown, 16), 0);
+    cbgr_deallocate(src);
+    cbgr_deallocate(grown);
+}
+
+@test
+fn integration_memset_over_reallocated_extent() {
+    let p = cbgr_allocate(8, 8);
+    let q = cbgr_realloc(p, 32);
+    memset(q, 7, 32);
+    assert_eq(load_byte(q), 7);
+    assert_eq(load_byte(q + 31), 7);
+    cbgr_deallocate(q);
+}
+
+// =============================================================================
+// Section 2: cbgr_validate across call boundaries
+// =============================================================================
+
+@test
+fn integration_validate_ref_through_function_call() {
+    let x = 7;
+    assert(validate_through_call(&x));
+}
+
+@test
+fn integration_validate_refs_to_multiple_locals() {
+    let a = 1;
+    let b = 2;
+    assert(cbgr_validate(&a));
+    assert(cbgr_validate(&b));
+    // Still valid after interleaved use of the referents.
+    let sum = a + b;
+    assert_eq(sum, 3);
+    assert(cbgr_validate(&a));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,42 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/text/regression_test.vr
+// =============================================================================
+//
+// Pinned defects for the text/char intrinsics.  No CLOSED defects yet — this
+// module's first conformance pass is 2026-07-03.  Guards below pin the
+// drift-prone surfaces found during the audit (see audit.md):
+//
+//   * RUNTIME-DUPLICATE-TREE-1 (task #15): `core/runtime/text.vr` is a dead
+//     parallel declaration tree with unwired `verum.runtime.*` intrinsic
+//     keys; sqlite mounts `float_to_text` from it.  The guard below pins the
+//     CANONICAL module's float_to_text behaviour so the cleanup has a
+//     conformance anchor.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.text.{
+    float_to_text, text_parse_float,
+};
+
+// Guard for RUNTIME-DUPLICATE-TREE-1: the canonical float_to_text renders a
+// value its own parser accepts (render/parse coherence through the wired
+// intrinsic pair — the dead-tree cleanup must keep this true).
+@test
+fn regression_canonical_float_render_parse_round_trip() {
+    let rendered = float_to_text(1.5);
+    assert(text_parse_float(&rendered) is Some(1.5));
+}
+
+@test
+fn regression_canonical_float_render_parse_negative() {
+    let rendered = float_to_text(-0.25);
+    assert(text_parse_float(&rendered) is Some(-0.25));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

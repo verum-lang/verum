@@ -5,39 +5,33 @@
 // `core/intrinsics/runtime/tier.vr` — VBC tier management intrinsics.
 //
 // Surface tested:
-//   * is_interpreted() — returns true under --interp, false under --aot
-//   * get_tier() — returns canonical tier code: 0=interp, 1=JIT baseline,
+//   * is_interpreted() — true exactly on Tier 0
+//   * get_tier() — canonical tier code: 0=interp, 1=JIT baseline,
 //     2=JIT optimized, 3=AOT
+//   * tier_promote(func_id) — promotion hint (side-effect only)
 //
-// tier_promote() is a hint side-effect — observable only via downstream
-// dispatch behavior, so tested at the language-level integration suite under
-// `vcs/specs/L2-standard/intrinsics/runtime/tier/`.
+// CONTRACT NOTE: the same test source runs under BOTH `verum test --interp`
+// and `verum test --aot`, so no test here may assert a specific tier — only
+// tier-agnostic invariants and the coherence between the two intrinsics.
+// (The original revision asserted `is_interpreted() == true`, which is
+// unsatisfiable under --aot; pinned in regression_test.vr.)
 // =============================================================================
 
 mount core.intrinsics.runtime.tier.{
-    is_interpreted, get_tier,
+    is_interpreted, get_tier, tier_promote,
 };
 
 // =============================================================================
-// Section 1: is_interpreted under --interp
+// Section 1: get_tier returns a canonical tier code
 // =============================================================================
 
 @test
-fn test_is_interpreted_returns_true_under_interp() {
-    // This test runs under `verum test --interp` so the answer is true.
-    assert(is_interpreted());
-}
-
-// =============================================================================
-// Section 2: get_tier returns canonical tier code
-// =============================================================================
-
-@test
-fn test_get_tier_returns_zero_under_interp() {
-    // Tier 0 is the VBC interpreter. Under `verum test --interp` we are at
-    // tier 0.
-    let t = get_tier();
-    assert_eq(t, 0_u8);
+fn test_get_tier_returns_canonical_code() {
+    // Under `verum test` only the interpreter (0) and AOT (3) tiers exist;
+    // JIT tiers (1, 2) never serve test processes.  Anything else is a
+    // corrupted tier report.
+    let t = get_tier() as Int;
+    assert(t == 0 || t == 3);
 }
 
 @test
@@ -47,14 +41,40 @@ fn test_get_tier_consistent_across_calls() {
     assert_eq(a, b);
 }
 
+// =============================================================================
+// Section 2: is_interpreted coheres with get_tier
+// =============================================================================
+
 @test
-fn test_get_tier_matches_is_interpreted() {
-    // get_tier()==0 ⇔ is_interpreted()==true. Cross-check the two intrinsics
-    // for consistency.
+fn test_is_interpreted_iff_tier_zero() {
+    // is_interpreted() == (get_tier() == 0), on every tier.
     let interp = is_interpreted();
-    let tier = get_tier();
-    assert(interp);
-    assert_eq(tier, 0_u8);
+    let tier_is_zero = get_tier() == 0 as UInt8;
+    assert_eq(interp, tier_is_zero);
 }
 
-fn main() {}
+@test
+fn test_is_interpreted_consistent_across_calls() {
+    assert_eq(is_interpreted(), is_interpreted());
+}
+
+// =============================================================================
+// Section 3: tier_promote is a safe no-fail hint
+// =============================================================================
+
+@test
+fn test_tier_promote_accepts_hint_without_fault() {
+    // Promotion is advisory; an unknown function id must be ignored, not
+    // fault.  (Observable promotion effects are exercised at the
+    // language-level integration suite, not here.)
+    tier_promote(0 as UInt32);
+    assert(true);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

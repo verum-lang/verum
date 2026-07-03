@@ -1,0 +1,78 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/tier/integration_test.vr
+// =============================================================================
+//
+// Tier introspection meeting the rest of the language: the tier answer must
+// be identical from free functions, methods, closures, and loop bodies —
+// one execution tier per process, no context-dependent drift.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.tier.{
+    is_interpreted, get_tier,
+};
+
+type TierProbe9 is { label: Text };
+
+implement TierProbe9 {
+    public fn read_tier(&self) -> UInt8 {
+        get_tier()
+    }
+}
+
+fn free_fn_tier() -> UInt8 {
+    get_tier()
+}
+
+// =============================================================================
+// Section 1: same answer from every calling context
+// =============================================================================
+
+@test
+fn integration_tier_same_from_method_and_free_fn() {
+    let probe = TierProbe9 { label: "t" };
+    assert_eq(probe.read_tier(), free_fn_tier());
+    assert_eq(probe.read_tier(), get_tier());
+}
+
+@test
+fn integration_tier_same_inside_loop_and_conditional() {
+    let base = get_tier();
+    let mut i = 0;
+    while i < 10 {
+        if i % 2 == 0 {
+            assert_eq(get_tier(), base);
+        } else {
+            assert_eq(free_fn_tier(), base);
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: coherence holds through stdlib data flow
+// =============================================================================
+
+@test
+fn integration_tier_value_flows_through_list() {
+    // The tier code stored into a collection round-trips unchanged —
+    // guards against a tier intrinsic that returns different values when
+    // its result is materialised vs consumed directly.
+    let mut readings: List<Int> = [];
+    let mut i = 0;
+    while i < 5 {
+        readings.push(get_tier() as Int);
+        i = i + 1;
+    }
+    for r in readings.iter() {
+        assert_eq(*r, get_tier() as Int);
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

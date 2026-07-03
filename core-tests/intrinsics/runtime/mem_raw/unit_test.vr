@@ -1,0 +1,267 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/mem_raw/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/mem_raw.vr` — raw-address (Int-pointer) memory
+// operations: memcpy / memmove / memset / memzero / memcmp, C-string
+// strlen / strcmp, and byte/word load-store.
+//
+// HARNESS: every test drives a LIVE allocation obtained from
+// `cbgr_allocate(size, align)` (core.intrinsics.runtime.cbgr — the same
+// allocation bridge the CBGR runtime itself uses) and releases it with
+// `cbgr_deallocate`.  This closes MEM-RAWPTR-HARNESS-1's "needs a real
+// allocation" gap without depending on List backing-pointer extraction
+// (LIST-ASPTR-HEADER-1).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
+mount core.intrinsics.runtime.mem_raw.{
+    memcpy, memmove, memset, memzero, memcmp,
+    strlen, strcmp,
+    load_byte, store_byte, load_i64, store_i64, load_i32, store_i32,
+};
+
+// =============================================================================
+// Section 1: allocation harness sanity — cbgr_allocate / cbgr_deallocate
+// =============================================================================
+
+@test
+fn test_allocate_returns_nonzero_address() {
+    let p = cbgr_allocate(64, 8);
+    assert(p != 0);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_allocate_two_allocations_are_distinct() {
+    let a = cbgr_allocate(32, 8);
+    let b = cbgr_allocate(32, 8);
+    assert(a != b);
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+// =============================================================================
+// Section 2: store_byte / load_byte
+// =============================================================================
+
+@test
+fn test_store_load_byte_round_trip() {
+    let p = cbgr_allocate(16, 8);
+    store_byte(p, 170); // 0xAA
+    assert_eq(load_byte(p), 170);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_store_load_byte_at_offsets() {
+    let p = cbgr_allocate(16, 8);
+    store_byte(p, 1);
+    store_byte(p + 1, 2);
+    store_byte(p + 15, 255);
+    assert_eq(load_byte(p), 1);
+    assert_eq(load_byte(p + 1), 2);
+    assert_eq(load_byte(p + 15), 255);
+    cbgr_deallocate(p);
+}
+
+// =============================================================================
+// Section 3: load_i64 / store_i64 / load_i32 / store_i32
+// =============================================================================
+
+@test
+fn test_store_load_i64_round_trip() {
+    let p = cbgr_allocate(16, 8);
+    store_i64(p, 81985529216486895); // 0x0123456789ABCDEF
+    assert_eq(load_i64(p), 81985529216486895);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_store_load_i64_negative() {
+    let p = cbgr_allocate(16, 8);
+    store_i64(p, -1);
+    assert_eq(load_i64(p), -1);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_store_load_i32_round_trip() {
+    let p = cbgr_allocate(16, 8);
+    store_i32(p, 305419896); // 0x12345678
+    assert_eq(load_i32(p), 305419896);
+    cbgr_deallocate(p);
+}
+
+// =============================================================================
+// Section 4: memset / memzero
+// =============================================================================
+
+@test
+fn test_memset_fills_every_byte() {
+    let p = cbgr_allocate(8, 8);
+    memset(p, 66, 8); // 'B'
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(load_byte(p + i), 66);
+        i = i + 1;
+    }
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_memset_returns_dst() {
+    let p = cbgr_allocate(8, 8);
+    assert_eq(memset(p, 1, 8), p);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_memzero_zeroes() {
+    let p = cbgr_allocate(8, 8);
+    memset(p, 255, 8);
+    memzero(p, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(load_byte(p + i), 0);
+        i = i + 1;
+    }
+    cbgr_deallocate(p);
+}
+
+// =============================================================================
+// Section 5: memcpy
+// =============================================================================
+
+@test
+fn test_memcpy_copies_bytes() {
+    let src = cbgr_allocate(8, 8);
+    let dst = cbgr_allocate(8, 8);
+    let mut i = 0;
+    while i < 8 {
+        store_byte(src + i, 10 + i);
+        i = i + 1;
+    }
+    memcpy(dst, src, 8);
+    let mut j = 0;
+    while j < 8 {
+        assert_eq(load_byte(dst + j), 10 + j);
+        j = j + 1;
+    }
+    cbgr_deallocate(src);
+    cbgr_deallocate(dst);
+}
+
+@test
+fn test_memcpy_zero_count_is_noop() {
+    let src = cbgr_allocate(8, 8);
+    let dst = cbgr_allocate(8, 8);
+    memset(dst, 7, 8);
+    memcpy(dst, src, 0);
+    assert_eq(load_byte(dst), 7);
+    cbgr_deallocate(src);
+    cbgr_deallocate(dst);
+}
+
+// =============================================================================
+// Section 6: memcmp
+// =============================================================================
+
+@test
+fn test_memcmp_equal_is_zero() {
+    let a = cbgr_allocate(8, 8);
+    let b = cbgr_allocate(8, 8);
+    memset(a, 5, 8);
+    memset(b, 5, 8);
+    assert_eq(memcmp(a, b, 8), 0);
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+@test
+fn test_memcmp_less_is_negative() {
+    let a = cbgr_allocate(8, 8);
+    let b = cbgr_allocate(8, 8);
+    memset(a, 1, 8);
+    memset(b, 2, 8);
+    assert(memcmp(a, b, 8) < 0);
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+@test
+fn test_memcmp_greater_is_positive() {
+    let a = cbgr_allocate(8, 8);
+    let b = cbgr_allocate(8, 8);
+    memset(a, 9, 8);
+    memset(b, 3, 8);
+    assert(memcmp(a, b, 8) > 0);
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+// =============================================================================
+// Section 7: strlen / strcmp over hand-built C strings
+// =============================================================================
+
+@test
+fn test_strlen_counts_to_nul() {
+    let p = cbgr_allocate(8, 8);
+    store_byte(p, 104);     // 'h'
+    store_byte(p + 1, 105); // 'i'
+    store_byte(p + 2, 0);   // NUL
+    assert_eq(strlen(p), 2);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_strlen_empty_string() {
+    let p = cbgr_allocate(8, 8);
+    store_byte(p, 0);
+    assert_eq(strlen(p), 0);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_strcmp_equal() {
+    let a = cbgr_allocate(8, 8);
+    let b = cbgr_allocate(8, 8);
+    store_byte(a, 120); store_byte(a + 1, 0); // "x"
+    store_byte(b, 120); store_byte(b + 1, 0); // "x"
+    assert_eq(strcmp(a, b), 0);
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+@test
+fn test_strcmp_orders_lexicographically() {
+    let a = cbgr_allocate(8, 8);
+    let b = cbgr_allocate(8, 8);
+    store_byte(a, 97); store_byte(a + 1, 0); // "a"
+    store_byte(b, 98); store_byte(b + 1, 0); // "b"
+    assert(strcmp(a, b) < 0);
+    assert(strcmp(b, a) > 0);
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+@test
+fn test_strcmp_prefix_is_less() {
+    let a = cbgr_allocate(8, 8);
+    let b = cbgr_allocate(8, 8);
+    // "ab" vs "abc" — the prefix sorts first.
+    store_byte(a, 97); store_byte(a + 1, 98); store_byte(a + 2, 0);
+    store_byte(b, 97); store_byte(b + 1, 98); store_byte(b + 2, 99); store_byte(b + 3, 0);
+    assert(strcmp(a, b) < 0);
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,34 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/tier/regression_test.vr
+// =============================================================================
+//
+// Pinned defects for the tier-introspection intrinsics.
+// =============================================================================
+
+mount core.intrinsics.runtime.tier.{
+    is_interpreted, get_tier,
+};
+
+// TIER-TEST-CONTRACT-1 (2026-07-03): the original unit suite asserted
+// `assert(is_interpreted())` and `assert_eq(get_tier(), 0_u8)` — true only
+// under --interp, unsatisfiable under --aot, violating the core-tests
+// contract that the SAME source passes both tiers.  The suite was rewritten
+// tier-agnostic; this pin keeps the coherence law that replaced the
+// tier-specific asserts.
+@test
+fn regression_tier_report_is_coherent_not_hardcoded() {
+    let t = get_tier() as Int;
+    // Canonical code…
+    assert(t == 0 || t == 3);
+    // …and the boolean view agrees with it (this is what the old
+    // interp-only asserts actually wanted to say).
+    assert_eq(is_interpreted(), t == 0);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

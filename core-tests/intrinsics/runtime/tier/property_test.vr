@@ -1,0 +1,71 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/tier/property_test.vr
+// =============================================================================
+//
+// Invariants of the tier-introspection intrinsics.  A test process never
+// migrates tiers mid-run, so the strongest observable law is stability —
+// every read agrees with every other read, at any call depth.
+// =============================================================================
+
+mount core.intrinsics.runtime.tier.{
+    is_interpreted, get_tier,
+};
+
+// =============================================================================
+// Section 1: stability — the tier is constant for the process lifetime
+// =============================================================================
+
+@test
+fn property_tier_stable_over_repeated_reads() {
+    let first = get_tier();
+    let mut i = 0;
+    while i < 100 {
+        assert_eq(get_tier(), first);
+        i = i + 1;
+    }
+}
+
+@test
+fn property_is_interpreted_stable_over_repeated_reads() {
+    let first = is_interpreted();
+    let mut i = 0;
+    while i < 100 {
+        assert_eq(is_interpreted(), first);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: coherence — the two intrinsics answer from the same authority
+// =============================================================================
+
+fn tier_read_nested() -> UInt8 {
+    get_tier()
+}
+
+fn tier_read_deeper() -> UInt8 {
+    tier_read_nested()
+}
+
+@test
+fn property_tier_agrees_at_any_call_depth() {
+    // The tier answer must not depend on the frame depth of the caller.
+    assert_eq(get_tier(), tier_read_nested());
+    assert_eq(get_tier(), tier_read_deeper());
+}
+
+@test
+fn property_interpreted_iff_tier_zero_holds_everywhere() {
+    let coherent_here = is_interpreted() == (get_tier() == 0 as UInt8);
+    assert(coherent_here);
+    let coherent_nested = is_interpreted() == (tier_read_deeper() == 0 as UInt8);
+    assert(coherent_nested);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

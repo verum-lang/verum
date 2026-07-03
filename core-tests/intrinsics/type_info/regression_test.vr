@@ -1,0 +1,107 @@
+// =============================================================================
+// core-tests/intrinsics/type_info/regression_test.vr
+// =============================================================================
+//
+// Pinned defects for the type-property surface.  One test per bug; never
+// deleted.  Each names the defect and its tracking id from audit.md.
+// =============================================================================
+
+// Local record types used by the layout-property regressions.  Names are
+// deliberately unique (Rti prefix) — a stdlib-shadowing name (e.g. `Counter`)
+// silently reads garbage fields (see the 2026-06-19 Counter red-herring).
+type RtiPair is { a: Int, b: Int };
+type RtiTri is { a: Int, b: Int, c: Int };
+
+// =============================================================================
+// TYPEINFO-USERTYPE-SIZE-1 (task #8) — user-record layout properties fell to
+// the unknown-identifier fallback (8) instead of the documented VBC layout
+// model `num_fields * 8`.  Pre-fix: `RtiTri.size == 8`.
+// =============================================================================
+
+@test
+fn regression_user_record_size_is_fieldcount_times_8() {
+    assert_eq(RtiPair.size, 16);
+    assert_eq(RtiTri.size, 24);
+}
+
+@test
+fn regression_user_record_stride_matches_size() {
+    assert_eq(RtiPair.stride, RtiPair.size);
+    assert_eq(RtiTri.stride, RtiTri.size);
+}
+
+@test
+fn regression_user_record_alignment_is_slot_aligned() {
+    // Every record slot is a NaN-boxed 8-byte Value → records are 8-aligned.
+    assert_eq(RtiPair.alignment, 8);
+    assert_eq(RtiTri.alignment, 8);
+}
+
+@test
+fn regression_user_record_name_resolves() {
+    // `.name` resolved correctly even while `.size` fell to the fallback —
+    // pin it so a future property-table refactor can't regress it.
+    assert_eq(RtiPair.name, "RtiPair");
+    assert_eq(RtiTri.name, "RtiTri");
+}
+
+// =============================================================================
+// TYPE-ID-COLLISION-1 (#27) class — user-type ids must be distinct from every
+// primitive id and from each other.  The 2026-06-28 archive fix re-homed
+// same-id different-name descriptors; this is the .vr-level contract.
+// =============================================================================
+
+@test
+fn regression_user_type_ids_distinct_from_primitives() {
+    let ids: List<UInt64> = [
+        Int.id, Int64.id, UInt64.id, Float64.id, Bool.id, Char.id, Text.id,
+    ];
+    let n = ids.len();
+    let mut i = 0;
+    while i < n {
+        assert(RtiPair.id != ids[i]);
+        assert(RtiTri.id != ids[i]);
+        i = i + 1;
+    }
+}
+
+@test
+fn regression_user_type_ids_distinct_from_each_other() {
+    assert(RtiPair.id != RtiTri.id);
+}
+
+// =============================================================================
+// Determinism — `T.id` must be stable across reads within one program.
+// (A name-derived id that changed between reads would break any map keyed
+// by type identity.)
+// =============================================================================
+
+@test
+fn regression_type_id_deterministic_across_reads() {
+    let a = RtiPair.id;
+    let b = RtiPair.id;
+    assert_eq(a, b);
+}
+
+// =============================================================================
+// Alias honesty — `T.name` reports the SPELLED name, not the canonical
+// resolution (`Int` is Int64-wide but spells "Int").  Pinned so a future
+// canonicalisation pass (TYPEINFO-ID-CANON-1) doesn't silently change the
+// user-visible name surface.
+// =============================================================================
+
+@test
+fn regression_alias_name_reports_spelled_name() {
+    assert_eq(Int.name, "Int");
+    assert_eq(Float.name, "Float");
+    assert_eq(Byte.name, "Byte");
+    assert_eq(USize.name, "USize");
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

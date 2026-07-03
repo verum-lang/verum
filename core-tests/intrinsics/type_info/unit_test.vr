@@ -316,3 +316,111 @@ fn test_id_int32_vs_int64_distinct() {
 fn test_id_int_vs_bool_distinct() {
     assert(Int.id != Bool.id);
 }
+
+// =============================================================================
+// Section 8: pointer-width and extended primitives — USize / ISize / Char /
+// Int128 / Float (alias of Float64)
+// =============================================================================
+
+@test
+fn test_usize_size_is_8() {
+    assert(USize.size == 8);
+}
+
+@test
+fn test_isize_size_is_8() {
+    assert(ISize.size == 8);
+}
+
+@test
+fn test_char_size_is_4() {
+    // Char is a Unicode scalar value — 32 bits.
+    assert(Char.size == 4);
+}
+
+@test
+fn test_char_bits_is_32() {
+    assert(Char.bits == 32);
+}
+
+@test
+fn test_bool_bits_is_8() {
+    assert(Bool.bits == 8);
+}
+
+@test
+fn test_int128_size_is_16() {
+    assert(Int128.size == 16);
+}
+
+@test
+fn test_int128_alignment_is_16() {
+    // Int128 is the one primitive whose alignment reaches the 16-byte cap.
+    assert(Int128.alignment == 16);
+}
+
+@test
+fn test_float_alias_size_is_8() {
+    // Float = Float64 on every target.
+    assert(Float.size == 8);
+    assert(Float.bits == 64);
+}
+
+// =============================================================================
+// Section 9: T.min / T.max — numeric bounds as type properties
+// =============================================================================
+
+@test
+fn test_int8_min_max() {
+    assert(Int8.min == -128);
+    assert(Int8.max == 127);
+}
+
+@test
+fn test_int16_min_max() {
+    assert(Int16.min == -32768);
+    assert(Int16.max == 32767);
+}
+
+@test
+fn test_int32_min_max() {
+    assert(Int32.min == -2147483648);
+    assert(Int32.max == 2147483647);
+}
+
+@test
+fn test_int64_min_max() {
+    assert(Int64.min == -9223372036854775808);
+    assert(Int64.max == 9223372036854775807);
+}
+
+@test
+fn test_int_min_max_matches_int64() {
+    assert(Int.min == Int64.min);
+    assert(Int.max == Int64.max);
+}
+
+@test
+fn test_uint8_min_max() {
+    assert(UInt8.min == 0);
+    assert(UInt8.max == 255);
+}
+
+@test
+fn test_uint16_min_max() {
+    assert(UInt16.min == 0);
+    assert(UInt16.max == 65535);
+}
+
+@test
+fn test_uint32_min_max() {
+    assert(UInt32.min == 0);
+    assert(UInt32.max == 4294967295);
+}
+
+@test
+fn test_uint64_max_is_all_ones() {
+    // u64::MAX exceeds the decimal Int literal range — pin the bit pattern.
+    let m = UInt64.max;
+    assert((m as Int) == -1);
+}

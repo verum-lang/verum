@@ -52,3 +52,28 @@ fn regression_swap_replace_transmute_still_work() {
 fn main() {
     // `verum test` synthesises a per-test main.
 }
+
+// =============================================================================
+// MEM-TRANSMUTE-FLOAT-1 (task #13) — OPEN, pinned
+// =============================================================================
+// interp `transmute<Float, UInt64>` compiles to identity ("transmute is
+// identity at the value level in VBC", expressions.rs) — the NaN-boxed Float
+// passes through with its Float tag and NO bit reinterpretation happens;
+// f-strings render the result as "1.0".  AOT bitcasts correctly → cross-tier
+// divergence.  Root: the destination type of the generic is invisible at the
+// @intrinsic arm (VBC-GENERIC-INSTANTIATION-1, task #14).  Portable form
+// today: `f64_to_bits` / `bits_to_f64` (core.intrinsics.conversion).
+
+@ignore("MEM-TRANSMUTE-FLOAT-1 (task #13) — interp float↔int transmute is identity, no bit reinterpret; blocked on VBC-GENERIC-INSTANTIATION-1 (task #14).")
+@test
+fn regression_transmute_float_to_bits_reinterprets() {
+    let bits: UInt64 = transmute(1.0);
+    assert_eq(bits, 4607182418800017408 as UInt64);
+}
+
+@ignore("MEM-TRANSMUTE-FLOAT-1 (task #13) — reverse direction of the same defect.")
+@test
+fn regression_transmute_bits_to_float_reinterprets() {
+    let f: Float = transmute(4607182418800017408 as UInt64);
+    assert_eq(f, 1.0);
+}

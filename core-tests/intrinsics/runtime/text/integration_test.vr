@@ -1,0 +1,101 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/text/integration_test.vr
+// =============================================================================
+//
+// Text intrinsics meeting the rest of the stdlib: byte-slice views
+// (text_as_bytes), UTF-8 decode over real Text, encode into a live byte
+// buffer, and agreement with the f-string formatter.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.text.{
+    text_byte_len, text_as_bytes, text_parse_int, int_to_text,
+    utf8_decode_char, char_encode_utf8,
+};
+
+// =============================================================================
+// Section 1: text_as_bytes — the canonical byte view over every Text repr
+// =============================================================================
+
+@test
+fn integration_as_bytes_ascii_reads_utf8_bytes() {
+    let t = "hi";
+    let bytes = text_as_bytes(&t);
+    assert_eq(bytes[0], 104 as Byte); // 'h'
+    assert_eq(bytes[1], 105 as Byte); // 'i'
+}
+
+@test
+fn integration_as_bytes_length_matches_byte_len() {
+    let t = "héllo";
+    let bytes = text_as_bytes(&t);
+    assert_eq(bytes.len(), text_byte_len(&t));
+}
+
+// =============================================================================
+// Section 2: utf8_decode_char over a real Text's bytes
+// =============================================================================
+
+@test
+fn integration_utf8_decode_ascii_char() {
+    let t = "abc";
+    let bytes = text_as_bytes(&t);
+    assert_eq(utf8_decode_char(bytes, 0), 'a');
+    assert_eq(utf8_decode_char(bytes, 2), 'c');
+}
+
+@test
+fn integration_utf8_decode_multibyte_char() {
+    // "é" is the 2-byte sequence 0xC3 0xA9 at index 0.
+    let t = "é";
+    let bytes = text_as_bytes(&t);
+    assert_eq(utf8_decode_char(bytes, 0), 'é');
+}
+
+// =============================================================================
+// Section 3: char_encode_utf8 into a live byte buffer
+// =============================================================================
+
+@test
+fn integration_encode_ascii_char_writes_one_byte() {
+    let mut buf: List<Byte> = [0 as Byte, 0 as Byte, 0 as Byte, 0 as Byte];
+    let written = char_encode_utf8('A', buf.as_mut_slice());
+    assert_eq(written, 1);
+    assert_eq(buf[0], 65 as Byte);
+}
+
+@test
+fn integration_encode_multibyte_char_writes_utf8_sequence() {
+    let mut buf: List<Byte> = [0 as Byte, 0 as Byte, 0 as Byte, 0 as Byte];
+    let written = char_encode_utf8('é', buf.as_mut_slice());
+    assert_eq(written, 2);
+    assert_eq(buf[0], 195 as Byte); // 0xC3
+    assert_eq(buf[1], 169 as Byte); // 0xA9
+}
+
+// =============================================================================
+// Section 4: agreement with the f-string formatter
+// =============================================================================
+
+@test
+fn integration_int_to_text_agrees_with_fstring() {
+    assert_eq(int_to_text(42), f"{42}");
+    assert_eq(int_to_text(-7), f"{-7}");
+    let x = 123456789;
+    assert_eq(int_to_text(x), f"{x}");
+}
+
+@test
+fn integration_parse_int_of_fstring_round_trip() {
+    let x = -987654;
+    let rendered = f"{x}";
+    assert(text_parse_int(&rendered) is Some(-987654));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

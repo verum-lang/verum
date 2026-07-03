@@ -1,0 +1,83 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/time/property_test.vr
+// =============================================================================
+//
+// Laws of the time intrinsics: monotonicity under repeated sampling, sleep's
+// lower-bound guarantee, and cross-clock coherence.  Bounds are deliberately
+// loose (lower bounds only, generous slack) — a timing law with a tight upper
+// bound is a flake, not a law.
+// =============================================================================
+
+mount core.intrinsics.runtime.time.{
+    monotonic_nanos, realtime_nanos, sleep_ms, sleep_ns,
+};
+
+// =============================================================================
+// Section 1: monotonicity — the defining law of the monotonic clock
+// =============================================================================
+
+@test
+fn law_monotonic_never_decreases_over_many_samples() {
+    let mut prev = monotonic_nanos();
+    let mut i = 0;
+    while i < 1000 {
+        let now = monotonic_nanos();
+        assert(now >= prev);
+        prev = now;
+        i = i + 1;
+    }
+}
+
+@test
+fn law_monotonic_strictly_advances_across_sleep() {
+    let a = monotonic_nanos();
+    sleep_ms(2 as UInt64);
+    let b = monotonic_nanos();
+    assert(b > a);
+}
+
+// =============================================================================
+// Section 2: sleep lower bound — sleep(d) never returns early
+// =============================================================================
+
+@test
+fn law_sleep_ms_waits_at_least_the_duration() {
+    let a = monotonic_nanos();
+    sleep_ms(10 as UInt64);
+    let b = monotonic_nanos();
+    let elapsed = b - a;
+    // Kernel sleep may round DOWN by at most one scheduler tick on some
+    // hosts; 8ms is the honest floor for a requested 10ms.
+    assert(elapsed >= 8000000 as UInt64);
+}
+
+@test
+fn law_sleep_ns_waits_at_least_the_duration() {
+    let a = monotonic_nanos();
+    sleep_ns(2000000 as UInt64); // 2ms
+    let b = monotonic_nanos();
+    let elapsed = b - a;
+    assert(elapsed >= 1500000 as UInt64);
+}
+
+// =============================================================================
+// Section 3: realtime advances with monotonic (no frozen wall clock)
+// =============================================================================
+
+@test
+fn law_realtime_advances_across_sleep() {
+    let a = realtime_nanos();
+    sleep_ms(5 as UInt64);
+    let b = realtime_nanos();
+    // Wall clock may be adjusted (NTP), but over 5ms it must not appear
+    // frozen or move backwards by more than the adjustment slack.
+    assert(b > a);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

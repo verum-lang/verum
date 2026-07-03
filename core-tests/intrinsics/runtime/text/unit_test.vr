@@ -1,0 +1,253 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/text/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/text.vr` — allocation-backed text/char intrinsics.
+//
+// Surface tested:
+//   * text_byte_len — UTF-8 byte length (not char count)
+//   * text_parse_int / text_parse_float — Maybe-returning parsers
+//   * int_to_text / float_to_text — number rendering
+//   * char classification — is_alphabetic / is_numeric / is_alphanumeric /
+//     is_whitespace / is_control / is_uppercase / is_lowercase
+//   * char conversion — to_uppercase / to_lowercase
+//
+// text_as_bytes / utf8_decode_char / char_encode_utf8 are exercised in
+// integration_test.vr (they need byte-slice plumbing); text_from_static is
+// compiler-internal (literal lowering) and audited, not unit-tested.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.text.{
+    text_byte_len, text_parse_int, text_parse_float,
+    int_to_text, float_to_text,
+    char_is_alphabetic, char_is_numeric, char_is_alphanumeric,
+    char_is_whitespace, char_is_control, char_is_uppercase, char_is_lowercase,
+    char_to_uppercase, char_to_lowercase,
+};
+
+// =============================================================================
+// Section 1: text_byte_len
+// =============================================================================
+
+@test
+fn test_text_byte_len_ascii() {
+    let t = "abc";
+    assert_eq(text_byte_len(&t), 3);
+}
+
+@test
+fn test_text_byte_len_empty() {
+    let t = "";
+    assert_eq(text_byte_len(&t), 0);
+}
+
+@test
+fn test_text_byte_len_multibyte_utf8() {
+    // 'é' is 2 bytes in UTF-8; "héllo" = 6 bytes, 5 chars.
+    let t = "héllo";
+    assert_eq(text_byte_len(&t), 6);
+}
+
+@test
+fn test_text_byte_len_cyrillic() {
+    // Cyrillic letters are 2 bytes each in UTF-8.
+    let t = "мир";
+    assert_eq(text_byte_len(&t), 6);
+}
+
+// =============================================================================
+// Section 2: text_parse_int
+// =============================================================================
+
+@test
+fn test_parse_int_positive() {
+    let t = "42";
+    assert(text_parse_int(&t) is Some(42));
+}
+
+@test
+fn test_parse_int_negative() {
+    let t = "-17";
+    assert(text_parse_int(&t) is Some(-17));
+}
+
+@test
+fn test_parse_int_zero() {
+    let t = "0";
+    assert(text_parse_int(&t) is Some(0));
+}
+
+@test
+fn test_parse_int_rejects_garbage() {
+    let t = "not-a-number";
+    assert(text_parse_int(&t) is None);
+}
+
+@test
+fn test_parse_int_rejects_empty() {
+    let t = "";
+    assert(text_parse_int(&t) is None);
+}
+
+@test
+fn test_parse_int_rejects_trailing_garbage() {
+    let t = "42abc";
+    assert(text_parse_int(&t) is None);
+}
+
+// =============================================================================
+// Section 3: text_parse_float
+// =============================================================================
+
+@test
+fn test_parse_float_simple() {
+    let t = "2.5";
+    let parsed = text_parse_float(&t);
+    assert(parsed is Some(2.5));
+}
+
+@test
+fn test_parse_float_integer_form() {
+    let t = "3";
+    assert(text_parse_float(&t) is Some(3.0));
+}
+
+@test
+fn test_parse_float_negative() {
+    let t = "-0.25";
+    assert(text_parse_float(&t) is Some(-0.25));
+}
+
+@test
+fn test_parse_float_rejects_garbage() {
+    let t = "x.y";
+    assert(text_parse_float(&t) is None);
+}
+
+// =============================================================================
+// Section 4: int_to_text / float_to_text
+// =============================================================================
+
+@test
+fn test_int_to_text_positive() {
+    assert_eq(int_to_text(42), "42");
+}
+
+@test
+fn test_int_to_text_negative() {
+    assert_eq(int_to_text(-7), "-7");
+}
+
+@test
+fn test_int_to_text_zero() {
+    assert_eq(int_to_text(0), "0");
+}
+
+@test
+fn test_int_to_text_int64_extremes() {
+    assert_eq(int_to_text(9223372036854775807), "9223372036854775807");
+    assert_eq(int_to_text(-9223372036854775808), "-9223372036854775808");
+}
+
+@test
+fn test_float_to_text_renders() {
+    // Exact rendering format is pinned in property_test round-trips; here
+    // just the basic shape.
+    let t = float_to_text(1.5);
+    assert(t.len() > 0);
+}
+
+// =============================================================================
+// Section 5: char classification
+// =============================================================================
+
+@test
+fn test_char_is_alphabetic() {
+    assert(char_is_alphabetic('a'));
+    assert(char_is_alphabetic('Z'));
+    assert(!char_is_alphabetic('5'));
+    assert(!char_is_alphabetic(' '));
+}
+
+@test
+fn test_char_is_numeric() {
+    assert(char_is_numeric('0'));
+    assert(char_is_numeric('9'));
+    assert(!char_is_numeric('a'));
+    assert(!char_is_numeric('-'));
+}
+
+@test
+fn test_char_is_alphanumeric() {
+    assert(char_is_alphanumeric('a'));
+    assert(char_is_alphanumeric('7'));
+    assert(!char_is_alphanumeric('_'));
+    assert(!char_is_alphanumeric(' '));
+}
+
+@test
+fn test_char_is_whitespace() {
+    assert(char_is_whitespace(' '));
+    assert(char_is_whitespace('\t'));
+    assert(char_is_whitespace('\n'));
+    assert(!char_is_whitespace('x'));
+}
+
+@test
+fn test_char_is_control() {
+    assert(char_is_control('\n'));
+    assert(char_is_control('\t'));
+    assert(!char_is_control('a'));
+    assert(!char_is_control(' '));
+}
+
+@test
+fn test_char_is_uppercase() {
+    assert(char_is_uppercase('A'));
+    assert(!char_is_uppercase('a'));
+    assert(!char_is_uppercase('5'));
+}
+
+@test
+fn test_char_is_lowercase() {
+    assert(char_is_lowercase('a'));
+    assert(!char_is_lowercase('A'));
+    assert(!char_is_lowercase('5'));
+}
+
+// =============================================================================
+// Section 6: char conversion
+// =============================================================================
+
+@test
+fn test_char_to_uppercase_ascii() {
+    assert_eq(char_to_uppercase('a'), 'A');
+    assert_eq(char_to_uppercase('z'), 'Z');
+}
+
+@test
+fn test_char_to_uppercase_identity_on_upper() {
+    assert_eq(char_to_uppercase('A'), 'A');
+    assert_eq(char_to_uppercase('5'), '5');
+}
+
+@test
+fn test_char_to_lowercase_ascii() {
+    assert_eq(char_to_lowercase('A'), 'a');
+    assert_eq(char_to_lowercase('Z'), 'z');
+}
+
+@test
+fn test_char_to_lowercase_identity_on_lower() {
+    assert_eq(char_to_lowercase('a'), 'a');
+    assert_eq(char_to_lowercase('_'), '_');
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

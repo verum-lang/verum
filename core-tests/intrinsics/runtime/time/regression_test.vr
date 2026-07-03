@@ -1,0 +1,34 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/time/regression_test.vr
+// =============================================================================
+//
+// Pinned defects for the time intrinsics.  No CLOSED defects yet — first
+// conformance pass 2026-07-03.  The guard below pins the UInt64-delta
+// arithmetic surface (subtraction of two intrinsic results), the class of
+// wide-unsigned handling that regressed elsewhere (large-int Map keys,
+// 01a2406dc) — kept as a tripwire.
+// =============================================================================
+
+mount core.intrinsics.runtime.time.{
+    monotonic_nanos,
+};
+
+@test
+fn regression_uint64_nanos_delta_is_small_nonnegative() {
+    let a = monotonic_nanos();
+    let b = monotonic_nanos();
+    // b >= a (monotonic) and the delta fits comfortably in the small-int
+    // range — a tagged/boxed-int mishandling would surface as a huge or
+    // negative delta here.
+    assert(b >= a);
+    let delta = b - a;
+    assert(delta < 60000000000 as UInt64); // < 60s between adjacent reads
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

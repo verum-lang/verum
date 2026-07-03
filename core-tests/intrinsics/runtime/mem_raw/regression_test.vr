@@ -1,0 +1,43 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/mem_raw/regression_test.vr
+// =============================================================================
+//
+// Pinned defects for the raw-address memory operations.  First conformance
+// pass 2026-07-03.  The guards below pin the two ways this surface has
+// historically drifted elsewhere:
+//
+//   * byte-vs-element scale (#38 ptr_offset class) — mem_raw addresses are
+//     BYTES by contract; the guard proves address arithmetic is byte-granular.
+//   * interpreter-fallback-body vs table-handler divergence (the module's
+//     @intrinsic fns carry fallback bodies; the dispatch-contract doc pins
+//     table authority) — the strlen/memcmp guards would diverge if the
+//     fallback body ever shadowed a table handler with different semantics.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
+mount core.intrinsics.runtime.mem_raw.{
+    memset, load_byte, store_byte,
+};
+
+// Byte-granular addressing: p+1 addresses the NEXT BYTE, not the next
+// 8-byte slot (the #38 ptr_offset defect class, pinned here for the
+// Int-address surface).
+@test
+fn regression_int_address_arithmetic_is_byte_granular() {
+    let p = cbgr_allocate(16, 8);
+    memset(p, 0, 16);
+    store_byte(p + 1, 77);
+    assert_eq(load_byte(p), 0);
+    assert_eq(load_byte(p + 1), 77);
+    assert_eq(load_byte(p + 2), 0);
+    cbgr_deallocate(p);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

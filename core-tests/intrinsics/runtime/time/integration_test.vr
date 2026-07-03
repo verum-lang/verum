@@ -1,0 +1,87 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/time/integration_test.vr
+// =============================================================================
+//
+// Time intrinsics meeting the rest of the stdlib: elapsed-time measurement
+// as the caller writes it (delta arithmetic on UInt64 nanos), and the
+// monotonic clock driving loop-bounded work.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.time.{
+    monotonic_nanos, sleep_ms, num_cpus,
+};
+
+// =============================================================================
+// Section 1: the canonical elapsed-time idiom
+// =============================================================================
+
+@test
+fn integration_elapsed_measurement_idiom() {
+    let start = monotonic_nanos();
+    sleep_ms(3 as UInt64);
+    let elapsed = monotonic_nanos() - start;
+    // Requested 3ms; floor at 2ms for scheduler slack, ceiling at 10s to
+    // catch a broken clock without flaking a loaded CI host.
+    assert(elapsed >= 2000000 as UInt64);
+    assert(elapsed < 10000000000 as UInt64);
+}
+
+@test
+fn integration_elapsed_arithmetic_stays_in_uint64() {
+    // Delta arithmetic between two nanosecond readings — the UInt64 result
+    // must flow through Int conversion and f-string rendering unmangled.
+    let a = monotonic_nanos();
+    let b = monotonic_nanos();
+    let delta = b - a;
+    let rendered = f"{delta}";
+    assert(rendered.len() > 0);
+    assert(delta < 1000000000 as UInt64); // two adjacent reads within 1s
+}
+
+// =============================================================================
+// Section 2: clock-driven loop bound
+// =============================================================================
+
+@test
+fn integration_monotonic_bounds_a_polling_loop() {
+    // A deadline loop written the way applications write it: poll until
+    // the clock passes start + 5ms.  Must terminate (monotonic clock
+    // advances) and must observe the deadline (final read >= deadline).
+    let start = monotonic_nanos();
+    let deadline = start + 5000000 as UInt64; // +5ms
+    let mut now = start;
+    let mut iterations = 0;
+    while now < deadline {
+        sleep_ms(1 as UInt64);
+        now = monotonic_nanos();
+        iterations = iterations + 1;
+        // A clock that stops advancing would loop forever; cap generously.
+        assert(iterations < 100000);
+    }
+    assert(now >= deadline);
+}
+
+// =============================================================================
+// Section 3: num_cpus is usable as a sizing input
+// =============================================================================
+
+@test
+fn integration_num_cpus_sizes_a_collection() {
+    let n = num_cpus();
+    let mut slots: List<Int> = [];
+    let mut i = 0;
+    while i < n {
+        slots.push(i);
+        i = i + 1;
+    }
+    assert_eq(slots.len(), n);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

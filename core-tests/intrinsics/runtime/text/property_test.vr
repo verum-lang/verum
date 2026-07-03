@@ -1,0 +1,141 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/text/property_test.vr
+// =============================================================================
+//
+// Laws of the text/char intrinsics:
+//   * parse ∘ render = identity over a representative Int sweep
+//   * classification partitions (alphanumeric = alphabetic ∪ numeric, ASCII
+//     exhaustive; case classes are disjoint)
+//   * case conversion: involution-free (idempotent) and class-correct
+//
+// The ASCII sweeps are EXHAUSTIVE (0..128 via Char.from_u32-equivalent
+// `as Char` casts); the Int sweep is boundary-sampled (documented inline).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.text.{
+    text_parse_int, int_to_text,
+    char_is_alphabetic, char_is_numeric, char_is_alphanumeric,
+    char_is_uppercase, char_is_lowercase,
+    char_to_uppercase, char_to_lowercase,
+};
+
+// =============================================================================
+// Section 1: parse ∘ render = identity  (render ∘ parse is covered by the
+// same loop because int_to_text output is canonical decimal)
+// =============================================================================
+
+@test
+fn law_parse_int_of_int_to_text_is_identity() {
+    // Boundary sample: zero, small, digit boundaries, signed extremes.
+    let xs: List<Int> = [
+        0, 1, -1, 9, 10, 99, 100, -99, -100, 4096, -4096,
+        2147483647, -2147483648,
+        9223372036854775807, -9223372036854775808,
+    ];
+    for x in xs.iter() {
+        let rendered = int_to_text(*x);
+        let back = text_parse_int(&rendered);
+        assert(back is Some(*x));
+    }
+}
+
+// =============================================================================
+// Section 2: classification partitions — ASCII-exhaustive
+// =============================================================================
+
+@test
+fn law_alphanumeric_is_alphabetic_or_numeric_ascii_exhaustive() {
+    let mut c = 0;
+    while c < 128 {
+        let ch = c as Char;
+        let alnum = char_is_alphanumeric(ch);
+        let split = char_is_alphabetic(ch) || char_is_numeric(ch);
+        assert_eq(alnum, split);
+        c = c + 1;
+    }
+}
+
+@test
+fn law_upper_and_lower_are_disjoint_ascii_exhaustive() {
+    let mut c = 0;
+    while c < 128 {
+        let ch = c as Char;
+        // No ASCII char is both uppercase and lowercase.
+        assert(!(char_is_uppercase(ch) && char_is_lowercase(ch)));
+        c = c + 1;
+    }
+}
+
+@test
+fn law_cased_implies_alphabetic_ascii_exhaustive() {
+    let mut c = 0;
+    while c < 128 {
+        let ch = c as Char;
+        if char_is_uppercase(ch) || char_is_lowercase(ch) {
+            assert(char_is_alphabetic(ch));
+        }
+        c = c + 1;
+    }
+}
+
+// =============================================================================
+// Section 3: case-conversion laws — ASCII-exhaustive
+// =============================================================================
+
+@test
+fn law_to_uppercase_is_idempotent_ascii_exhaustive() {
+    let mut c = 0;
+    while c < 128 {
+        let ch = c as Char;
+        let once = char_to_uppercase(ch);
+        assert_eq(char_to_uppercase(once), once);
+        c = c + 1;
+    }
+}
+
+@test
+fn law_to_lowercase_is_idempotent_ascii_exhaustive() {
+    let mut c = 0;
+    while c < 128 {
+        let ch = c as Char;
+        let once = char_to_lowercase(ch);
+        assert_eq(char_to_lowercase(once), once);
+        c = c + 1;
+    }
+}
+
+@test
+fn law_ascii_case_round_trip_on_letters() {
+    // For ASCII letters, lower ∘ upper = lower-of-original (and vice versa).
+    let mut c = 97; // 'a'
+    while c <= 122 { // 'z'
+        let ch = c as Char;
+        assert_eq(char_to_lowercase(char_to_uppercase(ch)), ch);
+        c = c + 1;
+    }
+    let mut u = 65; // 'A'
+    while u <= 90 { // 'Z'
+        let ch = u as Char;
+        assert_eq(char_to_uppercase(char_to_lowercase(ch)), ch);
+        u = u + 1;
+    }
+}
+
+@test
+fn law_uppercase_result_is_uppercase_for_letters() {
+    let mut c = 97; // 'a'..'z'
+    while c <= 122 {
+        let ch = c as Char;
+        assert(char_is_uppercase(char_to_uppercase(ch)));
+        c = c + 1;
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

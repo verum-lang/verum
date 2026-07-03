@@ -1,0 +1,161 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/cbgr/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/cbgr.vr` — CBGR memory-safety intrinsics.
+//
+// Surface tested here (value-level, process-local):
+//   * cbgr_allocate / cbgr_deallocate / cbgr_realloc — allocation bridge
+//   * cbgr_validate — live-reference validation
+//   * cbgr_get_epoch / cbgr_current_epoch — epoch reads
+//
+// NOT driven from this suite (global-state mutators — a shared in-process
+// test runner would leak their effects into sibling tests; see audit.md):
+// cbgr_advance_epoch, cbgr_epoch_begin, cbgr_new_generation, cbgr_invalidate,
+// cbgr_revoke, cbgr_register_root, and the packed-word validators
+// (cbgr_validate_ref / cbgr_check / cbgr_check_fat / cbgr_check_write —
+// their operands are runtime-internal packed layouts).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.cbgr.{
+    cbgr_allocate, cbgr_deallocate, cbgr_realloc,
+    cbgr_validate, cbgr_get_epoch, cbgr_current_epoch,
+};
+mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
+
+// =============================================================================
+// Section 1: cbgr_allocate
+// =============================================================================
+
+@test
+fn test_allocate_nonzero() {
+    let p = cbgr_allocate(64, 8);
+    assert(p != 0);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_allocate_is_8_aligned() {
+    let p = cbgr_allocate(24, 8);
+    assert_eq(p % 8, 0);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_allocate_is_16_aligned_on_request() {
+    let p = cbgr_allocate(24, 16);
+    assert_eq(p % 16, 0);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_allocate_full_extent_is_writable() {
+    let p = cbgr_allocate(128, 8);
+    store_byte(p, 1);
+    store_byte(p + 127, 2);
+    assert_eq(load_byte(p), 1);
+    assert_eq(load_byte(p + 127), 2);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_allocations_do_not_alias() {
+    let a = cbgr_allocate(16, 8);
+    let b = cbgr_allocate(16, 8);
+    store_byte(a, 11);
+    store_byte(b, 22);
+    assert_eq(load_byte(a), 11);
+    assert_eq(load_byte(b), 22);
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+// =============================================================================
+// Section 2: cbgr_deallocate
+// =============================================================================
+
+@test
+fn test_deallocate_null_is_noop() {
+    // Documented: "No-op on null."
+    cbgr_deallocate(0);
+    assert(true);
+}
+
+// =============================================================================
+// Section 3: cbgr_realloc
+// =============================================================================
+
+@test
+fn test_realloc_grow_preserves_prefix() {
+    let p = cbgr_allocate(8, 8);
+    let mut i = 0;
+    while i < 8 {
+        store_byte(p + i, 50 + i);
+        i = i + 1;
+    }
+    let q = cbgr_realloc(p, 32);
+    assert(q != 0);
+    let mut j = 0;
+    while j < 8 {
+        assert_eq(load_byte(q + j), 50 + j);
+        j = j + 1;
+    }
+    cbgr_deallocate(q);
+}
+
+@test
+fn test_realloc_extended_region_is_writable() {
+    let p = cbgr_allocate(8, 8);
+    let q = cbgr_realloc(p, 64);
+    assert(q != 0);
+    store_byte(q + 63, 9);
+    assert_eq(load_byte(q + 63), 9);
+    cbgr_deallocate(q);
+}
+
+// =============================================================================
+// Section 4: cbgr_validate on live references
+// =============================================================================
+
+@test
+fn test_validate_live_local_ref_is_true() {
+    let x = 42;
+    assert(cbgr_validate(&x));
+}
+
+@test
+fn test_validate_live_heap_value_ref_is_true() {
+    let mut xs: List<Int> = [1, 2, 3];
+    assert(cbgr_validate(&xs));
+}
+
+// =============================================================================
+// Section 5: epoch reads
+// =============================================================================
+
+@test
+fn test_get_epoch_non_negative() {
+    assert(cbgr_get_epoch() >= 0);
+}
+
+@test
+fn test_get_epoch_stable_across_adjacent_reads() {
+    // No epoch mutator runs in this suite, so two adjacent reads see the
+    // same epoch (another thread advancing is out-of-scope for core-tests).
+    assert_eq(cbgr_get_epoch(), cbgr_get_epoch());
+}
+
+@test
+fn test_current_epoch_reads() {
+    let e = cbgr_current_epoch();
+    assert(e >= 0 as UInt64);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
