@@ -5293,6 +5293,20 @@ pub enum SystemSubOpcode {
     /// 8-byte cell.
     StaticMutAddr = 0x52,
 
+    /// Raw byte/word load/store over Int addresses — the table-authoritative
+    /// route for `core/intrinsics/runtime/mem_raw.vr`'s leaf ops on BOTH
+    /// tiers.  History: the leaves were bodyless decls dispatched by NAME on
+    /// the interpreter only; AOT lowered the declaration stubs, so every
+    /// load returned 0 and every store was a no-op under AOT (26-test
+    /// cluster in the 2026-07-03 sweep).  Formats: load `dst:reg, addr:reg`,
+    /// store `dst:reg, addr:reg, value:reg` (dst receives 0).
+    RawLoadU8 = 0x53,
+    RawStoreU8 = 0x54,
+    RawLoadI32 = 0x55,
+    RawStoreI32 = 0x56,
+    RawLoadI64 = 0x57,
+    RawStoreI64 = 0x58,
+
     // ========================================================================
     // Raw Pointer Operations (0x60-0x6F)
     // ========================================================================
@@ -5463,6 +5477,11 @@ pub enum SystemSubOpcode {
     /// Returns: Process CPU time in nanoseconds (i64).
     /// Uses CLOCK_PROCESS_CPUTIME_ID.
     TimeProcessCpuNanos = 0x75,
+    /// Sleep for the given number of MILLISECONDS (`sleep_ms`).  The
+    /// millisecond form gets its own sub-op so the ms→ns scaling lives in
+    /// ONE place per tier instead of in every emitter.
+    /// Format: `dst:reg, ms:reg` (dst receives unit/0).
+    TimeSleepMillis = 0x76,
 
     // ========================================================================
     // System Call Operations (0x80-0x8F)
@@ -6030,6 +6049,12 @@ impl SystemSubOpcode {
             0x50 => Some(Self::CreateCallback),
             0x51 => Some(Self::FreeCallback),
             0x52 => Some(Self::StaticMutAddr),
+            0x53 => Some(Self::RawLoadU8),
+            0x54 => Some(Self::RawStoreU8),
+            0x55 => Some(Self::RawLoadI32),
+            0x56 => Some(Self::RawStoreI32),
+            0x57 => Some(Self::RawLoadI64),
+            0x58 => Some(Self::RawStoreI64),
             // Raw Pointer Operations
             0x60 => Some(Self::DerefRaw),
             0x61 => Some(Self::DerefMutRaw),
@@ -6046,6 +6071,7 @@ impl SystemSubOpcode {
             0x73 => Some(Self::TimeSleepNanos),
             0x74 => Some(Self::TimeThreadCpuNanos),
             0x75 => Some(Self::TimeProcessCpuNanos),
+            0x76 => Some(Self::TimeSleepMillis),
             // System Call Operations
             0x80 => Some(Self::SysGetpid),
             0x81 => Some(Self::SysGettid),
@@ -6178,6 +6204,12 @@ impl SystemSubOpcode {
             Self::CreateCallback         => m!("FFI_CREATE_CALLBACK",        CallbackSupport,          call=false, marshal=false, alloc=true,  dealloc=false),
             Self::FreeCallback           => m!("FFI_FREE_CALLBACK",          CallbackSupport,          call=false, marshal=false, alloc=false, dealloc=true),
             Self::StaticMutAddr          => m!("FFI_STATIC_MUT_ADDR",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::RawLoadU8          => m!("RAW_LOAD_U8",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::RawStoreU8          => m!("RAW_STORE_U8",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::RawLoadI32          => m!("RAW_LOAD_I32",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::RawStoreI32          => m!("RAW_STORE_I32",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::RawLoadI64          => m!("RAW_LOAD_I64",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::RawStoreI64          => m!("RAW_STORE_I64",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
 
             // ===== Raw Pointer Operations (0x60-0x6F) =====
             Self::DerefRaw               => m!("FFI_DEREF_RAW",              RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
@@ -6196,6 +6228,7 @@ impl SystemSubOpcode {
             Self::TimeSleepNanos         => m!("TIME_SLEEP_NANOS",           TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
             Self::TimeThreadCpuNanos     => m!("TIME_THREAD_CPU_NANOS",      TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
             Self::TimeProcessCpuNanos    => m!("TIME_PROCESS_CPU_NANOS",     TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
+            Self::TimeSleepMillis    => m!("TIME_SLEEP_MILLIS",     TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== System Call Operations (0x80-0x8F) =====
             Self::SysGetpid              => m!("SYS_GETPID",                 SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),

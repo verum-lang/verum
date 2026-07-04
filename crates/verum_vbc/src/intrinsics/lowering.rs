@@ -3582,6 +3582,41 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
+            // Raw byte/word leaves + time keys — generic MLIR shapes; the
+            // canonical semantics live at the VBC/LLVM layer.
+            InlineSequenceId::RawLoadU8
+            | InlineSequenceId::RawLoadI32
+            | InlineSequenceId::RawLoadI64 => self.emit(MlirOp {
+                name: "llvm.load".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::RawStoreU8
+            | InlineSequenceId::RawStoreI32
+            | InlineSequenceId::RawStoreI64 => self.emit(MlirOp {
+                name: "llvm.store".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::SleepNanosSeq
+            | InlineSequenceId::SleepMillisSeq => self.emit(MlirOp {
+                name: "verum.time.sleep".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::RealtimeNanosSeq => self.emit(MlirOp {
+                name: "verum.time.realtime_nanos".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::CbgrValidateBool => self.emit(MlirOp {
                 name: "verum.cbgr.validate".to_string(),
                 attrs: vec![],

@@ -17055,6 +17055,18 @@ impl VbcCodegen {
             // — which is the correct shape for an unconstrained generic parameter
             // since every NaN-boxed Value is exactly 8 bytes.
             if matches!(field, "size" | "alignment" | "stride" | "name")
+                && std::env::var("VERUM_TRACE_TYPEPROP").is_ok()
+            {
+                eprintln!(
+                    "[TYPEPROP] bare-path prop base='{}' field='{}' var_reg_hit={} fn_scope_hit={} field_count={:?}",
+                    type_name,
+                    field,
+                    self.ctx.get_var_reg(type_name).is_ok(),
+                    self.ctx.lookup_function_in_scope(type_name).is_some(),
+                    self.type_field_count(type_name)
+                );
+            }
+            if matches!(field, "size" | "alignment" | "stride" | "name")
                 && self.ctx.get_var_reg(type_name).is_err()
                 && self.ctx.lookup_function_in_scope(type_name).is_none()
                 && let Some(value) = self.layout_property_for_named(type_name, field)
@@ -29206,6 +29218,49 @@ impl VbcCodegen {
                     operands,
                 });
             }
+            // Raw byte/word leaves + time keys — one generic FfiExtended
+            // emission (dst + args) with the sub-op picked per id.  These
+            // exist on BOTH tiers by construction: interpreter handlers in
+            // handlers/ffi_extended.rs, AOT arms in verum_codegen
+            // lower_ffi_extended.
+            InlineSequenceId::RawLoadU8
+            | InlineSequenceId::RawStoreU8
+            | InlineSequenceId::RawLoadI32
+            | InlineSequenceId::RawStoreI32
+            | InlineSequenceId::RawLoadI64
+            | InlineSequenceId::RawStoreI64
+            | InlineSequenceId::SleepNanosSeq
+            | InlineSequenceId::SleepMillisSeq
+            | InlineSequenceId::RealtimeNanosSeq => {
+                let sub_op: u8 = match seq_id {
+                    InlineSequenceId::RawLoadU8 => 0x53,
+                    InlineSequenceId::RawStoreU8 => 0x54,
+                    InlineSequenceId::RawLoadI32 => 0x55,
+                    InlineSequenceId::RawStoreI32 => 0x56,
+                    InlineSequenceId::RawLoadI64 => 0x57,
+                    InlineSequenceId::RawStoreI64 => 0x58,
+                    InlineSequenceId::SleepNanosSeq => 0x73,   // TimeSleepNanos
+                    InlineSequenceId::SleepMillisSeq => 0x76,  // TimeSleepMillis
+                    _ => 0x71,                                  // TimeRealtimeNanos
+                };
+                let mut operands = Vec::<u8>::new();
+                // The sleep handlers (0x73 existing / 0x76 new) take ONLY
+                // the duration operand — no dst (return_count 0); writing a
+                // dst here would be read as the duration.  Every other id
+                // in this arm uses the dst-first convention.
+                let takes_dst = !matches!(
+                    seq_id,
+                    InlineSequenceId::SleepNanosSeq | InlineSequenceId::SleepMillisSeq
+                );
+                if takes_dst {
+                    Self::write_reg(&mut operands, dest.0);
+                }
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended { sub_op, operands });
+            }
+
             InlineSequenceId::CbgrValidateBool => {
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
@@ -29358,6 +29413,12 @@ impl VbcCodegen {
             "size_of" | "align_of" => {
                 // These should be resolved at compile time
                 // Emit a placeholder for now
+                if std::env::var("VERUM_TRACE_TYPEPROP").is_ok() {
+                    eprintln!(
+                        "[TYPEPROP] size_of/align_of PLACEHOLDER-8 fired (fn={:?} generic_params={:?})",
+                        self.ctx.current_function, self.ctx.generic_type_params
+                    );
+                }
                 self.ctx.emit(Instruction::LoadI {
                     dst: dest,
                     value: 8,
@@ -33190,6 +33251,33 @@ impl VbcCodegen {
 
         // Extract the type name string for property resolution
         let type_name = self.extract_display_type_name(ty);
+
+        // TYPEINFO-USERTYPE-SIZE-1 (task #8): user-defined RECORD types
+        // resolve size/stride/alignment from their registered field layout
+        // — the documented VBC model is `num_fields * 8` NaN-boxed slots,
+        // alignment 8.  `T.size` parses as ExprKind::TypeProperty (NOT a
+        // Field access), so none of compile_field_access's layout branches
+        // ever ran for it; every record fell into the primitive-bits
+        // table's `_ => 64` default below and answered 8.  Gated to
+        // user-defined types: built-in nominal types (Text, List, ...) keep
+        // their existing single-slot answers pending the type-identity
+        // canonicalisation (task #9).
+        if matches!(
+            property,
+            TypeProperty::Size | TypeProperty::Stride | TypeProperty::Alignment
+        ) {
+            let base_name = Self::strip_generic_args(&type_name).to_string();
+            if self.ctx.user_defined_types.contains(&base_name)
+                && let Some(field_count) = self.type_field_count(&base_name)
+            {
+                let value = match property {
+                    TypeProperty::Alignment => 8,
+                    _ => (field_count as i64) * 8,
+                };
+                self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                return Ok(Some(dest));
+            }
+        }
 
         // Get bits for the type
         let bits = match type_name.as_str() {

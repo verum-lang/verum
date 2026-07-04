@@ -1113,6 +1113,18 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::CbgrAllocateUser => self.emit_alloc(args),
             InlineSequenceId::CbgrDeallocUser => self.emit_dealloc(args),
             InlineSequenceId::CbgrReallocUser => self.emit_realloc(args),
+            // Raw byte/word leaves + time keys: the VBC codegen path
+            // (expressions.rs → FfiExtended 0x53-0x58 / 0x71 / 0x73 / 0x76)
+            // is authoritative; no dedicated MIR ops exist at this layer.
+            InlineSequenceId::RawLoadU8
+            | InlineSequenceId::RawStoreU8
+            | InlineSequenceId::RawLoadI32
+            | InlineSequenceId::RawStoreI32
+            | InlineSequenceId::RawLoadI64
+            | InlineSequenceId::RawStoreI64
+            | InlineSequenceId::SleepNanosSeq
+            | InlineSequenceId::SleepMillisSeq
+            | InlineSequenceId::RealtimeNanosSeq => None,
             InlineSequenceId::CbgrValidateBool => {
                 // No dedicated MIR op for reference validation; the VBC
                 // interpreter / LLVM arms own the semantics.

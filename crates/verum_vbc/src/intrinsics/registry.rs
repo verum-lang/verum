@@ -1054,6 +1054,19 @@ pub enum InlineSequenceId {
     PtrOffset,
     /// ptr_sub: subtract unsigned element count from a pointer
     PtrSubSeq,
+    /// load_byte / store_byte / load_i32 / store_i32 / load_i64 / store_i64
+    /// — raw Int-address leaves (FfiExtended 0x53-0x58, both tiers)
+    RawLoadU8,
+    RawStoreU8,
+    RawLoadI32,
+    RawStoreI32,
+    RawLoadI64,
+    RawStoreI64,
+    /// sleep_ns (TimeSleepNanos 0x73) / sleep_ms (TimeSleepMillis 0x76) /
+    /// realtime_nanos (TimeRealtimeNanos 0x71)
+    SleepNanosSeq,
+    SleepMillisSeq,
+    RealtimeNanosSeq,
 }
 
 /// Complete intrinsic definition.
@@ -1568,6 +1581,69 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrSubSeq),
         mlir_op: Some("llvm.getelementptr"),
         doc: "Subtract unsigned element count from pointer",
+    },
+    // Raw byte/word leaves (mem_raw.vr) — table-authoritative on BOTH
+    // tiers.  Pre-entry these were interp-only name-dispatch: AOT lowered
+    // the bodyless declaration stubs, so loads read 0 and stores no-op'd.
+    Intrinsic {
+        name: "load_byte",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RawLoadU8),
+        mlir_op: None,
+        doc: "Load one byte from a raw Int address",
+    },
+    Intrinsic {
+        name: "store_byte",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RawStoreU8),
+        mlir_op: None,
+        doc: "Store one byte to a raw Int address",
+    },
+    Intrinsic {
+        name: "load_i32",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RawLoadI32),
+        mlir_op: None,
+        doc: "Load an i32 (sign-extended) from a raw Int address",
+    },
+    Intrinsic {
+        name: "store_i32",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RawStoreI32),
+        mlir_op: None,
+        doc: "Store the low 32 bits to a raw Int address",
+    },
+    Intrinsic {
+        name: "load_i64",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RawLoadI64),
+        mlir_op: None,
+        doc: "Load an i64 from a raw Int address",
+    },
+    Intrinsic {
+        name: "store_i64",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RawStoreI64),
+        mlir_op: None,
+        doc: "Store an i64 to a raw Int address",
     },
     // =========================================================================
     // Memory Lifecycle Intrinsics
@@ -5211,6 +5287,40 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // Time Intrinsics
     // =========================================================================
+    // Kernel-boundary time keys that had NO entries (TIME-UNWIRED-1):
+    // sleeps returned instantly via the declaration stubs and
+    // realtime_nanos read nil.  Routed to the existing 0x71/0x73 handlers
+    // plus the new 0x76 millisecond form.
+    Intrinsic {
+        name: "sleep_ns",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SleepNanosSeq),
+        mlir_op: None,
+        doc: "Sleep for N nanoseconds",
+    },
+    Intrinsic {
+        name: "sleep_ms",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SleepMillisSeq),
+        mlir_op: None,
+        doc: "Sleep for N milliseconds",
+    },
+    Intrinsic {
+        name: "realtime_nanos",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline],
+        param_count: 0,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RealtimeNanosSeq),
+        mlir_op: None,
+        doc: "Wall-clock nanoseconds since the Unix epoch",
+    },
     Intrinsic {
         name: "monotonic_nanos",
         category: IntrinsicCategory::Time,

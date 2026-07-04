@@ -3127,6 +3127,102 @@ pub(in super::super) fn handle_ffi_extended(
         }
 
         // =================================================================
+        // Raw byte/word leaves (0x53-0x58) — the table-authoritative route
+        // for mem_raw's load/store over Int addresses (mirrors the legacy
+        // name-dispatch arms in calls.rs, which remain as aliases).
+        // =================================================================
+        Some(SystemSubOpcode::RawLoadU8) => {
+            let dst = read_reg(state)?;
+            let addr_reg = read_reg(state)?;
+            let addr = state.get_reg(addr_reg).as_integer_compatible();
+            let v = if addr > 0 {
+                // SAFETY: caller-supplied live address (allocation-harness
+                // discipline); byte read.
+                unsafe { *(addr as *const u8) as i64 }
+            } else {
+                0
+            };
+            state.set_reg(dst, Value::from_i64(v));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::RawStoreU8) => {
+            let dst = read_reg(state)?;
+            let addr_reg = read_reg(state)?;
+            let val_reg = read_reg(state)?;
+            let addr = state.get_reg(addr_reg).as_integer_compatible();
+            let v = state.get_reg(val_reg).as_integer_compatible() as u8;
+            if addr > 0 {
+                // SAFETY: as above.
+                unsafe { *(addr as *mut u8) = v };
+            }
+            state.set_reg(dst, Value::from_i64(0));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::RawLoadI32) => {
+            let dst = read_reg(state)?;
+            let addr_reg = read_reg(state)?;
+            let addr = state.get_reg(addr_reg).as_integer_compatible();
+            let v = if addr > 0 {
+                // SAFETY: as above; sign-extended per the C `int` contract.
+                unsafe { *(addr as *const i32) as i64 }
+            } else {
+                0
+            };
+            state.set_reg(dst, Value::from_i64(v));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::RawStoreI32) => {
+            let dst = read_reg(state)?;
+            let addr_reg = read_reg(state)?;
+            let val_reg = read_reg(state)?;
+            let addr = state.get_reg(addr_reg).as_integer_compatible();
+            let v = state.get_reg(val_reg).as_integer_compatible() as i32;
+            if addr > 0 {
+                // SAFETY: as above.
+                unsafe { *(addr as *mut i32) = v };
+            }
+            state.set_reg(dst, Value::from_i64(0));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::RawLoadI64) => {
+            let dst = read_reg(state)?;
+            let addr_reg = read_reg(state)?;
+            let addr = state.get_reg(addr_reg).as_integer_compatible();
+            let v = if addr > 0 {
+                // SAFETY: as above.
+                unsafe { *(addr as *const i64) }
+            } else {
+                0
+            };
+            state.set_reg(dst, Value::from_i64(v));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::RawStoreI64) => {
+            let dst = read_reg(state)?;
+            let addr_reg = read_reg(state)?;
+            let val_reg = read_reg(state)?;
+            let addr = state.get_reg(addr_reg).as_integer_compatible();
+            let v = state.get_reg(val_reg).as_integer_compatible();
+            if addr > 0 {
+                // SAFETY: as above.
+                unsafe { *(addr as *mut i64) = v };
+            }
+            state.set_reg(dst, Value::from_i64(0));
+            Ok(DispatchResult::Continue)
+        }
+
+        // TimeSleepMillis (0x76) — millisecond sleep; same (duration)-only
+        // operand shape as TimeSleepNanos (0x73).
+        Some(SystemSubOpcode::TimeSleepMillis) => {
+            let ms_reg = read_reg(state)?;
+            let ms = state.get_reg(ms_reg).as_integer_compatible();
+            if ms > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+            }
+            Ok(DispatchResult::Continue)
+        }
+
+        // =================================================================
         // Allocator-internal realloc (0xA4) — the 4-arg
         // `cbgr_realloc(ptr, old_size, new_size, align)` form used by
         // `core/mem/allocator.vr`.  Mirrors the CbgrAlloc conventions:

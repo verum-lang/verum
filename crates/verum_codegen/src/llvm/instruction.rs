@@ -24764,6 +24764,125 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        Some(SystemSubOpcode::TimeSleepMillis) => {
+            // Millisecond sleep — scale to ns and reuse the canonical
+            // verum_time_sleep_nanos runtime (single sleep authority).
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let ms = as_i64(ctx, ctx.get_register(op_reg(operands, 0))?, "sleep_ms")?;
+            let i64_ty = ctx.types().i64_type();
+            let ns = ctx
+                .builder()
+                .build_int_mul(ms, i64_ty.const_int(1_000_000, false), "sleep_ms_ns")
+                .or_llvm_err()?;
+            let module = ctx.get_module();
+            let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into()], false);
+            let sleep_fn = module
+                .get_function("verum_time_sleep_nanos")
+                .unwrap_or_else(|| module.add_function("verum_time_sleep_nanos", fn_type, None));
+            ctx.builder()
+                .build_call(sleep_fn, &[ns.into()], "")
+                .or_llvm_err()?;
+            Ok(())
+        }
+
+        // ================================================================
+        // Raw byte/word leaves (0x53-0x58) — mem_raw's load/store over Int
+        // addresses.  Pre-arm these lowered the bodyless declaration stubs:
+        // every AOT load read 0 and every store no-op'd (the 26-test
+        // mem_raw cluster + the byte-dependent cbgr cluster in the
+        // 2026-07-03 sweep).  inttoptr + width-typed load/store; u8 loads
+        // zero-extend, i32 loads sign-extend (C `int` contract).
+        // ================================================================
+        Some(SystemSubOpcode::RawLoadU8)
+        | Some(SystemSubOpcode::RawLoadI32)
+        | Some(SystemSubOpcode::RawLoadI64) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "raw_load_addr")?;
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(addr, ptr_ty, "raw_load_ptr")
+                .or_llvm_err()?;
+            let value = match sub_opcode {
+                Some(SystemSubOpcode::RawLoadU8) => {
+                    let i8_ty = ctx.types().i8_type();
+                    let v = ctx
+                        .builder()
+                        .build_load(i8_ty, p, "raw_load_u8")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    ctx.builder()
+                        .build_int_z_extend(v, i64_ty, "raw_load_u8_z")
+                        .or_llvm_err()?
+                }
+                Some(SystemSubOpcode::RawLoadI32) => {
+                    let i32_ty = ctx.types().i32_type();
+                    let v = ctx
+                        .builder()
+                        .build_load(i32_ty, p, "raw_load_i32")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    ctx.builder()
+                        .build_int_s_extend(v, i64_ty, "raw_load_i32_s")
+                        .or_llvm_err()?
+                }
+                _ => ctx
+                    .builder()
+                    .build_load(i64_ty, p, "raw_load_i64")
+                    .or_llvm_err()?
+                    .into_int_value(),
+            };
+            ctx.set_register(dst, value.into());
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::RawStoreU8)
+        | Some(SystemSubOpcode::RawStoreI32)
+        | Some(SystemSubOpcode::RawStoreI64) => {
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "raw_store_addr")?;
+            let value = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "raw_store_val")?;
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(addr, ptr_ty, "raw_store_ptr")
+                .or_llvm_err()?;
+            match sub_opcode {
+                Some(SystemSubOpcode::RawStoreU8) => {
+                    let i8_ty = ctx.types().i8_type();
+                    let v = ctx
+                        .builder()
+                        .build_int_truncate(value, i8_ty, "raw_store_u8_t")
+                        .or_llvm_err()?;
+                    ctx.builder().build_store(p, v).or_llvm_err()?;
+                }
+                Some(SystemSubOpcode::RawStoreI32) => {
+                    let i32_ty = ctx.types().i32_type();
+                    let v = ctx
+                        .builder()
+                        .build_int_truncate(value, i32_ty, "raw_store_i32_t")
+                        .or_llvm_err()?;
+                    ctx.builder().build_store(p, v).or_llvm_err()?;
+                }
+                _ => {
+                    ctx.builder().build_store(p, value).or_llvm_err()?;
+                }
+            }
+            // The .vr contract returns Int 0.
+            ctx.set_register(dst, i64_ty.const_int(0, false).into());
+            Ok(())
+        }
+
         Some(SystemSubOpcode::TimeThreadCpuNanos) | Some(SystemSubOpcode::TimeProcessCpuNanos) => {
             // Use monotonic time as fallback for CPU time
             if operands.is_empty() {
