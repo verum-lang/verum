@@ -29261,6 +29261,57 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::FfiExtended { sub_op, operands });
             }
 
+            // Spinlock trio, flat TLS quartet, fences.  Value-returning ids
+            // use the dst-first convention; set/clear/unlock/fences carry
+            // args only (a dst byte would be decoded as the first operand —
+            // the exact DirectOpcode-shape bug this batch retires).
+            InlineSequenceId::SpinTryLockSeq
+            | InlineSequenceId::SpinUnlockSeq
+            | InlineSequenceId::SpinIsLockedSeq
+            | InlineSequenceId::TlsGetSeq
+            | InlineSequenceId::TlsSetSeq
+            | InlineSequenceId::TlsHasSeq
+            | InlineSequenceId::TlsClearSeq => {
+                let (sub_op, takes_dst): (u8, bool) = match seq_id {
+                    InlineSequenceId::SpinTryLockSeq => (0xB3, true),
+                    InlineSequenceId::SpinUnlockSeq => (0xB4, false),
+                    InlineSequenceId::SpinIsLockedSeq => (0xB5, true),
+                    InlineSequenceId::TlsGetSeq => (0x59, true),
+                    InlineSequenceId::TlsSetSeq => (0x5A, false),
+                    InlineSequenceId::TlsHasSeq => (0x5B, true),
+                    _ => (0x5C, false), // TlsClearSeq
+                };
+                let mut operands = Vec::<u8>::new();
+                if takes_dst {
+                    Self::write_reg(&mut operands, dest.0);
+                }
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended { sub_op, operands });
+            }
+
+            InlineSequenceId::FenceSeq => {
+                // Conservative SeqCst regardless of the requested ordering —
+                // a stronger fence is always correct, and the ordering
+                // argument is a runtime value the fixed-immediate encoding
+                // cannot carry.  (The old DirectOpcode route emitted
+                // AtomicFence WITHOUT its ordering byte — truncated.)
+                self.ctx.emit(Instruction::AtomicFence { ordering: 5 });
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+            InlineSequenceId::SpinHintSeq => {
+                // CPU pause hint — no Tier-0 effect; the old route
+                // (OpcodeWithMode(AtomicFence, 0xFF)) emitted a truncated
+                // AtomicFence missing its ordering byte.
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+            InlineSequenceId::CompilerFenceSeq => {
+                // Ordering-only: no Tier-0 runtime effect; AOT emits a
+                // singlethread fence at its arm.
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+
             InlineSequenceId::CbgrValidateBool => {
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);

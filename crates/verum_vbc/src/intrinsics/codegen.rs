@@ -1125,6 +1125,17 @@ impl<'a> IntrinsicCodegen<'a> {
             | InlineSequenceId::SleepNanosSeq
             | InlineSequenceId::SleepMillisSeq
             | InlineSequenceId::RealtimeNanosSeq => None,
+            // VBC path authoritative (see the raw-leaf note above).
+            InlineSequenceId::SpinTryLockSeq
+            | InlineSequenceId::SpinUnlockSeq
+            | InlineSequenceId::SpinIsLockedSeq
+            | InlineSequenceId::TlsGetSeq
+            | InlineSequenceId::TlsSetSeq
+            | InlineSequenceId::TlsHasSeq
+            | InlineSequenceId::TlsClearSeq
+            | InlineSequenceId::FenceSeq
+            | InlineSequenceId::CompilerFenceSeq
+            | InlineSequenceId::SpinHintSeq => None,
             InlineSequenceId::CbgrValidateBool => {
                 // No dedicated MIR op for reference validation; the VBC
                 // interpreter / LLVM arms own the semantics.

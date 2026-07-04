@@ -37,7 +37,6 @@ fn test_tls_get_base_is_non_null() {
 // Section 2: slot set / get / has / clear
 // =============================================================================
 
-@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
 @test
 fn test_slot_starts_absent_then_set_then_clear() {
     let slot = 240 as UInt8;
@@ -53,7 +52,6 @@ fn test_slot_starts_absent_then_set_then_clear() {
     assert(!tls_slot_has(slot));
 }
 
-@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
 @test
 fn test_slot_get_round_trips_the_pointer() {
     let slot = 241 as UInt8;

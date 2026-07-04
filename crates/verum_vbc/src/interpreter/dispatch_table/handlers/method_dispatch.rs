@@ -8891,14 +8891,24 @@ pub(super) fn dispatch_array_method(
                 // len == 0 with no allocation yet: a null element pointer
                 // is the honest answer — there is no dereferenceable
                 // element.  (`ptr_is_null` lets callers detect this.)
-                return Ok(Some(Value::from_ptr(std::ptr::null_mut::<u8>())));
+                return Ok(Some(Value::from_i64(0)));
             }
-            let elems = unsafe { backing.add(heap::OBJECT_HEADER_SIZE) as *mut u8 };
-            return Ok(Some(Value::from_ptr(elems)));
+            let elems = unsafe { backing.add(heap::OBJECT_HEADER_SIZE) };
+            // INT-tagged address, NOT Value::from_ptr: as_ptr returns a
+            // Tier-2 raw pointer (`&unsafe T`), and a pointer-tagged Value
+            // is treated as a droppable heap object — DropRef at scope
+            // exit would reinterpret the ELEMENT BYTES as an ObjectHeader
+            // and chase a garbage descriptor (SIGSEGV that depended on the
+            // test's stored VALUE: 0xF0 at element[0] crashed, 0xFF
+            // didn't).  Every raw-address consumer (atomic ops, ptr_add,
+            // mem_raw) reads addresses through the dual
+            // int-or-pointer extraction, so the int tag is fully
+            // interoperable — and inert to the drop machinery.
+            return Ok(Some(Value::from_i64(elems as i64)));
         }
         // Inline-element arrays: data really does start right after the header.
-        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut u8 };
-        return Ok(Some(Value::from_ptr(data_ptr)));
+        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
+        return Ok(Some(Value::from_i64(data_ptr as i64)));
     }
 
     // `as_slice` / `as_mut_slice` are identity casts at runtime — a

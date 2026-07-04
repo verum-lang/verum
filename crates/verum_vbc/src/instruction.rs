@@ -5307,6 +5307,17 @@ pub enum SystemSubOpcode {
     RawLoadI64 = 0x57,
     RawStoreI64 = 0x58,
 
+    /// Flat TLS slot quartet — `tls_slot_get/set/has/clear` (runtime/tls.vr).
+    /// History: the quartet rode DirectOpcode(TlsGet/TlsSet), whose emission
+    /// writes DST FIRST — TlsSet then read the destination register index as
+    /// the SLOT, so `tls_slot_set(241, p)` wrote to slot <temp-reg-index>
+    /// and the whole set/get/has round-trip broke.  Formats:
+    /// get `dst,slot` / set `slot,value` / has `dst,slot` / clear `slot`.
+    TlsSlotGetF = 0x59,
+    TlsSlotSetF = 0x5A,
+    TlsSlotHasF = 0x5B,
+    TlsSlotClearF = 0x5C,
+
     // ========================================================================
     // Raw Pointer Operations (0x60-0x6F)
     // ========================================================================
@@ -5723,6 +5734,15 @@ pub enum SystemSubOpcode {
     /// (CAS loop with `pause`/`yield` backoff). Interpreter spins via
     /// AtomicU8::compare_exchange + `std::thread::yield_now`.
     SpinlockLock = 0xB2,
+    /// Spinlock trio completing 0xB2.  History: try_lock rode
+    /// OpcodeWithSize(AtomicCas,4) with ONE argument — the CAS read unset
+    /// expected/desired operand registers and always failed; unlock rode
+    /// AtomicStore with the VALUE operand missing; is_locked returned the
+    /// raw u32 where the signature promises Bool.  Formats:
+    /// try_lock `dst,lock` (Bool) / unlock `lock` / is_locked `dst,lock` (Bool).
+    SpinlockTryLock = 0xB3,
+    SpinlockUnlock = 0xB4,
+    SpinlockIsLocked = 0xB5,
 }
 
 /// Backward-compatibility alias.  The enum was renamed
@@ -6055,6 +6075,10 @@ impl SystemSubOpcode {
             0x56 => Some(Self::RawStoreI32),
             0x57 => Some(Self::RawLoadI64),
             0x58 => Some(Self::RawStoreI64),
+            0x59 => Some(Self::TlsSlotGetF),
+            0x5A => Some(Self::TlsSlotSetF),
+            0x5B => Some(Self::TlsSlotHasF),
+            0x5C => Some(Self::TlsSlotClearF),
             // Raw Pointer Operations
             0x60 => Some(Self::DerefRaw),
             0x61 => Some(Self::DerefMutRaw),
@@ -6103,6 +6127,9 @@ impl SystemSubOpcode {
             0xB0 => Some(Self::FutexWait),
             0xB1 => Some(Self::FutexWake),
             0xB2 => Some(Self::SpinlockLock),
+            0xB3 => Some(Self::SpinlockTryLock),
+            0xB4 => Some(Self::SpinlockUnlock),
+            0xB5 => Some(Self::SpinlockIsLocked),
             _ => None,
         }
     }
@@ -6210,6 +6237,10 @@ impl SystemSubOpcode {
             Self::RawStoreI32          => m!("RAW_STORE_I32",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
             Self::RawLoadI64          => m!("RAW_LOAD_I64",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
             Self::RawStoreI64          => m!("RAW_STORE_I64",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::TlsSlotGetF          => m!("TLS_SLOT_GET",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::TlsSlotSetF          => m!("TLS_SLOT_SET",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::TlsSlotHasF          => m!("TLS_SLOT_HAS",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::TlsSlotClearF          => m!("TLS_SLOT_CLEAR",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
 
             // ===== Raw Pointer Operations (0x60-0x6F) =====
             Self::DerefRaw               => m!("FFI_DEREF_RAW",              RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
@@ -6265,6 +6296,9 @@ impl SystemSubOpcode {
             Self::FutexWait              => m!("SYNC_FUTEX_WAIT",            SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
             Self::FutexWake              => m!("SYNC_FUTEX_WAKE",            SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
             Self::SpinlockLock           => m!("SYNC_SPINLOCK_LOCK",         SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::SpinlockTryLock           => m!("SYNC_SPIN_TRY_LOCK",         SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::SpinlockUnlock            => m!("SYNC_SPIN_UNLOCK",           SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::SpinlockIsLocked          => m!("SYNC_SPIN_IS_LOCKED",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
         }
     }
 

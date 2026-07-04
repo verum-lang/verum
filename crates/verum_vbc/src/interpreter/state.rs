@@ -684,6 +684,14 @@ pub struct InterpreterState {
     /// to detect CBGR header pointers and use raw u32 field access instead of
     /// the normal ObjectHeader + Value-sized field layout.
     pub cbgr_allocations: HashSet<usize>,
+    /// Flat user-visible TLS slots backing the `tls_slot_get/set/has/clear`
+    /// stdlib quartet (FfiExtended 0x59-0x5C).  DELIBERATELY separate from
+    /// the context system's internal TLS table — the runtime populates that
+    /// one (a probe found slot 245 already holding a context object), so
+    /// sharing it made user slots collide with `provide` machinery.  The
+    /// AOT twin is the `__verum_tls_slots` thread_local global — same
+    /// isolation.
+    pub user_tls_slots: std::collections::HashMap<u16, Value>,
 
     /// Tracks the source pointer of the most recent CBGR data deref.
     /// When Deref reads a Value from a CBGR data pointer, this records
@@ -2621,6 +2629,7 @@ impl InterpreterState {
             cbgr_epoch: 1,
             cbgr_bypass_depth: 0,
             cbgr_allocations: HashSet::new(),
+            user_tls_slots: std::collections::HashMap::new(),
             cbgr_deref_source: None,
             cbgr_mutable_ptrs: HashSet::new(),
             cbgr_ref_creation_epoch: std::collections::HashMap::new(),

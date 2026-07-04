@@ -3617,6 +3617,28 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
+            InlineSequenceId::SpinTryLockSeq
+            | InlineSequenceId::SpinIsLockedSeq
+            | InlineSequenceId::TlsGetSeq
+            | InlineSequenceId::TlsHasSeq => self.emit(MlirOp {
+                name: "verum.sync.op".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::SpinUnlockSeq
+            | InlineSequenceId::TlsSetSeq
+            | InlineSequenceId::TlsClearSeq
+            | InlineSequenceId::FenceSeq
+            | InlineSequenceId::CompilerFenceSeq
+            | InlineSequenceId::SpinHintSeq => self.emit(MlirOp {
+                name: "verum.sync.effect".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::CbgrValidateBool => self.emit(MlirOp {
                 name: "verum.cbgr.validate".to_string(),
                 attrs: vec![],

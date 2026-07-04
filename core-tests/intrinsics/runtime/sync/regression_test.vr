@@ -12,7 +12,6 @@
 mount core.prelude.*;
 mount core.intrinsics.runtime.sync.{spinlock_try_lock, spinlock_unlock};
 
-@ignore("SYNC-TLS-WIRING-1 (task #18) — registry strategy shape-misuse: spinlock family emits AtomicCas/AtomicLoad with missing operands; tls slot set/get/has trio out of sync. Unpin after the wiring fix.")
 @test
 fn regression_spinlock_cell_is_element_not_header() {
     let mut cell: List<UInt32> = [0 as UInt32];

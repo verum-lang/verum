@@ -1067,6 +1067,23 @@ pub enum InlineSequenceId {
     SleepNanosSeq,
     SleepMillisSeq,
     RealtimeNanosSeq,
+    /// spinlock trio (FfiExtended 0xB3-0xB5)
+    SpinTryLockSeq,
+    SpinUnlockSeq,
+    SpinIsLockedSeq,
+    /// flat TLS slot quartet (FfiExtended 0x59-0x5C)
+    TlsGetSeq,
+    TlsSetSeq,
+    TlsHasSeq,
+    TlsClearSeq,
+    /// memory_fence → AtomicFence with the SeqCst immediate; the
+    /// DirectOpcode route emitted the opcode WITHOUT its ordering byte
+    /// (truncated instruction → InvalidBytecode at the call site).
+    FenceSeq,
+    /// compiler_fence — ordering-only; runtime no-op on Tier 0.
+    CompilerFenceSeq,
+    /// spin_hint / spin_loop_hint — CPU pause hint; Tier-0 no-op.
+    SpinHintSeq,
 }
 
 /// Complete intrinsic definition.
@@ -2154,7 +2171,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Inline],
         param_count: 0,
         return_count: 0,
-        strategy: CodegenStrategy::OpcodeWithMode(Opcode::AtomicFence, 0xFF), // special mode
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SpinHintSeq),
         mlir_op: Some("llvm.intr.x86.sse2.pause"),
         doc: "CPU spin hint for busy-waiting",
     },
@@ -2164,7 +2181,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::SyncBarrier],
         param_count: 1, // ordering
         return_count: 0,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::AtomicFence),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FenceSeq),
         mlir_op: Some("llvm.fence"),
         doc: "Memory fence with specified ordering",
     },
@@ -2174,7 +2191,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure], // No runtime cost
         param_count: 1,                // ordering (u8)
         return_count: 0,
-        strategy: CodegenStrategy::CompileTimeConstant, // Compile-time only
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CompilerFenceSeq), // Compile-time only
         mlir_op: Some("llvm.compiler.fence"),
         doc: "Compiler fence (prevents reordering)",
     },
@@ -2908,7 +2925,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Inline, IntrinsicHint::Hot],
         param_count: 1, // slot
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TlsGet),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TlsGetSeq),
         mlir_op: Some("llvm.load"),
         doc: "Get value from TLS slot (~2ns)",
     },
@@ -2918,7 +2935,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Inline, IntrinsicHint::Hot],
         param_count: 2, // slot, value
         return_count: 0,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TlsSet),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TlsSetSeq),
         mlir_op: Some("llvm.store"),
         doc: "Set value in TLS slot",
     },
@@ -2928,7 +2945,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Inline],
         param_count: 1, // slot
         return_count: 0,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TlsSet), // with null value
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TlsClearSeq), // with null value
         mlir_op: Some("llvm.store"),
         doc: "Clear TLS slot (set to null)",
     },
@@ -2938,7 +2955,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Inline, IntrinsicHint::Hot],
         param_count: 1, // slot
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TlsGet), // + null check
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TlsHasSeq), // + null check
         mlir_op: Some("llvm.load"),
         doc: "Check if TLS slot is set",
     },
@@ -5154,7 +5171,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Inline, IntrinsicHint::MemoryEffect],
         param_count: 1,                                                  // lock
         return_count: 1,                                                 // bool
-        strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicCas, 4), // CAS 0→1
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SpinTryLockSeq),
         mlir_op: Some("llvm.cmpxchg"),
         doc: "Try to acquire spinlock",
     },
@@ -5174,7 +5191,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Inline, IntrinsicHint::MemoryEffect],
         param_count: 1, // lock
         return_count: 0,
-        strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicStore, 4), // store 0
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SpinUnlockSeq),
         mlir_op: Some("llvm.store atomic"),
         doc: "Release spinlock",
     },
@@ -5184,7 +5201,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Inline, IntrinsicHint::MemoryEffect],
         param_count: 1,  // lock
         return_count: 1, // bool
-        strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicLoad, 4),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SpinIsLockedSeq),
         mlir_op: Some("llvm.load atomic"),
         doc: "Check if spinlock is held",
     },

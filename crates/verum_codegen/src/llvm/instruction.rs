@@ -24884,6 +24884,170 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        // ================================================================
+        // Flat TLS slot quartet (0x59-0x5C): a module thread_local
+        // [256 x i64] backs the slots — no runtime externs needed and the
+        // semantics match the interpreter's flat table.
+        // ================================================================
+        Some(SystemSubOpcode::TlsSlotGetF)
+        | Some(SystemSubOpcode::TlsSlotSetF)
+        | Some(SystemSubOpcode::TlsSlotHasF)
+        | Some(SystemSubOpcode::TlsSlotClearF) => {
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let slots_ty = i64_ty.array_type(256);
+            let global = module.get_global("__verum_tls_slots").unwrap_or_else(|| {
+                let g = module.add_global(slots_ty, None, "__verum_tls_slots");
+                g.set_thread_local(true);
+                g.set_initializer(&slots_ty.const_zero());
+                g
+            });
+            let base = global.as_pointer_value();
+            let zero = i64_ty.const_int(0, false);
+            let value_returning = matches!(
+                sub_opcode,
+                Some(SystemSubOpcode::TlsSlotGetF) | Some(SystemSubOpcode::TlsSlotHasF)
+            );
+            let slot_idx = if value_returning { 1 } else { 0 };
+            if operands.len() <= slot_idx {
+                return Ok(());
+            }
+            let slot = as_i64(ctx, ctx.get_register(op_reg(operands, slot_idx))?, "tls_slot")?;
+            let gep = unsafe {
+                ctx.builder()
+                    .build_gep(slots_ty, base, &[zero, slot], "tls_gep")
+                    .or_llvm_err()?
+            };
+            match sub_opcode {
+                Some(SystemSubOpcode::TlsSlotGetF) => {
+                    let dst = op_reg(operands, 0);
+                    let v = ctx
+                        .builder()
+                        .build_load(i64_ty, gep, "tls_load")
+                        .or_llvm_err()?;
+                    ctx.set_register(dst, v);
+                }
+                Some(SystemSubOpcode::TlsSlotHasF) => {
+                    let dst = op_reg(operands, 0);
+                    let v = ctx
+                        .builder()
+                        .build_load(i64_ty, gep, "tls_load")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    let occupied = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::NE,
+                            v,
+                            i64_ty.const_int(0, false),
+                            "tls_has",
+                        )
+                        .or_llvm_err()?;
+                    ctx.set_register(dst, occupied.into());
+                }
+                Some(SystemSubOpcode::TlsSlotSetF) => {
+                    if operands.len() < 2 {
+                        return Ok(());
+                    }
+                    let value =
+                        as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "tls_val")?;
+                    ctx.builder().build_store(gep, value).or_llvm_err()?;
+                }
+                _ => {
+                    // TlsSlotClearF
+                    ctx.builder()
+                        .build_store(gep, i64_ty.const_int(0, false))
+                        .or_llvm_err()?;
+                }
+            }
+            Ok(())
+        }
+
+        // ================================================================
+        // Spinlock trio (0xB3-0xB5) — u32 cmpxchg / store-0 / load-compare
+        // per the declared *mut UInt32 contract.  SeqCst mirrors the
+        // existing cmpxchg precedents in this file; ordering refinement is
+        // a perf follow-up, not a correctness one.
+        // ================================================================
+        Some(SystemSubOpcode::SpinlockTryLock) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "spin_addr")?;
+            let i32_ty = ctx.types().i32_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(addr, ptr_ty, "spin_ptr")
+                .or_llvm_err()?;
+            let cas = ctx
+                .builder()
+                .build_cmpxchg(
+                    p,
+                    i32_ty.const_int(0, false),
+                    i32_ty.const_int(1, false),
+                    AtomicOrdering::SequentiallyConsistent,
+                    AtomicOrdering::SequentiallyConsistent,
+                )
+                .or_llvm_err()?;
+            let ok = ctx
+                .builder()
+                .build_extract_value(cas, 1, "spin_acquired")
+                .or_llvm_err()?;
+            ctx.set_register(dst, ok);
+            Ok(())
+        }
+        Some(SystemSubOpcode::SpinlockUnlock) => {
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 0))?, "spin_addr")?;
+            let i32_ty = ctx.types().i32_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(addr, ptr_ty, "spin_ptr")
+                .or_llvm_err()?;
+            let st = ctx
+                .builder()
+                .build_store(p, i32_ty.const_int(0, false))
+                .or_llvm_err()?;
+            let _ = st.set_atomic_ordering(AtomicOrdering::SequentiallyConsistent);
+            Ok(())
+        }
+        Some(SystemSubOpcode::SpinlockIsLocked) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let addr = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "spin_addr")?;
+            let i32_ty = ctx.types().i32_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(addr, ptr_ty, "spin_ptr")
+                .or_llvm_err()?;
+            let ld = ctx
+                .builder()
+                .build_load(i32_ty, p, "spin_load")
+                .or_llvm_err()?;
+            let locked = ctx
+                .builder()
+                .build_int_compare(
+                    IntPredicate::NE,
+                    ld.into_int_value(),
+                    i32_ty.const_int(0, false),
+                    "spin_locked",
+                )
+                .or_llvm_err()?;
+            ctx.set_register(dst, locked.into());
+            Ok(())
+        }
+
         Some(SystemSubOpcode::TimeThreadCpuNanos) | Some(SystemSubOpcode::TimeProcessCpuNanos) => {
             // Use monotonic time as fallback for CPU time
             if operands.is_empty() {

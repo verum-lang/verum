@@ -1121,8 +1121,10 @@ pub(in super::super) fn handle_ffi_extended(
             let new_addr = new_addr.ok_or(InterpreterError::IntegerOverflow {
                 operation: "PtrAdd",
             })?;
-            let result = new_addr as *mut u8;
-            state.set_reg(dst, Value::from_ptr(result));
+            // Int-tagged address — same rationale as the as_ptr intercept:
+            // a pointer-tagged interior address becomes a droppable-looking
+            // heap object and DropRef chases element bytes as a header.
+            state.set_reg(dst, Value::from_i64(new_addr as i64));
             Ok(DispatchResult::Continue)
         }
 
@@ -1154,8 +1156,10 @@ pub(in super::super) fn handle_ffi_extended(
             let new_addr = new_addr.ok_or(InterpreterError::IntegerOverflow {
                 operation: "PtrSub",
             })?;
-            let result = new_addr as *mut u8;
-            state.set_reg(dst, Value::from_ptr(result));
+            // Int-tagged address — same rationale as the as_ptr intercept:
+            // a pointer-tagged interior address becomes a droppable-looking
+            // heap object and DropRef chases element bytes as a header.
+            state.set_reg(dst, Value::from_i64(new_addr as i64));
             Ok(DispatchResult::Continue)
         }
 
@@ -3123,6 +3127,102 @@ pub(in super::super) fn handle_ffi_extended(
             // the interpreter has no way to match the exact Layout
             // passed at allocation time without carrying extra metadata.
             // Preferring leak over double-free matches __dealloc_raw.
+            Ok(DispatchResult::Continue)
+        }
+
+        // =================================================================
+        // Flat TLS slot quartet (0x59-0x5C) — wraps the same
+        // state.tls_get/tls_set storage the TlsGet/TlsSet OPCODES use, with
+        // the shapes the stdlib declarations promise (Bool has, nil clear).
+        // =================================================================
+        Some(SystemSubOpcode::TlsSlotGetF) => {
+            let dst = read_reg(state)?;
+            let slot_reg = read_reg(state)?;
+            let slot = state.get_reg(slot_reg).as_integer_compatible() as usize;
+            let value = state
+                .user_tls_slots
+                .get(&(slot as u16))
+                .copied()
+                .unwrap_or_else(Value::nil);
+            state.set_reg(dst, value);
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::TlsSlotSetF) => {
+            let slot_reg = read_reg(state)?;
+            let val_reg = read_reg(state)?;
+            let slot = state.get_reg(slot_reg).as_integer_compatible() as usize;
+            let value = state.get_reg(val_reg);
+            state.user_tls_slots.insert(slot as u16, value);
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::TlsSlotHasF) => {
+            let dst = read_reg(state)?;
+            let slot_reg = read_reg(state)?;
+            let slot = state.get_reg(slot_reg).as_integer_compatible() as usize;
+            let occupied = state
+                .user_tls_slots
+                .get(&(slot as u16))
+                .map(|v| !v.is_nil())
+                .unwrap_or(false);
+            state.set_reg(dst, Value::from_bool(occupied));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::TlsSlotClearF) => {
+            let slot_reg = read_reg(state)?;
+            let slot = state.get_reg(slot_reg).as_integer_compatible() as usize;
+            state.user_tls_slots.remove(&(slot as u16));
+            Ok(DispatchResult::Continue)
+        }
+
+        // =================================================================
+        // Spinlock trio (0xB3-0xB5) — AtomicU32 per the declared
+        // `*mut UInt32` contract.  (SpinlockLock at 0xB2 predates this and
+        // spins an AtomicU8 — low-byte-compatible on little-endian; the
+        // divergence is recorded in the sync audit.)
+        // =================================================================
+        Some(SystemSubOpcode::SpinlockTryLock) => {
+            let dst = read_reg(state)?;
+            let lock_reg = read_reg(state)?;
+            let addr = value_as_addr(state.get_reg(lock_reg));
+            let acquired = if addr != 0 {
+                // SAFETY: caller warrants a live u32 lock cell.
+                let atomic = unsafe { &*(addr as *const std::sync::atomic::AtomicU32) };
+                atomic
+                    .compare_exchange(
+                        0,
+                        1,
+                        std::sync::atomic::Ordering::Acquire,
+                        std::sync::atomic::Ordering::Relaxed,
+                    )
+                    .is_ok()
+            } else {
+                false
+            };
+            state.set_reg(dst, Value::from_bool(acquired));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::SpinlockUnlock) => {
+            let lock_reg = read_reg(state)?;
+            let addr = value_as_addr(state.get_reg(lock_reg));
+            if addr != 0 {
+                // SAFETY: as above.
+                let atomic = unsafe { &*(addr as *const std::sync::atomic::AtomicU32) };
+                atomic.store(0, std::sync::atomic::Ordering::Release);
+            }
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::SpinlockIsLocked) => {
+            let dst = read_reg(state)?;
+            let lock_reg = read_reg(state)?;
+            let addr = value_as_addr(state.get_reg(lock_reg));
+            let locked = if addr != 0 {
+                // SAFETY: as above.
+                let atomic = unsafe { &*(addr as *const std::sync::atomic::AtomicU32) };
+                atomic.load(std::sync::atomic::Ordering::Acquire) != 0
+            } else {
+                false
+            };
+            state.set_reg(dst, Value::from_bool(locked));
             Ok(DispatchResult::Continue)
         }
 

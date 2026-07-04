@@ -9,6 +9,19 @@ idempotent clear + balanced frame push/pop + non-null base.  HIGH slots
 context system owns the low slots — hygiene (clear before finish) is part
 of each test.
 
+## Resolution (2026-07-04)
+
+Slot trio FIXED — suite 6/6 interp: the quartet rode
+`DirectOpcode(TlsGet/TlsSet)` whose emission writes DST FIRST, so TlsSet
+read the destination register index as the SLOT (writes landed in slot
+<temp-reg>); `has` returned the stored pointer where Bool was promised;
+`clear`'s value operand was missing.  Now `SystemSubOpcode` 0x59-0x5C
+with the declared shapes — and a DEDICATED `user_tls_slots` store:
+probing found the context system's own table already populating high
+slots (245 held a context object), so user slots get their own map
+(the AOT twin `__verum_tls_slots` thread_local global has the same
+isolation).  AOT residual: tls_get_base arm (task #5).
+
 ## Coverage decisions
 
 * `tls_read_ptr/write_ptr/read_i32/write_i32/read_usize/write_usize`
