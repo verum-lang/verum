@@ -196,6 +196,12 @@ public fn script_engine_set_global_bool(engine: RawScriptEngine, name: Text, val
 @intrinsic("script_engine_set_global_float")
 public fn script_engine_set_global_float(engine: RawScriptEngine, name: Text, value: Float);
 
+/// Host: set ANY value (a `List`, `Map`, nested collection, or scalar) as a
+/// global — the channel for passing structured data in. Read inside the script
+/// with `script_global_list` / `script_global_map`.
+@intrinsic("script_engine_set_global_value")
+public fn script_engine_set_global_value<T>(engine: RawScriptEngine, name: Text, value: T);
+
 /// Script: the dynamic-kind tag of a host/shared global (canonical
 /// `ScriptValue` tag, see `script_outcome_kind`):
 /// `0`=Nil, `1`=Bool, `2`=Int, `3`=Float, `4`=Text, `5`=List, `6`=Map,

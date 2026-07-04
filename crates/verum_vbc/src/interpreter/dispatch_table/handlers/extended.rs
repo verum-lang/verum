@@ -252,6 +252,9 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::ScriptEngineLastErrorKind) => {
             super::script_runtime::handle_script_engine_last_error_kind(state)
         }
+        Some(ExtendedSubOpcode::ScriptEngineSetGlobalValue) => {
+            super::script_runtime::handle_script_engine_set_global_value(state)
+        }
         Some(ExtendedSubOpcode::ScriptSessionCall) => {
             super::script_runtime::handle_script_session_call(state)
         }
