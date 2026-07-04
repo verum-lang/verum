@@ -2615,6 +2615,65 @@ impl<'ctx> PlatformIR<'ctx> {
             module.add_function("verum_futex_wake", fn_type, None);
         }
 
+        // verum_spinlock_lock(lock_addr: i64) → i64 (always 0)
+        // Pure-atomics CAS spin loop (0→1 acquire) with a sleep backoff —
+        // the FfiExtended SpinlockLock (0xB2) arm calls this; it was
+        // previously declared nowhere, so every AOT spinlock_lock call
+        // site link-failed or read garbage (the is_locked conformance
+        // test was the canary).  Futex wait/wake remain the OS-parking
+        // follow-up; this lock needs no OS at all.
+        let spin_type = i64_type.fn_type(&[i64_type.into()], false);
+        let spin_fn =
+            super::error::get_or_declare_function(module, "verum_spinlock_lock", spin_type);
+        if spin_fn.count_basic_blocks() == 0 {
+            let builder = ctx.create_builder();
+            let entry = ctx.append_basic_block(spin_fn, "entry");
+            let loop_bb = ctx.append_basic_block(spin_fn, "spin");
+            let retry_bb = ctx.append_basic_block(spin_fn, "retry");
+            let done_bb = ctx.append_basic_block(spin_fn, "done");
+            builder.position_at_end(entry);
+            let addr = spin_fn
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_int_value();
+            let lock_ptr = builder
+                .build_int_to_ptr(addr, ptr_type, "lock_ptr")
+                .or_llvm_err()?;
+            builder.build_unconditional_branch(loop_bb).or_llvm_err()?;
+            builder.position_at_end(loop_bb);
+            let cas = builder
+                .build_cmpxchg(
+                    lock_ptr,
+                    i32_type.const_zero(),
+                    i32_type.const_int(1, false),
+                    verum_llvm::AtomicOrdering::SequentiallyConsistent,
+                    verum_llvm::AtomicOrdering::SequentiallyConsistent,
+                )
+                .or_llvm_err()?;
+            let acquired = builder
+                .build_extract_value(cas, 1, "acquired")
+                .or_llvm_err()?
+                .into_int_value();
+            builder
+                .build_conditional_branch(acquired, done_bb, retry_bb)
+                .or_llvm_err()?;
+            builder.position_at_end(retry_bb);
+            let sleep_type = void_type.fn_type(&[i64_type.into()], false);
+            let sleep_fn = super::error::get_or_declare_function(
+                module,
+                "verum_time_sleep_nanos",
+                sleep_type,
+            );
+            builder
+                .build_call(sleep_fn, &[i64_type.const_int(1_000, false).into()], "")
+                .or_llvm_err()?;
+            builder.build_unconditional_branch(loop_bb).or_llvm_err()?;
+            builder.position_at_end(done_bb);
+            builder
+                .build_return(Some(&i64_type.const_zero()))
+                .or_llvm_err()?;
+        }
+
         // verum_mutex_init(mutex_ptr: ptr) → void
         // Stores 0 to the i32 at mutex_ptr
         let init_type = void_type.fn_type(&[ptr_type.into()], false);

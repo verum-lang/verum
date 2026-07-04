@@ -24972,6 +24972,201 @@ fn lower_ffi_extended<'ctx>(
         // existing cmpxchg precedents in this file; ordering refinement is
         // a perf follow-up, not a correctness one.
         // ================================================================
+        // ================================================================
+        // tls_get_base (0x5D) — address of the user-TLS thread_local
+        // global (same backing as the 0x59-0x5C quartet).
+        // ================================================================
+        Some(SystemSubOpcode::TlsGetBaseF) => {
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let slots_ty = i64_ty.array_type(256);
+            let global = module.get_global("__verum_tls_slots").unwrap_or_else(|| {
+                let g = module.add_global(slots_ty, None, "__verum_tls_slots");
+                g.set_thread_local(true);
+                g.set_initializer(&slots_ty.const_zero());
+                g
+            });
+            let addr = ctx
+                .builder()
+                .build_ptr_to_int(global.as_pointer_value(), i64_ty, "tls_base")
+                .or_llvm_err()?;
+            ctx.set_register(dst, addr.into());
+            Ok(())
+        }
+
+        // ================================================================
+        // WaitGroup family (0xB6-0xBB): an 8-byte cbgr allocation holding
+        // an atomic i64 counter; the handle IS the address.  The interp's
+        // handle-table impl is its tier twin (opaque handles per tier).
+        // ================================================================
+        Some(SystemSubOpcode::WaitgroupNew) => {
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let alloc_fn = module.get_function("verum_cbgr_allocate").unwrap_or_else(|| {
+                let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
+                module.add_function("verum_cbgr_allocate", fn_ty, None)
+            });
+            let p = ctx
+                .builder()
+                .build_call(alloc_fn, &[i64_ty.const_int(8, false).into()], "wg_alloc")
+                .or_llvm_err()?
+                .basic_value_or("wg_alloc returned no value")?;
+            let pp = p.into_pointer_value();
+            ctx.builder()
+                .build_store(pp, i64_ty.const_int(0, false))
+                .or_llvm_err()?;
+            let handle = ctx
+                .builder()
+                .build_ptr_to_int(pp, i64_ty, "wg_handle")
+                .or_llvm_err()?;
+            ctx.set_register(dst, handle.into());
+            Ok(())
+        }
+        Some(SystemSubOpcode::WaitgroupAdd)
+        | Some(SystemSubOpcode::WaitgroupDone) => {
+            let need = if matches!(sub_opcode, Some(SystemSubOpcode::WaitgroupAdd)) { 3 } else { 2 };
+            if operands.len() < need {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
+                .or_llvm_err()?;
+            let delta = if matches!(sub_opcode, Some(SystemSubOpcode::WaitgroupAdd)) {
+                as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "wg_delta")?
+            } else {
+                i64_ty.const_int(1, false)
+            };
+            let op = if matches!(sub_opcode, Some(SystemSubOpcode::WaitgroupAdd)) {
+                AtomicRMWBinOp::Add
+            } else {
+                AtomicRMWBinOp::Sub
+            };
+            ctx.builder()
+                .build_atomicrmw(op, p, delta, AtomicOrdering::SequentiallyConsistent)
+                .map_err(|e| LlvmLoweringError::BuilderError(format!("wg rmw: {}", e).into()))?;
+            ctx.set_register(dst, i64_ty.const_int(0, false).into());
+            Ok(())
+        }
+        Some(SystemSubOpcode::WaitgroupTryWait) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
+                .or_llvm_err()?;
+            let v = ctx
+                .builder()
+                .build_load(i64_ty, p, "wg_count")
+                .or_llvm_err()?
+                .into_int_value();
+            let is_zero = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, v, i64_ty.const_int(0, false), "wg_zero")
+                .or_llvm_err()?;
+            let as_i64_val = ctx
+                .builder()
+                .build_int_z_extend(is_zero, i64_ty, "wg_try")
+                .or_llvm_err()?;
+            ctx.set_register(dst, as_i64_val.into());
+            Ok(())
+        }
+        Some(SystemSubOpcode::WaitgroupWait) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
+                .or_llvm_err()?;
+            // Spin-wait loop: load; ==0 → done; else sleep 100µs and retry.
+            // Correct-first; futex parking is the perf follow-up (task #5).
+            let cur_bb = ctx
+                .builder()
+                .get_insert_block()
+                .ok_or_else(|| LlvmLoweringError::internal("wg wait: no insert block"))?;
+            let function = cur_bb
+                .get_parent()
+                .ok_or_else(|| LlvmLoweringError::internal("wg wait: no parent fn"))?;
+            let loop_bb = ctx.llvm_context().append_basic_block(function, "wg_wait_loop");
+            let done_bb = ctx.llvm_context().append_basic_block(function, "wg_wait_done");
+            ctx.builder().build_unconditional_branch(loop_bb).or_llvm_err()?;
+            ctx.builder().position_at_end(loop_bb);
+            let v = ctx
+                .builder()
+                .build_load(i64_ty, p, "wg_count")
+                .or_llvm_err()?
+                .into_int_value();
+            let is_zero = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, v, i64_ty.const_int(0, false), "wg_zero")
+                .or_llvm_err()?;
+            let sleep_bb = ctx.llvm_context().append_basic_block(function, "wg_wait_sleep");
+            ctx.builder()
+                .build_conditional_branch(is_zero, done_bb, sleep_bb)
+                .or_llvm_err()?;
+            ctx.builder().position_at_end(sleep_bb);
+            let module = ctx.get_module();
+            let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into()], false);
+            let sleep_fn = module
+                .get_function("verum_time_sleep_nanos")
+                .unwrap_or_else(|| module.add_function("verum_time_sleep_nanos", fn_type, None));
+            ctx.builder()
+                .build_call(sleep_fn, &[i64_ty.const_int(100_000, false).into()], "")
+                .or_llvm_err()?;
+            ctx.builder().build_unconditional_branch(loop_bb).or_llvm_err()?;
+            ctx.builder().position_at_end(done_bb);
+            ctx.set_register(dst, i64_ty.const_int(0, false).into());
+            Ok(())
+        }
+        Some(SystemSubOpcode::WaitgroupDestroy) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let wg = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "wg_handle")?;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let dealloc_fn = module
+                .get_function("verum_cbgr_deallocate")
+                .unwrap_or_else(|| {
+                    let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
+                    module.add_function("verum_cbgr_deallocate", fn_ty, None)
+                });
+            let p = ctx
+                .builder()
+                .build_int_to_ptr(wg, ptr_ty, "wg_ptr")
+                .or_llvm_err()?;
+            ctx.builder()
+                .build_call(dealloc_fn, &[p.into()], "")
+                .or_llvm_err()?;
+            ctx.set_register(dst, i64_ty.const_int(0, false).into());
+            Ok(())
+        }
+
         Some(SystemSubOpcode::SpinlockTryLock) => {
             if operands.len() < 2 {
                 return Ok(());

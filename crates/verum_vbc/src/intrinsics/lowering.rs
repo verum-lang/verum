@@ -3610,7 +3610,10 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
-            InlineSequenceId::RealtimeNanosSeq => self.emit(MlirOp {
+            InlineSequenceId::WgNewSeq
+            | InlineSequenceId::WgTryWaitSeq
+            | InlineSequenceId::TlsGetBaseSeq
+            | InlineSequenceId::RealtimeNanosSeq => self.emit(MlirOp {
                 name: "verum.time.realtime_nanos".to_string(),
                 attrs: vec![],
                 result_types: vec![MlirType::I64],
@@ -3632,7 +3635,11 @@ impl IntrinsicLowering {
             | InlineSequenceId::TlsClearSeq
             | InlineSequenceId::FenceSeq
             | InlineSequenceId::CompilerFenceSeq
-            | InlineSequenceId::SpinHintSeq => self.emit(MlirOp {
+            | InlineSequenceId::SpinHintSeq
+            | InlineSequenceId::WgAddSeq
+            | InlineSequenceId::WgDoneSeq
+            | InlineSequenceId::WgWaitSeq
+            | InlineSequenceId::WgDestroySeq => self.emit(MlirOp {
                 name: "verum.sync.effect".to_string(),
                 attrs: vec![],
                 result_types: vec![],

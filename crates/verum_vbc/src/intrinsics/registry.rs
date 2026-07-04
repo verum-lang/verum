@@ -1084,6 +1084,15 @@ pub enum InlineSequenceId {
     CompilerFenceSeq,
     /// spin_hint / spin_loop_hint — CPU pause hint; Tier-0 no-op.
     SpinHintSeq,
+    /// waitgroup family (FfiExtended 0xB6-0xBB)
+    WgNewSeq,
+    WgAddSeq,
+    WgDoneSeq,
+    WgWaitSeq,
+    WgTryWaitSeq,
+    WgDestroySeq,
+    /// tls_get_base (FfiExtended 0x5D)
+    TlsGetBaseSeq,
 }
 
 /// Complete intrinsic definition.
@@ -2915,7 +2924,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Inline],
         param_count: 0,
         return_count: 1,
-        strategy: CodegenStrategy::OpcodeWithMode(Opcode::TlsGet, 0), // slot 0 = base
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TlsGetBaseSeq), // slot 0 = base
         mlir_op: Some("llvm.read_register"),
         doc: "Get TLS base pointer",
     },
@@ -5122,6 +5131,66 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // Futex Intrinsics
     // =========================================================================
+    Intrinsic {
+        name: "waitgroup_new",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 0,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::WgNewSeq),
+        mlir_op: None,
+        doc: "WaitGroup new (handle-based)",
+    },
+    Intrinsic {
+        name: "waitgroup_add",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::WgAddSeq),
+        mlir_op: None,
+        doc: "WaitGroup add (handle-based)",
+    },
+    Intrinsic {
+        name: "waitgroup_done",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::WgDoneSeq),
+        mlir_op: None,
+        doc: "WaitGroup done (handle-based)",
+    },
+    Intrinsic {
+        name: "waitgroup_wait",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::WgWaitSeq),
+        mlir_op: None,
+        doc: "WaitGroup wait (handle-based)",
+    },
+    Intrinsic {
+        name: "waitgroup_try_wait",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::WgTryWaitSeq),
+        mlir_op: None,
+        doc: "WaitGroup try_wait (handle-based)",
+    },
+    Intrinsic {
+        name: "waitgroup_destroy",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::WgDestroySeq),
+        mlir_op: None,
+        doc: "WaitGroup destroy (handle-based)",
+    },
     Intrinsic {
         name: "futex_wait",
         category: IntrinsicCategory::Futex,

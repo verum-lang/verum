@@ -3175,6 +3175,81 @@ pub(in super::super) fn handle_ffi_extended(
         }
 
         // =================================================================
+        // tls_get_base (0x5D) — an opaque, stable, non-null base pointer.
+        // The interpreter has no real TLS block; the state address is the
+        // honest opaque anchor.  (The old OpcodeWithMode(TlsGet, 0) route
+        // returned the CONTENT of context slot 0.)
+        // =================================================================
+        Some(SystemSubOpcode::TlsGetBaseF) => {
+            let dst = read_reg(state)?;
+            let anchor = state as *const InterpreterState as i64;
+            state.set_reg(dst, Value::from_i64(anchor));
+            Ok(DispatchResult::Continue)
+        }
+
+        // =================================================================
+        // WaitGroup family (0xB6-0xBB) — delegates to the same handle-table
+        // implementation the legacy name-dispatch arms use.
+        // =================================================================
+        Some(SystemSubOpcode::WaitgroupNew) => {
+            let dst = read_reg(state)?;
+            state.set_reg(dst, Value::from_i64(crate::interpreter::waitgroup::wg_new()));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::WaitgroupAdd) => {
+            let dst = read_reg(state)?;
+            let wg_reg = read_reg(state)?;
+            let delta_reg = read_reg(state)?;
+            let wg = state.get_reg(wg_reg).as_integer_compatible();
+            let delta = state.get_reg(delta_reg).as_integer_compatible();
+            state.set_reg(
+                dst,
+                Value::from_i64(crate::interpreter::waitgroup::wg_add(wg, delta)),
+            );
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::WaitgroupDone) => {
+            let dst = read_reg(state)?;
+            let wg_reg = read_reg(state)?;
+            let wg = state.get_reg(wg_reg).as_integer_compatible();
+            state.set_reg(
+                dst,
+                Value::from_i64(crate::interpreter::waitgroup::wg_done(wg)),
+            );
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::WaitgroupWait) => {
+            let dst = read_reg(state)?;
+            let wg_reg = read_reg(state)?;
+            let wg = state.get_reg(wg_reg).as_integer_compatible();
+            state.set_reg(
+                dst,
+                Value::from_i64(crate::interpreter::waitgroup::wg_wait(wg)),
+            );
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::WaitgroupTryWait) => {
+            let dst = read_reg(state)?;
+            let wg_reg = read_reg(state)?;
+            let wg = state.get_reg(wg_reg).as_integer_compatible();
+            state.set_reg(
+                dst,
+                Value::from_i64(crate::interpreter::waitgroup::wg_try_wait(wg)),
+            );
+            Ok(DispatchResult::Continue)
+        }
+        Some(SystemSubOpcode::WaitgroupDestroy) => {
+            let dst = read_reg(state)?;
+            let wg_reg = read_reg(state)?;
+            let wg = state.get_reg(wg_reg).as_integer_compatible();
+            state.set_reg(
+                dst,
+                Value::from_i64(crate::interpreter::waitgroup::wg_destroy(wg)),
+            );
+            Ok(DispatchResult::Continue)
+        }
+
+        // =================================================================
         // Spinlock trio (0xB3-0xB5) — AtomicU32 per the declared
         // `*mut UInt32` contract.  (SpinlockLock at 0xB2 predates this and
         // spins an AtomicU8 — low-byte-compatible on little-endian; the

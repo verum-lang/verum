@@ -29300,6 +29300,31 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::AtomicFence { ordering: 5 });
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
             }
+            // WaitGroup family + tls_get_base — dst-first generic emission.
+            InlineSequenceId::WgNewSeq
+            | InlineSequenceId::WgAddSeq
+            | InlineSequenceId::WgDoneSeq
+            | InlineSequenceId::WgWaitSeq
+            | InlineSequenceId::WgTryWaitSeq
+            | InlineSequenceId::WgDestroySeq
+            | InlineSequenceId::TlsGetBaseSeq => {
+                let sub_op: u8 = match seq_id {
+                    InlineSequenceId::WgNewSeq => 0xB6,
+                    InlineSequenceId::WgAddSeq => 0xB7,
+                    InlineSequenceId::WgDoneSeq => 0xB8,
+                    InlineSequenceId::WgWaitSeq => 0xB9,
+                    InlineSequenceId::WgTryWaitSeq => 0xBA,
+                    InlineSequenceId::WgDestroySeq => 0xBB,
+                    _ => 0x5D, // TlsGetBaseSeq
+                };
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended { sub_op, operands });
+            }
+
             InlineSequenceId::SpinHintSeq => {
                 // CPU pause hint — no Tier-0 effect; the old route
                 // (OpcodeWithMode(AtomicFence, 0xFF)) emitted a truncated

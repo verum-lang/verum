@@ -1135,7 +1135,14 @@ impl<'a> IntrinsicCodegen<'a> {
             | InlineSequenceId::TlsClearSeq
             | InlineSequenceId::FenceSeq
             | InlineSequenceId::CompilerFenceSeq
-            | InlineSequenceId::SpinHintSeq => None,
+            | InlineSequenceId::SpinHintSeq
+            | InlineSequenceId::WgNewSeq
+            | InlineSequenceId::WgAddSeq
+            | InlineSequenceId::WgDoneSeq
+            | InlineSequenceId::WgWaitSeq
+            | InlineSequenceId::WgTryWaitSeq
+            | InlineSequenceId::WgDestroySeq
+            | InlineSequenceId::TlsGetBaseSeq => None,
             InlineSequenceId::CbgrValidateBool => {
                 // No dedicated MIR op for reference validation; the VBC
                 // interpreter / LLVM arms own the semantics.

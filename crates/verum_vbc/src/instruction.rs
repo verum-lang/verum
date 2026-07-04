@@ -5317,6 +5317,10 @@ pub enum SystemSubOpcode {
     TlsSlotSetF = 0x5A,
     TlsSlotHasF = 0x5B,
     TlsSlotClearF = 0x5C,
+    /// `tls_get_base` — an opaque non-null TLS base pointer.  The old route
+    /// (OpcodeWithMode(TlsGet, 0)) returned the CONTENT of context slot 0.
+    /// Format: `dst`.
+    TlsGetBaseF = 0x5D,
 
     // ========================================================================
     // Raw Pointer Operations (0x60-0x6F)
@@ -5743,6 +5747,17 @@ pub enum SystemSubOpcode {
     SpinlockTryLock = 0xB3,
     SpinlockUnlock = 0xB4,
     SpinlockIsLocked = 0xB5,
+    /// WaitGroup family (`__waitgroup_*_raw`, sync.vr #65).  Interp: the
+    /// handle-table impl in `interpreter::waitgroup`; AOT: an 8-byte
+    /// cbgr allocation holding an atomic i64 counter (handle = address).
+    /// Formats: new `dst` / add `dst,wg,delta` / done `dst,wg` /
+    /// wait `dst,wg` / try_wait `dst,wg` / destroy `dst,wg`.
+    WaitgroupNew = 0xB6,
+    WaitgroupAdd = 0xB7,
+    WaitgroupDone = 0xB8,
+    WaitgroupWait = 0xB9,
+    WaitgroupTryWait = 0xBA,
+    WaitgroupDestroy = 0xBB,
 }
 
 /// Backward-compatibility alias.  The enum was renamed
@@ -6079,6 +6094,7 @@ impl SystemSubOpcode {
             0x5A => Some(Self::TlsSlotSetF),
             0x5B => Some(Self::TlsSlotHasF),
             0x5C => Some(Self::TlsSlotClearF),
+            0x5D => Some(Self::TlsGetBaseF),
             // Raw Pointer Operations
             0x60 => Some(Self::DerefRaw),
             0x61 => Some(Self::DerefMutRaw),
@@ -6130,6 +6146,12 @@ impl SystemSubOpcode {
             0xB3 => Some(Self::SpinlockTryLock),
             0xB4 => Some(Self::SpinlockUnlock),
             0xB5 => Some(Self::SpinlockIsLocked),
+            0xB6 => Some(Self::WaitgroupNew),
+            0xB7 => Some(Self::WaitgroupAdd),
+            0xB8 => Some(Self::WaitgroupDone),
+            0xB9 => Some(Self::WaitgroupWait),
+            0xBA => Some(Self::WaitgroupTryWait),
+            0xBB => Some(Self::WaitgroupDestroy),
             _ => None,
         }
     }
@@ -6241,6 +6263,7 @@ impl SystemSubOpcode {
             Self::TlsSlotSetF          => m!("TLS_SLOT_SET",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
             Self::TlsSlotHasF          => m!("TLS_SLOT_HAS",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
             Self::TlsSlotClearF          => m!("TLS_SLOT_CLEAR",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::TlsGetBaseF          => m!("TLS_GET_BASE",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
 
             // ===== Raw Pointer Operations (0x60-0x6F) =====
             Self::DerefRaw               => m!("FFI_DEREF_RAW",              RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
@@ -6299,6 +6322,12 @@ impl SystemSubOpcode {
             Self::SpinlockTryLock           => m!("SYNC_SPIN_TRY_LOCK",         SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
             Self::SpinlockUnlock            => m!("SYNC_SPIN_UNLOCK",           SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
             Self::SpinlockIsLocked          => m!("SYNC_SPIN_IS_LOCKED",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::WaitgroupNew          => m!("SYNC_WG_NEW",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::WaitgroupAdd          => m!("SYNC_WG_ADD",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::WaitgroupDone          => m!("SYNC_WG_DONE",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::WaitgroupWait          => m!("SYNC_WG_WAIT",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::WaitgroupTryWait          => m!("SYNC_WG_TRY_WAIT",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::WaitgroupDestroy          => m!("SYNC_WG_DESTROY",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
         }
     }
 
