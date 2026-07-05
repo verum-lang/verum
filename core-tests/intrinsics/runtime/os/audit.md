@@ -42,6 +42,15 @@ seek in integration.
 
 **Landed**
 * File-I/O conformance suite (Text-path + raw-fd-over-cbgr).
+* OS-RAWFD-BUF-STUB-1 FIXED (2026-07-05): `__file_read_raw`/`__file_write_raw`
+  were STUBS that ignored the buffer address — read filled a discarded local
+  vec (bytes vanished), write pretended (returned `len` untouched).  The
+  stubs predated honest raw addressing; a cbgr / mem_raw buffer is now a
+  real dereferenceable address (proven by the mem_raw suite), so both now
+  copy through it.  Same inert-stub class as MEMRAW-CANONICAL-NAMES-INERT-1.
+* file_open interp handler widened to accept the documented abstract
+  O_CREAT bit (0x100) alongside Linux 0x40 — partial OS-FILEOPEN-FLAG-DRIFT-1
+  (task #6).
 
 **Deferred**
 * Network fd round-trip → `core-tests/net`.

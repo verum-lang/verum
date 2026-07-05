@@ -1721,13 +1721,33 @@ fn try_dispatch_intrinsic_by_name(
         "__file_read_raw" => {
             use std::io::Read;
             let fd = get_i64_arg(state, 0);
-            let _buf = get_i64_arg(state, 1);
+            let buf = get_i64_arg(state, 1);
             let len = get_i64_arg(state, 2);
+            // OS-RAWFD-BUF-STUB-1 (2026-07-05): pre-fix this read into a
+            // LOCAL vec that was DISCARDED — the user's buffer was never
+            // filled (the byte count was returned but the bytes vanished).
+            // The stub predated honest raw addressing; a cbgr / mem_raw
+            // buffer is now a real dereferenceable address (proven by the
+            // mem_raw suite), so copy the bytes into it.
             match state.open_files.get_mut(&fd) {
                 Some(file) => {
-                    let mut buf = vec![0u8; len.max(0) as usize];
-                    match file.read(&mut buf) {
-                        Ok(n) => Ok(Some(Value::from_i64(n as i64))),
+                    let mut tmp = vec![0u8; len.max(0) as usize];
+                    match file.read(&mut tmp) {
+                        Ok(n) => {
+                            if buf > 0 && n > 0 {
+                                // SAFETY: `buf` is a live allocation address
+                                // (cbgr / mem_raw) of at least `len` bytes;
+                                // `n <= len`.
+                                unsafe {
+                                    std::ptr::copy_nonoverlapping(
+                                        tmp.as_ptr(),
+                                        buf as *mut u8,
+                                        n,
+                                    );
+                                }
+                            }
+                            Ok(Some(Value::from_i64(n as i64)))
+                        }
                         Err(_) => Ok(Some(Value::from_i64(-1))),
                     }
                 }
@@ -1736,14 +1756,27 @@ fn try_dispatch_intrinsic_by_name(
         }
         "__file_write_raw" => {
             // The (fd, buf_ptr, len) shape — fd-based byte write.
-            // In Tier-0 we don't actually have a usable buf_ptr in the
-            // user's address space, so this stays as a stub returning
-            // bytes-pretended-written.  Callers should use
-            // `__file_write_text_raw(fd, text)` for Text-shaped data.
-            let _fd = get_i64_arg(state, 0);
-            let _buf = get_i64_arg(state, 1);
-            let len = get_i64_arg(state, 2);
-            Ok(Some(Value::from_i64(len)))
+            // OS-RAWFD-BUF-STUB-1: pre-fix this pretended (returned `len`
+            // without touching the buffer).  A cbgr / mem_raw buffer is a
+            // real address now, so read the bytes from it and write them.
+            use std::io::Write;
+            let fd = get_i64_arg(state, 0);
+            let buf = get_i64_arg(state, 1);
+            let len = get_i64_arg(state, 2).max(0) as usize;
+            if buf <= 0 || len == 0 {
+                return Ok(Some(Value::from_i64(0)));
+            }
+            // SAFETY: `buf` is a live allocation address of at least `len`
+            // bytes (caller warrants the extent — same contract as
+            // `__file_read_raw` / memcpy).
+            let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, len) };
+            match state.open_files.get_mut(&fd) {
+                Some(file) => match file.write(bytes) {
+                    Ok(n) => Ok(Some(Value::from_i64(n as i64))),
+                    Err(_) => Ok(Some(Value::from_i64(-1))),
+                },
+                None => Ok(Some(Value::from_i64(-1))),
+            }
         }
 
         // --- Command-line Arguments ---
