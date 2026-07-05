@@ -1600,6 +1600,12 @@ impl<'s> CompilationPipeline<'s> {
             );
         }
 
+        // Implicit prelude — user compiles only; stdlib bootstrap
+        // defines the prelude and must not self-inject.
+        if matches!(self.build_mode, BuildMode::Normal) {
+            crate::pipeline::inject_implicit_prelude_mount(&mut module);
+        }
+
         // Register meta functions and macros
         for item in &module.items {
             match &item.kind {

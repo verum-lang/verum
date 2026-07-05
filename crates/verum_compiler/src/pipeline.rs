@@ -574,6 +574,78 @@ impl Default for BuildMode {
     }
 }
 
+/// Inject the implicit-prelude mount (`mount core.prelude.*;`) at the
+/// head of a user module's item list.
+///
+/// The language contract (`core/mod.vr` — "The prelude is automatically
+/// imported in every Verum module") was previously honoured only on the
+/// `verum_modules::loader` path; the Normal compilation pipeline parsed
+/// user sources without it, so prelude-only names (`range`,
+/// `format_debug` behind `f"{x:?}"`, `format_display`, …) failed
+/// `E100: unbound variable` unless the user wrote an explicit
+/// `mount core.prelude.*`. Injecting the mount into the AST — instead
+/// of special-casing the type environment — makes every downstream
+/// phase (type inference, VBC codegen, AOT lowering) resolve prelude
+/// names through the ONE existing mount-resolution path.
+///
+/// Call sites gate on `BuildMode::Normal`; stdlib bootstrap parses via
+/// `stdlib_bootstrap.rs` and must never self-inject (the prelude is
+/// DEFINED there). The mount is inserted at index 0 so every explicit
+/// user mount and local definition resolves after it and therefore
+/// shadows it.
+pub(crate) fn inject_implicit_prelude_mount(module: &mut verum_ast::Module) {
+    use verum_ast::decl::{MountDecl, Visibility};
+    use verum_ast::span::Span;
+    use verum_ast::{Ident, Item, ItemKind, MountTree, MountTreeKind, Path, PathSegment};
+    use verum_common::{List, Maybe, Text};
+
+    if module.has_no_implicit_prelude() {
+        return;
+    }
+    // Process-level escape hatch (diagnostics + A/B isolation): treat
+    // every module as `@![no_implicit_prelude]`.
+    if std::env::var_os("VERUM_NO_IMPLICIT_PRELUDE").is_some() {
+        return;
+    }
+    // Idempotence: a module that already mounts `core.prelude` (glob or
+    // subtree) keeps its own declaration as the single import site.
+    let already_mounted = module.items.iter().any(|item| {
+        let ItemKind::Mount(decl) = &item.kind else {
+            return false;
+        };
+        let path = match &decl.tree.kind {
+            MountTreeKind::Glob(p) | MountTreeKind::Path(p) => p,
+            MountTreeKind::Nested { prefix, .. } => prefix,
+            MountTreeKind::File { .. } => return false,
+        };
+        let mut names = path.segments.iter().filter_map(|s| match s {
+            PathSegment::Name(id) => Some(id.name.as_str()),
+            _ => None,
+        });
+        names.next() == Some("core") && names.next() == Some("prelude")
+    });
+    if already_mounted {
+        return;
+    }
+
+    let span = Span::new(0, 0, module.file_id);
+    let mut segments = List::new();
+    segments.push(PathSegment::Name(Ident::new(Text::from("core"), span)));
+    segments.push(PathSegment::Name(Ident::new(Text::from("prelude"), span)));
+    let tree = MountTree {
+        kind: MountTreeKind::Glob(Path::new(segments, span)),
+        alias: Maybe::None,
+        span,
+    };
+    let decl = MountDecl {
+        visibility: Visibility::Private,
+        tree,
+        alias: Maybe::None,
+        span,
+    };
+    module.items.insert(0, Item::new(ItemKind::Mount(decl), span));
+}
+
 // SmtCheckResult moved to crate::pipeline::refinement_verify
 // (#106 Phase 4 — pipeline.rs split).
 

@@ -736,6 +736,12 @@ impl<'s> CompilationPipeline<'s> {
                     let cfg_evaluator = self.session.cfg_evaluator();
                     module.items = cfg_evaluator.filter_items(&module.items);
 
+                    // Implicit prelude — user compiles only; stdlib
+                    // bootstrap defines the prelude itself.
+                    if matches!(self.build_mode, crate::pipeline::BuildMode::Normal) {
+                        crate::pipeline::inject_implicit_prelude_mount(&mut module);
+                    }
+
                     // Register meta functions and macros
                     for item in &module.items {
                         match &item.kind {

@@ -904,13 +904,63 @@ fn primitive_typeid_name(tid: TypeId) -> Option<&'static str> {
 fn type_ref_inner_generics(ty: &TypeRef, module: &VbcModule) -> Option<Vec<String>> {
     match ty {
         TypeRef::Instantiated { args, .. } if !args.is_empty() => {
+            // Render each argument with its FULL nested generic form —
+            // `Result<List<ResolvedRange>, RangeError>` yields
+            // `["List<ResolvedRange>", "RangeError"]`, not the
+            // generic-stripped `["List", "RangeError"]`.
+            //
+            // The variant disambiguator that consumes this
+            // (`find_variant_by_suffix_and_args` /
+            // `find_function_by_suffix`) already strips generics before
+            // comparing to parent names (`inner_name.split('<').next()`),
+            // so the nested form is transparent to it. What it ENABLES:
+            // `let m = free_fn().unwrap()` where the free fn returns
+            // `Result<List<T>, E>` now records `m` as `List<T>` (not bare
+            // `List`), so `m[i].field` recovers element type `T` and
+            // resolves the field offset from `T`'s descriptor instead of
+            // falling to the global field-name interner (the cross-module
+            // `collection[i].field` out-of-bounds defect surfaced by the
+            // http_range / link_header property suites).
             let names: Vec<String> = args
                 .iter()
-                .map(|a| type_ref_simple_name(a, module).unwrap_or_default())
+                .map(|a| type_ref_full_name(a, module).unwrap_or_default())
                 .collect();
             Some(names)
         }
         _ => None,
+    }
+}
+
+/// Render a `TypeRef` to its full nested generic form, e.g.
+/// `List<ResolvedRange>` / `Map<Text, List<Cidr>>`. Unlike
+/// [`type_ref_simple_name`] (which returns only the base nominal name),
+/// this preserves instantiation arguments recursively so downstream
+/// element-type extraction (`arr[i]` → element type) survives across the
+/// archive boundary. References render as their pointee's full name to
+/// match the simple-name convention the disambiguator expects.
+fn type_ref_full_name(ty: &TypeRef, module: &VbcModule) -> Option<String> {
+    match ty {
+        TypeRef::Instantiated { base, args } => {
+            let base_name = if let Some(name) = primitive_typeid_name(*base) {
+                name.to_string()
+            } else {
+                module
+                    .types
+                    .iter()
+                    .find(|t| t.id == *base)
+                    .and_then(|t| module.strings.get(t.name).map(|s| s.to_string()))?
+            };
+            if args.is_empty() {
+                return Some(base_name);
+            }
+            let rendered: Vec<String> = args
+                .iter()
+                .map(|a| type_ref_full_name(a, module).unwrap_or_else(|| "_".to_string()))
+                .collect();
+            Some(format!("{}<{}>", base_name, rendered.join(", ")))
+        }
+        TypeRef::Reference { inner, .. } => type_ref_full_name(inner, module),
+        _ => type_ref_simple_name(ty, module),
     }
 }
 

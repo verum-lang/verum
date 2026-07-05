@@ -1260,6 +1260,22 @@ const PRECOMPILE_SCHEMA_VERSION: &str =
 /// `.../target/<profile>/build/...`, so the dir above `<profile>` is
 /// `.../target`).
 fn derive_target_root(out_dir: &str) -> Option<std::path::PathBuf> {
+    // An explicit CARGO_TARGET_DIR IS the target root — no heuristics.
+    // The OUT_DIR walk below must not run for custom target dirs: its
+    // triple step-over used to mis-classify a custom dir whose NAME
+    // contains >=2 dashes (`/tmp/verum-net-target`) as a target-triple
+    // component and return its PARENT (`/tmp`), silently landing every
+    // isolated build's precompiled-stdlib in one shared directory —
+    // exactly the cross-session clobbering this isolation exists to
+    // prevent. Only absolute paths are honoured (cargo resolves a
+    // relative CARGO_TARGET_DIR against the invocation cwd, which a
+    // build script no longer observes).
+    if let Ok(dir) = std::env::var("CARGO_TARGET_DIR") {
+        let p = std::path::PathBuf::from(&dir);
+        if p.is_absolute() {
+            return Some(p);
+        }
+    }
     let comps: Vec<std::ffi::OsString> = Path::new(out_dir)
         .components()
         .map(|c| c.as_os_str().to_os_string())
@@ -1276,15 +1292,73 @@ fn derive_target_root(out_dir: &str) -> Option<std::path::PathBuf> {
         root.push(c);
     }
     // Step over an optional target-triple directory (e.g.
-    // `aarch64-apple-darwin`): a non-`target` leaf with >=2 dashes.
+    // `aarch64-apple-darwin`). Recognise a REAL triple by its leading
+    // architecture token — dash-counting alone false-positives on
+    // custom target-dir names like `verum-net-target`.
     if let Some(name) = root.file_name().and_then(|n| n.to_str())
         && name != "target"
-        && name.matches('-').count() >= 2
+        && is_target_triple_dir(name)
         && let Some(parent) = root.parent()
     {
         return Some(parent.to_path_buf());
     }
     Some(root)
+}
+
+/// `true` when a directory name looks like a rustc target triple
+/// (`<arch>-<vendor>-<os>[-<abi>]`). The leading token must be a known
+/// architecture — the dash count alone is not evidence (custom target
+/// roots like `verum-net-target` carry two dashes).
+fn is_target_triple_dir(name: &str) -> bool {
+    if name.matches('-').count() < 2 {
+        return false;
+    }
+    let arch = name.split('-').next().unwrap_or("");
+    matches!(
+        arch,
+        "x86_64"
+            | "i686"
+            | "i586"
+            | "aarch64"
+            | "arm64"
+            | "arm64e"
+            | "arm64ec"
+            | "arm"
+            | "armv5te"
+            | "armv6"
+            | "armv7"
+            | "armv7a"
+            | "armv7s"
+            | "armebv7r"
+            | "thumbv6m"
+            | "thumbv7em"
+            | "thumbv7m"
+            | "thumbv7neon"
+            | "riscv32"
+            | "riscv32i"
+            | "riscv32imac"
+            | "riscv32imc"
+            | "riscv64"
+            | "riscv64gc"
+            | "riscv64imac"
+            | "wasm32"
+            | "wasm64"
+            | "powerpc"
+            | "powerpc64"
+            | "powerpc64le"
+            | "s390x"
+            | "sparc"
+            | "sparc64"
+            | "sparcv9"
+            | "loongarch64"
+            | "mips"
+            | "mips64"
+            | "mips64el"
+            | "mipsel"
+            | "hexagon"
+            | "bpfeb"
+            | "bpfel"
+    )
 }
 
 /// Used as the cache key for the `runtime.vbca` +
@@ -1341,6 +1415,19 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         // call site that consults the archived FunctionInfo.
         "crates/verum_vbc/src/codegen/mod.rs",
         "crates/verum_vbc/src/codegen/context.rs",
+        // The precompile pass itself: `scan_module_reexports` /
+        // `inject_decl_spans` / glob-expansion shape ALL live in
+        // precompile.rs, and archive_metadata.rs owns the Pass-2
+        // descriptor registration (function key shapes, module_path
+        // collapsing). A change to either alters the EMITTED
+        // metadata sidecar without touching any `.vr` source or
+        // codegen path — pre-fix such a change produced a fresh
+        // `verum` binary embedding a STALE `runtime.core_metadata`
+        // (discovered via the prelude-reexport canonicalisation fix:
+        // `format_display` stayed unbound because the cache key never
+        // saw the scanner change).
+        "crates/verum_compiler/src/precompile.rs",
+        "crates/verum_compiler/src/archive_metadata.rs",
     ];
     hasher.update(b"codegen:");
     for rel in codegen_paths {

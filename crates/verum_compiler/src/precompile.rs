@@ -445,6 +445,16 @@ fn scan_module_reexports(
         local_name: String,
         /// Absolute dotted module path of the source.
         source_module: String,
+        /// The module that RE-EXPORTS this leaf — the file's own
+        /// module for top-level mounts, or the nested inline-module
+        /// path for mounts inside `public module prelude { ... }`.
+        /// Pre-fix every leaf was keyed under the FILE's module, so
+        /// concrete prelude mounts (`super.text.format.format_debug`)
+        /// landed in the `core` bucket instead of `core.prelude` —
+        /// the PRELUDE-FREEFN defect (`f"{x:?}"` → unbound
+        /// `format_debug`). Globs never had the bug because
+        /// `glob_pairs` already carried `current_module` per entry.
+        reexporting_module: String,
     }
 
     /// Resolve a `Path` plus an accumulated absolute prefix into
@@ -560,6 +570,7 @@ fn scan_module_reexports(
                         out.push(ReexportLeaf {
                             local_name: alias_name.unwrap_or(item_name),
                             source_module: module_path,
+                            reexporting_module: current_module.to_string(),
                         });
                     }
                 }
@@ -692,8 +703,13 @@ fn scan_module_reexports(
                 continue;
             }
             *files_with_reexports += 1;
-            let bucket = accum.entry(reexporting_module).or_default();
+            // Key each leaf by ITS OWN reexporting module (the file's
+            // module for top-level mounts, the nested inline-module
+            // path for prelude mounts) — NOT the file's module for
+            // all of them. Pre-fix the flat file-keying dropped every
+            // concrete prelude mount into the `core` bucket.
             for leaf in leaves {
+                let bucket = accum.entry(leaf.reexporting_module).or_default();
                 // First-wins under name collision so the BTreeMap
                 // iteration order is reproducible across runs.
                 bucket
@@ -870,6 +886,134 @@ fn scan_module_reexports(
                 .entry(name.as_str().to_string())
                 .or_insert_with(|| pd.module_path.as_str().to_string());
         }
+    }
+
+    // Canonicalise every Path-arm leaf's `source_module` against the
+    // metadata tables before persisting. A mount like
+    // `public mount super.text.format.format_display;` records the
+    // MOUNT-CHAIN module path (`core.text.format`), but the archive
+    // indexes each declaration under its DECLARING module path — which
+    // for collapsed hierarchies is the parent (`core.text`), and for
+    // free fns is also reachable via the qualified key
+    // (`core.text.format.format_display` → fd.module_path). The
+    // consumer (`import_all_from_module`'s metadata-driven leaf replay)
+    // resolves leaves via `import_item_from_module(source, name)` and
+    // silently drops any leaf whose module path the registry can't
+    // serve — pre-fix the prelude's CONCRETE mounts (`format_debug`,
+    // `format_display`, `read_to_string`, …) were captured with
+    // unresolvable module paths and every `f"{x:?}"` failed
+    // `unbound variable: format_debug` at user sites. Glob-expanded
+    // leaves never had the problem because the expansion reads
+    // `fd.module_path` (the truth) directly; this pass gives Path-arm
+    // leaves the same truth source.
+    let leaf_resolves = |local: &str, source: &str| -> bool {
+        let qualified = Text::from(format!("{source}.{local}").as_str());
+        if metadata.functions.get(&qualified).is_some() {
+            return true;
+        }
+        let local_t = Text::from(local);
+        if let Some(td) = metadata.types.get(&local_t) {
+            if td.module_path.as_str() == source {
+                return true;
+            }
+        }
+        if let Some(pd) = metadata.protocols.get(&local_t) {
+            if pd.module_path.as_str() == source {
+                return true;
+            }
+        }
+        if let Some(fd) = metadata.functions.get(&local_t) {
+            if fd.module_path.as_str() == source {
+                return true;
+            }
+        }
+        false
+    };
+    let canonical_source = |local: &str, source: &str| -> Option<String> {
+        // 1. Qualified free-fn key at the recorded path — the
+        //    descriptor's own module_path is the declaring truth.
+        let qualified = Text::from(format!("{source}.{local}").as_str());
+        if let Some(fd) = metadata.functions.get(&qualified) {
+            return Some(fd.module_path.as_str().to_string());
+        }
+        let local_t = Text::from(local);
+        // 2. Type / protocol simple-name lookup, accepted when the
+        //    declared path and the mount path agree up to hierarchy
+        //    collapsing (one is a dotted prefix of the other).
+        let path_compatible = |declared: &str| -> bool {
+            declared == source
+                || (source.starts_with(declared)
+                    && source.as_bytes().get(declared.len()) == Some(&b'.'))
+                || (declared.starts_with(source)
+                    && declared.as_bytes().get(source.len()) == Some(&b'.'))
+        };
+        if let Some(td) = metadata.types.get(&local_t) {
+            if path_compatible(td.module_path.as_str()) {
+                return Some(td.module_path.as_str().to_string());
+            }
+        }
+        if let Some(pd) = metadata.protocols.get(&local_t) {
+            if path_compatible(pd.module_path.as_str()) {
+                return Some(pd.module_path.as_str().to_string());
+            }
+        }
+        // 3. Bare free-fn simple key with the same compatibility bound.
+        if let Some(fd) = metadata.functions.get(&local_t) {
+            if path_compatible(fd.module_path.as_str()) {
+                return Some(fd.module_path.as_str().to_string());
+            }
+        }
+        // 4. Ancestor probe: walk the mount path upward and retry the
+        //    qualified key at each level — catches declarations homed
+        //    under a collapsed parent (`core.text.format_display` when
+        //    the mount said `core.text.format`).
+        let mut prefix = source.to_string();
+        while let Some(dot) = prefix.rfind('.') {
+            prefix.truncate(dot);
+            let q = Text::from(format!("{prefix}.{local}").as_str());
+            if let Some(fd) = metadata.functions.get(&q) {
+                return Some(fd.module_path.as_str().to_string());
+            }
+        }
+        None
+    };
+    let mut canonicalised = 0usize;
+    let mut unresolved: Vec<(String, String)> = Vec::new();
+    for items in accum.values_mut() {
+        for (local, source) in items.iter_mut() {
+            if leaf_resolves(local.as_str(), source.as_str()) {
+                continue;
+            }
+            match canonical_source(local.as_str(), source.as_str()) {
+                Some(fixed) => {
+                    if fixed != *source {
+                        *source = fixed;
+                        canonicalised += 1;
+                    }
+                }
+                None => unresolved.push((local.clone(), source.clone())),
+            }
+        }
+    }
+    if verbose {
+        eprintln!(
+            "verum stdlib precompile: canonicalised {} re-export leaves; {} left unresolved{}",
+            canonicalised,
+            unresolved.len(),
+            if unresolved.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " (first: {})",
+                    unresolved
+                        .iter()
+                        .take(5)
+                        .map(|(l, s)| format!("{s}.{l}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        );
     }
 
     let mut total_leaves = 0usize;
@@ -2080,6 +2224,68 @@ version = "0.1.0"
             "error should mention missing .vr files"
         );
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Pin the prelude re-export capture: the inline
+    /// `public module prelude { ... }` in `core/mod.vr` mixes glob
+    /// mounts (`super.base.*`) with CONCRETE named mounts
+    /// (`super.text.format.format_debug`, `super.io.print`,
+    /// `super.collections.List`, nested `super.math.{sin, ...}`).
+    /// The metadata `module_reexports["core.prelude"]` bucket must
+    /// carry BOTH families — losing the concrete leaves is exactly
+    /// the PRELUDE-FREEFN defect (`f"{x:?}"` → unbound
+    /// `format_debug` at every user site).
+    #[test]
+    fn scan_module_reexports_captures_prelude_concrete_mounts() {
+        let core_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("core"))
+            .expect("workspace root");
+        if !core_dir.join("mod.vr").is_file() {
+            eprintln!("skipping: core/mod.vr not found at {core_dir:?}");
+            return;
+        }
+        // `file_path_to_module_path` prepends "core" to every relative
+        // path, so the scan root must BE the `core/` dir for `mod.vr`
+        // to resolve to module `core` (and its inline prelude to
+        // `core.prelude`).
+        let mut metadata = verum_types::core_metadata::CoreMetadata::default();
+        scan_module_reexports(&mut metadata, &core_dir, true);
+        let bucket = metadata
+            .module_reexports
+            .get(&verum_common::Text::from("core.prelude"))
+            .expect("core.prelude bucket must exist");
+        let names: Vec<String> = bucket
+            .iter()
+            .map(|(local, _)| local.as_str().to_string())
+            .collect();
+        eprintln!("core.prelude leaves: {}", names.len());
+        for probe in [
+            "format_debug",
+            "format_display",
+            "print",
+            "read_to_string",
+            "List",
+            "Mutex",
+            "Duration",
+            "sin",
+            "range",
+        ] {
+            let hit = bucket.iter().find(|(l, _)| l.as_str() == probe);
+            eprintln!(
+                "  {probe}: {:?}",
+                hit.map(|(_, s)| s.as_str().to_string())
+            );
+        }
+        assert!(
+            bucket.iter().any(|(l, _)| l.as_str() == "format_debug"),
+            "concrete prelude mount format_debug must be captured"
+        );
+        assert!(
+            bucket.iter().any(|(l, _)| l.as_str() == "sin"),
+            "nested-brace prelude mount sin must be captured"
+        );
     }
 
     #[test]

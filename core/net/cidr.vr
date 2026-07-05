@@ -56,6 +56,7 @@ module core.net.cidr;
 mount core.*;
 mount core.collections.List;
 mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr, AddrParseError};
+mount core.net.ipv6_canonical.{format_ipv6};
 
 // =============================================================================
 // Typed CIDR
@@ -205,6 +206,139 @@ implement Cidr {
         if host_bits >= 64 { 0xFFFFFFFFFFFFFFFF_u64 }
         else               { 1_u64 << (host_bits as UInt64) }
     }
+
+    /// The first address of the block — host bits cleared.
+    ///
+    /// `10.1.2.3/8` → `10.0.0.0`; `2001:db8::5/32` → `2001:db8::`.
+    public fn network_address(&self) -> IpAddr {
+        match self {
+            Cidr.V4 { addr, prefix_len } => {
+                let host = 32 - *prefix_len;
+                let bits = addr.to_u32();
+                let base = if host >= 32 { 0 } else { (bits >> host) << host };
+                IpAddr.V4(Ipv4Addr.from_u32(base))
+            },
+            Cidr.V6 { addr, prefix_len } => {
+                let (s0, s1, s2, s3, s4, s5, s6, s7) = addr.segments();
+                let segs: [Int; 8] = [s0, s1, s2, s3, s4, s5, s6, s7];
+                let mut out: [Int; 8] = [0; 8];
+                let mut i: Int = 0;
+                while i < 8 {
+                    out[i] = segs[i] & v6_segment_mask(*prefix_len, i);
+                    i = i + 1;
+                }
+                IpAddr.V6(Ipv6Addr.new(
+                    out[0], out[1], out[2], out[3],
+                    out[4], out[5], out[6], out[7],
+                ))
+            },
+        }
+    }
+
+    /// The last address of the block — host bits set.
+    ///
+    /// Family-neutral name: IPv6 has no broadcast semantics, but every
+    /// block still has a well-defined final address.
+    public fn last_address(&self) -> IpAddr {
+        match self {
+            Cidr.V4 { addr, prefix_len } => {
+                let host = 32 - *prefix_len;
+                let bits = addr.to_u32();
+                let base = if host >= 32 { 0 } else { (bits >> host) << host };
+                let host_mask = if host >= 32 { 0xFFFFFFFF } else { (1 << host) - 1 };
+                IpAddr.V4(Ipv4Addr.from_u32(base | host_mask))
+            },
+            Cidr.V6 { addr, prefix_len } => {
+                let (s0, s1, s2, s3, s4, s5, s6, s7) = addr.segments();
+                let segs: [Int; 8] = [s0, s1, s2, s3, s4, s5, s6, s7];
+                let mut out: [Int; 8] = [0; 8];
+                let mut i: Int = 0;
+                while i < 8 {
+                    let mask = v6_segment_mask(*prefix_len, i);
+                    out[i] = (segs[i] & mask) | (0xFFFF ^ mask);
+                    i = i + 1;
+                }
+                IpAddr.V6(Ipv6Addr.new(
+                    out[0], out[1], out[2], out[3],
+                    out[4], out[5], out[6], out[7],
+                ))
+            },
+        }
+    }
+
+    /// The IPv4 directed-broadcast address — `Maybe.None` for IPv6,
+    /// which has no broadcast (RFC 4291 replaced it with multicast).
+    public fn broadcast_address(&self) -> Maybe<IpAddr> {
+        match self {
+            Cidr.V4 { addr: _, prefix_len: _ } => Maybe.Some(self.last_address()),
+            Cidr.V6 { addr: _, prefix_len: _ } => Maybe.None,
+        }
+    }
+
+    /// The canonical spelling of this block: the stored address
+    /// reduced to the network address, prefix length unchanged.
+    ///
+    /// `10.1.2.3/8` → `10.0.0.0/8`. Idempotent; `contains` is
+    /// invariant under it.
+    public fn normalize(&self) -> Cidr {
+        match self.network_address() {
+            IpAddr.V4(v4) => Cidr.V4 { addr: v4, prefix_len: self.prefix_len() },
+            IpAddr.V6(v6) => Cidr.V6 { addr: v6, prefix_len: self.prefix_len() },
+        }
+    }
+}
+
+/// The network-mask slice a 128-bit prefix contributes to 16-bit
+/// segment `index`: 16 ones for fully-covered segments, a left-packed
+/// partial run for the boundary segment, 0 past the prefix.
+fn v6_segment_mask(prefix_len: Int, index: Int) -> Int {
+    let seg_start = index * 16;
+    let keep = prefix_len - seg_start;
+    if keep <= 0 { return 0; }
+    if keep >= 16 { return 0xFFFF; }
+    (0xFFFF << (16 - keep)) & 0xFFFF
+}
+
+implement Eq for Cidr {
+    fn eq(&self, other: &Cidr) -> Bool {
+        match (self, other) {
+            (Cidr.V4 { addr: a, prefix_len: ap }, Cidr.V4 { addr: b, prefix_len: bp }) =>
+                *ap == *bp && a == b,
+            (Cidr.V6 { addr: a, prefix_len: ap }, Cidr.V6 { addr: b, prefix_len: bp }) =>
+                *ap == *bp && a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Display for Cidr {
+    /// `addr/prefix` — dotted-decimal for v4, RFC 5952 canonical
+    /// (compressed, lowercase) for v6.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Cidr.V4 { addr, prefix_len } => {
+                f.write_str(f"{addr}/{prefix_len}".as_str())
+            },
+            Cidr.V6 { addr, prefix_len } => {
+                let canon = format_ipv6(addr);
+                f.write_str(f"{canon}/{prefix_len}".as_str())
+            },
+        }
+    }
+}
+
+implement Debug for Cidr {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Cidr.V4 { addr, prefix_len } => {
+                f.write_str(f"Cidr.V4({addr}/{prefix_len})".as_str())
+            },
+            Cidr.V6 { addr, prefix_len } => {
+                let canon = format_ipv6(addr);
+                f.write_str(f"Cidr.V6({canon}/{prefix_len})".as_str())
+            },
+        }
+    }
 }
 
 // =============================================================================
@@ -219,6 +353,15 @@ implement CidrSet {
     public fn new() -> CidrSet { CidrSet { blocks: [] } }
 
     public fn add(&mut self, cidr: Cidr) {
+        self.blocks.push(cidr);
+    }
+
+    /// Set-protocol spelling of `add` — CidrSet is a set of blocks, so
+    /// it reads like every other `Set.insert` / `BTreeSet.insert` in
+    /// the stdlib. Inlines the push directly (not `self.add(cidr)`) for
+    /// the same transitive-`&mut self`-writeback reason `add_text`
+    /// documents.
+    public fn insert(&mut self, cidr: Cidr) {
         self.blocks.push(cidr);
     }
 

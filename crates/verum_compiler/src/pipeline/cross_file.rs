@@ -394,6 +394,15 @@ impl<'s> CompilationPipeline<'s> {
                             imported_module.items =
                                 cfg_evaluator.filter_items(&imported_module.items);
 
+                            // Implicit prelude for imported user
+                            // modules — same contract as the entry
+                            // file (Normal mode only).
+                            if matches!(self.build_mode, crate::pipeline::BuildMode::Normal) {
+                                crate::pipeline::inject_implicit_prelude_mount(
+                                    &mut imported_module,
+                                );
+                            }
+
                             // Header validation at the
                             // import-on-demand parse path. The
                             // imported module's filesystem path is
@@ -1309,6 +1318,12 @@ impl<'s> CompilationPipeline<'s> {
         let original_count = module.items.len();
         module.items = cfg_evaluator.filter_items(&module.items);
         let filtered_count = original_count - module.items.len();
+
+        // Implicit prelude — user compiles only; stdlib bootstrap
+        // defines the prelude and must not self-inject.
+        if matches!(self.build_mode, crate::pipeline::BuildMode::Normal) {
+            crate::pipeline::inject_implicit_prelude_mount(&mut module);
+        }
 
         let parse_time = start.elapsed();
         debug!(

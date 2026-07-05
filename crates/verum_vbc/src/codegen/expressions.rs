@@ -21031,6 +21031,27 @@ impl VbcCodegen {
                             } else {
                                 rt.clone()
                             };
+                            // Compose the generic instantiation from
+                            // `return_type_inner` — mirror of the
+                            // MethodCall arm's URL-8 composition. An
+                            // archive-loaded free fn like
+                            // `resolve_and_merge -> Result<List<ResolvedRange>,
+                            // RangeError>` stores `return_type_name = "Result"`
+                            // and the inner args separately. Without folding
+                            // them back, `let m = f().unwrap()` records `m`
+                            // as bare `Result`; the `.unwrap()` shortcut then
+                            // extracts NO inner type, so `m[i].field` loses
+                            // the element type and `resolve_field_index`
+                            // falls to the global interner → wrong offset →
+                            // "field access out of bounds" (the cross-module
+                            // `collection[i].field` defect surfaced by the
+                            // http_range / link_header property suites).
+                            if let Some(inner) = &info.return_type_inner
+                                && !inner.is_empty()
+                                && !resolved.contains('<')
+                            {
+                                return Some(format!("{}<{}>", resolved, inner.join(", ")));
+                            }
                             return Some(resolved);
                         }
                     }
