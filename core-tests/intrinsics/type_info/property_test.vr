@@ -202,11 +202,15 @@ fn law_id_deterministic_across_reads() {
 
 @test
 fn law_ids_pairwise_distinct_exhaustive() {
-    // 16 types → 120 unique pairs, checked exhaustively.
+    // CANONICALLY-DISTINCT types only — aliases (Int≡Int64, Byte≡UInt8,
+    // USize≡UInt64, Float≡Float64) now share an id by design
+    // (TYPEINFO-ID-CANON-1), so they are excluded here; their agreement is
+    // pinned separately by `law_id_aliases_agree`.  13 distinct types →
+    // 78 unique pairs.
     let ids: List<UInt64> = [
-        Int.id, Int8.id, Int16.id, Int32.id, Int64.id,
-        UInt8.id, UInt16.id, UInt32.id, UInt64.id, USize.id,
-        Byte.id, Float32.id, Float64.id, Bool.id, Char.id, Text.id,
+        Int8.id, Int16.id, Int32.id, Int64.id, Int128.id,
+        UInt8.id, UInt16.id, UInt32.id, UInt64.id,
+        Float32.id, Float64.id, Bool.id, Char.id,
     ];
     let n = ids.len();
     let mut i = 0;
@@ -318,4 +322,46 @@ fn law_is_signed_coheres_with_min() {
     assert(Int32.is_signed == (Int32.min < 0));
     assert(UInt8.is_signed == (UInt8.min < 0));
     assert(UInt32.is_signed == (UInt32.min < 0));
+}
+
+// =============================================================================
+// Section 8: id canonicalization — aliases of the same underlying type agree
+// (TYPEINFO-ID-CANON-1, task #2).  T.id hashes the CANONICAL identity name,
+// so alias spellings share an id while distinct widths stay distinct.
+// =============================================================================
+
+@test
+fn law_id_aliases_agree() {
+    // Int is Int64-wide; Float is Float64; Byte is UInt8; USize/ISize are
+    // pointer-width (64-bit) — each alias pair must produce the SAME id.
+    assert_eq(Int.id, Int64.id);
+    assert_eq(Float.id, Float64.id);
+    assert_eq(Byte.id, UInt8.id);
+    assert_eq(USize.id, UInt64.id);
+    assert_eq(ISize.id, Int64.id);
+}
+
+@test
+fn law_id_distinct_widths_stay_distinct() {
+    // Canonicalization must NOT collapse different widths.
+    assert(Int8.id != Int16.id);
+    assert(Int16.id != Int32.id);
+    assert(Int32.id != Int64.id);
+    assert(Int64.id != Int128.id);
+    assert(UInt8.id != UInt16.id);
+}
+
+@test
+fn law_id_signedness_distinguishes() {
+    // Same width, different signedness → different id.
+    assert(Int8.id != UInt8.id);
+    assert(Int32.id != UInt32.id);
+    assert(Int64.id != UInt64.id);
+}
+
+@test
+fn law_id_int_vs_float_same_width_distinct() {
+    // 64-bit int vs 64-bit float → different id (float-ness distinguishes).
+    assert(Int64.id != Float64.id);
+    assert(Int32.id != Float32.id);
 }

@@ -5131,10 +5131,21 @@ impl LoweringContext {
                         self.compute_type_max_constant(ty)
                     }
                     TypeProperty::Id => {
-                        // Return hash of canonical type name using Blake3
+                        // TYPEINFO-ID-CANON-1 (task #2): hash the CANONICAL
+                        // identity name so aliases agree (Int.id == Int64.id)
+                        // — mirrors the VBC interp Id arm.  Cross-tier id
+                        // equality is not required (T.id is meaningful within
+                        // one run); within-tier alias agreement is the fix.
+                        use verum_common::well_known_types::type_names;
                         let name = self.compute_type_name(ty);
+                        let canon = type_names::canonical_identity_name(&name);
+                        let key: &str = if canon == type_names::NON_PRIMITIVE_IDENTITY {
+                            name.as_str()
+                        } else {
+                            canon
+                        };
                         let mut hasher = crate::hash::ContentHash::new();
-                        hasher.update_str(&name);
+                        hasher.update_str(key);
                         MirConstant::Int(hasher.finalize().to_u64() as i64)
                     }
                 };

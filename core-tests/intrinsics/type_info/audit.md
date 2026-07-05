@@ -38,11 +38,20 @@ fallback itself is the architectural weakness: unknown NAMED types must be
 a compile-time error; only genuine unconstrained generic params
 legitimately answer 8.
 
-### TYPEINFO-ID-CANON-1 (task #9, OPEN) — three disjoint type-identity notions
+### TYPEINFO-ID-CANON-1 (task #2) — alias divergence FIXED 2026-07-05
 
-* `T.id` is name-derived: aliases DIVERGE (`Int.id != Int64.id`,
-  `Float.id != Float64.id`, `Byte.id != UInt8.id`, `USize.id != UInt64.id`)
-  while the docs pin `Int = Int64`, `Byte = UInt8`.
+* `T.id` used to be derived from the SPELLED name, so aliases DIVERGED
+  (`Int.id != Int64.id`, …).  FIXED: all three id-producing layers (VBC
+  `compile_type_property`, AOT `mir_lowering`, meta `compute_type_id`) now
+  hash the CANONICAL identity name via
+  `well_known_types::type_names::canonical_identity_name` — aliases agree
+  (`Int.id == Int64.id`, `Byte.id == UInt8.id`, `Float.id == Float64.id`,
+  `USize.id == UInt64.id`) while distinct widths / signedness / float-ness
+  stay distinct.  Pinned by `law_id_aliases_agree` +
+  `law_id_distinct_widths_stay_distinct` + `law_id_signedness_distinguishes`.
+  REMAINING (task #2): `type_id<T>()` legacy meta-fn under interp still
+  emits the param NAME (blocked on VBC-GENERIC-INSTANTIATION, task #3);
+  archive TypeIds are a third space (#27, non-user-facing).
 * legacy `type_id<T>()` under interp emits the generic param NAME as a
   string (see §3).
 * archive `TypeDescriptor` ids are a third space (#27 re-homing).

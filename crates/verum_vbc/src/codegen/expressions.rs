@@ -33516,8 +33516,22 @@ impl VbcCodegen {
             }
             TypeProperty::Id => {
                 use std::hash::{Hash, Hasher};
+                use verum_common::well_known_types::type_names;
+                // TYPEINFO-ID-CANON-1 (task #2): hash the CANONICAL identity
+                // name so aliases of the same underlying type agree —
+                // `Int.id == Int64.id`, `Byte.id == UInt8.id`,
+                // `Float.id == Float64.id`, `USize.id == UInt64.id` — while
+                // distinct widths (Int8 vs Int64) and user types stay
+                // distinct.  Pre-fix this hashed the SPELLED name, so every
+                // alias diverged.
+                let canon = type_names::canonical_identity_name(&type_name);
+                let key: &str = if canon == type_names::NON_PRIMITIVE_IDENTITY {
+                    type_name.as_str()
+                } else {
+                    canon
+                };
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                type_name.hash(&mut hasher);
+                key.hash(&mut hasher);
                 let type_id = hasher.finish() as i64;
                 self.ctx.emit(Instruction::LoadI {
                     dst: dest,
