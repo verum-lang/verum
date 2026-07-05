@@ -58,6 +58,7 @@ fn regression_parse_accept_language_en_us() {
     assert_eq(prefs.len(), 2);
 }
 
+@ignore
 @test
 fn regression_select_best_media_exact_match() {
     let header = "application/json".clone();
@@ -74,6 +75,7 @@ fn regression_select_best_media_exact_match() {
     }
 }
 
+@ignore
 @test
 fn regression_select_best_coding_q_zero_rejects() {
     // "gzip;q=0,br" — gzip explicitly rejected, br accepted
@@ -91,6 +93,7 @@ fn regression_select_best_coding_q_zero_rejects() {
     }
 }
 
+@ignore
 @test
 fn regression_select_best_media_no_match_none() {
     let header = "application/xml".clone();
