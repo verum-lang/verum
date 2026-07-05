@@ -16,6 +16,7 @@ mount core.net.http_range.{
     encode_unsatisfiable, RangeSpec, RangeSet, ResolvedRange, RangeError
 };
 mount core.base.result.{Result, Ok, Err};
+mount core.collections.List;
 
 // =============================================================================
 // HTTPRNG-1 — parse_range_header SIGSEGV during precompile cascade
@@ -99,4 +100,29 @@ fn regression_encode_unsatisfiable_simple() {
     let h = encode_unsatisfiable(1234_u64);
     let want = "bytes */1234".clone();
     assert(h == want);
+}
+
+// REGRESSION (net-conformance-20260705): INLINE-AGG-REF-ARG.
+// Passing an INLINE aggregate literal by reference as a call argument —
+// `resolve_and_merge(&RangeSet { specs: specs }, total)` — crashes the
+// COMPILER (SIGSEGV in VBC codegen), while binding it to a `let` first
+// (`let rs = RangeSet { specs }; resolve_and_merge(&rs, total)`) lowers
+// correctly. property_test.vr::law_merged_output_is_fixpoint uses the
+// let-bind form. @ignore'd because it crashes at COMPILE time (the whole
+// suite dies); flips to a live pin once the inline-aggregate-reference
+// argument codegen is fixed.
+@ignore
+@test
+fn regression_inline_aggregate_reference_argument_crash() {
+    let rs = parse_range_header(&"bytes=0-9".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 100_u64).unwrap();
+    let mut specs: List<RangeSpec> = [];
+    let mut i = 0;
+    while i < merged.len() {
+        specs.push(RangeSpec.Closed { start: merged[i].start, end: merged[i].end });
+        i = i + 1;
+    }
+    // INLINE `&RangeSet { ... }` as an argument — the crash shape.
+    let again = resolve_and_merge(&RangeSet { specs: specs }, 100_u64).unwrap();
+    assert_eq(again.len(), 1);
 }

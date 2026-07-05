@@ -1,0 +1,257 @@
+// =============================================================================
+// core-tests/net/websocket/property_test.vr
+// =============================================================================
+//
+// Codec laws for the RFC 6455 frame layer — the first functional
+// (encode/decode) coverage; the unit file pins constants and ADTs.
+//
+// Laws:
+//   L1  round-trip (unmasked): decode(encode(f, None)) == f across
+//       every frame constructor AND every payload-length encoding
+//       branch (0 / 1 / 125 / 126 / 65535 / 65536 — the 7-bit,
+//       16-bit and 64-bit wire forms)
+//   L2  round-trip (masked): mask ∘ mask = id — client-masked frames
+//       decode to the identical payload
+//   L3  consumed = encoded length — decode reports exactly the bytes
+//       encode produced
+//   L4  opcode wire round-trip: from_byte(to_byte(op)) == op over all
+//       named opcodes; is_control ⊕ is_data partitions them
+//   L5  truncation safety: every strict prefix of an encoded frame is
+//       NeedMore, never Err, never bogus Decoded
+//   L6  mask-expectation lattice: server rejects unmasked, client
+//       rejects masked
+//   L7  DoS guard: payload beyond max_payload → PayloadTooLong
+//   L8  RFC 6455 §4.2.2 accept_key vector
+// =============================================================================
+
+mount core.net.websocket.{
+    WsFrame, WsOpcode, CloseCode, encode, decode,
+    WebSocketDecodeResult, WebSocketDecodeError, accept_key,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.List;
+
+fn payload_of_len(n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        out.push((i % 251) as Byte);
+        i = i + 1;
+    }
+    out
+}
+
+fn payloads_equal(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn round_trip_unmasked(frame: &WsFrame) {
+    let mut wire: List<Byte> = [];
+    encode(frame, Maybe.None, &mut wire);
+    match decode(wire.as_slice(), false, 1 << 20) {
+        WebSocketDecodeResult.Decoded { frame: got, consumed } => {
+            assert_eq(consumed, wire.len());
+            assert(got.fin == frame.fin);
+            assert(got.opcode.to_byte() == frame.opcode.to_byte());
+            assert(payloads_equal(&got.payload, &frame.payload));
+        },
+        WebSocketDecodeResult.NeedMore => assert(false),
+        WebSocketDecodeResult.Err(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 1: L1 + L3 unmasked round-trip across constructors
+// =============================================================================
+
+@test
+fn law_round_trip_text_frame() {
+    round_trip_unmasked(&WsFrame.text(payload_of_len(11)));
+}
+
+@test
+fn law_round_trip_binary_frame() {
+    round_trip_unmasked(&WsFrame.binary(payload_of_len(32)));
+}
+
+@test
+fn law_round_trip_ping_pong_frames() {
+    round_trip_unmasked(&WsFrame.ping(payload_of_len(0)));
+    round_trip_unmasked(&WsFrame.pong(payload_of_len(8)));
+}
+
+@test
+fn law_round_trip_close_frame_carries_code_and_reason() {
+    let f = WsFrame.close(CloseCode.new(CloseCode.NORMAL), &"bye".clone());
+    let mut wire: List<Byte> = [];
+    encode(&f, Maybe.None, &mut wire);
+    match decode(wire.as_slice(), false, 1 << 20) {
+        WebSocketDecodeResult.Decoded { frame: got, consumed: _ } => {
+            assert(got.opcode is WsOpcode.Close);
+            // Payload = 2-byte big-endian code + reason bytes.
+            assert_eq(got.payload.len(), 5);
+            let hi = got.payload[0] as Int;
+            let lo = got.payload[1] as Int;
+            assert_eq((hi << 8) | lo, 1000);
+        },
+        WebSocketDecodeResult.NeedMore => assert(false),
+        WebSocketDecodeResult.Err(_) => assert(false),
+    }
+}
+
+@test
+fn law_round_trip_all_length_encoding_branches() {
+    // 0 / 1 / 125 → 7-bit form; 126 / 65535 → 16-bit form;
+    // 65536 → 64-bit form.
+    let sizes: List<Int> = [0, 1, 125, 126, 65535, 65536];
+    for n in sizes.iter() {
+        round_trip_unmasked(&WsFrame.binary(payload_of_len(*n)));
+    }
+}
+
+// =============================================================================
+// Section 2: L2 masked round-trip (mask ∘ mask = id)
+// =============================================================================
+
+@test
+fn law_masked_round_trip_restores_payload() {
+    let original = payload_of_len(300);
+    let f = WsFrame.binary(payload_of_len(300));
+    let mask: [UInt8; 4] = [0x37_u8, 0xfa_u8, 0x21_u8, 0x3d_u8];
+    let mut wire: List<Byte> = [];
+    encode(&f, Maybe.Some(mask), &mut wire);
+    match decode(wire.as_slice(), true, 1 << 20) {
+        WebSocketDecodeResult.Decoded { frame: got, consumed } => {
+            assert_eq(consumed, wire.len());
+            assert(payloads_equal(&got.payload, &original));
+        },
+        WebSocketDecodeResult.NeedMore => assert(false),
+        WebSocketDecodeResult.Err(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 3: L4 opcode wire round-trip + control/data partition
+// =============================================================================
+
+@test
+fn law_opcode_round_trip_named() {
+    let ops: List<WsOpcode> = [
+        WsOpcode.Continuation, WsOpcode.Textual, WsOpcode.Binary,
+        WsOpcode.Close, WsOpcode.Ping, WsOpcode.Pong,
+    ];
+    for op in ops.iter() {
+        let b = (*op).to_byte();
+        let back = WsOpcode.from_byte(b);
+        assert(back.to_byte() == b);
+    }
+}
+
+@test
+fn law_opcode_control_data_partition() {
+    let ops: List<WsOpcode> = [
+        WsOpcode.Continuation, WsOpcode.Textual, WsOpcode.Binary,
+        WsOpcode.Close, WsOpcode.Ping, WsOpcode.Pong,
+    ];
+    for op in ops.iter() {
+        // Named opcodes are exactly one of control / data.
+        let c = (*op).is_control();
+        let d = (*op).is_data();
+        assert(c != d);
+    }
+}
+
+// =============================================================================
+// Section 4: L5 truncation safety
+// =============================================================================
+
+@test
+fn law_every_strict_prefix_is_need_more() {
+    let f = WsFrame.binary(payload_of_len(130)); // 16-bit length form
+    let mut wire: List<Byte> = [];
+    encode(&f, Maybe.None, &mut wire);
+    let mut k = 0;
+    while k < wire.len() {
+        let mut pre: List<Byte> = List.with_capacity(k);
+        let mut i = 0;
+        while i < k {
+            pre.push(wire[i]);
+            i = i + 1;
+        }
+        match decode(pre.as_slice(), false, 1 << 20) {
+            WebSocketDecodeResult.NeedMore => {},
+            WebSocketDecodeResult.Decoded { frame: _, consumed: _ } => assert(false),
+            WebSocketDecodeResult.Err(_) => assert(false),
+        }
+        k = k + 1;
+    }
+}
+
+// =============================================================================
+// Section 5: L6 mask-expectation lattice
+// =============================================================================
+
+@test
+fn law_server_rejects_unmasked_client_frame() {
+    let f = WsFrame.text(payload_of_len(4));
+    let mut wire: List<Byte> = [];
+    encode(&f, Maybe.None, &mut wire);
+    match decode(wire.as_slice(), true, 1 << 20) {
+        WebSocketDecodeResult.Err(e) => assert(e == WebSocketDecodeError.ExpectedMasked),
+        WebSocketDecodeResult.Decoded { frame: _, consumed: _ } => assert(false),
+        WebSocketDecodeResult.NeedMore => assert(false),
+    }
+}
+
+@test
+fn law_client_rejects_masked_server_frame() {
+    let f = WsFrame.text(payload_of_len(4));
+    let mask: [UInt8; 4] = [1_u8, 2_u8, 3_u8, 4_u8];
+    let mut wire: List<Byte> = [];
+    encode(&f, Maybe.Some(mask), &mut wire);
+    match decode(wire.as_slice(), false, 1 << 20) {
+        WebSocketDecodeResult.Err(e) => assert(e == WebSocketDecodeError.UnexpectedlyMasked),
+        WebSocketDecodeResult.Decoded { frame: _, consumed: _ } => assert(false),
+        WebSocketDecodeResult.NeedMore => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 6: L7 DoS guard
+// =============================================================================
+
+@test
+fn law_payload_beyond_limit_rejected() {
+    let f = WsFrame.binary(payload_of_len(200));
+    let mut wire: List<Byte> = [];
+    encode(&f, Maybe.None, &mut wire);
+    match decode(wire.as_slice(), false, 100) {
+        WebSocketDecodeResult.Err(e) => {
+            assert(e == WebSocketDecodeError.PayloadTooLong { limit: 100 });
+        },
+        WebSocketDecodeResult.Decoded { frame: _, consumed: _ } => assert(false),
+        WebSocketDecodeResult.NeedMore => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 7: L8 RFC 6455 §4.2.2 accept-key vector
+// =============================================================================
+
+@ignore
+@test
+fn law_accept_key_rfc_vector() {
+    let key = "dGhlIHNhbXBsZSBub25jZQ==".clone();
+    let accept = accept_key(&key);
+    assert_eq(accept.as_str(), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

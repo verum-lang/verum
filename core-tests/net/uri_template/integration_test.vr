@@ -1,0 +1,112 @@
+// =============================================================================
+// core-tests/net/uri_template/integration_test.vr
+// =============================================================================
+//
+// Cross-type scenarios: RFC 6570 templates driving real request URIs
+// built from `core.collections.Map` variable bindings, exercising the
+// parse → expand round-trip against the kind of route tables a router
+// (`core.net.weft`) or an API client assembles.
+// =============================================================================
+
+mount core.net.uri_template.{UriTemplate, TemplateValue, UriTemplateError};
+mount core.collections.{Map, List};
+mount core.base.result.{Result, Ok, Err};
+
+fn vars_from(pairs: List<(Text, Text)>) -> Map<Text, TemplateValue> {
+    let mut m: Map<Text, TemplateValue> = Map.new();
+    let mut i = 0;
+    while i < pairs.len() {
+        // Tuple-INDEX access (`.0`/`.1`), NOT `let (k, v) = &pairs[i]` —
+        // destructuring a tuple bound from an indexed list element reads
+        // garbage (TUPLE-DESTRUCTURE-INDEXED codegen defect; index access
+        // lowers correctly).
+        m.insert(pairs[i].0.clone(), TemplateValue.Str(pairs[i].1.clone()));
+        i = i + 1;
+    }
+    m
+}
+
+// =============================================================================
+// Section 1: GitHub-style REST route templates
+// =============================================================================
+
+@test
+fn integration_repo_route_expansion() {
+    let tpl = UriTemplate.parse(&"/repos/{owner}/{repo}/issues/{number}".clone()).unwrap();
+    let mut pairs: List<(Text, Text)> = [];
+    pairs.push(("owner".clone(), "verum-lang".clone()));
+    pairs.push(("repo".clone(), "verum".clone()));
+    pairs.push(("number".clone(), "42".clone()));
+    let vars = vars_from(pairs);
+    assert_eq(tpl.expand(&vars).as_str(), "/repos/verum-lang/verum/issues/42");
+}
+
+@test
+fn integration_query_parameters_from_map() {
+    let tpl = UriTemplate.parse(&"/search{?q,lang,page}".clone()).unwrap();
+    let mut pairs: List<(Text, Text)> = [];
+    pairs.push(("q".clone(), "verum lang".clone()));
+    pairs.push(("lang".clone(), "en".clone()));
+    pairs.push(("page".clone(), "2".clone()));
+    let vars = vars_from(pairs);
+    // Spaces percent-encoded per §3.2.8; & separators between pairs.
+    assert_eq(tpl.expand(&vars).as_str(), "/search?q=verum%20lang&lang=en&page=2");
+}
+
+// =============================================================================
+// Section 2: List-valued expansion via TemplateValue.List_
+// =============================================================================
+
+@test
+fn integration_list_value_path_segments() {
+    let tpl = UriTemplate.parse(&"/files{/segments*}".clone()).unwrap();
+    let mut segs: List<Text> = [];
+    segs.push("a".clone());
+    segs.push("b".clone());
+    segs.push("c".clone());
+    let mut m: Map<Text, TemplateValue> = Map.new();
+    m.insert("segments".clone(), TemplateValue.List_(segs));
+    assert_eq(tpl.expand(&m).as_str(), "/files/a/b/c");
+}
+
+// =============================================================================
+// Section 3: partial variable sets — undefined vars drop cleanly
+// =============================================================================
+
+@test
+fn integration_partial_variable_set() {
+    let tpl = UriTemplate.parse(&"/api/{version}/users{?filter,sort}".clone()).unwrap();
+    let mut pairs: List<(Text, Text)> = [];
+    pairs.push(("version".clone(), "v3".clone()));
+    pairs.push(("sort".clone(), "name".clone()));
+    // `filter` deliberately absent.
+    let vars = vars_from(pairs);
+    assert_eq(tpl.expand(&vars).as_str(), "/api/v3/users?sort=name");
+}
+
+// =============================================================================
+// Section 4: error surface meets Result combinators
+// =============================================================================
+
+@test
+fn integration_parse_error_is_recoverable() {
+    let attempts: List<Text> = [
+        "/valid/{x}".clone(),
+        "/broken/{x".clone(),
+        "/also/{y}".clone(),
+    ];
+    let mut ok_count = 0;
+    let mut err_count = 0;
+    for t in attempts.iter() {
+        match UriTemplate.parse(t) {
+            Result.Ok(_) => ok_count = ok_count + 1,
+            Result.Err(_) => err_count = err_count + 1,
+        }
+    }
+    assert_eq(ok_count, 2);
+    assert_eq(err_count, 1);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

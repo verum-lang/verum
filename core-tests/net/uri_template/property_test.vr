@@ -1,0 +1,207 @@
+// =============================================================================
+// core-tests/net/uri_template/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for RFC 6570 URI Templates over the spec's own
+// fixture values (§1.2 / §3.2): var="value", hello="Hello World!",
+// path="/foo/bar", x="1024", y="768", empty="", list=["red","green",
+// "blue"]. Each law samples every operator the implementation
+// branches on (Simple / + Reserved / # Fragment / . Label / /
+// PathSeg / ; PathStyle / ? FormQuery / & ContQuery).
+//
+// Laws:
+//   L1  determinism:   expand(vars) called twice yields identical text
+//   L2  literal identity: brace-free template expands to itself
+//   L3  spec fixtures: RFC 6570 §3.2 canonical expansions (per level)
+//   L4  reserved ⊃ simple: `+` preserves reserved chars that Simple
+//       percent-encodes
+//   L5  fragment = "#" ++ reserved
+//   L6  undefined variables contribute nothing
+//   L7  level-4 modifiers: prefix `:N` truncates, explode `*` splits
+// =============================================================================
+
+mount core.net.uri_template.{UriTemplate, TemplateValue, UriTemplateError};
+mount core.collections.{Map, List};
+mount core.base.result.{Result, Ok, Err};
+
+fn spec_vars() -> Map<Text, TemplateValue> {
+    let mut vars: Map<Text, TemplateValue> = Map.new();
+    vars.insert("var".clone(), TemplateValue.Str("value".clone()));
+    vars.insert("hello".clone(), TemplateValue.Str("Hello World!".clone()));
+    vars.insert("path".clone(), TemplateValue.Str("/foo/bar".clone()));
+    vars.insert("x".clone(), TemplateValue.Str("1024".clone()));
+    vars.insert("y".clone(), TemplateValue.Str("768".clone()));
+    vars.insert("empty".clone(), TemplateValue.Str("".clone()));
+    let mut colors: List<Text> = [];
+    colors.push("red".clone());
+    colors.push("green".clone());
+    colors.push("blue".clone());
+    vars.insert("list".clone(), TemplateValue.List_(colors));
+    vars
+}
+
+fn expand_of(template: &Text) -> Text {
+    let tpl = UriTemplate.parse(template).unwrap();
+    let vars = spec_vars();
+    tpl.expand(&vars)
+}
+
+// =============================================================================
+// Section 1: L1 determinism + L2 literal identity
+// =============================================================================
+
+@test
+fn law_expand_deterministic() {
+    let s = "/users/{var}{?x,y}".clone();
+    let tpl = UriTemplate.parse(&s).unwrap();
+    let vars = spec_vars();
+    let a = tpl.expand(&vars);
+    let b = tpl.expand(&vars);
+    assert_eq(a.as_str(), b.as_str());
+}
+
+@test
+fn law_literal_template_is_identity() {
+    let literals: List<Text> = [
+        "/plain/path".clone(),
+        "http://example.com/a/b?c=d#e".clone(),
+        "".clone(),
+    ];
+    for s in literals.iter() {
+        let tpl = UriTemplate.parse(s).unwrap();
+        let vars = spec_vars();
+        assert_eq(tpl.expand(&vars).as_str(), s.as_str());
+    }
+}
+
+// =============================================================================
+// Section 2: L3 RFC 6570 §3.2 spec fixtures per operator
+// =============================================================================
+
+@test
+fn law_spec_simple_expansion() {
+    assert_eq(expand_of(&"{var}".clone()).as_str(), "value");
+    assert_eq(expand_of(&"{hello}".clone()).as_str(), "Hello%20World%21");
+    assert_eq(expand_of(&"{x,y}".clone()).as_str(), "1024,768");
+}
+
+@test
+fn law_spec_reserved_expansion() {
+    assert_eq(expand_of(&"{+var}".clone()).as_str(), "value");
+    assert_eq(expand_of(&"{+path}/here".clone()).as_str(), "/foo/bar/here");
+}
+
+@test
+fn law_spec_fragment_expansion() {
+    assert_eq(expand_of(&"X{#var}".clone()).as_str(), "X#value");
+}
+
+@test
+fn law_spec_label_expansion() {
+    assert_eq(expand_of(&"X{.var}".clone()).as_str(), "X.value");
+}
+
+@test
+fn law_spec_path_segment_expansion() {
+    assert_eq(expand_of(&"{/var}".clone()).as_str(), "/value");
+    assert_eq(expand_of(&"{/var,x}/here".clone()).as_str(), "/value/1024/here");
+}
+
+@test
+fn law_spec_path_style_expansion() {
+    assert_eq(expand_of(&"{;x,y}".clone()).as_str(), ";x=1024;y=768");
+}
+
+@test
+fn law_spec_form_query_expansion() {
+    assert_eq(expand_of(&"{?x,y}".clone()).as_str(), "?x=1024&y=768");
+}
+
+@test
+fn law_spec_form_continuation_expansion() {
+    assert_eq(expand_of(&"?fixed=yes{&x}".clone()).as_str(), "?fixed=yes&x=1024");
+}
+
+// =============================================================================
+// Section 3: L4 reserved-vs-simple encoding lattice
+// =============================================================================
+
+@test
+fn law_simple_encodes_slash_reserved_preserves() {
+    let simple = expand_of(&"{path}".clone());
+    let reserved = expand_of(&"{+path}".clone());
+    assert_eq(simple.as_str(), "%2Ffoo%2Fbar");
+    assert_eq(reserved.as_str(), "/foo/bar");
+}
+
+// =============================================================================
+// Section 4: L6 undefined variables contribute nothing
+// =============================================================================
+
+@test
+fn law_undefined_simple_expands_empty() {
+    assert_eq(expand_of(&"X{undef}Y".clone()).as_str(), "XY");
+}
+
+@test
+fn law_undefined_query_omits_pair() {
+    assert_eq(expand_of(&"{?undef}".clone()).as_str(), "");
+}
+
+@test
+fn law_defined_empty_is_kept_undefined_dropped() {
+    // §3.2.1: empty string is DEFINED — it expands (to nothing for
+    // Simple, to `x=` style pairs for FormQuery); undefined drops.
+    assert_eq(expand_of(&"{empty}".clone()).as_str(), "");
+    assert_eq(expand_of(&"{?empty}".clone()).as_str(), "?empty=");
+}
+
+// =============================================================================
+// Section 5: L7 level-4 modifiers — prefix + explode
+// =============================================================================
+
+@test
+fn law_prefix_modifier_truncates() {
+    assert_eq(expand_of(&"{var:3}".clone()).as_str(), "val");
+    // Prefix longer than value → whole value, no padding.
+    assert_eq(expand_of(&"{var:30}".clone()).as_str(), "value");
+}
+
+@test
+fn law_explode_list_form_query() {
+    assert_eq(
+        expand_of(&"{?list*}".clone()).as_str(),
+        "?list=red&list=green&list=blue"
+    );
+}
+
+@test
+fn law_unexploded_list_joins_with_comma() {
+    assert_eq(expand_of(&"{list}".clone()).as_str(), "red,green,blue");
+}
+
+// =============================================================================
+// Section 6: parse error lattice
+// =============================================================================
+
+@test
+fn law_unbalanced_brace_is_error() {
+    let s = "/users/{user".clone();
+    match UriTemplate.parse(&s) {
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert(e == UriTemplateError.UnbalancedBraces),
+    }
+}
+
+@test
+fn law_empty_expression_is_malformed() {
+    let s = "/users/{}".clone();
+    match UriTemplate.parse(&s) {
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert(e is UriTemplateError.Malformed),
+    }
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

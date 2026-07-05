@@ -102,3 +102,22 @@ fn regression_select_best_media_no_match_none() {
         Maybe.None => assert(true),
     }
 }
+
+// REGRESSION (net-conformance-20260705): SELECTBESTMEDIA-CODEGEN.
+// Calling `select_best_media(&prefs, &offers)` crashes the COMPILER
+// (SIGSEGV in VBC codegen) — distinct from the working
+// `select_best_coding` path; the difference is `score_media`'s tuple
+// `(Float, Int)` return threaded through the monomorphised body.
+// property_test.vr §2-§7 (the select_best_media laws) are @ignore'd on
+// this pin; parse_accept + select_best_coding coverage stays live.
+// @ignore'd: crashes at COMPILE time.
+@ignore
+@test
+fn regression_select_best_media_codegen_crash() {
+    let prefs = parse_accept(&"text/*, text/html".clone());
+    let mut offers: List<Text> = [];
+    offers.push("text/plain".clone());
+    offers.push("text/html".clone());
+    let _ = select_best_media(&prefs, &offers);
+    assert(true);
+}

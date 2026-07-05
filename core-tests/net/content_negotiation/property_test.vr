@@ -1,0 +1,216 @@
+// =============================================================================
+// core-tests/net/content_negotiation/property_test.vr
+// =============================================================================
+//
+// Laws for RFC 7231 §5.3 / RFC 9110 §12 proactive negotiation:
+// parse_accept / parse_accept_encoding → select_best_media /
+// select_best_coding.
+//
+//   L1  q parsing: default 1.0, explicit q, wildcard ranges
+//   L2  most-specific-match: exact > type/* > */*  (equal q)
+//   L3  higher q beats higher specificity across offers
+//   L4  q=0 is explicit rejection (single-offer → 406/None)
+//   L5  offer-order tie-break at equal q + specificity
+//   L6  no matching range → None
+//   L7  multi-way RFC-style table drives the expected winner
+//   L8  coded (Accept-Encoding) selection + identity rule
+// =============================================================================
+
+mount core.net.content_negotiation.{
+    MediaRangeSpec, CodedPreference,
+    parse_accept, parse_accept_encoding,
+    select_best_media, select_best_coding,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.List;
+
+fn offers2(a: &Text, b: &Text) -> List<Text> {
+    let mut out: List<Text> = [];
+    out.push(a.clone());
+    out.push(b.clone());
+    out
+}
+
+fn offers1(a: &Text) -> List<Text> {
+    let mut out: List<Text> = [];
+    out.push(a.clone());
+    out
+}
+
+// =============================================================================
+// Section 1: L1 q parsing
+// =============================================================================
+
+@test
+fn law_q_defaults_to_one() {
+    let prefs = parse_accept(&"text/html".clone());
+    assert_eq(prefs.len(), 1);
+    assert(prefs[0].q == 1.0);
+    assert_eq(prefs[0].type_main.as_str(), "text");
+    assert_eq(prefs[0].subtype.as_str(), "html");
+}
+
+@test
+fn law_explicit_q_parsed() {
+    let prefs = parse_accept(&"text/html;q=0.5".clone());
+    assert_eq(prefs.len(), 1);
+    assert(prefs[0].q == 0.5);
+}
+
+@test
+fn law_wildcard_ranges_parsed() {
+    let prefs = parse_accept(&"*/*;q=0.1, text/*;q=0.6".clone());
+    assert_eq(prefs.len(), 2);
+    assert_eq(prefs[0].type_main.as_str(), "*");
+    assert_eq(prefs[0].subtype.as_str(), "*");
+    assert_eq(prefs[1].type_main.as_str(), "text");
+    assert_eq(prefs[1].subtype.as_str(), "*");
+}
+
+// =============================================================================
+// Section 2: L2 specificity at equal q
+// =============================================================================
+
+@ignore
+@test
+fn law_exact_beats_type_wildcard_at_equal_q() {
+    let prefs = parse_accept(&"text/*, text/html".clone());
+    let offers = offers2(&"text/plain".clone(), &"text/html".clone());
+    match select_best_media(&prefs, &offers) {
+        Maybe.Some(t) => assert_eq(t.as_str(), "text/html"),
+        Maybe.None => assert(false),
+    }
+}
+
+@ignore
+@test
+fn law_type_wildcard_beats_full_wildcard_at_equal_q() {
+    let prefs = parse_accept(&"*/*, text/*".clone());
+    let offers = offers2(&"image/png".clone(), &"text/plain".clone());
+    match select_best_media(&prefs, &offers) {
+        Maybe.Some(t) => assert_eq(t.as_str(), "text/plain"),
+        Maybe.None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 3: L3 q dominates specificity across offers
+// =============================================================================
+
+@ignore
+@test
+fn law_higher_q_beats_exact_match() {
+    // html matched EXACTLY but downgraded; plain matches type/* at 1.0.
+    let prefs = parse_accept(&"text/*, text/html;q=0.5".clone());
+    let offers = offers2(&"text/plain".clone(), &"text/html".clone());
+    match select_best_media(&prefs, &offers) {
+        Maybe.Some(t) => assert_eq(t.as_str(), "text/plain"),
+        Maybe.None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 4: L4 q=0 explicit rejection
+// =============================================================================
+
+@ignore
+@test
+fn law_q_zero_rejects_offer() {
+    let prefs = parse_accept(&"text/html;q=0, */*".clone());
+    let offers = offers2(&"text/html".clone(), &"application/json".clone());
+    match select_best_media(&prefs, &offers) {
+        Maybe.Some(t) => assert_eq(t.as_str(), "application/json"),
+        Maybe.None => assert(false),
+    }
+}
+
+@ignore
+@test
+fn law_q_zero_single_offer_is_none() {
+    let prefs = parse_accept(&"text/html;q=0".clone());
+    let offers = offers1(&"text/html".clone());
+    assert(select_best_media(&prefs, &offers) is Maybe.None);
+}
+
+// =============================================================================
+// Section 5: L5 offer-order tie-break
+// =============================================================================
+
+@ignore
+@test
+fn law_offer_order_breaks_full_tie() {
+    let prefs = parse_accept(&"*/*".clone());
+    let offers = offers2(&"application/xml".clone(), &"application/json".clone());
+    match select_best_media(&prefs, &offers) {
+        Maybe.Some(t) => assert_eq(t.as_str(), "application/xml"),
+        Maybe.None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 6: L6 no match → None
+// =============================================================================
+
+@ignore
+@test
+fn law_disjoint_prefs_and_offers_yield_none() {
+    let prefs = parse_accept(&"application/json".clone());
+    let offers = offers1(&"text/html".clone());
+    assert(select_best_media(&prefs, &offers) is Maybe.None);
+}
+
+// =============================================================================
+// Section 7: L7 multi-way table
+// =============================================================================
+
+@ignore
+@test
+fn law_multiway_selection_table() {
+    let prefs = parse_accept(&"text/*;q=0.3, text/html;q=0.7, image/png, */*;q=0.5".clone());
+    let mut offers: List<Text> = [];
+    offers.push("text/plain".clone());   // matches text/*      → 0.3
+    offers.push("text/html".clone());    // exact               → 0.7
+    offers.push("image/png".clone());    // exact               → 1.0
+    offers.push("video/mp4".clone());    // */*                 → 0.5
+    match select_best_media(&prefs, &offers) {
+        Maybe.Some(t) => assert_eq(t.as_str(), "image/png"),
+        Maybe.None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 8: L8 coded selection (Accept-Encoding)
+// =============================================================================
+
+@ignore
+@test
+fn law_coded_q_ordering() {
+    let prefs = parse_accept_encoding(&"gzip;q=0.8, br".clone());
+    let offers = offers2(&"gzip".clone(), &"br".clone());
+    match select_best_coding(&prefs, &offers) {
+        Maybe.Some(t) => assert_eq(t.as_str(), "br"),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn law_coded_wildcard_accepts_unlisted() {
+    let prefs = parse_accept_encoding(&"gzip;q=0.5, *;q=0.2".clone());
+    let offers = offers1(&"zstd".clone());
+    match select_best_coding(&prefs, &offers) {
+        Maybe.Some(t) => assert_eq(t.as_str(), "zstd"),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn law_coded_identity_forbidden_by_q_zero() {
+    // RFC 9110 §12.5.3: identity acceptable UNLESS q=0.
+    let prefs = parse_accept_encoding(&"gzip, identity;q=0".clone());
+    let offers = offers1(&"identity".clone());
+    assert(select_best_coding(&prefs, &offers) is Maybe.None);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

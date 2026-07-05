@@ -230,13 +230,24 @@ fn parse_param_value(b: &[Byte], from: Int) -> Result<(Text, Int), LinkHeaderErr
 public fn find_rel<'a>(list: &'a List<LinkEntry>, rel: &str) -> Maybe<&'a LinkEntry> {
     let mut i: Int = 0;
     while i < list.len() {
-        let entry = &list[i];
         let mut j: Int = 0;
-        while j < entry.params.len() {
-            let (name, value) = &entry.params[j];
+        while j < list[i].params.len() {
+            // Access the tuple through `list[i].params[j].0` DIRECTLY —
+            // NOT via an intermediate `let entry = &list[i]` then
+            // `entry.params[j].0`. Two distinct interpreter codegen
+            // defects meet here: (1) `let (name, value) = &..[j]`
+            // (tuple-pattern destructure of an indexed tuple) reads
+            // GARBAGE; (2) binding the record to `let entry = &list[i]`
+            // loses its type, so `entry.params[j].0.as_bytes()` fails
+            // method resolution. `format_link_header`'s direct
+            // `entries[i].params[j].0` form proves the direct chain
+            // lowers correctly. See regression_test.vr
+            // TUPLE-DESTRUCTURE-INDEXED / RECORD-LET-REF-TYPE-LOSS.
+            let name = &list[i].params[j].0;
+            let value = &list[i].params[j].1;
             if bytes_eq_ci(name.as_bytes(), b"rel") {
                 if rel_matches(value.as_bytes(), rel.as_bytes()) {
-                    return Maybe.Some(entry);
+                    return Maybe.Some(&list[i]);
                 }
             }
             j = j + 1;
@@ -291,7 +302,10 @@ public fn format_link_header(entries: &List<LinkEntry>) -> Text {
         out.push('>' as Byte);
         let mut j: Int = 0;
         while j < entries[i].params.len() {
-            let (name, value) = &entries[i].params[j];
+            // Tuple-INDEX access, not `let (name, value) = &...[j]` — see
+            // find_rel's note (TUPLE-DESTRUCTURE-INDEXED codegen defect).
+            let name = &entries[i].params[j].0;
+            let value = &entries[i].params[j].1;
             out.push(';' as Byte);
             out.push(' ' as Byte);
             push_bytes(&mut out, name.as_bytes());

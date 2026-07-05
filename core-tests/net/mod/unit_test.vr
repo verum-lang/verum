@@ -1,0 +1,245 @@
+// =============================================================================
+// core-tests/net/mod/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core/net/mod.vr` — the `core.net` umbrella manifest.
+//
+// `core/net/mod.vr` declares NO types of its own; its whole public surface
+// is the re-export contract:
+//
+//   * addr  — IpAddr / Ipv4Addr / Ipv6Addr / SocketAddr / SocketAddrV4 /
+//             SocketAddrV6 / ToSocketAddrs
+//   * tcp   — TcpStream / TcpListener / Incoming
+//   * udp   — UdpSocket
+//   * unix  — UnixStream / UnixListener / UnixIncoming / UnixError /
+//             PeerCred / ShutdownKind
+//   * http  — Method / StatusCode / Version / Headers / Request / Response /
+//             HttpClient / HttpHandler / HttpError / Url / Cookie /
+//             ClientConfig / HttpPoolConfig
+//   * tls   — TlsVersion / Certificate / PrivateKey / TlsConfig / TlsStream /
+//             TlsConnector / TlsAcceptor / TlsError
+//   * dns   — lookup_host* / lookup_addr* / resolve* / is_valid_domain /
+//             is_ip_address / DnsError / DnsRecord / DnsRecordEntry /
+//             DnsRecordType / Resolver
+//   * prelude — nested `core.net.prelude` module re-exporting the 8 most
+//             common names (covered in regression_test.vr to keep the
+//             mount sets of the two files disjoint).
+//
+// Every test constructs a value THROUGH the umbrella mount and then CALLS
+// an impl-block method on it. This pins the umbrella-reexport-impl defect
+// class (a `mount core.X.{Type}` through an umbrella mod.vr that drops the
+// type's impl blocks — cf. `core.sys.{MemProt}` → `MemProt.NONE` resolving
+// to Unit, fixed 91d1c85b0): reaching the *name* is necessary but NOT
+// sufficient; the method surface must survive the re-export chain too.
+//
+// The live-socket types (TcpStream / UdpSocket / TlsConnector / ...) are
+// touched at mount level only — constructing them needs a socket fixture
+// harness (see tcp/udp/tls audits). The mount itself is load-bearing: if
+// the umbrella dropped the name, this file would fail to compile.
+// =============================================================================
+
+mount core.net.{
+    // addr
+    IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6,
+    // tcp / udp (mount-resolution smoke only — no construction)
+    TcpStream, TcpListener, UdpSocket,
+    // unix
+    UnixError, PeerCred, ShutdownKind,
+    // http
+    Method, StatusCode, Version, Headers,
+    // tls
+    TlsVersion,
+    // dns
+    DnsRecordType, is_valid_domain, is_ip_address,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: addr surface through the umbrella — construct + method call
+// =============================================================================
+
+@test
+fn test_umbrella_ipv4_new_and_octets() {
+    let a = Ipv4Addr.new(192, 168, 1, 1);
+    let (o0, o1, o2, o3) = a.octets();
+    assert_eq(o0, 192);
+    assert_eq(o1, 168);
+    assert_eq(o2, 1);
+    assert_eq(o3, 1);
+}
+
+@test
+fn test_umbrella_ipv4_localhost_is_loopback() {
+    // Static constructor + RFC predicate must BOTH survive the re-export.
+    let a = Ipv4Addr.localhost();
+    assert(a.is_loopback());
+}
+
+@test
+fn test_umbrella_ipv6_localhost_is_loopback() {
+    let a = Ipv6Addr.localhost();
+    assert(a.is_loopback());
+}
+
+@test
+fn test_umbrella_ip_addr_v4_discriminator() {
+    let ip = IpAddr.v4(127, 0, 0, 1);
+    assert(ip.is_ipv4());
+    assert(!ip.is_ipv6());
+    assert(ip.is_loopback());
+}
+
+@test
+fn test_umbrella_socket_addr_v4_port_round_trip() {
+    let sa = SocketAddr.new_v4(Ipv4Addr.localhost(), 8080);
+    assert_eq(sa.port(), 8080);
+    assert(sa.is_ipv4());
+    assert(!sa.is_ipv6());
+}
+
+@test
+fn test_umbrella_socket_addr_v4_record_port() {
+    let sa = SocketAddrV4.new(Ipv4Addr.new(10, 0, 0, 1), 443);
+    assert_eq(sa.port(), 443);
+}
+
+@test
+fn test_umbrella_socket_addr_v6_record_port() {
+    let sa = SocketAddrV6.new(Ipv6Addr.localhost(), 8443, 0, 0);
+    assert_eq(sa.port(), 8443);
+}
+
+// =============================================================================
+// Section 2: http surface through the umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_method_as_str() {
+    let m = Method.Get;
+    assert_eq(m.as_str(), "GET");
+}
+
+@test
+fn test_umbrella_method_from_str_round_trip() {
+    let parsed = Method.from_str("POST");
+    match parsed {
+        Maybe.Some(m) => assert_eq(m.as_str(), "POST"),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn test_umbrella_method_is_safe() {
+    assert(Method.Get.is_safe());
+    assert(!Method.Post.is_safe());
+}
+
+@test
+fn test_umbrella_status_code_ok() {
+    let s = StatusCode.ok();
+    assert_eq(s.code(), 200);
+    assert(s.is_success());
+    assert(!s.is_client_error());
+}
+
+@test
+fn test_umbrella_status_code_not_found_classification() {
+    let s = StatusCode.new(404);
+    assert(s.is_client_error());
+    assert(!s.is_success());
+    assert(!s.is_server_error());
+}
+
+@test
+fn test_umbrella_version_as_str() {
+    assert_eq(Version.Http11.as_str(), "HTTP/1.1");
+    assert_eq(Version.Http2.as_str(), "HTTP/2");
+}
+
+@test
+fn test_umbrella_headers_new_is_constructible() {
+    // Headers is a record with impl methods; `new()` through the
+    // umbrella pins constructor + method reachability.
+    let h = Headers.new();
+    let _ = h;
+    assert(true);
+}
+
+// =============================================================================
+// Section 3: tls surface through the umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_tls_version_is_secure_lattice() {
+    assert(TlsVersion.Tls13.is_secure());
+    assert(TlsVersion.Tls12.is_secure());
+    assert(!TlsVersion.Tls10.is_secure());
+}
+
+@test
+fn test_umbrella_tls_version_wire_version_tuple() {
+    // Tuple equality — pinned element-wise on both tiers since
+    // TUPLE-EQ-AOT closed (addr/audit.md §3.5.1).
+    let w = TlsVersion.Tls13.wire_version();
+    assert(w == (3, 4));
+}
+
+// =============================================================================
+// Section 4: dns surface through the umbrella — pure free functions
+// =============================================================================
+
+@test
+fn test_umbrella_dns_record_type_disjoint() {
+    let a = DnsRecordType.A;
+    assert(a is DnsRecordType.A);
+    assert(!(a is DnsRecordType.AAAA));
+    assert(!(a is DnsRecordType.CNAME));
+}
+
+@test
+fn test_umbrella_is_ip_address_accepts_v4() {
+    assert(is_ip_address(&"127.0.0.1".to_text()));
+}
+
+@test
+fn test_umbrella_is_ip_address_rejects_hostname() {
+    assert(!is_ip_address(&"example.com".to_text()));
+}
+
+@test
+fn test_umbrella_is_valid_domain_accepts_fqdn() {
+    assert(is_valid_domain(&"example.com".to_text()));
+}
+
+@test
+fn test_umbrella_is_valid_domain_rejects_empty() {
+    assert(!is_valid_domain(&"".to_text()));
+}
+
+// =============================================================================
+// Section 5: unix surface through the umbrella
+// =============================================================================
+
+@test
+fn test_umbrella_shutdown_kind_disjoint() {
+    let b = ShutdownKind.Both;
+    assert(b is ShutdownKind.Both);
+    assert(!(b is ShutdownKind.Read));
+    assert(!(b is ShutdownKind.Write));
+}
+
+@test
+fn test_umbrella_peer_cred_field_round_trip() {
+    let pc = PeerCred { pid: 1234 as Int32, uid: 501 as UInt32, gid: 20 as UInt32 };
+    assert_eq(pc.pid, 1234 as Int32);
+    assert_eq(pc.uid, 501 as UInt32);
+    assert_eq(pc.gid, 20 as UInt32);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

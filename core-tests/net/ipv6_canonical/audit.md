@@ -81,7 +81,24 @@ class.
 `addr.vr:760-808` (see `net/addr/audit.md §3.2`). The
 conformance suite exercises the working canonical path.
 
-## 4. Action items landed in this branch
+## 4. Action items landed — net-conformance-20260705
+
+* `core-tests/net/ipv6_canonical/property_test.vr` — 15 algebraic
+  laws over a structural corpus (leading/interior/trailing/whole
+  zero-runs, single-zero non-compression §4.2.2, tie→leftmost
+  §4.2.3, maximal groups, v4-mapped): idempotence, fixpoint,
+  spelling-class collapse, `canonicalize = format_ipv6 ∘ parse`
+  coherence, `equal_addresses` reflexive/symmetric/discriminating/
+  invalid-false, lowercase invariant (§4.3), and both v4-mapped
+  branches (dotted-tail preservation + hex-spelling → dotted).
+* `core-tests/net/ipv6_canonical/integration_test.vr` — 8 cross-type
+  scenarios against `core.net.addr.Ipv6Addr`: constructor → canonical
+  text, Display (uncompressed) vs `format_ipv6` (compressed)
+  coherence via `equal_addresses`, `Ipv6Addr.parse ∘ canonicalize`
+  round-trip, and predicate survival (`is_link_local` / `is_loopback`)
+  through canonicalisation.
+
+## Legacy action items — original landing branch
 
 * `core-tests/net/ipv6_canonical/unit_test.vr` — 23 unit tests
   covering format_ipv6 (RFC 5952 §4.1/§4.2.1/§4.2.2/§4.2.3/§4.3

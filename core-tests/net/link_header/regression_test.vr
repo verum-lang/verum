@@ -95,3 +95,23 @@ fn regression_parse_missing_close_angle() {
         Err(_) => assert(true),
     }
 }
+
+// REGRESSION (net-conformance-20260705): TUPLE-DESTRUCTURE-INDEXED.
+// Binding a tuple via a destructuring `let (a, b) = &list[i]` on an
+// INDEXED (or iterator-yielded) list element reads GARBAGE — the tuple
+// elements come back as unrelated bits (e.g. a `Text` renders as
+// "0.0"). Tuple-INDEX access on the same element (`list[i].0`,
+// `list[i].1`) lowers correctly. `find_rel` / `format_link_header` were
+// rewritten to use tuple-index (core/net/link_header.vr); this pin
+// reproduces the broken destructure shape so a fix flips it live.
+// @ignore'd: the garbage read makes the assertion fail (not a crash).
+@ignore
+@test
+fn regression_tuple_destructure_indexed_reads_garbage() {
+    let mut pairs: List<(Text, Text)> = [];
+    pairs.push(("rel".clone(), "next".clone()));
+    // BROKEN shape: destructure of an indexed tuple.
+    let (name, value) = &pairs[0];
+    assert_eq(name.as_str(), "rel");
+    assert_eq(value.as_str(), "next");
+}
