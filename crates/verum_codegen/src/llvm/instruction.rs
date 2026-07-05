@@ -1085,17 +1085,24 @@ pub(crate) fn get_or_declare_internal_f64_to_decimal<'ctx>(
     module: &Module<'ctx>,
 ) -> verum_llvm::values::FunctionValue<'ctx> {
     let wrapper_name = "verum_internal_f64_to_decimal";
-    if let Some(f) = module.get_function(wrapper_name) {
-        return f;
-    }
     let i8_type = llvm_ctx.i8_type();
     let i64_type = llvm_ctx.i64_type();
     let f64_type = llvm_ctx.f64_type();
     let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
 
     let fn_type = i64_type.fn_type(&[ptr_type.into(), f64_type.into()], false);
-    let func = module.add_function(wrapper_name, fn_type, None);
-    func.set_linkage(verum_llvm::module::Linkage::Internal);
+    // Bodyless-gate fix (same class as strtol/strtod): return an existing
+    // function ONLY if it has a body; a bodyless pre-declaration falls
+    // through and gets its body built here (else float rendering yields 0).
+    let func = match module.get_function(wrapper_name) {
+        Some(f) if f.count_basic_blocks() > 0 => return f,
+        Some(f) => f,
+        None => {
+            let f = module.add_function(wrapper_name, fn_type, None);
+            f.set_linkage(verum_llvm::module::Linkage::Internal);
+            f
+        }
+    };
 
     // Forward-declare the i64-to-decimal helper we're going to
     // call for the integer part + fractional digits.
@@ -18949,12 +18956,14 @@ fn lower_text_extended<'ctx>(
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
             let f64_ty = ctx.types().f64_type();
-            // Use compiled Text.from_float from text.vr (pure Verum, no C runtime).
-            let to_text_fn = module.get_function("Text.from_float").unwrap_or_else(|| {
-                // Safety fallback: declare C function if text.vr somehow didn't compile
+            // Prefer the libc-free verum_float_to_text (emitted via
+            // emit_verum_float_to_text → verum_internal_f64_to_decimal, which
+            // renders the FRACTIONAL part) over the compiled Text.from_float,
+            // which TRUNCATES to the integer part (float_to_text(1.5) → "1").
+            let to_text_fn = {
                 let fn_type = ptr_ty.fn_type(&[f64_ty.into()], false);
-                module.add_function("verum_float_to_text", fn_type, None)
-            });
+                super::error::get_or_declare_function(module, "verum_float_to_text", fn_type)
+            };
             let coerced = coerce_value(
                 ctx,
                 val,
