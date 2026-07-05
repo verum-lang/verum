@@ -1077,7 +1077,7 @@ impl VbcCodegen {
                 // supported surface; the `@deprecated` fn form is tracked in
                 // task #3.
                 type_args: _,
-            } => self.compile_call(func, args)
+            } => self.compile_call(func, args),
             ExprKind::MethodCall {
                 receiver,
                 method,
