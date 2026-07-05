@@ -27325,6 +27325,24 @@ fn lower_len<'ctx>(
 ) -> Result<()> {
     let i64_type = ctx.types().i64_type();
 
+    // Priority 0: a register EXPLICITLY marked as a slice (e.g. the result
+    // of `text_as_bytes`) stores {ptr@24, len@32}, so its length is at
+    // offset 32 — NOT LIST_LEN_OFFSET (24, where the ptr sits).  The VBC
+    // type hint often says List (1) for these, which would read the ptr as
+    // the length (garbage like 4311640223); the slice mark wins.
+    if ctx.is_slice_register(arr.0) {
+        let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "slice_ptr")?;
+        let i8_type = ctx.types().i8_type();
+        let len_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, arr_ptr, &[i64_type.const_int(32, false)], "slice_len_slot")
+                .or_llvm_err()?
+        };
+        let len = ctx.builder().build_load(i64_type, len_slot, "slice_len").or_llvm_err()?;
+        ctx.set_register(dst.0, len);
+        return Ok(());
+    }
+
     // Priority 1: VBC type hint (reliable, from compile-time type info).
     // This bypasses register tracking which is unreliable after function calls.
     match type_hint {
