@@ -330,6 +330,38 @@ pub(crate) fn get_or_declare_internal_strtol<'ctx>(
     let result = builder
         .build_int_mul(final_acc, final_sign, "result")
         .expect("final mul");
+    // C-contract endptr: write nptr + final_index to *endptr when the
+    // caller passed a non-null out-param, so callers can detect trailing
+    // garbage / a fully-consumed parse (the text ParseInt Maybe-wrap relies
+    // on this to yield None for "42abc" / "abc" / "").
+    let final_i = pl_i_phi.as_basic_value().into_int_value();
+    let end_gep = unsafe {
+        builder
+            .build_gep(i8_type, nptr, &[final_i], "strtol_end")
+            .expect("end gep")
+    };
+    if let Some(endptr_param) = func.get_nth_param(1) {
+        let endptr_ptr = endptr_param.into_pointer_value();
+        let is_endptr_null = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::EQ,
+                builder
+                    .build_ptr_to_int(endptr_ptr, i64_type, "endptr_i")
+                    .expect("endptr to int"),
+                i64_type.const_zero(),
+                "endptr_is_null",
+            )
+            .expect("endptr null cmp");
+        let store_end = llvm_ctx.append_basic_block(func, "store_end");
+        let do_ret = llvm_ctx.append_basic_block(func, "strtol_ret");
+        builder
+            .build_conditional_branch(is_endptr_null, do_ret, store_end)
+            .expect("endptr null br");
+        builder.position_at_end(store_end);
+        builder.build_store(endptr_ptr, end_gep).expect("store endptr");
+        builder.build_unconditional_branch(do_ret).expect("→ ret");
+        builder.position_at_end(do_ret);
+    }
     builder.build_return(Some(&result)).expect("ret result");
 
     func
@@ -18627,6 +18659,7 @@ fn lower_text_extended<'ctx>(
                 .build_load(ptr_type, endptr_slot, "parse_int_endp")
                 .or_llvm_err()?
                 .into_pointer_value();
+            let i8_ty = ctx.types().i8_type();
             let start_i = ctx
                 .builder()
                 .build_ptr_to_int(byte_ptr, i64_ty, "parse_int_start_i")
@@ -18635,10 +18668,53 @@ fn lower_text_extended<'ctx>(
                 .builder()
                 .build_ptr_to_int(endptr, i64_ty, "parse_int_end_i")
                 .or_llvm_err()?;
-            // None when nothing was consumed.
+            // Strict validity, matching the interpreter's `parse::<i64>().ok()`:
+            // Some iff at least one digit was consumed AND the parse reached
+            // the end of the string.
+            //   * advanced   = endptr != start (some chars consumed)
+            //   * last_digit = the byte just before endptr is 0-9 (so the
+            //                  consumed run ended on a digit, not whitespace)
+            //   * fully_done = *endptr == '\0' (no trailing garbage)
+            let advanced = ctx
+                .builder()
+                .build_int_compare(IntPredicate::NE, start_i, end_i, "pi_adv")
+                .or_llvm_err()?;
+            let prev_i = ctx
+                .builder()
+                .build_int_sub(end_i, i64_ty.const_int(1, false), "pi_prev_i")
+                .or_llvm_err()?;
+            let prev_ptr = ctx
+                .builder()
+                .build_int_to_ptr(prev_i, ptr_type, "pi_prev_ptr")
+                .or_llvm_err()?;
+            let prev_c = ctx
+                .builder()
+                .build_load(i8_ty, prev_ptr, "pi_prev_c")
+                .or_llvm_err()?
+                .into_int_value();
+            let ge0 = ctx
+                .builder()
+                .build_int_compare(IntPredicate::UGE, prev_c, i8_ty.const_int(b'0' as u64, false), "pi_ge0")
+                .or_llvm_err()?;
+            let le9 = ctx
+                .builder()
+                .build_int_compare(IntPredicate::ULE, prev_c, i8_ty.const_int(b'9' as u64, false), "pi_le9")
+                .or_llvm_err()?;
+            let last_digit = ctx.builder().build_and(ge0, le9, "pi_last_digit").or_llvm_err()?;
+            let end_c = ctx
+                .builder()
+                .build_load(i8_ty, endptr, "pi_end_c")
+                .or_llvm_err()?
+                .into_int_value();
+            let fully_done = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, end_c, i8_ty.const_zero(), "pi_done")
+                .or_llvm_err()?;
+            let some_a = ctx.builder().build_and(advanced, last_digit, "pi_some_a").or_llvm_err()?;
+            let is_some = ctx.builder().build_and(some_a, fully_done, "pi_some").or_llvm_err()?;
             let is_none = ctx
                 .builder()
-                .build_int_compare(IntPredicate::EQ, start_i, end_i, "parse_int_none")
+                .build_not(is_some, "parse_int_none")
                 .or_llvm_err()?;
             let result = build_maybe_int_wrap(ctx, value, is_none, "parse_int")?;
             ctx.set_register(dst, result);
