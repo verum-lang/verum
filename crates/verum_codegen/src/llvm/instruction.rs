@@ -855,6 +855,13 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     let is_ue = builder.build_int_compare(verum_llvm::IntPredicate::EQ, e_c, upper_e, "is_ue").expect("ue");
     let is_exp = builder.build_or(is_le, is_ue, "is_exp").expect("is_exp");
     let i_after_e = builder.build_int_add(af_iv, one_i64, "i_after_e").expect("i++");
+    // SSA-CORRECT: compute the final_exp contribution for the no-exponent
+    // edge HERE in after_frac (a predecessor of mul_setup), not inside the
+    // mul_setup PHI — a PHI incoming must dominate the predecessor's
+    // terminator.  The pre-fix built `sub 0, af_fd` in mul_setup itself, so
+    // the value did NOT dominate the after_frac→mul_setup edge (invalid SSA
+    // → the fractional scale exponent read garbage → "2.5" mis-parsed).
+    let neg_fd = builder.build_int_sub(zero_i64, af_fdv, "neg_fd").expect("nfd");
     builder.build_conditional_branch(is_exp, exp_after_e, mul_setup).expect("exp cond");
 
     // exp_after_e: parse sign of exponent
@@ -898,9 +905,12 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     el_i.add_incoming(&[(&el_i_next, exp_advance)]);
     el_acc.add_incoming(&[(&el_acc_next, exp_advance)]);
 
-    // after_exp: signed_exp = exp_sign_i64 * el_av
+    // after_exp: signed_exp = exp_sign_i64 * el_av; fexp = signed_exp - af_fd.
+    // fexp is computed HERE (a predecessor of mul_setup) for the same
+    // SSA-dominance reason as neg_fd above.
     builder.position_at_end(after_exp);
     let signed_exp = builder.build_int_mul(exp_sign_i64, el_av, "signed_exp").expect("sexp");
+    let fexp = builder.build_int_sub(signed_exp, af_fdv, "fexp").expect("fexp");
     builder.build_unconditional_branch(mul_setup).expect("→ mul");
 
     // mul_setup: PHI(final_exp); compute mant_f64 = sitofp(af_av);
@@ -908,10 +918,10 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     builder.position_at_end(mul_setup);
     let final_exp_phi = builder.build_phi(i64_type, "final_exp").expect("fe phi");
     final_exp_phi.add_incoming(&[
-        // Came from after_frac (no exp parsed): final_exp = -af_fdv
-        (&builder.build_int_sub(zero_i64, af_fdv, "neg_fd").expect("nfd"), after_frac),
-        // Came from after_exp: final_exp = signed_exp - af_fdv
-        (&builder.build_int_sub(signed_exp, af_fdv, "fexp").expect("fexp"), after_exp),
+        // from after_frac (no exponent): final_exp = -frac_digits
+        (&neg_fd, after_frac),
+        // from after_exp: final_exp = signed_exp - frac_digits
+        (&fexp, after_exp),
     ]);
     let final_exp_v = final_exp_phi.as_basic_value().into_int_value();
 
