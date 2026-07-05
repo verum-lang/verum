@@ -1067,8 +1067,17 @@ impl VbcCodegen {
             ExprKind::Call {
                 func,
                 args,
+                // VBC-GENERIC-INSTANTIATION-1 (task #3): the concrete type
+                // argument of a legacy meta-fn (`size_of<Int>()`) is NOT
+                // visible here — monomorphisation moves it into
+                // `resolved_call_target` and clears `type_args` before VBC
+                // codegen, so a call-site const-fold can't read it at this
+                // layer.  The canonical `T.size` / `T.id` forms (compiled via
+                // `compile_type_property`, which DOES see the type) are the
+                // supported surface; the `@deprecated` fn form is tracked in
+                // task #3.
                 type_args: _,
-            } => self.compile_call(func, args),
+            } => self.compile_call(func, args)
             ExprKind::MethodCall {
                 receiver,
                 method,
