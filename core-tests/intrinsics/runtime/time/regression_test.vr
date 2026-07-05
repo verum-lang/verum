@@ -32,3 +32,13 @@ fn regression_uint64_nanos_delta_is_small_nonnegative() {
 fn main() {
     // `verum test` synthesises a per-test main.
 }
+
+// TIME-MONO-CONTEXT-1 (#17) — the FIRST monotonic read in a fresh thread
+// returned ~0 (the interp epoch was a lazily-created thread_local, so the
+// very first `elapsed()` was near-zero), failing `> 0` under --exact while
+// passing in a full sweep.  Fixed with a process-global epoch + max(1).
+@test
+fn regression_monotonic_first_read_is_positive() {
+    // A single read — no warm-up call before it.  Must be strictly positive.
+    assert(monotonic_nanos() > 0 as UInt64);
+}

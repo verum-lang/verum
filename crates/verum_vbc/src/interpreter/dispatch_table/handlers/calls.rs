@@ -1609,8 +1609,14 @@ fn try_dispatch_intrinsic_by_name(
             if flags & 0x400 != 0 {
                 opts.append(true);
             }
-            // O_CREAT = 0x40 (Darwin/Linux).
-            if flags & 0x40 != 0 {
+            // O_CREAT — accept BOTH the documented ABSTRACT bit (os.vr:
+            // "0x100=create") AND the Linux platform value (0x40).  The
+            // file-I/O stack currently drifts across four conventions
+            // (os.vr doc 0x100 / io.file.vr 0x200 / sys.file_ops 0x409 /
+            // this Linux 0x40) — OS-FILEOPEN-FLAG-DRIFT-1 (task #6).  Until
+            // that's unified, this superset honours the documented abstract
+            // convention without breaking existing 0x40 callers.
+            if flags & (0x40 | 0x100) != 0 {
                 opts.create(true);
             }
             // O_TRUNC = 0x200 — but tier-0 maps via `truncate(true)`

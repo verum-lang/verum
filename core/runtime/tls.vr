@@ -5,54 +5,23 @@
 )
 module runtime.tls;
 
-/// Get TLS base pointer.
-@intrinsic("verum.runtime.tls_get_base")
-public fn tls_get_base() -> Int;
-
-/// Get a TLS slot value.
-@intrinsic("verum.runtime.tls_slot_get")
-public fn tls_slot_get(slot: Int) -> Int;
-
-/// Set a TLS slot value.
-@intrinsic("verum.runtime.tls_slot_set")
-public fn tls_slot_set(slot: Int, value: Int);
-
-/// Clear a TLS slot.
-@intrinsic("verum.runtime.tls_slot_clear")
-public fn tls_slot_clear(slot: Int);
-
-/// Check if a TLS slot has a value.
-@intrinsic("verum.runtime.tls_slot_has")
-public fn tls_slot_has(slot: Int) -> Bool;
-
-/// Push a TLS frame.
-@intrinsic("verum.runtime.tls_frame_push")
-public fn tls_frame_push() -> Int;
-
-/// Pop a TLS frame.
-@intrinsic("verum.runtime.tls_frame_pop")
-public fn tls_frame_pop(frame: Int);
-
-/// Read a pointer from TLS.
-@intrinsic("verum.runtime.tls_read_ptr")
-public fn tls_read_ptr(offset: Int) -> Int;
-
-/// Write a pointer to TLS.
-@intrinsic("verum.runtime.tls_write_ptr")
-public fn tls_write_ptr(offset: Int, value: Int);
-
-/// Read an i32 from TLS.
-@intrinsic("verum.runtime.tls_read_i32")
-public fn tls_read_i32(offset: Int) -> Int;
-
-/// Write an i32 to TLS.
-@intrinsic("verum.runtime.tls_write_i32")
-public fn tls_write_i32(offset: Int, value: Int);
-
-/// Read a usize from TLS.
-@intrinsic("verum.runtime.tls_read_usize")
-public fn tls_read_usize(offset: Int) -> Int;
-
-/// Write a usize to TLS.
-@intrinsic("verum.runtime.tls_write_usize")
-public fn tls_write_usize(offset: Int, value: Int);
+// RUNTIME-DUPLICATE-TREE-1 (task #5/#15): this module used to REDECLARE
+// the runtime intrinsics under dead `@intrinsic("verum.runtime.*")` keys
+// that no registry entry matched (calls resolved to nil).  It is now a
+// thin re-export of the canonical, wired declarations in
+// `core.intrinsics.runtime.tls` — one source of truth, both tiers.
+public mount core.intrinsics.runtime.tls.{
+    tls_get_base,
+    tls_slot_get,
+    tls_slot_set,
+    tls_slot_clear,
+    tls_slot_has,
+    tls_frame_push,
+    tls_frame_pop,
+    tls_read_ptr,
+    tls_write_ptr,
+    tls_read_i32,
+    tls_write_i32,
+    tls_read_usize,
+    tls_write_usize,
+};

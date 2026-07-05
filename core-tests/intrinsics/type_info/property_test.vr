@@ -276,3 +276,46 @@ fn law_unsigned_max_hierarchy_is_monotonic() {
 fn main() {
     // `verum test` synthesises a per-test main.
 }
+
+// =============================================================================
+// Section 7: is_signed — signedness as a type property (PROP-LAYER-DRIFT-1)
+// =============================================================================
+// The checker used to REJECT `Int.is_signed` ("associated constant not
+// found") while the codegen fully resolved it — a checker/codegen allowlist
+// drift (task #2).  These laws pin the property on both layers.
+
+@test
+fn law_is_signed_signed_integers() {
+    assert(Int.is_signed);
+    assert(Int8.is_signed);
+    assert(Int16.is_signed);
+    assert(Int32.is_signed);
+    assert(Int64.is_signed);
+    assert(ISize.is_signed);
+}
+
+@test
+fn law_is_signed_unsigned_integers_are_false() {
+    assert(!UInt8.is_signed);
+    assert(!UInt16.is_signed);
+    assert(!UInt32.is_signed);
+    assert(!UInt64.is_signed);
+    assert(!USize.is_signed);
+    assert(!Byte.is_signed);
+}
+
+@test
+fn law_is_signed_floats_are_signed() {
+    assert(Float32.is_signed);
+    assert(Float64.is_signed);
+    assert(Float.is_signed);
+}
+
+@test
+fn law_is_signed_coheres_with_min() {
+    // A signed type has a negative minimum; an unsigned type's min is 0.
+    assert(Int8.is_signed == (Int8.min < 0));
+    assert(Int32.is_signed == (Int32.min < 0));
+    assert(UInt8.is_signed == (UInt8.min < 0));
+    assert(UInt32.is_signed == (UInt32.min < 0));
+}

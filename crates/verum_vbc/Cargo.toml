@@ -158,6 +158,13 @@ harness = false
 name = "layout_invariant_verifier_tests"
 required-features = ["codegen"]
 
+# REGISTRY-UNKNOWN-KEY-SILENT-1 gate: walks core/**/*.vr @intrinsic keys
+# against the IntrinsicRegistry — needs the `codegen` feature for the
+# registry surface.
+[[test]]
+name = "intrinsic_key_resolution_gate"
+required-features = ["codegen"]
+
 # Cross-module type-table consistency tests (#170) compile real stdlib
 # `.vr` files via `compile_module_with_mounts` and assert the unified
 # type table satisfies the global hygiene invariants. Needs the

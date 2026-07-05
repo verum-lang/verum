@@ -7359,6 +7359,21 @@ impl TypeChecker {
                     "size" | "align" | "alignment" | "stride" | "bits" => {
                         return Ok(InferResult::new(Type::int()));
                     }
+                    // PROP-LAYER-DRIFT-1 (task #2): the codegen resolves
+                    // `is_signed`/`min`/`max`/`id` for primitives, but this
+                    // checker branch omitted them → `Int.is_signed` was a
+                    // hard "associated constant not found" error.  Typed here
+                    // to match the codegen surface (is_signed → Bool, min/max
+                    // → the numeric type itself, id → UInt64).
+                    "is_signed" => {
+                        return Ok(InferResult::new(Type::bool()));
+                    }
+                    "min" | "max" => {
+                        return Ok(InferResult::new(normalized_ty.clone()));
+                    }
+                    "id" => {
+                        return Ok(InferResult::new(Type::int()));
+                    }
                     "name" => {
                         return Ok(InferResult::new(Type::text()));
                     }
@@ -7412,6 +7427,9 @@ impl TypeChecker {
                     "size" | "align" | "alignment" | "stride" | "bits" => {
                         Ok(InferResult::new(Type::int()))
                     }
+                    "is_signed" => Ok(InferResult::new(Type::bool())),
+                    "min" | "max" => Ok(InferResult::new(normalized_ty.clone())),
+                    "id" => Ok(InferResult::new(Type::int())),
                     "name" => Ok(InferResult::new(Type::text())),
                     _ => Err(TypeError::OtherWithCode {
                         code: verum_common::Text::from("E103"),
@@ -7430,6 +7448,9 @@ impl TypeChecker {
                         // Type properties return Int (the size/alignment value)
                         Ok(InferResult::new(Type::int()))
                     }
+                    "is_signed" => Ok(InferResult::new(Type::bool())),
+                    "min" | "max" => Ok(InferResult::new(normalized_ty.clone())),
+                    "id" => Ok(InferResult::new(Type::int())),
                     "name" => {
                         // Type name property returns Text
                         Ok(InferResult::new(Type::text()))

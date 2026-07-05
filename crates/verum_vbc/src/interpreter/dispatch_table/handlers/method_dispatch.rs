@@ -3044,11 +3044,20 @@ pub(super) fn hash_value_i64(v: i64) -> i64 {
 /// All time operations in the interpreter MUST use this to ensure consistency
 /// between FfiExtended sub-opcodes and method dispatch.
 pub(super) fn monotonic_nanos_shared() -> i64 {
+    use std::sync::OnceLock;
     use std::time::Instant;
-    thread_local! {
-        static EPOCH: Instant = Instant::now();
-    }
-    EPOCH.with(|epoch| epoch.elapsed().as_nanos() as i64)
+    // TIME-MONO-CONTEXT-1 (#17): the epoch was a THREAD_LOCAL created lazily
+    // on first access, so (a) the very first read in a thread returned
+    // `elapsed()` since the just-created epoch — a near-zero value (the
+    // mysterious "42" a probe once printed), failing `monotonic_nanos() > 0`
+    // under `--exact` while passing in a full sweep where an earlier test
+    // had already aged the thread's epoch; and (b) per-thread epochs break
+    // cross-thread monotonic comparison.  A PROCESS-GLOBAL epoch fixes both,
+    // and `.max(1)` guarantees positivity for the first read without
+    // breaking monotonicity (the clamp only lifts a degenerate 0 to 1).
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    let epoch = EPOCH.get_or_init(Instant::now);
+    (epoch.elapsed().as_nanos() as i64).max(1)
 }
 
 /// Returns wall-clock nanoseconds since Unix epoch.

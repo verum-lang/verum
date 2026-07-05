@@ -5,6 +5,11 @@
 )
 module runtime.sync;
 
-/// Emit a spin-loop hint for the CPU.
-@intrinsic("verum.runtime.spin_loop_hint")
-public fn spin_loop_hint();
+// RUNTIME-DUPLICATE-TREE-1 (task #5/#15): this module used to REDECLARE
+// the runtime intrinsics under dead `@intrinsic("verum.runtime.*")` keys
+// that no registry entry matched (calls resolved to nil).  It is now a
+// thin re-export of the canonical, wired declarations in
+// `core.intrinsics.runtime.sync` — one source of truth, both tiers.
+public mount core.intrinsics.runtime.sync.{
+    spin_loop_hint,
+};

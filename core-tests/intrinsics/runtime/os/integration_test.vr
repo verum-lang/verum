@@ -1,0 +1,78 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/os/integration_test.vr
+// =============================================================================
+//
+// Raw-fd file READ over a cbgr-allocation buffer — the byte-level surface
+// under the Text-path convenience forms.  The file is CREATED via the
+// Text-path (`__file_write_string_raw`, which works on both tiers), then
+// opened O_RDONLY (flags = 0, no create bit) and read into a cbgr buffer.
+//
+// NOTE: the WRITE-with-create path is deliberately not exercised here —
+// the file_open create/truncate flag convention drifts across four layers
+// (os.vr doc 0x100 / io.file.vr 0x200 / sys.file_ops 0x409 / interp 0x40,
+// and the AOT handler is mode-based not flags-based).  That is
+// OS-FILEOPEN-FLAG-DRIFT-1 (task #6); reading through flags = 0 needs no
+// create bit and is stable on both tiers.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.os.{
+    __file_open_raw, __file_close_raw, __file_read_raw, __file_seek_raw,
+    __file_write_string_raw, __file_delete_raw,
+};
+mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
+mount core.intrinsics.runtime.mem_raw.{load_byte};
+
+// =============================================================================
+// Section 1: raw fd read into a cbgr buffer
+// =============================================================================
+
+@test
+fn integration_raw_fd_read_into_cbgr_buffer() {
+    let path = "/tmp/verum_os_conf_raw1.bin";
+    // Create via the Text path (no flag ambiguity).
+    __file_write_string_raw(path, "ABCDEFGH");
+
+    // O_RDONLY = 0 — no create bit needed.
+    let rfd = __file_open_raw(path, 0, 0);
+    assert(rfd >= 0);
+    let dst = cbgr_allocate(8, 8);
+    let r = __file_read_raw(rfd, dst, 8);
+    assert_eq(r, 8);
+    assert_eq(load_byte(dst), 65);     // 'A'
+    assert_eq(load_byte(dst + 7), 72); // 'H'
+    __file_close_raw(rfd);
+
+    cbgr_deallocate(dst);
+    __file_delete_raw(path);
+}
+
+@test
+fn integration_seek_then_read_offset() {
+    let path = "/tmp/verum_os_conf_raw2.bin";
+    __file_write_string_raw(path, "0123456789");
+
+    let rfd = __file_open_raw(path, 0, 0);
+    assert(rfd >= 0);
+    // Seek to byte 5 (whence 0 = SET).
+    let pos = __file_seek_raw(rfd, 5, 0);
+    assert_eq(pos, 5);
+    let dst = cbgr_allocate(5, 8);
+    let r = __file_read_raw(rfd, dst, 5);
+    assert_eq(r, 5);
+    // Bytes 5..10 are '5'..'9'.
+    assert_eq(load_byte(dst), 53);     // '5'
+    assert_eq(load_byte(dst + 4), 57); // '9'
+    __file_close_raw(rfd);
+
+    cbgr_deallocate(dst);
+    __file_delete_raw(path);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

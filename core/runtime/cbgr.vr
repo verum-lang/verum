@@ -5,18 +5,14 @@
 )
 module runtime.cbgr;
 
-/// CBGR generation counter.
-@intrinsic("verum.runtime.cbgr_generation")
-public fn cbgr_generation() -> Int;
+// RUNTIME-DUPLICATE-TREE-1 (task #5/#15): this module used to REDECLARE
+// the runtime intrinsics under dead `@intrinsic("verum.runtime.*")` keys
+// that no registry entry matched (calls resolved to nil).  It is now a
+// thin re-export of the canonical, wired declarations in
+// `core.intrinsics.runtime.cbgr` — one source of truth, both tiers.
+public mount core.intrinsics.runtime.cbgr.{
+    cbgr_check,
+    cbgr_invalidate,
+};
 
-/// CBGR epoch capability.
-@intrinsic("verum.runtime.cbgr_epoch")
-public fn cbgr_epoch() -> Int;
-
-/// CBGR check reference validity.
-@intrinsic("verum.runtime.cbgr_check")
-public fn cbgr_check(gen: Int, epoch: Int) -> Bool;
-
-/// CBGR invalidate a generation.
-@intrinsic("verum.runtime.cbgr_invalidate")
-public fn cbgr_invalidate(gen: Int);
+// Not re-exported (absent from the canonical module): cbgr_generation, cbgr_epoch

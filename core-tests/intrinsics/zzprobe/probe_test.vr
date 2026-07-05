@@ -1,0 +1,23 @@
+mount core.prelude.*;
+mount core.intrinsics.runtime.os.{__file_open_raw, __file_close_raw, __file_write_raw, __file_read_raw, __file_delete_raw};
+mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
+mount core.intrinsics.runtime.mem_raw.{store_byte, load_byte};
+@test
+fn probe_raw_fd() {
+    let path = "/tmp/verum_probe_rawfd.bin";
+    let wfd = __file_open_raw(path, 769, 420);
+    print(f"wfd={wfd}");
+    let src = cbgr_allocate(8, 8);
+    store_byte(src, 65);
+    let w = __file_write_raw(wfd, src, 8);
+    print(f"w={w}");
+    __file_close_raw(wfd);
+    let rfd = __file_open_raw(path, 0, 0);
+    print(f"rfd={rfd}");
+    let dst = cbgr_allocate(8, 8);
+    let r = __file_read_raw(rfd, dst, 8);
+    print(f"r={r} dst0={load_byte(dst)}");
+    __file_close_raw(rfd);
+    __file_delete_raw(path);
+    assert(true);
+}

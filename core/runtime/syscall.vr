@@ -5,6 +5,11 @@
 )
 module runtime.syscall;
 
-/// Raw syscall with up to 6 arguments.
-@intrinsic("verum.runtime.syscall6")
-public fn syscall6(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int;
+// RUNTIME-DUPLICATE-TREE-1 (task #5/#15): this module used to REDECLARE
+// the runtime intrinsics under dead `@intrinsic("verum.runtime.*")` keys
+// that no registry entry matched (calls resolved to nil).  It is now a
+// thin re-export of the canonical, wired declarations in
+// `core.intrinsics.runtime.syscall` — one source of truth, both tiers.
+public mount core.intrinsics.runtime.syscall.{
+    syscall6,
+};

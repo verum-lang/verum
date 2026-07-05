@@ -36,7 +36,7 @@ module core.database.sqlite.native.builtins.string_fns;
 mount core.*;
 mount base.{Text, Maybe};
 mount collections.List;
-mount core.runtime.text.{float_to_text};
+mount core.intrinsics.runtime.text.{float_to_text};
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RText, RBlob, RReal, RRowId};
 
 // -----------------------------------------------------------------------------

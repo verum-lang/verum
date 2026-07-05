@@ -1,0 +1,129 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/os/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/os.vr` — kernel-boundary file I/O intrinsics.
+//
+// Surface tested (Text-path convenience forms + fd lifecycle):
+//   * __file_write_string_raw / __file_read_to_string_raw round-trip
+//   * __file_delete_raw
+//   * __file_open_raw / __file_close_raw / __file_size_raw
+//   * __mkdir_raw
+//
+// Each test uses a UNIQUE path under /tmp and cleans up after itself —
+// file I/O is process-global, so hygiene is part of the contract.  The
+// raw fd read/write intrinsics (`__file_read_raw`/`__file_write_raw` over
+// Int buffers) are exercised through the cbgr-allocation harness in
+// integration_test.vr; here we pin the Text-path convenience surface.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.os.{
+    __file_write_string_raw, __file_read_to_string_raw, __file_delete_raw,
+    __file_open_raw, __file_close_raw, __file_size_raw, __mkdir_raw,
+};
+
+// =============================================================================
+// Section 1: write → read round-trip
+// =============================================================================
+
+@test
+fn test_write_read_string_round_trip() {
+    let path = "/tmp/verum_os_conf_rt1.txt";
+    let content = "hello verum os";
+    let w = __file_write_string_raw(path, content);
+    assert(w >= 0);
+    let back = __file_read_to_string_raw(path);
+    assert_eq(back, content);
+    __file_delete_raw(path);
+}
+
+@test
+fn test_write_truncates_on_rewrite() {
+    let path = "/tmp/verum_os_conf_rt2.txt";
+    __file_write_string_raw(path, "aaaaaaaaaa");
+    __file_write_string_raw(path, "bb");
+    let back = __file_read_to_string_raw(path);
+    // The second write create/truncates — no residual bytes from the first.
+    assert_eq(back, "bb");
+    __file_delete_raw(path);
+}
+
+@test
+fn test_empty_content_round_trip() {
+    let path = "/tmp/verum_os_conf_rt3.txt";
+    __file_write_string_raw(path, "");
+    let back = __file_read_to_string_raw(path);
+    assert_eq(back.len(), 0);
+    __file_delete_raw(path);
+}
+
+// =============================================================================
+// Section 2: delete
+// =============================================================================
+
+@test
+fn test_delete_returns_zero_on_success() {
+    let path = "/tmp/verum_os_conf_del.txt";
+    __file_write_string_raw(path, "x");
+    let r = __file_delete_raw(path);
+    assert_eq(r, 0);
+}
+
+@test
+fn test_delete_missing_file_is_negative() {
+    let path = "/tmp/verum_os_conf_absent_9137.txt";
+    // Never created; unlink of a missing path returns a negative error.
+    let r = __file_delete_raw(path);
+    assert(r < 0);
+}
+
+// =============================================================================
+// Section 3: fd lifecycle + size
+// =============================================================================
+
+@test
+fn test_open_close_existing_file() {
+    let path = "/tmp/verum_os_conf_fd.txt";
+    __file_write_string_raw(path, "0123456789");
+    // flags 0 = read.
+    let fd = __file_open_raw(path, 0, 0);
+    assert(fd >= 0);
+    let sz = __file_size_raw(fd);
+    assert_eq(sz, 10);
+    let c = __file_close_raw(fd);
+    assert_eq(c, 0);
+    __file_delete_raw(path);
+}
+
+@test
+fn test_open_missing_file_is_negative() {
+    let fd = __file_open_raw("/tmp/verum_os_conf_absent_5521.txt", 0, 0);
+    assert(fd < 0);
+}
+
+// =============================================================================
+// Section 4: mkdir
+// =============================================================================
+
+@test
+fn test_mkdir_creates_directory() {
+    let dir = "/tmp/verum_os_conf_dir_4410";
+    let r = __mkdir_raw(dir, 493); // 0o755
+    // 0 on success, or a negative error if it already exists — either way
+    // the call must not fault; a fresh unique path should succeed.
+    assert(r == 0 || r < 0);
+    // Write a file inside to prove the directory is real.
+    let f = dir + "/inner.txt";
+    __file_write_string_raw(f, "in");
+    assert_eq(__file_read_to_string_raw(f), "in");
+    __file_delete_raw(f);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

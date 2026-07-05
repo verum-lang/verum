@@ -5,26 +5,16 @@
 )
 module runtime.time;
 
-/// Monotonic clock in nanoseconds.
-@intrinsic("verum.runtime.monotonic_nanos")
-public fn monotonic_nanos() -> Int;
-
-/// Real-time clock in seconds since epoch.
-@intrinsic("verum.runtime.realtime_secs")
-public fn realtime_secs() -> Int;
-
-/// Real-time clock in nanoseconds since epoch.
-@intrinsic("verum.runtime.realtime_nanos")
-public fn realtime_nanos() -> Int;
-
-/// Number of logical CPUs available.
-@intrinsic("verum.runtime.num_cpus")
-public fn num_cpus() -> Int;
-
-/// Sleep for the given number of milliseconds.
-@intrinsic("verum.runtime.sleep_ms")
-public fn sleep_ms(ms: Int);
-
-/// Sleep for the given number of nanoseconds.
-@intrinsic("verum.runtime.sleep_ns")
-public fn sleep_ns(ns: Int);
+// RUNTIME-DUPLICATE-TREE-1 (task #5/#15): this module used to REDECLARE
+// the runtime intrinsics under dead `@intrinsic("verum.runtime.*")` keys
+// that no registry entry matched (calls resolved to nil).  It is now a
+// thin re-export of the canonical, wired declarations in
+// `core.intrinsics.runtime.time` — one source of truth, both tiers.
+public mount core.intrinsics.runtime.time.{
+    monotonic_nanos,
+    realtime_secs,
+    realtime_nanos,
+    num_cpus,
+    sleep_ms,
+    sleep_ns,
+};

@@ -13,13 +13,16 @@ bound on a timing test is a flake, not a law.
   `realtime_nanos` had NO registry entries and no handlers — sleeps
   returned instantly and the wall-clock reads failed every sanity window.
   Name-dispatch arms added (thread::sleep / SystemTime).  6 failures → 0.
-* TIME-MONO-CONTEXT-1 (task #17, OPEN): `monotonic_nanos` is
-  context-dependent — a probe file printed t=42 (placeholder-looking, yet
-  comparisons passed) while `test_monotonic_nanos_is_positive` fails
-  deterministically under `--exact`.  Suspect the dual-emitter drift class
-  (expressions.rs vs intrinsics/codegen.rs — the same split behind the
-  ghost-symbol fix) plus boxed-int rendering printing the box handle.
-  1 red pinned until resolved.
+* TIME-MONO-CONTEXT-1 — FIXED (2026-07-05): root cause was NOT a
+  dual-emitter drift — it was `monotonic_nanos_shared()` measuring elapsed
+  time against a LAZILY-created THREAD_LOCAL epoch.  The very first read in
+  a thread returned `elapsed()` since the just-created epoch — a near-zero
+  value (the "42" a probe printed), failing `> 0` under `--exact` while
+  passing in a full sweep where an earlier test had already aged the
+  thread's epoch.  Per-thread epochs also break cross-thread monotonic
+  comparison.  Fix: a PROCESS-GLOBAL `OnceLock<Instant>` epoch + `.max(1)`
+  positivity clamp (the clamp lifts only a degenerate 0 → 1; monotonicity
+  preserved).  Pinned by `regression_monotonic_first_read_is_positive`.
 * `monotonic_nanos`/`realtime_nanos` return `UInt64` whose values exceed
   the 48-bit NaN-box small-int range → they exercise the boxed-int path
   (the `01a2406dc` large-int class) on every call.  The regression guard
@@ -58,4 +61,4 @@ bound on a timing test is a flake, not a law.
 * Full conformance suite with flake-resistant law design.
 
 **Deferred (tracked)**
-* TIME-MONO-CONTEXT-1 (#17) — monotonic dual-emitter + boxed-int render.
+* (none — TIME-MONO-CONTEXT-1 closed 2026-07-05).
