@@ -117,7 +117,19 @@ constant for caller-side handshake.
 RFC 6455 §5.5 mandates control-frame payload ≤ 125 bytes +
 no fragmentation. The decoder enforces this — tested at L2 specs.
 
-## 4. Action items landed in this branch
+## 4. Action items landed — net-conformance-20260705
+
+* `property_test.vr` (+16 laws) — the FIRST `encode`/`decode` frame-codec
+  coverage: unmasked + masked round-trip across every payload-length
+  wire form (7-bit / 16-bit / 64-bit), `consumed`=encoded-length, opcode
+  wire round-trip + control/data partition, truncation safety (every
+  strict prefix → NeedMore), mask-expectation lattice (server rejects
+  unmasked, client rejects masked), DoS payload cap.
+* `law_accept_key_rfc_vector` is `@ignore`'d on WS-6 — `accept_key`
+  (`base64(sha1(key||MAGIC))`) produces the wrong digest; the defect is
+  in the `core.security` Sha1/base64 chain, out of net scope.
+
+## Legacy action items — original landing branch
 
 * `core-tests/net/websocket/unit_test.vr` — 38 unit tests
   covering WsOpcode 7-variant construction + to_byte (7) +

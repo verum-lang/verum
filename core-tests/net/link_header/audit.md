@@ -51,7 +51,22 @@ tests transition from @ignore'd-SIGSEGV to GREEN under `--interp`.
 CVE-2011-3192-class hardening — real-world headers carry 2-5
 entries (next/prev/canonical/preload).
 
-## 4. Action items landed in this branch
+## 4. Action items landed — net-conformance-20260705
+
+* `property_test.vr` (+14 laws) — RFC 8288: format∘parse round-trip,
+  GitHub pagination `next`/`last`, find_rel case-insensitive +
+  first-match + multi-rel-token, quoted-vs-token equivalence, whitespace
+  robustness, entry-count cap.
+* **`find_rel` / `format_link_header` stdlib fix** — read tuple params
+  via `list[i].params[j].0.as_bytes()` INLINE (no intermediate
+  `let name = &..`). Two interpreter codegen defects meet here:
+  `let (name,value) = &..[j]` (tuple destructure of an indexed tuple)
+  reads GARBAGE, and `let name = &<tuple index>` loses the field type so
+  `name.as_bytes()` fails method resolution. `format_link_header`'s
+  pre-existing inline form proves the direct chain lowers correctly.
+  Pinned as TUPLE-DESTRUCTURE-INDEXED / RECORD-LET-REF-TYPE-LOSS.
+
+## Legacy action items — original landing branch
 
 * `core-tests/net/link_header/unit_test.vr` — 12 unit tests
   covering LinkEntry minimal + with-rel + multi-param +

@@ -79,7 +79,17 @@ per-request arena. Tested at construction-shape only here;
 end-to-end lifecycle tested at language level
 (vcs/specs/L2-standard/net/http_parser/).
 
-## 4. Action items landed in this branch
+## 4. Action items landed — net-conformance-20260705
+
+* `property_test.vr` (+7 laws, all `@ignore`'d on HTTPPARSE-1) — the
+  resumable-`feed` functional suite: one-shot completion + body framing,
+  prefix safety (every strict prefix → NeedMore), split invariance
+  (resume ≡ one-shot), Done idempotence, zero-copy view decoding,
+  response-mode status line, garbage→Error. `HttpParser.feed()` crashes
+  VBC codegen at COMPILE time; the laws are authored and ready to
+  un-`@ignore` the moment HTTPPARSE-1's compile-time SIGSEGV closes.
+
+## Legacy action items — original landing branch
 
 * `core-tests/net/http_parser/unit_test.vr` — 32 unit tests
   covering HttpParseError 15-variant construction + Eq + 3
