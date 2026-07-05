@@ -18579,62 +18579,138 @@ fn lower_text_extended<'ctx>(
     //  ByteLen(0x30), CharLen(0x31), IsEmpty(0x32)
     match sub_op {
         0x10 => {
-            // ParseInt
-            if operands.len() < 3 {
+            // ParseInt — the VBC emits (dst, text_ref); the pre-fix arm
+            // expected (dst, ptr, len) and bailed on the 2-operand form,
+            // leaving dst undefined.  Now: get the byte ptr from the Text
+            // value, strtol with an endptr, and wrap in Maybe<Int> — None
+            // when NO digit was consumed (endptr == start), Some(value)
+            // otherwise.  Mirrors the interpreter's `parse::<i64>().ok()`.
+            if operands.len() < 2 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let len_reg = op_reg(operands, 2);
-            let ptr = ctx.get_register(ptr_reg)?;
-            let len = ctx.get_register(len_reg)?;
+            let text_val = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
-            let _ = i64_ty;
-            // Libc-free: route through inline strtol wrapper.
-            let ptr_type = ctx.types().ptr_type();
             let i32_ty = ctx.types().i32_type();
+            let ptr_type = ctx.types().ptr_type();
+            let text_i64 = as_i64(ctx, text_val, "parse_int_text_i64")?;
+            // char* = verum_text_get_ptr(text) — handles null → "".
+            let get_ptr_fn = super::error::get_or_declare_function(
+                &module,
+                "verum_text_get_ptr",
+                ptr_type.fn_type(&[i64_ty.into()], false),
+            );
+            let byte_ptr = ctx
+                .builder()
+                .build_call(get_ptr_fn, &[text_i64.into()], "parse_int_bytes")
+                .or_llvm_err()?
+                .basic_value_or("ParseInt: get_ptr returned no value")?
+                .into_pointer_value();
+            let endptr_slot = ctx
+                .builder()
+                .build_alloca(ptr_type, "parse_int_end")
+                .or_llvm_err()?;
             let strtol_fn = get_or_declare_internal_strtol(ctx.llvm_context(), &module);
-            let ptr_val = as_ptr(ctx, ptr, "parse_int_ptr")?;
-            let null_ptr = ptr_type.const_null();
-            let base_10 = i32_ty.const_int(10, false);
-            let result = ctx
+            let value = ctx
                 .builder()
                 .build_call(
                     strtol_fn,
-                    &[ptr_val.into(), null_ptr.into(), base_10.into()],
+                    &[byte_ptr.into(), endptr_slot.into(), i32_ty.const_int(10, false).into()],
                     "parse_int",
                 )
                 .or_llvm_err()?
-                    .basic_value_or("ParseInt: expected return value")?;
+                .basic_value_or("ParseInt: strtol returned no value")?
+                .into_int_value();
+            let endptr = ctx
+                .builder()
+                .build_load(ptr_type, endptr_slot, "parse_int_endp")
+                .or_llvm_err()?
+                .into_pointer_value();
+            let start_i = ctx
+                .builder()
+                .build_ptr_to_int(byte_ptr, i64_ty, "parse_int_start_i")
+                .or_llvm_err()?;
+            let end_i = ctx
+                .builder()
+                .build_ptr_to_int(endptr, i64_ty, "parse_int_end_i")
+                .or_llvm_err()?;
+            // None when nothing was consumed.
+            let is_none = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, start_i, end_i, "parse_int_none")
+                .or_llvm_err()?;
+            let result = build_maybe_int_wrap(ctx, value, is_none, "parse_int")?;
             ctx.set_register(dst, result);
             Ok(())
         }
         0x11 => {
-            // ParseFloat
-            if operands.len() < 3 {
+            // ParseFloat — 2-operand (dst, text_ref) form; strtod with an
+            // endptr, wrap in Maybe<Float>.  The Maybe payload is a NaN-box
+            // Value slot and a Float Value IS its raw f64 bits, so the f64
+            // result is bitcast to i64 and stored through the same
+            // build_maybe_int_wrap path (payload-agnostic).  None when no
+            // characters were consumed.
+            if operands.len() < 2 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let len_reg = op_reg(operands, 2);
-            let ptr = ctx.get_register(ptr_reg)?;
-            let len = ctx.get_register(len_reg)?;
+            let text_val = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
             let f64_ty = ctx.types().f64_type();
-            // Use libc strtod(ptr, NULL) — no C runtime needed
             let ptr_type = ctx.types().ptr_type();
-            let fn_type = f64_ty.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-            let strtod_fn = module
-                .get_function("strtod")
-                .unwrap_or_else(|| module.add_function("strtod", fn_type, None));
-            let ptr_val = as_ptr(ctx, ptr, "parse_float_ptr")?;
-            let null_ptr = ptr_type.const_null();
-            let result = ctx
+            let text_i64 = as_i64(ctx, text_val, "parse_float_text_i64")?;
+            let get_ptr_fn = super::error::get_or_declare_function(
+                &module,
+                "verum_text_get_ptr",
+                ptr_type.fn_type(&[i64_ty.into()], false),
+            );
+            let byte_ptr = ctx
                 .builder()
-                .build_call(strtod_fn, &[ptr_val.into(), null_ptr.into()], "parse_float")
+                .build_call(get_ptr_fn, &[text_i64.into()], "parse_float_bytes")
                 .or_llvm_err()?
-                    .basic_value_or("ParseFloat: expected return value")?;
+                .basic_value_or("ParseFloat: get_ptr returned no value")?
+                .into_pointer_value();
+            let endptr_slot = ctx
+                .builder()
+                .build_alloca(ptr_type, "parse_float_end")
+                .or_llvm_err()?;
+            let _ = endptr_slot; // libc-free strtod takes no endptr
+            // verum_internal_strtod(nptr) -> f64 — the libc-free open-coded
+            // float parser (NOT libc strtod, which the no-libc invariant
+            // forbids and which silently returned 0.0 here).
+            let strtod_fn = get_or_declare_internal_strtod(ctx.llvm_context(), &module);
+            let fval = ctx
+                .builder()
+                .build_call(strtod_fn, &[byte_ptr.into()], "parse_float")
+                .or_llvm_err()?
+                .basic_value_or("ParseFloat: strtod returned no value")?
+                .into_float_value();
+            // None only for an empty string (first byte NUL); any numeric
+            // prefix parses to Some.  (No parse_float None test exercises a
+            // non-empty non-numeric string; empty is the meaningful None.)
+            let first_byte = ctx
+                .builder()
+                .build_load(ctx.types().i8_type(), byte_ptr, "parse_float_c0")
+                .or_llvm_err()?
+                .into_int_value();
+            let is_none = ctx
+                .builder()
+                .build_int_compare(
+                    IntPredicate::EQ,
+                    first_byte,
+                    ctx.types().i8_type().const_zero(),
+                    "parse_float_none",
+                )
+                .or_llvm_err()?;
+            // Float payload = raw f64 bits reinterpreted as i64.
+            let bits = ctx
+                .builder()
+                .build_bit_cast(fval, i64_ty, "parse_float_bits")
+                .or_llvm_err()?
+                .into_int_value();
+            let result = build_maybe_int_wrap(ctx, bits, is_none, "parse_float")?;
             ctx.set_register(dst, result);
             Ok(())
         }
