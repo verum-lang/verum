@@ -18786,24 +18786,51 @@ fn lower_text_extended<'ctx>(
             Ok(())
         }
         0x30 => {
-            // ByteLen — return length of string in bytes
+            // ByteLen — the Text's STORED byte length at offset 8 of the
+            // {ptr@0, len@8, cap@16} struct (the layout `verum_text_get_ptr`
+            // itself assumes: it int_to_ptr's the text value and loads the
+            // char* from offset 0).  Pre-fix this called strlen, which walks
+            // to the first NUL — wrong for a len-bounded (non-NUL-terminated)
+            // buffer and for any multibyte content past an embedded NUL.
             if operands.len() < 2 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
-            let src = ctx.get_register(op_reg(operands, 1))?;
-            let module = ctx.get_module();
+            let text_val = ctx.get_register(op_reg(operands, 1))?;
             let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[ctx.types().ptr_type().into()], false);
-            let strlen_fn = module
-                .get_function("verum_strlen_export")
-                .unwrap_or_else(|| module.add_function("verum_strlen_export", fn_type, None));
-            let result = ctx
+            let i8_ty = ctx.types().i8_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let text_i64 = as_i64(ctx, text_val, "byte_len_text_i64")?;
+            // Null text → length 0 (mirrors verum_text_get_ptr's null guard).
+            let is_null = ctx
                 .builder()
-                .build_call(strlen_fn, &[src.into()], "byte_len")
+                .build_int_compare(IntPredicate::EQ, text_i64, i64_ty.const_zero(), "bl_null")
+                .or_llvm_err()?;
+            let text_ptr = ctx
+                .builder()
+                .build_int_to_ptr(text_i64, ptr_ty, "byte_len_text_ptr")
+                .or_llvm_err()?;
+            // SAFETY: Text layout {ptr:i64, len:i64, cap:i64}; offset 8 = len.
+            let len_slot = unsafe {
+                ctx.builder()
+                    .build_in_bounds_gep(
+                        i8_ty,
+                        text_ptr,
+                        &[i64_ty.const_int(8, false)],
+                        "byte_len_slot",
+                    )
+                    .or_llvm_err()?
+            };
+            let raw_len = ctx
+                .builder()
+                .build_load(i64_ty, len_slot, "byte_len_raw")
                 .or_llvm_err()?
-                    .basic_value_or("ByteLen: expected return value")?;
-            ctx.set_register(dst, result);
+                .into_int_value();
+            let len = ctx
+                .builder()
+                .build_select(is_null, i64_ty.const_zero(), raw_len, "byte_len")
+                .or_llvm_err()?;
+            ctx.set_register(dst, len);
             Ok(())
         }
         0x31 => {
