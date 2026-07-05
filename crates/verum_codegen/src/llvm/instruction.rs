@@ -666,17 +666,26 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     module: &Module<'ctx>,
 ) -> verum_llvm::values::FunctionValue<'ctx> {
     let wrapper_name = "verum_internal_strtod";
-    if let Some(f) = module.get_function(wrapper_name) {
-        return f;
-    }
+    // Return the existing function ONLY if it already has a body — a
+    // BODYLESS pre-declaration (e.g. from a `get_or_declare_function` call
+    // site that only declares) must fall through and get its body built
+    // here, or callers get a function that "returns" 0 (the parse_float
+    // Some(0) bug).  Mirrors get_or_declare_internal_strtol's gate.
     let i8_type = llvm_ctx.i8_type();
     let i64_type = llvm_ctx.i64_type();
     let f64_type = llvm_ctx.f64_type();
     let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
 
     let fn_type = f64_type.fn_type(&[ptr_type.into()], false);
-    let func = module.add_function(wrapper_name, fn_type, None);
-    func.set_linkage(verum_llvm::module::Linkage::Internal);
+    let func = match module.get_function(wrapper_name) {
+        Some(f) if f.count_basic_blocks() > 0 => return f,
+        Some(f) => f,
+        None => {
+            let f = module.add_function(wrapper_name, fn_type, None);
+            f.set_linkage(verum_llvm::module::Linkage::Internal);
+            f
+        }
+    };
 
     let entry = llvm_ctx.append_basic_block(func, "entry");
     let skip_ws = llvm_ctx.append_basic_block(func, "skip_ws");
