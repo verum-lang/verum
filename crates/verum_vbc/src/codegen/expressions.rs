@@ -29325,6 +29325,29 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::FfiExtended { sub_op, operands });
             }
 
+            InlineSequenceId::FutexWakeOneSeq | InlineSequenceId::FutexWakeAllSeq => {
+                use crate::instruction::SystemSubOpcode;
+                // Materialise the count immediate (1 or i32::MAX) so the
+                // FutexWake decoder finds its third operand.
+                let count = self.ctx.alloc_temp();
+                let count_val: i64 = if matches!(seq_id, InlineSequenceId::FutexWakeOneSeq) {
+                    1
+                } else {
+                    0x7fff_ffff
+                };
+                self.ctx.emit(Instruction::LoadI { dst: count, value: count_val });
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                if let Some(addr) = args.first() {
+                    Self::write_reg(&mut operands, addr.0);
+                }
+                Self::write_reg(&mut operands, count.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: SystemSubOpcode::FutexWake as u8,
+                    operands,
+                });
+                self.ctx.free_temp(count);
+            }
             InlineSequenceId::SpinHintSeq => {
                 // CPU pause hint — no Tier-0 effect; the old route
                 // (OpcodeWithMode(AtomicFence, 0xFF)) emitted a truncated

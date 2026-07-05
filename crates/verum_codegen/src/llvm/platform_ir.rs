@@ -15407,6 +15407,34 @@ impl<'ctx> PlatformIR<'ctx> {
                     .build_int_to_ptr(addr_i64, ptr_type, "addr_ptr")
                     .or_llvm_err()?;
 
+                // Value-mismatch pre-check — mirror the interpreter's
+                // explicit EAGAIN contract (handlers/ffi_extended.rs: a
+                // `*addr != expected` mismatch returns -EAGAIN = -11).
+                // macOS `__ulock_wait` returns 0 (not an error) on mismatch,
+                // so without this pre-check the two tiers diverge on the
+                // sign of the return.  Compare the 32-bit cell against the
+                // (truncated) expected; on mismatch return -11 immediately.
+                let mismatch_bb = ctx.append_basic_block(func, "mismatch");
+                let check_to_bb = ctx.append_basic_block(func, "check_to");
+                let cur = builder
+                    .build_load(i32_type, addr_ptr, "cur")
+                    .or_llvm_err()?
+                    .into_int_value();
+                let expected_i32 = builder
+                    .build_int_truncate(expected, i32_type, "expected32")
+                    .or_llvm_err()?;
+                let matches = builder
+                    .build_int_compare(IntPredicate::EQ, cur, expected_i32, "val_match")
+                    .or_llvm_err()?;
+                builder
+                    .build_conditional_branch(matches, check_to_bb, mismatch_bb)
+                    .or_llvm_err()?;
+                builder.position_at_end(mismatch_bb);
+                builder
+                    .build_return(Some(&i64_type.const_int((-11i64) as u64, true)))
+                    .or_llvm_err()?;
+                builder.position_at_end(check_to_bb);
+
                 // Check if timeout_ns > 0
                 let has_to = builder
                     .build_int_compare(

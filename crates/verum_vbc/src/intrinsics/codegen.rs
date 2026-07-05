@@ -1142,7 +1142,9 @@ impl<'a> IntrinsicCodegen<'a> {
             | InlineSequenceId::WgWaitSeq
             | InlineSequenceId::WgTryWaitSeq
             | InlineSequenceId::WgDestroySeq
-            | InlineSequenceId::TlsGetBaseSeq => None,
+            | InlineSequenceId::TlsGetBaseSeq
+            | InlineSequenceId::FutexWakeOneSeq
+            | InlineSequenceId::FutexWakeAllSeq => None,
             InlineSequenceId::CbgrValidateBool => {
                 // No dedicated MIR op for reference validation; the VBC
                 // interpreter / LLVM arms own the semantics.

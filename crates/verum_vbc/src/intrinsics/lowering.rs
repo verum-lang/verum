@@ -3613,6 +3613,8 @@ impl IntrinsicLowering {
             InlineSequenceId::WgNewSeq
             | InlineSequenceId::WgTryWaitSeq
             | InlineSequenceId::TlsGetBaseSeq
+            | InlineSequenceId::FutexWakeOneSeq
+            | InlineSequenceId::FutexWakeAllSeq
             | InlineSequenceId::RealtimeNanosSeq => self.emit(MlirOp {
                 name: "verum.time.realtime_nanos".to_string(),
                 attrs: vec![],

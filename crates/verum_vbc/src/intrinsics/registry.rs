@@ -1093,6 +1093,12 @@ pub enum InlineSequenceId {
     WgDestroySeq,
     /// tls_get_base (FfiExtended 0x5D)
     TlsGetBaseSeq,
+    /// futex_wake_one / futex_wake_all — 1-arg wrappers over FutexWake
+    /// that INJECT the count (1 / i32::MAX).  Without the injected count the
+    /// FfiExtended FutexWake decoder reads a third operand that the emitter
+    /// never wrote → bytecode desync → SIGILL/SIGSEGV at runtime.
+    FutexWakeOneSeq,
+    FutexWakeAllSeq,
 }
 
 /// Complete intrinsic definition.
@@ -5217,7 +5223,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::SyncBarrier, IntrinsicHint::Inline],
         param_count: 1, // addr
         return_count: 1,
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FutexWake),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FutexWakeOneSeq),
         mlir_op: Some("verum.futex.wake"),
         doc: "Wake one thread",
     },
@@ -5227,7 +5233,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::SyncBarrier],
         param_count: 1, // addr
         return_count: 1,
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FutexWake),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FutexWakeAllSeq),
         mlir_op: Some("verum.futex.wake"),
         doc: "Wake all threads",
     },

@@ -32,10 +32,25 @@ SYNC-TLS-WIRING-1 FIXED on the interpreter — suite 13/13 interp:
   values happened not to).  Raw addresses are now INT-tagged end to end;
   every consumer reads through the dual int-or-pointer extraction.
 
-AOT leg (documented residuals, task #5): try_lock/unlock/reacquire GREEN
-via the new cmpxchg arms; waitgroup family needs a real AOT runtime (the
-interp route is name-dispatch); futex return-convention must be pinned
-cross-tier (-11 contract); is_locked arm + tls_get_base arm small gaps.
+AOT leg (2026-07-05 follow-up — COMPLETE under `--exact`):
+* spinlock trio + `verum_spinlock_lock` bodied in platform_ir (was
+  declared nowhere); is_locked GREEN.
+* waitgroup family = 8-byte cbgr allocation + atomicrmw
+  (new/add/done/try_wait/wait-spin/destroy); GREEN.
+* `tls_get_base` = `__verum_tls_slots` global address; GREEN.
+* `futex_wake_one`/`futex_wake_all` had `param_count 1` but routed to the
+  3-operand FutexWake decoder — the emitter wrote 2 operands, the decoder
+  read a third that was never written → BYTECODE DESYNC → SIGILL/SIGSEGV.
+  Dedicated `FutexWakeOneSeq`/`FutexWakeAllSeq` inject the count immediate
+  (1 / i32::MAX).  GREEN.
+* `futex_wait` value-mismatch: the interpreter returns -EAGAIN (-11)
+  explicitly; macOS `__ulock_wait` reports mismatch as 0.  A value
+  pre-check in the AOT body normalises both tiers onto -11.  GREEN.
+
+All 13 sync tests pass on both tiers under `--exact`.  The suite-level
+`--test-threads N` AOT run occasionally drops 1-2 futex tests — the
+documented isolated-subprocess compile/timing flake (#41 family), NOT a
+code defect.
 
 ## Findings (2026-07-03 first pass)
 

@@ -78,9 +78,10 @@ fn test_futex_wait_returns_immediately_on_value_mismatch() {
     let mut cell: List<UInt32> = [7 as UInt32];
     let addr = cell.as_mut_ptr() as *const UInt32;
     let r = futex_wait(addr, 999 as UInt32, 1000000 as UInt64);
-    // ABI (handlers/ffi_extended.rs): value-mismatch returns -EAGAIN (-11);
-    // 0 means woken.  The first revision of this test asserted `>= -1` —
-    // a wrong guess at the contract, not a wiring defect.
+    // Cross-tier contract: a value MISMATCH returns -EAGAIN (-11) PROMPTLY.
+    // The interpreter returns -11 directly; the AOT body does a value
+    // pre-check (macOS `__ulock_wait` reports mismatch as 0, so the
+    // pre-check normalises both tiers onto the same -11 signal).
     assert_eq(r as Int, -11);
 }
 
