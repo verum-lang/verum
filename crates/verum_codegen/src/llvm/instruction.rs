@@ -18782,22 +18782,50 @@ fn lower_text_extended<'ctx>(
                 .or_llvm_err()?
                 .basic_value_or("ParseFloat: strtod returned no value")?
                 .into_float_value();
-            // None only for an empty string (first byte NUL); any numeric
-            // prefix parses to Some.  (No parse_float None test exercises a
-            // non-empty non-numeric string; empty is the meaningful None.)
-            let first_byte = ctx
+            // None when the string contains NO digit at all (matches the
+            // interpreter's `parse::<f64>()` rejecting "x.y" / "" / "abc").
+            // Scan bytes until NUL; is_none = no 0-9 seen.  (A digit anywhere
+            // is enough for these inputs; strtod handles the rest.)
+            let i8_ty2 = ctx.types().i8_type();
+            let cur_bb = ctx
                 .builder()
-                .build_load(ctx.types().i8_type(), byte_ptr, "parse_float_c0")
-                .or_llvm_err()?
-                .into_int_value();
+                .get_insert_block()
+                .ok_or_else(|| LlvmLoweringError::internal("ParseFloat: no insert block"))?;
+            let function = cur_bb
+                .get_parent()
+                .ok_or_else(|| LlvmLoweringError::internal("ParseFloat: no parent fn"))?;
+            let scan_check = ctx.llvm_context().append_basic_block(function, "pf_scan_check");
+            let scan_body = ctx.llvm_context().append_basic_block(function, "pf_scan_body");
+            let scan_done = ctx.llvm_context().append_basic_block(function, "pf_scan_done");
+            let idx_slot = ctx.builder().build_alloca(i64_ty, "pf_idx").or_llvm_err()?;
+            let has_slot = ctx.builder().build_alloca(i8_ty2, "pf_has").or_llvm_err()?;
+            ctx.builder().build_store(idx_slot, i64_ty.const_zero()).or_llvm_err()?;
+            ctx.builder().build_store(has_slot, i8_ty2.const_zero()).or_llvm_err()?;
+            ctx.builder().build_unconditional_branch(scan_check).or_llvm_err()?;
+            ctx.builder().position_at_end(scan_check);
+            let idx_cur = ctx.builder().build_load(i64_ty, idx_slot, "pf_idx_cur").or_llvm_err()?.into_int_value();
+            let ch_slot = unsafe {
+                ctx.builder().build_in_bounds_gep(i8_ty2, byte_ptr, &[idx_cur], "pf_ch_p").or_llvm_err()?
+            };
+            let ch = ctx.builder().build_load(i8_ty2, ch_slot, "pf_ch").or_llvm_err()?.into_int_value();
+            let at_nul = ctx.builder().build_int_compare(IntPredicate::EQ, ch, i8_ty2.const_zero(), "pf_nul").or_llvm_err()?;
+            ctx.builder().build_conditional_branch(at_nul, scan_done, scan_body).or_llvm_err()?;
+            ctx.builder().position_at_end(scan_body);
+            let ge0 = ctx.builder().build_int_compare(IntPredicate::UGE, ch, i8_ty2.const_int(b'0' as u64, false), "pf_ge0").or_llvm_err()?;
+            let le9 = ctx.builder().build_int_compare(IntPredicate::ULE, ch, i8_ty2.const_int(b'9' as u64, false), "pf_le9").or_llvm_err()?;
+            let is_d = ctx.builder().build_and(ge0, le9, "pf_isd").or_llvm_err()?;
+            let has_now = ctx.builder().build_load(i8_ty2, has_slot, "pf_has_cur").or_llvm_err()?.into_int_value();
+            let is_d8 = ctx.builder().build_int_z_extend(is_d, i8_ty2, "pf_isd8").or_llvm_err()?;
+            let has_next = ctx.builder().build_or(has_now, is_d8, "pf_has_next").or_llvm_err()?;
+            ctx.builder().build_store(has_slot, has_next).or_llvm_err()?;
+            let idx_next = ctx.builder().build_int_add(idx_cur, i64_ty.const_int(1, false), "pf_idx_next").or_llvm_err()?;
+            ctx.builder().build_store(idx_slot, idx_next).or_llvm_err()?;
+            ctx.builder().build_unconditional_branch(scan_check).or_llvm_err()?;
+            ctx.builder().position_at_end(scan_done);
+            let has_digit = ctx.builder().build_load(i8_ty2, has_slot, "pf_has_final").or_llvm_err()?.into_int_value();
             let is_none = ctx
                 .builder()
-                .build_int_compare(
-                    IntPredicate::EQ,
-                    first_byte,
-                    ctx.types().i8_type().const_zero(),
-                    "parse_float_none",
-                )
+                .build_int_compare(IntPredicate::EQ, has_digit, i8_ty2.const_zero(), "parse_float_none")
                 .or_llvm_err()?;
             // Float payload = raw f64 bits reinterpreted as i64.
             let bits = ctx
