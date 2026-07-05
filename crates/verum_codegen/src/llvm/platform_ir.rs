@@ -4243,57 +4243,65 @@ impl<'ctx> PlatformIR<'ctx> {
         }
 
         let entry = ctx.append_basic_block(func, "entry");
-        let do_open = ctx.append_basic_block(func, "do_open");
-
         builder.position_at_end(entry);
         let path = func
             .get_nth_param(0)
             .or_internal("missing param 0")?
             .into_pointer_value();
-        let mode = func
+        // OS-FILEOPEN-FLAG-DRIFT-1 (task #6): the second param is the
+        // ABSTRACT flag word the .vr contract defines (os.vr:
+        // access = bits 0-1 [0=read,1=write,2=rw], 0x100=create,
+        // 0x200=truncate, 0x400=append) — NOT a 3-way mode selector.  The
+        // pre-fix body compared it against ==1/==2, so a real abstract
+        // flag word (e.g. 769 = write|create|trunc) fell through to read
+        // mode and every AOT create/write open failed.  Decode the
+        // abstract bits into the platform's O_* values (per the module
+        // target triple) and OR them together — the interp handler is
+        // already abstract-flag-based, so both tiers now agree.
+        let abstract_flags = func
             .get_nth_param(1)
             .or_internal("missing param 1")?
             .into_int_value();
-        let flags_alloca = builder.build_alloca(i32_type, "flags").or_llvm_err()?;
-
-        // Default: O_RDONLY
-        builder
-            .build_store(flags_alloca, i32_type.const_int(o_rdonly as u64, false))
+        let abstract_i32 = builder
+            .build_int_truncate(abstract_flags, i32_type, "abs_flags32")
             .or_llvm_err()?;
 
-        // if mode == 1: flags = O_WRONLY|O_CREAT|O_TRUNC
-        let is_write = builder
-            .build_int_compare(IntPredicate::EQ, mode, i64_type.const_int(1, false), "is_w")
-            .or_llvm_err()?;
-        let write_flags = i32_type.const_int(o_wronly_creat_trunc as u64, false);
-        let append_flags = i32_type.const_int(o_wronly_creat_append as u64, false);
-        let read_flags = i32_type.const_int(o_rdonly as u64, false);
-
-        // if mode == 2: flags = O_WRONLY|O_CREAT|O_APPEND
-        let is_append = builder
-            .build_int_compare(IntPredicate::EQ, mode, i64_type.const_int(2, false), "is_a")
+        // Access bits 0-1 map 1:1 to O_RDONLY/O_WRONLY/O_RDWR (0/1/2 on both
+        // Linux and macOS), so the low two bits pass straight through.
+        let access = builder
+            .build_and(abstract_i32, i32_type.const_int(0x3, false), "access")
             .or_llvm_err()?;
 
-        // select(is_append, append_flags, read_flags) then select(is_write, write_flags, prev)
-        let sel1 = builder
-            .build_select(is_append, append_flags, read_flags, "sel1")
-            .or_llvm_err()?
-            .into_int_value();
-        let final_flags = builder
-            .build_select(is_write, write_flags, sel1, "flags_val")
-            .or_llvm_err()?
-            .into_int_value();
-        builder
-            .build_store(flags_alloca, final_flags)
-            .or_llvm_err()?;
-        builder.build_unconditional_branch(do_open).or_llvm_err()?;
+        // Platform O_* bits per the target triple.
+        let (p_creat, p_trunc, p_append) = if super::target_triple::target_is_linux(module) {
+            (0x0040u64, 0x0200u64, 0x0400u64)
+        } else {
+            // macOS / BSD-derived.
+            (0x0200u64, 0x0400u64, 0x0008u64)
+        };
+        let zero32 = i32_type.const_zero();
 
-        builder.position_at_end(do_open);
-        let flags = builder
-            .build_load(i32_type, flags_alloca, "fl")
-            .or_llvm_err()?
-            .into_int_value();
-        // Call verum_raw_open3(path, flags, 0644)
+        // For each abstract bit, OR in the platform bit when set.
+        let mut flags = access;
+        for (abs_mask, plat_bit) in [
+            (0x100u64, p_creat),
+            (0x200u64, p_trunc),
+            (0x400u64, p_append),
+        ] {
+            let masked = builder
+                .build_and(abstract_i32, i32_type.const_int(abs_mask, false), "abs_bit")
+                .or_llvm_err()?;
+            let has = builder
+                .build_int_compare(IntPredicate::NE, masked, zero32, "has_bit")
+                .or_llvm_err()?;
+            let contribution = builder
+                .build_select(has, i32_type.const_int(plat_bit, false), zero32, "plat_bit")
+                .or_llvm_err()?
+                .into_int_value();
+            flags = builder.build_or(flags, contribution, "flags_or").or_llvm_err()?;
+        }
+
+        // verum_raw_open3(path, platform_flags, 0644).
         let open_fn = module
             .get_function("verum_raw_open3")
             .or_missing_fn("verum_raw_open3")?;
