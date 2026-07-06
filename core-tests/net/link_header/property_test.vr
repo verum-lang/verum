@@ -55,7 +55,6 @@ fn law_parse_format_round_trip() {
 // Section 2: L2 pagination fixture
 // =============================================================================
 
-@ignore
 @test
 fn law_pagination_fixture_rels_resolve() {
     let src = "<https://api.example.com/page/2>; rel=\"next\", <https://api.example.com/page/34>; rel=\"last\"".clone();
@@ -76,7 +75,6 @@ fn law_pagination_fixture_rels_resolve() {
 // Section 3: L3 find_rel semantics
 // =============================================================================
 
-@ignore
 @test
 fn law_find_rel_case_insensitive() {
     let src = "<https://x.example/a>; rel=\"NEXT\"".clone();
@@ -87,7 +85,6 @@ fn law_find_rel_case_insensitive() {
     }
 }
 
-@ignore
 @test
 fn law_find_rel_first_match_wins() {
     let src = "<https://x.example/first>; rel=\"next\", <https://x.example/second>; rel=\"next\"".clone();
@@ -98,7 +95,6 @@ fn law_find_rel_first_match_wins() {
     }
 }
 
-@ignore
 @test
 fn law_find_rel_matches_token_inside_multi_rel() {
     // rel value is a whitespace-separated token list (RFC 8288 §3.3).

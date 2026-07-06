@@ -8982,9 +8982,20 @@ impl VbcCodegen {
                 .as_deref()
                 .map(VbcCodegen::strip_generic_args)
                 .map(str::to_string);
+            // `str` is a pure alias for `Text` in this language (verum_types
+            // maps `str` → Type::Text at infer/env.rs). A `&str` receiver
+            // (e.g. `find_rel(rel: &str)` calling `rel.as_bytes()`) shares
+            // Text's runtime representation, but the dispatch key stayed
+            // "str"/"&str" so `str.as_bytes` missed the intercept and fell
+            // through to a non-existent method → "method 'str.as_bytes' not
+            // found on receiver of runtime kind Text<small>". Accept the
+            // `str` spellings here, matching the sibling `Text.from`
+            // intercept. (find_rel BLOCKER — str→Text non-canonicalisation.)
             let is_text = receiver_type
                 .as_deref()
-                .map(|t| t == "Text" || t == "&Text")
+                .map(|t| {
+                    t == "Text" || t == "&Text" || t == "&mut Text" || t == "str" || t == "&str"
+                })
                 .unwrap_or(false);
             if is_text {
                 let result = self.ctx.alloc_temp();
@@ -21520,7 +21531,13 @@ impl VbcCodegen {
             Some(TypeKind::Bool)
         } else if matches!(name, "Char" | "char") {
             Some(TypeKind::Char)
-        } else if name == "Text" {
+        } else if matches!(name, "Text" | "str") {
+            // `str` is a canonical alias for `Text` (verum_types:
+            // infer/env.rs `define_type("str", Type::Text)`). Mapping it
+            // here lets `let x: str = …` / `&str` params dispatch Text
+            // methods (`.as_str()`, `.starts_with(..)`) instead of keying a
+            // non-existent `str.<m>` — the general form of the find_rel
+            // str→Text blocker.
             Some(TypeKind::Text)
         } else if matches!(name, "Unit" | "()") {
             Some(TypeKind::Unit)
@@ -22479,6 +22496,22 @@ impl VbcCodegen {
                 | ExprKind::Call { .. }
                 | ExprKind::MethodCall { .. }
                 | ExprKind::Literal(_)
+                // Aggregate literals (`&Agg { … }`, `&(a, b)`, `&[…]`,
+                // `&{…: …}`, `&{…}`) compile into an `alloc_temp` slot that
+                // the NEXT argument's `alloc_temp` recycles — so an inline
+                // `&<aggregate-literal>` call argument alongside any other
+                // temp argument had its CBGR register-ref decode the
+                // sibling's value (INLINE-AGG-REF-ARG: `zf(&Agg{n:7}, 2)`
+                // read `2` for `n`). Same recycle-collision class the
+                // Literal/Call arms above already close; stabilise into a
+                // fresh non-recyclable slot. Interp-only (AOT refs SSA/
+                // alloca addresses, not the recyclable temp pool), but the
+                // fix is in shared VBC codegen and inert for AOT.
+                | ExprKind::Record { .. }
+                | ExprKind::Tuple(_)
+                | ExprKind::Array(_)
+                | ExprKind::MapLiteral { .. }
+                | ExprKind::SetLiteral { .. }
         );
         if !needs_stable {
             // **Path** that resolves to a module-level const (not a

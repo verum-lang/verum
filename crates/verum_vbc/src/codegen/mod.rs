@@ -4477,14 +4477,31 @@ impl VbcCodegen {
             TypeRef::Slice(inner) => {
                 self.type_ref_to_field_name(inner).map(|n| format!("[{}]", n))
             }
-            // Function / Rank2Function / Generic / Tuple / Array do
-            // not produce a nominal field-type name that downstream
-            // consumers (raw-pointer prefix check, name-equality for
-            // mount-trace) compare against.  Returning None here
-            // mirrors `register_record_fields`'s behaviour at
-            // `extract_type_name_from_ast`'s structural-shape return
-            // (which produces a name like `(Int, Int)` for tuples —
-            // not a registry key) by simply omitting the entry.
+            // Tuple `(A, B, …)` — render the canonical parenthesised form,
+            // matching `extract_type_name_from_ast`'s `Tuple` arm. This is
+            // the ARCHIVE-side mirror: a cross-module record field of type
+            // `List<(Text, Text)>` loaded from the archive must register as
+            // `"List<(Text, Text)>"`, not `"List<_>"` — otherwise
+            // `extract_element_type` yields `"_"` and a USER-code `let (a,
+            // b) = &mounted_rec.field[i]` destructure left the bound names
+            // untyped (the cross-module half of RECORD-LET-REF-TYPE-LOSS).
+            // NOTE: this does NOT unblock the stdlib `find_rel` — that is
+            // precompiled with its record type LOCAL and is blocked by a
+            // separate str→Text non-canonicalisation, not this. The
+            // parenthesised render round-trips through
+            // `split_tuple_type_name`, and its non-nominal shape is inert
+            // for the raw-pointer-prefix / name-equality consumers.
+            TypeRef::Tuple(elems) => {
+                let names: Vec<String> = elems
+                    .iter()
+                    .map(|e| self.type_ref_to_field_name(e).unwrap_or_else(|| "_".into()))
+                    .collect();
+                Some(format!("({})", names.join(", ")))
+            }
+            // Function / Rank2Function / Generic / Array do not produce a
+            // nominal field-type name that downstream consumers
+            // (raw-pointer prefix check, name-equality for mount-trace)
+            // compare against — omit the entry.
             _ => None,
         }
     }

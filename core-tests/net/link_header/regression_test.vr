@@ -49,7 +49,6 @@ fn regression_parse_pagination_pair() {
     }
 }
 
-@ignore
 @test
 fn regression_find_rel_matches() {
     let s = "</page/2>; rel=\"next\"".clone();
@@ -60,7 +59,6 @@ fn regression_find_rel_matches() {
     }
 }
 
-@ignore
 @test
 fn regression_find_rel_case_insensitive() {
     let s = "</page/2>; rel=\"NEXT\"".clone();
@@ -71,7 +69,6 @@ fn regression_find_rel_case_insensitive() {
     }
 }
 
-@ignore
 @test
 fn regression_find_rel_no_match() {
     let s = "</page/2>; rel=\"next\"".clone();
@@ -107,7 +104,15 @@ fn regression_parse_missing_close_angle() {
 // `list[i].1`) lowers correctly. `find_rel` / `format_link_header` were
 // rewritten to use tuple-index (core/net/link_header.vr); this pin
 // reproduces the broken destructure shape so a fix flips it live.
-// @ignore'd: the garbage read makes the assertion fail (not a crash).
+// RUNTIME garbage FIXED (bdef8ba75 handle_unpack resolve_arg_value) — the
+// values now bind correctly. STILL @ignore'd on a NARROW compile-time
+// regression from the RECORD-LET recorder (f922700c3): reading BOTH
+// destructured elements of a DIRECT list-variable `&pairs[i]` inside one
+// f-string / assert_eq mis-types the receiver as an unrelated protocol
+// (`WindowFn.as_str not found`). Single-read, two-separate-statement, and
+// the RECORD-FIELD form (`&rec.field[i]`, which find_rel's round-trip test
+// exercises) all pass — so this is a direct-list-var dual-read shape bug,
+// tracked separately. Un-ignore once that is fixed.
 @ignore
 @test
 fn regression_tuple_destructure_indexed_reads_garbage() {
