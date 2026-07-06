@@ -14447,7 +14447,19 @@ impl VbcCodegen {
                     // type inference in nested variant patterns
                     // (`Some(a)` against `&Maybe<T>` element) registers
                     // `a` with the correct concrete type.
-                    let elem_types = self.ctx.match_tuple_element_types.clone();
+                    // Prefer the let-destructure element types (CONSUME them
+                    // so they cannot leak to a later statement), else the
+                    // match element types (CLONE — see the RECORD-LET note).
+                    // `from_let` records whether these came from a genuine
+                    // `let (a, b) = …` destructure (pending was set) vs a
+                    // match arm; only the former should write
+                    // `variable_type_names`.
+                    let from_let = self.ctx.pending_let_tuple_types.is_some();
+                    let elem_types = self
+                        .ctx
+                        .pending_let_tuple_types
+                        .take()
+                        .or_else(|| self.ctx.match_tuple_element_types.clone());
                     let prev_st = self.ctx.match_scrutinee_type.clone();
                     for (i, elem) in elements.iter().enumerate() {
                         let elem_reg = Reg(first_elem.0 + i as u16);
@@ -14455,6 +14467,23 @@ impl VbcCodegen {
                             self.ctx.match_scrutinee_type = types.get(i).cloned().flatten();
                         }
                         self.compile_pattern_bind(elem, elem_reg)?;
+                        // Record a simple `let (a, b) = …` element's type so
+                        // downstream method dispatch on the bound name resolves
+                        // (RECORD-LET-REF-TYPE-LOSS). Only fires for a genuine
+                        // let-destructure (pending was set), NOT for a match
+                        // arm — recording match-bound tuple elements' types
+                        // into `variable_type_names` regressed cmp-then-`<`
+                        // on Maybe (a stray entry mis-routed a later Ord
+                        // dispatch to a primitive compare).
+                        if let Some(ref types) = elem_types
+                            && from_let
+                            && let verum_ast::PatternKind::Ident { name, .. } = &elem.kind
+                            && let Some(Some(elem_ty)) = types.get(i)
+                        {
+                            self.ctx
+                                .variable_type_names
+                                .insert(name.name.to_string(), elem_ty.clone());
+                        }
                     }
                     self.ctx.match_scrutinee_type = prev_st;
 
@@ -20482,6 +20511,97 @@ impl VbcCodegen {
 
     /// Infers the custom type name for an expression used as an operand.
     ///
+
+    /// Infer the per-element type names of a tuple-typed expression, for
+    /// recording `let (a, b, …) = <expr>` destructure bindings' types.
+    ///
+    /// `compile_match` only populates `match_tuple_element_types` when the
+    /// scrutinee is a tuple LITERAL `(x, y)`; a `let`-destructure of an
+    /// expression that merely *evaluates* to a tuple (`&rec.field[i]`)
+    /// never set it, so the bound identifiers stayed untyped and
+    /// downstream method dispatch (`a.as_bytes()`) could not resolve a
+    /// receiver — the RECORD-LET-REF-TYPE-LOSS defect. Inline `pair.0`
+    /// worked only because it re-infers the element type on the spot; the
+    /// bound name has no such second chance, so its type MUST be recorded
+    /// at bind time.
+    ///
+    /// A `&`/`&mut`-borrow of a tuple destructures to the same element
+    /// types. Returns `None` (leaving the bindings untyped — the pre-fix
+    /// behaviour, never a regression) when the type is not a
+    /// recognisable N-tuple.
+    pub(crate) fn infer_tuple_element_type_names(
+        &self,
+        expr: &Expr,
+        arity: usize,
+    ) -> Option<Vec<Option<String>>> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::expr::UnOp;
+        let inner = match &expr.kind {
+            ExprKind::Unary { op, expr: inner }
+                if matches!(
+                    op,
+                    UnOp::Ref
+                        | UnOp::RefMut
+                        | UnOp::RefChecked
+                        | UnOp::RefCheckedMut
+                        | UnOp::RefUnsafe
+                        | UnOp::RefUnsafeMut
+                ) =>
+            {
+                inner.as_ref()
+            }
+            _ => expr,
+        };
+        let type_name = self
+            .infer_expr_type_name(inner)
+            .or_else(|| self.infer_expr_type_name(expr))
+            .or_else(|| self.extract_expr_type_name(inner))?;
+        let elems = Self::split_tuple_type_name(&type_name)?;
+        if elems.len() != arity {
+            return None;
+        }
+        Some(
+            elems
+                .into_iter()
+                .map(|s| if s.is_empty() || s == "_" { None } else { Some(s) })
+                .collect(),
+        )
+    }
+
+    /// Split a rendered tuple type name `"(A, B<C, D>, (E, F))"` into its
+    /// top-level element type names, respecting `<>` / `()` / `[]`
+    /// nesting. Returns `None` for a non-tuple (`"(X)"` is a parenthesised
+    /// type, not a 1-tuple).
+    fn split_tuple_type_name(name: &str) -> Option<Vec<String>> {
+        let inner = name.trim().strip_prefix('(')?.strip_suffix(')')?;
+        let mut out = Vec::new();
+        let mut depth = 0i32;
+        let mut cur = String::new();
+        for ch in inner.chars() {
+            match ch {
+                '<' | '(' | '[' => {
+                    depth += 1;
+                    cur.push(ch);
+                }
+                '>' | ')' | ']' => {
+                    depth -= 1;
+                    cur.push(ch);
+                }
+                ',' if depth == 0 => {
+                    out.push(cur.trim().to_string());
+                    cur.clear();
+                }
+                _ => cur.push(ch),
+            }
+        }
+        if !cur.trim().is_empty() {
+            out.push(cur.trim().to_string());
+        }
+        if out.len() < 2 {
+            return None;
+        }
+        Some(out)
+    }
 
     /// For variable references, looks up the type name from `variable_type_names`.
     /// For inline record literals, extracts the type name directly.

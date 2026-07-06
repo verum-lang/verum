@@ -288,6 +288,23 @@ impl VbcCodegen {
         ty: Option<&verum_ast::Type>,
         value: Option<&verum_ast::Expr>,
     ) -> CodegenResult<Option<Reg>> {
+        // `let (a, b, …) = <expr>` — record the destructured elements'
+        // types so downstream method dispatch on the bound names
+        // (`a.as_bytes()`) resolves a receiver type. `compile_match` only
+        // populates `match_tuple_element_types` for a tuple-LITERAL
+        // scrutinee; a let-destructure of an expression that evaluates to
+        // a tuple (`&rec.field[i]`) never set it — the
+        // RECORD-LET-REF-TYPE-LOSS defect. Uses the dedicated
+        // `pending_let_tuple_types` (NOT `match_tuple_element_types`) so
+        // consuming it for this bind cannot starve a later match arm; the
+        // Tuple arm of `compile_pattern_bind` `.take()`s it.
+        if let verum_ast::PatternKind::Tuple(elems) = &pattern.kind
+            && let Some(val) = value
+            && let Some(elem_types) = self.infer_tuple_element_type_names(val, elems.len())
+        {
+            self.ctx.pending_let_tuple_types = Some(elem_types);
+        }
+
         // Infer and track variable type for correct instruction selection
         // This must be done BEFORE compiling the expression to handle chained assignments
         if let Some(var_name) = self.extract_pattern_name(pattern) {

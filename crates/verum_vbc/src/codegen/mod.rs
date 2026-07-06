@@ -1217,11 +1217,32 @@ impl VbcCodegen {
             return None;
         }
         let inner = &type_name[start + 1..end];
-        // For Map<K,V>, take the first type arg; for List<T>, take the only one
-        let first_arg = if let Some(comma) = inner.find(',') {
-            inner[..comma].trim()
-        } else {
-            inner.trim()
+        // For Map<K,V>, take the first type arg; for List<T>, take the only
+        // one. The separator is the first TOP-LEVEL comma — commas nested
+        // inside a tuple / generic / slice element (`List<(A, B)>`,
+        // `List<Map<K, V>>`, `List<[T; N]>`) belong to that element and must
+        // NOT split it. A naive `find(',')` returned `"(Text"` for
+        // `List<(Text, Text)>`, which then failed to round-trip through
+        // `split_tuple_type_name` and left `let (a, b) = xs[i]` bindings
+        // untyped (RECORD-LET-REF-TYPE-LOSS).
+        let first_arg = {
+            let mut depth = 0i32;
+            let mut split_at = None;
+            for (idx, ch) in inner.char_indices() {
+                match ch {
+                    '<' | '(' | '[' => depth += 1,
+                    '>' | ')' | ']' => depth -= 1,
+                    ',' if depth == 0 => {
+                        split_at = Some(idx);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            match split_at {
+                Some(comma) => inner[..comma].trim(),
+                None => inner.trim(),
+            }
         };
         if first_arg.is_empty() {
             None
@@ -14862,6 +14883,21 @@ impl VbcCodegen {
             // → garbage seq → SIGSEGV at scale).
             TypeKind::Array { element, .. } => {
                 format!("[{}]", Self::extract_type_name_from_ast(element))
+            }
+            // Tuple `(A, B, …)` — render the canonical parenthesised form so
+            // downstream tuple-element inference can recover the element
+            // types. Without this arm the `{:?}`-Debug catch-all produced a
+            // truncated garbage name ("Tuple(List { inner: "), so a
+            // `let (a, b) = <tuple-expr>` destructure left `a`/`b` untyped and
+            // `a.method()` failed method resolution (RECORD-LET-REF-TYPE-LOSS).
+            // Same class of fix as the Array / Slice arms above; the
+            // parenthesised render round-trips through `split_tuple_type_name`.
+            TypeKind::Tuple(elements) => {
+                let elem_names: Vec<String> = elements
+                    .iter()
+                    .map(Self::extract_type_name_from_ast)
+                    .collect();
+                format!("({})", elem_names.join(", "))
             }
             TypeKind::DynProtocol { bounds, .. } => {
                 // dyn Protocol → "dyn:Protocol" for dispatch tracking

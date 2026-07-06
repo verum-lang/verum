@@ -259,6 +259,16 @@ pub struct CodegenContext {
     /// to `None` for non-tuple scrutinees.
     pub match_tuple_element_types: Option<Vec<Option<String>>>,
 
+    /// Per-element type names for a `let (a, b, …) = <tuple-expr>`
+    /// destructure, set by `compile_let` and CONSUMED (`.take()`) by the
+    /// Tuple arm of `compile_pattern_bind`. Kept separate from
+    /// `match_tuple_element_types` (which `compile_match` populates and
+    /// must survive across ALL arms of a multi-arm match) so consuming it
+    /// for one let-destructure cannot starve a later match arm — the
+    /// RECORD-LET-REF-TYPE-LOSS fix must not regress
+    /// `match (self, other) { … }` element typing.
+    pub pending_let_tuple_types: Option<Vec<Option<String>>>,
+
     /// Registers that contain raw FFI pointers (not CBGR references).
     ///
 
@@ -1138,6 +1148,7 @@ impl CodegenContext {
             last_function_variable_types: HashMap::new(),
             match_scrutinee_type: None,
             match_tuple_element_types: None,
+            pending_let_tuple_types: None,
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
             const_generic_params: HashSet::new(),
