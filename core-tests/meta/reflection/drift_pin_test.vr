@@ -1,0 +1,155 @@
+// =============================================================================
+// core-tests/meta/reflection/drift_pin_test.vr
+// =============================================================================
+//
+// META-REFLECTION-DRIFT-1 — stdlib-side drift pin for the reflection
+// data model.
+//
+// `core/meta/reflection.vr` is the SOURCE OF TRUTH for a data model that
+// is mirrored BY HAND in two Rust locations consumed by the compiler:
+//
+//   * crates/verum_compiler/src/meta/reflection/   (meta-runtime mirror)
+//   * crates/verum_compiler/src/derives/common.rs  (derive-side mirror,
+//     consumed by the 13 @derive codegens)
+//
+// @derive codegen reads the RUST mirrors, not this stdlib — so silent
+// drift produces wrong derives without any test failing.  This file pins
+// the stdlib enum surfaces from the .vr side:
+//
+//   * `type_kind_name` / `primitive_type_name` below match EVERY variant
+//     with NO wildcard arm.  Adding a variant to reflection.vr makes the
+//     match non-exhaustive (compile error); removing/renaming one makes
+//     an arm unresolvable.  Either way this test breaks loudly.
+//   * Each @test constructs one value of EVERY variant and asserts the
+//     name round-trip, so the pin is exercised at runtime too.
+//
+// If this test breaks: update BOTH Rust mirrors and the companion Rust
+// drift-pin test crates/verum_compiler/tests/reflection_mirror_drift.rs
+// IN SYNC with the reflection.vr change.
+//
+// Companion pins the Rust side; this file pins the stdlib side.
+// =============================================================================
+
+mount core.meta.reflection.{TypeKind, PrimitiveType};
+
+// =============================================================================
+// Section 1: TypeKind — exhaustive match pin (17 variants, NO wildcard)
+// =============================================================================
+
+fn type_kind_name(k: TypeKind) -> Text {
+    match k {
+        TypeKind.Struct => "Struct",
+        TypeKind.Enum => "Enum",
+        TypeKind.Newtype => "Newtype",
+        TypeKind.Unit => "Unit",
+        TypeKind.Protocol => "Protocol",
+        TypeKind.Tuple => "Tuple",
+        TypeKind.Array => "Array",
+        TypeKind.Slice => "Slice",
+        TypeKind.Reference => "Reference",
+        TypeKind.Pointer => "Pointer",
+        TypeKind.Function => "Function",
+        TypeKind.TypeParam => "TypeParam",
+        TypeKind.Associated => "Associated",
+        TypeKind.Primitive => "Primitive",
+        TypeKind.Never => "Never",
+        TypeKind.Infer => "Infer",
+        TypeKind.Unknown => "Unknown",
+    }
+}
+
+@test
+fn drift_pin_type_kind_exhaustive_match() {
+    // One value of EVERY TypeKind variant, routed through the
+    // wildcard-free match above.
+    assert_eq(type_kind_name(TypeKind.Struct), "Struct");
+    assert_eq(type_kind_name(TypeKind.Enum), "Enum");
+    assert_eq(type_kind_name(TypeKind.Newtype), "Newtype");
+    assert_eq(type_kind_name(TypeKind.Unit), "Unit");
+    assert_eq(type_kind_name(TypeKind.Protocol), "Protocol");
+    assert_eq(type_kind_name(TypeKind.Tuple), "Tuple");
+    assert_eq(type_kind_name(TypeKind.Array), "Array");
+    assert_eq(type_kind_name(TypeKind.Slice), "Slice");
+    assert_eq(type_kind_name(TypeKind.Reference), "Reference");
+    assert_eq(type_kind_name(TypeKind.Pointer), "Pointer");
+    assert_eq(type_kind_name(TypeKind.Function), "Function");
+    assert_eq(type_kind_name(TypeKind.TypeParam), "TypeParam");
+    assert_eq(type_kind_name(TypeKind.Associated), "Associated");
+    assert_eq(type_kind_name(TypeKind.Primitive), "Primitive");
+    assert_eq(type_kind_name(TypeKind.Never), "Never");
+    assert_eq(type_kind_name(TypeKind.Infer), "Infer");
+    assert_eq(type_kind_name(TypeKind.Unknown), "Unknown");
+}
+
+// =============================================================================
+// Section 2: PrimitiveType — exhaustive match pin (17 variants, NO wildcard)
+// =============================================================================
+
+fn primitive_type_name(p: PrimitiveType) -> Text {
+    match p {
+        PrimitiveType.Bool => "Bool",
+        PrimitiveType.Char => "Char",
+        PrimitiveType.Int8 => "Int8",
+        PrimitiveType.Int16 => "Int16",
+        PrimitiveType.Int32 => "Int32",
+        PrimitiveType.Int64 => "Int64",
+        PrimitiveType.Int => "Int",
+        PrimitiveType.UInt8 => "UInt8",
+        PrimitiveType.UInt16 => "UInt16",
+        PrimitiveType.UInt32 => "UInt32",
+        PrimitiveType.UInt64 => "UInt64",
+        PrimitiveType.ISize => "ISize",
+        PrimitiveType.USize => "USize",
+        PrimitiveType.Float32 => "Float32",
+        PrimitiveType.Float64 => "Float64",
+        PrimitiveType.Text => "Text",
+        PrimitiveType.Unit => "Unit",
+    }
+}
+
+@test
+fn drift_pin_primitive_type_exhaustive_match() {
+    // One value of EVERY PrimitiveType variant, routed through the
+    // wildcard-free match above.
+    assert_eq(primitive_type_name(PrimitiveType.Bool), "Bool");
+    assert_eq(primitive_type_name(PrimitiveType.Char), "Char");
+    assert_eq(primitive_type_name(PrimitiveType.Int8), "Int8");
+    assert_eq(primitive_type_name(PrimitiveType.Int16), "Int16");
+    assert_eq(primitive_type_name(PrimitiveType.Int32), "Int32");
+    assert_eq(primitive_type_name(PrimitiveType.Int64), "Int64");
+    assert_eq(primitive_type_name(PrimitiveType.Int), "Int");
+    assert_eq(primitive_type_name(PrimitiveType.UInt8), "UInt8");
+    assert_eq(primitive_type_name(PrimitiveType.UInt16), "UInt16");
+    assert_eq(primitive_type_name(PrimitiveType.UInt32), "UInt32");
+    assert_eq(primitive_type_name(PrimitiveType.UInt64), "UInt64");
+    assert_eq(primitive_type_name(PrimitiveType.ISize), "ISize");
+    assert_eq(primitive_type_name(PrimitiveType.USize), "USize");
+    assert_eq(primitive_type_name(PrimitiveType.Float32), "Float32");
+    assert_eq(primitive_type_name(PrimitiveType.Float64), "Float64");
+    assert_eq(primitive_type_name(PrimitiveType.Text), "Text");
+    assert_eq(primitive_type_name(PrimitiveType.Unit), "Unit");
+}
+
+// =============================================================================
+// Section 3: cross-check the pinned names against the stdlib's own
+// `.name()` accessors where the two agree — a second, independent probe
+// that the variant set did not silently rotate.  (TypeKind.name returns
+// lower-case prose and PrimitiveType.name returns "()" for Unit, so only
+// the stable exact-name subset is asserted here.)
+// =============================================================================
+
+@test
+fn drift_pin_stdlib_name_accessors_agree() {
+    // TypeKind.name(): prose names for a representative spread.
+    assert_eq(TypeKind.Struct.name(), "struct");
+    assert_eq(TypeKind.Unknown.name(), "unknown");
+    assert_eq(TypeKind.TypeParam.name(), "type parameter");
+
+    // PrimitiveType.name(): exact variant names (Unit is "()" by design).
+    assert_eq(PrimitiveType.Bool.name(), "Bool");
+    assert_eq(PrimitiveType.Int.name(), "Int");
+    assert_eq(PrimitiveType.USize.name(), "USize");
+    assert_eq(PrimitiveType.Float64.name(), "Float64");
+    assert_eq(PrimitiveType.Text.name(), "Text");
+    assert_eq(PrimitiveType.Unit.name(), "()");
+}
