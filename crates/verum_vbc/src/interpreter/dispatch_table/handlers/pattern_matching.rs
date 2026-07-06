@@ -5,7 +5,7 @@ use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
-use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, resolve_arg_value};
 use crate::instruction::Reg;
 use crate::types::TypeId;
 use crate::value::Value;
@@ -678,7 +678,19 @@ pub(in super::super) fn handle_unpack(
     let tuple_reg = read_reg(state)?;
     let count = read_u8(state)?;
 
-    let tuple_value = state.get_reg(tuple_reg);
+    // Resolve any reference wrapper to the underlying tuple value BEFORE
+    // unpacking. `let (a, b) = &xs[i]` (destructuring an INDEXED or
+    // iterator-yielded tuple) lowers the scrutinee to a CBGR reference —
+    // a heap-interior pointer into the list SLOT that holds the tuple
+    // pointer, a register-ref, or a ThinRef — NOT the tuple object
+    // itself. Pre-fix `handle_unpack` treated that ref address as the
+    // tuple object and read `ref + header + i*8`, i.e. bytes of the list
+    // slot / ref internals, yielding garbage (a `Text` element rendered
+    // as "0.0"). `resolve_arg_value` collapses all three ref shapes to
+    // the pointee tuple value and passes a direct tuple pointer through
+    // unchanged, so both `let (a,b) = tup` and `let (a,b) = &xs[i]`
+    // unpack correctly. Closes TUPLE-DESTRUCTURE-INDEXED.
+    let tuple_value = resolve_arg_value(state, state.get_reg(tuple_reg));
 
     // Tuples in VBC are heap-allocated objects with layout:
     // [ObjectHeader][Value0][Value1]...[ValueN]
