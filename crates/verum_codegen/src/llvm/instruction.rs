@@ -21568,14 +21568,53 @@ fn lower_char_extended<'ctx>(
                     .builder()
                     .build_int_to_ptr(buf_val, ptr_type, "enc_buf_obj")
                     .or_llvm_err()?;
-                let backing_slot = unsafe {
+                // PACK-HEADER-STAMP discrimination: the buffer arrives as
+                // EITHER a slice Pack {ptr@24,len@32} (as_mut_slice call
+                // shapes — stamped TUPLE 521) OR a raw LIST object
+                // {len@24,cap@32,ptr@40} (`&mut buf` of a fixed array —
+                // Text.push's shape). The fixed @24 read on a LIST loaded
+                // the LEN (4) as a "pointer" → store at address 0x4 →
+                // EXC_BAD_ACCESS in Char.encode_utf8 (unmasked by the
+                // encode_utf8 dedup fix; pre-dedup the whole fn was a
+                // ret-0 stub). Select the backing slot by the header tid.
+                let i32_ty = ctx.types().context().i32_type();
+                let tid = ctx
+                    .builder()
+                    .build_load(i32_ty, buf_obj, "enc_hdr_tid")
+                    .or_llvm_err()?
+                    .into_int_value();
+                let is_pack = ctx
+                    .builder()
+                    .build_int_compare(
+                        IntPredicate::EQ,
+                        tid,
+                        i32_ty.const_int(521, false),
+                        "enc_is_pack",
+                    )
+                    .or_llvm_err()?;
+                let pack_slot = unsafe {
                     ctx.builder()
-                        .build_in_bounds_gep(i8_ty, buf_obj, &[i64_ty.const_int(24, false)], "enc_backing_slot")
+                        .build_in_bounds_gep(i8_ty, buf_obj, &[i64_ty.const_int(24, false)], "enc_pack_slot")
                         .or_llvm_err()?
                 };
+                let list_slot = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(i8_ty, buf_obj, &[i64_ty.const_int(super::runtime::LIST_PTR_OFFSET, false)], "enc_list_slot")
+                        .or_llvm_err()?
+                };
+                let pack_i = ctx
+                    .builder()
+                    .build_load(i64_ty, pack_slot, "enc_pack_i")
+                    .or_llvm_err()?
+                    .into_int_value();
+                let list_i = ctx
+                    .builder()
+                    .build_load(i64_ty, list_slot, "enc_list_i")
+                    .or_llvm_err()?
+                    .into_int_value();
                 let backing_i = ctx
                     .builder()
-                    .build_load(i64_ty, backing_slot, "enc_backing_i")
+                    .build_select(is_pack, pack_i, list_i, "enc_backing_sel")
                     .or_llvm_err()?
                     .into_int_value();
                 let data_ptr = ctx
