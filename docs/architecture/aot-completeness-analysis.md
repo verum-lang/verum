@@ -50,31 +50,36 @@ them.
   `hiXYZ`, long append no longer crashes, `ptr_offset(list_int, 2)`
   still reads element 2 (stride 8 preserved), text/text interp failing
   set byte-identical to baseline (0 regression).
-* **1b — grow-from-empty derived-view length garbage — OPEN.** An
-  **empty** `Text.new()` (null buffer) + `push_str` then `as_str`
-  SIGBUSes. Deep diagnosis (do NOT trust the first-order "null ptr"
-  reading — it is wrong):
-  - The Text FIELDS are all correct after the append: `s.len()` == 1,
-    `s.capacity()` == 16, and the buffer content is right — reading
-    `s.as_bytes()[0]` yields 81 (`'Q'`), which proves `self.ptr`@0 is a
-    valid pointer to the grown buffer. So grow's `&mut self` writeback
-    (ptr@0 / cap@16) and push_str's len@8 all persist correctly. The
-    earlier "nested-writeback / offset-0-lost" theories are DISPROVEN.
-  - The fault is in the DERIVED views: `s.as_bytes().len()` returns
-    garbage (e.g. 4385112096) even though `s.len()` == 1, and `as_str`
-    (which builds the same view) then reads that bogus length → OOB →
-    SIGBUS. `s.as_bytes()[0]` still returns the right byte because
-    indexing uses the (valid) base pointer, not the (garbage) length.
-  So `as_str`/`as_bytes` compute a byte-view length that is correct for
-  a heap-backed Text but garbage specifically for a Text whose buffer
-  was grown from the `Text.new()` null-buffer state — a length-source
-  (byte_len helper / view struct) that reads the wrong slot for that
-  post-grow layout, NOT a pointer-writeback bug. Next step: dump the
-  `as_bytes`/`verum_text_get_ptr` view construction and compare the
-  length source for a `Text.new()`-grown buffer vs a `"".to_text()`
-  buffer (the latter works). Baseline crashes identically (pre-existing,
-  NOT introduced by 1a). Blocks build-from-scratch (Formatter/parser
-  from `Text.new()`), so it is the remaining #1-lever work.
+* **1b — empty-Text views — OPEN, ENTANGLED (diagnosis is NOT yet
+  reliable).** An **empty** `Text.new()` (null buffer) + `push_str`
+  then `as_str` SIGBUSes. Confirmed facts (trustworthy):
+  - The Text FIELDS are correct after the append: `s.len()` == 1,
+    `s.capacity()` == 16, and `s.as_bytes()[0]` == `0x51` (`'Q'`) — so
+    `self.ptr`@0 is a VALID pointer to the grown buffer and the
+    `&mut self` writeback (ptr@0/cap@16/len@8) all persist. The
+    "null-ptr / nested-writeback / offset-0-lost" theories are all
+    DISPROVEN.
+  This area has AT LEAST TWO entangled AOT bugs, and incremental repros
+  have repeatedly mischaracterised them (this root cause has been
+  corrected four times — treat any single-repro conclusion here with
+  suspicion):
+  1. **`as_bytes().len()` returns garbage (a pointer-valued number)**
+     for BOTH `Text.new()`-grown AND `"".to_text()` buffers, even
+     though `s.len()` == 1 — i.e. NOT empty-specific. The AsBytes AOT
+     lowering (`instruction.rs:19106`) packs `[ptr, len]` reading `len`
+     from `self+8` and `lower_pack`s them; either `Len` reads the wrong
+     Pack slot for this slice, or the `let ab = s.as_bytes().len()`
+     temporary is recycled — needs isolation from the crash below.
+  2. **`as_str` (in an f-string) SIGBUSes only for the `Text.new()`-grown
+     buffer** (`"".to_text()` renders fine) — a distinct empty-specific
+     path.
+  A reliable fix requires a DEDICATED pass that isolates these two (not
+  more one-off repros): dump the AsBytes Pack + `Len` slice-offset, and
+  separately the `as_str`/f-string path for a grown-vs-non-grown Text.
+  Baseline crashes identically (pre-existing, NOT introduced by 1a).
+  Blocks build-from-scratch (Formatter/parser from `Text.new()`), so it
+  remains the #1-lever residual — but it is a multi-bug knot, not the
+  single clean defect the earlier notes implied.
 
 **Symptom (original, confirmed with reproducers):**
 
