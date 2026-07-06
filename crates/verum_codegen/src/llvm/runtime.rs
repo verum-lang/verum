@@ -1941,6 +1941,38 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // Allocate tuple
         let tuple_ptr = self.emit_checked_malloc(&builder, module, size, "tuple")?;
 
+        // PACK-HEADER-STAMP-1 (TEXT-AOT-CHARS-PUSH-1 leg 1 enabler):
+        // `emit_checked_malloc` is a raw malloc — the 24-byte object
+        // header was left UNINITIALIZED, so every runtime consumer that
+        // discriminates by header bytes read garbage (verum_generic_len's
+        // ptr-vs-tag heuristic misrouted slices stored in record fields
+        // to the Text arm and returned header noise as the "length";
+        // Chars/ByteIter then iterated zero times). Zero the header and
+        // stamp the canonical TUPLE TypeId (521 — verum_vbc::types) so
+        // Pack objects are runtime-identifiable, mirroring the
+        // interpreter's typed heap allocations.
+        let i32_type = self.context.i32_type();
+        let i8_type = self.context.i8_type();
+        for hdr_off in [0u64, 8, 16] {
+            // SAFETY: in-bounds GEP within the 24-byte header just allocated.
+            let slot = unsafe {
+                builder
+                    .build_in_bounds_gep(
+                        i8_type,
+                        tuple_ptr,
+                        &[i64_type.const_int(hdr_off, false)],
+                        "pack_hdr_slot",
+                    )
+                    .or_llvm_err()?
+            };
+            builder
+                .build_store(slot, i64_type.const_zero())
+                .or_llvm_err()?;
+        }
+        builder
+            .build_store(tuple_ptr, i32_type.const_int(521, false))
+            .or_llvm_err()?;
+
         // Store each value
         for (i, value) in values.iter().enumerate() {
             let offset = Self::OBJECT_HEADER_SIZE + (i as u64 * VALUE_SIZE);
@@ -4211,6 +4243,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let func = super::error::get_or_declare_function(module, "verum_generic_len", fn_type);
 
         let entry = ctx.append_basic_block(func, "entry");
+        let pack_path = ctx.append_basic_block(func, "pack_len");
+        let heuristic_path = ctx.append_basic_block(func, "len_heuristic");
         let text_path = ctx.append_basic_block(func, "text_len");
         let newg_path = ctx.append_basic_block(func, "newg_len");
 
@@ -4226,11 +4260,52 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_int_to_ptr(obj_i64, ptr_type, "obj_ptr")
             .or_llvm_err()?;
 
-        // Check offset 0: if it's a heap pointer, this is Text
         let field0 = builder
             .build_load(i64_type, obj_ptr, "field0")
             .or_llvm_err()?
             .into_int_value();
+
+        // PACK-HEADER-STAMP-1: `lower_pack` zeroes the 24-byte header
+        // and stamps the canonical TUPLE TypeId (521) at offset 0, so a
+        // Pack/slice object reads field0 == 521 exactly. Check this
+        // FIRST — under the old two-way heuristic a slice that reached
+        // an untyped register via a record field (`Chars { bytes:
+        // s.as_bytes() }` → `self.bytes.len()`) fell into the NewG arm
+        // and returned its own PTR word as the "length" (garbage like
+        // 4309396287), collapsing every AOT text iterator to zero
+        // iterations (TEXT-AOT-CHARS-PUSH-1 leg 1).
+        let is_pack = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::EQ,
+                field0,
+                i64_type.const_int(521, false),
+                "is_pack",
+            )
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_pack, pack_path, heuristic_path)
+            .or_llvm_err()?;
+
+        // pack_len: Pack {ptr@24, len@32} → len at offset 32
+        builder.position_at_end(pack_path);
+        // SAFETY: GEP into the Pack object (24-byte header + 2 Value slots) to read len at offset 32
+        let pack_len_slot = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    i8_type,
+                    obj_ptr,
+                    &[i64_type.const_int(32, false)],
+                    "pack_len_slot",
+                )
+                .or_llvm_err()?
+        };
+        let pack_len = builder
+            .build_load(i64_type, pack_len_slot, "pack_len")
+            .or_llvm_err()?;
+        builder.build_return(Some(&pack_len)).or_llvm_err()?;
+
+        // Heuristic fallback (pre-existing): offset 0 heap-pointer-like → Text
+        builder.position_at_end(heuristic_path);
         let is_text = builder
             .build_int_compare(verum_llvm::IntPredicate::UGT, field0, threshold, "is_text")
             .or_llvm_err()?;
