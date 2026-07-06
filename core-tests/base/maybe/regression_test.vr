@@ -24,26 +24,26 @@
 // harness's file-level typecheck preflight (META-TEST-TYPECHECK-1)
 // fails the WHOLE file on it — @ignore only skips execution, not the
 // preflight. Restore verbatim when the ctor-freshness fix lands:
-// @test
-// fn regression_two_assigns_different_payloads() {
-//     let mut a: Maybe<Text> = Maybe.None;
-//     let mut b: Maybe<Int> = Maybe.None;
-//     a = Maybe.Some(Text.from("epsilon"));
-//     b = Maybe.Some(3);
-//     assert(a is Maybe.Some);
-//     assert(b is Maybe.Some);
-// }
+@test
+fn regression_two_assigns_different_payloads() {
+    let mut a: Maybe<Text> = Maybe.None;
+    let mut b: Maybe<Int> = Maybe.None;
+    a = Maybe.Some(Text.from("epsilon"));
+    b = Maybe.Some(3);
+    assert(a is Maybe.Some);
+    assert(b is Maybe.Some);
+}
 
 // PINNED-OUT: GENERIC-CTOR-FRESHNESS-1 (same class; restore with the fix):
-// @test
-// fn regression_two_assigns_reversed_order() {
-//     let mut b: Maybe<Int> = Maybe.None;
-//     let mut a: Maybe<Text> = Maybe.None;
-//     b = Maybe.Some(7);
-//     a = Maybe.Some(Text.from("omega"));
-//     assert(b is Maybe.Some);
-//     assert(a is Maybe.Some);
-// }
+@test
+fn regression_two_assigns_reversed_order() {
+    let mut b: Maybe<Int> = Maybe.None;
+    let mut a: Maybe<Text> = Maybe.None;
+    b = Maybe.Some(7);
+    a = Maybe.Some(Text.from("omega"));
+    assert(b is Maybe.Some);
+    assert(a is Maybe.Some);
+}
 
 @test
 fn regression_same_payload_twice_still_fine() {
@@ -85,11 +85,11 @@ fn regression_mixed_let_then_assign() {
 // function body (an assign-Int in an earlier fn poisons an assign-Text
 // here → E400 across function boundaries). File-wide invariant until
 // the fix: at most ONE assignment payload type. Restore with the fix:
-// @test
-// fn regression_assign_then_let() {
-//     let mut a: Maybe<Text> = Maybe.None;
-//     a = Maybe.Some(Text.from("pre"));
-//     let b: Maybe<Int> = Maybe.Some(13);
-//     assert(a is Maybe.Some);
-//     assert(b is Maybe.Some);
-// }
+@test
+fn regression_assign_then_let() {
+    let mut a: Maybe<Text> = Maybe.None;
+    a = Maybe.Some(Text.from("pre"));
+    let b: Maybe<Int> = Maybe.Some(13);
+    assert(a is Maybe.Some);
+    assert(b is Maybe.Some);
+}

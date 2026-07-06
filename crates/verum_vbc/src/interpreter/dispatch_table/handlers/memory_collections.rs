@@ -89,7 +89,19 @@ pub(in super::super) fn handle_get_field(
 
     let obj_val = state.get_reg(obj);
 
+    // REFL-CLOSURE-XREC-1: adapter closures receive their element as a
+    // REFERENCE (`any`/`all`/`find` pass `&x` per `fn(&Self.Item)`),
+    // and only the register-ref encoding was peeled here — a ThinRef or
+    // tracked-raw-ptr receiver had GetF read the REF'S OWN BYTES as
+    // field slots (SIGSEGV on `|r| r.name`). Resolve through the full
+    // helper first: it covers all three ref encodings and is IDENTITY
+    // for plain values, so the for-loop's by-value binder path is
+    // untouched (same precedent as the handle_iter_new fix).
+    let obj_val = super::cbgr_helpers::resolve_arg_value(state, obj_val);
+
     // Handle CBGR register references: deref to get the actual pointer
+    // (kept for layered register-ref chains the single resolve above
+    // may still surface).
     let obj_val = if is_cbgr_ref(&obj_val) {
         let (abs_index, _generation) = decode_cbgr_ref(obj_val.as_i64());
         state.registers.get_absolute(abs_index)
