@@ -551,6 +551,112 @@ pub fn check_no_signature_mismatches() -> Result<()> {
     }
 }
 
+// ============================================================================
+// Unresolved-generic-call diagnostic registry
+// ============================================================================
+//
+// Best-practice compiler diagnostic (fail-fast, actionable): AOT lowering
+// degrades an unresolvable Call target to a const-zero stub so the enclosing
+// function can finish lowering.  That is a graceful *codegen* fallback, but a
+// SILENT one — the stub produces wrong results or a runtime SIGSEGV.  The
+// canonical trigger is a generic function calling a protocol method on a type
+// parameter (`future.poll()` in `future_poll_sync<F: Future>`): the call is
+// emitted as a `dyn:Protocol.method` dispatch token that the interpreter
+// resolves via the runtime protocol registry, but AOT has no concrete target
+// for it unless the call site was monomorphized for the concrete receiver.
+// Recording every such stub and surfacing it (warning by default, hard error
+// under `VERUM_STRICT_MONO=1`) turns a silent-SIGSEGV into a visible, greppable
+// signal — the same registry+strict-gate discipline as the signature-mismatch
+// diagnostic above.
+
+/// One un-devirtualized/unresolved call that AOT lowering degraded to a
+/// const-zero stub.
+#[derive(Debug, Clone)]
+pub struct UnresolvedGenericCall {
+    /// The enclosing function being lowered when the stub was emitted.
+    pub caller: String,
+    /// What could not be resolved (fn-id, dispatch token, or other detail).
+    pub detail: String,
+}
+
+fn unresolved_generic_call_registry() -> &'static Mutex<Vec<UnresolvedGenericCall>> {
+    static REGISTRY: OnceLock<Mutex<Vec<UnresolvedGenericCall>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Record an unresolved call that degraded to a const-zero stub during AOT
+/// lowering.  Public so the instruction lowerer (a different module) can
+/// report into the process-global registry.
+pub fn record_unresolved_generic_call(caller: &str, detail: String) {
+    if let Ok(mut g) = unresolved_generic_call_registry().lock() {
+        g.push(UnresolvedGenericCall {
+            caller: caller.to_string(),
+            detail,
+        });
+    }
+}
+
+/// Drain the unresolved-generic-call registry.
+pub fn take_unresolved_generic_calls() -> Vec<UnresolvedGenericCall> {
+    if let Ok(mut g) = unresolved_generic_call_registry().lock() {
+        std::mem::take(&mut *g)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Drain + surface the unresolved-generic-call stubs.
+///
+/// **Default** (warning): stderr, `Ok(())`.  **Strict** (`VERUM_STRICT_MONO=1`):
+/// hard `LlvmLoweringError::Internal`.  These stubs are the AOT symptom of the
+/// missing generic-monomorphization-context propagation
+/// (VBC-GENERIC-INSTANTIATION): a generic function's protocol-method call on a
+/// type parameter has no concrete AOT target.
+pub fn check_no_unresolved_generic_calls() -> Result<()> {
+    let calls = take_unresolved_generic_calls();
+    if calls.is_empty() {
+        return Ok(());
+    }
+    let mut seen = std::collections::HashSet::new();
+    let unique: Vec<&UnresolvedGenericCall> = calls
+        .iter()
+        .filter(|c| seen.insert((c.caller.clone(), c.detail.clone())))
+        .collect();
+    // Cap the per-entry list so the warning stays readable on a large
+    // stdlib build (the strict gate still counts every unique site).
+    const MAX_SHOWN: usize = 15;
+    let mut lines: Vec<String> = Vec::with_capacity(MAX_SHOWN + 3);
+    lines.push(format!(
+        "{} unresolved call(s) degraded to a const-zero stub during AOT \
+         lowering — the target could not be pinned to a concrete function \
+         (wrong-result or SIGSEGV at runtime):",
+        unique.len()
+    ));
+    for c in unique.iter().take(MAX_SHOWN) {
+        lines.push(format!("  in `{}`: {}", c.caller, c.detail));
+    }
+    if unique.len() > MAX_SHOWN {
+        lines.push(format!("  … and {} more", unique.len() - MAX_SHOWN));
+    }
+    lines.push(
+        "cause: typically a generic function calling a protocol method on a \
+         type parameter (e.g. `future.poll()` in `future_poll_sync<F: Future>`) \
+         emitted as a `dyn:Protocol.method` token with no concrete AOT target — \
+         the call site was not monomorphized for the receiver.  The interpreter \
+         resolves this via the runtime protocol registry; AOT needs \
+         monomorphization-context propagation (VBC-GENERIC-INSTANTIATION).  Set \
+         VERUM_STRICT_MONO=1 to elevate this to a hard error."
+            .to_string(),
+    );
+    let message = lines.join("\n");
+    if std::env::var_os("VERUM_STRICT_MONO").is_some() {
+        Err(LlvmLoweringError::Internal(message.into()))
+    } else {
+        eprintln!("[codegen-warn] {}", message);
+        Ok(())
+    }
+}
+
 /// Get-or-declare a `__verum_libsys_*` shim and tag it with the
 /// `verum.libsys` attribute carrying the libc-call name (e.g.
 /// `"open"`, `"close"`, `"read"`, `"unlink"`, `"lseek"`,
