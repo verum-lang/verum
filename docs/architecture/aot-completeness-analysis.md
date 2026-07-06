@@ -73,13 +73,48 @@ them.
   2. **`as_str` (in an f-string) SIGBUSes only for the `Text.new()`-grown
      buffer** (`"".to_text()` renders fine) — a distinct empty-specific
      path.
-  A reliable fix requires a DEDICATED pass that isolates these two (not
-  more one-off repros): dump the AsBytes Pack + `Len` slice-offset, and
-  separately the `as_str`/f-string path for a grown-vs-non-grown Text.
+  **CLEAN ISOLATION (all confounds removed 2026-07-06):** using the
+  BOUND form + a comparison (not inline `.as_bytes().len()`, which has a
+  known temp-lifetime pitfall, and not an f-string of the result, which
+  mis-formats a `.len()` value separately):
+  - non-mutated `"Q".to_text()` → `as_bytes().len()` == 1 ✓
+  - mutated-from-NON-empty `"Q".to_text()` + `push_str("X")` → 2 ✓
+  - mutated-from-EMPTY `Text.new()` + `push_str("Q")` → **garbage** ✗
+  So the defect is SPECIFICALLY the **grow-from-null** path
+  (`Text.new()`: cap 0 / ptr null → first `grow` allocates), and it
+  corrupts the byte-VIEW length (`as_bytes`/`as_str`/Display) while the
+  DIRECT field reads (`s.len()`==1, `s.capacity()`==16) and byte
+  indexing (`as_bytes()[0]`=='Q') stay correct.
+  **The codegen is provably correct:** IR of `verum_main` shows
+  `s.len()` and `s.as_bytes()` load `self` from the SAME slot
+  (`%r1_ptr`) and the AsBytes lowering (`instruction.rs:19144`) reads
+  `len` from `self+8` — the exact offset `s.len()` reads as 1. So this
+  is a RUNTIME memory / LLVM-miscompilation issue in the grow-from-null
+  path (the fresh Text-struct alloc + first buffer alloc likely alias or
+  the len@8 field is clobbered after `s.len()` reads it), NOT a codegen
+  offset/marking bug. Static IR analysis is exhausted; the next step is
+  a DEBUGGER on the actual heap (watch `s_ptr+8` across the push_str →
+  as_bytes window) or an allocator/ASan trace — not more source repros.
+  **DO NOT trust the "null-ptr / grow-from-null specific" reading
+  either — it too is confounded.** `Text.with_capacity(1)` (a non-null
+  HEAP buffer, `push("Q")` needs no grow) is ALSO broken, while
+  `"Q".to_text()` (also heap, via clone) works and `"".to_text()`
+  (static, cap 0) works. So the failing/​passing split does not fall
+  cleanly on null-vs-non-null, grow-vs-no-grow, or cap-0-vs-cap-N — the
+  characterization has shifted 6+ times, each source repro hitting a
+  different mix of at-least-three entangled confounds (inline-temp
+  slice lifetime; f-string mis-formatting of a `.len()` result; and the
+  byte-view corruption itself). **Conclusion: source-level repros
+  cannot reliably diagnose this knot** — every "clean isolation" has
+  been overturned by the next repro. A trustworthy diagnosis REQUIRES
+  runtime tooling: run under a debugger / AddressSanitizer, watch the
+  actual `Text` struct bytes and the `as_bytes` slice `{ptr,len}` across
+  the mutation→view window for a failing vs passing constructor, and
+  find the real memory event. That is the mandatory next step; further
+  source repros will only produce more contradictory "root causes."
   Baseline crashes identically (pre-existing, NOT introduced by 1a).
-  Blocks build-from-scratch (Formatter/parser from `Text.new()`), so it
-  remains the #1-lever residual — but it is a multi-bug knot, not the
-  single clean defect the earlier notes implied.
+  Blocks build-from-scratch (Formatter/parser from `Text.new()`), the
+  #1-lever residual.
 
 **Symptom (original, confirmed with reproducers):**
 
