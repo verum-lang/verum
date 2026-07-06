@@ -4029,7 +4029,41 @@ impl VbcCodegen {
 
     /// Call this after `initialize()`, `collect_all_declarations()`, and
     /// `compile_module_items()` to produce the final bytecode module.
+    /// Diagnostic (VERUM_DUMP_VBC): disassemble compiled function
+    /// bodies. `VERUM_DUMP_VBC=<substring>` filters by function name;
+    /// `=*` dumps everything. Instruction indices printed here match
+    /// the `pc` reported by interpreter panics/backtraces, so a
+    /// runtime "field write out of bounds … backtrace=[main@pc=46]"
+    /// can be mapped straight to the emitting instruction. Wired into
+    /// BOTH finalizers (`finalize_module` — single-module/test path;
+    /// `finalize_module_from_state` — pipeline path).
+    fn dump_vbc_if_requested(&self) {
+        if let Ok(filter) = std::env::var("VERUM_DUMP_VBC") {
+            for f in &self.functions {
+                let name = self
+                    .ctx
+                    .strings
+                    .get(f.descriptor.name.0 as usize)
+                    .cloned()
+                    .unwrap_or_default();
+                if filter != "*" && !name.contains(&filter) {
+                    continue;
+                }
+                eprintln!(
+                    "[vbc-dump] fn '{}' (id={}, {} instrs):",
+                    name,
+                    f.descriptor.id.0,
+                    f.instructions.len()
+                );
+                for (pc, ins) in f.instructions.iter().enumerate() {
+                    eprintln!("[vbc-dump]   {:>4}: {:?}", pc, ins);
+                }
+            }
+        }
+    }
+
     pub fn finalize_module(&mut self) -> CodegenResult<VbcModule> {
+        self.dump_vbc_if_requested();
         // Compile any pending constants (struct literals, etc.) before building
         self.compile_pending_constants()?;
         // Compile any pending @thread_local initializations
@@ -4327,8 +4361,27 @@ impl VbcCodegen {
     /// `alloc_user_type_id` calls don't collide.
     pub fn register_archive_type(
         &mut self,
+        ty: crate::types::TypeDescriptor,
+        simple_name: String,
+    ) {
+        self.register_archive_type_qualified(ty, simple_name, None, None)
+    }
+
+    /// As [`register_archive_type`], additionally registering the type
+    /// under its module-qualified key (`"<module_prefix>.<simple>"`,
+    /// collision-free namespace — META-GROUP-XMODULE-1) and, when the
+    /// source module's string table is provided, reading field names
+    /// from it. The descriptor's `FieldDescriptor.name` StringIds index
+    /// the ARCHIVE string pool until the finalize-time linker remap;
+    /// the pre-fix code read them through `self.ctx.strings`, silently
+    /// producing garbage/empty layout names whenever the two tables
+    /// disagreed at those indices.
+    pub fn register_archive_type_qualified(
+        &mut self,
         mut ty: crate::types::TypeDescriptor,
         simple_name: String,
+        module_prefix: Option<&str>,
+        archive_strings: Option<&crate::module::StringTable>,
     ) {
         // TYPE-ID-COLLISION-1 (#27) FUNDAMENTAL FIX. Archive type ids are
         // MODULE-LOCAL: every `.vr` module numbers its own types starting from
@@ -4359,6 +4412,14 @@ impl VbcCodegen {
         if !self.type_name_to_id.contains_key(&simple_name) {
             self.type_name_to_id.insert(simple_name.clone(), ty.id);
         }
+        // Module-qualified key — collision-free, always registers
+        // (META-GROUP-XMODULE-1).
+        let qualified_key: Option<String> = module_prefix
+            .filter(|p| !p.is_empty())
+            .map(|p| format!("{}.{}", p, simple_name));
+        if let Some(q) = qualified_key.clone() {
+            self.type_name_to_id.entry(q).or_insert(ty.id);
+        }
         // Field layout cache for `field_type_name` consumers.  Uses
         // the descriptor's structured field list (records) and
         // each variant's payload field list (record-style variants).
@@ -4369,10 +4430,12 @@ impl VbcCodegen {
                 .fields
                 .iter()
                 .map(|f| {
-                    self.ctx
-                        .strings
-                        .get(f.name.0 as usize)
-                        .cloned()
+                    archive_strings
+                        .and_then(|st| st.get(f.name))
+                        .map(|s| s.to_string())
+                        .or_else(|| {
+                            self.ctx.strings.get(f.name.0 as usize).cloned()
+                        })
                         .unwrap_or_default()
                 })
                 .collect();
@@ -4420,6 +4483,9 @@ impl VbcCodegen {
             // Archive-sourced field names live in archive's string
             // pool, not in codegen's. Pull them through the
             // descriptor → simple-name map keyed by simple type name.
+            if let Some(q) = qualified_key {
+                self.type_field_layouts.entry(q).or_insert(names.clone());
+            }
             self.type_field_layouts
                 .entry(simple_name)
                 .or_insert(names);
@@ -4554,8 +4620,15 @@ impl VbcCodegen {
                 // codegen's string pool too — the descriptor itself
                 // is moved into self.types as-is (the linker pass
                 // remaps StringIds at finalize time, mirroring the
-                // existing source-driven flow).
-                self.register_archive_type(ty.clone(), simple_name);
+                // existing source-driven flow). The entry name
+                // qualifies the registration (META-GROUP-XMODULE-1)
+                // and the module string table supplies field names.
+                self.register_archive_type_qualified(
+                    ty.clone(),
+                    simple_name,
+                    Some(entry.name.as_str()),
+                    Some(&module.strings),
+                );
                 registered += 1;
             }
         }
@@ -4758,7 +4831,29 @@ impl VbcCodegen {
     /// Distinct return shape from `verify_type_layout_invariants` so
     /// the two checks compose without one masking the other.
     pub fn verify_global_type_table_consistency(&self) -> TypeTableHealthReport {
-        Self::compute_type_table_health(&self.types, &self.ctx.strings)
+        // META-GROUP-XMODULE-1: distinct types from different modules
+        // legitimately share a SIMPLE name now (each imports under its
+        // own module-qualified registry key instead of being silently
+        // dropped by first-wins). Same-name×different-id is anomalous
+        // ONLY when the colliding ids are not separated by distinct
+        // qualified keys — build the id → qualified-key witness map so
+        // the health pass can tell benign homonym groups from the real
+        // duplicate-registration bug class.
+        let mut qualified_witness: std::collections::HashMap<u32, std::collections::HashSet<&str>> =
+            std::collections::HashMap::new();
+        for (key, id) in self.type_name_to_id.iter() {
+            if key.contains('.') {
+                qualified_witness
+                    .entry(id.0)
+                    .or_default()
+                    .insert(key.as_str());
+            }
+        }
+        Self::compute_type_table_health_with_witness(
+            &self.types,
+            &self.ctx.strings,
+            Some(&qualified_witness),
+        )
     }
 
     /// Scan every emitted function body for `MakeVariant` instructions
@@ -4823,6 +4918,25 @@ impl VbcCodegen {
         types: &[crate::types::TypeDescriptor],
         strings: &[String],
     ) -> TypeTableHealthReport {
+        Self::compute_type_table_health_with_witness(types, strings, None)
+    }
+
+    /// As [`compute_type_table_health`], with an optional
+    /// `id → {module-qualified registry keys}` witness map
+    /// (META-GROUP-XMODULE-1). A same-simple-name × different-ids group
+    /// is downgraded from anomaly to benign homonym when every id in
+    /// the group carries at least one qualified key and no qualified
+    /// key is shared between two ids — i.e. the ids demonstrably come
+    /// from DIFFERENT modules' registrations. Groups without full
+    /// witness coverage keep the historical anomaly classification
+    /// (the original duplicate-registration bug class stays caught).
+    fn compute_type_table_health_with_witness(
+        types: &[crate::types::TypeDescriptor],
+        strings: &[String],
+        qualified_witness: Option<
+            &std::collections::HashMap<u32, std::collections::HashSet<&str>>,
+        >,
+    ) -> TypeTableHealthReport {
         use std::collections::HashMap;
         let resolve_name = |idx: u32| -> String {
             strings
@@ -4864,6 +4978,27 @@ impl VbcCodegen {
             if slots.len() > 1 {
                 let ids: std::collections::HashSet<u32> = slots.iter().map(|(id, _)| *id).collect();
                 if ids.len() > 1 {
+                    // Benign-homonym downgrade (META-GROUP-XMODULE-1):
+                    // every id in the group is separated by its own
+                    // module-qualified registry key → these are DISTINCT
+                    // types from different modules sharing a simple
+                    // name, which is the designed post-fix state, not a
+                    // duplicate registration.
+                    if let Some(witness) = qualified_witness {
+                        let mut seen_keys: std::collections::HashSet<&str> =
+                            std::collections::HashSet::new();
+                        let all_separated = ids.iter().all(|id| {
+                            match witness.get(id) {
+                                Some(keys) if !keys.is_empty() => {
+                                    keys.iter().any(|k| seen_keys.insert(k))
+                                }
+                                _ => false,
+                            }
+                        });
+                        if all_separated {
+                            continue;
+                        }
+                    }
                     let mut sorted_ids: Vec<u32> = ids.into_iter().collect();
                     sorted_ids.sort_unstable();
                     duplicate_names_with_different_ids.push(DuplicateNameDifferentId {
@@ -5992,6 +6127,7 @@ impl VbcCodegen {
     /// have run for every file in the module — one finalize pass
     /// replaces the per-file `build_module + merge` chain.
     pub fn finalize_module_from_state(&mut self) -> CodegenResult<VbcModule> {
+        self.dump_vbc_if_requested();
         // Stdlib precompile finalize — MINIMAL path.
         //
         // **History**: two earlier attempts to add prep passes for
@@ -7691,6 +7827,26 @@ impl VbcCodegen {
                         None => func_name.clone(),
                     },
                 };
+
+                // META-GROUP-XMODULE-1: record mounted TYPE bindings.
+                // An uppercase leaf (`mount core.meta.token.{Group}` /
+                // `… .{Group as TokGroup}`) is a type-name mount by
+                // Verum naming convention. The binding is authoritative
+                // user intent — `resolve_record_type_key` consults it to
+                // re-key simple-name registry lookups to the module-
+                // qualified registration when the simple name lost the
+                // cross-module first-wins race. Unconditional insert:
+                // an explicit mount in THIS module owns its local alias.
+                if full_path.len() >= 2
+                    && func_name
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_uppercase())
+                {
+                    self.ctx
+                        .mounted_types
+                        .insert(alias_name.clone(), full_path.join("."));
+                }
 
                 // Try to look up the function in the registry with various qualified names
                 let qualified_verum = full_path.join(".");
@@ -12049,6 +12205,20 @@ impl VbcCodegen {
         {
             return self.resolve_field_type_ref(inner, generic_param_map);
         }
+        // Refinement types erase to their base at the descriptor layer
+        // — the runtime representation of `Float{>= 0.0, <= 1.0}` IS a
+        // Float (META-REFINED-FIELD-FLOATCMP-1, archive leg). Without
+        // this arm a refined record field fell through to the unknown-
+        // shape fallback, the baked descriptor carried no usable
+        // TypeRef, `type_ref_to_field_name` recovered no field-type
+        // name at archive import, and int/float compare classification
+        // failed for every archive-loaded refined field (CmpI over raw
+        // IEEE-754 bits: `cfg.min_confidence < other.min_confidence`
+        // compared 0.4 < 0.7 → false). The refinement PREDICATE is not
+        // lost — assert emission reads the AST, never descriptors.
+        if let TypeKind::Refined { base, .. } = &ty.kind {
+            return self.resolve_field_type_ref(base, generic_param_map);
+        }
         // #131 Layer E — nested function types must preserve the
         // map through recursion.  The standard `ast_type_to_type_ref`
         // recurses with itself for `TypeKind::Function`, which loses
@@ -14006,7 +14176,90 @@ impl VbcCodegen {
         __idx
     }
 
+    /// Whether `key` resolves (via descriptor or layout cache) to a
+    /// record with a non-empty positional field list — i.e. field-index
+    /// resolution against this key is trustworthy.
+    /// META-GROUP-XMODULE-1 helper.
+    fn record_key_is_authoritative(&self, key: &str) -> bool {
+        if let Some(&tid) = self.type_name_to_id.get(key)
+            && let Some(td) = self.types.iter().find(|t| t.id == tid)
+            && matches!(td.kind, crate::types::TypeKind::Record)
+            && !td.fields.is_empty()
+        {
+            return true;
+        }
+        self.type_field_layouts
+            .get(key)
+            .is_some_and(|f| !f.is_empty())
+    }
+
+    /// META-GROUP-XMODULE-1: re-key a SIMPLE record-type name to its
+    /// module-qualified registration when the simple name lost the
+    /// cross-module first-wins race (e.g. `Group` bound to the
+    /// `math.algebra.Group` protocol while the literal means
+    /// `core.meta.token.Group`).
+    ///
+    /// Resolution order:
+    ///  1. `name` itself is authoritative → `None` (no re-key needed).
+    ///  2. The compiling module's explicit mount binding
+    ///     (`ctx.mounted_types`): probe the mount path and its
+    ///     right-truncated parents — archive entries bundle submodule
+    ///     files under the parent module name, so
+    ///     `core.meta.token.Group` typically registers as
+    ///     `core.meta.Group`.
+    ///  3. Unambiguous global suffix: exactly ONE registered qualified
+    ///     record key ends in `.<name>` → that key. Ambiguity keeps the
+    ///     legacy behaviour (returns `None`) — deterministic, and the
+    ///     caller's existing fallback chain still applies.
+    fn resolve_record_type_key(&self, name: &str) -> Option<String> {
+        if name.is_empty() || name.contains('.') || name.contains('<') {
+            return None;
+        }
+        if self.record_key_is_authoritative(name) {
+            return None;
+        }
+        if let Some(path) = self.ctx.mounted_types.get(name) {
+            let segs: Vec<&str> = path.split('.').collect();
+            if segs.len() >= 2 {
+                let leaf = segs[segs.len() - 1];
+                for parent_len in (1..segs.len()).rev() {
+                    let key = format!("{}.{}", segs[..parent_len].join("."), leaf);
+                    if self.record_key_is_authoritative(&key) {
+                        return Some(key);
+                    }
+                }
+            }
+        }
+        let suffix = format!(".{}", name);
+        let mut hit: Option<&String> = None;
+        for key in self.type_name_to_id.keys() {
+            if key.ends_with(&suffix) && self.record_key_is_authoritative(key) {
+                if hit.is_some() {
+                    return None; // ambiguous — keep legacy resolution
+                }
+                hit = Some(key);
+            }
+        }
+        hit.cloned()
+    }
+
     fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> u32 {
+        if let Some(tn) = type_name {
+            // META-GROUP-XMODULE-1: when the simple name is NOT an
+            // authoritative record key (lost the cross-module
+            // first-wins race — descriptor missing, wrong kind, or
+            // empty fields), re-key to the module-qualified
+            // registration BEFORE any fallback can mis-resolve via the
+            // global intern table. The recursion is bounded: the
+            // resolved key is authoritative, so the guard fails on
+            // re-entry.
+            if !tn.contains('.')
+                && !self.record_key_is_authoritative(tn)
+                && let Some(q) = self.resolve_record_type_key(tn)
+            {
+                return self.resolve_field_index_impl(Some(&q), field_name);
+            }
+        }
         if let Some(tn) = type_name {
             // **Allocating-wrapper field auto-deref** (Heap<T> / Shared<T>).
             //
@@ -14923,6 +15176,16 @@ impl VbcCodegen {
                 let prefix = if *mutable { "*mut " } else { "*const " };
                 format!("{}{}", prefix, Self::extract_type_name_from_ast(inner))
             }
+            // Refinement types erase to their base at runtime — the
+            // carrier name IS the base name (`Float{>= 0.0, <= 1.0}` →
+            // `Float`). Pre-fix this fell through to the debug-format
+            // catch-all and stored `"Refined { base: Typ"` as the field
+            // type name, so int/float compare classification, unsigned
+            // selection, and field-type recovery all failed for
+            // refined-typed record fields (META-REFINED-FIELD-FLOATCMP-1).
+            // The refinement PREDICATE is not lost: assert emission reads
+            // the AST type directly, never this carrier string.
+            TypeKind::Refined { base, .. } => Self::extract_type_name_from_ast(base),
             TypeKind::Slice(inner) => {
                 format!("[{}]", Self::extract_type_name_from_ast(inner))
             }
@@ -16516,6 +16779,42 @@ impl VbcCodegen {
             crate::types::TypeId,
         >,
     ) {
+        self.import_archive_type_with_protocol_remap_qualified(
+            ty,
+            archive_strings,
+            protocol_id_remap,
+            None,
+        )
+    }
+
+    /// As [`import_archive_type_with_protocol_remap`], with the source
+    /// archive module's canonical dotted name (e.g. `"core.meta"`) so
+    /// the imported type ALSO registers under its module-qualified key
+    /// (`"core.meta.Group"`).
+    ///
+    /// META-GROUP-XMODULE-1 (fundamental fix): the simple-name key is
+    /// first-wins across every loaded archive module, so two distinct
+    /// stdlib types sharing a simple name (`meta.token.Group` record vs
+    /// `math.algebra.Group` protocol) collide and the loser was
+    /// **silently dropped** — no descriptor, no field layout. Record
+    /// literals of the dropped type then allocated with the winner's
+    /// (wrong-kind/wrong-arity) TypeId and resolved field indices via
+    /// the global intern fallback → runtime "field write out of bounds".
+    /// The qualified key is collision-free by construction; the
+    /// mount-aware `resolve_record_type_key` re-keys lookups to it, and
+    /// `merge_archive_function_bodies` prefers it for archive-body
+    /// type-id remaps. The simple-name key keeps its historical
+    /// first-wins semantics for backwards compatibility.
+    pub fn import_archive_type_with_protocol_remap_qualified(
+        &mut self,
+        ty: &crate::types::TypeDescriptor,
+        archive_strings: &crate::module::StringTable,
+        protocol_id_remap: &std::collections::HashMap<
+            crate::types::TypeId,
+            crate::types::TypeId,
+        >,
+        module_prefix: Option<&str>,
+    ) {
         let intern = |this: &mut Self, sid: crate::types::StringId| -> crate::types::StringId {
             let name = match archive_strings.get(sid) {
                 Some(s) => s.to_string(),
@@ -16549,23 +16848,58 @@ impl VbcCodegen {
         // unrelated type's variant ALSO has tag 0/1
         // (`AliasError.EmptyWeights` vs `Maybe.None`,
         // `AliasError.NonFiniteWeight` vs `Maybe.Some`).
-        let new_id = match self.type_name_to_id.get(&name_str).copied() {
-            Some(existing_id) => {
-                // Reuse the pre-allocated id IF no descriptor exists
-                // yet for it.  When a descriptor IS already present,
-                // the earlier registration is authoritative — bail
-                // (mirrors the prior first-wins discipline).
-                if self.types.iter().any(|d| d.id == existing_id) {
-                    return;
+        let qualified_key: Option<String> = module_prefix
+            .filter(|p| !p.is_empty())
+            .map(|p| format!("{}.{}", p, name_str));
+        // Idempotence: this exact qualified type was already imported
+        // (repeat archive merges) — nothing to do.
+        if let Some(q) = qualified_key.as_deref()
+            && let Some(&qid) = self.type_name_to_id.get(q)
+            && self.types.iter().any(|d| d.id == qid)
+        {
+            return;
+        }
+        // `owns_simple_key`: whether THIS import may claim / reuse the
+        // simple-name slot. Three cases:
+        //   a. simple vacant             → claim it (fresh id).
+        //   b. simple bound, NO descriptor → reuse the pre-allocated id
+        //      (built-in well-known types whose ids are reserved by
+        //      `register_builtin_variants` but whose descriptors only
+        //      arrive via this import path).
+        //   c. simple bound WITH descriptor → a DIFFERENT type from an
+        //      earlier-loaded module owns the simple name. Pre-fix this
+        //      silently dropped the incoming type; now it imports under
+        //      the module-qualified key only (fresh id), leaving the
+        //      simple binding untouched.
+        let (new_id, owns_simple_key) =
+            match self.type_name_to_id.get(&name_str).copied() {
+                Some(existing_id) => {
+                    if self.types.iter().any(|d| d.id == existing_id) {
+                        // Case (c): simple slot taken by another type.
+                        match qualified_key.as_deref() {
+                            Some(_) => (self.alloc_user_type_id(), false),
+                            // No module prefix available (legacy shim
+                            // callers): preserve the historical
+                            // first-wins bail — an unkeyable duplicate
+                            // registration would be unreachable anyway.
+                            None => return,
+                        }
+                    } else {
+                        // Case (b).
+                        (existing_id, true)
+                    }
                 }
-                existing_id
-            }
-            None => {
-                let id = self.alloc_user_type_id();
-                self.type_name_to_id.insert(name_str.clone(), id);
-                id
-            }
-        };
+                None => {
+                    let id = self.alloc_user_type_id();
+                    self.type_name_to_id.insert(name_str.clone(), id);
+                    (id, true)
+                }
+            };
+        let _ = owns_simple_key;
+        // The qualified key ALWAYS registers (collision-free namespace).
+        if let Some(q) = qualified_key.clone() {
+            self.type_name_to_id.entry(q).or_insert(new_id);
+        }
         let new_name_id = crate::types::StringId(self.ctx.intern_string_raw(&name_str));
 
         // Type parameters
@@ -16709,6 +17043,13 @@ impl VbcCodegen {
             self.type_field_layouts
                 .entry(name_str.clone())
                 .or_insert(names.clone());
+            // META-GROUP-XMODULE-1: the module-qualified layout key is
+            // collision-free and always registers, so a type that lost
+            // the simple-name race still resolves positionally via
+            // `resolve_record_type_key` / the cross-module scan.
+            if let Some(q) = qualified_key.clone() {
+                self.type_field_layouts.entry(q).or_insert(names.clone());
+            }
 
             // **Field-type-name population — mirrors `register_archive_type`
             // at codegen/mod.rs:3997.**
@@ -16743,17 +17084,29 @@ impl VbcCodegen {
             // end of that walk, every type in the module IS loaded, so
             // a second-pass repopulation can fill any deferred entries.
             for (fname, fdesc) in names.iter().zip(imported.fields.iter()) {
-                if self
+                let resolved = self.type_ref_to_field_name(&fdesc.type_ref);
+                if !self
                     .type_field_type_names
                     .contains_key(&(name_str.clone(), fname.clone()))
+                    && let Some(ty_name) = resolved.clone()
                 {
-                    continue;
-                }
-                if let Some(ty_name) = self.type_ref_to_field_name(&fdesc.type_ref) {
                     self.type_field_type_names.insert(
                         (name_str.clone(), fname.clone()),
                         ty_name,
                     );
+                }
+                // META-GROUP-XMODULE-1: field-type entries under the
+                // module-qualified key too, so a re-keyed lookup
+                // (`field_type_name("core.meta.Group", "tokens")`)
+                // recovers the declared field type.
+                if let Some(q) = qualified_key.as_ref()
+                    && !self
+                        .type_field_type_names
+                        .contains_key(&(q.clone(), fname.clone()))
+                    && let Some(ty_name) = resolved
+                {
+                    self.type_field_type_names
+                        .insert((q.clone(), fname.clone()), ty_name);
                 }
             }
         }
@@ -16865,6 +17218,11 @@ impl VbcCodegen {
             crate::types::TypeId,
             crate::types::TypeId,
         > = std::collections::HashMap::new();
+        // META-GROUP-XMODULE-1: the archive module's canonical dotted
+        // name qualifies every type registration in this walk so
+        // same-simple-name types from different modules stay distinct.
+        let module_prefix: Option<&str> =
+            (!module.name.is_empty()).then_some(module.name.as_str());
         for ty in module.types.iter() {
             if !matches!(ty.kind, crate::types::TypeKind::Protocol) {
                 continue;
@@ -16881,6 +17239,15 @@ impl VbcCodegen {
                     id
                 }
             };
+            // Qualified protocol key — keeps `merge_archive_function_bodies`'
+            // qualified-first type-id remap exact for protocol references
+            // too. `or_insert`: the simple-name binding may already point
+            // at a DIFFERENT module's protocol; the qualified key is ours.
+            if let Some(p) = module_prefix {
+                self.type_name_to_id
+                    .entry(format!("{}.{}", p, proto_name))
+                    .or_insert(codegen_id);
+            }
             protocol_id_remap.insert(ty.id, codegen_id);
             // Push the stub IF no descriptor for this id has been
             // pushed yet (first-wins, mirrors `import_archive_type`'s
@@ -16913,10 +17280,11 @@ impl VbcCodegen {
             if matches!(ty.kind, crate::types::TypeKind::Protocol) {
                 continue;
             }
-            self.import_archive_type_with_protocol_remap(
+            self.import_archive_type_with_protocol_remap_qualified(
                 ty,
                 &module.strings,
                 &protocol_id_remap,
+                module_prefix,
             );
         }
         // SECOND PASS — populate `type_aliases` for every imported
@@ -17142,13 +17510,28 @@ impl VbcCodegen {
         // archive type id → codegen type id (via type-name lookup;
         // codegen.type_name_to_id was populated by
         // `import_archive_module_types`).
+        //
+        // META-GROUP-XMODULE-1: prefer the MODULE-QUALIFIED key
+        // (`"<module>.<Type>"`) — the simple name is first-wins across
+        // every loaded archive module, so when two modules declare the
+        // same simple type name (`meta.token.Group` record vs
+        // `math.algebra.Group` protocol) the simple lookup remaps THIS
+        // module's constructions onto the foreign winner's id (wrong
+        // kind/arity → out-of-bounds field writes at runtime). The
+        // qualified key is registered unconditionally at type import,
+        // so bodies from this archive module resolve to their own type.
         let mut type_id_remap: HashMap<u32, u32> = HashMap::new();
         for ty in archive_module.types.iter() {
             let archive_name = match archive_module.strings.get(ty.name) {
                 Some(s) => s,
                 None => continue,
             };
-            if let Some(&codegen_tid) = self.type_name_to_id.get(archive_name) {
+            let qualified_tid = (!archive_module.name.is_empty())
+                .then(|| format!("{}.{}", archive_module.name, archive_name))
+                .and_then(|q| self.type_name_to_id.get(&q).copied());
+            if let Some(codegen_tid) =
+                qualified_tid.or_else(|| self.type_name_to_id.get(archive_name).copied())
+            {
                 type_id_remap.insert(ty.id.0, codegen_tid.0);
             }
         }

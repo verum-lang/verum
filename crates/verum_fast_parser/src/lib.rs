@@ -91,6 +91,7 @@ pub mod attr_validation;
 mod decl;
 pub mod error;
 mod expr;
+pub mod normalize;
 mod parser;
 mod pattern;
 mod proof;
@@ -259,6 +260,13 @@ impl FastParser {
                 // Explicitly convert Vec to List
                 let items_list: List<Item> = items.into_iter().collect();
                 let mut module = Module::new(items_list, file_id, span);
+                // META-SPAN-ALIAS-1: module-level deferred classification
+                // of the grammatically ambiguous `type X is BareIdent;`
+                // form (alias vs single-variant enum) — see
+                // `normalize.rs` module docs. Runs at the single parse
+                // funnel so every consumer (typecheck, VBC codegen, AOT,
+                // archive metadata, LSP) sees one consistent reading.
+                normalize::reclassify_single_variant_aliases(&mut module);
                 // Auto-tag script modules so the entry-detection fallback
                 // recognises the synthesised `__verum_script_main` wrapper
                 // as the program entry. Single source of truth: every caller

@@ -310,6 +310,22 @@ pub struct CodegenContext {
     /// with the same name (e.g., user's `Disconnected` vs stdlib's `TryRecvError.Disconnected`).
     pub user_defined_types: HashSet<String>,
 
+    /// Mounted TYPE-name bindings: alias/simple name → full dotted mount
+    /// path (`mount core.meta.token.{Group}` ⇒ `"Group" →
+    /// "core.meta.token.Group"`; `Group as TokGroup` ⇒ `"TokGroup" → …`).
+    ///
+    /// META-GROUP-XMODULE-1: type registries (`type_name_to_id`,
+    /// `type_field_layouts`) are keyed by SIMPLE name with first-wins
+    /// across every loaded archive module, so two stdlib types sharing a
+    /// simple name (`meta.token.Group` record vs `math.algebra.Group`
+    /// protocol) collide — the loser is silently dropped and its record
+    /// literals fall through to the global-intern field-index fallback
+    /// (out-of-bounds `SetF`). This table carries the user's explicit
+    /// mount intent so `resolve_record_type_key` can re-key the lookup
+    /// to the module-qualified registration (`"core.meta.Group"`).
+    /// Populated by `process_import_tree` for uppercase-leaf mounts.
+    pub mounted_types: HashMap<String, String>,
+
     /// Module aliases populated from bare-path `mount X.Y.Z;` declarations.
     ///
     /// Each entry maps the rightmost path segment (`Z`) to the **full
@@ -1144,6 +1160,7 @@ impl CodegenContext {
             newtype_names: HashSet::new(),
             newtype_inner_type: HashMap::new(),
             user_defined_types: HashSet::new(),
+            mounted_types: HashMap::new(),
             module_aliases: HashMap::new(),
             byte_array_vars: HashSet::new(),
             current_fn_escaping_vars: HashSet::new(),

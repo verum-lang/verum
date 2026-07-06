@@ -110,8 +110,6 @@ fn build_module(name: &str, instructions: Vec<Instruction>, reg_count: u8) -> Ar
         debug_variables: Vec::new(),
         is_test: false,
         is_gpu_only: false,
-        intrinsic_name: None,
-        is_const: false,
     };
 
     module.functions.push(func_desc);
