@@ -1,0 +1,61 @@
+// FUNC-REGISTRY-QUALIFICATION-1 phase-1 canary (AOT-FOR-NEXT class).
+// Two custom iterator types, each with its OWN `next()`. A for-loop over
+// each must bind ITS OWN `.next` owner (not the other type's).
+//
+// TWO sub-cases, because the AOT reg_types fixpoint types record-literal /
+// variable iterables but NOT CallM (method-call) results:
+//   * CONTROL (typed iterable): `for x in a` where a: UpIter — reg_types
+//     tags `a` (record construction) -> receiver_type_name Some -> resolves.
+//     Expected to pass PRE and POST fix.
+//   * REPRO (untyped iterable): `for x in s.ups()` — CallM result is untyped
+//     by the fixpoint -> __for_iter untyped -> foreign-owner bind. This is
+//     the loopdiff `for ch in s.chars()` shape. Expected to MIS-BIND pre-fix.
+// Expected POST-fix BOTH tiers: ctrl_up=3 ctrl_down=3 call_up=3 call_down=3.
+
+type UpIter is { cur: Int, hi: Int };
+implement UpIter {
+    fn next(&mut self) -> Maybe<Int> {
+        if self.cur >= self.hi { return Maybe.None; }
+        let v = self.cur;
+        self.cur = self.cur + 1;
+        Maybe.Some(v)
+    }
+}
+
+type DownIter is { cur: Int, lo: Int };
+implement DownIter {
+    fn next(&mut self) -> Maybe<Int> {
+        if self.cur <= self.lo { return Maybe.None; }
+        self.cur = self.cur - 1;
+        Maybe.Some(self.cur)
+    }
+}
+
+type Src is { n: Int };
+implement Src {
+    fn ups(&self) -> UpIter { UpIter { cur: 0, hi: self.n } }
+    fn downs(&self) -> DownIter { DownIter { cur: self.n, lo: 0 } }
+}
+
+fn main() {
+    // CONTROL — typed variable iterables.
+    let mut a = UpIter { cur: 0, hi: 3 };
+    let mut ctrl_up = 0;
+    for x in a { ctrl_up = ctrl_up + 1; }
+    print(f"ctrl_up={ctrl_up}");      // expect 3
+
+    let mut b = DownIter { cur: 3, lo: 0 };
+    let mut ctrl_down = 0;
+    for y in b { ctrl_down = ctrl_down + 1; }
+    print(f"ctrl_down={ctrl_down}");  // expect 3
+
+    // REPRO — untyped CallM iterables (loopdiff chars() shape).
+    let s = Src { n: 3 };
+    let mut call_up = 0;
+    for p in s.ups() { call_up = call_up + 1; }
+    print(f"call_up={call_up}");      // expect 3 (mis-binds pre-fix)
+
+    let mut call_down = 0;
+    for q in s.downs() { call_down = call_down + 1; }
+    print(f"call_down={call_down}");  // expect 3 (mis-binds pre-fix)
+}
