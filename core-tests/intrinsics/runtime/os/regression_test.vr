@@ -1,0 +1,52 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/os/regression_test.vr
+// =============================================================================
+//
+// Pinned defects for the file-I/O intrinsics.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.os.{
+    __file_open_raw, __file_close_raw, __file_delete_raw,
+    __file_read_to_string_raw,
+};
+
+// OS-FILEOPEN-FLAG-DRIFT-1 (task #6): __file_open_raw with the documented
+// abstract WRITE|CREATE|TRUNCATE flags (1 | 0x100 | 0x200 = 0x301) must
+// CREATE the file on BOTH tiers.  Pre-fix the interp handler read O_CREAT
+// at 0x40 (missed the documented 0x100); the AOT verum_file_open treated
+// its flag argument as a 3-way MODE SELECTOR (0/1/2), so a real abstract
+// flag word (0x301) fell to READ mode → the file was never created.
+// Now the interp accepts the 0x100 abstract create bit and the AOT
+// decodes the abstract flag bits into platform O_* values.
+//
+// (The raw-fd byte read/write over a cbgr buffer — __file_read_raw /
+// __file_write_raw — is exercised in integration_test.vr on the
+// interpreter; its AOT lowering is a separate gap, task #6.)
+@test
+fn regression_open_create_flag_creates_file() {
+    let path = "/tmp/verum_os_conf_flag_create.bin";
+    // Ensure a clean slate (ignore result — may not exist).
+    __file_delete_raw(path);
+
+    // 0x301 = O_WRONLY | O_CREATE | O_TRUNCATE (abstract convention).
+    let wfd = __file_open_raw(path, 769, 420);
+    assert(wfd >= 0);
+    __file_close_raw(wfd);
+
+    // The file now exists: opening it O_RDONLY (flags = 0) succeeds where
+    // opening a MISSING file returns a negative fd.
+    let rfd = __file_open_raw(path, 0, 0);
+    assert(rfd >= 0);
+    __file_close_raw(rfd);
+
+    __file_delete_raw(path);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
