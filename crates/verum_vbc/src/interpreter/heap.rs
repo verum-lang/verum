@@ -463,6 +463,26 @@ impl ObjectHeader {
     /// still live for the duration of the returned reference.
     #[inline(always)]
     pub unsafe fn try_from_ptr<'a>(ptr: *const u8) -> Option<&'a Self> {
+        // Reject NaN-box special-value marker payloads (FatRef / ThinRef /
+        // Generator / boxed-int).  A real heap pointer is a canonical
+        // user-space address with bit 47 clear; EVERY special-value marker
+        // sets bit 47 (`SPECIAL_VALUE_MARKER`, value.rs) — that invariant is
+        // exactly what `Value::is_regular_ptr` relies on to tell a real
+        // pointer from a marker.  `as_ptr()` on a FatRef/ThinRef VALUE hands
+        // back its marker payload (e.g. `FAT_REF_MARKER = 0xe00000000000`),
+        // which is 8-aligned but points at an unmapped address, so reading a
+        // header there SIGSEGVs.  This single guard makes EVERY
+        // `is_ptr()`→`as_ptr()`→header-deref site (there are ~200 `is_ptr`
+        // call sites) safe against the FatRef-as-pointer class in one place:
+        // a special-value reaching a header-deref site is a mis-dispatch, and
+        // None/stub is the correct benign result — identical to how a
+        // misaligned pointer is already handled.  Legitimate interior derefs
+        // go through `FatRef::ptr()` / `ThinRef.ptr`, which are real
+        // bit-47-clear addresses and are unaffected.
+        const SPECIAL_VALUE_MARKER: u64 = 1u64 << 47;
+        if (ptr as u64) & SPECIAL_VALUE_MARKER != 0 {
+            return None;
+        }
         if Self::ptr_is_aligned(ptr) {
             // SAFETY: alignment proven above; lifetime is caller's
             // responsibility as documented in the trait-level Safety
