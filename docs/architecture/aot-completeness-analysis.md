@@ -24,15 +24,45 @@ gaps that actually block stdlib modules are a small number of
 
 | # | Gap | Leverage | Status |
 |---|-----|----------|--------|
-| 1 | **`&mut self` mutation-writeback lost under AOT** | stdlib-wide (Text/List/parse/Display) | **OPEN — #1 lever** |
+| 1a | **ptr_offset byte-stride (Text/parse byte buffers ×8 too far)** | stdlib-wide (Text append / parse / Display) | **FIXED 2026-07-06 (986bee268)** |
+| 1b | **nested `&mut self` writeback lost (grow-from-null)** | empty-Text build-from-scratch | OPEN — remaining #1 lever |
 | 2 | Cross-module aggregate-field value lowering (tuple/record-through-ref) | broad | tuple-destructure **FIXED 2026-07-06**; record-let-ref-type-loss OPEN |
 | 3 | `strtod` (float parse) on Linux; `setjmp` Linux body; native DNS; ffi `__sys_*_raw` | targeted | OPEN (per no-libc doc) |
 | 4 | Scripting `Engine.*` Extended sub-ops (0x20–0x60) | niche (host-embedding only) | interp-only |
 | 5 | `MakeVariantTyped` cross-module placeholder warnings (~170) | cosmetic | non-fatal |
 
-## 1. The #1 lever — AOT `&mut self` mutation-writeback (DISP-EMPTY-AOT / PARSE-AOT)
+## 1. The #1 lever — AOT byte-buffer append (DISP-EMPTY-AOT / PARSE-AOT)
 
-**Symptom (confirmed with reproducers):**
+**STATUS 2026-07-06: the dominant root cause (1a, ptr_offset byte-stride)
+is FIXED and validated (commit `986bee268`); a narrower residual (1b,
+nested `&mut self` grow-from-null writeback) remains.** The two were
+entangled in the original symptom below; IR-level tracing separated
+them.
+
+* **1a — ptr_offset byte-stride — FIXED.** `Text.push_str`'s
+  `memcpy(ptr_offset(self.ptr, self.len), …)` walked a `&unsafe Byte`
+  buffer with the ×8 Value-slot stride, landing the append 8× too far
+  (content silently dropped on short strings, SIGBUS off-allocation on
+  long ones). Fixed by inferring the pointee element size at the
+  intrinsic call site and emitting `ptr + count` (stride 1) for
+  `&unsafe <byte>` buffers while leaving Value/`*const`-`*mut` pointers
+  on the ×8 path — see §1a below. Validated: `"hi".push_str("XYZ")` →
+  `hiXYZ`, long append no longer crashes, `ptr_offset(list_int, 2)`
+  still reads element 2 (stride 8 preserved), text/text interp failing
+  set byte-identical to baseline (0 regression).
+* **1b — nested `&mut self` writeback — OPEN.** An **empty**
+  `Text.new()` (null buffer) + `push_str` still SIGBUSes: `push_str`
+  writes its own `self.len` (persists) but the reallocated `self.ptr`
+  set two frames deep (`push_str` → `self.reserve` → `self.grow`) does
+  NOT reach the caller — a later `as_str` reads the stale null pointer.
+  `s.reserve(8)` called DIRECTLY persists, so the loss is specific to
+  the nested `self.method()` receiver-passing (grow's writeback at call
+  depth ≥3). This is the true "&mut self writeback" defect, now scoped
+  to the nested-self case. Baseline crashes identically — pre-existing,
+  NOT introduced by 1a. It blocks build-from-scratch (Formatter/parser
+  starting from `Text.new()`), so it is the remaining #1-lever work.
+
+**Symptom (original, confirmed with reproducers):**
 
 ```verum
 fn append(t: &mut Text) { t.push_str("XYZ"); }
