@@ -2439,6 +2439,7 @@ mod precompile_extension_tests {
             is_gpu_only: false,
             intrinsic_name: None,
             is_const: false,
+            register_type_hints: Vec::new(),
         };
         // Backwards-compat field is filled with the existing layout.
         let _ = &mut desc;
@@ -2490,6 +2491,7 @@ mod precompile_extension_tests {
             is_gpu_only: false,
             intrinsic_name: None,
             is_const: false,
+            register_type_hints: Vec::new(),
         };
         m.functions.push(desc);
 

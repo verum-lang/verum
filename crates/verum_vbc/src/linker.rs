@@ -1339,6 +1339,7 @@ mod tests {
             is_gpu_only: false,
             intrinsic_name: None,
             is_const: false,
+            register_type_hints: Vec::new(),
         };
         let n0 = a.intern_string("alpha");
         let n1 = a.intern_string("beta");
