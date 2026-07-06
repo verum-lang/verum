@@ -505,7 +505,22 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         if fat_a.is_null() || fat_b.is_null() {
             return false;
         }
-        // Dereference and compare the pointed-to values
+        // Byte-slice FatRefs (`reserved == 1`, produced by `Text.as_bytes()`
+        // — see text_extended.rs) point at raw BYTES, not a `Value`.
+        // Dereferencing `ptr()` as `*const Value` (the value-ref path below)
+        // reads a byte as a NaN-boxed word → garbage compare. Compare the
+        // `[ptr, ptr+len)` byte ranges directly so `text_eq(a, b) =
+        // a.as_bytes() == b.as_bytes()` is correct.
+        if fat_a.reserved == 1 || fat_b.reserved == 1 {
+            if fat_a.len() != fat_b.len() {
+                return false;
+            }
+            let n = fat_a.len() as usize;
+            let sa = unsafe { std::slice::from_raw_parts(fat_a.ptr(), n) };
+            let sb = unsafe { std::slice::from_raw_parts(fat_b.ptr(), n) };
+            return sa == sb;
+        }
+        // Value-ref FatRefs: dereference and compare the pointed-to values.
         let deref_a = unsafe { *(fat_a.ptr() as *const Value) };
         let deref_b = unsafe { *(fat_b.ptr() as *const Value) };
         return deep_value_eq_depth(&deref_a, &deref_b, state, depth + 1);

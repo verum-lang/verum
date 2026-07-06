@@ -287,6 +287,20 @@ pub(in super::super) fn handle_eqg(
 /// comment in `handle_eqg`).
 fn runtime_type_name_for_eq(v: &Value, state: &InterpreterState) -> Option<String> {
     use crate::interpreter::heap;
+    // A byte/raw-element slice FatRef (`Text.as_bytes()`, `reserved != 0`)
+    // carries the FAT_REF_MARKER payload in `as_ptr::<u8>()`, which
+    // `ObjectHeader::ref_or_stub` would then dereference → SIGSEGV (reached
+    // by `Text.as_bytes() == <slice>` through EqG's protocol_id-0
+    // fallback). It has no nominal pointee type; return None so the
+    // operands fall through to `deep_value_eq`, which byte-compares slices.
+    // NOTE: kept narrow to byte/raw slices — NOT all non-`is_regular_ptr`
+    // values — because a value-ref ThinRef/FatRef to a custom-`Eq` object
+    // must still resolve its pointee type here so the custom `.eq`
+    // dispatches (broadening to `!is_regular_ptr` regressed custom-Ord/Eq
+    // by diverting reference comparisons to structural `deep_value_eq`).
+    if v.is_fat_ref() && v.as_fat_ref().reserved != 0 {
+        return None;
+    }
     if !v.is_ptr() || v.is_nil() {
         return None;
     }

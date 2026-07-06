@@ -1164,12 +1164,45 @@ pub(in super::super) fn handle_cbgr_extended(
             let start = state.get_reg(start_reg).as_i64() as usize;
             let len = state.get_reg(len_reg).as_i64() as u64;
 
-            // eprintln!("[DEBUG RefSlice] src={:?}, start={}, len={}", src, start, len);
-            // eprintln!("[DEBUG RefSlice] src.is_ptr()={}, src.is_thin_ref()={}, src.is_fat_ref()={}",
-            //  src.is_ptr(), src.is_thin_ref(), src.is_fat_ref());
+            // FatRef fast-path (mirrors SliceSubslice below). A FatRef src —
+            // a slice-of-a-slice, e.g. `&remaining[..n]` where `remaining`
+            // is itself a byte-slice from `text.as_bytes()` (HttpParser.feed
+            // re-slices `&buf[pos..]`) — shares TAG_POINTER, so the generic
+            // pointer path below would take its FAT_REF_MARKER payload as a
+            // heap address (both for `base_ptr` and the `try_type_id`
+            // elem-size probe) → SIGSEGV. Re-slice directly, carrying the
+            // element stride in `reserved` (1/2/4/8 for raw integers, 0 =
+            // NaN-boxed Value) so we don't walk past the end of a byte slice.
+            if src.is_fat_ref() {
+                let fat_ref = src.as_fat_ref();
+                let element_size = if fat_ref.reserved == 0 {
+                    std::mem::size_of::<Value>()
+                } else {
+                    fat_ref.reserved as usize
+                };
+                let new_ptr = unsafe { fat_ref.ptr().add(start * element_size) };
+                let mut new_fat_ref = crate::value::FatRef::new(
+                    new_ptr,
+                    fat_ref.generation(),
+                    fat_ref.epoch(),
+                    fat_ref.capabilities(),
+                    len,
+                );
+                new_fat_ref.reserved = fat_ref.reserved;
+                state.set_reg(dst, Value::from_fat_ref(new_fat_ref));
+                return Ok(DispatchResult::Continue);
+            }
 
-            // Get the base pointer from source - could be a pointer, thin ref, or object
-            let mut base_ptr = if src.is_ptr() {
+            // Get the base pointer from source - could be a pointer, thin ref, or object.
+            // `is_regular_ptr` (NOT `is_ptr`) leads: a FatRef/ThinRef shares
+            // TAG_POINTER but sets SPECIAL_VALUE_MARKER, so `is_ptr()` is
+            // true for it and the first arm's `as_ptr::<u8>()` would return
+            // the FAT_REF_MARKER payload — which `try_from_ptr` below then
+            // dereferences → SIGSEGV. Trigger: `&slice[range]` where `slice`
+            // is itself a FatRef (slice-of-a-slice, e.g. HttpParser.feed's
+            // `&remaining[..scan_end]` over `&buf[pos..]`). Gating on
+            // is_regular_ptr routes a FatRef to the is_fat_ref arm below.
+            let mut base_ptr = if src.is_regular_ptr() {
                 // eprintln!("[DEBUG RefSlice] src is pointer: {:p}", src.as_ptr::<u8>());
                 src.as_ptr::<u8>()
             } else if src.is_thin_ref() {
@@ -1213,7 +1246,10 @@ pub(in super::super) fn handle_cbgr_extended(
             // Determine element size based on source TypeId
             // For typed arrays (U8, U16, U32, U64), elements are stored as raw integers
             // For LIST and other types, elements are NaN-boxed Values (elem_size = 0 signals Value)
-            let elem_size: u32 = if !src.is_ptr() || src.is_nil() {
+            let elem_size: u32 = if !src.is_regular_ptr() {
+                // FatRef handled by the fast-path above; a ThinRef / non-ptr
+                // has no heap header to probe → NaN-boxed Values. (`is_ptr`
+                // would be true for a ThinRef and read its marker as a ptr.)
                 0 // Default to Value
             } else {
                 let src_ptr = src.as_ptr::<u8>();
