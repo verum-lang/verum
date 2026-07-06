@@ -976,13 +976,31 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             std::collections::HashMap::new();
 
         // First pass: collect (name, arity) pairs that have multiple bodies.
+        //
+        // TEXT-AOT-CHARS-PUSH-1 / FUNC-REGISTRY-QUALIFICATION-1 class:
+        // also record, per colliding key, the ordinal of the last
+        // occurrence with a NON-EMPTY body. The dedup below historically
+        // kept the positionally-LAST occurrence ("user overrides
+        // stdlib") — but for stdlib-internal duplicates (two
+        // `Char.encode_utf8` definitions) the last one could be the
+        // BODYLESS intrinsic wrapper shell, so the surviving LLVM
+        // symbol lowered to a `skipped_entry: ret 0` stub and every
+        // caller got 0 (Text.push encoded zero bytes). Prefer the last
+        // occurrence that actually HAS instructions; fall back to the
+        // positional-last when none do.
         let mut body_count: std::collections::HashMap<(String, usize), usize> =
             std::collections::HashMap::new();
+        let mut last_nonempty_ordinal: std::collections::HashMap<(String, usize), usize> =
+            std::collections::HashMap::new();
         for func_desc in &vbc_module.functions {
-            if func_desc.instructions.is_some() {
+            if let Some(ref instrs) = func_desc.instructions {
                 let name = vbc_module.strings.get(func_desc.name).unwrap_or("");
                 let key = (name.to_string(), func_desc.params.len());
-                *body_count.entry(key).or_default() += 1;
+                let cnt = body_count.entry(key.clone()).or_default();
+                *cnt += 1;
+                if !instrs.is_empty() {
+                    last_nonempty_ordinal.insert(key, *cnt);
+                }
             }
         }
 
@@ -1010,13 +1028,18 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 let dedupe_key = (func_name.to_string(), func_desc.params.len());
                 if let Some(&count) = body_count.get(&dedupe_key) {
                     if count > 1 {
+                        let keep_ordinal = last_nonempty_ordinal
+                            .get(&dedupe_key)
+                            .copied()
+                            .unwrap_or(count);
                         let seen = lowered_llvm_fns.entry(dedupe_key).or_insert(0);
                         *seen += 1;
-                        if *seen < count {
-                            // Not the last occurrence — skip it
+                        if *seen != keep_ordinal {
+                            // Not the survivor (last NON-EMPTY body wins;
+                            // positional-last only when all are empty) —
+                            // skip it.
                             continue;
                         }
-                        // Last occurrence — lower it (this is the user's body)
                     }
                 }
 
