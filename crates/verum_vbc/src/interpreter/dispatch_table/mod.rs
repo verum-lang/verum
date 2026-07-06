@@ -895,6 +895,21 @@ pub(crate) fn call_function_sync(
     let return_pc = state.pc();
     let entry_depth = state.call_stack.depth();
 
+    // **CALLSYNC-R0-CLOBBER-1**: `do_return` unconditionally writes the
+    // callee's return value into the caller frame's `return_reg`.  This
+    // synchronous-call helper has no real destination register, and the
+    // historical `Reg(0)` placeholder CLOBBERED the caller's r0 — which
+    // in any method frame is `self`.  Concrete casualty: the
+    // ITER_TYPE_PROTOCOL leg of IterNext calling `Drain.next` from
+    // inside `ThreadHazardRecord.reclaim` overwrote `self` with the
+    // returned `Maybe`, so the subsequent `self.retired = …` SetF
+    // targeted a `Maybe` object ("field write out of bounds: field
+    // index 2 … type='Maybe'").  Save the caller's r0 before the nested
+    // dispatch and restore it after — the function's result is the
+    // dispatch loop's return value, not the register side-channel.
+    let caller_base = state.reg_base();
+    let saved_r0 = state.registers.get(caller_base, Reg(0));
+
     let new_base = state
         .call_stack
         .push_frame(func_id, reg_count, return_pc, Reg(0))?;
@@ -911,7 +926,14 @@ pub(crate) fn call_function_sync(
     }
 
     state.set_pc(0);
-    dispatch_loop_table_with_entry_depth(state, entry_depth)
+    let result = dispatch_loop_table_with_entry_depth(state, entry_depth);
+    // Restore the caller's r0 whether the callee succeeded or not — on
+    // the error path the frames above `entry_depth` have already been
+    // unwound by the dispatch loop's error handling.
+    if state.call_stack.depth() == entry_depth {
+        state.registers.set(caller_base, Reg(0), saved_r0);
+    }
+    result
 }
 
 /// Execute a pending task from the task queue.

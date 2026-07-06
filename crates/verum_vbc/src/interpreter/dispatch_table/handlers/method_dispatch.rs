@@ -983,6 +983,31 @@ pub(in super::super) fn handle_call_method(
                     state.set_reg(dst, receiver);
                     return Ok(DispatchResult::Continue);
                 }
+                // **SHARED-STRONGCOUNT-1** — refcount observers over the
+                // runtime Shared repr `[refcount:i64][value]`.  The
+                // COMPILED `Shared.strong_count` body reads
+                // `(*self.ptr).strong_count` against the source-level
+                // SharedInner layout, which the interp repr does not
+                // have — so these methods MUST be intercepted here
+                // (the pre-fix auto-deref arm below forwarded them to
+                // the inner T and dispatch failed with "method not
+                // found ... runtime kind Object").  The repr tracks no
+                // weak references: `weak_count` is 0 by construction.
+                // Pinned by `core-tests/mem/allocator/integration_test.vr §5`.
+                "strong_count" => {
+                    let refcount = unsafe { (*data_ptr).as_i64() };
+                    state.set_reg(dst, Value::from_i64(refcount));
+                    return Ok(DispatchResult::Continue);
+                }
+                "weak_count" => {
+                    state.set_reg(dst, Value::from_i64(0));
+                    return Ok(DispatchResult::Continue);
+                }
+                "is_unique" => {
+                    let refcount = unsafe { (*data_ptr).as_i64() };
+                    state.set_reg(dst, Value::from_bool(refcount == 1));
+                    return Ok(DispatchResult::Continue);
+                }
                 _ => {
                     // Auto-deref: any other method on `Shared<T>` is
                     // forwarded to the inner `T`. Covers
@@ -1184,6 +1209,34 @@ pub(in super::super) fn handle_call_method(
                 return Ok(DispatchResult::Continue);
             }
         }
+    }
+
+    // **HEAP-INTORAW-1** — Heap.from_raw(ptr) static intercept.  The
+    // runtime Heap<T> repr IS the CBGR data pointer, so reconstructing
+    // a Heap from an `into_raw`-produced raw reference is the identity
+    // on the pointer bits (generation/epoch live in the allocation
+    // header and are re-read on demand by the is_valid/generation
+    // intercepts).  Pre-fix the call reached the COMPILED
+    // `Heap.from_raw` body, which mis-read the CBGR payload as a
+    // record.  Pairs with the `into_raw` instance intercept in
+    // `dispatch_primitive_method`.
+    let is_heap_from_raw = (bare_method_name == "from_raw"
+        && receiver_type_name.as_deref() == Some("Heap"))
+        || method_name == "dyn:Heap.from_raw"
+        || method_name == "Heap.from_raw";
+    if is_heap_from_raw {
+        let caller_base = state.reg_base();
+        let value = if receiver_type_name.as_deref() == Some("Heap") {
+            if args.count > 0 {
+                state.registers.get(caller_base, Reg(args.start.0))
+            } else {
+                Value::unit()
+            }
+        } else {
+            receiver
+        };
+        state.set_reg(dst, value);
+        return Ok(DispatchResult::Continue);
     }
 
     // Handle Text.from(string) - string conversion
@@ -3316,6 +3369,35 @@ pub(super) fn dispatch_primitive_method(
                 // Clone on a reference should return a clone of the inner value
                 // This handles cases like ref_text.clone() where ref_text: &Text
                 let inner_val = state.registers.get_absolute(abs_index);
+                // **SHARED-STRONGCOUNT-1 (ref-clone leg)**: when the
+                // referent is a `Shared<T>` runtime object, `clone`
+                // must bump the strong count — this arm previously
+                // returned the pointer without bumping, so
+                // `s.clone()` through a `&self` register ref left the
+                // count at 1 and the paired binding-drop decrement
+                // underflowed the balance.
+                if inner_val.is_ptr() && !inner_val.is_nil() {
+                    let p = inner_val.as_ptr::<u8>();
+                    if !p.is_null()
+                        && (p as usize)
+                            .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                    {
+                        // SAFETY: alignment verified; heap objects
+                        // begin with an ObjectHeader.
+                        let header = unsafe { heap::ObjectHeader::ref_or_stub(p) };
+                        if header.type_id == TypeId::SHARED {
+                            let rc_ptr = unsafe {
+                                p.add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                            };
+                            // SAFETY: slot 0 of a validated SHARED
+                            // object is the refcount Value.
+                            unsafe {
+                                let rc = (*rc_ptr).as_i64();
+                                *rc_ptr = Value::from_i64(rc + 1);
+                            }
+                        }
+                    }
+                }
                 // For primitives and small strings, just return the value (copy semantics)
                 // For heap-allocated objects, we would need deep clone
                 return Ok(Some(inner_val));
@@ -3392,6 +3474,21 @@ pub(super) fn dispatch_primitive_method(
                     // (matching cbgr_dealloc's semantics — it bumps
                     // generation but keeps the pointer live until GC).
                     return Ok(Some(inner));
+                }
+                // **HEAP-INTORAW-1** — Heap.into_raw intercept.  The
+                // runtime Heap<T> repr IS the CBGR data pointer, so
+                // `into_raw(self) -> &unsafe T` is the identity on the
+                // pointer bits plus `forget(self)` (no dealloc, no
+                // generation bump — the allocation stays live and the
+                // caller owns it).  Pre-fix the call fell through to
+                // the COMPILED `Heap.into_raw` body whose `self.ptr`
+                // field read misread the CBGR payload as an object
+                // (the stored Int surfaced as `type_id=<value>`,
+                // "field access out of bounds ... data size 0").
+                // Sister of the `into_inner` intercept above; pinned
+                // by `core-tests/mem/allocator/integration_test.vr §4`.
+                "into_raw" => {
+                    return Ok(Some(*receiver));
                 }
                 // AllocationHeader layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
                 "generation" | "stored_generation" => {
@@ -3485,6 +3582,34 @@ pub(super) fn dispatch_primitive_method(
                 // Read the actual value and return it (clone for Copy types)
                 let actual_value = unsafe { *(ptr_addr as *const Value) };
                 return Ok(Some(actual_value));
+            }
+            // **SHARED-STRONGCOUNT-1 (universal-clone leg)**: a
+            // `Shared<T>` runtime object cloning through this
+            // catch-all MUST bump its strong count — the identity
+            // return below otherwise silently aliased the pointer and
+            // the paired binding-drop decrement unbalanced the count.
+            // This arm runs BEFORE handle_call_method's dedicated
+            // Shared block (dispatch_primitive_method is consulted
+            // first with the dereffed receiver), so the bump belongs
+            // here too.
+            let p = receiver.as_ptr::<u8>();
+            if !p.is_null()
+                && (ptr_addr).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+            {
+                // SAFETY: alignment verified; heap objects begin with
+                // an ObjectHeader.
+                let header = unsafe { heap::ObjectHeader::ref_or_stub(p) };
+                if header.type_id == TypeId::SHARED {
+                    let rc_ptr =
+                        unsafe { p.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    // SAFETY: slot 0 of a validated SHARED object is
+                    // the refcount Value.
+                    unsafe {
+                        let rc = (*rc_ptr).as_i64();
+                        *rc_ptr = Value::from_i64(rc + 1);
+                    }
+                    return Ok(Some(*receiver));
+                }
             }
         }
         // All primitives are Copy — clone returns the value itself

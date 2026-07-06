@@ -21,6 +21,23 @@ const ITER_TYPE_GENERATOR: i64 = 4;
 /// Element stride is 1 byte instead of `sizeof(Value)`; reads
 /// zero-extend the byte into a NaN-boxed Value.
 const ITER_TYPE_BYTE_LIST: i64 = 5;
+/// **Iterator-protocol fallback** (PROTOCOL-ITER-1, closes the
+/// hazard/reclaim SIGSEGV class).  A for-in whose iterable is a
+/// stdlib/user Iterator RECORD (`Drain<T>`, adapter chains, …) may
+/// still be lowered to native IterNew/IterNext when codegen could not
+/// classify the iterable's type.  Pre-fix the type-discrimination
+/// mapped every non-builtin `type_id` to ITER_TYPE_LIST and IterNext
+/// then read the record's fields as a `List` header — a memory-unsafe
+/// misinterpretation whose outcome depended on the record's field
+/// values (immediate exit, garbage elements, or SIGSEGV).
+///
+/// With this tag, IterNew detects a record whose type has a
+/// resolvable 1-arg `<Type>.next` method and stores that FunctionId
+/// in blob slot 1; IterNext dispatches `next(&mut self)` through
+/// `call_function_sync` and unpacks the returned `Maybe<T>`.
+/// Iteration semantics are therefore IDENTICAL between the native
+/// lowering and the codegen protocol-loop lowering.
+const ITER_TYPE_PROTOCOL: i64 = 6;
 
 // ============================================================================
 // Iterator + Range Operations
@@ -115,7 +132,10 @@ pub(in super::super) fn handle_iter_new(
         (source, None)
     };
 
-    // Determine collection type by examining the object header
+    // Determine collection type by examining the object header.
+    // For non-builtin records, `protocol_next_fid` carries the resolved
+    // `<Type>.next` FunctionId into blob slot 1 (see ITER_TYPE_PROTOCOL).
+    let mut protocol_next_fid: Option<crate::module::FunctionId> = None;
     let iter_type = if let Some(tag) = forced_iter_type {
         // Already-built iterator blob — use the blob's tag rather than
         // re-deriving from `source`'s (now unwrapped) header.
@@ -130,8 +150,21 @@ pub(in super::super) fn handle_iter_new(
                 TypeId::ARRAY => ITER_TYPE_ARRAY,
                 TypeId::RANGE => ITER_TYPE_RANGE,
                 TypeId::BYTE_LIST => ITER_TYPE_BYTE_LIST,
-                // LIST and all other types default to list iteration
-                _ => ITER_TYPE_LIST,
+                TypeId::LIST => ITER_TYPE_LIST,
+                // Non-builtin heap object.  If its type is an Iterator
+                // record (resolvable 1-arg `<Type>.next` with a real
+                // body), iterate through the protocol — reading an
+                // arbitrary record as a List header is memory-unsafe
+                // (PROTOCOL-ITER-1).  Types without a `next` keep the
+                // historic list treatment (synthetic list-shaped blobs
+                // from runtime intercepts rely on it).
+                other => match resolve_protocol_next(state, other) {
+                    Some(fid) => {
+                        protocol_next_fid = Some(fid);
+                        ITER_TYPE_PROTOCOL
+                    }
+                    None => ITER_TYPE_LIST,
+                },
             }
         } else {
             // Null pointer - default to list (will fail on IterNext)
@@ -152,15 +185,52 @@ pub(in super::super) fn handle_iter_new(
     let iter_ptr =
         unsafe { (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
-    // Initialize iterator
+    // Initialize iterator.  Slot 1 is the cursor for indexed iteration
+    // and the `next` FunctionId for protocol iteration.
+    let slot1 = match protocol_next_fid {
+        Some(fid) => Value::from_i64(fid.0 as i64),
+        None => Value::from_i64(0),
+    };
     unsafe {
         *iter_ptr = source; // source_ptr
-        *iter_ptr.add(1) = Value::from_i64(0); // current_idx = 0
+        *iter_ptr.add(1) = slot1; // current_idx = 0 | protocol next fid
         *iter_ptr.add(2) = Value::from_i64(iter_type); // iter_type
     }
 
     state.set_reg(dst, Value::from_ptr(iter_obj.as_ptr() as *mut u8));
     Ok(DispatchResult::Continue)
+}
+
+/// Resolve the Iterator-protocol `next` method for a non-builtin
+/// record type (PROTOCOL-ITER-1).  Accepts only a 1-arg (`&mut self`)
+/// function with a real body whose name is exactly `<Type>.next` or
+/// ends with `.<Type>.next` (the module-qualified bundled form).  The
+/// tight name discipline mirrors the protocol-default fallback in
+/// `method_dispatch.rs` — loose `.next` suffix matches would route a
+/// record to a SIBLING iterator's `next` (the Chars/Rev collision
+/// class).
+fn resolve_protocol_next(
+    state: &InterpreterState,
+    type_id: TypeId,
+) -> Option<crate::module::FunctionId> {
+    let td = state.module.get_type(type_id)?;
+    let ty_name = state.module.strings.get(td.name)?;
+    if ty_name.is_empty() {
+        return None;
+    }
+    let qualified = format!("{}.next", ty_name);
+    let dotted = format!(".{}.next", ty_name);
+    state
+        .module
+        .functions
+        .iter()
+        .find(|f| {
+            let n = state.module.strings.get(f.name).unwrap_or("");
+            (n == qualified || n.ends_with(&dotted))
+                && f.params.len() == 1
+                && f.bytecode_length > 0
+        })
+        .map(|f| f.id)
 }
 
 /// IterNext (0xC1) - Get next element from iterator.
@@ -301,6 +371,37 @@ pub(in super::super) fn handle_iter_next(
             }
         }
 
+        return Ok(DispatchResult::Continue);
+    }
+
+    // Iterator-protocol dispatch (PROTOCOL-ITER-1): slot 1 carries the
+    // resolved `<Type>.next` FunctionId.  Call `next(&mut self)` and
+    // unpack the returned `Maybe<T>`: a heap variant carries its tag at
+    // OBJECT_HEADER_SIZE (None ⇒ exhausted, Some ⇒ payload slot 0); a
+    // non-pointer result (nil / unit) is the payload-less None shape.
+    if iter_type == ITER_TYPE_PROTOCOL {
+        let next_fid = crate::module::FunctionId(current_idx as u32);
+        let maybe = super::super::call_function_sync(state, next_fid, &[source])?;
+        if maybe.is_ptr() && !maybe.is_nil() {
+            let p = maybe.as_ptr::<u8>();
+            if !p.is_null() {
+                // SAFETY: `next` returns a Maybe variant object; every
+                // heap object begins with an ObjectHeader and variants
+                // carry their tag immediately after it.
+                let tag = unsafe { heap::variant_tag(p) };
+                if tag == verum_common::well_known_types::maybe_none_tag() {
+                    state.set_reg(dst, Value::unit());
+                    state.set_reg(has_next_dst, Value::from_bool(false));
+                } else {
+                    let payload = unsafe { heap::variant_payload(p, 0) };
+                    state.set_reg(dst, payload);
+                    state.set_reg(has_next_dst, Value::from_bool(true));
+                }
+                return Ok(DispatchResult::Continue);
+            }
+        }
+        state.set_reg(dst, Value::unit());
+        state.set_reg(has_next_dst, Value::from_bool(false));
         return Ok(DispatchResult::Continue);
     }
 

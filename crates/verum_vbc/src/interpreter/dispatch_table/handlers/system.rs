@@ -334,6 +334,30 @@ pub(in super::super) fn handle_atomic_cas(
                     failure_ord,
                 ) {
                     Ok(old) => (nan_box_payload_to_i64(old), true),
+                    // **ATOMIC-CAS-ZEROINIT-1**: a freshly-allocated
+                    // static-mut cell (`static_mut_cell_addr`) is RAW
+                    // zero — the payload-equivalent of boxed 0 (loads
+                    // unbox raw 0 to 0) but bit-distinct from
+                    // `i64_to_nan_box_payload(0)`.  A caller CAS-ing
+                    // `expected == 0` against the never-stored cell
+                    // must therefore accept the raw-zero pattern, or
+                    // the first transition can never happen — the
+                    // cap_audit_ring NEXT_SEQ fetch_add (inlined as
+                    // Load+Add+Cas) silently lost every increment and
+                    // `count()` stayed 0 forever.  Retry once against
+                    // raw 0; a concurrent writer landing in between
+                    // simply fails the retry (correct CAS semantics).
+                    Err(old) if old == 0 && expected == 0 => {
+                        match atomic.compare_exchange(
+                            0,
+                            desired_boxed,
+                            success_ord,
+                            failure_ord,
+                        ) {
+                            Ok(_) => (0, true),
+                            Err(old2) => (nan_box_payload_to_i64(old2), false),
+                        }
+                    }
                     Err(old) => (nan_box_payload_to_i64(old), false),
                 }
             }

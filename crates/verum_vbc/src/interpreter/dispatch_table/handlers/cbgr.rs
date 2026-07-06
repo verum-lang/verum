@@ -235,6 +235,27 @@ pub(in super::super) fn handle_deref(
                 let value = unsafe { *(base_ptr as *const Value) };
                 state.set_reg(dst, value);
             } else {
+                // **SHARED-STRONGCOUNT-1 (deref leg)** — `*shared`
+                // dereferences to the inner T.  The runtime Shared repr
+                // is `[ObjectHeader(SHARED)][refcount][value]`; without
+                // this arm the identity-deref below handed the Shared
+                // OBJECT to consumers (an f-string then dispatched
+                // `Shared.fmt` and panicked "method not found").
+                let unwrap_shared = (base_ptr as usize)
+                    .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                    && {
+                        // SAFETY: alignment verified; heap objects begin
+                        // with an ObjectHeader.
+                        let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
+                        header.type_id == crate::types::TypeId::SHARED
+                    };
+                if unwrap_shared {
+                    let inner = unsafe {
+                        *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value).add(1)
+                    };
+                    state.set_reg(dst, inner);
+                    return Ok(DispatchResult::Continue);
+                }
                 // Regular heap object dereference: identity deref (return pointer as-is).
                 // Sum type variants and other heap objects should NOT be automatically unwrapped.
                 // The pattern matching (IsVar, GetVariantData) handles variant extraction.
@@ -573,6 +594,26 @@ pub(in super::super) fn handle_drop_ref(
                     return Ok(DispatchResult::Continue);
                 }
             };
+
+            // **SHARED-STRONGCOUNT-1 (drop leg)** — Shared<T> binding
+            // drop decrements the strong count that `clone` bumped.
+            // DropRef is emitted once per user BINDING (not per alias
+            // temp), so binding-granularity decrement mirrors the
+            // source-level `Drop for Shared` semantics over the runtime
+            // repr `[refcount:i64][value]`.  Saturates at zero — the
+            // repr keeps the allocation alive for the interpreter heap
+            // to reclaim, matching `into_inner`'s no-hard-free policy.
+            if type_id == crate::types::TypeId::SHARED {
+                let data_ptr =
+                    unsafe { obj_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                let refcount = unsafe { (*data_ptr).as_i64() };
+                if refcount > 0 {
+                    unsafe {
+                        *data_ptr = Value::from_i64(refcount - 1);
+                    }
+                }
+                return Ok(DispatchResult::Continue);
+            }
 
             // Debug: show what type we're dropping
             if type_id.0 >= crate::types::TypeId::FIRST_USER {
