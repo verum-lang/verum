@@ -249,3 +249,13 @@ green); `GLOBAL_HAZARD_DOMAIN.binary_search` mis-qualification is gone
 Suite: **47/47 GREEN under `--interp --test-threads 1` and inside the
 858/858 parallel run.**  The parallel-runner crash (§ task #5) is
 closed by the same fix.
+
+## 9. Session 2026-07-06 — AOT 46/47 after SIGNATURE-PREPASS-1
+
+The stage-1 method stubs now carry declared return types, so
+`self.retired.drain(…)` classifies as a protocol iterator during the
+stdlib precompile and `reclaim` compiles to the Iterator-protocol loop
+(`CALL_M next` + `IS_VAR` + `GET_VDATA`) in the shared archive —
+IDENTICAL lowering on both tiers (verified by `--emit-vbc` dump).
+AOT went 44/3 → 46/1; the interp `ITER_TYPE_PROTOCOL` runtime path
+remains as the safety net for future classification misses.

@@ -106,3 +106,16 @@ Round-trip proven end-to-end: two `record_revoke` commits → seqs 1,2;
 `count()==2`; `recent(2)` returns both events with correct seq/ptr_id.
 Suite: **36/36 GREEN** (was 27/9).  Deferred items §A/§C (SPMC race
 coverage) remain open pending a task-spawn primitive.
+
+## 7. Session 2026-07-06 — AOT 34/36 (was 27/9)
+
+DEREF-INTERIOR-1 + CLONE-AOT-ALIAS-1 (commit `53e13bf29`): the AOT
+`Deref` of a `RefListElement` result double-dereferenced (the slot
+record's zero header word treated as an address — `commit`
+EXC_BAD_ACCESS 0x18), and AOT `Clone` pointer-aliased the repeat-array
+initializer so all 256 ring "slots" were ONE record.  With interior
+marks passing through `Deref`/`Mov` and Clone emitting a real
+`checked_malloc+memcpy` copy, the live commit/count/recent round-trip
+runs under `--aot`.  2 residual: `recent()` skips slot 0 in the
+2-commit window (n=1-vs-2 cross-tier detail) — pinned, minimal repro
+`repro_ring2.vr` in the session scratchpad.
