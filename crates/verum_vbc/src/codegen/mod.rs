@@ -13522,6 +13522,14 @@ impl VbcCodegen {
         // strictly per-function-body and must not contaminate siblings).
         self.ctx.current_fn_escaping_vars.clear();
 
+        // FUNC-REGISTRY-QUALIFICATION-1: collect register→owner-type hints
+        // BEFORE end_function() resets the register allocator. This is the
+        // REGULAR user/stdlib-function path (main, methods, free fns) —
+        // distinct from the pattern/const/tls descriptor builds, which each
+        // carry their own flush. Unconditional (dispatch correctness, not
+        // debug info).
+        let type_hints = self.ctx.collect_register_type_hints();
+
         // End function compilation
         let (instructions, register_count) = self.ctx.end_function();
 
@@ -13585,6 +13593,28 @@ impl VbcCodegen {
         // Set return type from function info (default is UNIT)
         if let Some(ref ret_type) = func_info.return_type {
             descriptor.return_type = ret_type.clone();
+        }
+
+        // FUNC-REGISTRY-QUALIFICATION-1: flush register→owner-type hints into
+        // the descriptor (shipped in the archive, consumed by the AOT
+        // reg_types pass). VERUM_TRACE_TYPE_HINTS reports the per-function
+        // count — the anti-B1 invariant is that this stays O(for-loops over
+        // custom iterators), not thousands.
+        if !type_hints.is_empty() {
+            if std::env::var("VERUM_TRACE_TYPE_HINTS").is_ok() {
+                eprintln!(
+                    "[type-hints] fn={} count={}",
+                    descriptor_name,
+                    type_hints.len()
+                );
+            }
+            descriptor.register_type_hints = type_hints
+                .into_iter()
+                .map(|(register, tn)| crate::module::RegisterTypeHint {
+                    register,
+                    type_name: StringId(self.intern_string(&tn)),
+                })
+                .collect();
         }
 
         // Build a generic-param-name → TypeParamId index map for
