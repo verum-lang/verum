@@ -45,6 +45,14 @@ pub struct RegisterAllocator {
 
     /// Whether to recycle temporaries (optimization).
     recycle_temps: bool,
+
+    /// AOT-only register→owner-type hints (FUNC-REGISTRY-QUALIFICATION-1).
+    /// Populated by codegen where the receiver's static type is known but not
+    /// recoverable from the bytecode alone (the for-loop `__for_iter` temp).
+    /// Flushed into `FunctionDescriptor.register_type_hints` at descriptor
+    /// build. Per-function-scoped via snapshot/restore/reset, exactly like
+    /// `variables`, so nested-function compilation doesn't leak hints.
+    type_hints: Vec<(u16, String)>,
 }
 
 /// Information about a register binding.
@@ -131,6 +139,7 @@ impl RegisterAllocator {
             peak_usage: 0,
             free_list: Vec::new(),
             recycle_temps: true,
+            type_hints: Vec::new(),
         }
     }
 
@@ -426,6 +435,7 @@ impl RegisterAllocator {
             scope_stack: self.scope_stack.clone(),
             peak_usage: self.peak_usage,
             free_list: self.free_list.clone(),
+            type_hints: self.type_hints.clone(),
         }
     }
 
@@ -441,6 +451,7 @@ impl RegisterAllocator {
         self.scope_stack = snapshot.scope_stack.clone();
         self.peak_usage = snapshot.peak_usage;
         self.free_list = snapshot.free_list.clone();
+        self.type_hints = snapshot.type_hints.clone();
     }
 
     /// Resets the allocator for a new function.
@@ -454,6 +465,20 @@ impl RegisterAllocator {
         });
         self.peak_usage = 0;
         self.free_list.clear();
+        self.type_hints.clear();
+    }
+
+    /// Records a register→owner-type hint for the current function
+    /// (FUNC-REGISTRY-QUALIFICATION-1). Consumed only by the AOT reg_types
+    /// pass; the interpreter ignores it.
+    pub fn push_type_hint(&mut self, register: u16, type_name: String) {
+        self.type_hints.push((register, type_name));
+    }
+
+    /// Returns the register→owner-type hints collected for the current
+    /// function (drained per-function via `reset`/`restore_reg`).
+    pub fn collect_type_hints(&self) -> Vec<(u16, String)> {
+        self.type_hints.clone()
     }
 }
 
@@ -474,6 +499,9 @@ pub struct RegisterSnapshot {
     peak_usage: u16,
     /// Free list for temporary recycling
     free_list: Vec<Reg>,
+    /// Saved register→owner-type hints (FUNC-REGISTRY-QUALIFICATION-1) — kept
+    /// per-function-scoped across nested-function compilation.
+    type_hints: Vec<(u16, String)>,
 }
 
 #[cfg(test)]

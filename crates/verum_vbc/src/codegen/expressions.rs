@@ -12466,6 +12466,31 @@ impl VbcCodegen {
         });
         self.ctx.free_temp(iter_val);
 
+        // FUNC-REGISTRY-QUALIFICATION-1: record the iterator's static type as
+        // a register hint on `__for_iter`. The `next` CallM below is emitted
+        // with a BARE method id (the iterator type isn't in the bytecode), so
+        // under AOT the receiver register would be untyped and `next` would
+        // collide with every `Type.next` in the module. The hint lets the AOT
+        // reg_types pass type this register so the existing owner-equality
+        // resolves the right `<IterType>.next`. Derived exactly as
+        // `is_custom_iterator_type` classified it; the interpreter ignores the
+        // hint (it dispatches on the runtime object header).
+        if let Some(cls) = self
+            .infer_expr_type_name(iter)
+            .or_else(|| self.extract_expr_type_name(iter))
+        {
+            let base = cls
+                .trim_start_matches("&mut ")
+                .trim_start_matches("&checked ")
+                .trim_start_matches("&unsafe ")
+                .trim_start_matches('&')
+                .trim_start();
+            let base = base.split('<').next().unwrap_or(base).trim();
+            if !base.is_empty() {
+                self.ctx.add_register_type_hint(iter_reg.0, base.to_string());
+            }
+        }
+
         let loop_ctx = self.ctx.enter_loop(label.map(|s| s.to_string()), None);
 
         let opt_reg = self.ctx.alloc_temp();
