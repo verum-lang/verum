@@ -1,0 +1,23 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: refinement, record-fields, runtime-assert, red-team
+// @timeout: 30000
+// @expect: fail
+//
+// REFINE-FIELD-DYNAMIC-BYPASS-1: dynamic out-of-range Int into a
+// refined field traps at runtime (assignment shape).
+
+type Limits is {
+    taps: Int{it >= 1, it <= 16},
+};
+
+fn fifty() -> Int {
+    25 + 25
+}
+
+fn main() {
+    let mut l = Limits { taps: 4 };
+    l.taps = fifty();
+    print(f"assigned taps={l.taps}");
+}

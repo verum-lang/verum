@@ -288,3 +288,65 @@ fn test_multi_span_with_primary_and_labeled() {
     assert(!m.is_empty());
     assert(m.primary_span() is Some);
 }
+
+// =============================================================================
+// Section: runtime intrinsic surface (META-INTRINSIC-NILSTUB-1 CLOSED)
+// =============================================================================
+//
+// Bodiless `@compiler_intrinsic` MetaSpan fns now get table-driven
+// SYNTHESIZED bodies at codegen (both tiers): runtime spans carry no
+// source info, so ctors produce the canonical synthetic span with
+// distinct hygiene marks, `location()` is `Maybe.None`, offsets are 0,
+// and `join`/`subspan` return `self` (the documented different-file
+// fallback). Pre-fix every one of these returned nil and the whole
+// runtime TokenStream ctor surface cascaded off `Span.call_site()`.
+
+@test
+fn test_intrinsic_call_site_returns_synthetic_span() {
+    let s = MetaSpan.call_site();
+    assert(s.is_synthetic());
+    assert(!s.is_expansion());
+    assert_eq(s.hygiene, 0);
+}
+
+@test
+fn test_intrinsic_synthetic_returns_synthetic_span() {
+    let s = MetaSpan.synthetic();
+    assert(s.is_synthetic());
+    assert_eq(s.id, 0);
+}
+
+@test
+fn test_intrinsic_hygiene_marks_distinct() {
+    let call = MetaSpan.call_site();
+    let def = MetaSpan.def_site();
+    let mixed = MetaSpan.mixed_site();
+    assert_eq(call.hygiene, 0);
+    assert_eq(def.hygiene, 1);
+    assert_eq(mixed.hygiene, 2);
+}
+
+@test
+fn test_intrinsic_location_is_none_at_runtime() {
+    let s = MetaSpan.call_site();
+    assert(s.location() is Maybe.None);
+}
+
+@test
+fn test_intrinsic_offsets_zero_and_empty() {
+    let s = MetaSpan.call_site();
+    assert_eq(s.start(), 0);
+    assert_eq(s.end(), 0);
+    assert_eq(s.len(), 0);
+    assert(s.is_empty());
+}
+
+@test
+fn test_intrinsic_join_returns_self_fallback() {
+    let a = MetaSpan.def_site();
+    let b = MetaSpan.call_site();
+    let j = a.join(b);
+    // Different-file fallback: join yields self (hygiene preserved).
+    assert_eq(j.hygiene, 1);
+    assert(j.is_synthetic());
+}

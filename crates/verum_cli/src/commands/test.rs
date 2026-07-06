@@ -229,7 +229,21 @@ pub fn execute(opts: TestOptions) -> Result<()> {
 
     // Effective config for a single test-run
     let cfg = TestRunCfg {
-        timeout_secs: manifest.test.timeout_secs,
+        // AOT-BUDGET-1 (META-AOT-PARITY-1 stopgap): every per-test AOT
+        // subprocess currently recompiles the mounted stdlib's NATIVE
+        // leg from scratch — a measured 35-55s fixed baseline (the
+        // precompiled stdlib caches VBC+metadata only), and umbrella
+        // mounts (core.meta.mod: 55 re-exports) push heavy tests to
+        // 100-120s. Those tests COMPLETE; the 60s default guillotined
+        // them (16-18 'timed out' failures in the meta sweep with the
+        // binary running in 0.01s). Until AOT-STDLIB-NATIVE-CACHE-1
+        // removes the baseline, give AOT runs a 180s floor — explicit
+        // manifest values above that still win.
+        timeout_secs: if matches!(opts.tier, Tier::Aot) {
+            manifest.test.timeout_secs.max(180)
+        } else {
+            manifest.test.timeout_secs
+        },
         deny_warnings: manifest.test.deny_warnings,
         coverage: opts.coverage || manifest.test.coverage,
         nocapture: opts.nocapture,

@@ -1,0 +1,90 @@
+// @test: unit
+// @level: L1
+// @tags: refinement, record-fields, runtime-assert
+// @timeout: 30000
+//
+// REFINE-FIELD-DYNAMIC-BYPASS-1 — refined record FIELDS carry runtime
+// asserts (T1-F parity with params/returns). This suite pins the
+// PASSING side: in-range dynamic values flow through every field-write
+// shape (record literal, ctor-form, plain assignment, compound
+// assignment) without tripping the assert. The TRAPPING side (NaN /
+// out-of-range dynamic values abort with `refinement violation:
+// field ...`) cannot be expressed under the `verum test` harness (no
+// should-panic) — it is pinned by vcs/specs/L1-core/refinement/
+// field_dynamic_nan_trap.vr (@expect: fail) and the literal-reject
+// twin (@expect: error).
+
+type Calib is {
+    gain: Float{it >= 0.0, it <= 1.0},
+    taps: Int{it >= 1, it <= 16},
+};
+
+fn dyn_gain() -> Float {
+    0.25 + 0.25
+}
+
+fn dyn_taps() -> Int {
+    2 + 2
+}
+
+@test
+fn test_refined_field_literal_in_range_constructs() {
+    let c = Calib { gain: 0.7, taps: 8 };
+    assert(c.gain > 0.69);
+    assert(c.gain < 0.71);
+    assert_eq(c.taps, 8);
+}
+
+@test
+fn test_refined_field_dynamic_in_range_constructs() {
+    // The SMT gate only sees literals; these values arrive through
+    // function returns and are checked by the NEW runtime assert.
+    let c = Calib { gain: dyn_gain(), taps: dyn_taps() };
+    assert(c.gain > 0.49);
+    assert(c.gain < 0.51);
+    assert_eq(c.taps, 4);
+}
+
+@test
+fn test_refined_field_boundary_values_pass() {
+    // Closed bounds: exactly-on-boundary is in-range.
+    let lo = Calib { gain: 0.0, taps: 1 };
+    let hi = Calib { gain: 1.0, taps: 16 };
+    assert(lo.gain < 0.0001);
+    assert_eq(lo.taps, 1);
+    assert(hi.gain > 0.9999);
+    assert_eq(hi.taps, 16);
+}
+
+@test
+fn test_refined_field_assignment_in_range() {
+    let mut c = Calib { gain: 0.1, taps: 2 };
+    c.gain = dyn_gain();
+    c.taps = dyn_taps();
+    assert(c.gain > 0.49);
+    assert_eq(c.taps, 4);
+}
+
+@test
+fn test_refined_field_compound_assignment_in_range() {
+    let mut c = Calib { gain: 0.25, taps: 4 };
+    c.gain += 0.25;
+    c.taps += 4;
+    assert(c.gain > 0.49);
+    assert(c.gain < 0.51);
+    assert_eq(c.taps, 8);
+}
+
+@test
+fn test_unrefined_sibling_fields_unaffected() {
+    // A record with NO refinements compiles and behaves identically —
+    // the assert emission is keyed strictly to refined fields.
+    let p = Plain { a: -999.0, b: -999 };
+    assert(p.a < 0.0);
+    assert_eq(p.b, -999);
+}
+
+type Plain is {
+    a: Float,
+    b: Int,
+};
