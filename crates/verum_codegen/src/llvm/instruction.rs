@@ -16455,6 +16455,227 @@ fn lower_call_method<'ctx>(
     // of this CallM block. No fallback dispatch needed here — dyn dispatch
     // is only triggered when VBC codegen explicitly marks the call with "dyn:".
 
+    // FUNC-REGISTRY-QUALIFICATION-1 phase 1 (AOT-FOR-NEXT class): runtime
+    // owner-safe devirtualization for an UNTYPED receiver with an ambiguous
+    // bare method name.
+    //
+    // When a method-call result flows into another CallM without a tracked
+    // receiver type (the reg_types fixpoint has no CallM arm, so e.g.
+    // `for ch in s.chars()` stores an untyped Chars temp into `__for_iter`),
+    // the bare method id ("next") collides with every `Type.next` in the
+    // merged module. All static strategies above then reject (receiver type
+    // None + many same-suffix candidates), and the terminal `None` arm below
+    // would set the destination to nil — the loop's Maybe-tag test reads that
+    // nil as `None` and iterates zero times (loopdiff n2=0).
+    //
+    // Instead, when the receiver is a heap object of unknown static type and
+    // >1 candidates share the method suffix, emit the SAME runtime dispatch
+    // the interpreter already performs and that the "dyn:" path emits: read
+    // the type_id from the receiver's object header and switch to the owner's
+    // method. This is AOT-only (the interpreter is unaffected — it already
+    // reads the header type_id at runtime) and purely additive: it only
+    // replaces the nil terminal fallback, so single-candidate, typed-receiver,
+    // and allowlisted-collection paths (all of which resolve earlier) are
+    // untouched.
+    // Compute the untyped-receiver check as an OWNED bool. Reusing the
+    // `receiver_type_name` binding here would extend its `ctx.reg_types()`
+    // reborrow across the mutable IR building below (E0502). This is the exact
+    // `receiver_type_name.is_none()` predicate (`from_reg_types.or(from_prefix)`),
+    // recomputed with borrows that end at this statement.
+    let receiver_untyped =
+        ctx.reg_types().type_name(receiver.0).is_none() && method_type_prefix.is_none();
+    if resolved_func_name.is_none()
+        && !method_name_str.contains('.')
+        && receiver_untyped
+        // Scalar-receiver guard: the header read below int-to-ptr's the
+        // receiver, so never fire for a value we know is a non-pointer scalar.
+        && !ctx.is_float_register(receiver.0)
+        && !ctx.is_bool_register(receiver.0)
+    {
+        // Gate on the SAME candidate set the permissive fallback would use
+        // (the `.method` suffix index). >1 keeps single-candidate fast paths
+        // binding statically as before.
+        let suffix = format!(".{}", method_name_str);
+        let candidate_count = ctx
+            .func_name_index()
+            .map(|idx| idx.find_by_suffix(&suffix).len())
+            .unwrap_or(0);
+        if candidate_count > 1 {
+            // Build (owner_type_id, "Owner.method") cases from the types that
+            // actually define a compiled body for this method. Mirrors the
+            // dyn: dispatch entry collection. `vbc_mod` / `get_module()` return
+            // `&'a` handles (independent of the `&self` borrow), so this does
+            // not conflict with the mutable IR building below.
+            let mut dispatch_entries: Vec<(u32, String)> = Vec::new();
+            for type_desc in &vbc_mod.types {
+                let Some(tname) = vbc_mod.get_string(type_desc.name) else {
+                    continue;
+                };
+                if tname.is_empty() {
+                    continue;
+                }
+                let cand = format!("{}.{}", tname, method_name_str);
+                if let Some(f) = ctx.get_module().get_function(&cand)
+                    && f.count_basic_blocks() > 0
+                {
+                    let pc = f.count_params() as u32;
+                    let ac = args.count as u32;
+                    if pc == ac + 1 || pc == ac {
+                        dispatch_entries.push((type_desc.id.0, cand));
+                    }
+                }
+            }
+            if !dispatch_entries.is_empty() {
+                if std::env::var("VERUM_TRACE_DEVIRT_SWITCH").is_ok() {
+                    eprintln!(
+                        "[devirt-switch] method='{}' candidates={} entries={} fn={}",
+                        method_name_str,
+                        candidate_count,
+                        dispatch_entries.len(),
+                        ctx.function_name().as_str()
+                    );
+                }
+
+                let i64_type = ctx.types().i64_type();
+                let ptr_type = ctx.types().ptr_type();
+                let receiver_val = ctx.get_register(receiver.0)?;
+
+                // Read type_id from the object header (first i64 at ptr).
+                let recv_i64 = as_i64(ctx, receiver_val, "b1_recv_i64")?;
+                let recv_ptr = ctx
+                    .builder()
+                    .build_int_to_ptr(recv_i64, ptr_type, "b1_recv_ptr")
+                    .or_llvm_err()?;
+                let type_id_val = ctx
+                    .builder()
+                    .build_load(i64_type, recv_ptr, "b1_type_id")
+                    .or_llvm_err()?
+                    .into_int_value();
+
+                // Build arguments: (receiver, args...), coerced to i64.
+                let mut arg_vals: Vec<BasicMetadataValueEnum> = Vec::new();
+                arg_vals.push(receiver_val.into());
+                for i in 0..args.count {
+                    let r = Reg(args.start.0 + i as u16);
+                    let val = ctx.get_register(r.0)?;
+                    let coerced = as_i64(ctx, val, &format!("b1_arg{}", i))?;
+                    arg_vals.push(coerced.into());
+                }
+
+                let current_fn = ctx.function();
+                let llvm_cx = ctx.llvm_context();
+                let merge_bb = llvm_cx.append_basic_block(current_fn, "b1_merge");
+                let default_bb = llvm_cx.append_basic_block(current_fn, "b1_default");
+
+                let mut cases = Vec::new();
+                let mut case_blocks = Vec::new();
+                for (tid, fname) in &dispatch_entries {
+                    let bb = llvm_cx.append_basic_block(current_fn, &format!("b1_{}", tid));
+                    cases.push((i64_type.const_int(*tid as u64, false), bb));
+                    case_blocks.push((bb, fname.clone()));
+                }
+
+                ctx.builder()
+                    .build_switch(type_id_val, default_bb, &cases)
+                    .or_llvm_err()?;
+
+                // Default (type_id matches no candidate): preserve the prior
+                // nil semantics.
+                ctx.builder().position_at_end(default_bb);
+                ctx.builder()
+                    .build_unconditional_branch(merge_bb)
+                    .or_llvm_err()?;
+
+                let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
+                incoming.push((i64_type.const_zero().into(), default_bb));
+
+                for (bb, fname) in &case_blocks {
+                    ctx.builder().position_at_end(*bb);
+                    let target_fn =
+                        ctx.get_module().get_function(fname).or_missing_fn(fname)?;
+                    let pc = target_fn.count_params() as usize;
+                    let raw_args: Vec<BasicMetadataValueEnum> = if pc == arg_vals.len() {
+                        arg_vals.clone()
+                    } else if pc == arg_vals.len() - 1 {
+                        arg_vals[1..].to_vec()
+                    } else {
+                        arg_vals.clone()
+                    };
+
+                    // Coerce each argument to the target's parameter type.
+                    let call_args: Vec<BasicMetadataValueEnum> = raw_args
+                        .iter()
+                        .enumerate()
+                        .map(|(i, arg)| -> Result<BasicMetadataValueEnum<'ctx>> {
+                            if i < pc {
+                                let expected = target_fn
+                                    .get_nth_param(i as u32)
+                                    .or_internal(&format!("missing param {}", i))?
+                                    .get_type();
+                                let arg_bv: BasicValueEnum =
+                                    (*arg).try_into().unwrap_or(i64_type.const_zero().into());
+                                if arg_bv.is_int_value() && expected.is_pointer_type() {
+                                    let coerced = ctx
+                                        .builder()
+                                        .build_int_to_ptr(
+                                            arg_bv.into_int_value(),
+                                            ptr_type,
+                                            "b1_arg_ptr",
+                                        )
+                                        .or_llvm_err()?;
+                                    Ok(coerced.into())
+                                } else if arg_bv.is_pointer_value() && expected.is_int_type() {
+                                    let coerced = ctx
+                                        .builder()
+                                        .build_ptr_to_int(
+                                            arg_bv.into_pointer_value(),
+                                            i64_type,
+                                            "b1_arg_i64",
+                                        )
+                                        .or_llvm_err()?;
+                                    Ok(coerced.into())
+                                } else {
+                                    Ok(*arg)
+                                }
+                            } else {
+                                Ok(*arg)
+                            }
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+
+                    let result = ctx
+                        .builder()
+                        .build_call(target_fn, &call_args, "b1_call")
+                        .or_llvm_err()?;
+                    let ret_val = result
+                        .try_as_basic_value()
+                        .basic()
+                        .unwrap_or(i64_type.const_zero().into());
+                    let ret_i64: BasicValueEnum = if ret_val.is_pointer_value() {
+                        ctx.builder()
+                            .build_ptr_to_int(ret_val.into_pointer_value(), i64_type, "b1_ret_i64")
+                            .or_llvm_err()?
+                            .into()
+                    } else {
+                        ret_val
+                    };
+                    ctx.builder()
+                        .build_unconditional_branch(merge_bb)
+                        .or_llvm_err()?;
+                    incoming.push((ret_i64, *bb));
+                }
+
+                ctx.builder().position_at_end(merge_bb);
+                let phi = ctx.builder().build_phi(i64_type, "b1_result").or_llvm_err()?;
+                for (val, bb) in &incoming {
+                    phi.add_incoming(&[(&(*val), *bb)]);
+                }
+                ctx.set_register(dst.0, phi.as_basic_value());
+                return Ok(());
+            }
+        }
+    }
+
     let func_name = match resolved_func_name {
         Some(name) => name,
         None => {

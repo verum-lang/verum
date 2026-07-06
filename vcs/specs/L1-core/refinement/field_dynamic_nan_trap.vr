@@ -1,0 +1,29 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: refinement, record-fields, runtime-assert, red-team
+// @timeout: 30000
+// @expect: fail
+//
+// REFINE-FIELD-DYNAMIC-BYPASS-1 red-team pin: a NaN smuggled through a
+// function return into a `Float{it >= 0.0, it <= 1.0}` field MUST trap
+// at runtime with `refinement violation: field ...`. Pre-fix this
+// constructed successfully and the field read back NaN (literals were
+// E500-rejected by SMT, dynamic values were unchecked). Both refinement
+// clauses are ORDERED float compares, so NaN fails `>= 0.0` and the
+// Assert fires — the expected outcome of this test is the trap itself.
+
+type Conf is {
+    level: Float{it >= 0.0, it <= 1.0},
+};
+
+fn nan_val() -> Float {
+    0.0 / 0.0
+}
+
+fn main() {
+    let c = Conf { level: nan_val() };
+    // Unreachable when the runtime assert works; reaching this print
+    // (and exiting 0) is the FAILURE mode this pin guards against.
+    print(f"constructed with level={c.level}");
+}

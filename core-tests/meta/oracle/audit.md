@@ -114,6 +114,19 @@ i64. Three legs, all closed in verum_vbc/verum_common:
   has_viable agrees with count, default vs aggressive axes.
 * `core-tests/meta/oracle/audit.md` — this file.
 
+### §3.6 RED-TEAM — REFINE-FIELD-DYNAMIC-BYPASS-1 — OPEN
+
+Literal out-of-range construction of refined fields is rejected at
+compile time (E500 via SMT: `min_confidence: 1.5` and `-0.3` both
+refuse). But a DYNAMIC value smuggles through:
+`OracleConfig { min_confidence: nan_val(), … }` where
+`fn nan_val() -> Float { 0.0 / 0.0 }` constructs successfully and
+the field reads back NaN. Record-literal field writes carry no
+runtime refinement assert (unlike params/returns — T1-F). Tracked as
+REFINE-FIELD-DYNAMIC-BYPASS-1: emit `Assert` for refined fields at
+construction/assignment when not statically discharged; NaN must
+fail `>= 0.0`-style predicates.
+
 ## Action items deferred
 
 | Item | Scope | Estimated effort |

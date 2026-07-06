@@ -254,6 +254,24 @@ impl MakeVariantReport {
 
 /// Transforms Verum AST into VBC bytecode modules.
 #[derive(Debug)]
+/// REFINE-FIELD-DYNAMIC-BYPASS-1: a record field's refinement
+/// predicate, carried from the type declaration to the field-write
+/// emission sites in expressions.rs (record literal, ctor-form,
+/// field assignment, compound assignment).
+#[derive(Clone)]
+pub(crate) struct FieldRefinementInfo {
+    /// Predicate expression (`it >= 0.0 && it <= 1.0` — multi-clause
+    /// refinements are already And-merged by the parser).
+    pred_expr: verum_ast::Expr,
+    /// Binding name (`it` unless the refinement names one).
+    binding: String,
+    /// Simple name of the refined BASE type — registered on the alias
+    /// so predicate compilation selects CmpF vs CmpI correctly.
+    base_type_name: String,
+    /// VarTypeKind of the base, same purpose.
+    base_var_type: context::VarTypeKind,
+}
+
 pub struct VbcCodegen {
     /// Codegen context with registers, labels, etc.
     ctx: CodegenContext,
@@ -408,6 +426,17 @@ pub struct VbcCodegen {
     /// Type field type names: maps (type_name, field_name) → field_type_name.
     /// Used to infer the type of field access expressions for chained access.
     type_field_type_names: std::collections::HashMap<(String, String), String>,
+
+    /// REFINE-FIELD-DYNAMIC-BYPASS-1: refinement predicates for record
+    /// fields, keyed (type_name, field_name) — same dual simple/qualified
+    /// key discipline as `type_field_type_names`. Params/returns keep
+    /// their predicates because assert emission reads the AST type node
+    /// directly (T1-F); FIELDS only had the erased carrier string from
+    /// `extract_type_name_from_ast`, so a dynamic out-of-range value
+    /// (NaN through a fn return) constructed fine while the literal
+    /// path was E500-rejected by SMT. This map carries the predicate to
+    /// the four field-write emission sites in expressions.rs.
+    type_field_refinements: std::collections::HashMap<(String, String), FieldRefinementInfo>,
 
     /// Declared type-name for every `static mut NAME: T = init;` slot.
     /// Populated when an `ItemKind::Static` with `is_mut == true` is
@@ -1337,6 +1366,7 @@ impl VbcCodegen {
             next_field_id: 0,
             type_field_layouts: std::collections::HashMap::new(),
             type_field_type_names: std::collections::HashMap::new(),
+            type_field_refinements: std::collections::HashMap::new(),
             static_mut_type_names: std::collections::HashMap::new(),
             // Pending constants for deferred compilation
             pending_constants: Vec::new(),
@@ -6286,6 +6316,7 @@ impl VbcCodegen {
         self.next_field_id = 0;
         self.type_field_layouts.clear();
         self.type_field_type_names.clear();
+        self.type_field_refinements.clear();
         // Clear pending constants
         self.pending_constants.clear();
         // Clear static init function tracking
@@ -6929,6 +6960,34 @@ impl VbcCodegen {
                         .map(|f| Self::extract_type_name_from_ast(&f.ty))
                         .collect();
                     self.register_record_fields(&type_decl.name.name, field_names, field_types);
+
+                    // REFINE-FIELD-DYNAMIC-BYPASS-1: `extract_type_name_from_ast`
+                    // deliberately erases `Refined { base, .. }` to the base
+                    // name for the carrier string — capture the PREDICATE here
+                    // (the only point where the field's AST type node is in
+                    // hand) so the field-write sites can emit runtime asserts,
+                    // mirroring what params/returns already get (T1-F).
+                    for f in fields.iter() {
+                        if let verum_ast::ty::TypeKind::Refined { base, predicate } = &f.ty.kind {
+                            let binding = match &predicate.binding {
+                                verum_common::Maybe::Some(id) => id.name.to_string(),
+                                verum_common::Maybe::None => "it".to_string(),
+                            };
+                            let info = FieldRefinementInfo {
+                                pred_expr: predicate.expr.clone(),
+                                binding,
+                                base_type_name: Self::extract_type_name_from_ast(base),
+                                base_var_type: self.type_kind_to_var_type(&base.kind),
+                            };
+                            self.type_field_refinements.insert(
+                                (
+                                    type_decl.name.name.to_string(),
+                                    f.name.name.to_string(),
+                                ),
+                                info,
+                            );
+                        }
+                    }
                 }
             }
             ItemKind::Protocol(_) | ItemKind::Predicate(_) => {
@@ -13359,6 +13418,27 @@ impl VbcCodegen {
             Self::collect_escaping_local_refs(body, &mut self.ctx.current_fn_escaping_vars);
         }
 
+        // META-INTRINSIC-NILSTUB-1: bodiless `@compiler_intrinsic` fns
+        // get NO dispatch registration and NO body — every runtime call
+        // silently returned nil, and the whole runtime TokenStream ctor
+        // surface cascaded off `Span.call_site()` returning nil. For
+        // the intrinsics whose semantics are well-defined WITHOUT a
+        // compiler invocation context (the MetaSpan surface: runtime
+        // spans carry no source info), synthesize a real VBC body from
+        // a table — both tiers get it for free (interp executes it; the
+        // AOT lowering consumes the same merged VBC). Unknown intrinsics
+        // keep the pre-existing empty-body behaviour.
+        if func.body.is_none()
+            && func
+                .attributes
+                .iter()
+                .any(|a| a.name.as_str() == "compiler_intrinsic")
+            && self.try_emit_synthesized_intrinsic_body(&lookup_name)
+        {
+            // Body synthesized (including its Ret) — the shared epilogue
+            // below handles registration exactly as for compiled bodies.
+        }
+
         // Compile the body
         if let Some(ref body) = func.body {
             match body {
@@ -14105,6 +14185,221 @@ impl VbcCodegen {
             self.ctx.free_temp(cond_reg);
         }
         self.ctx.exit_scope(false);
+    }
+
+    /// META-INTRINSIC-NILSTUB-1: table-driven synthesized bodies for
+    /// bodiless `@compiler_intrinsic` fns whose RUNTIME semantics are
+    /// well-defined without a compiler invocation context. Returns true
+    /// iff a body (including its `Ret`) was emitted.
+    ///
+    /// MetaSpan surface: runtime spans carry no source information, so
+    /// the ctors produce the canonical synthetic span (`id = 0`,
+    /// `flags.is_synthetic = true`) with DISTINCT hygiene marks
+    /// (call_site 0 / def_site 1 / mixed_site 2) so hygiene algebra
+    /// stays observable; `location()` is documented to return
+    /// `Maybe.None` when source info is unavailable — at runtime that
+    /// is always; `start()`/`end()` are 0 (=> `len() == 0`,
+    /// `is_empty()`); `join`/`subspan` return `self` (the documented
+    /// different-file fallback — runtime spans have no files).
+    ///
+    /// `TokenStream.from_str` is deliberately NOT synthesized: it
+    /// requires real lexing; an honest nil today, tracked for a
+    /// runtime-lexer bridge.
+    fn try_emit_synthesized_intrinsic_body(&mut self, lookup_name: &str) -> bool {
+        match lookup_name {
+            "MetaSpan.synthetic"
+            | "MetaSpan.call_site"
+            | "MetaSpan.def_site"
+            | "MetaSpan.mixed_site" => {
+                let Some(&span_tid) = self.type_name_to_id.get("MetaSpan") else {
+                    return false;
+                };
+                let Some(&flags_tid) = self.type_name_to_id.get("SpanFlags") else {
+                    return false;
+                };
+                let hygiene: i64 = match lookup_name {
+                    "MetaSpan.def_site" => 1,
+                    "MetaSpan.mixed_site" => 2,
+                    _ => 0,
+                };
+                // SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false }
+                let flags_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::New {
+                    dst: flags_reg,
+                    type_id: flags_tid.0,
+                    field_count: 3,
+                });
+                let scratch = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadFalse { dst: scratch });
+                self.ctx.emit(Instruction::SetF {
+                    obj: flags_reg,
+                    field_idx: 0,
+                    value: scratch,
+                });
+                self.ctx.emit(Instruction::LoadTrue { dst: scratch });
+                self.ctx.emit(Instruction::SetF {
+                    obj: flags_reg,
+                    field_idx: 1,
+                    value: scratch,
+                });
+                self.ctx.emit(Instruction::LoadFalse { dst: scratch });
+                self.ctx.emit(Instruction::SetF {
+                    obj: flags_reg,
+                    field_idx: 2,
+                    value: scratch,
+                });
+                // MetaSpan { id: 0, hygiene, flags }
+                let span_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::New {
+                    dst: span_reg,
+                    type_id: span_tid.0,
+                    field_count: 3,
+                });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: scratch,
+                    value: 0,
+                });
+                self.ctx.emit(Instruction::SetF {
+                    obj: span_reg,
+                    field_idx: 0,
+                    value: scratch,
+                });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: scratch,
+                    value: hygiene,
+                });
+                self.ctx.emit(Instruction::SetF {
+                    obj: span_reg,
+                    field_idx: 1,
+                    value: scratch,
+                });
+                self.ctx.emit(Instruction::SetF {
+                    obj: span_reg,
+                    field_idx: 2,
+                    value: flags_reg,
+                });
+                self.ctx.emit(Instruction::Ret { value: span_reg });
+                self.ctx.free_temp(scratch);
+                self.ctx.free_temp(flags_reg);
+                self.ctx.free_temp(span_reg);
+                true
+            }
+            "MetaSpan.location" => {
+                let none_tag = verum_common::well_known_types::maybe_none_tag();
+                let none_reg = self.ctx.alloc_temp();
+                self.emit_make_variant(none_reg, none_tag, 0, Some("Maybe"));
+                self.ctx.emit(Instruction::Ret { value: none_reg });
+                self.ctx.free_temp(none_reg);
+                true
+            }
+            "MetaSpan.start" | "MetaSpan.end" => {
+                let zero = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: zero, value: 0 });
+                self.ctx.emit(Instruction::Ret { value: zero });
+                self.ctx.free_temp(zero);
+                true
+            }
+            "MetaSpan.join" | "MetaSpan.subspan" => {
+                // Documented fallback: return self (receiver = param 0).
+                self.ctx.emit(Instruction::Ret { value: Reg(0) });
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// REFINE-FIELD-DYNAMIC-BYPASS-1: emit a runtime refinement Assert
+    /// for a record FIELD write, mirroring the param/return T1-F shape.
+    /// `type_key` is whatever name the write site resolved the record
+    /// to (simple, qualified, generic-instantiated, wrapper-stripped —
+    /// all normalized here the same way `resolve_field_index` does).
+    /// Fail-open by design: a key miss or an unsupported predicate
+    /// shape emits nothing (never a wrong assert), matching the
+    /// gradual-verification policy for undischargeable obligations.
+    pub(super) fn emit_field_refinement_assert(
+        &mut self,
+        value_reg: Reg,
+        type_key: &str,
+        field_name: &str,
+    ) {
+        // Normalize the key like the field-index machinery does.
+        let stripped = Self::strip_generic_args(Self::strip_wrapper_type(type_key)).to_string();
+        let info = self
+            .type_field_refinements
+            .get(&(stripped.clone(), field_name.to_string()))
+            .cloned()
+            .or_else(|| {
+                self.resolve_record_type_key(&stripped).and_then(|rk| {
+                    self.type_field_refinements
+                        .get(&(rk, field_name.to_string()))
+                        .cloned()
+                })
+            });
+        let Some(info) = info else { return };
+
+        // Conservative free-var guard: the predicate may reference ONLY
+        // its binding (plus literals/operators/calls over those). A
+        // predicate mentioning other names could accidentally resolve
+        // against unrelated locals in the CONSTRUCTOR's scope — skip
+        // (fail-open) rather than mis-assert. Unknown expression kinds
+        // are treated as unsupported.
+        if !Self::pred_expr_refs_only(&info.pred_expr, &info.binding) {
+            return;
+        }
+
+        let message_id = {
+            let msg = format!(
+                "refinement violation: field `{}.{}`",
+                stripped, field_name
+            );
+            self.intern_string(&msg)
+        };
+
+        self.ctx.enter_scope();
+        let alias_reg = self.ctx.define_var(&info.binding, false);
+        self.ctx.emit(Instruction::Mov {
+            dst: alias_reg,
+            src: value_reg,
+        });
+        self.ctx
+            .register_variable_type(&info.binding, info.base_var_type);
+        self.ctx
+            .variable_type_names
+            .insert(info.binding.clone(), info.base_type_name.clone());
+
+        if let Ok(Some(cond_reg)) = self.compile_expr(&info.pred_expr) {
+            self.ctx.emit(Instruction::Assert {
+                cond: cond_reg,
+                message_id,
+            });
+            self.ctx.free_temp(cond_reg);
+        }
+        self.ctx.exit_scope(false);
+    }
+
+    /// Free-variable check for field-refinement predicates: true iff
+    /// every path reference in the expression is exactly `binding`.
+    /// Unhandled expression kinds return false (conservative).
+    fn pred_expr_refs_only(expr: &verum_ast::Expr, binding: &str) -> bool {
+        use verum_ast::ExprKind;
+        match &expr.kind {
+            ExprKind::Literal(_) => true,
+            ExprKind::Path(path) => path
+                .as_ident()
+                .map(|id| id.name.as_str() == binding)
+                .unwrap_or(false),
+            ExprKind::Binary { left, right, .. } => {
+                Self::pred_expr_refs_only(left, binding)
+                    && Self::pred_expr_refs_only(right, binding)
+            }
+            ExprKind::Unary { expr, .. } => Self::pred_expr_refs_only(expr, binding),
+            ExprKind::Paren(inner) => Self::pred_expr_refs_only(inner, binding),
+            ExprKind::MethodCall { receiver, args, .. } => {
+                Self::pred_expr_refs_only(receiver, binding)
+                    && args.iter().all(|a| Self::pred_expr_refs_only(a, binding))
+            }
+            _ => false,
+        }
     }
 
     /// Ensures function ends with a return instruction.

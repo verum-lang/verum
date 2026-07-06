@@ -176,10 +176,13 @@ fn test_name_has_brand_prefix_partial_match_rejected() {
 }
 
 @test
-fn test_name_has_brand_prefix_case_sensitive() {
-    // The check is byte-exact; uppercase variants are NOT banned.
-    assert(!name_has_brand_prefix(Text.from("DIAKRISIS_FOO")));
-    assert(!name_has_brand_prefix(Text.from("Actic_foo")));
+fn test_name_has_brand_prefix_case_insensitive() {
+    // CONTRACT CHANGE 2026-07-06 (red-team hardening, audit §3.3):
+    // the check lowercases the candidate first — uppercase/mixed-case
+    // brand spellings ARE banned. The pre-fix byte-exact behaviour let
+    // `DIAKRISIS_FOO` trivially evade R1.
+    assert(name_has_brand_prefix(Text.from("DIAKRISIS_FOO")));
+    assert(name_has_brand_prefix(Text.from("Actic_foo")));
 }
 
 // =============================================================================
