@@ -1677,8 +1677,43 @@ fn build_stdlib_test_module(test: &Test) -> CachedModule {
     if crate_root_items.is_none()
         && std::env::var("VERUM_TEST_LENIENT_TYPES").is_err()
     {
+        // TEST-PREFLIGHT-IGNORE-1: strip `@ignore`'d test fns before the
+        // file-level check. A deliberately compile-broken pinned test
+        // (an E400 repro under @ignore) previously failed EVERY test in
+        // the file uniformly — @ignore only skipped execution, not this
+        // preflight — forcing pins to be fully commented out. The strip
+        // is lexical (attr-anchored brace matching, string/char-aware)
+        // and FAIL-OPEN: any irregularity falls back to checking the
+        // original file (today's behaviour). The stripped copy lives at
+        // a stable per-source path so the pipeline's per-file compile
+        // cache keeps amortising.
+        let check_input: std::path::PathBuf = match std::fs::read_to_string(&test.file)
+            .ok()
+            .and_then(|s| strip_ignored_test_fns(&s))
+        {
+            Some(stripped) => {
+                let mut tmp = std::env::temp_dir();
+                tmp.push("verum-preflight");
+                let _ = std::fs::create_dir_all(&tmp);
+                let stem = test
+                    .file
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("test");
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                use std::hash::{Hash, Hasher};
+                test.file.hash(&mut hasher);
+                tmp.push(format!("{}_{:016x}.vr", stem, hasher.finish()));
+                if std::fs::write(&tmp, stripped).is_ok() {
+                    tmp
+                } else {
+                    test.file.clone()
+                }
+            }
+            None => test.file.clone(),
+        };
         let options = CompilerOptions {
-            input: test.file.clone(),
+            input: check_input,
             output_format: OutputFormat::Human,
             ..Default::default()
         };
@@ -2724,4 +2759,110 @@ mod tests {
             }
         }
     }
+}
+
+/// TEST-PREFLIGHT-IGNORE-1: lexically remove test fns annotated
+/// `@ignore` (with or without a reason) so the file-level typecheck
+/// preflight tolerates deliberately compile-broken pinned tests.
+///
+/// Returns `Some(stripped)` when at least one fn was removed and the
+/// scan stayed regular; `None` means "use the original file" (no
+/// @ignore present, or the matcher hit something irregular —
+/// fail-open by design).
+fn strip_ignored_test_fns(src: &str) -> Option<String> {
+    if !src.contains("@ignore") {
+        return None;
+    }
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0usize;
+    let mut stripped_any = false;
+    'outer: while i < bytes.len() {
+        // Find the next line start with `@ignore` (allow leading ws).
+        let line_end = src[i..].find('\n').map(|o| i + o + 1).unwrap_or(bytes.len());
+        let line = &src[i..line_end];
+        let t = line.trim_start();
+        if t.starts_with("@ignore") {
+            // Scan forward over subsequent attribute/comment lines to
+            // the `fn ` header; give up (fail-open) past 8 lines.
+            let mut j = line_end;
+            let mut hops = 0;
+            loop {
+                if hops > 8 || j >= bytes.len() {
+                    // Irregular shape — keep original text as-is.
+                    out.push_str(line);
+                    i = line_end;
+                    continue 'outer;
+                }
+                let le = src[j..].find('\n').map(|o| j + o + 1).unwrap_or(bytes.len());
+                let l2 = src[j..le].trim_start();
+                if l2.starts_with("fn ") || l2.starts_with("pub fn ") {
+                    // Brace-match from the first '{' after the header.
+                    let Some(open_rel) = src[j..].find('{') else {
+                        out.push_str(line);
+                        i = line_end;
+                        continue 'outer;
+                    };
+                    let mut k = j + open_rel;
+                    let mut depth = 0i32;
+                    let mut in_str = false;
+                    let mut in_char = false;
+                    let mut prev_bs = false;
+                    while k < bytes.len() {
+                        let c = bytes[k] as char;
+                        if in_str {
+                            if c == '"' && !prev_bs {
+                                in_str = false;
+                            }
+                            prev_bs = c == '\\' && !prev_bs;
+                        } else if in_char {
+                            if c == '\'' && !prev_bs {
+                                in_char = false;
+                            }
+                            prev_bs = c == '\\' && !prev_bs;
+                        } else {
+                            match c {
+                                '"' => in_str = true,
+                                '\'' => in_char = true,
+                                '{' => depth += 1,
+                                '}' => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        // Consume through end of line.
+                                        let after = src[k..]
+                                            .find('\n')
+                                            .map(|o| k + o + 1)
+                                            .unwrap_or(bytes.len());
+                                        out.push_str(
+                                            "// [preflight] @ignore'd test stripped\n",
+                                        );
+                                        stripped_any = true;
+                                        i = after;
+                                        continue 'outer;
+                                    }
+                                }
+                                _ => {}
+                            }
+                            prev_bs = false;
+                        }
+                        k += 1;
+                    }
+                    // Unbalanced — fail-open.
+                    return None;
+                }
+                if l2.starts_with('@') || l2.starts_with("//") || l2.is_empty() {
+                    j = le;
+                    hops += 1;
+                    continue;
+                }
+                // Non-attr, non-fn after @ignore — irregular; keep text.
+                out.push_str(line);
+                i = line_end;
+                continue 'outer;
+            }
+        }
+        out.push_str(line);
+        i = line_end;
+    }
+    if stripped_any { Some(out) } else { None }
 }

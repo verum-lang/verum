@@ -1,0 +1,20 @@
+// @test: unit
+// @level: L1
+// @tags: harness, preflight
+// Probe for TEST-PREFLIGHT-IGNORE-1: the @ignore'd fn below is
+// DELIBERATELY type-broken; pre-fix its E400 failed the whole file at
+// the typecheck preflight. Post-fix the preflight strips it and the
+// healthy sibling passes.
+
+@test
+fn healthy_sibling_passes() {
+    assert_eq(2 + 2, 4);
+}
+
+// @ignore: TEST-PREFLIGHT-IGNORE-1 probe — deliberately type-broken
+@ignore
+@test
+fn deliberately_broken_pinned() {
+    let x: Int = Text.from("not an int");
+    assert(x == 0);
+}
