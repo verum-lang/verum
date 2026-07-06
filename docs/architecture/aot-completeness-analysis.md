@@ -49,37 +49,56 @@ Both compile & run correctly under `--interp`. Under `--aot`:
   (reallocates), sets `self.ptr`, then writes — but the new `self.ptr`
   writeback is lost, so the store dereferences the stale null.
 
-**Root cause (LOCATED):** `lower_set_field` (`instruction.rs:31640`)
-branches on the receiver's LLVM value shape:
+**Root cause (LOCATED — corrected 2026-07-06 after IR-level tracing).**
+The `&mut self` writeback is NOT the fault — IR tracing of
+`Text.push_str` under AOT proves `self` is passed as a **pointer**
+(i64), `SetF` on it stores through at the correct flat offsets
+(`self.len`@8, `grow`'s `self.ptr`@0 / `self.cap`@16 all persist — the
+repro even reports `after len=5`). The corruption is in **byte-pointer
+arithmetic**:
 
-* If `obj_val` is a 3-field CBGR-ref struct `{ptr, i32, i32}` (line
-  31665), it extracts the pointer, GEPs past the object header to the
-  field, and `build_store`s — a genuine **write-through** that persists
-  to the caller. ✓
-* If `obj_val` is any OTHER `StructValue` (line 31691), it does
-  `build_insert_value` + `set_register(obj, new_struct)` — a
-  **functional update** that rebuilds the struct value in the callee's
-  register and never touches the caller's storage. ✗
+* `push_str` does `memcpy(ptr_offset(self.ptr, self.len), s.as_ptr(),
+  n)`. `self.ptr` is a `*mut Byte` (byte buffer).
+* `ptr_offset` lowers via `emit_ptr_offset`
+  (`intrinsics/codegen.rs:1194`) which HARD-CODES `stride = 8`
+  ("VBC type-erases to 64-bit values; element stride is always 8
+  bytes") — it even ignores the `byte_width` param that
+  `emit_intrinsic_inline_sequence` threads. So it computes `self.ptr +
+  self.len * 8` instead of `self.ptr + self.len * 1`.
+* Result: the appended bytes land **8× too far** into the buffer.
+  Short buffers → the append is invisible (content reads as the
+  original, e.g. "hi" not "hiXYZ", even though `len` is 5); long
+  buffers → the write runs off the allocation → SIGBUS.
 
-Text is a flat 24-byte value (`{ptr@0, len@8, cap@16}`), so a `&mut
-self` Text receiver arrives as a plain `StructValue`, NOT a CBGR ref —
-it takes the `insert_value` branch, so `self.len`/`self.ptr` writes are
-lost at the call boundary. `insert_value` is CORRECT for a local
-struct mutation (`let mut p = Point{..}; p.x = 5`) but WRONG for a `&mut
-self` receiver, and `lower_set_field` cannot tell the two apart from the
-value shape alone.
+**Why interp is fine:** the interpreter **intercepts** the Text
+mutation methods natively (`method_dispatch.rs:527` — push/push_str/
+push_char), so it never executes the Verum body's `ptr_offset`; and its
+raw `ptr_offset` handler (`ffi_extended.rs:1101`) is element-stride
+aware via `fat_ref.reserved` (1/2/4/8). Only AOT compiles the Verum
+body and hits the hard-coded stride 8.
 
-**Fix (ABI change):** `&mut self` methods (and `&mut Text`/`&mut List`/
-`&mut <record>` params) must receive the receiver as a **pointer** to
-the caller's alloca — not the by-value struct — so every `SetF` takes
-the store-through path. This is a caller-side + prologue change
-(`lower_call_method` receiver marshalling `instruction.rs:11815` + the
-VBC codegen `takes_self_mut_ref` receiver lowering, which currently
-yields a by-value struct for flat aggregates rather than a pointer);
-no callee-side patch to `lower_set_field` alone can fix it, because the
-callee's `insert_value` result has nowhere to propagate. Requires a
-broad AOT regression sweep (every Text/List/record method depends on
-this path).
+**Generality:** this is not Text-specific — every AOT-compiled Verum
+body that walks a `*Byte`/`*U8` buffer with `ptr_offset`/`ptr_add`
+(parse via `split`/`slice`, List<Byte> byte ops, encoding/compression
+byte loops) is 8× wrong. This single stride bug IS what the audits
+named DISP-EMPTY-AOT (Formatter writes into a `&mut Text buf` byte
+buffer) and PARSE-AOT (parsers walk byte buffers).
+
+**Fix:** `ptr_offset`/`ptr_sub` must scale by `sizeof(pointee)`, not a
+constant 8. The plumbing already half-exists —
+`CodegenStrategy::InlineSequenceWithWidth(seq_id, width)` and the
+`byte_width` param of `emit_intrinsic_inline_sequence` — but (a)
+`emit_ptr_offset` must actually USE `byte_width` (emit `LoadI
+byte_width`, not `LoadI 8`), and the MLIR path
+(`lowering.rs:3505`, `elem_type: I64`) must mirror it; (b) the width
+must be chosen **per call** from the pointee type (`*Byte` → 1, `*T`
+value → 8), which the monomorphised call site knows but the registry
+strategy (fixed per-intrinsic) does not — so the `ptr_offset` dispatch
+needs to inspect `args[0]`'s pointee element size (or the stdlib must
+route byte buffers through a distinct byte-stride intrinsic). Must land
+behind a broad AOT regression sweep — the `stride = 8` was itself a
+deliberate fix (`d844a6113`) for Value-array pointers, so any change
+must keep those at stride 8 while giving byte buffers stride 1.
 
 **Why it's the #1 lever:** this single class is what the `addr` audit
 §3.5 named DISP-EMPTY-AOT (f-string `Display` of a user type renders
