@@ -215,7 +215,20 @@ way.
   (`interpreter/.../pattern_matching.rs`). **AOT parity pending** — the
   `Instruction::Unpack` LLVM lowering (`instruction.rs:3955`) must apply
   the same ref-deref before `lower_unpack_element`.
-* **RECORD-LET-REF-TYPE-LOSS — OPEN, root cause LOCATED 2026-07-06.**
+* **RECORD-LET-REF-TYPE-LOSS — FIXED 2026-07-06 (`f922700c3`).** The
+  clean-tuple-name rendering + let-destructure element-type recorder
+  landed and validated (base/maybe 162/12 baseline, net suites
+  unchanged). `let (a, b) = <tuple-expr>` now types the bound names, so
+  `a.method()` resolves. Two renderer bugs fixed (`extract_type_name_from_ast`
+  gained a `Tuple` arm; `extract_element_type` now scans the top-level
+  comma depth-aware so `List<(A,B)>[i]` → `(A,B)`), plus the recorder in
+  the Tuple arm (guarded `from_let` to avoid a cmp-then-`<` Ord
+  regression). **Residual:** the original `find_rel` target still fails
+  — but on a SEPARATE cross-module record field-type registration issue
+  (a local-type equivalent of the exact chain now works), not the
+  tuple-rendering defect this closed. Historic diagnosis below.
+
+* **RECORD-LET-REF-TYPE-LOSS — historic diagnosis.**
   `let (name, value) = &entry.params[j]; name.as_bytes()…` fails method
   resolution because `name` is left UNTYPED. Isolated precisely (the
   earlier "generic fn only" note is wrong — it reproduces in a plain fn
