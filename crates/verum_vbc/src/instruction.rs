@@ -11856,8 +11856,19 @@ pub enum Instruction {
         dst: Reg,
         /// Function table index.
         func_id: u32,
-        /// Registers containing type arguments.
-        type_args: Vec<Reg>,
+        /// Concrete type arguments (STATIC types, not runtime registers).
+        ///
+        /// Pre-fix this was `Vec<Reg>` and the encoder wrote a register vector,
+        /// but BOTH decoders (`bytecode::decode`/`parse_call_g` and
+        /// `mono::specializer::specialize_call_g`) read `TypeRef`s — an
+        /// encode/decode mismatch that made CallG unusable, which is why the
+        /// codegen never emitted it and generic AOT monomorphization never ran.
+        /// Type arguments are static (known at compile time), so `TypeRef` is
+        /// the correct representation; the interpreter consumes and ignores
+        /// them (it dispatches dynamically), while the AOT monomorphization pass
+        /// keys specializations on them and `specialize_call_g` routes the call
+        /// to the specialized function.
+        type_args: Vec<crate::types::TypeRef>,
         /// Argument registers.
         args: RegRange,
     },

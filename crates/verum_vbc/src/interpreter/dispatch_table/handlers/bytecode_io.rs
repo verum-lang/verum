@@ -115,6 +115,82 @@ pub(super) fn read_reg_range(state: &mut InterpreterState) -> InterpreterResult<
     Ok(RegRange { start, count })
 }
 
+/// Consume (skip) one serialized `TypeRef` from the bytecode stream.
+///
+/// `CallG` carries STATIC `TypeRef` type arguments (used by the AOT
+/// monomorphization pass).  The interpreter ignores them — it dispatches
+/// dynamically — but must advance the program counter past them.  This mirrors
+/// `crate::bytecode::encode_type_ref` byte-for-byte; keep the two in sync.
+pub(super) fn skip_type_ref(state: &mut InterpreterState) -> InterpreterResult<()> {
+    let tag = read_u8(state)?;
+    match tag {
+        0x00 | 0x01 => {
+            // Concrete(TypeId) / Generic(TypeParamId)
+            read_varint(state)?;
+        }
+        0x02 => {
+            // Instantiated { base, args }
+            read_varint(state)?;
+            let n = read_varint(state)?;
+            for _ in 0..n {
+                skip_type_ref(state)?;
+            }
+        }
+        0x03 | 0x08 => {
+            // Function / Rank2Function { [type_param_count,] params, return, contexts }
+            if tag == 0x08 {
+                read_varint(state)?; // type_param_count
+            }
+            let np = read_varint(state)?;
+            for _ in 0..np {
+                skip_type_ref(state)?;
+            }
+            skip_type_ref(state)?; // return type
+            let nc = read_varint(state)?;
+            for _ in 0..nc {
+                read_varint(state)?; // context ids
+            }
+        }
+        0x04 => {
+            // Reference { inner, mutability, tier }
+            skip_type_ref(state)?;
+            read_u8(state)?; // mutability
+            read_u8(state)?; // tier
+        }
+        0x05 => {
+            // Tuple(elems)
+            let n = read_varint(state)?;
+            for _ in 0..n {
+                skip_type_ref(state)?;
+            }
+        }
+        0x06 => {
+            // Array { element, length }
+            skip_type_ref(state)?;
+            read_varint(state)?;
+        }
+        0x07 => {
+            // Slice(inner)
+            skip_type_ref(state)?;
+        }
+        0x09 => {
+            // AssociatedProjection { base, assoc }
+            skip_type_ref(state)?;
+            let len = read_varint(state)? as usize;
+            for _ in 0..len {
+                read_u8(state)?;
+            }
+        }
+        other => {
+            return Err(InterpreterError::InvalidBytecode {
+                pc: state.pc() as usize,
+                message: format!("invalid TypeRef tag {} in CallG type args", other),
+            });
+        }
+    }
+    Ok(())
+}
+
 // ============================================================================
 // Tensor Register Helpers
 // ============================================================================

@@ -557,11 +557,12 @@ pub(in super::super) fn handle_call_generic(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let func_id = FunctionId(read_varint(state)? as u32);
-    // Read type_args as reg_vec: varint(count) + reg * count
-    // Type args are not used at runtime (monomorphization) but must be consumed from bytecode.
+    // Read type_args as a TypeRef vector: varint(count) + TypeRef * count.
+    // Type args are static (used only by AOT monomorphization); the
+    // interpreter dispatches dynamically and just skips past them.
     let type_args_count = read_varint(state)? as usize;
     for _ in 0..type_args_count {
-        let _type_arg = read_reg(state)?;
+        super::bytecode_io::skip_type_ref(state)?;
     }
     let args = read_reg_range(state)?;
 
