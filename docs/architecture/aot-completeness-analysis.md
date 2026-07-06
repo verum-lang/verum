@@ -50,17 +50,31 @@ them.
   `hiXYZ`, long append no longer crashes, `ptr_offset(list_int, 2)`
   still reads element 2 (stride 8 preserved), text/text interp failing
   set byte-identical to baseline (0 regression).
-* **1b — nested `&mut self` writeback — OPEN.** An **empty**
-  `Text.new()` (null buffer) + `push_str` still SIGBUSes: `push_str`
-  writes its own `self.len` (persists) but the reallocated `self.ptr`
-  set two frames deep (`push_str` → `self.reserve` → `self.grow`) does
-  NOT reach the caller — a later `as_str` reads the stale null pointer.
-  `s.reserve(8)` called DIRECTLY persists, so the loss is specific to
-  the nested `self.method()` receiver-passing (grow's writeback at call
-  depth ≥3). This is the true "&mut self writeback" defect, now scoped
-  to the nested-self case. Baseline crashes identically — pre-existing,
-  NOT introduced by 1a. It blocks build-from-scratch (Formatter/parser
-  starting from `Text.new()`), so it is the remaining #1-lever work.
+* **1b — grow-from-empty derived-view length garbage — OPEN.** An
+  **empty** `Text.new()` (null buffer) + `push_str` then `as_str`
+  SIGBUSes. Deep diagnosis (do NOT trust the first-order "null ptr"
+  reading — it is wrong):
+  - The Text FIELDS are all correct after the append: `s.len()` == 1,
+    `s.capacity()` == 16, and the buffer content is right — reading
+    `s.as_bytes()[0]` yields 81 (`'Q'`), which proves `self.ptr`@0 is a
+    valid pointer to the grown buffer. So grow's `&mut self` writeback
+    (ptr@0 / cap@16) and push_str's len@8 all persist correctly. The
+    earlier "nested-writeback / offset-0-lost" theories are DISPROVEN.
+  - The fault is in the DERIVED views: `s.as_bytes().len()` returns
+    garbage (e.g. 4385112096) even though `s.len()` == 1, and `as_str`
+    (which builds the same view) then reads that bogus length → OOB →
+    SIGBUS. `s.as_bytes()[0]` still returns the right byte because
+    indexing uses the (valid) base pointer, not the (garbage) length.
+  So `as_str`/`as_bytes` compute a byte-view length that is correct for
+  a heap-backed Text but garbage specifically for a Text whose buffer
+  was grown from the `Text.new()` null-buffer state — a length-source
+  (byte_len helper / view struct) that reads the wrong slot for that
+  post-grow layout, NOT a pointer-writeback bug. Next step: dump the
+  `as_bytes`/`verum_text_get_ptr` view construction and compare the
+  length source for a `Text.new()`-grown buffer vs a `"".to_text()`
+  buffer (the latter works). Baseline crashes identically (pre-existing,
+  NOT introduced by 1a). Blocks build-from-scratch (Formatter/parser
+  from `Text.new()`), so it is the remaining #1-lever work.
 
 **Symptom (original, confirmed with reproducers):**
 
