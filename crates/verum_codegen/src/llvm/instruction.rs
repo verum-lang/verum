@@ -13150,10 +13150,26 @@ fn lower_call_method<'ctx>(
                 ctx.mark_text_register(dst.0);
                 return Ok(());
             }
-            "push" if args.count == 1 => {
+            "push" if args.count == 1
+                && !ctx.is_text_register(receiver.0)
+                && !ctx.is_string_register(receiver.0)
+                && ctx
+                    .get_refmut_source(receiver.0)
+                    .map(|src| !ctx.is_text_register(src) && !ctx.is_string_register(src))
+                    .unwrap_or(true) =>
+            {
                 // Push: route to C runtime lower_list_push (in-place mutation).
                 // Compiled list.vr push uses &mut self ABI which creates a copy
                 // for map-retrieved lists, so intercept here instead.
+                //
+                // TEXT-AOT-CHARS-PUSH-1 leg 2: the guard above excludes
+                // TEXT receivers (directly marked or through the RefMut
+                // chain). This bare-name intercept caught `Text.push(Char)`
+                // too and wrote list-layout fields (len@24, backing@40)
+                // into the flat Text struct {ptr@0, len@8, cap@16} — every
+                // AOT `Text.push` silently corrupted/no-op'd (builder
+                // pattern produced empty output). Text receivers now fall
+                // through to the compiled `Text.push` stdlib body.
                 let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
                 let push_val = ctx.get_register(args.start.0)?;
                 let runtime = RuntimeLowering::new(ctx.llvm_context());
@@ -27468,6 +27484,93 @@ fn lower_get_element<'ctx>(
         return Ok(());
     }
 
+    // PACK-HEADER-STAMP-1: a slice that crossed a function boundary as
+    // a `&[Byte]` PARAM (or was read back from a record field) carries
+    // no compile-time slice mark — it lands here on the list/unmarked
+    // path and the Pack object itself was treated as the element
+    // array: `utf8_decode_char_len(self.bytes, pos)` inside
+    // `Chars.next` read the pack header/ptr words as "elements" and
+    // NULL-deref'd, killing every AOT text iterator
+    // (TEXT-AOT-CHARS-PUSH-1). `lower_pack` stamps TUPLE (521) into
+    // the zeroed object header, so branch on the stamp at runtime:
+    // pack → byte-stride read through the stored data ptr (@24);
+    // anything else → the pre-existing i64-stride read.
+    let i8_type = ctx.types().i8_type();
+    let i32_type = ctx.types().context().i32_type();
+    let ptr_type = ctx.types().ptr_type();
+    let cur_bb = ctx
+        .builder()
+        .get_insert_block()
+        .or_internal("lower_get_element: no insert block")?;
+    let func = cur_bb
+        .get_parent()
+        .or_internal("lower_get_element: block has no parent")?;
+    let llvm_ctx = ctx.llvm_context();
+    let bb_pack = llvm_ctx.append_basic_block(func, "gete_pack");
+    let bb_orig = llvm_ctx.append_basic_block(func, "gete_orig");
+    let bb_merge = llvm_ctx.append_basic_block(func, "gete_merge");
+
+    let tid = ctx
+        .builder()
+        .build_load(i32_type, arr_ptr, "gete_hdr_tid")
+        .or_llvm_err()?
+        .into_int_value();
+    let is_pack = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::EQ,
+            tid,
+            i32_type.const_int(521, false),
+            "gete_is_pack",
+        )
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(is_pack, bb_pack, bb_orig)
+        .or_llvm_err()?;
+
+    // bb_pack: byte-stride read through the Pack's data ptr (field 0 @24).
+    ctx.builder().position_at_end(bb_pack);
+    // SAFETY: GEP into the Pack object to read the backing data pointer at offset 24 (past the 24-byte header)
+    let pk_ptr_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(
+                i8_type,
+                arr_ptr,
+                &[i64_type.const_int(24, false)],
+                "gete_pk_ptr_slot",
+            )
+            .or_llvm_err()?
+    };
+    let pk_data_int = ctx
+        .builder()
+        .build_load(i64_type, pk_ptr_slot, "gete_pk_data_int")
+        .or_llvm_err()?
+        .into_int_value();
+    let pk_data = ctx
+        .builder()
+        .build_int_to_ptr(pk_data_int, ptr_type, "gete_pk_data")
+        .or_llvm_err()?;
+    // SAFETY: GEP into the slice backing data to access a byte at the given index
+    let pk_byte_ptr = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(i8_type, pk_data, &[index], "gete_pk_byte_ptr")
+            .or_llvm_err()?
+    };
+    let pk_byte = ctx
+        .builder()
+        .build_load(i8_type, pk_byte_ptr, "gete_pk_byte")
+        .or_llvm_err()?
+        .into_int_value();
+    let pk_elem = ctx
+        .builder()
+        .build_int_z_extend(pk_byte, i64_type, "gete_pk_zext")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_unconditional_branch(bb_merge)
+        .or_llvm_err()?;
+
+    // bb_orig: the pre-existing i64-stride element read.
+    ctx.builder().position_at_end(bb_orig);
     // GEP into the element array (elements are i64)
     // SAFETY: GEP into list data array to access an element; the index is validated against the list length before access
     let elem_ptr = unsafe {
@@ -27475,17 +27578,37 @@ fn lower_get_element<'ctx>(
             .build_in_bounds_gep(i64_type, data_ptr, &[index], "elem_ptr")
             .or_llvm_err()?
     };
-
-    let element = ctx
+    let orig_elem = ctx
         .builder()
         .build_load(i64_type, elem_ptr, "elem_load")
+        .or_llvm_err()?
+        .into_int_value();
+    ctx.builder()
+        .build_unconditional_branch(bb_merge)
         .or_llvm_err()?;
+
+    // bb_merge: phi the element value.
+    ctx.builder().position_at_end(bb_merge);
+    let elem_phi = ctx
+        .builder()
+        .build_phi(i64_type, "gete_elem")
+        .or_llvm_err()?;
+    elem_phi.add_incoming(&[(&pk_elem, bb_pack), (&orig_elem, bb_orig)]);
+    let element = elem_phi.as_basic_value();
 
     ctx.set_register(dst.0, element);
     // Save element pointer for Ref — enables references into heap-allocated
     // backing arrays that survive function returns (unlike stack allocas).
+    // Re-emit the GEP in the merge block so the stored value dominates any
+    // later consumer blocks (bb_orig's copy would not).
     if is_list {
-        ctx.set_gete_element_ptr(dst.0, elem_ptr);
+        // SAFETY: address computation only (no load); same bounds reasoning as the bb_orig GEP.
+        let elem_ptr_merge = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i64_type, data_ptr, &[index], "elem_ptr_m")
+                .or_llvm_err()?
+        };
+        ctx.set_gete_element_ptr(dst.0, elem_ptr_merge);
     }
     // Propagate string tracking: if this list contains strings, mark the element
     if ctx.is_string_list_register(arr.0) {
@@ -27610,11 +27733,48 @@ fn lower_len<'ctx>(
     // This bypasses register tracking which is unreliable after function calls.
     match type_hint {
         1 => {
-            // List: NewG layout, len at LIST_LEN_OFFSET (32)
+            // List hint — but the hint LIES for slice values that
+            // reached this register through provenance the compile-time
+            // slice mark cannot follow (record FIELDS: `Chars { bytes:
+            // s.as_bytes(), pos: 0 }` → `self.bytes.len()` inside
+            // `Chars.next`; params; returns). A slice is a Pack
+            // `{ptr@24, len@32}`, so reading LIST_LEN_OFFSET (24, the
+            // list's len slot) returns the PACK'S PTR as the "length"
+            // (garbage like 4309396287) — Chars/ByteIter/CharIndices
+            // then iterate zero times and the whole AOT text-iteration
+            // family collapses (TEXT-AOT-CHARS-PUSH-1 leg 1).
+            //
+            // Discriminate at RUNTIME by the object header's type_id
+            // (u32 at offset 0 of the #[repr(C, align(8))]
+            // ObjectHeader). AOT allocations historically left the
+            // header UNSTAMPED (lists zero it, lower_pack didn't init
+            // it at all), so the check is deliberately one-sided:
+            // `lower_pack` now stamps TUPLE (521) — ONLY that stamp
+            // diverts to the Pack len slot (@32); every other tid
+            // (0 = zeroed AOT list, 512/527 = interp-style ids, or
+            // legacy noise) takes the pre-existing list read (@24), so
+            // real lists behave exactly as before this fix.
             let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "list_ptr")?;
             let i8_type = ctx.types().i8_type();
-            // SAFETY: GEP into the List object (NewG layout) to read the length at LIST_LEN_OFFSET (32)
-            let len_slot = unsafe {
+            let i32_type = ctx.types().context().i32_type();
+            let tid = ctx
+                .builder()
+                .build_load(i32_type, arr_ptr, "len_hdr_tid")
+                .or_llvm_err()?
+                .into_int_value();
+            let is_pack = ctx
+                .builder()
+                .build_int_compare(
+                    IntPredicate::EQ,
+                    tid,
+                    i32_type.const_int(521, false),
+                    "len_is_pack",
+                )
+                .or_llvm_err()?;
+            // SAFETY: GEP into the object to read either the list len
+            // slot (24) or the Pack len slot (32); both are within the
+            // smallest valid allocation for either shape.
+            let list_len_slot = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(
                         i8_type,
@@ -27624,9 +27784,32 @@ fn lower_len<'ctx>(
                     )
                     .or_llvm_err()?
             };
+            let pack_len_slot = unsafe {
+                ctx.builder()
+                    .build_in_bounds_gep(
+                        i8_type,
+                        arr_ptr,
+                        &[i64_type.const_int(
+                            super::runtime::RuntimeLowering::OBJECT_HEADER_SIZE + 8,
+                            false,
+                        )],
+                        "pack_len_slot",
+                    )
+                    .or_llvm_err()?
+            };
+            let list_len = ctx
+                .builder()
+                .build_load(i64_type, list_len_slot, "list_len")
+                .or_llvm_err()?
+                .into_int_value();
+            let pack_len = ctx
+                .builder()
+                .build_load(i64_type, pack_len_slot, "pack_len")
+                .or_llvm_err()?
+                .into_int_value();
             let len = ctx
                 .builder()
-                .build_load(i64_type, len_slot, "list_len")
+                .build_select(is_pack, pack_len, list_len, "len_sel")
                 .or_llvm_err()?;
             ctx.set_register(dst.0, len);
             return Ok(());
@@ -27786,9 +27969,33 @@ fn lower_len<'ctx>(
     // Also check flow-sensitive override for registers reused between List and Text.
     let vbc_idx = ctx.current_vbc_instr_idx();
     if ctx.is_list_register(arr.0) || ctx.is_len_list_override(vbc_idx) {
+        // PACK-HEADER-STAMP-1: `&[Byte]`-typed record fields get the
+        // LIST register mark (byte-collection family), but the VALUE is
+        // a slice Pack {ptr@24, len@32} produced by as_bytes — reading
+        // LIST_LEN_OFFSET returned the Pack's PTR word as the "length"
+        // (ASLR-floating garbage) for `Chars { bytes: s.as_bytes() }` →
+        // `self.bytes.len()`. `lower_pack` stamps TUPLE (521) into the
+        // zeroed header, so select the Pack len slot at runtime when
+        // the stamp matches; every other tid keeps the pre-existing
+        // list read.
         let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
         let i8_type = ctx.types().i8_type();
-        // SAFETY: GEP into the List object (NewG layout) to read the length at LIST_LEN_OFFSET (32) — register tracking fallback path
+        let i32_type = ctx.types().context().i32_type();
+        let tid = ctx
+            .builder()
+            .build_load(i32_type, arr_ptr, "len_hdr_tid")
+            .or_llvm_err()?
+            .into_int_value();
+        let is_pack = ctx
+            .builder()
+            .build_int_compare(
+                IntPredicate::EQ,
+                tid,
+                i32_type.const_int(521, false),
+                "len_is_pack",
+            )
+            .or_llvm_err()?;
+        // SAFETY: GEP into the object to read either the list len slot or the Pack len slot (32); both in-bounds for either shape.
         let len_slot = unsafe {
             ctx.builder()
                 .build_in_bounds_gep(
@@ -27799,9 +28006,29 @@ fn lower_len<'ctx>(
                 )
                 .or_llvm_err()?
         };
-        let len = ctx
+        let pack_len_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(
+                    i8_type,
+                    arr_ptr,
+                    &[i64_type.const_int(32, false)],
+                    "pack_len_slot",
+                )
+                .or_llvm_err()?
+        };
+        let list_len = ctx
             .builder()
             .build_load(i64_type, len_slot, "arr_len")
+            .or_llvm_err()?
+            .into_int_value();
+        let pack_len = ctx
+            .builder()
+            .build_load(i64_type, pack_len_slot, "pack_len")
+            .or_llvm_err()?
+            .into_int_value();
+        let len = ctx
+            .builder()
+            .build_select(is_pack, pack_len, list_len, "len_sel")
             .or_llvm_err()?;
         ctx.set_register(dst.0, len);
         return Ok(());
