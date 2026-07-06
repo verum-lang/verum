@@ -385,24 +385,16 @@ impl TypeChecker {
                 // Exhaustiveness check (check_expr path)
                 // Only for variant/bool types without guards to avoid false positives
                 let applied_scrut_chk = self.unifier.apply(&scrutinee_ty);
-                // Resolve named types to their underlying definition
-                let resolved_scrut = match &applied_scrut_chk {
-                    Type::Named { path, .. } => {
-                        let name = path
-                            .segments
-                            .last()
-                            .and_then(|s| match s {
-                                verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
-                                _ => None,
-                            })
-                            .unwrap_or("");
-                        self.ctx
-                            .lookup_type(name)
-                            .cloned()
-                            .unwrap_or(applied_scrut_chk.clone())
-                    }
-                    _ => applied_scrut_chk.clone(),
-                };
+                // Expand the scrutinee to its variant form, SUBSTITUTING the
+                // concrete type arguments.  The pre-fix code used a bare
+                // `lookup_type(name)` which returns the type's raw variant with
+                // UNSUBSTITUTED payload vars (`Poll`'s `Ready(T)`), so a match
+                // like `match y.poll(cx) { Poll.Ready(()) => .. }` over
+                // `Poll<Unit>` saw `Ready(Var)` and reported `Ready(_)` not
+                // covered.  `expand_generic_to_variant` substitutes the args
+                // (`Ready(Unit)`), so the `()` pattern is recognised as
+                // exhaustive; non-variant types pass through unchanged.
+                let resolved_scrut = self.expand_generic_to_variant(&applied_scrut_chk);
                 let should_check = matches!(&resolved_scrut, Type::Variant(_) | Type::Bool);
                 let has_guards = arms.iter().any(|arm| arm.guard.is_some());
                 // Check if patterns contain complex forms the exhaustiveness checker can't handle
@@ -4555,24 +4547,11 @@ impl TypeChecker {
                     // Only check for types with finite constructors (Variant, Bool)
                     // to avoid false positives with Int/Float/Text and guarded patterns.
                     let applied_scrut = self.unifier.apply(&scrut_ty);
-                    // Resolve named types to their underlying definition for exhaustiveness checking
-                    let resolved_scrut = match &applied_scrut {
-                        Type::Named { path, .. } => {
-                            let name = path
-                                .segments
-                                .last()
-                                .and_then(|s| match s {
-                                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
-                                    _ => None,
-                                })
-                                .unwrap_or("");
-                            self.ctx
-                                .lookup_type(name)
-                                .cloned()
-                                .unwrap_or(applied_scrut.clone())
-                        }
-                        _ => applied_scrut.clone(),
-                    };
+                    // Expand to the variant form WITH type-argument substitution
+                    // (see the check_expr path above): a bare `lookup_type` would
+                    // leave `Poll`'s `Ready(T)` payload unsubstituted, breaking
+                    // `Poll.Ready(())` exhaustiveness over `Poll<Unit>`.
+                    let resolved_scrut = self.expand_generic_to_variant(&applied_scrut);
                     let should_check_exhaustiveness =
                         matches!(&resolved_scrut, Type::Variant(_) | Type::Bool);
                     // Don't check if any arm has a guard (guards make analysis imprecise)
