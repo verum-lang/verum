@@ -3501,6 +3501,30 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
         }
 
+        // FUNC-REGISTRY-QUALIFICATION-1: apply VBC-side register→owner-type
+        // hints (the for-loop `__for_iter` custom-iterator temp). The reg_types
+        // fixpoint above has no CallM arm, so a method-call result flowing into
+        // a for-loop is untyped; without this the bare `next` CallM would
+        // collide with every `Type.next` in the module and resolve to nil.
+        // Setting `CustomIterator` makes `ctx.reg_types().type_name(reg)` return
+        // the iterator type so the existing owner-equality in
+        // `lower_call_method` resolves the right `<IterType>.next`.  Applied
+        // AFTER inference so the VBC-known type is authoritative.  Only the
+        // registers VBC explicitly hinted are typed (never the stdlib's generic
+        // dispatch sites), which is the anti-over-fire invariant.
+        for hint in &vbc_func.descriptor.register_type_hints {
+            if let Some(type_name) = vbc_module.strings.get(hint.type_name) {
+                if !type_name.is_empty() {
+                    ctx.reg_types_mut().set(
+                        hint.register,
+                        super::register_types::RegisterType::CustomIterator {
+                            type_name: type_name.to_string(),
+                        },
+                    );
+                }
+            }
+        }
+
         // Pre-scan: mark registers used as BinaryF/UnaryF/CmpF operands as float.
         // This ensures GetVariantData-extracted float fields are known before ToString.
         // Also propagate through Mov chains so that source registers of float operands are marked.

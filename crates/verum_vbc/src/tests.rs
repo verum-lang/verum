@@ -280,6 +280,7 @@ fn test_roundtrip_function_descriptor() {
         is_gpu_only: false,
         intrinsic_name: None,
         is_const: false,
+        register_type_hints: Vec::new(),
     };
 
     // Add some dummy bytecode
@@ -339,6 +340,7 @@ fn intrinsic_name_marker_survives_round_trip() {
         is_gpu_only: false,
         intrinsic_name: Some(iname),
         is_const: true,
+        register_type_hints: Vec::new(),
     });
     module.header.function_table_count = 1;
 

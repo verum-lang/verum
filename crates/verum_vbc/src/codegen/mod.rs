@@ -7592,6 +7592,11 @@ impl VbcCodegen {
             Vec::new()
         };
 
+        // FUNC-REGISTRY-QUALIFICATION-1: collect register→owner-type hints
+        // BEFORE end_function() clears register state. Unconditional (unlike
+        // debug_vars) — these carry dispatch correctness, not debug info.
+        let type_hints = self.ctx.collect_register_type_hints();
+
         let (instructions, register_count) = self.ctx.end_function();
 
         // Promote the descriptor's stored name to the FULL source-
@@ -7674,6 +7679,28 @@ impl VbcCodegen {
                         is_parameter: is_param,
                         arg_index: arg_idx,
                     }
+                })
+                .collect();
+        }
+
+        // FUNC-REGISTRY-QUALIFICATION-1: flush register→owner-type hints into
+        // the descriptor (shipped in the archive, consumed by the AOT
+        // reg_types pass). VERUM_TRACE_TYPE_HINTS reports the per-function
+        // count — the anti-B1 invariant is that this stays O(for-loops over
+        // custom iterators), i.e. tens across a whole compile, not thousands.
+        if !type_hints.is_empty() {
+            if std::env::var("VERUM_TRACE_TYPE_HINTS").is_ok() {
+                eprintln!(
+                    "[type-hints] fn={} count={}",
+                    descriptor_name,
+                    type_hints.len()
+                );
+            }
+            descriptor.register_type_hints = type_hints
+                .into_iter()
+                .map(|(register, tn)| crate::module::RegisterTypeHint {
+                    register,
+                    type_name: StringId(self.intern_string(&tn)),
                 })
                 .collect();
         }

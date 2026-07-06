@@ -1,0 +1,14 @@
+fn main() {
+    let s = Text.from("ABC");
+    let mut it = s.chars();
+    let mut n1 = 0;
+    while it.next() is Maybe.Some {
+        n1 = n1 + 1;
+    }
+    print(f"while-let n1={n1}");
+    let mut n2 = 0;
+    for ch in s.chars() {
+        n2 = n2 + 1;
+    }
+    print(f"for n2={n2}");
+}

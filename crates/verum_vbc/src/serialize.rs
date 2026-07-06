@@ -614,6 +614,18 @@ impl Serializer {
         // `FunctionDescriptor::is_const`.
         self.output.push(desc.is_const as u8);
 
+        // v2.2 — FUNC-REGISTRY-QUALIFICATION-1: trailing register→owner-type
+        // hints (AOT-only; the interpreter never reads them).  Unlike the
+        // fixed is_const/intrinsic_name trailing bytes, this is VARIABLE
+        // length, so the reader gates it on format minor >= 2 rather than the
+        // `offset < data.len()` heuristic.  Every v2.2 descriptor writes the
+        // count (0 when there are no hints).
+        encode_varint(desc.register_type_hints.len() as u64, &mut self.output);
+        for hint in &desc.register_type_hints {
+            encode_u16(hint.register, &mut self.output);
+            encode_u32(hint.type_name.0, &mut self.output);
+        }
+
         Ok(())
     }
 

@@ -1285,6 +1285,18 @@ pub struct FunctionDescriptor {
     /// fits the inline path.
     #[serde(default)]
     pub is_const: bool,
+
+    /// AOT-only register→owner-type hints for method dispatch.
+    ///
+    /// Populated by VBC codegen ONLY where the receiver's static type is
+    /// known but not recoverable from the bytecode alone (e.g. the for-loop
+    /// `__for_iter` temp holding a custom iterator). The AOT `reg_types`
+    /// pre-pass consumes these to type the register so owner-qualified
+    /// method resolution succeeds; the interpreter ignores them entirely
+    /// (it dispatches on the runtime object header). Empty for functions
+    /// with no such hints. Serialized only at VBC format minor >= 2.
+    #[serde(default)]
+    pub register_type_hints: Vec<RegisterTypeHint>,
 }
 
 /// Debug information for a local variable or parameter.
@@ -1306,6 +1318,20 @@ pub struct DebugVariableInfo {
     pub is_parameter: bool,
     /// For parameters: 1-based argument index. 0 for locals.
     pub arg_index: u16,
+}
+
+/// AOT-only register→owner-type hint (FUNC-REGISTRY-QUALIFICATION-1 phase 1).
+///
+/// Records that VBC codegen statically knew `register` holds a value of type
+/// `type_name`, for a site where the bytecode alone doesn't recover it (the
+/// for-loop custom-iterator temp). Consumed only by the AOT `reg_types` pass
+/// to type the register; the interpreter never reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegisterTypeHint {
+    /// Register index whose owner type is being hinted.
+    pub register: u16,
+    /// Owner type name (index into string table).
+    pub type_name: StringId,
 }
 
 impl Default for FunctionDescriptor {
@@ -1339,6 +1365,7 @@ impl Default for FunctionDescriptor {
             is_gpu_only: false,
             intrinsic_name: None,
             is_const: false,
+            register_type_hints: Vec::new(),
         }
     }
 }
@@ -2412,6 +2439,7 @@ mod precompile_extension_tests {
             is_gpu_only: false,
             intrinsic_name: None,
             is_const: false,
+            register_type_hints: Vec::new(),
         };
         // Backwards-compat field is filled with the existing layout.
         let _ = &mut desc;
@@ -2463,6 +2491,7 @@ mod precompile_extension_tests {
             is_gpu_only: false,
             intrinsic_name: None,
             is_const: false,
+            register_type_hints: Vec::new(),
         };
         m.functions.push(desc);
 
