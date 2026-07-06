@@ -24681,8 +24681,12 @@ impl VbcCodegen {
             }
         }
 
-        // Emit instructions based on codegen strategy
-        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest)?;
+        // Emit instructions based on codegen strategy.  For `@intrinsic`
+        // form args[0] is the name literal and args[1] (when present) is
+        // the pointer operand — used to pick the ptr-arithmetic stride.
+        let ptr_elem_stride =
+            self.ptr_intrinsic_byte_stride(intrinsic_name, args.iter().nth(1));
+        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride)?;
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -24805,8 +24809,11 @@ impl VbcCodegen {
             }
         }
 
-        // Emit instructions based on codegen strategy
-        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest)?;
+        // Emit instructions based on codegen strategy.  args[1] (when
+        // present) is the pointer operand for a ptr-arithmetic intrinsic.
+        let ptr_elem_stride =
+            self.ptr_intrinsic_byte_stride(intrinsic_name.as_str(), args.iter().nth(1));
+        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride)?;
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -25006,8 +25013,12 @@ impl VbcCodegen {
             }
         }
 
-        // Emit instructions based on codegen strategy
-        self.emit_intrinsic_instructions(info, &arg_regs, dest)?;
+        // Emit instructions based on codegen strategy.  For an imported
+        // intrinsic call args[0] IS the pointer operand (no name literal),
+        // so it drives the ptr-arithmetic stride selection.
+        let ptr_elem_stride =
+            self.ptr_intrinsic_byte_stride(info.intrinsic.name, args.first());
+        self.emit_intrinsic_instructions(info, &arg_regs, dest, ptr_elem_stride)?;
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -25017,12 +25028,79 @@ impl VbcCodegen {
         Ok(Some(dest))
     }
 
+    /// Element stride (bytes) for a pointer-arithmetic intrinsic call.
+    ///
+    /// `ptr_offset<T>(ptr, count)` advances by `count * sizeof(T)`.  The
+    /// VBC value model type-erases to 8-byte NaN-boxed `Value` slots, so
+    /// the default `FfiExtended 0x63` (PtrAdd) lowering scales by 8 —
+    /// correct for pointers INTO `Value` arrays (List / slice backing),
+    /// but 8× too far for a **byte buffer** (`Text.ptr: &unsafe Byte`).
+    /// Under AOT that mis-scaling made `Text.push_str`'s append land off
+    /// the buffer (content silently lost on short buffers, OOB SIGBUS on
+    /// long ones) — the `ptr_offset` root cause of DISP-EMPTY-AOT /
+    /// PARSE-AOT.  The interpreter is unaffected because it intercepts
+    /// the Text mutation methods natively.
+    ///
+    /// Returns `1` ONLY when the pointer operand's pointee is provably a
+    /// 1-byte scalar; every other case (including any inference miss)
+    /// falls back to `8`, so a wrong guess can never corrupt a `Value`-
+    /// array pointer — it can only leave a byte pointer on the old
+    /// (already-broken-under-AOT) path.  The `&unsafe `/`*mut `/`*const `
+    /// carrier prefix is preserved by `extract_type_name_from_ast`
+    /// precisely so raw-pointer dispatch can key on it here.
+    fn ptr_intrinsic_byte_stride(&self, intrinsic_name: &str, ptr_arg: Option<&Expr>) -> u8 {
+        const DEFAULT_STRIDE: u8 = 8;
+        let is_ptr_arith = matches!(
+            intrinsic_name,
+            "ptr_offset"
+                | "ptr_offset_mut"
+                | "intrinsic_ptr_offset"
+                | "ptr_add"
+                | "ptr_sub"
+        );
+        if !is_ptr_arith {
+            return DEFAULT_STRIDE;
+        }
+        let Some(arg) = ptr_arg else {
+            return DEFAULT_STRIDE;
+        };
+        let Some(type_name) = self
+            .infer_expr_type_name(arg)
+            .or_else(|| self.extract_expr_type_name(arg))
+        else {
+            return DEFAULT_STRIDE;
+        };
+        // Only an UNSAFE-REFERENCE to a 1-byte scalar (`&unsafe Byte` —
+        // the `Text.ptr` raw-byte-buffer idiom, preserved verbatim by
+        // `extract_type_name_from_ast`) is a genuine packed byte buffer
+        // with stride 1.  A `*const`/`*mut` byte pointer, or a
+        // `List<Byte>` / `[Byte; N]` backing exposed via `as_ptr`, is an
+        // 8-byte NaN-boxed `Value` array despite its `Byte` element
+        // type, so it MUST stay on the ×8 path.  Requiring the exact
+        // `&unsafe ` spelling guarantees no false positive can mis-scale
+        // a Value pointer (which would corrupt List/slice raw-ptr walks
+        // — the one regression this fix must never introduce).
+        let pointee = match type_name.trim().strip_prefix("&unsafe ") {
+            Some(rest) => rest.trim(),
+            None => return DEFAULT_STRIDE,
+        };
+        match pointee {
+            "Byte" | "U8" | "UInt8" | "I8" | "Int8" => 1,
+            _ => DEFAULT_STRIDE,
+        }
+    }
+
     /// Emits VBC instructions for an intrinsic based on its codegen strategy.
+    ///
+    /// `ptr_elem_stride` is the byte stride for a pointer-arithmetic
+    /// intrinsic (see [`Self::ptr_intrinsic_byte_stride`]); callers that
+    /// do not resolve a pointer operand pass the default `8`.
     fn emit_intrinsic_instructions(
         &mut self,
         info: &IntrinsicInfo,
         args: &[Reg],
         dest: Reg,
+        ptr_elem_stride: u8,
     ) -> CodegenResult<()> {
         use crate::intrinsics::registry::{CodegenStrategy, IntrinsicCategory, IntrinsicHint};
 
@@ -25088,7 +25166,12 @@ impl VbcCodegen {
                 self.emit_intrinsic_opcode_with_size(*opcode, *size, args, dest);
             }
             CodegenStrategy::InlineSequence(seq_id) => {
-                self.emit_intrinsic_inline_sequence(*seq_id, args, dest, 8)?;
+                // `ptr_elem_stride` is 8 for every non-pointer intrinsic
+                // (the historical default) and only differs (→1) for a
+                // byte-buffer `ptr_offset`/`ptr_add`/`ptr_sub`, whose
+                // seq_id is PtrOffset/PtrSubSeq — so repurposing the
+                // width here is safe: each call carries a single seq_id.
+                self.emit_intrinsic_inline_sequence(*seq_id, args, dest, ptr_elem_stride)?;
             }
             CodegenStrategy::InlineSequenceWithWidth(seq_id, width) => {
                 self.emit_intrinsic_inline_sequence(*seq_id, args, dest, *width)?;
@@ -25766,14 +25849,34 @@ impl VbcCodegen {
             // `checked_add_signed`/`checked_sub`, trapping overflow.
             InlineSequenceId::PtrOffset => {
                 if args.len() >= 2 {
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, dest.0);
-                    Self::write_reg(&mut operands, args[0].0);
-                    Self::write_reg(&mut operands, args[1].0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x63, // PtrAdd
-                        operands,
-                    });
+                    if byte_width == 1 {
+                        // Byte-buffer pointer (`&unsafe Byte` / `*mut U8`):
+                        // `count` is already a byte count, so the target
+                        // address is exactly `ptr + count`.  The default
+                        // 0x63 PtrAdd path scales by the 8-byte Value slot,
+                        // which over-advances a byte buffer 8× (Text append
+                        // landed off-buffer → content loss / SIGBUS under
+                        // AOT).  `BinaryI::Add` is tier-agnostic — interp and
+                        // AOT both compute the raw byte address identically —
+                        // and `&unsafe` pointers are Tier-2 (no CBGR bound
+                        // check to preserve), so bypassing 0x63 is sound.
+                        self.ctx.emit(Instruction::BinaryI {
+                            op: BinaryIntOp::Add,
+                            dst: dest,
+                            a: args[0],
+                            b: args[1],
+                        });
+                        self.ctx.mark_raw_pointer(dest);
+                    } else {
+                        let mut operands = Vec::<u8>::new();
+                        Self::write_reg(&mut operands, dest.0);
+                        Self::write_reg(&mut operands, args[0].0);
+                        Self::write_reg(&mut operands, args[1].0);
+                        self.ctx.emit(Instruction::FfiExtended {
+                            sub_op: 0x63, // PtrAdd (element-scaled ×8)
+                            operands,
+                        });
+                    }
                 } else {
                     self.ctx.emit(Instruction::Mov {
                         dst: dest,
@@ -25786,14 +25889,26 @@ impl VbcCodegen {
             // SystemSubOpcode::PtrSub (0x64) does the checked negative walk.
             InlineSequenceId::PtrSubSeq => {
                 if args.len() >= 2 {
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, dest.0);
-                    Self::write_reg(&mut operands, args[0].0);
-                    Self::write_reg(&mut operands, args[1].0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x64, // PtrSub
-                        operands,
-                    });
+                    if byte_width == 1 {
+                        // Byte-buffer pointer: `ptr - count` bytes directly
+                        // (see the PtrOffset arm for the full rationale).
+                        self.ctx.emit(Instruction::BinaryI {
+                            op: BinaryIntOp::Sub,
+                            dst: dest,
+                            a: args[0],
+                            b: args[1],
+                        });
+                        self.ctx.mark_raw_pointer(dest);
+                    } else {
+                        let mut operands = Vec::<u8>::new();
+                        Self::write_reg(&mut operands, dest.0);
+                        Self::write_reg(&mut operands, args[0].0);
+                        Self::write_reg(&mut operands, args[1].0);
+                        self.ctx.emit(Instruction::FfiExtended {
+                            sub_op: 0x64, // PtrSub (element-scaled ×8)
+                            operands,
+                        });
+                    }
                 } else {
                     self.ctx.emit(Instruction::Mov {
                         dst: dest,
