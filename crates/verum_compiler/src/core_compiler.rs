@@ -674,8 +674,16 @@ impl StdlibModuleResolver {
             let name = entry.file_name().to_string_lossy().to_string();
 
             if path.is_dir() {
-                // Skip hidden directories and __pycache__ etc.
-                if !name.starts_with('.') && !name.starts_with('_') {
+                // Skip hidden directories and __pycache__ etc., and skip
+                // `target/` trees — codegen/test-harness OUTPUT, not
+                // stdlib source.  This walker is the one that feeds
+                // module COMPILATION: sweeping `core/target/test/`
+                // compiled `test_*_merged.vr` harness residue as if it
+                // were stdlib (garbage type context — 355 of the 580
+                // global-intern field fallbacks traced 2026-07-05) and
+                // perturbed the precompile content hash on every test
+                // run.  Twin guards live in `precompile.rs`'s walkers.
+                if !name.starts_with('.') && !name.starts_with('_') && name != "target" {
                     subdirs.push((path, name));
                 }
             } else if path.extension().map_or(false, |e| e == "vr") {
