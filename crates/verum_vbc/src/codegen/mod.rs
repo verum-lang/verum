@@ -16859,6 +16859,20 @@ impl VbcCodegen {
                 descriptor.intrinsic_name = string_id_map.get(codegen_idx).copied();
             }
 
+            // Register-type hints: same codegen-index → module-StringId
+            // remap as descriptor.name/params/intrinsic_name above. The
+            // AOT consume side resolves `hint.type_name` against the
+            // FINAL module's string table; without this remap the id was
+            // a codegen-local index read as a byte offset (None/garbage)
+            // and every hint was dead on arrival.
+            for hint in descriptor.register_type_hints.iter_mut() {
+                let codegen_idx = hint.type_name.0 as usize;
+                hint.type_name = string_id_map
+                    .get(codegen_idx)
+                    .copied()
+                    .unwrap_or(StringId::EMPTY);
+            }
+
             // Store decoded instructions for LLVM lowering (AOT path).
             // The LLVM lowering reads from descriptor.instructions rather than
             // decoding from raw bytecode.
@@ -18398,6 +18412,17 @@ impl VbcCodegen {
             }
             new_desc.return_type =
                 remap_type_ref_archive(&new_desc.return_type, &type_id_remap);
+            // Register-type hints carry a type NAME StringId relative to
+            // the ARCHIVE string table — re-intern like the fn name above
+            // (the consume side resolves against the merged module's
+            // strings; unremapped ids resolved to None and the hint was
+            // silently dead for every archive-loaded fn).
+            for hint in new_desc.register_type_hints.iter_mut() {
+                if let Some(tname) = archive_module.strings.get(hint.type_name) {
+                    let sid = self.ctx.intern_string_raw(tname);
+                    hint.type_name = StringId(sid);
+                }
+            }
             if let Some(parent) = new_desc.parent_type {
                 if let Some(&codegen_parent) = type_id_remap.get(&parent.0) {
                     new_desc.parent_type = Some(crate::types::TypeId(codegen_parent));

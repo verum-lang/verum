@@ -3512,8 +3512,32 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // AFTER inference so the VBC-known type is authoritative.  Only the
         // registers VBC explicitly hinted are typed (never the stdlib's generic
         // dispatch sites), which is the anti-over-fire invariant.
+        if std::env::var("VERUM_TRACE_TYPE_HINTS").is_ok() {
+            let fname = vbc_module
+                .strings
+                .get(vbc_func.descriptor.name)
+                .unwrap_or("?");
+            if fname == "main" {
+                eprintln!(
+                    "[type-hints-consume] fn=main hints_len={}",
+                    vbc_func.descriptor.register_type_hints.len()
+                );
+            }
+        }
         for hint in &vbc_func.descriptor.register_type_hints {
-            if let Some(type_name) = vbc_module.strings.get(hint.type_name) {
+            let resolved = vbc_module.strings.get(hint.type_name);
+            if std::env::var("VERUM_TRACE_TYPE_HINTS").is_ok() {
+                eprintln!(
+                    "[type-hints-consume] fn={} reg={} resolved={:?}",
+                    vbc_module
+                        .strings
+                        .get(vbc_func.descriptor.name)
+                        .unwrap_or("?"),
+                    hint.register,
+                    resolved
+                );
+            }
+            if let Some(type_name) = resolved {
                 if !type_name.is_empty() {
                     ctx.reg_types_mut().set(
                         hint.register,
@@ -3521,6 +3545,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             type_name: type_name.to_string(),
                         },
                     );
+                    // STICKY copy: the flow-sensitive instruction walk
+                    // re-propagates Mov/call results over reg_types and
+                    // clobbered the pre-pass typing before the loop's
+                    // CallM (dispatch saw recv_type=None despite a
+                    // successful consume). The sticky map is never
+                    // touched by the walk; the receiver-type
+                    // computation consults it as Priority-0.
+                    ctx.set_sticky_type_hint(hint.register, type_name.to_string());
                 }
             }
         }

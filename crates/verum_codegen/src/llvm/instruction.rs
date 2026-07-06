@@ -13363,13 +13363,22 @@ fn lower_call_method<'ctx>(
     // all the scattered type detection below.
     // ============================================================
     let receiver_type_name: Option<&str> = {
+        // Priority 0: sticky VBC-authored hint (survives the
+        // flow-sensitive walk that clobbers reg_types via Mov
+        // propagation — FUNC-REGISTRY-QUALIFICATION-1).
+        let from_sticky = ctx.sticky_type_hint(receiver.0);
         // Priority 1: RegisterTypeMap (pre-pass populated)
         let from_reg_types = ctx.reg_types().type_name(receiver.0);
         // Priority 2: VBC method_type_prefix (compile-time resolution)
         let from_prefix = method_type_prefix;
-        // Use RegisterTypeMap if available, otherwise fall back to prefix
-        from_reg_types.or(from_prefix)
+        from_sticky.or(from_reg_types).or(from_prefix)
     };
+    if std::env::var("VERUM_TRACE_NEXT_DISPATCH").is_ok() && method_name_str == "next" {
+        eprintln!(
+            "[next-dispatch] recv_reg={} recv_type={:?} prefix={:?}",
+            receiver.0, receiver_type_name, method_type_prefix
+        );
+    }
 
     // ============================================================
     // Declarative dispatch table lookup.

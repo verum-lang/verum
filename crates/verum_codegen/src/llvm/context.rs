@@ -104,6 +104,8 @@ impl FuncNameIndex {
 /// Manages register values, basic blocks, and statistics for a single
 /// function being lowered.
 pub struct FunctionContext<'a, 'ctx> {
+    /// Sticky VBC-authored type hints (see set_sticky_type_hint).
+    sticky_type_hints: std::collections::HashMap<u16, String>,
     /// LLVM function being built.
     function: FunctionValue<'ctx>,
 
@@ -657,6 +659,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         let cbgr = CbgrLowering::new(context);
 
         Self {
+            sticky_type_hints: std::collections::HashMap::new(),
             function,
             module,
             vbc_module: None,
@@ -757,6 +760,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         let cbgr = CbgrLowering::new(context);
 
         Self {
+            sticky_type_hints: std::collections::HashMap::new(),
             function,
             module,
             vbc_module: Some(vbc_module),
@@ -970,6 +974,20 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     }
 
     /// Get the unified register type map.
+    /// FUNC-REGISTRY-QUALIFICATION-1 sticky hints: VBC-authored
+    /// register→owner-type facts that MUST survive the flow-sensitive
+    /// instruction walk (a `Mov` propagating an untyped src clobbered
+    /// the pre-pass `CustomIterator` typing before the loop's CallM).
+    /// Consulted as Priority-0 by the receiver-type computation; only
+    /// registers VBC explicitly hinted live here (anti-over-fire).
+    pub fn set_sticky_type_hint(&mut self, reg: u16, type_name: String) {
+        self.sticky_type_hints.insert(reg, type_name);
+    }
+
+    pub fn sticky_type_hint(&self, reg: u16) -> Option<&str> {
+        self.sticky_type_hints.get(&reg).map(|s| s.as_str())
+    }
+
     pub fn reg_types(&self) -> &RegisterTypeMap {
         &self.reg_types
     }

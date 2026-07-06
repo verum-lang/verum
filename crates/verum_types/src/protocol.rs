@@ -7475,6 +7475,14 @@ impl ProtocolChecker {
 
         // Get all implementations for this type (no hardcoded fallbacks - pure registration-based)
         let impls = self.get_implementations(ty);
+        if std::env::var("VERUM_TRACE_ASSOC").is_ok() {
+            eprintln!(
+                "[assoc-trace] resolve ::{} for type_key='{}' — {} impl(s) registered",
+                assoc_name,
+                type_key,
+                impls.len()
+            );
+        }
 
         // Two-pass resolution: first try direct (non-blanket) impls for concrete answers,
         // then fall back to blanket impls. This mirrors rustc's trait solver priority.
