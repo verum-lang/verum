@@ -880,6 +880,7 @@ impl<'a> BytecodeSpecializer<'a> {
             TypeRef::Function { .. } => 8,      // function pointer
             TypeRef::Rank2Function { .. } => 8, // function pointer (rank-2 polymorphic)
             TypeRef::Generic(_) => 8,           // Should be substituted by now
+            TypeRef::AssociatedProjection { .. } => 8, // resolved before mono
         }
     }
 
@@ -907,6 +908,7 @@ impl<'a> BytecodeSpecializer<'a> {
             TypeRef::Function { .. } => 8,
             TypeRef::Rank2Function { .. } => 8,
             TypeRef::Generic(_) => 8,
+            TypeRef::AssociatedProjection { .. } => 8, // resolved before mono
         }
     }
 
@@ -1378,6 +1380,13 @@ impl<'a> BytecodeSpecializer<'a> {
                     self.write_type_ref(output, param);
                 }
                 self.write_type_ref(output, return_type);
+            }
+            TypeRef::AssociatedProjection { base, assoc } => {
+                output.push(9); // tag for AssociatedProjection
+                self.write_type_ref(output, base);
+                let bytes = assoc.as_bytes();
+                self.write_varint(output, bytes.len() as u64);
+                output.extend_from_slice(bytes);
             }
         }
     }

@@ -468,6 +468,9 @@ impl VbcModule {
             TypeRef::Slice(inner) => {
                 format!("[{}]", self.display_type_ref(inner))
             }
+            TypeRef::AssociatedProjection { base, assoc } => {
+                format!("{}.{}", self.display_type_ref(base), assoc)
+            }
         }
     }
 

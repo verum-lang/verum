@@ -18,7 +18,11 @@ pub const MAGIC: [u8; 4] = [0x56, 0x42, 0x43, 0x31]; // "VBC1"
 pub const VERSION_MAJOR: u16 = 2;
 
 /// Current minor version of VBC format.
-pub const VERSION_MINOR: u16 = 0;
+/// Version 2.1: additive `TypeRef::AssociatedProjection` variant (0x09 in the
+/// bytecode wire format, 0x0A in the archive wire format) — preserves
+/// associated-type projections (`F.Output`) across serialization.  Additive:
+/// old readers reject the new tag, new readers accept all 2.0 archives.
+pub const VERSION_MINOR: u16 = 1;
 
 /// Size of VBC header in bytes.
 /// 4 (magic) + 2 + 2 (version) + 4 (flags) + 4 (name) +

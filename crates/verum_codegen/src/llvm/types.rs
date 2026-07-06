@@ -81,6 +81,9 @@ impl<'ctx> TypeLowering<'ctx> {
                     .struct_type(&[self.ptr_type.into(), self.i64_type.into()], false);
                 Ok(slice_type.into())
             }
+            TypeRef::AssociatedProjection { .. } => Err(LlvmLoweringError::type_lowering(
+                "Associated-type projections should be resolved before lowering",
+            )),
         }
     }
 

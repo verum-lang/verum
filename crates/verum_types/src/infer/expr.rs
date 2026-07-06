@@ -369,6 +369,11 @@ impl TypeChecker {
                 arms,
             } => {
                 let scrutinee_ty = self.synth_expr(scrutinee)?.ty;
+                // Resolve any associated-type projection in the scrutinee (e.g.
+                // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding and
+                // exhaustiveness see the concrete payload (`Poll<Unit>`).
+                let applied = self.unifier.apply(&scrutinee_ty);
+                let scrutinee_ty = self.resolve_assoc_projections_deep(&applied);
                 for arm in arms.iter() {
                     self.bind_pattern(&arm.pattern, &scrutinee_ty)?;
                     if let Some(ref guard) = arm.guard {
@@ -4440,7 +4445,11 @@ impl TypeChecker {
                     // Do NOT add explicit use_value here - it would cause double-consume errors
                     // since infer_path_expr already calls use_value for Path expressions
                     let scrut_result = self.synth_expr(scrutinee)?;
-                    let scrut_ty = scrut_result.ty;
+                    // Resolve associated-type projections in the scrutinee (e.g.
+                    // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding
+                    // and exhaustiveness see the concrete payload.
+                    let __applied = self.unifier.apply(&scrut_result.ty);
+                    let scrut_ty = self.resolve_assoc_projections_deep(&__applied);
 
                     // Auto-deref scrutinee for match expressions:
                     // When matching &T where T is a variant/generic type, auto-deref to T.
@@ -5669,6 +5678,91 @@ impl TypeChecker {
         }
     }
 
+    /// Recursively resolve associated-type projections (`::Assoc[Base, ..]`,
+    /// encoded as a `Type::Generic` whose name starts with `::`) at ANY depth.
+    ///
+    /// The call-site return-type logic historically resolved only a TOP-LEVEL
+    /// projection (`::Item[ListIter<Int>]` → `&Int`).  A NESTED projection —
+    /// e.g. the `F.Output` in `future_poll_sync<F: Future>() -> Maybe<F.Output>`,
+    /// which after binding `F = ReadyFuture<Text>` is
+    /// `Maybe<::Output[ReadyFuture<Text>]>` — was left unresolved (the top-level
+    /// type is `Maybe`, not `::…`) and defaulted to `Int`.  `contains_type_app`
+    /// does not flag a `::`-projection node, so `normalize_type` never fired for
+    /// it either — this walk is the single place the nested case is driven.
+    /// Stdlib-agnostic: resolution flows through `try_find_associated_type`.
+    fn resolve_assoc_projections_deep(&self, ty: &Type) -> Type {
+        if let Type::Generic { name, args } = ty {
+            if name.as_str().starts_with("::") && !args.is_empty() {
+                let assoc_name = &name.as_str()[2..];
+                let base = self.resolve_assoc_projections_deep(&args[0]);
+                // The projected-over base may be a reference: a `&mut F`
+                // parameter is stored in the descriptor as the bare generic (the
+                // producer strips the reference wrapper), so at the call site the
+                // generic `F` binds to the WHOLE `&mut ReadyFuture<Text>`.
+                // Associated-type resolution is over the pointee, so deref first.
+                let base_deref = match &base {
+                    Type::Reference { inner, .. }
+                    | Type::CheckedReference { inner, .. }
+                    | Type::UnsafeReference { inner, .. } => (**inner).clone(),
+                    other => other.clone(),
+                };
+                let assoc_text: Text = assoc_name.into();
+                let found = self
+                    .protocol_checker
+                    .read()
+                    .try_find_associated_type(&base_deref, &assoc_text);
+                if let Some(resolved) = found {
+                    return self.resolve_assoc_projections_deep(&resolved);
+                }
+            }
+        }
+        match ty {
+            Type::Generic { name, args } => Type::Generic {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|a| self.resolve_assoc_projections_deep(a))
+                    .collect(),
+            },
+            Type::Named { path, args } => Type::Named {
+                path: path.clone(),
+                args: args
+                    .iter()
+                    .map(|a| self.resolve_assoc_projections_deep(a))
+                    .collect(),
+            },
+            Type::Tuple(parts) => Type::Tuple(
+                parts
+                    .iter()
+                    .map(|p| self.resolve_assoc_projections_deep(p))
+                    .collect(),
+            ),
+            Type::Reference { mutable, inner } => Type::Reference {
+                mutable: *mutable,
+                inner: Box::new(self.resolve_assoc_projections_deep(inner)),
+            },
+            Type::CheckedReference { mutable, inner } => Type::CheckedReference {
+                mutable: *mutable,
+                inner: Box::new(self.resolve_assoc_projections_deep(inner)),
+            },
+            Type::UnsafeReference { mutable, inner } => Type::UnsafeReference {
+                mutable: *mutable,
+                inner: Box::new(self.resolve_assoc_projections_deep(inner)),
+            },
+            Type::Future { output } => Type::Future {
+                output: Box::new(self.resolve_assoc_projections_deep(output)),
+            },
+            Type::Array { element, size } => Type::Array {
+                element: Box::new(self.resolve_assoc_projections_deep(element)),
+                size: *size,
+            },
+            Type::Slice { element } => Type::Slice {
+                element: Box::new(self.resolve_assoc_projections_deep(element)),
+            },
+            _ => ty.clone(),
+        }
+    }
+
     fn infer_expr_call(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Call { func, args, type_args } = &expr.kind else { unreachable!() };
@@ -6737,21 +6831,12 @@ impl TypeChecker {
                     resolved_return
                 };
                 // Resolve top-level associated type projections (e.g., ::Item[ListIter<Int>] → &Int)
-                let resolved_return =
-                    if let Type::Generic { name, args } = &resolved_return {
-                        if name.as_str().starts_with("::") && !args.is_empty() {
-                            let assoc_name = &name.as_str()[2..];
-                            let assoc_text: Text = assoc_name.into();
-                            self.protocol_checker
-                                .read()
-                                .try_find_associated_type(&args[0], &assoc_text)
-                                .unwrap_or(resolved_return)
-                        } else {
-                            resolved_return
-                        }
-                    } else {
-                        resolved_return
-                    };
+                // Resolve associated-type projections at ANY depth — a NESTED
+                // projection such as the `Maybe<::Output[ReadyFuture<Text>]>`
+                // return of `future_poll_sync<F: Future>() -> Maybe<F.Output>`
+                // was left unresolved by the old top-level-only check and
+                // defaulted to Int.
+                let resolved_return = self.resolve_assoc_projections_deep(&resolved_return);
                 if self.is_reference_type(&resolved_return) {
                     for arg in args.iter() {
                         // Check if the argument is a &checked reference to a local

@@ -1098,6 +1098,16 @@ fn type_ref_to_text_with_params(
         TypeRef::Reference { inner, .. } => {
             format!("&{}", type_ref_to_text_with_params(inner, type_id_to_name, param_id_to_name))
         }
+        // Associated-type projection `F.Output` → `::Output<F>` (parseable back
+        // into `Type::Generic { name: "::Output", args: [F] }` by
+        // parse_descriptor_type_string).
+        TypeRef::AssociatedProjection { base, assoc } => {
+            format!(
+                "::{}<{}>",
+                assoc,
+                type_ref_to_text_with_params(base, type_id_to_name, param_id_to_name)
+            )
+        }
         _ => "__opaque_typeref".to_string(),
     }
 }

@@ -464,6 +464,9 @@ impl RegisterType {
             TypeRef::Slice(element) => Self::Slice {
                 element: Some(Box::new(Self::from_type_ref(element))),
             },
+
+            // A projection like `F.Output` is generic until monomorphized.
+            TypeRef::AssociatedProjection { .. } => Self::GenericParam,
         }
     }
 

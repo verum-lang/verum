@@ -6024,19 +6024,25 @@ impl TypeChecker {
 
         let to_type =
             |s: &Text| -> Type { crate::infer::helpers::parse_descriptor_type_string(s.as_str()) };
-        let params: List<Type> = fd
-            .params
-            .iter()
-            .enumerate()
-            .filter_map(|(i, p)| {
-                if i == 0 && p.name.as_str() == "self" {
-                    None
-                } else {
-                    Some(to_type(&p.ty))
-                }
-            })
-            .collect();
-        let return_ty = to_type(&fd.return_type);
+        // Parse params AND return under ONE generic-var scope so a param `F`
+        // and a projection `F.Output` in the return share the same TypeVar.
+        let (params, return_ty): (List<Type>, Type) =
+            crate::infer::helpers::with_generic_var_scope(|| {
+                let params: List<Type> = fd
+                    .params
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, p)| {
+                        if i == 0 && p.name.as_str() == "self" {
+                            None
+                        } else {
+                            Some(to_type(&p.ty))
+                        }
+                    })
+                    .collect();
+                let return_ty = to_type(&fd.return_type);
+                (params, return_ty)
+            });
         let fn_ty = Type::function(params, return_ty);
 
         let scheme = {
@@ -10108,6 +10114,15 @@ impl TypeChecker {
         } else {
             return_type.clone()
         };
+        // Resolve the return type through the unifier BEFORE generalization so an
+        // associated-type projection recovered during the body-vs-declared check
+        // survives into the stored scheme (source-driven stdlib path).  For a
+        // generic wrapper like `future_poll_sync<F: Future>() -> Maybe<F.Output>`
+        // the body infers `Maybe<Var>` and the body-vs-declared unify binds that
+        // Var to `::Output[F]`; without applying the substitution the raw
+        // `Maybe<Var>` is re-generalized as an INDEPENDENT param that defaults to
+        // Int at call sites.  Free type-param vars pass through unchanged.
+        let final_return_type = self.unifier.apply(&final_return_type);
 
         // Infer computational properties from function body
         // Computational properties: compile-time tracking of Pure, IO, Async, Fallible, Mutates effects inferred from function bodies — (Pure, IO, Async, Fallible, Mutates)
@@ -12360,6 +12375,24 @@ impl TypeChecker {
         let d = depth + 1;
 
         match ty {
+            // Type variable: metadata-loaded variant payloads carry their
+            // generic params as `Type::Var(tv)` (the source-driven path uses
+            // `Named { "T" }`).  `expand_generic_to_variant` keys those vars into
+            // `param_subst` under `"T{tv.id()}"`.  Without this arm the payload of
+            // a metadata variant like `Maybe`'s `Some(T)` is never substituted, so
+            // `Maybe<Text>` expands to `Some(Var)` — a process-shared var that the
+            // FIRST match poisons (e.g. to Int), breaking every later match over a
+            // different arg (the async future_poll_sync suite: an `Int` test
+            // poisons the shared payload var, then the `Text`/`Bool` tests fail
+            // `expected 'Int', found 'Text'` on the correctly-typed scrutinee).
+            Type::Var(tv) => {
+                let var_key: verum_common::Text = format!("T{}", tv.id()).into();
+                if let Some(replacement) = param_subst.get(&var_key) {
+                    replacement.clone()
+                } else {
+                    ty.clone()
+                }
+            }
             // Named type: if it matches a parameter name, substitute it
             Type::Named { path, args } if args.is_empty() => {
                 let name = self.path_to_string(path);

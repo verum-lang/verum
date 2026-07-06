@@ -222,6 +222,11 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
             7u8.hash(hasher);
             hash_type_ref(element, hasher);
         }
+        TypeRef::AssociatedProjection { base, assoc } => {
+            10u8.hash(hasher);
+            hash_type_ref(base, hasher);
+            assoc.hash(hasher);
+        }
         TypeRef::Rank2Function {
             type_param_count,
             params,

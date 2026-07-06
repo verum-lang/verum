@@ -99,6 +99,10 @@ impl TypeSubstitution {
                 length: *length,
             },
             TypeRef::Slice(element) => TypeRef::Slice(Box::new(self.apply(element))),
+            TypeRef::AssociatedProjection { base, assoc } => TypeRef::AssociatedProjection {
+                base: Box::new(self.apply(base)),
+                assoc: assoc.clone(),
+            },
         }
     }
 
