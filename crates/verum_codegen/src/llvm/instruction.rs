@@ -330,38 +330,6 @@ pub(crate) fn get_or_declare_internal_strtol<'ctx>(
     let result = builder
         .build_int_mul(final_acc, final_sign, "result")
         .expect("final mul");
-    // C-contract endptr: write nptr + final_index to *endptr when the
-    // caller passed a non-null out-param, so callers can detect trailing
-    // garbage / a fully-consumed parse (the text ParseInt Maybe-wrap relies
-    // on this to yield None for "42abc" / "abc" / "").
-    let final_i = pl_i_phi.as_basic_value().into_int_value();
-    let end_gep = unsafe {
-        builder
-            .build_gep(i8_type, nptr, &[final_i], "strtol_end")
-            .expect("end gep")
-    };
-    if let Some(endptr_param) = func.get_nth_param(1) {
-        let endptr_ptr = endptr_param.into_pointer_value();
-        let is_endptr_null = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                builder
-                    .build_ptr_to_int(endptr_ptr, i64_type, "endptr_i")
-                    .expect("endptr to int"),
-                i64_type.const_zero(),
-                "endptr_is_null",
-            )
-            .expect("endptr null cmp");
-        let store_end = llvm_ctx.append_basic_block(func, "store_end");
-        let do_ret = llvm_ctx.append_basic_block(func, "strtol_ret");
-        builder
-            .build_conditional_branch(is_endptr_null, do_ret, store_end)
-            .expect("endptr null br");
-        builder.position_at_end(store_end);
-        builder.build_store(endptr_ptr, end_gep).expect("store endptr");
-        builder.build_unconditional_branch(do_ret).expect("→ ret");
-        builder.position_at_end(do_ret);
-    }
     builder.build_return(Some(&result)).expect("ret result");
 
     func
@@ -666,26 +634,17 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     module: &Module<'ctx>,
 ) -> verum_llvm::values::FunctionValue<'ctx> {
     let wrapper_name = "verum_internal_strtod";
-    // Return the existing function ONLY if it already has a body — a
-    // BODYLESS pre-declaration (e.g. from a `get_or_declare_function` call
-    // site that only declares) must fall through and get its body built
-    // here, or callers get a function that "returns" 0 (the parse_float
-    // Some(0) bug).  Mirrors get_or_declare_internal_strtol's gate.
+    if let Some(f) = module.get_function(wrapper_name) {
+        return f;
+    }
     let i8_type = llvm_ctx.i8_type();
     let i64_type = llvm_ctx.i64_type();
     let f64_type = llvm_ctx.f64_type();
     let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
 
     let fn_type = f64_type.fn_type(&[ptr_type.into()], false);
-    let func = match module.get_function(wrapper_name) {
-        Some(f) if f.count_basic_blocks() > 0 => return f,
-        Some(f) => f,
-        None => {
-            let f = module.add_function(wrapper_name, fn_type, None);
-            f.set_linkage(verum_llvm::module::Linkage::Internal);
-            f
-        }
-    };
+    let func = module.add_function(wrapper_name, fn_type, None);
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
 
     let entry = llvm_ctx.append_basic_block(func, "entry");
     let skip_ws = llvm_ctx.append_basic_block(func, "skip_ws");
@@ -855,13 +814,6 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     let is_ue = builder.build_int_compare(verum_llvm::IntPredicate::EQ, e_c, upper_e, "is_ue").expect("ue");
     let is_exp = builder.build_or(is_le, is_ue, "is_exp").expect("is_exp");
     let i_after_e = builder.build_int_add(af_iv, one_i64, "i_after_e").expect("i++");
-    // SSA-CORRECT: compute the final_exp contribution for the no-exponent
-    // edge HERE in after_frac (a predecessor of mul_setup), not inside the
-    // mul_setup PHI — a PHI incoming must dominate the predecessor's
-    // terminator.  The pre-fix built `sub 0, af_fd` in mul_setup itself, so
-    // the value did NOT dominate the after_frac→mul_setup edge (invalid SSA
-    // → the fractional scale exponent read garbage → "2.5" mis-parsed).
-    let neg_fd = builder.build_int_sub(zero_i64, af_fdv, "neg_fd").expect("nfd");
     builder.build_conditional_branch(is_exp, exp_after_e, mul_setup).expect("exp cond");
 
     // exp_after_e: parse sign of exponent
@@ -905,12 +857,9 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     el_i.add_incoming(&[(&el_i_next, exp_advance)]);
     el_acc.add_incoming(&[(&el_acc_next, exp_advance)]);
 
-    // after_exp: signed_exp = exp_sign_i64 * el_av; fexp = signed_exp - af_fd.
-    // fexp is computed HERE (a predecessor of mul_setup) for the same
-    // SSA-dominance reason as neg_fd above.
+    // after_exp: signed_exp = exp_sign_i64 * el_av
     builder.position_at_end(after_exp);
     let signed_exp = builder.build_int_mul(exp_sign_i64, el_av, "signed_exp").expect("sexp");
-    let fexp = builder.build_int_sub(signed_exp, af_fdv, "fexp").expect("fexp");
     builder.build_unconditional_branch(mul_setup).expect("→ mul");
 
     // mul_setup: PHI(final_exp); compute mant_f64 = sitofp(af_av);
@@ -918,10 +867,10 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     builder.position_at_end(mul_setup);
     let final_exp_phi = builder.build_phi(i64_type, "final_exp").expect("fe phi");
     final_exp_phi.add_incoming(&[
-        // from after_frac (no exponent): final_exp = -frac_digits
-        (&neg_fd, after_frac),
-        // from after_exp: final_exp = signed_exp - frac_digits
-        (&fexp, after_exp),
+        // Came from after_frac (no exp parsed): final_exp = -af_fdv
+        (&builder.build_int_sub(zero_i64, af_fdv, "neg_fd").expect("nfd"), after_frac),
+        // Came from after_exp: final_exp = signed_exp - af_fdv
+        (&builder.build_int_sub(signed_exp, af_fdv, "fexp").expect("fexp"), after_exp),
     ]);
     let final_exp_v = final_exp_phi.as_basic_value().into_int_value();
 
@@ -19159,51 +19108,24 @@ fn lower_text_extended<'ctx>(
             Ok(())
         }
         0x30 => {
-            // ByteLen — the Text's STORED byte length at offset 8 of the
-            // {ptr@0, len@8, cap@16} struct (the layout `verum_text_get_ptr`
-            // itself assumes: it int_to_ptr's the text value and loads the
-            // char* from offset 0).  Pre-fix this called strlen, which walks
-            // to the first NUL — wrong for a len-bounded (non-NUL-terminated)
-            // buffer and for any multibyte content past an embedded NUL.
+            // ByteLen — return length of string in bytes
             if operands.len() < 2 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
-            let text_val = ctx.get_register(op_reg(operands, 1))?;
+            let src = ctx.get_register(op_reg(operands, 1))?;
+            let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
-            let i8_ty = ctx.types().i8_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let text_i64 = as_i64(ctx, text_val, "byte_len_text_i64")?;
-            // Null text → length 0 (mirrors verum_text_get_ptr's null guard).
-            let is_null = ctx
+            let fn_type = i64_ty.fn_type(&[ctx.types().ptr_type().into()], false);
+            let strlen_fn = module
+                .get_function("verum_strlen_export")
+                .unwrap_or_else(|| module.add_function("verum_strlen_export", fn_type, None));
+            let result = ctx
                 .builder()
-                .build_int_compare(IntPredicate::EQ, text_i64, i64_ty.const_zero(), "bl_null")
-                .or_llvm_err()?;
-            let text_ptr = ctx
-                .builder()
-                .build_int_to_ptr(text_i64, ptr_ty, "byte_len_text_ptr")
-                .or_llvm_err()?;
-            // SAFETY: Text layout {ptr:i64, len:i64, cap:i64}; offset 8 = len.
-            let len_slot = unsafe {
-                ctx.builder()
-                    .build_in_bounds_gep(
-                        i8_ty,
-                        text_ptr,
-                        &[i64_ty.const_int(8, false)],
-                        "byte_len_slot",
-                    )
-                    .or_llvm_err()?
-            };
-            let raw_len = ctx
-                .builder()
-                .build_load(i64_ty, len_slot, "byte_len_raw")
+                .build_call(strlen_fn, &[src.into()], "byte_len")
                 .or_llvm_err()?
-                .into_int_value();
-            let len = ctx
-                .builder()
-                .build_select(is_null, i64_ty.const_zero(), raw_len, "byte_len")
-                .or_llvm_err()?;
-            ctx.set_register(dst, len);
+                    .basic_value_or("ByteLen: expected return value")?;
+            ctx.set_register(dst, result);
             Ok(())
         }
         0x31 => {
@@ -19497,7 +19419,6 @@ fn lower_cbgr_extended<'ctx>(
             };
 
             let i64_type = ctx.types().i64_type();
-            let ptr_type = ctx.types().ptr_type();
             let i8_type = ctx.types().i8_type();
 
             // Convert base register to a heap pointer.  `as_ptr`
@@ -19517,23 +19438,33 @@ fn lower_cbgr_extended<'ctx>(
                     .build_in_bounds_gep(i8_type, base_ptr, &[offset_const], "refield_ptr")
                     .or_llvm_err()?
             };
-            // Encode as i64-NaN-boxed pointer for storage in the
-            // register file (matches `Value::from_ptr` in the
-            // interpreter).  Downstream `Deref` / `DerefMut` opcodes
-            // route through this register and read/write the pointed-
-            // to `Value`.
-            let field_ptr_int = ctx
+            // REFFIELD-AOT-DEREF-1 (META-AOT-PARITY leg): load the
+            // stored Value and return THAT, exactly like the 0x0B
+            // RefListElement arm above. The interpreter's `&self.field`
+            // produces a slot pointer whose every USE auto-derefs
+            // through the runtime `cbgr_mutable_ptrs` tracking; AOT has
+            // no runtime tracking, so a raw slot pointer flowing into a
+            // method receiver or a cross-function `&T` return was read
+            // as the OBJECT itself — `Group.tokens()` returned
+            // `&group_slot`, `TokenStream.is_empty` then read
+            // `slot_addr+24` (one past the 3-field Group) and chased a
+            // stale/zero word → EXC_BAD_ACCESS at 0x18 in every
+            // `g.tokens().is_empty()` chain (all four
+            // META-GROUP-XMODULE canaries crashed under AOT while
+            // interp was green).
+            //
+            // For record-typed fields the slot holds the object's heap
+            // pointer, so the LOADED value gives `r.method(...)` /
+            // `r.field` the real address with no second hop — the
+            // interp-observable semantics at every read site. Pure
+            // whole-value replacement `*r = v` through a retained slot
+            // pointer routes via the DerefMut opcode path, same
+            // trade the 0x0B arm documents.
+            let loaded = ctx
                 .builder()
-                .build_ptr_to_int(field_ptr, i64_type, "refield_ptr_int")
+                .build_load(i64_type, field_ptr, "refield_loaded")
                 .or_llvm_err()?;
-            // Cast back to pointer for register storage (set_register
-            // accepts any BasicValueEnum).  Storing as ptr lets
-            // downstream `as_ptr` calls round-trip without a re-cast.
-            let field_ptr_val = ctx
-                .builder()
-                .build_int_to_ptr(field_ptr_int, ptr_type, "refield_ptr_back")
-                .or_llvm_err()?;
-            ctx.set_register(dst, field_ptr_val.into());
+            ctx.set_register(dst, loaded);
             Ok(())
         }
         0x0A => {
@@ -21517,96 +21448,7 @@ fn lower_char_extended<'ctx>(
             ctx.set_register(dst, result.into());
             return Ok(());
         }
-        0x50 => {
-            // EncodeUtf8: write the UTF-8 bytes of `ch` into a &mut [Byte]
-            // buffer and return the byte count.  Operands: [dst, ch, buffer].
-            // The pre-fix code lumped 0x50 with the DECODE arm (0x51) and ran
-            // decode logic, corrupting the result.  The buffer is a List<Byte>
-            // as_mut_slice → its backing (slice data ptr at offset 24) is
-            // i64-STRIDED (one byte per 8-byte slot), so byte k is written at
-            // backing + k*8, matching how `buf[k]` reads it back.
-            if operands.len() >= 3 {
-                let buf_reg = op_reg(operands, 2);
-                let buf_val = as_i64(ctx, ctx.get_register(buf_reg)?, "enc_buf")?;
-                let ptr_type = ctx.types().ptr_type();
-                let i8_ty = ctx.types().i8_type();
-                let buf_obj = ctx
-                    .builder()
-                    .build_int_to_ptr(buf_val, ptr_type, "enc_buf_obj")
-                    .or_llvm_err()?;
-                let backing_slot = unsafe {
-                    ctx.builder()
-                        .build_in_bounds_gep(i8_ty, buf_obj, &[i64_ty.const_int(24, false)], "enc_backing_slot")
-                        .or_llvm_err()?
-                };
-                let backing_i = ctx
-                    .builder()
-                    .build_load(i64_ty, backing_slot, "enc_backing_i")
-                    .or_llvm_err()?
-                    .into_int_value();
-                let data_ptr = ctx
-                    .builder()
-                    .build_int_to_ptr(backing_i, ptr_type, "enc_data_ptr")
-                    .or_llvm_err()?;
-                let store_k = |ctx: &mut FunctionContext<'_, 'ctx>, k: u64, byte: verum_llvm::values::IntValue<'ctx>| -> Result<()> {
-                    let slot = unsafe {
-                        ctx.builder().build_in_bounds_gep(i8_ty, data_ptr, &[i64_ty.const_int(k * 8, false)], "enc_slot").or_llvm_err()?
-                    };
-                    let b64 = ctx.builder().build_int_z_extend(byte, i64_ty, "enc_b64").or_llvm_err()?;
-                    ctx.builder().build_store(slot, b64).or_llvm_err()?;
-                    Ok(())
-                };
-                let trunc = |ctx: &mut FunctionContext<'_, 'ctx>, v: verum_llvm::values::IntValue<'ctx>, name: &str| ctx.builder().build_int_truncate(v, i8_ty, name).unwrap();
-                let andv = |ctx: &mut FunctionContext<'_, 'ctx>, v: verum_llvm::values::IntValue<'ctx>, m: u64| ctx.builder().build_and(v, i64_ty.const_int(m, false), "and").unwrap();
-                let orv = |ctx: &mut FunctionContext<'_, 'ctx>, v: verum_llvm::values::IntValue<'ctx>, m: u64| ctx.builder().build_or(v, i64_ty.const_int(m, false), "or").unwrap();
-                let shr = |ctx: &mut FunctionContext<'_, 'ctx>, v: verum_llvm::values::IntValue<'ctx>, n: u64| ctx.builder().build_right_shift(v, i64_ty.const_int(n, false), false, "shr").unwrap();
-                let cur = ctx.builder().get_insert_block().or_internal("no bb")?;
-                let function = cur.get_parent().or_internal("no fn")?;
-                let one_bb = ctx.llvm_context().append_basic_block(function, "enc_1");
-                let c2 = ctx.llvm_context().append_basic_block(function, "enc_c2");
-                let two_bb = ctx.llvm_context().append_basic_block(function, "enc_2");
-                let c3 = ctx.llvm_context().append_basic_block(function, "enc_c3");
-                let three_bb = ctx.llvm_context().append_basic_block(function, "enc_3");
-                let four_bb = ctx.llvm_context().append_basic_block(function, "enc_4");
-                let done_bb = ctx.llvm_context().append_basic_block(function, "enc_done");
-                let lt = |ctx: &mut FunctionContext<'_, 'ctx>, m: u64, name: &str| ctx.builder().build_int_compare(IntPredicate::ULT, ch, i64_ty.const_int(m, false), name).unwrap();
-                let c = lt(ctx, 0x80, "lt80"); ctx.builder().build_conditional_branch(c, one_bb, c2).or_llvm_err()?;
-                ctx.builder().position_at_end(one_bb);
-                let t = trunc(ctx, ch, "e1_0"); store_k(ctx, 0, t)?;
-                ctx.builder().build_unconditional_branch(done_bb).or_llvm_err()?;
-                ctx.builder().position_at_end(c2);
-                let c = lt(ctx, 0x800, "lt800"); ctx.builder().build_conditional_branch(c, two_bb, c3).or_llvm_err()?;
-                ctx.builder().position_at_end(two_bb);
-                let hi = shr(ctx, ch, 6); let hi = orv(ctx, hi, 0xC0); let t = trunc(ctx, hi, "e2_0"); store_k(ctx, 0, t)?;
-                let lo = andv(ctx, ch, 0x3F); let lo = orv(ctx, lo, 0x80); let t = trunc(ctx, lo, "e2_1"); store_k(ctx, 1, t)?;
-                ctx.builder().build_unconditional_branch(done_bb).or_llvm_err()?;
-                ctx.builder().position_at_end(c3);
-                let c = lt(ctx, 0x10000, "lt10000"); ctx.builder().build_conditional_branch(c, three_bb, four_bb).or_llvm_err()?;
-                ctx.builder().position_at_end(three_bb);
-                let v = shr(ctx, ch, 12); let v = orv(ctx, v, 0xE0); let t = trunc(ctx, v, "e3_0"); store_k(ctx, 0, t)?;
-                let v = shr(ctx, ch, 6); let v = andv(ctx, v, 0x3F); let v = orv(ctx, v, 0x80); let t = trunc(ctx, v, "e3_1"); store_k(ctx, 1, t)?;
-                let v = andv(ctx, ch, 0x3F); let v = orv(ctx, v, 0x80); let t = trunc(ctx, v, "e3_2"); store_k(ctx, 2, t)?;
-                ctx.builder().build_unconditional_branch(done_bb).or_llvm_err()?;
-                ctx.builder().position_at_end(four_bb);
-                let v = shr(ctx, ch, 18); let v = orv(ctx, v, 0xF0); let t = trunc(ctx, v, "e4_0"); store_k(ctx, 0, t)?;
-                let v = shr(ctx, ch, 12); let v = andv(ctx, v, 0x3F); let v = orv(ctx, v, 0x80); let t = trunc(ctx, v, "e4_1"); store_k(ctx, 1, t)?;
-                let v = shr(ctx, ch, 6); let v = andv(ctx, v, 0x3F); let v = orv(ctx, v, 0x80); let t = trunc(ctx, v, "e4_2"); store_k(ctx, 2, t)?;
-                let v = andv(ctx, ch, 0x3F); let v = orv(ctx, v, 0x80); let t = trunc(ctx, v, "e4_3"); store_k(ctx, 3, t)?;
-                ctx.builder().build_unconditional_branch(done_bb).or_llvm_err()?;
-                ctx.builder().position_at_end(done_bb);
-                let count = ctx.builder().build_phi(i64_ty, "enc_count").or_llvm_err()?;
-                count.add_incoming(&[
-                    (&i64_ty.const_int(1, false), one_bb),
-                    (&i64_ty.const_int(2, false), two_bb),
-                    (&i64_ty.const_int(3, false), three_bb),
-                    (&i64_ty.const_int(4, false), four_bb),
-                ]);
-                ctx.set_register(dst, count.as_basic_value());
-                return Ok(());
-            }
-            i64_ty.const_zero()
-        }
-        0x51 => {
+        0x50 | 0x51 => {
             // DecodeUtf8 (0x51): decode UTF-8 char from bytes at index
             // Operands: [dst, bytes_ptr, index]
             if operands.len() >= 3 {
