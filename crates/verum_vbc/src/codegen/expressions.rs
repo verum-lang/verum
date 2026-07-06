@@ -2106,6 +2106,40 @@ impl VbcCodegen {
 
     // ==================== Binary Operations ====================
 
+    /// Emit a `Text` ordering comparison (`<`, `>`, `<=`, `>=`).
+    ///
+    /// `Text` was gated out of the operator-method path (it is neither a
+    /// user type nor `is_primitive`), and only `==`/`!=` had a dedicated
+    /// `is_text` arm emitting `CmpG` — so `<`/`>`/`<=`/`>=` fell to the
+    /// integer `CmpI`, comparing the raw Text POINTERS (allocation order),
+    /// e.g. `"zebra" > "apple"` returned false. `CmpG` (Ord protocol,
+    /// opcode 0x4D) content-compares via the interpreter's string branch
+    /// and yields an ordering (-1/0/1); threshold it against 0 with the
+    /// requested integer relation for the boolean result.
+    fn emit_text_ordering(&mut self, dest: Reg, a_reg: Reg, b_reg: Reg, op: CompareOp) {
+        let ord = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::CmpG {
+            eq: false,
+            dst: ord,
+            a: a_reg,
+            b: b_reg,
+            protocol_id: 0,
+        });
+        let zero = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadI {
+            dst: zero,
+            value: 0,
+        });
+        self.ctx.emit(Instruction::CmpI {
+            op,
+            dst: dest,
+            a: ord,
+            b: zero,
+        });
+        self.ctx.free_temp(ord);
+        self.ctx.free_temp(zero);
+    }
+
     /// Compiles a binary operation.
     fn compile_binary(
         &mut self,
@@ -2507,6 +2541,8 @@ impl VbcCodegen {
                         a: left_reg,
                         b: right_reg,
                     });
+                } else if is_text {
+                    self.emit_text_ordering(dest, left_reg, right_reg, CompareOp::Lt);
                 } else if is_unsigned {
                     self.ctx.emit(Instruction::CmpU {
                         sub_op: CmpSubOpcode::LtU,
@@ -2531,6 +2567,8 @@ impl VbcCodegen {
                         a: left_reg,
                         b: right_reg,
                     });
+                } else if is_text {
+                    self.emit_text_ordering(dest, left_reg, right_reg, CompareOp::Le);
                 } else if is_unsigned {
                     self.ctx.emit(Instruction::CmpU {
                         sub_op: CmpSubOpcode::LeU,
@@ -2555,6 +2593,8 @@ impl VbcCodegen {
                         a: left_reg,
                         b: right_reg,
                     });
+                } else if is_text {
+                    self.emit_text_ordering(dest, left_reg, right_reg, CompareOp::Gt);
                 } else if is_unsigned {
                     self.ctx.emit(Instruction::CmpU {
                         sub_op: CmpSubOpcode::GtU,
@@ -2579,6 +2619,8 @@ impl VbcCodegen {
                         a: left_reg,
                         b: right_reg,
                     });
+                } else if is_text {
+                    self.emit_text_ordering(dest, left_reg, right_reg, CompareOp::Ge);
                 } else if is_unsigned {
                     self.ctx.emit(Instruction::CmpU {
                         sub_op: CmpSubOpcode::GeU,
