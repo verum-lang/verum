@@ -26,7 +26,7 @@ fn sample_response() -> OracleResponse {
     let c3 = OracleCandidate { proof_term: Text.from("c"), confidence: 0.75, justification: Text.from("") };
     let c4 = OracleCandidate { proof_term: Text.from("d"), confidence: 0.95, justification: Text.from("") };
     OracleResponse {
-        candidates: List.of(c1).append(List.of(c2)).append(List.of(c3)).append(List.of(c4)),
+        candidates: [c1, c2, c3, c4],
         goal: Text.from("g"),
         elapsed_ms: 0,
     }

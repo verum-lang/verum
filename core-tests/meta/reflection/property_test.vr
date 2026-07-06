@@ -1,0 +1,459 @@
+// =============================================================================
+// core-tests/meta/reflection/property_test.vr
+// =============================================================================
+//
+// Algebraic / partition laws for the pure-data reflection types in
+// `core/meta/reflection.vr`.  Every domain here is a finite enum, so
+// each law is exhausted over the full Cartesian product — a passing
+// test is a theorem, not a sample.
+//
+// Laws verified:
+//   §1  TypeKind classifier partition — is_compound / is_reference /
+//       is_primitive are mutually exclusive; each holds for exactly its
+//       declared set; name() is non-empty for all 17 variants.
+//   §2  PrimitiveType coherence matrix — signed ⊕ unsigned for integers;
+//       is_float excludes int-ness; is_numeric = signed ∨ unsigned ∨
+//       float; size invariants across all 18 variants.
+//   §3  VariantInfo kind predicates partition (is_unit / is_tuple /
+//       is_struct) + wildcard_pattern shape per kind.
+//   §4  Visibility.is_public ⇔ variant is Public; keyword presence
+//       coherence across all 5 variants.
+//   §5  GenericParam has_bound / is_constrained / has_default /
+//       declaration coherence.
+//   §6  FunctionInfo is_method ⇔ leading self param; is_static is its
+//       exact negation (via self_param presence).
+// =============================================================================
+
+mount core.meta.reflection.{
+    TypeKind, VariantKind, VariantInfo, FieldInfo, Visibility, PrimitiveType,
+    FunctionInfo, ParamInfo, SelfKind, GenericParam, GenericParamKind,
+};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn ssp() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+/// All 17 TypeKind variants.
+fn all_type_kinds() -> List<TypeKind> {
+    [
+        TypeKind.Struct, TypeKind.Enum, TypeKind.Newtype, TypeKind.Unit,
+        TypeKind.Protocol, TypeKind.Tuple, TypeKind.Array, TypeKind.Slice,
+        TypeKind.Reference, TypeKind.Pointer, TypeKind.Function, TypeKind.TypeParam,
+        TypeKind.Associated, TypeKind.Primitive, TypeKind.Never, TypeKind.Infer,
+        TypeKind.Unknown,
+    ]
+}
+
+/// All 18 PrimitiveType variants.
+fn all_primitives() -> List<PrimitiveType> {
+    [
+        PrimitiveType.Bool, PrimitiveType.Char,
+        PrimitiveType.Int8, PrimitiveType.Int16, PrimitiveType.Int32,
+        PrimitiveType.Int64, PrimitiveType.Int,
+        PrimitiveType.UInt8, PrimitiveType.UInt16, PrimitiveType.UInt32,
+        PrimitiveType.UInt64,
+        PrimitiveType.ISize, PrimitiveType.USize,
+        PrimitiveType.Float32, PrimitiveType.Float64,
+        PrimitiveType.Text, PrimitiveType.Unit,
+    ]
+}
+
+// =============================================================================
+// §1  TypeKind classifier partition
+// =============================================================================
+//
+// is_compound (Struct|Enum|Tuple), is_reference (Reference|Pointer),
+// is_primitive (Primitive) must never overlap on any variant, and the
+// human-readable name() must be non-empty everywhere.
+
+@test
+fn property_type_kind_classifiers_mutually_exclusive() {
+    for k in all_type_kinds().iter() {
+        let mut n = 0;
+        if (*k).is_compound()  { n = n + 1; }
+        if (*k).is_reference() { n = n + 1; }
+        if (*k).is_primitive() { n = n + 1; }
+        // At most one classifier fires per variant (many fire zero).
+        assert(n <= 1);
+    }
+}
+
+@test
+fn property_type_kind_is_compound_exact_set() {
+    for k in all_type_kinds().iter() {
+        let expected = (*k is TypeKind.Struct)
+            || (*k is TypeKind.Enum)
+            || (*k is TypeKind.Tuple);
+        assert_eq((*k).is_compound(), expected);
+    }
+}
+
+@test
+fn property_type_kind_is_reference_exact_set() {
+    for k in all_type_kinds().iter() {
+        let expected = (*k is TypeKind.Reference) || (*k is TypeKind.Pointer);
+        assert_eq((*k).is_reference(), expected);
+    }
+}
+
+@test
+fn property_type_kind_is_primitive_exact_set() {
+    for k in all_type_kinds().iter() {
+        assert_eq((*k).is_primitive(), *k is TypeKind.Primitive);
+    }
+}
+
+@test
+fn property_type_kind_name_non_empty_all_variants() {
+    for k in all_type_kinds().iter() {
+        assert(!(*k).name().is_empty());
+    }
+}
+
+// =============================================================================
+// §2  PrimitiveType coherence matrix
+// =============================================================================
+
+@test
+fn property_primitive_signed_unsigned_disjoint() {
+    // No primitive is both signed and unsigned.
+    for p in all_primitives().iter() {
+        assert(!((*p).is_signed() && (*p).is_unsigned()));
+    }
+}
+
+@test
+fn property_primitive_float_excludes_integer_ness() {
+    // A float is never signed or unsigned.
+    for p in all_primitives().iter() {
+        if (*p).is_float() {
+            assert(!(*p).is_signed());
+            assert(!(*p).is_unsigned());
+        }
+    }
+}
+
+@test
+fn property_primitive_numeric_is_signed_or_unsigned_or_float() {
+    // is_numeric partitions exactly into the three numeric predicates.
+    for p in all_primitives().iter() {
+        let any_numeric = (*p).is_signed() || (*p).is_unsigned() || (*p).is_float();
+        assert_eq((*p).is_numeric(), any_numeric);
+    }
+}
+
+@test
+fn property_primitive_non_numeric_have_no_numeric_flag() {
+    // Bool / Char / Text / Unit: numeric predicates all false.
+    for p in all_primitives().iter() {
+        if !(*p).is_numeric() {
+            assert(!(*p).is_signed());
+            assert(!(*p).is_unsigned());
+            assert(!(*p).is_float());
+        }
+    }
+}
+
+@test
+fn property_primitive_size_non_negative_and_unit_is_zero() {
+    // Every declared size is >= 0; Unit is the only zero-size primitive.
+    for p in all_primitives().iter() {
+        assert((*p).size() >= 0);
+        if *p is PrimitiveType.Unit {
+            assert_eq((*p).size(), 0);
+        } else {
+            assert((*p).size() > 0);
+        }
+    }
+}
+
+@test
+fn property_primitive_name_non_empty_all_variants() {
+    for p in all_primitives().iter() {
+        assert(!(*p).name().is_empty());
+    }
+}
+
+@test
+fn property_primitive_signed_set_exact() {
+    for p in all_primitives().iter() {
+        let expected = (*p is PrimitiveType.Int8)
+            || (*p is PrimitiveType.Int16)
+            || (*p is PrimitiveType.Int32)
+            || (*p is PrimitiveType.Int64)
+            || (*p is PrimitiveType.Int)
+            || (*p is PrimitiveType.ISize);
+        assert_eq((*p).is_signed(), expected);
+    }
+}
+
+@test
+fn property_primitive_unsigned_set_exact() {
+    for p in all_primitives().iter() {
+        let expected = (*p is PrimitiveType.UInt8)
+            || (*p is PrimitiveType.UInt16)
+            || (*p is PrimitiveType.UInt32)
+            || (*p is PrimitiveType.UInt64)
+            || (*p is PrimitiveType.USize);
+        assert_eq((*p).is_unsigned(), expected);
+    }
+}
+
+// =============================================================================
+// §3  VariantInfo kind predicates partition + wildcard_pattern shape
+// =============================================================================
+
+fn variant_of(kind: VariantKind) -> VariantInfo {
+    VariantInfo {
+        name: Text.from("V"),
+        index: 0,
+        kind: kind,
+        fields: List.new(),
+        attributes: List.new(),
+        doc: Maybe.None,
+        span: ssp(),
+    }
+}
+
+fn all_variant_kinds() -> List<VariantKind> {
+    [VariantKind.Unit, VariantKind.Tuple, VariantKind.Struct]
+}
+
+@test
+fn property_variant_kind_predicates_partition() {
+    // Exactly one of is_unit / is_tuple / is_struct holds.
+    for vk in all_variant_kinds().iter() {
+        let vi = variant_of(*vk);
+        let mut n = 0;
+        if vi.is_unit()   { n = n + 1; }
+        if vi.is_tuple()  { n = n + 1; }
+        if vi.is_struct() { n = n + 1; }
+        assert_eq(n, 1);
+    }
+}
+
+@test
+fn property_variant_wildcard_pattern_shape_unit() {
+    let vi = variant_of(VariantKind.Unit);
+    // Unit wildcard is just the bare name — no delimiters.
+    assert_eq(vi.wildcard_pattern(), Text.from("V"));
+}
+
+@test
+fn property_variant_wildcard_pattern_shape_tuple() {
+    let vi = variant_of(VariantKind.Tuple);
+    // Tuple wildcard carries `(..)`.
+    assert(vi.wildcard_pattern().contains(Text.from("(..)")));
+}
+
+@test
+fn property_variant_wildcard_pattern_shape_struct() {
+    let vi = variant_of(VariantKind.Struct);
+    // Struct wildcard carries `{ .. }`.
+    assert(vi.wildcard_pattern().contains(Text.from("..")));
+}
+
+@test
+fn property_variant_pattern_unit_is_bare_name() {
+    // Unit pattern needs no field enumeration — equals the name.
+    let vi = variant_of(VariantKind.Unit);
+    assert_eq(vi.pattern(), Text.from("V"));
+}
+
+// =============================================================================
+// §4  Visibility.is_public + keyword coherence
+// =============================================================================
+
+fn all_visibilities() -> List<Visibility> {
+    [
+        Visibility.Public,
+        Visibility.Private,
+        Visibility.Crate,
+        Visibility.Super,
+        Visibility.In(Text.from("a.b")),
+    ]
+}
+
+@test
+fn property_visibility_is_public_iff_public_variant() {
+    for v in all_visibilities().iter() {
+        assert_eq((*v).is_public(), *v is Visibility.Public);
+    }
+}
+
+@test
+fn property_visibility_keyword_none_only_for_private() {
+    // Private is the sole visibility with no keyword; every other
+    // variant produces Some(keyword).
+    for v in all_visibilities().iter() {
+        match (*v).keyword() {
+            Maybe.None => assert(*v is Visibility.Private),
+            Maybe.Some(_) => assert(!(*v is Visibility.Private)),
+        }
+    }
+}
+
+@test
+fn property_visibility_public_keyword_text() {
+    match Visibility.Public.keyword() {
+        Maybe.Some(k) => assert_eq(k, Text.from("public")),
+        Maybe.None => panic("Public must have a keyword"),
+    }
+}
+
+// =============================================================================
+// §5  GenericParam bound coherence
+// =============================================================================
+
+fn gp(bounds: List<Text>, default: Maybe<Text>) -> GenericParam {
+    GenericParam {
+        name: Text.from("T"),
+        index: 0,
+        kind: GenericParamKind.Type,
+        bounds: bounds,
+        default: default,
+        span: ssp(),
+    }
+}
+
+@test
+fn property_generic_is_constrained_iff_bounds_present() {
+    let unbounded = gp(List.new(), Maybe.None);
+    assert(!unbounded.is_constrained());
+
+    let bounded = gp([Text.from("Clone")], Maybe.None);
+    assert(bounded.is_constrained());
+}
+
+@test
+fn property_generic_has_bound_reflects_membership() {
+    let g = gp([Text.from("Clone"), Text.from("Send")], Maybe.None);
+    assert(g.has_bound(Text.from("Clone")));
+    assert(g.has_bound(Text.from("Send")));
+    assert(!g.has_bound(Text.from("Sync")));
+}
+
+@test
+fn property_generic_has_default_reflects_option() {
+    let no_def = gp(List.new(), Maybe.None);
+    assert(!no_def.has_default());
+
+    let has_def = gp(List.new(), Maybe.Some(Text.from("Int")));
+    assert(has_def.has_default());
+}
+
+@test
+fn property_generic_declaration_includes_name_and_bounds() {
+    let g = gp([Text.from("Clone"), Text.from("Send")], Maybe.None);
+    let decl = g.declaration();
+    assert(decl.contains(Text.from("T")));
+    assert(decl.contains(Text.from("Clone")));
+    assert(decl.contains(Text.from("Send")));
+}
+
+@test
+fn property_generic_declaration_bare_when_unconstrained() {
+    let g = gp(List.new(), Maybe.None);
+    assert_eq(g.declaration(), Text.from("T"));
+}
+
+// =============================================================================
+// §6  FunctionInfo is_method / is_static coherence
+// =============================================================================
+
+fn self_param(kind: SelfKind) -> ParamInfo {
+    ParamInfo {
+        name: Text.from("self"),
+        index: 0,
+        type_name: Text.from("Self"),
+        type_kind: TypeKind.Reference,
+        is_mut: false,
+        is_self_param: true,
+        self_kind: Maybe.Some(kind),
+        default: Maybe.None,
+        attributes: List.new(),
+        span: ssp(),
+    }
+}
+
+fn value_param(name: Text) -> ParamInfo {
+    ParamInfo {
+        name: name,
+        index: 0,
+        type_name: Text.from("Int"),
+        type_kind: TypeKind.Primitive,
+        is_mut: false,
+        is_self_param: false,
+        self_kind: Maybe.None,
+        default: Maybe.None,
+        attributes: List.new(),
+        span: ssp(),
+    }
+}
+
+fn fn_with(params: List<ParamInfo>) -> FunctionInfo {
+    FunctionInfo {
+        name: Text.from("f"),
+        path: Text.from("m.f"),
+        generics: List.new(),
+        params: params,
+        return_type: Text.from("()"),
+        return_kind: TypeKind.Unit,
+        is_async: false,
+        is_const: false,
+        is_unsafe: false,
+        is_pure: false,
+        is_meta: false,
+        contexts: List.new(),
+        attributes: List.new(),
+        doc: Maybe.None,
+        visibility: Visibility.Public,
+        span: ssp(),
+    }
+}
+
+@test
+fn property_function_is_method_exact_negation_of_is_static() {
+    let m = fn_with([self_param(SelfKind.Ref)]);
+    assert_eq(m.is_method(), !m.is_static());
+
+    let s = fn_with([value_param(Text.from("n"))]);
+    assert_eq(s.is_method(), !s.is_static());
+}
+
+@test
+fn property_function_is_method_iff_leading_self() {
+    // Method: leading self param → is_method.
+    let m = fn_with([self_param(SelfKind.RefMut), value_param(Text.from("n"))]);
+    assert(m.is_method());
+    assert(!m.is_static());
+
+    // Static: no self param → is_static.
+    let s = fn_with([value_param(Text.from("a")), value_param(Text.from("b"))]);
+    assert(s.is_static());
+    assert(!s.is_method());
+
+    // Zero-param function is static.
+    let z = fn_with(List.new());
+    assert(z.is_static());
+}
+
+@test
+fn property_function_is_method_over_all_self_kinds() {
+    // Every SelfKind flavour of the leading param yields a method.
+    let kinds: List<SelfKind> = [SelfKind.Value, SelfKind.Ref, SelfKind.RefMut];
+    for k in kinds.iter() {
+        let m = fn_with([self_param(*k)]);
+        assert(m.is_method());
+    }
+}

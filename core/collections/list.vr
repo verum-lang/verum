@@ -1385,6 +1385,26 @@ implement<T> List<T> {
         }
     }
 
+    /// Consume both lists and return their concatenation.
+    ///
+    /// The value-returning companion to `append` — `append` mutates the
+    /// receiver in place (and returns Unit), which makes it unusable in
+    /// expression position. `concat` is the canonical way to build a
+    /// list from parts inside an expression:
+    ///
+    /// ```verum
+    /// let all = List.of(first).concat(List.of(second));
+    /// let merged = xs.concat(ys).concat(zs);   // chains
+    /// ```
+    ///
+    /// Cost: O(len(other)) pushes into `self`'s (reserved) backing —
+    /// `self` is moved through, so no copy of the receiver is made.
+    public fn concat(mut self, mut other: List<T>) -> List<T> {
+        self.reserve(other.len());
+        self.append(&mut other);
+        self
+    }
+
     /// Append all elements from another list, leaving the other list empty.
     public fn append(&mut self, other: &mut List<T>) {
         // Safe-operation append — same rationale as get_mut /

@@ -2024,6 +2024,25 @@ impl CodegenContext {
     /// every `safe_write` / `safe_pread` / `safe_send` wrapper that
     /// genuinely needs the FFI.
     pub fn register_function(&mut self, name: String, info: FunctionInfo) {
+        // Diagnostic (VERUM_TRACE_FNREG=<substring>): logs EVERY
+        // registration whose key contains the filter — id, arity,
+        // return type, and whether the key was already bound. The
+        // registration graph has many writers (compile_function,
+        // archive Pass 3/4, mounts, ctor fanouts); this is the one
+        // choke point they all funnel through.
+        if let Ok(filter) = std::env::var("VERUM_TRACE_FNREG")
+            && name.contains(&filter)
+        {
+            eprintln!(
+                "[fnreg] '{}' id={} arity={} rt={:?} variant_tag={:?} prev={:?}",
+                name,
+                info.id.0,
+                info.param_count,
+                info.return_type_name.as_deref(),
+                info.variant_tag,
+                self.functions.get(&name).map(|e| (e.id.0, e.param_count)),
+            );
+        }
         if let Some(existing) = self.functions.get(&name)
             && existing.param_count != info.param_count
         {
@@ -2203,6 +2222,18 @@ impl CodegenContext {
         name: String,
         info: FunctionInfo,
     ) -> Option<FunctionInfo> {
+        if let Ok(filter) = std::env::var("VERUM_TRACE_FNREG")
+            && name.contains(&filter)
+        {
+            eprintln!(
+                "[fnreg-AUTH] '{}' id={} arity={} rt={:?} prev={:?}",
+                name,
+                info.id.0,
+                info.param_count,
+                info.return_type_name.as_deref(),
+                self.functions.get(&name).map(|e| (e.id.0, e.param_count)),
+            );
+        }
         // Mirror the `name#arity` shadow slot so callers that resolve via
         // `lookup_function_with_arity` still find the chosen variant —
         // the authoritative binding owns BOTH `name` AND `name#arity`

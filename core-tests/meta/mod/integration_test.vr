@@ -1,0 +1,215 @@
+// =============================================================================
+// core-tests/meta/mod/integration_test.vr
+// =============================================================================
+//
+// Cross-type scenarios for the `core/meta/mod.vr` root: the
+// MetaError→message() rendering surface, the MetaResult<T> alias
+// (= Result<T, MetaError>) threaded through real function signatures,
+// and the compile-time constants used together.
+//
+// Construction discipline:
+//   * MetaError variants built directly at the test site (record /
+//     tuple shapes work under --interp).
+//   * MetaResult<Int> is only ever named as a *function parameter /
+//     return type* — never as a `let x: MetaResult<Int> = …`
+//     annotation.  The alias-annotation form is defective (the
+//     `type Span is MetaSpan` alias-identity class, tracked as
+//     META-SPAN-ALIAS); the signature form is exercised safely here
+//     and is the idiom stdlib callers actually use.
+// =============================================================================
+
+mount core.meta.{
+    MetaError, MetaResult, VERSION, VERSION_INFO,
+    DEFAULT_RECURSION_LIMIT, DEFAULT_ITERATION_LIMIT,
+    DEFAULT_MEMORY_LIMIT, DEFAULT_TIMEOUT_MS,
+};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+fn ssp() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MetaResult<Int> plumbing — signature-typed, never let-annotated.
+// -----------------------------------------------------------------------------
+
+fn ok_of(n: Int) -> MetaResult<Int> {
+    Result.Ok(n)
+}
+
+fn err_of(msg: Text) -> MetaResult<Int> {
+    Result.Err(MetaError.Other { message: msg })
+}
+
+/// Double the payload on success; propagate the error verbatim.
+fn map_double(r: MetaResult<Int>) -> MetaResult<Int> {
+    match r {
+        Result.Ok(v) => Result.Ok(v * 2),
+        Result.Err(e) => Result.Err(e),
+    }
+}
+
+// =============================================================================
+// Section 1: MetaError.message() carries the discriminating payload
+// =============================================================================
+
+@test
+fn integration_message_asset_not_found_has_path() {
+    let e = MetaError.AssetNotFound { path: Text.from("schema/api.json") };
+    assert(e.message().contains(Text.from("schema/api.json")));
+}
+
+@test
+fn integration_message_asset_read_error_has_reason() {
+    let e = MetaError.AssetReadError { path: Text.from("/p"), reason: Text.from("EACCES") };
+    assert(e.message().contains(Text.from("EACCES")));
+}
+
+@test
+fn integration_message_syntax_error_has_message() {
+    let e = MetaError.SyntaxError { message: Text.from("unexpected token"), span: ssp() };
+    assert(e.message().contains(Text.from("unexpected token")));
+}
+
+@test
+fn integration_message_parse_failed_has_count() {
+    let e = MetaError.ParseFailed(List.new());
+    assert(e.message().contains(Text.from("0")));
+}
+
+@test
+fn integration_message_type_error_has_expected_and_found() {
+    let e = MetaError.TypeError { expected: Text.from("Int"), found: Text.from("Text") };
+    let m = e.message();
+    assert(m.contains(Text.from("Int")));
+    assert(m.contains(Text.from("Text")));
+}
+
+@test
+fn integration_message_recursion_limit_has_depth() {
+    let e = MetaError.RecursionLimit { depth: 300, limit: 256 };
+    assert(e.message().contains(Text.from("300")));
+}
+
+@test
+fn integration_message_iteration_limit_has_count() {
+    let e = MetaError.IterationLimit { count: 1000001, limit: 1000000 };
+    assert(e.message().contains(Text.from("1000001")));
+}
+
+@test
+fn integration_message_memory_limit_has_used() {
+    let e = MetaError.MemoryLimit { used: 70000000, limit: 67108864 };
+    assert(e.message().contains(Text.from("70000000")));
+}
+
+@test
+fn integration_message_timeout_has_elapsed() {
+    let e = MetaError.Timeout { elapsed_ms: 31000, limit_ms: 30000 };
+    assert(e.message().contains(Text.from("31000")));
+}
+
+@test
+fn integration_message_invalid_operation_has_operation() {
+    let e = MetaError.InvalidOperation { operation: Text.from("emit"), reason: Text.from("no ctx") };
+    assert(e.message().contains(Text.from("emit")));
+}
+
+@test
+fn integration_message_cache_error_has_key() {
+    let e = MetaError.CacheError { key: Text.from("derive:Foo"), reason: Text.from("evicted") };
+    assert(e.message().contains(Text.from("derive:Foo")));
+}
+
+@test
+fn integration_message_method_not_found_has_method_name() {
+    let e = MetaError.MethodNotFound { type_name: Text.from("Foo"), method_name: Text.from("bar") };
+    assert(e.message().contains(Text.from("bar")));
+}
+
+@test
+fn integration_message_other_is_the_message_verbatim() {
+    let e = MetaError.Other { message: Text.from("custom failure text") };
+    assert(e.message().contains(Text.from("custom failure text")));
+}
+
+// =============================================================================
+// Section 2: MetaResult<Int> Ok/Err flows through function boundaries
+// =============================================================================
+
+@test
+fn integration_metaresult_ok_maps_through() {
+    let r = map_double(ok_of(21));
+    match r {
+        Result.Ok(v) => assert_eq(v, 42),
+        Result.Err(_) => panic("expected Ok"),
+    }
+}
+
+@test
+fn integration_metaresult_err_propagates_message() {
+    let r = map_double(err_of(Text.from("boom")));
+    match r {
+        Result.Ok(_) => panic("expected Err"),
+        Result.Err(e) => assert(e.message().contains(Text.from("boom"))),
+    }
+}
+
+@test
+fn integration_metaresult_chained_maps_compose() {
+    // (5 → 10 → 20) — two hops through the Ok path.
+    let r = map_double(map_double(ok_of(5)));
+    match r {
+        Result.Ok(v) => assert_eq(v, 20),
+        Result.Err(_) => panic("expected Ok"),
+    }
+}
+
+@test
+fn integration_metaresult_err_survives_further_maps() {
+    // An Err stays Err no matter how many map_double hops follow.
+    let r = map_double(map_double(err_of(Text.from("stuck"))));
+    match r {
+        Result.Ok(_) => panic("expected Err"),
+        Result.Err(e) => assert(e.message().contains(Text.from("stuck"))),
+    }
+}
+
+// =============================================================================
+// Section 3: Compile-time constants used together
+// =============================================================================
+
+@test
+fn integration_version_const_and_tuple_agree() {
+    // VERSION text and VERSION_INFO tuple describe the same 0.1.0.
+    assert_eq(VERSION, Text.from("0.1.0"));
+    let (major, minor, patch) = VERSION_INFO;
+    assert_eq(major, 0);
+    assert_eq(minor, 1);
+    assert_eq(patch, 0);
+}
+
+@test
+fn integration_recursion_limit_const_flows_into_error_message() {
+    // A RecursionLimit built from the default constant renders the
+    // default value in its message — the constant and the renderer agree.
+    let e = MetaError.RecursionLimit {
+        depth: DEFAULT_RECURSION_LIMIT + 1,
+        limit: DEFAULT_RECURSION_LIMIT,
+    };
+    assert(e.message().contains(Text.from("256")));
+}
+
+@test
+fn integration_default_limits_ordering_holds() {
+    // The four limit defaults keep their design ordering when read
+    // together (memory ≫ iteration ≫ timeout ≫ recursion).
+    assert(DEFAULT_MEMORY_LIMIT > DEFAULT_ITERATION_LIMIT);
+    assert(DEFAULT_ITERATION_LIMIT > DEFAULT_TIMEOUT_MS);
+    assert(DEFAULT_TIMEOUT_MS > DEFAULT_RECURSION_LIMIT);
+}

@@ -287,8 +287,8 @@ fn test_parse_infinity_category_no_args_rejected() {
 fn test_parse_autopoietic_both_present() {
     let attr = attr_with(
         Text.from("autopoietic"),
-        List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_math"))))
-            .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(3)))),
+        [named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_math"))),
+         named_arg(Text.from("depth"), MetaAttributeValue.Int(3))],
     );
     assert(parse_autopoietic(&attr) is Some);
 }
@@ -298,8 +298,8 @@ fn test_parse_autopoietic_order_independent() {
     // depth first, epsilon second — same result.
     let attr = attr_with(
         Text.from("autopoietic"),
-        List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(5)))
-            .append(List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_compute"))))),
+        [named_arg(Text.from("depth"), MetaAttributeValue.Int(5)),
+         named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_compute")))],
     );
     assert(parse_autopoietic(&attr) is Some);
 }
@@ -326,8 +326,8 @@ fn test_parse_autopoietic_missing_depth_rejected() {
 fn test_parse_autopoietic_negative_depth_rejected() {
     let attr = attr_with(
         Text.from("autopoietic"),
-        List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_math"))))
-            .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(-1)))),
+        [named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_math"))),
+         named_arg(Text.from("depth"), MetaAttributeValue.Int(-1))],
     );
     assert(parse_autopoietic(&attr) is None);
 }
@@ -336,8 +336,8 @@ fn test_parse_autopoietic_negative_depth_rejected() {
 fn test_parse_autopoietic_wrong_name_rejected() {
     let attr = attr_with(
         Text.from("not_autopoietic"),
-        List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("x"))))
-            .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(1)))),
+        [named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("x"))),
+         named_arg(Text.from("depth"), MetaAttributeValue.Int(1))],
     );
     assert(parse_autopoietic(&attr) is None);
 }
@@ -347,8 +347,8 @@ fn test_parse_autopoietic_epsilon_int_value_rejected() {
     // Wrong value type for epsilon: needs String, given Int.
     let attr = attr_with(
         Text.from("autopoietic"),
-        List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.Int(42)))
-            .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(1)))),
+        [named_arg(Text.from("epsilon"), MetaAttributeValue.Int(42)),
+         named_arg(Text.from("depth"), MetaAttributeValue.Int(1))],
     );
     assert(parse_autopoietic(&attr) is None);
 }
@@ -446,8 +446,8 @@ fn test_parse_cut_elimination_named_string_value_rejected() {
 fn test_parse_cut_elimination_two_args_rejected() {
     let attr = attr_with(
         Text.from("cut_elimination"),
-        List.of(positional_arg(MetaAttributeValue.Int(1)))
-            .append(List.of(positional_arg(MetaAttributeValue.Int(2)))),
+        [positional_arg(MetaAttributeValue.Int(1)),
+         positional_arg(MetaAttributeValue.Int(2))],
     );
     assert(parse_cut_elimination(&attr) is None);
 }

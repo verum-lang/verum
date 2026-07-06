@@ -13258,11 +13258,87 @@ impl TypeChecker {
             let named_substituted = Self::substitute_named_params_in_type(ty, &tv_subst);
             Self::substitute_typevars_in_type(&named_substituted, &var_subst)
         };
-        let params: List<Type> = ctor
+        let mut params: List<Type> = ctor
             .args
             .iter()
             .map(|a| subst_named_params(a.as_ref()))
             .collect();
+        // GENERIC-CTOR-FRESHNESS-1 — instantiation boundary freshening.
+        //
+        // Any `Type::Var` still embedded in the constructor's stored
+        // signature after the name/var substitutions above is a
+        // PERSISTENT registration-time variable that none of the three
+        // metadata sources covered (canonical case: `Maybe`'s ctors
+        // registered with `Var(persistent)` payload slots but an EMPTY
+        // `type_params` list — `var_subst` never learns the mapping).
+        // Persistent vars must never reach call-site unification: the
+        // FIRST `Maybe.Some(Text…)` in a function bound the shared var
+        // to Text, and every later `Maybe.Some(3)` in the same checker
+        // session failed `expected Text, found Int` (order-symmetric —
+        // swapping the two uses flips the error). Freshen every
+        // distinct leftover var — consistently across params AND return
+        // type so payload/return positions stay linked — mirroring the
+        // standard ML instantiate-at-use discipline.
+        let mut leftover: indexmap::IndexMap<crate::ty::TypeVar, Type> =
+            indexmap::IndexMap::new();
+        {
+            fn collect_vars(
+                ty: &Type,
+                out: &mut indexmap::IndexMap<crate::ty::TypeVar, Type>,
+            ) {
+                match ty {
+                    Type::Var(v) => {
+                        out.entry(*v)
+                            .or_insert_with(|| Type::Var(crate::ty::TypeVar::fresh()));
+                    }
+                    Type::Named { args, .. } | Type::Generic { args, .. } => {
+                        for a in args.iter() {
+                            collect_vars(a, out);
+                        }
+                    }
+                    Type::Tuple(parts) => {
+                        for p in parts.iter() {
+                            collect_vars(p, out);
+                        }
+                    }
+                    Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } => {
+                        for p in params.iter() {
+                            collect_vars(p, out);
+                        }
+                        collect_vars(return_type, out);
+                    }
+                    Type::Reference { inner, .. }
+                    | Type::CheckedReference { inner, .. }
+                    | Type::UnsafeReference { inner, .. } => collect_vars(inner, out),
+                    _ => {}
+                }
+            }
+            for p in params.iter() {
+                collect_vars(p, &mut leftover);
+            }
+            collect_vars(&return_type, &mut leftover);
+        }
+        // The parent's own fresh_args are intentionally-fresh vars
+        // created above — they must NOT be re-freshened (that would
+        // sever the payload ↔ return-type linkage they exist for).
+        for fa in fresh_args.iter() {
+            if let Type::Var(v) = fa {
+                leftover.shift_remove(v);
+            }
+        }
+        let return_type = if leftover.is_empty() {
+            return_type
+        } else {
+            params = params
+                .iter()
+                .map(|p| Self::substitute_typevars_in_type(p, &leftover))
+                .collect();
+            Self::substitute_typevars_in_type(&return_type, &leftover)
+        };
         if params.is_empty() {
             // Unit-position variant (None, Less, …) — return the
             // constructed value directly, not a function.
@@ -14224,6 +14300,12 @@ impl TypeChecker {
                 if parent_matches {
                     if let Some(params) = params_opt {
                         if params.len() == args.len() {
+                            if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                                eprintln!(
+                                    "[ctor-trace] qualified-ctor branch: {}.{} params={:?} return={:?}",
+                                    recv_type_name, method.name, params, return_type,
+                                );
+                            }
                             for (arg, param_ty) in args.iter().zip(params.iter()) {
                                 let resolved_param = self.unifier.apply(param_ty);
                                 self.check_expr(arg, &resolved_param)?;

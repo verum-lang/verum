@@ -241,7 +241,7 @@ fn test_has_viable_candidate_all_below_threshold() {
     let c1 = OracleCandidate { proof_term: Text.from("?"), confidence: 0.3, justification: Text.from("") };
     let c2 = OracleCandidate { proof_term: Text.from("?"), confidence: 0.5, justification: Text.from("") };
     let r = OracleResponse {
-        candidates: List.of(c1).append(List.of(c2)),
+        candidates: [c1, c2],
         goal: Text.from("g"),
         elapsed_ms: 0,
     };
@@ -254,7 +254,7 @@ fn test_has_viable_candidate_one_above_threshold() {
     let c1 = OracleCandidate { proof_term: Text.from("?"), confidence: 0.3, justification: Text.from("") };
     let c2 = OracleCandidate { proof_term: Text.from("ok"), confidence: 0.85, justification: Text.from("") };
     let r = OracleResponse {
-        candidates: List.of(c1).append(List.of(c2)),
+        candidates: [c1, c2],
         goal: Text.from("g"),
         elapsed_ms: 0,
     };
@@ -295,7 +295,7 @@ fn test_filter_by_confidence_drops_below_threshold() {
     let c1 = OracleCandidate { proof_term: Text.from("a"), confidence: 0.3, justification: Text.from("") };
     let c2 = OracleCandidate { proof_term: Text.from("b"), confidence: 0.8, justification: Text.from("") };
     let r = OracleResponse {
-        candidates: List.of(c1).append(List.of(c2)),
+        candidates: [c1, c2],
         goal: Text.from("g"),
         elapsed_ms: 0,
     };
@@ -308,7 +308,7 @@ fn test_filter_by_confidence_keeps_all_when_threshold_zero() {
     let c1 = OracleCandidate { proof_term: Text.from("a"), confidence: 0.1, justification: Text.from("") };
     let c2 = OracleCandidate { proof_term: Text.from("b"), confidence: 0.2, justification: Text.from("") };
     let r = OracleResponse {
-        candidates: List.of(c1).append(List.of(c2)),
+        candidates: [c1, c2],
         goal: Text.from("g"),
         elapsed_ms: 0,
     };
@@ -321,7 +321,7 @@ fn test_filter_by_confidence_drops_all_when_threshold_one() {
     let c1 = OracleCandidate { proof_term: Text.from("a"), confidence: 0.4, justification: Text.from("") };
     let c2 = OracleCandidate { proof_term: Text.from("b"), confidence: 0.99, justification: Text.from("") };
     let r = OracleResponse {
-        candidates: List.of(c1).append(List.of(c2)),
+        candidates: [c1, c2],
         goal: Text.from("g"),
         elapsed_ms: 0,
     };
@@ -349,7 +349,7 @@ fn test_candidate_count_above_mixed_threshold() {
     let c2 = OracleCandidate { proof_term: Text.from("b"), confidence: 0.6, justification: Text.from("") };
     let c3 = OracleCandidate { proof_term: Text.from("c"), confidence: 0.9, justification: Text.from("") };
     let r = OracleResponse {
-        candidates: List.of(c1).append(List.of(c2)).append(List.of(c3)),
+        candidates: [c1, c2, c3],
         goal: Text.from("g"),
         elapsed_ms: 0,
     };

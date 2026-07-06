@@ -83,6 +83,14 @@ When they land, drop sister tests mirroring §5 / §7's pattern.
   inadmissible inputs (empty / letter / space / minus / garbage).
 * `core-tests/meta/framework_hygiene/audit.md` — this file.
 
+### §3.2 META-HYGIENE-VALIDATE-1 — 2 unit tests misused `List.append` — CLOSED 2026-07-06
+
+`MetaClassifierTally { candidates: List.of(t1).append(List.of(t2)) }`
+— `append` returns `()`; `validate_meta_classifier_uniqueness`
+null-derefed indexing the Unit (`NullPointerAt opcode 0x66 … pc=4`).
+Rewritten to list literals. Language hole closed by
+META-TEST-TYPECHECK-1 (see meta/oracle audit §3.4).
+
 ## Action items deferred
 
 | Item | Scope | Estimated effort |

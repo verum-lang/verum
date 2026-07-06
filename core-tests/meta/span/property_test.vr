@@ -1,0 +1,326 @@
+// =============================================================================
+// core-tests/meta/span/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core/meta/span.vr`.
+//
+// **Construction discipline (same as unit_test.vr).**  The
+// `@compiler_intrinsic` surface — `MetaSpan.start` / `.end` / `.join` /
+// `.location` / `.overlaps` / `.contains` / `.source_text` and the
+// resolution variants — is compile-time-only; at Tier-0 runtime it
+// returns zero-filled stubs (audit.md §3.2/§3.3).  It is therefore NOT
+// exercised here.  Only pure-data record + flag + Eq surfaces are
+// tested.  Spans are built by **direct record construction**.
+//
+// Cross-module factory functions that return records
+// (`SpanRange.single` / `.new`, `MultiSpan.empty` / `.from_span` /
+// `.with_primary` / `.with_span`) DO work at runtime now (the §3.1
+// cross-module fn-return field-access OOB defect the unit_test header
+// warns about has since closed for these paths), so the record-shape
+// laws below drive them directly.
+//
+// Laws covered:
+//   §A  MetaSpan Eq — reflexive / symmetric / transitive; eq is by
+//       (id, hygiene) with `flags` EXCLUDED (pinned).
+//   §B  SpanFlags — exhaustive 2^3 Bool construction; each flag reads
+//       back exactly and independently.
+//   §C  SourceLocation Eq — reflexive / symmetric / transitive; eq is
+//       by (file, line, column) with `offset` EXCLUDED (pinned).
+//   §D  SpanRange — `single(s)` ⇒ start == end == s; `new(a,b)`
+//       preserves endpoints.
+//   §E  MultiSpan — empty / from_span / with_primary / with_span over
+//       0, 1, 2 labeled spans; is_empty and primary_span coherence.
+// =============================================================================
+
+mount core.meta.span.{MetaSpan, SourceLocation, SpanRange, MultiSpan, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+// ---- builders --------------------------------------------------------------
+
+fn span(id: UInt64, hy: UInt32, e: Bool, s: Bool, h: Bool) -> MetaSpan {
+    MetaSpan { id, hygiene: hy, flags: SpanFlags { is_expansion: e, is_synthetic: s, is_hidden: h } }
+}
+
+fn plain(id: UInt64) -> MetaSpan {
+    span(id, 0, false, false, false)
+}
+
+fn bools() -> List<Bool> {
+    [false, true]
+}
+
+// A small finite domain for the MetaSpan Eq laws.  Deliberately contains
+// a duplicate `(id, hygiene)` pair whose flags DIFFER (index 0 and 1) so
+// the equal-pair case is non-trivial, plus variation in id and hygiene.
+fn eq_domain() -> List<MetaSpan> {
+    [
+        span(5, 1, false, false, false),  // A
+        span(5, 1, true,  true,  true),   // A' — Eq-equal to A (flags differ)
+        span(6, 1, false, false, false),  // differs by id
+        span(5, 2, false, false, false),  // differs by hygiene
+    ]
+}
+
+// =============================================================================
+// §A  MetaSpan Eq laws — by (id, hygiene), flags excluded
+// =============================================================================
+
+@test
+fn law_meta_span_eq_reflexive() {
+    for a in eq_domain().iter() {
+        assert(*a == *a);
+    }
+}
+
+@test
+fn law_meta_span_eq_symmetric() {
+    for a in eq_domain().iter() {
+        for b in eq_domain().iter() {
+            assert((*a == *b) == (*b == *a));
+        }
+    }
+}
+
+@test
+fn law_meta_span_eq_transitive() {
+    for a in eq_domain().iter() {
+        for b in eq_domain().iter() {
+            for c in eq_domain().iter() {
+                if *a == *b && *b == *c {
+                    assert(*a == *c);
+                }
+            }
+        }
+    }
+}
+
+@test
+fn law_meta_span_eq_ignores_flags() {
+    // Same (id, hygiene), every flag bit flipped → still equal.
+    let a = span(5, 1, false, false, false);
+    let b = span(5, 1, true, true, true);
+    assert(a == b);
+}
+
+@test
+fn law_meta_span_eq_distinguishes_id() {
+    let a = span(5, 1, false, false, false);
+    let b = span(6, 1, false, false, false);
+    assert(!(a == b));
+}
+
+@test
+fn law_meta_span_eq_distinguishes_hygiene() {
+    let a = span(5, 1, false, false, false);
+    let b = span(5, 2, false, false, false);
+    assert(!(a == b));
+}
+
+// =============================================================================
+// §B  SpanFlags — exhaustive 2^3 Bool combinations
+// =============================================================================
+
+@test
+fn law_span_flags_exhaustive_readback() {
+    // All eight (is_expansion, is_synthetic, is_hidden) combinations.
+    for e in bools().iter() {
+        for s in bools().iter() {
+            for h in bools().iter() {
+                let f = SpanFlags { is_expansion: *e, is_synthetic: *s, is_hidden: *h };
+                assert_eq(f.is_expansion, *e);
+                assert_eq(f.is_synthetic, *s);
+                assert_eq(f.is_hidden, *h);
+            }
+        }
+    }
+}
+
+@test
+fn law_meta_span_predicates_read_flags_exhaustive() {
+    // `.is_expansion()` / `.is_synthetic()` are pure (read self.flags.*);
+    // they must mirror the constructed flag bits for every combination.
+    for e in bools().iter() {
+        for s in bools().iter() {
+            let sp = MetaSpan {
+                id: 1,
+                hygiene: 0,
+                flags: SpanFlags { is_expansion: *e, is_synthetic: *s, is_hidden: false },
+            };
+            assert_eq(sp.is_expansion(), *e);
+            assert_eq(sp.is_synthetic(), *s);
+        }
+    }
+}
+
+// =============================================================================
+// §C  SourceLocation Eq laws — by (file, line, column), offset excluded
+// =============================================================================
+
+fn loc(file: Text, line: Int, column: Int, offset: Int) -> SourceLocation {
+    SourceLocation { file, line, column, offset }
+}
+
+fn loc_domain() -> List<SourceLocation> {
+    [
+        loc(Text.from("a.vr"), 1, 2, 0),   // L
+        loc(Text.from("a.vr"), 1, 2, 99),  // L' — Eq-equal to L (offset differs)
+        loc(Text.from("b.vr"), 1, 2, 0),   // differs by file
+        loc(Text.from("a.vr"), 3, 2, 0),   // differs by line
+        loc(Text.from("a.vr"), 1, 5, 0),   // differs by column
+    ]
+}
+
+@test
+fn law_source_location_eq_reflexive() {
+    for a in loc_domain().iter() {
+        assert(*a == *a);
+    }
+}
+
+@test
+fn law_source_location_eq_symmetric() {
+    for a in loc_domain().iter() {
+        for b in loc_domain().iter() {
+            assert((*a == *b) == (*b == *a));
+        }
+    }
+}
+
+@test
+fn law_source_location_eq_transitive() {
+    for a in loc_domain().iter() {
+        for b in loc_domain().iter() {
+            for c in loc_domain().iter() {
+                if *a == *b && *b == *c {
+                    assert(*a == *c);
+                }
+            }
+        }
+    }
+}
+
+@test
+fn law_source_location_eq_ignores_offset() {
+    let a = loc(Text.from("a.vr"), 1, 2, 0);
+    let b = loc(Text.from("a.vr"), 1, 2, 99);
+    assert(a == b);
+}
+
+@test
+fn law_source_location_eq_distinguishes_file() {
+    let a = loc(Text.from("a.vr"), 1, 2, 0);
+    let b = loc(Text.from("b.vr"), 1, 2, 0);
+    assert(!(a == b));
+}
+
+@test
+fn law_source_location_eq_distinguishes_line() {
+    let a = loc(Text.from("a.vr"), 1, 2, 0);
+    let b = loc(Text.from("a.vr"), 3, 2, 0);
+    assert(!(a == b));
+}
+
+@test
+fn law_source_location_eq_distinguishes_column() {
+    let a = loc(Text.from("a.vr"), 1, 2, 0);
+    let b = loc(Text.from("a.vr"), 1, 5, 0);
+    assert(!(a == b));
+}
+
+// =============================================================================
+// §D  SpanRange — single / new record laws
+// =============================================================================
+
+fn span_list() -> List<MetaSpan> {
+    [plain(0), plain(1), plain(7), plain(42)]
+}
+
+@test
+fn law_span_range_single_collapses_endpoints() {
+    // single(s) ⇒ start == end == s, for every s in the domain.
+    for s in span_list().iter() {
+        let r = SpanRange.single(*s);
+        assert(r.start == r.end);
+        assert(r.start == *s);
+    }
+}
+
+@test
+fn law_span_range_new_preserves_endpoints() {
+    let a = plain(10);
+    let b = plain(20);
+    let r = SpanRange.new(a, b);
+    assert(r.start == a);
+    assert(r.end == b);
+}
+
+@test
+fn law_span_range_new_distinct_endpoints_not_collapsed() {
+    let a = plain(10);
+    let b = plain(20);
+    let r = SpanRange.new(a, b);
+    assert(!(r.start == r.end));
+}
+
+// =============================================================================
+// §E  MultiSpan — empty / from_span / with_primary / with_span
+// =============================================================================
+
+@test
+fn law_multi_span_empty_is_empty_no_primary() {
+    let m = MultiSpan.empty();
+    assert(m.is_empty());
+    assert(m.primary_span() is None);
+    assert_eq(m.spans.len(), 0);
+}
+
+@test
+fn law_multi_span_from_span_has_primary_no_labels() {
+    let m = MultiSpan.from_span(plain(1));
+    assert(!m.is_empty());
+    assert(m.primary_span() is Some);
+    assert_eq(m.spans.len(), 0);
+}
+
+@test
+fn law_multi_span_with_primary_sets_primary() {
+    let m = MultiSpan.empty().with_primary(plain(3));
+    assert(!m.is_empty());
+    assert(m.primary_span() is Some);
+}
+
+@test
+fn law_multi_span_labeled_zero() {
+    let m = MultiSpan.empty();
+    assert(m.is_empty());
+    assert_eq(m.spans.len(), 0);
+}
+
+@test
+fn law_multi_span_labeled_one() {
+    // with_span adds a labeled span WITHOUT setting the primary.
+    let m = MultiSpan.empty().with_span(plain(1), Text.from("a"));
+    assert(!m.is_empty());
+    assert(m.primary_span() is None);
+    assert_eq(m.spans.len(), 1);
+}
+
+@test
+fn law_multi_span_labeled_two() {
+    let m = MultiSpan.empty()
+        .with_span(plain(1), Text.from("a"))
+        .with_span(plain(2), Text.from("b"));
+    assert(!m.is_empty());
+    assert(m.primary_span() is None);
+    assert_eq(m.spans.len(), 2);
+}
+
+@test
+fn law_multi_span_primary_plus_labeled() {
+    let m = MultiSpan.from_span(plain(9)).with_span(plain(1), Text.from("note"));
+    assert(!m.is_empty());
+    assert(m.primary_span() is Some);
+    assert_eq(m.spans.len(), 1);
+}
+
+fn main() {}

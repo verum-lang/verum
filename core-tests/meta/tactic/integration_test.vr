@@ -1,0 +1,189 @@
+// =============================================================================
+// core-tests/meta/tactic/integration_test.vr
+// =============================================================================
+//
+// Cross-shape scenarios composing the whole MetaTerm surface at once —
+// smart-constructors, beta_cancel, meta_seq, meta_normalise,
+// meta_is_normal, and references_elaborator woven through deeply
+// nested terms built over `Heap<MetaTerm>` and `Text`.
+//
+// property_test.vr proves the individual algebraic laws (β-cancel,
+// seq-elim, normalise idempotence, references monotonicity). This file
+// adds the *cross-law* connections those laws don't state directly:
+//
+//   §1  Normal-form soundness — meta_is_normal(meta_normalise(t)) holds
+//       for every shape (the two functions agree on what "normal" is).
+//   §2  Multi-operator composition chains reduce end-to-end.
+//   §3  references_elaborator survives normalisation for non-redex
+//       elaborators, and descends arbitrarily deep nests.
+//   §4  beta_cancel ∘ meta_seq / meta_splice interplay.
+// =============================================================================
+
+mount core.meta.tactic.{
+    MetaTerm,
+    meta_quote, meta_splice, meta_reflect, meta_custom, meta_seq, meta_const,
+    is_meta_value, references_elaborator,
+    beta_cancel, meta_normalise, meta_is_normal,
+};
+
+// =============================================================================
+// §1  Normal-form soundness: meta_is_normal(meta_normalise(t)) for all shapes
+// =============================================================================
+//
+// meta_normalise and meta_is_normal are defined independently; this law
+// pins that they agree — normalising any term yields something the
+// predicate accepts as normal.  Each test drives one representative
+// shape through the pair.
+
+@test
+fn integration_normalise_yields_normal_splice_of_quote() {
+    let t = meta_splice(meta_quote(Text.from("e")));
+    assert(meta_is_normal(meta_normalise(t)));
+}
+
+@test
+fn integration_normalise_yields_normal_deep_splice_stack() {
+    let t = meta_splice(meta_splice(meta_splice(meta_quote(Text.from("e")))));
+    assert(meta_is_normal(meta_normalise(t)));
+}
+
+@test
+fn integration_normalise_yields_normal_seq_of_value() {
+    let t = meta_seq(meta_quote(Text.from("a")), meta_const(Text.from("b")));
+    assert(meta_is_normal(meta_normalise(t)));
+}
+
+@test
+fn integration_normalise_yields_normal_custom_with_redex_arg() {
+    let t = meta_custom(Text.from("simp"), meta_splice(meta_quote(Text.from("x"))));
+    assert(meta_is_normal(meta_normalise(t)));
+}
+
+@test
+fn integration_normalise_yields_normal_seq_of_reflect_first() {
+    // Reflect is normal-at-layer but NOT an is_meta_value → seq stays a Seq,
+    // and that Seq must still be recognised as normal.
+    let t = meta_seq(meta_reflect(Text.from("g")), meta_const(Text.from("b")));
+    assert(meta_is_normal(meta_normalise(t)));
+}
+
+@test
+fn integration_normalise_yields_normal_nested_seq_custom_splice() {
+    // custom(f, seq(splice(quote(a)), splice(quote(b))))
+    let inner = meta_seq(
+        meta_splice(meta_quote(Text.from("a"))),
+        meta_splice(meta_quote(Text.from("b"))),
+    );
+    let t = meta_custom(Text.from("f"), inner);
+    assert(meta_is_normal(meta_normalise(t)));
+}
+
+// =============================================================================
+// §2  Multi-operator composition chains reduce end-to-end
+// =============================================================================
+
+@test
+fn integration_seq_of_two_redexes_reduces_to_second_normal_form() {
+    // seq(splice(quote(a)), splice(quote(b))):
+    //   first splice(quote(a)) → quote(a)  [now a value]
+    //   seq-elim → second: splice(quote(b)) → quote(b)
+    let t = meta_seq(
+        meta_splice(meta_quote(Text.from("a"))),
+        meta_splice(meta_quote(Text.from("b"))),
+    );
+    let n = meta_normalise(t);
+    assert(n is MetaTerm.Quote);
+}
+
+@test
+fn integration_left_nested_seq_chain_collapses() {
+    // seq(seq(quote(a), const(b)), const(c))
+    //   inner seq(quote(a), const(b)) → const(b)  [value]
+    //   outer seq(const(b), const(c)) → const(c)
+    let inner = meta_seq(meta_quote(Text.from("a")), meta_const(Text.from("b")));
+    let t = meta_seq(inner, meta_const(Text.from("c")));
+    let n = meta_normalise(t);
+    assert(n is MetaTerm.Const);
+}
+
+@test
+fn integration_custom_wraps_reduced_seq() {
+    // custom(g, seq(quote(a), splice(quote(b)))) — outer Custom preserved,
+    // its arg reduces to quote(b).
+    let arg = meta_seq(meta_quote(Text.from("a")), meta_splice(meta_quote(Text.from("b"))));
+    let t = meta_custom(Text.from("g"), arg);
+    let n = meta_normalise(t);
+    assert(n is MetaTerm.Custom);
+}
+
+@test
+fn integration_beta_cancel_then_normalise_agree_on_single_redex() {
+    // For a single splice(quote) head, one beta_cancel == full normalise.
+    let t1 = meta_splice(meta_quote(Text.from("e")));
+    let t2 = meta_splice(meta_quote(Text.from("e")));
+    let one_step = beta_cancel(t1);
+    let full = meta_normalise(t2);
+    assert(one_step is MetaTerm.Quote);
+    assert(full is MetaTerm.Quote);
+}
+
+// =============================================================================
+// §3  references_elaborator across normalisation and deep nesting
+// =============================================================================
+
+@test
+fn integration_references_survives_normalisation() {
+    // A Custom elaborator buried inside a reducible splice is still
+    // referenced after the term normalises (normalise keeps Custom nodes).
+    let inner = meta_custom(Text.from("ring"), meta_quote(Text.from("x")));
+    let t = meta_splice(inner);
+    let n = meta_normalise(t);
+    assert(references_elaborator(n, Text.from("ring")));
+}
+
+@test
+fn integration_references_five_level_custom_nest() {
+    // custom(a, custom(b, custom(c, custom(d, custom(e, quote(x))))))
+    let l5 = meta_custom(Text.from("e"), meta_quote(Text.from("x")));
+    let l4 = meta_custom(Text.from("d"), l5);
+    let l3 = meta_custom(Text.from("c"), l4);
+    let l2 = meta_custom(Text.from("b"), l3);
+    let l1 = meta_custom(Text.from("a"), l2);
+    assert(references_elaborator(l1, Text.from("e")));
+    assert(references_elaborator(l1, Text.from("c")));
+    assert(!references_elaborator(l1, Text.from("z")));
+}
+
+@test
+fn integration_references_through_seq_and_splice_mix() {
+    // seq(splice(custom(deep, quote(x))), quote(y)) — the elaborator is
+    // reachable through the splice on the left of the seq.
+    let deep = meta_custom(Text.from("deep"), meta_quote(Text.from("x")));
+    let t = meta_seq(meta_splice(deep), meta_quote(Text.from("y")));
+    assert(references_elaborator(t, Text.from("deep")));
+}
+
+// =============================================================================
+// §4  beta_cancel / splice / seq structural interplay
+// =============================================================================
+
+@test
+fn integration_beta_cancel_leaves_splice_of_reflect_reducible_head_intact() {
+    // splice(reflect(g)) has no β-redex (reflect isn't quote) — stays Splice.
+    let t = meta_splice(meta_reflect(Text.from("g")));
+    let r = beta_cancel(t);
+    assert(r is MetaTerm.Splice);
+    // And the whole thing is already normal.
+    assert(meta_is_normal(meta_splice(meta_reflect(Text.from("g")))));
+}
+
+@test
+fn integration_value_head_seq_is_not_normal_but_normalises() {
+    // seq(const(a), reflect(g)): first is a value → not normal;
+    // normalising collapses it to the second (reflect), which is normal.
+    let s = meta_seq(meta_const(Text.from("a")), meta_reflect(Text.from("g")));
+    assert(!meta_is_normal(s));
+    let n = meta_normalise(s);
+    assert(n is MetaTerm.Reflect);
+    assert(meta_is_normal(n));
+}

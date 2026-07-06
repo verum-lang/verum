@@ -1,0 +1,278 @@
+// =============================================================================
+// core-tests/meta/attribute/regression_test.vr
+// =============================================================================
+//
+// One @test per past/present defect. Never deleted — a pin becomes a
+// re-regression guardrail once its underlying bug is fixed.
+//
+// DEFECT CLASS (this file): cross-module static-method NAME COLLISION.
+// A static method `Type.method(...)` whose bare name also names a
+// method (or a record ctor) on an unrelated type in another compiled
+// module can resolve to the WIDER sibling. When that sibling is a
+// record constructor with more fields, codegen writes past the real
+// object's data size — a field-write out-of-bounds that panics or
+// corrupts memory (audit §meta/attribute #17/#39; kin to the
+// META-GROUP-XMODULE-1 `Group`-vs-`Probability` TypeId collision).
+//
+// Whether the collision *fires* depends on the compiled type-universe
+// (which TypeIds get assigned), so these pins can pass in isolation
+// and fail (or SIGSEGV) inside a larger build. That instability is
+// itself the regression being tracked.
+// =============================================================================
+
+mount core.meta.attribute.{
+    Attribute, AttributeStyle, MetaAttributeValue, AttributeArg,
+    CfgPredicate, DeriveInfo, ReprInfo,
+};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.token.{TokenStream};
+mount core.base.maybe.{Maybe};
+
+fn synthetic_span() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn empty_ts() -> TokenStream {
+    TokenStream { tokens: List.new(), span: synthetic_span() }
+}
+
+// =============================================================================
+// Section 1: AttributeArg.positional / .named static-ctor collision
+// =============================================================================
+//
+// REGRESSION (audit #17/#39): `AttributeArg.positional(value)` is a
+// 3-field record ctor, but the bare name `positional` collided with a
+// wider same-named sibling; codegen wrote past the AttributeArg's
+// 3-field size and panicked. The 8 unit-test cases exercising it are
+// still `@ignore`'d there. These two pins assert the CORRECT builder
+// behaviour (is_named reflects the ctor used); they pass when the
+// collision is dormant and fail/panic when it fires.
+//
+
+@test
+fn regression_attribute_arg_positional_not_named() {
+    let a = AttributeArg.positional(MetaAttributeValue.string(Text.from("x")));
+    assert(!a.is_named());
+}
+
+@test
+fn regression_attribute_arg_named_is_named() {
+    let a = AttributeArg.named(Text.from("align"), MetaAttributeValue.int(8));
+    assert(a.is_named());
+}
+
+// =============================================================================
+// Section 2: intrinsic-nil / iterator / const-slice defects (@ignore'd)
+// =============================================================================
+//
+// These pin defects confirmed while building this suite (audit §meta/
+// attribute). They are `@ignore`'d because each currently HANGS or
+// hard-CRASHES the runner (a SIGSEGV in one parallel worker takes the
+// whole process down); the pin keeps the exact reproducer so removal
+// of `@ignore` becomes the fix's acceptance test. `@ignore`'d bodies
+// are still type-checked, so they also guard against API drift.
+//
+
+// REGRESSION: `Attribute.is_builtin()` calls
+// `BUILTIN_ATTRIBUTES.contains(&self.name.as_str())` over a
+// `const &[&str]`; the const-slice `.contains` path SIGSEGVs at
+// runtime (RC=139). Un-ignore when the `&[&str]` const lowering lands.
+@ignore
+@test
+fn regression_attribute_is_builtin_const_slice_crash() {
+    let a = Attribute {
+        name: Text.from("inline"),
+        style: AttributeStyle.Word,
+        args: List.new(),
+        tokens: empty_ts(),
+        span: synthetic_span(),
+    };
+    assert(a.is_builtin());
+}
+
+// REGRESSION: `Attribute.has_arg(name)` does
+// `self.args.iter().any(|a| a.name == Maybe.Some(name))`; the
+// `Maybe<Text> ==` comparison reads field index 0 out of bounds
+// ("field access out of bounds: field index 0"). Un-ignore when
+// Maybe equality over Text is fixed.
+@ignore
+@test
+fn regression_attribute_has_arg_maybe_eq_oob() {
+    let a = Attribute {
+        name: Text.from("cfg"),
+        style: AttributeStyle.Call,
+        args: [AttributeArg {
+            name: Maybe.Some(Text.from("target_os")),
+            value: MetaAttributeValue.string(Text.from("linux")),
+            span: synthetic_span(),
+        }],
+        tokens: empty_ts(),
+        span: synthetic_span(),
+    };
+    assert(a.has_arg(Text.from("target_os")));
+}
+
+// REGRESSION: `Attribute.get_named_arg(name)` uses `.iter().find(...)`
+// with the same `Maybe ==` comparison and HANGS (RC=124 timeout)
+// rather than returning. Un-ignore when the find/Maybe-eq path
+// terminates.
+@ignore
+@test
+fn regression_attribute_get_named_arg_hangs() {
+    let a = Attribute {
+        name: Text.from("cfg"),
+        style: AttributeStyle.Call,
+        args: [AttributeArg {
+            name: Maybe.Some(Text.from("k")),
+            value: MetaAttributeValue.string(Text.from("v")),
+            span: synthetic_span(),
+        }],
+        tokens: empty_ts(),
+        span: synthetic_span(),
+    };
+    assert(a.get_named_arg(Text.from("k")) is Some);
+}
+
+// REGRESSION (COLLECT-FROMITER-RESOLVE-1): every `Attribute` accessor
+// ending in `.iter()...collect()` — positional_args / named_args /
+// as_ident_list / as_key_values (and DeriveInfo.from_attribute, which
+// calls as_ident_list) — mis-resolves `.collect()` to
+// `FFIAbi.from_iter` and panics ("method 'FFIAbi.from_iter' not
+// found"). Un-ignore when generic `collect()` resolves at monomorph
+// time.
+@ignore
+@test
+fn regression_attribute_as_ident_list_collect_from_iter() {
+    let a = Attribute {
+        name: Text.from("derive"),
+        style: AttributeStyle.Call,
+        args: [
+            AttributeArg { name: Maybe.None, value: MetaAttributeValue.ident(Text.from("Clone")), span: synthetic_span() },
+            AttributeArg { name: Maybe.None, value: MetaAttributeValue.ident(Text.from("Eq")), span: synthetic_span() },
+        ],
+        tokens: empty_ts(),
+        span: synthetic_span(),
+    };
+    assert_eq(a.as_ident_list().len(), 2);
+}
+
+// =============================================================================
+// Section 3: interp/AOT codegen divergences (@ignore'd, META-AOT-PARITY-1)
+// =============================================================================
+//
+// These pass `--interp` but mis-lower under `--aot`. The same source
+// must pass both tiers, so each is `@ignore`'d until the AOT codegen
+// gap closes; removing the `@ignore` is the fix's acceptance test.
+//
+
+// REGRESSION: `Maybe`-returning value accessors read `Some` as `None`
+// under `--aot`. `MetaAttributeValue.ident(x).as_ident()` should be
+// Some. (This is the same defect the existing unit_test case
+// `test_meta_attribute_value_as_ident_match` hits under AOT.)
+@ignore
+@test
+fn regression_aot_meta_value_as_ident_some() {
+    let v = MetaAttributeValue.ident(Text.from("Y"));
+    assert(v.as_ident() is Some);
+}
+
+// REGRESSION: `AttributeArg.as_string()` over a String value should be
+// Some; the Maybe-Some degenerates to None under `--aot`.
+@ignore
+@test
+fn regression_aot_arg_as_string_some() {
+    let a = AttributeArg { name: Maybe.None, value: MetaAttributeValue.string(Text.from("linux")), span: synthetic_span() };
+    assert(a.as_string() is Some);
+}
+
+// REGRESSION: a NON-EMPTY `List<AttributeArg>` (records carrying a
+// `Span`) degenerates under `--aot` — `arg_count()` / `has_args()`
+// read the wrong length. `--interp` is correct.
+@ignore
+@test
+fn regression_aot_attr_nonempty_arg_count() {
+    let a = Attribute {
+        name: Text.from("derive"),
+        style: AttributeStyle.Call,
+        args: [
+            AttributeArg { name: Maybe.None, value: MetaAttributeValue.ident(Text.from("Clone")), span: synthetic_span() },
+            AttributeArg { name: Maybe.None, value: MetaAttributeValue.ident(Text.from("Eq")), span: synthetic_span() },
+        ],
+        tokens: empty_ts(),
+        span: synthetic_span(),
+    };
+    assert(a.has_args());
+    assert_eq(a.arg_count(), 2);
+}
+
+// REGRESSION: `CfgPredicate.from_attribute` over a cfg attribute
+// returns `Some` under `--interp` but the cross-module enum return
+// degenerates under `--aot` (the rejection/None direction is stable).
+@ignore
+@test
+fn regression_aot_cfg_from_attribute_recognizes() {
+    let a = Attribute {
+        name: Text.from("cfg"),
+        style: AttributeStyle.Call,
+        args: [AttributeArg { name: Maybe.None, value: MetaAttributeValue.ident(Text.from("unix")), span: synthetic_span() }],
+        tokens: empty_ts(),
+        span: synthetic_span(),
+    };
+    assert(CfgPredicate.from_attribute(&a) is Some);
+}
+
+// REGRESSION: `ReprInfo.from_attribute` over a repr attribute returns
+// `Some` under `--interp`; the cross-module enum return degenerates
+// under `--aot`.
+@ignore
+@test
+fn regression_aot_repr_from_attribute_recognizes() {
+    let a = Attribute {
+        name: Text.from("repr"),
+        style: AttributeStyle.Call,
+        args: [AttributeArg { name: Maybe.None, value: MetaAttributeValue.ident(Text.from("C")), span: synthetic_span() }],
+        tokens: empty_ts(),
+        span: synthetic_span(),
+    };
+    assert(ReprInfo.from_attribute(&a) is Some);
+}
+
+// REGRESSION (REFL-LIST-CONTAINS-TEXT-1 family): `DeriveInfo.derives`
+// uses `List<Text>.contains`, which mis-lowers under `--aot` (returns
+// the wrong membership). Interp is correct.
+@ignore
+@test
+fn regression_aot_derive_info_derives_membership() {
+    let di = DeriveInfo {
+        derives: [Text.from("Clone"), Text.from("Debug")],
+        span: synthetic_span(),
+    };
+    assert(di.derives(Text.from("Clone")));
+    assert(!di.derives(Text.from("Hash")));
+}
+
+// REGRESSION (META-GROUP-XMODULE-1 / #27): even a purely tag-checking
+// multi-variant `is` chain over `MetaAttributeValue` flakes under
+// `--aot` — the type's TypeId assignment is non-deterministic per
+// compile, so a 5-variant disjointness cycle (and the negative
+// `Maybe`-accessor `is None` cases over `MetaAttributeValue` /
+// `AttributeArg`) pass some AOT compiles and fail others. `--interp`
+// is deterministic. Un-ignore when TypeIds are stable per module.
+@ignore
+@test
+fn regression_aot_meta_value_multivariant_cycle_flaky() {
+    let ident: MetaAttributeValue = MetaAttributeValue.Ident(Text.from("Clone"));
+    let string: MetaAttributeValue = MetaAttributeValue.String(Text.from("linux"));
+    let int: MetaAttributeValue = MetaAttributeValue.Int(42);
+    let float: MetaAttributeValue = MetaAttributeValue.Float(3.14);
+    let boolean: MetaAttributeValue = MetaAttributeValue.Bool(true);
+    assert(ident is MetaAttributeValue.Ident && !(ident is MetaAttributeValue.String));
+    assert(string is MetaAttributeValue.String && !(string is MetaAttributeValue.Int));
+    assert(int is MetaAttributeValue.Int && !(int is MetaAttributeValue.Float));
+    assert(float is MetaAttributeValue.Float && !(float is MetaAttributeValue.Bool));
+    assert(boolean is MetaAttributeValue.Bool && !(boolean is MetaAttributeValue.Ident));
+}

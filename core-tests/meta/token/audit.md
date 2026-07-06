@@ -77,6 +77,42 @@ Pinned regressions for the ctor paths could be added; deferred
 until the cross-module fix lands so the regression-set isn't
 artificially inflated.
 
+### §3.6 META-GROUP-XMODULE-1 — cross-module simple-name type collision — CLOSED 2026-07-06
+
+`Group { delimiter, tokens, span }` (8 unit tests) crashed with
+`field write out of bounds: field index 3 … data size 24
+type='Group'`. Root cause chain (language level, systemic):
+
+1. VBC codegen's type registries (`type_name_to_id`,
+   `type_field_layouts`, `type_field_type_names`) were keyed by
+   **simple type name** with first-wins across every loaded archive
+   module.
+2. The reachability-driven archive loader pulls `core.math` (protocol
+   `Group`) before `core.meta` for these tests; the protocol-stub
+   pass claimed the name `Group` with an EMPTY-fields descriptor.
+3. `import_archive_type_with_protocol_remap` then **silently
+   dropped** `meta.token.Group` (and `cli.spec.Group`) — bail on
+   "name already has a descriptor".
+4. Record literals of the dropped type allocated with the literal's
+   own field count but resolved field indices through the
+   global-intern fallback (`tokens`→3, `span`→15) → out-of-bounds
+   `SetF`. Which module won was **load-order dependent** — adding
+   test files to the folder shifted the composition and flipped the
+   failure (observed 2026-07-06).
+
+Fundamental fix (verum_vbc): module-qualified registry keys
+(`"core.meta.Group"`) registered unconditionally alongside the
+first-wins simple key; mount-aware re-keying
+(`resolve_record_type_key`, driven by a new
+`CodegenContext.mounted_types` populated from `mount` decls);
+qualified-first type-id remap in `merge_archive_function_bodies`;
+benign-homonym downgrade in the type-table health checker (same
+simple name × different ids is the designed state when every id has
+its own qualified key). Pinned by
+`core-tests/meta/token/regression_test.vr` — note the pin is a
+**canary**, not an order-forcing pin: validate across multiple suite
+compositions.
+
 ## Action items landed in this branch
 
 * `core-tests/meta/token/unit_test.vr` — 56 unit tests over
@@ -85,6 +121,11 @@ artificially inflated.
   TokenKind 6-variant + Literal 6-variant + Literal ctors +
   Token record + TokenTree 2-variant + TokenStream record +
   Group record + LexError record.
+* `core-tests/meta/token/property_test.vr` — 25 law tests
+  (Delimiter open/close pairing, Literal ctor→variant matrix,
+  Token ctor/predicate coherence, TokenKind 6-variant partition).
+* `core-tests/meta/token/regression_test.vr` — 4 canary pins for
+  META-GROUP-XMODULE-1 (§3.6).
 * `core-tests/meta/token/audit.md` — this file.
 
 ## Action items deferred

@@ -31,7 +31,6 @@ mount core.base.maybe.{Maybe};
 // cross-module fn-return record layout is preserved through codegen.
 //
 
-@ignore
 @test
 fn regression_source_location_new_cross_module_return() {
     let loc = SourceLocation.new(Text.from("foo.vr"), 1, 1, 0);
@@ -42,7 +41,6 @@ fn regression_source_location_new_cross_module_return() {
 // §2: cross-module SpanRange.new return-value field access (same class as §1)
 // =============================================================================
 
-@ignore
 @test
 fn regression_span_range_new_cross_module_return() {
     let s1 = MetaSpan { id: 1, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
@@ -55,7 +53,6 @@ fn regression_span_range_new_cross_module_return() {
 // §3: cross-module SpanRange.single return-value field access
 // =============================================================================
 
-@ignore
 @test
 fn regression_span_range_single_cross_module_return() {
     let s = MetaSpan { id: 9, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
@@ -67,7 +64,6 @@ fn regression_span_range_single_cross_module_return() {
 // §4: cross-module MultiSpan.empty return-value field access
 // =============================================================================
 
-@ignore
 @test
 fn regression_multi_span_empty_cross_module_return() {
     let m = MultiSpan.empty();
@@ -78,7 +74,6 @@ fn regression_multi_span_empty_cross_module_return() {
 // §5: cross-module MultiSpan.from_span return-value field access
 // =============================================================================
 
-@ignore
 @test
 fn regression_multi_span_from_span_cross_module_return() {
     let s = MetaSpan { id: 1, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };

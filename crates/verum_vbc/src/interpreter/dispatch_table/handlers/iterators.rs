@@ -6,7 +6,6 @@ use super::super::super::state::{GeneratorId, GeneratorStatus, InterpreterState}
 use super::super::DispatchResult;
 use super::super::dispatch_loop_table_with_entry_depth;
 use super::bytecode_io::*;
-use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
 use crate::instruction::Reg;
 use crate::types::TypeId;
 use crate::value::Value;
@@ -69,14 +68,16 @@ pub(in super::super) fn handle_iter_new(
 
     let source = state.get_reg(src);
 
-    // If source is a CBGR register reference (e.g., &List<Int> parameter),
-    // deref it to get the actual collection pointer
-    let source = if is_cbgr_ref(&source) {
-        let (abs_index, _generation) = decode_cbgr_ref(source.as_i64());
-        state.registers.get_absolute(abs_index)
-    } else {
-        source
-    };
+    // If source is a reference (e.g. `&List<Int>` parameter, or a
+    // FIELD reference from `for x in &h.items`), deref it to the
+    // actual collection pointer. REFFIELD-LIST-FORITER-EMPTY-1: the
+    // pre-fix arm handled ONLY the register-ref encoding
+    // (`cbgr_helpers::is_cbgr_ref` — the inline-negative-int shape);
+    // a field reference (ThinRef / `cbgr_mutable_ptrs` heap-slot
+    // pointer from `CbgrExtended RefField`) fell through unchanged,
+    // and the slot ADDRESS was then read as a List header → SIGSEGV.
+    // `resolve_arg_value` handles all three reference shapes.
+    let source = super::cbgr_helpers::resolve_arg_value(state, source);
 
     // Check for generator values first (NaN-boxed generator tag, not pointer)
     if source.is_generator() {
