@@ -259,7 +259,7 @@ fn integration_variant_unit_pattern_and_kind() {
     assert_eq(v.wildcard_pattern(), Text.from("Case"));
 }
 
-/// PINNED — REFL-COLLECT-FROMITER-1.
+/// RE-PINNED 2026-07-06: collect drain landed but the body ALSO hits the REFL-CLOSURE-XREC-1 SIGSEGV class (closure over record refs inside pattern/signature builders) — un-ignore when task #13 lands;
 /// `VariantInfo.pattern` for a Tuple/Struct variant enumerates its
 /// fields via `.enumerate().map(...).collect().join(...)`; the
 /// `.collect()` dispatches to `FFIAbi.from_iter` and panics.
@@ -295,7 +295,7 @@ fn integration_protocol_with_required_method_is_not_marker() {
     assert(!proto.is_marker());
 }
 
-/// PINNED — REFL-COLLECT-FROMITER-1.
+/// RE-PINNED 2026-07-06: collect drain landed but the body ALSO hits the REFL-CLOSURE-XREC-1 SIGSEGV class (closure over record refs inside pattern/signature builders) — un-ignore when task #13 lands;
 /// `ProtocolInfo.all_methods` concatenates required+provided via
 /// `.chain(...).collect()`; the collect panics on `FFIAbi.from_iter`.
 @ignore
@@ -363,7 +363,7 @@ fn integration_function_requires_context_membership() {
     assert(!f.requires_context(Text.from("FileSystem")));
 }
 
-/// PINNED — REFL-COLLECT-FROMITER-1.
+/// RE-PINNED 2026-07-06: collect drain landed but the body ALSO hits the REFL-CLOSURE-XREC-1 SIGSEGV class (closure over record refs inside pattern/signature builders) — un-ignore when task #13 lands;
 /// `FunctionInfo.signature` renders parameters via
 /// `.map(|p| p.declaration()).collect().join(", ")`; the `.collect()`
 /// panics on `FFIAbi.from_iter`.

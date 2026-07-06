@@ -142,8 +142,11 @@ fn regression_attribute_get_named_arg_hangs() {
 // as_ident_list / as_key_values (and DeriveInfo.from_attribute, which
 // calls as_ident_list) — mis-resolves `.collect()` to
 // `FFIAbi.from_iter` and panics ("method 'FFIAbi.from_iter' not
-// found"). Un-ignore when generic `collect()` resolves at monomorph
-// time.
+// found"). RE-PINNED 2026-07-06: the COLLECT-FROMITER-2 runtime drain
+// fixed the from_iter dispatch itself (map/chain collect over
+// Int/Text elements green — collx.vr), but this body ALSO hits the
+// REFL-CLOSURE-XREC-1 SIGSEGV class (filter/map closures over
+// RECORD-typed elements). Un-ignore when task #13 lands.
 @ignore
 @test
 fn regression_attribute_as_ident_list_collect_from_iter() {
