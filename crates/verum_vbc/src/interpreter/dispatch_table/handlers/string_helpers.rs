@@ -324,6 +324,40 @@ pub(super) fn is_array_type_id(type_id: u32) -> bool {
 /// silently produced garbage results on CBGR-ref values while the
 /// `==` operator (which routed through this implementation) was
 /// correct. The duplicate is now deleted.
+/// Normalize a byte-addressable value to a `(ptr, len)` byte range, for
+/// cross-representation byte-slice equality (#20):
+///  * a byte/raw-slice FatRef (`Text.as_bytes()`, `reserved != 0`) → its
+///    `(ptr, len)` directly;
+///  * a const-bytes `U8` heap object (`b"..."`, load_constant mod.rs:792)
+///    → bytes at `OBJECT_HEADER_SIZE`, length in `header.size`.
+///
+/// Returns `None` for anything else (value-ref FatRef, Text object, etc.),
+/// so the caller falls through to the type-specific comparison branches.
+fn byte_slice_of(v: &Value, _state: &InterpreterState) -> Option<(*const u8, usize)> {
+    if v.is_fat_ref() {
+        let fr = v.as_fat_ref();
+        if fr.reserved == 0 || fr.is_null() {
+            return None;
+        }
+        return Some((fr.ptr() as *const u8, fr.len() as usize));
+    }
+    if v.is_regular_ptr() {
+        let ptr = v.as_ptr::<u8>();
+        if ptr.is_null() {
+            return None;
+        }
+        // SAFETY: is_regular_ptr + non-null; ref_or_stub returns a benign
+        // INVALID-type stub for pointers that don't satisfy the alignment /
+        // sentinel check, so a misclassified value simply yields None.
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+        if header.type_id == TypeId::U8 {
+            let data = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
+            return Some((data as *const u8, header.size as usize));
+        }
+    }
+    None
+}
+
 pub(crate) fn deep_value_eq(
     va: &Value,
     vb: &Value,
@@ -478,6 +512,30 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     }
     // (Remaining both-ref and neither-ref cases fall through to
     // the existing type-specific branches.)
+
+    // Byte-slice equality across representations (#20). If EITHER operand
+    // is a byte/raw-element slice FatRef (`Text.as_bytes()`, reserved != 0),
+    // normalize BOTH to byte ranges and compare — covers
+    // `as_bytes() == as_bytes()` (both FatRef) AND the mixed
+    // `as_bytes() == b"lit"`, where the byte-string literal is a const-bytes
+    // U8 heap object (TypeId::U8, bytes at OBJECT_HEADER_SIZE, length in
+    // header.size), NOT a FatRef — so the both-FatRef branch below missed it
+    // and `subtype.as_bytes() == b"*"` (select_best_media wildcard) was
+    // always false.
+    if (va.is_fat_ref() && va.as_fat_ref().reserved != 0)
+        || (vb.is_fat_ref() && vb.as_fat_ref().reserved != 0)
+    {
+        if let (Some((pa, la)), Some((pb, lb))) =
+            (byte_slice_of(va, state), byte_slice_of(vb, state))
+        {
+            return la == lb
+                && unsafe {
+                    std::slice::from_raw_parts(pa, la) == std::slice::from_raw_parts(pb, lb)
+                };
+        }
+        // One side isn't byte-addressable (e.g. FatRef vs a value-ref) —
+        // fall through to the type-specific branches below.
+    }
 
     // Handle ThinRef values - compare dereferenced values
     if va.is_thin_ref() && vb.is_thin_ref() {

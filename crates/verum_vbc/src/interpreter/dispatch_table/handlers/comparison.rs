@@ -189,6 +189,22 @@ pub(in super::super) fn handle_eqg(
         );
     }
 
+    // A byte/raw-element slice FatRef operand (`Text.as_bytes()`,
+    // reserved != 0) has no nominal `.eq` — its equality is purely
+    // structural over byte ranges. Route straight to the byte-slice-aware
+    // `deep_value_eq` (#20), bypassing the type-name dispatch below, which
+    // would otherwise resolve the OTHER operand's runtime type (e.g. the
+    // `U8` const-bytes object from `b"..."`) and dispatch that type's `.eq`
+    // — the reason `subtype.as_bytes() == b"*"` (select_best_media
+    // wildcard) was always false.
+    if (va.is_fat_ref() && va.as_fat_ref().reserved != 0)
+        || (vb.is_fat_ref() && vb.as_fat_ref().reserved != 0)
+    {
+        let result = deep_value_eq(&va, &vb, state);
+        state.set_reg(dst, Value::from_bool(result));
+        return Ok(DispatchResult::Continue);
+    }
+
     // **Eq dispatch chain** (most-specific → most-general):
     //
     // (1) **protocol_id != 0** — codegen knew the static type at the
