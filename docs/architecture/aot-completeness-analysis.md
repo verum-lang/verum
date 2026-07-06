@@ -215,12 +215,33 @@ way.
   (`interpreter/.../pattern_matching.rs`). **AOT parity pending** — the
   `Instruction::Unpack` LLVM lowering (`instruction.rs:3955`) must apply
   the same ref-deref before `lower_unpack_element`.
-* **RECORD-LET-REF-TYPE-LOSS — OPEN.** In a GENERIC fn
-  (`fn f<'a>(list: &'a List<LinkEntry>)`), `list[i].params[j].0.as_bytes()`
-  fails method resolution (the tuple-field type is lost); the
-  non-generic `format_link_header` with the identical chain works. The
-  fix surface is `infer_expr_type_name` / `extract_expr_type_name` for
-  field/tuple-index chains inside a lifetime-generic function body.
+* **RECORD-LET-REF-TYPE-LOSS — OPEN, root cause LOCATED 2026-07-06.**
+  `let (name, value) = &entry.params[j]; name.as_bytes()…` fails method
+  resolution because `name` is left UNTYPED. Isolated precisely (the
+  earlier "generic fn only" note is wrong — it reproduces in a plain fn
+  too, and works in `main()`):
+  - The real trigger is a tuple **destructure** whose scrutinee is an
+    indexed record field reached through a **function parameter**
+    (`&List<Rec>`); inline tuple-INDEX (`pair.0.as_bytes()`) works, and
+    the destructure works when the collection is a `main()` local.
+  - `compile_pattern_bind`'s Ident arm never records a bound variable's
+    type; the type flows via `match_tuple_element_types`, which only
+    `compile_match` populates (for a tuple-LITERAL scrutinee). A
+    `let`-destructure of an *expression* never set it, so `name` stayed
+    untyped and `.as_bytes()` could not pick a receiver.
+  - A fix was PROTOTYPED (helper `infer_tuple_element_type_names` +
+    record in the Tuple arm + set from `compile_let`) and REVERTED: it
+    is blocked by a deeper bug — `infer_expr_type_name(entry.params[j])`
+    returns a **Debug-rendered garbage** string
+    (`"Tuple(List { inner: …"`) for the indexed record-field tuple, not
+    a clean `"(Text, Text)"` (traced via `VERUM_TRACE_LETTUP`). So the
+    element types can't be parsed out. The real fix is two-part: (a)
+    make `infer_expr_type_name` render an `Index`-of-`List<(A,B)>` as a
+    clean tuple type name (it currently falls through to a `{:?}` Debug
+    fallback via `extract_display_type_name`), then (b) the
+    prototyped let-destructure element-type recording works on top. The
+    prototype infra is correct and harmless (no-op when the tuple type
+    is unparseable) — it just needs (a) first.
 * **INLINE-AGG-REF-ARG — OPEN.** `f(&RangeSet { specs })` (an inline
   aggregate literal by reference as a call argument) crashes VBC
   codegen; `let x = …; &x` works. Candidate: `stabilize_ref_source`
