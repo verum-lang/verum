@@ -220,6 +220,22 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            // Heap<T>/Shared<T> wrapper methods over their runtime reprs
+            // — statically-resolved `Call` twin of the CallM intercepts
+            // (HEAP-INTORAW-1 / SHARED-STRONGCOUNT-1).  Shape-guarded:
+            // fires only when the receiver carries the runtime repr, so
+            // stdlib-internal record-shaped wrappers still reach their
+            // compiled bodies.
+            if let Some(result) = super::wrapper_runtime::try_intercept_wrapper_call(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
             // NB: V-LLSI context-system + defer raw intrinsics
             // (`__ctx_*_raw` / `__defer_*_raw`) used to be intercepted
             // here as a sibling to hasher_runtime / char_runtime.  The

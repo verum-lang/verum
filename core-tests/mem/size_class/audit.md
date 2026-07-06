@@ -129,3 +129,14 @@ which may introduce a cycle.
 | §C | Pin `BIN_COUNT` / `QUEUE_COUNT` / `MAX_ALIGN_SIZE` with `verum_common::well_known_types` constants so Rust-side allocator emits cannot drift. | ~45 min | open |
 | §D | Cross-tier divergence sweep: run all four test files under `--aot` and confirm exit-code parity with `--interp`. | 1 hour wall-clock | open |
 | §E | Remove inline `@test` functions from `core/mem/size_class.vr` (lines 486-575) — coverage has migrated to `core-tests/mem/size_class/` and the inline tests are now duplicates. | ~10 min | open |
+
+## Session 2026-07-06 — AOT 88/88 GREEN (was 50/38)
+
+CONST-ARRAY-RETTYPE-1 (commit `53e13bf29`): composite-typed consts
+archived with `return_type=Unit` left the AOT call-site register
+unmarked, so `GetE` on `SIZE_CLASSES[i]` indexed the ZEROED object
+header instead of the backing array — every table read returned 0
+under `--aot` (`e0=0` while `--interp` read 8).  The declared TypeRef
+now rides into the archive descriptor and the existing
+`mark_register_from_return_type` LIST/Array arms classify the result.
+Both tiers now agree: interp 88/88 + AOT 88/88.

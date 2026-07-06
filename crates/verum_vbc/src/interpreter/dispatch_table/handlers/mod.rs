@@ -98,6 +98,12 @@ pub(super) mod hasher_runtime;
 // caller's slot via the CBGR-ref writeback discipline (same pattern
 // as hasher_runtime).  See `char_runtime` doc comment for rationale.
 pub(super) mod char_runtime;
+// Heap<T>/Shared<T> wrapper methods over their Tier-0 runtime reprs
+// (CBGR data ptr / [refcount, value] object) — statically-resolved
+// `Call` twin of the CallM-side intercepts in method_dispatch.rs.
+// See `wrapper_runtime` doc comment (HEAP-INTORAW-1 /
+// SHARED-STRONGCOUNT-1).
+pub(super) mod wrapper_runtime;
 
 // High-level Rust intercepts for process spawning
 // (spawn_child_with_output for `Command.output()` / `.status()`).

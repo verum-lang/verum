@@ -17760,12 +17760,28 @@ impl VbcCodegen {
         // segment AND collides — qualified `Parent.Variant` literals
         // and non-colliding bare ctors keep their existing resolution.
         let path_is_qualified = variant_name.contains("::") || variant_name.contains('.');
+        // META-GROUP-XMODULE-1: mount-aware record-type re-key. When the
+        // bare literal name lost the cross-module simple-name race (the
+        // registered descriptor is a DIFFERENT module's same-named type —
+        // canonical: `Group` bound to the `math.algebra.Group` protocol
+        // while this literal means the mounted `core.meta.token.Group`
+        // record), every downstream consumer (New type-id, alloc slots,
+        // field-index resolution, record-vs-variant disambiguation) must
+        // use the module-qualified registration instead. `record_key`
+        // stays == `variant_name` whenever the simple name is already
+        // authoritative, so non-colliding literals compile unchanged.
+        let record_key: String = if path_is_qualified {
+            variant_name.clone()
+        } else {
+            self.resolve_record_type_key(&variant_name)
+                .unwrap_or_else(|| variant_name.clone())
+        };
         let literal_field_names: std::collections::HashSet<&str> = fields
             .iter()
             .map(|f| f.name.name.as_str())
             .collect();
         let simple_resolves_to_record = !path_is_qualified
-            && self.type_field_layouts.get(variant_name.as_str()).is_some_and(|decl| {
+            && self.type_field_layouts.get(record_key.as_str()).is_some_and(|decl| {
                 literal_field_names.iter().all(|n| decl.iter().any(|d| d == n))
             });
         // Bare record-variant CONSTRUCTION scoping (mirror of the
@@ -17968,8 +17984,11 @@ impl VbcCodegen {
             } else {
                 // Look up TypeId for proper Drop dispatch.
                 // Use the §F-resolved concrete name when the literal
-                // path was `Self`; otherwise the raw path string.
-                let type_name = variant_name.clone();
+                // path was `Self`; otherwise the raw path string —
+                // re-keyed to the module-qualified registration when the
+                // simple name lost the cross-module first-wins race
+                // (META-GROUP-XMODULE-1).
+                let type_name = record_key.clone();
                 let mut type_id_opt = self.type_name_to_id.get(&type_name).copied();
 
                 // **Cross-module record-construction TypeId synthesis**
@@ -18114,7 +18133,9 @@ impl VbcCodegen {
             // §F: when the literal path was `Self`, this is the
             // resolved concrete impl type so field indices map to the
             // real layout instead of the global intern fallback.
-            let type_name = variant_name.clone();
+            // META-GROUP-XMODULE-1: `record_key` carries the module-
+            // qualified re-key when the simple name collided.
+            let type_name = record_key.clone();
 
             for field in fields.iter() {
                 // Root fix for Issue #1 (silent impl-method SKIP with
@@ -18211,6 +18232,12 @@ impl VbcCodegen {
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
+
+        // META-GROUP-XMODULE-1: re-key to the module-qualified
+        // registration when the simple name lost the cross-module
+        // first-wins race (see `compile_record`).
+        let resolved_key: Option<String> = self.resolve_record_type_key(type_name);
+        let type_name: &str = resolved_key.as_deref().unwrap_or(type_name);
 
         // Resolve TypeId for the New instruction.  Fallback to 0 when
         // the type isn't yet in `type_name_to_id` — preserves the
@@ -21836,12 +21863,24 @@ impl VbcCodegen {
 
     /// Converts a type name string (from FunctionInfo.return_type_name) to a TypeKind.
     /// Used by infer_expr_type_kind to determine the return type of regular function calls.
+    ///
+    /// Routes through the canonical `well_known_types::type_names`
+    /// registry (all alias spellings) with refinement stripping —
+    /// `Float{>= 0.0, <= 1.0}` classifies as Float
+    /// (META-REFINED-FIELD-FLOATCMP-1: pre-fix a refined-Float record
+    /// field fell to `None` here, so `a.conf < b.conf` emitted a
+    /// signed-int compare over raw IEEE-754 bits).
     fn type_name_to_type_kind(&self, name: &str) -> Option<verum_ast::ty::TypeKind> {
         use verum_ast::ty::TypeKind;
-        match name {
-            "Int" | "Int64" | "Int32" | "Int16" | "Int8" | "UInt64" | "UInt32" | "UInt16"
-            | "UInt8" | "ISize" | "USize" | "Byte" => Some(TypeKind::Int),
-            "Float" | "Float64" | "Float32" => Some(TypeKind::Float),
+        use verum_common::well_known_types::type_names as tn;
+        let base = tn::strip_refinement(name);
+        if tn::is_integer_type(base) {
+            return Some(TypeKind::Int);
+        }
+        if tn::is_float_type(base) {
+            return Some(TypeKind::Float);
+        }
+        match base {
             "Bool" => Some(TypeKind::Bool),
             "Text" => Some(TypeKind::Text),
             "Char" => Some(TypeKind::Char),

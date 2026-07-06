@@ -1649,6 +1649,24 @@ pub mod type_names {
     pub const RWLOCK: &str = "RwLock";
     pub const BARRIER: &str = "Barrier";
 
+    /// Strips a refinement suffix from a type name:
+    /// `"Float{>= 0.0, <= 1.0}"` → `"Float"`, `"Int{it > 0}"` → `"Int"`.
+    ///
+    /// Refinement predicates erase at runtime — the VALUE representation
+    /// of `Float{…}` IS a `Float` — so every runtime-representation
+    /// classification (int-vs-float compare selection, unsigned compare
+    /// selection, primitive-vs-object dispatch) MUST see the base name.
+    /// META-REFINED-FIELD-FLOATCMP-1: pre-fix, a record field declared
+    /// `Float{>= 0.0, <= 1.0}` failed every `is_float_type` probe, so
+    /// `a.conf < b.conf` lowered to a SIGNED-INT compare over the raw
+    /// IEEE-754 bit patterns (0.4 < 0.7 → false).
+    pub fn strip_refinement(name: &str) -> &str {
+        match name.find('{') {
+            Some(i) => name[..i].trim_end(),
+            None => name,
+        }
+    }
+
     /// Returns true if `name` is a primitive numeric type (any Int or Float variant).
     pub fn is_numeric_type(name: &str) -> bool {
         is_integer_type(name) || is_float_type(name)
@@ -1674,7 +1692,7 @@ pub mod type_names {
     /// pointer-width integer.
     pub fn is_signed_integer_type(name: &str) -> bool {
         matches!(
-            name,
+            strip_refinement(name),
             // Canonical Verum
             "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize" | "ISize"
             // Legacy uppercase-short Verum aliases
@@ -1693,7 +1711,7 @@ pub mod type_names {
     /// used by FFI carrier types (`CULong is (UInt)` in `core/sys/cabi.vr`).
     pub fn is_unsigned_integer_type(name: &str) -> bool {
         matches!(
-            name,
+            strip_refinement(name),
             // Canonical Verum
             "UInt" | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
             | "UIntSize" | "USize" | "Byte"
@@ -1743,7 +1761,7 @@ pub mod type_names {
     /// (`f32`, `f64`).
     pub fn is_float_type(name: &str) -> bool {
         matches!(
-            name,
+            strip_refinement(name),
             "Float" | "Float32" | "Float64"
             | "F32" | "F64"
             | "f32" | "f64"

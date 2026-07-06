@@ -4561,9 +4561,20 @@ pub(super) fn dispatch_primitive_method(
                     // NaN-boxed bits never matches — so without the deref the
                     // intercept reports `contains(&20) == false` for every
                     // primitive value in the list. Auto-deref through
-                    // `decode_cbgr_ref` recovers the underlying scalar, and
-                    // the bit-equality compare then behaves correctly for Int,
-                    // Bool, Float, small-string Text, and pointer values.
+                    // `resolve_arg_value` recovers the underlying scalar.
+                    //
+                    // REFL-LIST-CONTAINS-TEXT-1: the compare MUST be
+                    // `value_eq`, not raw bit equality. Bit equality only
+                    // covers values with a canonical NaN-box encoding
+                    // (Int, Bool, inline ≤6-byte small-string Text). A
+                    // heap Text (≥7 bytes, e.g. "Database") is a POINTER
+                    // — two equal-content allocations have different
+                    // bits, so `contains` false-negatived exactly when
+                    // the needle crossed the SSO boundary. `value_eq`
+                    // routes heap strings through content equality,
+                    // boxed ints through decoded-value equality, and
+                    // variants through structural equality — the same
+                    // contract Map/Set keys already rely on.
                     let caller_base = state.reg_base();
                     let needle_raw = state.registers.get(caller_base, Reg(args.start.0));
                     let needle = resolve_arg_value(state, needle_raw);
@@ -4571,7 +4582,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut found = false;
                     for i in 0..len {
                         let elem = get_array_element(ptr, header, i)?;
-                        if elem.to_bits() == needle.to_bits() {
+                        if super::memory_collections::value_eq(elem, needle) {
                             found = true;
                             break;
                         }
@@ -9173,7 +9184,13 @@ pub(super) fn dispatch_array_method(
             }
         }
         "contains" => {
-            let needle = state.registers.get(caller_base, Reg(args.start.0));
+            // REFL-LIST-CONTAINS-TEXT-1 sibling arm: the needle is a
+            // `&T` at the stdlib signature level — deref it before the
+            // content-aware `value_eq` compare (inline small values
+            // arrive as plain Values because ref-of-immediate elides;
+            // heap values arrive as ThinRef/FatRef).
+            let needle_raw = state.registers.get(caller_base, Reg(args.start.0));
+            let needle = resolve_arg_value(state, needle_raw);
             let mut found = false;
             for i in 0..len {
                 let elem = get_array_element(ptr, header, i)?;

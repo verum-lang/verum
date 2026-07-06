@@ -1638,7 +1638,44 @@ fn build_stdlib_test_module(test: &Test) -> CachedModule {
     // walking up from the test file, parse the crate root, and
     // append its items to the test module's item list. Mount-line
     // boilerplate in test files becomes optional.
-    if let Some(crate_root_items) = find_and_parse_crate_root(test) {
+    let crate_root_items = find_and_parse_crate_root(test);
+
+    // META-TEST-TYPECHECK-1 — run the REAL type checker before VBC
+    // codegen.  Pre-fix the interp/property harness compiled test
+    // files straight through `compile_module_with_stdlib` (AST → VBC),
+    // which contains NO `verum_types` phase at all — a test could
+    // assign `()` (e.g. the Unit return of `List.append`) into a
+    // `List<T>`-typed field and "pass" compilation, then die at
+    // runtime with NullPointer/`method not found on ()`.  That made
+    // `verum test --interp` STRICTLY MORE LENIENT than both
+    // `verum run --interp` (which calls `validate_module`) and
+    // `verum test --aot` (full pipeline `phase_type_check`) — so
+    // interp-vs-AOT "divergence" was frequently just the missing
+    // checker, not a tier bug.  Route through the same
+    // `run_check_only` entry `verum check` uses; the per-file compile
+    // cache (`CompileKind::Stdlib`) amortises it to once per file.
+    //
+    // Scope: standalone (non-cog) test files — exactly the
+    // `core-tests/` conformance surface.  Cog tests merge crate-root
+    // items below and would need the same synthesis the AOT path does;
+    // they keep the pre-existing behaviour for now.
+    // Escape hatch for triage sweeps: `VERUM_TEST_LENIENT_TYPES=1`.
+    if crate_root_items.is_none()
+        && std::env::var("VERUM_TEST_LENIENT_TYPES").is_err()
+    {
+        let options = CompilerOptions {
+            input: test.file.clone(),
+            output_format: OutputFormat::Human,
+            ..Default::default()
+        };
+        let mut session = Session::new(options);
+        let mut pipeline = CompilationPipeline::new(&mut session);
+        if let Err(e) = pipeline.run_check_only() {
+            return Err(format!("typecheck: {}", e));
+        }
+    }
+
+    if let Some(crate_root_items) = crate_root_items {
         // Prepend crate-root items so test items can reference them.
         let mut merged = crate_root_items;
         for item in ast.items.iter() {

@@ -3381,12 +3381,20 @@ impl<'a> RecursiveParser<'a> {
                 return Ok(TypeDeclBody::Variant(variants.into_iter().collect()));
             }
 
-            // **Architectural rule** (closes task #13): per
-            // `grammar/verum.ebnf` §2.4 — `type X = Y;` (with the `=`
-            // sigil) is a TYPE ALIAS; `type X is Y;` (with the `is`
-            // sigil) is a SUM-TYPE DECLARATION whose `variant_list`
-            // production accepts a single variant without the leading
-            // `|`:
+            // **Architectural rule** (closes task #13; REFINED by
+            // META-SPAN-ALIAS-1): `type X = Y;` (with the `=` sigil) is
+            // a TYPE ALIAS at parse time. For the `is` sigil this arm
+            // provisionally emits a single-variant SUM — but the form is
+            // grammatically ambiguous (`type_expr ;` vs `variant_list ;`
+            // both match a bare identifier), and token-level code cannot
+            // know whether `Y` names an existing type (alias intent:
+            // `type Span is MetaSpan;`) or a fresh marker variant
+            // (`type SemaphoreError is Closed;`). The module-level
+            // normalisation pass `normalize::reclassify_single_variant_aliases`
+            // (run at the parse funnel in lib.rs) re-classifies the
+            // provisional Variant into an Alias when the name resolves
+            // to a known type — see normalize.rs for the full decision
+            // table. Historical grammar note:
             //
             //     variant_list = [ '|' ] , variant , { '|' , variant } ;
             //     type_alias   = 'type' , identifier , [ generics ]
