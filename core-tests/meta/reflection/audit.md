@@ -76,6 +76,42 @@ fn primitive_size_matches_stdlib_declared() {
 }
 ```
 
+### §3.3 REFL-CLOSURE-XREC-1 — closure params typed as cross-module record refs are size-0 views — OPEN (pinned)
+
+`FieldInfo.has_attribute` body `self.attributes.iter().any(|a|
+a.name == name)`: the closure param `a` (&Attribute, a cross-module
+record) is compiled with NO element-type registration — `a.name`
+panics `field access out of bounds: field index 0 … exceeds object
+data size 0`, **even on an empty list** (the closure body compiles
+against a zero-size view regardless of iteration). A manual
+`for a in xs.iter() { a.name }` loop works — the for-loop binder
+registers the element type; the closure-param binder does not.
+6 `@ignore` pins in `integration_test.vr`. Fix: closure-parameter
+element-type propagation in VBC codegen (mirror the for-binder).
+
+### §3.4 COLLECT-FROMITER-2 — `.map(…).collect()` dispatches to receiver-less `FFIAbi.from_iter` — OPEN (pinned)
+
+`FunctionInfo.signature`, `VariantInfo.pattern` (Tuple/Struct),
+`ProtocolInfo.all_methods`, `FunctionInfo.non_self_params` all
+crash: `method 'FFIAbi.from_iter' not found on receiver of runtime
+kind Object`. Same family as COLLECT-FROMITER-RESOLVE-1 (2026-06-19
+session): `Call{func_id}` bypasses monomorphisation; the fix is
+generic-body collect-resolution at monomorph time.
+
+### §3.5 REFL-LIST-CONTAINS-TEXT-1 — `List<Text>.contains` false-negative past the SSO boundary — CLOSED 2026-07-06
+
+`[Text.from("Database")].contains(&Text.from("Database"))` returned
+`false` while ≤6-char needles worked. The interp `contains`
+intercept deref'd the needle but compared with RAW BIT equality —
+correct only for values with canonical NaN-box encodings (Int,
+Bool, ≤6-byte inline small strings). Heap Texts (≥7 bytes) are
+pointers; equal content ≠ equal bits. Fixed: both interp `contains`
+arms now route through `value_eq` (content equality for heap
+strings, decoded equality for boxed ints, structural equality for
+variants) after needle deref — the same (hash, eq) contract Map/Set
+keys already rely on. Broke `FunctionInfo.requires_context` /
+`GenericParam.has_bound` for ≥7-char names pre-fix.
+
 ## Action items landed in this branch
 
 * `core-tests/meta/reflection/unit_test.vr` — 58 unit tests over:

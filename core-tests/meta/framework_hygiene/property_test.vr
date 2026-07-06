@@ -1,0 +1,283 @@
+// =============================================================================
+// core-tests/meta/framework_hygiene/property_test.vr
+// =============================================================================
+//
+// Algebraic / coherence laws for the R1/R2/R3 hygiene discipline in
+// `core/meta/framework_hygiene.vr`.  Every domain is a finite matrix of
+// name / ε-coordinate strings, so the sweeps below are exhaustive over
+// their representative sets.
+//
+// Laws verified:
+//   §1  name_has_brand_prefix — the 5 brand prefixes (diakrisis_,
+//       actic_, msfs_, uhm_, noesis_) are detected only at segment
+//       start; neutral names and mid-string occurrences are not.
+//   §2  R1 coherence — validate_foundation_neutral_name emits a
+//       diagnostic ⟺ name_has_brand_prefix(name).  Every emitted
+//       diagnostic is (R1, Warning).
+//   §3  R2 admissibility — validate_epsilon_canonicalisable returns
+//       None for admissible forms (ε_/epsilon_ prefixes + ordinal
+//       grammar) and a (R2, Warning) diagnostic otherwise.
+//   §4  severity_as_text is total, non-empty, and injective across the
+//       3 severities.
+//   §5  R3 monotonicity — validate_meta_classifier_uniqueness returns
+//       None ⟺ the tally holds ≤ 1 candidate; otherwise (R3, Error).
+//   §6  run_all_hygiene_rules end-to-end diagnostic count = R1 + R2 + R3
+//       violations.
+// =============================================================================
+
+mount core.meta.framework_hygiene.{
+    HygieneSeverity, HygieneDiagnostic, MetaClassifierTally,
+    hygiene_diagnostic, severity_as_text,
+    name_has_brand_prefix,
+    validate_foundation_neutral_name,
+    validate_epsilon_canonicalisable,
+    validate_meta_classifier_uniqueness,
+    meta_classifier_tally_new,
+    run_all_hygiene_rules,
+};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+fn ssp() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+// =============================================================================
+// §1  name_has_brand_prefix — brand detection at segment start
+// =============================================================================
+
+@test
+fn property_all_brand_prefixes_detected() {
+    let branded: List<Text> = [
+        Text.from("diakrisis_substrate"),
+        Text.from("actic_foundation"),
+        Text.from("msfs_stratum"),
+        Text.from("uhm_hierarchy"),
+        Text.from("noesis_layer"),
+    ];
+    for n in branded.iter() {
+        assert(name_has_brand_prefix((*n).clone()));
+    }
+}
+
+@test
+fn property_neutral_names_never_branded() {
+    let neutral: List<Text> = [
+        Text.from("substrate"),
+        Text.from("foundation"),
+        Text.from("coordinate_system"),
+        Text.from("axiom_of_choice"),
+        Text.from(""),
+    ];
+    for n in neutral.iter() {
+        assert(!name_has_brand_prefix((*n).clone()));
+    }
+}
+
+@test
+fn property_brand_only_matched_at_start() {
+    // The brand token embedded mid-string is NOT a prefix match.
+    let mid: List<Text> = [
+        Text.from("my_diakrisis_axiom"),
+        Text.from("core_actic_thing"),
+        Text.from("x_msfs_y"),
+    ];
+    for n in mid.iter() {
+        assert(!name_has_brand_prefix((*n).clone()));
+    }
+}
+
+// =============================================================================
+// §2  R1 coherence: validate emits ⟺ name is branded
+// =============================================================================
+
+@test
+fn property_r1_validate_agrees_with_brand_prefix() {
+    let names: List<Text> = [
+        Text.from("diakrisis_x"),      // branded
+        Text.from("actic_y"),          // branded
+        Text.from("noesis_z"),         // branded
+        Text.from("clean_axiom"),      // neutral
+        Text.from("foundation"),       // neutral
+        Text.from("my_diakrisis_x"),   // mid-string, neutral
+    ];
+    for n in names.iter() {
+        let branded = name_has_brand_prefix((*n).clone());
+        let emitted = match validate_foundation_neutral_name((*n).clone(), ssp()) {
+            Maybe.Some(_) => true,
+            Maybe.None => false,
+        };
+        assert_eq(branded, emitted);
+    }
+}
+
+@test
+fn property_r1_diagnostic_is_r1_warning() {
+    // Every emitted R1 diagnostic carries rule "R1" at Warning severity.
+    let branded: List<Text> = [
+        Text.from("diakrisis_x"),
+        Text.from("actic_y"),
+        Text.from("uhm_z"),
+    ];
+    for n in branded.iter() {
+        match validate_foundation_neutral_name((*n).clone(), ssp()) {
+            Maybe.Some(d) => {
+                assert(d.rule == Text.from("R1"));
+                assert(d.severity is HygieneSeverity.Warning);
+            },
+            Maybe.None => panic("branded name must emit an R1 diagnostic"),
+        }
+    }
+}
+
+// =============================================================================
+// §3  R2 admissibility partition
+// =============================================================================
+
+@test
+fn property_r2_admissible_forms_return_none() {
+    let ok: List<Text> = [
+        Text.from("ε_math"),
+        Text.from("ε_classify"),
+        Text.from("epsilon_compute"),
+        Text.from("ω"),
+        Text.from("Ω"),
+        Text.from("ω+1"),
+        Text.from("ω·2"),
+        Text.from("ω²"),
+        Text.from("ω·3+2"),
+        Text.from("0"),
+    ];
+    for e in ok.iter() {
+        match validate_epsilon_canonicalisable((*e).clone(), ssp()) {
+            Maybe.None => assert(true),
+            Maybe.Some(_) => panic("admissible ε-coordinate must not emit"),
+        }
+    }
+}
+
+@test
+fn property_r2_inadmissible_forms_emit_r2_warning() {
+    let bad: List<Text> = [
+        Text.from(""),           // empty
+        Text.from("ω+a"),        // stray letter
+        Text.from("ω + 1"),      // spaces
+        Text.from("ω-1"),        // minus not admissible
+        Text.from("frobnicate"), // pure garbage
+    ];
+    for e in bad.iter() {
+        match validate_epsilon_canonicalisable((*e).clone(), ssp()) {
+            Maybe.Some(d) => {
+                assert(d.rule == Text.from("R2"));
+                assert(d.severity is HygieneSeverity.Warning);
+            },
+            Maybe.None => panic("inadmissible ε-coordinate must emit R2"),
+        }
+    }
+}
+
+// =============================================================================
+// §4  severity_as_text total / non-empty / injective
+// =============================================================================
+
+@test
+fn property_severity_as_text_non_empty() {
+    let sevs: List<HygieneSeverity> = [
+        HygieneSeverity.Info, HygieneSeverity.Warning, HygieneSeverity.Error,
+    ];
+    for s in sevs.iter() {
+        assert(!severity_as_text(*s).is_empty());
+    }
+}
+
+@test
+fn property_severity_as_text_injective() {
+    let info = severity_as_text(HygieneSeverity.Info);
+    let warn = severity_as_text(HygieneSeverity.Warning);
+    let err = severity_as_text(HygieneSeverity.Error);
+    assert(info != warn);
+    assert(warn != err);
+    assert(info != err);
+    // Pin the exact mapping.
+    assert_eq(info, Text.from("info"));
+    assert_eq(warn, Text.from("warning"));
+    assert_eq(err, Text.from("error"));
+}
+
+// =============================================================================
+// §5  R3 monotonicity: None ⟺ ≤ 1 candidate
+// =============================================================================
+
+@test
+fn property_r3_none_when_zero_candidates() {
+    let t = meta_classifier_tally_new();
+    match validate_meta_classifier_uniqueness(t, ssp()) {
+        Maybe.None => assert(true),
+        Maybe.Some(_) => panic("empty tally must not conflict"),
+    }
+}
+
+@test
+fn property_r3_none_when_single_candidate() {
+    let t = MetaClassifierTally { candidates: [Text.from("Solo")] };
+    match validate_meta_classifier_uniqueness(t, ssp()) {
+        Maybe.None => assert(true),
+        Maybe.Some(_) => panic("single classifier is admissible"),
+    }
+}
+
+@test
+fn property_r3_error_when_two_candidates() {
+    let t = MetaClassifierTally { candidates: [Text.from("A"), Text.from("B")] };
+    match validate_meta_classifier_uniqueness(t, ssp()) {
+        Maybe.Some(d) => {
+            assert(d.rule == Text.from("R3"));
+            assert(d.severity is HygieneSeverity.Error);
+        },
+        Maybe.None => panic("two classifiers must conflict"),
+    }
+}
+
+@test
+fn property_r3_error_when_three_candidates() {
+    let t = MetaClassifierTally {
+        candidates: [Text.from("A"), Text.from("B"), Text.from("C")],
+    };
+    match validate_meta_classifier_uniqueness(t, ssp()) {
+        Maybe.Some(d) => assert(d.severity is HygieneSeverity.Error),
+        Maybe.None => panic("three classifiers must conflict"),
+    }
+}
+
+// =============================================================================
+// §6  run_all_hygiene_rules end-to-end count
+// =============================================================================
+
+@test
+fn property_run_all_clean_batch_is_empty() {
+    let decls: List<(Text, Span)> = [(Text.from("clean_axiom"), ssp())];
+    let eps: List<(Text, Span)> = [(Text.from("ε_math"), ssp())];
+    let tally = MetaClassifierTally { candidates: [Text.from("Solo")] };
+    let diags = run_all_hygiene_rules(decls, eps, tally, ssp());
+    assert(diags.is_empty());
+}
+
+@test
+fn property_run_all_counts_each_violation_once() {
+    // 1 branded decl (R1) + 1 garbage ε (R2) + 2 classifiers (R3) = 3.
+    let decls: List<(Text, Span)> = [
+        (Text.from("diakrisis_bad"), ssp()),
+        (Text.from("clean_name"), ssp()),
+    ];
+    let eps: List<(Text, Span)> = [
+        (Text.from("ε_math"), ssp()),
+        (Text.from("garbage!"), ssp()),
+    ];
+    let tally = MetaClassifierTally { candidates: [Text.from("A"), Text.from("B")] };
+    let diags = run_all_hygiene_rules(decls, eps, tally, ssp());
+    assert_eq(diags.len(), 3);
+}

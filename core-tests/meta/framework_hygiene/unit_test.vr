@@ -253,7 +253,7 @@ fn test_validate_meta_classifier_single_candidate_returns_none() {
 @test
 fn test_validate_meta_classifier_two_candidates_returns_some() {
     let t = MetaClassifierTally {
-        candidates: List.of(Text.from("Diakrisis")).append(List.of(Text.from("ACTIC"))),
+        candidates: [Text.from("Diakrisis"), Text.from("ACTIC")],
     };
     let result = validate_meta_classifier_uniqueness(t, synthetic_span());
     assert(result is Some);
@@ -262,7 +262,7 @@ fn test_validate_meta_classifier_two_candidates_returns_some() {
 @test
 fn test_validate_meta_classifier_emits_R3_error_diagnostic() {
     let t = MetaClassifierTally {
-        candidates: List.of(Text.from("A")).append(List.of(Text.from("B"))),
+        candidates: [Text.from("A"), Text.from("B")],
     };
     let result = validate_meta_classifier_uniqueness(t, synthetic_span());
     match result {

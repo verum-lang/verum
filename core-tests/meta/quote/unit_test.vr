@@ -2,31 +2,46 @@
 // core-tests/meta/quote/unit_test.vr
 // =============================================================================
 //
-// `core/meta/quote.vr` — quasi-quotation builder.
+// `core/meta/quote.vr` — quasi-quotation builder (QuoteBuilder /
+// GroupBuilder / QuotePart) and TokenStream convenience helpers.
 //
-// Most of `QuoteBuilder` calls `keyword_from_str` (a
-// `@compiler_intrinsic`) or references variant names that don't
-// match the canonical `core.meta.token` definitions (audit §3.1):
+// The §3.1 variant-name drift (`TokenTree.Token`/`TokenKind.Keyword`)
+// is CLOSED (see audit), so part of the API is runtime-exercisable.
+// Every test in THIS file passes under BOTH `--interp` and `--aot`;
+// the frontier was mapped empirically (audit §3.5).
 //
-//   `TokenTree.Token(...)`   — but token.vr says `TokenTree.Leaf(t)`
-//   `TokenKind.Keyword(kw)`  — but token.vr says `TokenKind.Kw(kw)`
+//   BOTH-TIER SAFE (tested here):
+//     * QuotePart 3-variant + disjointness.
+//     * QuoteBuilder record-literal ctor + `with_span` (static &
+//       instance) — direct `MetaSpan`, no `call_site()`.
+//     * `.keyword` (Leaf built inline) + `.splice` of an empty stream;
+//       `.build()` inspected via `.len()` and leaf `.flatten()` only.
+//     * Direct `Token`/`TokenKind`/`TokenTree.Leaf` construction +
+//       Bool predicates; `Delimiter.open/close`.
 //
-// Until those are realigned (or a `Token` / `Keyword` alias is
-// added), the builder API can't be exercised at runtime. This
-// regression is pinned in `regression_test.vr`.
+//   BLOCKED ON BOTH TIERS (documented, NOT called — audit §3.5):
+//     * `QuoteBuilder.new()` / `TokenStream.empty()` / `quote.empty()`
+//       — `Span.call_site()` intrinsic degenerates the stream.
+//     * `.ident()` / `Token.ident_spanned()` — cross-module static
+//       ctor layout mismatch.
+//     * `.punct/.operator/.int_lit/.float_lit/...` —
+//       `Token.punct`/`Token.literal` reach `call_site()`.
+//     * `.append/.push`, `quote.join_with` — `Span.join` intrinsic.
+//     * `GroupBuilder.close` — `from_trees` reaches call_site/join.
+//     * direct `Group { ... }` record literal — Group-vs-Probability
+//       TypeId collision (META-GROUP-XMODULE-1), field-write OOB.
 //
-// The pure-data surface that IS testable at this layer:
-//
-//   * QuotePart 3-variant (Literal / Interpolate / Repeat) +
-//     variant disjointness
-//   * Convenience module-level fns over Tier-0 TokenStream
-//     construction (`empty`, `parens`, `braces`, `brackets`,
-//     `ident`, `int`, `string`, `join_with`) — these only use
-//     direct ctors and `.wrap` (data-only).
+//   AOT-FLAKY / INTERP-ONLY (pinned in regression_test.vr):
+//     * ANY Group / GroupBuilder construction (`.group/.paren/.brace/
+//       .bracket`, `paren_open`, module `parens/braces/brackets`) —
+//       the Group TypeId collision is non-deterministic per compile,
+//       so these pass `--interp` but flake under `--aot`.
+//     * post-`build()` `.trees()` access, `.flatten()` over groups.
+//     * `Maybe`-returning accessors `Token.as_ident` / `.as_token`.
 // =============================================================================
 
-mount core.meta.quote.{QuotePart};
-mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter};
+mount core.meta.quote.{QuotePart, QuoteBuilder};
+mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter, Spacing, Literal};
 mount core.meta.span.{MetaSpan, Span, SpanFlags};
 mount core.base.maybe.{Maybe};
 
@@ -36,6 +51,10 @@ fn synthetic_span() -> Span {
         hygiene: 0,
         flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
     }
+}
+
+fn empty_ts() -> TokenStream {
+    TokenStream { tokens: List.new(), span: synthetic_span() }
 }
 
 // =============================================================================
@@ -74,4 +93,175 @@ fn test_quote_part_variants_pairwise_disjoint() {
     let i: QuotePart = QuotePart.Interpolate(ts);
     assert(l is QuotePart.Literal && !(l is QuotePart.Interpolate));
     assert(i is QuotePart.Interpolate && !(i is QuotePart.Literal));
+}
+
+// =============================================================================
+// Section 2: QuoteBuilder constructors (no `call_site()` intrinsic)
+// =============================================================================
+//
+// `QuoteBuilder.new()` is intentionally NOT tested — it calls
+// `Span.call_site()`. `with_span(<MetaSpan>)` is the intrinsic-free
+// entry point; a record literal is the other.
+//
+
+@test
+fn test_builder_record_literal_ctor_empty() {
+    let b = QuoteBuilder { tokens: List.new(), span: synthetic_span() };
+    assert_eq(b.tokens.len(), 0);
+}
+
+@test
+fn test_builder_with_span_static_ctor() {
+    let b = QuoteBuilder.with_span(synthetic_span());
+    assert_eq(b.tokens.len(), 0);
+}
+
+@test
+fn test_builder_with_span_instance_sets_span() {
+    let sp = MetaSpan {
+        id: 7,
+        hygiene: 1,
+        flags: SpanFlags { is_expansion: true, is_synthetic: false, is_hidden: false },
+    };
+    let b = QuoteBuilder { tokens: List.new(), span: synthetic_span() }.with_span(sp);
+    assert_eq(b.span.id, 7);
+}
+
+// =============================================================================
+// Section 3: keyword (Leaf token built inline)
+// =============================================================================
+//
+// `keyword_from_str` is `@compiler_intrinsic`; at runtime it yields a
+// default `Keyword`, so we assert the token's *shape* (a leaf token
+// was appended) — never which keyword it decoded to. `.ident` is NOT
+// tested (Token.ident_spanned cross-module static-ctor layout defect).
+//
+
+@test
+fn test_builder_keyword_pushes_one_tree() {
+    let b = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .keyword(Text.from("let"));
+    assert_eq(b.tokens.len(), 1);
+}
+
+@test
+fn test_builder_two_keywords_len_two() {
+    let b = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .keyword(Text.from("let"))
+        .keyword(Text.from("fn"));
+    assert_eq(b.tokens.len(), 2);
+}
+
+// =============================================================================
+// Section 4: splice (over an empty stream)
+// =============================================================================
+
+@test
+fn test_builder_splice_empty_adds_zero() {
+    let b = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .keyword(Text.from("let"))
+        .splice(empty_ts());
+    assert_eq(b.tokens.len(), 1);
+}
+
+// =============================================================================
+// Section 5: build() — length + leaf flatten
+// =============================================================================
+//
+// The resulting stream's `.span` is NOT read — `from_trees` computes
+// it via `Span.join` / `call_site`. Post-build `.trees()` access and
+// `.flatten()` over GROUPS mis-lower under `--aot` (regression_test);
+// `.len()` and leaf-flatten hold on both tiers.
+//
+
+@test
+fn test_builder_build_empty_len_zero() {
+    let ts = QuoteBuilder { tokens: List.new(), span: synthetic_span() }.build();
+    assert_eq(ts.len(), 0);
+}
+
+@test
+fn test_builder_build_keyword_len_one() {
+    let ts = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .keyword(Text.from("let"))
+        .build();
+    assert_eq(ts.len(), 1);
+}
+
+@test
+fn test_builder_build_flatten_keyword_one_token() {
+    let ts = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .keyword(Text.from("let"))
+        .build();
+    assert_eq(ts.flatten().len(), 1);
+}
+
+// =============================================================================
+// Section 6: Direct Token / TokenKind / TokenTree (data-only surface)
+// =============================================================================
+//
+// The builder's `.ident` path is blocked, but tokens themselves are
+// directly constructible via record literal — `Token.ident_spanned`
+// (a static ctor) is the only broken part. Only Bool predicates are
+// asserted; `Maybe`-returning `as_ident`/`as_token` mis-lower under
+// AOT (regression_test).
+//
+
+@test
+fn test_token_kind_ident_variant() {
+    let k: TokenKind = TokenKind.Ident(Text.from("foo"));
+    assert(k is TokenKind.Ident);
+}
+
+@test
+fn test_token_record_is_ident() {
+    let t = Token { kind: TokenKind.Ident(Text.from("foo")), span: synthetic_span() };
+    assert(t.is_ident());
+}
+
+@test
+fn test_token_record_is_punct() {
+    let t = Token { kind: TokenKind.Punct('=', Spacing.Alone), span: synthetic_span() };
+    assert(t.is_punct());
+}
+
+@test
+fn test_token_record_is_literal() {
+    let t = Token { kind: TokenKind.Lit(Literal.int(42)), span: synthetic_span() };
+    assert(t.is_literal());
+}
+
+@test
+fn test_tokentree_leaf_is_token() {
+    let tt: TokenTree = TokenTree.Leaf(
+        Token { kind: TokenKind.Ident(Text.from("x")), span: synthetic_span() });
+    assert(tt.is_token());
+}
+
+@test
+fn test_tokenstream_with_direct_leaf() {
+    let leaf: TokenTree = TokenTree.Leaf(
+        Token { kind: TokenKind.Ident(Text.from("z")), span: synthetic_span() });
+    let ts = TokenStream { tokens: [leaf], span: synthetic_span() };
+    assert_eq(ts.len(), 1);
+    assert_eq(ts.flatten().len(), 1);
+}
+
+// =============================================================================
+// Section 7: Delimiter open / close accessors
+// =============================================================================
+
+@test
+fn test_delimiter_paren_open() {
+    assert(Delimiter.Parenthesis.open() is Some);
+}
+
+@test
+fn test_delimiter_brace_close() {
+    assert(Delimiter.Brace.close() is Some);
+}
+
+@test
+fn test_delimiter_invisible_open_none() {
+    assert(Delimiter.Invisible.open() is None);
 }

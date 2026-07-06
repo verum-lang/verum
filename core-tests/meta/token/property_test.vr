@@ -1,0 +1,311 @@
+// =============================================================================
+// core-tests/meta/token/property_test.vr
+// =============================================================================
+//
+// Algebraic / partition laws for `core/meta/token.vr`.
+//
+// **Construction discipline (same as unit_test.vr).**  `Token.ident` /
+// `.keyword` / `.literal` / `.punct` and `TokenStream.empty` / etc. call
+// `Span.call_site()` internally (`@compiler_intrinsic`), so the ctor
+// coherence matrix in §D builds `Token` by **direct record construction**
+// with an explicit `TokenKind`, never via those cross-module ctors.
+// `Literal.*` and `Delimiter.open/close` are plain code and ARE driven
+// directly.
+//
+// Laws covered:
+//   §A  Delimiter — 4-variant partition; open/close are Some for the
+//       three real delimiters and None for Invisible; the open/close
+//       character pairs match.
+//   §B  Literal ctors — each ctor produces its matching variant and
+//       payload; the three string ctors map to the right StringKind.
+//   §C  StringKind (4) + Spacing (2) — exhaustive partition (each value
+//       satisfies exactly one variant predicate).
+//   §D  Token ctor/predicate coherence — for each kind, exactly one of
+//       {is_ident, is_keyword, is_literal, is_punct} holds; as_ident /
+//       as_punct are Some only on the matching kind.
+//   §E  TokenKind — 6-variant partition (incl. DocComment / Eof).
+// =============================================================================
+
+mount core.meta.token.{
+    Token, TokenKind, Delimiter, Spacing, Keyword, Literal, StringKind,
+};
+mount core.meta.span.{MetaSpan, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+fn syn() -> MetaSpan {
+    MetaSpan { id: 0, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false } }
+}
+
+// =============================================================================
+// §A  Delimiter — partition + open/close
+// =============================================================================
+
+fn count_delimiter(d: Delimiter) -> Int {
+    let mut c = 0;
+    if d is Delimiter.Parenthesis { c = c + 1; }
+    if d is Delimiter.Brace { c = c + 1; }
+    if d is Delimiter.Bracket { c = c + 1; }
+    if d is Delimiter.Invisible { c = c + 1; }
+    c
+}
+
+@test
+fn law_delimiter_partition_exactly_one() {
+    let ds: List<Delimiter> = [
+        Delimiter.Parenthesis, Delimiter.Brace, Delimiter.Bracket, Delimiter.Invisible,
+    ];
+    for d in ds.iter() {
+        assert_eq(count_delimiter(*d), 1);
+    }
+}
+
+@test
+fn law_delimiter_visible_open_close_some() {
+    let visible: List<Delimiter> = [Delimiter.Parenthesis, Delimiter.Brace, Delimiter.Bracket];
+    for d in visible.iter() {
+        assert((*d).open() is Some);
+        assert((*d).close() is Some);
+    }
+}
+
+@test
+fn law_delimiter_invisible_open_close_none() {
+    let d: Delimiter = Delimiter.Invisible;
+    assert(d.open() is None);
+    assert(d.close() is None);
+}
+
+@test
+fn law_delimiter_char_pairs_match() {
+    let p: Delimiter = Delimiter.Parenthesis;
+    assert(p.open().unwrap() == '(');
+    assert(p.close().unwrap() == ')');
+
+    let br: Delimiter = Delimiter.Brace;
+    assert(br.open().unwrap() == '{');
+    assert(br.close().unwrap() == '}');
+
+    let bk: Delimiter = Delimiter.Bracket;
+    assert(bk.open().unwrap() == '[');
+    assert(bk.close().unwrap() == ']');
+}
+
+// =============================================================================
+// §B  Literal ctors — variant + payload + string-kind mapping
+// =============================================================================
+
+@test
+fn law_literal_int_ctor_variant_and_payload() {
+    let l = Literal.int(42);
+    assert(l is Literal.Int);
+    match l {
+        Literal.Int { value, suffix } => assert_eq(value, 42),
+        _ => assert(false),
+    }
+}
+
+@test
+fn law_literal_float_ctor_variant() {
+    let l = Literal.float(2.5);
+    assert(l is Literal.Float);
+}
+
+@test
+fn law_literal_char_ctor_variant_and_payload() {
+    let l = Literal.char('Z');
+    assert(l is Literal.Char);
+    match l {
+        Literal.Char(c) => assert(c == 'Z'),
+        _ => assert(false),
+    }
+}
+
+@test
+fn law_literal_bool_ctor_variant_and_payload() {
+    match Literal.bool(true) {
+        Literal.Bool(b) => assert(b),
+        _ => assert(false),
+    }
+    match Literal.bool(false) {
+        Literal.Bool(b) => assert(!b),
+        _ => assert(false),
+    }
+}
+
+@test
+fn law_literal_string_ctor_kind_normal() {
+    let l = Literal.string(Text.from("s"));
+    assert(l is Literal.String);
+    match l {
+        Literal.String { value, kind } => assert(kind is StringKind.Normal),
+        _ => assert(false),
+    }
+}
+
+@test
+fn law_literal_format_string_ctor_kind_format() {
+    let l = Literal.format_string(Text.from("x={}"));
+    assert(l is Literal.String);
+    match l {
+        Literal.String { value, kind } => assert(kind is StringKind.Format),
+        _ => assert(false),
+    }
+}
+
+@test
+fn law_literal_raw_string_ctor_kind_raw() {
+    let l = Literal.raw_string(Text.from("s"));
+    assert(l is Literal.String);
+    match l {
+        Literal.String { value, kind } => assert(kind is StringKind.Raw),
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// §C  StringKind (4) + Spacing (2) — exhaustive partition
+// =============================================================================
+
+fn count_string_kind(k: StringKind) -> Int {
+    let mut c = 0;
+    if k is StringKind.Normal { c = c + 1; }
+    if k is StringKind.Format { c = c + 1; }
+    if k is StringKind.Raw { c = c + 1; }
+    if k is StringKind.RawFormat { c = c + 1; }
+    c
+}
+
+@test
+fn law_string_kind_partition_exactly_one() {
+    let ks: List<StringKind> = [
+        StringKind.Normal, StringKind.Format, StringKind.Raw, StringKind.RawFormat,
+    ];
+    for k in ks.iter() {
+        assert_eq(count_string_kind(*k), 1);
+    }
+}
+
+fn count_spacing(s: Spacing) -> Int {
+    let mut c = 0;
+    if s is Spacing.Joint { c = c + 1; }
+    if s is Spacing.Alone { c = c + 1; }
+    c
+}
+
+@test
+fn law_spacing_partition_exactly_one() {
+    let ss: List<Spacing> = [Spacing.Joint, Spacing.Alone];
+    for s in ss.iter() {
+        assert_eq(count_spacing(*s), 1);
+    }
+}
+
+// =============================================================================
+// §D  Token ctor/predicate coherence matrix
+// =============================================================================
+
+fn count_token_predicates(t: &Token) -> Int {
+    let mut c = 0;
+    if t.is_ident() { c = c + 1; }
+    if t.is_keyword() { c = c + 1; }
+    if t.is_literal() { c = c + 1; }
+    if t.is_punct() { c = c + 1; }
+    c
+}
+
+@test
+fn law_token_ident_exactly_one_predicate() {
+    let t = Token { kind: TokenKind.Ident(Text.from("x")), span: syn() };
+    assert_eq(count_token_predicates(&t), 1);
+    assert(t.is_ident());
+    assert(t.as_ident() is Some);
+    assert(t.as_punct() is None);
+}
+
+@test
+fn law_token_keyword_exactly_one_predicate() {
+    let t = Token { kind: TokenKind.Kw(Keyword.Let), span: syn() };
+    assert_eq(count_token_predicates(&t), 1);
+    assert(t.is_keyword());
+    assert(t.as_ident() is None);
+    assert(t.as_punct() is None);
+}
+
+@test
+fn law_token_literal_exactly_one_predicate() {
+    let t = Token { kind: TokenKind.Lit(Literal.int(1)), span: syn() };
+    assert_eq(count_token_predicates(&t), 1);
+    assert(t.is_literal());
+    assert(t.as_ident() is None);
+}
+
+@test
+fn law_token_punct_exactly_one_predicate() {
+    let t = Token { kind: TokenKind.Punct('+', Spacing.Alone), span: syn() };
+    assert_eq(count_token_predicates(&t), 1);
+    assert(t.is_punct());
+    assert(t.as_punct() is Some);
+    assert(t.as_ident() is None);
+}
+
+@test
+fn law_token_doc_comment_matches_no_predicate() {
+    // DocComment is a TokenKind but matches none of the four predicates.
+    let t = Token { kind: TokenKind.DocComment(Text.from("/// doc")), span: syn() };
+    assert_eq(count_token_predicates(&t), 0);
+    assert(t.as_ident() is None);
+    assert(t.as_punct() is None);
+}
+
+@test
+fn law_token_eof_matches_no_predicate() {
+    let t = Token { kind: TokenKind.Eof, span: syn() };
+    assert_eq(count_token_predicates(&t), 0);
+}
+
+// =============================================================================
+// §E  TokenKind — 6-variant partition (incl. DocComment / Eof)
+// =============================================================================
+
+fn count_token_kind(k: TokenKind) -> Int {
+    let mut c = 0;
+    if k is TokenKind.Ident { c = c + 1; }
+    if k is TokenKind.Kw { c = c + 1; }
+    if k is TokenKind.Lit { c = c + 1; }
+    if k is TokenKind.Punct { c = c + 1; }
+    if k is TokenKind.DocComment { c = c + 1; }
+    if k is TokenKind.Eof { c = c + 1; }
+    c
+}
+
+@test
+fn law_token_kind_partition_ident() {
+    assert_eq(count_token_kind(TokenKind.Ident(Text.from("a"))), 1);
+}
+
+@test
+fn law_token_kind_partition_kw() {
+    assert_eq(count_token_kind(TokenKind.Kw(Keyword.Let)), 1);
+}
+
+@test
+fn law_token_kind_partition_lit() {
+    assert_eq(count_token_kind(TokenKind.Lit(Literal.int(1))), 1);
+}
+
+@test
+fn law_token_kind_partition_punct() {
+    assert_eq(count_token_kind(TokenKind.Punct('+', Spacing.Alone)), 1);
+}
+
+@test
+fn law_token_kind_partition_doc_comment() {
+    assert_eq(count_token_kind(TokenKind.DocComment(Text.from("/// d"))), 1);
+}
+
+@test
+fn law_token_kind_partition_eof() {
+    assert_eq(count_token_kind(TokenKind.Eof), 1);
+}
+
+fn main() {}

@@ -16895,7 +16895,6 @@ impl VbcCodegen {
                     (id, true)
                 }
             };
-        let _ = owns_simple_key;
         // The qualified key ALWAYS registers (collision-free namespace).
         if let Some(q) = qualified_key.clone() {
             self.type_name_to_id.entry(q).or_insert(new_id);
@@ -17012,7 +17011,12 @@ impl VbcCodegen {
         // surface as opaque records at runtime — `m.0` would emit
         // `GetF(0)` on a value that was never boxed, producing
         // garbage.  See `TypeDescriptor::is_transparent_wrapper`.
-        if imported.is_transparent_wrapper {
+        // Ownership gate (META-GROUP-XMODULE-1 hardening): every SIMPLE-
+        // name side table below keeps its historical first-wins
+        // discipline — a case-(c) import (simple name owned by a
+        // DIFFERENT module's type) must not pollute newtype fast-caches
+        // or layout maps keyed by the bare name it lost.
+        if imported.is_transparent_wrapper && owns_simple_key {
             self.ctx.newtype_names.insert(name_str.clone());
         }
 
@@ -17040,9 +17044,11 @@ impl VbcCodegen {
                         .unwrap_or_default()
                 })
                 .collect();
-            self.type_field_layouts
-                .entry(name_str.clone())
-                .or_insert(names.clone());
+            if owns_simple_key {
+                self.type_field_layouts
+                    .entry(name_str.clone())
+                    .or_insert(names.clone());
+            }
             // META-GROUP-XMODULE-1: the module-qualified layout key is
             // collision-free and always registers, so a type that lost
             // the simple-name race still resolves positionally via
@@ -17085,9 +17091,10 @@ impl VbcCodegen {
             // a second-pass repopulation can fill any deferred entries.
             for (fname, fdesc) in names.iter().zip(imported.fields.iter()) {
                 let resolved = self.type_ref_to_field_name(&fdesc.type_ref);
-                if !self
-                    .type_field_type_names
-                    .contains_key(&(name_str.clone(), fname.clone()))
+                if owns_simple_key
+                    && !self
+                        .type_field_type_names
+                        .contains_key(&(name_str.clone(), fname.clone()))
                     && let Some(ty_name) = resolved.clone()
                 {
                     self.type_field_type_names.insert(

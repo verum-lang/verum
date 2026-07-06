@@ -1,0 +1,192 @@
+// =============================================================================
+// core-tests/meta/attribute/property_test.vr
+// =============================================================================
+//
+// Coherence laws for `core/meta/attribute.vr`.
+//
+// `Attribute`/`AttributeArg` are built via DIRECT RECORD LITERALS
+// (synthetic `MetaSpan`s, directly-built empty TokenStreams), never
+// via the `simple/with_value/with_args/positional/named` static ctors
+// (which reach `Span.call_site()`/`TokenStream.empty()`).
+//
+// Every law here holds under BOTH `--interp` and `--aot`. The attribute
+// value/arg types are pervasively AOT-fragile — the systemic TypeId
+// collision (META-GROUP-XMODULE-1 / #27) makes `MetaAttributeValue` /
+// `AttributeArg` `Maybe`-accessors, multi-variant `is` chains, and
+// non-empty `List<AttributeArg>` non-deterministic under AOT. So the
+// live laws stay on the reliably-stable class — Bool predicates,
+// record-field reads, and early-return `None` — and the AOT-fragile
+// surface (positive `Maybe`-accessors, `from_attribute` recognition,
+// non-empty args, `DeriveInfo.derives`, multi-variant cycles) is
+// pinned in `regression_test.vr`.
+//
+// Fully blocked (never called): has_arg/get_named_arg (`Maybe ==`),
+// positional_args/named_args/as_ident_list/as_key_values
+// (`.collect()`), is_builtin (`&[&str]`), CfgPredicate.evaluate
+// (intrinsic).
+// =============================================================================
+
+mount core.meta.attribute.{
+    Attribute, AttributeStyle, MetaAttributeValue, AttributeArg,
+    CfgPredicate, ReprInfo, ReprKind,
+};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.token.{TokenStream};
+mount core.base.maybe.{Maybe};
+
+fn synthetic_span() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn empty_ts() -> TokenStream {
+    TokenStream { tokens: List.new(), span: synthetic_span() }
+}
+
+fn pos_arg(v: MetaAttributeValue) -> AttributeArg {
+    AttributeArg { name: Maybe.None, value: v, span: synthetic_span() }
+}
+
+fn named_arg(n: Text, v: MetaAttributeValue) -> AttributeArg {
+    AttributeArg { name: Maybe.Some(n), value: v, span: synthetic_span() }
+}
+
+// Empty-args attribute (the AOT-stable shape).
+fn word_attr(name: Text) -> Attribute {
+    Attribute { name, style: AttributeStyle.Word, args: List.new(), tokens: empty_ts(), span: synthetic_span() }
+}
+
+// =============================================================================
+// Law 1: is_ident is the exact Bool predicate for the Ident variant
+// =============================================================================
+
+@test
+fn law_meta_value_is_ident_positive() {
+    let v = MetaAttributeValue.ident(Text.from("Eq"));
+    assert(v is MetaAttributeValue.Ident);
+    assert(v.is_ident());
+}
+
+@test
+fn law_meta_value_is_ident_negative() {
+    let s = MetaAttributeValue.string(Text.from("x"));
+    let i = MetaAttributeValue.int(1);
+    let b = MetaAttributeValue.bool(true);
+    assert(!s.is_ident());
+    assert(!i.is_ident());
+    assert(!b.is_ident());
+}
+
+// =============================================================================
+// Law 2: AttributeArg.is_named partitions positional vs named
+// =============================================================================
+
+@test
+fn law_arg_is_named_partition() {
+    let p = pos_arg(MetaAttributeValue.int(1));
+    let n = named_arg(Text.from("align"), MetaAttributeValue.int(8));
+    assert(!p.is_named());
+    assert(n.is_named());
+}
+
+// =============================================================================
+// Law 3: Attribute is_simple ⇔ style == Word; empty ⇒ no args
+// =============================================================================
+//
+// Only EMPTY-args attributes are asserted (a non-empty
+// `List<AttributeArg>` degenerates under AOT — regression_test).
+//
+
+@test
+fn law_attr_word_is_simple_and_empty() {
+    let a = word_attr(Text.from("inline"));
+    assert(a.is_simple());
+    assert(!a.has_args());
+    assert_eq(a.arg_count(), 0);
+}
+
+// =============================================================================
+// Law 4: name-predicate matrix (each true for its name, false for another)
+// =============================================================================
+
+@test
+fn law_predicate_is_cfg() {
+    let a = word_attr(Text.from("cfg"));
+    assert(a.is_cfg());
+    assert(!a.is_derive());
+}
+
+@test
+fn law_predicate_is_derive() {
+    let a = word_attr(Text.from("derive"));
+    assert(a.is_derive());
+    assert(!a.is_repr());
+}
+
+@test
+fn law_predicate_is_repr() {
+    let a = word_attr(Text.from("repr"));
+    assert(a.is_repr());
+    assert(!a.is_inline());
+}
+
+@test
+fn law_predicate_is_inline() {
+    let a = word_attr(Text.from("inline"));
+    assert(a.is_inline());
+    assert(!a.is_deprecated());
+}
+
+@test
+fn law_predicate_is_deprecated() {
+    let a = word_attr(Text.from("deprecated"));
+    assert(a.is_deprecated());
+    assert(!a.is_doc());
+}
+
+@test
+fn law_predicate_is_doc() {
+    let a = word_attr(Text.from("doc"));
+    assert(a.is_doc());
+    assert(!a.is_cfg());
+}
+
+// =============================================================================
+// Law 5: from_attribute REJECTION (non-cfg ⇒ None, non-repr ⇒ None)
+// =============================================================================
+//
+// The recognition (Some) direction degenerates under AOT
+// (regression_test); rejection is stable on both tiers.
+//
+
+@test
+fn law_cfg_from_attribute_rejects_non_cfg() {
+    let a = word_attr(Text.from("derive"));
+    assert(CfgPredicate.from_attribute(&a) is None);
+}
+
+@test
+fn law_repr_from_attribute_rejects_non_repr() {
+    let a = word_attr(Text.from("derive"));
+    assert(ReprInfo.from_attribute(&a) is None);
+}
+
+// =============================================================================
+// Law 6: ReprInfo record shape ⇔ ReprKind
+// =============================================================================
+
+@test
+fn law_repr_info_record_kind_coheres() {
+    let ri = ReprInfo {
+        kind: ReprKind.C,
+        align: Maybe.None,
+        packed: false,
+        span: synthetic_span(),
+    };
+    assert(ri.kind is ReprKind.C);
+    assert(!ri.packed);
+    assert(ri.align is None);
+}

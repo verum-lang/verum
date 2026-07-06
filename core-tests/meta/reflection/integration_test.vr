@@ -1,0 +1,380 @@
+// =============================================================================
+// core-tests/meta/reflection/integration_test.vr
+// =============================================================================
+//
+// Cross-type scenarios for `core/meta/reflection.vr`: the reflection
+// record types (FieldInfo, VariantInfo, ProtocolInfo, FunctionInfo)
+// carrying real `core.meta.attribute.Attribute` values and real
+// `ParamInfo` / `FunctionInfo` lists — all built directly (the
+// `TypeInfo` accessors that would produce them are @compiler_intrinsic
+// and need a live compile-time registry).
+//
+// Two language-level defects gate the method surface here.  Both are
+// pinned with @ignore tests that reference the finding so they promote
+// automatically once fixed (`verum test --include-ignored`):
+//
+//   REFL-CLOSURE-XREC-1  — a closure `|a| a.field` fed by `.iter()`
+//     over a List of *cross-module record* elements receives the
+//     element as a size-0 view → "field access out of bounds ...
+//     object data size 0".  Breaks FieldInfo/VariantInfo
+//     `.has_attribute` / `.get_attribute` (both use
+//     `self.attributes.iter().any|find(|a| a.name == name)`).
+//     Manual `for a in xs.iter() { a.name }` is unaffected — the
+//     for-loop binder registers the element type; the closure param
+//     does not.  Audit §3.2.
+//
+//   REFL-COLLECT-FROMITER-1 — `.map(...).collect()` / `.chain(...)
+//     .collect()` over these iterators dispatches to `FFIAbi.from_iter`
+//     (a receiver-less resolution) and panics.  Breaks
+//     FunctionInfo.signature, VariantInfo.pattern (Tuple/Struct),
+//     ProtocolInfo.all_methods, FunctionInfo.non_self_params.
+//
+// The working surface (direct field reads, manual iteration, the
+// Attribute's own predicates, is_marker, is_method/is_static,
+// self_param) is exercised live.
+// =============================================================================
+
+mount core.meta.reflection.{
+    TypeKind, VariantKind, VariantInfo, FieldInfo, Visibility, PrimitiveType,
+    FunctionInfo, ParamInfo, SelfKind, ProtocolInfo, GenericParam, GenericParamKind,
+    AssociatedTypeInfo,
+};
+mount core.meta.attribute.{Attribute, AttributeStyle};
+mount core.meta.token.{TokenStream};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+// -----------------------------------------------------------------------------
+// Builders
+// -----------------------------------------------------------------------------
+
+fn ssp() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn attr(name: Text, style: AttributeStyle) -> Attribute {
+    Attribute {
+        name: name,
+        style: style,
+        args: List.new(),
+        tokens: TokenStream { tokens: List.new(), span: ssp() },
+        span: ssp(),
+    }
+}
+
+fn field_with(attrs: List<Attribute>) -> FieldInfo {
+    FieldInfo {
+        name: Text.from("value"),
+        index: 0,
+        type_name: Text.from("Int"),
+        type_kind: TypeKind.Primitive,
+        visibility: Visibility.Public,
+        is_mutable: false,
+        attributes: attrs,
+        doc: Maybe.None,
+        span: ssp(),
+    }
+}
+
+fn variant_with(attrs: List<Attribute>) -> VariantInfo {
+    VariantInfo {
+        name: Text.from("Case"),
+        index: 0,
+        kind: VariantKind.Unit,
+        fields: List.new(),
+        attributes: attrs,
+        doc: Maybe.None,
+        span: ssp(),
+    }
+}
+
+fn method_named(name: Text, params: List<ParamInfo>, contexts: List<Text>) -> FunctionInfo {
+    FunctionInfo {
+        name: name,
+        path: Text.from("m.f"),
+        generics: List.new(),
+        params: params,
+        return_type: Text.from("()"),
+        return_kind: TypeKind.Unit,
+        is_async: false,
+        is_const: false,
+        is_unsafe: false,
+        is_pure: false,
+        is_meta: false,
+        contexts: contexts,
+        attributes: List.new(),
+        doc: Maybe.None,
+        visibility: Visibility.Public,
+        span: ssp(),
+    }
+}
+
+fn self_ref_param() -> ParamInfo {
+    ParamInfo {
+        name: Text.from("self"),
+        index: 0,
+        type_name: Text.from("Self"),
+        type_kind: TypeKind.Reference,
+        is_mut: false,
+        is_self_param: true,
+        self_kind: Maybe.Some(SelfKind.Ref),
+        default: Maybe.None,
+        attributes: List.new(),
+        span: ssp(),
+    }
+}
+
+fn protocol_with(required: List<FunctionInfo>, provided: List<FunctionInfo>) -> ProtocolInfo {
+    ProtocolInfo {
+        name: Text.from("Proto"),
+        path: Text.from("m.Proto"),
+        generics: List.new(),
+        super_protocols: List.new(),
+        associated_types: List.new(),
+        required_methods: required,
+        provided_methods: provided,
+        attributes: List.new(),
+        doc: Maybe.None,
+        span: ssp(),
+    }
+}
+
+// =============================================================================
+// Section 1: FieldInfo carrying Attributes — working surface
+// =============================================================================
+
+@test
+fn integration_field_holds_multiple_attributes() {
+    let f = field_with([
+        attr(Text.from("derive"), AttributeStyle.Call),
+        attr(Text.from("repr"), AttributeStyle.Call),
+    ]);
+    assert_eq(f.attributes.len(), 2);
+}
+
+@test
+fn integration_field_manual_scan_finds_derive() {
+    // Manual iteration — the for-loop binder registers the element type,
+    // so `a.name` reads correctly (unlike the .any closure, §3.2).
+    let f = field_with([
+        attr(Text.from("derive"), AttributeStyle.Call),
+        attr(Text.from("inline"), AttributeStyle.Word),
+    ]);
+    let mut has_derive = false;
+    for a in f.attributes.iter() {
+        if a.name == Text.from("derive") { has_derive = true; }
+    }
+    assert(has_derive);
+}
+
+@test
+fn integration_field_attribute_own_predicates_dispatch() {
+    // The Attribute's *own* methods dispatch fine cross-module when the
+    // receiver is bound by the for-loop.
+    let f = field_with([
+        attr(Text.from("derive"), AttributeStyle.Call),
+        attr(Text.from("repr"), AttributeStyle.Call),
+    ]);
+    let mut derive_seen = false;
+    let mut repr_seen = false;
+    for a in f.attributes.iter() {
+        if a.is_derive() { derive_seen = true; }
+        if a.is_repr() { repr_seen = true; }
+    }
+    assert(derive_seen);
+    assert(repr_seen);
+}
+
+@test
+fn integration_field_visibility_and_kind_read_back() {
+    // Field carries a Visibility and a TypeKind; both round-trip.
+    let f = field_with(List.new());
+    assert(f.is_public());
+    assert(f.type_kind.is_primitive());
+    assert(f.accessor().contains(Text.from("value")));
+}
+
+// =============================================================================
+// Section 2: has_attribute / get_attribute — pinned closure-over-record defect
+// =============================================================================
+//
+// Both crash under --interp regardless of list contents: the crash is in
+// the closure body (`a.name`), which the runtime reaches even for an
+// empty list (`ListIter.any` invokes the closure path with a size-0
+// element view).  So there is no "safe" happy path to test live — the
+// whole method surface is pinned until REFL-CLOSURE-XREC-1 closes.
+
+/// PINNED — REFL-CLOSURE-XREC-1 (audit §3.2).
+/// `FieldInfo.has_attribute` crashes: the `.any(|a| a.name == name)`
+/// closure receives `a` as a size-0 view ("field access out of bounds
+/// ... object data size 0"), even on an empty list.  Promote when
+/// closure element-type propagation for cross-module records lands.
+@ignore
+@test
+fn integration_has_attribute_nonempty_closure_crash() {
+    let f = field_with([attr(Text.from("derive"), AttributeStyle.Call)]);
+    assert(f.has_attribute(Text.from("derive")));
+}
+
+/// PINNED — REFL-CLOSURE-XREC-1 (audit §3.2).
+/// `FieldInfo.get_attribute` shares the `.find(|a| a.name == name)`
+/// closure pattern and the same crash.
+@ignore
+@test
+fn integration_get_attribute_nonempty_closure_crash() {
+    let f = field_with([attr(Text.from("repr"), AttributeStyle.Call)]);
+    match f.get_attribute(Text.from("repr")) {
+        Maybe.Some(a) => assert(a.name == Text.from("repr")),
+        Maybe.None => panic("attribute should be found"),
+    }
+}
+
+// =============================================================================
+// Section 3: VariantInfo carrying Attributes — working surface
+// =============================================================================
+
+@test
+fn integration_variant_holds_attributes_and_manual_scan() {
+    let v = variant_with([
+        attr(Text.from("deprecated"), AttributeStyle.Word),
+    ]);
+    assert_eq(v.attributes.len(), 1);
+    let mut deprecated = false;
+    for a in v.attributes.iter() {
+        if a.name == Text.from("deprecated") { deprecated = true; }
+    }
+    assert(deprecated);
+}
+
+@test
+fn integration_variant_unit_pattern_and_kind() {
+    // Unit-variant pattern needs no field iteration — works cross-module.
+    let v = variant_with(List.new());
+    assert(v.is_unit());
+    assert_eq(v.pattern(), Text.from("Case"));
+    assert_eq(v.wildcard_pattern(), Text.from("Case"));
+}
+
+/// PINNED — REFL-COLLECT-FROMITER-1.
+/// `VariantInfo.pattern` for a Tuple/Struct variant enumerates its
+/// fields via `.enumerate().map(...).collect().join(...)`; the
+/// `.collect()` dispatches to `FFIAbi.from_iter` and panics.
+@ignore
+@test
+fn integration_variant_tuple_pattern_collect_crash() {
+    let field = FieldInfo {
+        name: Text.from("0"), index: 0, type_name: Text.from("Int"),
+        type_kind: TypeKind.Primitive, visibility: Visibility.Public,
+        is_mutable: false, attributes: List.new(), doc: Maybe.None, span: ssp(),
+    };
+    let v = VariantInfo {
+        name: Text.from("Some"), index: 1, kind: VariantKind.Tuple,
+        fields: [field], attributes: List.new(), doc: Maybe.None, span: ssp(),
+    };
+    assert(v.pattern().contains(Text.from("Some")));
+}
+
+// =============================================================================
+// Section 4: ProtocolInfo — is_marker (live) + all_methods (pinned)
+// =============================================================================
+
+@test
+fn integration_protocol_marker_is_empty_of_methods() {
+    let marker = protocol_with(List.new(), List.new());
+    assert(marker.is_marker());
+}
+
+@test
+fn integration_protocol_with_required_method_is_not_marker() {
+    let m = method_named(Text.from("next"), List.new(), List.new());
+    let proto = protocol_with([m], List.new());
+    assert(!proto.is_marker());
+}
+
+/// PINNED — REFL-COLLECT-FROMITER-1.
+/// `ProtocolInfo.all_methods` concatenates required+provided via
+/// `.chain(...).collect()`; the collect panics on `FFIAbi.from_iter`.
+@ignore
+@test
+fn integration_protocol_all_methods_collect_crash() {
+    let req = method_named(Text.from("next"), List.new(), List.new());
+    let prov = method_named(Text.from("size_hint"), List.new(), List.new());
+    let proto = protocol_with([req], [prov]);
+    assert_eq(proto.all_methods().len(), 2);
+}
+
+// =============================================================================
+// Section 5: FunctionInfo — method/static/context (live) + signature (pinned)
+// =============================================================================
+
+@test
+fn integration_function_method_vs_static_from_self_param() {
+    let method = method_named(Text.from("len"), [self_ref_param()], List.new());
+    assert(method.is_method());
+    assert(!method.is_static());
+
+    let ctor = method_named(Text.from("new"), List.new(), List.new());
+    assert(ctor.is_static());
+    assert(!ctor.is_method());
+}
+
+@test
+fn integration_function_self_param_presence() {
+    // self_param() = `.first().filter(|p| p.is_self())` — the Maybe.filter
+    // closure path works cross-module (unlike the List-iter closure).
+    let method = method_named(Text.from("len"), [self_ref_param()], List.new());
+    match method.self_param() {
+        Maybe.Some(_) => assert(true),
+        Maybe.None => panic("method must expose a self param"),
+    }
+
+    let ctor = method_named(Text.from("new"), List.new(), List.new());
+    match ctor.self_param() {
+        Maybe.Some(_) => panic("static fn has no self param"),
+        Maybe.None => assert(true),
+    }
+}
+
+/// PINNED — REFL-LIST-CONTAINS-TEXT-1.
+/// `FunctionInfo.requires_context` returns the wrong answer because its
+/// body `self.contexts.contains(&ctx)` hits a `List<Text>.contains`
+/// defect: under `verum test --interp`, a long-enough needle is not
+/// matched even though it is present.  The trigger is Text length —
+/// `[Text.from("Database"), Text.from("Logger")].contains(&Text.from("Database"))`
+/// is FALSE (8-char needle), while shorter needles match
+/// (`[Text.from("Clone"), Text.from("Send")].contains(&Text.from("Clone"))`
+/// is true).  Standalone `Text == Text` on "Database" is correct, so the
+/// fault is in list-element readback during the contains scan (likely a
+/// small-string/SSO boundary).  Promote when it lands.
+@ignore
+@test
+fn integration_function_requires_context_membership() {
+    let f = method_named(
+        Text.from("query"),
+        [self_ref_param()],
+        [Text.from("Database"), Text.from("Logger")],
+    );
+    assert(f.requires_context(Text.from("Database")));
+    assert(f.requires_context(Text.from("Logger")));
+    assert(!f.requires_context(Text.from("FileSystem")));
+}
+
+/// PINNED — REFL-COLLECT-FROMITER-1.
+/// `FunctionInfo.signature` renders parameters via
+/// `.map(|p| p.declaration()).collect().join(", ")`; the `.collect()`
+/// panics on `FFIAbi.from_iter`.
+@ignore
+@test
+fn integration_function_signature_collect_crash() {
+    let p = ParamInfo {
+        name: Text.from("n"), index: 0, type_name: Text.from("Int"),
+        type_kind: TypeKind.Primitive, is_mut: false, is_self_param: false,
+        self_kind: Maybe.None, default: Maybe.None, attributes: List.new(), span: ssp(),
+    };
+    let f = method_named(Text.from("make"), [p], List.new());
+    assert(f.signature().contains(Text.from("make")));
+}

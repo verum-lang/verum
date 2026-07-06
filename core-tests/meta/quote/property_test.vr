@@ -1,0 +1,149 @@
+// =============================================================================
+// core-tests/meta/quote/property_test.vr
+// =============================================================================
+//
+// Builder-algebra laws for `core/meta/quote.vr`.
+//
+// The runtime-safe frontier of `QuoteBuilder` is narrow: every path
+// reaching a `@compiler_intrinsic` span (`Span.call_site`, `Span.join`,
+// `keyword_from_str`) degenerates to `()` or trips a layout mismatch,
+// and ANY `Group` construction flakes under `--aot` (the
+// Group-vs-Probability TypeId collision is non-deterministic per
+// compile — META-GROUP-XMODULE-1). Every law below holds under BOTH
+// `--interp` and `--aot`, and touches no `Group`:
+//
+//   * `.keyword()` append is length-additive on `.len()`
+//   * `.splice()` of an empty stream is a no-op on `.len()`
+//   * `flatten` preserves leaf-token count
+//   * `Delimiter.open/close` coherence (visible ⇒ both; Invisible ⇒ none)
+//   * `TokenTree` Leaf/Grouped predicate exclusivity
+//   * `QuotePart` 3-variant disjointness
+//
+// The Group-touching laws (group/wrap append additivity, wrap ⇒ one
+// group tree, flatten-descends-group) and intrinsic-blocked laws
+// (`append` associativity) are pinned in `regression_test.vr` and
+// become live once META-GROUP-XMODULE-1 / META-INTRINSIC-NILSTUB-1
+// land.
+// =============================================================================
+
+mount core.meta.quote.{QuotePart, QuoteBuilder};
+mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+fn synthetic_span() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn fresh() -> QuoteBuilder {
+    QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+}
+
+fn empty_ts() -> TokenStream {
+    TokenStream { tokens: List.new(), span: synthetic_span() }
+}
+
+// =============================================================================
+// Law 1: `.keyword()` append is length-additive (0..3 keywords)
+// =============================================================================
+
+@test
+fn law_keyword_append_additive() {
+    assert_eq(fresh().tokens.len(), 0);
+    assert_eq(fresh().keyword(Text.from("let")).tokens.len(), 1);
+    assert_eq(fresh()
+        .keyword(Text.from("let"))
+        .keyword(Text.from("fn"))
+        .tokens.len(), 2);
+    assert_eq(fresh()
+        .keyword(Text.from("let"))
+        .keyword(Text.from("fn"))
+        .keyword(Text.from("type"))
+        .tokens.len(), 3);
+}
+
+// =============================================================================
+// Law 2: `.splice()` of an empty stream is length-neutral
+// =============================================================================
+
+@test
+fn law_splice_empty_is_identity_on_len() {
+    let b0 = fresh().splice(empty_ts());
+    assert_eq(b0.tokens.len(), 0);
+    let b1 = fresh().keyword(Text.from("let")).splice(empty_ts());
+    assert_eq(b1.tokens.len(), 1);
+}
+
+// =============================================================================
+// Law 3: build() then flatten preserves the leaf-token count
+// =============================================================================
+
+@test
+fn law_flatten_keywords_count_preserved() {
+    assert_eq(fresh().build().flatten().len(), 0);
+    assert_eq(fresh().keyword(Text.from("let")).build().flatten().len(), 1);
+    assert_eq(fresh()
+        .keyword(Text.from("let"))
+        .keyword(Text.from("fn"))
+        .build()
+        .flatten()
+        .len(), 2);
+}
+
+// =============================================================================
+// Law 4: Delimiter open/close coherence
+// =============================================================================
+//
+// Parenthesis/Brace/Bracket each have Some open and Some close;
+// Invisible has neither. Asserted directly per-delimiter (a
+// `for d in List<Delimiter>.iter()` loop is universe-fragile — the
+// List-iteration mis-lowers once the compiled type set grows).
+//
+
+@test
+fn law_delimiter_visible_have_both_ends() {
+    assert(Delimiter.Parenthesis.open() is Some && Delimiter.Parenthesis.close() is Some);
+    assert(Delimiter.Brace.open() is Some && Delimiter.Brace.close() is Some);
+    assert(Delimiter.Bracket.open() is Some && Delimiter.Bracket.close() is Some);
+}
+
+@test
+fn law_delimiter_invisible_has_no_ends() {
+    assert(Delimiter.Invisible.open() is None);
+    assert(Delimiter.Invisible.close() is None);
+}
+
+// =============================================================================
+// Law 5: TokenTree Leaf predicate exclusivity
+// =============================================================================
+
+@test
+fn law_leaf_is_token_not_group() {
+    let tt: TokenTree = TokenTree.Leaf(
+        Token { kind: TokenKind.Ident(Text.from("x")), span: synthetic_span() });
+    assert(tt.is_token());
+    assert(!tt.is_group());
+}
+
+// =============================================================================
+// Law 6: QuotePart 3-variant pairwise disjointness
+// =============================================================================
+
+@test
+fn law_quote_part_pairwise_disjoint() {
+    let l: QuotePart = QuotePart.Literal(Text.from("let "));
+    let i: QuotePart = QuotePart.Interpolate(empty_ts());
+    let r: QuotePart = QuotePart.Repeat {
+        var_name: Text.from("x"),
+        iterator: empty_ts(),
+        body: List.new(),
+        separator: Maybe.None,
+    };
+    assert(l is QuotePart.Literal && !(l is QuotePart.Interpolate) && !(l is QuotePart.Repeat));
+    assert(i is QuotePart.Interpolate && !(i is QuotePart.Literal) && !(i is QuotePart.Repeat));
+    assert(r is QuotePart.Repeat && !(r is QuotePart.Literal) && !(r is QuotePart.Interpolate));
+}

@@ -96,15 +96,57 @@ not meaningful and live at the verum_compiler test layer instead.
 calling `to_span()` at runtime returns whatever the intrinsic
 stub yields (typically a zero-Span). Not testable at this layer.
 
+### §3.4 META-SPAN-ALIAS-1 — `type Span is MetaSpan;` parsed as a single-variant enum — CLOSED 2026-07-06
+
+`let s: Span = MetaSpan { … }; s.is_synthetic()` crashed with
+`NullPointerAt … MetaSpan.is_synthetic pc=4`; `s.id` read back a
+heap-pointer bit pattern (denormal float in an f-string).
+
+Root cause (language level, systemic — 55+ declarations across
+`core/` affected): the parser committed the grammatically ambiguous
+`type X is BareIdent;` form to the **variant** reading (a fresh sum
+type with one nullary variant *named* `MetaSpan`), per the task #13
+marker-enum idiom (`type SemaphoreError is Closed;`). Under a
+`let s: Span = …` annotation the record literal then compiled as a
+VARIANT construction (`MakeVariant tag=0` + `SetVariantData`
+payload slots — VBC-dump verified), while every field READ used
+plain record `GetF` offsets — a one-slot shift and total value
+corruption. The EBNF's ordered alternatives (`type_expr ;` before
+`variant_list ;`), the doc comments ("Public alias"), and
+`tests/type_alias_test.vr` all pin the ALIAS intent.
+
+Fundamental fix: **module-level deferred classification** at the
+parse funnel (`verum_fast_parser/src/normalize.rs`) — a single bare
+nullary variant re-classifies to `TypeDeclBody::Alias` when its
+name resolves to a known type (module-local declaration, explicit
+mount, or well-known primitive/core name); otherwise the
+marker-enum reading stays. Explicit disambiguators: leading pipe
+(`type X is | OnlyVariant;`) forces the enum; the `=` sigil always
+means alias. Runs upstream of every consumer (typecheck, VBC, AOT,
+archive metadata, LSP) — one consistent reading.
+
+### §3.1 status update 2026-07-06 — CLOSED
+
+The cross-module fn-return record-layout defect this audit
+originally pinned (SourceLocation.new / SpanRange.new / .single /
+MultiSpan.empty / .from_span) no longer reproduces — all five
+`@ignore` regressions pass when un-ignored (probed 2026-07-06).
+Un-ignore them and keep them as guardrails.
+
 ## Action items landed in this branch
 
 * `core-tests/meta/span/unit_test.vr` — 25 unit tests over
   SpanFlags + MetaSpan + Span alias + SourceLocation + SpanRange +
   MultiSpan via **direct record construction** (works around the
   cross-module fn-return defect).
-* `core-tests/meta/span/regression_test.vr` — 5 `@ignore` regressions
+* `core-tests/meta/span/regression_test.vr` — 5 regressions
   pinning the cross-module ctor return-value field-access OOB defect
-  class.
+  class (now green — un-ignored per §3.1 update).
+* `core-tests/meta/span/property_test.vr` — 25 law tests (MetaSpan
+  Eq laws with flags-exclusion pinned; SpanFlags 2^3 exhaustive;
+  SourceLocation Eq offset-exclusion pinned; SpanRange/MultiSpan).
+* `core-tests/meta/span/integration_test.vr` — 12 tests (spans
+  flowing through Token/TokenStream/LexError records).
 * `core-tests/meta/span/audit.md` — this file.
 
 ## Action items deferred

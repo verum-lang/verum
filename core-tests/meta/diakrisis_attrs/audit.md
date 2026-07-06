@@ -111,6 +111,17 @@ inspects `arg.value` for `MetaAttributeValue.String` /
   across all 5 `parse_*` functions. Closes §3.3.
 * `core-tests/meta/diakrisis_attrs/audit.md` — this file.
 
+### §3.4 META-DIAKRISIS-PARSE-1 — 6 integration tests misused `List.append` — CLOSED 2026-07-06
+
+Same class as meta/oracle §3.4: attribute-arg lists built as
+`List.of(a).append(List.of(b))` — `append` returns `()`, the Unit
+flowed into `Attribute.args`, and `parse_autopoietic` /
+`parse_cut_elimination` crashed iterating it (`method 'next' not
+found on receiver of runtime kind Object`). Rewritten to list
+literals `[a, b]`. The enabling language hole (no type checker in
+the interp test harness) closed by META-TEST-TYPECHECK-1 — see
+meta/oracle audit §3.4 for the full chain.
+
 ## Action items deferred
 
 | Item | Scope | Estimated effort |

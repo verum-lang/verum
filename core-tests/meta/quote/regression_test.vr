@@ -1,0 +1,200 @@
+// =============================================================================
+// core-tests/meta/quote/regression_test.vr
+// =============================================================================
+//
+// One @test per defect the quote suite has surfaced. Every pin here is
+// currently `@ignore`'d: each either mis-lowers under `--aot` while
+// passing `--interp` (a codegen divergence — the same source must
+// pass BOTH tiers) or hard-crashes/degenerates on both tiers via a
+// `@compiler_intrinsic` span. `@ignore`'d bodies are still
+// type-checked, so they also guard the API shape against drift.
+// Deleting the `@ignore` on a pin is the acceptance test for its fix.
+//
+// DEFECT FAMILIES:
+//   (A) INTERP/AOT DIVERGENCE — `build()` computes its span through
+//       `TokenStream.from_trees` (`Span.join`/`call_site`); under AOT
+//       the resulting stream's internal `.trees()` reference and any
+//       `.flatten()` that descends a Group mis-lower, and `wrap`-built
+//       Groups (module `parens/braces/brackets`) mis-lower. Also,
+//       `Maybe`-returning token accessors that clone/borrow
+//       (`Token.as_ident`, `TokenTree.as_token`) return the wrong
+//       tag under AOT. (META-AOT-PARITY-1.)
+//   (B) BOTH-TIER INTRINSIC/COLLISION — `Span.call_site`/`Span.join`/
+//       `keyword_from_str` are bodiless `@compiler_intrinsic`s that
+//       return nil at runtime (META-INTRINSIC-NILSTUB-1);
+//       `Token.ident_spanned` (cross-module static ctor) and a direct
+//       `Group { ... }` record literal (Group-vs-Probability TypeId
+//       collision, META-GROUP-XMODULE-1) corrupt object layout.
+// =============================================================================
+
+mount core.meta.quote.{QuoteBuilder, GroupBuilder, parens, braces, brackets};
+mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter, Group};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+fn synthetic_span() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn empty_ts() -> TokenStream {
+    TokenStream { tokens: List.new(), span: synthetic_span() }
+}
+
+// =============================================================================
+// Family A: interp passes, AOT mis-lowers (META-AOT-PARITY-1)
+// =============================================================================
+
+// REGRESSION (META-GROUP-XMODULE-1): ANY builder Group construction —
+// `.group()` here — passes `--interp` but FLAKES under `--aot`: the
+// Group TypeId collides with `Probability` (1240) and the assignment
+// is non-deterministic per compile, so the same test's pass/fail set
+// changes run-to-run. Even `.tokens.len()` after one `.group()` is
+// unreliable. Un-ignore when Group gets a stable per-module TypeId.
+@ignore
+@test
+fn regression_aot_flaky_builder_group() {
+    let b = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .group(Delimiter.Parenthesis, empty_ts());
+    assert_eq(b.tokens.len(), 1);
+}
+
+// REGRESSION (META-GROUP-XMODULE-1): `.paren()/.brace()/.bracket()`
+// (the `wrap`-style group helpers) share the same Group-collision
+// AOT flakiness. Interp is fine.
+@ignore
+@test
+fn regression_aot_flaky_builder_paren_wrapper() {
+    let b = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .paren(empty_ts());
+    assert_eq(b.tokens.len(), 1);
+}
+
+// REGRESSION (META-GROUP-XMODULE-1): `paren_open()` returns a
+// `GroupBuilder`; reading its `.delimiter` is AOT-flaky for the same
+// collision reason. Interp is fine.
+@ignore
+@test
+fn regression_aot_flaky_group_builder_open() {
+    let gb = QuoteBuilder { tokens: List.new(), span: synthetic_span() }.paren_open();
+    assert(gb.delimiter is Delimiter.Parenthesis);
+}
+
+// REGRESSION: after `build()`, reading the internal `.trees()` list
+// and inspecting a tree yields the wrong result under `--aot` (the
+// `from_trees`-computed span reference is bad). `--interp` is fine.
+@ignore
+@test
+fn regression_aot_post_build_trees_access() {
+    let ts = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .group(Delimiter.Brace, empty_ts())
+        .build();
+    match ts.trees().get(0) {
+        Maybe.Some(tt) => assert(tt.is_group()),
+        Maybe.None => assert(false),
+    }
+}
+
+// REGRESSION: `flatten()` that DESCENDS into a Group (`g.tokens
+// .flatten()`) mis-lowers under `--aot` (empty group should yield 0
+// tokens); leaf-only flatten is fine. `--interp` is fine.
+@ignore
+@test
+fn regression_aot_flatten_descends_group() {
+    let ts = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .group(Delimiter.Brace, empty_ts())
+        .build();
+    assert_eq(ts.flatten().len(), 0);
+}
+
+// REGRESSION: `Token.as_ident()` returns `Maybe.Some(name.clone())`;
+// the Text clone + Maybe-wrap returns the wrong tag under `--aot`
+// (the Bool `is_ident()` is fine). `--interp` is fine.
+@ignore
+@test
+fn regression_aot_token_as_ident_maybe() {
+    let t = Token { kind: TokenKind.Ident(Text.from("foo")), span: synthetic_span() };
+    assert(t.as_ident() is Some);
+}
+
+// REGRESSION: `TokenTree.as_token()` returns `Maybe.Some(&Token)`;
+// the borrow-in-Maybe returns the wrong tag under `--aot`. `--interp`
+// is fine.
+@ignore
+@test
+fn regression_aot_tokentree_as_token_maybe() {
+    let tt: TokenTree = TokenTree.Leaf(
+        Token { kind: TokenKind.Ident(Text.from("y")), span: synthetic_span() });
+    assert(tt.as_token() is Some);
+}
+
+// REGRESSION: module helpers `parens/braces/brackets` wrap via
+// `TokenStream.wrap` (Group construction); the wrap/Group path
+// mis-lowers under `--aot` so `.len()` is wrong. `--interp` is fine.
+@ignore
+@test
+fn regression_aot_module_parens_wrap() {
+    let ts = parens(empty_ts());
+    assert_eq(ts.len(), 1);
+}
+
+// =============================================================================
+// Family B: blocked on BOTH tiers (intrinsic-nil / layout collision)
+// =============================================================================
+
+// REGRESSION: `GroupBuilder.close()` builds its Group via
+// `TokenStream.from_trees`, which reaches `Span.call_site()` (empty)
+// or `Span.join` (non-empty) — bodiless `@compiler_intrinsic`s that
+// return nil — degenerating the returned QuoteBuilder to `()`
+// (META-INTRINSIC-NILSTUB-1).
+@ignore
+@test
+fn regression_group_builder_close_intrinsic_nil() {
+    let b = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .paren_open()
+        .close();
+    assert_eq(b.tokens.len(), 1);
+}
+
+// REGRESSION: `QuoteBuilder.ident()` calls `Token.ident_spanned` — a
+// cross-module static ctor whose returned `Token` layout mismatches
+// (TypeId collision), a `LayoutMismatch` at runtime. The inline
+// `Token { ... }` record literal is unaffected.
+@ignore
+@test
+fn regression_builder_ident_static_ctor_layout() {
+    let b = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
+        .ident(Text.from("foo"));
+    assert_eq(b.tokens.len(), 1);
+}
+
+// REGRESSION (META-GROUP-XMODULE-1): a direct `Group { ... }` record
+// literal in a test module resolves `Group` to a colliding TypeId
+// (1240, shared with `Probability`); the field write runs past the
+// object's data size ("field write out of bounds ... type='Group'").
+@ignore
+@test
+fn regression_direct_group_literal_collision() {
+    let g = Group { delimiter: Delimiter.Parenthesis, tokens: empty_ts(), span: synthetic_span() };
+    let tt: TokenTree = TokenTree.Grouped(g);
+    assert(tt.is_group());
+}
+
+// REGRESSION (#27 universe-flakiness): iterating a `List<Delimiter>`
+// with `for d in xs.iter()` and calling a `Maybe`-returning method on
+// the deref'd element (`(*d).open()`) passes per-file but FAILS once
+// the compiled type set grows (e.g. running the whole meta/quote
+// folder together) — the List-iteration mis-lowers non-
+// deterministically. Direct per-delimiter assertions are stable.
+@ignore
+@test
+fn regression_list_delimiter_iter_flaky() {
+    let visible: List<Delimiter> = [Delimiter.Parenthesis, Delimiter.Brace, Delimiter.Bracket];
+    for d in visible.iter() {
+        assert((*d).open() is Some);
+        assert((*d).close() is Some);
+    }
+}

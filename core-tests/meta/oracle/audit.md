@@ -60,11 +60,55 @@ compile time lives in `verum_runtime::mcp_bridge` and depends on
 an external endpoint. Tests for the dispatch live in a
 feature-gated integration suite under `crates/verum_runtime/tests/`.
 
+### §3.4 META-ORACLE-APPEND-1 — tests misused `List.append` (returns Unit) — CLOSED 2026-07-06
+
+19 oracle tests built candidate lists as
+`List.of(c1).append(List.of(c2))` — but `List.append(&mut self,
+&mut List<T>)` returns `()`. The `()` flowed into
+`OracleResponse.candidates` and every consumer null-derefed
+(`NullPointerAt opcode 0x66 in filter_by_confidence`) or panicked
+(`method '().append' not found`). Two-layer close-out:
+
+* tests rewritten to canonical list literals `[c1, c2, c3]`;
+* stdlib gained the missing expression-position API:
+  `List.concat(mut self, mut other) -> List<T>`
+  (`core/collections/list.vr`) — the value-returning companion to
+  `append`, mirroring `Text.concat`.
+
+The deeper language finding: `verum test --interp` compiled the
+type error without complaint because the interp/property harness
+ran NO type checker at all (`compile_module_with_stdlib` has no
+`verum_types` phase). Closed by META-TEST-TYPECHECK-1 — the
+harness now routes each standalone test file through the same
+`run_check_only` entry `verum check` uses (escape hatch:
+`VERUM_TEST_LENIENT_TYPES=1`).
+
+### §3.5 META-REFINED-FIELD-FLOATCMP-1 — refined `Float{…}` field compares lowered to signed-int compares — CLOSED 2026-07-06
+
+`aggressive.min_confidence < default.min_confidence` returned
+`false` for 0.4 < 0.7: every compare over a record field typed
+`Float{>= 0.0, <= 1.0}` bit-compared the raw IEEE-754 patterns as
+i64. Three legs, all closed in verum_vbc/verum_common:
+
+1. `extract_type_name_from_ast` had no `Refined` arm — field-type
+   names were stored as a truncated debug dump
+   (`"Refined { base: Typ"`), so int/float classification failed
+   for locally-declared refined fields.
+2. The canonical `well_known_types::type_names` classifiers now
+   strip refinement suffixes (`strip_refinement`): `Float{…}`
+   classifies as Float everywhere.
+3. `resolve_field_type_ref` had no `Refined` arm — the BAKED
+   archive descriptor carried no usable TypeRef for refined fields,
+   so archive-loaded `OracleConfig.min_confidence` failed
+   classification even after (1)+(2). Refinement predicates are
+   unaffected (assert emission reads the AST, not descriptors).
+
 ## Action items landed in this branch
 
 * `core-tests/meta/oracle/unit_test.vr` — 25 unit tests:
   defaults / aggressive / direct construction / candidate /
-  response / outcome 5-variant / has_viable / filter / count.
+  response / outcome 5-variant / has_viable / filter / count —
+  candidate lists rebuilt as list literals (§3.4).
 * `core-tests/meta/oracle/property_test.vr` — 13 laws:
   filter monotonicity, count monotonicity, count-matches-filter,
   has_viable agrees with count, default vs aggressive axes.

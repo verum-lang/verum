@@ -1,0 +1,180 @@
+// =============================================================================
+// core-tests/meta/span/integration_test.vr
+// =============================================================================
+//
+// Cross-type scenarios: `MetaSpan` values flowing through the
+// `core/meta/token.vr` types that carry them — `Token { kind, span }`,
+// `TokenStream { tokens, span }`, and `LexError { message, span }`.
+//
+// Identity of a span carried through a token record is checked via the
+// `MetaSpan` `Eq` impl (`token.span == original`), NOT via sub-field
+// reads such as `token.span.id` — reading a sub-field through a
+// `span: Span` alias field is currently unreliable (META-SPAN-ALIAS-1,
+// tracked as a language defect; Eq dispatch through the same field is
+// unaffected).
+//
+// No `@compiler_intrinsic` span method is called; spans are built by
+// direct record construction.  `Group` / `TokenTree.Grouped` are NOT
+// constructed here (that path trips META-GROUP-XMODULE-1, pinned in
+// `core-tests/meta/token/regression_test.vr`); only `TokenTree.Leaf`
+// is used.
+// =============================================================================
+
+mount core.meta.span.{MetaSpan, SourceLocation, SpanRange, MultiSpan, SpanFlags};
+mount core.meta.token.{Token, TokenKind, TokenTree, TokenStream, LexError, Keyword, Literal, Spacing};
+mount core.base.maybe.{Maybe};
+
+fn synthetic_span() -> MetaSpan {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn span_with_id(id: UInt64) -> MetaSpan {
+    MetaSpan {
+        id,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false },
+    }
+}
+
+// =============================================================================
+// Section 1: MetaSpan flows into a Token record
+// =============================================================================
+
+@test
+fn test_meta_span_flows_into_token() {
+    let sp = span_with_id(42);
+    let t = Token { kind: TokenKind.Ident(Text.from("foo")), span: sp };
+    assert(t.is_ident());
+    // The span survives intact inside the token record.
+    assert(t.span == sp);
+}
+
+@test
+fn test_token_span_identity_is_discriminating() {
+    let sp = span_with_id(42);
+    let t = Token { kind: TokenKind.Ident(Text.from("foo")), span: sp };
+    // A different span must NOT compare equal (true identity, not a stub).
+    assert(!(t.span == span_with_id(43)));
+}
+
+@test
+fn test_synthetic_span_flows_into_keyword_token() {
+    let sp = synthetic_span();
+    let t = Token { kind: TokenKind.Kw(Keyword.Fn), span: sp };
+    assert(t.is_keyword());
+    assert(t.span == sp);
+}
+
+// =============================================================================
+// Section 2: A stream of spanned tokens
+// =============================================================================
+
+@test
+fn test_token_stream_of_spanned_tokens() {
+    let t0 = Token { kind: TokenKind.Kw(Keyword.Fn), span: span_with_id(1) };
+    let t1 = Token { kind: TokenKind.Ident(Text.from("main")), span: span_with_id(2) };
+    let t2 = Token { kind: TokenKind.Punct('(', Spacing.Joint), span: span_with_id(3) };
+    let trees: List<TokenTree> = [TokenTree.Leaf(t0), TokenTree.Leaf(t1), TokenTree.Leaf(t2)];
+    let ts = TokenStream { tokens: trees, span: span_with_id(0) };
+    assert_eq(ts.len(), 3);
+    assert(!ts.is_empty());
+    assert(ts.first() is Some);
+    assert(ts.last() is Some);
+}
+
+@test
+fn test_empty_token_stream_with_span() {
+    let ts = TokenStream { tokens: List.new(), span: synthetic_span() };
+    assert(ts.is_empty());
+    assert_eq(ts.len(), 0);
+    assert(ts.first() is None);
+    assert(ts.last() is None);
+}
+
+@test
+fn test_token_stream_stream_span_survives() {
+    // The stream-level span is a plain field; it round-trips by Eq.
+    let stream_span = span_with_id(500);
+    let leaf = TokenTree.Leaf(Token { kind: TokenKind.Ident(Text.from("x")), span: span_with_id(1) });
+    let ts = TokenStream { tokens: List.of(leaf), span: stream_span };
+    assert(ts.span == stream_span);
+}
+
+// =============================================================================
+// Section 3: LexError carries a span
+// =============================================================================
+
+@test
+fn test_lex_error_carries_span() {
+    let e = LexError.new(Text.from("unexpected token"), span_with_id(7));
+    assert(e.message == "unexpected token");
+}
+
+@test
+fn test_lex_error_eq_is_by_message_span_excluded() {
+    // Eq for LexError compares message only — same message, different
+    // spans ⇒ equal.
+    let a = LexError.new(Text.from("boom"), span_with_id(7));
+    let b = LexError.new(Text.from("boom"), span_with_id(999));
+    assert(a == b);
+}
+
+@test
+fn test_lex_error_neq_by_message() {
+    let a = LexError.new(Text.from("boom"), span_with_id(7));
+    let b = LexError.new(Text.from("kaboom"), span_with_id(7));
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 4: One span set drives both a MultiSpan diagnostic and tokens
+// =============================================================================
+
+@test
+fn test_shared_spans_across_multispan_and_tokens() {
+    let primary = span_with_id(100);
+    let label = span_with_id(101);
+
+    // Diagnostic side: a MultiSpan built from the same spans.
+    let diag = MultiSpan.from_span(primary).with_span(label, Text.from("here"));
+    assert(diag.primary_span() is Some);
+    assert_eq(diag.spans.len(), 1);
+
+    // Token side: reuse the identical span values.
+    let t_primary = Token { kind: TokenKind.Ident(Text.from("x")), span: primary };
+    let t_label = Token { kind: TokenKind.Ident(Text.from("y")), span: label };
+    assert(t_primary.span == primary);
+    assert(t_label.span == label);
+}
+
+@test
+fn test_span_range_endpoints_as_token_spans() {
+    let s = span_with_id(200);
+    let e = span_with_id(201);
+    let r = SpanRange.new(s, e);
+
+    let t_start = Token { kind: TokenKind.Ident(Text.from("start")), span: r.start };
+    let t_end = Token { kind: TokenKind.Ident(Text.from("end")), span: r.end };
+    assert(t_start.span == s);
+    assert(t_end.span == e);
+}
+
+// =============================================================================
+// Section 5: SourceLocation alongside a token literal
+// =============================================================================
+
+@test
+fn test_source_location_paired_with_literal_token() {
+    // A diagnostic pairs a human-readable location with the offending
+    // literal token — both are plain records constructed at the site.
+    let loc = SourceLocation { file: Text.from("mod.vr"), line: 12, column: 4, offset: 220 };
+    let t = Token { kind: TokenKind.Lit(Literal.int(0)), span: span_with_id(12) };
+    assert_eq(loc.line, 12);
+    assert(t.is_literal());
+}
+
+fn main() {}

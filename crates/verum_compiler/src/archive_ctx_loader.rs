@@ -3956,12 +3956,38 @@ fn register_module_filtered(
             }
             let prefixes_compatible = match (w.contains('.'), simple_name.contains('.')) {
                 (true, true) => path_to_leaf(w) == path_to_leaf(simple_name.as_str()),
-                _ => {
-                    let w_prefix = w.split('.').next().unwrap_or(w.as_str());
-                    !w.contains('.')
-                        || !simple_name.contains('.')
-                        || w_prefix == simple_prefix
+                // DELIM-FANOUT-SQUAT-1: a DOTTED wanted key bound to a
+                // BARE-named descriptor by leaf coincidence alone is
+                // unsound. The call-site harvester puts `Type.method`
+                // strings into `wanted` (e.g. `d.close()` under a
+                // `Delimiter`-typed receiver harvests
+                // `Delimiter.close`); pre-fix, the FIRST bare `close`
+                // walked (an io-driver's `close(fd) -> ()`) registered
+                // its info under the `Delimiter.close` key, first-wins
+                // squatted it, and the devirtualizer then bound
+                // `d.close()` straight to `close(fd)` — Delimiter's
+                // real method (loaded later, qualified-only) never
+                // reached the simple key. Only accept the binding when
+                // the descriptor's own parent type matches the wanted
+                // key's type segment — i.e. the bare name genuinely IS
+                // that type's method exported under a bare descriptor
+                // name.
+                (true, false) => {
+                    let type_seg = w.rsplit('.').nth(1).unwrap_or("");
+                    !type_seg.is_empty()
+                        && info
+                            .parent_type_name
+                            .as_ref()
+                            .map(|p| p.as_str() == type_seg)
+                            .unwrap_or(false)
                 }
+                // Bare wanted key + dotted descriptor: the explicit
+                // `mount X.Y.{w}` renaming case — keep the legacy
+                // liberality (there is no prefix on `w` to compare).
+                (false, true) => true,
+                // Both bare with equal leaves ⇒ w == simple_name,
+                // already excluded above; keep the branch total.
+                (false, false) => true,
             };
             if w_leaf == simple_leaf
                 && w != simple_name.as_str()

@@ -12298,8 +12298,35 @@ impl VbcCodegen {
             if is_slice_shape {
                 return false;
             }
+            // REFFIELD-LIST-FORITER-EMPTY-1: reference-typed iterables
+            // (`for x in &h.items` classifies as "&List<Int>") must
+            // match the builtin-collection set below by their POINTEE.
+            // Pre-fix the "&List" base missed the match, the loop
+            // lowered through the custom `.next()` form, the CallM
+            // dispatched `next` against a CBGR ref, and the runtime
+            // silently yielded None — the loop body never ran (3-element
+            // list iterated zero times; broke
+            // core.meta.diakrisis_attrs.parse_autopoietic's
+            // `for arg in &attr.args`). `handle_iter_new` already
+            // derefs CBGR refs (iterators.rs:74), so the native
+            // IterNew/IterNext path is correct for every `&Collection`.
+            let deref_name: &str = {
+                let mut n = type_name.as_str();
+                loop {
+                    let stripped = n
+                        .trim_start_matches("&mut ")
+                        .trim_start_matches("&checked ")
+                        .trim_start_matches("&unsafe ")
+                        .trim_start_matches('&')
+                        .trim_start();
+                    if stripped == n {
+                        break n;
+                    }
+                    n = stripped;
+                }
+            };
             // Strip generic args: "List<Int>" → "List", "Map<K, V>" → "Map"
-            let base = type_name.split('<').next().unwrap_or(&type_name);
+            let base = deref_name.split('<').next().unwrap_or(deref_name);
             // Builtin collection iterator wrappers — the interpreter
             // recognises the underlying collection (Map / Set / etc.) and
             // the `.iter()` method now returns the collection itself,

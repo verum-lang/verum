@@ -2327,6 +2327,17 @@ impl TypeChecker {
 
             // Assignment operators
             Assign => {
+                // Diagnostic (VERUM_TRACE_CTOR): assignment unify inputs
+                // in their unifier-applied forms — pinpoints which side
+                // carries a stale ctor instantiation
+                // (GENERIC-CTOR-FRESHNESS-1).
+                if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                    eprintln!(
+                        "[ctor-trace] Assign unify: left={:?} right={:?}",
+                        self.unifier.apply(left_ty),
+                        self.unifier.apply(right_ty),
+                    );
+                }
                 self.unifier.unify(left_ty, right_ty, span)?;
                 Ok(Type::unit())
             }
