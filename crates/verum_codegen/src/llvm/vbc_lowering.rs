@@ -1310,6 +1310,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // root cause (two emit paths fighting over one symbol's
             // ABI) is visible at compile time.
             super::error::check_no_signature_mismatches()?;
+            // Monomorphization-completeness gate: surface every Call that
+            // degraded to a const-zero stub (unresolved target — typically an
+            // un-monomorphized generic protocol dispatch).  Warning by default;
+            // hard error under VERUM_STRICT_MONO=1.
+            super::error::check_no_unresolved_generic_calls()?;
         }
 
         // Phase 3.6 (#106 Path A.2): final-pass safety net — for any
