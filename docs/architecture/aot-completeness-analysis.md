@@ -49,16 +49,37 @@ Both compile & run correctly under `--interp`. Under `--aot`:
   (reallocates), sets `self.ptr`, then writes — but the new `self.ptr`
   writeback is lost, so the store dereferences the stale null.
 
-**Root cause (hypothesis, needs the value-model confirmed):** Text is a
-flat 24-byte value (`{ptr@0, len@8, cap@16}`) in the AOT value model.
-`lower_call_method` (`instruction.rs:11815`) passes `receiver_val` as a
-value; even with the Task-#11 `takes_self_mut_ref` RefMut wrapping the
-VBC receiver, the AOT lowering of the RefMut + the method body's `SetF
-self.<field>` does not write **through** to the caller's `Text`
-storage — the callee mutates a copy. The fix is an ABI change: `&mut
-self` (and `&mut Text`/`&mut List` params) must pass a **pointer** to
-the caller's alloca, and `SetF` on a ref-typed receiver must
-store-through the pointer.
+**Root cause (LOCATED):** `lower_set_field` (`instruction.rs:31640`)
+branches on the receiver's LLVM value shape:
+
+* If `obj_val` is a 3-field CBGR-ref struct `{ptr, i32, i32}` (line
+  31665), it extracts the pointer, GEPs past the object header to the
+  field, and `build_store`s — a genuine **write-through** that persists
+  to the caller. ✓
+* If `obj_val` is any OTHER `StructValue` (line 31691), it does
+  `build_insert_value` + `set_register(obj, new_struct)` — a
+  **functional update** that rebuilds the struct value in the callee's
+  register and never touches the caller's storage. ✗
+
+Text is a flat 24-byte value (`{ptr@0, len@8, cap@16}`), so a `&mut
+self` Text receiver arrives as a plain `StructValue`, NOT a CBGR ref —
+it takes the `insert_value` branch, so `self.len`/`self.ptr` writes are
+lost at the call boundary. `insert_value` is CORRECT for a local
+struct mutation (`let mut p = Point{..}; p.x = 5`) but WRONG for a `&mut
+self` receiver, and `lower_set_field` cannot tell the two apart from the
+value shape alone.
+
+**Fix (ABI change):** `&mut self` methods (and `&mut Text`/`&mut List`/
+`&mut <record>` params) must receive the receiver as a **pointer** to
+the caller's alloca — not the by-value struct — so every `SetF` takes
+the store-through path. This is a caller-side + prologue change
+(`lower_call_method` receiver marshalling `instruction.rs:11815` + the
+VBC codegen `takes_self_mut_ref` receiver lowering, which currently
+yields a by-value struct for flat aggregates rather than a pointer);
+no callee-side patch to `lower_set_field` alone can fix it, because the
+callee's `insert_value` result has nowhere to propagate. Requires a
+broad AOT regression sweep (every Text/List/record method depends on
+this path).
 
 **Why it's the #1 lever:** this single class is what the `addr` audit
 §3.5 named DISP-EMPTY-AOT (f-string `Display` of a user type renders
