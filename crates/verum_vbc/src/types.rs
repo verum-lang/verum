@@ -402,6 +402,23 @@ pub enum TypeRef {
 
     /// Slice type (dynamic size).
     Slice(Box<TypeRef>),
+
+    /// Associated-type projection: `F.Output`, `I.Item`, etc.
+    ///
+    /// Preserves the link between a protocol-bounded type parameter and its
+    /// associated type across VBC serialization.  Without this variant the
+    /// archive lowered `Maybe<F.Output>` to `Maybe<T_n>` (an independent
+    /// generic param), so a call to a generic wrapper like
+    /// `future_poll_sync<F: Future>() -> Maybe<F.Output>` could not recover
+    /// the payload from the bound `F` and defaulted it to `Int` (the async
+    /// future_poll_sync conformance suite).  `base` is the projected-over
+    /// type (usually a `Generic` param), `assoc` the associated-type name.
+    AssociatedProjection {
+        /// The base type the projection is taken over (the `F` in `F.Output`).
+        base: Box<TypeRef>,
+        /// The associated-type name (e.g. `"Output"`).
+        assoc: String,
+    },
 }
 
 impl Default for TypeRef {
@@ -458,6 +475,9 @@ impl TypeRef {
             TypeRef::Tuple(elems) => elems.iter().any(|e| e.is_generic()),
             TypeRef::Array { element, .. } => element.is_generic(),
             TypeRef::Slice(inner) => inner.is_generic(),
+            // A projection `F.Output` is generic iff its base is (it references
+            // the type param `F`).
+            TypeRef::AssociatedProjection { base, .. } => base.is_generic(),
         }
     }
 

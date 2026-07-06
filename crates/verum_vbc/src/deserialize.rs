@@ -1113,6 +1113,16 @@ impl<'a> Deserializer<'a> {
  contexts,
  })
  }
+ 0x0A => {
+     let base = Box::new(self.parse_type_ref()?);
+     let len = decode_varint(self.data, &mut self.offset)? as usize;
+     if self.offset + len > self.data.len() {
+         return Err(VbcError::InvalidTypeRefTag(tag));
+     }
+     let assoc = String::from_utf8_lossy(&self.data[self.offset..self.offset + len]).into_owned();
+     self.offset += len;
+     Ok(TypeRef::AssociatedProjection { base, assoc })
+ }
  _ => Err(VbcError::InvalidTypeRefTag(tag)),
  }
  }

@@ -1520,6 +1520,39 @@ pub(crate) fn collect_named_types_from_function_body(
 /// degrade to opaque `Type::Named { path: "IoResult<Metadata>" }`
 /// blobs that never unify with `Type::Generic { name: "IoResult",
 /// args: [Type::Named { Metadata }] }` at call sites.
+thread_local! {
+    /// Per-function-scheme interning map for `__generic_N` placeholders.
+    /// `Some` while inside [`with_generic_var_scope`]; `None` otherwise.
+    static GENERIC_VAR_SCOPE: std::cell::RefCell<Option<indexmap::IndexMap<String, crate::ty::TypeVar>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Intern a `__generic_N` placeholder to a stable `TypeVar` for the duration of
+/// the current [`with_generic_var_scope`].  Returns `None` when no scope is
+/// active (caller then falls back to a fresh var, preserving legacy behaviour).
+fn generic_var_scope_intern(name: &str) -> Option<crate::ty::TypeVar> {
+    GENERIC_VAR_SCOPE.with(|s| {
+        let mut guard = s.borrow_mut();
+        guard.as_mut().map(|map| {
+            *map.entry(name.to_string())
+                .or_insert_with(crate::ty::TypeVar::fresh)
+        })
+    })
+}
+
+/// Run `f` with a fresh generic-var interning scope so that repeated
+/// `__generic_N` placeholders parsed by [`parse_descriptor_type_string`] within
+/// it map to the SAME `TypeVar`.  Used by the metadata-driven function-scheme
+/// builders to parse a function's params AND return under one scope, keeping a
+/// generic param linked to a projection over it (`F` ↔ `F.Output`).  Nesting is
+/// supported: the previous scope is saved and restored.
+pub(crate) fn with_generic_var_scope<R>(f: impl FnOnce() -> R) -> R {
+    let prev = GENERIC_VAR_SCOPE.with(|s| s.borrow_mut().replace(indexmap::IndexMap::new()));
+    let result = f();
+    GENERIC_VAR_SCOPE.with(|s| *s.borrow_mut() = prev);
+    result
+}
+
 pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed == "()" {
@@ -1539,6 +1572,17 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
         || trimmed.starts_with("__generic_")
         || trimmed == "__opaque_typeref"
     {
+        // Within a function-scheme scope (`with_generic_var_scope`), the SAME
+        // `__generic_N` placeholder must map to the SAME TypeVar across the
+        // params and the return type so a generic param `F` stays linked to a
+        // projection over it (`F.Output`).  Without this, `fn(&mut __generic_5)
+        // -> Maybe<::Output<__generic_5>>` parses the two occurrences to
+        // DISTINCT fresh vars, the return payload never resolves from the bound
+        // `F`, and it defaults to Int (async future_poll_sync suite).  Outside a
+        // scope, keep the historic fresh-per-occurrence behaviour.
+        if let Some(tv) = generic_var_scope_intern(trimmed) {
+            return Type::Var(tv);
+        }
         return Type::Var(crate::ty::TypeVar::fresh());
     }
     // References: "&mut T" / "&T".
@@ -1639,6 +1683,18 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
                 .into_iter()
                 .map(|s| parse_descriptor_type_string(s.trim()))
                 .collect();
+            // Associated-type projection spelling `::Assoc<Base>` (emitted by
+            // `core_loader::type_ref_to_text` for `TypeRef::AssociatedProjection`).
+            // Reconstruct the unifier's internal projection form
+            // `Type::Generic { name: "::Assoc", args: [Base] }` so a bound base
+            // (the `F` in `F.Output`) still resolves the associated type — the
+            // fix for the async future_poll_sync payload defaulting to Int.
+            if base.starts_with("::") {
+                return Type::Generic {
+                    name: Text::from(base),
+                    args,
+                };
+            }
             return Type::Named {
                 path: TypeChecker::text_to_path(&Text::from(base)),
                 args,

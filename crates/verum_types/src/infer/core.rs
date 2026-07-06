@@ -1560,19 +1560,25 @@ impl TypeChecker {
             // call-site arg types.  Skipping `self` here aligns
             // with how `import_impl_blocks` (the AST-driven path)
             // populates the bucket.
-            let params: List<Type> = fn_desc
-                .params
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| {
-                    if i == 0 && p.name.as_str() == "self" {
-                        None
-                    } else {
-                        Some(to_type(&p.ty))
-                    }
-                })
-                .collect();
-            let return_ty = to_type(&fn_desc.return_type);
+            // Parse params AND return under ONE generic-var scope so a param
+            // `F` and a projection `F.Output` in the return share one TypeVar.
+            let (params, return_ty): (List<Type>, Type) =
+                crate::infer::helpers::with_generic_var_scope(|| {
+                    let params: List<Type> = fn_desc
+                        .params
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, p)| {
+                            if i == 0 && p.name.as_str() == "self" {
+                                None
+                            } else {
+                                Some(to_type(&p.ty))
+                            }
+                        })
+                        .collect();
+                    let return_ty = to_type(&fn_desc.return_type);
+                    (params, return_ty)
+                });
             // Recursively collect referenced type names so the
             // lazy loader registers any types this method's
             // signature touches (Path, Metadata, IoResult, …).

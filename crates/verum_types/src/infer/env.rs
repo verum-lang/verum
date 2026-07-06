@@ -282,19 +282,25 @@ impl TypeChecker {
                 |s: &verum_common::Text| -> crate::ty::Type {
                     crate::infer::helpers::parse_descriptor_type_string(s.as_str())
                 };
-            let params: verum_common::List<crate::ty::Type> = fd
-                .params
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| {
-                    if i == 0 && p.name.as_str() == "self" {
-                        None
-                    } else {
-                        Some(to_type(&p.ty))
-                    }
-                })
-                .collect();
-            let return_ty = to_type(&fd.return_type);
+            // Parse params AND return under ONE generic-var scope so a param
+            // `F` and a projection `F.Output` in the return share one TypeVar.
+            let (params, return_ty): (verum_common::List<crate::ty::Type>, crate::ty::Type) =
+                crate::infer::helpers::with_generic_var_scope(|| {
+                    let params: verum_common::List<crate::ty::Type> = fd
+                        .params
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, p)| {
+                            if i == 0 && p.name.as_str() == "self" {
+                                None
+                            } else {
+                                Some(to_type(&p.ty))
+                            }
+                        })
+                        .collect();
+                    let return_ty = to_type(&fd.return_type);
+                    (params, return_ty)
+                });
             let fn_ty = crate::ty::Type::function(params, return_ty);
             // Wrap in poly scheme so generic params get fresh
             // instantiation at each call site (same rationale as

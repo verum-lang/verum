@@ -748,6 +748,15 @@ fn type_ref_to_text(type_ref: &TypeRef, module: &VbcModule) -> Text {
             format!("[{}; {}]", type_ref_to_text(element, module), length).into()
         }
         TypeRef::Slice(inner) => format!("[{}]", type_ref_to_text(inner, module)).into(),
+        // Associated-type projection `F.Output`.  Render as `::Assoc<Base>` so
+        // `parse_descriptor_type_string` re-parses it into a projection
+        // (`Type::Generic { name: "::Assoc", args: [Base] }`) instead of an
+        // independent generic param — the fix for the async future_poll_sync
+        // payload defaulting to Int.  The `::` prefix disambiguates it from an
+        // ordinary named-type instantiation.
+        TypeRef::AssociatedProjection { base, assoc } => {
+            format!("::{}<{}>", assoc, type_ref_to_text(base, module)).into()
+        }
     }
 }
 

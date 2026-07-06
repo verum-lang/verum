@@ -914,7 +914,31 @@ impl TypeChecker {
                 // binds `payload_ty = E` (unsubstituted generic param)
                 // and the inner pattern's qualifier never gets a
                 // chance to override.
-                if let Some(q) = qualifier_name {
+                // The qualifier override below re-derives the variant set from
+                // the qualifier TYPE (e.g. `VarError` in `Err(VarError.X)`),
+                // discarding the scrutinee's concrete type arguments.  That is
+                // correct for a union-MEMBER qualifier that differs from the
+                // scrutinee type, but WRONG when the qualifier IS the scrutinee's
+                // own type (`Maybe.Some(v)` against `Maybe<Text>`): the raw
+                // `lookup_type("Maybe")` variant carries the type's shared
+                // (process-global) payload var, which the FIRST match poisons —
+                // so a later `Text`/`Bool` match reads the poisoned `Int` and
+                // fails `expected 'Int', found 'Text'` (async future_poll_sync).
+                // In that case keep the already-substituted `expanded_ty`.
+                let qualifier_is_scrutinee_type = qualifier_name.is_some_and(|q| {
+                    let scrut_name = match &scheme.ty {
+                        Type::Named { path, .. } => {
+                            path.segments.last().and_then(|s| match s {
+                                verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+                                _ => None,
+                            })
+                        }
+                        Type::Generic { name, .. } => Some(name.as_str()),
+                        _ => None,
+                    };
+                    scrut_name == Some(q)
+                });
+                if let Some(q) = qualifier_name.filter(|_| !qualifier_is_scrutinee_type) {
                     // Direct path: lookup_type returns Variant directly.
                     let direct: Option<Type> = self
                         .ctx

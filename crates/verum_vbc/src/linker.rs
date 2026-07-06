@@ -893,6 +893,10 @@ impl VbcLinker {
             TypeRef::Slice(inner) => {
                 TypeRef::Slice(Box::new(self.remap_type_ref(inner, remap)?))
             }
+            TypeRef::AssociatedProjection { base, assoc } => TypeRef::AssociatedProjection {
+                base: Box::new(self.remap_type_ref(base, remap)?),
+                assoc: assoc.clone(),
+            },
         })
     }
 

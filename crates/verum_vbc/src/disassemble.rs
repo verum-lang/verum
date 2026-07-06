@@ -177,6 +177,9 @@ fn format_type_ref(module: &VbcModule, tr: &TypeRef) -> String {
         TypeRef::Slice(inner) => {
             format!("[{}]", format_type_ref(module, inner))
         }
+        TypeRef::AssociatedProjection { base, assoc } => {
+            format!("{}.{}", format_type_ref(module, base), assoc)
+        }
     }
 }
 

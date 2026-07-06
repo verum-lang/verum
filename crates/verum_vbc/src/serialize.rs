@@ -529,6 +529,13 @@ impl Serializer {
                     encode_u32(ctx.0, &mut self.output);
                 }
             }
+            TypeRef::AssociatedProjection { base, assoc } => {
+                self.output.push(0x0A);
+                self.serialize_type_ref(base)?;
+                let bytes = assoc.as_bytes();
+                encode_varint(bytes.len() as u64, &mut self.output);
+                self.output.extend_from_slice(bytes);
+            }
         }
         Ok(())
     }

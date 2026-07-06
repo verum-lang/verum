@@ -12335,14 +12335,31 @@ impl VbcCodegen {
             }
             _ => None,
         };
-        if let Some((base_str, assoc_str)) = qualified_components {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut h = DefaultHasher::new();
-            base_str.hash(&mut h);
-            assoc_str.hash(&mut h);
-            let synthetic_id = 0xC000u16 + ((h.finish() as u16) & 0x3FFF);
-            return TypeRef::Generic(crate::types::TypeParamId(synthetic_id));
+        if let Some((_base_str, assoc_str)) = qualified_components {
+            // Emit a structured associated-type projection so the archived
+            // signature keeps `F.Output` linked to the bound param `F`.  The
+            // pre-fix path hashed (base, assoc) into a synthetic
+            // `TypeRef::Generic(0xC000+)`, discarding both the base and the
+            // name; once re-generalized on load that became an INDEPENDENT
+            // quantified var, unconstrained at call sites, which defaulted the
+            // payload to Int (the async future_poll_sync conformance suite:
+            // `future_poll_sync<F: Future>() -> Maybe<F.Output>`).  The base is
+            // resolved recursively through the same `generic_param_map`, so a
+            // generic param `F` maps to the SAME `TypeRef::Generic(id)` the
+            // function's parameter binds — the link the fix depends on.
+            let base_ref = match &ty.kind {
+                TypeKind::AssociatedType { base, .. } => {
+                    self.resolve_field_type_ref(base, generic_param_map)
+                }
+                TypeKind::Qualified { self_ty, .. } => {
+                    self.resolve_field_type_ref(self_ty, generic_param_map)
+                }
+                _ => TypeRef::Concrete(crate::types::TypeId::UNIT),
+            };
+            return TypeRef::AssociatedProjection {
+                base: Box::new(base_ref),
+                assoc: assoc_str,
+            };
         }
         // Check if the type is a simple path that matches a generic param.
         //
@@ -12495,6 +12512,16 @@ impl VbcCodegen {
                     TypeRef::Concrete(TypeId::LIST)
                 }
             }
+            // Associated-type projection `F.Output` / `I.Item`.  Preserve it
+            // as a `TypeRef::AssociatedProjection` so the archived signature
+            // keeps the link to the protocol-bounded param; the pre-fix
+            // fall-through collapsed it to `TypeId::UNIT` and, once
+            // re-generalized, to an independent generic param that defaulted
+            // to Int at call sites (async future_poll_sync suite).
+            TypeKind::AssociatedType { base, assoc } => TypeRef::AssociatedProjection {
+                base: Box::new(self.ast_type_to_type_ref(base)),
+                assoc: assoc.name.to_string(),
+            },
             _ => TypeRef::Concrete(TypeId::UNIT),
         }
     }
@@ -18579,6 +18606,10 @@ fn remap_type_ref_archive(
         TypeRef::Slice(inner) => {
             TypeRef::Slice(Box::new(remap_type_ref_archive(inner, type_id_remap)))
         }
+        TypeRef::AssociatedProjection { base, assoc } => TypeRef::AssociatedProjection {
+            base: Box::new(remap_type_ref_archive(base, type_id_remap)),
+            assoc: assoc.clone(),
+        },
     }
 }
 

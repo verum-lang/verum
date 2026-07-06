@@ -2999,6 +2999,13 @@ fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
                 encode_varint(ctx.0 as u64, output);
             }
         }
+        TypeRef::AssociatedProjection { base, assoc } => {
+            output.push(0x09);
+            encode_type_ref(base, output);
+            let bytes = assoc.as_bytes();
+            encode_varint(bytes.len() as u64, output);
+            output.extend_from_slice(bytes);
+        }
     }
 }
 
@@ -5806,6 +5813,20 @@ fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
                 return_type,
                 contexts,
             })
+        }
+        0x09 => {
+            // AssociatedProjection { base, assoc }
+            let base = Box::new(decode_type_ref(data, offset)?);
+            let len = decode_varint(data, offset)? as usize;
+            if *offset + len > data.len() {
+                return Err(VbcError::InvalidTypeRef {
+                    offset: *offset as u32,
+                    discriminant,
+                });
+            }
+            let assoc = String::from_utf8_lossy(&data[*offset..*offset + len]).into_owned();
+            *offset += len;
+            Ok(TypeRef::AssociatedProjection { base, assoc })
         }
         _ => Err(VbcError::InvalidTypeRef {
             offset: *offset as u32 - 1,
