@@ -71,7 +71,6 @@ fn law_wildcard_ranges_parsed() {
 // Section 2: L2 specificity at equal q
 // =============================================================================
 
-@ignore
 @test
 fn law_exact_beats_type_wildcard_at_equal_q() {
     let prefs = parse_accept(&"text/*, text/html".clone());
@@ -82,7 +81,6 @@ fn law_exact_beats_type_wildcard_at_equal_q() {
     }
 }
 
-@ignore
 @test
 fn law_type_wildcard_beats_full_wildcard_at_equal_q() {
     let prefs = parse_accept(&"*/*, text/*".clone());
@@ -97,7 +95,6 @@ fn law_type_wildcard_beats_full_wildcard_at_equal_q() {
 // Section 3: L3 q dominates specificity across offers
 // =============================================================================
 
-@ignore
 @test
 fn law_higher_q_beats_exact_match() {
     // html matched EXACTLY but downgraded; plain matches type/* at 1.0.
@@ -113,7 +110,6 @@ fn law_higher_q_beats_exact_match() {
 // Section 4: L4 q=0 explicit rejection
 // =============================================================================
 
-@ignore
 @test
 fn law_q_zero_rejects_offer() {
     let prefs = parse_accept(&"text/html;q=0, */*".clone());
@@ -124,7 +120,6 @@ fn law_q_zero_rejects_offer() {
     }
 }
 
-@ignore
 @test
 fn law_q_zero_single_offer_is_none() {
     let prefs = parse_accept(&"text/html;q=0".clone());
@@ -136,7 +131,6 @@ fn law_q_zero_single_offer_is_none() {
 // Section 5: L5 offer-order tie-break
 // =============================================================================
 
-@ignore
 @test
 fn law_offer_order_breaks_full_tie() {
     let prefs = parse_accept(&"*/*".clone());
@@ -151,7 +145,6 @@ fn law_offer_order_breaks_full_tie() {
 // Section 6: L6 no match → None
 // =============================================================================
 
-@ignore
 @test
 fn law_disjoint_prefs_and_offers_yield_none() {
     let prefs = parse_accept(&"application/json".clone());
@@ -163,7 +156,6 @@ fn law_disjoint_prefs_and_offers_yield_none() {
 // Section 7: L7 multi-way table
 // =============================================================================
 
-@ignore
 @test
 fn law_multiway_selection_table() {
     let prefs = parse_accept(&"text/*;q=0.3, text/html;q=0.7, image/png, */*;q=0.5".clone());
@@ -182,7 +174,6 @@ fn law_multiway_selection_table() {
 // Section 8: L8 coded selection (Accept-Encoding)
 // =============================================================================
 
-@ignore
 @test
 fn law_coded_q_ordering() {
     let prefs = parse_accept_encoding(&"gzip;q=0.8, br".clone());
