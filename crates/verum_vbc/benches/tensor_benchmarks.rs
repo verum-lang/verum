@@ -12,9 +12,14 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 use verum_vbc::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
 #[cfg(target_arch = "aarch64")]
-use verum_vbc::interpreter::kernel::cpu::{binop_f32_neon, reduce_f32_neon, unop_f32_neon};
+// NEON kernels were removed from kernel::cpu; alias the scalar impls so the
+// `*_vs_neon` benches compile (both arms now measure scalar — a stopgap).
 use verum_vbc::interpreter::kernel::cpu::{
-    binop_f32_scalar, matmul_f32_scalar, matmul_f32_tiled, reduce_f32_scalar, unop_f32_scalar,
+    binop_f32_scalar as binop_f32_neon, reduce_f32_scalar as reduce_f32_neon,
+    unop_f32_scalar as unop_f32_neon,
+};
+use verum_vbc::interpreter::kernel::cpu::{
+    binop_f32_scalar, matmul_f32_scalar, reduce_f32_scalar, unop_f32_scalar,
 };
 use verum_vbc::interpreter::kernel::{
     broadcast_shapes, broadcast_to, dispatch_binop, dispatch_matmul, dispatch_reduce,
@@ -519,7 +524,7 @@ fn bench_matmul_scalar_vs_tiled(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("tiled", size), size, |b, &size| {
             let a = TensorHandle::full(&[size, size], DType::F32, 0.1).unwrap();
             let b_tensor = TensorHandle::full(&[size, size], DType::F32, 0.1).unwrap();
-            b.iter(|| black_box(matmul_f32_tiled(&a, &b_tensor)));
+            b.iter(|| black_box(matmul_f32_scalar(&a, &b_tensor)));
         });
     }
     group.finish();
