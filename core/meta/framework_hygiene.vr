@@ -118,7 +118,14 @@ public fn hygiene_diagnostic(
 /// `@framework(<corpus>, "<citation>")` annotation, NOT in the
 /// public-facing axiom name.
 public fn name_has_brand_prefix(name: Text) -> Bool {
-    let s: Text = name.clone();
+    // R1 red-team hardening 2026-07-06: the check is CASE-INSENSITIVE —
+    // pre-fix `DIAKRISIS_axiom` / `Diakrisis_axiom` trivially evaded the
+    // brand filter. (Unicode-homoglyph spoofing — e.g. Cyrillic 'а' in
+    // "diаkrisis_" — is intentionally out of scope for an advisory
+    // hygiene rule; such a name is genuinely a different identifier and
+    // the lexer's identifier policy is the right layer for confusable
+    // scripts.)
+    let s: Text = name.to_lowercase();
     if s.starts_with("diakrisis_") { return true; }
     if s.starts_with("actic_")     { return true; }
     if s.starts_with("msfs_")      { return true; }
@@ -190,13 +197,23 @@ public fn validate_epsilon_canonicalisable(
         return Maybe.None;
     }
 
-    // Ordinal form — every Char must be one of the admissible set:
-    //   ASCII digits '0'..='9'
-    //   '+'
-    //   Greek small omega 'ω' (U+03C9)
-    //   Greek capital omega 'Ω' (U+03A9)
-    //   Middle dot '·' (U+00B7)
-    //   Superscript two '²' (U+00B2)
+    // Ordinal form — two-stage validation (R2 red-team hardening
+    // 2026-07-06; pre-fix stage 2 was absent and pure operator
+    // strings like `ω+` / `ω·` / `+++` passed as "canonicalisable"):
+    //
+    //  Stage 1 — ALPHABET: every Char must be one of the admissible
+    //  set: ASCII digits '0'..='9', '+', Greek small omega 'ω'
+    //  (U+03C9), Greek capital omega 'Ω' (U+03A9), middle dot '·'
+    //  (U+00B7), superscript two '²' (U+00B2).
+    //
+    //  Stage 2 — SHAPE: the string must not START or END with a
+    //  binary operator ('+' / '·'), must not contain two adjacent
+    //  operators, and 'Ω' (the absolute top) is only admissible
+    //  standalone. This is a conservative structural filter, not a
+    //  full ordinal parser — the AST-layer canonicaliser remains the
+    //  source of truth at @enact parse time; R2 exists to catch
+    //  stale strings sneaking through raw `Attribute.tokens`
+    //  manipulation.
     let mut all_admissible: Bool = true;
     for ch in s.chars() {
         if !ordinal_char_admissible(ch) {
@@ -204,7 +221,27 @@ public fn validate_epsilon_canonicalisable(
         }
     }
 
-    if !all_admissible {
+    let mut shape_ok: Bool = true;
+    if all_admissible {
+        let mut prev_was_op: Bool = true; // leading operator is inadmissible
+        let mut saw_capital_omega: Bool = false;
+        let mut char_count: Int = 0;
+        for ch in s.chars() {
+            let is_op = ch == '+' || ch == '·';
+            if is_op && prev_was_op {
+                shape_ok = false;
+            }
+            if ch == 'Ω' { saw_capital_omega = true; }
+            prev_was_op = is_op;
+            char_count = char_count + 1;
+        }
+        // trailing operator
+        if prev_was_op { shape_ok = false; }
+        // 'Ω' is standalone-only
+        if saw_capital_omega && char_count != 1 { shape_ok = false; }
+    }
+
+    if !all_admissible || !shape_ok {
         let msg: Text = Text.from("ε-coordinate '")
             .concat(s)
             .concat("' is not canonicalisable; expected primitive ")

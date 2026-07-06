@@ -13105,6 +13105,12 @@ impl TypeChecker {
         name: &str,
         expected_arity: Option<usize>,
     ) -> Option<Type> {
+        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+            eprintln!(
+                "[ctor-trace] try_resolve_variant_constructor_with_arity('{}', {:?})",
+                name, expected_arity
+            );
+        }
         let ctor_text = verum_common::Text::from(name);
         let parents = self.variant_constructor_parents.get(&ctor_text)?;
         // Pick the parent whose constructor for `name` accepts the
@@ -14152,6 +14158,17 @@ impl TypeChecker {
     ///
 
     /// `type_args` contains explicit type arguments for generic method calls like `obj.method<T>()`.
+    #[allow(clippy::too_many_arguments)]
+    fn infer_method_call_inner_impl_traced_entry(&self, receiver: &Expr, method: &Ident) {
+        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+            let recv = match &receiver.kind {
+                ExprKind::Path(p) => format!("{}", p),
+                other => format!("<{:?}>", std::mem::discriminant(other)),
+            };
+            eprintln!("[ctor-trace] method_call recv={} method={}", recv, method.name);
+        }
+    }
+
     fn infer_method_call_inner_impl(
         &mut self,
         receiver: &Expr,
@@ -14162,6 +14179,14 @@ impl TypeChecker {
         precomputed_recv_ty: Option<Type>,
         skip_static_lookup: bool,
     ) -> Result<InferResult> {
+        self.infer_method_call_inner_impl_traced_entry(receiver, method);
+        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+            eprintln!(
+                "[ctor-trace]   skip_static_lookup={} precomputed={:?}",
+                skip_static_lookup,
+                precomputed_recv_ty.as_ref().map(|t| format!("{:?}", t)),
+            );
+        }
         // ============================================================
         // Iterator Invalidation & Borrow Conflict Checks
         // Memory layout and reference representation: ThinRef (16 bytes) for sized types, FatRef (24 bytes) for unsized types — .4 - Iterator invalidation
