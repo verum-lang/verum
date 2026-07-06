@@ -314,6 +314,15 @@ fn compute_source_blake3_for_root(root: &Path) -> [u8; 32] {
         };
         for entry in entries.flatten() {
             let p = entry.path();
+            // Skip `target/` trees — codegen/test-harness output, not
+            // stdlib source.  Sweeping them poisoned the precompile:
+            // `core/target/test/*.merged.vr` harness residue compiled
+            // as if it were stdlib (garbage type-context, 355 of the
+            // 580 FIELD-INTERN fallbacks) and perturbed the content
+            // hash on every test run (cache thrash).
+            if p.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
             if p.is_dir() {
                 walk(root, &p, out);
                 continue;
@@ -363,6 +372,11 @@ fn scan_context_declarations(
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            // Skip `target/` trees — see compute_source_blake3's twin
+            // guard (harness residue is not stdlib source).
+            if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
             if path.is_dir() {
                 walk(&path, found);
                 continue;
@@ -615,6 +629,11 @@ fn scan_module_reexports(
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            // Skip `target/` trees — see compute_source_blake3's twin
+            // guard (harness residue is not stdlib source).
+            if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
             if path.is_dir() {
                 visit_dir(root, &path, accum, glob_pairs, files_visited, files_parsed, files_with_reexports);
                 continue;
@@ -974,6 +993,11 @@ fn scan_implementation_protocol_args(
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            // Skip `target/` trees — see compute_source_blake3's twin
+            // guard (harness residue is not stdlib source).
+            if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
             if path.is_dir() {
                 visit_dir(&path, found, files_visited, files_parsed, impls_captured);
                 continue;
@@ -1116,6 +1140,11 @@ fn scan_protocol_supers(
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            // Skip `target/` trees — see compute_source_blake3's twin
+            // guard (harness residue is not stdlib source).
+            if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
             if path.is_dir() {
                 visit_dir(&path, captured, files_visited, files_parsed, protos_seen);
                 continue;
@@ -1282,6 +1311,11 @@ fn inject_decl_spans(
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            // Skip `target/` trees — see compute_source_blake3's twin
+            // guard (harness residue is not stdlib source).
+            if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
             if path.is_dir() {
                 visit_dir(root, &path, name_index, files_visited, files_parsed);
                 continue;

@@ -91,3 +91,21 @@ verifying conformance. Deferred to follow-up.
 | §D | Test `Alloc` / `Allocator` protocol implementations (TieredAllocator, SimpleAllocator, MemStackAllocator). | ~3 hours | open |
 | §E | Test AllocStats accuracy across alloc + dealloc cycles. | ~30 min | open |
 | §F | Cross-tier divergence sweep on `--aot` + `--interp`. | 1 hour wall-clock | open |
+
+## Session 2026-07-05 — wrapper-method surface closed; 63/63 GREEN
+
+The 2 residual failures closed in `799cff9b2` (HEAP-INTORAW-1 /
+SHARED-STRONGCOUNT-1): the Tier-0 runtime representations of the
+allocating wrappers (`Heap<T>` = CBGR data pointer; `Shared<T>` =
+`[ObjectHeader][refcount][value]`) do not match the source-level
+records in `core/base/memory.vr`, so the COMPILED
+`into_raw`/`from_raw`/`strong_count` bodies misread memory
+(`self.ptr` on a Heap surfaced the stored payload as a bogus
+type_id).  Shape-guarded Rust intercepts now cover BOTH dispatch
+paths (`wrapper_runtime.rs` for statically-resolved `Call`,
+`method_dispatch.rs` arms for `CallM`): `into_raw`/`from_raw` are
+identity on the CBGR data pointer (forget-semantics), `strong_count`
+/`weak_count`/`is_unique` read the refcount slot, `clone` bumps it on
+all three clone dispatch arms, binding-drop (`DropRef`) decrements
+it, and `*shared` derefs to the inner value.  §4 round-trip and §5
+clone-count tests both green; suite **63/63** (was 61/2).

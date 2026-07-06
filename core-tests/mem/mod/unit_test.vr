@@ -503,8 +503,11 @@ fn test_reexport_capability_functions_resolve() {
     // sister test below + `regression_test.vr §H`.
 }
 
+// Un-@ignore'd 2026-07-05: the `public mount` re-export traversal in
+// `compile_mount_import` (parent-subtree scan with module-parent-
+// before-type-parent tie-break) resolves the umbrella-mounted free fn
+// authoritatively; verified green via direct probe + module run.
 @test
-@ignore
 fn test_reexport_has_capability_call_pinned_by_collision() {
     // PINS the dispatch-collision defect class: bare-name
     // `has_capability(flags, cap)` umbrella-mounted from `core.mem.{...}`

@@ -140,8 +140,6 @@ fn create_loop_module(iterations: i64) -> Arc<VbcModule> {
         debug_variables: Vec::new(),
         is_test: false,
         is_gpu_only: false,
-        intrinsic_name: None,
-        is_const: false,
     };
 
     module.functions.push(func_desc);
@@ -273,8 +271,6 @@ fn create_arith_module(iterations: i64) -> Arc<VbcModule> {
         debug_variables: Vec::new(),
         is_test: false,
         is_gpu_only: false,
-        intrinsic_name: None,
-        is_const: false,
     };
 
     module.functions.push(func_desc);

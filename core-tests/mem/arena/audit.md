@@ -93,3 +93,10 @@ for "Two fundamental fixes CLOSED in this branch" entries).
 | §B | Test arena snapshot / restore. | Blocked on §A. |
 | §C | Test ArenaError variants (CapacityExceeded, AllocationTooLarge, BufferOverflow). | ~30 min | open |
 | §D | Cross-tier divergence sweep on `--aot` + `--interp`. | 1 hour wall-clock | open |
+
+## Session 2026-07-05 — single-field record-variant Eq pin closed; 60/60/0
+
+`ArenaError.InvalidAlignment { alignment } == same` compares the
+payload correctly (the Duration-class single-field unboxing defect
+closed in the interim waves).  Pin un-@ignore'd; the module is
+**60 passed / 0 failed / 0 ignored**.

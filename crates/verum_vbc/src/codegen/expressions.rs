@@ -12260,10 +12260,28 @@ impl VbcCodegen {
         // in the builtin set below, so it correctly routes to the custom
         // `.next()` loop (`compile_for_custom_iterator`), which yields via
         // the now-correct `self.iter.next()?` (ADAPTER-TRY-NEXT-1).
-        if let Some(type_name) = self
+        let classified = self
             .infer_expr_type_name(iter)
-            .or_else(|| self.extract_expr_type_name(iter))
+            .or_else(|| self.extract_expr_type_name(iter));
+        // ITER-CLASSIFY trace (PROTOCOL-ITER-1 diagnosis): logs the
+        // classifier's inputs for every for-in whose iterable is a
+        // method call — the shape where a miss silently lowers a
+        // protocol-iterator record through native IterNew.  Gated;
+        // used to pinpoint which inference link breaks during stdlib
+        // precompile (e.g. `self.retired.drain(…)` in
+        // `ThreadHazardRecord.reclaim`).
+        if std::env::var("VERUM_TRACE_ITER_CLASSIFY").is_ok()
+            && let ExprKind::MethodCall { method, .. } = &iter.kind
         {
+            eprintln!(
+                "[iter-classify] method='{}' resolved_type={:?} fn={} src_mod={:?}",
+                method.name,
+                classified,
+                self.ctx.current_function.as_deref().unwrap_or("?"),
+                self.ctx.current_source_module,
+            );
+        }
+        if let Some(type_name) = classified {
             // **Slice / array shape detection**: types like `&[Byte]`,
             // `&mut [Byte]`, `[Int]`, `[T; N]` are storage-layout-
             // equivalent to `List<T>` at runtime (the interpreter
@@ -19689,13 +19707,36 @@ impl VbcCodegen {
             // Unary operations: deref, ref, etc. → propagate inner type
             ExprKind::Unary { op, expr: inner } => {
                 let inner_type = self.extract_expr_type_name(inner);
-                // For Deref on Heap<T>/Shared<T>, unwrap to inner type T
                 if matches!(op, verum_ast::expr::UnOp::Deref)
                     && let Some(ref t) = inner_type
-                    && let Some(inner_t) = Self::extract_element_type(t)
-                    && (t.starts_with("Heap<") || t.starts_with("Shared<"))
                 {
-                    return Some(inner_t);
+                    // For Deref on Heap<T>/Shared<T>, unwrap to inner type T.
+                    // Degenerate carriers ("Heap<>" / bare "Heap") report
+                    // UNKNOWN — see the infer_expr_type_name mirror arm.
+                    let wrapper_base = t.split('<').next().unwrap_or(t);
+                    if wrapper_base == "Heap" || wrapper_base == "Shared" {
+                        return match Self::extract_element_type(t) {
+                            Some(inner_t) if !inner_t.trim().is_empty() => Some(inner_t),
+                            _ => None,
+                        };
+                    }
+                    // Deref through a reference / raw-pointer carrier name:
+                    // strip the prefix so `(*slot_ptr).field` resolves the
+                    // field against the pointee's descriptor (mirrors the
+                    // `infer_expr_type_name` Deref arm; closes
+                    // CAP-AUDIT-SLOT-LAYOUT-1's sibling on this path).
+                    if let Some(stripped) = t
+                        .strip_prefix("&checked ")
+                        .or_else(|| t.strip_prefix("&unsafe "))
+                        .or_else(|| t.strip_prefix("&mut "))
+                        .or_else(|| t.strip_prefix('&'))
+                        .or_else(|| t.strip_prefix("*mut "))
+                        .or_else(|| t.strip_prefix("*const "))
+                        .or_else(|| t.strip_prefix("*volatile mut "))
+                        .or_else(|| t.strip_prefix("*volatile "))
+                    {
+                        return Some(stripped.trim().to_string());
+                    }
                 }
                 inner_type
             }
@@ -19753,6 +19794,45 @@ impl VbcCodegen {
                     && let PathSegment::Name(ident) = &path.segments[0]
                 {
                     let name = &ident.name;
+                    // **Static-mut receiver classification** (4th site of the
+                    // static-mut-vs-type-namespace defect class; siblings live
+                    // in `try_resolve_static_method`'s value-receiver gates).
+                    // `GLOBAL_HAZARD_DOMAIN.scan_hazards()` is an INSTANCE
+                    // call on the static's declared type (`HazardDomain`),
+                    // but SCREAMING_CASE trips the is_uppercase type-name
+                    // heuristic below, whose miss-fallback returned the
+                    // static's NAME as the "type".  Downstream that junk
+                    // type-name qualified sibling method calls
+                    // ("GLOBAL_HAZARD_DOMAIN.binary_search") and defeated
+                    // the for-in iterator classification (`drain` result
+                    // lowered to native IterNew against a Drain record —
+                    // the hazard/reclaim SIGSEGV).  Resolve via the
+                    // static's declared type and never fall through.
+                    if let Some(static_ty) = self.static_mut_type_names.get(&**name).cloned() {
+                        let base_type = VbcCodegen::strip_generic_args(&static_ty);
+                        let qualified_method = format!("{}.{}", base_type, method.name);
+                        if let Some(func_info) = self.ctx.lookup_function(&qualified_method)
+                            && let Some(ref ret_type_name) = func_info.return_type_name
+                        {
+                            let resolved = VbcCodegen::substitute_self_in_type_name(
+                                ret_type_name,
+                                &static_ty,
+                            );
+                            if let Some(ref inner) = func_info.return_type_inner
+                                && !inner.is_empty()
+                                && inner.iter().all(|s| !s.trim().is_empty())
+                                && !resolved.contains('<')
+                            {
+                                return Some(format!("{}<{}>", resolved, inner.join(", ")));
+                            }
+                            return Some(resolved);
+                        }
+                        // The receiver IS a static binding; its method's
+                        // return type is simply unknown.  Returning the
+                        // static's name here would poison every consumer —
+                        // report "unknown" instead.
+                        return None;
+                    }
                     if name.chars().next().is_some_and(|c| c.is_uppercase()) {
                         // Heap.new(x) / Shared.new(x): return the WRAPPER type
                         // `Heap<T>` / `Shared<T>` (NOT the bare inner `T`).
@@ -19845,6 +19925,7 @@ impl VbcCodegen {
                             // type annotation as workaround.
                             if let Some(ref inner) = func_info.return_type_inner
                                 && !inner.is_empty()
+                                && inner.iter().all(|s| !s.trim().is_empty())
                                 && !resolved.contains('<')
                             {
                                 return Some(format!("{}<{}>", resolved, inner.join(", ")));
@@ -19870,16 +19951,31 @@ impl VbcCodegen {
                 // Try to look up the method's return type for instance method calls.
                 // If the receiver is a variable with a known type, construct the qualified
                 // method name (e.g., "ValidFd.as_fd") and check for return_type_name.
-                if let ExprKind::Path(path) = &receiver.kind
-                    && path.segments.len() == 1
                 {
-                    // Handle both named variables and `self` keyword
-                    let receiver_type = match &path.segments[0] {
-                        PathSegment::Name(var_ident) => {
-                            self.ctx.variable_type_names.get(&*var_ident.name).cloned()
+                    // Receiver-type resolution: variable lookup for simple
+                    // Path receivers, RECURSIVE extraction for everything
+                    // else (field access `self.retired.drain(...)`, chained
+                    // calls, index, deref).  Pre-fix only single-segment
+                    // Path receivers resolved, so a method call on a
+                    // field/chain receiver reported None — the for-in
+                    // classifier then lowered stdlib `Drain` iterators
+                    // through native IterNew against the record layout
+                    // (hazard/reclaim SIGSEGV class).
+                    let receiver_type = match &receiver.kind {
+                        ExprKind::Path(path) if path.segments.len() == 1 => {
+                            match &path.segments[0] {
+                                PathSegment::Name(var_ident) => self
+                                    .ctx
+                                    .variable_type_names
+                                    .get(&*var_ident.name)
+                                    .cloned(),
+                                PathSegment::SelfValue => {
+                                    self.ctx.variable_type_names.get("self").cloned()
+                                }
+                                _ => None,
+                            }
                         }
-                        PathSegment::SelfValue => self.ctx.variable_type_names.get("self").cloned(),
-                        _ => None,
+                        _ => self.extract_expr_type_name(receiver),
                     };
                     if let Some(ref receiver_type) = receiver_type {
                         // Unwrapping methods: extract inner type from generic wrapper
@@ -20438,12 +20534,21 @@ impl VbcCodegen {
             // Mirrors the normalisation in `infer_expr_type_kind`'s Cast arm
             // and in `compile_cast` so the three sites agree on the recognised
             // primitive name set.
-            ExprKind::Cast { ty, .. } => match &ty.kind {
-                verum_ast::ty::TypeKind::Path(path) => {
-                    path.as_ident().map(|ident| ident.name.to_string())
-                }
-                _ => None,
-            },
+            // Cast: `x as T` — the expression's type IS the cast target.
+            // Route through `extract_type_name_from_ast` so EVERY type
+            // shape resolves, not just single-ident paths: raw pointers
+            // (`x as *mut CapAuditSlot` → "*mut CapAuditSlot"), unsafe
+            // references, slices, generics.  Pre-fix the Path-only match
+            // returned None for pointer casts, so a later
+            // `(*slot_ptr).field` deref-field access resolved with
+            // type_name=None and `resolve_field_index` fell through to
+            // the global-intern fallback — the root of the
+            // CAP-AUDIT-SLOT-LAYOUT-1 wrong-offset write (`commit`
+            // wrote `.event` at slot 4 of a 2-field record).
+            ExprKind::Cast { ty, .. } => {
+                let name = VbcCodegen::extract_type_name_from_ast(ty);
+                if name.is_empty() { None } else { Some(name) }
+            }
             // Range expression `a..b` / `a..=b` lowers to a 3-field
             // `TypeId::RANGE` (517) record `[current, end, inclusive]`
             // via `compile_range`. Without this arm, `let r = 1..=10;`
@@ -20726,11 +20831,42 @@ impl VbcCodegen {
                 expr: inner,
             } => {
                 let inner_ty = self.infer_expr_type_name(inner)?;
+                // Allocating-wrapper deref: `*heap_box` / `*shared` yield
+                // the inner T (mirrors extract_expr_type_name's Deref
+                // arm).  Without this, `f"{*restored}"` on a
+                // `Heap<T>`-typed binding qualified the format dispatch
+                // as `Heap.fmt` and panicked "method not found" at
+                // runtime (HEAP-INTORAW-1 fallout).
+                {
+                    let base = inner_ty.split('<').next().unwrap_or(&inner_ty);
+                    if base == "Heap" || base == "Shared" {
+                        // Degenerate carrier names ("Heap<>" / bare
+                        // "Heap" — archive descriptors whose generic
+                        // args were lost) must report UNKNOWN —
+                        // propagating the wrapper name routes Display
+                        // dispatch to `Heap.fmt` against the unwrapped
+                        // runtime value.
+                        return match Self::extract_element_type(&inner_ty) {
+                            Some(t) if !t.trim().is_empty() => Some(t),
+                            _ => None,
+                        };
+                    }
+                }
                 let stripped = inner_ty
                     .strip_prefix("&checked ")
                     .or_else(|| inner_ty.strip_prefix("&unsafe "))
                     .or_else(|| inner_ty.strip_prefix("&mut "))
                     .or_else(|| inner_ty.strip_prefix('&'))
+                    // Raw / volatile pointers: `(*slot_ptr).field` where
+                    // `slot_ptr: *mut CapAuditSlot` must resolve the field
+                    // against `CapAuditSlot`.  Without these prefixes the
+                    // deref kept the pointer-carrier name, no descriptor
+                    // matched, and field resolution fell to the global
+                    // interner (CAP-AUDIT-SLOT-LAYOUT-1).
+                    .or_else(|| inner_ty.strip_prefix("*mut "))
+                    .or_else(|| inner_ty.strip_prefix("*const "))
+                    .or_else(|| inner_ty.strip_prefix("*volatile mut "))
+                    .or_else(|| inner_ty.strip_prefix("*volatile "))
                     .map(|s| s.trim().to_string())
                     .unwrap_or(inner_ty);
                 Some(stripped)
@@ -21253,12 +21389,21 @@ impl VbcCodegen {
             // the inner type.  Paired with the Cast arm in
             // `extract_expr_type_name` so the two type-extraction functions
             // agree on cast semantics.
-            ExprKind::Cast { ty, .. } => match &ty.kind {
-                verum_ast::ty::TypeKind::Path(path) => {
-                    path.as_ident().map(|ident| ident.name.to_string())
-                }
-                _ => None,
-            },
+            // Cast: `x as T` — the expression's type IS the cast target.
+            // Route through `extract_type_name_from_ast` so EVERY type
+            // shape resolves, not just single-ident paths: raw pointers
+            // (`x as *mut CapAuditSlot` → "*mut CapAuditSlot"), unsafe
+            // references, slices, generics.  Pre-fix the Path-only match
+            // returned None for pointer casts, so a later
+            // `(*slot_ptr).field` deref-field access resolved with
+            // type_name=None and `resolve_field_index` fell through to
+            // the global-intern fallback — the root of the
+            // CAP-AUDIT-SLOT-LAYOUT-1 wrong-offset write (`commit`
+            // wrote `.event` at slot 4 of a 2-field record).
+            ExprKind::Cast { ty, .. } => {
+                let name = VbcCodegen::extract_type_name_from_ast(ty);
+                if name.is_empty() { None } else { Some(name) }
+            }
             // Range expression `a..b` / `a..=b` lowers to a 3-field
             // `TypeId::RANGE` (517) record. Mirrors the corresponding
             // arm in `extract_expr_type_name` so the two inferrers

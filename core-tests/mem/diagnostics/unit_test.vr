@@ -243,8 +243,11 @@ fn test_has_capability_zero_mask_yields_false_for_every_bit() {
     assert(!has_capability(v.capabilities, CAP_REVOKE));
 }
 
+// Un-@ignore'd 2026-07-05: receiver-type-aware CallM dispatch
+// (exact `<ReceiverType>.<method>` first pass + parent-compatibility
+// gate) resolves `MemHeaderView.can_read` past the 5-way sibling
+// collision; verified green via direct probe + module run.
 @test
-@ignore
 fn test_mem_header_view_can_read_method_pinned_by_collision() {
     // PINS the dispatch collision class: `v.can_read()` on a
     // MemHeaderView with `capabilities: CAP_READ` should return

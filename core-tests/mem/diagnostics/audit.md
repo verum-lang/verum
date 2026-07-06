@@ -68,3 +68,12 @@ usage (panic handler must not mutate runtime state).
 | §B | Wire `current_call_stack` to the VBC debug-info section so it returns actual frames. | ~3 hours | open |
 | §C | Cross-tier divergence sweep on `--aot` + `--interp`. | 1 hour wall-clock | open |
 | §D | Test `MemHeaderView.from_header(&AllocationHeader)` — requires a live header pointer (deferred to `core-tests/mem/allocator/`). | Blocked on `mem/allocator/` | open |
+
+## Session 2026-07-05 — §B can_read collision pin closed; 29/29/0
+
+`MemHeaderView.can_read()` now dispatches correctly past the 5-way
+sibling collision (`ThinRef`/`FatRef`/`PagerState`/`Capability`):
+receiver-type-aware CallM dispatch (exact `<ReceiverType>.<method>`
+first pass + the parent-compatibility gate) picks the
+`MemHeaderView` impl.  Pin un-@ignore'd; the module is
+**29 passed / 0 failed / 0 ignored**.

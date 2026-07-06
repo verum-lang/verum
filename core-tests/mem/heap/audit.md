@@ -64,3 +64,21 @@ Direct heap_alloc unit tests deferred.
 | §C | Test `init_thread_heap` / `shutdown_thread_heap` lifecycle. | ~1 hour | open |
 | §D | Test HeapError variants (OutOfMemory, InvalidPointer, etc.). | ~30 min | open |
 | §E | Cross-tier divergence sweep on `--aot` + `--interp`. | 1 hour wall-clock | open |
+
+## Session 2026-07-05 — XMOD-CALL-ID-BAND-1 (get_heap_stats hijack)
+
+`test_get_heap_stats_returns_value` regressed to a NullPointer inside
+`atomic_fetch_add_int` whenever `core.mem.segment` was in the mount
+set.  The disassembly showed `get_heap_stats`'s `get_heap()` call
+dispatching to `atomic_fetch_add_int`: archive bytecode kept
+ctx-GLOBAL ids for cross-module calls while local calls were remapped
+to contiguous [0, N), and heap's LOCAL `get_heap` id (461) numerically
+collided with the module's recorded cross-module id for
+`atomic_fetch_add_int` — `ArchiveBodyRemap::map_function`'s id-keyed
+Tier-0 external lookup is structurally ambiguous over overlapping id
+spaces in EITHER priority order (the inverse ordering had broken
+`Deque.reallocate → realloc`).  Fundamental fix in `799cff9b2`:
+cross-module call ids re-home into the reserved band
+`[0x2000_0000, 0x4000_0000)` at precompile
+(`module::XMOD_CALL_ID_BAND_BASE`), making the id spaces disjoint by
+construction.  Suite **52/52 GREEN**.

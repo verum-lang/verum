@@ -42,6 +42,27 @@ pub struct ConstId(pub u32);
 
 /// A VbcModule contains all compiled code and metadata for a Verum module,
 /// ready for interpretation, JIT compilation, or AOT compilation.
+///
+/// **XMOD-CALL-ID-BAND-1** — `XMOD_CALL_ID_BAND_BASE` below is the base
+/// of the reserved id band that cross-module `Call`-family references
+/// occupy in ARCHIVE bytecode.
+///
+/// The precompiler remaps module-LOCAL call targets to contiguous
+/// `[0, N)` ids and re-homes every plain cross-module target to
+/// `XMOD_CALL_ID_BAND_BASE + seq` (see the emission pass in
+/// `codegen/mod.rs`), recording `(band_id, qualified_name)` in
+/// [`VbcModule::external_function_names`].  Keeping the two id spaces
+/// DISJOINT is what makes `ArchiveBodyRemap::map_function`'s
+/// name-based Tier-0 resolution sound: an id-keyed external map over
+/// an OVERLAPPING id space is structurally ambiguous in either
+/// priority order (local-first broke `Deque.reallocate → realloc`;
+/// external-first broke `get_heap_stats → get_heap`).
+///
+/// Band: `[0x2000_0000, 0x4000_0000)` — far above any realistic
+/// function count, below the extern-sentinel threshold (`u32::MAX/4`)
+/// and the stage-1/2/3 stub ranges near `u32::MAX`.
+pub const XMOD_CALL_ID_BAND_BASE: u32 = 0x2000_0000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VbcModule {
     /// Module header.
@@ -214,9 +235,11 @@ pub struct VbcModule {
     /// without each external reference paying the cost of a full
     /// FunctionDescriptor stub.
     ///
-    /// Carries `(precompile-time-global FunctionId, qualified-name StringId)`.
-    /// Empty when the module has no cross-module references (e.g. tiny
-    /// user scripts that import nothing).
+    /// Carries `(XMOD-band FunctionId, qualified-name StringId)` for
+    /// plain cross-module references (see [`XMOD_CALL_ID_BAND_BASE`])
+    /// and `(stage-stub FunctionId, name)` for stage-1/2/3 stub
+    /// references.  Empty when the module has no cross-module
+    /// references (e.g. tiny user scripts that import nothing).
     #[serde(default)]
     pub external_function_names: Vec<(FunctionId, StringId)>,
 

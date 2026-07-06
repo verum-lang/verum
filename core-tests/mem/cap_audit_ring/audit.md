@@ -75,3 +75,34 @@ arithmetic could underflow. Pinned by `regression_test §D`.
 | §B | Cross-tier divergence sweep on `--aot` + `--interp`. | 1 hour wall-clock | open |
 | §C | Test the seqlock retry loop — requires deliberate writer-contention timing. | Blocked on §A | open |
 | §D | Test `commit(event)` direct entry point (bypassing record_* writers). | ~30 min | open |
+
+## 6. Session 2026-07-05 — live ring closed; 36/36 GREEN
+
+The 9 live-path failures (`commit` / `recent` / `record_*` family,
+formerly the InvalidOpcode-29 PC-desync, latterly a clean
+"field write out of bounds: field index 4 … type='CapAuditSlot'")
+root-caused to TWO fundamental defects, both closed in `799cff9b2`:
+
+1. **CAP-AUDIT-SLOT-LAYOUT-1 / TYPE-NAME-INFERENCE-1** — the codegen
+   Cast arm resolved only single-ident Path targets, so
+   `let slot_ptr = &mut CAP_AUDIT_RING[idx] as *mut CapAuditSlot`
+   carried NO type; `(*slot_ptr).event = stamped` then resolved the
+   field with `type_name=None` and the global-intern fallback produced
+   slot index 4 for a 2-field record (proven via
+   `VERUM_TRACE_FIELDSHIFT`: `resolve('None','event') = 4 fn=commit`).
+   Cast now routes through `extract_type_name_from_ast` (all type
+   shapes incl. raw pointers) and the Deref arms strip
+   `*mut `/`*const `/`*volatile ` carriers.
+
+2. **ATOMIC-CAS-ZEROINIT-1** — 8-byte atomic CAS compares NaN-boxed
+   bit patterns, but a freshly allocated static-mut cell is RAW zero:
+   `expected == 0` could never match, so `NEXT_SEQ`'s inlined
+   fetch_add (`AtomicLoad + Add + AtomicCas`) silently lost every
+   increment — `commit` returned seq=1 forever and `count()` stayed 0.
+   The CAS now accepts the raw-zero never-stored pattern when
+   `expected == 0` (single retry; contention-correct).
+
+Round-trip proven end-to-end: two `record_revoke` commits → seqs 1,2;
+`count()==2`; `recent(2)` returns both events with correct seq/ptr_id.
+Suite: **36/36 GREEN** (was 27/9).  Deferred items §A/§C (SPMC race
+coverage) remain open pending a task-spawn primitive.

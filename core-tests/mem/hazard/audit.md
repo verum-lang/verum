@@ -205,3 +205,47 @@ Closing #17/#39 simultaneously closes:
 Estimate: multi-day VBC codegen refactor (refactor every
 `lookup_function` call site to honour mount scope).  Out of scope
 for this session — pinned for future work.
+
+## 8. Session 2026-07-05 — whole-module SIGSEGV closed; hazard 47/47 GREEN
+
+The module had REGRESSED from 40/7 to a whole-module SIGSEGV that
+killed every parallel `verum test --interp` invocation (the in-process
+crash tears down the shared runner).  Root-caused to a THREE-layer
+stack, all closed in commit `799cff9b2`:
+
+1. **TYPE-NAME-INFERENCE-1** — inside `ThreadHazardRecord.reclaim`,
+   `let protected = GLOBAL_HAZARD_DOMAIN.scan_hazards()` typed
+   `protected` as literal `"GLOBAL_HAZARD_DOMAIN"` (SCREAMING_CASE
+   receivers hit the is-uppercase TYPE-namespace heuristic whose
+   miss-fallback returns the receiver name), and
+   `self.retired.drain(0, …)` resolved NO type at all (instance-method
+   return-type resolution only handled Path receivers).  The for-in
+   over the `Drain<T>` result therefore lowered to native
+   IterNew/IterNext.
+
+2. **PROTOCOL-ITER-1** — native `IterNew` mapped every non-builtin
+   `type_id` to ITER_TYPE_LIST and `IterNext` read the `Drain` record
+   as a List header: value-dependent SIGSEGV (fault at `0 + 0x18`, the
+   List LEN slot behind a NULL mis-read).  The interpreter now
+   resolves `<Type>.next` for unknown records and iterates through the
+   Iterator protocol (`call_function_sync` + Maybe unpack) — the
+   native lowering and the protocol-loop lowering are now
+   semantically identical.
+
+3. **CALLSYNC-R0-CLOBBER-1** — the protocol dispatch surfaced a latent
+   kernel bug: `call_function_sync` pushed frames with
+   `return_reg=Reg(0)`, so `do_return` wrote the callee's result into
+   the CALLER's r0 — `self` in any method frame.  `reclaim`'s `self`
+   became the returned `Maybe` and `self.retired = still_retired`
+   panicked "field write out of bounds … type='Maybe'".  Fixed by
+   save/restore of caller r0 around the nested dispatch (fixes every
+   `call_function_sync` consumer, not just iteration).
+
+Also landed: the §3.3 record-static-mut surface now passes
+(`hazard_stats` / `force_reclaim_all` / `cleanup_thread_hazards` all
+green); `GLOBAL_HAZARD_DOMAIN.binary_search` mis-qualification is gone
+(the emitted CallM now reads `List.binary_search`).
+
+Suite: **47/47 GREEN under `--interp --test-threads 1` and inside the
+858/858 parallel run.**  The parallel-runner crash (§ task #5) is
+closed by the same fix.

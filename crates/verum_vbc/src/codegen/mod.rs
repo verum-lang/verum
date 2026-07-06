@@ -363,6 +363,26 @@ pub struct VbcCodegen {
     /// Carries `(alias_name, FunctionId)`.  Drained on every
     /// `finalize_module` so the buffer resets between modules.
     mount_aliases_buffer: Vec<(String, FunctionId)>,
+    /// **FIELD-INTERN-FALLBACK visibility** — unique `(type, field)`
+    /// pairs that resolved through the global field-name interner
+    /// (the wrong-offset landmine class; defect-class-catalogue §40).
+    /// Each unique pair logs one `warn` so stdlib-precompile CI
+    /// surfaces layout drift without per-site spam.
+    field_intern_fallbacks: std::collections::HashSet<(String, String)>,
+    /// **CONST-ARRAY-RETTYPE-1** — declared `TypeRef` for every
+    /// body-compiled (non-inlinable) const, keyed by
+    /// `(queued_source_module_or_empty, name)`.  `FunctionDescriptor::new`
+    /// defaults `return_type` to Unit and the primitive-only
+    /// `VarTypeKind` map cannot express composites, so a
+    /// `const SIZE_CLASSES: [Int; 73]` archived with `return_type=Unit`
+    /// left the AOT call-site register UNMARKED — `GetE` then indexed
+    /// the list OBJECT BASE (the zeroed header) instead of the backing
+    /// array, and every const-table read returned 0 under `--aot`
+    /// while `--interp` was correct (cross-tier divergence, 38
+    /// size_class failures).  Populated by
+    /// `register_constant_with_value`, consumed by
+    /// `compile_pending_constants`.
+    constant_type_refs: std::collections::HashMap<(String, String), crate::types::TypeRef>,
 
     /// Variant names that have collisions (multiple types define the same variant name).
     /// When a collision is detected, the simple name is removed from the registry and
@@ -1306,6 +1326,8 @@ impl VbcCodegen {
             // Deferred imports for multi-file modules
             pending_imports: Vec::new(),
             mount_aliases_buffer: Vec::new(),
+            field_intern_fallbacks: std::collections::HashSet::new(),
+            constant_type_refs: std::collections::HashMap::new(),
             // Track variant name collisions
             variant_collisions: std::collections::HashSet::new(),
             // Bitfield type layouts for @bitfield types
@@ -11186,6 +11208,19 @@ impl VbcCodegen {
             // file's `compile_items_into_state` is on the stack when
             // the queue is eventually drained (task #121).
             let source_module = self.ctx.current_source_module.clone();
+            // CONST-ARRAY-RETTYPE-1: stash the declared TypeRef so the
+            // drained body's descriptor carries the composite return
+            // type ([Int; N] / List<T> / …) — see the field doc.
+            if let Some(ty) = const_type {
+                let tref = self.ast_type_to_type_ref(ty);
+                self.constant_type_refs.insert(
+                    (
+                        source_module.clone().unwrap_or_default(),
+                        name.to_string(),
+                    ),
+                    tref,
+                );
+            }
             self.pending_constants
                 .push((name.to_string(), expr.clone(), source_module));
         }
@@ -11488,6 +11523,18 @@ impl VbcCodegen {
             };
             if let Some(tid) = tid {
                 descriptor.return_type = VbcTypeRef::Concrete(tid);
+            } else if let Some(tref) = self.constant_type_refs.get(&(
+                queued_source_module.clone().unwrap_or_default(),
+                name.to_string(),
+            )) {
+                // CONST-ARRAY-RETTYPE-1: composite-typed consts
+                // ([Int; N] / List<T> / records / …) carry their
+                // declared TypeRef instead of the Unit fallback, so
+                // the AOT call-site register classification
+                // (`mark_register_from_return_type`'s LIST / Array /
+                // MAP arms) sees the real shape and `GetE` indexes the
+                // BACKING array rather than the zeroed object header.
+                descriptor.return_type = tref.clone();
             }
             // Closes task #18: Float.NAN / INFINITY / PI / MAX / MIN /
             // EPSILON etc. now land in the archive with `is_const=true`
@@ -14316,6 +14363,30 @@ impl VbcCodegen {
                 self.ctx.current_source_module
             );
         }
+        // **FIELD-INTERN-FALLBACK visibility** (task: eliminate the
+        // global-intern class — every fallback with ANY type context is
+        // a latent wrong-offset landmine of the CAP-AUDIT-SLOT-LAYOUT-1
+        // family).  Always-on aggregation, once per unique
+        // (type, field) pair, at `warn` so stdlib-precompile CI logs
+        // surface the drift without per-site log spam (580 raw events
+        // per full-stdlib build as of 2026-07-05; ~40 unique pairs).
+        // `resolve_field_index(None, …)` sites — no type context at
+        // all — are tracked under the same key with type `"?"`.
+        {
+            let key = (
+                type_name.unwrap_or("?").to_string(),
+                field_name.to_string(),
+            );
+            if self.field_intern_fallbacks.insert(key.clone()) {
+                tracing::warn!(
+                    "[field-intern-fallback] '{}.{}' resolved via GLOBAL intern (idx {}) in fn `{}` — positional layout NOT guaranteed; see defect-class-catalogue §40",
+                    key.0,
+                    key.1,
+                    idx,
+                    self.ctx.current_function.as_deref().unwrap_or("?"),
+                );
+            }
+        }
         idx
     }
 
@@ -14769,7 +14840,12 @@ impl VbcCodegen {
 
     /// Generic parameters are preserved so that element types can be extracted
     /// later via `extract_element_type` (e.g., "List<Token>" → "Token").
-    fn extract_type_name_from_ast(ty: &verum_ast::ty::Type) -> String {
+    /// Public because the stdlib-precompile signature pre-pass
+    /// (`stdlib_bootstrap::pre_register_canonical_static_methods`,
+    /// SIGNATURE-PREPASS-1) derives stub `return_type_name`s from AST
+    /// signatures with the SAME canonical rendering codegen uses —
+    /// two extractors would drift.
+    pub fn extract_type_name_from_ast(ty: &verum_ast::ty::Type) -> String {
         use verum_ast::ty::{GenericArg, PathSegment, TypeKind};
         if let Some(name) = ty.kind.primitive_name() {
             return name.to_string();
@@ -15953,6 +16029,41 @@ impl VbcCodegen {
             }
         }
 
+        // **XMOD-CALL-ID-BAND-1 (fundamental)** — re-home every plain
+        // cross-module call id into a RESERVED band so the emitted
+        // bytecode can never confuse a cross-module reference with a
+        // module-local one.
+        //
+        // Pre-fix, cross-module Calls kept their ctx-GLOBAL id (e.g.
+        // `atomic_fetch_add_int` at ctx id 461) while local Calls were
+        // remapped to contiguous [0, N).  Both ranges overlap: a local
+        // function whose contiguous id happens to equal a recorded
+        // cross-module ctx id becomes AMBIGUOUS at user-side merge.
+        // `ArchiveBodyRemap::map_function`'s Tier-0 (external-name
+        // lookup, checked FIRST to fix the inverse collision —
+        // `Deque.reallocate`'s `realloc` at foreign id 4 vs local
+        // `AdjacencyList.add_edge` at id 4) then hijacks the LOCAL
+        // call: live failure `core.mem.heap.get_heap_stats`'s
+        // `get_heap()` (local id 461) dispatched to
+        // `atomic_fetch_add_int` → NullPointer at pc=9 whenever
+        // `core.mem.segment` was in the mount set.  An id-keyed map
+        // is structurally ambiguous in BOTH priority orders; the only
+        // sound contract is DISJOINT id spaces.
+        //
+        // Band choice: [0x2000_0000, 0x2800_0000) — far above any real
+        // function count (local ids are contiguous [0, N), N ≈ 10⁴ for
+        // the full stdlib), far below EXTERN_SENTINEL_THRESHOLD
+        // (u32::MAX/4 = 0x4000_0000) and the stage-1/2/3 stub bands
+        // (u32::MAX - …).  Stage-stub ids keep their stub-range ids —
+        // those ranges are already disjoint from [0, N) by
+        // construction.
+        let xmod_band: std::collections::HashMap<u32, u32> = external_pending
+            .iter()
+            .filter(|fid| !is_stage_stub(**fid))
+            .enumerate()
+            .map(|(seq, fid)| (*fid, crate::module::XMOD_CALL_ID_BAND_BASE + seq as u32))
+            .collect();
+
         // Encode functions and their bytecode, remapping name_id and func_id references
         for func in &self.functions {
             // Remap string IDs and func_ids in instructions
@@ -16008,24 +16119,21 @@ impl VbcCodegen {
                             *func_name = mapped.0;
                         }
                     }
-                    // Remap func_id references to contiguous 0-based IDs
-                    Instruction::Call { func_id, .. } => {
-                        if let Some(&new_id) = func_id_remap.get(func_id) { *func_id = new_id; }
-                    }
-                    Instruction::TailCall { func_id, .. } => {
-                        if let Some(&new_id) = func_id_remap.get(func_id) { *func_id = new_id; }
-                    }
-                    Instruction::NewClosure { func_id, .. } => {
-                        if let Some(&new_id) = func_id_remap.get(func_id) { *func_id = new_id; }
-                    }
-                    Instruction::CallG { func_id, .. } => {
-                        if let Some(&new_id) = func_id_remap.get(func_id) { *func_id = new_id; }
-                    }
-                    Instruction::GenCreate { func_id, .. } => {
-                        if let Some(&new_id) = func_id_remap.get(func_id) { *func_id = new_id; }
-                    }
-                    Instruction::Spawn { func_id, .. } => {
-                        if let Some(&new_id) = func_id_remap.get(func_id) { *func_id = new_id; }
+                    // Remap func_id references to contiguous 0-based IDs.
+                    // Cross-module references re-home into the reserved
+                    // XMOD band instead (XMOD-CALL-ID-BAND-1) so the two
+                    // id spaces stay disjoint in the emitted bytecode.
+                    Instruction::Call { func_id, .. }
+                    | Instruction::TailCall { func_id, .. }
+                    | Instruction::NewClosure { func_id, .. }
+                    | Instruction::CallG { func_id, .. }
+                    | Instruction::GenCreate { func_id, .. }
+                    | Instruction::Spawn { func_id, .. } => {
+                        if let Some(&new_id) = func_id_remap.get(func_id) {
+                            *func_id = new_id;
+                        } else if let Some(&band_id) = xmod_band.get(func_id) {
+                            *func_id = band_id;
+                        }
                     }
                     // Remap func_id inside FfiExtended::CreateCallback operand bytes.
                     // Format: dst:reg (variable-length), fn_id:u32, signature_idx:u32
@@ -16270,7 +16378,11 @@ impl VbcCodegen {
                     // is released before `module.intern_string`.
                     let owned = name.clone();
                     let sid = module.intern_string(&owned);
-                    external_list.push((FunctionId(fid), sid));
+                    // Key by the BAND id the bytecode now carries
+                    // (XMOD-CALL-ID-BAND-1); stage-stub ids keep their
+                    // stub-range key.
+                    let key = xmod_band.get(&fid).copied().unwrap_or(fid);
+                    external_list.push((FunctionId(key), sid));
                 }
             }
             tracing::debug!(

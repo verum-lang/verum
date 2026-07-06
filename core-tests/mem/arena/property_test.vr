@@ -248,8 +248,10 @@ fn law_arena_error_exceeds_max_capacity_eq_requires_both_fields() {
 // cover the InvalidAlignment-vs-other-variant case; same-variant
 // alignment-comparison is gated until the single-field unboxing defect
 // class closes.
+// Un-@ignore'd 2026-07-05: single-field record-variant Eq now
+// compares the payload (the Duration-class unboxing defect closed
+// in the interim waves); verified green via direct probe.
 @test
-@ignore
 fn law_arena_error_invalid_alignment_eq_compares_alignment() {
     let a = ArenaError.InvalidAlignment { alignment: 3 };
     let same = ArenaError.InvalidAlignment { alignment: 3 };

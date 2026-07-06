@@ -864,6 +864,39 @@ impl<'s> CompilationPipeline<'s> {
                         let param_names: Vec<String> = (0..param_count)
                             .map(|i| format!("_arg{}", i))
                             .collect();
+                        // **SIGNATURE-PREPASS-1**: carry the declared
+                        // return type on the stub.  The stub exists
+                        // precisely so ORDER-INDEPENDENT lookups
+                        // resolve (`lookup_function("List.drain")`
+                        // during `core.mem` compilation, which runs
+                        // BEFORE `core.collections` in the hardcoded
+                        // dependency graph) — but a `return_type_name:
+                        // None` stub SATISFIES the lookup while
+                        // starving every return-type consumer: the
+                        // for-in classifier `is_custom_iterator_type`
+                        // saw None for `self.retired.drain(…)` and
+                        // lowered the `Drain<T>` protocol iterator
+                        // through native IterNew (the hazard/reclaim
+                        // SIGSEGV class, PROTOCOL-ITER-1).  Rendering
+                        // via the codegen's own canonical extractor
+                        // keeps the two views drift-free.
+                        let stub_return_type_name = match &func.return_type {
+                            verum_common::Maybe::Some(ty) => {
+                                let n =
+                                    verum_vbc::codegen::VbcCodegen::extract_type_name_from_ast(ty);
+                                if n.is_empty() || n == "()" {
+                                    None
+                                } else if n == "Self" {
+                                    // `fn clone(&self) -> Self` etc. —
+                                    // bind to the impl target so
+                                    // consumers see the concrete type.
+                                    Some(target_type_name.clone())
+                                } else {
+                                    Some(n)
+                                }
+                            }
+                            verum_common::Maybe::None => None,
+                        };
                         let info = FunctionInfo {
                             id: stub_id,
                             param_count,
@@ -880,7 +913,7 @@ impl<'s> CompilationPipeline<'s> {
                             variant_payload_types: None,
                             is_partial_pattern: false,
                             takes_self_mut_ref: false,
-                            return_type_name: None,
+                            return_type_name: stub_return_type_name,
                             return_type_inner: None,
                             is_const: false,
                             is_transparent_wrapper: false,

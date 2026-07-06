@@ -156,7 +156,7 @@ default green-suite gate.
 | `shell/escape`                         | 104 | 0 | 0 | 0 | 0 — **complete**. 10/10 unit tests GREEN. §1 ShellFlavour 4-variant (Posix / Fish / Cmd / PowerShell) — fully-qualified `ShellFlavour.Posix` everywhere to dodge bare-name collision (4/4) + §2 pairwise disjointness 5 pairs (5/5) + §3 default_flavour() returns ShellFlavour.Posix on Unix host (1/1). Escaper static methods (posix / fish / cmd_exe / powershell / posix_safe_unquoted) + shell_join / validate_sh + protocol ShellEscape impls use `for ch in s.chars()` Char iterator dispatch — deferred to language-level under `vcs/specs/L2-standard/shell/escape/`. |
 | `intrinsics/runtime/tier`              | 82 | 74 | 79 | 34 | 0 — **rewritten tier-agnostic 2026-07-03** (TIER-TEST-CONTRACT-1: old unit suite asserted `is_interpreted()==true` / `get_tier()==0` — unsatisfiable under --aot, violating the both-tiers contract). 13 tests: canonical-code membership (0|3), `is_interpreted ⇔ tier==0` coherence at every call depth/method/closure, 100-read stability, `tier_promote(0)` no-fault hint. interp 13/13. |
 | `intrinsics/runtime/time`              | 121 | 87 | 89 | 32 | 1 — **NEW 2026-07-03**. Monotonicity (1000-sample + across-sleep), sleep lower bounds, wall-clock sanity window (2020..2100) + nanos/secs coherence, num_cpus, deadline-loop + elapsed idiom integrations. TIME-UNWIRED-1 FIXED (sleep_ms/sleep_ns/realtime_nanos had no entries — sleeps returned instantly, wall reads failed every window). interp 19/20; 1 red = TIME-MONO-CONTEXT-1 (#17: monotonic_nanos context-dependent 42/positive-assert failure; dual-emitter + boxed-int-render family). |
-| `intrinsics/runtime/text`              | 253 | 146 | 106 | 42 | 2 — **NEW 2026-07-03**. Byte-length (ASCII/UTF-8/Cyrillic), full-string Maybe parsers, render round-trips, ASCII-exhaustive classification partitions + case-conversion laws, UTF-8 decode/encode over live buffers, f-string agreement. CHAR/TEXT-GHOST-SYMBOLS-1 + TEXT-HANDLER-STUBS-1 FIXED (emissions called nonexistent verum_char_*/verum_text_* FFI symbols while complete CharExtended/TextExtended handlers sat unused; handlers were small-string-only stubs truncating renders to 6 chars and returning raw Int for Maybe signatures). interp 48/48. RUNTIME-DUPLICATE-TREE-1 (#15) filed: core/runtime/* dead tree, sqlite mounts it. utf8-encode/escape-debug sub-ops deferred (no CharSubOpcode yet). | **AOT 40/48 (2026-07-05, was 33)**: byte_len offset-8 read (not strlen), ParseInt 2-operand Maybe-wrap + internal_strtol endptr (strict valid+rejects), internal_strtod bodyless-gate fix (integer_form). Residual: parse_float FRACTIONAL NaN (open-coded strtod mantissa bug), char-encode, float-render, as_bytes.
+| `intrinsics/runtime/text`              | 253 | 146 | 106 | 42 | 2 — **NEW 2026-07-03**. Byte-length (ASCII/UTF-8/Cyrillic), full-string Maybe parsers, render round-trips, ASCII-exhaustive classification partitions + case-conversion laws, UTF-8 decode/encode over live buffers, f-string agreement. CHAR/TEXT-GHOST-SYMBOLS-1 + TEXT-HANDLER-STUBS-1 FIXED (emissions called nonexistent verum_char_*/verum_text_* FFI symbols while complete CharExtended/TextExtended handlers sat unused; handlers were small-string-only stubs truncating renders to 6 chars and returning raw Int for Maybe signatures). interp 48/48. RUNTIME-DUPLICATE-TREE-1 (#15) filed: core/runtime/* dead tree, sqlite mounts it. utf8-encode/escape-debug sub-ops deferred (no CharSubOpcode yet). |
 | `intrinsics/runtime/mem_raw`           | 231 | 194 | 121 | 43 | 1 — **NEW 2026-07-03**; allocation-backed harness over the CBGR bridge (closes the MEM-RAWPTR-HARNESS-1 'needs a live allocation' gap). memcpy/memmove(overlap both directions)/memset(mod-256)/memcmp(offset sweep)/strlen(first-NUL)/strcmp + byte-granular addressing pin (#38 class) + Text→C-string + platform-endianness cross-check. MEMRAW-CANONICAL-NAMES-INERT-1 FIXED (leaf load/store carried {0} stub bodies that beat the dispatch table — whole Tier-0 raw byte/word surface was inert). interp 35/35; **AOT 34/37 (2026-07-04, was 11/37)** via FfiExtended 0x53-0x58 twins (b34bd3140); 3 residual = text_as_bytes AOT leg. Deferred: fallback-body → 0x43-0x46 routing (perf). |
 | `intrinsics/runtime/cbgr`              | 168 | 108 | 89 | 39 | 3 — **NEW 2026-07-03**. Bridge allocate/deallocate/realloc (alignment sweep ≤32, realloc grow/shrink preservation, extent exactness, no-alias), live-ref validate, epoch reads. THREE FUNDAMENTAL FIXES landed (d31878ee8): CBGR-REALLOC-PTRADD-1 (realloc inline seq emitted 0x63=PtrAdd → interp SIGSEGV / AOT ptr+old_size), CBGR-BRIDGE-HOLLOW-1 (allocate/deallocate unwired → nil; realloc key collided with internal 4-arg; now FfiExtended 0xA5-0xA7 + interp AllocationHeader parity + AOT verum_cbgr_* arms), CBGR-VALIDATE-SHAPE-1 (DirectOpcode(ChkRef) wrote no Bool). interp 23/23; **AOT 23/23 (2026-07-04)** — bridge fully green both tiers. Deferred: align>32 (AOT runtime signature), global-state mutators need subprocess harness, packed-word validators. |
 | `intrinsics/runtime/sync`              | 142 | 74 | 0 | 31 | 0 — **NEW 2026-07-03, wired 2026-07-04/05**. futex no-waiter/mismatch edges, waitgroup counter algebra (add(n) ⇔ n×done), spinlock state machine, hint/fence smoke. SYNC-TLS-WIRING-1 FIXED: spinlock trio (0xB3-0xB5) was OpcodeWithSize(AtomicCas/Store/Load) with missing operands; fences emitted truncated AtomicFence (InvalidBytecode); futex_wake_one/all had a 2-vs-3 operand desync → SIGILL. **interp 13/13 + AOT 13/13 (--exact)**; waitgroup AOT = cbgr-alloc+atomicrmw, verum_spinlock_lock bodied in platform_ir, futex_wait value-precheck normalises -11 cross-tier. Suite-level --test-threads N AOT drops 1-2 futex tests to the #41 harness flake (deterministic single-run). |
@@ -580,6 +580,50 @@ Attacked the 48 AOT-ITER-1 failures above. Commits `15bfeaceb` + `c321cde54`
 - **2 deep AOT defects newly tracked** (block whole-module AOT compile):
   QUALVAR-CONSTRUCT-1 / D-AOT-1 (§28, thin_ref/unit) + RECVAR-TUPLE-1 (§29,
   header/integration). Tasks #7/#8/#9.
+
+## Session 2026-07-05 — mem interp frontier CLOSED: 861/861/0 (was whole-module SIGSEGV + 11 fails) — 5 fundamental defect classes fixed in `verum_vbc` (commit `799cff9b2`) + last 3 @ignore pins un-gated (`c3e4236bb`)
+
+- **mem/hazard 47/47** (was whole-module SIGSEGV killing every parallel run):
+  TYPE-NAME-INFERENCE-1 (SCREAMING_CASE static-mut receivers classified as
+  TYPE namespaces; Path-only instance-receiver resolution) mis-lowered the
+  `reclaim` for-in to native IterNew; PROTOCOL-ITER-1 (IterNew mapped every
+  non-builtin type_id to ITER_TYPE_LIST — memory-unsafe record-as-List reads;
+  now Iterator-protocol dispatch via resolved `<Type>.next`);
+  CALLSYNC-R0-CLOBBER-1 (`call_function_sync` return_reg=Reg(0) clobbered the
+  caller's `self`).  The parallel-runner SIGSEGV (task #5 of this session)
+  closed with it: full `mem/` at `--test-threads 4` = 861/861.
+- **mem/cap_audit_ring 36/36** (was 27/9): CAP-AUDIT-SLOT-LAYOUT-1 — Cast arm
+  resolved only single-ident Path types, so `as *mut CapAuditSlot` carried no
+  type and `(*slot_ptr).event` fell to the global intern (idx 4 on a 2-field
+  record; proven via VERUM_TRACE_FIELDSHIFT `resolve('None','event')=4
+  fn=commit`).  Plus ATOMIC-CAS-ZEROINIT-1: size-8 CAS compares NaN-boxed
+  patterns but a fresh static-mut cell is raw zero — NEXT_SEQ's inlined
+  fetch_add lost every increment (`commit` seq=1 forever, `count()`=0).
+- **mem/allocator 63/63** (was 61/2): HEAP-INTORAW-1 / SHARED-STRONGCOUNT-1 —
+  runtime wrapper reprs (Heap = CBGR data ptr; Shared = [refcount,value])
+  don't match the source records; shape-guarded intercepts on BOTH dispatch
+  paths (new `wrapper_runtime.rs` Call-twin + CallM arms), clone bumps on all
+  three clone arms, DropRef decrements, `*shared` derefs to inner.
+- **mem/heap 52/52**: XMOD-CALL-ID-BAND-1 — archive cross-module call ids kept
+  ctx-GLOBAL numbering overlapping the local [0,N) remap; the id-keyed
+  external-name map is structurally ambiguous in either priority order
+  (external-first hijacked `get_heap_stats→get_heap` into
+  `atomic_fetch_add_int` whenever `core.mem.segment` was mounted).  Cross-
+  module ids now re-home into reserved band [0x2000_0000,0x4000_0000) at
+  precompile — disjoint id spaces by construction.
+- **Pins un-@ignore'd** (each verified green): mem/mod §3.4 has_capability
+  umbrella collision → 87/87/0; mem/diagnostics §B MemHeaderView.can_read
+  5-way collision → 29/29/0; mem/arena single-field record-variant Eq →
+  60/60/0.
+- **Attribution discipline**: time/ (duration/instant/system_time/…) and
+  async/{generator,poll,timer} failures reproduce IDENTICALLY on pure HEAD
+  `d1c721f36` (clean-baseline build) — they belong to the concurrent
+  intrinsics wave, tracked separately; NOT introduced by this batch.
+  intrinsics/ suite unchanged at 808/830.
+- **Systemic follow-ups filed**: (a) 580 GLOBAL-INTERN field-resolution
+  fallbacks traced across the stdlib precompile (each a latent wrong-offset
+  landmine of the CAP-AUDIT-SLOT-LAYOUT-1 class); (b) AOT twin of
+  PROTOCOL-ITER-1; (c) mem `--aot` sweep in flight.
 
 ## How to update
 

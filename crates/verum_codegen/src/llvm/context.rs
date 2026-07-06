@@ -381,6 +381,9 @@ pub struct FunctionContext<'a, 'ctx> {
     /// fields. During Phase 1, both systems are maintained in parallel. Once all
     /// call sites are migrated, the legacy fields will be removed.
     reg_types: RegisterTypeMap,
+    /// CLONE-AOT-ALIAS-1 — statically-known allocation byte sizes per
+    /// register (see `set_obj_alloc_size`).
+    obj_alloc_sizes: std::collections::HashMap<u16, u64>,
 
     /// Method dispatch table for declarative method routing.
     ///
@@ -719,6 +722,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
             closure_return_types: HashMap::new(),
             reg_types: RegisterTypeMap::new(),
+            obj_alloc_sizes: std::collections::HashMap::new(),
             dispatch_table: MethodDispatchTable::new(),
             tuple_element_types: HashMap::new(),
             generic_type_args: HashMap::new(),
@@ -818,6 +822,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
             closure_return_types: HashMap::new(),
             reg_types: RegisterTypeMap::new(),
+            obj_alloc_sizes: std::collections::HashMap::new(),
             dispatch_table: MethodDispatchTable::new(),
             tuple_element_types: HashMap::new(),
             generic_type_args: HashMap::new(),
@@ -1212,6 +1217,30 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Check whether this register is an interior ref into a List slot.
     pub fn is_interior_list_ref(&self, reg: u16) -> bool {
         self.reg_types.is_interior_list_ref(reg)
+    }
+
+    /// **CLONE-AOT-ALIAS-1** — record the STATIC byte size of the heap
+    /// object a register was allocated with (`New` = header +
+    /// fields×8; `MakeVariant*` = header + tag word + fields×8).
+    /// AOT objects carry no live size in their header (the 24-byte
+    /// header area is zero-initialised), so `Clone` can only produce a
+    /// real copy when the allocation size is statically known.
+    /// Overwritten whenever the register is re-assigned by another
+    /// tracked allocation site; same per-VBC-register staleness
+    /// discipline as every other `reg_types` mark.
+    pub fn set_obj_alloc_size(&mut self, reg: u16, size: u64) {
+        self.obj_alloc_sizes.insert(reg, size);
+    }
+
+    /// Read back a register's statically-known allocation size, if any.
+    pub fn get_obj_alloc_size(&self, reg: u16) -> Option<u64> {
+        self.obj_alloc_sizes.get(&reg).copied()
+    }
+
+    /// Clear a register's allocation-size mark (on re-assignment by a
+    /// non-allocation producer).
+    pub fn clear_obj_alloc_size(&mut self, reg: u16) {
+        self.obj_alloc_sizes.remove(&reg);
     }
 
     /// Mark a register as holding a generic type parameter value-as-pointer.
@@ -1946,6 +1975,12 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         // will re-add them after this call.
         // Clear unified type map (covers struct, inline_struct, custom_iter, generic_param, etc.)
         self.reg_types.clear(reg);
+        // CLONE-AOT-ALIAS-1: allocation-size marks are re-set by the
+        // allocation/propagation sites AFTER this call; a stale size on
+        // a reused register made Clone memcpy the wrong byte count
+        // (observed: Text handle cloned with a record's size → OOB
+        // write in memmove).
+        self.obj_alloc_sizes.remove(&reg);
         self.string_registers.remove(&reg);
         self.text_registers.remove(&reg);
         self.bool_registers.remove(&reg);

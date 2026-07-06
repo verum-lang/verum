@@ -330,38 +330,6 @@ pub(crate) fn get_or_declare_internal_strtol<'ctx>(
     let result = builder
         .build_int_mul(final_acc, final_sign, "result")
         .expect("final mul");
-    // C-contract endptr: write nptr + final_index to *endptr when the
-    // caller passed a non-null out-param, so callers can detect trailing
-    // garbage / a fully-consumed parse (the text ParseInt Maybe-wrap relies
-    // on this to yield None for "42abc" / "abc" / "").
-    let final_i = pl_i_phi.as_basic_value().into_int_value();
-    let end_gep = unsafe {
-        builder
-            .build_gep(i8_type, nptr, &[final_i], "strtol_end")
-            .expect("end gep")
-    };
-    if let Some(endptr_param) = func.get_nth_param(1) {
-        let endptr_ptr = endptr_param.into_pointer_value();
-        let is_endptr_null = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                builder
-                    .build_ptr_to_int(endptr_ptr, i64_type, "endptr_i")
-                    .expect("endptr to int"),
-                i64_type.const_zero(),
-                "endptr_is_null",
-            )
-            .expect("endptr null cmp");
-        let store_end = llvm_ctx.append_basic_block(func, "store_end");
-        let do_ret = llvm_ctx.append_basic_block(func, "strtol_ret");
-        builder
-            .build_conditional_branch(is_endptr_null, do_ret, store_end)
-            .expect("endptr null br");
-        builder.position_at_end(store_end);
-        builder.build_store(endptr_ptr, end_gep).expect("store endptr");
-        builder.build_unconditional_branch(do_ret).expect("→ ret");
-        builder.position_at_end(do_ret);
-    }
     builder.build_return(Some(&result)).expect("ret result");
 
     func
@@ -666,26 +634,17 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     module: &Module<'ctx>,
 ) -> verum_llvm::values::FunctionValue<'ctx> {
     let wrapper_name = "verum_internal_strtod";
-    // Return the existing function ONLY if it already has a body — a
-    // BODYLESS pre-declaration (e.g. from a `get_or_declare_function` call
-    // site that only declares) must fall through and get its body built
-    // here, or callers get a function that "returns" 0 (the parse_float
-    // Some(0) bug).  Mirrors get_or_declare_internal_strtol's gate.
+    if let Some(f) = module.get_function(wrapper_name) {
+        return f;
+    }
     let i8_type = llvm_ctx.i8_type();
     let i64_type = llvm_ctx.i64_type();
     let f64_type = llvm_ctx.f64_type();
     let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
 
     let fn_type = f64_type.fn_type(&[ptr_type.into()], false);
-    let func = match module.get_function(wrapper_name) {
-        Some(f) if f.count_basic_blocks() > 0 => return f,
-        Some(f) => f,
-        None => {
-            let f = module.add_function(wrapper_name, fn_type, None);
-            f.set_linkage(verum_llvm::module::Linkage::Internal);
-            f
-        }
-    };
+    let func = module.add_function(wrapper_name, fn_type, None);
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
 
     let entry = llvm_ctx.append_basic_block(func, "entry");
     let skip_ws = llvm_ctx.append_basic_block(func, "skip_ws");
@@ -855,13 +814,6 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     let is_ue = builder.build_int_compare(verum_llvm::IntPredicate::EQ, e_c, upper_e, "is_ue").expect("ue");
     let is_exp = builder.build_or(is_le, is_ue, "is_exp").expect("is_exp");
     let i_after_e = builder.build_int_add(af_iv, one_i64, "i_after_e").expect("i++");
-    // SSA-CORRECT: compute the final_exp contribution for the no-exponent
-    // edge HERE in after_frac (a predecessor of mul_setup), not inside the
-    // mul_setup PHI — a PHI incoming must dominate the predecessor's
-    // terminator.  The pre-fix built `sub 0, af_fd` in mul_setup itself, so
-    // the value did NOT dominate the after_frac→mul_setup edge (invalid SSA
-    // → the fractional scale exponent read garbage → "2.5" mis-parsed).
-    let neg_fd = builder.build_int_sub(zero_i64, af_fdv, "neg_fd").expect("nfd");
     builder.build_conditional_branch(is_exp, exp_after_e, mul_setup).expect("exp cond");
 
     // exp_after_e: parse sign of exponent
@@ -905,12 +857,9 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     el_i.add_incoming(&[(&el_i_next, exp_advance)]);
     el_acc.add_incoming(&[(&el_acc_next, exp_advance)]);
 
-    // after_exp: signed_exp = exp_sign_i64 * el_av; fexp = signed_exp - af_fd.
-    // fexp is computed HERE (a predecessor of mul_setup) for the same
-    // SSA-dominance reason as neg_fd above.
+    // after_exp: signed_exp = exp_sign_i64 * el_av
     builder.position_at_end(after_exp);
     let signed_exp = builder.build_int_mul(exp_sign_i64, el_av, "signed_exp").expect("sexp");
-    let fexp = builder.build_int_sub(signed_exp, af_fdv, "fexp").expect("fexp");
     builder.build_unconditional_branch(mul_setup).expect("→ mul");
 
     // mul_setup: PHI(final_exp); compute mant_f64 = sitofp(af_av);
@@ -918,10 +867,10 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     builder.position_at_end(mul_setup);
     let final_exp_phi = builder.build_phi(i64_type, "final_exp").expect("fe phi");
     final_exp_phi.add_incoming(&[
-        // from after_frac (no exponent): final_exp = -frac_digits
-        (&neg_fd, after_frac),
-        // from after_exp: final_exp = signed_exp - frac_digits
-        (&fexp, after_exp),
+        // Came from after_frac (no exp parsed): final_exp = -af_fdv
+        (&builder.build_int_sub(zero_i64, af_fdv, "neg_fd").expect("nfd"), after_frac),
+        // Came from after_exp: final_exp = signed_exp - af_fdv
+        (&builder.build_int_sub(signed_exp, af_fdv, "fexp").expect("fexp"), after_exp),
     ]);
     let final_exp_v = final_exp_phi.as_basic_value().into_int_value();
 
@@ -2979,6 +2928,12 @@ pub fn lower_instruction<'ctx>(
                 let runtime = RuntimeLowering::new(ctx.llvm_context());
                 let obj_ptr =
                     runtime.lower_new_object(ctx.builder(), ctx.get_module(), *field_count)?;
+                // CLONE-AOT-ALIAS-1: record the static allocation size
+                // so a later `Clone` of this register can real-copy.
+                ctx.set_obj_alloc_size(
+                    dst.0,
+                    RuntimeLowering::OBJECT_HEADER_SIZE + (*field_count as u64) * 8,
+                );
 
                 // Store type_id in object header at offset 0 for protocol dispatch.
                 // Only store for types that have protocol implementations (to avoid
@@ -3426,8 +3381,62 @@ pub fn lower_instruction<'ctx>(
         } => lower_iter_next(ctx, *dst, *has_next, *iter),
 
         Instruction::Clone { dst, src } => {
-            // For primitives, just copy
             let value = ctx.get_register(src.0)?;
+            // **CLONE-AOT-ALIAS-1** — for heap objects whose allocation
+            // size is statically known (`New` / `MakeVariant*` in the
+            // same function; see `set_obj_alloc_size`), emit a REAL
+            // shallow copy: fresh checked_malloc(size) + memcpy.  The
+            // previous unconditional register copy ALIASED the object,
+            // so e.g. `[CapAuditSlot { … }; 256]`'s repeat-loop
+            // (`CLONE proto; LIST_PUSH`) filled the audit ring with 256
+            // pointers to ONE slot — every commit overwrote every
+            // "slot" and the distinct-ptr_id round-trip tests could
+            // never pass under AOT while the interpreter (whose Clone
+            // handler allocates) was correct.  Primitives and
+            // unknown-size objects keep the historic pass-through.
+            if let Some(size) = ctx.get_obj_alloc_size(src.0) {
+                let i64_type = ctx.types().i64_type();
+                let module = ctx.get_module();
+                let src_ptr = as_ptr(ctx, value, "clone_src_ptr")?;
+                let size_val = i64_type.const_int(size, false);
+                let dst_ptr = checked_malloc_instr(ctx, module, size_val, "clone_obj")?;
+                let memcpy_ty = ctx
+                    .types()
+                    .ptr_type()
+                    .fn_type(
+                        &[
+                            ctx.types().ptr_type().into(),
+                            ctx.types().ptr_type().into(),
+                            i64_type.into(),
+                        ],
+                        false,
+                    );
+                let memcpy_fn = super::error::get_or_declare_function(
+                    module,
+                    "verum_internal_memcpy",
+                    memcpy_ty,
+                );
+                ctx.builder()
+                    .build_call(
+                        memcpy_fn,
+                        &[dst_ptr.into(), src_ptr.into(), size_val.into()],
+                        "clone_copy",
+                    )
+                    .or_llvm_err()?;
+                ctx.set_register(dst.0, dst_ptr.into());
+                ctx.set_obj_alloc_size(dst.0, size);
+                if let Some(tn) = ctx.get_obj_register_type(src.0).map(|s| s.to_string()) {
+                    ctx.set_obj_register_type(dst.0, tn);
+                }
+                if ctx.is_struct_register(src.0) {
+                    let fc = size
+                        .saturating_sub(RuntimeLowering::OBJECT_HEADER_SIZE)
+                        / 8;
+                    ctx.mark_struct_register(dst.0, fc as u32);
+                }
+                return Ok(());
+            }
+            // For primitives, just copy
             ctx.set_register(dst.0, value);
             Ok(())
         }
@@ -3446,6 +3455,11 @@ pub fn lower_instruction<'ctx>(
                 runtime.lower_make_variant(ctx.builder(), ctx.get_module(), *tag, *field_count)?;
             ctx.set_register(dst.0, variant_ptr.into());
             ctx.mark_variant_register(dst.0);
+            // CLONE-AOT-ALIAS-1: static size = header + tag word + fields.
+            ctx.set_obj_alloc_size(
+                dst.0,
+                RuntimeLowering::OBJECT_HEADER_SIZE + 8 + (*field_count as u64) * 8,
+            );
             Ok(())
         }
 
@@ -3545,6 +3559,11 @@ pub fn lower_instruction<'ctx>(
                 runtime.lower_make_variant(ctx.builder(), ctx.get_module(), *tag, *field_count)?;
             ctx.set_register(dst.0, variant_ptr.into());
             ctx.mark_variant_register(dst.0);
+            // CLONE-AOT-ALIAS-1: static size = header + tag word + fields.
+            ctx.set_obj_alloc_size(
+                dst.0,
+                RuntimeLowering::OBJECT_HEADER_SIZE + 8 + (*field_count as u64) * 8,
+            );
             Ok(())
         }
 
@@ -4112,6 +4131,17 @@ pub fn lower_instruction<'ctx>(
             // tracking the rest of the codegen sets up via `mark_struct_register`
             // / `set_obj_register_type` / `is_list/map/...` helpers.
             let is_value_type_ptr = ctx.is_struct_register(ref_reg.0)
+                // **DEREF-INTERIOR-1**: RefListElement already LOADED the
+                // element value into its dst (see lower_cbgr_extended
+                // 0x0B), so `*r` on that register must pass the value
+                // through — a second load treats a record-element's
+                // pointer as an address-to-load and reads its (zeroed
+                // under AOT) header word: `commit`'s
+                // `&mut CAP_AUDIT_RING[idx]` slot deref then
+                // StructFieldAddr'd garbage and crashed at 0x18.
+                // Mirrors the interpreter's cbgr_mutable_ptrs semantics
+                // where the interior slot is consumed pre-loaded.
+                || ctx.is_interior_list_ref(ref_reg.0)
                 || ctx.is_list_register(ref_reg.0)
                 || ctx.is_map_register(ref_reg.0)
                 || ctx.is_set_register(ref_reg.0)
@@ -10556,6 +10586,36 @@ fn lower_call<'ctx>(
     }
 
     // ============================================================
+    // **HEAP-INTORAW-1 (AOT `Call`-form twin)** — statically-resolved
+    // calls to the transparent-Heap raw round-trip.  Under the Tier-1
+    // model `Heap<T>` IS the inner value (see the `Heap.new`
+    // pass-through in `lower_call_method`), so `into_raw`/`from_raw`
+    // are the identity on the argument and `is_valid` is statically
+    // TRUE.  Letting these reach the COMPILED `core/base/memory.vr`
+    // bodies misreads the transparent value as a 3-field record
+    // (`self.ptr` on an Int → garbage).  Mirrors the CallM-side twin
+    // and the interpreter's `wrapper_runtime.rs`.
+    if (func_name == "Heap.into_raw" || func_name == "Heap.from_raw")
+        && args.count == 1
+    {
+        let v = ctx.get_register(args.start.0)?;
+        ctx.set_register(dst.0, v);
+        ctx.mark_pass_through_ref(dst.0);
+        if let Some(tn) = ctx
+            .get_obj_register_type(args.start.0)
+            .map(|s| s.to_string())
+        {
+            ctx.set_obj_register_type(dst.0, tn);
+        }
+        return Ok(());
+    }
+    if func_name == "Heap.is_valid" && args.count == 1 {
+        let i64_type = ctx.types().i64_type();
+        ctx.set_register(dst.0, i64_type.const_int(1, false).into());
+        ctx.mark_bool_register(dst.0);
+        return Ok(());
+    }
+
     // Text.from_utf8_unchecked / Text.from_utf8_lossy → AOT body.
     //
     // These two stdlib factories are registered as EMPTY stub
@@ -12174,6 +12234,60 @@ fn lower_call_method<'ctx>(
             ctx.set_obj_register_type(dst.0, tn);
         }
         return Ok(());
+    }
+
+    // **HEAP-INTORAW-1 (AOT twin)** — under the Tier-1 transparent-Heap
+    // model (`Heap.new` above passes the inner value through; no CBGR
+    // allocation exists), the wrapper's raw-pointer round-trip is the
+    // identity and validity is statically TRUE (tier-1 checked-ref
+    // semantics: safety was proven at compile time, the runtime check
+    // is zero-cost by design).  Letting these calls reach the COMPILED
+    // `core/base/memory.vr` bodies misreads the transparent value as a
+    // 3-field `Heap` record (`self.ptr` on an Int → garbage), which is
+    // exactly the interpreter-side defect class fixed in
+    // `wrapper_runtime.rs` — this is its AOT mirror.
+    {
+        // Instance form: `boxed.into_raw()` — CallM receiver carries
+        // the transparent value, args.count == 0.
+        let is_heap_into_raw = bare_method_early == "into_raw"
+            && args.count == 0
+            && (method_name_str == "Heap.into_raw"
+                || method_name_str == "dyn:Heap.into_raw");
+        // Static form: `Heap.from_raw(raw)` — the raw pointer is arg 0
+        // (the receiver register holds the "Heap" type marker).
+        let is_heap_from_raw = bare_method_early == "from_raw"
+            && args.count == 1
+            && (method_name_str == "Heap.from_raw"
+                || method_name_str == "dyn:Heap.from_raw"
+                || receiver_type_name.as_deref() == Some(WKT::Heap.as_str()));
+        if is_heap_into_raw || is_heap_from_raw {
+            let src_reg = if is_heap_into_raw { receiver.0 } else { args.start.0 };
+            let inner_val = ctx.get_register(src_reg)?;
+            ctx.set_register(dst.0, inner_val);
+            // The round-trip stays transparent: `from_raw(into_raw(h))`
+            // must deref exactly like the original `Heap.new` result.
+            ctx.mark_pass_through_ref(dst.0);
+            if let Some(tn) = ctx
+                .get_obj_register_type(src_reg)
+                .map(|s| s.to_string())
+            {
+                ctx.set_obj_register_type(dst.0, tn);
+            }
+            return Ok(());
+        }
+        let is_heap_is_valid = bare_method_early == "is_valid"
+            && (method_name_str == "Heap.is_valid"
+                || method_name_str == "dyn:Heap.is_valid");
+        if is_heap_is_valid && ctx.is_pass_through_ref(receiver.0) {
+            // Transparent Heap value — statically valid (tier-1
+            // checked-ref semantics; the safety proof happened at
+            // compile time and the wrapper carries no runtime header
+            // to consult).
+            let i64_type = ctx.types().i64_type();
+            ctx.set_register(dst.0, i64_type.const_int(1, false).into());
+            ctx.mark_bool_register(dst.0);
+            return Ok(());
+        }
     }
 
     // Map/Set/Deque: compiled from .vr via VBC→LLVM pipeline (Phase 2C).
@@ -18994,51 +19108,24 @@ fn lower_text_extended<'ctx>(
             Ok(())
         }
         0x30 => {
-            // ByteLen — the Text's STORED byte length at offset 8 of the
-            // {ptr@0, len@8, cap@16} struct (the layout `verum_text_get_ptr`
-            // itself assumes: it int_to_ptr's the text value and loads the
-            // char* from offset 0).  Pre-fix this called strlen, which walks
-            // to the first NUL — wrong for a len-bounded (non-NUL-terminated)
-            // buffer and for any multibyte content past an embedded NUL.
+            // ByteLen — return length of string in bytes
             if operands.len() < 2 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
-            let text_val = ctx.get_register(op_reg(operands, 1))?;
+            let src = ctx.get_register(op_reg(operands, 1))?;
+            let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
-            let i8_ty = ctx.types().i8_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let text_i64 = as_i64(ctx, text_val, "byte_len_text_i64")?;
-            // Null text → length 0 (mirrors verum_text_get_ptr's null guard).
-            let is_null = ctx
+            let fn_type = i64_ty.fn_type(&[ctx.types().ptr_type().into()], false);
+            let strlen_fn = module
+                .get_function("verum_strlen_export")
+                .unwrap_or_else(|| module.add_function("verum_strlen_export", fn_type, None));
+            let result = ctx
                 .builder()
-                .build_int_compare(IntPredicate::EQ, text_i64, i64_ty.const_zero(), "bl_null")
-                .or_llvm_err()?;
-            let text_ptr = ctx
-                .builder()
-                .build_int_to_ptr(text_i64, ptr_ty, "byte_len_text_ptr")
-                .or_llvm_err()?;
-            // SAFETY: Text layout {ptr:i64, len:i64, cap:i64}; offset 8 = len.
-            let len_slot = unsafe {
-                ctx.builder()
-                    .build_in_bounds_gep(
-                        i8_ty,
-                        text_ptr,
-                        &[i64_ty.const_int(8, false)],
-                        "byte_len_slot",
-                    )
-                    .or_llvm_err()?
-            };
-            let raw_len = ctx
-                .builder()
-                .build_load(i64_ty, len_slot, "byte_len_raw")
+                .build_call(strlen_fn, &[src.into()], "byte_len")
                 .or_llvm_err()?
-                .into_int_value();
-            let len = ctx
-                .builder()
-                .build_select(is_null, i64_ty.const_zero(), raw_len, "byte_len")
-                .or_llvm_err()?;
-            ctx.set_register(dst, len);
+                    .basic_value_or("ByteLen: expected return value")?;
+            ctx.set_register(dst, result);
             Ok(())
         }
         0x31 => {
@@ -30573,6 +30660,18 @@ fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
         ctx.mark_variant_register(dst.0);
     }
     ctx.copy_variant_float_fields(src.0, dst.0);
+    // DEREF-INTERIOR-1: the pre-loaded-element property must survive
+    // register moves — `CbgrExtended 0x0B; MOV; CHK_REF; DEREF` is the
+    // canonical archive shape for `&mut list[i]` consumption, and a
+    // dropped mark sends DEREF down the load path (double-deref of a
+    // record element → header word treated as an address).
+    if ctx.is_interior_list_ref(src.0) {
+        ctx.mark_interior_list_ref(dst.0);
+    }
+    // CLONE-AOT-ALIAS-1: statically-known alloc size follows the value.
+    if let Some(sz) = ctx.get_obj_alloc_size(src.0) {
+        ctx.set_obj_alloc_size(dst.0, sz);
+    }
     if ctx.is_pass_through_ref(src.0) {
         ctx.mark_pass_through_ref(dst.0);
     }

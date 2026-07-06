@@ -284,3 +284,12 @@ across `memory/`):
 | §A | Fundamental fix for §3.1 — propagate receiver type binding to method-body `compile_field_access` | multi-day VBC codegen | open (cross-module record-return field-access OOB defect class) |
 | §B | Cross-tier divergence sweep: run the four test files under `--aot` and ensure exit-code parity with `--interp` | 1 hour wall-clock (AOT compile times) | pending |
 | §C | Extend `Debug` / `Display` `.fmt(...)` tests for `UseAfterFreeError` and `RevocationError` once §A closes | ~30 min | open (gated on §A) |
+
+## Session 2026-07-05 — §3.4 umbrella-dispatch pin closed; 87/87/0
+
+`has_capability(CAP_OWNED, CAP_READ)` via the `core.mem.{…}` umbrella
+now routes to the `core.mem.capability` free fn: the `public mount`
+re-export traversal in `compile_mount_import` (parent-subtree scan,
+module-parent-before-type-parent tie-break, landed in the interim
+waves) resolves the binding authoritatively.  Pin un-@ignore'd; the
+module is **87 passed / 0 failed / 0 ignored**.
