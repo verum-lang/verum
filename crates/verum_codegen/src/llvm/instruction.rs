@@ -11981,6 +11981,322 @@ fn lower_call<'ctx>(
     Ok(())
 }
 
+/// ITER-ADAPTER-EAGER-AOT-1 / COLLECT-DRAIN-AOT-1 — resolve a register's
+/// tracked owner-type BASE name for the iterator-adapter intercepts
+/// (sticky VBC hint → reg_types pre-pass → obj return-type marking),
+/// generic args stripped. Owned so no `ctx` borrow outlives the probe.
+fn adapter_tracked_type_base(ctx: &FunctionContext<'_, '_>, reg: u16) -> Option<String> {
+    let full = ctx
+        .sticky_type_hint(reg)
+        .map(|s| s.to_string())
+        .or_else(|| ctx.reg_types().type_name(reg).map(|s| s.to_string()))
+        .or_else(|| ctx.get_obj_register_type(reg).map(|s| s.to_string()))?;
+    let base = full.split('<').next().unwrap_or("").trim().to_string();
+    if base.is_empty() { None } else { Some(base) }
+}
+
+/// ITER-ADAPTER-EAGER-AOT-1: eagerly walk a `ListIter` / `ListIterMut`
+/// record — an element-pointer pair `{ ptr (field 0 @ header+24),
+/// end (field 1 @ header+32) }` over the list's i64 value slots — and
+/// build a fresh List from the slot VALUES, mapped through `closure_reg`
+/// when present (`iter().map(f)`) or taken as-is (`iter().collect()`).
+///
+/// This is the Tier-1 twin of the Tier-0 builtin EAGER adapters
+/// (`method_dispatch.rs` `"map"` / `"collect"` on the builtin iterator):
+/// the interpreter never runs the compiled lazy `MappedIter` chain for
+/// list-origin iterators — it collects values eagerly and consumes the
+/// iterator. The compiled lazy chain is NOT usable under AOT (the
+/// generic `MappedIter.next` body's inner `self.iter.next()` lowers to
+/// the const-zero terminal fallback — the erased receiver can't be
+/// resolved statically), so mirroring Tier-0's eager semantics is both
+/// the parity-correct and the only workable lowering. The iterator is
+/// consumed afterwards (ptr := end), matching the interpreter.
+fn emit_listiter_eager_walk<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Reg,
+    iter_reg: Reg,
+    closure_reg: Option<Reg>,
+) -> Result<()> {
+    let i64_type = ctx.types().i64_type();
+    let i8_type = ctx.types().i8_type();
+    let ptr_type = ctx.types().ptr_type();
+
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    let out_list = runtime.lower_new_list(ctx.builder(), ctx.get_module())?;
+
+    let iter_i64 = as_i64(ctx, ctx.get_register(iter_reg.0)?, "eiter_i64")?;
+
+    let current_fn = ctx.function();
+    let llvm_cx = ctx.llvm_context();
+    let init_bb = llvm_cx.append_basic_block(current_fn, "eiter_init");
+    let head_bb = llvm_cx.append_basic_block(current_fn, "eiter_head");
+    let body_bb = llvm_cx.append_basic_block(current_fn, "eiter_body");
+    let consume_bb = llvm_cx.append_basic_block(current_fn, "eiter_consume");
+    let done_bb = llvm_cx.append_basic_block(current_fn, "eiter_done");
+
+    // Nil-receiver guard: degrade to an empty List (same graceful-nil
+    // discipline as the const-zero terminal fallback, minus the crash).
+    let iter_is_nil = ctx
+        .builder()
+        .build_int_compare(IntPredicate::EQ, iter_i64, i64_type.const_zero(), "eiter_nil")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(iter_is_nil, done_bb, init_bb)
+        .or_llvm_err()?;
+
+    // init: load cur/end from the record; hoist the closure fn/env loads.
+    ctx.builder().position_at_end(init_bb);
+    let iter_ptr = ctx
+        .builder()
+        .build_int_to_ptr(iter_i64, ptr_type, "eiter_ptr")
+        .or_llvm_err()?;
+    // SAFETY: GEP to ListIter record field 0 (`ptr`) at header+24.
+    let cur_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(
+                i8_type,
+                iter_ptr,
+                &[i64_type.const_int(RuntimeLowering::OBJECT_HEADER_SIZE, false)],
+                "eiter_cur_slot",
+            )
+            .or_llvm_err()?
+    };
+    // SAFETY: GEP to ListIter record field 1 (`end`) at header+32.
+    let end_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(
+                i8_type,
+                iter_ptr,
+                &[i64_type.const_int(RuntimeLowering::OBJECT_HEADER_SIZE + 8, false)],
+                "eiter_end_slot",
+            )
+            .or_llvm_err()?
+    };
+    let end_v = ctx
+        .builder()
+        .build_load(i64_type, end_slot, "eiter_end")
+        .or_llvm_err()?
+        .into_int_value();
+    let cur_var = ctx
+        .builder()
+        .build_alloca(i64_type, "eiter_cur_var")
+        .or_llvm_err()?;
+    let cur0 = ctx
+        .builder()
+        .build_load(i64_type, cur_slot, "eiter_cur0")
+        .or_llvm_err()?
+        .into_int_value();
+    ctx.builder().build_store(cur_var, cur0).or_llvm_err()?;
+    // Closure fn/env (loaded once): closure struct is {fn_ptr@0, env@8}.
+    let closure_parts = if let Some(creg) = closure_reg {
+        let cval = ctx.get_register(creg.0)?;
+        let cptr = as_ptr(ctx, cval, "eiter_closure")?;
+        let fn_ptr = ctx
+            .builder()
+            .build_load(ptr_type, cptr, "eiter_fn")
+            .or_llvm_err()?
+            .into_pointer_value();
+        // SAFETY: GEP into the closure struct {fn_ptr, env_ptr} at offset 8.
+        let env_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, cptr, &[i64_type.const_int(8, false)], "eiter_env_slot")
+                .or_llvm_err()?
+        };
+        let env_ptr = ctx
+            .builder()
+            .build_load(ptr_type, env_slot, "eiter_env")
+            .or_llvm_err()?;
+        Some((fn_ptr, env_ptr))
+    } else {
+        None
+    };
+    ctx.builder()
+        .build_unconditional_branch(head_bb)
+        .or_llvm_err()?;
+
+    // head: cur >= end → consume/done.
+    ctx.builder().position_at_end(head_bb);
+    let cur = ctx
+        .builder()
+        .build_load(i64_type, cur_var, "eiter_cur")
+        .or_llvm_err()?
+        .into_int_value();
+    let exhausted = ctx
+        .builder()
+        .build_int_compare(IntPredicate::UGE, cur, end_v, "eiter_exhausted")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(exhausted, consume_bb, body_bb)
+        .or_llvm_err()?;
+
+    // body: elem = *cur (raw i64 value slot); map through the closure when
+    // present; push; cur += 8.
+    ctx.builder().position_at_end(body_bb);
+    let elem_ptr = ctx
+        .builder()
+        .build_int_to_ptr(cur, ptr_type, "eiter_elem_ptr")
+        .or_llvm_err()?;
+    let elem = ctx
+        .builder()
+        .build_load(i64_type, elem_ptr, "eiter_elem")
+        .or_llvm_err()?
+        .into_int_value();
+    let pushed: BasicValueEnum = if let Some((fn_ptr, env_ptr)) = closure_parts {
+        // Closure ABI (mirrors CallClosure lowering): i64 (ptr env, i64 arg).
+        let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let mapped = ctx
+            .builder()
+            .build_indirect_call(
+                fn_type,
+                fn_ptr,
+                &[env_ptr.into(), elem.into()],
+                "eiter_mapped",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .unwrap_or_else(|| i64_type.const_zero().into());
+        mapped
+    } else {
+        elem.into()
+    };
+    runtime.lower_list_push(ctx.builder(), ctx.get_module(), out_list, pushed)?;
+    // lower_list_push splits blocks; reload insertion point context is fine —
+    // the builder now sits in its continue block.
+    let cur_next = ctx
+        .builder()
+        .build_int_add(cur, i64_type.const_int(8, false), "eiter_cur_next")
+        .or_llvm_err()?;
+    ctx.builder().build_store(cur_var, cur_next).or_llvm_err()?;
+    ctx.builder()
+        .build_unconditional_branch(head_bb)
+        .or_llvm_err()?;
+
+    // consume: ptr := end (Tier-0 consumes the iterator after map/collect).
+    ctx.builder().position_at_end(consume_bb);
+    ctx.builder().build_store(cur_slot, end_v).or_llvm_err()?;
+    ctx.builder()
+        .build_unconditional_branch(done_bb)
+        .or_llvm_err()?;
+
+    // done: dst := out list.
+    ctx.builder().position_at_end(done_bb);
+    ctx.set_register(dst.0, out_list.into());
+    ctx.mark_list_register(dst.0);
+    Ok(())
+}
+
+/// COLLECT-DRAIN-AOT-1: drain an iterator whose concrete type is
+/// statically tracked into a fresh List by repeatedly calling the
+/// type's own `<IterType>.next(iter)` until the returned `Maybe` is
+/// nil-shaped or tag==None (0), pushing each `Some` payload (slot 0).
+///
+/// Tier-1 twin of the Tier-0 runtime drain (COLLECT-FROMITER-2,
+/// `method_dispatch.rs` from_iter intercept): same next-until-None
+/// drive the for-loop path uses, same payload semantics, List target
+/// (the erased `collect` target C defaults to List on both tiers).
+fn emit_collect_drain<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Reg,
+    iter_reg: Reg,
+    next_fn_name: &str,
+) -> Result<()> {
+    let i64_type = ctx.types().i64_type();
+    let ptr_type = ctx.types().ptr_type();
+
+    let next_fn = ctx
+        .get_module()
+        .get_function(next_fn_name)
+        .or_missing_fn(next_fn_name)?;
+
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    let out_list = runtime.lower_new_list(ctx.builder(), ctx.get_module())?;
+
+    let iter_val = ctx.get_register(iter_reg.0)?;
+    let iter_i64 = as_i64(ctx, iter_val, "cdrain_iter_i64")?;
+    // Coerce the receiver once to next()'s param-0 type (i64 or ptr).
+    let iter_arg: BasicMetadataValueEnum = {
+        let param_tys = next_fn.get_type().get_param_types();
+        if let Some(expected_meta) = param_tys.first() {
+            if let Some(expected_ty) = meta_type_to_basic(*expected_meta) {
+                coerce_value(ctx, iter_val, expected_ty, "cdrain_iter")?.into()
+            } else {
+                coerce_value(ctx, iter_val, i64_type.into(), "cdrain_iter")?.into()
+            }
+        } else {
+            coerce_value(ctx, iter_val, i64_type.into(), "cdrain_iter")?.into()
+        }
+    };
+
+    let current_fn = ctx.function();
+    let llvm_cx = ctx.llvm_context();
+    let head_bb = llvm_cx.append_basic_block(current_fn, "cdrain_head");
+    let tag_bb = llvm_cx.append_basic_block(current_fn, "cdrain_tag");
+    let some_bb = llvm_cx.append_basic_block(current_fn, "cdrain_some");
+    let done_bb = llvm_cx.append_basic_block(current_fn, "cdrain_done");
+
+    // Nil-receiver guard: empty List (graceful-nil discipline).
+    let iter_is_nil = ctx
+        .builder()
+        .build_int_compare(IntPredicate::EQ, iter_i64, i64_type.const_zero(), "cdrain_nil")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(iter_is_nil, done_bb, head_bb)
+        .or_llvm_err()?;
+
+    // head: m = <T>.next(iter); nil-shaped Maybe → done.
+    ctx.builder().position_at_end(head_bb);
+    let m_raw = ctx
+        .builder()
+        .build_call(next_fn, &[iter_arg], "cdrain_next")
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .unwrap_or_else(|| i64_type.const_zero().into());
+    let m_i64 = as_i64(ctx, m_raw, "cdrain_next_i64")?;
+    let m_is_nil = ctx
+        .builder()
+        .build_int_compare(IntPredicate::EQ, m_i64, i64_type.const_zero(), "cdrain_mnil")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(m_is_nil, done_bb, tag_bb)
+        .or_llvm_err()?;
+
+    // tag: Maybe variant tag (i32 @ +24); None (tag 0) terminates.
+    ctx.builder().position_at_end(tag_bb);
+    let m_ptr = ctx
+        .builder()
+        .build_int_to_ptr(m_i64, ptr_type, "cdrain_m_ptr")
+        .or_llvm_err()?;
+    let is_none_i64 = runtime.lower_is_var(ctx.builder(), m_ptr, 0)?;
+    let is_none = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::NE,
+            is_none_i64,
+            i64_type.const_zero(),
+            "cdrain_is_none",
+        )
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(is_none, done_bb, some_bb)
+        .or_llvm_err()?;
+
+    // some: payload (slot 0 @ +32) → push; loop.
+    ctx.builder().position_at_end(some_bb);
+    let payload = runtime.lower_as_var(ctx.builder(), m_ptr, 0)?;
+    runtime.lower_list_push(ctx.builder(), ctx.get_module(), out_list, payload.into())?;
+    ctx.builder()
+        .build_unconditional_branch(head_bb)
+        .or_llvm_err()?;
+
+    // done: dst := out list.
+    ctx.builder().position_at_end(done_bb);
+    ctx.set_register(dst.0, out_list.into());
+    ctx.mark_list_register(dst.0);
+    Ok(())
+}
+
 fn lower_call_method<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     dst: Reg,
@@ -15243,6 +15559,100 @@ fn lower_call_method<'ctx>(
             }
             _ => {
                 // Fall through for unrecognized TCP/UDP methods
+            }
+        }
+    }
+
+    // ============================================================
+    // ITER-ADAPTER-EAGER-AOT-1 + COLLECT-DRAIN-AOT-1 — the AOT leg of
+    // the Tier-0 iterator-adapter surface (COLLECT-FROMITER-2 twin).
+    //
+    // The compiled lazy adapter chain is not runnable under AOT: the
+    // generic `MappedIter.next` body's inner `self.iter.next()` lowers
+    // to the const-zero terminal fallback (the erased receiver type
+    // can't be resolved statically), and the erased `C.from_iter(self)`
+    // inside `Iterator.collect` nil-degrades the same way — so every
+    // adapter-chain `.collect()` produced nil and the follow-on
+    // `len()/GetE` crashed (verum_generic_len(NULL)). Tier-0 solved
+    // this class with EAGER builtin adapters + a runtime from_iter
+    // drain; this block is the Tier-1 mirror:
+    //   * `map` on a `ListIter`/`ListIterMut` record → eager slot walk
+    //     through the closure into a fresh List (Tier-0 builtin map).
+    //   * `collect`/`from_iter` on a List-valued register → passthrough
+    //     (Tier-0: "collect() on a List returns it as-is").
+    //   * `collect`/`from_iter` on `ListIter`/`ListIterMut` → eager
+    //     slot walk (values), iterator consumed (Tier-0 builtin
+    //     collect).
+    //   * `collect`/`from_iter` on any other statically-tracked type
+    //     with its own `<T>.next` and no own `<T>.collect`/`from_iter`
+    //     → next-until-None drain (Tier-0 COLLECT-FROMITER-2 drain).
+    // Types with their OWN `collect`/`from_iter` are never intercepted
+    // (legitimate static targets resolve through the strategies).
+    // ============================================================
+    {
+        let is_map_shape = bare_method_early == "map" && args.count == 1;
+        let is_collect_shape = bare_method_early == "collect" && args.count == 0;
+        let is_from_iter_shape = bare_method_early == "from_iter";
+        if is_map_shape || is_collect_shape || is_from_iter_shape {
+            let is_slice_iter =
+                |n: Option<&str>| matches!(n, Some("ListIter") | Some("ListIterMut"));
+
+            if is_map_shape && !ctx.is_list_register(receiver.0) {
+                let recv_base = adapter_tracked_type_base(ctx, receiver.0);
+                // Trust the register marks first; fall back to the
+                // VBC-resolved method prefix ("ListIter.map") when the
+                // receiver register is untracked.
+                if is_slice_iter(recv_base.as_deref())
+                    || (recv_base.is_none() && is_slice_iter(method_type_prefix))
+                {
+                    return emit_listiter_eager_walk(
+                        ctx,
+                        dst,
+                        receiver,
+                        Some(Reg(args.start.0)),
+                    );
+                }
+            }
+
+            if is_collect_shape || is_from_iter_shape {
+                // The iterator travels as the RECEIVER (instance form) or
+                // as ARG 0 with a placeholder receiver (the static/bogus-
+                // owner from_iter form) — probe both, receiver first,
+                // exactly like the Tier-0 drain.
+                let mut cand_regs: Vec<Reg> = vec![receiver];
+                if is_from_iter_shape && args.count >= 1 {
+                    cand_regs.push(Reg(args.start.0));
+                }
+                for creg in cand_regs {
+                    let cbase = adapter_tracked_type_base(ctx, creg.0);
+                    // (a) List passthrough — Tier-0 collect-on-List mirror.
+                    if ctx.is_list_register(creg.0) || cbase.as_deref() == Some("List") {
+                        let v = ctx.get_register(creg.0)?;
+                        ctx.set_register(dst.0, v);
+                        ctx.mark_list_register(dst.0);
+                        return Ok(());
+                    }
+                    let Some(base) = cbase else { continue };
+                    // A type with its OWN collect/from_iter is a
+                    // legitimate static target — never intercept it.
+                    if ctx
+                        .get_module()
+                        .get_function(&format!("{}.{}", base, bare_method_early))
+                        .is_some()
+                    {
+                        break;
+                    }
+                    // (b) list-slice iterators: eager value walk.
+                    if base == "ListIter" || base == "ListIterMut" {
+                        return emit_listiter_eager_walk(ctx, dst, creg, None);
+                    }
+                    // (c) any other tracked iterator with its own `.next`:
+                    // next-until-None drain.
+                    let next_name = format!("{}.next", base);
+                    if ctx.get_module().get_function(&next_name).is_some() {
+                        return emit_collect_drain(ctx, dst, creg, &next_name);
+                    }
+                }
             }
         }
     }
