@@ -485,7 +485,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(Opcode::CallG.to_byte());
             encode_reg(*dst, output);
             encode_varint(*func_id as u64, output);
-            encode_reg_vec(type_args, output);
+            // Type args are static TypeRefs (see `Instruction::CallG` doc).
+            encode_varint(type_args.len() as u64, output);
+            for ty in type_args {
+                encode_type_ref(ty, output);
+            }
             encode_reg_range(*args, output);
         }
 
@@ -3745,7 +3749,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         Opcode::CallG => {
             let dst = decode_reg(data, offset)?;
             let func_id = decode_varint(data, offset)? as u32;
-            let type_args = decode_reg_vec(data, offset)?;
+            // Type args are static TypeRefs (see `Instruction::CallG` doc).
+            let type_arg_count = decode_varint(data, offset)? as usize;
+            let mut type_args = Vec::with_capacity(type_arg_count);
+            for _ in 0..type_arg_count {
+                type_args.push(decode_type_ref(data, offset)?);
+            }
             let args = decode_reg_range(data, offset)?;
             Ok(Instruction::CallG {
                 dst,

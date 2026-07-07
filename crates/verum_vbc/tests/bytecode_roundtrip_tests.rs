@@ -23,7 +23,7 @@ use verum_vbc::instruction::{
     BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp, CompareOp, FloatToIntMode, Instruction,
     Opcode, Reg, RegRange, UnaryFloatOp, UnaryIntOp,
 };
-use verum_vbc::types::TypeId;
+use verum_vbc::types::{TypeId, TypeParamId, TypeRef};
 
 // =============================================================================
 // Helper
@@ -834,4 +834,95 @@ fn test_roundtrip_conversion_sequence() {
         assert_eq!(&decoded, expected, "Sequence roundtrip failed");
     }
     assert_eq!(offset, bytes.len(), "All bytes should be consumed");
+}
+
+// =============================================================================
+// Generic / method-call roundtrips
+// =============================================================================
+//
+// These are the length-table-sensitive opcodes whose hand-rolled operand-length
+// tables (`get_operand_bytes` / `skip_instruction_operands`) desynchronised the
+// monomorphizer's bytecode walkers.  A round-trip test pins their exact wire
+// shape so an added or reshaped operand can't silently reintroduce a length
+// gap.  In particular, `CallG`'s `type_args` are STATIC `TypeRef`s (not
+// registers) — exercise several TypeRef shapes, including the recursive
+// `Instantiated` + `AssociatedProjection` combination that mirrors
+// `future_poll_sync<F: Future>()`'s `Maybe<F.Output>` return type.
+
+#[test]
+fn test_roundtrip_call_g_empty_type_args() {
+    assert_roundtrip(&Instruction::CallG {
+        dst: Reg(0),
+        func_id: 7,
+        type_args: vec![],
+        args: RegRange::new(Reg(1), 2),
+    });
+}
+
+#[test]
+fn test_roundtrip_call_g_concrete_type_args() {
+    assert_roundtrip(&Instruction::CallG {
+        dst: Reg(3),
+        func_id: 1234,
+        type_args: vec![TypeRef::Concrete(TypeId(4)), TypeRef::Concrete(TypeId(99))],
+        args: RegRange::new(Reg(4), 1),
+    });
+}
+
+#[test]
+fn test_roundtrip_call_g_generic_type_arg() {
+    assert_roundtrip(&Instruction::CallG {
+        dst: Reg(1),
+        func_id: 88,
+        type_args: vec![TypeRef::Generic(TypeParamId(0)), TypeRef::Generic(TypeParamId(3))],
+        args: RegRange::new(Reg(2), 0),
+    });
+}
+
+#[test]
+fn test_roundtrip_call_g_associated_projection_type_arg() {
+    // Instantiated<Maybe, [AssociatedProjection<Generic(0), "Output">]> — the
+    // exact shape that broke VBC serialization before TypeRef::AssociatedProjection.
+    assert_roundtrip(&Instruction::CallG {
+        dst: Reg(2),
+        func_id: 515,
+        type_args: vec![TypeRef::Instantiated {
+            base: TypeId(515),
+            args: vec![TypeRef::AssociatedProjection {
+                base: Box::new(TypeRef::Generic(TypeParamId(0))),
+                assoc: "Output".to_string(),
+            }],
+        }],
+        args: RegRange::new(Reg(3), 1),
+    });
+}
+
+#[test]
+fn test_roundtrip_call_m() {
+    assert_roundtrip(&Instruction::CallM {
+        dst: Reg(0),
+        receiver: Reg(1),
+        method_id: 12345,
+        args: RegRange::new(Reg(2), 2),
+    });
+}
+
+#[test]
+fn test_roundtrip_call_m_no_args() {
+    assert_roundtrip(&Instruction::CallM {
+        dst: Reg(5),
+        receiver: Reg(6),
+        method_id: 0,
+        args: RegRange::new(Reg(7), 0),
+    });
+}
+
+#[test]
+fn test_roundtrip_call_m_high_ids() {
+    assert_roundtrip(&Instruction::CallM {
+        dst: Reg(300),
+        receiver: Reg(4095),
+        method_id: 1_048_576,
+        args: RegRange::new(Reg(10), 4),
+    });
 }

@@ -761,7 +761,8 @@ fn write_instruction(
             type_args,
             args,
         } => {
-            let targs: Vec<String> = type_args.iter().map(r).collect();
+            // CallG type args are static TypeRefs (not registers).
+            let targs: Vec<String> = type_args.iter().map(|t| format!("{:?}", t)).collect();
             write!(
                 out,
                 "CALL_G    {}, {}<{}> {}",

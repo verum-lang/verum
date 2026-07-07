@@ -334,10 +334,29 @@ impl<'a> BytecodeSpecializer<'a> {
         let mut output = Vec::with_capacity(bytecode.len());
         let mut pc = 0;
 
+        let trace_this = std::env::var_os("VERUM_TRACE_MONO").is_some()
+            && self
+                .module
+                .get_string(func.name)
+                .is_some_and(|n| n.contains("future_poll_sync"));
+        if trace_this {
+            eprintln!(
+                "[mono-spec-body] specializing '{}' bytecode_len={}",
+                self.module.get_string(func.name).unwrap_or("?"),
+                bytecode.len()
+            );
+        }
+
         while pc < bytecode.len() {
             self.stats.total_instructions += 1;
             let opcode_byte = bytecode[pc];
             let opcode = Opcode::from_byte(opcode_byte);
+
+            if trace_this {
+                // For Call/CallM, peek the callee/method id and print its
+                // string so we can see how `future.poll()` was compiled.
+                eprintln!("[mono-spec-body]   pc={} opcode={:?}", pc, opcode);
+            }
 
             match opcode {
                 // Generic call: rewrite to direct call
@@ -349,6 +368,12 @@ impl<'a> BytecodeSpecializer<'a> {
                 // Virtual dispatch: attempt devirtualization
                 Opcode::CallV => {
                     self.specialize_call_v(bytecode, &mut pc, &mut output)?;
+                }
+
+                // Method call: devirtualize a `dyn:Protocol.method` token using
+                // the concrete substitution (F → ReadyFuture ⇒ ReadyFuture.poll).
+                Opcode::CallM => {
+                    self.specialize_call_m(bytecode, &mut pc, &mut output)?;
                 }
 
                 // Generic object creation
@@ -595,6 +620,120 @@ impl<'a> BytecodeSpecializer<'a> {
         }
 
         Ok(())
+    }
+
+    /// Specializes a CALL_M (method call) instruction.
+    ///
+    /// If the method token is a `dyn:Protocol.method` dispatch on a type
+    /// parameter, devirtualize it to the concrete implementation by rewriting
+    /// the method-id string to `ConcreteType.method` (the concrete receiver
+    /// type comes from the substitution's primary type parameter).  The AOT
+    /// method-call lowering then resolves the concrete method directly instead
+    /// of hitting the unresolved-dyn const-zero stub (the async-AOT SIGSEGV).
+    /// Re-emitting CALL_M unchanged in shape (not rewriting to CALL) avoids any
+    /// receiver/argument-register-contiguity assumptions.
+    fn specialize_call_m(
+        &mut self,
+        bytecode: &[u8],
+        pc: &mut usize,
+        output: &mut Vec<u8>,
+    ) -> Result<(), SpecializationError> {
+        use crate::instruction::Instruction;
+        // Decode/re-encode through the CANONICAL codec so the CALL_M operand
+        // layout (dst, receiver, method_id-varint, reg-RANGE args) round-trips
+        // byte-for-byte — a hand-rolled re-emit that got the args encoding
+        // wrong desynchronised the whole specialized stream, so every later
+        // instruction misdecoded (a phantom RANGE_NEW etc.) and the body was
+        // lowered to garbage.  Only `method_id` is rewritten (devirtualized).
+        let start = *pc;
+        let instr =
+            crate::bytecode::decode_instruction(bytecode, pc).map_err(|e| {
+                SpecializationError::InvalidBytecode {
+                    offset: start,
+                    message: format!("specialize_call_m: canonical decode failed: {:?}", e),
+                }
+            })?;
+        if let Instruction::CallM {
+            dst,
+            receiver,
+            method_id,
+            args,
+        } = instr
+        {
+            if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                let nm = self
+                    .module
+                    .get_string(crate::types::StringId(method_id))
+                    .unwrap_or("<none>");
+                if nm.contains("poll") || nm.contains("dyn:") || nm.contains("Future") {
+                    eprintln!(
+                        "[mono-callm-raw] method_id={} name='{}' subst_T0={:?}",
+                        method_id,
+                        nm,
+                        self.substitution.get(TypeParamId(0))
+                    );
+                }
+            }
+            let method_id = self.devirt_dyn_method_id(method_id).unwrap_or(method_id);
+            crate::bytecode::encode_instruction(
+                &Instruction::CallM {
+                    dst,
+                    receiver,
+                    method_id,
+                    args,
+                },
+                output,
+            );
+        } else {
+            // Not actually a CALL_M — re-encode verbatim (defensive).
+            crate::bytecode::encode_instruction(&instr, output);
+        }
+        Ok(())
+    }
+
+    /// Resolve a `dyn:Protocol.method` method-id string to the concrete
+    /// `ConcreteType.method` string id via the substitution's primary type
+    /// parameter.  Returns None if the token is not a dyn-dispatch, the primary
+    /// type isn't concrete, or the concrete method function is absent.
+    fn devirt_dyn_method_id(&self, method_id: u32) -> Option<u32> {
+        let name = self
+            .module
+            .get_string(crate::types::StringId(method_id))?
+            .to_string();
+        // Extract the method name from either a `dyn:Protocol.method` token or
+        // a BARE `method` (a protocol-method call on a type parameter whose
+        // receiver's concrete type is only known after substitution — e.g.
+        // `future.poll()` in `future_poll_sync<F: Future>` compiles to a
+        // CALL_M with the bare method name "poll").  An already-concrete
+        // `Type.method` is left untouched.
+        let method: &str = if let Some(rest) = name.strip_prefix("dyn:") {
+            rest.rsplit('.').next()?
+        } else if !name.contains('.') {
+            name.as_str()
+        } else {
+            return None;
+        };
+        let TypeRef::Concrete(tid) = self.substitution.get(TypeParamId(0))? else {
+            return None;
+        };
+        let type_name = self.module.get_type_name(*tid)?;
+        let concrete = format!("{}.{}", type_name, method);
+        if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+            let hit = self
+                .module
+                .functions
+                .iter()
+                .any(|f| self.module.get_string(f.name).is_some_and(|s| s == concrete));
+            eprintln!(
+                "[mono-callm] dyn='{}' -> concrete='{}' found={}",
+                name, concrete, hit
+            );
+        }
+        self.module
+            .functions
+            .iter()
+            .find(|f| self.module.get_string(f.name).is_some_and(|s| s == concrete))
+            .map(|f| f.name.0)
     }
 
     /// Looks up a protocol implementation for a concrete type.
@@ -880,14 +1019,28 @@ impl<'a> BytecodeSpecializer<'a> {
         pc: &mut usize,
         output: &mut Vec<u8>,
     ) -> Result<(), SpecializationError> {
-        output.push(opcode.to_byte());
-        *pc += 1;
-
-        // Get operand length and copy
-        let operand_bytes = self.get_operand_bytes(opcode, bytecode, *pc)?;
-        output.extend_from_slice(&bytecode[*pc..*pc + operand_bytes]);
-        *pc += operand_bytes;
-
+        // Copy a non-specialized instruction verbatim, using the CANONICAL
+        // decoder to find its exact length.  The previous `get_operand_bytes`
+        // was a self-described "simplified" (incomplete) operand-length table:
+        // one wrong/missing opcode length desynchronised the stream, after
+        // which a later operand byte decoded as a phantom instruction — the
+        // failure surfaced as an out-of-bounds slice panic (a LoadF read as 9
+        // bytes with 2 remaining).  Delegating to `decode_instruction` makes
+        // the copy correct for every current and future opcode.  These opcodes
+        // carry no type operands to substitute, so a verbatim copy is exact.
+        let start = *pc;
+        let mut probe = *pc;
+        crate::bytecode::decode_instruction(bytecode, &mut probe).map_err(|e| {
+            SpecializationError::InvalidBytecode {
+                offset: start,
+                message: format!(
+                    "copy_instruction: canonical decode of {:?} failed: {:?}",
+                    opcode, e
+                ),
+            }
+        })?;
+        output.extend_from_slice(&bytecode[start..probe]);
+        *pc = probe;
         Ok(())
     }
 
@@ -1421,175 +1574,6 @@ impl<'a> BytecodeSpecializer<'a> {
                 self.write_varint(output, bytes.len() as u64);
                 output.extend_from_slice(bytes);
             }
-        }
-    }
-
-    /// Gets the number of operand bytes for an opcode.
-    fn get_operand_bytes(
-        &self,
-        opcode: Opcode,
-        bytecode: &[u8],
-        pc: usize,
-    ) -> Result<usize, SpecializationError> {
-        // This is a simplified version. Full implementation would parse
-        // each instruction precisely.
-        match opcode {
-            // No operands
-            Opcode::Nop | Opcode::RetV => Ok(0),
-
-            // Single register
-            Opcode::LoadTrue | Opcode::LoadFalse | Opcode::LoadUnit | Opcode::LoadNil => {
-                self.count_reg_bytes(bytecode, pc)
-            }
-
-            // Two registers (unary ops)
-            Opcode::Mov
-            | Opcode::Not
-            | Opcode::NegI
-            | Opcode::NegF
-            | Opcode::Bnot
-            | Opcode::Clone
-            | Opcode::Ref
-            | Opcode::RefMut
-            | Opcode::Deref
-            | Opcode::DerefMut => {
-                let first = self.count_reg_bytes(bytecode, pc)?;
-                let second = self.count_reg_bytes(bytecode, pc + first)?;
-                Ok(first + second)
-            }
-
-            // Three registers (binary ops)
-            Opcode::AddI
-            | Opcode::SubI
-            | Opcode::MulI
-            | Opcode::DivI
-            | Opcode::ModI
-            | Opcode::AddF
-            | Opcode::SubF
-            | Opcode::MulF
-            | Opcode::DivF
-            | Opcode::Band
-            | Opcode::Bor
-            | Opcode::Bxor
-            | Opcode::Shl
-            | Opcode::Shr
-            | Opcode::Ushr
-            | Opcode::EqI
-            | Opcode::NeI
-            | Opcode::LtI
-            | Opcode::LeI
-            | Opcode::GtI
-            | Opcode::GeI
-            | Opcode::EqF
-            | Opcode::NeF
-            | Opcode::LtF
-            | Opcode::LeF
-            | Opcode::GtF
-            | Opcode::GeF
-            | Opcode::And
-            | Opcode::Or
-            | Opcode::Xor
-            | Opcode::EqRef => {
-                let mut total = 0;
-                for _ in 0..3 {
-                    total += self.count_reg_bytes(bytecode, pc + total)?;
-                }
-                Ok(total)
-            }
-
-            // Ret: single register
-            Opcode::Ret => self.count_reg_bytes(bytecode, pc),
-
-            // Jump: register (for conditional) + 4-byte offset
-            Opcode::Jmp => Ok(4),
-            Opcode::JmpIf | Opcode::JmpNot => {
-                let reg_bytes = self.count_reg_bytes(bytecode, pc)?;
-                Ok(reg_bytes + 4)
-            }
-
-            // Fused compare-and-jump: two registers + 4-byte offset
-            Opcode::JmpEq
-            | Opcode::JmpNe
-            | Opcode::JmpLt
-            | Opcode::JmpLe
-            | Opcode::JmpGt
-            | Opcode::JmpGe => {
-                let mut total = 0;
-                for _ in 0..2 {
-                    total += self.count_reg_bytes(bytecode, pc + total)?;
-                }
-                Ok(total + 4)
-            }
-
-            // Call: dst + func_id (varint) + arg_count + args
-            Opcode::Call => {
-                let dst_bytes = self.count_reg_bytes(bytecode, pc)?;
-                let func_bytes = self.count_varint_bytes(bytecode, pc + dst_bytes)?;
-                let arg_count_offset = pc + dst_bytes + func_bytes;
-                if arg_count_offset >= bytecode.len() {
-                    return Err(SpecializationError::InvalidBytecode {
-                        offset: arg_count_offset,
-                        message: "Unexpected end reading arg count for CALL".to_string(),
-                    });
-                }
-                let arg_count = bytecode[arg_count_offset] as usize;
-                let mut total = dst_bytes + func_bytes + 1;
-                for _ in 0..arg_count {
-                    total += self.count_reg_bytes(bytecode, pc + total)?;
-                }
-                Ok(total)
-            }
-
-            // LoadI: register + signed varint
-            Opcode::LoadI => {
-                let reg_bytes = self.count_reg_bytes(bytecode, pc)?;
-                let varint_bytes = self.count_varint_bytes(bytecode, pc + reg_bytes)?;
-                Ok(reg_bytes + varint_bytes)
-            }
-
-            // LoadF: register + 8 bytes
-            Opcode::LoadF => {
-                let reg_bytes = self.count_reg_bytes(bytecode, pc)?;
-                Ok(reg_bytes + 8)
-            }
-
-            // LoadK: register + varint
-            Opcode::LoadK => {
-                let reg_bytes = self.count_reg_bytes(bytecode, pc)?;
-                let varint_bytes = self.count_varint_bytes(bytecode, pc + reg_bytes)?;
-                Ok(reg_bytes + varint_bytes)
-            }
-
-            // LoadSmallI: register + 1 byte
-            Opcode::LoadSmallI => {
-                let reg_bytes = self.count_reg_bytes(bytecode, pc)?;
-                Ok(reg_bytes + 1)
-            }
-
-            // NEW: dst + type_id (varint)
-            Opcode::New => {
-                let dst_bytes = self.count_reg_bytes(bytecode, pc)?;
-                let type_bytes = self.count_varint_bytes(bytecode, pc + dst_bytes)?;
-                Ok(dst_bytes + type_bytes)
-            }
-
-            // GetF/SetF: register + register + field_idx (varint)
-            Opcode::GetF => {
-                let dst_bytes = self.count_reg_bytes(bytecode, pc)?;
-                let obj_bytes = self.count_reg_bytes(bytecode, pc + dst_bytes)?;
-                let field_bytes = self.count_varint_bytes(bytecode, pc + dst_bytes + obj_bytes)?;
-                Ok(dst_bytes + obj_bytes + field_bytes)
-            }
-
-            Opcode::SetF => {
-                let obj_bytes = self.count_reg_bytes(bytecode, pc)?;
-                let field_bytes = self.count_varint_bytes(bytecode, pc + obj_bytes)?;
-                let val_bytes = self.count_reg_bytes(bytecode, pc + obj_bytes + field_bytes)?;
-                Ok(obj_bytes + field_bytes + val_bytes)
-            }
-
-            // Default: estimate based on typical sizes
-            _ => Ok(4),
         }
     }
 

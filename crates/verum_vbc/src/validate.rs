@@ -586,9 +586,9 @@ impl<'a> Validator<'a> {
                     self.check_call_arity(*func_id, args.count as u32, &func_name);
                 }
                 self.check_reg(*dst, max_reg, &func_name);
-                for r in type_args {
-                    self.check_reg(*r, max_reg, &func_name);
-                }
+                // `type_args` are static `TypeRef`s, not registers — nothing
+                // register-shaped to validate here.
+                let _ = type_args;
                 self.check_reg_range(*args, max_reg, &func_name);
             }
             Instruction::TailCall { func_id, args } => {

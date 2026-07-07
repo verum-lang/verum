@@ -185,8 +185,67 @@ impl VbcMonomorphizationPhase {
 
     /// Returns the monomorphized module on success, or diagnostic errors on failure.
     pub fn monomorphize(&mut self, module: &VbcModule) -> Result<VbcModule, List<Diagnostic>> {
+        // Fast path: with no seeded instantiations there is nothing to
+        // specialize, so skip the whole pass — including the per-function
+        // `is_generic` recovery below, which walks all ~42k descriptors and is
+        // pure waste when no specialization will run.  Codegen seeds
+        // `module.specializations` (VBC-GENERIC-INSTANTIATION) only for
+        // programs that actually instantiate a generic function needing
+        // monomorphization, so the common case pays a single clone and returns.
+        if module.specializations.is_empty() {
+            return Ok(module.clone());
+        }
+        let mut cloned = module.clone();
+        // VBC-GENERIC-INSTANTIATION: recover the `is_generic` flag from each
+        // descriptor's parameter/return `TypeRef`s.  The codegen never sets
+        // `descriptor.is_generic` (it is a dead flag defaulting to false), so
+        // this pass historically counted zero generic functions and returned
+        // early — generic AOT monomorphization never ran.  The param/return
+        // TypeRefs DO encode `Generic(TypeParamId)` (they survive the archive
+        // round-trip), so `TypeRef::is_generic()` recovers the flag exactly.
+        // Doing this IN-MEMORY here — not by setting the flag in the codegen —
+        // deliberately avoids regenerating the precompiled stdlib archive,
+        // whose byte-layout perturbation shifts the global field-intern order
+        // and trips a latent positional-field-layout non-determinism
+        // (defect-class §40).  Self-consistent: the interpreter never runs
+        // this pass, so nothing observes the recovered flag except the AOT
+        // monomorphizer.
+        let mut recovered = 0usize;
+        for f in cloned.functions.iter_mut() {
+            if !f.is_generic
+                && (f.params.iter().any(|p| p.type_ref.is_generic())
+                    || f.return_type.is_generic())
+            {
+                f.is_generic = true;
+                recovered += 1;
+            }
+        }
+        if recovered > 0 {
+            tracing::debug!(
+                "VBC monomorphization: recovered is_generic on {} descriptor(s) from TypeRefs",
+                recovered
+            );
+        }
+        // Dead-invariant guard (defect-class: consulted-but-never-set). This
+        // whole pass keys on `is_generic`; if a stdlib-sized module ends up with
+        // ZERO generic functions, the recovery itself has regressed (the
+        // TypeRefs no longer carry `Generic`, or the flag was consulted before
+        // recovery) — the exact silent failure that kept generic AOT
+        // monomorphization dead for the project's entire history. Warn so it
+        // cannot recur unnoticed: any module that links the stdlib has generic
+        // functions, so 0 is implausible.
+        let total_generic = cloned.functions.iter().filter(|f| f.is_generic).count();
+        if total_generic == 0 && cloned.functions.len() > 1000 {
+            tracing::warn!(
+                "VBC monomorphization: 0 generic functions across {} descriptors — the \
+                 is_generic recovery has likely REGRESSED (a stdlib-linked module must have \
+                 generics). generic-AOT-monomorphization is silently disabled; see the \
+                 dead-invariant audit + defect-class consulted-but-never-set.",
+                cloned.functions.len(),
+            );
+        }
         let module_data = VbcModuleData {
-            module: module.clone(),
+            module: cloned,
             tier_stats: super::VbcTierStats {
                 tier0_refs: 0,
                 tier1_refs: 0,
@@ -209,10 +268,42 @@ impl VbcMonomorphizationPhase {
         let generic_count = module.functions.iter().filter(|f| f.is_generic).count();
         self.metrics.generic_functions = generic_count;
 
-        if generic_count == 0 {
+        if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+            let sample: Vec<String> = module
+                .functions
+                .iter()
+                .filter(|f| f.is_generic)
+                .filter_map(|f| module.strings.get(f.name).map(|s| s.to_string()))
+                .filter(|n| n.contains("poll") || n.contains("future"))
+                .take(6)
+                .collect();
+            eprintln!(
+                "[mono-pass] total_fns={} generic_fns={} poll/future-generics={:?}",
+                module.functions.len(),
+                generic_count,
+                sample
+            );
+        }
+
+        // Skip the (expensive) instantiation-graph scan unless there is
+        // actual monomorphization work.  `build_instantiation_graph` walks the
+        // bytecode of EVERY function in the module — including the whole
+        // precompiled stdlib (~42k functions) — so running it per compilation
+        // when there is nothing to specialize is a severe, pure-waste perf
+        // regression.  Instantiations are seeded into `module.specializations`
+        // by the codegen (VBC-GENERIC-INSTANTIATION); with no seeds there is
+        // no work, so short-circuit.  (Historically `is_generic` was never set
+        // so `generic_count` was always 0 and this pass was always a no-op —
+        // gating on the seed set preserves that fast path exactly while
+        // enabling real specialization when the codegen records an
+        // instantiation.)
+        if generic_count == 0 || module.specializations.is_empty() {
             tracing::debug!(
-                "VBC monomorphization: module '{}' has no generic functions",
-                module.name
+                "VBC monomorphization: module '{}' — nothing to specialize \
+                 ({} generic fns, {} seeded instantiations)",
+                module.name,
+                generic_count,
+                module.specializations.len(),
             );
             return Ok(module_data.clone());
         }
@@ -332,203 +423,40 @@ impl VbcMonomorphizationPhase {
         generic_fns: &[FunctionId],
         graph: &mut InstantiationGraph,
     ) {
-        use verum_vbc::instruction::Opcode;
+        use verum_vbc::instruction::Instruction;
 
         let generic_set: std::collections::HashSet<FunctionId> =
             generic_fns.iter().copied().collect();
         let mut pc = 0;
 
+        // Decode with the CANONICAL decoder so the scan stays ALIGNED to real
+        // instruction boundaries.  The previous hand-rolled
+        // `skip_instruction_operands` length table was incomplete (a
+        // "simplified" copy of the same class of bug as the specializer's
+        // get_operand_bytes) — one wrong length desynchronised the stream and
+        // made a later operand byte (e.g. a 0x80 register byte) decode as a
+        // phantom CALL_G whose garbage callee happened to land in the generic
+        // set, injecting instantiations for completely unrelated functions.
         while pc < bytecode.len() {
-            let opcode = Opcode::from_byte(bytecode[pc]);
-            pc += 1;
-
-            if opcode == Opcode::CallG {
-                // Parse CALL_G instruction
-                if let Some((callee, type_args)) = self.parse_call_g(bytecode, &mut pc) {
+            let instr_start = pc;
+            match verum_vbc::bytecode::decode_instruction(bytecode, &mut pc) {
+                Ok(Instruction::CallG {
+                    func_id, type_args, ..
+                }) => {
+                    let callee = FunctionId(func_id);
                     if generic_set.contains(&callee) && !type_args.is_empty() {
                         graph.record_instantiation(callee, type_args, SourceLocation::default());
-
-                        // Record dependency: caller's instantiations depend on callee
-                        // This is simplified - full implementation would track
-                        // per-instantiation dependencies
                     }
                 }
-            } else {
-                // Skip other instructions
-                pc += self.skip_instruction_operands(opcode, bytecode, pc);
+                Ok(_) => {}
+                Err(_) => break,
             }
-        }
-    }
-
-    /// Parses a CALL_G instruction to extract callee and type args.
-    fn parse_call_g(&self, bytecode: &[u8], pc: &mut usize) -> Option<(FunctionId, Vec<TypeRef>)> {
-        // Skip destination register
-        if *pc >= bytecode.len() {
-            return None;
-        }
-        if bytecode[*pc] < 128 {
-            *pc += 1;
-        } else {
-            *pc += 2;
-        }
-
-        // Read function ID (varint)
-        let func_id = self.read_varint(bytecode, pc)? as u32;
-
-        // Read type argument count
-        if *pc >= bytecode.len() {
-            return None;
-        }
-        let type_arg_count = bytecode[*pc] as usize;
-        *pc += 1;
-
-        // Parse type arguments
-        let mut type_args = Vec::with_capacity(type_arg_count);
-        for _ in 0..type_arg_count {
-            if let Some(type_ref) = self.parse_type_ref(bytecode, pc) {
-                type_args.push(type_ref);
-            } else {
-                return None;
-            }
-        }
-
-        // Skip argument count and registers
-        if *pc >= bytecode.len() {
-            return None;
-        }
-        let arg_count = bytecode[*pc] as usize;
-        *pc += 1;
-        for _ in 0..arg_count {
-            if *pc >= bytecode.len() {
-                return None;
-            }
-            if bytecode[*pc] < 128 {
-                *pc += 1;
-            } else {
-                *pc += 2;
-            }
-        }
-
-        Some((FunctionId(func_id), type_args))
-    }
-
-    /// Reads a varint from bytecode.
-    fn read_varint(&self, bytecode: &[u8], pc: &mut usize) -> Option<u64> {
-        let mut result: u64 = 0;
-        let mut shift = 0;
-
-        loop {
-            if *pc >= bytecode.len() {
-                return None;
-            }
-
-            let byte = bytecode[*pc];
-            *pc += 1;
-
-            result |= ((byte & 0x7F) as u64) << shift;
-            if byte < 128 {
+            if pc <= instr_start {
                 break;
             }
-            shift += 7;
-            if shift >= 64 {
-                return None;
-            }
-        }
-
-        Some(result)
-    }
-
-    /// Parses a type reference from bytecode.
-    fn parse_type_ref(&self, bytecode: &[u8], pc: &mut usize) -> Option<TypeRef> {
-        use verum_vbc::types::{TypeId, TypeParamId};
-
-        if *pc >= bytecode.len() {
-            return None;
-        }
-
-        let tag = bytecode[*pc];
-        *pc += 1;
-
-        match tag {
-            0 => {
-                // Concrete type
-                let type_id = self.read_varint(bytecode, pc)? as u32;
-                Some(TypeRef::Concrete(TypeId(type_id)))
-            }
-            1 => {
-                // Generic type parameter
-                if *pc + 2 > bytecode.len() {
-                    return None;
-                }
-                let param_id = bytecode[*pc] as u16 | ((bytecode[*pc + 1] as u16) << 8);
-                *pc += 2;
-                Some(TypeRef::Generic(TypeParamId(param_id)))
-            }
-            2 => {
-                // Instantiated generic type
-                let base = self.read_varint(bytecode, pc)? as u32;
-
-                if *pc >= bytecode.len() {
-                    return None;
-                }
-                let arg_count = bytecode[*pc] as usize;
-                *pc += 1;
-
-                let mut args = Vec::with_capacity(arg_count);
-                for _ in 0..arg_count {
-                    if let Some(arg) = self.parse_type_ref(bytecode, pc) {
-                        args.push(arg);
-                    } else {
-                        return None;
-                    }
-                }
-
-                Some(TypeRef::Instantiated {
-                    base: TypeId(base),
-                    args,
-                })
-            }
-            _ => None,
         }
     }
 
-    /// Skips an instruction's operands.
-    fn skip_instruction_operands(
-        &self,
-        opcode: verum_vbc::instruction::Opcode,
-        bytecode: &[u8],
-        pc: usize,
-    ) -> usize {
-        use verum_vbc::instruction::Opcode;
-
-        match opcode {
-            Opcode::Nop | Opcode::RetV => 0,
-            Opcode::LoadTrue | Opcode::LoadFalse | Opcode::LoadNil | Opcode::LoadUnit => {
-                if pc < bytecode.len() && bytecode[pc] < 128 {
-                    1
-                } else {
-                    2
-                }
-            }
-            Opcode::Jmp => 4,
-            Opcode::JmpIf
-            | Opcode::JmpNot
-            | Opcode::JmpEq
-            | Opcode::JmpNe
-            | Opcode::JmpLt
-            | Opcode::JmpLe
-            | Opcode::JmpGt
-            | Opcode::JmpGe => {
-                let reg_len = if pc < bytecode.len() && bytecode[pc] < 128 {
-                    1
-                } else {
-                    2
-                };
-                reg_len + 4
-            }
-            _ => 4, // Default estimate
-        }
-    }
 }
 
 impl Default for VbcMonomorphizationPhase {

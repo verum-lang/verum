@@ -8939,9 +8939,18 @@ fn lower_call<'ctx>(
     const UNRESOLVED_FN_ID: u32 = 0x7FFFFFFF;
     if func_id == UNRESOLVED_FN_ID {
         // Emit a const-zero into dst as the call's "return value".
-        // Subsequent code reads the default and degrades gracefully.
+        // Subsequent code reads the default and degrades gracefully — but
+        // RECORD it so the monomorphization-completeness diagnostic can
+        // surface the stub (warning, or hard error under VERUM_STRICT_MONO)
+        // instead of it silently producing wrong results / a SIGSEGV.
+        let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
+        super::error::record_unresolved_generic_call(
+            &cur_fn,
+            "call target unresolved at codegen (sentinel fn-id 0x7FFFFFFF — \
+             typically a generic protocol-method dispatch or inner closure)"
+                .to_string(),
+        );
         if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
-            let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
             eprintln!("[aot-unresolved] in fn {} → const-zero dst", cur_fn);
         }
         ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
@@ -8963,8 +8972,17 @@ fn lower_call<'ctx>(
         None => match vbc_mod.get_function(FunctionId(func_id)) {
             Some(d) => d,
             None => {
+                let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
+                super::error::record_unresolved_generic_call(
+                    &cur_fn,
+                    format!(
+                        "Call fn-id {} (base {} + {}) missing in the VBC module table",
+                        resolved_id,
+                        ctx.func_id_base(),
+                        func_id
+                    ),
+                );
                 if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
-                    let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
                     eprintln!(
                         "[aot-unresolved] Call: fn_id={} (base {} + {}) miss in vbc_mod, const-zero in {}",
                         resolved_id,

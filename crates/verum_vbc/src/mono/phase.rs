@@ -262,16 +262,33 @@ impl MonomorphizationPhase {
             resolver = resolver.with_cache(cache.clone());
         }
 
+        let trace_mono = std::env::var_os("VERUM_TRACE_MONO").is_some();
+        if trace_mono {
+            eprintln!("[mono-exec] graph.len()={}", graph.len());
+        }
+
         // Step 2: Resolve all instantiations
         resolver.resolve(graph)?;
 
         // Step 3: Specialize pending functions
         let pending = resolver.take_pending();
+        if trace_mono {
+            let rs = resolver.stats();
+            eprintln!(
+                "[mono-exec] resolved: pending={} stdlib_hits={} cache_hits={}",
+                pending.len(),
+                rs.stdlib_hits,
+                rs.cache_hits
+            );
+        }
         let specialized = if self.config.parallel && pending.len() > 1 {
             self.specialize_parallel(&user_module, graph, &pending)?
         } else {
             self.specialize_sequential(&user_module, graph, &pending)?
         };
+        if trace_mono {
+            eprintln!("[mono-exec] specialized={}", specialized.len());
+        }
 
         // Step 4: Cache newly specialized functions
         if let Some(ref mut cache) = self.cache {

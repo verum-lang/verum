@@ -628,6 +628,15 @@ pub struct VbcCodegen {
     /// own `sys.bitfield.X` — task #121 archive-side regression.
     pending_constants: Vec<(String, verum_ast::Expr, Option<String>)>,
 
+    /// VBC-GENERIC-INSTANTIATION: generic-function instantiations discovered at
+    /// call sites — `(callee raw codegen FunctionId, [concrete type-arg
+    /// TypeRefs in TypeParamId order])`.  Written to `module.specializations`
+    /// in `build_module` (translated through `func_id_remap` to the final
+    /// contiguous index), which both drives and gates the AOT monomorphization
+    /// pass.  AOT-only metadata: the interpreter dispatches dynamically and
+    /// never reads it.
+    pending_specializations: Vec<(u32, Vec<crate::types::TypeRef>)>,
+
     /// Map from type name to TypeId for user-defined types.
     /// Used to emit correct type_id in New instructions for proper Drop dispatch.
     type_name_to_id: std::collections::HashMap<String, crate::types::TypeId>,
@@ -1523,6 +1532,7 @@ impl VbcCodegen {
             static_mut_type_names: std::collections::HashMap::new(),
             // Pending constants for deferred compilation
             pending_constants: Vec::new(),
+            pending_specializations: Vec::new(),
             archive_func_name_to_fid: std::collections::HashMap::new(),
             // Type name to TypeId mapping for Drop dispatch.
             // Pre-populated with all well-known type names and their aliases so that
@@ -16716,28 +16726,59 @@ impl VbcCodegen {
                 .map(|(&k, &v)| (k, v))
                 .collect();
             if !dups.is_empty() {
-                tracing::debug!(
-                    target: "verum_vbc::codegen::dedup",
-                    "{} duplicate codegen-id groups detected (e.g. id={} appears {}x)",
-                    dups.len(), dups[0].0, dups[0].1,
+                // FN-ID-COLLISION diagnostic (defect-class analogue of the
+                // module-local TypeId collision).  Two DISTINCT functions were
+                // pushed under the same codegen-time id; the dedup below keeps
+                // only one, so every `Call(id)` from any caller silently
+                // resolves to the survivor — a wrong-dispatch (and, for a
+                // dropped GENERIC function, the reason AOT monomorphization
+                // can't find it: it was collapsed away).  Surface it at WARN by
+                // default (previously only `tracing::debug`, invisible in
+                // normal runs), list the colliding names, and fail hard under
+                // `VERUM_STRICT_FN_ID=1` so the systemic id-space issue can be
+                // driven to zero.
+                let total_dropped: usize = dups.iter().map(|&(_, c)| c - 1).sum();
+                let names_for = |id: u32| -> Vec<String> {
+                    self.functions
+                        .iter()
+                        .filter(|f| f.descriptor.id.0 == id)
+                        .filter_map(|f| {
+                            self.ctx.strings.get(f.descriptor.name.0 as usize).cloned()
+                        })
+                        .collect()
+                };
+                tracing::warn!(
+                    target: "verum_vbc::codegen::fn_id_collision",
+                    "FN-ID-COLLISION: {} codegen-id group(s) collide; {} function \
+                     body(ies) will be DROPPED by dedup — callers silently resolve \
+                     to the surviving body (wrong-dispatch; a dropped generic fn is \
+                     invisible to AOT monomorphization). Set VERUM_STRICT_FN_ID=1 to \
+                     fail the build.",
+                    dups.len(),
+                    total_dropped,
                 );
-                if std::env::var("VERUM_TRACE_DEDUP").is_ok() {
-                    for f in &self.functions {
-                        if f.descriptor.id.0 == dups[0].0 {
-                            let n = self
-                                .ctx
-                                .strings
-                                .get(f.descriptor.name.0 as usize)
-                                .cloned()
-                                .unwrap_or_default();
-                            eprintln!(
-                                "[codegen-dedup]   duplicate id={} name='{}' bytecode_len={}",
-                                f.descriptor.id.0,
-                                n,
-                                f.instructions.len(),
-                            );
-                        }
-                    }
+                let show = if std::env::var("VERUM_TRACE_DEDUP").is_ok() {
+                    dups.len()
+                } else {
+                    dups.len().min(8)
+                };
+                for &(id, _) in dups.iter().take(show) {
+                    tracing::warn!(
+                        target: "verum_vbc::codegen::fn_id_collision",
+                        "  codegen-id {} collides across {:?}",
+                        id,
+                        names_for(id),
+                    );
+                }
+                if std::env::var("VERUM_STRICT_FN_ID").is_ok() {
+                    return Err(CodegenError::internal(format!(
+                        "FN-ID-COLLISION (strict): {} colliding codegen-id group(s), \
+                         {} body(ies) dropped; first: id={} across {:?}",
+                        dups.len(),
+                        total_dropped,
+                        dups[0].0,
+                        names_for(dups[0].0),
+                    )));
                 }
             }
             use std::collections::HashSet;
@@ -17390,6 +17431,51 @@ impl VbcCodegen {
                 emitted.len(),
             );
             module.mount_aliases = emitted;
+        }
+
+        // VBC-GENERIC-INSTANTIATION: seed `module.specializations` from the
+        // generic instantiations discovered at call sites
+        // (`record_generic_instantiation`).  The recorded `raw_fn_id` is the
+        // callee's pre-remap codegen id; translate it through `func_id_remap`
+        // to the final CONTIGUOUS index the emitted module uses (post-remap
+        // `descriptor.id == index`), so the mono pass resolves it to the right
+        // function.  De-duplicated by (generic_fn, type_args).
+        if !self.pending_specializations.is_empty() {
+            use std::collections::HashSet;
+            let trace = std::env::var_os("VERUM_TRACE_MONO").is_some();
+            let mut seen: HashSet<(u32, Vec<u32>)> = HashSet::new();
+            for (raw_fn_id, type_args) in std::mem::take(&mut self.pending_specializations) {
+                let fn_id = func_id_remap.get(&raw_fn_id).copied().unwrap_or(raw_fn_id);
+                let key_ids: Vec<u32> = type_args
+                    .iter()
+                    .map(|t| match t {
+                        crate::types::TypeRef::Concrete(id) => id.0,
+                        _ => u32::MAX,
+                    })
+                    .collect();
+                if !seen.insert((fn_id, key_ids)) {
+                    continue;
+                }
+                if trace {
+                    let nm = module
+                        .functions
+                        .get(fn_id as usize)
+                        .and_then(|f| module.get_string(f.name))
+                        .unwrap_or("<?>");
+                    eprintln!(
+                        "[mono-seed] raw_fn_id={} -> fn_id={} ('{}') type_args={:?}",
+                        raw_fn_id, fn_id, nm, type_args
+                    );
+                }
+                module.specializations.push(crate::module::SpecializationEntry {
+                    generic_fn: crate::module::FunctionId(fn_id),
+                    type_args,
+                    hash: 0,
+                    bytecode_offset: 0,
+                    bytecode_length: 0,
+                    register_count: 0,
+                });
+            }
         }
 
         Ok(module)
