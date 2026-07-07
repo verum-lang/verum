@@ -1,0 +1,99 @@
+// Repro for law_parse_result_is_ok_iff_success_and_no_errors (AOT Bool mismatch).
+// Mirrors core-tests/meta/contexts/property_test.vr construction exactly.
+// Expected (both tiers identical):
+//   D1 is_ok=true, D2 is_ok=false, D3 is_ok=false, D4 is_ok=false
+//   I-rows: got == want on all 8.
+
+mount core.meta.contexts.{ParseResult, MetaParseError};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.token.{TokenStream};
+mount core.base.maybe.{Maybe};
+
+fn ssp() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn ets() -> TokenStream {
+    TokenStream { tokens: List.new(), span: ssp() }
+}
+
+fn mk_parse_error(msg: Text) -> MetaParseError {
+    MetaParseError {
+        message: msg,
+        code: Maybe.None,
+        span: ssp(),
+        expected: List.new(),
+        found: Maybe.None,
+    }
+}
+
+fn mk_pr(v: Maybe<Int>, ok: Bool, with_err: Bool) -> ParseResult<Int> {
+    let e = mk_parse_error(Text.from("e"));
+    let errs: List<MetaParseError> = if with_err { [e] } else { List.new() };
+    ParseResult { value: v, errors: errs, remaining: ets(), success: ok }
+}
+
+fn bools() -> List<Bool> {
+    [false, true]
+}
+
+fn b2i(b: Bool) -> Int {
+    if b { 1 } else { 0 }
+}
+
+fn main() {
+    // ---- Direct corners (literal bools) ----
+    let r1 = mk_pr(Maybe.Some(7), true, false);
+    let a1 = r1.is_ok();
+    let s1 = r1.success;
+    let e1 = r1.errors.is_empty();
+    let l1 = r1.errors.len();
+    print(f"D1 s=t,e=f: is_ok={a1}/{b2i(a1)} success={s1}/{b2i(s1)} empty={e1}/{b2i(e1)} len={l1}");
+
+    let r2 = mk_pr(Maybe.Some(7), true, true);
+    let a2 = r2.is_ok();
+    let s2 = r2.success;
+    let e2 = r2.errors.is_empty();
+    let l2 = r2.errors.len();
+    print(f"D2 s=t,e=t: is_ok={a2}/{b2i(a2)} success={s2}/{b2i(s2)} empty={e2}/{b2i(e2)} len={l2}");
+
+    let r3 = mk_pr(Maybe.None, false, false);
+    let a3 = r3.is_ok();
+    let s3 = r3.success;
+    let e3 = r3.errors.is_empty();
+    let l3 = r3.errors.len();
+    print(f"D3 s=f,e=f: is_ok={a3}/{b2i(a3)} success={s3}/{b2i(s3)} empty={e3}/{b2i(e3)} len={l3}");
+
+    let r4 = mk_pr(Maybe.None, false, true);
+    let a4 = r4.is_ok();
+    let s4 = r4.success;
+    let e4 = r4.errors.is_empty();
+    let l4 = r4.errors.len();
+    print(f"D4 s=f,e=t: is_ok={a4}/{b2i(a4)} success={s4}/{b2i(s4)} empty={e4}/{b2i(e4)} len={l4}");
+
+    // ---- Iterator-driven 2x2x2 (mirrors the law test) ----
+    for hv in bools().iter() {
+        for ok in bools().iter() {
+            for we in bools().iter() {
+                let has_value = *hv;
+                let success = *ok;
+                let with_err = *we;
+                let v: Maybe<Int> = if has_value { Maybe.Some(7) } else { Maybe.None };
+                let r = mk_pr(v, success, with_err);
+                let got = r.is_ok();
+                let want = success && !with_err;
+                let sv = r.success;
+                let em = r.errors.is_empty();
+                // `agree` mirrors the law test's assert_eq(got, want)
+                // (bit-level Bool compare); inputs are printed via b2i so
+                // both tiers render identically (raw iterator-deref Bools
+                // format as 0/1 under AOT — separate cosmetic class).
+                print(f"I hv={b2i(has_value)} ok={b2i(success)} we={b2i(with_err)} got={got} want={want} agree={b2i(got == want)} success={sv} empty={em}");
+            }
+        }
+    }
+}
