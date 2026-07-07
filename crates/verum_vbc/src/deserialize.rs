@@ -463,6 +463,8 @@ impl<'a> Deserializer<'a> {
  // mount_aliases record in the extensions region, or empty
  // for legacy archives that predate the record.
  mount_aliases: extensions.mount_aliases,
+ // Runtime-only reverse cache — never serialized.
+ type_idx_by_id: std::sync::OnceLock::new(),
  })
  }
 

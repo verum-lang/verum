@@ -541,6 +541,16 @@ pub(in super::super) fn handle_drop_ref(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let src = read_reg(state)?;
+    // ARCHIVE-TYPE-GLUE-IDS-1 hardening: DropRef's drop-glue /
+    // pending-drop machinery re-executes THIS instruction by rewinding
+    // the pc.  The encoded size is opcode(1) + reg operand — 1 byte
+    // for r0-r127, 2 bytes for r128+ (see `encoding::encode_reg`).
+    // The rewind was hard-coded `2`, which for a wide-reg DropRef
+    // landed the pc on the LAST byte of its own encoding and decoded
+    // garbage from there.  Latent while imported-type glue ids were
+    // cleared (user-module Drop types rarely sit above r127); real
+    // stdlib glue activates the path in large frames too.
+    let dropref_len: u32 = if src.0 < 128 { 2 } else { 3 };
     let mut val = state.get_reg(src);
 
     // If the source register is already cleared (unit), check for pending field drops
@@ -615,59 +625,91 @@ pub(in super::super) fn handle_drop_ref(
                 return Ok(DispatchResult::Continue);
             }
 
-            // Look up TypeDescriptor to find drop_fn.
+            // ARCHIVE-TYPE-GLUE-IDS-1: resolve the descriptor BY ID
+            // (`type_index_by_id`), never positionally.  Descriptor ids
+            // are not positional in `module.types` (well-known-id
+            // backfills shift them), so the old
+            // `types[type_id - FIRST_USER]` indexing resolved the WRONG
+            // descriptor — latent while imported-type glue was cleared
+            // (every wrong hit had `drop_fn == None`), loud once real
+            // glue ids are live: a CfgPredicate drop dispatched
+            // `PosixTerminal.drop` (whatever descriptor owned the
+            // coincident POSITION) and null-deref'd on foreign layout.
             //
-            // TYPE-ID-COLLISION-2 (FUNDAMENTAL). Resolve the descriptor BY ID
-            // via `get_type`, NOT by the positional index `types[id -
-            // FIRST_USER]`. VBC type-ids are assigned non-deterministically
-            // (order-dependent `alloc_user_type_id` — see `get_type`'s own
-            // doc-comment and `import_archive_type_with_protocol_remap`), so
-            // `id - FIRST_USER` does NOT equal the descriptor's slot in
-            // `module.types`. Under the positional lookup, mounting any
-            // type-carrying symbol shifts a type's id off its coincidental
-            // slot and the drop handler reads a DIFFERENT type's descriptor:
-            // e.g. dropping a `Cidr` (id 2521) indexed `QuicStream`, whose
-            // `drop_fn` is `core.intrinsics.control.abort` → `Unreachable at
-            // pc 1`. `get_type` scans by `desc.id == id`, which is correct
-            // regardless of load order. Root cause of the mount-dependent,
-            // regen-non-deterministic net/cidr collision class.
-            let drop_info = state
-                .module
-                .get_type(type_id)
+            // SEMANTIC-band gate: ids in
+            // [`FIRST_SEMANTIC`, `LAST_SEMANTIC`] (List/Map/Heap/
+            // Shared/…) are NATIVE interpreter representations — the
+            // runtime heap owns their buffers and their layout is NOT
+            // the stdlib record layout the imported descriptor
+            // describes.  Dispatching the stdlib record drop glue over
+            // a native object reads/writes record offsets into the
+            // native layout (observed: `List.drop`'s
+            // `clear`+`free_buffer` over a native LIST object →
+            // libmalloc "pointer being freed was not allocated" abort).
+            // The codegen allocator provably never places USER types in
+            // this band (`alloc_type_id` skips it; asserted at
+            // finalize), so gating the band excludes exactly the
+            // native-representation set.  Their .vr `Drop` impls remain
+            // meaningful for the self-hosted/AOT record layer only.
+            let semantic_band = crate::types::TypeId::FIRST_SEMANTIC
+                ..=crate::types::TypeId::LAST_SEMANTIC;
+            let type_desc_idx = if type_id.0 >= crate::types::TypeId::FIRST_USER
+                && !semantic_band.contains(&type_id.0)
+            {
+                state.module.type_index_by_id(type_id)
+            } else {
+                None
+            };
+
+            // SYNTHESIS with main's independent TYPE-ID-COLLISION-3 fix
+            // (net-conformance lineage): even a correctly-indexed
+            // descriptor can carry a STALE drop_fn on the lazy run-path
+            // (finalize_module_from_state sets it by name but never
+            // remaps to the contiguous module id). Every genuine Drop
+            // impl registers as `<Type>.drop`, so a resolved drop_fn
+            // whose name is not a drop is a mis-resolution: skip it and
+            // fall through to builtin cleanup rather than execute
+            // arbitrary code. (The loader-side remap-or-clear makes
+            // this a belt-and-braces guard on the archive path; the
+            // run-path load is the one it still protects.)
+
+            // Look up TypeDescriptor to find drop_fn
+            // Extract all needed values before any mutable operations to avoid borrow conflicts
+            let drop_info = type_desc_idx
+                .and_then(|type_idx| state.module.types.get(type_idx))
                 .and_then(|type_desc| type_desc.drop_fn)
                 .and_then(|drop_fn_id| {
-                    state.module.functions.get(drop_fn_id as usize).and_then(|func| {
-                        // TYPE-ID-COLLISION-3 (FUNDAMENTAL, runtime guard). A
-                        // descriptor's drop_fn is a func-id baked at codegen
-                        // and NOT reliably remapped on the lazy run-path load
-                        // (finalize_module_from_state sets it by name at
-                        // mod.rs:6593 but never remaps it to the contiguous
-                        // module id). When the func-id space shifts (any extra
-                        // symbol mounted), a stale drop_fn indexes an unrelated
-                        // function: `List` (id 512) kept drop_fn=1231 which,
-                        // after a mount, pointed at `child_setup_stdio` —
-                        // dropping a `List<Byte>` ran process-spawn syscalls
-                        // and faulted. Every genuine Drop impl is registered as
-                        // `<Type>.drop` (mod.rs:6584), so a resolved drop_fn
-                        // whose name is not a `drop` is a mis-resolution: skip
-                        // it and fall through to the builtin List/tuple/CBGR
-                        // cleanup rather than executing arbitrary code.
-                        let name = state.module.strings.get(func.name).unwrap_or("");
-                        if name == "drop" || name.ends_with(".drop") {
-                            Some((drop_fn_id, func.register_count, func.bytecode_offset))
-                        } else {
-                            None
-                        }
-                    })
+                    state
+                        .module
+                        .functions
+                        .get(drop_fn_id as usize)
+                        .and_then(|func| {
+                            let name =
+                                state.module.strings.get(func.name).unwrap_or("");
+                            if name == "drop" || name.ends_with(".drop") {
+                                Some((
+                                    drop_fn_id,
+                                    func.register_count,
+                                    func.bytecode_offset,
+                                ))
+                            } else {
+                                None
+                            }
+                        })
                 });
 
             if let Some((drop_fn_id, reg_count, _bytecode_offset)) = drop_info {
                 if std::env::var("VERUM_TRACE_DROPFN").is_ok() {
-                    let tn = state
-                        .module
-                        .get_type(type_id)
-                        .and_then(|td| state.module.strings.get(td.name))
-                        .unwrap_or("<builtin>");
+                    let tn = if let Some(type_idx) = type_desc_idx {
+                        state
+                            .module
+                            .types
+                            .get(type_idx)
+                            .and_then(|td| state.module.strings.get(td.name))
+                            .unwrap_or("?")
+                    } else {
+                        "<builtin>"
+                    };
                     let dfn = state
                         .module
                         .functions
@@ -682,9 +724,9 @@ pub(in super::super) fn handle_drop_ref(
                 // Set return_pc to the CURRENT DropRef instruction.
                 // After drop() returns, we'll re-execute DropRef with a cleared register.
                 // Subtract the instruction size to re-execute this instruction
-                // (DropRef encoding: opcode(1) + reg(1) = 2 bytes typically)
+                // (DropRef encoding: opcode(1) + reg(1 or 2) — see dropref_len above)
                 let current_pc = state.pc();
-                let return_pc = current_pc.saturating_sub(2);
+                let return_pc = current_pc.saturating_sub(dropref_len);
                 let caller_base = state.reg_base();
 
                 // Push a new frame for the drop call
@@ -714,13 +756,13 @@ pub(in super::super) fn handle_drop_ref(
                 // No drop_fn for this type, but check if it has fields with Drop impls
                 // This handles structs like StructWithTrackers whose fields have Drop
                 {
+                    // Id-correct resolution here too (see the drop_info
+                    // comment above) — the outer type AND each field's
+                    // type must resolve by descriptor id, not position.
                     // Clone the field list out so the immutable borrow of
                     // `state.module` ends before the drop dispatch below.
-                    // Resolve BY ID (`get_type`), not positional index — same
-                    // TYPE-ID-COLLISION-2 fix as the drop_fn lookup above.
-                    let fields: Vec<crate::types::FieldDescriptor> = state
-                        .module
-                        .get_type(type_id)
+                    let fields: Vec<crate::types::FieldDescriptor> = type_desc_idx
+                        .and_then(|type_idx| state.module.types.get(type_idx))
                         .map(|td| td.fields.iter().cloned().collect())
                         .unwrap_or_default();
                     if !fields.is_empty() {
@@ -734,10 +776,12 @@ pub(in super::super) fn handle_drop_ref(
 
                             if let Some(ftid) = field_type_id
                                 && ftid.0 >= crate::types::TypeId::FIRST_USER
+                                && !semantic_band.contains(&ftid.0)
                             {
                                 let has_drop = state
                                     .module
-                                    .get_type(ftid)
+                                    .type_index_by_id(ftid)
+                                    .and_then(|i| state.module.types.get(i))
                                     .map(|fd| fd.drop_fn.is_some())
                                     .unwrap_or(false);
 
@@ -764,7 +808,7 @@ pub(in super::super) fn handle_drop_ref(
 
                             // Re-run DropRef to process the pending drops
                             let current_pc = state.pc();
-                            state.set_pc(current_pc.saturating_sub(2));
+                            state.set_pc(current_pc.saturating_sub(dropref_len));
                             return Ok(DispatchResult::Continue);
                         }
                     }
@@ -805,7 +849,7 @@ pub(in super::super) fn handle_drop_ref(
             if !state.pending_drops.is_empty() {
                 state.set_reg(src, Value::unit());
                 let current_pc = state.pc();
-                state.set_pc(current_pc.saturating_sub(2));
+                state.set_pc(current_pc.saturating_sub(dropref_len));
                 return Ok(DispatchResult::Continue);
             }
         }

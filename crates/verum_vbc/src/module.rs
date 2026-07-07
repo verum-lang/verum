@@ -260,6 +260,26 @@ pub struct VbcModule {
     /// apply_lazy_with_types` (planned).
     #[serde(default)]
     pub mount_aliases: Vec<(StringId, FunctionId)>,
+
+    /// ARCHIVE-TYPE-GLUE-IDS-1: lazily-built `TypeId.0 → types-vec
+    /// index` reverse cache for id-correct descriptor resolution on
+    /// runtime hot paths (`DropRef` drop-glue dispatch).
+    ///
+    /// `TypeDescriptor.id` is NOT positional in `types` — well-known-id
+    /// backfills (Maybe / Result descriptors pushed under pre-allocated
+    /// ids) and codegen allocation gaps shift descriptors relative to
+    /// their ids; see `get_type`'s non-positional contract.  Any
+    /// `types[id - FIRST_USER]` indexing therefore resolves the WRONG
+    /// descriptor in general — latent while imported-type glue ids were
+    /// cleared (every descriptor's `drop_fn` was `None`, so a wrong hit
+    /// was still a no-op), loud once real drop glue is live.
+    ///
+    /// First-wins on duplicate ids, mirroring `get_type`'s `.find`
+    /// semantics.  `OnceLock` (not `OnceCell`) keeps `Arc<VbcModule>`
+    /// `Send + Sync`; skipped from serialize to keep the wire format
+    /// unchanged — mirrors `StringTable::id_to_idx`.
+    #[serde(skip, default)]
+    pub(crate) type_idx_by_id: std::sync::OnceLock<std::collections::HashMap<u32, usize>>,
 }
 
 impl Default for VbcModule {
@@ -319,6 +339,7 @@ impl VbcModule {
             discharge_receipts: Vec::new(),
             external_function_names: Vec::new(),
             mount_aliases: Vec::new(),
+            type_idx_by_id: std::sync::OnceLock::new(),
         }
     }
 
@@ -371,8 +392,31 @@ impl VbcModule {
     /// Adds a type descriptor.
     pub fn add_type(&mut self, desc: TypeDescriptor) -> TypeId {
         let id = TypeId(self.types.len() as u32 + TypeId::FIRST_USER);
+        // Keep the id-correct reverse cache coherent when it is
+        // already materialised (first-wins, mirroring `get_type`).
+        if let Some(m) = self.type_idx_by_id.get_mut() {
+            m.entry(desc.id.0).or_insert(self.types.len());
+        }
         self.types.push(desc);
         id
+    }
+
+    /// ARCHIVE-TYPE-GLUE-IDS-1: id-correct `types` index lookup —
+    /// O(1) amortised after the first call.  Returns the index of the
+    /// FIRST descriptor whose `id` field matches (identical semantics
+    /// to `get_type`, without the O(N) scan per call).  Use this —
+    /// never positional `types[id - FIRST_USER]` indexing — to resolve
+    /// a runtime `ObjectHeader.type_id` to its descriptor: descriptor
+    /// ids are not positional (see `type_idx_by_id` field docs).
+    pub fn type_index_by_id(&self, id: TypeId) -> Option<usize> {
+        let map = self.type_idx_by_id.get_or_init(|| {
+            let mut m = std::collections::HashMap::with_capacity(self.types.len());
+            for (i, t) in self.types.iter().enumerate() {
+                m.entry(t.id.0).or_insert(i);
+            }
+            m
+        });
+        map.get(&id.0).copied()
     }
 
     /// Gets a type descriptor by ID.
