@@ -6851,7 +6851,10 @@ mod tests {
         test_roundtrip(&Instruction::CallG {
             dst: Reg(0),
             func_id: 100,
-            type_args: vec![Reg(1), Reg(2)],
+            type_args: vec![
+                crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                crate::types::TypeRef::Concrete(crate::types::TypeId::FLOAT),
+            ],
             args: RegRange::new(Reg(3), 2),
         });
     }
@@ -7674,7 +7677,11 @@ mod tests {
         let instr = Instruction::CallG {
             dst: Reg(10),
             func_id: 12345,
-            type_args: vec![Reg(1), Reg(2), Reg(3)],
+            type_args: vec![
+                crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                crate::types::TypeRef::Concrete(crate::types::TypeId::FLOAT),
+                crate::types::TypeRef::Concrete(crate::types::TypeId::BOOL),
+            ],
             args: RegRange::new(Reg(5), 4),
         };
 

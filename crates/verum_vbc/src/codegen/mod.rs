@@ -12174,7 +12174,15 @@ impl VbcCodegen {
                 if let ExprKind::Literal(lit) = &operand.kind
                     && let LiteralKind::Int(int_lit) = &lit.kind
                 {
-                    return i64::try_from(-int_lit.value).ok();
+                    // checked_neg: i128::MIN negation overflows (debug
+                    // panic: 'attempt to negate with overflow' — the 8
+                    // test_compile_stdlib_* async/atomic modules carry
+                    // that literal). None falls through, same as any
+                    // out-of-i64-range constant.
+                    return int_lit
+                        .value
+                        .checked_neg()
+                        .and_then(|n| i64::try_from(n).ok());
                 }
                 Self::extract_const_literal_value(operand).and_then(|v| v.checked_neg())
             }

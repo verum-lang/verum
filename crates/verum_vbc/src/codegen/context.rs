@@ -2085,9 +2085,10 @@ impl CodegenContext {
                 self.functions.get(&name).map(|e| (e.id.0, e.param_count)),
             );
         }
-        if let Some(existing) = self.functions.get(&name)
+        if let Some(existing) = self.functions.get(&name).cloned()
             && existing.param_count != info.param_count
         {
+            let existing = &existing;
             // FUNDAMENTAL #6 — arity-collision richness promotion.
             //
             // The bare-name slot in `self.functions` was, pre-fix,
@@ -2164,6 +2165,44 @@ impl CodegenContext {
                 && !new_is_stub_shape
                 && info.param_count > 0;
             let alt_key = format!("{}#{}", name, info.param_count);
+            // ARCHIVE-SERIALIZE-DETERMINISM-1 wave 3: the bare-slot
+            // winner among same-name DIFFERENT-ARITY functions was
+            // ARRIVAL-ORDER-dependent (parallel bake feeds
+            // registrations in completion order) — byte-diff of two
+            // bakes showed `on_signal#2`+`broadcast_channel` vs
+            // `on_signal`+`broadcast_channel#1`, flipping the string
+            // table and every bare-suffix dispatch winner (the §40
+            // canary's dice). Canonical order-independent rule: among
+            // non-stub candidates the LOWEST ARITY owns the bare slot
+            // (ties keep the incumbent); everyone else lives at
+            // `name#arity`, which the arity-aware lookup probes first
+            // anyway. The richer/real-over-stub promotions below stay
+            // (they only fire on equal-arity or stub shapes).
+            if !new_is_stub_shape
+                && !existing_is_stub_shape
+                && info.param_count != existing.param_count
+            {
+                // BOTH parties always get their `name#arity` mirror so
+                // the KEY SET (and thus the interned-string set feeding
+                // the bake's string table) is arrival-order-independent
+                // — wave 3 made the bare WINNER deterministic but the
+                // alt-mirror existed only on displacement, which still
+                // flipped `on_signal` vs `on_signal#2` presence between
+                // bakes.
+                let existing_alt =
+                    format!("{}#{}", name, existing.param_count);
+                let existing_clone = existing.clone();
+                self.functions
+                    .entry(existing_alt)
+                    .or_insert(existing_clone);
+                if info.param_count < existing.param_count {
+                    self.functions.insert(alt_key, info.clone());
+                    self.functions.insert(name, info);
+                } else {
+                    self.functions.entry(alt_key).or_insert(info);
+                }
+                return;
+            }
             if new_is_richer || new_is_real_over_stub {
                 let existing_alt = format!("{}#{}", name, existing.param_count);
                 if let Some(existing_info) = self.functions.remove(&name) {

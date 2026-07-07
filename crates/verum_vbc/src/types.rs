@@ -1872,12 +1872,16 @@ mod tests {
         let mut td = TypeDescriptor::default();
         td.kind = TypeKind::Record;
         td.fields.push(FieldDescriptor {
+            refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
             name: StringId(1),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 0,
             visibility: Visibility::Public,
         });
         td.fields.push(FieldDescriptor {
+            refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
             name: StringId(2),
             type_ref: TypeRef::Concrete(TypeId::FLOAT),
             offset: 8,
@@ -1986,6 +1990,8 @@ mod tests {
     #[test]
     fn test_field_descriptor_custom() {
         let fd = FieldDescriptor {
+            refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
             name: StringId(42),
             type_ref: TypeRef::Concrete(TypeId::TEXT),
             offset: 16,
@@ -2046,6 +2052,8 @@ mod tests {
     fn test_variant_descriptor_record() {
         let mut fields = SmallVec::new();
         fields.push(FieldDescriptor {
+            refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
             name: StringId(10),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 0,
@@ -2301,6 +2309,8 @@ mod tests {
         td.size = 16;
         td.alignment = 8;
         td.fields.push(FieldDescriptor {
+            refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
             name: StringId(1),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 0,
@@ -2328,6 +2338,8 @@ mod tests {
     #[test]
     fn test_field_descriptor_serde() {
         let fd = FieldDescriptor {
+            refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
             name: StringId(42),
             type_ref: TypeRef::Concrete(TypeId::TEXT),
             offset: 8,

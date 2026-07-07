@@ -1282,12 +1282,16 @@ mod tests {
 
         // Create a type with named fields
         let field1 = FieldDescriptor {
+            refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
             name: module.intern_string("x"),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 0,
             visibility: Visibility::Public,
         };
         let field2 = FieldDescriptor {
+            refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
             name: module.intern_string("y"),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 8,
@@ -1387,6 +1391,8 @@ mod tests {
 
         // Add a type with named field
         let field = FieldDescriptor {
+            refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
             name: module.intern_string("value"),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 0,
@@ -1432,6 +1438,8 @@ mod tests {
             // Add 5 fields per type
             for j in 0..5 {
                 let field = FieldDescriptor {
+                    refinement_src: StringId::EMPTY,
+                    refinement_binding: StringId::EMPTY,
                     name: module.intern_string(&format!("field{}_{}", i, j)),
                     type_ref: TypeRef::Concrete(TypeId::INT),
                     offset: (j * 8) as u32,

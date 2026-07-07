@@ -134,12 +134,16 @@ fn test_roundtrip_type_descriptor() {
         type_params: smallvec::smallvec![],
         fields: smallvec::smallvec![
             FieldDescriptor {
+                refinement_src: crate::types::StringId::EMPTY,
+                refinement_binding: crate::types::StringId::EMPTY,
                 name: x_name,
                 type_ref: TypeRef::Concrete(TypeId::FLOAT),
                 offset: 0,
                 visibility: Visibility::Public,
             },
             FieldDescriptor {
+                refinement_src: crate::types::StringId::EMPTY,
+                refinement_binding: crate::types::StringId::EMPTY,
                 name: y_name,
                 type_ref: TypeRef::Concrete(TypeId::FLOAT),
                 offset: 8,
@@ -903,6 +907,8 @@ fn test_roundtrip_empty_and_full_variants() {
                 kind: VariantKind::Record,
                 arity: 1,
                 fields: smallvec::smallvec![FieldDescriptor {
+                    refinement_src: crate::types::StringId::EMPTY,
+                    refinement_binding: crate::types::StringId::EMPTY,
                     name: val_name,
                     type_ref: TypeRef::Concrete(TypeId::TEXT),
                     offset: 0,
