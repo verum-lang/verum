@@ -3093,6 +3093,37 @@ pub fn lower_instruction<'ctx>(
                 let runtime = RuntimeLowering::new(ctx.llvm_context());
                 let obj_ptr =
                     runtime.lower_new_object(ctx.builder(), ctx.get_module(), field_count)?;
+                // AOT-XMODULE-VALUESEM-1 / AOT-ITERDEREF-SLOT-1: stamp the
+                // header UNCONDITIONALLY — same discipline as `New` and
+                // `MakeVariantTyped` (d720e502f). NewG was the remaining
+                // record producer with a fully zeroed header, which (a) kept
+                // NewG'd records out of `verum_generic_eq`'s structural path
+                // and (b) would make the Deref slot-vs-object probe
+                // misclassify a real NewG object as an element slot.
+                {
+                    let i32_type = ctx.types().context().i32_type();
+                    let i8_type = ctx.types().i8_type();
+                    let i64_type = ctx.types().i64_type();
+                    ctx.builder()
+                        .build_store(obj_ptr, i32_type.const_int(*type_id as u64, false))
+                        .or_llvm_err()?;
+                    // SAFETY: in-bounds GEP within the 24-byte header.
+                    let size_slot = unsafe {
+                        ctx.builder()
+                            .build_in_bounds_gep(
+                                i8_type,
+                                obj_ptr,
+                                &[i64_type.const_int(12, false)],
+                                "hdr_size_slot",
+                            )
+                            .or_llvm_err()?
+                    };
+                    let total =
+                        RuntimeLowering::OBJECT_HEADER_SIZE + (field_count as u64) * 8;
+                    ctx.builder()
+                        .build_store(size_slot, i32_type.const_int(total, false))
+                        .or_llvm_err()?;
+                }
                 ctx.set_register(dst.0, obj_ptr.into());
                 // Track heap allocation for drop protocol cleanup on return
                 ctx.mark_heap_alloc_register(dst.0);
@@ -4260,7 +4291,237 @@ pub fn lower_instruction<'ctx>(
                 // Inline struct pointer (from offset() into array) OR a
                 // heap-allocated value type: the value-in-register IS the
                 // pointer to the underlying object. Pass through unchanged.
-                ctx.set_register(dst.0, val);
+                //
+                // **AOT-ITERDEREF-SLOT-1** — the passthrough is only correct
+                // when the register really holds the OBJECT pointer. Iterator
+                // element refs violate that: `ListIter.next()` yields
+                // `&*self.ptr`, and the REFDEREF fold (`&*p → p` on raw
+                // pointers) makes the yielded `&T` the raw SLOT ADDRESS
+                // (&data[i]) — one load away from the element. The Tier-0
+                // interpreter loads that slot at deref time; the AOT
+                // passthrough handed the slot address to every downstream
+                // consumer, so `GetF@+24` landed inside the list backing
+                // array (for i=0 the array BASE: field-0 reads data[3] — a
+                // neighbouring element pointer — and e.g. `SchemaError.eq`'s
+                // message strcmp then dereferenced an ObjectHeader word →
+                // SIGSEGV; enum domains read garbage tags → partition laws
+                // miscounted). Repro: repro/ctx_iterderef.vr (CallM-result
+                // iterables — reg_types does not type call results, so the
+                // payload register arrives here obj-marked).
+                //
+                // Objects are self-describing since the header stamp
+                // (`New`/`MakeVariantTyped` write type_id u32@0 + size
+                // u32@12, d720e502f), so discriminate AT RUNTIME:
+                //   * [p] parses as a stamped header (tid==expected when the
+                //     obj-mark resolves to a VBC TypeId, OR generic shape:
+                //     tid!=0 && size!=0 && size%8==0 && size<=4096) →
+                //     the register IS the object → pass through (status quo);
+                //   * otherwise → it is a slot: load [p] (the element ptr).
+                // Flat-layout families (Text) and unstamped collections
+                // (List/Map/Set/...) keep the unconditional passthrough —
+                // their headers are not stamped, so the shape probe would
+                // misclassify real objects as slots.
+                let discriminate = !is_inline
+                    && (val.is_int_value() || val.is_pointer_value())
+                    && !ctx.is_interior_list_ref(ref_reg.0)
+                    && !ctx.is_list_register(ref_reg.0)
+                    && !ctx.is_map_register(ref_reg.0)
+                    && !ctx.is_set_register(ref_reg.0)
+                    && !ctx.is_deque_register(ref_reg.0)
+                    && !ctx.is_btreemap_register(ref_reg.0)
+                    && !ctx.is_btreeset_register(ref_reg.0)
+                    && !ctx.is_binaryheap_register(ref_reg.0)
+                    && !ctx.is_chan_register(ref_reg.0)
+                    && !ctx.is_text_register(ref_reg.0)
+                    && !ctx.is_string_register(ref_reg.0)
+                    && (ctx.is_struct_register(ref_reg.0)
+                        || ctx.get_obj_register_type(ref_reg.0).is_some());
+
+                if discriminate {
+                    // Resolve the obj-mark's type name to its stamped VBC
+                    // TypeId for the exact-tid probe (miss → shape probe).
+                    let objty_name: Option<String> =
+                        ctx.get_obj_register_type(ref_reg.0).map(|s| s.to_string());
+                    let expected_tid: Option<u32> = objty_name.as_deref().and_then(|name| {
+                        ctx.vbc_module().and_then(|m| {
+                            m.types.iter().find_map(|d| {
+                                if m.get_string(d.name).map(|s| s == name).unwrap_or(false) {
+                                    Some(d.id.0)
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                    });
+                    if std::env::var("VERUM_TRACE_ITERDEREF").is_ok() {
+                        eprintln!(
+                            "[iterderef] Deref r{} -> r{}: struct={} objty={:?} expected_tid={:?}",
+                            ref_reg.0,
+                            dst.0,
+                            ctx.is_struct_register(ref_reg.0),
+                            objty_name,
+                            expected_tid
+                        );
+                    }
+
+                    let i64_type = ctx.types().i64_type();
+                    let i32_type = ctx.llvm_context().i32_type();
+                    let i8_type = ctx.types().i8_type();
+                    let val64 = as_i64(ctx, val, "sdisc_val")?;
+
+                    let cur_bb = ctx
+                        .builder()
+                        .get_insert_block()
+                        .or_internal("deref sdisc: no insert block")?;
+                    let func = cur_bb
+                        .get_parent()
+                        .or_internal("deref sdisc: no parent function")?;
+                    let probe_bb = ctx.llvm_context().append_basic_block(func, "sdisc_probe");
+                    let done_bb = ctx.llvm_context().append_basic_block(func, "sdisc_done");
+
+                    // Heap-plausible gate: only probe memory for 8-aligned
+                    // user-space heap addresses; anything else passes
+                    // through untouched (immediates, nil, tagged values).
+                    let lo = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::UGE,
+                            val64,
+                            i64_type.const_int(0x10000000, false),
+                            "sdisc_lo",
+                        )
+                        .or_llvm_err()?;
+                    let hi = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::ULE,
+                            val64,
+                            i64_type.const_int(0x7FFFFFFFFFFF, false),
+                            "sdisc_hi",
+                        )
+                        .or_llvm_err()?;
+                    let alm = ctx
+                        .builder()
+                        .build_and(val64, i64_type.const_int(7, false), "sdisc_alm")
+                        .or_llvm_err()?;
+                    let al = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::EQ,
+                            alm,
+                            i64_type.const_zero(),
+                            "sdisc_al",
+                        )
+                        .or_llvm_err()?;
+                    let r1 = ctx.builder().build_and(lo, hi, "sdisc_r1").or_llvm_err()?;
+                    let in_range = ctx.builder().build_and(r1, al, "sdisc_inr").or_llvm_err()?;
+                    ctx.builder()
+                        .build_conditional_branch(in_range, probe_bb, done_bb)
+                        .or_llvm_err()?;
+
+                    // Probe: parse [p] as an ObjectHeader.
+                    ctx.builder().position_at_end(probe_bb);
+                    let p = ctx
+                        .builder()
+                        .build_int_to_ptr(val64, ctx.types().ptr_type(), "sdisc_p")
+                        .or_llvm_err()?;
+                    let tid = ctx
+                        .builder()
+                        .build_load(i32_type, p, "sdisc_tid")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    // SAFETY: in-bounds GEP within the minimal 8-byte
+                    // readable region already guaranteed by the heap gate
+                    // (both header and slot cases are ≥16-byte mapped).
+                    let size_gep = unsafe {
+                        ctx.builder()
+                            .build_in_bounds_gep(
+                                i8_type,
+                                p,
+                                &[i64_type.const_int(12, false)],
+                                "sdisc_szp",
+                            )
+                            .or_llvm_err()?
+                    };
+                    let size = ctx
+                        .builder()
+                        .build_load(i32_type, size_gep, "sdisc_sz")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    let tid_nz = ctx
+                        .builder()
+                        .build_int_compare(IntPredicate::NE, tid, i32_type.const_zero(), "sdisc_tidnz")
+                        .or_llvm_err()?;
+                    let sz_nz = ctx
+                        .builder()
+                        .build_int_compare(IntPredicate::NE, size, i32_type.const_zero(), "sdisc_sznz")
+                        .or_llvm_err()?;
+                    let szm = ctx
+                        .builder()
+                        .build_and(size, i32_type.const_int(7, false), "sdisc_szm")
+                        .or_llvm_err()?;
+                    let sz_al = ctx
+                        .builder()
+                        .build_int_compare(IntPredicate::EQ, szm, i32_type.const_zero(), "sdisc_szal")
+                        .or_llvm_err()?;
+                    let sz_bnd = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::ULE,
+                            size,
+                            i32_type.const_int(4096, false),
+                            "sdisc_szbnd",
+                        )
+                        .or_llvm_err()?;
+                    let a1 = ctx.builder().build_and(tid_nz, sz_nz, "sdisc_a1").or_llvm_err()?;
+                    let a2 = ctx.builder().build_and(sz_al, sz_bnd, "sdisc_a2").or_llvm_err()?;
+                    let mut is_obj = ctx.builder().build_and(a1, a2, "sdisc_shape").or_llvm_err()?;
+                    if let Some(want) = expected_tid {
+                        // Exact match is authoritative; OR it in so a real
+                        // object whose obj-mark went stale still passes
+                        // through on shape.
+                        let tid_eq = ctx
+                            .builder()
+                            .build_int_compare(
+                                IntPredicate::EQ,
+                                tid,
+                                i32_type.const_int(want as u64, false),
+                                "sdisc_tideq",
+                            )
+                            .or_llvm_err()?;
+                        is_obj = ctx
+                            .builder()
+                            .build_or(is_obj, tid_eq, "sdisc_isobj")
+                            .or_llvm_err()?;
+                    }
+                    let slot_val = ctx
+                        .builder()
+                        .build_load(i64_type, p, "sdisc_slot")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    let probe_res = ctx
+                        .builder()
+                        .build_select(is_obj, val64, slot_val, "sdisc_sel")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    let probe_end = ctx
+                        .builder()
+                        .get_insert_block()
+                        .or_internal("deref sdisc: no probe block")?;
+                    ctx.builder()
+                        .build_unconditional_branch(done_bb)
+                        .or_llvm_err()?;
+
+                    ctx.builder().position_at_end(done_bb);
+                    let phi = ctx
+                        .builder()
+                        .build_phi(i64_type, "sdisc_res")
+                        .or_llvm_err()?;
+                    phi.add_incoming(&[(&val64, cur_bb), (&probe_res, probe_end)]);
+                    ctx.set_register(dst.0, phi.as_basic_value());
+                } else {
+                    ctx.set_register(dst.0, val);
+                }
                 if is_inline {
                     ctx.mark_inline_struct_register(dst.0);
                 }
