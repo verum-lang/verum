@@ -25,8 +25,23 @@ impl TypeSubstitution {
     }
 
     /// Creates a substitution from a function descriptor and type arguments.
+    ///
+    /// The specialized body refers to its type parameters as
+    /// `Generic(TypeParamId(i))` by DECLARATION POSITION.  `func.type_params`
+    /// is not reliably populated (the codegen leaves it empty — the same
+    /// historically-dead-flag class as `is_generic`), so when it doesn't line
+    /// up with the type args, bind POSITIONALLY (`TypeParamId(i) -> args[i]`).
+    /// Without this the substitution is empty and every `apply` is a no-op, so
+    /// no `Generic` is ever replaced and no protocol-method call devirtualizes.
     pub fn from_function(func: &FunctionDescriptor, args: &[TypeRef]) -> Self {
-        Self::new(&func.type_params, args)
+        if !func.type_params.is_empty() && func.type_params.len() == args.len() {
+            return Self::new(&func.type_params, args);
+        }
+        let mut bindings = HashMap::new();
+        for (i, arg) in args.iter().enumerate() {
+            bindings.insert(crate::types::TypeParamId(i as u16), arg.clone());
+        }
+        Self { bindings }
     }
 
     /// Creates an empty substitution.

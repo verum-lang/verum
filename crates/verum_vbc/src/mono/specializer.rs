@@ -319,10 +319,29 @@ impl<'a> BytecodeSpecializer<'a> {
         let mut output = Vec::with_capacity(bytecode.len());
         let mut pc = 0;
 
+        let trace_this = std::env::var_os("VERUM_TRACE_MONO").is_some()
+            && self
+                .module
+                .get_string(func.name)
+                .is_some_and(|n| n.contains("future_poll_sync"));
+        if trace_this {
+            eprintln!(
+                "[mono-spec-body] specializing '{}' bytecode_len={}",
+                self.module.get_string(func.name).unwrap_or("?"),
+                bytecode.len()
+            );
+        }
+
         while pc < bytecode.len() {
             self.stats.total_instructions += 1;
             let opcode_byte = bytecode[pc];
             let opcode = Opcode::from_byte(opcode_byte);
+
+            if trace_this {
+                // For Call/CallM, peek the callee/method id and print its
+                // string so we can see how `future.poll()` was compiled.
+                eprintln!("[mono-spec-body]   pc={} opcode={:?}", pc, opcode);
+            }
 
             match opcode {
                 // Generic call: rewrite to direct call
@@ -334,6 +353,12 @@ impl<'a> BytecodeSpecializer<'a> {
                 // Virtual dispatch: attempt devirtualization
                 Opcode::CallV => {
                     self.specialize_call_v(bytecode, &mut pc, &mut output)?;
+                }
+
+                // Method call: devirtualize a `dyn:Protocol.method` token using
+                // the concrete substitution (F → ReadyFuture ⇒ ReadyFuture.poll).
+                Opcode::CallM => {
+                    self.specialize_call_m(bytecode, &mut pc, &mut output)?;
                 }
 
                 // Generic object creation
@@ -562,6 +587,120 @@ impl<'a> BytecodeSpecializer<'a> {
         }
 
         Ok(())
+    }
+
+    /// Specializes a CALL_M (method call) instruction.
+    ///
+    /// If the method token is a `dyn:Protocol.method` dispatch on a type
+    /// parameter, devirtualize it to the concrete implementation by rewriting
+    /// the method-id string to `ConcreteType.method` (the concrete receiver
+    /// type comes from the substitution's primary type parameter).  The AOT
+    /// method-call lowering then resolves the concrete method directly instead
+    /// of hitting the unresolved-dyn const-zero stub (the async-AOT SIGSEGV).
+    /// Re-emitting CALL_M unchanged in shape (not rewriting to CALL) avoids any
+    /// receiver/argument-register-contiguity assumptions.
+    fn specialize_call_m(
+        &mut self,
+        bytecode: &[u8],
+        pc: &mut usize,
+        output: &mut Vec<u8>,
+    ) -> Result<(), SpecializationError> {
+        use crate::instruction::Instruction;
+        // Decode/re-encode through the CANONICAL codec so the CALL_M operand
+        // layout (dst, receiver, method_id-varint, reg-RANGE args) round-trips
+        // byte-for-byte — a hand-rolled re-emit that got the args encoding
+        // wrong desynchronised the whole specialized stream, so every later
+        // instruction misdecoded (a phantom RANGE_NEW etc.) and the body was
+        // lowered to garbage.  Only `method_id` is rewritten (devirtualized).
+        let start = *pc;
+        let instr =
+            crate::bytecode::decode_instruction(bytecode, pc).map_err(|e| {
+                SpecializationError::InvalidBytecode {
+                    offset: start,
+                    message: format!("specialize_call_m: canonical decode failed: {:?}", e),
+                }
+            })?;
+        if let Instruction::CallM {
+            dst,
+            receiver,
+            method_id,
+            args,
+        } = instr
+        {
+            if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                let nm = self
+                    .module
+                    .get_string(crate::types::StringId(method_id))
+                    .unwrap_or("<none>");
+                if nm.contains("poll") || nm.contains("dyn:") || nm.contains("Future") {
+                    eprintln!(
+                        "[mono-callm-raw] method_id={} name='{}' subst_T0={:?}",
+                        method_id,
+                        nm,
+                        self.substitution.get(TypeParamId(0))
+                    );
+                }
+            }
+            let method_id = self.devirt_dyn_method_id(method_id).unwrap_or(method_id);
+            crate::bytecode::encode_instruction(
+                &Instruction::CallM {
+                    dst,
+                    receiver,
+                    method_id,
+                    args,
+                },
+                output,
+            );
+        } else {
+            // Not actually a CALL_M — re-encode verbatim (defensive).
+            crate::bytecode::encode_instruction(&instr, output);
+        }
+        Ok(())
+    }
+
+    /// Resolve a `dyn:Protocol.method` method-id string to the concrete
+    /// `ConcreteType.method` string id via the substitution's primary type
+    /// parameter.  Returns None if the token is not a dyn-dispatch, the primary
+    /// type isn't concrete, or the concrete method function is absent.
+    fn devirt_dyn_method_id(&self, method_id: u32) -> Option<u32> {
+        let name = self
+            .module
+            .get_string(crate::types::StringId(method_id))?
+            .to_string();
+        // Extract the method name from either a `dyn:Protocol.method` token or
+        // a BARE `method` (a protocol-method call on a type parameter whose
+        // receiver's concrete type is only known after substitution — e.g.
+        // `future.poll()` in `future_poll_sync<F: Future>` compiles to a
+        // CALL_M with the bare method name "poll").  An already-concrete
+        // `Type.method` is left untouched.
+        let method: &str = if let Some(rest) = name.strip_prefix("dyn:") {
+            rest.rsplit('.').next()?
+        } else if !name.contains('.') {
+            name.as_str()
+        } else {
+            return None;
+        };
+        let TypeRef::Concrete(tid) = self.substitution.get(TypeParamId(0))? else {
+            return None;
+        };
+        let type_name = self.module.get_type_name(*tid)?;
+        let concrete = format!("{}.{}", type_name, method);
+        if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+            let hit = self
+                .module
+                .functions
+                .iter()
+                .any(|f| self.module.get_string(f.name).is_some_and(|s| s == concrete));
+            eprintln!(
+                "[mono-callm] dyn='{}' -> concrete='{}' found={}",
+                name, concrete, hit
+            );
+        }
+        self.module
+            .functions
+            .iter()
+            .find(|f| self.module.get_string(f.name).is_some_and(|s| s == concrete))
+            .map(|f| f.name.0)
     }
 
     /// Looks up a protocol implementation for a concrete type.

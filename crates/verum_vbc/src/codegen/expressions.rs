@@ -5533,17 +5533,194 @@ impl VbcCodegen {
             } else {
                 func_info.id.0
             };
-            self.ctx.emit(Instruction::Call {
-                dst: result,
-                func_id: final_func_id,
-                args: crate::instruction::RegRange {
-                    start: args_start,
-                    count: call_arg_count as u8,
-                },
-            });
+            // VBC-GENERIC-INSTANTIATION: if the callee is generic, record its
+            // concrete instantiation (derived from the argument types) and emit
+            // `CallG` carrying the static type args.  The interpreter dispatches
+            // the same function id and ignores the type args; the AOT
+            // monomorphization pass specializes the callee and (via the merger's
+            // single-instantiation routing) resolves this call to the
+            // specialized body, devirtualizing any protocol-method call on a
+            // type parameter (`future.poll()`).
+            let call_args = crate::instruction::RegRange {
+                start: args_start,
+                count: call_arg_count as u8,
+            };
+            let type_args = if final_func_id != UNRESOLVED_FN_ID {
+                self.record_generic_instantiation(final_func_id, args)
+            } else {
+                None
+            };
+            match type_args {
+                Some(type_args) if !type_args.is_empty() => {
+                    self.ctx.emit(Instruction::CallG {
+                        dst: result,
+                        func_id: final_func_id,
+                        type_args,
+                        args: call_args,
+                    });
+                }
+                _ => {
+                    self.ctx.emit(Instruction::Call {
+                        dst: result,
+                        func_id: final_func_id,
+                        args: call_args,
+                    });
+                }
+            }
         }
 
         Ok(Some(result))
+    }
+
+    /// Record a generic-function instantiation discovered at a call site.
+    ///
+    /// Looks up the callee's descriptor by `func_id`, and if it is generic
+    /// (any parameter or the return type mentions a type parameter), binds each
+    /// `Generic(TypeParamId)` appearing in a parameter's `TypeRef` to the
+    /// inferred concrete type of the corresponding argument, producing the
+    /// concrete type-argument list in `TypeParamId` order and queueing
+    /// `(func_id, type_args)` for `build_module`.  Returns the type args when
+    /// an instantiation was derived (so the caller emits `CallG`), else `None`.
+    /// AOT-only.
+    fn record_generic_instantiation(
+        &mut self,
+        func_id: u32,
+        args: &verum_common::List<verum_ast::Expr>,
+    ) -> Option<Vec<crate::types::TypeRef>> {
+        // OPT-IN gate.  The AOT generic-monomorphization pipeline
+        // (CallG emission → seed → specialize → route → devirtualize) is under
+        // active reconstruction (#3).  Until it lands green, keep it OFF by
+        // default so every generic call emits a plain `Call` exactly as before
+        // — zero behavior change, zero regression risk.  Set
+        // VERUM_ENABLE_MONO_AOT=1 to exercise the new path.
+        if std::env::var_os("VERUM_ENABLE_MONO_AOT").is_none() {
+            return None;
+        }
+        if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+            let found = self
+                .functions
+                .iter()
+                .find(|f| f.descriptor.id.0 == func_id)
+                .and_then(|f| self.ctx.strings.get(f.descriptor.name.0 as usize).cloned());
+            // Fire for the async-repro callees + any find-miss, so we can see
+            // whether record is even reached for future_poll_sync / ready.
+            let arg0 = args
+                .get(0)
+                .and_then(|a| self.infer_expr_type_name(a))
+                .unwrap_or_default();
+            if found.is_none()
+                || found.as_deref().is_some_and(|n| {
+                    n.contains("poll_sync") || n.contains("ready") || n.contains("Ready")
+                })
+                || arg0.contains("Ready")
+            {
+                let gen_info = self
+                    .functions
+                    .iter()
+                    .find(|f| f.descriptor.id.0 == func_id)
+                    .map(|f| {
+                        (
+                            f.descriptor
+                                .params
+                                .iter()
+                                .map(|p| p.type_ref.clone())
+                                .collect::<Vec<_>>(),
+                            f.descriptor.return_type.clone(),
+                            f.descriptor.params.iter().any(|p| p.type_ref.is_generic())
+                                || f.descriptor.return_type.is_generic(),
+                        )
+                    });
+                eprintln!(
+                    "[mono-entry] func_id={} found={:?} arg0_type='{}' nargs={} generic={:?} param_trs={:?} ret={:?}",
+                    func_id,
+                    found,
+                    arg0,
+                    args.len(),
+                    gen_info.as_ref().map(|g| g.2),
+                    gen_info.as_ref().map(|g| &g.0),
+                    gen_info.as_ref().map(|g| &g.1),
+                );
+            }
+        }
+        let param_trs: Vec<crate::types::TypeRef> = {
+            let d = self
+                .functions
+                .iter()
+                .find(|f| f.descriptor.id.0 == func_id)
+                .map(|f| &f.descriptor)?;
+            let generic = d.params.iter().any(|p| p.type_ref.is_generic())
+                || d.return_type.is_generic();
+            if !generic {
+                if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                    let nm = self.ctx.strings.get(d.name.0 as usize).cloned().unwrap_or_default();
+                    if nm.contains("poll_sync") || nm.contains("ready") {
+                        eprintln!("[mono-record] '{}' id={} NOT-generic (params/ret carry no Generic)", nm, func_id);
+                    }
+                }
+                return None;
+            }
+            d.params.iter().map(|p| p.type_ref.clone()).collect()
+        };
+        let strip_ref = |s: &str| -> String {
+            s.trim()
+                .trim_start_matches("&mut ")
+                .trim_start_matches("&checked ")
+                .trim_start_matches("&unsafe ")
+                .trim_start_matches('&')
+                .trim()
+                .to_string()
+        };
+        fn outer_type_param(tr: &crate::types::TypeRef) -> Option<u32> {
+            match tr {
+                crate::types::TypeRef::Generic(tp) => Some(tp.0 as u32),
+                crate::types::TypeRef::Reference { inner, .. } => outer_type_param(inner),
+                _ => None,
+            }
+        }
+        let mut bindings: std::collections::BTreeMap<u32, crate::types::TypeId> =
+            std::collections::BTreeMap::new();
+        for (i, ptr) in param_trs.iter().enumerate() {
+            if let Some(tp_id) = outer_type_param(ptr) {
+                if let Some(arg) = args.get(i) {
+                    if let Some(concrete) = self.infer_expr_type_name(arg) {
+                        let base = strip_ref(&concrete);
+                        let base = base.split('<').next().unwrap_or(&base).trim().to_string();
+                        if base.is_empty()
+                            || verum_common::well_known_types::looks_like_type_param(&base)
+                        {
+                            continue;
+                        }
+                        if let Some(&tid) = self.type_name_to_id.get(base.as_str()) {
+                            bindings.entry(tp_id).or_insert(tid);
+                        }
+                    }
+                }
+            }
+        }
+        if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+            let nm = self
+                .functions
+                .iter()
+                .find(|f| f.descriptor.id.0 == func_id)
+                .and_then(|f| self.ctx.strings.get(f.descriptor.name.0 as usize).cloned())
+                .unwrap_or_default();
+            if nm.contains("poll_sync") || nm.contains("ready") {
+                eprintln!(
+                    "[mono-record] '{}' id={} param_trs={:?} nargs={} bindings={:?}",
+                    nm, func_id, param_trs, args.len(), bindings
+                );
+            }
+        }
+        if bindings.is_empty() {
+            return None;
+        }
+        let type_args: Vec<crate::types::TypeRef> = bindings
+            .into_values()
+            .map(crate::types::TypeRef::Concrete)
+            .collect();
+        self.pending_specializations
+            .push((func_id, type_args.clone()));
+        Some(type_args)
     }
 
     /// Compiles an array element reference (`&arr[idx]` or `&mut arr[idx]`) for FFI calls.

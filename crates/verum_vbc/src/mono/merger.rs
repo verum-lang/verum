@@ -235,10 +235,21 @@ impl ModuleMerger {
         self.add_stdlib_specializations(&mut output)?;
 
         // Step 4: Add newly specialized functions
+        let first_new_spec = output.functions.len();
         self.add_new_specializations(&mut output)?;
 
         // Step 5: Fixup function references in bytecode
         self.fixup_references(&mut output)?;
+
+        // Step 5.5: Decode `instructions` for the new specializations from the
+        // now-FIXED-UP bytecode.  The AOT lowers function BODIES only for
+        // descriptors whose `instructions` is populated (it builds its
+        // VbcFunction work-list by filtering on `instructions.is_some()`); a
+        // specialization left with `instructions: None` is forward-declared but
+        // never defined, so every call to it lands on an undefined symbol
+        // (SIGSEGV).  Decoding here — after `fixup_references` — guarantees the
+        // instruction stream carries the final, remapped call targets.
+        self.decode_specialized_instructions(&mut output, first_new_spec);
 
         // Step 6: Update module flags
         output.update_flags();
@@ -381,18 +392,78 @@ impl ModuleMerger {
                 output.constants.push(constant);
             }
 
-            // Create function descriptor
-            let new_func = FunctionDescriptor {
-                id: FunctionId(output.functions.len() as u32),
-                name: StringId::EMPTY, // Could generate from generic function name + type args
-                bytecode_offset: new_offset,
-                bytecode_length: specialized.bytecode.len() as u32,
-                register_count: specialized.register_count,
-                locals_count: specialized.locals_count,
-                max_stack: specialized.max_stack,
-                is_generic: false,
-                ..Default::default()
-            };
+            // Generate a UNIQUE, non-empty name mangled from the generic
+            // function name + concrete type args.  The AOT backend lowers and
+            // CALLs functions BY NAME; an empty name (or one colliding with the
+            // still-present generic body) makes every caller resolve back to
+            // the un-specialized generic — so the whole specialization is inert
+            // and a protocol-method call on the type parameter stays a
+            // passthrough (the async-AOT SIGSEGV).  Look the generic name up in
+            // the user module, falling back to the stdlib.
+            let generic_name = self
+                .user_module
+                .get_function(request.function_id)
+                .and_then(|f| self.user_module.get_string(f.name))
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    self.stdlib.as_ref().and_then(|s| {
+                        s.get_function(request.function_id)
+                            .and_then(|f| s.get_string(f.name))
+                            .map(|n| n.to_string())
+                    })
+                })
+                .unwrap_or_else(|| format!("mono_fn_{}", request.function_id.0));
+            let mangle: String = request
+                .type_args
+                .iter()
+                .map(|t| match t {
+                    TypeRef::Concrete(id) => id.0.to_string(),
+                    _ => "x".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join("_");
+            let spec_name = format!("{}$mono${}", generic_name, mangle);
+            let name_id = output.intern_string(&spec_name);
+            if std::env::var_os("VERUM_TRACE_MONO").is_some()
+                && (spec_name.contains("poll_sync") || spec_name.contains("ready"))
+            {
+                eprintln!(
+                    "[mono-spec-name] specialized fn id={} name='{}'",
+                    output.functions.len(),
+                    spec_name
+                );
+            }
+
+            // Base the specialized descriptor on the GENERIC descriptor so it
+            // inherits the parameter list, return type and context/property
+            // metadata — the AOT declares each function's LLVM signature from
+            // `params`/`return_type`, and an empty `params` (the old
+            // `..Default::default()`) declares a zero-arg `()` signature the
+            // real body can't satisfy (the callee reads argument registers that
+            // were never passed → garbage/crash).  Only the identity-, name-,
+            // location- and size-fields are overridden.  `instructions` is left
+            // None here and decoded from the FIXED-UP bytecode after
+            // `fixup_references` (see `decode_specialized_instructions`).
+            let base_desc = self
+                .user_module
+                .get_function(request.function_id)
+                .cloned()
+                .or_else(|| {
+                    self.stdlib
+                        .as_ref()
+                        .and_then(|s| s.get_function(request.function_id).cloned())
+                })
+                .unwrap_or_default();
+            let mut new_func = base_desc;
+            new_func.id = FunctionId(output.functions.len() as u32);
+            new_func.name = name_id;
+            new_func.bytecode_offset = new_offset;
+            new_func.bytecode_length = specialized.bytecode.len() as u32;
+            new_func.register_count = specialized.register_count;
+            new_func.locals_count = specialized.locals_count;
+            new_func.max_stack = specialized.max_stack;
+            new_func.is_generic = false;
+            new_func.instructions = None;
 
             output.functions.push(new_func);
 
@@ -413,6 +484,81 @@ impl ModuleMerger {
         }
 
         Ok(())
+    }
+
+    /// Decode `instructions` for the functions in `[first_new_spec, len)` from
+    /// the (already fixed-up) module bytecode.  Required so the AOT lowers
+    /// their bodies (its body work-list filters on `instructions.is_some()`).
+    /// A function whose byte range fails to decode cleanly is left as-is (it
+    /// will simply be forward-declared, as before) rather than aborting merge.
+    fn decode_specialized_instructions(&self, output: &mut VbcModule, first_new_spec: usize) {
+        let ranges: Vec<(usize, usize, usize)> = output.functions[first_new_spec..]
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                (
+                    first_new_spec + i,
+                    f.bytecode_offset as usize,
+                    f.bytecode_length as usize,
+                )
+            })
+            .collect();
+        for (idx, off, len) in ranges {
+            if len == 0 || off + len > output.bytecode.len() {
+                continue;
+            }
+            let mut instrs = Vec::new();
+            let mut pc = off;
+            let end = off + len;
+            let mut ok = true;
+            while pc < end {
+                match crate::bytecode::decode_instruction(&output.bytecode, &mut pc) {
+                    Ok(instr) => instrs.push(instr),
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if ok && pc == end {
+                if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                    let nm = output
+                        .get_string(output.functions[idx].name)
+                        .unwrap_or("<?>")
+                        .to_string();
+                    if nm.contains("poll_sync") {
+                        let ops: Vec<String> = instrs
+                            .iter()
+                            .take(12)
+                            .map(|i| {
+                                let s = format!("{:?}", i);
+                                s.split([' ', '{', '(']).next().unwrap_or("?").to_string()
+                            })
+                            .collect();
+                        eprintln!(
+                            "[mono-decode] '{}' off={} len={} n_instr={} first_ops={:?}",
+                            nm,
+                            off,
+                            len,
+                            instrs.len(),
+                            ops
+                        );
+                    }
+                }
+                output.functions[idx].instructions = Some(instrs);
+            } else if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                let nm = output
+                    .get_string(output.functions[idx].name)
+                    .unwrap_or("<?>")
+                    .to_string();
+                if nm.contains("poll_sync") {
+                    eprintln!(
+                        "[mono-decode] '{}' off={} len={} DECODE-FAILED (ok={} pc={} end={})",
+                        nm, off, len, ok, pc, end
+                    );
+                }
+            }
+        }
     }
 
     /// Fixes up function references in bytecode.
@@ -437,6 +583,40 @@ impl ModuleMerger {
         }
         for (old_id, new_id) in &self.mapping.stdlib_to_output {
             id_remap.insert(old_id.0, new_id.0);
+        }
+
+        // VBC-GENERIC-INSTANTIATION routing: for a generic function with
+        // EXACTLY ONE specialization, route EVERY reference to it (Call/CallG,
+        // in any function including non-specialized callers like `main`) to the
+        // specialized body by overriding its id_remap entry.  The intra-function
+        // `specialize_call_g` only rewrites CallG *inside* functions being
+        // specialized; a plain caller's call would otherwise still target the
+        // un-specialized generic body (whose protocol-method call on the type
+        // parameter is a passthrough → wrong result / crash).  Single-
+        // instantiation only — a generic used at several concrete types can't
+        // collapse to one id.  `output.specializations` holds only the newly-
+        // created specializations, so there is no double counting.
+        {
+            let mut spec_count: HashMap<u32, usize> = HashMap::new();
+            for spec in &output.specializations {
+                if self.mapping.get_by_hash(spec.hash).is_some() {
+                    *spec_count.entry(spec.generic_fn.0).or_insert(0) += 1;
+                }
+            }
+            let trace = std::env::var_os("VERUM_TRACE_MONO").is_some();
+            for spec in &output.specializations {
+                if spec_count.get(&spec.generic_fn.0) == Some(&1)
+                    && let Some(spec_id) = self.mapping.get_by_hash(spec.hash)
+                {
+                    if trace {
+                        eprintln!(
+                            "[mono-route] generic_fn={} -> specialized_fn={}",
+                            spec.generic_fn.0, spec_id.0
+                        );
+                    }
+                    id_remap.insert(spec.generic_fn.0, spec_id.0);
+                }
+            }
         }
 
         // Process each function's bytecode

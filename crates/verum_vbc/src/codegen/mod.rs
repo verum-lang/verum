@@ -447,6 +447,15 @@ pub struct VbcCodegen {
     /// own `sys.bitfield.X` — task #121 archive-side regression.
     pending_constants: Vec<(String, verum_ast::Expr, Option<String>)>,
 
+    /// VBC-GENERIC-INSTANTIATION: generic-function instantiations discovered at
+    /// call sites — `(callee raw codegen FunctionId, [concrete type-arg
+    /// TypeRefs in TypeParamId order])`.  Written to `module.specializations`
+    /// in `build_module` (translated through `func_id_remap` to the final
+    /// contiguous index), which both drives and gates the AOT monomorphization
+    /// pass.  AOT-only metadata: the interpreter dispatches dynamically and
+    /// never reads it.
+    pending_specializations: Vec<(u32, Vec<crate::types::TypeRef>)>,
+
     /// Map from type name to TypeId for user-defined types.
     /// Used to emit correct type_id in New instructions for proper Drop dispatch.
     type_name_to_id: std::collections::HashMap<String, crate::types::TypeId>,
@@ -1340,6 +1349,7 @@ impl VbcCodegen {
             static_mut_type_names: std::collections::HashMap::new(),
             // Pending constants for deferred compilation
             pending_constants: Vec::new(),
+            pending_specializations: Vec::new(),
             archive_func_name_to_fid: std::collections::HashMap::new(),
             // Type name to TypeId mapping for Drop dispatch.
             // Pre-populated with all well-known type names and their aliases so that
@@ -16749,6 +16759,51 @@ impl VbcCodegen {
                 emitted.len(),
             );
             module.mount_aliases = emitted;
+        }
+
+        // VBC-GENERIC-INSTANTIATION: seed `module.specializations` from the
+        // generic instantiations discovered at call sites
+        // (`record_generic_instantiation`).  The recorded `raw_fn_id` is the
+        // callee's pre-remap codegen id; translate it through `func_id_remap`
+        // to the final CONTIGUOUS index the emitted module uses (post-remap
+        // `descriptor.id == index`), so the mono pass resolves it to the right
+        // function.  De-duplicated by (generic_fn, type_args).
+        if !self.pending_specializations.is_empty() {
+            use std::collections::HashSet;
+            let trace = std::env::var_os("VERUM_TRACE_MONO").is_some();
+            let mut seen: HashSet<(u32, Vec<u32>)> = HashSet::new();
+            for (raw_fn_id, type_args) in std::mem::take(&mut self.pending_specializations) {
+                let fn_id = func_id_remap.get(&raw_fn_id).copied().unwrap_or(raw_fn_id);
+                let key_ids: Vec<u32> = type_args
+                    .iter()
+                    .map(|t| match t {
+                        crate::types::TypeRef::Concrete(id) => id.0,
+                        _ => u32::MAX,
+                    })
+                    .collect();
+                if !seen.insert((fn_id, key_ids)) {
+                    continue;
+                }
+                if trace {
+                    let nm = module
+                        .functions
+                        .get(fn_id as usize)
+                        .and_then(|f| module.get_string(f.name))
+                        .unwrap_or("<?>");
+                    eprintln!(
+                        "[mono-seed] raw_fn_id={} -> fn_id={} ('{}') type_args={:?}",
+                        raw_fn_id, fn_id, nm, type_args
+                    );
+                }
+                module.specializations.push(crate::module::SpecializationEntry {
+                    generic_fn: crate::module::FunctionId(fn_id),
+                    type_args,
+                    hash: 0,
+                    bytecode_offset: 0,
+                    bytecode_length: 0,
+                    register_count: 0,
+                });
+            }
         }
 
         Ok(module)
