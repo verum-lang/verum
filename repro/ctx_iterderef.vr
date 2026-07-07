@@ -1,0 +1,73 @@
+// AOT-XMODULE-VALUESEM-1 — iterator-element deref lane (the REAL
+// mechanism behind law_schema_error_eq_reflexive/symmetric AOT crashes).
+//
+// ListIter.next() returns `&*self.ptr` — the REFDEREF fold makes the
+// yielded `&T` a raw SLOT ADDRESS (&data[i]). AOT's Deref passthrough
+// arm treated obj-marked `*a` as "the register already IS the object"
+// and passed the slot address through — every downstream field read
+// then dereferences the backing array as if it were the record
+// (GetF@+24 lands on data[3] — for i=0 that is another element's
+// pointer; reading its ObjectHeader as a Text data pointer SIGSEGVs).
+//
+// Expected BOTH tiers:
+//   v=11 w=12  v=21 w=22  v=31 w=32  ITER_SUM=129
+//   e0=Apple e1=Banana e2=Cherry e3=Damson
+//   fv=11 fv=21 fv=31 FN_ITER_SUM=63
+//   f0=Apple f1=Banana f2=Cherry f3=Damson
+type P is { v: Int, w: Int };
+type Fruit is Apple | Banana | Cherry | Damson;
+
+// Function-returned domains — the failing tests' shape: the iterable is
+// a CallM result (reg_types fixpoint does NOT type call results, so the
+// element registers carry different marks than the local-literal case).
+fn p_domain() -> List<P> {
+    [P { v: 11, w: 12 }, P { v: 21, w: 22 }, P { v: 31, w: 32 }]
+}
+
+fn fruit_domain() -> List<Fruit> {
+    [Fruit.Apple, Fruit.Banana, Fruit.Cherry, Fruit.Damson]
+}
+
+fn fruit_name(x: Fruit) -> Text {
+    if x is Fruit.Apple { return "Apple"; }
+    if x is Fruit.Banana { return "Banana"; }
+    if x is Fruit.Cherry { return "Cherry"; }
+    if x is Fruit.Damson { return "Damson"; }
+    "?"
+}
+
+fn main() {
+    let ps: List<P> = [P { v: 11, w: 12 }, P { v: 21, w: 22 }, P { v: 31, w: 32 }];
+    let mut sum = 0;
+    for a in ps.iter() {
+        let x: P = *a;
+        print(f"v={x.v} w={x.w}");
+        sum = sum + x.v + x.w;
+    }
+    print(f"ITER_SUM={sum}");
+
+    // Variant (enum) domain — the partition-law shape (4+ variants).
+    let fs: List<Fruit> = [Fruit.Apple, Fruit.Banana, Fruit.Cherry, Fruit.Damson];
+    let mut i = 0;
+    for a in fs.iter() {
+        let x: Fruit = *a;
+        print(f"e{i}={fruit_name(x)}");
+        i = i + 1;
+    }
+
+    // ---- CallM-result iterables (the failing tests' exact shape) ----
+    let mut fsum = 0;
+    for a in p_domain().iter() {
+        let x: P = *a;
+        print(f"fv={x.v}");
+        fsum = fsum + x.v;
+    }
+    print(f"FN_ITER_SUM={fsum}");
+
+    let mut j = 0;
+    for a in fruit_domain().iter() {
+        let x: Fruit = *a;
+        print(f"f{j}={fruit_name(x)}");
+        j = j + 1;
+    }
+}

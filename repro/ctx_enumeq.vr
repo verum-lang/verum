@@ -1,0 +1,15 @@
+// AOT-XMODULE-VALUESEM-1 guard (recreated) — distinct unit variants
+// must compare NOT-equal under `==` (pre-d720e502f the zeroed header
+// hit the first==0 early-out and reported equal regardless of tag).
+// Expected BOTH tiers: ENUM_DISTINCT then ENUM_SAME_EQ
+
+type Fruit is Apple | Banana | Cherry;
+
+fn main() {
+    let a = Fruit.Apple;
+    let b = Fruit.Banana;
+    if a == b { print("ENUM_CONFUSED"); } else { print("ENUM_DISTINCT"); }
+
+    let c = Fruit.Apple;
+    if a == c { print("ENUM_SAME_EQ"); } else { print("ENUM_SAME_NEQ"); }
+}
