@@ -226,6 +226,24 @@ impl VbcMonomorphizationPhase {
                 recovered
             );
         }
+        // Dead-invariant guard (defect-class: consulted-but-never-set). This
+        // whole pass keys on `is_generic`; if a stdlib-sized module ends up with
+        // ZERO generic functions, the recovery itself has regressed (the
+        // TypeRefs no longer carry `Generic`, or the flag was consulted before
+        // recovery) — the exact silent failure that kept generic AOT
+        // monomorphization dead for the project's entire history. Warn so it
+        // cannot recur unnoticed: any module that links the stdlib has generic
+        // functions, so 0 is implausible.
+        let total_generic = cloned.functions.iter().filter(|f| f.is_generic).count();
+        if total_generic == 0 && cloned.functions.len() > 1000 {
+            tracing::warn!(
+                "VBC monomorphization: 0 generic functions across {} descriptors — the \
+                 is_generic recovery has likely REGRESSED (a stdlib-linked module must have \
+                 generics). generic-AOT-monomorphization is silently disabled; see the \
+                 dead-invariant audit + defect-class consulted-but-never-set.",
+                cloned.functions.len(),
+            );
+        }
         let module_data = VbcModuleData {
             module: cloned,
             tier_stats: super::VbcTierStats {
