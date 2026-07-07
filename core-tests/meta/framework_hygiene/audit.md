@@ -91,6 +91,34 @@ null-derefed indexing the Unit (`NullPointerAt opcode 0x66 … pc=4`).
 Rewritten to list literals. Language hole closed by
 META-TEST-TYPECHECK-1 (see meta/oracle audit §3.4).
 
+### §3.3 Red-team hardening — R1 case-evasion + R2 shape-bypass — CLOSED 2026-07-06
+
+Red-team probes surfaced two advisory-validator weaknesses:
+
+* **R1 uppercase evasion** — `name_has_brand_prefix` was
+  case-sensitive; `DIAKRISIS_axiom` / `Diakrisis_axiom` trivially
+  evaded the brand filter. Fixed: the check lowercases the candidate
+  first. Unicode-homoglyph spoofing (Cyrillic 'а' in "diаkrisis_")
+  is documented as intentionally out of scope — a confusable-script
+  identifier is genuinely a different name; the lexer's identifier
+  policy is the right enforcement layer.
+* **R2 alphabet-only validation** — `validate_epsilon_canonicalisable`
+  checked per-Char admissibility but not SHAPE, so operator-only /
+  operator-trailing strings (`ω+`, `ω·`, `+++`) passed as
+  canonicalisable. Fixed: stage-2 structural filter — no
+  leading/trailing binary operator, no adjacent operators, `Ω`
+  standalone-only. Full ordinal parsing remains the AST
+  canonicaliser's job (R2 is the stale-string backstop).
+
+Pinned by `property_test.vr` §R (9 red-team tests incl.
+canonical-forms-still-accepted).
+
+Verified-solid red-team results (no finding): refinement bounds on
+`OracleConfig`-style refined fields REJECT literal out-of-range
+construction at compile time (E500 via SMT, both bounds) — but see
+REFINE-FIELD-DYNAMIC-BYPASS-1 in the oracle audit for the dynamic-
+value gap.
+
 ## Action items deferred
 
 | Item | Scope | Estimated effort |

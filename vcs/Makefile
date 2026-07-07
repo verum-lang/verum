@@ -170,8 +170,8 @@ endef
 .PHONY: list list-l0 list-l1 list-l2 list-l3 list-l4 list-all list-by-tag
 .PHONY: watch clean clean-all clean-cache clean-reports install-tools check-tools update-tools
 .PHONY: validate validate-specs validate-config validate-thresholds validate-grammar
-.PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-red-team diff-full-corpus
-.PHONY: production-readiness gate-diagnostic gate-soundness gate-documentation gate-aot-skip gate-memory-safety gate-tier-equivalence
+.PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-red-team diff-full-corpus diff-meta-engines
+.PHONY: production-readiness gate-diagnostic gate-soundness gate-documentation gate-aot-skip gate-memory-safety gate-tier-equivalence gate-aot-determinism
 
 # =============================================================================
 # Default Target
@@ -956,6 +956,16 @@ diff-interp-vs-aot-verbose:
 	@bash $(DIFF_DIR)/run_differential.sh -v $(DIFF_DIR)/cross-impl
 	$(call SUCCESS,Interpreter vs AOT differential tests completed)
 
+# META-EXEC-CONVERGENCE-1: differential harness for the two compile-time
+# meta-execution engines (VBC executor vs tree-walk evaluator) — see
+# vcs/differential/meta_engines. The script cache is cleared first so no
+# stale compiled artifact can mask a codegen-side change.
+diff-meta-engines:
+	$(call PROGRESS,Running meta-engine differential harness (VBC executor vs tree-walk)...)
+	@rm -rf ~/.verum/script-cache
+	@cd $(PROJECT_ROOT) && cargo run -p meta_engines --bin meta-engines-diff
+	$(call SUCCESS,Meta-engine differential harness completed)
+
 diff-all: diff-cross-tier
 
 # Run cross-tier differential tests (all combinations)
@@ -1081,6 +1091,13 @@ diff-full-corpus: build
 # that the production-readiness aggregator can pin without binding
 # to the differential machinery's name.
 gate-tier-equivalence: diff-full-corpus
+
+# AOT determinism + regression gate (AOT-DETERMINISM-GATE-1):
+# two-run flip detection + baseline comparison over core-tests/meta.
+gate-aot-determinism:
+	$(call PROGRESS,Running AOT determinism gate (2 runs over meta/)...)
+	@bash $(VCS_ROOT)/scripts/aot-determinism-gate.sh --filter "meta/" --runs 2
+	$(call SUCCESS,AOT determinism gate completed)
 
 # =============================================================================
 # List Targets

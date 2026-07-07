@@ -1,0 +1,46 @@
+// AOT-XMODULE-VALUESEM-1 — eq-Text leg repro.
+// Records/variants with TEXT fields, constructed separately with equal
+// content, compared via `==` (CmpG -> verum_generic_eq structural path).
+// Text objects are FLAT {ptr,len,cap} with NO ObjectHeader, so the
+// recursive per-field compare must route Text field values through the
+// is_text_object -> strcmp path, NOT the tid/size structural path.
+//
+// Expected BOTH tiers:
+//   REC_FROM_EQ  REC_LIT_EQ  MAYBE_SOME_EQ  MAYBE_NONE_EQ
+//   NONE_SOME_NEQ  REC_DIFF_NEQ
+
+type Wrap is { msg: Text, code: Int };
+
+fn mk(s: Text) -> Wrap {
+    Wrap { msg: s, code: 7 }
+}
+
+fn main() {
+    // Heap-copied texts (Text.from) in record fields.
+    let a = mk(Text.from("hello"));
+    let b = mk(Text.from("hello"));
+    if a == b { print("REC_FROM_EQ"); } else { print("REC_FROM_NEQ"); }
+
+    // Static literal texts in record fields.
+    let c = mk("lit");
+    let d = mk("lit");
+    if c == d { print("REC_LIT_EQ"); } else { print("REC_LIT_NEQ"); }
+
+    // Maybe<Text> (the SchemaError `suggestion` leg).
+    let ma: Maybe<Text> = Maybe.Some(Text.from("fix"));
+    let mb: Maybe<Text> = Maybe.Some(Text.from("fix"));
+    if ma == mb { print("MAYBE_SOME_EQ"); } else { print("MAYBE_SOME_NEQ"); }
+
+    let na: Maybe<Text> = Maybe.None;
+    let nb: Maybe<Text> = Maybe.None;
+    if na == nb { print("MAYBE_NONE_EQ"); } else { print("MAYBE_NONE_NEQ"); }
+
+    // Negative controls — must stay NOT-equal.
+    let xa: Maybe<Text> = Maybe.None;
+    let xb: Maybe<Text> = Maybe.Some(Text.from("fix"));
+    if xa == xb { print("NONE_SOME_EQ_BUG"); } else { print("NONE_SOME_NEQ"); }
+
+    let e = mk(Text.from("hello"));
+    let g = mk(Text.from("world"));
+    if e == g { print("REC_DIFF_EQ_BUG"); } else { print("REC_DIFF_NEQ"); }
+}

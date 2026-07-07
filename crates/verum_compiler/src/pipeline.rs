@@ -81,6 +81,7 @@ use crate::staged_pipeline::{StagedConfig, StagedPipeline};
 // crate's `pub(crate)` surface via `super::*`, so private fields
 // of `CompilationPipeline` remain genuinely private — only methods
 // move out of this file, not access boundaries.
+mod aot_object_cache;
 mod ats_v_phase;
 mod audit;
 mod bounds_stats;

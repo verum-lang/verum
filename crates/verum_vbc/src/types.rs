@@ -864,6 +864,17 @@ pub struct FieldDescriptor {
     pub offset: u32,
     /// Field visibility.
     pub visibility: Visibility,
+    /// REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: the field's refinement
+    /// predicate SOURCE (display form, e.g. "it >= 0.0 && it <= 1.0"),
+    /// carried through the archive so USER-side construction of
+    /// archive-loaded refined types re-emits the runtime Assert.
+    /// StringId::EMPTY when the field is unrefined. Wire: appended
+    /// version-gated at minor >= 3 (see serialize/deserialize).
+    #[serde(default)]
+    pub refinement_src: StringId,
+    /// Binding name for the predicate ("it" unless named).
+    #[serde(default)]
+    pub refinement_binding: StringId,
 }
 
 impl Default for FieldDescriptor {
@@ -873,6 +884,8 @@ impl Default for FieldDescriptor {
             type_ref: TypeRef::Concrete(TypeId::UNIT),
             offset: 0,
             visibility: Visibility::Public,
+                    refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
         }
     }
 }

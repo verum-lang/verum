@@ -1969,6 +1969,22 @@ impl CodegenContext {
         self.registers.collect_debug_variables()
     }
 
+    /// Records a register→owner-type hint for the current function
+    /// (FUNC-REGISTRY-QUALIFICATION-1). Used where VBC codegen statically
+    /// knows a register's owner type but the bytecode alone can't recover it
+    /// (the for-loop `__for_iter` temp). Flushed into the FunctionDescriptor
+    /// at build time and consumed only by the AOT reg_types pass.
+    pub fn add_register_type_hint(&mut self, register: u16, type_name: String) {
+        self.registers.push_type_hint(register, type_name);
+    }
+
+    /// Returns the register→owner-type hints collected for the current
+    /// function. Collected before `end_function` clears register state,
+    /// mirroring `collect_debug_variables`.
+    pub fn collect_register_type_hints(&self) -> Vec<(u16, String)> {
+        self.registers.collect_type_hints()
+    }
+
     /// Atomically save+override the variant-disambiguation context
     /// `(current_return_type_name, current_return_type_inner)`,
     /// returning the old pair so a caller can restore it.

@@ -2986,22 +2986,40 @@ pub fn lower_instruction<'ctx>(
                     RuntimeLowering::OBJECT_HEADER_SIZE + (*field_count as u64) * 8,
                 );
 
-                // Store type_id in object header at offset 0 for protocol dispatch.
-                // Only store for types that have protocol implementations (to avoid
-                // breaking code that expects zeroed headers for non-protocol types).
-                let has_protocols = ctx
-                    .vbc_module()
-                    .map(|vbc| {
-                        vbc.types
-                            .iter()
-                            .any(|td| td.id.0 == *type_id && !td.protocols.is_empty())
-                    })
-                    .unwrap_or(false);
-                if has_protocols {
+                // AOT-XMODULE-VALUESEM-1: stamp the header UNCONDITIONALLY —
+                // type_id (u32 @0, interp ObjectHeader layout) + size
+                // (u32 @12). Pre-fix only protocol-bearing types got a
+                // (whole-i64) stamp and everything else kept a zeroed
+                // header, which made records and variants runtime-
+                // indistinguishable: `verum_generic_eq` had no
+                // structural path, so record `==` fell into the Text
+                // byte-compare (false) and variant `==` hit the
+                // `first==0 -> ret_true` early-out (true regardless of
+                // tag). The stamp gives the eq runtime (and future
+                // introspection) a truthful header; the PACK stamp
+                // (TUPLE 521) established the discipline.
+                {
+                    let i32_type = ctx.types().context().i32_type();
+                    let i8_type = ctx.types().i8_type();
                     let i64_type = ctx.types().i64_type();
-                    let type_id_val = i64_type.const_int(*type_id as u64, false);
                     ctx.builder()
-                        .build_store(obj_ptr, type_id_val)
+                        .build_store(obj_ptr, i32_type.const_int(*type_id as u64, false))
+                        .or_llvm_err()?;
+                    // SAFETY: in-bounds GEP within the 24-byte header.
+                    let size_slot = unsafe {
+                        ctx.builder()
+                            .build_in_bounds_gep(
+                                i8_type,
+                                obj_ptr,
+                                &[i64_type.const_int(12, false)],
+                                "hdr_size_slot",
+                            )
+                            .or_llvm_err()?
+                    };
+                    let total =
+                        RuntimeLowering::OBJECT_HEADER_SIZE + (*field_count as u64) * 8;
+                    ctx.builder()
+                        .build_store(size_slot, i32_type.const_int(total, false))
                         .or_llvm_err()?;
                 }
 
@@ -3075,6 +3093,37 @@ pub fn lower_instruction<'ctx>(
                 let runtime = RuntimeLowering::new(ctx.llvm_context());
                 let obj_ptr =
                     runtime.lower_new_object(ctx.builder(), ctx.get_module(), field_count)?;
+                // AOT-XMODULE-VALUESEM-1 / AOT-ITERDEREF-SLOT-1: stamp the
+                // header UNCONDITIONALLY — same discipline as `New` and
+                // `MakeVariantTyped` (d720e502f). NewG was the remaining
+                // record producer with a fully zeroed header, which (a) kept
+                // NewG'd records out of `verum_generic_eq`'s structural path
+                // and (b) would make the Deref slot-vs-object probe
+                // misclassify a real NewG object as an element slot.
+                {
+                    let i32_type = ctx.types().context().i32_type();
+                    let i8_type = ctx.types().i8_type();
+                    let i64_type = ctx.types().i64_type();
+                    ctx.builder()
+                        .build_store(obj_ptr, i32_type.const_int(*type_id as u64, false))
+                        .or_llvm_err()?;
+                    // SAFETY: in-bounds GEP within the 24-byte header.
+                    let size_slot = unsafe {
+                        ctx.builder()
+                            .build_in_bounds_gep(
+                                i8_type,
+                                obj_ptr,
+                                &[i64_type.const_int(12, false)],
+                                "hdr_size_slot",
+                            )
+                            .or_llvm_err()?
+                    };
+                    let total =
+                        RuntimeLowering::OBJECT_HEADER_SIZE + (field_count as u64) * 8;
+                    ctx.builder()
+                        .build_store(size_slot, i32_type.const_int(total, false))
+                        .or_llvm_err()?;
+                }
                 ctx.set_register(dst.0, obj_ptr.into());
                 // Track heap allocation for drop protocol cleanup on return
                 ctx.mark_heap_alloc_register(dst.0);
@@ -3608,6 +3657,39 @@ pub fn lower_instruction<'ctx>(
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let variant_ptr =
                 runtime.lower_make_variant(ctx.builder(), ctx.get_module(), *tag, *field_count)?;
+            // AOT-XMODULE-VALUESEM-1: stamp type_id (u32 @0) + size
+            // (u32 @12) into the variant header — same discipline as
+            // `New`. Variants had fully zeroed headers, so
+            // `verum_generic_eq`'s `first==0` early-out equated
+            // DISTINCT enum variants before ever reading the tag.
+            {
+                let i32_type = ctx.types().context().i32_type();
+                let i8_type = ctx.types().i8_type();
+                let i64_type = ctx.types().i64_type();
+                ctx.builder()
+                    .build_store(
+                        variant_ptr,
+                        i32_type.const_int(*type_id as u64, false),
+                    )
+                    .or_llvm_err()?;
+                // SAFETY: in-bounds GEP within the 24-byte header.
+                let size_slot = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(
+                            i8_type,
+                            variant_ptr,
+                            &[i64_type.const_int(12, false)],
+                            "vhdr_size_slot",
+                        )
+                        .or_llvm_err()?
+                };
+                let total = RuntimeLowering::OBJECT_HEADER_SIZE
+                    + 8
+                    + (*field_count as u64) * 8;
+                ctx.builder()
+                    .build_store(size_slot, i32_type.const_int(total, false))
+                    .or_llvm_err()?;
+            }
             ctx.set_register(dst.0, variant_ptr.into());
             ctx.mark_variant_register(dst.0);
             // CLONE-AOT-ALIAS-1: static size = header + tag word + fields.
@@ -4209,7 +4291,237 @@ pub fn lower_instruction<'ctx>(
                 // Inline struct pointer (from offset() into array) OR a
                 // heap-allocated value type: the value-in-register IS the
                 // pointer to the underlying object. Pass through unchanged.
-                ctx.set_register(dst.0, val);
+                //
+                // **AOT-ITERDEREF-SLOT-1** — the passthrough is only correct
+                // when the register really holds the OBJECT pointer. Iterator
+                // element refs violate that: `ListIter.next()` yields
+                // `&*self.ptr`, and the REFDEREF fold (`&*p → p` on raw
+                // pointers) makes the yielded `&T` the raw SLOT ADDRESS
+                // (&data[i]) — one load away from the element. The Tier-0
+                // interpreter loads that slot at deref time; the AOT
+                // passthrough handed the slot address to every downstream
+                // consumer, so `GetF@+24` landed inside the list backing
+                // array (for i=0 the array BASE: field-0 reads data[3] — a
+                // neighbouring element pointer — and e.g. `SchemaError.eq`'s
+                // message strcmp then dereferenced an ObjectHeader word →
+                // SIGSEGV; enum domains read garbage tags → partition laws
+                // miscounted). Repro: repro/ctx_iterderef.vr (CallM-result
+                // iterables — reg_types does not type call results, so the
+                // payload register arrives here obj-marked).
+                //
+                // Objects are self-describing since the header stamp
+                // (`New`/`MakeVariantTyped` write type_id u32@0 + size
+                // u32@12, d720e502f), so discriminate AT RUNTIME:
+                //   * [p] parses as a stamped header (tid==expected when the
+                //     obj-mark resolves to a VBC TypeId, OR generic shape:
+                //     tid!=0 && size!=0 && size%8==0 && size<=4096) →
+                //     the register IS the object → pass through (status quo);
+                //   * otherwise → it is a slot: load [p] (the element ptr).
+                // Flat-layout families (Text) and unstamped collections
+                // (List/Map/Set/...) keep the unconditional passthrough —
+                // their headers are not stamped, so the shape probe would
+                // misclassify real objects as slots.
+                let discriminate = !is_inline
+                    && (val.is_int_value() || val.is_pointer_value())
+                    && !ctx.is_interior_list_ref(ref_reg.0)
+                    && !ctx.is_list_register(ref_reg.0)
+                    && !ctx.is_map_register(ref_reg.0)
+                    && !ctx.is_set_register(ref_reg.0)
+                    && !ctx.is_deque_register(ref_reg.0)
+                    && !ctx.is_btreemap_register(ref_reg.0)
+                    && !ctx.is_btreeset_register(ref_reg.0)
+                    && !ctx.is_binaryheap_register(ref_reg.0)
+                    && !ctx.is_chan_register(ref_reg.0)
+                    && !ctx.is_text_register(ref_reg.0)
+                    && !ctx.is_string_register(ref_reg.0)
+                    && (ctx.is_struct_register(ref_reg.0)
+                        || ctx.get_obj_register_type(ref_reg.0).is_some());
+
+                if discriminate {
+                    // Resolve the obj-mark's type name to its stamped VBC
+                    // TypeId for the exact-tid probe (miss → shape probe).
+                    let objty_name: Option<String> =
+                        ctx.get_obj_register_type(ref_reg.0).map(|s| s.to_string());
+                    let expected_tid: Option<u32> = objty_name.as_deref().and_then(|name| {
+                        ctx.vbc_module().and_then(|m| {
+                            m.types.iter().find_map(|d| {
+                                if m.get_string(d.name).map(|s| s == name).unwrap_or(false) {
+                                    Some(d.id.0)
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                    });
+                    if std::env::var("VERUM_TRACE_ITERDEREF").is_ok() {
+                        eprintln!(
+                            "[iterderef] Deref r{} -> r{}: struct={} objty={:?} expected_tid={:?}",
+                            ref_reg.0,
+                            dst.0,
+                            ctx.is_struct_register(ref_reg.0),
+                            objty_name,
+                            expected_tid
+                        );
+                    }
+
+                    let i64_type = ctx.types().i64_type();
+                    let i32_type = ctx.llvm_context().i32_type();
+                    let i8_type = ctx.types().i8_type();
+                    let val64 = as_i64(ctx, val, "sdisc_val")?;
+
+                    let cur_bb = ctx
+                        .builder()
+                        .get_insert_block()
+                        .or_internal("deref sdisc: no insert block")?;
+                    let func = cur_bb
+                        .get_parent()
+                        .or_internal("deref sdisc: no parent function")?;
+                    let probe_bb = ctx.llvm_context().append_basic_block(func, "sdisc_probe");
+                    let done_bb = ctx.llvm_context().append_basic_block(func, "sdisc_done");
+
+                    // Heap-plausible gate: only probe memory for 8-aligned
+                    // user-space heap addresses; anything else passes
+                    // through untouched (immediates, nil, tagged values).
+                    let lo = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::UGE,
+                            val64,
+                            i64_type.const_int(0x10000000, false),
+                            "sdisc_lo",
+                        )
+                        .or_llvm_err()?;
+                    let hi = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::ULE,
+                            val64,
+                            i64_type.const_int(0x7FFFFFFFFFFF, false),
+                            "sdisc_hi",
+                        )
+                        .or_llvm_err()?;
+                    let alm = ctx
+                        .builder()
+                        .build_and(val64, i64_type.const_int(7, false), "sdisc_alm")
+                        .or_llvm_err()?;
+                    let al = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::EQ,
+                            alm,
+                            i64_type.const_zero(),
+                            "sdisc_al",
+                        )
+                        .or_llvm_err()?;
+                    let r1 = ctx.builder().build_and(lo, hi, "sdisc_r1").or_llvm_err()?;
+                    let in_range = ctx.builder().build_and(r1, al, "sdisc_inr").or_llvm_err()?;
+                    ctx.builder()
+                        .build_conditional_branch(in_range, probe_bb, done_bb)
+                        .or_llvm_err()?;
+
+                    // Probe: parse [p] as an ObjectHeader.
+                    ctx.builder().position_at_end(probe_bb);
+                    let p = ctx
+                        .builder()
+                        .build_int_to_ptr(val64, ctx.types().ptr_type(), "sdisc_p")
+                        .or_llvm_err()?;
+                    let tid = ctx
+                        .builder()
+                        .build_load(i32_type, p, "sdisc_tid")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    // SAFETY: in-bounds GEP within the minimal 8-byte
+                    // readable region already guaranteed by the heap gate
+                    // (both header and slot cases are ≥16-byte mapped).
+                    let size_gep = unsafe {
+                        ctx.builder()
+                            .build_in_bounds_gep(
+                                i8_type,
+                                p,
+                                &[i64_type.const_int(12, false)],
+                                "sdisc_szp",
+                            )
+                            .or_llvm_err()?
+                    };
+                    let size = ctx
+                        .builder()
+                        .build_load(i32_type, size_gep, "sdisc_sz")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    let tid_nz = ctx
+                        .builder()
+                        .build_int_compare(IntPredicate::NE, tid, i32_type.const_zero(), "sdisc_tidnz")
+                        .or_llvm_err()?;
+                    let sz_nz = ctx
+                        .builder()
+                        .build_int_compare(IntPredicate::NE, size, i32_type.const_zero(), "sdisc_sznz")
+                        .or_llvm_err()?;
+                    let szm = ctx
+                        .builder()
+                        .build_and(size, i32_type.const_int(7, false), "sdisc_szm")
+                        .or_llvm_err()?;
+                    let sz_al = ctx
+                        .builder()
+                        .build_int_compare(IntPredicate::EQ, szm, i32_type.const_zero(), "sdisc_szal")
+                        .or_llvm_err()?;
+                    let sz_bnd = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::ULE,
+                            size,
+                            i32_type.const_int(4096, false),
+                            "sdisc_szbnd",
+                        )
+                        .or_llvm_err()?;
+                    let a1 = ctx.builder().build_and(tid_nz, sz_nz, "sdisc_a1").or_llvm_err()?;
+                    let a2 = ctx.builder().build_and(sz_al, sz_bnd, "sdisc_a2").or_llvm_err()?;
+                    let mut is_obj = ctx.builder().build_and(a1, a2, "sdisc_shape").or_llvm_err()?;
+                    if let Some(want) = expected_tid {
+                        // Exact match is authoritative; OR it in so a real
+                        // object whose obj-mark went stale still passes
+                        // through on shape.
+                        let tid_eq = ctx
+                            .builder()
+                            .build_int_compare(
+                                IntPredicate::EQ,
+                                tid,
+                                i32_type.const_int(want as u64, false),
+                                "sdisc_tideq",
+                            )
+                            .or_llvm_err()?;
+                        is_obj = ctx
+                            .builder()
+                            .build_or(is_obj, tid_eq, "sdisc_isobj")
+                            .or_llvm_err()?;
+                    }
+                    let slot_val = ctx
+                        .builder()
+                        .build_load(i64_type, p, "sdisc_slot")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    let probe_res = ctx
+                        .builder()
+                        .build_select(is_obj, val64, slot_val, "sdisc_sel")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    let probe_end = ctx
+                        .builder()
+                        .get_insert_block()
+                        .or_internal("deref sdisc: no probe block")?;
+                    ctx.builder()
+                        .build_unconditional_branch(done_bb)
+                        .or_llvm_err()?;
+
+                    ctx.builder().position_at_end(done_bb);
+                    let phi = ctx
+                        .builder()
+                        .build_phi(i64_type, "sdisc_res")
+                        .or_llvm_err()?;
+                    phi.add_incoming(&[(&val64, cur_bb), (&probe_res, probe_end)]);
+                    ctx.set_register(dst.0, phi.as_basic_value());
+                } else {
+                    ctx.set_register(dst.0, val);
+                }
                 if is_inline {
                     ctx.mark_inline_struct_register(dst.0);
                 }
@@ -8589,18 +8901,9 @@ fn lower_call<'ctx>(
     const UNRESOLVED_FN_ID: u32 = 0x7FFFFFFF;
     if func_id == UNRESOLVED_FN_ID {
         // Emit a const-zero into dst as the call's "return value".
-        // Subsequent code reads the default and degrades gracefully — but
-        // RECORD it so the monomorphization-completeness diagnostic can
-        // surface the stub (warning, or hard error under VERUM_STRICT_MONO)
-        // instead of it silently producing wrong results / a SIGSEGV.
-        let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
-        super::error::record_unresolved_generic_call(
-            &cur_fn,
-            "call target unresolved at codegen (sentinel fn-id 0x7FFFFFFF — \
-             typically a generic protocol-method dispatch or inner closure)"
-                .to_string(),
-        );
+        // Subsequent code reads the default and degrades gracefully.
         if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
+            let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
             eprintln!("[aot-unresolved] in fn {} → const-zero dst", cur_fn);
         }
         ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
@@ -8622,17 +8925,8 @@ fn lower_call<'ctx>(
         None => match vbc_mod.get_function(FunctionId(func_id)) {
             Some(d) => d,
             None => {
-                let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
-                super::error::record_unresolved_generic_call(
-                    &cur_fn,
-                    format!(
-                        "Call fn-id {} (base {} + {}) missing in the VBC module table",
-                        resolved_id,
-                        ctx.func_id_base(),
-                        func_id
-                    ),
-                );
                 if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
+                    let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
                     eprintln!(
                         "[aot-unresolved] Call: fn_id={} (base {} + {}) miss in vbc_mod, const-zero in {}",
                         resolved_id,
@@ -11948,6 +12242,322 @@ fn lower_call<'ctx>(
     Ok(())
 }
 
+/// ITER-ADAPTER-EAGER-AOT-1 / COLLECT-DRAIN-AOT-1 — resolve a register's
+/// tracked owner-type BASE name for the iterator-adapter intercepts
+/// (sticky VBC hint → reg_types pre-pass → obj return-type marking),
+/// generic args stripped. Owned so no `ctx` borrow outlives the probe.
+fn adapter_tracked_type_base(ctx: &FunctionContext<'_, '_>, reg: u16) -> Option<String> {
+    let full = ctx
+        .sticky_type_hint(reg)
+        .map(|s| s.to_string())
+        .or_else(|| ctx.reg_types().type_name(reg).map(|s| s.to_string()))
+        .or_else(|| ctx.get_obj_register_type(reg).map(|s| s.to_string()))?;
+    let base = full.split('<').next().unwrap_or("").trim().to_string();
+    if base.is_empty() { None } else { Some(base) }
+}
+
+/// ITER-ADAPTER-EAGER-AOT-1: eagerly walk a `ListIter` / `ListIterMut`
+/// record — an element-pointer pair `{ ptr (field 0 @ header+24),
+/// end (field 1 @ header+32) }` over the list's i64 value slots — and
+/// build a fresh List from the slot VALUES, mapped through `closure_reg`
+/// when present (`iter().map(f)`) or taken as-is (`iter().collect()`).
+///
+/// This is the Tier-1 twin of the Tier-0 builtin EAGER adapters
+/// (`method_dispatch.rs` `"map"` / `"collect"` on the builtin iterator):
+/// the interpreter never runs the compiled lazy `MappedIter` chain for
+/// list-origin iterators — it collects values eagerly and consumes the
+/// iterator. The compiled lazy chain is NOT usable under AOT (the
+/// generic `MappedIter.next` body's inner `self.iter.next()` lowers to
+/// the const-zero terminal fallback — the erased receiver can't be
+/// resolved statically), so mirroring Tier-0's eager semantics is both
+/// the parity-correct and the only workable lowering. The iterator is
+/// consumed afterwards (ptr := end), matching the interpreter.
+fn emit_listiter_eager_walk<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Reg,
+    iter_reg: Reg,
+    closure_reg: Option<Reg>,
+) -> Result<()> {
+    let i64_type = ctx.types().i64_type();
+    let i8_type = ctx.types().i8_type();
+    let ptr_type = ctx.types().ptr_type();
+
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    let out_list = runtime.lower_new_list(ctx.builder(), ctx.get_module())?;
+
+    let iter_i64 = as_i64(ctx, ctx.get_register(iter_reg.0)?, "eiter_i64")?;
+
+    let current_fn = ctx.function();
+    let llvm_cx = ctx.llvm_context();
+    let init_bb = llvm_cx.append_basic_block(current_fn, "eiter_init");
+    let head_bb = llvm_cx.append_basic_block(current_fn, "eiter_head");
+    let body_bb = llvm_cx.append_basic_block(current_fn, "eiter_body");
+    let consume_bb = llvm_cx.append_basic_block(current_fn, "eiter_consume");
+    let done_bb = llvm_cx.append_basic_block(current_fn, "eiter_done");
+
+    // Nil-receiver guard: degrade to an empty List (same graceful-nil
+    // discipline as the const-zero terminal fallback, minus the crash).
+    let iter_is_nil = ctx
+        .builder()
+        .build_int_compare(IntPredicate::EQ, iter_i64, i64_type.const_zero(), "eiter_nil")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(iter_is_nil, done_bb, init_bb)
+        .or_llvm_err()?;
+
+    // init: load cur/end from the record; hoist the closure fn/env loads.
+    ctx.builder().position_at_end(init_bb);
+    let iter_ptr = ctx
+        .builder()
+        .build_int_to_ptr(iter_i64, ptr_type, "eiter_ptr")
+        .or_llvm_err()?;
+    // SAFETY: GEP to ListIter record field 0 (`ptr`) at header+24.
+    let cur_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(
+                i8_type,
+                iter_ptr,
+                &[i64_type.const_int(RuntimeLowering::OBJECT_HEADER_SIZE, false)],
+                "eiter_cur_slot",
+            )
+            .or_llvm_err()?
+    };
+    // SAFETY: GEP to ListIter record field 1 (`end`) at header+32.
+    let end_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(
+                i8_type,
+                iter_ptr,
+                &[i64_type.const_int(RuntimeLowering::OBJECT_HEADER_SIZE + 8, false)],
+                "eiter_end_slot",
+            )
+            .or_llvm_err()?
+    };
+    let end_v = ctx
+        .builder()
+        .build_load(i64_type, end_slot, "eiter_end")
+        .or_llvm_err()?
+        .into_int_value();
+    let cur_var = ctx
+        .builder()
+        .build_alloca(i64_type, "eiter_cur_var")
+        .or_llvm_err()?;
+    let cur0 = ctx
+        .builder()
+        .build_load(i64_type, cur_slot, "eiter_cur0")
+        .or_llvm_err()?
+        .into_int_value();
+    ctx.builder().build_store(cur_var, cur0).or_llvm_err()?;
+    // Closure fn/env (loaded once): closure struct is {fn_ptr@0, env@8}.
+    let closure_parts = if let Some(creg) = closure_reg {
+        let cval = ctx.get_register(creg.0)?;
+        let cptr = as_ptr(ctx, cval, "eiter_closure")?;
+        let fn_ptr = ctx
+            .builder()
+            .build_load(ptr_type, cptr, "eiter_fn")
+            .or_llvm_err()?
+            .into_pointer_value();
+        // SAFETY: GEP into the closure struct {fn_ptr, env_ptr} at offset 8.
+        let env_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, cptr, &[i64_type.const_int(8, false)], "eiter_env_slot")
+                .or_llvm_err()?
+        };
+        let env_ptr = ctx
+            .builder()
+            .build_load(ptr_type, env_slot, "eiter_env")
+            .or_llvm_err()?;
+        Some((fn_ptr, env_ptr))
+    } else {
+        None
+    };
+    ctx.builder()
+        .build_unconditional_branch(head_bb)
+        .or_llvm_err()?;
+
+    // head: cur >= end → consume/done.
+    ctx.builder().position_at_end(head_bb);
+    let cur = ctx
+        .builder()
+        .build_load(i64_type, cur_var, "eiter_cur")
+        .or_llvm_err()?
+        .into_int_value();
+    let exhausted = ctx
+        .builder()
+        .build_int_compare(IntPredicate::UGE, cur, end_v, "eiter_exhausted")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(exhausted, consume_bb, body_bb)
+        .or_llvm_err()?;
+
+    // body: elem = *cur (raw i64 value slot); map through the closure when
+    // present; push; cur += 8.
+    ctx.builder().position_at_end(body_bb);
+    let elem_ptr = ctx
+        .builder()
+        .build_int_to_ptr(cur, ptr_type, "eiter_elem_ptr")
+        .or_llvm_err()?;
+    let elem = ctx
+        .builder()
+        .build_load(i64_type, elem_ptr, "eiter_elem")
+        .or_llvm_err()?
+        .into_int_value();
+    let pushed: BasicValueEnum = if let Some((fn_ptr, env_ptr)) = closure_parts {
+        // Closure ABI (mirrors CallClosure lowering): i64 (ptr env, i64 arg).
+        let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let mapped = ctx
+            .builder()
+            .build_indirect_call(
+                fn_type,
+                fn_ptr,
+                &[env_ptr.into(), elem.into()],
+                "eiter_mapped",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .unwrap_or_else(|| i64_type.const_zero().into());
+        mapped
+    } else {
+        elem.into()
+    };
+    runtime.lower_list_push(ctx.builder(), ctx.get_module(), out_list, pushed)?;
+    // lower_list_push splits blocks; reload insertion point context is fine —
+    // the builder now sits in its continue block.
+    let cur_next = ctx
+        .builder()
+        .build_int_add(cur, i64_type.const_int(8, false), "eiter_cur_next")
+        .or_llvm_err()?;
+    ctx.builder().build_store(cur_var, cur_next).or_llvm_err()?;
+    ctx.builder()
+        .build_unconditional_branch(head_bb)
+        .or_llvm_err()?;
+
+    // consume: ptr := end (Tier-0 consumes the iterator after map/collect).
+    ctx.builder().position_at_end(consume_bb);
+    ctx.builder().build_store(cur_slot, end_v).or_llvm_err()?;
+    ctx.builder()
+        .build_unconditional_branch(done_bb)
+        .or_llvm_err()?;
+
+    // done: dst := out list.
+    ctx.builder().position_at_end(done_bb);
+    ctx.set_register(dst.0, out_list.into());
+    ctx.mark_list_register(dst.0);
+    Ok(())
+}
+
+/// COLLECT-DRAIN-AOT-1: drain an iterator whose concrete type is
+/// statically tracked into a fresh List by repeatedly calling the
+/// type's own `<IterType>.next(iter)` until the returned `Maybe` is
+/// nil-shaped or tag==None (0), pushing each `Some` payload (slot 0).
+///
+/// Tier-1 twin of the Tier-0 runtime drain (COLLECT-FROMITER-2,
+/// `method_dispatch.rs` from_iter intercept): same next-until-None
+/// drive the for-loop path uses, same payload semantics, List target
+/// (the erased `collect` target C defaults to List on both tiers).
+fn emit_collect_drain<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Reg,
+    iter_reg: Reg,
+    next_fn_name: &str,
+) -> Result<()> {
+    let i64_type = ctx.types().i64_type();
+    let ptr_type = ctx.types().ptr_type();
+
+    let next_fn = ctx
+        .get_module()
+        .get_function(next_fn_name)
+        .or_missing_fn(next_fn_name)?;
+
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    let out_list = runtime.lower_new_list(ctx.builder(), ctx.get_module())?;
+
+    let iter_val = ctx.get_register(iter_reg.0)?;
+    let iter_i64 = as_i64(ctx, iter_val, "cdrain_iter_i64")?;
+    // Coerce the receiver once to next()'s param-0 type (i64 or ptr).
+    let iter_arg: BasicMetadataValueEnum = {
+        let param_tys = next_fn.get_type().get_param_types();
+        if let Some(expected_meta) = param_tys.first() {
+            if let Some(expected_ty) = meta_type_to_basic(*expected_meta) {
+                coerce_value(ctx, iter_val, expected_ty, "cdrain_iter")?.into()
+            } else {
+                coerce_value(ctx, iter_val, i64_type.into(), "cdrain_iter")?.into()
+            }
+        } else {
+            coerce_value(ctx, iter_val, i64_type.into(), "cdrain_iter")?.into()
+        }
+    };
+
+    let current_fn = ctx.function();
+    let llvm_cx = ctx.llvm_context();
+    let head_bb = llvm_cx.append_basic_block(current_fn, "cdrain_head");
+    let tag_bb = llvm_cx.append_basic_block(current_fn, "cdrain_tag");
+    let some_bb = llvm_cx.append_basic_block(current_fn, "cdrain_some");
+    let done_bb = llvm_cx.append_basic_block(current_fn, "cdrain_done");
+
+    // Nil-receiver guard: empty List (graceful-nil discipline).
+    let iter_is_nil = ctx
+        .builder()
+        .build_int_compare(IntPredicate::EQ, iter_i64, i64_type.const_zero(), "cdrain_nil")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(iter_is_nil, done_bb, head_bb)
+        .or_llvm_err()?;
+
+    // head: m = <T>.next(iter); nil-shaped Maybe → done.
+    ctx.builder().position_at_end(head_bb);
+    let m_raw = ctx
+        .builder()
+        .build_call(next_fn, &[iter_arg], "cdrain_next")
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .unwrap_or_else(|| i64_type.const_zero().into());
+    let m_i64 = as_i64(ctx, m_raw, "cdrain_next_i64")?;
+    let m_is_nil = ctx
+        .builder()
+        .build_int_compare(IntPredicate::EQ, m_i64, i64_type.const_zero(), "cdrain_mnil")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(m_is_nil, done_bb, tag_bb)
+        .or_llvm_err()?;
+
+    // tag: Maybe variant tag (i32 @ +24); None (tag 0) terminates.
+    ctx.builder().position_at_end(tag_bb);
+    let m_ptr = ctx
+        .builder()
+        .build_int_to_ptr(m_i64, ptr_type, "cdrain_m_ptr")
+        .or_llvm_err()?;
+    let is_none_i64 = runtime.lower_is_var(ctx.builder(), m_ptr, 0)?;
+    let is_none = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::NE,
+            is_none_i64,
+            i64_type.const_zero(),
+            "cdrain_is_none",
+        )
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(is_none, done_bb, some_bb)
+        .or_llvm_err()?;
+
+    // some: payload (slot 0 @ +32) → push; loop.
+    ctx.builder().position_at_end(some_bb);
+    let payload = runtime.lower_as_var(ctx.builder(), m_ptr, 0)?;
+    runtime.lower_list_push(ctx.builder(), ctx.get_module(), out_list, payload.into())?;
+    ctx.builder()
+        .build_unconditional_branch(head_bb)
+        .or_llvm_err()?;
+
+    // done: dst := out list.
+    ctx.builder().position_at_end(done_bb);
+    ctx.set_register(dst.0, out_list.into());
+    ctx.mark_list_register(dst.0);
+    Ok(())
+}
+
 fn lower_call_method<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     dst: Reg,
@@ -13381,13 +13991,22 @@ fn lower_call_method<'ctx>(
     // all the scattered type detection below.
     // ============================================================
     let receiver_type_name: Option<&str> = {
+        // Priority 0: sticky VBC-authored hint (survives the
+        // flow-sensitive walk that clobbers reg_types via Mov
+        // propagation — FUNC-REGISTRY-QUALIFICATION-1).
+        let from_sticky = ctx.sticky_type_hint(receiver.0);
         // Priority 1: RegisterTypeMap (pre-pass populated)
         let from_reg_types = ctx.reg_types().type_name(receiver.0);
         // Priority 2: VBC method_type_prefix (compile-time resolution)
         let from_prefix = method_type_prefix;
-        // Use RegisterTypeMap if available, otherwise fall back to prefix
-        from_reg_types.or(from_prefix)
+        from_sticky.or(from_reg_types).or(from_prefix)
     };
+    if std::env::var("VERUM_TRACE_NEXT_DISPATCH").is_ok() && method_name_str == "next" {
+        eprintln!(
+            "[next-dispatch] recv_reg={} recv_type={:?} prefix={:?}",
+            receiver.0, receiver_type_name, method_type_prefix
+        );
+    }
 
     // ============================================================
     // Declarative dispatch table lookup.
@@ -15201,6 +15820,100 @@ fn lower_call_method<'ctx>(
             }
             _ => {
                 // Fall through for unrecognized TCP/UDP methods
+            }
+        }
+    }
+
+    // ============================================================
+    // ITER-ADAPTER-EAGER-AOT-1 + COLLECT-DRAIN-AOT-1 — the AOT leg of
+    // the Tier-0 iterator-adapter surface (COLLECT-FROMITER-2 twin).
+    //
+    // The compiled lazy adapter chain is not runnable under AOT: the
+    // generic `MappedIter.next` body's inner `self.iter.next()` lowers
+    // to the const-zero terminal fallback (the erased receiver type
+    // can't be resolved statically), and the erased `C.from_iter(self)`
+    // inside `Iterator.collect` nil-degrades the same way — so every
+    // adapter-chain `.collect()` produced nil and the follow-on
+    // `len()/GetE` crashed (verum_generic_len(NULL)). Tier-0 solved
+    // this class with EAGER builtin adapters + a runtime from_iter
+    // drain; this block is the Tier-1 mirror:
+    //   * `map` on a `ListIter`/`ListIterMut` record → eager slot walk
+    //     through the closure into a fresh List (Tier-0 builtin map).
+    //   * `collect`/`from_iter` on a List-valued register → passthrough
+    //     (Tier-0: "collect() on a List returns it as-is").
+    //   * `collect`/`from_iter` on `ListIter`/`ListIterMut` → eager
+    //     slot walk (values), iterator consumed (Tier-0 builtin
+    //     collect).
+    //   * `collect`/`from_iter` on any other statically-tracked type
+    //     with its own `<T>.next` and no own `<T>.collect`/`from_iter`
+    //     → next-until-None drain (Tier-0 COLLECT-FROMITER-2 drain).
+    // Types with their OWN `collect`/`from_iter` are never intercepted
+    // (legitimate static targets resolve through the strategies).
+    // ============================================================
+    {
+        let is_map_shape = bare_method_early == "map" && args.count == 1;
+        let is_collect_shape = bare_method_early == "collect" && args.count == 0;
+        let is_from_iter_shape = bare_method_early == "from_iter";
+        if is_map_shape || is_collect_shape || is_from_iter_shape {
+            let is_slice_iter =
+                |n: Option<&str>| matches!(n, Some("ListIter") | Some("ListIterMut"));
+
+            if is_map_shape && !ctx.is_list_register(receiver.0) {
+                let recv_base = adapter_tracked_type_base(ctx, receiver.0);
+                // Trust the register marks first; fall back to the
+                // VBC-resolved method prefix ("ListIter.map") when the
+                // receiver register is untracked.
+                if is_slice_iter(recv_base.as_deref())
+                    || (recv_base.is_none() && is_slice_iter(method_type_prefix))
+                {
+                    return emit_listiter_eager_walk(
+                        ctx,
+                        dst,
+                        receiver,
+                        Some(Reg(args.start.0)),
+                    );
+                }
+            }
+
+            if is_collect_shape || is_from_iter_shape {
+                // The iterator travels as the RECEIVER (instance form) or
+                // as ARG 0 with a placeholder receiver (the static/bogus-
+                // owner from_iter form) — probe both, receiver first,
+                // exactly like the Tier-0 drain.
+                let mut cand_regs: Vec<Reg> = vec![receiver];
+                if is_from_iter_shape && args.count >= 1 {
+                    cand_regs.push(Reg(args.start.0));
+                }
+                for creg in cand_regs {
+                    let cbase = adapter_tracked_type_base(ctx, creg.0);
+                    // (a) List passthrough — Tier-0 collect-on-List mirror.
+                    if ctx.is_list_register(creg.0) || cbase.as_deref() == Some("List") {
+                        let v = ctx.get_register(creg.0)?;
+                        ctx.set_register(dst.0, v);
+                        ctx.mark_list_register(dst.0);
+                        return Ok(());
+                    }
+                    let Some(base) = cbase else { continue };
+                    // A type with its OWN collect/from_iter is a
+                    // legitimate static target — never intercept it.
+                    if ctx
+                        .get_module()
+                        .get_function(&format!("{}.{}", base, bare_method_early))
+                        .is_some()
+                    {
+                        break;
+                    }
+                    // (b) list-slice iterators: eager value walk.
+                    if base == "ListIter" || base == "ListIterMut" {
+                        return emit_listiter_eager_walk(ctx, dst, creg, None);
+                    }
+                    // (c) any other tracked iterator with its own `.next`:
+                    // next-until-None drain.
+                    let next_name = format!("{}.next", base);
+                    if ctx.get_module().get_function(&next_name).is_some() {
+                        return emit_collect_drain(ctx, dst, creg, &next_name);
+                    }
+                }
             }
         }
     }
@@ -21577,14 +22290,53 @@ fn lower_char_extended<'ctx>(
                     .builder()
                     .build_int_to_ptr(buf_val, ptr_type, "enc_buf_obj")
                     .or_llvm_err()?;
-                let backing_slot = unsafe {
+                // PACK-HEADER-STAMP discrimination: the buffer arrives as
+                // EITHER a slice Pack {ptr@24,len@32} (as_mut_slice call
+                // shapes — stamped TUPLE 521) OR a raw LIST object
+                // {len@24,cap@32,ptr@40} (`&mut buf` of a fixed array —
+                // Text.push's shape). The fixed @24 read on a LIST loaded
+                // the LEN (4) as a "pointer" → store at address 0x4 →
+                // EXC_BAD_ACCESS in Char.encode_utf8 (unmasked by the
+                // encode_utf8 dedup fix; pre-dedup the whole fn was a
+                // ret-0 stub). Select the backing slot by the header tid.
+                let i32_ty = ctx.types().context().i32_type();
+                let tid = ctx
+                    .builder()
+                    .build_load(i32_ty, buf_obj, "enc_hdr_tid")
+                    .or_llvm_err()?
+                    .into_int_value();
+                let is_pack = ctx
+                    .builder()
+                    .build_int_compare(
+                        IntPredicate::EQ,
+                        tid,
+                        i32_ty.const_int(521, false),
+                        "enc_is_pack",
+                    )
+                    .or_llvm_err()?;
+                let pack_slot = unsafe {
                     ctx.builder()
-                        .build_in_bounds_gep(i8_ty, buf_obj, &[i64_ty.const_int(24, false)], "enc_backing_slot")
+                        .build_in_bounds_gep(i8_ty, buf_obj, &[i64_ty.const_int(24, false)], "enc_pack_slot")
                         .or_llvm_err()?
                 };
+                let list_slot = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(i8_ty, buf_obj, &[i64_ty.const_int(super::runtime::LIST_PTR_OFFSET, false)], "enc_list_slot")
+                        .or_llvm_err()?
+                };
+                let pack_i = ctx
+                    .builder()
+                    .build_load(i64_ty, pack_slot, "enc_pack_i")
+                    .or_llvm_err()?
+                    .into_int_value();
+                let list_i = ctx
+                    .builder()
+                    .build_load(i64_ty, list_slot, "enc_list_i")
+                    .or_llvm_err()?
+                    .into_int_value();
                 let backing_i = ctx
                     .builder()
-                    .build_load(i64_ty, backing_slot, "enc_backing_i")
+                    .build_select(is_pack, pack_i, list_i, "enc_backing_sel")
                     .or_llvm_err()?
                     .into_int_value();
                 let data_ptr = ctx
@@ -24136,7 +24888,40 @@ fn lower_ffi_extended<'ctx>(
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
             let offset = as_i64(ctx, ctx.get_register(offset_reg)?, "offset")?;
 
-            let result = ffi.lower_ptr_add(ctx.builder(), ptr, offset)?;
+            // TEXT-AOT-CHARS-PUSH-1 (print-truncation leg): ptr_offset
+            // is ELEMENT-scaled — 8 for NaN-boxed List slots (the
+            // historic default), but 1 for raw BYTE buffers
+            // (Text.push_byte's `ptr_offset(self.ptr, self.len)` wrote
+            // 'y' at +8 and the NUL at +8/+16, so a builder-built
+            // "xy" printed as "x": len field said 2 while the bytes
+            // were x,0,...,y). The stride is tracked per-register
+            // (Text.ptr field loads mark stride 1); default stays 8 —
+            // every List/slice path lowers exactly as before.
+            let stride = ctx.get_element_stride(ptr_reg);
+            let result = if stride == 8 {
+                ffi.lower_ptr_add(ctx.builder(), ptr, offset)?
+            } else {
+                let i8_ty = ctx.types().i8_type();
+                let i64_ty = ctx.types().i64_type();
+                let scaled = ctx
+                    .builder()
+                    .build_int_mul(
+                        offset,
+                        i64_ty.const_int(stride, false),
+                        "ptr_add_scaled",
+                    )
+                    .or_llvm_err()?;
+                // SAFETY: byte-scaled GEP within the buffer the caller
+                // guarantees (same contract as the 8-stride path).
+                unsafe {
+                    ctx.builder()
+                        .build_gep(i8_ty, ptr, &[scaled], "ptr_add_b")
+                        .or_llvm_err()?
+                }
+            };
+            if stride != 8 {
+                ctx.set_element_stride(dst_reg, stride);
+            }
 
             ctx.set_register(dst_reg, result.into());
             Ok(())
@@ -31731,6 +32516,14 @@ fn lower_get_field<'ctx>(
                 .build_load(i64_ty, field_ptr, &format!("field_{}", field_idx))
                 .or_llvm_err()?;
             ctx.set_register(dst.0, result);
+            // Text.ptr (field 0 of the flat {ptr,len,cap}) is a raw
+            // BYTE pointer — stride 1 so PtrAdd walks bytes, not
+            // 8-byte slots (TEXT-AOT print-truncation leg).
+            if (ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0))
+                && field_idx == 0
+            {
+                ctx.set_element_stride(dst.0, 1);
+            }
         }
         BasicValueEnum::PointerValue(ptr) => {
             // Heap object: use GEP + load
@@ -31742,6 +32535,12 @@ fn lower_get_field<'ctx>(
             let i64_type = ctx.types().i64_type();
             let is_text = ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0);
             let is_inline = ctx.is_inline_struct_register(obj.0);
+            // Text.ptr (field 0 of the flat {ptr,len,cap}) is a raw
+            // BYTE pointer — mark stride 1 so downstream ptr_offset
+            // (PtrAdd) walks bytes, not 8-byte slots.
+            if is_text && field_idx == 0 {
+                ctx.set_element_stride(dst.0, 1);
+            }
             let offset = if is_text || is_inline {
                 field_idx as u64 * 8
             } else {
@@ -31764,6 +32563,14 @@ fn lower_get_field<'ctx>(
                 .build_load(i64_ty, field_ptr, &format!("field_{}", field_idx))
                 .or_llvm_err()?;
             ctx.set_register(dst.0, result);
+            // Text.ptr (field 0 of the flat {ptr,len,cap}) is a raw
+            // BYTE pointer — stride 1 so PtrAdd walks bytes, not
+            // 8-byte slots (TEXT-AOT print-truncation leg).
+            if (ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0))
+                && field_idx == 0
+            {
+                ctx.set_element_stride(dst.0, 1);
+            }
         }
         BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() == 64 => {
             // Check for newtype field access: e.g. FileDesc(Int).0
@@ -31872,6 +32679,12 @@ fn lower_get_field<'ctx>(
                     .build_load(i64_ty, field_ptr, &format!("field_{}", field_idx))
                     .or_llvm_err()?;
                 ctx.set_register(dst.0, result);
+                // Text.ptr byte-pointer stride (see sibling arm above).
+                if (ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0))
+                    && field_idx == 0
+                {
+                    ctx.set_element_stride(dst.0, 1);
+                }
             } // end else (not newtype)
         }
         _ => {
@@ -32933,7 +33746,13 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
             || ctx.is_inline_struct_register(src.0)
             || ctx.get_obj_register_type(src.0).is_some()
             || ctx.get_maybe_inner_type(src.0).is_some()
-            || ctx.is_variant_register(src.0);
+            || ctx.is_variant_register(src.0)
+            // Sticky VBC-authored type hints (register_type_hints
+            // channel): a hinted register holds a heap object by
+            // construction — passthrough, never the alloca (#21
+            // Display leg: the f-string arm hints its buf/formatter
+            // temps).
+            || ctx.sticky_type_hint(src.0).is_some();
 
         if !is_heap_type {
             // Check for GetE element pointer first — if this register was
@@ -33017,7 +33836,13 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
             || ctx.is_inline_struct_register(src.0)
             || ctx.get_obj_register_type(src.0).is_some()
             || ctx.get_maybe_inner_type(src.0).is_some()
-            || ctx.is_variant_register(src.0);
+            || ctx.is_variant_register(src.0)
+            // Sticky VBC-authored type hints (register_type_hints
+            // channel): a hinted register holds a heap object by
+            // construction — passthrough, never the alloca (#21
+            // Display leg: the f-string arm hints its buf/formatter
+            // temps).
+            || ctx.sticky_type_hint(src.0).is_some();
 
         let src_val = ctx.get_register(src.0)?;
         let ptr = if !is_heap_type {
@@ -33129,7 +33954,13 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
             || ctx.is_inline_struct_register(src.0)
             || ctx.get_obj_register_type(src.0).is_some()
             || ctx.get_maybe_inner_type(src.0).is_some()
-            || ctx.is_variant_register(src.0);
+            || ctx.is_variant_register(src.0)
+            // Sticky VBC-authored type hints (register_type_hints
+            // channel): a hinted register holds a heap object by
+            // construction — passthrough, never the alloca (#21
+            // Display leg: the f-string arm hints its buf/formatter
+            // temps).
+            || ctx.sticky_type_hint(src.0).is_some();
 
         if !is_heap_type {
             if let Some(alloca_ptr) = ctx.get_alloca_ptr(src.0) {
@@ -33162,7 +33993,13 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
             || ctx.is_inline_struct_register(src.0)
             || ctx.get_obj_register_type(src.0).is_some()
             || ctx.get_maybe_inner_type(src.0).is_some()
-            || ctx.is_variant_register(src.0);
+            || ctx.is_variant_register(src.0)
+            // Sticky VBC-authored type hints (register_type_hints
+            // channel): a hinted register holds a heap object by
+            // construction — passthrough, never the alloca (#21
+            // Display leg: the f-string arm hints its buf/formatter
+            // temps).
+            || ctx.sticky_type_hint(src.0).is_some();
 
         let src_val = ctx.get_register(src.0)?;
         let ptr = if !is_heap_type {

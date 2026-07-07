@@ -1,0 +1,20 @@
+// AOT-XMODULE-VALUESEM-1 guard (recreated) — cross-module record eq.
+// Two MetaSpan records with identical content constructed separately
+// must compare EQUAL under `==` (structural path via stamped headers).
+// Expected BOTH tiers: SPAN_EQ
+
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+
+fn mkspan(id: UInt64) -> Span {
+    MetaSpan {
+        id: id,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false },
+    }
+}
+
+fn main() {
+    let a = mkspan(5);
+    let b = mkspan(5);
+    if a == b { print("SPAN_EQ"); } else { print("SPAN_NEQ"); }
+}

@@ -14,22 +14,102 @@
 // **This test layer** covers the pure-data payload types that those
 // methods accept and return:
 //
-//   * DiagnosticSeverity 4-variant
-//   * SuggestionKind 3-variant
-//   * UsageContext 6-variant (Call / TypeAnnotation / FieldAccess /
-//     InPattern / Import / Other(Text))
-//   * ItemKind 7-variant
-//   * SchemaErrorSeverity 3-variant
-//   * BraceStyle 3-variant
+//   Enums:
+//   * DiagnosticSeverity 4-variant, SuggestionKind 3-variant,
+//     UsageContext 6-variant, ItemKind 7-variant,
+//     SchemaErrorSeverity 3-variant (+ Display/Eq impls),
+//     BraceStyle 3-variant
+//
+//   Records (construction + field readback + pure methods):
+//   * AssetMetadata, SpanLabel, Suggestion, DiagnosticBuilder (pure
+//     fluent setters; `.emit()` is @compiler_intrinsic — NOT called),
+//     CacheStats, FunctionSearchResult, TypeSearchResult, UsageInfo,
+//     PatternMatch, ItemInfo, DependencyInfo, SpanMapping,
+//     SchemaError (+ Display/Eq), BenchTimer (fields only —
+//     `.stop()`/`.elapsed()` are bodyless compiler fns), BenchResult,
+//     BenchStats, StageRecord, TraceMarker, InvocationId (+ to_text),
+//     ParseResult<Int> (+ is_ok/has_errors/ok/to_result),
+//     MetaParseError (+ format + Display), FormatOptions
+//     (+ default/compact)
+//
+//   NOT tested here (no runtime surface):
 //   * MetaExpr / Type / Item / Pattern / Statement / MetaBlock —
-//     unit-type opaque tokens
+//     @compiler_type unit-type opaque tokens
+//   * FunctionSchemaBuilder / TypeSchemaBuilder / ExprSchemaBuilder /
+//     ModuleSchemaBuilder / CodeSchema — `_inner: ()` opaque handles
+//     whose methods are all bodyless compiler declarations
+//   * ToTokens protocol — meta fn only
+//
+// Construction discipline: Spans are built by direct MetaSpan record
+// construction (`Span.call_site()` is @compiler_intrinsic); alias
+// types (Span, MetaResult<T>) are only ever named in fn signatures,
+// never in `let` annotations (META-SPAN-ALIAS class).
+//
+// Locals pulled OUT of a cross-module record (list elements, nested
+// records) are always explicitly annotated (`let l: SpanLabel = …`) —
+// the unannotated form falls back to dynamic field lookup and misreads
+// (META-CTX-ELEM-INFER-1, audit.md §3.2).
 // =============================================================================
 
 mount core.meta.contexts.{
     DiagnosticSeverity, SuggestionKind,
     UsageContext, ItemKind,
     SchemaErrorSeverity, BraceStyle,
+    AssetMetadata,
+    DiagnosticBuilder, SpanLabel, Suggestion,
+    CacheStats,
+    FunctionSearchResult, TypeSearchResult, UsageInfo, PatternMatch, ItemInfo,
+    DependencyInfo, SpanMapping, SchemaError,
+    BenchTimer, BenchResult, BenchStats,
+    StageRecord, TraceMarker, InvocationId,
+    ParseResult, MetaParseError, FormatOptions,
 };
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.token.{TokenStream};
+mount core.meta.reflection.{TypeKind};
+mount core.base.maybe.{Maybe};
+
+// ---- builders ---------------------------------------------------------------
+
+fn ssp() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn sp(id: UInt64) -> Span {
+    MetaSpan {
+        id,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false },
+    }
+}
+
+fn ets() -> TokenStream {
+    TokenStream { tokens: List.new(), span: ssp() }
+}
+
+fn fresh_builder() -> DiagnosticBuilder {
+    DiagnosticBuilder {
+        severity: DiagnosticSeverity.Note,
+        code: Maybe.None,
+        message: Maybe.None,
+        spans: List.new(),
+        suggestions: List.new(),
+    }
+}
+
+fn mk_parse_error(msg: Text) -> MetaParseError {
+    MetaParseError {
+        message: msg,
+        code: Maybe.None,
+        span: ssp(),
+        expected: List.new(),
+        found: Maybe.None,
+    }
+}
 
 // =============================================================================
 // Section 1: DiagnosticSeverity 4-variant
@@ -275,4 +355,958 @@ fn test_brace_style_pairwise_disjoint() {
     assert(s is BraceStyle.SameLine && !(s is BraceStyle.NextLine));
     assert(n is BraceStyle.NextLine && !(n is BraceStyle.Adaptive));
     assert(a is BraceStyle.Adaptive && !(a is BraceStyle.SameLine));
+}
+
+// =============================================================================
+// Section 7: AssetMetadata record (BuildAssets payload)
+// =============================================================================
+
+@test
+fn test_asset_metadata_file_shape() {
+    let m = AssetMetadata {
+        size: 2048,
+        modified_ns: 1700000000000000000,
+        is_directory: false,
+        is_file: true,
+        is_symlink: false,
+    };
+    assert(m.size == 2048);
+    assert(m.modified_ns == 1700000000000000000);
+    assert(!m.is_directory);
+    assert(m.is_file);
+    assert(!m.is_symlink);
+}
+
+@test
+fn test_asset_metadata_directory_shape() {
+    let m = AssetMetadata {
+        size: 0,
+        modified_ns: 0,
+        is_directory: true,
+        is_file: false,
+        is_symlink: false,
+    };
+    assert(m.size == 0);
+    assert(m.is_directory);
+    assert(!m.is_file);
+}
+
+@test
+fn test_asset_metadata_symlink_shape() {
+    let m = AssetMetadata {
+        size: 12,
+        modified_ns: 5,
+        is_directory: false,
+        is_file: false,
+        is_symlink: true,
+    };
+    assert(m.is_symlink);
+    assert(!m.is_directory && !m.is_file);
+}
+
+// =============================================================================
+// Section 8: SpanLabel record (CompileDiag payload)
+// =============================================================================
+
+@test
+fn test_span_label_primary_construction() {
+    let l = SpanLabel { span: sp(7), label: Text.from("expected here"), is_primary: true };
+    assert(l.label == "expected here");
+    assert(l.is_primary);
+    assert(l.span == sp(7));
+}
+
+@test
+fn test_span_label_secondary_construction() {
+    let l = SpanLabel { span: sp(9), label: Text.from("defined here"), is_primary: false };
+    assert(l.label == "defined here");
+    assert(!l.is_primary);
+}
+
+// =============================================================================
+// Section 9: Suggestion record (CompileDiag payload)
+// =============================================================================
+
+@test
+fn test_suggestion_note_shape_no_span_no_replacement() {
+    let s = Suggestion {
+        kind: SuggestionKind.Note,
+        message: Text.from("consider this"),
+        span: Maybe.None,
+        replacement: Maybe.None,
+    };
+    assert(s.kind is SuggestionKind.Note);
+    assert(s.message == "consider this");
+    assert(s.span is None);
+    assert(s.replacement is None);
+}
+
+@test
+fn test_suggestion_fix_shape_with_span_and_replacement() {
+    let s = Suggestion {
+        kind: SuggestionKind.Fix,
+        message: Text.from("use .into()"),
+        span: Maybe.Some(sp(3)),
+        replacement: Maybe.Some(Text.from(".into()")),
+    };
+    assert(s.kind is SuggestionKind.Fix);
+    assert(s.span is Some);
+    assert(s.replacement is Some);
+}
+
+// =============================================================================
+// Section 10: DiagnosticBuilder — pure fluent setters
+// (`.emit()` is @compiler_intrinsic and is NOT called here)
+// =============================================================================
+
+@test
+fn test_diagnostic_builder_fresh_state() {
+    let b = fresh_builder();
+    assert(b.severity is DiagnosticSeverity.Note);
+    assert(b.code is None);
+    assert(b.message is None);
+    assert(b.spans.len() == 0);
+    assert(b.suggestions.len() == 0);
+}
+
+@test
+fn test_diagnostic_builder_error_sets_severity_and_message() {
+    let b = fresh_builder().error(Text.from("mismatched types"));
+    assert(b.severity is DiagnosticSeverity.Error);
+    assert(b.message is Some);
+}
+
+@test
+fn test_diagnostic_builder_warning_sets_severity_and_message() {
+    let b = fresh_builder().warning(Text.from("unused variable"));
+    assert(b.severity is DiagnosticSeverity.Warning);
+    assert(b.message is Some);
+}
+
+// DEFECT META-CTX-BUILDER-CODE-METHODFIELD-1 (audit.md §3.3): the
+// stdlib `DiagnosticBuilder.code(Text)` method shares its name with the
+// `code` field; called cross-module at Tier-0 the invocation returns a
+// corrupt value (subsequent field reads null-deref, opcode 0x62).  An
+// identically-shaped method/field collision on a LOCALLY-declared type
+// works fine — archive-dispatch-specific.  `.error()`/`.warning()` etc.
+// (non-colliding names) work.
+// @ignore: META-CTX-BUILDER-CODE-METHODFIELD-1
+@ignore
+@test
+fn test_diagnostic_builder_code_sets_code_only() {
+    let b = fresh_builder().code(Text.from("E0308"));
+    assert(b.code is Some);
+    assert(b.message is None);
+}
+
+@test
+fn test_diagnostic_builder_code_field_direct_assignment() {
+    // Data-surface counterpart of the @ignored method test above.
+    let mut b = fresh_builder();
+    b.code = Maybe.Some(Text.from("E0308"));
+    assert(b.code is Some);
+    assert(b.message is None);
+}
+
+@test
+fn test_diagnostic_builder_primary_span_pushes_primary_label() {
+    let b = fresh_builder().primary_span(sp(11), Text.from("found here"));
+    assert(b.spans.len() == 1);
+    let l: SpanLabel = b.spans[0];
+    assert(l.is_primary);
+    assert(l.label == "found here");
+    assert(l.span == sp(11));
+}
+
+@test
+fn test_diagnostic_builder_secondary_span_pushes_secondary_label() {
+    let b = fresh_builder().secondary_span(sp(12), Text.from("expected here"));
+    assert(b.spans.len() == 1);
+    let l: SpanLabel = b.spans[0];
+    assert(!l.is_primary);
+    assert(l.label == "expected here");
+}
+
+@test
+fn test_diagnostic_builder_note_pushes_note_suggestion() {
+    let b = fresh_builder().note(Text.from("types must match"));
+    assert(b.suggestions.len() == 1);
+    let s: Suggestion = b.suggestions[0];
+    assert(s.kind is SuggestionKind.Note);
+    assert(s.message == "types must match");
+    assert(s.span is None);
+    assert(s.replacement is None);
+}
+
+@test
+fn test_diagnostic_builder_help_pushes_help_suggestion() {
+    let b = fresh_builder().help(Text.from("try .into()"));
+    assert(b.suggestions.len() == 1);
+    let s: Suggestion = b.suggestions[0];
+    assert(s.kind is SuggestionKind.Help);
+    assert(s.span is None);
+}
+
+@test
+fn test_diagnostic_builder_suggest_pushes_fix_with_span_and_replacement() {
+    let b = fresh_builder().suggest(Text.from("convert"), sp(4), Text.from("x.into()"));
+    assert(b.suggestions.len() == 1);
+    let s: Suggestion = b.suggestions[0];
+    assert(s.kind is SuggestionKind.Fix);
+    assert(s.span is Some);
+    assert(s.replacement is Some);
+}
+
+@test
+fn test_diagnostic_builder_full_chain() {
+    // `.code(...)` is deliberately absent from the chain — the method is
+    // defective cross-module (META-CTX-BUILDER-CODE-METHODFIELD-1, see
+    // the @ignored test above) and corrupts every later link.
+    let b = fresh_builder()
+        .error(Text.from("mismatched types"))
+        .primary_span(sp(1), Text.from("found Int"))
+        .secondary_span(sp(2), Text.from("expected Text"))
+        .help(Text.from("consider using .into()"));
+    assert(b.severity is DiagnosticSeverity.Error);
+    assert(b.message is Some);
+    assert(b.code is None);
+    assert(b.spans.len() == 2);
+    assert(b.suggestions.len() == 1);
+}
+
+// =============================================================================
+// Section 11: CacheStats record (MacroState payload)
+// =============================================================================
+
+@test
+fn test_cache_stats_construction_readback() {
+    let s = CacheStats { entry_count: 12, hits: 90, misses: 10, memory_bytes: 4096 };
+    assert(s.entry_count == 12);
+    assert(s.hits == 90);
+    assert(s.misses == 10);
+    assert(s.memory_bytes == 4096);
+}
+
+@test
+fn test_cache_stats_zero_state() {
+    let s = CacheStats { entry_count: 0, hits: 0, misses: 0, memory_bytes: 0 };
+    assert(s.entry_count == 0);
+    assert(s.hits + s.misses == 0);
+}
+
+// =============================================================================
+// Section 12: FunctionSearchResult record (CodeSearch payload)
+// =============================================================================
+
+@test
+fn test_function_search_result_construction_readback() {
+    let r = FunctionSearchResult {
+        name: Text.from("app.handlers.on_get"),
+        module: Text.from("app.handlers"),
+        is_public: true,
+        span: sp(21),
+        attributes: List.new(),
+        signature: Text.from("fn on_get(req: Request) -> Response"),
+    };
+    assert(r.name == "app.handlers.on_get");
+    assert(r.module == "app.handlers");
+    assert(r.is_public);
+    assert(r.span == sp(21));
+    assert(r.attributes.len() == 0);
+    assert(r.signature == "fn on_get(req: Request) -> Response");
+}
+
+@test
+fn test_function_search_result_private_function() {
+    let r = FunctionSearchResult {
+        name: Text.from("helper"),
+        module: Text.from("app"),
+        is_public: false,
+        span: ssp(),
+        attributes: List.new(),
+        signature: Text.from("fn helper()"),
+    };
+    assert(!r.is_public);
+}
+
+// =============================================================================
+// Section 13: TypeSearchResult record (CodeSearch payload)
+// =============================================================================
+
+@test
+fn test_type_search_result_struct_kind() {
+    let r = TypeSearchResult {
+        name: Text.from("app.User"),
+        module: Text.from("app"),
+        is_public: true,
+        span: sp(31),
+        attributes: List.new(),
+        kind: TypeKind.Struct,
+    };
+    assert(r.name == "app.User");
+    assert(r.is_public);
+    assert(r.kind is TypeKind.Struct);
+}
+
+@test
+fn test_type_search_result_enum_kind() {
+    let r = TypeSearchResult {
+        name: Text.from("app.Color"),
+        module: Text.from("app"),
+        is_public: false,
+        span: ssp(),
+        attributes: List.new(),
+        kind: TypeKind.Enum,
+    };
+    assert(r.kind is TypeKind.Enum);
+    assert(!(r.kind is TypeKind.Struct));
+}
+
+// =============================================================================
+// Section 14: UsageInfo record (CodeSearch payload)
+// =============================================================================
+
+@test
+fn test_usage_info_inside_function() {
+    let u = UsageInfo {
+        span: sp(41),
+        module: Text.from("app.main"),
+        containing_function: Maybe.Some(Text.from("main")),
+        context: UsageContext.Call,
+    };
+    assert(u.module == "app.main");
+    assert(u.containing_function is Some);
+    assert(u.context is UsageContext.Call);
+}
+
+@test
+fn test_usage_info_top_level() {
+    let u = UsageInfo {
+        span: ssp(),
+        module: Text.from("app.types"),
+        containing_function: Maybe.None,
+        context: UsageContext.TypeAnnotation,
+    };
+    assert(u.containing_function is None);
+    assert(u.context is UsageContext.TypeAnnotation);
+}
+
+@test
+fn test_usage_info_other_context_payload() {
+    let u = UsageInfo {
+        span: ssp(),
+        module: Text.from("app"),
+        containing_function: Maybe.None,
+        context: UsageContext.Other(Text.from("doc-link")),
+    };
+    assert(u.context is UsageContext.Other);
+}
+
+// =============================================================================
+// Section 15: PatternMatch record (CodeSearch payload)
+// =============================================================================
+
+@test
+fn test_pattern_match_empty_captures() {
+    let m = PatternMatch {
+        span: sp(51),
+        captures: Map.new(),
+        module: Text.from("app.core"),
+    };
+    assert(m.module == "app.core");
+    assert(m.captures.len() == 0);
+    assert(m.span == sp(51));
+}
+
+@test
+fn test_pattern_match_with_one_capture() {
+    let mut caps: Map<Text, TokenStream> = Map.new();
+    caps.insert(Text.from("x"), ets());
+    let m = PatternMatch {
+        span: ssp(),
+        captures: caps,
+        module: Text.from("app"),
+    };
+    assert(m.captures.len() == 1);
+}
+
+// =============================================================================
+// Section 16: ItemInfo record (CodeSearch payload)
+// =============================================================================
+
+@test
+fn test_item_info_with_doc() {
+    let i = ItemInfo {
+        name: Text.from("parse"),
+        kind: ItemKind.Function,
+        span: sp(61),
+        doc: Maybe.Some(Text.from("Parses input.")),
+    };
+    assert(i.name == "parse");
+    assert(i.kind is ItemKind.Function);
+    assert(i.doc is Some);
+}
+
+@test
+fn test_item_info_without_doc() {
+    let i = ItemInfo {
+        name: Text.from("CONFIG"),
+        kind: ItemKind.Const,
+        span: ssp(),
+        doc: Maybe.None,
+    };
+    assert(i.kind is ItemKind.Const);
+    assert(i.doc is None);
+}
+
+// =============================================================================
+// Section 17: DependencyInfo record (ProjectInfo payload)
+// =============================================================================
+
+@test
+fn test_dependency_info_plain() {
+    let d = DependencyInfo {
+        name: Text.from("serde"),
+        version: Text.from("1.0"),
+        is_optional: false,
+        features: List.new(),
+    };
+    assert(d.name == "serde");
+    assert(d.version == "1.0");
+    assert(!d.is_optional);
+    assert(d.features.len() == 0);
+}
+
+@test
+fn test_dependency_info_optional_with_features() {
+    let d = DependencyInfo {
+        name: Text.from("tokio"),
+        version: Text.from(">=1.2"),
+        is_optional: true,
+        features: [Text.from("rt"), Text.from("net")],
+    };
+    assert(d.is_optional);
+    assert(d.features.len() == 2);
+    assert(d.features[0] == "rt");
+    assert(d.features[1] == "net");
+}
+
+// =============================================================================
+// Section 18: SpanMapping record (SourceMap payload)
+// =============================================================================
+
+@test
+fn test_span_mapping_construction_readback() {
+    let m = SpanMapping {
+        generated: sp(100),
+        source: sp(200),
+        scope: Text.from("derive_clone"),
+    };
+    assert(m.generated == sp(100));
+    assert(m.source == sp(200));
+    assert(m.scope == "derive_clone");
+}
+
+@test
+fn test_span_mapping_generated_and_source_distinct() {
+    let m = SpanMapping {
+        generated: sp(1),
+        source: sp(2),
+        scope: Text.from("g"),
+    };
+    assert(!(m.generated == m.source));
+}
+
+// =============================================================================
+// Section 19: SchemaError record (Schema payload) + Display/Eq
+// =============================================================================
+
+@test
+fn test_schema_error_construction_with_suggestion() {
+    let e = SchemaError {
+        message: Text.from("missing @handler attribute"),
+        span: sp(71),
+        severity: SchemaErrorSeverity.Error,
+        suggestion: Maybe.Some(Text.from("add @handler")),
+    };
+    assert(e.message == "missing @handler attribute");
+    assert(e.severity is SchemaErrorSeverity.Error);
+    assert(e.suggestion is Some);
+}
+
+@test
+fn test_schema_error_construction_without_suggestion() {
+    let e = SchemaError {
+        message: Text.from("odd shape"),
+        span: ssp(),
+        severity: SchemaErrorSeverity.Info,
+        suggestion: Maybe.None,
+    };
+    assert(e.severity is SchemaErrorSeverity.Info);
+    assert(e.suggestion is None);
+}
+
+@test
+fn test_schema_error_eq_same_fields() {
+    let a = SchemaError {
+        message: Text.from("m"),
+        span: sp(1),
+        severity: SchemaErrorSeverity.Warning,
+        suggestion: Maybe.None,
+    };
+    let b = SchemaError {
+        message: Text.from("m"),
+        span: sp(1),
+        severity: SchemaErrorSeverity.Warning,
+        suggestion: Maybe.None,
+    };
+    assert(a == b);
+}
+
+@test
+fn test_schema_error_severity_display_error() {
+    let s: SchemaErrorSeverity = SchemaErrorSeverity.Error;
+    assert(f"{s}" == "error");
+}
+
+@test
+fn test_schema_error_severity_display_warning() {
+    let s: SchemaErrorSeverity = SchemaErrorSeverity.Warning;
+    assert(f"{s}" == "warning");
+}
+
+@test
+fn test_schema_error_severity_display_info() {
+    let s: SchemaErrorSeverity = SchemaErrorSeverity.Info;
+    assert(f"{s}" == "info");
+}
+
+@test
+fn test_schema_error_display_format() {
+    let e = SchemaError {
+        message: Text.from("boom"),
+        span: ssp(),
+        severity: SchemaErrorSeverity.Error,
+        suggestion: Maybe.None,
+    };
+    assert(f"{e}" == "schema error: boom");
+}
+
+// =============================================================================
+// Section 20: BenchTimer record (MetaBench payload — fields only;
+// `.stop()`/`.elapsed()` are bodyless compiler-provided fns)
+// =============================================================================
+
+@test
+fn test_bench_timer_construction_readback() {
+    let t = BenchTimer { name: Text.from("type_analysis"), start_ns: 123456789 };
+    assert(t.name == "type_analysis");
+    assert(t.start_ns == 123456789);
+}
+
+// =============================================================================
+// Section 21: BenchResult record (MetaBench payload)
+// =============================================================================
+
+@test
+fn test_bench_result_minimal() {
+    let r = BenchResult {
+        name: Text.from("codegen"),
+        duration_ns: 5000,
+        context: Maybe.None,
+        memory_bytes: Maybe.None,
+    };
+    assert(r.name == "codegen");
+    assert(r.duration_ns == 5000);
+    assert(r.context is None);
+    assert(r.memory_bytes is None);
+}
+
+@test
+fn test_bench_result_with_context_and_memory() {
+    let r = BenchResult {
+        name: Text.from("codegen"),
+        duration_ns: 750,
+        context: Maybe.Some(Text.from("cold cache")),
+        memory_bytes: Maybe.Some(1024),
+    };
+    assert(r.context is Some);
+    assert(r.memory_bytes is Some);
+}
+
+// =============================================================================
+// Section 22: BenchStats record (MetaBench payload)
+// =============================================================================
+
+@test
+fn test_bench_stats_construction_readback() {
+    let s = BenchStats {
+        count: 4,
+        total_ns: 1000,
+        avg_ns: 250,
+        min_ns: 100,
+        max_ns: 400,
+    };
+    assert(s.count == 4);
+    assert(s.total_ns == 1000);
+    assert(s.avg_ns == 250);
+    assert(s.min_ns == 100);
+    assert(s.max_ns == 400);
+}
+
+// =============================================================================
+// Section 23: StageRecord record (StageInfo payload)
+// =============================================================================
+
+@test
+fn test_stage_record_construction_readback() {
+    let r = StageRecord {
+        stage_level: 2,
+        source_span: sp(81),
+        generator_name: Text.from("make_meta_function"),
+        timestamp_ns: 987654321,
+    };
+    assert(r.stage_level == 2);
+    assert(r.source_span == sp(81));
+    assert(r.generator_name == "make_meta_function");
+    assert(r.timestamp_ns == 987654321);
+}
+
+// =============================================================================
+// Section 24: TraceMarker record (StageInfo payload)
+// =============================================================================
+
+@test
+fn test_trace_marker_construction_readback() {
+    let m = TraceMarker {
+        id: 7,
+        label: Text.from("start_generation"),
+        stage_level: 3,
+        timestamp_ns: 111222333,
+    };
+    assert(m.id == 7);
+    assert(m.label == "start_generation");
+    assert(m.stage_level == 3);
+    assert(m.timestamp_ns == 111222333);
+}
+
+// =============================================================================
+// Section 25: InvocationId record (Hygiene payload) + to_text
+// =============================================================================
+
+@test
+fn test_invocation_id_construction_readback() {
+    let i = InvocationId { value: 42 };
+    assert(i.value == 42);
+}
+
+@test
+fn test_invocation_id_to_text() {
+    let i = InvocationId { value: 42 };
+    assert(i.to_text() == "42");
+}
+
+@test
+fn test_invocation_id_to_text_zero() {
+    let i = InvocationId { value: 0 };
+    assert(i.to_text() == "0");
+}
+
+// =============================================================================
+// Section 26: ParseResult<Int> (AstAccess recovery-parse payload) —
+// generic record + pure predicate/accessor methods
+// =============================================================================
+
+fn pr_clean_success(v: Int) -> ParseResult<Int> {
+    ParseResult {
+        value: Maybe.Some(v),
+        errors: List.new(),
+        remaining: ets(),
+        success: true,
+    }
+}
+
+fn pr_failed() -> ParseResult<Int> {
+    let e = mk_parse_error(Text.from("unexpected token"));
+    ParseResult {
+        value: Maybe.None,
+        errors: [e],
+        remaining: ets(),
+        success: false,
+    }
+}
+
+fn pr_partial(v: Int) -> ParseResult<Int> {
+    // Recovered: has a value AND errors; success=true (parser recovered).
+    let e = mk_parse_error(Text.from("recovered"));
+    ParseResult {
+        value: Maybe.Some(v),
+        errors: [e],
+        remaining: ets(),
+        success: true,
+    }
+}
+
+@test
+fn test_parse_result_construction_readback() {
+    let r = pr_clean_success(7);
+    assert(r.value is Some);
+    assert(r.errors.len() == 0);
+    assert(r.success);
+    // Nested cross-module record reads need an annotated hop
+    // (META-CTX-ELEM-INFER-1): `r.remaining.tokens` direct chain
+    // misresolves the field index at Tier-0.
+    let rem: TokenStream = r.remaining;
+    assert(rem.tokens.len() == 0);
+}
+
+@test
+fn test_parse_result_is_ok_clean_success() {
+    let r = pr_clean_success(7);
+    assert(r.is_ok());
+}
+
+@test
+fn test_parse_result_is_ok_false_on_failure() {
+    let r = pr_failed();
+    assert(!r.is_ok());
+}
+
+@test
+fn test_parse_result_is_ok_false_when_recovered_with_errors() {
+    // success=true but errors non-empty → NOT ok.
+    let r = pr_partial(3);
+    assert(!r.is_ok());
+}
+
+@test
+fn test_parse_result_has_errors_true() {
+    let r = pr_failed();
+    assert(r.has_errors());
+}
+
+@test
+fn test_parse_result_has_errors_false() {
+    let r = pr_clean_success(1);
+    assert(!r.has_errors());
+}
+
+@test
+fn test_parse_result_ok_returns_value_on_success() {
+    let r = pr_clean_success(9);
+    let v = r.ok();
+    assert(v is Some);
+}
+
+@test
+fn test_parse_result_ok_returns_none_on_failure() {
+    let r = pr_failed();
+    let v = r.ok();
+    assert(v is None);
+}
+
+@test
+fn test_parse_result_ok_returns_value_even_with_errors_when_success() {
+    // `ok()` keys off `success` alone (unlike is_ok) — pinned behavior.
+    let r = pr_partial(5);
+    let v = r.ok();
+    assert(v is Some);
+}
+
+@test
+fn test_parse_result_to_result_ok_on_clean_success() {
+    let r = pr_clean_success(11);
+    let res = r.to_result();
+    assert(res is Ok);
+}
+
+@test
+fn test_parse_result_to_result_err_on_failure() {
+    let r = pr_failed();
+    let res = r.to_result();
+    assert(res is Err);
+}
+
+// =============================================================================
+// Section 27: MetaParseError record + format() + Display
+// =============================================================================
+
+@test
+fn test_meta_parse_error_construction_readback() {
+    let e = MetaParseError {
+        message: Text.from("expected expression"),
+        code: Maybe.Some(Text.from("E0101")),
+        span: sp(91),
+        expected: [Text.from("Int"), Text.from("Ident")],
+        found: Maybe.Some(Text.from(".")),
+    };
+    assert(e.message == "expected expression");
+    assert(e.code is Some);
+    assert(e.span == sp(91));
+    assert(e.expected.len() == 2);
+    assert(e.found is Some);
+}
+
+@test
+fn test_meta_parse_error_format_message_only() {
+    let e = mk_parse_error(Text.from("boom"));
+    assert(e.format() == "boom");
+}
+
+// DEFECT META-CTX-FSTRING-NEWLINE-1 (audit.md §3.4): `\n` inside an
+// f-string is emitted as the LITERAL two characters `\` `n` while the
+// same escape in a plain string literal produces a real newline
+// (`f"x\ny".len() == 4` but `"x\ny".len() == 3`).  `format()` is built
+// from f-strings, so its multi-line output currently carries literal
+// `\n` sequences and these exact-equality pins fail.  The composition
+// tests below cover the pure logic escape-agnostically.
+// @ignore: META-CTX-FSTRING-NEWLINE-1
+@ignore
+@test
+fn test_meta_parse_error_format_with_expected() {
+    let e = MetaParseError {
+        message: Text.from("boom"),
+        code: Maybe.None,
+        span: ssp(),
+        expected: [Text.from("Int"), Text.from("Bool")],
+        found: Maybe.None,
+    };
+    assert(e.format() == "boom\nExpected: Int, Bool");
+}
+
+// @ignore: META-CTX-FSTRING-NEWLINE-1
+@ignore
+@test
+fn test_meta_parse_error_format_with_found() {
+    let e = MetaParseError {
+        message: Text.from("boom"),
+        code: Maybe.None,
+        span: ssp(),
+        expected: List.new(),
+        found: Maybe.Some(Text.from("Ident")),
+    };
+    assert(e.format() == "boom\nFound: Ident");
+}
+
+// @ignore: META-CTX-FSTRING-NEWLINE-1
+@ignore
+@test
+fn test_meta_parse_error_format_with_expected_and_found() {
+    let e = MetaParseError {
+        message: Text.from("boom"),
+        code: Maybe.None,
+        span: ssp(),
+        expected: [Text.from("Int")],
+        found: Maybe.Some(Text.from("Text")),
+    };
+    assert(e.format() == "boom\nExpected: Int\nFound: Text");
+}
+
+@test
+fn test_meta_parse_error_format_expected_line_composition() {
+    // Escape-agnostic: message prefix + joined expected list are present.
+    let e = MetaParseError {
+        message: Text.from("boom"),
+        code: Maybe.None,
+        span: ssp(),
+        expected: [Text.from("Int"), Text.from("Bool")],
+        found: Maybe.None,
+    };
+    let out = e.format();
+    let prefix = Text.from("boom");
+    let exp_line = Text.from("Expected: Int, Bool");
+    let found_marker = Text.from("Found:");
+    assert(out.starts_with(&prefix));
+    assert(out.contains(&exp_line));
+    assert(!out.contains(&found_marker));
+}
+
+@test
+fn test_meta_parse_error_format_found_line_composition() {
+    let e = MetaParseError {
+        message: Text.from("boom"),
+        code: Maybe.None,
+        span: ssp(),
+        expected: List.new(),
+        found: Maybe.Some(Text.from("Ident")),
+    };
+    let out = e.format();
+    let prefix = Text.from("boom");
+    let found_line = Text.from("Found: Ident");
+    let exp_marker = Text.from("Expected:");
+    assert(out.starts_with(&prefix));
+    assert(out.contains(&found_line));
+    assert(!out.contains(&exp_marker));
+}
+
+@test
+fn test_meta_parse_error_format_both_lines_composition() {
+    let e = MetaParseError {
+        message: Text.from("boom"),
+        code: Maybe.None,
+        span: ssp(),
+        expected: [Text.from("Int")],
+        found: Maybe.Some(Text.from("Text")),
+    };
+    let out = e.format();
+    let exp_line = Text.from("Expected: Int");
+    let found_line = Text.from("Found: Text");
+    assert(out.contains(&exp_line));
+    assert(out.contains(&found_line));
+}
+
+@test
+fn test_meta_parse_error_display_delegates_to_format() {
+    let e = MetaParseError {
+        message: Text.from("boom"),
+        code: Maybe.None,
+        span: ssp(),
+        expected: [Text.from("Int")],
+        found: Maybe.None,
+    };
+    assert(f"{e}" == e.format());
+}
+
+// =============================================================================
+// Section 28: FormatOptions record + default() / compact()
+// =============================================================================
+
+@test
+fn test_format_options_custom_construction_readback() {
+    let o = FormatOptions {
+        indent_width: 2,
+        max_width: 80,
+        use_tabs: true,
+        trailing_commas: false,
+        preserve_blank_lines: true,
+        brace_style: BraceStyle.NextLine,
+    };
+    assert(o.indent_width == 2);
+    assert(o.max_width == 80);
+    assert(o.use_tabs);
+    assert(!o.trailing_commas);
+    assert(o.preserve_blank_lines);
+    assert(o.brace_style is BraceStyle.NextLine);
+}
+
+@test
+fn test_format_options_default_pinned_values() {
+    let o = FormatOptions.default();
+    assert(o.indent_width == 4);
+    assert(o.max_width == 100);
+    assert(!o.use_tabs);
+    assert(o.trailing_commas);
+    assert(o.preserve_blank_lines);
+    assert(o.brace_style is BraceStyle.SameLine);
+}
+
+@test
+fn test_format_options_compact_pinned_values() {
+    let o = FormatOptions.compact();
+    assert(o.indent_width == 0);
+    assert(o.max_width == 1000);
+    assert(!o.use_tabs);
+    assert(!o.trailing_commas);
+    assert(!o.preserve_blank_lines);
+    assert(o.brace_style is BraceStyle.SameLine);
 }

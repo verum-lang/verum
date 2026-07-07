@@ -71,7 +71,19 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
         module_reexports: OrderedMap::new(),
     };
 
-    for entry in &archive.index {
+    // METADATA-DETERMINISM-1 (the live #17-ph2 root): the archive index
+    // order follows the BAKE's (rayon-parallel) write order, and the
+    // simple-name `meta.types.insert` below was last-wins — every
+    // rebake ROLLED DICE on which same-name descriptor owned the
+    // simple slot. Concretely: core.meta.token's `Span` ALIAS record
+    // vs core.tracing's / sqlite-meta's `Span` records — when the
+    // alias lost, the checker's lazy alias registration never ran and
+    // 42 unmounted-alias tests failed E400 'expected Span found
+    // MetaSpan' (bake-dependent, code-independent). Sort the walk for
+    // determinism; the collision POLICY lives at the insert.
+    let mut sorted_index: Vec<_> = archive.index.iter().collect();
+    sorted_index.sort_by(|a, b| a.name.cmp(&b.name));
+    for entry in sorted_index {
         let module = match archive.load_module(&entry.name) {
             Ok(m) => m,
             Err(e) => {
@@ -489,7 +501,31 @@ fn register_module_metadata(
             // failed with `cannot index type 'FileDesc'`.
             is_transparent_wrapper: ty.is_transparent_wrapper,
         };
-        meta.types.insert(type_name.clone(), descriptor);
+        // Collision policy for the SIMPLE name slot (deterministic,
+        // documented): an ALIAS descriptor wins over a non-alias —
+        // an alias is a deliberate name-forward while a same-named
+        // record merely collides; the only exercised consumer (the
+        // checker's lazy alias hop) needs the alias. Ties keep the
+        // first (sorted-walk) occupant. The QUALIFIED key
+        // `<module>.<Name>` is always inserted so no descriptor is
+        // ever lost (future consumers resolve qualified — the full
+        // #17-ph2 shape).
+        let qualified_key: Text =
+            format!("{}.{}", module_name, type_name).into();
+        meta.types.insert(qualified_key, descriptor.clone());
+        let incoming_is_alias =
+            matches!(descriptor.kind, TypeDescriptorKind::Alias { .. });
+        let insert_simple = match meta.types.get(&type_name) {
+            None => true,
+            Some(existing) => {
+                let existing_is_alias =
+                    matches!(existing.kind, TypeDescriptorKind::Alias { .. });
+                incoming_is_alias && !existing_is_alias
+            }
+        };
+        if insert_simple {
+            meta.types.insert(type_name.clone(), descriptor);
+        }
         meta.type_declaration_order.push(type_name);
 
         collect_type_impls(ty, module, &mut meta.implementations, &type_id_to_name);

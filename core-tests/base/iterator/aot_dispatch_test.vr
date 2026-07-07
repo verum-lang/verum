@@ -1,0 +1,83 @@
+// =============================================================================
+// core-tests/base/iterator/aot_dispatch_test.vr
+// =============================================================================
+// @test: regression
+// @level: L1
+// @tags: iterator, aot, dispatch, func-registry-qualification, custom-iterator
+// @timeout: 30000
+//
+// FUNC-REGISTRY-QUALIFICATION-1 phase 1: for-loops over custom iterators
+// dispatch .next() to the RIGHT owner under AOT. Pre-fix the for-loop's
+// __for_iter temp was untyped at AOT lowering -> bare `next` collided with
+// every Type.next and resolved to nil (loop ran 0 times under AOT; interp
+// counted right). register_type_hints side-table (d965b03e6 + 42fc1dc7e +
+// 7e3dcdc11) types the register; AOT reg_types consumes it Priority-0.
+
+mount core.base.maybe.{Maybe, Some, None};
+
+type UpIter is { cur: Int, hi: Int };
+implement UpIter {
+    fn next(&mut self) -> Maybe<Int> {
+        if self.cur >= self.hi { return Maybe.None; }
+        let v = self.cur;
+        self.cur = self.cur + 1;
+        Maybe.Some(v)
+    }
+}
+
+type DownIter is { cur: Int, lo: Int };
+implement DownIter {
+    fn next(&mut self) -> Maybe<Int> {
+        if self.cur <= self.lo { return Maybe.None; }
+        self.cur = self.cur - 1;
+        Maybe.Some(self.cur)
+    }
+}
+
+type Src is { n: Int };
+implement Src {
+    fn ups(&self) -> UpIter { UpIter { cur: 0, hi: self.n } }
+    fn downs(&self) -> DownIter { DownIter { cur: self.n, lo: 0 } }
+}
+
+// CONTROL: typed custom-iterator VARIABLE (reg_types tags the record-literal;
+// resolved even pre-fix — safety-net arm).
+@test
+fn test_for_custom_iter_variable() {
+    let mut a = UpIter { cur: 0, hi: 3 };
+    let mut up = 0;
+    for x in a {
+        up = up + 1;
+    }
+    assert_eq(up, 3);
+}
+
+// REPRO: METHOD-RETURNING custom iterators (untyped CallM result — the nil
+// shape). Two distinct owners so a mis-bind calls the wrong .next.
+@test
+fn test_for_custom_iter_method_call() {
+    let s = Src { n: 3 };
+    let mut up = 0;
+    for p in s.ups() {
+        up = up + 1;
+    }
+    assert_eq(up, 3);
+
+    let mut down = 0;
+    for q in s.downs() {
+        down = down + 1;
+    }
+    assert_eq(down, 3);
+}
+
+// HEADLINE: Text.chars() (the loopdiff repro; stdlib Chars iterator). AOT
+// counted 0 pre-fix.
+@test
+fn test_for_text_chars() {
+    let s = Text.from("ABC");
+    let mut n = 0;
+    for ch in s.chars() {
+        n = n + 1;
+    }
+    assert_eq(n, 3);
+}

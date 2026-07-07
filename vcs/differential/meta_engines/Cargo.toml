@@ -1,0 +1,33 @@
+[package]
+name = "meta_engines"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "META-EXEC-CONVERGENCE-1: differential harness for Verum's two compile-time meta-execution engines (VBC executor vs tree-walk evaluator)"
+
+[lints]
+workspace = true
+
+[lib]
+name = "meta_engines"
+path = "src/lib.rs"
+
+[[bin]]
+name = "meta-engines-diff"
+path = "src/bin/main.rs"
+
+[dependencies]
+# Engine A (VBC executor) and Engine B (tree-walk evaluator) both live in
+# verum_compiler's meta module.
+verum_compiler = { workspace = true }
+# NaN-boxed Value model + interpreter state (heap decoding for the extractor).
+verum_vbc = { workspace = true }
+# AST types (FunctionDecl / Module) for fixture registration.
+verum_ast = { workspace = true }
+# MetaValue is verum_ast::MetaValue re-exported as verum_compiler ConstValue.
+verum_fast_parser = { workspace = true }
+verum_lexer = { workspace = true }
+verum_common = { workspace = true }

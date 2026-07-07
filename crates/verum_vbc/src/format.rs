@@ -22,7 +22,15 @@ pub const VERSION_MAJOR: u16 = 2;
 /// bytecode wire format, 0x0A in the archive wire format) — preserves
 /// associated-type projections (`F.Output`) across serialization.  Additive:
 /// old readers reject the new tag, new readers accept all 2.0 archives.
-pub const VERSION_MINOR: u16 = 1;
+/// Version 2.2: additive `FunctionDescriptor.register_type_hints` — trailing
+/// per-descriptor register→owner-type table (varint count + [u16 reg, u32
+/// stringid]*) consumed only by the AOT reg_types pass.  Gated on minor >= 2
+/// in the deserializer (a variable-length trailing field can't ride the
+/// `offset < data.len()` heuristic the fixed intrinsic_name/is_const fields
+/// use).  Reader/data quadrants: old-reader/new-data → clean reject via
+/// `is_version_compatible` (2 > VERSION_MINOR); new-reader/old-data (minor <=1)
+/// → skip, hints default empty; new/new → preserved; old/old → unaffected.
+pub const VERSION_MINOR: u16 = 3;
 
 /// Size of VBC header in bytes.
 /// 4 (magic) + 2 + 2 (version) + 4 (flags) + 4 (name) +

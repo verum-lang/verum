@@ -1198,7 +1198,16 @@ impl StdlibModuleResolver {
             Ok(())
         }
 
-        let module_names: Vec<String> = self.modules.keys().cloned().collect();
+        let mut module_names: Vec<String> = self.modules.keys().cloned().collect();
+        // ARCHIVE-SERIALIZE-DETERMINISM-1: the DFS start order was raw
+        // HashMap iteration — per-process dice that reordered the WHOLE
+        // archive (byte-diff: two bakes diverged from byte 16, 12.1M of
+        // 14.4M bytes differing — wholesale module reordering). Sorted
+        // starts make the topo order (and thus the archive layout, the
+        // metadata walk, and every downstream order-sensitive consumer)
+        // bake-stable. Dependencies are declaration-ordered Vecs and
+        // need no sort.
+        module_names.sort();
         for name in &module_names {
             visit(
                 name,

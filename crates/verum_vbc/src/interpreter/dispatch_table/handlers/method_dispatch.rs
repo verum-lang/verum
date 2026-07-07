@@ -1640,6 +1640,107 @@ pub(in super::super) fn handle_call_method(
         method_name
     };
 
+    // COLLECT-FROMITER-2 (runtime leg): the generic `collect` body
+    // `C.from_iter(self)` miscompiles to an INSTANCE call of bare
+    // `from_iter` ON THE ITERATOR (the type-param target C is erased at
+    // codegen — compile_type_param_method_call emits `dyn:C.from_iter`).
+    // The §J concrete-type recovery below then resolves a bogus owner
+    // from the ITERATOR's type_id (historically `FFIAbi.from_iter`) and
+    // panics. Intercept the shape here: drain the iterator by invoking
+    // its own `<Type>.next` until `Maybe.None` and build a List — the
+    // exact drive the for-loop path uses, so adapter compositions
+    // (MapIter<ListIter>, Chain, Zip, Rev, …) yield their real
+    // elements. LIMITATION (tracked in the task): the erased target C
+    // defaults to List — Set/Map `collect()` targets need the codegen
+    // leg (call-site drain with the captured target type); pre-fix
+    // those panicked anyway.
+    // Two arrival shapes for the miscompiled call: bare "from_iter"
+    // (post dyn:-strip) AND an already-qualified bogus owner
+    // ("FFIAbi.from_iter" — the wrong owner gets baked into the name
+    // earlier for some chains, e.g. `.chain(...).collect()`). Either
+    // way the RECEIVER is the iterator; the receiver-has-its-own-
+    // `.next` gate below distinguishes this miscompile from a
+    // legitimate static-form `List.from_iter(iter)` (collection
+    // receivers have no `.next` of their own).
+    let is_from_iter_shape =
+        method_name == "from_iter" || method_name.ends_with(".from_iter");
+    if is_from_iter_shape {
+        // The miscompile has TWO argument layouts in the wild: the
+        // iterator as the RECEIVER (dyn:C.from_iter instance-form) or
+        // the iterator as ARG 0 with a placeholder receiver (the
+        // resolved-bogus-owner form, e.g. FFIAbi.from_iter — `self`
+        // travels in the arg range). Probe both, in that order; the
+        // winner is whichever value's own type has a `.next`.
+        let arg0: Option<Value> = if args.count >= 1 {
+            Some(state.registers.get(state.reg_base(), Reg(args.start.0)))
+        } else {
+            None
+        };
+        let mut drain_target: Option<(Value, String, FunctionId)> = None;
+        for cand in [Some(receiver), arg0].into_iter().flatten() {
+            if !cand.is_ptr() || cand.is_nil() {
+                continue;
+            }
+            let cptr = cand.as_ptr::<u8>();
+            if cptr.is_null()
+                || !(cptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+            {
+                continue;
+            }
+            // SAFETY: alignment verified; heap objects start with ObjectHeader.
+            let tname = match unsafe { heap::ObjectHeader::try_type_id(cptr) }
+                .and_then(|tid| state.module.get_type_name(tid))
+            {
+                Some(t) => t,
+                None => continue,
+            };
+            let base = tname.split('<').next().unwrap_or(&tname).to_string();
+            let next_fid = state
+                .module
+                .find_function_by_name(&format!("{}.next", base))
+                .or_else(|| state.module.find_function_by_name(&format!("{}.next", tname)));
+            if let Some(fid) = next_fid {
+                drain_target = Some((cand, tname, fid));
+                break;
+            }
+        }
+        if let Some((iter_val, tname, next_fid)) = drain_target {
+            {
+                let none_tag = verum_common::well_known_types::maybe_none_tag();
+                let mut drained: Vec<Value> = Vec::new();
+                // Backstop against a non-terminating iterator: bound the
+                // drain far above any realistic collection size.
+                const DRAIN_CAP: usize = 16_777_216;
+                loop {
+                    let item = super::super::call_function_sync(state, next_fid, &[iter_val])?;
+                    if !item.is_ptr() || item.is_nil() {
+                        break; // nil-shaped next result: treat as exhausted
+                    }
+                    let iptr = item.as_ptr::<u8>();
+                    // SAFETY: next() returns a heap Maybe variant; tag read only.
+                    let tag = unsafe { heap::variant_tag(iptr) };
+                    if tag == none_tag {
+                        break;
+                    }
+                    // SAFETY: Some payload occupies slot 0 of the variant.
+                    let payload = unsafe { heap::variant_payload(iptr, 0) };
+                    drained.push(payload);
+                    if drained.len() >= DRAIN_CAP {
+                        return Err(InterpreterError::Panic {
+                            message: format!(
+                                "collect(): iterator `{}` exceeded {} elements — non-terminating?",
+                                tname, DRAIN_CAP
+                            ),
+                        });
+                    }
+                }
+                let out = super::super::alloc_list_from_values(state, drained)?;
+                state.set_reg(dst, out);
+                return Ok(DispatchResult::Continue);
+            }
+        }
+    }
+
     let is_already_qualified = method_name.contains('.') || method_name.contains("::");
     let method_suffix = if is_already_qualified {
         method_name.clone()

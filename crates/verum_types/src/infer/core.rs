@@ -854,6 +854,12 @@ impl TypeChecker {
                 // `infer_method_call_inner_impl` missed.  Mirrors the
                 // eager loader's parse path at line ~696.
                 let target_ty = parse_descriptor_type_string(target.as_str());
+                if std::env::var("VERUM_TRACE_ALIAS").is_ok() {
+                    eprintln!(
+                        "[alias-trace] lazy register alias '{}' -> '{}' (parsed: {:?})",
+                        name, target, target_ty
+                    );
+                }
                 self.ctx.define_alias(name.clone(), target_ty.clone());
                 self.unifier
                     .register_type_alias(name.clone(), target_ty);

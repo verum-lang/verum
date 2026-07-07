@@ -1,0 +1,707 @@
+// =============================================================================
+// core-tests/meta/contexts/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for the pure-data payload types of
+// `core/meta/contexts.vr`.  The 14 capability contexts themselves are
+// @compiler_provided and have no runtime law surface; every law below
+// is over data records/enums and the pure functions defined on them.
+//
+// All enum domains are finite — laws are EXHAUSTIVE over the domain
+// (and over small Cartesian products for relational laws).
+//
+// Laws covered:
+//   §A  Variant partition — for each of the 6 payload enums, every
+//       domain element satisfies EXACTLY ONE variant predicate.
+//   §B  SchemaErrorSeverity Eq — reflexive / symmetric / transitive /
+//       agrees-with-variant-identity (3, 3x3, 3^3 exhaustive).
+//   §C  SchemaError Eq — reflexive / symmetric; eq is by
+//       (message, severity, suggestion) with `span` EXCLUDED (pinned);
+//       each included field individually distinguishes.
+//   §D  DiagnosticBuilder fluent laws — severity last-write-wins;
+//       suggestion count/order/kind partition; span-label order +
+//       primary flag; spans/suggestions independence; chained ==
+//       stepwise application.
+//   §E  ParseResult<Int> — exhaustive 2x2x2 truth table for
+//       is_ok / has_errors / ok / to_result over
+//       (value present) x (success) x (errors nonempty), including the
+//       pinned is_ok-vs-to_result divergence cell (audit.md §3.5).
+//   §F  FormatOptions — default()/compact() determinism + axis
+//       relations between the two presets.
+//   §G  InvocationId.to_text — agrees with f-string rendering,
+//       injective on sample, deterministic.
+//   §H  MetaParseError.format — message is always a prefix; the
+//       Expected:/Found: sections appear exactly when their source
+//       fields are populated (2x2 exhaustive).
+//
+// Construction discipline (same as unit_test.vr): direct MetaSpan
+// record construction for spans; locals pulled out of cross-module
+// records are explicitly annotated (META-CTX-ELEM-INFER-1);
+// `DiagnosticBuilder.code()` is never called
+// (META-CTX-BUILDER-CODE-METHODFIELD-1); no `\n` escapes inside
+// f-strings (META-CTX-FSTRING-NEWLINE-1).
+// =============================================================================
+
+mount core.meta.contexts.{
+    DiagnosticSeverity, SuggestionKind,
+    UsageContext, ItemKind,
+    SchemaErrorSeverity, BraceStyle,
+    DiagnosticBuilder, SpanLabel, Suggestion,
+    SchemaError,
+    InvocationId,
+    ParseResult, MetaParseError, FormatOptions,
+};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.token.{TokenStream};
+mount core.base.maybe.{Maybe};
+
+// ---- builders ---------------------------------------------------------------
+
+fn ssp() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn sp(id: UInt64) -> Span {
+    MetaSpan {
+        id,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false },
+    }
+}
+
+fn ets() -> TokenStream {
+    TokenStream { tokens: List.new(), span: ssp() }
+}
+
+fn fresh_builder() -> DiagnosticBuilder {
+    DiagnosticBuilder {
+        severity: DiagnosticSeverity.Note,
+        code: Maybe.None,
+        message: Maybe.None,
+        spans: List.new(),
+        suggestions: List.new(),
+    }
+}
+
+fn mk_parse_error(msg: Text) -> MetaParseError {
+    MetaParseError {
+        message: msg,
+        code: Maybe.None,
+        span: ssp(),
+        expected: List.new(),
+        found: Maybe.None,
+    }
+}
+
+fn mk_pr(v: Maybe<Int>, ok: Bool, with_err: Bool) -> ParseResult<Int> {
+    let e = mk_parse_error(Text.from("e"));
+    let errs: List<MetaParseError> = if with_err { [e] } else { List.new() };
+    ParseResult { value: v, errors: errs, remaining: ets(), success: ok }
+}
+
+fn se(msg: Text, sev: SchemaErrorSeverity, span_id: UInt64, sugg: Maybe<Text>) -> SchemaError {
+    SchemaError { message: msg, span: sp(span_id), severity: sev, suggestion: sugg }
+}
+
+fn bools() -> List<Bool> {
+    [false, true]
+}
+
+// ---- enum domains -----------------------------------------------------------
+
+fn diag_severities() -> List<DiagnosticSeverity> {
+    [
+        DiagnosticSeverity.Error,
+        DiagnosticSeverity.Warning,
+        DiagnosticSeverity.Note,
+        DiagnosticSeverity.Help,
+    ]
+}
+
+fn suggestion_kinds() -> List<SuggestionKind> {
+    [SuggestionKind.Note, SuggestionKind.Help, SuggestionKind.Fix]
+}
+
+fn usage_contexts() -> List<UsageContext> {
+    [
+        UsageContext.Call,
+        UsageContext.TypeAnnotation,
+        UsageContext.FieldAccess,
+        UsageContext.InPattern,
+        UsageContext.Import,
+        UsageContext.Other(Text.from("doc-link")),
+    ]
+}
+
+fn item_kinds() -> List<ItemKind> {
+    [
+        ItemKind.Function,
+        ItemKind.TypeDef,
+        ItemKind.Const,
+        ItemKind.Static,
+        ItemKind.Module,
+        ItemKind.Protocol,
+        ItemKind.Implement,
+    ]
+}
+
+fn schema_severities() -> List<SchemaErrorSeverity> {
+    [SchemaErrorSeverity.Error, SchemaErrorSeverity.Warning, SchemaErrorSeverity.Info]
+}
+
+fn brace_styles() -> List<BraceStyle> {
+    [BraceStyle.SameLine, BraceStyle.NextLine, BraceStyle.Adaptive]
+}
+
+// ---- variant-predicate counters (is-chains; one per enum) -------------------
+
+fn diag_severity_pred_count(v: DiagnosticSeverity) -> Int {
+    let mut n = 0;
+    if v is DiagnosticSeverity.Error { n = n + 1; }
+    if v is DiagnosticSeverity.Warning { n = n + 1; }
+    if v is DiagnosticSeverity.Note { n = n + 1; }
+    if v is DiagnosticSeverity.Help { n = n + 1; }
+    n
+}
+
+fn suggestion_kind_pred_count(v: SuggestionKind) -> Int {
+    let mut n = 0;
+    if v is SuggestionKind.Note { n = n + 1; }
+    if v is SuggestionKind.Help { n = n + 1; }
+    if v is SuggestionKind.Fix { n = n + 1; }
+    n
+}
+
+fn usage_context_pred_count(v: UsageContext) -> Int {
+    let mut n = 0;
+    if v is UsageContext.Call { n = n + 1; }
+    if v is UsageContext.TypeAnnotation { n = n + 1; }
+    if v is UsageContext.FieldAccess { n = n + 1; }
+    if v is UsageContext.InPattern { n = n + 1; }
+    if v is UsageContext.Import { n = n + 1; }
+    if v is UsageContext.Other { n = n + 1; }
+    n
+}
+
+fn item_kind_pred_count(v: ItemKind) -> Int {
+    let mut n = 0;
+    if v is ItemKind.Function { n = n + 1; }
+    if v is ItemKind.TypeDef { n = n + 1; }
+    if v is ItemKind.Const { n = n + 1; }
+    if v is ItemKind.Static { n = n + 1; }
+    if v is ItemKind.Module { n = n + 1; }
+    if v is ItemKind.Protocol { n = n + 1; }
+    if v is ItemKind.Implement { n = n + 1; }
+    n
+}
+
+fn schema_severity_pred_count(v: SchemaErrorSeverity) -> Int {
+    let mut n = 0;
+    if v is SchemaErrorSeverity.Error { n = n + 1; }
+    if v is SchemaErrorSeverity.Warning { n = n + 1; }
+    if v is SchemaErrorSeverity.Info { n = n + 1; }
+    n
+}
+
+fn brace_style_pred_count(v: BraceStyle) -> Int {
+    let mut n = 0;
+    if v is BraceStyle.SameLine { n = n + 1; }
+    if v is BraceStyle.NextLine { n = n + 1; }
+    if v is BraceStyle.Adaptive { n = n + 1; }
+    n
+}
+
+fn schema_severity_tag(v: SchemaErrorSeverity) -> Int {
+    let mut t = 2;
+    if v is SchemaErrorSeverity.Error { t = 0; }
+    if v is SchemaErrorSeverity.Warning { t = 1; }
+    t
+}
+
+// =============================================================================
+// §A  Variant partition — exactly one predicate true per domain element
+// =============================================================================
+
+@test
+fn law_diagnostic_severity_partition_exhaustive() {
+    for v in diag_severities().iter() {
+        assert_eq(diag_severity_pred_count(*v), 1);
+    }
+}
+
+@test
+fn law_suggestion_kind_partition_exhaustive() {
+    for v in suggestion_kinds().iter() {
+        assert_eq(suggestion_kind_pred_count(*v), 1);
+    }
+}
+
+@test
+fn law_usage_context_partition_exhaustive() {
+    for v in usage_contexts().iter() {
+        assert_eq(usage_context_pred_count(*v), 1);
+    }
+}
+
+@test
+fn law_item_kind_partition_exhaustive() {
+    for v in item_kinds().iter() {
+        assert_eq(item_kind_pred_count(*v), 1);
+    }
+}
+
+@test
+fn law_schema_error_severity_partition_exhaustive() {
+    for v in schema_severities().iter() {
+        assert_eq(schema_severity_pred_count(*v), 1);
+    }
+}
+
+@test
+fn law_brace_style_partition_exhaustive() {
+    for v in brace_styles().iter() {
+        assert_eq(brace_style_pred_count(*v), 1);
+    }
+}
+
+// =============================================================================
+// §B  SchemaErrorSeverity Eq — 3 / 3x3 / 3^3 exhaustive
+// =============================================================================
+
+@test
+fn law_schema_severity_eq_reflexive() {
+    for a in schema_severities().iter() {
+        let x = *a;
+        assert(x == x);
+    }
+}
+
+@test
+fn law_schema_severity_eq_symmetric() {
+    for a in schema_severities().iter() {
+        for b in schema_severities().iter() {
+            let x = *a;
+            let y = *b;
+            assert_eq(x == y, y == x);
+        }
+    }
+}
+
+@test
+fn law_schema_severity_eq_transitive() {
+    for a in schema_severities().iter() {
+        for b in schema_severities().iter() {
+            for c in schema_severities().iter() {
+                let x = *a;
+                let y = *b;
+                let z = *c;
+                if x == y && y == z {
+                    assert(x == z);
+                }
+            }
+        }
+    }
+}
+
+@test
+fn law_schema_severity_eq_agrees_with_variant_identity() {
+    // a == b exactly when a and b are the same variant.
+    for a in schema_severities().iter() {
+        for b in schema_severities().iter() {
+            let x = *a;
+            let y = *b;
+            assert_eq(x == y, schema_severity_tag(x) == schema_severity_tag(y));
+        }
+    }
+}
+
+// =============================================================================
+// §C  SchemaError Eq — by (message, severity, suggestion); span EXCLUDED
+// =============================================================================
+
+// Domain deliberately contains a pair identical up to `span` (index 0/1)
+// so the equal-pair case is non-trivial, plus one variation per
+// Eq-included field.
+fn schema_error_domain() -> List<SchemaError> {
+    [
+        se(Text.from("m"), SchemaErrorSeverity.Warning, 1, Maybe.None),   // E
+        se(Text.from("m"), SchemaErrorSeverity.Warning, 99, Maybe.None),  // E' — Eq-equal to E (span differs)
+        se(Text.from("other"), SchemaErrorSeverity.Warning, 1, Maybe.None), // differs by message
+        se(Text.from("m"), SchemaErrorSeverity.Info, 1, Maybe.None),      // differs by severity
+        se(Text.from("m"), SchemaErrorSeverity.Warning, 1, Maybe.Some(Text.from("fix"))), // differs by suggestion
+    ]
+}
+
+@test
+fn law_schema_error_eq_reflexive() {
+    for a in schema_error_domain().iter() {
+        let x: SchemaError = *a;
+        assert(x == x);
+    }
+}
+
+@test
+fn law_schema_error_eq_symmetric() {
+    for a in schema_error_domain().iter() {
+        for b in schema_error_domain().iter() {
+            let x: SchemaError = *a;
+            let y: SchemaError = *b;
+            assert_eq(x == y, y == x);
+        }
+    }
+}
+
+@test
+fn law_schema_error_eq_ignores_span() {
+    let a = se(Text.from("m"), SchemaErrorSeverity.Warning, 1, Maybe.None);
+    let b = se(Text.from("m"), SchemaErrorSeverity.Warning, 99, Maybe.None);
+    assert(a == b);
+}
+
+@test
+fn law_schema_error_eq_distinguishes_message() {
+    let a = se(Text.from("m"), SchemaErrorSeverity.Warning, 1, Maybe.None);
+    let b = se(Text.from("other"), SchemaErrorSeverity.Warning, 1, Maybe.None);
+    assert(!(a == b));
+}
+
+@test
+fn law_schema_error_eq_distinguishes_severity() {
+    let a = se(Text.from("m"), SchemaErrorSeverity.Warning, 1, Maybe.None);
+    let b = se(Text.from("m"), SchemaErrorSeverity.Info, 1, Maybe.None);
+    assert(!(a == b));
+}
+
+@test
+fn law_schema_error_eq_distinguishes_suggestion() {
+    let a = se(Text.from("m"), SchemaErrorSeverity.Warning, 1, Maybe.None);
+    let b = se(Text.from("m"), SchemaErrorSeverity.Warning, 1, Maybe.Some(Text.from("fix")));
+    assert(!(a == b));
+}
+
+// =============================================================================
+// §D  DiagnosticBuilder fluent laws
+// =============================================================================
+
+@test
+fn law_builder_severity_last_write_wins_error_then_warning() {
+    let b = fresh_builder().error(Text.from("first")).warning(Text.from("second"));
+    assert(b.severity is DiagnosticSeverity.Warning);
+    assert(b.message is Some);
+}
+
+@test
+fn law_builder_severity_last_write_wins_warning_then_error() {
+    let b = fresh_builder().warning(Text.from("first")).error(Text.from("second"));
+    assert(b.severity is DiagnosticSeverity.Error);
+}
+
+@test
+fn law_builder_suggestion_count_matches_pushes() {
+    let b0 = fresh_builder();
+    assert_eq(b0.suggestions.len(), 0);
+    let b1 = fresh_builder().note(Text.from("a"));
+    assert_eq(b1.suggestions.len(), 1);
+    let b2 = fresh_builder().note(Text.from("a")).help(Text.from("b"));
+    assert_eq(b2.suggestions.len(), 2);
+    let b3 = fresh_builder()
+        .note(Text.from("a"))
+        .help(Text.from("b"))
+        .suggest(Text.from("c"), sp(1), Text.from("r"));
+    assert_eq(b3.suggestions.len(), 3);
+}
+
+@test
+fn law_builder_suggestion_kind_and_order_partition() {
+    // note→Note, help→Help, suggest→Fix, appended in call order;
+    // note/help carry no span/replacement, suggest carries both.
+    let b = fresh_builder()
+        .note(Text.from("n"))
+        .help(Text.from("h"))
+        .suggest(Text.from("s"), sp(2), Text.from("r"));
+    assert_eq(b.suggestions.len(), 3);
+    let s0: Suggestion = b.suggestions[0];
+    let s1: Suggestion = b.suggestions[1];
+    let s2: Suggestion = b.suggestions[2];
+    assert(s0.kind is SuggestionKind.Note);
+    assert(s1.kind is SuggestionKind.Help);
+    assert(s2.kind is SuggestionKind.Fix);
+    assert(s0.message == "n");
+    assert(s1.message == "h");
+    assert(s2.message == "s");
+    assert(s0.span is None && s0.replacement is None);
+    assert(s1.span is None && s1.replacement is None);
+    assert(s2.span is Some && s2.replacement is Some);
+}
+
+@test
+fn law_builder_span_label_order_and_primary_flag() {
+    let b = fresh_builder()
+        .primary_span(sp(1), Text.from("a"))
+        .secondary_span(sp(2), Text.from("b"))
+        .secondary_span(sp(3), Text.from("c"));
+    assert_eq(b.spans.len(), 3);
+    let l0: SpanLabel = b.spans[0];
+    let l1: SpanLabel = b.spans[1];
+    let l2: SpanLabel = b.spans[2];
+    assert(l0.is_primary);
+    assert(!l1.is_primary);
+    assert(!l2.is_primary);
+    assert(l0.label == "a");
+    assert(l1.label == "b");
+    assert(l2.label == "c");
+    assert(l0.span == sp(1));
+    assert(l1.span == sp(2));
+    assert(l2.span == sp(3));
+}
+
+@test
+fn law_builder_spans_and_suggestions_independent() {
+    let b = fresh_builder()
+        .primary_span(sp(1), Text.from("a"))
+        .note(Text.from("n"))
+        .secondary_span(sp(2), Text.from("b"));
+    assert_eq(b.spans.len(), 2);
+    assert_eq(b.suggestions.len(), 1);
+    // Pushing labels/suggestions never touches severity/message/code.
+    assert(b.severity is DiagnosticSeverity.Note);
+    assert(b.message is None);
+    assert(b.code is None);
+}
+
+@test
+fn law_builder_chain_equals_stepwise() {
+    let chained = fresh_builder()
+        .error(Text.from("m"))
+        .primary_span(sp(1), Text.from("a"))
+        .note(Text.from("n"));
+    let s0 = fresh_builder();
+    let s1 = s0.error(Text.from("m"));
+    let s2 = s1.primary_span(sp(1), Text.from("a"));
+    let s3 = s2.note(Text.from("n"));
+    assert(chained.severity is DiagnosticSeverity.Error);
+    assert(s3.severity is DiagnosticSeverity.Error);
+    assert_eq(chained.spans.len(), s3.spans.len());
+    assert_eq(chained.suggestions.len(), s3.suggestions.len());
+    assert_eq(chained.message is Some, s3.message is Some);
+    let cl: SpanLabel = chained.spans[0];
+    let sl: SpanLabel = s3.spans[0];
+    assert(cl.label == sl.label);
+    assert_eq(cl.is_primary, sl.is_primary);
+}
+
+// =============================================================================
+// §E  ParseResult<Int> — exhaustive 2x2x2 truth table
+// =============================================================================
+
+@test
+fn law_parse_result_is_ok_iff_success_and_no_errors() {
+    for hv in bools().iter() {
+        for ok in bools().iter() {
+            for we in bools().iter() {
+                let has_value = *hv;
+                let success = *ok;
+                let with_err = *we;
+                let v: Maybe<Int> = if has_value { Maybe.Some(7) } else { Maybe.None };
+                let r = mk_pr(v, success, with_err);
+                assert_eq(r.is_ok(), success && !with_err);
+            }
+        }
+    }
+}
+
+@test
+fn law_parse_result_has_errors_iff_error_list_nonempty() {
+    for hv in bools().iter() {
+        for ok in bools().iter() {
+            for we in bools().iter() {
+                let has_value = *hv;
+                let success = *ok;
+                let with_err = *we;
+                let v: Maybe<Int> = if has_value { Maybe.Some(7) } else { Maybe.None };
+                let r = mk_pr(v, success, with_err);
+                assert_eq(r.has_errors(), with_err);
+            }
+        }
+    }
+}
+
+@test
+fn law_parse_result_ok_some_iff_success_and_value_present() {
+    // `ok()` keys off `success` alone; a present value survives, an
+    // absent one yields None either way.
+    for hv in bools().iter() {
+        for ok in bools().iter() {
+            for we in bools().iter() {
+                let has_value = *hv;
+                let success = *ok;
+                let with_err = *we;
+                let v: Maybe<Int> = if has_value { Maybe.Some(7) } else { Maybe.None };
+                let r = mk_pr(v, success, with_err);
+                let o = r.ok();
+                assert_eq(o is Some, success && has_value);
+            }
+        }
+    }
+}
+
+@test
+fn law_parse_result_to_result_ok_iff_success_and_value_present() {
+    for hv in bools().iter() {
+        for ok in bools().iter() {
+            for we in bools().iter() {
+                let has_value = *hv;
+                let success = *ok;
+                let with_err = *we;
+                let v: Maybe<Int> = if has_value { Maybe.Some(7) } else { Maybe.None };
+                let r = mk_pr(v, success, with_err);
+                let res = r.to_result();
+                assert_eq(res is Ok, success && has_value);
+            }
+        }
+    }
+}
+
+@test
+fn law_parse_result_is_ok_vs_to_result_divergence_pinned() {
+    // PINNED WART (audit.md §3.5): a ParseResult with success=true,
+    // errors=[] but value=None reports is_ok() == true yet
+    // to_result() == Err.  `is_ok` checks (success, errors) while
+    // `to_result` checks (success, value) — the two "ok" notions
+    // diverge on this cell.
+    let r = mk_pr(Maybe.None, true, false);
+    assert(r.is_ok());
+    let r2 = mk_pr(Maybe.None, true, false);
+    let res = r2.to_result();
+    assert(res is Err);
+}
+
+// =============================================================================
+// §F  FormatOptions — preset determinism + axis relations
+// =============================================================================
+
+@test
+fn law_format_options_default_deterministic() {
+    let a = FormatOptions.default();
+    let b = FormatOptions.default();
+    assert_eq(a.indent_width, b.indent_width);
+    assert_eq(a.max_width, b.max_width);
+    assert_eq(a.use_tabs, b.use_tabs);
+    assert_eq(a.trailing_commas, b.trailing_commas);
+    assert_eq(a.preserve_blank_lines, b.preserve_blank_lines);
+    assert(a.brace_style is BraceStyle.SameLine && b.brace_style is BraceStyle.SameLine);
+}
+
+@test
+fn law_format_options_compact_deterministic() {
+    let a = FormatOptions.compact();
+    let b = FormatOptions.compact();
+    assert_eq(a.indent_width, b.indent_width);
+    assert_eq(a.max_width, b.max_width);
+    assert_eq(a.trailing_commas, b.trailing_commas);
+    assert_eq(a.preserve_blank_lines, b.preserve_blank_lines);
+}
+
+@test
+fn law_format_options_compact_vs_default_axes() {
+    let d = FormatOptions.default();
+    let c = FormatOptions.compact();
+    // compact minimises whitespace: narrower indent, wider line budget,
+    // no trailing commas, no preserved blank lines; neither uses tabs.
+    assert(c.indent_width < d.indent_width);
+    assert(c.max_width > d.max_width);
+    assert(d.trailing_commas && !c.trailing_commas);
+    assert(d.preserve_blank_lines && !c.preserve_blank_lines);
+    assert(!d.use_tabs && !c.use_tabs);
+}
+
+// =============================================================================
+// §G  InvocationId.to_text
+// =============================================================================
+
+fn id_samples() -> List<UInt64> {
+    [0, 1, 7, 42, 999999]
+}
+
+@test
+fn law_invocation_id_to_text_matches_fstring() {
+    for n in id_samples().iter() {
+        let v = *n;
+        let i = InvocationId { value: v };
+        assert(i.to_text() == f"{v}");
+    }
+}
+
+@test
+fn law_invocation_id_to_text_deterministic() {
+    for n in id_samples().iter() {
+        let v = *n;
+        let i = InvocationId { value: v };
+        let a = i.to_text();
+        let b = i.to_text();
+        assert(a == b);
+    }
+}
+
+@test
+fn law_invocation_id_to_text_injective_on_sample() {
+    for m in id_samples().iter() {
+        for n in id_samples().iter() {
+            let x = *m;
+            let y = *n;
+            let ix = InvocationId { value: x };
+            let iy = InvocationId { value: y };
+            assert_eq(ix.to_text() == iy.to_text(), x == y);
+        }
+    }
+}
+
+// =============================================================================
+// §H  MetaParseError.format — sectional composition (2x2 exhaustive)
+// =============================================================================
+
+fn mk_pe(with_expected: Bool, with_found: Bool) -> MetaParseError {
+    let exp: List<Text> = if with_expected { [Text.from("Int"), Text.from("Bool")] } else { List.new() };
+    let fnd: Maybe<Text> = if with_found { Maybe.Some(Text.from("Ident")) } else { Maybe.None };
+    MetaParseError {
+        message: Text.from("boom"),
+        code: Maybe.None,
+        span: ssp(),
+        expected: exp,
+        found: fnd,
+    }
+}
+
+@test
+fn law_format_message_always_prefix() {
+    for we in bools().iter() {
+        for wf in bools().iter() {
+            let e = mk_pe(*we, *wf);
+            let out = e.format();
+            let prefix = Text.from("boom");
+            assert(out.starts_with(&prefix));
+        }
+    }
+}
+
+@test
+fn law_format_sections_iff_fields_populated() {
+    for we in bools().iter() {
+        for wf in bools().iter() {
+            let with_expected = *we;
+            let with_found = *wf;
+            let e = mk_pe(with_expected, with_found);
+            let out = e.format();
+            let exp_marker = Text.from("Expected: Int, Bool");
+            let found_marker = Text.from("Found: Ident");
+            assert_eq(out.contains(&exp_marker), with_expected);
+            assert_eq(out.contains(&found_marker), with_found);
+        }
+    }
+}
+
+fn main() {}

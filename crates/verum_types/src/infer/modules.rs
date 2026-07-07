@@ -13138,6 +13138,12 @@ impl TypeChecker {
         name: &str,
         expected_arity: Option<usize>,
     ) -> Option<Type> {
+        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+            eprintln!(
+                "[ctor-trace] try_resolve_variant_constructor_with_arity('{}', {:?})",
+                name, expected_arity
+            );
+        }
         let ctor_text = verum_common::Text::from(name);
         let parents = self.variant_constructor_parents.get(&ctor_text)?;
         // Pick the parent whose constructor for `name` accepts the
@@ -14185,6 +14191,17 @@ impl TypeChecker {
     ///
 
     /// `type_args` contains explicit type arguments for generic method calls like `obj.method<T>()`.
+    #[allow(clippy::too_many_arguments)]
+    fn infer_method_call_inner_impl_traced_entry(&self, receiver: &Expr, method: &Ident) {
+        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+            let recv = match &receiver.kind {
+                ExprKind::Path(p) => format!("{}", p),
+                other => format!("<{:?}>", std::mem::discriminant(other)),
+            };
+            eprintln!("[ctor-trace] method_call recv={} method={}", recv, method.name);
+        }
+    }
+
     fn infer_method_call_inner_impl(
         &mut self,
         receiver: &Expr,
@@ -14195,6 +14212,14 @@ impl TypeChecker {
         precomputed_recv_ty: Option<Type>,
         skip_static_lookup: bool,
     ) -> Result<InferResult> {
+        self.infer_method_call_inner_impl_traced_entry(receiver, method);
+        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+            eprintln!(
+                "[ctor-trace]   skip_static_lookup={} precomputed={:?}",
+                skip_static_lookup,
+                precomputed_recv_ty.as_ref().map(|t| format!("{:?}", t)),
+            );
+        }
         // ============================================================
         // Iterator Invalidation & Borrow Conflict Checks
         // Memory layout and reference representation: ThinRef (16 bytes) for sized types, FatRef (24 bytes) for unsized types — .4 - Iterator invalidation
@@ -20057,15 +20082,96 @@ impl TypeChecker {
                                     span,
                                 });
                             }
+                            // GENERIC-CTOR-FRESHNESS-1 (§52, fix A2):
+                            // registry InductiveConstructors store
+                            // REGISTRATION-TIME TypeVars (env.rs
+                            // register_stdlib_constructors_from_metadata
+                            // mints the return's payload var ONCE and
+                            // `type_params` is empty), and this arm
+                            // previously `unifier.apply`'d them RAW —
+                            // the first `Maybe.Some(Text)` in a checking
+                            // session bound the stored var and every
+                            // later `Some(...)` RETURNED the stale
+                            // binding while its arg checked against the
+                            // independently-parsed (decoupled) param —
+                            // "expected Int found Text" on the second
+                            // different-payload assignment, file-wide.
+                            // Standard ML instantiate-at-use: freshen
+                            // the ctor's free vars with ONE substitution
+                            // shared by params AND return, so each call
+                            // site gets an independent instantiation
+                            // (and the param↔return linkage the
+                            // registration failed to establish is at
+                            // least per-call consistent).
+                            let mut ctor_fresh: indexmap::IndexMap<
+                                crate::ty::TypeVar,
+                                Type,
+                            > = indexmap::IndexMap::new();
+                            {
+                                fn collect_free(
+                                    ty: &Type,
+                                    out: &mut indexmap::IndexMap<
+                                        crate::ty::TypeVar,
+                                        Type,
+                                    >,
+                                ) {
+                                    match ty {
+                                        Type::Var(v) => {
+                                            out.entry(*v).or_insert_with(|| {
+                                                Type::Var(crate::ty::TypeVar::fresh())
+                                            });
+                                        }
+                                        Type::Named { args, .. }
+                                        | Type::Generic { args, .. } => {
+                                            for a in args.iter() {
+                                                collect_free(a, out);
+                                            }
+                                        }
+                                        Type::Tuple(parts) => {
+                                            for p in parts.iter() {
+                                                collect_free(p, out);
+                                            }
+                                        }
+                                        Type::Function {
+                                            params,
+                                            return_type,
+                                            ..
+                                        } => {
+                                            for p in params.iter() {
+                                                collect_free(p, out);
+                                            }
+                                            collect_free(return_type, out);
+                                        }
+                                        Type::Reference { inner, .. }
+                                        | Type::CheckedReference { inner, .. }
+                                        | Type::UnsafeReference { inner, .. } => {
+                                            collect_free(inner, out)
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                for a in ctor.args.iter() {
+                                    collect_free(a.as_ref(), &mut ctor_fresh);
+                                }
+                                collect_free(ctor.return_type.as_ref(), &mut ctor_fresh);
+                            }
                             for (arg, param_ty_boxed) in
                                 args.iter().zip(ctor.args.iter())
                             {
+                                let fresh_param = Self::substitute_typevars_in_type(
+                                    param_ty_boxed.as_ref(),
+                                    &ctor_fresh,
+                                );
                                 let resolved_param =
-                                    self.unifier.apply(param_ty_boxed.as_ref());
+                                    self.unifier.apply(&fresh_param);
                                 self.check_expr(arg, &resolved_param)?;
                             }
+                            let fresh_return = Self::substitute_typevars_in_type(
+                                ctor.return_type.as_ref(),
+                                &ctor_fresh,
+                            );
                             let resolved_return =
-                                self.unifier.apply(ctor.return_type.as_ref());
+                                self.unifier.apply(&fresh_return);
                             return Ok(Some(InferResult::new(resolved_return)));
                         }
                     }

@@ -281,3 +281,63 @@ fn property_run_all_counts_each_violation_once() {
     let diags = run_all_hygiene_rules(decls, eps, tally, ssp());
     assert_eq(diags.len(), 3);
 }
+
+// =============================================================================
+// Section R: red-team hardening pins (2026-07-06)
+// =============================================================================
+//
+// R1 case-insensitivity: `DIAKRISIS_x` / `Diakrisis_x` must brand-match
+// (pre-fix the check was case-sensitive and trivially evadable).
+// R2 shape: operator-only / operator-trailing ordinal strings must be
+// rejected even though every CHAR is admissible (pre-fix stage 2 was
+// absent — `ω+`, `ω·`, `+++` passed as canonicalisable).
+
+@test
+fn red_team_r1_uppercase_brand_detected() {
+    assert(name_has_brand_prefix(Text.from("DIAKRISIS_axiom")));
+}
+
+@test
+fn red_team_r1_mixedcase_brand_detected() {
+    assert(name_has_brand_prefix(Text.from("Diakrisis_axiom")));
+}
+
+@test
+fn red_team_r1_homoglyph_is_not_branded() {
+    // Cyrillic 'а' — genuinely a different identifier; advisory rule
+    // does NOT chase confusables (lexer identifier policy's layer).
+    assert(!name_has_brand_prefix(Text.from("diаkrisis_axiom")));
+}
+
+@test
+fn red_team_r2_trailing_plus_rejected() {
+    assert(validate_epsilon_canonicalisable(Text.from("ω+"), ssp()) is Some);
+}
+
+@test
+fn red_team_r2_trailing_dot_rejected() {
+    assert(validate_epsilon_canonicalisable(Text.from("ω·"), ssp()) is Some);
+}
+
+@test
+fn red_team_r2_operator_only_rejected() {
+    assert(validate_epsilon_canonicalisable(Text.from("+++"), ssp()) is Some);
+}
+
+@test
+fn red_team_r2_adjacent_operators_rejected() {
+    assert(validate_epsilon_canonicalisable(Text.from("ω+·2"), ssp()) is Some);
+}
+
+@test
+fn red_team_r2_capital_omega_standalone_only() {
+    assert(validate_epsilon_canonicalisable(Text.from("Ω"), ssp()) is None);
+    assert(validate_epsilon_canonicalisable(Text.from("Ω+1"), ssp()) is Some);
+}
+
+@test
+fn red_team_r2_canonical_forms_still_accepted() {
+    assert(validate_epsilon_canonicalisable(Text.from("ω+1"), ssp()) is None);
+    assert(validate_epsilon_canonicalisable(Text.from("ω·3+2"), ssp()) is None);
+    assert(validate_epsilon_canonicalisable(Text.from("ω²"), ssp()) is None);
+}

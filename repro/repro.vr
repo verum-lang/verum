@@ -1,0 +1,8 @@
+fn main() {
+    let mut xs = List.new();
+    xs.push(1); xs.push(2); xs.push(3);
+    let doubled = xs.iter().map(|x| x * 2).collect();
+    print(f"n={doubled.len()}");
+    let d0 = doubled[0];
+    print(f"d0={d0}");
+}

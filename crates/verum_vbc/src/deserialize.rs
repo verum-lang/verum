@@ -943,11 +943,28 @@ impl<'a> Deserializer<'a> {
  }
  })?;
 
+ // minor >= 3: refinement predicate carriage; older data has no
+ // trailing pair — default EMPTY (new-reader/old-data quadrant).
+ let (refinement_src, refinement_binding) = if self
+ .header
+ .as_ref()
+ .map_or(false, |h| h.version_minor >= 3)
+ {
+ (
+ StringId(decode_u32(self.data, &mut self.offset)?),
+ StringId(decode_u32(self.data, &mut self.offset)?),
+ )
+ } else {
+ (StringId::EMPTY, StringId::EMPTY)
+ };
+
  Ok(FieldDescriptor {
  name,
  type_ref,
  offset,
  visibility,
+ refinement_src,
+ refinement_binding,
  })
  }
 
@@ -1244,6 +1261,26 @@ impl<'a> Deserializer<'a> {
  false
  };
 
+ // v2.2 — FUNC-REGISTRY-QUALIFICATION-1: trailing register→owner-type hints.
+ // VARIABLE length, so gate on the format minor rather than the
+ // `offset < data.len()` heuristic (a stray varint length read from the next
+ // section would be garbage).  minor <= 1 archives have no such bytes →
+ // default empty.  A short/corrupt buffer errors naturally when a per-hint
+ // decode runs past the end.
+ let fmt_minor = self.header.as_ref().map_or(0, |h| h.version_minor);
+ let register_type_hints = if fmt_minor >= 2 {
+ let count = decode_varint(self.data, &mut self.offset)? as usize;
+ let mut hints = Vec::with_capacity(count.min(4096));
+ for _ in 0..count {
+ let register = decode_u16(self.data, &mut self.offset)?;
+ let type_name = StringId(decode_u32(self.data, &mut self.offset)?);
+ hints.push(crate::module::RegisterTypeHint { register, type_name });
+ }
+ hints
+ } else {
+ Vec::new()
+ };
+
  Ok(FunctionDescriptor {
  id,
  name,
@@ -1278,6 +1315,7 @@ impl<'a> Deserializer<'a> {
  is_gpu_only: false,
  intrinsic_name,
  is_const,
+ register_type_hints,
  })
  }
 
@@ -1575,6 +1613,58 @@ mod tests {
  assert_eq!(module.name, loaded.name);
  assert_eq!(module.types.len(), loaded.types.len());
  assert_eq!(module.functions.len(), loaded.functions.len());
+ }
+
+ // FUNC-REGISTRY-QUALIFICATION-1: register_type_hints round-trips (v2.2).
+ #[test]
+ fn test_roundtrip_register_type_hints() {
+ let mut module = VbcModule::new("test_hints".to_string());
+ let fn_name = module.intern_string("myfn");
+ let ty_name = module.intern_string("Chars");
+ let mut desc = crate::module::FunctionDescriptor::new(fn_name);
+ desc.register_type_hints = vec![crate::module::RegisterTypeHint {
+ register: 7,
+ type_name: ty_name,
+ }];
+ module.functions.push(desc);
+
+ let bytes = serialize_module(&module).unwrap();
+ let loaded = deserialize_module(&bytes).unwrap();
+
+ assert_eq!(loaded.functions.len(), 1);
+ let hints = &loaded.functions[0].register_type_hints;
+ assert_eq!(hints.len(), 1);
+ assert_eq!(hints[0].register, 7);
+ assert_eq!(loaded.get_string(hints[0].type_name), Some("Chars"));
+ }
+
+ // FUNC-REGISTRY-QUALIFICATION-1: a minor<=1 archive (old-data / new-reader)
+ // yields EMPTY hints — the version gate skips the trailing bytes rather than
+ // mis-parsing. Synthesized by patching the header's version_minor to 1.
+ #[test]
+ fn test_register_type_hints_minor_gate_defaults_empty() {
+ let mut module = VbcModule::new("test_hints_gate".to_string());
+ let fn_name = module.intern_string("myfn");
+ let ty_name = module.intern_string("Chars");
+ let mut desc = crate::module::FunctionDescriptor::new(fn_name);
+ desc.register_type_hints = vec![crate::module::RegisterTypeHint {
+ register: 3,
+ type_name: ty_name,
+ }];
+ module.functions.push(desc);
+
+ let mut bytes = serialize_module(&module).unwrap();
+ // Header layout: magic(4) + version_major u16(2) + version_minor u16(2) ...
+ // Patch version_minor (LE u16 at offset 6) down to 1.
+ assert_eq!(crate::format::VERSION_MINOR, 2, "test assumes current minor is 2");
+ bytes[6] = 1;
+ bytes[7] = 0;
+ let loaded = deserialize_module(&bytes).unwrap();
+ assert_eq!(loaded.functions.len(), 1);
+ assert!(
+ loaded.functions[0].register_type_hints.is_empty(),
+ "minor<=1 must default hints to empty (gate skips the trailing bytes)"
+ );
  }
 
  #[test]

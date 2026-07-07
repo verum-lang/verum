@@ -3022,6 +3022,13 @@ impl VbcCodegen {
                     .compile_expr(base)?
                     .or_internal("field base has no value")?;
 
+                // REFINE-FIELD-DYNAMIC-BYPASS-1: refined fields get a
+                // runtime Assert on the incoming value before the write
+                // (T1-F parity for fields; fail-open on key miss).
+                if let Some(bt) = base_type.as_deref() {
+                    self.emit_field_refinement_assert(value_reg, bt, &field.name);
+                }
+
                 let field_idx = self.resolve_field_index(base_type.as_deref(), &field.name);
                 self.ctx.emit(Instruction::SetF {
                     obj: base_reg,
@@ -3375,6 +3382,34 @@ impl VbcCodegen {
                     .compile_expr(value)?
                     .or_internal("compound assign value has no value")?;
 
+                // FLOAT-FIELD-COMPOUND-1: `obj.f += v` on a FLOAT field
+                // unconditionally emitted BinaryI — an integer add over
+                // NaN-boxed float bits — so `p.a += 0.25` produced 0/
+                // garbage for every Float record field (locals were
+                // fine; the field arm never had a float branch). Detect
+                // floatness from the field's DECLARED type (the carrier
+                // string classifies refined `Float{...}` too via
+                // strip_refinement) and route to BinaryF. Exposed by the
+                // REFINE-FIELD-DYNAMIC-BYPASS-1 runtime assert catching
+                // the garbage value in the in-range compound test.
+                let field_is_float = obj_type
+                    .as_deref()
+                    .and_then(|bt| {
+                        let key = Self::strip_generic_args(Self::strip_wrapper_type(bt));
+                        self.type_field_type_names
+                            .get(&(key.to_string(), field_name.to_string()))
+                            .or_else(|| {
+                                self.resolve_record_type_key(key).and_then(|rk| {
+                                    self.type_field_type_names
+                                        .get(&(rk, field_name.to_string()))
+                                })
+                            })
+                    })
+                    .map(|ftn| {
+                        verum_common::well_known_types::type_names::is_float_type(ftn)
+                    })
+                    .unwrap_or(false);
+
                 // Perform operation
                 let result = self.ctx.alloc_temp();
                 if let Some(bop) = bitwise_op {
@@ -3385,17 +3420,42 @@ impl VbcCodegen {
                         b: right_reg,
                     });
                 } else if let Some(iop) = binary_op {
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: iop,
-                        dst: result,
-                        a: current_val,
-                        b: right_reg,
-                    });
+                    if field_is_float {
+                        let fop = match iop {
+                            BinaryIntOp::Add => BinaryFloatOp::Add,
+                            BinaryIntOp::Sub => BinaryFloatOp::Sub,
+                            BinaryIntOp::Mul => BinaryFloatOp::Mul,
+                            BinaryIntOp::Div => BinaryFloatOp::Div,
+                            BinaryIntOp::Mod => BinaryFloatOp::Mod,
+                            _ => BinaryFloatOp::Add,
+                        };
+                        self.ctx.emit(Instruction::BinaryF {
+                            op: fop,
+                            dst: result,
+                            a: current_val,
+                            b: right_reg,
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::BinaryI {
+                            op: iop,
+                            dst: result,
+                            a: current_val,
+                            b: right_reg,
+                        });
+                    }
                 } else {
                     self.ctx.free_temp(current_val);
                     self.ctx.free_temp(right_reg);
                     self.ctx.free_temp(obj_reg);
                     return Err(CodegenError::internal("not a compound assignment"));
+                }
+
+                // REFINE-FIELD-DYNAMIC-BYPASS-1: the post-op value is
+                // what lands in the refined field — assert it before
+                // the write-back (T1-F parity for compound assignment).
+                if let Some(bt) = obj_type.as_deref() {
+                    let field_name_owned = field.name.to_string();
+                    self.emit_field_refinement_assert(result, bt, &field_name_owned);
                 }
 
                 // Store back to field
@@ -12406,6 +12466,31 @@ impl VbcCodegen {
         });
         self.ctx.free_temp(iter_val);
 
+        // FUNC-REGISTRY-QUALIFICATION-1: record the iterator's static type as
+        // a register hint on `__for_iter`. The `next` CallM below is emitted
+        // with a BARE method id (the iterator type isn't in the bytecode), so
+        // under AOT the receiver register would be untyped and `next` would
+        // collide with every `Type.next` in the module. The hint lets the AOT
+        // reg_types pass type this register so the existing owner-equality
+        // resolves the right `<IterType>.next`. Derived exactly as
+        // `is_custom_iterator_type` classified it; the interpreter ignores the
+        // hint (it dispatches on the runtime object header).
+        if let Some(cls) = self
+            .infer_expr_type_name(iter)
+            .or_else(|| self.extract_expr_type_name(iter))
+        {
+            let base = cls
+                .trim_start_matches("&mut ")
+                .trim_start_matches("&checked ")
+                .trim_start_matches("&unsafe ")
+                .trim_start_matches('&')
+                .trim_start();
+            let base = base.split('<').next().unwrap_or(base).trim();
+            if !base.is_empty() {
+                self.ctx.add_register_type_hint(iter_reg.0, base.to_string());
+            }
+        }
+
         let loop_ctx = self.ctx.enter_loop(label.map(|s| s.to_string()), None);
 
         let opt_reg = self.ctx.alloc_temp();
@@ -18221,6 +18306,13 @@ impl VbcCodegen {
                 // would only become a hazard if records had interior
                 // mutability through field-reference, which Verum doesn't
                 // expose at the record-literal layer.
+                // REFINE-FIELD-DYNAMIC-BYPASS-1: refined fields get a
+                // runtime Assert on the incoming value before the write —
+                // the SMT E500 gate only rejects LITERAL violations; a
+                // dynamic value (NaN through a fn return) reached the
+                // field unchecked (T1-F parity for fields).
+                self.emit_field_refinement_assert(value_reg, &type_name, &field.name.name);
+
                 let field_idx = self.resolve_field_index(Some(&type_name), &field.name.name);
                 self.ctx.emit(Instruction::SetF {
                     obj: result,
@@ -18301,6 +18393,14 @@ impl VbcCodegen {
             let value_reg = self
                 .compile_expr(arg_expr)?
                 .or_internal("record ctor arg has no value")?;
+
+            // REFINE-FIELD-DYNAMIC-BYPASS-1: assert the refined-field
+            // predicate on the incoming value once, before either
+            // SetF arm below (T1-F parity for ctor-form construction).
+            if let Some(fname) = func_info.param_names.get(idx) {
+                let fname = fname.clone();
+                self.emit_field_refinement_assert(value_reg, type_name, &fname);
+            }
 
             let field_idx = func_info
                 .param_names
@@ -33350,8 +33450,12 @@ impl VbcCodegen {
         // Step 2: allocate `buf` = "" (empty small-string).  The
         // user-side `Formatter.write_str` mutates this buffer via
         // `self.buffer.push_str(s)` which routes through the runtime
-        // Text-push intercept; small-string → heap-string promotion
-        // is handled transparently by that intercept.
+        // Text-push intercept.  (A `Call Text.new()` heap-seed was
+        // tried for the AOT Display leg and REVERTED: bare "Text.new"
+        // resolution inside stdlib-merged suite contexts mis-bound —
+        // the #17 bare-name class — regressing 42 interp Display-law
+        // tests.  The AOT Display extraction gap is parked in task
+        // #21 with the full evidence map.)
         let buf_reg = self.ctx.alloc_temp();
         let empty_const = self.ctx.add_const_string("");
         self.ctx.emit(Instruction::LoadK {
@@ -33361,7 +33465,10 @@ impl VbcCodegen {
 
         // Step 3: formatter = Formatter.new(&mut buf).  `Call` requires
         // args in a contiguous fresh-allocated block; we put the
-        // `&mut buf` CBGR ref at slot 0.
+        // `&mut buf` CBGR ref at slot 0.  (A direct-object pass was
+        // tried and REVERTED: the interp's mutation path NEEDS the ref
+        // — both tiers went empty.  The AOT-side fix is in the RefMut
+        // LOWERING: heap-ptr pass-through.)
         let new_arg_block = self.ctx.registers.alloc_fresh();
         self.ctx.emit(Instruction::RefMut {
             dst: new_arg_block,

@@ -424,6 +424,13 @@ impl Serializer {
         self.serialize_type_ref(&field.type_ref)?;
         encode_u32(field.offset, &mut self.output);
         self.output.push(field.visibility as u8);
+        // minor >= 3: refinement predicate carriage (REFINE-FIELD-
+        // DYNAMIC-BYPASS-1 phase 2). Fixed-width appends — the reader
+        // gates on header.version_minor, so pre-3 readers reject the
+        // archive cleanly via is_version_compatible rather than
+        // mis-parsing mid-stream.
+        encode_u32(field.refinement_src.0, &mut self.output);
+        encode_u32(field.refinement_binding.0, &mut self.output);
         Ok(())
     }
 
@@ -613,6 +620,18 @@ impl Serializer {
         // byte and `is_const` defaults to `false`.  See
         // `FunctionDescriptor::is_const`.
         self.output.push(desc.is_const as u8);
+
+        // v2.2 — FUNC-REGISTRY-QUALIFICATION-1: trailing register→owner-type
+        // hints (AOT-only; the interpreter never reads them).  Unlike the
+        // fixed is_const/intrinsic_name trailing bytes, this is VARIABLE
+        // length, so the reader gates it on format minor >= 2 rather than the
+        // `offset < data.len()` heuristic.  Every v2.2 descriptor writes the
+        // count (0 when there are no hints).
+        encode_varint(desc.register_type_hints.len() as u64, &mut self.output);
+        for hint in &desc.register_type_hints {
+            encode_u16(hint.register, &mut self.output);
+            encode_u32(hint.type_name.0, &mut self.output);
+        }
 
         Ok(())
     }

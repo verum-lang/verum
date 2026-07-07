@@ -7275,6 +7275,25 @@ impl TypeChecker {
         // we need to resolve it to the underlying Record type before checking fields
         let normalized_ty = self.normalize_type(dereferenced_ty);
 
+        // f10a integration completion (leg B): field access on an
+        // ASSOCIATED-TYPE PROJECTION receiver. AssociatedProjection
+        // preservation made adapter elements arrive as
+        // `Generic{ "::Item", [Iter] }` — projections that
+        // normalize_type does not reduce — so `|r| r.hot` in
+        // `.any/.find` chains errored E103 "Cannot access field on
+        // non-record type: Item<_>". Run the projection resolver
+        // (deref-aware, recursive; the same one call-returns and match
+        // scrutinees already use) before giving up — resolving MORE,
+        // never less: a projection that still doesn't resolve keeps
+        // today's error.
+        let normalized_ty = match &normalized_ty {
+            Type::Generic { name, .. } if name.as_str().starts_with("::") => {
+                let resolved = self.resolve_assoc_projections_deep(&normalized_ty);
+                self.normalize_type(&resolved)
+            }
+            _ => normalized_ty,
+        };
+
         // Never propagation: any field access on Never produces Never
         if matches!(normalized_ty, Type::Never) {
             return Ok(InferResult::new(Type::Never));
