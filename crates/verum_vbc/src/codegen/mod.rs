@@ -12956,6 +12956,35 @@ impl VbcCodegen {
         // drifts that affects `Ord.max`, `Ord.min`, `Ord.clamp`,
         // `Eq.ne`, `Hash.hash_value`, and every other default method
         // with a `Self`-typed parameter or return.
+        // TYPE-DEREF-4: record which bindings are REFERENCES so the `*x`
+        // (Deref) lowering treats `*reference` as a BUILT-IN dereference
+        // (→ pointee) rather than a call to the pointee type's `Deref` impl
+        // (which applies only to `*value`). Cleared per-function; a stale
+        // set would mis-lower an unrelated function's `*x`.
+        self.ctx.reference_bindings.clear();
+        for ((param_name, _), param) in params_with_mutability.iter().zip(func.params.iter()) {
+            use verum_ast::FunctionParamKind;
+            let is_ref = match &param.kind {
+                FunctionParamKind::SelfRef
+                | FunctionParamKind::SelfRefMut
+                | FunctionParamKind::SelfRefChecked
+                | FunctionParamKind::SelfRefCheckedMut
+                | FunctionParamKind::SelfRefUnsafe
+                | FunctionParamKind::SelfRefUnsafeMut => true,
+                FunctionParamKind::Regular { ty, .. } => matches!(
+                    &ty.kind,
+                    verum_ast::ty::TypeKind::Reference { .. }
+                        | verum_ast::ty::TypeKind::CheckedReference { .. }
+                        | verum_ast::ty::TypeKind::UnsafeReference { .. }
+                        | verum_ast::ty::TypeKind::GenRef { .. }
+                ),
+                _ => false,
+            };
+            if is_ref {
+                self.ctx.reference_bindings.insert(param_name.clone());
+            }
+        }
+
         for ((param_name, _), param) in params_with_mutability.iter().zip(func.params.iter()) {
             if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
                 let var_type = self.type_kind_to_var_type(&ty.kind);

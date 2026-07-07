@@ -4380,6 +4380,34 @@ impl VbcCodegen {
                 } else if let Some(deref_method_id) = inner_type
                     .as_ref()
                     .and_then(|ty_name| {
+                        // TYPE-DEREF-4. `*reference` is a BUILT-IN dereference
+                        // (→ the pointee), NOT an invocation of the pointee
+                        // type's `Deref` impl (which applies only to `*value`).
+                        // When the operand is a reference binding (a `&T`/`&mut
+                        // T` param, or a `&self`-shape receiver), skip the
+                        // user-Deref path so it falls through to the generic
+                        // Deref opcode (identity/read-through). Without this,
+                        // `let old = *self` in `Maybe.replace`/`take`
+                        // (self: &mut Maybe; Maybe `implement Deref { fn
+                        // deref(&self)->&T }`) called `Maybe::deref` and bound
+                        // the payload T instead of the Maybe.
+                        let inner_is_ref = if let ExprKind::Path(p) = &inner.kind {
+                            p.segments.len() == 1
+                                && match &p.segments[0] {
+                                    PathSegment::Name(id) => {
+                                        self.ctx.reference_bindings.contains(id.name.as_str())
+                                    }
+                                    PathSegment::SelfValue => {
+                                        self.ctx.reference_bindings.contains("self")
+                                    }
+                                    _ => false,
+                                }
+                        } else {
+                            false
+                        };
+                        if inner_is_ref {
+                            return None;
+                        }
                         // **User Deref-protocol dispatch (cell #119)**.
                         // `*r` where `r: Ref<T>` / `RefMut<T>` / any
                         // user type that `implement Deref for X { fn

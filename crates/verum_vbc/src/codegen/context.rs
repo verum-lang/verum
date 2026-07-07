@@ -233,6 +233,18 @@ pub struct CodegenContext {
     /// Used to determine if `==` should dispatch to a custom `implement Eq` method.
     pub variable_type_names: HashMap<String, String>,
 
+    /// Names of bindings (params) whose DECLARED type is a REFERENCE
+    /// (`&T` / `&mut T` / `&checked T` / `&unsafe T`, plus `&self`-shape
+    /// receivers). Consulted by the `*x` (Deref) lowering: `*reference` is a
+    /// built-in dereference (→ pointee), NOT an invocation of the pointee
+    /// type's `Deref` impl — the latter applies only to `*value`. Without
+    /// this, `let old = *self` in `Maybe.replace`/`take` (self: &mut Maybe,
+    /// and Maybe `implement Deref { fn deref(&self)->&T }`) wrongly called
+    /// `Maybe::deref` and yielded the payload T instead of the Maybe.
+    /// Populated per-function at compile_function entry; saved/restored across
+    /// closure bodies alongside `variable_type_names`.
+    pub reference_bindings: std::collections::HashSet<String>,
+
     /// Snapshot of `variable_type_names` from the last compiled function body.
     /// Preserved across function boundaries so the playground can read bindings
     /// after compilation (the main map gets cleared between functions).
@@ -526,6 +538,8 @@ pub struct ClosureCompilationContext {
     pub defer_stack: Vec<Vec<DeferInfo>>,
     /// Saved variable type names (critical for method resolution).
     pub variable_type_names: HashMap<String, String>,
+    /// Saved reference-binding names (for the `*reference` Deref lowering).
+    pub reference_bindings: std::collections::HashSet<String>,
 }
 
 /// Entry in the constant pool.
@@ -1145,6 +1159,7 @@ impl CodegenContext {
             variable_types: HashMap::new(),
             constant_types: HashMap::new(),
             variable_type_names: HashMap::new(),
+            reference_bindings: std::collections::HashSet::new(),
             last_function_variable_types: HashMap::new(),
             match_scrutinee_type: None,
             match_tuple_element_types: None,
@@ -2686,6 +2701,7 @@ impl CodegenContext {
             loop_stack: self.loop_stack.clone(),
             defer_stack: self.defer_stack.clone(),
             variable_type_names: self.variable_type_names.clone(),
+            reference_bindings: self.reference_bindings.clone(),
         }
     }
 
@@ -2701,6 +2717,7 @@ impl CodegenContext {
         self.loop_stack = saved.loop_stack;
         self.defer_stack = saved.defer_stack;
         self.variable_type_names = saved.variable_type_names;
+        self.reference_bindings = saved.reference_bindings;
     }
 
     /// Looks up a function by qualified name (e.g., "module::function" or "Type::method").
