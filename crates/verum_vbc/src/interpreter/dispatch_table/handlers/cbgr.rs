@@ -574,48 +574,41 @@ pub(in super::super) fn handle_drop_ref(
                 }
             };
 
-            // Debug: show what type we're dropping
-            if type_id.0 >= crate::types::TypeId::FIRST_USER {
-                let type_idx = (type_id.0 - crate::types::TypeId::FIRST_USER) as usize;
-                if let Some(type_desc) = state.module.types.get(type_idx) {
-                    let _type_name = state.module.strings.get(type_desc.name).unwrap_or("?");
-                    // DEBUG: eprintln!("[DEBUG DropRef] Dropping type '{}' (id={}, idx={}, drop_fn={:?}, fields={})",
-                    //  type_name, type_id.0, type_idx, type_desc.drop_fn, type_desc.fields.len());
-                }
-            }
-
-            // Look up TypeDescriptor to find drop_fn
-            // Extract all needed values before any mutable operations to avoid borrow conflicts
-            let drop_info = if type_id.0 >= crate::types::TypeId::FIRST_USER {
-                let type_idx = (type_id.0 - crate::types::TypeId::FIRST_USER) as usize;
-                state
-                    .module
-                    .types
-                    .get(type_idx)
-                    .and_then(|type_desc| type_desc.drop_fn)
-                    .and_then(|drop_fn_id| {
-                        state
-                            .module
-                            .functions
-                            .get(drop_fn_id as usize)
-                            .map(|func| (drop_fn_id, func.register_count, func.bytecode_offset))
-                    })
-            } else {
-                None
-            };
+            // Look up TypeDescriptor to find drop_fn.
+            //
+            // TYPE-ID-COLLISION-2 (FUNDAMENTAL). Resolve the descriptor BY ID
+            // via `get_type`, NOT by the positional index `types[id -
+            // FIRST_USER]`. VBC type-ids are assigned non-deterministically
+            // (order-dependent `alloc_user_type_id` — see `get_type`'s own
+            // doc-comment and `import_archive_type_with_protocol_remap`), so
+            // `id - FIRST_USER` does NOT equal the descriptor's slot in
+            // `module.types`. Under the positional lookup, mounting any
+            // type-carrying symbol shifts a type's id off its coincidental
+            // slot and the drop handler reads a DIFFERENT type's descriptor:
+            // e.g. dropping a `Cidr` (id 2521) indexed `QuicStream`, whose
+            // `drop_fn` is `core.intrinsics.control.abort` → `Unreachable at
+            // pc 1`. `get_type` scans by `desc.id == id`, which is correct
+            // regardless of load order. Root cause of the mount-dependent,
+            // regen-non-deterministic net/cidr collision class.
+            let drop_info = state
+                .module
+                .get_type(type_id)
+                .and_then(|type_desc| type_desc.drop_fn)
+                .and_then(|drop_fn_id| {
+                    state
+                        .module
+                        .functions
+                        .get(drop_fn_id as usize)
+                        .map(|func| (drop_fn_id, func.register_count, func.bytecode_offset))
+                });
 
             if let Some((drop_fn_id, reg_count, _bytecode_offset)) = drop_info {
                 if std::env::var("VERUM_TRACE_DROPFN").is_ok() {
-                    let tn = if type_id.0 >= crate::types::TypeId::FIRST_USER {
-                        state
-                            .module
-                            .types
-                            .get((type_id.0 - crate::types::TypeId::FIRST_USER) as usize)
-                            .and_then(|td| state.module.strings.get(td.name))
-                            .unwrap_or("?")
-                    } else {
-                        "<builtin>"
-                    };
+                    let tn = state
+                        .module
+                        .get_type(type_id)
+                        .and_then(|td| state.module.strings.get(td.name))
+                        .unwrap_or("<builtin>");
                     let dfn = state
                         .module
                         .functions
@@ -661,11 +654,19 @@ pub(in super::super) fn handle_drop_ref(
             } else {
                 // No drop_fn for this type, but check if it has fields with Drop impls
                 // This handles structs like StructWithTrackers whose fields have Drop
-                if type_id.0 >= crate::types::TypeId::FIRST_USER {
-                    let type_idx = (type_id.0 - crate::types::TypeId::FIRST_USER) as usize;
-                    if let Some(type_desc) = state.module.types.get(type_idx) {
+                {
+                    // Clone the field list out so the immutable borrow of
+                    // `state.module` ends before the drop dispatch below.
+                    // Resolve BY ID (`get_type`), not positional index — same
+                    // TYPE-ID-COLLISION-2 fix as the drop_fn lookup above.
+                    let fields: Vec<crate::types::FieldDescriptor> = state
+                        .module
+                        .get_type(type_id)
+                        .map(|td| td.fields.iter().cloned().collect())
+                        .unwrap_or_default();
+                    if !fields.is_empty() {
                         // Check each field for droppable types
-                        for field in &type_desc.fields {
+                        for field in &fields {
                             // Get the field type ID
                             let field_type_id = match &field.type_ref {
                                 crate::types::TypeRef::Concrete(tid) => Some(*tid),
@@ -675,12 +676,9 @@ pub(in super::super) fn handle_drop_ref(
                             if let Some(ftid) = field_type_id
                                 && ftid.0 >= crate::types::TypeId::FIRST_USER
                             {
-                                let field_type_idx =
-                                    (ftid.0 - crate::types::TypeId::FIRST_USER) as usize;
                                 let has_drop = state
                                     .module
-                                    .types
-                                    .get(field_type_idx)
+                                    .get_type(ftid)
                                     .map(|fd| fd.drop_fn.is_some())
                                     .unwrap_or(false);
 
