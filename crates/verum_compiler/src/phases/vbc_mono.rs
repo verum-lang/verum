@@ -423,203 +423,40 @@ impl VbcMonomorphizationPhase {
         generic_fns: &[FunctionId],
         graph: &mut InstantiationGraph,
     ) {
-        use verum_vbc::instruction::Opcode;
+        use verum_vbc::instruction::Instruction;
 
         let generic_set: std::collections::HashSet<FunctionId> =
             generic_fns.iter().copied().collect();
         let mut pc = 0;
 
+        // Decode with the CANONICAL decoder so the scan stays ALIGNED to real
+        // instruction boundaries.  The previous hand-rolled
+        // `skip_instruction_operands` length table was incomplete (a
+        // "simplified" copy of the same class of bug as the specializer's
+        // get_operand_bytes) — one wrong length desynchronised the stream and
+        // made a later operand byte (e.g. a 0x80 register byte) decode as a
+        // phantom CALL_G whose garbage callee happened to land in the generic
+        // set, injecting instantiations for completely unrelated functions.
         while pc < bytecode.len() {
-            let opcode = Opcode::from_byte(bytecode[pc]);
-            pc += 1;
-
-            if opcode == Opcode::CallG {
-                // Parse CALL_G instruction
-                if let Some((callee, type_args)) = self.parse_call_g(bytecode, &mut pc) {
+            let instr_start = pc;
+            match verum_vbc::bytecode::decode_instruction(bytecode, &mut pc) {
+                Ok(Instruction::CallG {
+                    func_id, type_args, ..
+                }) => {
+                    let callee = FunctionId(func_id);
                     if generic_set.contains(&callee) && !type_args.is_empty() {
                         graph.record_instantiation(callee, type_args, SourceLocation::default());
-
-                        // Record dependency: caller's instantiations depend on callee
-                        // This is simplified - full implementation would track
-                        // per-instantiation dependencies
                     }
                 }
-            } else {
-                // Skip other instructions
-                pc += self.skip_instruction_operands(opcode, bytecode, pc);
+                Ok(_) => {}
+                Err(_) => break,
             }
-        }
-    }
-
-    /// Parses a CALL_G instruction to extract callee and type args.
-    fn parse_call_g(&self, bytecode: &[u8], pc: &mut usize) -> Option<(FunctionId, Vec<TypeRef>)> {
-        // Skip destination register
-        if *pc >= bytecode.len() {
-            return None;
-        }
-        if bytecode[*pc] < 128 {
-            *pc += 1;
-        } else {
-            *pc += 2;
-        }
-
-        // Read function ID (varint)
-        let func_id = self.read_varint(bytecode, pc)? as u32;
-
-        // Read type argument count
-        if *pc >= bytecode.len() {
-            return None;
-        }
-        let type_arg_count = bytecode[*pc] as usize;
-        *pc += 1;
-
-        // Parse type arguments
-        let mut type_args = Vec::with_capacity(type_arg_count);
-        for _ in 0..type_arg_count {
-            if let Some(type_ref) = self.parse_type_ref(bytecode, pc) {
-                type_args.push(type_ref);
-            } else {
-                return None;
-            }
-        }
-
-        // Skip argument count and registers
-        if *pc >= bytecode.len() {
-            return None;
-        }
-        let arg_count = bytecode[*pc] as usize;
-        *pc += 1;
-        for _ in 0..arg_count {
-            if *pc >= bytecode.len() {
-                return None;
-            }
-            if bytecode[*pc] < 128 {
-                *pc += 1;
-            } else {
-                *pc += 2;
-            }
-        }
-
-        Some((FunctionId(func_id), type_args))
-    }
-
-    /// Reads a varint from bytecode.
-    fn read_varint(&self, bytecode: &[u8], pc: &mut usize) -> Option<u64> {
-        let mut result: u64 = 0;
-        let mut shift = 0;
-
-        loop {
-            if *pc >= bytecode.len() {
-                return None;
-            }
-
-            let byte = bytecode[*pc];
-            *pc += 1;
-
-            result |= ((byte & 0x7F) as u64) << shift;
-            if byte < 128 {
+            if pc <= instr_start {
                 break;
             }
-            shift += 7;
-            if shift >= 64 {
-                return None;
-            }
-        }
-
-        Some(result)
-    }
-
-    /// Parses a type reference from bytecode.
-    fn parse_type_ref(&self, bytecode: &[u8], pc: &mut usize) -> Option<TypeRef> {
-        use verum_vbc::types::{TypeId, TypeParamId};
-
-        if *pc >= bytecode.len() {
-            return None;
-        }
-
-        let tag = bytecode[*pc];
-        *pc += 1;
-
-        match tag {
-            0 => {
-                // Concrete type
-                let type_id = self.read_varint(bytecode, pc)? as u32;
-                Some(TypeRef::Concrete(TypeId(type_id)))
-            }
-            1 => {
-                // Generic type parameter
-                if *pc + 2 > bytecode.len() {
-                    return None;
-                }
-                let param_id = bytecode[*pc] as u16 | ((bytecode[*pc + 1] as u16) << 8);
-                *pc += 2;
-                Some(TypeRef::Generic(TypeParamId(param_id)))
-            }
-            2 => {
-                // Instantiated generic type
-                let base = self.read_varint(bytecode, pc)? as u32;
-
-                if *pc >= bytecode.len() {
-                    return None;
-                }
-                let arg_count = bytecode[*pc] as usize;
-                *pc += 1;
-
-                let mut args = Vec::with_capacity(arg_count);
-                for _ in 0..arg_count {
-                    if let Some(arg) = self.parse_type_ref(bytecode, pc) {
-                        args.push(arg);
-                    } else {
-                        return None;
-                    }
-                }
-
-                Some(TypeRef::Instantiated {
-                    base: TypeId(base),
-                    args,
-                })
-            }
-            _ => None,
         }
     }
 
-    /// Skips an instruction's operands.
-    fn skip_instruction_operands(
-        &self,
-        opcode: verum_vbc::instruction::Opcode,
-        bytecode: &[u8],
-        pc: usize,
-    ) -> usize {
-        use verum_vbc::instruction::Opcode;
-
-        match opcode {
-            Opcode::Nop | Opcode::RetV => 0,
-            Opcode::LoadTrue | Opcode::LoadFalse | Opcode::LoadNil | Opcode::LoadUnit => {
-                if pc < bytecode.len() && bytecode[pc] < 128 {
-                    1
-                } else {
-                    2
-                }
-            }
-            Opcode::Jmp => 4,
-            Opcode::JmpIf
-            | Opcode::JmpNot
-            | Opcode::JmpEq
-            | Opcode::JmpNe
-            | Opcode::JmpLt
-            | Opcode::JmpLe
-            | Opcode::JmpGt
-            | Opcode::JmpGe => {
-                let reg_len = if pc < bytecode.len() && bytecode[pc] < 128 {
-                    1
-                } else {
-                    2
-                };
-                reg_len + 4
-            }
-            _ => 4, // Default estimate
-        }
-    }
 }
 
 impl Default for VbcMonomorphizationPhase {
