@@ -2594,6 +2594,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "meta_engines"
+version = "0.1.0"
+dependencies = [
+ "verum_ast",
+ "verum_common",
+ "verum_compiler",
+ "verum_fast_parser",
+ "verum_lexer",
+ "verum_vbc",
+]
+
+[[package]]
 name = "metal"
 version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

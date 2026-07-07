@@ -49,6 +49,11 @@ members = [
     "vcs/runner/vbench",
     "vcs/runner/vfuzz",
     "vcs/tools/isabelle_graph_import",
+    # META-EXEC-CONVERGENCE-1: differential harness for the two
+    # compile-time meta-execution engines (VBC executor vs tree-walk
+    # evaluator). Note: vcs/differential/runner is a distinct, dormant
+    # non-member crate and stays out of the workspace.
+    "vcs/differential/meta_engines",
 ]
 
 # `vcs/fuzz` cannot join the workspace yet — it has ~344 pre-existing
