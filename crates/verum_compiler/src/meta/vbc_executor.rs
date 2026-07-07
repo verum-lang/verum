@@ -141,6 +141,22 @@ impl std::error::Error for VbcExecutionError {}
 /// Result type for VBC execution.
 pub type VbcExecutionResult<T> = std::result::Result<T, VbcExecutionError>;
 
+/// Result of a raw (value-level) meta function execution.
+///
+
+/// Produced by [`VbcExecutor::execute_raw`]. Carries the NaN-boxed result
+/// [`Value`] together with the [`Interpreter`] that produced it: heap-backed
+/// results (Text, List, Map, records) are only decodable while the
+/// interpreter — and therefore its heap — is still alive. Callers decode
+/// through `interpreter.state` (e.g. `read_text` / `list_elements` /
+/// `map_entries`).
+pub struct RawExecution {
+    /// The meta function's return value (NaN-boxed; may point into the heap).
+    pub value: Value,
+    /// The interpreter that executed the function, kept alive for heap access.
+    pub interpreter: Interpreter,
+}
+
 /// VBC executor for meta functions.
 ///
 
@@ -196,11 +212,14 @@ impl VbcExecutor {
         let func_name = &meta_func.name;
         debug!("Executing meta function '{}' via VBC", func_name);
 
-        // Step 1: Create synthetic module containing the meta function
-        let synthetic_module = self.create_synthetic_module(meta_func);
+        // Step 1: Create synthetic module containing the meta function.
+        // The main wrapper is typed as returning TokenStream — the historical
+        // (and for `execute()` correct) contract of this entry point.
+        let wrapper_return = Self::token_stream_type(meta_func.span);
+        let synthetic_module = self.create_synthetic_module(meta_func, wrapper_return);
 
         // Step 2: Compile to VBC
-        let vbc_module = self.compile_module(&synthetic_module, func_name)?;
+        let vbc_module = self.compile_module(&synthetic_module, func_name, func_name.clone())?;
 
         // Step 3: Execute with interpreter
         let (result, interpreter) = self.execute_module(vbc_module, func_name, args)?;
@@ -209,20 +228,116 @@ impl VbcExecutor {
         self.extract_token_stream(result, &interpreter, func_name)
     }
 
+    /// Executes a meta function and returns its raw result [`Value`].
+    ///
+
+    /// Unlike [`execute`](Self::execute), the synthetic `main` wrapper is
+    /// typed with the meta function's *own* declared return type instead of
+    /// the hardcoded `TokenStream`, and the result is returned as-is — no
+    /// TokenStream extraction. This is the entry point for value-level
+    /// (pure-computation) meta functions: with the TokenStream-typed wrapper
+    /// their scalar results were coerced to Unit on the raw path.
+    ///
+
+    /// The returned [`RawExecution`] carries the interpreter so heap-backed
+    /// results (Text, collections) remain decodable by the caller.
+    ///
+
+    /// Raw and TokenStream executions of the same function are cached under
+    /// distinct keys — the two synthetic modules differ in wrapper typing.
+    pub fn execute_raw(
+        &mut self,
+        meta_func: &MetaFunction,
+        args: &[Value],
+    ) -> VbcExecutionResult<RawExecution> {
+        let func_name = &meta_func.name;
+        debug!("Executing meta function '{}' via VBC (raw value mode)", func_name);
+
+        // Step 1: Synthetic module whose main wrapper is typed with the meta
+        // function's own return type (NOT TokenStream).
+        let synthetic_module =
+            self.create_synthetic_module(meta_func, meta_func.return_type.clone());
+
+        // Step 2: Compile to VBC under a raw-mode cache key so the
+        // TokenStream-typed module for the same function is never reused.
+        let cache_key = Text::from(format!("{}::__raw", func_name));
+        let vbc_module = self.compile_module(&synthetic_module, func_name, cache_key)?;
+
+        // Step 3: Execute with interpreter; skip TokenStream extraction.
+        let (value, interpreter) = self.execute_module_raw(vbc_module, func_name, args)?;
+
+        Ok(RawExecution { value, interpreter })
+    }
+
+    /// Executes the compiled raw-mode module and returns the result value
+    /// and the interpreter (for heap decoding).
+    ///
+
+    /// Differs from [`execute_module`](Self::execute_module) in two ways,
+    /// both required for correct value-level execution:
+    ///
+
+    /// * The entry function is resolved **by name** (the synthetic `main`
+    ///   wrapper, falling back to the meta function itself) — codegen
+    ///   registers stdlib/intrinsic functions first, so `FunctionId(0)` is
+    ///   not in general the wrapper.
+    /// * Arguments are passed through
+    ///   [`Interpreter::execute_function_with_args`] — the host-facing
+    ///   fresh-entry path. `Interpreter::call` is the re-entrant path for
+    ///   use *while already executing bytecode*; calling it host-side
+    ///   panics on frame-base accounting ("Invalid frame base").
+    fn execute_module_raw(
+        &self,
+        vbc_module: Arc<VbcModule>,
+        func_name: &Text,
+        args: &[Value],
+    ) -> VbcExecutionResult<(Value, Interpreter)> {
+        // Resolve the entry point by name. Functions may be registered
+        // fully-qualified (e.g. "<module>.main"), so fall back to the
+        // unique-bare-suffix lookup, then to the meta function itself.
+        let entry_id = vbc_module
+            .find_function_by_name("main")
+            .or_else(|| vbc_module.find_function_by_unique_bare_suffix("main"))
+            .or_else(|| vbc_module.find_function_by_name(func_name.as_str()))
+            .or_else(|| vbc_module.find_function_by_unique_bare_suffix(func_name.as_str()))
+            .ok_or_else(|| VbcExecutionError::FunctionNotFound {
+                function_name: func_name.clone(),
+            })?;
+
+        let mut interpreter = Interpreter::new(vbc_module);
+        let result = interpreter.execute_function_with_args(entry_id, args);
+
+        result
+            .map(|v| (v, interpreter))
+            .map_err(|e| VbcExecutionError::ExecutionFailed {
+                function_name: func_name.clone(),
+                error: Text::from(format!("{:?}", e)),
+            })
+    }
+
     /// Creates a synthetic AST module wrapping the meta function.
     ///
 
     /// The synthetic module contains:
     /// 1. A main wrapper function that calls the meta function
     /// 2. The original meta function body
-    fn create_synthetic_module(&self, meta_func: &MetaFunction) -> Module {
+    ///
+
+    /// `wrapper_return` is the declared return type of the synthetic main
+    /// wrapper: `TokenStream` for [`execute`](Self::execute), the meta
+    /// function's own return type for [`execute_raw`](Self::execute_raw).
+    fn create_synthetic_module(&self, meta_func: &MetaFunction, wrapper_return: Type) -> Module {
         // Create the function declaration from the MetaFunction
         let func_decl = self.meta_func_to_decl(meta_func);
 
         // Create a main function that just calls the meta function
         // This is the entry point for the interpreter
-        let main_func =
-            self.create_main_wrapper(&meta_func.name, &meta_func.params, meta_func.span);
+        let main_func = self.create_main_wrapper(
+            &meta_func.name,
+            &meta_func.params,
+            meta_func.span,
+            wrapper_return,
+        );
 
         // Build the module with both functions
         let items: List<Item> = vec![
@@ -306,12 +421,36 @@ impl VbcExecutor {
         }
     }
 
+    /// The `TokenStream` type node used as the wrapper return type on the
+    /// classic [`execute`](Self::execute) path.
+    fn token_stream_type(span: Span) -> Type {
+        Type {
+            kind: TypeKind::Path(Path {
+                segments: vec![PathSegment::Name(Ident::new(
+                    "TokenStream".to_string(),
+                    span,
+                ))]
+                .into_iter()
+                .collect(),
+                span,
+            }),
+            span,
+        }
+    }
+
     /// Creates a main wrapper function that calls the meta function.
+    ///
+
+    /// `return_type` is the wrapper's declared return type. It is a
+    /// parameter (rather than hardcoded `TokenStream`) so that value-level
+    /// executions can type the wrapper with the meta function's own return
+    /// type — otherwise pure-value results coerce to Unit on the raw path.
     fn create_main_wrapper(
         &self,
         func_name: &Text,
         params: &List<super::registry::MetaParam>,
         span: Span,
+        return_type: Type,
     ) -> FunctionDecl {
         // Build the call expression: func_name(arg0, arg1, ...)
         let call_args: List<Expr> = params
@@ -378,20 +517,8 @@ impl VbcExecutor {
             span,
         };
 
-        // Return type is TokenStream
-        let return_type = Type {
-            kind: TypeKind::Path(Path {
-                segments: vec![PathSegment::Name(Ident::new(
-                    "TokenStream".to_string(),
-                    span,
-                ))]
-                .into_iter()
-                .collect(),
-                span,
-            }),
-            span,
-        };
-
+        // Return type is supplied by the caller (TokenStream on the classic
+        // path, the meta function's own return type on the raw path).
         FunctionDecl {
             visibility: Visibility::Private,
             is_async: false,
@@ -422,14 +549,21 @@ impl VbcExecutor {
     }
 
     /// Compiles the synthetic module to VBC bytecode.
+    ///
+
+    /// `cache_key` identifies the compiled artifact in the module cache.
+    /// It equals the function name on the classic TokenStream path and a
+    /// `"<name>::__raw"` variant on the raw path — the two synthetic modules
+    /// differ (wrapper return type), so they must never share a cache slot.
     fn compile_module(
         &mut self,
         module: &Module,
         func_name: &Text,
+        cache_key: Text,
     ) -> VbcExecutionResult<Arc<VbcModule>> {
         // Check cache first
-        if let Some(cached) = self.module_cache.get(func_name) {
-            trace!("Using cached VBC module for '{}'", func_name);
+        if let Some(cached) = self.module_cache.get(&cache_key) {
+            trace!("Using cached VBC module for '{}'", cache_key);
             return Ok(cached.clone());
         }
 
@@ -446,8 +580,7 @@ impl VbcExecutor {
         let module_arc = Arc::new(vbc_module);
 
         // Cache the compiled module
-        self.module_cache
-            .insert(func_name.clone(), module_arc.clone());
+        self.module_cache.insert(cache_key, module_arc.clone());
 
         debug!(
             "Compiled meta function '{}' to VBC ({} bytes)",
