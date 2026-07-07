@@ -24166,7 +24166,40 @@ fn lower_ffi_extended<'ctx>(
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
             let offset = as_i64(ctx, ctx.get_register(offset_reg)?, "offset")?;
 
-            let result = ffi.lower_ptr_add(ctx.builder(), ptr, offset)?;
+            // TEXT-AOT-CHARS-PUSH-1 (print-truncation leg): ptr_offset
+            // is ELEMENT-scaled — 8 for NaN-boxed List slots (the
+            // historic default), but 1 for raw BYTE buffers
+            // (Text.push_byte's `ptr_offset(self.ptr, self.len)` wrote
+            // 'y' at +8 and the NUL at +8/+16, so a builder-built
+            // "xy" printed as "x": len field said 2 while the bytes
+            // were x,0,...,y). The stride is tracked per-register
+            // (Text.ptr field loads mark stride 1); default stays 8 —
+            // every List/slice path lowers exactly as before.
+            let stride = ctx.get_element_stride(ptr_reg);
+            let result = if stride == 8 {
+                ffi.lower_ptr_add(ctx.builder(), ptr, offset)?
+            } else {
+                let i8_ty = ctx.types().i8_type();
+                let i64_ty = ctx.types().i64_type();
+                let scaled = ctx
+                    .builder()
+                    .build_int_mul(
+                        offset,
+                        i64_ty.const_int(stride, false),
+                        "ptr_add_scaled",
+                    )
+                    .or_llvm_err()?;
+                // SAFETY: byte-scaled GEP within the buffer the caller
+                // guarantees (same contract as the 8-stride path).
+                unsafe {
+                    ctx.builder()
+                        .build_gep(i8_ty, ptr, &[scaled], "ptr_add_b")
+                        .or_llvm_err()?
+                }
+            };
+            if stride != 8 {
+                ctx.set_element_stride(dst_reg, stride);
+            }
 
             ctx.set_register(dst_reg, result.into());
             Ok(())
@@ -31761,6 +31794,14 @@ fn lower_get_field<'ctx>(
                 .build_load(i64_ty, field_ptr, &format!("field_{}", field_idx))
                 .or_llvm_err()?;
             ctx.set_register(dst.0, result);
+            // Text.ptr (field 0 of the flat {ptr,len,cap}) is a raw
+            // BYTE pointer — stride 1 so PtrAdd walks bytes, not
+            // 8-byte slots (TEXT-AOT print-truncation leg).
+            if (ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0))
+                && field_idx == 0
+            {
+                ctx.set_element_stride(dst.0, 1);
+            }
         }
         BasicValueEnum::PointerValue(ptr) => {
             // Heap object: use GEP + load
@@ -31772,6 +31813,12 @@ fn lower_get_field<'ctx>(
             let i64_type = ctx.types().i64_type();
             let is_text = ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0);
             let is_inline = ctx.is_inline_struct_register(obj.0);
+            // Text.ptr (field 0 of the flat {ptr,len,cap}) is a raw
+            // BYTE pointer — mark stride 1 so downstream ptr_offset
+            // (PtrAdd) walks bytes, not 8-byte slots.
+            if is_text && field_idx == 0 {
+                ctx.set_element_stride(dst.0, 1);
+            }
             let offset = if is_text || is_inline {
                 field_idx as u64 * 8
             } else {
@@ -31794,6 +31841,14 @@ fn lower_get_field<'ctx>(
                 .build_load(i64_ty, field_ptr, &format!("field_{}", field_idx))
                 .or_llvm_err()?;
             ctx.set_register(dst.0, result);
+            // Text.ptr (field 0 of the flat {ptr,len,cap}) is a raw
+            // BYTE pointer — stride 1 so PtrAdd walks bytes, not
+            // 8-byte slots (TEXT-AOT print-truncation leg).
+            if (ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0))
+                && field_idx == 0
+            {
+                ctx.set_element_stride(dst.0, 1);
+            }
         }
         BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() == 64 => {
             // Check for newtype field access: e.g. FileDesc(Int).0
@@ -31902,6 +31957,12 @@ fn lower_get_field<'ctx>(
                     .build_load(i64_ty, field_ptr, &format!("field_{}", field_idx))
                     .or_llvm_err()?;
                 ctx.set_register(dst.0, result);
+                // Text.ptr byte-pointer stride (see sibling arm above).
+                if (ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0))
+                    && field_idx == 0
+                {
+                    ctx.set_element_stride(dst.0, 1);
+                }
             } // end else (not newtype)
         }
         _ => {
