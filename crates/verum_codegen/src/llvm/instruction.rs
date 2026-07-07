@@ -2082,31 +2082,39 @@ pub fn lower_instruction<'ctx>(
                     ctx.set_register(dst.0, result.into());
                 }
                 _ => {
-                    // VBC Not is dual-use: boolean NOT (for booleans) and bitwise NOT (for integers).
-                    // Use bool_register tracking to distinguish at compile time.
+                    // **AOT-LNOT-BITWISE-1** — `Instruction::Not` (opcode
+                    // 0x99, `handle_lnot`) is UNCONDITIONALLY logical:
+                    // truthy → false, falsy → true. Bitwise complement is a
+                    // SEPARATE instruction (`Bitwise { op: Not }`); the VBC
+                    // codegen's type-aware `UnOp::Not` split routes every
+                    // integer `!` there, so `Instruction::Not` only reaches
+                    // this lowering for Bool or statically-unknown operands.
+                    //
+                    // Pre-fix this arm gated the logical form on
+                    // `is_bool_register` and fell back to bitwise `~value`
+                    // for unmarked operands — but the bool mark is a lossy
+                    // hint (an iterator-deref `*b` of a `List<Bool>` element
+                    // is a raw slot load, never marked), so `!with_err`
+                    // produced -1/-2 (`~0`/`~1`), which is TRUTHY — the
+                    // negation logically inverted AND every downstream
+                    // bit-level Bool compare (assert_eq) diverged from the
+                    // interpreter (whose handle_lnot had this exact bug
+                    // fixed already; this is its AOT twin). Pinned by
+                    // repro/pr_isok.vr + meta/contexts/property_test::
+                    // law_parse_result_is_ok_iff_success_and_no_errors.
                     let src_val = as_i64(ctx, src_raw, "src_val")?;
-
-                    if ctx.is_bool_register(src.0) {
-                        // Logical NOT: result = (value == 0) ? 1 : 0
-                        let zero = src_val.get_type().const_zero();
-                        let is_zero = ctx
-                            .builder()
-                            .build_int_compare(IntPredicate::EQ, src_val, zero, "lnot")
-                            .or_llvm_err()?;
-                        let result = ctx
-                            .builder()
-                            .build_int_z_extend(is_zero, ctx.types().i64_type(), "lnot_ext")
-                            .or_llvm_err()?;
-                        ctx.set_register(dst.0, result.into());
-                        ctx.mark_bool_register(dst.0);
-                    } else {
-                        // Bitwise NOT: result = ~value
-                        let result = ctx
-                            .builder()
-                            .build_not(src_val, "bnot")
-                            .or_llvm_err()?;
-                        ctx.set_register(dst.0, result.into());
-                    }
+                    // Logical NOT: result = (value == 0) ? 1 : 0
+                    let zero = src_val.get_type().const_zero();
+                    let is_zero = ctx
+                        .builder()
+                        .build_int_compare(IntPredicate::EQ, src_val, zero, "lnot")
+                        .or_llvm_err()?;
+                    let result = ctx
+                        .builder()
+                        .build_int_z_extend(is_zero, ctx.types().i64_type(), "lnot_ext")
+                        .or_llvm_err()?;
+                    ctx.set_register(dst.0, result.into());
+                    ctx.mark_bool_register(dst.0);
                 }
             }
             Ok(())
