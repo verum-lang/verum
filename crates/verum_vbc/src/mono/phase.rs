@@ -23,7 +23,6 @@ use super::MonoMetrics;
 use super::cache::MonomorphizationCache;
 use super::graph::{InstantiationGraph, InstantiationRequest};
 use super::merger::{MergeStats, ModuleMerger};
-use super::optimizer::SpecializationOptimizer;
 use super::resolver::{CacheMetadata, MonomorphizationResolver, ResolverStats};
 use super::specializer::{BytecodeSpecializer, SpecializationError, SpecializedFunction};
 use super::substitution::TypeSubstitution;
@@ -358,15 +357,9 @@ impl MonomorphizationPhase {
             // Specialize
             let specialized = specializer.specialize(func, &request.type_args)?;
 
-            // NOTE: the post-specialization SpecializationOptimizer is DISABLED.
-            // It is a byte-by-byte constant-folding/peephole scanner that
-            // mis-tracks operand bytes as opcodes and REWRITES the stream —
-            // observed turning a correct 95-byte specialized body
-            // (Call/Mov/Ref/…/CallM) into 91 bytes of garbage
-            // (Call/LoadK/LoadI/NewRange/MakeVariantTyped), which then lowered
-            // to an undefined/mis-shaped LLVM body.  The specialized bytecode is
-            // already correct without it.  Re-enable only once the optimizer is
-            // rewritten on the canonical decode→transform→encode path (#3).
+            // No post-specialization bytecode optimizer — see specialize_one
+            // in specialize_parallel for the rationale (LLVM owns Tier-1
+            // optimization; a byte-level pass was redundant and unsafe).
 
             results.push((request.clone(), specialized));
         }
@@ -386,9 +379,7 @@ impl MonomorphizationPhase {
 
         // Inner closure shared by both the bespoke-pool and the
         // global-pool branches below — keeps the specialization logic
-        // single-source-of-truth so a change to the optimizer hook
-        // can't drift between paths.
-        let optimize_flag = self.config.optimize;
+        // single-source-of-truth across paths.
         let specialize_one = |request: &InstantiationRequest| -> Result<
             (InstantiationRequest, SpecializedFunction),
             MonoPhaseError,
@@ -399,9 +390,10 @@ impl MonomorphizationPhase {
             let substitution = TypeSubstitution::from_function(func, &request.type_args);
             let mut specializer = BytecodeSpecializer::new(module, &substitution, graph);
             let specialized = specializer.specialize(func, &request.type_args)?;
-            // SpecializationOptimizer DISABLED — it corrupts the byte stream
-            // (see specialize_sequential for the detail).
-            let _ = optimize_flag;
+            // No post-specialization bytecode optimizer: LLVM owns Tier-1
+            // optimization (constant folding, DCE, peephole) on the lowered IR,
+            // and the interpreter never runs the mono path — a second,
+            // byte-level optimizer was redundant AND corrupted the stream.
             Ok((request.clone(), specialized))
         };
 

@@ -48,7 +48,6 @@
 mod cache;
 mod graph;
 mod merger;
-mod optimizer;
 mod phase;
 mod resolver;
 mod specializer;
@@ -59,7 +58,6 @@ pub use graph::{
     CallSite, InstantiationGraph, InstantiationKey, InstantiationRequest, SourceLocation,
 };
 pub use merger::{FunctionMapping, IncrementalMerger, MergeError, MergeStats, ModuleMerger};
-pub use optimizer::{OptimizationStats, SpecializationOptimizer};
 pub use phase::{
     MonoPhaseConfig, MonoPhaseError, MonoPhaseResult, MonomorphizationPhase, monomorphize,
     monomorphize_minimal, monomorphize_with_core,
