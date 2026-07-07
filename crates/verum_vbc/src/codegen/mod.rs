@@ -14845,6 +14845,26 @@ impl VbcCodegen {
                     Self::scan_expr_as_return(&arm.body, out);
                 }
             }
+            // Bare `IDENT` in return position — the local is MOVED into the
+            // return (the caller owns it now), so it must NOT be DropRef'd in
+            // this frame. Critical for a returned reference / raw-pointer
+            // local: `Heap.into_raw`'s `let ptr = self.ptr; forget(self); ptr`
+            // returns a `&unsafe T`; DropRef on it reads the pointee's absent
+            // header (type_id = the payload) and panics 'field access out of
+            // bounds'. Also prevents a latent double-drop of any returned
+            // OWNED local. Additive skip (see the scan comment above: extra
+            // entries only elide a redundant generation bump).
+            ExprKind::Path(path)
+                if path.segments.len() == 1
+                    && matches!(
+                        path.segments.first(),
+                        Some(verum_ast::ty::PathSegment::Name(_))
+                    ) =>
+            {
+                if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first() {
+                    out.insert(ident.name.to_string());
+                }
+            }
             _ => {}
         }
     }
