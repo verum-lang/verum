@@ -46,14 +46,27 @@ pub(in super::super) fn handle_nei(
     Ok(DispatchResult::Continue)
 }
 
+/// Deref a scalar reference operand (CBGR register-ref, cbgr_mutable_ptr, or
+/// ThinRef) before an ordering comparison, so `x > 10` where `x: &Int`
+/// compares the POINTEE — not the reference's encoded bits (a CBGR negative
+/// sentinel or a raw heap address). The `==`/`!=` path already normalises
+/// refs via `deep_value_eq` (handle_eqi); ordering (`<`,`<=`,`>`,`>=`) needs
+/// the same. Root cause of `Maybe.filter(|x| x > 10)` misfiring: the
+/// predicate receives `&T` (from `Some(ref v)`), and `x > 10` compared the
+/// reference value instead of the pointee — deciding by address, not value.
+#[inline]
+fn ord_operand(state: &InterpreterState, reg: crate::instruction::Reg) -> Value {
+    super::cbgr_helpers::resolve_arg_value(state, state.get_reg(reg))
+}
+
 pub(in super::super) fn handle_lti(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result =
-        state.get_reg(a).as_integer_compatible() < state.get_reg(b).as_integer_compatible();
+    let result = ord_operand(state, a).as_integer_compatible()
+        < ord_operand(state, b).as_integer_compatible();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -64,8 +77,8 @@ pub(in super::super) fn handle_lei(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result =
-        state.get_reg(a).as_integer_compatible() <= state.get_reg(b).as_integer_compatible();
+    let result = ord_operand(state, a).as_integer_compatible()
+        <= ord_operand(state, b).as_integer_compatible();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -76,8 +89,8 @@ pub(in super::super) fn handle_gti(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result =
-        state.get_reg(a).as_integer_compatible() > state.get_reg(b).as_integer_compatible();
+    let result = ord_operand(state, a).as_integer_compatible()
+        > ord_operand(state, b).as_integer_compatible();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -122,7 +135,7 @@ pub(in super::super) fn handle_ltf(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() < state.get_reg(b).as_f64();
+    let result = ord_operand(state, a).as_f64() < ord_operand(state, b).as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -133,7 +146,7 @@ pub(in super::super) fn handle_lef(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() <= state.get_reg(b).as_f64();
+    let result = ord_operand(state, a).as_f64() <= ord_operand(state, b).as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -144,7 +157,7 @@ pub(in super::super) fn handle_gtf(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() > state.get_reg(b).as_f64();
+    let result = ord_operand(state, a).as_f64() > ord_operand(state, b).as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -155,7 +168,7 @@ pub(in super::super) fn handle_gef(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() >= state.get_reg(b).as_f64();
+    let result = ord_operand(state, a).as_f64() >= ord_operand(state, b).as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
