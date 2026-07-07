@@ -16074,28 +16074,59 @@ impl VbcCodegen {
                 .map(|(&k, &v)| (k, v))
                 .collect();
             if !dups.is_empty() {
-                tracing::debug!(
-                    target: "verum_vbc::codegen::dedup",
-                    "{} duplicate codegen-id groups detected (e.g. id={} appears {}x)",
-                    dups.len(), dups[0].0, dups[0].1,
+                // FN-ID-COLLISION diagnostic (defect-class analogue of the
+                // module-local TypeId collision).  Two DISTINCT functions were
+                // pushed under the same codegen-time id; the dedup below keeps
+                // only one, so every `Call(id)` from any caller silently
+                // resolves to the survivor — a wrong-dispatch (and, for a
+                // dropped GENERIC function, the reason AOT monomorphization
+                // can't find it: it was collapsed away).  Surface it at WARN by
+                // default (previously only `tracing::debug`, invisible in
+                // normal runs), list the colliding names, and fail hard under
+                // `VERUM_STRICT_FN_ID=1` so the systemic id-space issue can be
+                // driven to zero.
+                let total_dropped: usize = dups.iter().map(|&(_, c)| c - 1).sum();
+                let names_for = |id: u32| -> Vec<String> {
+                    self.functions
+                        .iter()
+                        .filter(|f| f.descriptor.id.0 == id)
+                        .filter_map(|f| {
+                            self.ctx.strings.get(f.descriptor.name.0 as usize).cloned()
+                        })
+                        .collect()
+                };
+                tracing::warn!(
+                    target: "verum_vbc::codegen::fn_id_collision",
+                    "FN-ID-COLLISION: {} codegen-id group(s) collide; {} function \
+                     body(ies) will be DROPPED by dedup — callers silently resolve \
+                     to the surviving body (wrong-dispatch; a dropped generic fn is \
+                     invisible to AOT monomorphization). Set VERUM_STRICT_FN_ID=1 to \
+                     fail the build.",
+                    dups.len(),
+                    total_dropped,
                 );
-                if std::env::var("VERUM_TRACE_DEDUP").is_ok() {
-                    for f in &self.functions {
-                        if f.descriptor.id.0 == dups[0].0 {
-                            let n = self
-                                .ctx
-                                .strings
-                                .get(f.descriptor.name.0 as usize)
-                                .cloned()
-                                .unwrap_or_default();
-                            eprintln!(
-                                "[codegen-dedup]   duplicate id={} name='{}' bytecode_len={}",
-                                f.descriptor.id.0,
-                                n,
-                                f.instructions.len(),
-                            );
-                        }
-                    }
+                let show = if std::env::var("VERUM_TRACE_DEDUP").is_ok() {
+                    dups.len()
+                } else {
+                    dups.len().min(8)
+                };
+                for &(id, _) in dups.iter().take(show) {
+                    tracing::warn!(
+                        target: "verum_vbc::codegen::fn_id_collision",
+                        "  codegen-id {} collides across {:?}",
+                        id,
+                        names_for(id),
+                    );
+                }
+                if std::env::var("VERUM_STRICT_FN_ID").is_ok() {
+                    return Err(CodegenError::internal(format!(
+                        "FN-ID-COLLISION (strict): {} colliding codegen-id group(s), \
+                         {} body(ies) dropped; first: id={} across {:?}",
+                        dups.len(),
+                        total_dropped,
+                        dups[0].0,
+                        names_for(dups[0].0),
+                    )));
                 }
             }
             use std::collections::HashSet;
