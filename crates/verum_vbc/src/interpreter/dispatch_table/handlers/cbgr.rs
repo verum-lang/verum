@@ -541,6 +541,16 @@ pub(in super::super) fn handle_drop_ref(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let src = read_reg(state)?;
+    // ARCHIVE-TYPE-GLUE-IDS-1 hardening: DropRef's drop-glue /
+    // pending-drop machinery re-executes THIS instruction by rewinding
+    // the pc.  The encoded size is opcode(1) + reg operand — 1 byte
+    // for r0-r127, 2 bytes for r128+ (see `encoding::encode_reg`).
+    // The rewind was hard-coded `2`, which for a wide-reg DropRef
+    // landed the pc on the LAST byte of its own encoding and decoded
+    // garbage from there.  Latent while imported-type glue ids were
+    // cleared (user-module Drop types rarely sit above r127); real
+    // stdlib glue activates the path in large frames too.
+    let dropref_len: u32 = if src.0 < 128 { 2 } else { 3 };
     let mut val = state.get_reg(src);
 
     // If the source register is already cleared (unit), check for pending field drops
@@ -615,43 +625,62 @@ pub(in super::super) fn handle_drop_ref(
                 return Ok(DispatchResult::Continue);
             }
 
-            // Debug: show what type we're dropping
-            if type_id.0 >= crate::types::TypeId::FIRST_USER {
-                let type_idx = (type_id.0 - crate::types::TypeId::FIRST_USER) as usize;
-                if let Some(type_desc) = state.module.types.get(type_idx) {
-                    let _type_name = state.module.strings.get(type_desc.name).unwrap_or("?");
-                    // DEBUG: eprintln!("[DEBUG DropRef] Dropping type '{}' (id={}, idx={}, drop_fn={:?}, fields={})",
-                    //  type_name, type_id.0, type_idx, type_desc.drop_fn, type_desc.fields.len());
-                }
-            }
-
-            // Look up TypeDescriptor to find drop_fn
-            // Extract all needed values before any mutable operations to avoid borrow conflicts
-            let drop_info = if type_id.0 >= crate::types::TypeId::FIRST_USER {
-                let type_idx = (type_id.0 - crate::types::TypeId::FIRST_USER) as usize;
-                state
-                    .module
-                    .types
-                    .get(type_idx)
-                    .and_then(|type_desc| type_desc.drop_fn)
-                    .and_then(|drop_fn_id| {
-                        state
-                            .module
-                            .functions
-                            .get(drop_fn_id as usize)
-                            .map(|func| (drop_fn_id, func.register_count, func.bytecode_offset))
-                    })
+            // ARCHIVE-TYPE-GLUE-IDS-1: resolve the descriptor BY ID
+            // (`type_index_by_id`), never positionally.  Descriptor ids
+            // are not positional in `module.types` (well-known-id
+            // backfills shift them), so the old
+            // `types[type_id - FIRST_USER]` indexing resolved the WRONG
+            // descriptor — latent while imported-type glue was cleared
+            // (every wrong hit had `drop_fn == None`), loud once real
+            // glue ids are live: a CfgPredicate drop dispatched
+            // `PosixTerminal.drop` (whatever descriptor owned the
+            // coincident POSITION) and null-deref'd on foreign layout.
+            //
+            // SEMANTIC-band gate: ids in
+            // [`FIRST_SEMANTIC`, `LAST_SEMANTIC`] (List/Map/Heap/
+            // Shared/…) are NATIVE interpreter representations — the
+            // runtime heap owns their buffers and their layout is NOT
+            // the stdlib record layout the imported descriptor
+            // describes.  Dispatching the stdlib record drop glue over
+            // a native object reads/writes record offsets into the
+            // native layout (observed: `List.drop`'s
+            // `clear`+`free_buffer` over a native LIST object →
+            // libmalloc "pointer being freed was not allocated" abort).
+            // The codegen allocator provably never places USER types in
+            // this band (`alloc_type_id` skips it; asserted at
+            // finalize), so gating the band excludes exactly the
+            // native-representation set.  Their .vr `Drop` impls remain
+            // meaningful for the self-hosted/AOT record layer only.
+            let semantic_band = crate::types::TypeId::FIRST_SEMANTIC
+                ..=crate::types::TypeId::LAST_SEMANTIC;
+            let type_desc_idx = if type_id.0 >= crate::types::TypeId::FIRST_USER
+                && !semantic_band.contains(&type_id.0)
+            {
+                state.module.type_index_by_id(type_id)
             } else {
                 None
             };
 
+            // Look up TypeDescriptor to find drop_fn
+            // Extract all needed values before any mutable operations to avoid borrow conflicts
+            let drop_info = type_desc_idx
+                .and_then(|type_idx| state.module.types.get(type_idx))
+                .and_then(|type_desc| type_desc.drop_fn)
+                .and_then(|drop_fn_id| {
+                    state
+                        .module
+                        .functions
+                        .get(drop_fn_id as usize)
+                        .map(|func| (drop_fn_id, func.register_count, func.bytecode_offset))
+                });
+
             if let Some((drop_fn_id, reg_count, _bytecode_offset)) = drop_info {
                 if std::env::var("VERUM_TRACE_DROPFN").is_ok() {
-                    let tn = if type_id.0 >= crate::types::TypeId::FIRST_USER {
+                    let tn = if let Some(type_idx) = type_desc_idx {
                         state
                             .module
                             .types
-                            .get((type_id.0 - crate::types::TypeId::FIRST_USER) as usize)
+                            .get(type_idx)
                             .and_then(|td| state.module.strings.get(td.name))
                             .unwrap_or("?")
                     } else {
@@ -671,9 +700,9 @@ pub(in super::super) fn handle_drop_ref(
                 // Set return_pc to the CURRENT DropRef instruction.
                 // After drop() returns, we'll re-execute DropRef with a cleared register.
                 // Subtract the instruction size to re-execute this instruction
-                // (DropRef encoding: opcode(1) + reg(1) = 2 bytes typically)
+                // (DropRef encoding: opcode(1) + reg(1 or 2) — see dropref_len above)
                 let current_pc = state.pc();
-                let return_pc = current_pc.saturating_sub(2);
+                let return_pc = current_pc.saturating_sub(dropref_len);
                 let caller_base = state.reg_base();
 
                 // Push a new frame for the drop call
@@ -702,9 +731,13 @@ pub(in super::super) fn handle_drop_ref(
             } else {
                 // No drop_fn for this type, but check if it has fields with Drop impls
                 // This handles structs like StructWithTrackers whose fields have Drop
-                if type_id.0 >= crate::types::TypeId::FIRST_USER {
-                    let type_idx = (type_id.0 - crate::types::TypeId::FIRST_USER) as usize;
-                    if let Some(type_desc) = state.module.types.get(type_idx) {
+                {
+                    // Id-correct resolution here too (see the drop_info
+                    // comment above) — the outer type AND each field's
+                    // type must resolve by descriptor id, not position.
+                    if let Some(type_desc) =
+                        type_desc_idx.and_then(|type_idx| state.module.types.get(type_idx))
+                    {
                         // Check each field for droppable types
                         for field in &type_desc.fields {
                             // Get the field type ID
@@ -715,13 +748,12 @@ pub(in super::super) fn handle_drop_ref(
 
                             if let Some(ftid) = field_type_id
                                 && ftid.0 >= crate::types::TypeId::FIRST_USER
+                                && !semantic_band.contains(&ftid.0)
                             {
-                                let field_type_idx =
-                                    (ftid.0 - crate::types::TypeId::FIRST_USER) as usize;
                                 let has_drop = state
                                     .module
-                                    .types
-                                    .get(field_type_idx)
+                                    .type_index_by_id(ftid)
+                                    .and_then(|i| state.module.types.get(i))
                                     .map(|fd| fd.drop_fn.is_some())
                                     .unwrap_or(false);
 
@@ -748,7 +780,7 @@ pub(in super::super) fn handle_drop_ref(
 
                             // Re-run DropRef to process the pending drops
                             let current_pc = state.pc();
-                            state.set_pc(current_pc.saturating_sub(2));
+                            state.set_pc(current_pc.saturating_sub(dropref_len));
                             return Ok(DispatchResult::Continue);
                         }
                     }
@@ -789,7 +821,7 @@ pub(in super::super) fn handle_drop_ref(
             if !state.pending_drops.is_empty() {
                 state.set_reg(src, Value::unit());
                 let current_pc = state.pc();
-                state.set_pc(current_pc.saturating_sub(2));
+                state.set_pc(current_pc.saturating_sub(dropref_len));
                 return Ok(DispatchResult::Continue);
             }
         }

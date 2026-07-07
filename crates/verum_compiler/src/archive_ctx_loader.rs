@@ -2705,8 +2705,10 @@ fn compute_merge_keep_sets(
         .collect()
 }
 
-/// UMBRELLA-MOUNT-PRUNE-1: neutralise a decoded archive module's
-/// TYPE-descriptor `drop_fn` / `clone_fn` references before import.
+/// ARCHIVE-TYPE-GLUE-IDS-1: rewrite a decoded archive module's
+/// TYPE-descriptor `drop_fn` / `clone_fn` references from
+/// ARCHIVE-LOCAL fn ids to the ctx FunctionIds the loader allocated
+/// for this module, BEFORE the descriptors are imported.
 ///
 /// `import_archive_module_types` / `import_archive_type` copy these
 /// fields VERBATIM — i.e. as ARCHIVE-LOCAL fn ids — and the finalize
@@ -2715,27 +2717,80 @@ fn compute_merge_keep_sets(
 /// so on the merge-all path every imported type's drop/clone glue has
 /// ALWAYS dispatched to an arbitrary (id-coincident) function — an
 /// effective no-op that the dense 46K-function table kept benign and
-/// stable.  Pruning compacts the final table and turned the same
+/// stable.  Pruning compacted the final table and turned the same
 /// stale ids into loud misdispatch (`DropRef` on a span-test local
-/// executing `Signal.fmt` → `Formatter.write_str` on Unit → panic),
-/// and rewriting them to the REAL glue ctx ids (first attempt)
-/// regressed differently — it activated drop/clone glue that the
-/// merge-all path never actually ran.
+/// executing `Signal.fmt` → `Formatter.write_str` on Unit → panic);
+/// the bring-up stopgap cleared both fields (deterministic no-glue).
 ///
-/// Deterministic no-op is the behaviour-preserving choice: clear both
-/// fields on the pruning path so the runtime takes its no-glue
-/// default, exactly matching the effective merge-all semantics
-/// without the id-roulette.  `ProtocolImpl.methods` are left
-/// untouched: their consumer validates by name before dispatching, so
-/// stale ids fall through harmlessly there.  Gated on pruning so the
-/// kill-switch path stays bit-identical.
+/// The proper translation implemented here: `func_id_remap` (from
+/// `register_module_filtered`) is TOTAL over this module's own
+/// function table — id allocation precedes the registration filter —
+/// so an archive-local glue id resolves to exactly the ctx id whose
+/// body the keep-set closure guarantees is merged
+/// (`compute_merge_keep_sets` seeds every descriptor's `drop_fn` /
+/// `clone_fn` — see "Type-glue surface of EVERY imported
+/// descriptor").  Finalize then remaps ctx→final and `DropRef`
+/// executes the REAL glue body.
+///
+/// Fallback: a glue id with NO remap entry references a function
+/// whose body does not live in this module (a cross-module Drop impl
+/// left as a precompile-global sparse id by the bake's per-module
+/// finalize).  There is no ctx binding to route it through — clear
+/// the field so the runtime takes its no-glue default instead of the
+/// id-roulette.
+///
+/// `ProtocolImpl.methods` are left untouched: their consumer
+/// validates by name before dispatching, so stale ids fall through
+/// harmlessly there.  Gated on pruning so the kill-switch path stays
+/// bit-identical.
+///
+/// `VERUM_TRACE_GLUE_REMAP=1` lists every glue rewrite/clear
+/// (entry, type, old→new id, archive-side fn name) for per-type
+/// bisection when activating real glue surfaces a latent drop/clone
+/// body bug.
 fn remap_type_glue_fn_ids(
     module: &mut VbcModule,
-    _func_id_remap: &HashMap<u32, verum_vbc::module::FunctionId>,
+    func_id_remap: &HashMap<u32, verum_vbc::module::FunctionId>,
 ) {
-    for ty in module.types.iter_mut() {
-        ty.drop_fn = None;
-        ty.clone_fn = None;
+    let trace = std::env::var("VERUM_TRACE_GLUE_REMAP").is_ok();
+    // Split field borrows: the trace needs `strings` / `functions`
+    // (immutable) while `types` is mutated.
+    let VbcModule {
+        name,
+        strings,
+        types,
+        functions,
+        ..
+    } = module;
+    for ty in types.iter_mut() {
+        let (old_drop, old_clone) = (ty.drop_fn, ty.clone_fn);
+        if old_drop.is_none() && old_clone.is_none() {
+            continue;
+        }
+        ty.drop_fn = old_drop.and_then(|f| func_id_remap.get(&f).map(|fid| fid.0));
+        ty.clone_fn = old_clone.and_then(|f| func_id_remap.get(&f).map(|fid| fid.0));
+        if trace {
+            let fn_name = |fid: Option<u32>| -> &str {
+                fid.and_then(|f| {
+                    functions
+                        .iter()
+                        .find(|d| d.id.0 == f)
+                        .and_then(|d| strings.get(d.name))
+                })
+                .unwrap_or("-")
+            };
+            eprintln!(
+                "[GLUE-REMAP] entry={} type={} drop {:?}→{:?} ({}) clone {:?}→{:?} ({})",
+                name,
+                strings.get(ty.name).unwrap_or("?"),
+                old_drop,
+                ty.drop_fn,
+                fn_name(old_drop),
+                old_clone,
+                ty.clone_fn,
+                fn_name(old_clone),
+            );
+        }
     }
 }
 
