@@ -2219,8 +2219,12 @@ pub fn lower_instruction<'ctx>(
                     .build_int_compare(pred, cmp_int, zero_i32, "strcmp_cmp")
                     .or_llvm_err()?
             } else {
-                let lhs = as_i64(ctx, ctx.get_register(a.0)?, "lhs")?;
-                let rhs = as_i64(ctx, ctx.get_register(b.0)?, "rhs")?;
+                // task #41: deref a lone scalar `&T` reference operand so we
+                // compare pointee values, not value-vs-pointer.
+                let lhs_raw = deref_if_lone_ref(ctx, a.0, b.0, "cmpi_lhs")?;
+                let lhs = as_i64(ctx, lhs_raw, "lhs")?;
+                let rhs_raw = deref_if_lone_ref(ctx, b.0, a.0, "cmpi_rhs")?;
+                let rhs = as_i64(ctx, rhs_raw, "rhs")?;
 
                 ctx.builder()
                     .build_int_compare(pred, lhs, rhs, "icmp")
@@ -5498,7 +5502,7 @@ pub fn lower_instruction<'ctx>(
         // explicit AOT lowering. NewDeque is emitted by the VBC codegen for
         // `Deque.new()` and `Deque.with_capacity(n)` (the capacity arg has
         // already been dropped at the VBC level — heap auto-grows).
-        Instruction::NewDeque { dst, .. } => {
+        Instruction::NewDeque { dst, capacity_hint } => {
             // Deque.new() is intercepted by the VBC codegen (see
             // verum_vbc/src/codegen/expressions.rs) so it emits the
             // NewDeque opcode rather than a function Call. That
@@ -5512,7 +5516,41 @@ pub fn lower_instruction<'ctx>(
             // value rather than a bare i64 0 that LLVM rejects during
             // codegen.
             let module = ctx.get_module();
-            if let Some(new_fn) = module.get_function("Deque.new") {
+            let new_fn = module.get_function("Deque.new");
+            let realloc_fn = module.get_function("Deque.reallocate");
+            // task #40: honour a compile-time capacity hint (from
+            // `Deque.with_capacity(n)`) by reserving the backing up front, so
+            // `Deque.with_capacity(n).capacity() >= n` holds on AOT. Route through
+            // `Deque.new()` + `Deque.reallocate(next_pow2(n))` rather than the
+            // compiled `Deque.with_capacity`: with_capacity is ALWAYS intercepted at
+            // the VBC level (→ NewDeque) so it is never monomorphised and calling it
+            // by bare name allocates a wrong size (→ NULL → panic). `reallocate` IS
+            // properly compiled (push_back reaches it in-context) and both allocate
+            // the backing + set `cap`; the ring buffer requires a power-of-two cap.
+            if *capacity_hint > 0
+                && let (Some(new_fn), Some(realloc_fn)) = (new_fn, realloc_fn)
+            {
+                let deque = ctx
+                    .builder()
+                    .build_call(new_fn, &[], "deque_new")
+                    .or_llvm_err()?
+                    .basic_value_or("Deque.new should return value")?;
+                ctx.set_register(dst.0, deque);
+                let i64_type = ctx.types().i64_type();
+                let deque_self = as_i64(ctx, deque, "deque_self")?;
+                let cap = (*capacity_hint as u64).next_power_of_two();
+                let cap_val = i64_type.const_int(cap, false);
+                ctx.builder()
+                    .build_call(
+                        realloc_fn,
+                        &[deque_self.into(), cap_val.into()],
+                        "deque_reserve",
+                    )
+                    .or_llvm_err()?;
+                ctx.mark_deque_register(dst.0);
+                return Ok(());
+            }
+            if let Some(new_fn) = new_fn {
                 let result = ctx
                     .builder()
                     .build_call(new_fn, &[], "deque_new")
@@ -12124,21 +12162,21 @@ fn lower_call<'ctx>(
             let raw_val = ctx.get_register(r.0)?;
             if let Some(expected_meta) = param_types.get(i) {
                 if let Some(expected_ty) = meta_type_to_basic(*expected_meta) {
-                    // Implicit Int→Float coercion: when callee expects f64
-                    // but argument is a non-float i64 register, use sitofp
-                    // (signed int to float point) instead of bitcast.
-                    if let BasicTypeEnum::FloatType(ft) = expected_ty {
-                        if let BasicValueEnum::IntValue(iv) = raw_val {
-                            if !ctx.is_float_register(r.0) {
-                                // Real integer → float conversion
-                                return Ok(ctx
-                                    .builder()
-                                    .build_signed_int_to_float(iv, ft, &format!("arg{}_itof", i))
-                                    .or_llvm_err()?
-                                    .into());
-                            }
-                        }
-                    }
+                    // task #35: i64 → float param must BITCAST (recover the IEEE-754
+                    // bits), NOT sitofp. A value reaching a float param is a float
+                    // held in an i64 register — e.g. `f32_to_bits(*e)` / `f64_to_bits(*e)`
+                    // where `*e` is an iter-deref'd `List<Float>`/`List<Float32>`
+                    // element that never got float-marked: the iterator chain marks
+                    // only fn-return list elements, and the prescan_float pass marks
+                    // only CmpF/BinaryF operands — neither covers a value consumed
+                    // solely as a call argument. sitofp would treat the float bits as
+                    // an integer (0x4000000000000000 → 4.6e18 → f32 0x5E800000),
+                    // corrupting every `*_to_bits` round trip (law_f32/f64_bits_round_trip).
+                    // coerce_value bitcasts i64→f64 (+fptrunc for f32) — the correct
+                    // reinterpretation, and the SAME path the float-marked case already
+                    // took. A genuine Int passed to a Float param is not a supported
+                    // Verum coercion (the interpreter yields garbage for it too), so no
+                    // correct program depends on the removed sitofp path.
                     let coerced =
                         coerce_value(ctx, raw_val, expected_ty, &format!("arg{}_coerce", i))?;
                     Ok(coerced.into())
@@ -12158,6 +12196,26 @@ fn lower_call<'ctx>(
         ctx.set_register(dst.0, ret_val);
         // Track register types based on function return type
         mark_register_from_return_type(ctx, dst.0, &func_desc.return_type);
+        // task #39/#35: a generic fn returning a bare type param T (e.g.
+        // `fn fma<T>(...) -> T`, `fn passthru<T>(x: T) -> T`) reuses the generic
+        // descriptor at Tier-1, so `return_type` is Generic(T) and the mark above
+        // can't classify it. If the return type equals a param's type (the same
+        // T) and the matching arg register is float-marked, propagate the float
+        // mark to the result so a downstream CmpG/assert_eq compares via fcmp —
+        // fixes signed-zero cases like law_fma_zero_addend (fma(a,b,+0.0) yields
+        // +0.0 while a*b yields -0.0; both are float and +0.0 == -0.0 under fcmp
+        // but differ bitwise).
+        if matches!(func_desc.return_type, TypeRef::Generic(_)) {
+            let arg_regs: Vec<u16> = args.iter().map(|r| r.0).collect();
+            for (i, p) in func_desc.params.iter().enumerate() {
+                if p.type_ref == func_desc.return_type
+                    && arg_regs.get(i).is_some_and(|&r| ctx.is_float_register(r))
+                {
+                    ctx.mark_float_register(dst.0);
+                    break;
+                }
+            }
+        }
         // Name-based fallback: VBC may assign non-semantic TypeIds to
         // compiled stdlib types, so mark_register_from_return_type misses
         // them. Detect from function name prefix as fallback.
@@ -12678,14 +12736,27 @@ fn lower_call_method<'ctx>(
                         .build_switch(type_id_val, default_bb, &cases)
                         .or_llvm_err()?;
 
-                    // Default: return 0
+                    // Default: an unmatched type_id means the receiver is a
+                    // primitive / Copy type (Int/Float/Bool/…) whose Clone impl is
+                    // not one of the heap-registered ones in the switch. task #40:
+                    // for `clone`, a Copy value's identity clone is its own value —
+                    // and for a scalar `&T` the already-loaded `type_id_val`
+                    // (= *receiver) IS that value — so return it instead of 0, which
+                    // corrupted `list[i].clone()` in `Deque.from_list` (→ crash) and
+                    // every generic `T: Clone` over a primitive (returned 0). Other
+                    // protocol methods keep the 0 default.
                     ctx.builder().position_at_end(default_bb);
                     ctx.builder()
                         .build_unconditional_branch(merge_bb)
                         .or_llvm_err()?;
 
+                    let default_val: BasicValueEnum<'ctx> = if method_name == "clone" {
+                        type_id_val.into()
+                    } else {
+                        i64_type.const_zero().into()
+                    };
                     let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
-                    incoming.push((i64_type.const_zero().into(), default_bb));
+                    incoming.push((default_val, default_bb));
 
                     for (bb, fname) in &case_blocks {
                         ctx.builder().position_at_end(*bb);
@@ -13090,6 +13161,102 @@ fn lower_call_method<'ctx>(
     //  contains (needs Eq), index_of (needs Eq)
     // (C) Text-specific: join (uses verum_string_join C stub)
     // (D) Simple inline: first, last, clear
+    // task #40: Deque.contains ring-buffer scan. The compiled @Deque.contains does
+    // `self.get(i).expect() == value` (value: &T); under AOT the archive-compiled
+    // body does NOT deref the &T value param (the #41 scalar-&-param deref isn't
+    // applied to archive/specialized Deque methods), so it compares element-vs-
+    // pointer and always returns false. Scan the ring buffer directly, deref'ing
+    // the search value like List.contains: the element at logical index i is
+    // `data[(head + i) & (cap - 1)]` (cap is always a power of two).
+    let is_deque_method =
+        ctx.is_deque_register(receiver.0) || method_name_str.starts_with("Deque.");
+    if is_deque_method && bare_method_early == "contains" && args.count == 1 {
+        let deque_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "dq_ptr")?;
+        let i64_type = ctx.types().i64_type();
+        let i8_type = ctx.types().i8_type();
+        let ptr_type = ctx.types().ptr_type();
+        // Deref the &T search value (guard int/ptr to avoid the ARM-backend SIGSEGV
+        // on a non-address value — same guard as List.contains).
+        let search_val = {
+            let raw = ctx.get_register(args.start.0)?;
+            if raw.is_pointer_value() || raw.is_int_value() {
+                let sptr = as_ptr(ctx, raw, "dq_search_ptr")?;
+                ctx.builder()
+                    .build_load(i64_type, sptr, "dq_search_deref")
+                    .or_llvm_err()?
+                    .into_int_value()
+            } else {
+                as_i64(ctx, raw, "dq_search_val")?
+            }
+        };
+        // Load head / len / cap / data from the Deque object (NewG layout).
+        let head_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, deque_ptr, &[i64_type.const_int(super::runtime::DEQUE_HEAD_OFFSET, false)], "dq_head_slot")
+                .or_llvm_err()?
+        };
+        let head = ctx.builder().build_load(i64_type, head_slot, "dq_head").or_llvm_err()?.into_int_value();
+        let len_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, deque_ptr, &[i64_type.const_int(super::runtime::DEQUE_LEN_OFFSET, false)], "dq_len_slot")
+                .or_llvm_err()?
+        };
+        let len = ctx.builder().build_load(i64_type, len_slot, "dq_len").or_llvm_err()?.into_int_value();
+        let cap_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, deque_ptr, &[i64_type.const_int(super::runtime::DEQUE_CAP_OFFSET, false)], "dq_cap_slot")
+                .or_llvm_err()?
+        };
+        let cap = ctx.builder().build_load(i64_type, cap_slot, "dq_cap").or_llvm_err()?.into_int_value();
+        let data_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, deque_ptr, &[i64_type.const_int(super::runtime::DEQUE_DATA_OFFSET, false)], "dq_data_slot")
+                .or_llvm_err()?
+        };
+        let data_i64 = ctx.builder().build_load(i64_type, data_slot, "dq_data_i64").or_llvm_err()?.into_int_value();
+        let data_ptr = ctx.builder().build_int_to_ptr(data_i64, ptr_type, "dq_data_ptr").or_llvm_err()?;
+        // mask = cap - 1 (cap is a power of two, so (head + i) & mask == (head + i) mod cap)
+        let mask = ctx.builder().build_int_sub(cap, i64_type.const_int(1, false), "dq_mask").or_llvm_err()?;
+        let current_fn = ctx.function();
+        let entry_bb = ctx.builder().get_insert_block().or_internal("no insert block")?;
+        let loop_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_loop");
+        let body_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_body");
+        let inc_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_inc");
+        let found_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_found");
+        let not_found_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_not_found");
+        let merge_bb = ctx.llvm_context().append_basic_block(current_fn, "dq_contains_merge");
+        ctx.builder().build_unconditional_branch(loop_bb).or_llvm_err()?;
+        ctx.builder().position_at_end(loop_bb);
+        let phi_i = ctx.builder().build_phi(i64_type, "dq_i").or_llvm_err()?;
+        let i_val = phi_i.as_basic_value().into_int_value();
+        let cmp_done = ctx.builder().build_int_compare(IntPredicate::SLT, i_val, len, "dq_cmp_done").or_llvm_err()?;
+        ctx.builder().build_conditional_branch(cmp_done, body_bb, not_found_bb).or_llvm_err()?;
+        ctx.builder().position_at_end(body_bb);
+        let hpi = ctx.builder().build_int_add(head, i_val, "dq_hpi").or_llvm_err()?;
+        let phys = ctx.builder().build_and(hpi, mask, "dq_phys").or_llvm_err()?;
+        // SAFETY: GEP into the ring buffer at the physical index; phys is masked to [0, cap)
+        let elem_ptr = unsafe {
+            ctx.builder().build_in_bounds_gep(i64_type, data_ptr, &[phys], "dq_elem_ptr").or_llvm_err()?
+        };
+        let elem = ctx.builder().build_load(i64_type, elem_ptr, "dq_elem").or_llvm_err()?.into_int_value();
+        let cmp_eq = ctx.builder().build_int_compare(IntPredicate::EQ, elem, search_val, "dq_cmp_eq").or_llvm_err()?;
+        ctx.builder().build_conditional_branch(cmp_eq, found_bb, inc_bb).or_llvm_err()?;
+        ctx.builder().position_at_end(inc_bb);
+        let i_next = ctx.builder().build_int_add(i_val, i64_type.const_int(1, false), "dq_i_next").or_llvm_err()?;
+        ctx.builder().build_unconditional_branch(loop_bb).or_llvm_err()?;
+        phi_i.add_incoming(&[(&i64_type.const_zero(), entry_bb), (&i_next, inc_bb)]);
+        ctx.builder().position_at_end(found_bb);
+        ctx.builder().build_unconditional_branch(merge_bb).or_llvm_err()?;
+        ctx.builder().position_at_end(not_found_bb);
+        ctx.builder().build_unconditional_branch(merge_bb).or_llvm_err()?;
+        ctx.builder().position_at_end(merge_bb);
+        let phi_result = ctx.builder().build_phi(i64_type, "dq_contains_result").or_llvm_err()?;
+        phi_result.add_incoming(&[(&i64_type.const_int(1, false), found_bb), (&i64_type.const_zero(), not_found_bb)]);
+        ctx.set_register(dst.0, phi_result.as_basic_value());
+        ctx.mark_bool_register(dst.0);
+        return Ok(());
+    }
+
     // pop goes through compiled list.vr (returns Maybe<T> properly).
     // len/is_empty go through compiled list.vr via Strategy 1/2.
     let is_list_method = ctx.is_list_register(receiver.0) || method_name_str.starts_with("List.");
@@ -13098,7 +13265,26 @@ fn lower_call_method<'ctx>(
             "contains" if args.count == 1 => {
                 // Inline linear scan: iterate backing array, compare with value
                 let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
-                let search_val = as_i64(ctx, ctx.get_register(args.start.0)?, "search_val")?;
+                // task #41: `contains`/`index_of`'s value param is ALWAYS `&T`
+                // (list/deque/heap/btree — see core/collections/*.vr), so the search
+                // operand is a reference address. Deref it to scan for the pointee
+                // VALUE against the backing elements, not the address (the
+                // interpreter auto-derefs; without this every AOT contains/index_of
+                // over a scalar returns false/-1). Guard int/ptr to avoid the
+                // ARM-backend SIGSEGV on a non-address value.
+                let search_val = {
+                    let raw = ctx.get_register(args.start.0)?;
+                    if raw.is_pointer_value() || raw.is_int_value() {
+                        let sptr = as_ptr(ctx, raw, "search_ptr")?;
+                        let i64t = ctx.types().i64_type();
+                        ctx.builder()
+                            .build_load(i64t, sptr, "search_deref")
+                            .or_llvm_err()?
+                            .into_int_value()
+                    } else {
+                        as_i64(ctx, raw, "search_val")?
+                    }
+                };
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
@@ -13238,7 +13424,26 @@ fn lower_call_method<'ctx>(
             "index_of" if args.count == 1 => {
                 // Same as contains but returns index or -1
                 let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
-                let search_val = as_i64(ctx, ctx.get_register(args.start.0)?, "search_val")?;
+                // task #41: `contains`/`index_of`'s value param is ALWAYS `&T`
+                // (list/deque/heap/btree — see core/collections/*.vr), so the search
+                // operand is a reference address. Deref it to scan for the pointee
+                // VALUE against the backing elements, not the address (the
+                // interpreter auto-derefs; without this every AOT contains/index_of
+                // over a scalar returns false/-1). Guard int/ptr to avoid the
+                // ARM-backend SIGSEGV on a non-address value.
+                let search_val = {
+                    let raw = ctx.get_register(args.start.0)?;
+                    if raw.is_pointer_value() || raw.is_int_value() {
+                        let sptr = as_ptr(ctx, raw, "search_ptr")?;
+                        let i64t = ctx.types().i64_type();
+                        ctx.builder()
+                            .build_load(i64t, sptr, "search_deref")
+                            .or_llvm_err()?
+                            .into_int_value()
+                    } else {
+                        as_i64(ctx, raw, "search_val")?
+                    }
+                };
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
@@ -19868,26 +20073,19 @@ fn lower_text_extended<'ctx>(
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
             let f64_ty = ctx.types().f64_type();
-            // Prefer the libc-free verum_float_to_text (emitted via
-            // emit_verum_float_to_text → verum_internal_f64_to_decimal, which
-            // renders the FRACTIONAL part) over the compiled Text.from_float,
-            // which TRUNCATES to the integer part (float_to_text(1.5) → "1").
-            let to_text_fn = {
-                let fn_type = ptr_ty.fn_type(&[f64_ty.into()], false);
-                super::error::get_or_declare_function(module, "verum_float_to_text", fn_type)
-            };
-            let coerced = coerce_value(
-                ctx,
-                val,
-                to_text_fn.get_type().get_param_types()[0]
-                    .try_into()
-                    .ok()
-                    .or_internal("param type conversion failed")?,
-                "float_coerce",
-            )?;
+            // task #36: use the C snprintf-based `verum_float_to_text` (the same path
+            // `lower_to_string` takes), NOT the compiled `Text.from_float` — under AOT
+            // the latter truncates a float to its integer part (e.g. 3.5 → "3"),
+            // which corrupted a typed f-string interpolation of a Float value. as_f64
+            // bitcasts an i64-stored float back to f64 (identity for a native f64).
+            let _ = ptr_ty;
+            let fn_type = i64_ty.fn_type(&[f64_ty.into()], false);
+            let to_text_fn =
+                super::error::get_or_declare_function(module, "verum_float_to_text", fn_type);
+            let f64_val = as_f64(ctx, val, "float_to_text_f64")?;
             let result = ctx
                 .builder()
-                .build_call(to_text_fn, &[coerced.into()], "float_to_text")
+                .build_call(to_text_fn, &[f64_val.into()], "float_to_text")
                 .or_llvm_err()?
                     .basic_value_or("FloatToText: expected return value")?;
             // Normalize pointer return to i64
@@ -32099,6 +32297,36 @@ fn lower_load_const<'ctx>(
     Ok(())
 }
 
+/// task #41: deref a scalar `&T` reference operand when it is the LONE reference
+/// in a comparison (the other operand is a value), so CmpI / lower_cmp_generic
+/// compare pointee VALUES, not value-vs-pointer. Matches the interpreter, which
+/// auto-derefs a CBGR-ref operand at CmpI/CmpG runtime. No-op otherwise (both
+/// refs, or neither — so pointer==pointer and value==value are unaffected).
+fn deref_if_lone_ref<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    reg: u16,
+    other: u16,
+    name: &str,
+) -> Result<BasicValueEnum<'ctx>> {
+    // task #41: deref a lone scalar `&T` ref operand. GUARD (post-isolation): only
+    // deref when the register's value is a genuine pointer/int address — a marked
+    // reg that has been reused for a non-address SSA value (or whose LLVM value is
+    // not int/ptr) must NOT be inttoptr+loaded (that emits IR the ARM backend
+    // SIGSEGVs on, seen via rebaked stdlib funcs; eqref, a direct arg, is fine).
+    if ctx.is_ref_param_register(reg) && !ctx.is_ref_param_register(other) {
+        let raw = ctx.get_register(reg)?;
+        if raw.is_pointer_value() || raw.is_int_value() {
+            let ptr = as_ptr(ctx, raw, name)?;
+            let i64_type = ctx.types().i64_type();
+            ctx.builder().build_load(i64_type, ptr, name).or_llvm_err()
+        } else {
+            ctx.get_register(reg)
+        }
+    } else {
+        ctx.get_register(reg)
+    }
+}
+
 fn lower_cmp_generic<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     eq: bool,
@@ -32108,8 +32336,11 @@ fn lower_cmp_generic<'ctx>(
 ) -> Result<()> {
     // After monomorphization, operands are concrete types.
     // Lower as direct comparison based on operand types.
-    let lhs = ctx.get_register(a.0)?;
-    let rhs = ctx.get_register(b.0)?;
+    // task #41: deref a lone scalar `&T` reference operand so we compare pointee
+    // values, not value-vs-pointer (only scalar-ref params are marked, so
+    // variant/string/struct comparisons are unaffected).
+    let lhs = deref_if_lone_ref(ctx, a.0, b.0, "cmpg_lhs")?;
+    let rhs = deref_if_lone_ref(ctx, b.0, a.0, "cmpg_rhs")?;
 
     // ============================================================
     // task #10: VARIANT / enum / record structural equality.
@@ -32225,6 +32456,42 @@ fn lower_cmp_generic<'ctx>(
                 .build_int_s_extend(cmp_int, i64_type, "strcmp_ext")
                 .or_llvm_err()?;
             cmp64.into()
+        }
+    } else if ctx.is_float_register(a.0) || ctx.is_float_register(b.0) {
+        // task #39/#35: a float operand may arrive as an i64 register (its float
+        // bits, e.g. from a call result whose float mark survived but whose LLVM
+        // value is i64) — the int branch below would bit-compare it, so +0.0 (an
+        // fma's +0.0 addend) != -0.0 (a*b) even though they are equal floats.
+        // `==`/Ord compare same-type operands, so if EITHER side is float-marked
+        // BOTH are floats: bitcast both to f64 (as_f64) and use fcmp. Closes
+        // float law_fma_zero_addend and generic-fn-return float comparisons.
+        let la = as_f64(ctx, lhs, "cmpf_a")?;
+        let lb = as_f64(ctx, rhs, "cmpf_b")?;
+        if eq {
+            ctx.builder()
+                .build_float_compare(FloatPredicate::OEQ, la, lb, "geq_fm")
+                .or_llvm_err()?
+                .into()
+        } else {
+            let lt = ctx
+                .builder()
+                .build_float_compare(FloatPredicate::OLT, la, lb, "lt_fm")
+                .or_llvm_err()?;
+            let gt = ctx
+                .builder()
+                .build_float_compare(FloatPredicate::OGT, la, lb, "gt_fm")
+                .or_llvm_err()?;
+            let i64_type = ctx.types().i64_type();
+            let neg_one = i64_type.const_int((-1i64) as u64, true);
+            let zero = i64_type.const_int(0, false);
+            let one = i64_type.const_int(1, false);
+            let gt_val = ctx
+                .builder()
+                .build_select(gt, one, zero, "gt_sel_fm")
+                .or_llvm_err()?;
+            ctx.builder()
+                .build_select(lt, neg_one, gt_val.into_int_value(), "ord_sel_fm")
+                .or_llvm_err()?
         }
     } else if lhs.is_int_value() && rhs.is_int_value() {
         let mut lhs_int = lhs.into_int_value();

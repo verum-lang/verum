@@ -13950,7 +13950,46 @@ impl VbcCodegen {
                     // and drive the call-site disambig push for closure
                     // arguments.  No-op when the param isn't a generic-param
                     // path or when the generic carries no fn bound.
-                    self.substitute_fn_bound_for_generic(resolved, ty, &func.generics, &method_generic_param_map)
+                    let resolved = self.substitute_fn_bound_for_generic(resolved, ty, &func.generics, &method_generic_param_map);
+                    // task #41: a scalar `&T` param keeps TypeRef::Reference so the
+                    // AOT can deref a lone `&scalar` comparison operand (the
+                    // interpreter auto-derefs the CBGR-ref at CmpI/CmpG runtime; the
+                    // AOT otherwise stores it as a raw pointer indistinguishable from
+                    // an Int). `resolve_field_type_ref` strips the ref, so re-wrap
+                    // scalars here — PARAMS only, not struct fields.
+                    let should_wrap_ref = if matches!(&ty.kind, verum_ast::ty::TypeKind::Reference { .. }) {
+                        match &resolved {
+                            // Concrete scalar `&Int`/`&Float`/… — deref directly.
+                            TypeRef::Concrete(tid) => matches!(
+                                *tid,
+                                TypeId::INT
+                                    | TypeId::FLOAT
+                                    | TypeId::BOOL
+                                    | TypeId::U8
+                                    | TypeId::I8
+                                    | TypeId::U16
+                                    | TypeId::I16
+                                    | TypeId::U32
+                                    | TypeId::I32
+                                    | TypeId::U64
+                                    | TypeId::F32
+                            ),
+                            // Bare generic `&T`: mono/substitution.rs `apply` recurses
+                            // into the Reference wrapper (→ Reference{Concrete}), and
+                            // the AOT param-mark gates on a scalar inner — so only
+                            // scalar instantiations (e.g. Deque<Int>.contains(&value))
+                            // are derefed; T=struct/List stay unmarked & unaffected.
+                            TypeRef::Generic(_) => true,
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
+                    if should_wrap_ref {
+                        TypeRef::reference(resolved, Mutability::Immutable, CbgrTier::default())
+                    } else {
+                        resolved
+                    }
                 }
                 FunctionParamKind::SelfRefMut => TypeRef::Reference {
                     inner: Box::new(TypeRef::Concrete(parent_tid)),

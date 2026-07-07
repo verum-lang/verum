@@ -2719,6 +2719,33 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         TypeRef::Reference { inner, .. } => inner.as_ref(),
                         other => other,
                     };
+                    // task #41: mark a scalar `&T` reference parameter. A comparison
+                    // (`a == b`) with exactly one such operand must compare the
+                    // pointee VALUE — the AOT stores a scalar `&T` param as a raw
+                    // pointer indistinguishable from an Int, so CmpI /
+                    // lower_cmp_generic deref this operand (the interpreter already
+                    // auto-derefs the CBGR-ref at runtime). Only scalar pointees are
+                    // marked; &Text/&List/&Map keep their string/list/map handling.
+                    if matches!(&p.type_ref, TypeRef::Reference { .. }) {
+                        if let TypeRef::Concrete(tid) = effective_type {
+                            if matches!(
+                                *tid,
+                                TypeId::INT
+                                    | TypeId::FLOAT
+                                    | TypeId::BOOL
+                                    | TypeId::U8
+                                    | TypeId::I8
+                                    | TypeId::U16
+                                    | TypeId::I16
+                                    | TypeId::U32
+                                    | TypeId::I32
+                                    | TypeId::U64
+                                    | TypeId::F32
+                            ) {
+                                ctx.mark_ref_param_register(i as u16);
+                            }
+                        }
+                    }
                     let is_text = match effective_type {
                         TypeRef::Concrete(tid) => *tid == TypeId::TEXT,
                         _ => false,

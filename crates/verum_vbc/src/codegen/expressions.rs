@@ -8319,7 +8319,11 @@ impl VbcCodegen {
                 let instr = match template {
                     Instruction::NewList { .. } => Instruction::NewList { dst: dest , capacity_hint: const_cap },
                     Instruction::NewSet { .. } => Instruction::NewSet { dst: dest , capacity_hint: 0 },
-                    Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest , capacity_hint: 0 },
+                    // task #40: honour the capacity hint for Deque. The AOT NewDeque
+                    // lowering reserves the backing via Deque.new()+Deque.reallocate(
+                    // next_pow2(hint)) so `Deque.with_capacity(n).capacity() >= n`; the
+                    // interpreter's NewDeque already reserves a default capacity.
+                    Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest , capacity_hint: const_cap },
                     other => other,
                 };
                 self.ctx.emit(instr);
@@ -19625,6 +19629,61 @@ impl VbcCodegen {
     /// full expression-tree walk inference performs, e.g.
     /// `compile_record`'s field-type-context push and the
     /// raw-pointer-marker propagation gate in `compile_field_access`.
+    /// task #36: bind a generic type parameter (e.g. "T") that appears in a
+    /// function's return type by unifying the callee's declared parameter type
+    /// strings against the concrete argument types at the call site. Handles the
+    /// direct case (`x: T` → the arg's type) and the single-level container case
+    /// (`&List<T>` / `List<T>` / `Maybe<T>` vs a concrete `List<Float>` etc.,
+    /// aligning inner type args positionally). Returns the concrete type name for
+    /// `generic`, or None when it can't be bound (caller keeps the raw param name).
+    fn resolve_generic_from_args(
+        &self,
+        generic: &str,
+        param_type_names: &[String],
+        args: &[Expr],
+    ) -> Option<String> {
+        let is_generic = |s: &str| -> bool {
+            s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
+        };
+        let strip = |s: &str| -> String {
+            let t = s.trim();
+            let t = t.strip_prefix("&mut ").unwrap_or(t);
+            let t = t.strip_prefix('&').unwrap_or(t);
+            t.trim().to_string()
+        };
+        for (i, ptype) in param_type_names.iter().enumerate() {
+            let Some(arg) = args.get(i) else { continue };
+            let p = strip(ptype);
+            // Direct: the parameter type IS the generic (e.g. `x: T`).
+            if p == generic {
+                if let Some(at) = self.extract_expr_type_name(arg) {
+                    let a = strip(&at);
+                    if !a.is_empty() && !is_generic(&a) {
+                        return Some(a);
+                    }
+                }
+                continue;
+            }
+            // Container: parameter is `Base<.. G ..>`, argument a concrete
+            // `Base<.. C ..>`; align inner type args positionally.
+            let p_inner = self.extract_inner_types(&p);
+            if p_inner.iter().any(|g| g == generic)
+                && let Some(at) = self.extract_expr_type_name(arg)
+            {
+                let a_inner = self.extract_inner_types(&strip(&at));
+                for (pg, ac) in p_inner.iter().zip(a_inner.iter()) {
+                    if pg == generic {
+                        let a = strip(ac);
+                        if !a.is_empty() && !is_generic(&a) {
+                            return Some(a);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub fn extract_expr_type_name(&self, expr: &Expr) -> Option<String> {
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::PathSegment;
@@ -20419,6 +20478,43 @@ impl VbcCodegen {
                                     && !ret_type.contains('<')
                                 {
                                     return Some(format!("{}<{}>", ret_type, inner.join(", ")));
+                                }
+                                // task #36: when the return type embeds generic params
+                                // (e.g. "Maybe<T>" for `first<T>(l: &List<T>) -> Maybe<T>`),
+                                // resolve them from the call's ARGUMENT types so a
+                                // downstream `match`/f-string on the result knows the
+                                // concrete payload type. Without this the match payload
+                                // binds as Unknown and `f"{v}"` mis-formats under AOT.
+                                if ret_type.contains('<') {
+                                    let is_generic = |s: &str| -> bool {
+                                        s.len() <= 2
+                                            && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
+                                    };
+                                    let inner = self.extract_inner_types(ret_type);
+                                    if inner.iter().any(|g| is_generic(g)) {
+                                        let param_types = func_info.param_type_names.clone();
+                                        let base = ret_type
+                                            .split('<')
+                                            .next()
+                                            .unwrap_or(ret_type)
+                                            .to_string();
+                                        let resolved: Vec<String> = inner
+                                            .iter()
+                                            .map(|g| {
+                                                if is_generic(g) {
+                                                    self.resolve_generic_from_args(
+                                                        g,
+                                                        &param_types,
+                                                        args,
+                                                    )
+                                                    .unwrap_or_else(|| g.clone())
+                                                } else {
+                                                    g.clone()
+                                                }
+                                            })
+                                            .collect();
+                                        return Some(format!("{}<{}>", base, resolved.join(", ")));
+                                    }
                                 }
                                 return Some(ret_type.clone());
                             }
@@ -21796,6 +21892,18 @@ impl VbcCodegen {
             }
             ExprKind::Paren(inner) => self.infer_expr_type_kind(inner),
             ExprKind::Unary { op: _, expr: inner } => self.infer_expr_type_kind(inner),
+            // task #42: a container-index element (e.g. `fs[0]` for fs: List<Float>).
+            // extract_expr_type_name resolves the Index to its element type name; map
+            // that to a TypeKind so a downstream `f"{fs[i]}"` types the element — else
+            // it falls to the mark-dependent ToString and prints raw bits under AOT.
+            ExprKind::Index { .. } => match self.extract_expr_type_name(expr)?.as_str() {
+                "Float" | "Float64" | "Float32" => Some(TypeKind::Float),
+                "Text" => Some(TypeKind::Text),
+                "Char" => Some(TypeKind::Char),
+                "Bool" => Some(TypeKind::Bool),
+                "Int" | "Int64" | "Int32" | "UInt64" | "Byte" | "USize" => Some(TypeKind::Int),
+                _ => None,
+            },
             ExprKind::Binary {
                 op, left, right, ..
             } => {
@@ -33049,10 +33157,17 @@ impl VbcCodegen {
             let type_name = match &expr_type {
                 Some(verum_ast::ty::TypeKind::Char) => "Char",
                 Some(verum_ast::ty::TypeKind::Text) => "Text",
+                // task #36: a concrete Float payload (e.g. from a generic
+                // `Maybe<Float>` match, now that #36 resolves the generic return
+                // type) uses the typed float→text conversion — the runtime
+                // ToString relies on register marks that an unmarked i64 payload
+                // lacks under AOT, so it would print raw float bits.
+                Some(verum_ast::ty::TypeKind::Float) => "Float",
                 Some(verum_ast::ty::TypeKind::Path(path)) => {
                     match path.as_ident().map(|id| id.name.as_str()) {
                         Some("Char") => "Char",
                         Some("Text") => "Text",
+                        Some("Float") | Some("Float64") | Some("Float32") => "Float",
                         _ => "",
                     }
                 }
@@ -33070,6 +33185,10 @@ impl VbcCodegen {
                     dst: str_reg,
                     src: expr_reg,
                 });
+            } else if type_name == "Float" {
+                // Typed float→text — carries the type decision in the bytecode so
+                // both tiers format correctly regardless of runtime register marks.
+                self.emit_intrinsic_library_call("verum_float_to_text", &[expr_reg], str_reg)?;
             } else if !self.try_emit_display_dispatch(expr, expr_reg, str_reg)? {
                 // No user-defined Display impl for `expr`'s static type
                 // (or the type is non-introspectable) — fall back to the

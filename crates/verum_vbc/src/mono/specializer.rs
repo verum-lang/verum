@@ -39,6 +39,21 @@ pub struct SpecializedFunction {
     pub max_stack: u16,
     /// New constants added during specialization.
     pub new_constants: Vec<Constant>,
+    /// task #41: substituted param descriptors — the generic descriptor's params
+    /// with type params resolved to concretes (Reference{Generic(T)} →
+    /// Reference{Concrete(Int)}). The merger writes these onto the specialized
+    /// FunctionDescriptor so the AOT param loop can mark scalar `&T` ref params
+    /// (e.g. Deque<Int>.contains's `value: &Int`); without this the specialized
+    /// descriptor has empty params and the AOT can't deref a lone `&scalar`.
+    pub params: smallvec::SmallVec<[crate::module::ParamDescriptor; 4]>,
+    /// task #39/#35: substituted return type — the generic descriptor's
+    /// return_type with type params resolved (T → Float64/Float32/…). The merger
+    /// writes it onto the specialized FunctionDescriptor so the AOT can
+    /// float-mark the call result (mark_register_from_return_type). Without it a
+    /// generic `fn fma<T>(...) -> T` monomorphized to Float64 loses the float
+    /// mark, so a downstream assert_eq/CmpG compares raw bits (e.g. +0.0 vs
+    /// -0.0 signed-zero) instead of via fcmp and fails at Tier-1 only.
+    pub return_type: crate::types::TypeRef,
 }
 
 // ============================================================================
@@ -379,12 +394,30 @@ impl<'a> BytecodeSpecializer<'a> {
 
         self.stats.bytes_output = output.len();
 
+        // task #41: carry the substituted param descriptors so the merged
+        // specialized FunctionDescriptor exposes them to the AOT param loop
+        // (Reference{Generic(T)} → Reference{Concrete(Int)} via the substitution).
+        let params = func
+            .params
+            .iter()
+            .map(|p| {
+                let mut np = p.clone();
+                np.type_ref = self.substitution.apply(&p.type_ref);
+                np
+            })
+            .collect();
+        // task #39/#35: substitute the return type so the merged descriptor lets
+        // the AOT float-mark the call result of a generic fn returning T.
+        let return_type = self.substitution.apply(&func.return_type);
+
         Ok(SpecializedFunction {
             bytecode: output,
             register_count: func.register_count,
             locals_count: func.locals_count,
             max_stack: func.max_stack,
             new_constants: std::mem::take(&mut self.new_constants),
+            params,
+            return_type,
         })
     }
 
@@ -1637,6 +1670,8 @@ mod tests {
             locals_count: 2,
             max_stack: 8,
             new_constants: vec![],
+            params: Default::default(),
+            return_type: crate::types::TypeRef::Concrete(crate::types::TypeId::UNIT),
         };
         assert_eq!(sf.bytecode.len(), 2);
         assert_eq!(sf.register_count, 4);
