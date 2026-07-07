@@ -187,6 +187,444 @@ impl<'s> CompilationPipeline<'s> {
             }
         };
 
+        // Emit VBC bytecode dump if requested
+        if self.session.options().emit_vbc {
+            let dump = verum_vbc::disassemble::disassemble_module(&vbc_module);
+            let vbc_path = self.session.options().input.with_extension("vbc.txt");
+            if let Err(e) = std::fs::write(&vbc_path, &dump) {
+                warn!("Failed to write VBC dump: {}", e);
+            } else {
+                info!(
+                    "Wrote VBC dump: {} ({} bytes)",
+                    vbc_path.display(),
+                    dump.len()
+                );
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // AOT-STDLIB-NATIVE-CACHE-1 — whole-module native-object cache.
+        //
+        // The LLVM leg (`lower_optimize_and_emit_object`: VBC→IR
+        // lowering of the merged stdlib+user module, pass pipeline,
+        // machine codegen) is a multi-second fixed baseline per
+        // compile, dominated by the ~9K precompiled-stdlib functions
+        // that are byte-identical across runs.  Key the final object
+        // by the compile's deterministic INPUTS — input source bytes
+        // + on-disk stdlib tree + compiler-binary stamp (covers the
+        // embedded archive/metadata) + a fingerprint of every
+        // out-of-module knob the lowering reads — and skip the whole
+        // leg on a hit.  (NOT keyed on the VBC module: its
+        // serialization is per-process-HashMap-order nondeterministic
+        // — measured identical length / different bytes every run —
+        // so a VBC key never hits.)  See
+        // `pipeline/aot_object_cache.rs` for the boundary rationale
+        // (whole-module vs stdlib-split) and the on-disk contract.
+        //
+        // Everything the key needs (pass string, target identity) is
+        // hoisted ABOVE the lowering; the hoisted values are then
+        // passed into `lower_optimize_and_emit_object` unchanged so
+        // the miss path compiles exactly as before.
+        //
+        // Kill switch: VERUM_NO_OBJECT_CACHE=1.  LTO and the IR-dump
+        // diagnostic paths bypass the cache (they need the live LLVM
+        // module), as do compiles with merged project modules /
+        // external cogs (their file set isn't part of the key) and
+        // archive-less builds (stdlib compiled from source).
+        // ════════════════════════════════════════════════════════════
+        let opt_level = self.session.options().optimization_level;
+        let obj_path = build_dir.join(format!("{}.o", module_name));
+
+        // LLVM pass-pipeline selection (hoisted ahead of lowering so
+        // the chosen pipeline participates in the object-cache key;
+        // the selection depends only on env vars + opt level).
+        //
+        // **Tiered pipeline** (#94 / #91 perf roadmap).
+        //
+        // Pre-fix: any skip-body or arity-collided function dropped
+        // the entire module to `globaldce`-only — defeating EVERY
+        // perf pass including `always-inline`.  Hello-world hits
+        // this because the stdlib has 9 `swap` overloads (one of
+        // which hits `InvalidRegister(2)` during VBC→LLVM lowering),
+        // silently degrading every binary's perf to "linked but
+        // unoptimised".
+        //
+        // Post-fix tiering:
+        //
+        //   * **Clean modules** (no skip-body, no arity collisions):
+        //     run the full canonical `default<O2>` / `default<O3>`
+        //     pipeline.  Inliner, SROA, GVN, instcombine, loop opts,
+        //     vectorization — everything LLVM offers.
+        //
+        //   * **Modules with IR issues**: run a curated SAFE subset
+        //     anchored on `always-inline` + `globaldce`.  The
+        //     `always-inline` pass respects `alwaysinline` function
+        //     attributes (#92's `verum_text_get_ptr` etc.) and
+        //     critically does NOT traverse into the bodies of
+        //     non-alwaysinline functions — so the broken IR in
+        //     skip-body stubs can't trip it.  `globaldce` then
+        //     deletes any function that became unreachable after
+        //     inlining, including the stubs themselves.
+        //
+        // Result: even on dirty modules the user's hot Text helpers
+        // get inlined into call sites, cutting hello-world's
+        // `verum_main` from `bl _verum_text_get_ptr; bl _verum_internal_puts`
+        // to inline `_verum_internal_puts(adrp+add)`.
+        // VERUM_FORCE_FULL_O2=1 — diagnostic override; force the
+        // full O2/O3 pipeline regardless of IR-issue status.  Used
+        // to investigate codegen-level type-conflict bugs (arity-
+        // collided functions with multi-typed register slots that
+        // crash SROA / SimplifyCFG / GVN).  See #91 follow-up.
+        let force_full = std::env::var("VERUM_FORCE_FULL_O2").is_ok();
+        // **VERUM_PASSES_OVERRIDE** — diagnostic env-var that
+        // overrides the pass pipeline string entirely.  Used to
+        // bisect which specific pass in `default<O2>` triggers
+        // the bitcode-write / loop-pass SIGBUS on arity-collided
+        // modules (#98).
+        let override_passes = std::env::var("VERUM_PASSES_OVERRIDE").ok();
+        // **Task #24 mitigation** (LLVM PassManager SIGBUS at
+        // `appendLoopsToWorklist` / `IntervalMap::deleteNode`):
+        // `default<O[1-3]>` triggers LLVM's loop-pass pipeline,
+        // which walks Verum-emitted IR's loop-info graph and
+        // SIGBUSes on metadata corruption / dangling Use chains
+        // (see the investigation log in the pass-run block below —
+        // bitcode + text roundtrip both crash, root cause is
+        // metadata-corruption-at-write-time not pass-side bug).
+        //
+        // The crash is deterministic for every non-trivial
+        // module; even `fn main() { let x: Int = 42; }` reproduces
+        // it.  Until the metadata-corruption root cause lands,
+        // **default to `always-inline,globaldce`** — the same
+        // safe pipeline that `has_ir_issues` branch uses.  Users
+        // who need aggressive optimisation can opt in explicitly
+        // via `VERUM_FORCE_FULL_O2=1` (force the broken
+        // `default<O2>`) or `VERUM_PASSES_OVERRIDE=<pipeline>`
+        // (custom pipeline).
+        //
+        // Validated 2026-05-18: `verum build --release` on a
+        // minimal program produces a 17.1 KB binary linking only
+        // libSystem.B.dylib (no-libc invariant per CLAUDE.md);
+        // running the binary exits 0.
+        let passes = if let Some(p) = override_passes {
+            p
+        } else if force_full {
+            match opt_level {
+                0 => "globaldce".to_string(),
+                1 => "default<O1>".to_string(),
+                2 => "default<O2>".to_string(),
+                _ => "default<O3>".to_string(),
+            }
+        } else {
+            // Anchor on always-inline so our `verum_text_get_ptr` /
+            // `verum_is_text_object` (and any future `@inline` Verum
+            // attribute) get honoured even when full O2 isn't safe.
+            // Order matters: always-inline first → globaldce last
+            // so the stubs that become unreachable post-inlining
+            // get removed.
+            "always-inline,globaldce".to_string()
+        };
+
+        // Target identity (triple / CPU / features) — hoisted ahead
+        // of lowering: these strings are pure host/options queries
+        // (no LLVM target-registry init required) and participate in
+        // the object-cache key.  The TargetMachine itself is still
+        // created inside `lower_optimize_and_emit_object` (miss path
+        // only), after `Target::initialize_all`.
+        //
+        // **CPU/features dispatch** (#82 cross-compile correctness).
+        //
+        // For native (host == target) builds: use host CPU + features
+        // for maximum performance.
+        //
+        // For cross builds: use "generic" CPU + empty features.
+        // Pre-fix the host CPU name (e.g. `apple-m3`) was forwarded
+        // into every TargetMachine regardless of arch, which LLVM
+        // rejects with `'apple-m3' is not a recognized processor for
+        // this target` followed by `LLVM ERROR: 64-bit code requested
+        // on a subtarget that doesn't support it!` — every cross-arch
+        // build crashed.
+        //
+        // Detection: compare target architecture to host architecture
+        // via the TargetMachine's default-host triple.
+        let (triple_str, cpu_str, features_str) = {
+            use verum_codegen::llvm::verum_llvm::targets::TargetMachine;
+            let triple_str: String = match self.session.options().target_triple {
+                Some(ref target) => target.as_str().to_string(),
+                None => TargetMachine::get_default_triple()
+                    .as_str()
+                    .to_string_lossy()
+                    .into_owned(),
+            };
+            let is_wasm = triple_str.contains("wasm");
+            let host_triple_for_cpu = TargetMachine::get_default_triple()
+                .as_str()
+                .to_string_lossy()
+                .into_owned();
+            // Heuristic: if target arch differs from host, host CPU is
+            // not applicable.  Use simple substring match on arch prefix.
+            let host_arch = host_triple_for_cpu.split('-').next().unwrap_or("");
+            let target_arch = triple_str.split('-').next().unwrap_or("");
+            let cross_arch = !target_arch.is_empty() && target_arch != host_arch;
+
+            let (cpu_str, features_str): (&'static str, &'static str) = if is_wasm || cross_arch {
+                ("generic", "")
+            } else {
+                // Native build — use host CPU info for max perf.
+                let cpu = TargetMachine::get_host_cpu_name();
+                let features = TargetMachine::get_host_cpu_features();
+                // Leak to static — called once per compilation, acceptable
+                let cpu_s: &'static str = Box::leak(
+                    cpu.to_str()
+                        .unwrap_or("generic")
+                        .to_string()
+                        .into_boxed_str(),
+                );
+                let feat_s: &'static str =
+                    Box::leak(features.to_str().unwrap_or("").to_string().into_boxed_str());
+                (cpu_s, feat_s)
+            };
+            debug!(
+                "LLVM target: triple={}, cpu={}, features={} (cross_arch={})",
+                triple_str, cpu_str, features_str, cross_arch
+            );
+            (triple_str, cpu_str, features_str)
+        };
+
+        // Fingerprint of every out-of-module input the LLVM leg
+        // reads: compiler binary stamp (also covers the EMBEDDED
+        // stdlib archive + metadata), lowering-config knobs (the
+        // same session fields `lower_optimize_and_emit_object`
+        // resolves), monomorphization-cache flag (can reorder the
+        // emitted module), permission policy (Debug over BTreeSets —
+        // deterministic), target identity, pass string, and the
+        // module-mutating diagnostic env (orphan sweep).
+        let object_cache = {
+            let lf = &self.session.options().language_features;
+            let fingerprint = format!(
+                "exe={exe}|module={module}|opt={opt}|dbg={dbg}|cov={cov}|panic={panic}|\
+                 tco={tco}|vect={vect}|inline={inline}|futures={fut}|nurseries={nur}|\
+                 awt={awt}|tss={tss}|mono_cache={mc}|perm={perm:?}|triple={triple}|\
+                 cpu={cpu}|features={features}|passes={passes}|orphan_sweep={osweep}",
+                exe = super::aot_object_cache::compiler_stamp(),
+                module = module_name,
+                opt = opt_level,
+                dbg = self.session.options().debug_info,
+                cov = self.session.options().coverage,
+                panic = lf.runtime.panic.as_str(),
+                tco = lf.codegen.tail_call_optimization,
+                vect = lf.codegen.vectorize,
+                inline = lf.codegen.inline_depth,
+                fut = lf.runtime.futures,
+                nur = lf.runtime.nurseries,
+                awt = lf.runtime.async_worker_threads,
+                tss = lf.runtime.task_stack_size,
+                mc = lf.codegen.monomorphization_cache,
+                perm = self.session.aot_permission_policy(),
+                triple = triple_str,
+                cpu = cpu_str,
+                features = features_str,
+                passes = passes,
+                osweep = std::env::var_os("VERUM_SKIP_ORPHAN_SWEEP").is_some(),
+            );
+            if super::aot_object_cache::bypassed(
+                self.session.options().lto,
+                self.session.options().emit_ir,
+            ) {
+                None
+            } else if !self.project_modules.is_empty() {
+                // Merged project modules / external cogs are inputs
+                // this key does not hash — correctness first.
+                debug!(
+                    "aot-object-cache: bypass — {} merged project module(s) not part of the key",
+                    self.project_modules.len()
+                );
+                None
+            } else if crate::embedded_stdlib_vbc::get_runtime_archive().is_none() {
+                // Archive-less build: stdlib function bodies come from
+                // the legacy source-compile path, whose input set is
+                // broader than the stdlib tree stamp — bypass.
+                debug!("aot-object-cache: bypass — no embedded stdlib archive");
+                None
+            } else {
+                super::aot_object_cache::AotObjectCache::prepare(
+                    &target_dir,
+                    &self.session.options().input,
+                    &fingerprint,
+                )
+            }
+        };
+
+        let needs_metal = match object_cache
+            .as_ref()
+            .and_then(|cache| cache.try_fetch(&obj_path))
+        {
+            Some(hit) => hit.needs_metal,
+            None => {
+                let needs_metal = self.lower_optimize_and_emit_object(
+                    &vbc_module,
+                    module_name,
+                    &build_dir,
+                    &obj_path,
+                    cpu_str,
+                    features_str,
+                    &passes,
+                )?;
+                if let Some(cache) = object_cache.as_ref() {
+                    cache.store(&obj_path, needs_metal);
+                }
+                needs_metal
+            }
+        };
+
+        // Runtime compilation: LLVM IR provides core runtime (allocator, text, etc.)
+        // ALL runtime functions are now pure LLVM IR (platform_ir.rs + tensor_ir.rs + metal_ir.rs).
+        // No C compilation needed. We still generate an empty .o for the linker.
+        let runtime_stubs_path = self.generate_runtime_stubs(&build_dir, module_name)?;
+        let runtime_obj = self.compile_c_file(&runtime_stubs_path, &build_dir)?;
+
+        // Metal GPU runtime — now in LLVM IR (metal_ir.rs), no Objective-C compilation needed
+        let metal_obj: Option<PathBuf> = None;
+
+        // Load linker configuration from Verum.toml (if present)
+        let mut linker_config = self.load_linker_config(&project_root, profile)?;
+
+        // Wire CLI LTO option into linker config
+        if self.session.options().lto {
+            use crate::phases::linking::LTOConfig;
+            linker_config.lto = match self.session.options().lto_mode {
+                Some(crate::options::LtoMode::Full) => LTOConfig::Full,
+                Some(crate::options::LtoMode::Thin) | None => LTOConfig::Thin,
+            };
+            // Enable LLD for LTO support
+            linker_config.use_llvm_linker = true;
+        }
+
+        // Wire CLI strip flags into linker config. Closes the
+        // inert-defense pattern: pre-fix the CLI's `--strip` and
+        // `--strip-debug` flags populated
+        // `CompilerOptions.strip_symbols` / `.strip_debug` but
+        // `link_with_config` only read from `LinkingConfig`, so
+        // CLI strip overrides were silently dropped when no
+        // `Verum.toml` was present.
+        apply_strip_options_to_linker_config(self.session.options(), &mut linker_config);
+
+        // Wire Windows subsystem (console / GUI) into linker config.
+        // The CLI (`--windows-subsystem`) and manifest
+        // (`[build].windows_subsystem`) get resolved into
+        // `options.windows_subsystem` upstream by `verum_cli::commands::build`.
+        // Here we apply it to the no-libc Windows configuration so the
+        // produced .exe carries `/SUBSYSTEM:WINDOWS` (GUI) instead of
+        // the default `/SUBSYSTEM:CONSOLE`. Ignored on non-Windows
+        // targets — the linker config's flags table is unchanged when
+        // `for_platform` returns a non-Windows variant.
+        if let Some(ref subsystem_flag) = self.session.options().windows_subsystem {
+            // Only apply when we have a no-libc config AND it's a
+            // Windows config (otherwise the flag would be a silent
+            // no-op). Detect via the platform field on the existing
+            // config, falling back to inspection of the target triple.
+            let is_windows_target = match &linker_config.no_libc_config {
+                Some(cfg) => matches!(cfg.platform, verum_codegen::link::Platform::Windows),
+                None => self
+                    .session
+                    .options()
+                    .target_triple
+                    .as_ref()
+                    .map(|t| {
+                        t.as_str().contains("windows")
+                            || t.as_str().contains("msvc")
+                            || t.as_str().contains("mingw")
+                    })
+                    .unwrap_or(false),
+            };
+            if is_windows_target {
+                use verum_codegen::link::NoLibcConfig;
+                linker_config.no_libc_config = Some(NoLibcConfig::windows_with_subsystem(
+                    subsystem_flag.as_str(),
+                ));
+            }
+        }
+
+        // Add Metal/Foundation frameworks for macOS GPU support (LLD path).
+        // **Target-aware** (#80): driven by configured target triple via
+        // the canonical `triple_str_is_darwin` helper, not host
+        // `#[cfg(target_os)]`.  Pre-fix this gate used host-cfg,
+        // which silently dropped the Metal frameworks when cross-compiling
+        // to macOS from Linux.
+        let triple_for_frameworks: String = match self.session.options().target_triple.clone() {
+            Some(t) => t.as_str().to_string(),
+            None => {
+                use verum_codegen::llvm::verum_llvm::targets::TargetMachine;
+                TargetMachine::get_default_triple()
+                    .as_str()
+                    .to_string_lossy()
+                    .into_owned()
+            }
+        };
+        if verum_codegen::llvm::target_triple::triple_str_is_darwin(&triple_for_frameworks)
+            && needs_metal
+        {
+            // Only link Metal/Foundation/objc when the program
+            // actually uses GPU (post-globaldce probe — see #100).
+            // Programs with no `@device(GPU)` and no tensor ops
+            // above the GPU threshold get a leaner binary
+            // (libSystem-only `LC_LOAD_DYLIB` table).
+            linker_config.extra_flags.push("-framework Metal".into());
+            linker_config
+                .extra_flags
+                .push("-framework Foundation".into());
+            linker_config.libraries.push("objc".into());
+        }
+
+        // Link object files into executable in target/<profile>/
+        info!("  Linking executable");
+        let mut link_objects = vec![obj_path.clone(), runtime_obj];
+        if let Some(ref metal) = metal_obj {
+            link_objects.push(metal.clone());
+            info!("  Including Metal GPU runtime in link");
+        }
+        self.link_with_config(&link_objects, &output_path, &linker_config, needs_metal)?;
+
+        // Clean up intermediate files
+        let _ = std::fs::remove_file(&runtime_stubs_path);
+        // verum_platform.c deleted — no cleanup needed
+        // verum_tensor.c deleted — no cleanup needed
+        // verum_metal.m deleted — no cleanup needed
+
+        let elapsed = start.elapsed();
+        info!(
+            "Generated native executable: {} ({:.2}s)",
+            output_path.display(),
+            elapsed.as_secs_f64()
+        );
+
+        Ok(output_path)
+    }
+
+    /// The AOT LLVM leg: CBGR escape analysis → VBC→LLVM lowering →
+    /// pass pipeline → verification → GPU-usage probe → object-file
+    /// emission (+ LTO bitcode sidecar).  Extracted verbatim from
+    /// `phase_generate_native` so the whole leg can be SKIPPED on an
+    /// AOT object-cache hit (AOT-STDLIB-NATIVE-CACHE-1).
+    ///
+
+    /// Returns the post-globaldce `needs_metal` probe result (#100),
+    /// the only lowering-derived fact the link step still needs.
+    ///
+
+    /// `cpu_str` / `features_str` / `passes` are hoisted by the
+    /// caller (they participate in the object-cache key) and used
+    /// here unchanged.
+    #[allow(clippy::too_many_arguments)]
+    fn lower_optimize_and_emit_object(
+        &self,
+        vbc_module: &std::sync::Arc<verum_vbc::module::VbcModule>,
+        module_name: &str,
+        build_dir: &Path,
+        obj_path: &Path,
+        cpu_str: &'static str,
+        features_str: &'static str,
+        passes: &str,
+    ) -> Result<bool> {
         // Phase 1.75: CBGR escape analysis
         // Determines which Ref/RefMut instructions can be promoted from Tier 0
         // (runtime-checked, ~15ns) to Tier 1 (compiler-proven safe, zero overhead).
@@ -211,21 +649,6 @@ impl<'s> CompilationPipeline<'s> {
             );
             result
         };
-
-        // Emit VBC bytecode dump if requested
-        if self.session.options().emit_vbc {
-            let dump = verum_vbc::disassemble::disassemble_module(&vbc_module);
-            let vbc_path = self.session.options().input.with_extension("vbc.txt");
-            if let Err(e) = std::fs::write(&vbc_path, &dump) {
-                warn!("Failed to write VBC dump: {}", e);
-            } else {
-                info!(
-                    "Wrote VBC dump: {} ({} bytes)",
-                    vbc_path.display(),
-                    dump.len()
-                );
-            }
-        }
 
         // Phase 2: Lower VBC to LLVM IR (CPU path)
         // Note: For native compilation, we use the VBC → LLVM IR path (not MLIR).
@@ -336,7 +759,6 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         // Phase 3: Write intermediate files
-        let obj_path = build_dir.join(format!("{}.o", module_name));
         let ir_path = build_dir.join(format!("{}.ll", module_name));
 
         let opt_level = self.session.options().optimization_level;
@@ -406,54 +828,9 @@ impl<'s> CompilationPipeline<'s> {
             _ => verum_codegen::llvm::verum_llvm::OptimizationLevel::Default,
         };
 
-        // **CPU/features dispatch** (#82 cross-compile correctness).
-        //
-        // For native (host == target) builds: use host CPU + features
-        // for maximum performance.
-        //
-        // For cross builds: use "generic" CPU + empty features.
-        // Pre-fix the host CPU name (e.g. `apple-m3`) was forwarded
-        // into every TargetMachine regardless of arch, which LLVM
-        // rejects with `'apple-m3' is not a recognized processor for
-        // this target` followed by `LLVM ERROR: 64-bit code requested
-        // on a subtarget that doesn't support it!` — every cross-arch
-        // build crashed.
-        //
-        // Detection: compare target architecture to host architecture
-        // via the TargetMachine's default-host triple.
-        let is_wasm = triple.as_str().to_string_lossy().contains("wasm");
-        let triple_str = triple.as_str().to_string_lossy().to_string();
-        let host_triple_for_cpu = TargetMachine::get_default_triple()
-            .as_str()
-            .to_string_lossy()
-            .into_owned();
-        // Heuristic: if target arch differs from host, host CPU is
-        // not applicable.  Use simple substring match on arch prefix.
-        let host_arch = host_triple_for_cpu.split('-').next().unwrap_or("");
-        let target_arch = triple_str.split('-').next().unwrap_or("");
-        let cross_arch = !target_arch.is_empty() && target_arch != host_arch;
-
-        let (cpu_str, features_str) = if is_wasm || cross_arch {
-            ("generic", "")
-        } else {
-            // Native build — use host CPU info for max perf.
-            let cpu = TargetMachine::get_host_cpu_name();
-            let features = TargetMachine::get_host_cpu_features();
-            // Leak to static — called once per compilation, acceptable
-            let cpu_s: &'static str = Box::leak(
-                cpu.to_str()
-                    .unwrap_or("generic")
-                    .to_string()
-                    .into_boxed_str(),
-            );
-            let feat_s: &'static str =
-                Box::leak(features.to_str().unwrap_or("").to_string().into_boxed_str());
-            (cpu_s, feat_s)
-        };
-        debug!(
-            "LLVM target: triple={}, cpu={}, features={} (cross_arch={})",
-            triple_str, cpu_str, features_str, cross_arch
-        );
+        // CPU/features dispatch (#82) — computed by the caller ahead
+        // of the object-cache key derivation and passed in unchanged
+        // (`cpu_str` / `features_str` parameters).
 
         let target_machine = target
             .create_target_machine(
@@ -524,90 +901,11 @@ impl<'s> CompilationPipeline<'s> {
             // operands.
             let has_ir_issues = lowering.has_arity_collisions() || lowering.skip_body_count() > 0;
 
-            // **Tiered pipeline** (#94 / #91 perf roadmap).
-            //
-            // Pre-fix: any skip-body or arity-collided function dropped
-            // the entire module to `globaldce`-only — defeating EVERY
-            // perf pass including `always-inline`.  Hello-world hits
-            // this because the stdlib has 9 `swap` overloads (one of
-            // which hits `InvalidRegister(2)` during VBC→LLVM lowering),
-            // silently degrading every binary's perf to "linked but
-            // unoptimised".
-            //
-            // Post-fix tiering:
-            //
-            //   * **Clean modules** (no skip-body, no arity collisions):
-            //     run the full canonical `default<O2>` / `default<O3>`
-            //     pipeline.  Inliner, SROA, GVN, instcombine, loop opts,
-            //     vectorization — everything LLVM offers.
-            //
-            //   * **Modules with IR issues**: run a curated SAFE subset
-            //     anchored on `always-inline` + `globaldce`.  The
-            //     `always-inline` pass respects `alwaysinline` function
-            //     attributes (#92's `verum_text_get_ptr` etc.) and
-            //     critically does NOT traverse into the bodies of
-            //     non-alwaysinline functions — so the broken IR in
-            //     skip-body stubs can't trip it.  `globaldce` then
-            //     deletes any function that became unreachable after
-            //     inlining, including the stubs themselves.
-            //
-            // Result: even on dirty modules the user's hot Text helpers
-            // get inlined into call sites, cutting hello-world's
-            // `verum_main` from `bl _verum_text_get_ptr; bl _verum_internal_puts`
-            // to inline `_verum_internal_puts(adrp+add)`.
-            // VERUM_FORCE_FULL_O2=1 — diagnostic override; force the
-            // full O2/O3 pipeline regardless of IR-issue status.  Used
-            // to investigate codegen-level type-conflict bugs (arity-
-            // collided functions with multi-typed register slots that
-            // crash SROA / SimplifyCFG / GVN).  See #91 follow-up.
-            let force_full = std::env::var("VERUM_FORCE_FULL_O2").is_ok();
-            // **VERUM_PASSES_OVERRIDE** — diagnostic env-var that
-            // overrides the pass pipeline string entirely.  Used to
-            // bisect which specific pass in `default<O2>` triggers
-            // the bitcode-write / loop-pass SIGBUS on arity-collided
-            // modules (#98).
-            let override_passes = std::env::var("VERUM_PASSES_OVERRIDE").ok();
-            // **Task #24 mitigation** (LLVM PassManager SIGBUS at
-            // `appendLoopsToWorklist` / `IntervalMap::deleteNode`):
-            // `default<O[1-3]>` triggers LLVM's loop-pass pipeline,
-            // which walks Verum-emitted IR's loop-info graph and
-            // SIGBUSes on metadata corruption / dangling Use chains
-            // (see lines 645-710 for the full investigation log —
-            // bitcode + text roundtrip both crash, root cause is
-            // metadata-corruption-at-write-time not pass-side bug).
-            //
-            // The crash is deterministic for every non-trivial
-            // module; even `fn main() { let x: Int = 42; }` reproduces
-            // it.  Until the metadata-corruption root cause lands,
-            // **default to `always-inline,globaldce`** — the same
-            // safe pipeline that `has_ir_issues` branch uses.  Users
-            // who need aggressive optimisation can opt in explicitly
-            // via `VERUM_FORCE_FULL_O2=1` (force the broken
-            // `default<O2>`) or `VERUM_PASSES_OVERRIDE=<pipeline>`
-            // (custom pipeline).
-            //
-            // Validated 2026-05-18: `verum build --release` on a
-            // minimal program produces a 17.1 KB binary linking only
-            // libSystem.B.dylib (no-libc invariant per CLAUDE.md);
-            // running the binary exits 0.
-            let passes = if let Some(p) = override_passes {
-                p
-            } else if force_full {
-                match opt_level {
-                    0 => "globaldce".to_string(),
-                    1 => "default<O1>".to_string(),
-                    2 => "default<O2>".to_string(),
-                    _ => "default<O3>".to_string(),
-                }
-            } else {
-                // Anchor on always-inline so our `verum_text_get_ptr` /
-                // `verum_is_text_object` (and any future `@inline` Verum
-                // attribute) get honoured even when full O2 isn't safe.
-                // Order matters: always-inline first → globaldce last
-                // so the stubs that become unreachable post-inlining
-                // get removed.
-                "always-inline,globaldce".to_string()
-            };
+            // Pass-pipeline STRING selection is hoisted into
+            // `phase_generate_native` (it participates in the
+            // object-cache key) and arrives via the `passes`
+            // parameter.  The tiering rationale lives with the
+            // selection.
 
             if has_ir_issues {
                 tracing::info!(
@@ -831,128 +1129,7 @@ impl<'s> CompilationPipeline<'s> {
             debug!("  Wrote LLVM bitcode for LTO: {}", bc_path.display());
         }
 
-        // Runtime compilation: LLVM IR provides core runtime (allocator, text, etc.)
-        // ALL runtime functions are now pure LLVM IR (platform_ir.rs + tensor_ir.rs + metal_ir.rs).
-        // No C compilation needed. We still generate an empty .o for the linker.
-        let runtime_stubs_path = self.generate_runtime_stubs(&build_dir, module_name)?;
-        let runtime_obj = self.compile_c_file(&runtime_stubs_path, &build_dir)?;
-
-        // Metal GPU runtime — now in LLVM IR (metal_ir.rs), no Objective-C compilation needed
-        let metal_obj: Option<PathBuf> = None;
-
-        // Load linker configuration from Verum.toml (if present)
-        let mut linker_config = self.load_linker_config(&project_root, profile)?;
-
-        // Wire CLI LTO option into linker config
-        if self.session.options().lto {
-            use crate::phases::linking::LTOConfig;
-            linker_config.lto = match self.session.options().lto_mode {
-                Some(crate::options::LtoMode::Full) => LTOConfig::Full,
-                Some(crate::options::LtoMode::Thin) | None => LTOConfig::Thin,
-            };
-            // Enable LLD for LTO support
-            linker_config.use_llvm_linker = true;
-        }
-
-        // Wire CLI strip flags into linker config. Closes the
-        // inert-defense pattern: pre-fix the CLI's `--strip` and
-        // `--strip-debug` flags populated
-        // `CompilerOptions.strip_symbols` / `.strip_debug` but
-        // `link_with_config` only read from `LinkingConfig`, so
-        // CLI strip overrides were silently dropped when no
-        // `Verum.toml` was present.
-        apply_strip_options_to_linker_config(self.session.options(), &mut linker_config);
-
-        // Wire Windows subsystem (console / GUI) into linker config.
-        // The CLI (`--windows-subsystem`) and manifest
-        // (`[build].windows_subsystem`) get resolved into
-        // `options.windows_subsystem` upstream by `verum_cli::commands::build`.
-        // Here we apply it to the no-libc Windows configuration so the
-        // produced .exe carries `/SUBSYSTEM:WINDOWS` (GUI) instead of
-        // the default `/SUBSYSTEM:CONSOLE`. Ignored on non-Windows
-        // targets — the linker config's flags table is unchanged when
-        // `for_platform` returns a non-Windows variant.
-        if let Some(ref subsystem_flag) = self.session.options().windows_subsystem {
-            // Only apply when we have a no-libc config AND it's a
-            // Windows config (otherwise the flag would be a silent
-            // no-op). Detect via the platform field on the existing
-            // config, falling back to inspection of the target triple.
-            let is_windows_target = match &linker_config.no_libc_config {
-                Some(cfg) => matches!(cfg.platform, verum_codegen::link::Platform::Windows),
-                None => self
-                    .session
-                    .options()
-                    .target_triple
-                    .as_ref()
-                    .map(|t| {
-                        t.as_str().contains("windows")
-                            || t.as_str().contains("msvc")
-                            || t.as_str().contains("mingw")
-                    })
-                    .unwrap_or(false),
-            };
-            if is_windows_target {
-                use verum_codegen::link::NoLibcConfig;
-                linker_config.no_libc_config = Some(NoLibcConfig::windows_with_subsystem(
-                    subsystem_flag.as_str(),
-                ));
-            }
-        }
-
-        // Add Metal/Foundation frameworks for macOS GPU support (LLD path).
-        // **Target-aware** (#80): driven by configured target triple via
-        // the canonical `triple_str_is_darwin` helper, not host
-        // `#[cfg(target_os)]`.  Pre-fix this gate used host-cfg,
-        // which silently dropped the Metal frameworks when cross-compiling
-        // to macOS from Linux.
-        let triple_for_frameworks: String = match self.session.options().target_triple.clone() {
-            Some(t) => t.as_str().to_string(),
-            None => {
-                use verum_codegen::llvm::verum_llvm::targets::TargetMachine;
-                TargetMachine::get_default_triple()
-                    .as_str()
-                    .to_string_lossy()
-                    .into_owned()
-            }
-        };
-        if verum_codegen::llvm::target_triple::triple_str_is_darwin(&triple_for_frameworks)
-            && needs_metal
-        {
-            // Only link Metal/Foundation/objc when the program
-            // actually uses GPU (post-globaldce probe — see #100).
-            // Programs with no `@device(GPU)` and no tensor ops
-            // above the GPU threshold get a leaner binary
-            // (libSystem-only `LC_LOAD_DYLIB` table).
-            linker_config.extra_flags.push("-framework Metal".into());
-            linker_config
-                .extra_flags
-                .push("-framework Foundation".into());
-            linker_config.libraries.push("objc".into());
-        }
-
-        // Link object files into executable in target/<profile>/
-        info!("  Linking executable");
-        let mut link_objects = vec![obj_path.clone(), runtime_obj];
-        if let Some(ref metal) = metal_obj {
-            link_objects.push(metal.clone());
-            info!("  Including Metal GPU runtime in link");
-        }
-        self.link_with_config(&link_objects, &output_path, &linker_config, needs_metal)?;
-
-        // Clean up intermediate files
-        let _ = std::fs::remove_file(&runtime_stubs_path);
-        // verum_platform.c deleted — no cleanup needed
-        // verum_tensor.c deleted — no cleanup needed
-        // verum_metal.m deleted — no cleanup needed
-
-        let elapsed = start.elapsed();
-        info!(
-            "Generated native executable: {} ({:.2}s)",
-            output_path.display(),
-            elapsed.as_secs_f64()
-        );
-
-        Ok(output_path)
+        Ok(needs_metal)
     }
 
     /// Get the project root directory
