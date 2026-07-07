@@ -16440,8 +16440,22 @@ impl VbcCodegen {
                 };
                 idx.entry(last_seg).or_default().push((name.clone(), info.clone()));
             }
+            // ARCHIVE-SERIALIZE-DETERMINISM-1: buckets are fed from a
+            // per-process-seeded HashMap walk — sort them so stub
+            // creation order (→ function ids → string-table layout →
+            // bare-suffix dispatch winners) is identical across bakes.
+            // Two consecutive bakes previously produced different
+            // blake3 for the SAME source; the latent `.lock`-class
+            // dispatch canary flipped with them.
+            for bucket in idx.values_mut() {
+                bucket.sort_by(|a, b| a.0.cmp(&b.0));
+            }
             idx
         };
+        // ARCHIVE-SERIALIZE-DETERMINISM-1: HashSet walk order is
+        // per-process; sort ids so stub emission order is bake-stable.
+        let mut method_names: Vec<u32> = method_names.into_iter().collect();
+        method_names.sort_unstable();
         for method_id in method_names {
             let method_name = match self
                 .ctx
