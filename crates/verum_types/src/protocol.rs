@@ -7424,6 +7424,18 @@ impl ProtocolChecker {
     /// ```
     ///
 
+    /// True if `name` is declared as an associated type by ANY registered
+    /// protocol (Iterator's `Item`, Future's `Output`, …). Registry-driven —
+    /// no hardcoded stdlib names (CLAUDE.md) — used to recognise the LEGACY
+    /// bare-name projection encoding `Generic{"Item",[Iter]}` alongside the
+    /// `::Assoc` form the VBC serializer now emits.
+    pub fn is_associated_type_name(&self, name: &str) -> bool {
+        let key = Text::from(name);
+        self.protocols
+            .values()
+            .any(|p| p.associated_types.contains_key(&key))
+    }
+
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Resolution
     pub fn try_find_associated_type(&self, ty: &Type, assoc_name: &Text) -> Option<Type> {
         // Cycle detection: if we're already resolving this (type, assoc_name) pair,

@@ -5692,8 +5692,20 @@ impl TypeChecker {
     /// Stdlib-agnostic: resolution flows through `try_find_associated_type`.
     fn resolve_assoc_projections_deep(&self, ty: &Type) -> Type {
         if let Type::Generic { name, args } = ty {
-            if name.as_str().starts_with("::") && !args.is_empty() {
-                let assoc_name = &name.as_str()[2..];
+            // Recognise BOTH the `::Assoc` form the VBC serializer emits AND
+            // the LEGACY bare-name form (`Generic{"Item",[Iter]}`) the
+            // pre-projection codegen still produces. The bare name is checked
+            // against the protocol registry (no hardcoded names, CLAUDE.md);
+            // `try_find_associated_type` returns None for non-associated names
+            // (List/Map/Maybe/…), so a real generic type is left unchanged
+            // (resolve MORE, never less).
+            let is_projection = name.as_str().starts_with("::")
+                || self
+                    .protocol_checker
+                    .read()
+                    .is_associated_type_name(name.as_str());
+            if is_projection && !args.is_empty() {
+                let assoc_name = name.as_str().strip_prefix("::").unwrap_or(name.as_str());
                 let base = self.resolve_assoc_projections_deep(&args[0]);
                 // The projected-over base may be a reference: a `&mut F`
                 // parameter is stored in the descriptor as the bare generic (the
@@ -7295,6 +7307,35 @@ impl TypeChecker {
         // When we have a type alias like `type CreateTokenRequestDto is { name: Text, ... }`,
         // we need to resolve it to the underlying Record type before checking fields
         let normalized_ty = self.normalize_type(dereferenced_ty);
+
+        // f10a integration completion (leg B): field access on an
+        // ASSOCIATED-TYPE PROJECTION receiver. AssociatedProjection
+        // preservation made adapter elements arrive as an associated-type
+        // projection — either the `::Assoc` form the VBC serializer emits or
+        // the LEGACY bare-name form `Generic{"Item",[Iter]}` the
+        // pre-projection codegen still produces — which `normalize_type` does
+        // not reduce, so `|r| r.hot` in `.any/.find` chains errored E103
+        // "Cannot access field on non-record type: Item<_>". Recognise both
+        // forms (bare via the protocol registry — no hardcoded names) and run
+        // the deref-aware projection resolver call-returns/scrutinees already
+        // use, then re-deref: `ListIter.Item = &T` resolves to `&Rec`, and
+        // field access needs the pointee. Resolving MORE, never less — a
+        // projection that still doesn't resolve keeps today's error.
+        let normalized_ty = match &normalized_ty {
+            Type::Generic { name, args }
+                if !args.is_empty()
+                    && (name.as_str().starts_with("::")
+                        || self
+                            .protocol_checker
+                            .read()
+                            .is_associated_type_name(name.as_str())) =>
+            {
+                let resolved = self.resolve_assoc_projections_deep(&normalized_ty);
+                let resolved = self.normalize_type(&resolved);
+                self.unwrap_reference_type(&resolved).clone()
+            }
+            _ => normalized_ty,
+        };
 
         // Never propagation: any field access on Never produces Never
         if matches!(normalized_ty, Type::Never) {
