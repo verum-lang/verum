@@ -4866,8 +4866,17 @@ impl VbcCodegen {
             }
         }
 
-        // Pass 2: bucket by name. Two entries with the same name should
-        // share the same id (alias case); different ids = a real bug.
+        // Pass 2: bucket by name, then flag by (name, KIND). Two entries
+        // with the same name AND the same kind must share one id; two ids
+        // for a single (name, kind) is a real split-of-one-type bug.
+        // Different KINDS under a shared simple name are DISTINCT types
+        // (TYPE-ID-COLLISION-4: blake3's `ChunkState` record vs
+        // http_parser's `ChunkState` sum — two private types that
+        // legitimately share a simple name) and correctly carry different
+        // ids, so they are NOT a violation. Aliases collapse onto their
+        // target's id (empty descriptor, never re-homed), so the historical
+        // "same name → same id (alias case)" expectation still holds for
+        // that path.
         let mut by_name: HashMap<String, Vec<(u32, usize)>> = HashMap::new();
         for (i, ty) in types.iter().enumerate() {
             by_name
@@ -4878,9 +4887,24 @@ impl VbcCodegen {
         let mut duplicate_names_with_different_ids: Vec<DuplicateNameDifferentId> = Vec::new();
         for (name, slots) in &by_name {
             if slots.len() > 1 {
-                let ids: std::collections::HashSet<u32> = slots.iter().map(|(id, _)| *id).collect();
-                if ids.len() > 1 {
-                    let mut sorted_ids: Vec<u32> = ids.into_iter().collect();
+                let mut kind_to_ids: HashMap<
+                    std::mem::Discriminant<crate::types::TypeKind>,
+                    std::collections::HashSet<u32>,
+                > = HashMap::new();
+                for (id, idx) in slots {
+                    kind_to_ids
+                        .entry(std::mem::discriminant(&types[*idx].kind))
+                        .or_default()
+                        .insert(*id);
+                }
+                let split_ids: std::collections::HashSet<u32> = kind_to_ids
+                    .values()
+                    .filter(|ids| ids.len() > 1)
+                    .flatten()
+                    .copied()
+                    .collect();
+                if !split_ids.is_empty() {
+                    let mut sorted_ids: Vec<u32> = split_ids.into_iter().collect();
                     sorted_ids.sort_unstable();
                     duplicate_names_with_different_ids.push(DuplicateNameDifferentId {
                         name: name.clone(),
@@ -16506,10 +16530,38 @@ impl VbcCodegen {
                 // yet for it.  When a descriptor IS already present,
                 // the earlier registration is authoritative — bail
                 // (mirrors the prior first-wins discipline).
-                if self.types.iter().any(|d| d.id == existing_id) {
-                    return;
+                //
+                // TYPE-ID-COLLISION-4 (FUNDAMENTAL). EXCEPTION: two DISTINCT
+                // private types from different modules can share a simple name
+                // (e.g. `core.security.hash.blake3.ChunkState` — a 6-field
+                // RECORD — and `core.net.http_parser.ChunkState` — a 5-variant
+                // SUM). Simple-name-keyed registration collapsed them onto one
+                // id, so the second's real descriptor bailed and its
+                // constructions (`ChunkState.ChunkSize`) resolved against the
+                // FIRST type's layout → `LayoutMismatch: unknown tag`. When the
+                // incoming descriptor has a DIFFERENT kind than a NON-EMPTY
+                // resident (and is itself non-empty), it is genuinely a
+                // different type: give it a fresh globally-unique id so BOTH
+                // coexist. Requiring both non-empty avoids forking a single
+                // type whose forward-reference stub or alias-redirect (both
+                // empty) is transiently registered under a different kind —
+                // those must still collapse. The instruction remap in
+                // merge_archive_function_bodies disambiguates
+                // archive-id→codegen-id by (name + kind), routing each module's
+                // references to its own descriptor.
+                let resident_info = self
+                    .types
+                    .iter()
+                    .find(|d| d.id == existing_id)
+                    .map(|d| (d.kind.clone(), d.variants.is_empty() && d.fields.is_empty()));
+                let incoming_empty = ty.variants.is_empty() && ty.fields.is_empty();
+                match resident_info {
+                    Some((rk, false)) if !incoming_empty && rk != ty.kind => {
+                        self.alloc_user_type_id()
+                    }
+                    Some(_) => return,
+                    None => existing_id,
                 }
-                existing_id
             }
             None => {
                 let id = self.alloc_user_type_id();
@@ -17099,8 +17151,38 @@ impl VbcCodegen {
                 Some(s) => s,
                 None => continue,
             };
-            if let Some(&codegen_tid) = self.type_name_to_id.get(archive_name) {
-                type_id_remap.insert(ty.id.0, codegen_tid.0);
+            let by_name = self.type_name_to_id.get(archive_name).map(|i| i.0);
+            // TYPE-ID-COLLISION-4 disambiguation. The simple-name lookup
+            // collapses two DISTINCT private types that share a name (blake3
+            // `ChunkState` record vs http_parser `ChunkState` sum) onto
+            // whichever registered first. When the by-name id resolves to a
+            // descriptor of a DIFFERENT kind than THIS archive type, route to
+            // the same-named codegen descriptor whose kind matches — the fresh
+            // id `import_archive_type_with_protocol_remap` allocated for the
+            // second type. Only pays the O(N) scan on an actual kind mismatch;
+            // the overwhelming common case (unique name) takes the O(1)
+            // by-name path.
+            let by_name_wrong_kind = by_name.is_some_and(|id| {
+                self.types
+                    .iter()
+                    .find(|d| d.id.0 == id)
+                    .is_some_and(|d| d.kind != ty.kind)
+            });
+            let codegen_tid = if by_name_wrong_kind {
+                self.types
+                    .iter()
+                    .find(|d| {
+                        d.kind == ty.kind
+                            && self.ctx.strings.get(d.name.0 as usize).map(|s| s.as_str())
+                                == Some(archive_name)
+                    })
+                    .map(|d| d.id.0)
+                    .or(by_name)
+            } else {
+                by_name
+            };
+            if let Some(tid) = codegen_tid {
+                type_id_remap.insert(ty.id.0, tid);
             }
         }
 
