@@ -170,7 +170,7 @@ endef
 .PHONY: list list-l0 list-l1 list-l2 list-l3 list-l4 list-all list-by-tag
 .PHONY: watch clean clean-all clean-cache clean-reports install-tools check-tools update-tools
 .PHONY: validate validate-specs validate-config validate-thresholds validate-grammar
-.PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-red-team diff-full-corpus
+.PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-core-tiers diff-red-team diff-full-corpus
 .PHONY: production-readiness gate-diagnostic gate-soundness gate-documentation gate-aot-skip gate-memory-safety gate-tier-equivalence
 
 # =============================================================================
@@ -955,6 +955,19 @@ diff-interp-vs-aot-verbose:
 	$(call PROGRESS,Running interpreter vs AOT differential tests (verbose)...)
 	@bash $(DIFF_DIR)/run_differential.sh -v $(DIFF_DIR)/cross-impl
 	$(call SUCCESS,Interpreter vs AOT differential tests completed)
+
+# Full core-tests tier differential gate (Tier 0 interpreter vs Tier 1 AOT).
+# Runs EVERY core-test on BOTH tiers and fails on any per-test divergence —
+# complements the fixed cross-impl corpus above with the comprehensive stdlib
+# suite, which is where a whole subsystem (e.g. the AOT monomorphization pass)
+# can go silently dead while the interpreter stays green.
+#   make diff-core-tiers                 # all core-tests
+#   make diff-core-tiers FILTER=async/   # one suite
+#   VERUM_BIN=/path/to/verum make diff-core-tiers
+diff-core-tiers:
+	$(call PROGRESS,Running full core-tests interp-vs-AOT tier differential...)
+	@VERUM_BIN="$${VERUM_BIN:-verum}" bash $(VCS_ROOT)/scripts/differential-tiers.sh $(FILTER)
+	$(call SUCCESS,Core-tests tier differential completed)
 
 diff-all: diff-cross-tier
 
