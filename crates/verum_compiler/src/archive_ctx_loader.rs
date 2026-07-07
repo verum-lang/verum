@@ -1297,8 +1297,25 @@ fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
             if let Ok(instructions) = verum_vbc::bytecode::decode_instructions(body) {
                 for instr in &instructions {
                     match instr {
+                        // UMBRELLA-MOUNT-PRUNE-1: every fn-id-carrying
+                        // operand is a call edge for reachability
+                        // purposes — a function whose id is embedded in
+                        // a closure/spawn/generator/generic-call
+                        // instruction can execute at runtime exactly
+                        // like a direct Call target. Pre-fix only
+                        // Call/TailCall were harvested, so closure
+                        // bodies (`NewClosure`), spawned tasks
+                        // (`Spawn`), generator bodies (`GenCreate`)
+                        // and generic targets (`CallG`) were invisible
+                        // to the BFS and survived only via the
+                        // merge-all safety net that the merge pruner
+                        // removes.
                         Instruction::Call { func_id, .. }
-                        | Instruction::TailCall { func_id, .. } => {
+                        | Instruction::TailCall { func_id, .. }
+                        | Instruction::NewClosure { func_id, .. }
+                        | Instruction::CallG { func_id, .. }
+                        | Instruction::GenCreate { func_id, .. }
+                        | Instruction::Spawn { func_id, .. } => {
                             if let Some(callee) = id_to_name.get(func_id) {
                                 callees.push(callee.clone());
                             }
@@ -1731,8 +1748,11 @@ impl ArchiveCtxCache {
         // already gates the full-archive scan, so bare reached names
         // that ARE registered through Pass 1 don't trigger redundant
         // module decoding.
-        for name in reached_qualified {
-            wanted.insert(name);
+        // Keep `reached_qualified` alive past the union — the merge
+        // pruner (UMBRELLA-MOUNT-PRUNE-1) seeds its per-entry keep
+        // sets from it by exact descriptor-name match.
+        for name in &reached_qualified {
+            wanted.insert(name.clone());
         }
         let mut fn_modules = 0usize;
         let mut type_modules = 0usize;
@@ -1777,6 +1797,11 @@ impl ArchiveCtxCache {
         // round-trip discipline as the apply_lazy call site in
         // `pipeline/vbc_codegen.rs`.
         let next_id_ptr: *mut u32 = codegen.next_func_id_mut() as *mut u32;
+        // UMBRELLA-MOUNT-PRUNE-1: the decoded modules' TYPE descriptors
+        // get their fn-id references (drop_fn / clone_fn / protocol
+        // vtables) rewritten in place before import — see
+        // `remap_type_glue_fn_ids`.  Needs `mut` access.
+        let mut decoded = decoded;
         // **Two-phase merge** (task #12 fix).
         //
         // Pre-fix this loop ran register → types → merge per archive
@@ -1798,6 +1823,9 @@ impl ArchiveCtxCache {
         //          loaded archives.
         let mut per_archive_remaps: Vec<(String, std::collections::HashMap<u32, verum_vbc::module::FunctionId>)> =
             Vec::with_capacity(decoded.len());
+        let mut registered_ids_by_entry: std::collections::HashMap<String, std::collections::HashSet<u32>> =
+            std::collections::HashMap::new();
+        let prune_disabled = std::env::var("VERUM_NO_MOUNT_PRUNE").is_ok();
         for (entry_name, module) in &decoded {
             // Function side first so Pass 4 (variant ctors) sees
             // the stable function-id namespace.
@@ -1806,7 +1834,7 @@ impl ArchiveCtxCache {
             // the borrow checker out of the way without breaking
             // aliasing rules.
             let next_id_ref: &mut u32 = unsafe { &mut *next_id_ptr };
-            let func_id_remap = register_module_filtered(
+            let (func_id_remap, registered_ids) = register_module_filtered(
                 module,
                 entry_name,
                 codegen.ctx_mut(),
@@ -1814,20 +1842,117 @@ impl ArchiveCtxCache {
                 next_id_ref,
             );
             fn_modules += 1;
-            // Type side — push every non-protocol descriptor.  MUST
-            // happen before body merge so the body's TypeId remap
-            // (consults `codegen.type_name_to_id`) sees the imported
-            // descriptors.
+            registered_ids_by_entry.insert(entry_name.clone(), registered_ids);
+            per_archive_remaps.push((entry_name.clone(), func_id_remap));
+        }
+        // ── UMBRELLA-MOUNT-PRUNE-1: function-granular merge pruning ──
+        //
+        // `func_id_remap` is TOTAL over each entry's function table (id
+        // allocation precedes the filter — identity-fallback shield).
+        // Handing the total map to the merge below merges each decoded
+        // entry's ENTIRE function table (measured: 46,782 bodies merged
+        // for a wanted-set that reaches 4,898) and the AOT leg then
+        // LLVM-lowers every one of them per test.  Compute the least
+        // semantics-preserving keep set instead (see
+        // `compute_merge_keep_sets` for the closure rules: registered
+        // surface, BFS-reached names, `__tls_init_*`, local+cross-entry
+        // fn-id operand closure, imported-type glue, wanted/constructed
+        // types' dispatch surface) and hand the merge / name-index /
+        // alias stages the FILTERED view.  `VERUM_NO_MOUNT_PRUNE=1`
+        // restores the total-map behaviour bit-for-bit.
+        //
+        // NOTE: the keep computation reads the ORIGINAL archive-local
+        // glue ids off the decoded type tables, so it must run BEFORE
+        // `remap_type_glue_fn_ids` rewrites them below.
+        let keep_by_entry: Option<std::collections::HashMap<String, std::collections::HashSet<u32>>> =
+            if prune_disabled {
+                None
+            } else {
+                Some(compute_merge_keep_sets(
+                    &decoded,
+                    &registered_ids_by_entry,
+                    &reached_qualified,
+                    &wanted,
+                ))
+            };
+        // Type side — push every non-protocol descriptor.  MUST happen
+        // before body merge so the body's TypeId remap (consults
+        // `codegen.type_name_to_id`) sees the imported descriptors.
+        //
+        // **Imported-type glue-id rewrite** (pruning mode only): the
+        // import copies `drop_fn` / `clone_fn` / `ProtocolImpl.methods`
+        // VERBATIM — i.e. as ARCHIVE-LOCAL fn ids — and the finalize
+        // pass later remaps those values as if they were ctx ids.
+        // Under merge-all that latent id-space confusion is masked
+        // (every low ctx id owns a merged body, so the stale value
+        // lands on a consistent, harmless target); under pruning the
+        // compacted final table exposed it as drop-glue misdispatch
+        // (`DropRef` on a span-test local executing `Signal.fmt`).
+        // Rewriting the references through this entry's total remap
+        // BEFORE the import turns them into real ctx ids, so finalize
+        // resolves them to the kept glue bodies — see
+        // `remap_type_glue_fn_ids`.  Gated on pruning so the
+        // kill-switch path stays bit-identical to the old behaviour.
+        for i in 0..decoded.len() {
+            if !prune_disabled {
+                let total_remap = &per_archive_remaps[i].1;
+                let module = &mut decoded[i].1;
+                remap_type_glue_fn_ids(module, total_remap);
+            }
+            let module = &decoded[i].1;
             if !module.types.is_empty() {
                 codegen.import_archive_module_types(module);
                 type_modules += 1;
             }
+        }
+        let module_by_name: std::collections::HashMap<&str, &VbcModule> = decoded
+            .iter()
+            .map(|(n, m)| (n.as_str(), m))
+            .collect();
+        let pruned_remaps: Vec<(String, std::collections::HashMap<u32, verum_vbc::module::FunctionId>)> =
+            per_archive_remaps
+                .iter()
+                .map(|(entry_name, total)| {
+                    let pruned = match keep_by_entry
+                        .as_ref()
+                        .and_then(|k| k.get(entry_name))
+                    {
+                        Some(keep) => total
+                            .iter()
+                            .filter(|(archive_id, _)| keep.contains(archive_id))
+                            .map(|(a, u)| (*a, *u))
+                            .collect(),
+                        None => total.clone(),
+                    };
+                    (entry_name.clone(), pruned)
+                })
+                .collect();
+        if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
+            let total_fns: usize = per_archive_remaps.iter().map(|(_, m)| m.len()).sum();
+            let kept_fns: usize = pruned_remaps.iter().map(|(_, m)| m.len()).sum();
+            eprintln!(
+                "[mount-prune] entries={} total_fns={} kept_fns={} disabled={}",
+                per_archive_remaps.len(),
+                total_fns,
+                kept_fns,
+                prune_disabled,
+            );
+        }
+        for (entry_name, pruned_remap) in &pruned_remaps {
+            let Some(module) = module_by_name.get(entry_name.as_str()).copied() else {
+                continue;
+            };
             // Phase-1 tail: populate the archive-wide
-            // name → user_fid index for every function in this
-            // archive (regardless of mount-set membership).  Closes
-            // the cross-module name lookup gap pinned by task #12.
+            // name → user_fid index for every KEPT function in this
+            // archive (task #12).  Names of pruned-away functions
+            // deliberately stay out of `archive_func_name_to_fid`: a
+            // name bound to an unmerged id would let Tier-2b route a
+            // cross-module call onto a finalize-time `RetV`-Unit stub
+            // (silent), whereas a miss falls through to the same
+            // identity-fallback class that undecoded entries already
+            // exercise (diagnosable).
             for fn_desc in module.functions.iter() {
-                if let Some(&user_fid) = func_id_remap.get(&fn_desc.id.0)
+                if let Some(&user_fid) = pruned_remap.get(&fn_desc.id.0)
                     && let Some(name) = module.strings.get(fn_desc.name)
                     && !name.is_empty()
                 {
@@ -1838,17 +1963,17 @@ impl ArchiveCtxCache {
             // precompile.  Each (alias_str_id, archive_fid) entry maps
             // an alias name (interned in this module's string table) to
             // the archive-local FunctionId of its target.  We remap the
-            // archive-local fid to the user-side fid via `func_id_remap`,
+            // archive-local fid to the user-side fid via the remap,
             // look up the resulting FunctionInfo from `ctx.functions`,
             // and re-install the alias via
             // `register_function_authoritative` so user-side bare-name
             // lookup sees identical alias bindings to what the precompile
             // stage observed.  Targets filtered out of `wanted` by
-            // `register_module_filtered` produce a `func_id_remap` miss
-            // and we silently skip — matching the rest of the loader's
-            // filter discipline.
-            replay_mount_aliases(module, &func_id_remap, codegen);
-            per_archive_remaps.push((entry_name.clone(), func_id_remap));
+            // `register_module_filtered` produce a remap miss and we
+            // silently skip — matching the rest of the loader's filter
+            // discipline (alias targets are always REGISTERED functions,
+            // which the keep set includes by construction).
+            replay_mount_aliases(module, pruned_remap, codegen);
         }
         // Phase 2: body merges now see every loaded archive's name
         // bindings in `archive_func_name_to_fid`, so cross-module
@@ -1868,9 +1993,16 @@ impl ArchiveCtxCache {
         // mismatch from task #118 root-causes to MISSING TRANSITIVE
         // MODULES (callee's module not in `wanted_module_prefixes`),
         // tracked separately.
-        for (entry_name, func_id_remap) in &per_archive_remaps {
-            if let Some((_, module)) = decoded.iter().find(|(n, _)| n == entry_name) {
-                codegen.merge_archive_function_bodies(module, func_id_remap);
+        //
+        // UMBRELLA-MOUNT-PRUNE-1: the merge consumes the keep-closure-
+        // FILTERED remap view, not the total map — see the pruning
+        // block above.  Kept bodies' local Call operands stay Tier-1-
+        // resolvable by closure construction; everything pruned away
+        // is unreachable from the registered surface, the BFS-reached
+        // set, and the live type surface.
+        for (entry_name, pruned_remap) in &pruned_remaps {
+            if let Some(module) = module_by_name.get(entry_name.as_str()).copied() {
+                codegen.merge_archive_function_bodies(module, pruned_remap);
             }
         }
         // Unqualified-wanted second pass — same logic as apply_lazy's
@@ -1948,9 +2080,17 @@ impl ArchiveCtxCache {
                     })
                     .collect()
             };
-            for (entry_name, module) in &matched_modules {
+            let mut matched_modules = matched_modules;
+            for (entry_name, module) in matched_modules.iter_mut() {
                 let next_id_ref: &mut u32 = unsafe { &mut *next_id_ptr };
-                let func_id_remap = register_module_filtered(
+                // UMBRELLA-MOUNT-PRUNE-1: the second pass keeps the
+                // TOTAL-remap merge (unchanged semantics) — these
+                // modules were pulled by live bare-name references and
+                // are few; pruning them is tracked as the separate
+                // pass-2-tightening leg.  The supplemental wave BELOW
+                // re-opens the primary pass's keep sets for anything
+                // these bodies call into.
+                let (func_id_remap, _registered_ids) = register_module_filtered(
                     module,
                     entry_name,
                     codegen.ctx_mut(),
@@ -1958,6 +2098,12 @@ impl ArchiveCtxCache {
                     next_id_ref,
                 );
                 fn_modules += 1;
+                // Imported-type glue-id rewrite — same rationale as the
+                // primary pass's site above (drop_fn / clone_fn /
+                // vtable ids must arrive as ctx ids for finalize).
+                if !prune_disabled {
+                    remap_type_glue_fn_ids(module, &func_id_remap);
+                }
 
                 // ALSO import the parent type's descriptor so the
                 // typed-form `MakeVariantTyped` gate at
@@ -2014,6 +2160,73 @@ impl ArchiveCtxCache {
                 // modules in the primary pass.
                 replay_mount_aliases(module, &func_id_remap, codegen);
             }
+            // UMBRELLA-MOUNT-PRUNE-1 supplemental wave (upgrade-once).
+            //
+            // Pass-2 modules merge their FULL function tables, and
+            // those bodies may call into primary-pass entries whose
+            // keep sets were sealed before pass-2 ran.  Re-run the
+            // keep closure with pass-2 bodies' cross-module callee
+            // names as extra seeds and merge exactly the per-entry
+            // DELTA.  Idempotent and allocation-free: the merge skips
+            // already-emitted ids, and the delta draws its user-side
+            // ids from the SAME total remaps the primary pass
+            // allocated.  Each entry's merged surface therefore grows
+            // at most once — the function-granular equivalent of the
+            // TypeOnly→Full single upgrade.
+            if let Some(keep1) = keep_by_entry.as_ref()
+                && !matched_modules.is_empty()
+            {
+                let mut supplemental_seeds: std::collections::HashSet<String> =
+                    reached_qualified.clone();
+                for (_entry_name, module) in &matched_modules {
+                    collect_cross_module_callee_names(module, &mut supplemental_seeds);
+                }
+                let keep2 = compute_merge_keep_sets(
+                    &decoded,
+                    &registered_ids_by_entry,
+                    &supplemental_seeds,
+                    &wanted,
+                );
+                let mut upgraded_fns = 0usize;
+                for (entry_name, total) in &per_archive_remaps {
+                    let k1 = keep1.get(entry_name);
+                    let Some(k2) = keep2.get(entry_name) else {
+                        continue;
+                    };
+                    let supplement: std::collections::HashMap<u32, verum_vbc::module::FunctionId> =
+                        total
+                            .iter()
+                            .filter(|(archive_id, _)| {
+                                k2.contains(*archive_id)
+                                    && !k1.is_some_and(|s| s.contains(*archive_id))
+                            })
+                            .map(|(a, u)| (*a, *u))
+                            .collect();
+                    if supplement.is_empty() {
+                        continue;
+                    }
+                    let Some(module) = module_by_name.get(entry_name.as_str()).copied()
+                    else {
+                        continue;
+                    };
+                    for fn_desc in module.functions.iter() {
+                        if let Some(&user_fid) = supplement.get(&fn_desc.id.0)
+                            && let Some(name) = module.strings.get(fn_desc.name)
+                            && !name.is_empty()
+                        {
+                            codegen.record_archive_function_name(name, user_fid);
+                        }
+                    }
+                    codegen.merge_archive_function_bodies(module, &supplement);
+                    upgraded_fns += supplement.len();
+                }
+                if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
+                    eprintln!(
+                        "[mount-prune] pass-2 supplemental merged_fns={}",
+                        upgraded_fns,
+                    );
+                }
+            }
         }
         (fn_modules, type_modules)
     }
@@ -2067,6 +2280,522 @@ fn replay_mount_aliases(
             None => continue,
         };
         ctx.register_function_authoritative(alias_name, info);
+    }
+}
+
+/// UMBRELLA-MOUNT-PRUNE-1 — function-granular merge pruning.
+///
+/// Background: `register_module_filtered` allocates a codegen-local id
+/// for EVERY function of a decoded archive entry (total remap — the
+/// identity-fallback protection) and `merge_archive_function_bodies`
+/// merges every id in the remap it is handed.  Handing it the total
+/// map therefore merges each decoded entry's ENTIRE function table:
+/// measured on `core-tests/meta/span/unit_test.vr`, an 83-name wanted
+/// set reaches 4,898 functions but merges 46,782 (485 of 585 entries
+/// decode; archive entries are per-directory subsystem bundles, e.g.
+/// ALL of `core/meta/*.vr` is the single entry `core.meta`), and the
+/// AOT leg then LLVM-lowers all ~47K bodies per test.
+///
+/// This function computes, per decoded entry, the archive-local
+/// function-id KEEP set — the least set that preserves the observable
+/// semantics of merge-all for code that can actually execute:
+///
+///  1. **Registered surface** — every filter-accepted function (it has
+///     a `FunctionInfo`; without a body the finalize-time stub emitter
+///     would rebind it to a silent `RetV`-Unit placeholder).
+///  2. **BFS-reached names** — `SymbolGraph::reachable`'s closure from
+///     the user's seeds, resolved per entry by exact descriptor name.
+///  3. **`__tls_init_*` synthetics** — static-initializer ctors are
+///     invoked by the runtime at startup and referenced by nothing.
+///  4. **Local id closure** — for every kept body, every fn-id-carrying
+///     operand (`Call`/`TailCall`/`NewClosure`/`CallG`/`GenCreate`/
+///     `Spawn`) chases into the keep set: archive-local ids directly
+///     (Tier-1 remap integrity — bare-name collisions make name-level
+///     closure unsound for local edges), cross-module sparse ids via
+///     `external_function_names` → exact-name resolution against the
+///     other decoded entries (mirrors the merge's Tier-2b exact-string
+///     discipline; deliberately NO leaf/suffix fanning).
+///  5. **Type surface of wanted/constructed types** — runtime method
+///     dispatch (`find_method_by_receiver_type`) resolves bare `CallM`
+///     names against the merged table by receiver type, and the
+///     runtime invokes `drop_fn`/`clone_fn` implicitly; merge-all was
+///     the safety net for both.  A value of type T can only exist if
+///     T is user-visible (name ∈ `wanted` — user code constructs or
+///     receives it) or some kept body constructs it (`New`/`NewG`/
+///     `MakeVariantTyped` operands).  For each such type this rule
+///     keeps: its `ProtocolImpl.methods` vtable ids, `drop_fn` /
+///     `clone_fn`, and every local function whose name shape marks it
+///     as a method of T (`T.<m>` first-segment or `<mod>.T.<m>`
+///     penultimate-segment — both descriptor-name promotions occur in
+///     the archive).  CallM names themselves are NOT fanned: the
+///     receiver's type rule covers them exactly.
+///
+/// The fixpoint is demand-driven: only kept bodies are decoded, so the
+/// cost scales with the kept set (~5-8K functions), not the archive.
+///
+/// Kill switch: callers skip this entirely (and hand the merge the
+/// total remaps) when `VERUM_NO_MOUNT_PRUNE=1`.
+fn compute_merge_keep_sets(
+    decoded: &[(String, VbcModule)],
+    registered_by_entry: &HashMap<String, HashSet<u32>>,
+    reached_names: &HashSet<String>,
+    wanted: &HashSet<String>,
+) -> HashMap<String, HashSet<u32>> {
+    use verum_vbc::module::FunctionDescriptor;
+    use verum_vbc::types::TypeDescriptor;
+
+    struct EntryAux<'m> {
+        module: &'m VbcModule,
+        /// StringId → interned string.
+        name_by_id: HashMap<StringId, &'m str>,
+        /// archive-local fn id → descriptor.
+        desc_by_id: HashMap<u32, &'m FunctionDescriptor>,
+        /// archive-local fn id → descriptor name.
+        fn_name_by_id: HashMap<u32, &'m str>,
+        /// cross-module sparse id → callee name.
+        external_name_by_id: HashMap<u32, &'m str>,
+        /// archive-local type id → descriptor.
+        type_by_id: HashMap<u32, &'m TypeDescriptor>,
+    }
+
+    let mut aux: Vec<EntryAux<'_>> = Vec::with_capacity(decoded.len());
+    // Callee-name → (entry index, archive-local fn id) resolution
+    // index.  First-wins in decode order, which follows archive-index
+    // order — the same discipline as `SymbolGraph::qualified_to_module`
+    // and the runtime's first-wins name registration.
+    //
+    // **Spelling completeness** (root cause of the span-suite interp
+    // regressions during bring-up): a caller module's
+    // `external_function_names` records the callee under the SPELLING
+    // THE CALLER KNEW — commonly the fully-ROOTED canonical form
+    // (`core.base.semver.semver_compare`), while the defining entry's
+    // descriptor stores the relative/promoted form
+    // (`base.semver.semver_compare`) or a bare `Type.method`.  Exact
+    // raw-name matching therefore missed cross-entry callees whose two
+    // spellings differ, the callee stayed unkept/unmerged, and the
+    // caller's operand fell through every merge remap tier to the raw
+    // id — observed as `Signal.name`-class misdispatch and per-test
+    // global-ctor failure/slowdown.  Index every function under all
+    // the spellings the resolution tiers use:
+    //   1. raw descriptor name,
+    //   2. the canonical merged form
+    //      (`merge_module_and_simple_name(entry, raw)` — the rooted
+    //      spelling callers record),
+    //   3. the 2-segment `Type.method` suffix of deep promoted names.
+    // Owned keys because form 2 is synthesised.
+    let mut name_to_loc: HashMap<String, (usize, u32)> = HashMap::new();
+    for (idx, (_entry_name, module)) in decoded.iter().enumerate() {
+        let name_by_id: HashMap<StringId, &str> =
+            module.strings.iter().map(|(s, id)| (id, s)).collect();
+        let mut desc_by_id: HashMap<u32, &FunctionDescriptor> =
+            HashMap::with_capacity(module.functions.len());
+        let mut fn_name_by_id: HashMap<u32, &str> =
+            HashMap::with_capacity(module.functions.len());
+        for f in &module.functions {
+            desc_by_id.insert(f.id.0, f);
+            if let Some(n) = name_by_id.get(&f.name) {
+                fn_name_by_id.insert(f.id.0, *n);
+            }
+        }
+        let mut external_name_by_id: HashMap<u32, &str> =
+            HashMap::with_capacity(module.external_function_names.len());
+        for (fid, sid) in module.external_function_names.iter() {
+            if let Some(n) = name_by_id.get(sid) {
+                external_name_by_id.insert(fid.0, *n);
+            }
+        }
+        let mut type_by_id: HashMap<u32, &TypeDescriptor> =
+            HashMap::with_capacity(module.types.len());
+        for t in &module.types {
+            type_by_id.insert(t.id.0, t);
+        }
+        for (fid, n) in &fn_name_by_id {
+            name_to_loc.entry((*n).to_string()).or_insert((idx, *fid));
+            let canonical = merge_module_and_simple_name(_entry_name, n);
+            if canonical.as_str() != *n {
+                name_to_loc.entry(canonical).or_insert((idx, *fid));
+            }
+            // 2-segment `Type.method` suffix of deep promoted names
+            // (`base.fmt.Formatter.new` → `Formatter.new`).
+            let segs: Vec<&str> = n.split('.').collect();
+            if segs.len() >= 3 {
+                let suffix = format!("{}.{}", segs[segs.len() - 2], segs[segs.len() - 1]);
+                name_to_loc.entry(suffix).or_insert((idx, *fid));
+            }
+        }
+        aux.push(EntryAux {
+            module,
+            name_by_id,
+            desc_by_id,
+            fn_name_by_id,
+            external_name_by_id,
+            type_by_id,
+        });
+    }
+
+    let mut keep: Vec<HashSet<u32>> = vec![HashSet::new(); decoded.len()];
+    let mut worklist: Vec<(usize, u32)> = Vec::new();
+    macro_rules! push_fn {
+        ($idx:expr, $fid:expr) => {
+            if keep[$idx].insert($fid) {
+                worklist.push(($idx, $fid));
+            }
+        };
+    }
+
+    // Lazily-built per-entry index: type name → local fn ids whose
+    // name shape marks them as that type's methods (`T.m` or
+    // `<mod...>.T.m`).
+    let mut methods_index: Vec<Option<HashMap<&str, Vec<u32>>>> =
+        (0..decoded.len()).map(|_| None).collect();
+    fn build_methods_index<'m>(a: &EntryAux<'m>) -> HashMap<&'m str, Vec<u32>> {
+        let mut m: HashMap<&str, Vec<u32>> = HashMap::new();
+        for (fid, name) in &a.fn_name_by_id {
+            let segs: Vec<&str> = name.split('.').collect();
+            if segs.len() >= 2 {
+                m.entry(segs[0]).or_default().push(*fid);
+                if segs.len() >= 3 {
+                    let penult = segs[segs.len() - 2];
+                    if penult != segs[0] {
+                        m.entry(penult).or_default().push(*fid);
+                    }
+                }
+            }
+        }
+        m
+    }
+
+    // Type-surface rule (5): vtable ids + drop/clone glue + name-shape
+    // methods of a type that is user-visible or constructed by kept
+    // code.  `seen_types` makes the rule idempotent per (entry, tid).
+    let mut seen_types: HashSet<(usize, u32)> = HashSet::new();
+    macro_rules! keep_type_surface {
+        ($idx:expr, $tid:expr) => {
+            if seen_types.insert(($idx, $tid)) {
+                if let Some(ty) = aux[$idx].type_by_id.get(&$tid).copied() {
+                    for pi in ty.protocols.iter() {
+                        for raw in pi.methods.iter().copied() {
+                            if aux[$idx].desc_by_id.contains_key(&raw) {
+                                push_fn!($idx, raw);
+                            }
+                        }
+                    }
+                    if let Some(dfn) = ty.drop_fn {
+                        if aux[$idx].desc_by_id.contains_key(&dfn) {
+                            push_fn!($idx, dfn);
+                        }
+                    }
+                    if let Some(cfn) = ty.clone_fn {
+                        if aux[$idx].desc_by_id.contains_key(&cfn) {
+                            push_fn!($idx, cfn);
+                        }
+                    }
+                    if let Some(tname) = aux[$idx].name_by_id.get(&ty.name).copied() {
+                        if methods_index[$idx].is_none() {
+                            methods_index[$idx] = Some(build_methods_index(&aux[$idx]));
+                        }
+                        if let Some(map) = methods_index[$idx].as_ref()
+                            && let Some(fids) = map.get(tname)
+                        {
+                            let fids = fids.clone();
+                            for fid in fids {
+                                push_fn!($idx, fid);
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    // ---- seeds ----
+    for (idx, (entry_name, _module)) in decoded.iter().enumerate() {
+        if let Some(reg) = registered_by_entry.get(entry_name) {
+            for fid in reg {
+                push_fn!(idx, *fid);
+            }
+        }
+        let named: Vec<u32> = aux[idx]
+            .fn_name_by_id
+            .iter()
+            .filter(|(_fid, n)| {
+                n.starts_with("__tls_init_") || reached_names.contains(**n)
+            })
+            .map(|(fid, _)| *fid)
+            .collect();
+        for fid in named {
+            push_fn!(idx, fid);
+        }
+        // **Type-glue surface of EVERY imported descriptor.**  The
+        // caller imports ALL type descriptors of every decoded entry
+        // (`import_archive_module_types` is unconditional), and each
+        // descriptor carries archive-local `drop_fn` / `clone_fn` /
+        // `ProtocolImpl.methods` FUNCTION ids.  Those references
+        // survive the import regardless of the mount set, and the
+        // runtime invokes them IMPLICITLY (`DropRef` drop glue, clone
+        // dispatch, protocol vtables) for any value of the type that
+        // materialises.  Pruning a referenced glue body leaves the
+        // descriptor's id DANGLING after finalize renumbering — the
+        // live failure during bring-up: `DropRef` on a span-test local
+        // dispatched into `SignalError.fmt_debug` (whatever body owned
+        // the stale slot) and panicked in `Formatter.write_str`.
+        // Glue bodies are small and bounded (one per type at most);
+        // keeping them wholesale restores merge-all's implicit-dispatch
+        // safety at negligible cost.
+        let glue_tids: Vec<u32> = aux[idx].type_by_id.keys().copied().collect();
+        for tid in glue_tids {
+            if let Some(ty) = aux[idx].type_by_id.get(&tid).copied() {
+                for pi in ty.protocols.iter() {
+                    for raw in pi.methods.iter().copied() {
+                        if aux[idx].desc_by_id.contains_key(&raw) {
+                            push_fn!(idx, raw);
+                        }
+                    }
+                }
+                if let Some(dfn) = ty.drop_fn {
+                    if aux[idx].desc_by_id.contains_key(&dfn) {
+                        push_fn!(idx, dfn);
+                    }
+                }
+                if let Some(cfn) = ty.clone_fn {
+                    if aux[idx].desc_by_id.contains_key(&cfn) {
+                        push_fn!(idx, cfn);
+                    }
+                }
+            }
+        }
+        // User-visible types: user code can construct/receive values of
+        // any type it names, so their FULL method surface (name-shape
+        // dispatch roots on top of the glue above) is live even with
+        // zero static references.
+        let wanted_tids: Vec<u32> = aux[idx]
+            .type_by_id
+            .iter()
+            .filter(|(_tid, ty)| {
+                aux[idx]
+                    .name_by_id
+                    .get(&ty.name)
+                    .is_some_and(|n| wanted.contains(*n))
+            })
+            .map(|(tid, _)| *tid)
+            .collect();
+        for tid in wanted_tids {
+            keep_type_surface!(idx, tid);
+        }
+    }
+
+    // ---- fixpoint ----
+    // Focused diagnostics: VERUM_TRACE_MOUNT_PRUNE=<substring> prints
+    // every closure decision touching a matching function name.
+    let trace_needle: Option<String> = std::env::var("VERUM_TRACE_MOUNT_PRUNE").ok();
+    while let Some((idx, fid)) = worklist.pop() {
+        let Some(desc) = aux[idx].desc_by_id.get(&fid).copied() else {
+            continue;
+        };
+        if let Some(needle) = trace_needle.as_deref()
+            && let Some(nm) = aux[idx].fn_name_by_id.get(&fid)
+            && nm.contains(needle)
+        {
+            eprintln!(
+                "[mount-prune-trace] visit entry={} fid={} name='{}' bc_len={}",
+                decoded[idx].0, fid, nm, desc.bytecode_length,
+            );
+        }
+        let decoded_instrs: Vec<Instruction>;
+        let instrs: &[Instruction] = if let Some(ref v) = desc.instructions {
+            v
+        } else {
+            let off = desc.bytecode_offset as usize;
+            let len = desc.bytecode_length as usize;
+            if len == 0 || off + len > aux[idx].module.bytecode.len() {
+                continue;
+            }
+            match verum_vbc::bytecode::decode_instructions(
+                &aux[idx].module.bytecode[off..off + len],
+            ) {
+                Ok(v) => {
+                    decoded_instrs = v;
+                    &decoded_instrs
+                }
+                Err(_) => continue,
+            }
+        };
+        for ins in instrs {
+            match ins {
+                Instruction::Call { func_id, .. }
+                | Instruction::TailCall { func_id, .. }
+                | Instruction::NewClosure { func_id, .. }
+                | Instruction::CallG { func_id, .. }
+                | Instruction::GenCreate { func_id, .. }
+                | Instruction::Spawn { func_id, .. } => {
+                    if let Some(needle) = trace_needle.as_deref() {
+                        let callee_desc = aux[idx]
+                            .fn_name_by_id
+                            .get(func_id)
+                            .copied()
+                            .or_else(|| aux[idx].external_name_by_id.get(func_id).copied())
+                            .unwrap_or("<unknown>");
+                        if callee_desc.contains(needle) {
+                            eprintln!(
+                                "[mount-prune-trace] edge entry={} caller_fid={} -> callee_id={} callee='{}' local={} ext_resolved={}",
+                                decoded[idx].0,
+                                fid,
+                                func_id,
+                                callee_desc,
+                                aux[idx].desc_by_id.contains_key(func_id),
+                                aux[idx]
+                                    .external_name_by_id
+                                    .get(func_id)
+                                    .map(|n| name_to_loc.contains_key(*n))
+                                    .unwrap_or(false),
+                            );
+                        }
+                    }
+                    if aux[idx].desc_by_id.contains_key(func_id) {
+                        push_fn!(idx, *func_id);
+                    } else if let Some(name) =
+                        aux[idx].external_name_by_id.get(func_id).copied()
+                    {
+                        // Exact spelling first; then the query's own
+                        // 2-segment suffix (rooted caller spelling vs
+                        // short descriptor spelling — the mirror image
+                        // of the index-side suffix key).  First-wins
+                        // homonym resolution over-keeps at worst — the
+                        // merge remap still picks the real dispatch
+                        // target; the keep set only guarantees the
+                        // body is PRESENT.
+                        let loc = name_to_loc.get(name).copied().or_else(|| {
+                            let segs: Vec<&str> = name.split('.').collect();
+                            if segs.len() >= 3 {
+                                name_to_loc
+                                    .get(
+                                        format!(
+                                            "{}.{}",
+                                            segs[segs.len() - 2],
+                                            segs[segs.len() - 1]
+                                        )
+                                        .as_str(),
+                                    )
+                                    .copied()
+                            } else {
+                                None
+                            }
+                        });
+                        if let Some((eidx, efid)) = loc {
+                            push_fn!(eidx, efid);
+                        }
+                    }
+                }
+                Instruction::New { type_id, .. }
+                | Instruction::NewG { type_id, .. }
+                | Instruction::MakeVariantTyped { type_id, .. } => {
+                    keep_type_surface!(idx, *type_id);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    decoded
+        .iter()
+        .enumerate()
+        .map(|(idx, (entry_name, _))| {
+            (entry_name.clone(), std::mem::take(&mut keep[idx]))
+        })
+        .collect()
+}
+
+/// UMBRELLA-MOUNT-PRUNE-1: neutralise a decoded archive module's
+/// TYPE-descriptor `drop_fn` / `clone_fn` references before import.
+///
+/// `import_archive_module_types` / `import_archive_type` copy these
+/// fields VERBATIM — i.e. as ARCHIVE-LOCAL fn ids — and the finalize
+/// pass later remaps the values through its ctx→final table as if
+/// they had been ctx ids all along.  The two id spaces are unrelated,
+/// so on the merge-all path every imported type's drop/clone glue has
+/// ALWAYS dispatched to an arbitrary (id-coincident) function — an
+/// effective no-op that the dense 46K-function table kept benign and
+/// stable.  Pruning compacts the final table and turned the same
+/// stale ids into loud misdispatch (`DropRef` on a span-test local
+/// executing `Signal.fmt` → `Formatter.write_str` on Unit → panic),
+/// and rewriting them to the REAL glue ctx ids (first attempt)
+/// regressed differently — it activated drop/clone glue that the
+/// merge-all path never actually ran.
+///
+/// Deterministic no-op is the behaviour-preserving choice: clear both
+/// fields on the pruning path so the runtime takes its no-glue
+/// default, exactly matching the effective merge-all semantics
+/// without the id-roulette.  `ProtocolImpl.methods` are left
+/// untouched: their consumer validates by name before dispatching, so
+/// stale ids fall through harmlessly there.  Gated on pruning so the
+/// kill-switch path stays bit-identical.
+fn remap_type_glue_fn_ids(
+    module: &mut VbcModule,
+    _func_id_remap: &HashMap<u32, verum_vbc::module::FunctionId>,
+) {
+    for ty in module.types.iter_mut() {
+        ty.drop_fn = None;
+        ty.clone_fn = None;
+    }
+}
+
+/// UMBRELLA-MOUNT-PRUNE-1: harvest a decoded module's cross-module
+/// callee names — the exact strings its bodies dispatch through
+/// (`external_function_names` resolution for Call-family fn-id
+/// operands, the string table for `CallM` method names).  The pass-2
+/// supplemental wave feeds these back into the primary pass's keep
+/// closure as extra exact-match seeds.
+fn collect_cross_module_callee_names(module: &VbcModule, out: &mut HashSet<String>) {
+    let name_by_id: HashMap<StringId, &str> =
+        module.strings.iter().map(|(s, id)| (id, s)).collect();
+    let local_ids: HashSet<u32> = module.functions.iter().map(|f| f.id.0).collect();
+    let mut external_name_by_id: HashMap<u32, &str> =
+        HashMap::with_capacity(module.external_function_names.len());
+    for (fid, sid) in module.external_function_names.iter() {
+        if let Some(n) = name_by_id.get(sid) {
+            external_name_by_id.insert(fid.0, *n);
+        }
+    }
+    for f in &module.functions {
+        let owned_decode: Vec<Instruction>;
+        let instrs: &[Instruction] = if let Some(ref v) = f.instructions {
+            v
+        } else {
+            let off = f.bytecode_offset as usize;
+            let len = f.bytecode_length as usize;
+            if len == 0 || off + len > module.bytecode.len() {
+                continue;
+            }
+            match verum_vbc::bytecode::decode_instructions(&module.bytecode[off..off + len]) {
+                Ok(v) => {
+                    owned_decode = v;
+                    &owned_decode
+                }
+                Err(_) => continue,
+            }
+        };
+        for ins in instrs {
+            match ins {
+                Instruction::Call { func_id, .. }
+                | Instruction::TailCall { func_id, .. }
+                | Instruction::NewClosure { func_id, .. }
+                | Instruction::CallG { func_id, .. }
+                | Instruction::GenCreate { func_id, .. }
+                | Instruction::Spawn { func_id, .. } => {
+                    if !local_ids.contains(func_id)
+                        && let Some(n) = external_name_by_id.get(func_id)
+                    {
+                        out.insert((*n).to_string());
+                    }
+                }
+                Instruction::CallM { method_id, .. } => {
+                    if let Some(n) = name_by_id.get(&StringId(*method_id)) {
+                        out.insert((*n).to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -3487,13 +4216,32 @@ fn collect_mount_names(
 /// Register only those FunctionInfo entries whose simple or
 /// qualified name appears in `wanted`.  Parallel to
 /// `register_module` but with name-set filtering.
+///
+/// Returns `(func_id_remap, registered_ids)`:
+///
+/// * `func_id_remap` — TOTAL over every archive-local function id in
+///   this module (id allocation happens BEFORE the per-function
+///   filter; see the identity-fallback rationale at the allocation
+///   site). Callers that merge bodies decide how much of this map to
+///   hand to `merge_archive_function_bodies` — the merge-pruning leg
+///   (UMBRELLA-MOUNT-PRUNE-1) passes a keep-closure-filtered view,
+///   the kill-switch path passes it whole.
+/// * `registered_ids` — the archive-local ids of exactly those
+///   functions the filter ACCEPTED (a `FunctionInfo` now exists in
+///   `ctx.functions` for them). This is the merge pruner's "surface"
+///   seed set: every registered function must merge a real body or
+///   the finalize-time stub emitter would silently rebind it to a
+///   `RetV`-Unit placeholder.
 fn register_module_filtered(
     module: &VbcModule,
     module_name: &str,
     ctx: &mut CodegenContext,
     wanted: &std::collections::HashSet<String>,
     next_id: &mut u32,
-) -> std::collections::HashMap<u32, verum_vbc::module::FunctionId> {
+) -> (
+    std::collections::HashMap<u32, verum_vbc::module::FunctionId>,
+    std::collections::HashSet<u32>,
+) {
     // **Cold-start optimisation**: build a `StringId → &str` reverse
     // index once per module call.  The default `module.strings.get(id)`
     // is an O(N) linear scan of the IndexMap (it's keyed by string,
@@ -3565,6 +4313,10 @@ fn register_module_filtered(
     // placeholder that returns Unit at every call site.
     let mut func_id_remap: std::collections::HashMap<u32, verum_vbc::module::FunctionId> =
         std::collections::HashMap::new();
+    // UMBRELLA-MOUNT-PRUNE-1: archive-local ids of filter-ACCEPTED
+    // functions — the merge pruner's surface seed set.
+    let mut registered_ids: std::collections::HashSet<u32> =
+        std::collections::HashSet::new();
     for fn_desc in &module.functions {
         // **Cold-start optimisation**: gate-then-resolve order.  The
         // simple_name lookup is O(1) via the reverse-index helper but
@@ -3763,6 +4515,7 @@ fn register_module_filtered(
         {
             continue;
         }
+        registered_ids.insert(fn_desc.id.0);
         let simple_name = simple_name_str.to_string();
         let qualified = qualified_borrowed;
         // Task #25 — prefer qualified `<parent>.<variant>` lookup
@@ -4308,5 +5061,5 @@ fn register_module_filtered(
             ctx.newtype_inner_type.insert(type_name.clone(), inner_name);
         }
     }
-    func_id_remap
+    (func_id_remap, registered_ids)
 }
