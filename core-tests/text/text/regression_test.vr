@@ -759,6 +759,102 @@ fn regression_x_result_bool_ok_false_destructure() {
 }
 
 // =============================================================================
+// §Y — SSO-UTF8-SPLIT-1: push_byte multibyte split poisons the small-string
+//      NaN box (CLOSED 2026-07-07)
+//
+// The stdlib byte-wise Text builders (`to_lowercase` / `to_uppercase` /
+// `slice` / `concat`) lower to per-byte `push_byte` loops, so between two
+// `push_byte` calls the receiver legitimately holds a PARTIAL UTF-8 code
+// point (e.g. just 0xCE, the lead byte of 'Ω'). The Tier-0 push-family
+// intercepts round-tripped that intermediate through a Rust String +
+// `Value::from_small_string`, packing INVALID UTF-8 into the NaN-boxed
+// SmallString: debug builds panicked at value.rs:1516 ("SmallString
+// contains invalid UTF-8: [206]") on the next extract; release builds
+// silently dropped the pending bytes (mojibake/empty results). Fixed by
+// the byte-domain round trip (`extract_text_bytes` +
+// `alloc_text_bytes_value` in string_helpers.rs — invalid intermediates
+// widen to the byte-transparent heap blob, never the SSO box; producers:
+// text_static_runtime.rs + method_dispatch.rs push-family intercepts).
+//
+// These tests assert CONTENT (not just Some/None like the
+// meta/framework_hygiene suite that surfaced the ICE), so the release-
+// profile silent-mojibake mode regresses loudly too. Greek 2-byte chars:
+// Ω = 0xCE 0xA9, ω = 0xCF 0x89, ε = 0xCE 0xB5.
+// =============================================================================
+
+@test
+fn regression_y_push_byte_split_two_byte_char() {
+    // The raw producer shape: a 2-byte code point split across two
+    // push_byte calls. Between the two calls the text holds a lone
+    // UTF-8 lead byte — must survive byte-exact (0xCE = 206, 0xB5 = 181).
+    let mut t = Text.with_capacity(2);
+    t.push_byte(206);
+    t.push_byte(181);
+    assert_eq(t.len(), 2);
+    assert_eq(t, Text.from("ε"));
+}
+
+@test
+fn regression_y_push_byte_split_then_ascii_suffix() {
+    // Continue past the completed sequence with ASCII — pins that the
+    // recovered text keeps accumulating correctly (release mode used to
+    // drop the pending lead byte and yield garbage here).
+    let mut t = Text.with_capacity(4);
+    t.push_byte(206);   // 'ε' lead
+    t.push_byte(181);   // 'ε' continuation
+    t.push_byte(95);    // '_'
+    t.push_byte(109);   // 'm'
+    assert_eq(t, Text.from("ε_m"));
+}
+
+@test
+fn regression_y_lowercase_greek_sso_size() {
+    // <= 6-byte result exercises the small-string repack path.
+    let s = Text.from("Ω");
+    assert_eq(s.to_lowercase(), Text.from("ω"));
+}
+
+@test
+fn regression_y_uppercase_greek_sso_size() {
+    let s = Text.from("ω");
+    assert_eq(s.to_uppercase(), Text.from("Ω"));
+}
+
+@test
+fn regression_y_lowercase_greek_heap_size() {
+    // 12-byte result exercises the heap-text path end-to-end.
+    let s = Text.from("ΑΒΓΔΕΖ");
+    assert_eq(s.to_lowercase(), Text.from("αβγδεζ"));
+}
+
+@test
+fn regression_y_case_roundtrip_mixed_ascii_greek() {
+    // Mixed ASCII fast path + multibyte slow path in one walk.
+    let s = Text.from("aΩb");
+    assert_eq(s.to_lowercase(), Text.from("aωb"));
+    assert_eq(s.to_uppercase(), Text.from("AΩB"));
+}
+
+@test
+fn regression_y_slice_on_multibyte_boundaries() {
+    // slice() copies its byte range via push_byte — the first pushed
+    // byte of "ω" (0xCF) is a mid-sequence state.
+    let s = Text.from("ω+1");
+    assert_eq(s.slice(0, 2), Text.from("ω"));
+    assert_eq(s.slice(2, 4), Text.from("+1"));
+}
+
+@test
+fn regression_y_concat_greek_prefix() {
+    // concat() copies self's bytes first — a Greek-prefixed left
+    // operand splits mid-char on the very first push_byte (this is the
+    // exact shape the framework_hygiene R2 message builder hit).
+    let a = Text.from("ε");
+    let joined = a.concat("_math");
+    assert_eq(joined, Text.from("ε_math"));
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 

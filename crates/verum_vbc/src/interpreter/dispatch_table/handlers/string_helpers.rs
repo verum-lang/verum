@@ -164,6 +164,131 @@ pub(super) fn alloc_string_value(
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
 
+/// Extracts the raw byte content of a Text value WITHOUT requiring the
+/// bytes to be valid UTF-8 — the byte-domain twin of [`extract_string`].
+///
+/// **Why this exists (SSO-UTF8-SPLIT-1)**: `Text.push_byte` builds
+/// multi-byte UTF-8 sequences ONE BYTE AT A TIME — the stdlib
+/// `to_lowercase` / `to_uppercase` / `slice` / `concat` bodies all lower
+/// to per-byte `push_byte` loops — so *between* two `push_byte` calls the
+/// receiver legitimately holds a PARTIAL code point (e.g. just `0xCE`,
+/// the lead byte of `'Ω'`). Routing that intermediate state through
+/// `extract_string` either panics (`SmallString::as_str` debug assert,
+/// value.rs:1516) or silently loses it (release `unwrap_or("")` /
+/// `String::from_utf8_lossy`). Byte-level Text mutators must round-trip
+/// through this + [`alloc_text_bytes_value`] instead.
+///
+/// Classification and auto-deref mirror `extract_string` branch-for-
+/// branch; non-Text-shaped values delegate to `extract_string`'s debug
+/// formats so behavior is identical outside the byte-transparent shapes.
+pub(super) fn extract_text_bytes(value: &Value, state: &InterpreterState) -> Vec<u8> {
+    use heap::OBJECT_HEADER_SIZE;
+
+    // Auto-deref CBGR register-refs and ThinRefs — same discipline as
+    // `extract_string`.
+    let mut v = *value;
+    if is_cbgr_ref(&v) {
+        let (abs_index, _gen) = decode_cbgr_ref(v.as_i64());
+        v = state.registers.get_absolute(abs_index);
+    }
+    if v.is_thin_ref() {
+        let tr = v.as_thin_ref();
+        if !tr.ptr.is_null() {
+            v = unsafe { *(tr.ptr as *const Value) };
+        }
+    }
+
+    if v.is_small_string() {
+        // `as_bytes` (NOT `as_str`) — must tolerate a partial code point.
+        return v.as_small_string().as_bytes().to_vec();
+    }
+    if v.is_fat_ref() {
+        let fr = v.as_fat_ref();
+        let p = fr.ptr();
+        let len = fr.len() as usize;
+        if p.is_null() || len == 0 || len > 1_000_000 {
+            return Vec::new();
+        }
+        return unsafe { std::slice::from_raw_parts(p, len) }.to_vec();
+    }
+    if v.is_ptr() {
+        let ptr = v.as_ptr::<u8>();
+        if ptr.is_null() {
+            return Vec::new();
+        }
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+        if header.type_id == crate::types::TypeId::TEXT
+            || header.type_id == crate::types::TypeId(0x0001)
+        {
+            let data_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) };
+            // Builder Text `{Value(ptr), Value(len), Value(cap)}` — 24-byte payload.
+            if header.size as usize == 24 {
+                let field0 = unsafe { *(data_ptr as *const Value) };
+                let field1 = unsafe { *((data_ptr as *const Value).add(1)) };
+                if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
+                    let b_ptr = if field0.is_nil() {
+                        std::ptr::null()
+                    } else {
+                        field0.as_ptr::<u8>() as *const u8
+                    };
+                    let b_len = field1.as_i64() as usize;
+                    if !b_ptr.is_null() && b_len > 0 && b_len <= 1_000_000 {
+                        return unsafe { std::slice::from_raw_parts(b_ptr, b_len) }.to_vec();
+                    }
+                    return Vec::new();
+                }
+            }
+            // Flat heap-string `[len: u64][bytes…]`.
+            let len_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) as *const u64 };
+            let len = unsafe { *len_ptr } as usize;
+            if len > 0 && len <= 1_000_000 {
+                let bytes_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE + 8) };
+                return unsafe { std::slice::from_raw_parts(bytes_ptr, len) }.to_vec();
+            }
+            if len == 0 {
+                return Vec::new();
+            }
+            // Oversize-len recovery path — delegate (matches extract_string).
+        }
+    }
+    extract_string(&v, state).into_bytes()
+}
+
+/// Allocates a Text value from raw bytes, preserving byte content even
+/// when the bytes are not (yet) valid UTF-8.
+///
+/// Valid UTF-8 takes the canonical [`alloc_string_value`] path (small-
+/// string optimization for <= 6 bytes, heap otherwise) — representation
+/// for complete strings is unchanged. Byte strings that are NOT valid
+/// UTF-8 (a `push_byte` sequence mid-code-point) are ALWAYS heap-
+/// allocated: the `[len: u64][bytes…]` heap blob is byte-transparent,
+/// whereas the NaN-boxed SmallString requires valid UTF-8
+/// (`SmallString::as_str` asserts it in debug builds). This preserves
+/// the invariant that every SSO small-string Value contains valid UTF-8.
+pub(super) fn alloc_text_bytes_value(
+    state: &mut InterpreterState,
+    bytes: &[u8],
+) -> InterpreterResult<Value> {
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return alloc_string_value(state, s);
+    }
+    let len = bytes.len();
+    let alloc_size = 8 + len;
+    let obj = state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?;
+    state.record_allocation();
+    let base_ptr = obj.as_ptr() as *mut u8;
+    // SAFETY: obj was just allocated with size 8 + len. Writing the length
+    // as u64 at data_offset, then copying `len` bytes of raw data after it.
+    unsafe {
+        let data_offset = heap::OBJECT_HEADER_SIZE;
+        let len_ptr = base_ptr.add(data_offset) as *mut u64;
+        *len_ptr = len as u64;
+        let bytes_ptr = base_ptr.add(data_offset + 8);
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
+    }
+    Ok(Value::from_ptr(base_ptr))
+}
+
 /// Check if a Value is a heap-allocated string (pointer to object with TEXT type id or concat layout).
 pub(super) fn is_heap_string(v: &Value) -> bool {
     // Small strings are NOT heap strings (they're inline NaN-boxed)

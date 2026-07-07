@@ -456,7 +456,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
         // Call dispatch with self as arg[0].
         "push_byte" | "push_str" | "push" | "push_char" if arg_count == 2 => {
             use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
-            use super::string_helpers::extract_string;
+            use super::string_helpers::{alloc_text_bytes_value, extract_string, extract_text_bytes};
             let self_raw = state
                 .registers
                 .get(caller_base, Reg(args_start_reg));
@@ -481,39 +481,56 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             };
             let self_val = deref(self_raw, state);
             let arg_val = deref(arg_raw, state);
-            let mut current_text = extract_string(&self_val, state);
+            // BYTE-domain round trip (SSO-UTF8-SPLIT-1): `push_byte`
+            // builds multi-byte UTF-8 sequences one byte at a time
+            // (stdlib `to_lowercase` / `to_uppercase` / `slice` /
+            // `concat` bodies all lower to per-byte `push_byte`
+            // loops), so between two calls the receiver legitimately
+            // holds a PARTIAL code point (e.g. just `0xCE`, the lead
+            // byte of `'Ω'`). The previous String round trip
+            // (`extract_string` → `as_mut_vec().push` →
+            // `alloc_string_value`) SSO-packed that invalid
+            // intermediate into the NaN box — `SmallString::as_str`
+            // panics on it in debug and silently drops the pending
+            // bytes in release (mojibake). Accumulate in `Vec<u8>` and
+            // let `alloc_text_bytes_value` widen not-yet-valid
+            // intermediates to the byte-transparent heap blob.
+            let mut current_bytes = extract_text_bytes(&self_val, state);
             match method {
                 "push_byte" => {
                     if !arg_val.is_int() {
                         return Ok(None);
                     }
                     let byte = (arg_val.as_i64() as u32 & 0xFF) as u8;
-                    // SAFETY: caller-responsible UTF-8 validity (mirrors
-                    // stdlib `Text.push_byte` contract).
-                    unsafe { current_text.as_mut_vec().push(byte); }
+                    // Raw byte append — caller-responsible EVENTUAL
+                    // UTF-8 validity (mirrors stdlib `Text.push_byte`
+                    // contract); mid-sequence states stay byte-exact.
+                    current_bytes.push(byte);
                 }
                 "push_str" => {
                     let s = extract_string(&arg_val, state);
-                    current_text.push_str(&s);
+                    current_bytes.extend_from_slice(s.as_bytes());
                 }
                 "push" | "push_char" => {
                     if arg_val.is_int() {
                         if let Some(ch) = char::from_u32(arg_val.as_i64() as u32) {
-                            current_text.push(ch);
+                            let mut buf = [0u8; 4];
+                            current_bytes
+                                .extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
                         } else {
                             return Ok(None);
                         }
                     } else if arg_val.is_small_string() {
-                        // Single-char Text arg → append as substring.
-                        let s = extract_string(&arg_val, state);
-                        current_text.push_str(&s);
+                        // Single-char Text arg → append its bytes.
+                        current_bytes
+                            .extend_from_slice(arg_val.as_small_string().as_bytes());
                     } else {
                         return Ok(None);
                     }
                 }
                 _ => unreachable!(),
             }
-            let new_value = alloc_string_value(state, &current_text)?;
+            let new_value = alloc_text_bytes_value(state, &current_bytes)?;
             // Writeback via CBGR ref to the caller-frame slot — same
             // discipline as `handle_call_method`'s push_str intercept.
             // Without this, the mutation is local to the intercept and

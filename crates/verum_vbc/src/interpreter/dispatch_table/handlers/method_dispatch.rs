@@ -25,7 +25,10 @@ use verum_common::well_known_types::WellKnownType as WKT;
 use super::bytecode_io::{read_reg, read_reg_range, read_varint};
 
 // Re-import string helper functions
-use super::string_helpers::{alloc_string_value, extract_string, is_heap_string};
+use super::string_helpers::{
+    alloc_string_value, alloc_text_bytes_value, extract_string, extract_text_bytes,
+    is_heap_string,
+};
 
 // Re-import CBGR helper functions
 use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, is_cbgr_ref_mutable, resolve_arg_value};
@@ -573,12 +576,25 @@ pub(in super::super) fn handle_call_method(
         || bare_method_name == "push_byte")
         && (dispatch_receiver.is_small_string() || is_heap_string(&dispatch_receiver))
     {
-        let mut current_text = extract_string(&dispatch_receiver, state);
+        // BYTE-domain round trip (SSO-UTF8-SPLIT-1): `push_byte` builds
+        // multi-byte UTF-8 sequences one byte at a time (stdlib
+        // `to_lowercase` / `to_uppercase` / `slice` / `concat` bodies
+        // all lower to per-byte `push_byte` loops), so between two
+        // calls the receiver legitimately holds a PARTIAL code point
+        // (e.g. just `0xCE`, the lead byte of `'Ω'`). The previous
+        // String round trip (`extract_string` → `as_mut_vec().push` →
+        // `alloc_string_value`) SSO-packed that invalid intermediate
+        // into the NaN box — `SmallString::as_str` panics on it in
+        // debug builds and silently drops the pending bytes in release
+        // (mojibake). Accumulate in `Vec<u8>` and let
+        // `alloc_text_bytes_value` widen not-yet-valid intermediates
+        // to the byte-transparent heap blob.
+        let mut current_bytes = extract_text_bytes(&dispatch_receiver, state);
         let caller_base = state.reg_base();
         if std::env::var("VERUM_TRACE_PUSH_STR").is_ok() {
             eprintln!(
-                "[push_str trace] INTERCEPT FIRED, current_text.len = {}",
-                current_text.len(),
+                "[push_str trace] INTERCEPT FIRED, current_bytes.len = {}",
+                current_bytes.len(),
             );
         }
         let arg_val_raw = state.registers.get(caller_base, Reg(args.start.0));
@@ -592,7 +608,7 @@ pub(in super::super) fn handle_call_method(
         match bare_method_name.as_str() {
             "push_str" => {
                 let s = extract_string(&arg_val, state);
-                current_text.push_str(&s);
+                current_bytes.extend_from_slice(s.as_bytes());
             }
             "push" | "push_char" => {
                 // Char is stored as Int (Unicode codepoint).  Accept
@@ -600,11 +616,11 @@ pub(in super::super) fn handle_call_method(
                 // Text from a call site like `s.push("a")`).
                 if arg_val.is_int() {
                     if let Some(ch) = char::from_u32(arg_val.as_i64() as u32) {
-                        current_text.push(ch);
+                        let mut buf = [0u8; 4];
+                        current_bytes.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
                     }
                 } else if arg_val.is_small_string() || is_heap_string(&arg_val) {
-                    let s = extract_string(&arg_val, state);
-                    current_text.push_str(&s);
+                    current_bytes.extend_from_slice(&extract_text_bytes(&arg_val, state));
                 }
             }
             "push_byte" => {
@@ -617,24 +633,21 @@ pub(in super::super) fn handle_call_method(
                 // `Text.with_capacity()`. The body's
                 // `self.ptr = new_ptr` then SetF-null-derefs through
                 // the inline representation. Intercept here so the
-                // append happens against the Rust-side String the
-                // intercept layer already uses, then write back via
-                // the CBGR-ref writeback path below. Bytes outside
-                // ASCII are appended verbatim — caller is responsible
-                // for UTF-8 validity (mirrors the stdlib contract).
+                // append happens against the byte buffer, then write
+                // back via the CBGR-ref writeback path below. Bytes
+                // outside ASCII are appended verbatim — caller is
+                // responsible for EVENTUAL UTF-8 validity (mirrors the
+                // stdlib contract); mid-sequence states stay byte-
+                // exact via the heap-blob widening in
+                // `alloc_text_bytes_value`.
                 if arg_val.is_int() {
                     let byte = (arg_val.as_i64() as i32) as u8;
-                    // SAFETY: We accept the byte as-is; the caller's
-                    // contract is that the resulting byte sequence
-                    // remains valid UTF-8 (same as stdlib push_byte).
-                    unsafe {
-                        current_text.as_mut_vec().push(byte);
-                    }
+                    current_bytes.push(byte);
                 }
             }
             _ => unreachable!(),
         }
-        let new_value = alloc_string_value(state, &current_text)?;
+        let new_value = alloc_text_bytes_value(state, &current_bytes)?;
         // Write back to receiver_reg, following CBGR ref to the
         // caller's frame slot if present.
         if is_cbgr_ref(&receiver) {
@@ -643,7 +656,7 @@ pub(in super::super) fn handle_call_method(
                 eprintln!(
                     "[push_str trace] WRITEBACK via CBGR ref, abs_index={}, new_text.len={}",
                     abs_index,
-                    current_text.len(),
+                    current_bytes.len(),
                 );
             }
             state.registers.set_absolute(abs_index, new_value);
@@ -653,7 +666,7 @@ pub(in super::super) fn handle_call_method(
                     "[push_str trace] WRITEBACK via caller_base+receiver_reg, base={} reg={} new_text.len={}",
                     caller_base,
                     receiver_reg.0,
-                    current_text.len(),
+                    current_bytes.len(),
                 );
             }
             state.registers.set(caller_base, receiver_reg, new_value);
