@@ -16549,6 +16549,23 @@ impl VbcCodegen {
                 // merge_archive_function_bodies disambiguates
                 // archive-id→codegen-id by (name + kind), routing each module's
                 // references to its own descriptor.
+                // If a descriptor with THIS (name, kind) already exists
+                // (possibly a PRIOR re-home under a fresh id), first-wins onto
+                // it. This collapses N same-(name,kind) registrations — e.g.
+                // two distinct `RetryPolicy` records from different modules —
+                // onto a single id. Without this, each same-kind registration
+                // compares only against the name's PRIMARY id (held by a
+                // different-kind sibling) and re-homes to its OWN fresh id,
+                // splitting one (name,kind) across several ids and tripping the
+                // (name+kind)→id invariant fatally in the finalize path.
+                let same_name_kind_exists = self.types.iter().any(|d| {
+                    d.kind == ty.kind
+                        && self.ctx.strings.get(d.name.0 as usize).map(|s| s.as_str())
+                            == Some(name_str.as_str())
+                });
+                if same_name_kind_exists {
+                    return;
+                }
                 let resident_info = self
                     .types
                     .iter()
