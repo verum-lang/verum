@@ -33450,8 +33450,12 @@ impl VbcCodegen {
         // Step 2: allocate `buf` = "" (empty small-string).  The
         // user-side `Formatter.write_str` mutates this buffer via
         // `self.buffer.push_str(s)` which routes through the runtime
-        // Text-push intercept; small-string → heap-string promotion
-        // is handled transparently by that intercept.
+        // Text-push intercept.  (A `Call Text.new()` heap-seed was
+        // tried for the AOT Display leg and REVERTED: bare "Text.new"
+        // resolution inside stdlib-merged suite contexts mis-bound —
+        // the #17 bare-name class — regressing 42 interp Display-law
+        // tests.  The AOT Display extraction gap is parked in task
+        // #21 with the full evidence map.)
         let buf_reg = self.ctx.alloc_temp();
         let empty_const = self.ctx.add_const_string("");
         self.ctx.emit(Instruction::LoadK {
@@ -33461,7 +33465,10 @@ impl VbcCodegen {
 
         // Step 3: formatter = Formatter.new(&mut buf).  `Call` requires
         // args in a contiguous fresh-allocated block; we put the
-        // `&mut buf` CBGR ref at slot 0.
+        // `&mut buf` CBGR ref at slot 0.  (A direct-object pass was
+        // tried and REVERTED: the interp's mutation path NEEDS the ref
+        // — both tiers went empty.  The AOT-side fix is in the RefMut
+        // LOWERING: heap-ptr pass-through.)
         let new_arg_block = self.ctx.registers.alloc_fresh();
         self.ctx.emit(Instruction::RefMut {
             dst: new_arg_block,

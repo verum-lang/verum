@@ -1999,6 +1999,11 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         // (observed: Text handle cloned with a record's size → OOB
         // write in memmove).
         self.obj_alloc_sizes.remove(&reg);
+        // Element stride is a per-VALUE fact; a redefined register must
+        // not inherit the previous value's stride (temp reuse turned the
+        // Text.ptr stride-1 marks into under-advancing walks on
+        // unrelated later objects — 24 scattered AOT regressions).
+        self.element_stride_registers.remove(&reg);
         self.string_registers.remove(&reg);
         self.text_registers.remove(&reg);
         self.bool_registers.remove(&reg);

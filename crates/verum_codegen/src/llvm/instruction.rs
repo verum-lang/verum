@@ -2986,22 +2986,40 @@ pub fn lower_instruction<'ctx>(
                     RuntimeLowering::OBJECT_HEADER_SIZE + (*field_count as u64) * 8,
                 );
 
-                // Store type_id in object header at offset 0 for protocol dispatch.
-                // Only store for types that have protocol implementations (to avoid
-                // breaking code that expects zeroed headers for non-protocol types).
-                let has_protocols = ctx
-                    .vbc_module()
-                    .map(|vbc| {
-                        vbc.types
-                            .iter()
-                            .any(|td| td.id.0 == *type_id && !td.protocols.is_empty())
-                    })
-                    .unwrap_or(false);
-                if has_protocols {
+                // AOT-XMODULE-VALUESEM-1: stamp the header UNCONDITIONALLY —
+                // type_id (u32 @0, interp ObjectHeader layout) + size
+                // (u32 @12). Pre-fix only protocol-bearing types got a
+                // (whole-i64) stamp and everything else kept a zeroed
+                // header, which made records and variants runtime-
+                // indistinguishable: `verum_generic_eq` had no
+                // structural path, so record `==` fell into the Text
+                // byte-compare (false) and variant `==` hit the
+                // `first==0 -> ret_true` early-out (true regardless of
+                // tag). The stamp gives the eq runtime (and future
+                // introspection) a truthful header; the PACK stamp
+                // (TUPLE 521) established the discipline.
+                {
+                    let i32_type = ctx.types().context().i32_type();
+                    let i8_type = ctx.types().i8_type();
                     let i64_type = ctx.types().i64_type();
-                    let type_id_val = i64_type.const_int(*type_id as u64, false);
                     ctx.builder()
-                        .build_store(obj_ptr, type_id_val)
+                        .build_store(obj_ptr, i32_type.const_int(*type_id as u64, false))
+                        .or_llvm_err()?;
+                    // SAFETY: in-bounds GEP within the 24-byte header.
+                    let size_slot = unsafe {
+                        ctx.builder()
+                            .build_in_bounds_gep(
+                                i8_type,
+                                obj_ptr,
+                                &[i64_type.const_int(12, false)],
+                                "hdr_size_slot",
+                            )
+                            .or_llvm_err()?
+                    };
+                    let total =
+                        RuntimeLowering::OBJECT_HEADER_SIZE + (*field_count as u64) * 8;
+                    ctx.builder()
+                        .build_store(size_slot, i32_type.const_int(total, false))
                         .or_llvm_err()?;
                 }
 
@@ -3608,6 +3626,39 @@ pub fn lower_instruction<'ctx>(
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let variant_ptr =
                 runtime.lower_make_variant(ctx.builder(), ctx.get_module(), *tag, *field_count)?;
+            // AOT-XMODULE-VALUESEM-1: stamp type_id (u32 @0) + size
+            // (u32 @12) into the variant header — same discipline as
+            // `New`. Variants had fully zeroed headers, so
+            // `verum_generic_eq`'s `first==0` early-out equated
+            // DISTINCT enum variants before ever reading the tag.
+            {
+                let i32_type = ctx.types().context().i32_type();
+                let i8_type = ctx.types().i8_type();
+                let i64_type = ctx.types().i64_type();
+                ctx.builder()
+                    .build_store(
+                        variant_ptr,
+                        i32_type.const_int(*type_id as u64, false),
+                    )
+                    .or_llvm_err()?;
+                // SAFETY: in-bounds GEP within the 24-byte header.
+                let size_slot = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(
+                            i8_type,
+                            variant_ptr,
+                            &[i64_type.const_int(12, false)],
+                            "vhdr_size_slot",
+                        )
+                        .or_llvm_err()?
+                };
+                let total = RuntimeLowering::OBJECT_HEADER_SIZE
+                    + 8
+                    + (*field_count as u64) * 8;
+                ctx.builder()
+                    .build_store(size_slot, i32_type.const_int(total, false))
+                    .or_llvm_err()?;
+            }
             ctx.set_register(dst.0, variant_ptr.into());
             ctx.mark_variant_register(dst.0);
             // CLONE-AOT-ALIAS-1: static size = header + tag word + fields.
@@ -33024,7 +33075,13 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
             || ctx.is_inline_struct_register(src.0)
             || ctx.get_obj_register_type(src.0).is_some()
             || ctx.get_maybe_inner_type(src.0).is_some()
-            || ctx.is_variant_register(src.0);
+            || ctx.is_variant_register(src.0)
+            // Sticky VBC-authored type hints (register_type_hints
+            // channel): a hinted register holds a heap object by
+            // construction — passthrough, never the alloca (#21
+            // Display leg: the f-string arm hints its buf/formatter
+            // temps).
+            || ctx.sticky_type_hint(src.0).is_some();
 
         if !is_heap_type {
             // Check for GetE element pointer first — if this register was
@@ -33108,7 +33165,13 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
             || ctx.is_inline_struct_register(src.0)
             || ctx.get_obj_register_type(src.0).is_some()
             || ctx.get_maybe_inner_type(src.0).is_some()
-            || ctx.is_variant_register(src.0);
+            || ctx.is_variant_register(src.0)
+            // Sticky VBC-authored type hints (register_type_hints
+            // channel): a hinted register holds a heap object by
+            // construction — passthrough, never the alloca (#21
+            // Display leg: the f-string arm hints its buf/formatter
+            // temps).
+            || ctx.sticky_type_hint(src.0).is_some();
 
         let src_val = ctx.get_register(src.0)?;
         let ptr = if !is_heap_type {
@@ -33220,7 +33283,13 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
             || ctx.is_inline_struct_register(src.0)
             || ctx.get_obj_register_type(src.0).is_some()
             || ctx.get_maybe_inner_type(src.0).is_some()
-            || ctx.is_variant_register(src.0);
+            || ctx.is_variant_register(src.0)
+            // Sticky VBC-authored type hints (register_type_hints
+            // channel): a hinted register holds a heap object by
+            // construction — passthrough, never the alloca (#21
+            // Display leg: the f-string arm hints its buf/formatter
+            // temps).
+            || ctx.sticky_type_hint(src.0).is_some();
 
         if !is_heap_type {
             if let Some(alloca_ptr) = ctx.get_alloca_ptr(src.0) {
@@ -33253,7 +33322,13 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
             || ctx.is_inline_struct_register(src.0)
             || ctx.get_obj_register_type(src.0).is_some()
             || ctx.get_maybe_inner_type(src.0).is_some()
-            || ctx.is_variant_register(src.0);
+            || ctx.is_variant_register(src.0)
+            // Sticky VBC-authored type hints (register_type_hints
+            // channel): a hinted register holds a heap object by
+            // construction — passthrough, never the alloca (#21
+            // Display leg: the f-string arm hints its buf/formatter
+            // temps).
+            || ctx.sticky_type_hint(src.0).is_some();
 
         let src_val = ctx.get_register(src.0)?;
         let ptr = if !is_heap_type {
