@@ -318,6 +318,9 @@ implement<T> Heap<T> {
 
     /// The caller is responsible for eventually freeing the memory
     /// by calling `from_raw` and then dropping it or calling `into_inner`.
+    // NOTE: `ptr` is a `&unsafe T` MOVED into the return — the codegen must
+    // not DropRef it at scope exit (that would read the pointee's header and
+    // panic); see the by-value-return skip in scan_expr_as_return.
     public fn into_raw(self) -> &unsafe T {
         let ptr = self.ptr;
         forget(self);

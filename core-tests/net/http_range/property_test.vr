@@ -1,0 +1,312 @@
+// =============================================================================
+// core-tests/net/http_range/property_test.vr
+// =============================================================================
+//
+// Laws for the RFC 7233/9110 byte-range pipeline:
+// parse_range_header → resolve_and_merge → encode_content_range.
+//
+//   L1  parse shapes: Closed / Prefix / Suffix / multi-spec
+//   L2  RFC 9110 §14.1.2 resolution fixtures (total = 10000)
+//   L3  merge algebra: overlap + adjacency coalesce; disjoint sort
+//   L4  clamping + satisfiability lattice (end clamp, start-beyond
+//       drop, all-beyond → 416, empty resource → 416)
+//   L5  merged output is a fixpoint of resolve_and_merge
+//   L6  output invariants: sorted, pairwise gap ≥ 2, end < total
+//   L7  Content-Range builders byte-exact
+//   L8  CVE-2011-3192 cap: 256 specs pass, 257 rejected
+// =============================================================================
+
+mount core.net.http_range.{
+    RangeSpec, RangeSet, ResolvedRange, RangeError,
+    parse_range_header, resolve_and_merge,
+    encode_content_range, encode_unsatisfiable, MAX_RANGE_SPECS,
+};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.List;
+
+// =============================================================================
+// Section 1: L1 parse shapes
+// =============================================================================
+
+@test
+fn law_parse_closed_spec() {
+    let rs = parse_range_header(&"bytes=0-499".clone()).unwrap();
+    assert_eq(rs.specs.len(), 1);
+    match rs.specs[0] {
+        RangeSpec.Closed { start, end } => {
+            assert(start == 0_u64);
+            assert(end == 499_u64);
+        },
+        RangeSpec.Prefix { start: _ } => assert(false),
+        RangeSpec.Suffix { length: _ } => assert(false),
+    }
+}
+
+@test
+fn law_parse_prefix_spec() {
+    let rs = parse_range_header(&"bytes=9500-".clone()).unwrap();
+    assert_eq(rs.specs.len(), 1);
+    match rs.specs[0] {
+        RangeSpec.Prefix { start } => assert(start == 9500_u64),
+        RangeSpec.Closed { start: _, end: _ } => assert(false),
+        RangeSpec.Suffix { length: _ } => assert(false),
+    }
+}
+
+@test
+fn law_parse_suffix_spec() {
+    let rs = parse_range_header(&"bytes=-500".clone()).unwrap();
+    assert_eq(rs.specs.len(), 1);
+    match rs.specs[0] {
+        RangeSpec.Suffix { length } => assert(length == 500_u64),
+        RangeSpec.Closed { start: _, end: _ } => assert(false),
+        RangeSpec.Prefix { start: _ } => assert(false),
+    }
+}
+
+@test
+fn law_parse_multi_spec_preserves_order_and_count() {
+    let rs = parse_range_header(&"bytes=500-999, 1000-1499".clone()).unwrap();
+    assert_eq(rs.specs.len(), 2);
+}
+
+@test
+fn law_parse_wrong_unit_is_malformed() {
+    match parse_range_header(&"items=0-499".clone()) {
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert(e is RangeError.Malformed),
+    }
+}
+
+// =============================================================================
+// Section 2: L2 RFC 9110 resolution fixtures (total = 10000)
+// =============================================================================
+
+@test
+fn law_resolve_closed_range() {
+    let rs = parse_range_header(&"bytes=0-499".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 10000_u64).unwrap();
+    assert_eq(merged.len(), 1);
+    assert(merged[0].start == 0_u64);
+    assert(merged[0].end == 499_u64);
+}
+
+@test
+fn law_resolve_suffix_takes_final_bytes() {
+    let rs = parse_range_header(&"bytes=-500".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 10000_u64).unwrap();
+    assert_eq(merged.len(), 1);
+    assert(merged[0].start == 9500_u64);
+    assert(merged[0].end == 9999_u64);
+}
+
+@test
+fn law_resolve_prefix_runs_to_eof() {
+    let rs = parse_range_header(&"bytes=9500-".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 10000_u64).unwrap();
+    assert_eq(merged.len(), 1);
+    assert(merged[0].start == 9500_u64);
+    assert(merged[0].end == 9999_u64);
+}
+
+@test
+fn law_resolve_first_and_last_byte() {
+    let rs = parse_range_header(&"bytes=0-0,-1".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 10000_u64).unwrap();
+    assert_eq(merged.len(), 2);
+    assert(merged[0].start == 0_u64);
+    assert(merged[0].end == 0_u64);
+    assert(merged[1].start == 9999_u64);
+    assert(merged[1].end == 9999_u64);
+}
+
+// =============================================================================
+// Section 3: L3 merge algebra
+// =============================================================================
+
+@test
+fn law_adjacent_ranges_coalesce() {
+    let rs = parse_range_header(&"bytes=0-499,500-999".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 10000_u64).unwrap();
+    assert_eq(merged.len(), 1);
+    assert(merged[0].start == 0_u64);
+    assert(merged[0].end == 999_u64);
+}
+
+@test
+fn law_overlapping_ranges_coalesce() {
+    let rs = parse_range_header(&"bytes=0-600,400-999".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 10000_u64).unwrap();
+    assert_eq(merged.len(), 1);
+    assert(merged[0].start == 0_u64);
+    assert(merged[0].end == 999_u64);
+}
+
+@test
+fn law_disjoint_ranges_sorted_not_merged() {
+    let rs = parse_range_header(&"bytes=500-699,0-99".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 10000_u64).unwrap();
+    assert_eq(merged.len(), 2);
+    assert(merged[0].start == 0_u64);
+    assert(merged[0].end == 99_u64);
+    assert(merged[1].start == 500_u64);
+    assert(merged[1].end == 699_u64);
+}
+
+// =============================================================================
+// Section 4: L4 clamping + satisfiability lattice
+// =============================================================================
+
+@test
+fn law_end_clamps_to_total() {
+    let rs = parse_range_header(&"bytes=0-99999".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 100_u64).unwrap();
+    assert_eq(merged.len(), 1);
+    assert(merged[0].start == 0_u64);
+    assert(merged[0].end == 99_u64);
+}
+
+@test
+fn law_start_beyond_total_dropped_but_valid_sibling_kept() {
+    let rs = parse_range_header(&"bytes=500-599,0-9".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 100_u64).unwrap();
+    assert_eq(merged.len(), 1);
+    assert(merged[0].start == 0_u64);
+    assert(merged[0].end == 9_u64);
+}
+
+@test
+fn law_all_specs_beyond_total_is_unsatisfiable() {
+    let rs = parse_range_header(&"bytes=500-599,700-".clone()).unwrap();
+    match resolve_and_merge(&rs, 100_u64) {
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert(e == RangeError.UnsatisfiableRange),
+    }
+}
+
+@test
+fn law_empty_resource_is_unsatisfiable() {
+    let rs = parse_range_header(&"bytes=0-0".clone()).unwrap();
+    match resolve_and_merge(&rs, 0_u64) {
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert(e == RangeError.UnsatisfiableRange),
+    }
+}
+
+@test
+fn law_suffix_longer_than_resource_takes_whole() {
+    let rs = parse_range_header(&"bytes=-500".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 100_u64).unwrap();
+    assert_eq(merged.len(), 1);
+    assert(merged[0].start == 0_u64);
+    assert(merged[0].end == 99_u64);
+}
+
+// =============================================================================
+// Section 5: L5 merged output is a fixpoint
+// =============================================================================
+
+@test
+fn law_merged_output_is_fixpoint() {
+    let rs = parse_range_header(&"bytes=700-800,0-100,90-200,801-810".clone()).unwrap();
+    let merged = resolve_and_merge(&rs, 10000_u64).unwrap();
+
+    // Re-feed the merged ranges as Closed specs.
+    let mut specs: List<RangeSpec> = [];
+    let mut i = 0;
+    while i < merged.len() {
+        specs.push(RangeSpec.Closed { start: merged[i].start, end: merged[i].end });
+        i = i + 1;
+    }
+    // NOTE: bind the RangeSet to a `let` before taking its reference —
+    // an INLINE `&RangeSet { specs }` aggregate literal as a call
+    // argument crashes the compiler (SIGSEGV at codegen; see
+    // regression_test.vr INLINE-AGG-REF-ARG). The law is unchanged.
+    let refed = RangeSet { specs: specs };
+    let again = resolve_and_merge(&refed, 10000_u64).unwrap();
+    assert_eq(again.len(), merged.len());
+    let mut j = 0;
+    while j < merged.len() {
+        assert(again[j].start == merged[j].start);
+        assert(again[j].end == merged[j].end);
+        j = j + 1;
+    }
+}
+
+// =============================================================================
+// Section 6: L6 output invariants on a messy input
+// =============================================================================
+
+@test
+fn law_output_sorted_gapped_bounded() {
+    let rs = parse_range_header(&"bytes=700-800,0-100,90-200,802-810,-5".clone()).unwrap();
+    let total = 1000_u64;
+    let merged = resolve_and_merge(&rs, total).unwrap();
+    let mut i = 0;
+    while i < merged.len() {
+        assert(merged[i].start <= merged[i].end);
+        assert(merged[i].end < total);
+        if i > 0 {
+            // Sorted and non-coalescible: gap of at least 2.
+            assert(merged[i].start > merged[i - 1].end + 1_u64);
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 7: L7 Content-Range builders
+// =============================================================================
+
+@test
+fn law_encode_content_range_exact() {
+    let r = ResolvedRange { start: 0_u64, end: 499_u64 };
+    assert_eq(encode_content_range(&r, 10000_u64).as_str(), "bytes 0-499/10000");
+}
+
+@test
+fn law_encode_unsatisfiable_exact() {
+    assert_eq(encode_unsatisfiable(10000_u64).as_str(), "bytes */10000");
+}
+
+// =============================================================================
+// Section 8: L8 CVE-2011-3192 spec-count cap
+// =============================================================================
+
+@test
+fn law_spec_count_cap_rejects_beyond_limit() {
+    // 257 one-byte ranges — one past MAX_RANGE_SPECS.
+    let mut header = "bytes=".clone();
+    let mut i = 0;
+    while i < 257 {
+        if i > 0 { header.push_str(","); }
+        header.push_str("0-0");
+        i = i + 1;
+    }
+    match parse_range_header(&header) {
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => {
+            assert(e == RangeError.TooManyRanges {
+                declared: 257, limit: MAX_RANGE_SPECS,
+            });
+        },
+    }
+}
+
+@test
+fn law_spec_count_at_limit_parses() {
+    let mut header = "bytes=".clone();
+    let mut i = 0;
+    while i < MAX_RANGE_SPECS {
+        if i > 0 { header.push_str(","); }
+        header.push_str("0-0");
+        i = i + 1;
+    }
+    let rs = parse_range_header(&header).unwrap();
+    assert_eq(rs.specs.len(), MAX_RANGE_SPECS);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

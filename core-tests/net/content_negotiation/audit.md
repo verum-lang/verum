@@ -57,7 +57,23 @@ Accept-Encoding unless it appears with `q=0`. This is
 implementation-side; tests pin the data-shape via
 `test_coded_preference_identity`.
 
-## 4. Action items landed in this branch
+## 4. Action items landed — net-conformance-20260705
+
+* `property_test.vr` (+14 laws) — RFC 7231 §5.3.2 `parse_accept`
+  q-parsing (default/explicit/wildcard) + single-offer
+  `select_best_coding` are GREEN.
+* **SELECTBESTMEDIA-CODEGEN pin** — `select_best_media` (and a
+  multi-offer `select_best_coding` case) crash VBC codegen at COMPILE
+  time; `score_media`'s tuple `(Float, Int)` return threaded through the
+  monomorphised body is the differentiator from the working single-offer
+  path. The select-best laws + the pre-existing CONNEG-1 regression tests
+  that call these functions are `@ignore`'d (compile-time crashers must
+  skip compilation).
+* NOTE: the full module has a PRE-EXISTING whole-file in-process interp
+  crash (each file passes in isolation; reproduces on `main`); AOT's
+  per-test subprocess isolation sidesteps it.
+
+## Legacy action items — original landing branch
 
 * `core-tests/net/content_negotiation/unit_test.vr` — 13 unit
   tests covering MediaRangeSpec construction across q=0/q=0.9/

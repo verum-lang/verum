@@ -46,14 +46,27 @@ pub(in super::super) fn handle_nei(
     Ok(DispatchResult::Continue)
 }
 
+/// Deref a scalar reference operand (CBGR register-ref, cbgr_mutable_ptr, or
+/// ThinRef) before an ordering comparison, so `x > 10` where `x: &Int`
+/// compares the POINTEE — not the reference's encoded bits (a CBGR negative
+/// sentinel or a raw heap address). The `==`/`!=` path already normalises
+/// refs via `deep_value_eq` (handle_eqi); ordering (`<`,`<=`,`>`,`>=`) needs
+/// the same. Root cause of `Maybe.filter(|x| x > 10)` misfiring: the
+/// predicate receives `&T` (from `Some(ref v)`), and `x > 10` compared the
+/// reference value instead of the pointee — deciding by address, not value.
+#[inline]
+fn ord_operand(state: &InterpreterState, reg: crate::instruction::Reg) -> Value {
+    super::cbgr_helpers::resolve_arg_value(state, state.get_reg(reg))
+}
+
 pub(in super::super) fn handle_lti(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result =
-        state.get_reg(a).as_integer_compatible() < state.get_reg(b).as_integer_compatible();
+    let result = ord_operand(state, a).as_integer_compatible()
+        < ord_operand(state, b).as_integer_compatible();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -64,8 +77,8 @@ pub(in super::super) fn handle_lei(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result =
-        state.get_reg(a).as_integer_compatible() <= state.get_reg(b).as_integer_compatible();
+    let result = ord_operand(state, a).as_integer_compatible()
+        <= ord_operand(state, b).as_integer_compatible();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -76,8 +89,8 @@ pub(in super::super) fn handle_gti(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result =
-        state.get_reg(a).as_integer_compatible() > state.get_reg(b).as_integer_compatible();
+    let result = ord_operand(state, a).as_integer_compatible()
+        > ord_operand(state, b).as_integer_compatible();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -122,7 +135,7 @@ pub(in super::super) fn handle_ltf(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() < state.get_reg(b).as_f64();
+    let result = ord_operand(state, a).as_f64() < ord_operand(state, b).as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -133,7 +146,7 @@ pub(in super::super) fn handle_lef(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() <= state.get_reg(b).as_f64();
+    let result = ord_operand(state, a).as_f64() <= ord_operand(state, b).as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -144,7 +157,7 @@ pub(in super::super) fn handle_gtf(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() > state.get_reg(b).as_f64();
+    let result = ord_operand(state, a).as_f64() > ord_operand(state, b).as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -155,7 +168,7 @@ pub(in super::super) fn handle_gef(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() >= state.get_reg(b).as_f64();
+    let result = ord_operand(state, a).as_f64() >= ord_operand(state, b).as_f64();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -187,6 +200,22 @@ pub(in super::super) fn handle_eqg(
             "[eqg-entry] protocol_id={} va.is_ptr={} vb.is_ptr={} va.bits=0x{:x} vb.bits=0x{:x}",
             protocol_id, va.is_ptr(), vb.is_ptr(), va.to_bits(), vb.to_bits(),
         );
+    }
+
+    // A byte/raw-element slice FatRef operand (`Text.as_bytes()`,
+    // reserved != 0) has no nominal `.eq` — its equality is purely
+    // structural over byte ranges. Route straight to the byte-slice-aware
+    // `deep_value_eq` (#20), bypassing the type-name dispatch below, which
+    // would otherwise resolve the OTHER operand's runtime type (e.g. the
+    // `U8` const-bytes object from `b"..."`) and dispatch that type's `.eq`
+    // — the reason `subtype.as_bytes() == b"*"` (select_best_media
+    // wildcard) was always false.
+    if (va.is_fat_ref() && va.as_fat_ref().reserved != 0)
+        || (vb.is_fat_ref() && vb.as_fat_ref().reserved != 0)
+    {
+        let result = deep_value_eq(&va, &vb, state);
+        state.set_reg(dst, Value::from_bool(result));
+        return Ok(DispatchResult::Continue);
     }
 
     // **Eq dispatch chain** (most-specific → most-general):
@@ -287,6 +316,20 @@ pub(in super::super) fn handle_eqg(
 /// comment in `handle_eqg`).
 fn runtime_type_name_for_eq(v: &Value, state: &InterpreterState) -> Option<String> {
     use crate::interpreter::heap;
+    // A byte/raw-element slice FatRef (`Text.as_bytes()`, `reserved != 0`)
+    // carries the FAT_REF_MARKER payload in `as_ptr::<u8>()`, which
+    // `ObjectHeader::ref_or_stub` would then dereference → SIGSEGV (reached
+    // by `Text.as_bytes() == <slice>` through EqG's protocol_id-0
+    // fallback). It has no nominal pointee type; return None so the
+    // operands fall through to `deep_value_eq`, which byte-compares slices.
+    // NOTE: kept narrow to byte/raw slices — NOT all non-`is_regular_ptr`
+    // values — because a value-ref ThinRef/FatRef to a custom-`Eq` object
+    // must still resolve its pointee type here so the custom `.eq`
+    // dispatches (broadening to `!is_regular_ptr` regressed custom-Ord/Eq
+    // by diverting reference comparisons to structural `deep_value_eq`).
+    if v.is_fat_ref() && v.as_fat_ref().reserved != 0 {
+        return None;
+    }
     if !v.is_ptr() || v.is_nil() {
         return None;
     }

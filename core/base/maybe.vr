@@ -60,6 +60,11 @@ implement<T> IntCoercible for Maybe<T> {}
 // `Deref` impl keep the existing identity-deref behaviour — the
 // dispatch is strictly per-type.  `None` panics with a clear
 // message, mirroring `Maybe.unwrap()`'s contract.
+// NOTE (TYPE-DEREF-4): this Deref impl applies to `*maybe_VALUE` only.
+// `*maybe_REFERENCE` (e.g. `*self` where self: &mut Maybe, as in
+// `replace`/`take`) is a BUILT-IN dereference yielding the Maybe itself —
+// the codegen skips this Deref path for reference operands (see
+// compile_unary's reference_bindings gate).
 implement<T> Deref for Maybe<T> {
     type Target = T;
 

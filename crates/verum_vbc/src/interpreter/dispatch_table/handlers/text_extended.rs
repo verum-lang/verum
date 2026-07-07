@@ -180,6 +180,36 @@ pub(in super::super) fn handle_text_extended(
                     text = unsafe { *(tr.ptr as *const Value) };
                 }
             }
+            // A `cbgr_mutable_ptr` interior reference — what `&list[i]`
+            // produces for a `List<Text>` element passed as a `&Text` fn
+            // argument — is a POINTER to the SLOT holding the Text. Without
+            // dereferencing it the handler read the slot address as a Text
+            // header and returned a zero-length byte view (`fn f(s:&Text){
+            // s.as_bytes() }` called `f(&offers[i])` gave len 0, breaking
+            // text_eq / split_media_type / select_best_media). Deref it —
+            // but ONLY when the result is itself a Text: a `cbgr_mutable_ptr`
+            // that already points AT the Text (some `&local` forms, cidr
+            // `set.add_text(&s)`) must NOT be over-dereferenced into its
+            // buffer pointer.
+            if text.is_ptr() && !text.is_nil() {
+                let addr = text.as_ptr::<u8>() as usize;
+                if state.cbgr_mutable_ptrs.contains(&addr) {
+                    let derefed = unsafe { *(addr as *const Value) };
+                    let yields_text = derefed.is_small_string()
+                        || derefed.is_fat_ref()
+                        || (derefed.is_ptr()
+                            && !derefed.is_nil()
+                            && matches!(
+                                unsafe {
+                                    heap::ObjectHeader::try_type_id(derefed.as_ptr::<u8>())
+                                },
+                                Some(TypeId::TEXT) | Some(TypeId(0x0001))
+                            ));
+                    if yields_text {
+                        text = derefed;
+                    }
+                }
+            }
 
             // FatRef representation: `Text.from_utf8_unchecked` (and every
             // struct-literal Text-builder path) materialises the Text value

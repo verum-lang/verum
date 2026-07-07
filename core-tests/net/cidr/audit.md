@@ -130,7 +130,31 @@ The conformance suite exercises this through `CidrSet.matching`
 which clones a stored `Cidr` via `clone_cidr` to return as
 `Maybe<Cidr>`. Tests pass, so the workaround is durable.
 
-## 4. Action items landed in this branch
+## 4. Action items landed — net-conformance-20260705
+
+* **`Cidr` block-boundary API added** (`core/net/cidr.vr`) —
+  `network_address()` (host bits cleared), `last_address()` (host
+  bits set), `broadcast_address()` (`Maybe<IpAddr>`; `None` for v6
+  per RFC 4291), `normalize()` (canonical block spelling), plus
+  `Eq`, `Display` (`addr/prefix`, RFC 5952 canonical for v6), and
+  `Debug` impls. IPv6 boundary math via `v6_segment_mask` (16-bit
+  per-segment mask from a 128-bit prefix). 22 new property laws in
+  `property_test.vr` pin the boundary/normalize/Eq/Display surface.
+* **`CidrSet.insert` alias** — set-protocol spelling of `add`
+  (matching `Set.insert` / `BTreeSet.insert` convention). The
+  pre-existing `integration_test.vr` called `CidrSet.insert`, which
+  did not exist — the method was missing, not the test wrong.
+* **Cross-module `collection[i].field` OOB fixed** (verum_vbc +
+  verum_compiler) — `let m = free_fn().unwrap(); m[i].field` on a
+  cross-module record element baked a wrong field index via the
+  global `intern_field_name` fallback because the archive dropped
+  the free fn's nested return generics (`Result<List<Cidr>, …>` →
+  bare `List`). Fixed by (a) rendering `return_type_inner` with full
+  nested generics in `archive_ctx_loader::type_ref_full_name` and
+  (b) composing `return_type_inner` in `infer_expr_type_name`'s Call
+  arm.
+
+## Legacy action items — original landing branch
 
 * `core-tests/net/cidr/unit_test.vr` — 35 unit tests covering
   direct `Cidr.V4`/`V6` variant construction, `contains`

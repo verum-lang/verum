@@ -3015,6 +3015,38 @@ impl TypeChecker {
                 }
             }
 
+            // Archive-only free-function fallback (PRELUDE-FREEFN close-out).
+            //
+            // The module could not be materialised as a `ModuleInfo` — e.g.
+            // a `mount core.prelude.*` glob replay of `format_debug` whose
+            // source module `core.text.format` is NOT itself mounted, so the
+            // lazy resolver never registers it. The `Some(module_info)` path
+            // above owns a metadata fallback (line ~2448) for exactly this
+            // shape; the None path had none, so the leaf silently no-op'd
+            // under `import_span == None` (glob/internal) — leaving
+            // `f"{x:?}"` → `format_debug` and every other concrete prelude
+            // free-fn mount UNBOUND at the use site. The descriptor still
+            // lives in `metadata.functions`; bind straight from it, trying
+            // the recorded module first and its re-export source second.
+            let bind_name = local_name.unwrap_or(item_name);
+            if self.ctx.env.lookup(&Text::from(bind_name)).is_none() {
+                if let Some(scheme) = self
+                    .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
+                {
+                    self.ctx.env.insert(bind_name, scheme);
+                    return Ok(());
+                }
+                if let Some(src) = self
+                    .reexport_source_module_for(module_path.as_str(), item_name)
+                    .filter(|s| s.as_str() != module_path.as_str())
+                    && let Some(scheme) =
+                        self.resolve_function_via_metadata_reexports(src.as_str(), item_name)
+                {
+                    self.ctx.env.insert(bind_name, scheme);
+                    return Ok(());
+                }
+            }
+
             // Module still not found - return error if span is provided (user import)
             if let Some(span) = import_span {
                 // Collect similar module names for suggestions

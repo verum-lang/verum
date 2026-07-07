@@ -1427,11 +1427,32 @@ impl VbcCodegen {
             return None;
         }
         let inner = &type_name[start + 1..end];
-        // For Map<K,V>, take the first type arg; for List<T>, take the only one
-        let first_arg = if let Some(comma) = inner.find(',') {
-            inner[..comma].trim()
-        } else {
-            inner.trim()
+        // For Map<K,V>, take the first type arg; for List<T>, take the only
+        // one. The separator is the first TOP-LEVEL comma — commas nested
+        // inside a tuple / generic / slice element (`List<(A, B)>`,
+        // `List<Map<K, V>>`, `List<[T; N]>`) belong to that element and must
+        // NOT split it. A naive `find(',')` returned `"(Text"` for
+        // `List<(Text, Text)>`, which then failed to round-trip through
+        // `split_tuple_type_name` and left `let (a, b) = xs[i]` bindings
+        // untyped (RECORD-LET-REF-TYPE-LOSS).
+        let first_arg = {
+            let mut depth = 0i32;
+            let mut split_at = None;
+            for (idx, ch) in inner.char_indices() {
+                match ch {
+                    '<' | '(' | '[' => depth += 1,
+                    '>' | ')' | ']' => depth -= 1,
+                    ',' if depth == 0 => {
+                        split_at = Some(idx);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            match split_at {
+                Some(comma) => inner[..comma].trim(),
+                None => inner.trim(),
+            }
         };
         if first_arg.is_empty() {
             None
@@ -4738,14 +4759,31 @@ impl VbcCodegen {
             TypeRef::Slice(inner) => {
                 self.type_ref_to_field_name(inner).map(|n| format!("[{}]", n))
             }
-            // Function / Rank2Function / Generic / Tuple / Array do
-            // not produce a nominal field-type name that downstream
-            // consumers (raw-pointer prefix check, name-equality for
-            // mount-trace) compare against.  Returning None here
-            // mirrors `register_record_fields`'s behaviour at
-            // `extract_type_name_from_ast`'s structural-shape return
-            // (which produces a name like `(Int, Int)` for tuples —
-            // not a registry key) by simply omitting the entry.
+            // Tuple `(A, B, …)` — render the canonical parenthesised form,
+            // matching `extract_type_name_from_ast`'s `Tuple` arm. This is
+            // the ARCHIVE-side mirror: a cross-module record field of type
+            // `List<(Text, Text)>` loaded from the archive must register as
+            // `"List<(Text, Text)>"`, not `"List<_>"` — otherwise
+            // `extract_element_type` yields `"_"` and a USER-code `let (a,
+            // b) = &mounted_rec.field[i]` destructure left the bound names
+            // untyped (the cross-module half of RECORD-LET-REF-TYPE-LOSS).
+            // NOTE: this does NOT unblock the stdlib `find_rel` — that is
+            // precompiled with its record type LOCAL and is blocked by a
+            // separate str→Text non-canonicalisation, not this. The
+            // parenthesised render round-trips through
+            // `split_tuple_type_name`, and its non-nominal shape is inert
+            // for the raw-pointer-prefix / name-equality consumers.
+            TypeRef::Tuple(elems) => {
+                let names: Vec<String> = elems
+                    .iter()
+                    .map(|e| self.type_ref_to_field_name(e).unwrap_or_else(|| "_".into()))
+                    .collect();
+                Some(format!("({})", names.join(", ")))
+            }
+            // Function / Rank2Function / Generic / Array do not produce a
+            // nominal field-type name that downstream consumers
+            // (raw-pointer prefix check, name-equality for mount-trace)
+            // compare against — omit the entry.
             _ => None,
         }
     }
@@ -5158,8 +5196,17 @@ impl VbcCodegen {
             }
         }
 
-        // Pass 2: bucket by name. Two entries with the same name should
-        // share the same id (alias case); different ids = a real bug.
+        // Pass 2: bucket by name, then flag by (name, KIND). Two entries
+        // with the same name AND the same kind must share one id; two ids
+        // for a single (name, kind) is a real split-of-one-type bug.
+        // Different KINDS under a shared simple name are DISTINCT types
+        // (TYPE-ID-COLLISION-4: blake3's `ChunkState` record vs
+        // http_parser's `ChunkState` sum — two private types that
+        // legitimately share a simple name) and correctly carry different
+        // ids, so they are NOT a violation. Aliases collapse onto their
+        // target's id (empty descriptor, never re-homed), so the historical
+        // "same name → same id (alias case)" expectation still holds for
+        // that path.
         let mut by_name: HashMap<String, Vec<(u32, usize)>> = HashMap::new();
         for (i, ty) in types.iter().enumerate() {
             by_name
@@ -5171,13 +5218,11 @@ impl VbcCodegen {
         for (name, slots) in &by_name {
             if slots.len() > 1 {
                 let ids: std::collections::HashSet<u32> = slots.iter().map(|(id, _)| *id).collect();
+                // Benign-homonym downgrade (META-GROUP-XMODULE-1): when every id
+                // in the group is separated by its own module-qualified registry
+                // key, these are DISTINCT types from different modules sharing a
+                // simple name — the designed post-fix state, not a duplicate.
                 if ids.len() > 1 {
-                    // Benign-homonym downgrade (META-GROUP-XMODULE-1):
-                    // every id in the group is separated by its own
-                    // module-qualified registry key → these are DISTINCT
-                    // types from different modules sharing a simple
-                    // name, which is the designed post-fix state, not a
-                    // duplicate registration.
                     if let Some(witness) = qualified_witness {
                         let mut seen_keys: std::collections::HashSet<&str> =
                             std::collections::HashSet::new();
@@ -5193,7 +5238,29 @@ impl VbcCodegen {
                             continue;
                         }
                     }
-                    let mut sorted_ids: Vec<u32> = ids.into_iter().collect();
+                }
+                // TYPE-ID-COLLISION (#27): migrate the invariant from name->id to
+                // (name+kind)->id. A simple name legitimately maps to several ids
+                // across DIFFERENT kinds (record vs variant vs protocol homonyms);
+                // only a single KIND mapping to >1 id is a real one-type split.
+                let mut kind_to_ids: HashMap<
+                    std::mem::Discriminant<crate::types::TypeKind>,
+                    std::collections::HashSet<u32>,
+                > = HashMap::new();
+                for (id, idx) in slots {
+                    kind_to_ids
+                        .entry(std::mem::discriminant(&types[*idx].kind))
+                        .or_default()
+                        .insert(*id);
+                }
+                let split_ids: std::collections::HashSet<u32> = kind_to_ids
+                    .values()
+                    .filter(|ids| ids.len() > 1)
+                    .flatten()
+                    .copied()
+                    .collect();
+                if !split_ids.is_empty() {
+                    let mut sorted_ids: Vec<u32> = split_ids.into_iter().collect();
                     sorted_ids.sort_unstable();
                     duplicate_names_with_different_ids.push(DuplicateNameDifferentId {
                         name: name.clone(),
@@ -13432,6 +13499,35 @@ impl VbcCodegen {
         // drifts that affects `Ord.max`, `Ord.min`, `Ord.clamp`,
         // `Eq.ne`, `Hash.hash_value`, and every other default method
         // with a `Self`-typed parameter or return.
+        // TYPE-DEREF-4: record which bindings are REFERENCES so the `*x`
+        // (Deref) lowering treats `*reference` as a BUILT-IN dereference
+        // (→ pointee) rather than a call to the pointee type's `Deref` impl
+        // (which applies only to `*value`). Cleared per-function; a stale
+        // set would mis-lower an unrelated function's `*x`.
+        self.ctx.reference_bindings.clear();
+        for ((param_name, _), param) in params_with_mutability.iter().zip(func.params.iter()) {
+            use verum_ast::FunctionParamKind;
+            let is_ref = match &param.kind {
+                FunctionParamKind::SelfRef
+                | FunctionParamKind::SelfRefMut
+                | FunctionParamKind::SelfRefChecked
+                | FunctionParamKind::SelfRefCheckedMut
+                | FunctionParamKind::SelfRefUnsafe
+                | FunctionParamKind::SelfRefUnsafeMut => true,
+                FunctionParamKind::Regular { ty, .. } => matches!(
+                    &ty.kind,
+                    verum_ast::ty::TypeKind::Reference { .. }
+                        | verum_ast::ty::TypeKind::CheckedReference { .. }
+                        | verum_ast::ty::TypeKind::UnsafeReference { .. }
+                        | verum_ast::ty::TypeKind::GenRef { .. }
+                ),
+                _ => false,
+            };
+            if is_ref {
+                self.ctx.reference_bindings.insert(param_name.clone());
+            }
+        }
+
         for ((param_name, _), param) in params_with_mutability.iter().zip(func.params.iter()) {
             if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
                 let var_type = self.type_kind_to_var_type(&ty.kind);
@@ -15704,6 +15800,26 @@ impl VbcCodegen {
                     Self::scan_expr_as_return(&arm.body, out);
                 }
             }
+            // Bare `IDENT` in return position — the local is MOVED into the
+            // return (the caller owns it now), so it must NOT be DropRef'd in
+            // this frame. Critical for a returned reference / raw-pointer
+            // local: `Heap.into_raw`'s `let ptr = self.ptr; forget(self); ptr`
+            // returns a `&unsafe T`; DropRef on it reads the pointee's absent
+            // header (type_id = the payload) and panics 'field access out of
+            // bounds'. Also prevents a latent double-drop of any returned
+            // OWNED local. Additive skip (see the scan comment above: extra
+            // entries only elide a redundant generation bump).
+            ExprKind::Path(path)
+                if path.segments.len() == 1
+                    && matches!(
+                        path.segments.first(),
+                        Some(verum_ast::ty::PathSegment::Name(_))
+                    ) =>
+            {
+                if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first() {
+                    out.insert(ident.name.to_string());
+                }
+            }
             _ => {}
         }
     }
@@ -15827,6 +15943,21 @@ impl VbcCodegen {
             // → garbage seq → SIGSEGV at scale).
             TypeKind::Array { element, .. } => {
                 format!("[{}]", Self::extract_type_name_from_ast(element))
+            }
+            // Tuple `(A, B, …)` — render the canonical parenthesised form so
+            // downstream tuple-element inference can recover the element
+            // types. Without this arm the `{:?}`-Debug catch-all produced a
+            // truncated garbage name ("Tuple(List { inner: "), so a
+            // `let (a, b) = <tuple-expr>` destructure left `a`/`b` untyped and
+            // `a.method()` failed method resolution (RECORD-LET-REF-TYPE-LOSS).
+            // Same class of fix as the Array / Slice arms above; the
+            // parenthesised render round-trips through `split_tuple_type_name`.
+            TypeKind::Tuple(elements) => {
+                let elem_names: Vec<String> = elements
+                    .iter()
+                    .map(Self::extract_type_name_from_ast)
+                    .collect();
+                format!("({})", elem_names.join(", "))
             }
             TypeKind::DynProtocol { bounds, .. } => {
                 // dyn Protocol → "dyn:Protocol" for dispatch tracking
@@ -16876,17 +17007,27 @@ impl VbcCodegen {
                     tp.name = *mapped;
                 }
             }
-            // Remap drop_fn from sparse ID to contiguous 0-based ID
-            if let Some(drop_fn) = remapped_ty.drop_fn
-                && let Some(&new_id) = func_id_remap.get(&drop_fn)
-            {
-                remapped_ty.drop_fn = Some(new_id);
+            // Remap drop_fn from sparse ID to contiguous 0-based ID.
+            //
+            // TYPE-ID-COLLISION-3 (FUNDAMENTAL). A drop_fn/clone_fn that is
+            // NOT present in func_id_remap (its function was not linked into
+            // the final module — e.g. a lazily-loaded stdlib type whose Drop
+            // impl the reference-walker didn't pull in) must be CLEARED to
+            // None, NOT left at its stale sparse id. The old `if let …` left a
+            // dangling id: at runtime `module.functions[stale_id]` resolves to
+            // whatever unrelated function now occupies that contiguous slot,
+            // and DropRef executes it. Concretely `List` (id 512) kept
+            // drop_fn=1231 which, after the func-id space shifted, pointed at
+            // `child_setup_stdio` — dropping any `List<Byte>` ran process-spawn
+            // syscalls and faulted. Clearing to None falls through to the
+            // builtin List/tuple/CBGR cleanup, which is correct. Root of the
+            // net/cidr slice_text crash surfaced once the drop handler began
+            // resolving descriptors by id (TYPE-ID-COLLISION-2).
+            if let Some(drop_fn) = remapped_ty.drop_fn {
+                remapped_ty.drop_fn = func_id_remap.get(&drop_fn).copied();
             }
-            // Remap clone_fn from sparse ID to contiguous 0-based ID
-            if let Some(clone_fn) = remapped_ty.clone_fn
-                && let Some(&new_id) = func_id_remap.get(&clone_fn)
-            {
-                remapped_ty.clone_fn = Some(new_id);
+            if let Some(clone_fn) = remapped_ty.clone_fn {
+                remapped_ty.clone_fn = func_id_remap.get(&clone_fn).copied();
             }
             // Remap protocol method FunctionIds from sparse to contiguous 0-based IDs
             for proto_impl in remapped_ty.protocols.iter_mut() {

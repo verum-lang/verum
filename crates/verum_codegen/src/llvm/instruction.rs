@@ -13283,29 +13283,29 @@ fn lower_call_method<'ctx>(
             "contains" if args.count == 1 => {
                 // Inline linear scan: iterate backing array, compare with value
                 let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
-                // task #41: `contains`/`index_of`'s value param is ALWAYS `&T`
-                // (list/deque/heap/btree — see core/collections/*.vr), so the search
-                // operand is a reference address. Deref it to scan for the pointee
-                // VALUE against the backing elements, not the address (the
-                // interpreter auto-derefs; without this every AOT contains/index_of
-                // over a scalar returns false/-1). Guard int/ptr to avoid the
-                // ARM-backend SIGSEGV on a non-address value.
-                let search_val = {
-                    let raw = ctx.get_register(args.start.0)?;
-                    if raw.is_pointer_value() || raw.is_int_value() {
-                        let sptr = as_ptr(ctx, raw, "search_ptr")?;
-                        let i64t = ctx.types().i64_type();
-                        ctx.builder()
-                            .build_load(i64t, sptr, "search_deref")
-                            .or_llvm_err()?
-                            .into_int_value()
-                    } else {
-                        as_i64(ctx, raw, "search_val")?
-                    }
-                };
+                let search_val_ref = as_i64(ctx, ctx.get_register(args.start.0)?, "search_val_ref")?;
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
+                // `contains(item: &T)` takes the item BY REFERENCE, so the
+                // argument register holds the ADDRESS of the searched value,
+                // not the value. Under interp the ref auto-derefs; under AOT
+                // it stayed a pointer and the scan compared list elements
+                // against the reference address (`value == &ref`, #18) →
+                // always false. Dereference to the pointee before comparing.
+                // For a scalar element this is the value; for a heap element
+                // it is the element pointer (pointer-identity), both correct
+                // improvements over comparing against the ref address.
+                let search_val = {
+                    let sp = ctx
+                        .builder()
+                        .build_int_to_ptr(search_val_ref, ptr_type, "search_ref_ptr")
+                        .or_llvm_err()?;
+                    ctx.builder()
+                        .build_load(i64_type, sp, "search_deref")
+                        .or_llvm_err()?
+                        .into_int_value()
+                };
                 // Load len from LIST_LEN_OFFSET
                 // SAFETY: GEP into the list object header to access the length field at a fixed offset; the list pointer is non-null and valid
                 let len_slot = unsafe {
@@ -13442,29 +13442,23 @@ fn lower_call_method<'ctx>(
             "index_of" if args.count == 1 => {
                 // Same as contains but returns index or -1
                 let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
-                // task #41: `contains`/`index_of`'s value param is ALWAYS `&T`
-                // (list/deque/heap/btree — see core/collections/*.vr), so the search
-                // operand is a reference address. Deref it to scan for the pointee
-                // VALUE against the backing elements, not the address (the
-                // interpreter auto-derefs; without this every AOT contains/index_of
-                // over a scalar returns false/-1). Guard int/ptr to avoid the
-                // ARM-backend SIGSEGV on a non-address value.
-                let search_val = {
-                    let raw = ctx.get_register(args.start.0)?;
-                    if raw.is_pointer_value() || raw.is_int_value() {
-                        let sptr = as_ptr(ctx, raw, "search_ptr")?;
-                        let i64t = ctx.types().i64_type();
-                        ctx.builder()
-                            .build_load(i64t, sptr, "search_deref")
-                            .or_llvm_err()?
-                            .into_int_value()
-                    } else {
-                        as_i64(ctx, raw, "search_val")?
-                    }
-                };
+                let search_val_ref = as_i64(ctx, ctx.get_register(args.start.0)?, "search_val_ref")?;
                 let i64_type = ctx.types().i64_type();
                 let i8_type = ctx.types().i8_type();
                 let ptr_type = ctx.types().ptr_type();
+                // `index_of(item: &T)` — same by-reference argument as
+                // `contains` (#18): deref the ref to the pointee before
+                // scanning, else the scan compares against the ref address.
+                let search_val = {
+                    let sp = ctx
+                        .builder()
+                        .build_int_to_ptr(search_val_ref, ptr_type, "search_ref_ptr")
+                        .or_llvm_err()?;
+                    ctx.builder()
+                        .build_load(i64_type, sp, "search_deref")
+                        .or_llvm_err()?
+                        .into_int_value()
+                };
                 // SAFETY: GEP into the list object header to access the length field at a fixed offset; the list pointer is non-null and valid
                 let len_slot = unsafe {
                     ctx.builder()

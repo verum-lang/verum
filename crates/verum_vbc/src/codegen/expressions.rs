@@ -2106,6 +2106,40 @@ impl VbcCodegen {
 
     // ==================== Binary Operations ====================
 
+    /// Emit a `Text` ordering comparison (`<`, `>`, `<=`, `>=`).
+    ///
+    /// `Text` was gated out of the operator-method path (it is neither a
+    /// user type nor `is_primitive`), and only `==`/`!=` had a dedicated
+    /// `is_text` arm emitting `CmpG` — so `<`/`>`/`<=`/`>=` fell to the
+    /// integer `CmpI`, comparing the raw Text POINTERS (allocation order),
+    /// e.g. `"zebra" > "apple"` returned false. `CmpG` (Ord protocol,
+    /// opcode 0x4D) content-compares via the interpreter's string branch
+    /// and yields an ordering (-1/0/1); threshold it against 0 with the
+    /// requested integer relation for the boolean result.
+    fn emit_text_ordering(&mut self, dest: Reg, a_reg: Reg, b_reg: Reg, op: CompareOp) {
+        let ord = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::CmpG {
+            eq: false,
+            dst: ord,
+            a: a_reg,
+            b: b_reg,
+            protocol_id: 0,
+        });
+        let zero = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadI {
+            dst: zero,
+            value: 0,
+        });
+        self.ctx.emit(Instruction::CmpI {
+            op,
+            dst: dest,
+            a: ord,
+            b: zero,
+        });
+        self.ctx.free_temp(ord);
+        self.ctx.free_temp(zero);
+    }
+
     /// Compiles a binary operation.
     fn compile_binary(
         &mut self,
@@ -2507,6 +2541,8 @@ impl VbcCodegen {
                         a: left_reg,
                         b: right_reg,
                     });
+                } else if is_text {
+                    self.emit_text_ordering(dest, left_reg, right_reg, CompareOp::Lt);
                 } else if is_unsigned {
                     self.ctx.emit(Instruction::CmpU {
                         sub_op: CmpSubOpcode::LtU,
@@ -2531,6 +2567,8 @@ impl VbcCodegen {
                         a: left_reg,
                         b: right_reg,
                     });
+                } else if is_text {
+                    self.emit_text_ordering(dest, left_reg, right_reg, CompareOp::Le);
                 } else if is_unsigned {
                     self.ctx.emit(Instruction::CmpU {
                         sub_op: CmpSubOpcode::LeU,
@@ -2555,6 +2593,8 @@ impl VbcCodegen {
                         a: left_reg,
                         b: right_reg,
                     });
+                } else if is_text {
+                    self.emit_text_ordering(dest, left_reg, right_reg, CompareOp::Gt);
                 } else if is_unsigned {
                     self.ctx.emit(Instruction::CmpU {
                         sub_op: CmpSubOpcode::GtU,
@@ -2579,6 +2619,8 @@ impl VbcCodegen {
                         a: left_reg,
                         b: right_reg,
                     });
+                } else if is_text {
+                    self.emit_text_ordering(dest, left_reg, right_reg, CompareOp::Ge);
                 } else if is_unsigned {
                     self.ctx.emit(Instruction::CmpU {
                         sub_op: CmpSubOpcode::GeU,
@@ -4398,6 +4440,34 @@ impl VbcCodegen {
                 } else if let Some(deref_method_id) = inner_type
                     .as_ref()
                     .and_then(|ty_name| {
+                        // TYPE-DEREF-4. `*reference` is a BUILT-IN dereference
+                        // (→ the pointee), NOT an invocation of the pointee
+                        // type's `Deref` impl (which applies only to `*value`).
+                        // When the operand is a reference binding (a `&T`/`&mut
+                        // T` param, or a `&self`-shape receiver), skip the
+                        // user-Deref path so it falls through to the generic
+                        // Deref opcode (identity/read-through). Without this,
+                        // `let old = *self` in `Maybe.replace`/`take`
+                        // (self: &mut Maybe; Maybe `implement Deref { fn
+                        // deref(&self)->&T }`) called `Maybe::deref` and bound
+                        // the payload T instead of the Maybe.
+                        let inner_is_ref = if let ExprKind::Path(p) = &inner.kind {
+                            p.segments.len() == 1
+                                && match &p.segments[0] {
+                                    PathSegment::Name(id) => {
+                                        self.ctx.reference_bindings.contains(id.name.as_str())
+                                    }
+                                    PathSegment::SelfValue => {
+                                        self.ctx.reference_bindings.contains("self")
+                                    }
+                                    _ => false,
+                                }
+                        } else {
+                            false
+                        };
+                        if inner_is_ref {
+                            return None;
+                        }
                         // **User Deref-protocol dispatch (cell #119)**.
                         // `*r` where `r: Ref<T>` / `RefMut<T>` / any
                         // user type that `implement Deref for X { fn
@@ -9223,9 +9293,20 @@ impl VbcCodegen {
                 .as_deref()
                 .map(VbcCodegen::strip_generic_args)
                 .map(str::to_string);
+            // `str` is a pure alias for `Text` in this language (verum_types
+            // maps `str` → Type::Text at infer/env.rs). A `&str` receiver
+            // (e.g. `find_rel(rel: &str)` calling `rel.as_bytes()`) shares
+            // Text's runtime representation, but the dispatch key stayed
+            // "str"/"&str" so `str.as_bytes` missed the intercept and fell
+            // through to a non-existent method → "method 'str.as_bytes' not
+            // found on receiver of runtime kind Text<small>". Accept the
+            // `str` spellings here, matching the sibling `Text.from`
+            // intercept. (find_rel BLOCKER — str→Text non-canonicalisation.)
             let is_text = receiver_type
                 .as_deref()
-                .map(|t| t == "Text" || t == "&Text")
+                .map(|t| {
+                    t == "Text" || t == "&Text" || t == "&mut Text" || t == "str" || t == "&str"
+                })
                 .unwrap_or(false);
             if is_text {
                 let result = self.ctx.alloc_temp();
@@ -14758,7 +14839,19 @@ impl VbcCodegen {
                     // type inference in nested variant patterns
                     // (`Some(a)` against `&Maybe<T>` element) registers
                     // `a` with the correct concrete type.
-                    let elem_types = self.ctx.match_tuple_element_types.clone();
+                    // Prefer the let-destructure element types (CONSUME them
+                    // so they cannot leak to a later statement), else the
+                    // match element types (CLONE — see the RECORD-LET note).
+                    // `from_let` records whether these came from a genuine
+                    // `let (a, b) = …` destructure (pending was set) vs a
+                    // match arm; only the former should write
+                    // `variable_type_names`.
+                    let from_let = self.ctx.pending_let_tuple_types.is_some();
+                    let elem_types = self
+                        .ctx
+                        .pending_let_tuple_types
+                        .take()
+                        .or_else(|| self.ctx.match_tuple_element_types.clone());
                     let prev_st = self.ctx.match_scrutinee_type.clone();
                     for (i, elem) in elements.iter().enumerate() {
                         let elem_reg = Reg(first_elem.0 + i as u16);
@@ -14766,6 +14859,23 @@ impl VbcCodegen {
                             self.ctx.match_scrutinee_type = types.get(i).cloned().flatten();
                         }
                         self.compile_pattern_bind(elem, elem_reg)?;
+                        // Record a simple `let (a, b) = …` element's type so
+                        // downstream method dispatch on the bound name resolves
+                        // (RECORD-LET-REF-TYPE-LOSS). Only fires for a genuine
+                        // let-destructure (pending was set), NOT for a match
+                        // arm — recording match-bound tuple elements' types
+                        // into `variable_type_names` regressed cmp-then-`<`
+                        // on Maybe (a stray entry mis-routed a later Ord
+                        // dispatch to a primitive compare).
+                        if let Some(ref types) = elem_types
+                            && from_let
+                            && let verum_ast::PatternKind::Ident { name, .. } = &elem.kind
+                            && let Some(Some(elem_ty)) = types.get(i)
+                        {
+                            self.ctx
+                                .variable_type_names
+                                .insert(name.name.to_string(), elem_ty.clone());
+                        }
                     }
                     self.ctx.match_scrutinee_type = prev_st;
 
@@ -21015,6 +21125,97 @@ impl VbcCodegen {
     /// Infers the custom type name for an expression used as an operand.
     ///
 
+    /// Infer the per-element type names of a tuple-typed expression, for
+    /// recording `let (a, b, …) = <expr>` destructure bindings' types.
+    ///
+    /// `compile_match` only populates `match_tuple_element_types` when the
+    /// scrutinee is a tuple LITERAL `(x, y)`; a `let`-destructure of an
+    /// expression that merely *evaluates* to a tuple (`&rec.field[i]`)
+    /// never set it, so the bound identifiers stayed untyped and
+    /// downstream method dispatch (`a.as_bytes()`) could not resolve a
+    /// receiver — the RECORD-LET-REF-TYPE-LOSS defect. Inline `pair.0`
+    /// worked only because it re-infers the element type on the spot; the
+    /// bound name has no such second chance, so its type MUST be recorded
+    /// at bind time.
+    ///
+    /// A `&`/`&mut`-borrow of a tuple destructures to the same element
+    /// types. Returns `None` (leaving the bindings untyped — the pre-fix
+    /// behaviour, never a regression) when the type is not a
+    /// recognisable N-tuple.
+    pub(crate) fn infer_tuple_element_type_names(
+        &self,
+        expr: &Expr,
+        arity: usize,
+    ) -> Option<Vec<Option<String>>> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::expr::UnOp;
+        let inner = match &expr.kind {
+            ExprKind::Unary { op, expr: inner }
+                if matches!(
+                    op,
+                    UnOp::Ref
+                        | UnOp::RefMut
+                        | UnOp::RefChecked
+                        | UnOp::RefCheckedMut
+                        | UnOp::RefUnsafe
+                        | UnOp::RefUnsafeMut
+                ) =>
+            {
+                inner.as_ref()
+            }
+            _ => expr,
+        };
+        let type_name = self
+            .infer_expr_type_name(inner)
+            .or_else(|| self.infer_expr_type_name(expr))
+            .or_else(|| self.extract_expr_type_name(inner))?;
+        let elems = Self::split_tuple_type_name(&type_name)?;
+        if elems.len() != arity {
+            return None;
+        }
+        Some(
+            elems
+                .into_iter()
+                .map(|s| if s.is_empty() || s == "_" { None } else { Some(s) })
+                .collect(),
+        )
+    }
+
+    /// Split a rendered tuple type name `"(A, B<C, D>, (E, F))"` into its
+    /// top-level element type names, respecting `<>` / `()` / `[]`
+    /// nesting. Returns `None` for a non-tuple (`"(X)"` is a parenthesised
+    /// type, not a 1-tuple).
+    fn split_tuple_type_name(name: &str) -> Option<Vec<String>> {
+        let inner = name.trim().strip_prefix('(')?.strip_suffix(')')?;
+        let mut out = Vec::new();
+        let mut depth = 0i32;
+        let mut cur = String::new();
+        for ch in inner.chars() {
+            match ch {
+                '<' | '(' | '[' => {
+                    depth += 1;
+                    cur.push(ch);
+                }
+                '>' | ')' | ']' => {
+                    depth -= 1;
+                    cur.push(ch);
+                }
+                ',' if depth == 0 => {
+                    out.push(cur.trim().to_string());
+                    cur.clear();
+                }
+                _ => cur.push(ch),
+            }
+        }
+        if !cur.trim().is_empty() {
+            out.push(cur.trim().to_string());
+        }
+        if out.len() < 2 {
+            return None;
+        }
+        Some(out)
+    }
+
     /// For variable references, looks up the type name from `variable_type_names`.
     /// For inline record literals, extracts the type name directly.
     /// Used by `compile_binary` to set `protocol_id` in CmpG for custom Eq dispatch.
@@ -21594,6 +21795,27 @@ impl VbcCodegen {
                             } else {
                                 rt.clone()
                             };
+                            // Compose the generic instantiation from
+                            // `return_type_inner` — mirror of the
+                            // MethodCall arm's URL-8 composition. An
+                            // archive-loaded free fn like
+                            // `resolve_and_merge -> Result<List<ResolvedRange>,
+                            // RangeError>` stores `return_type_name = "Result"`
+                            // and the inner args separately. Without folding
+                            // them back, `let m = f().unwrap()` records `m`
+                            // as bare `Result`; the `.unwrap()` shortcut then
+                            // extracts NO inner type, so `m[i].field` loses
+                            // the element type and `resolve_field_index`
+                            // falls to the global interner → wrong offset →
+                            // "field access out of bounds" (the cross-module
+                            // `collection[i].field` defect surfaced by the
+                            // http_range / link_header property suites).
+                            if let Some(inner) = &info.return_type_inner
+                                && !inner.is_empty()
+                                && !resolved.contains('<')
+                            {
+                                return Some(format!("{}<{}>", resolved, inner.join(", ")));
+                            }
                             return Some(resolved);
                         }
                     }
@@ -21951,7 +22173,13 @@ impl VbcCodegen {
             Some(TypeKind::Bool)
         } else if matches!(name, "Char" | "char") {
             Some(TypeKind::Char)
-        } else if name == "Text" {
+        } else if matches!(name, "Text" | "str") {
+            // `str` is a canonical alias for `Text` (verum_types:
+            // infer/env.rs `define_type("str", Type::Text)`). Mapping it
+            // here lets `let x: str = …` / `&str` params dispatch Text
+            // methods (`.as_str()`, `.starts_with(..)`) instead of keying a
+            // non-existent `str.<m>` — the general form of the find_rel
+            // str→Text blocker.
             Some(TypeKind::Text)
         } else if matches!(name, "Unit" | "()") {
             Some(TypeKind::Unit)
@@ -22934,6 +23162,22 @@ impl VbcCodegen {
                 | ExprKind::Call { .. }
                 | ExprKind::MethodCall { .. }
                 | ExprKind::Literal(_)
+                // Aggregate literals (`&Agg { … }`, `&(a, b)`, `&[…]`,
+                // `&{…: …}`, `&{…}`) compile into an `alloc_temp` slot that
+                // the NEXT argument's `alloc_temp` recycles — so an inline
+                // `&<aggregate-literal>` call argument alongside any other
+                // temp argument had its CBGR register-ref decode the
+                // sibling's value (INLINE-AGG-REF-ARG: `zf(&Agg{n:7}, 2)`
+                // read `2` for `n`). Same recycle-collision class the
+                // Literal/Call arms above already close; stabilise into a
+                // fresh non-recyclable slot. Interp-only (AOT refs SSA/
+                // alloca addresses, not the recyclable temp pool), but the
+                // fix is in shared VBC codegen and inert for AOT.
+                | ExprKind::Record { .. }
+                | ExprKind::Tuple(_)
+                | ExprKind::Array(_)
+                | ExprKind::MapLiteral { .. }
+                | ExprKind::SetLiteral { .. }
         );
         if !needs_stable {
             // **Path** that resolves to a module-level const (not a
@@ -25256,8 +25500,12 @@ impl VbcCodegen {
             }
         }
 
-        // Emit instructions based on codegen strategy
-        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest)?;
+        // Emit instructions based on codegen strategy.  For `@intrinsic`
+        // form args[0] is the name literal and args[1] (when present) is
+        // the pointer operand — used to pick the ptr-arithmetic stride.
+        let ptr_elem_stride =
+            self.ptr_intrinsic_byte_stride(intrinsic_name, args.iter().nth(1));
+        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride)?;
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -25380,8 +25628,11 @@ impl VbcCodegen {
             }
         }
 
-        // Emit instructions based on codegen strategy
-        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest)?;
+        // Emit instructions based on codegen strategy.  args[1] (when
+        // present) is the pointer operand for a ptr-arithmetic intrinsic.
+        let ptr_elem_stride =
+            self.ptr_intrinsic_byte_stride(intrinsic_name.as_str(), args.iter().nth(1));
+        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride)?;
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -25581,8 +25832,12 @@ impl VbcCodegen {
             }
         }
 
-        // Emit instructions based on codegen strategy
-        self.emit_intrinsic_instructions(info, &arg_regs, dest)?;
+        // Emit instructions based on codegen strategy.  For an imported
+        // intrinsic call args[0] IS the pointer operand (no name literal),
+        // so it drives the ptr-arithmetic stride selection.
+        let ptr_elem_stride =
+            self.ptr_intrinsic_byte_stride(info.intrinsic.name, args.first());
+        self.emit_intrinsic_instructions(info, &arg_regs, dest, ptr_elem_stride)?;
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -25592,12 +25847,79 @@ impl VbcCodegen {
         Ok(Some(dest))
     }
 
+    /// Element stride (bytes) for a pointer-arithmetic intrinsic call.
+    ///
+    /// `ptr_offset<T>(ptr, count)` advances by `count * sizeof(T)`.  The
+    /// VBC value model type-erases to 8-byte NaN-boxed `Value` slots, so
+    /// the default `FfiExtended 0x63` (PtrAdd) lowering scales by 8 —
+    /// correct for pointers INTO `Value` arrays (List / slice backing),
+    /// but 8× too far for a **byte buffer** (`Text.ptr: &unsafe Byte`).
+    /// Under AOT that mis-scaling made `Text.push_str`'s append land off
+    /// the buffer (content silently lost on short buffers, OOB SIGBUS on
+    /// long ones) — the `ptr_offset` root cause of DISP-EMPTY-AOT /
+    /// PARSE-AOT.  The interpreter is unaffected because it intercepts
+    /// the Text mutation methods natively.
+    ///
+    /// Returns `1` ONLY when the pointer operand's pointee is provably a
+    /// 1-byte scalar; every other case (including any inference miss)
+    /// falls back to `8`, so a wrong guess can never corrupt a `Value`-
+    /// array pointer — it can only leave a byte pointer on the old
+    /// (already-broken-under-AOT) path.  The `&unsafe `/`*mut `/`*const `
+    /// carrier prefix is preserved by `extract_type_name_from_ast`
+    /// precisely so raw-pointer dispatch can key on it here.
+    fn ptr_intrinsic_byte_stride(&self, intrinsic_name: &str, ptr_arg: Option<&Expr>) -> u8 {
+        const DEFAULT_STRIDE: u8 = 8;
+        let is_ptr_arith = matches!(
+            intrinsic_name,
+            "ptr_offset"
+                | "ptr_offset_mut"
+                | "intrinsic_ptr_offset"
+                | "ptr_add"
+                | "ptr_sub"
+        );
+        if !is_ptr_arith {
+            return DEFAULT_STRIDE;
+        }
+        let Some(arg) = ptr_arg else {
+            return DEFAULT_STRIDE;
+        };
+        let Some(type_name) = self
+            .infer_expr_type_name(arg)
+            .or_else(|| self.extract_expr_type_name(arg))
+        else {
+            return DEFAULT_STRIDE;
+        };
+        // Only an UNSAFE-REFERENCE to a 1-byte scalar (`&unsafe Byte` —
+        // the `Text.ptr` raw-byte-buffer idiom, preserved verbatim by
+        // `extract_type_name_from_ast`) is a genuine packed byte buffer
+        // with stride 1.  A `*const`/`*mut` byte pointer, or a
+        // `List<Byte>` / `[Byte; N]` backing exposed via `as_ptr`, is an
+        // 8-byte NaN-boxed `Value` array despite its `Byte` element
+        // type, so it MUST stay on the ×8 path.  Requiring the exact
+        // `&unsafe ` spelling guarantees no false positive can mis-scale
+        // a Value pointer (which would corrupt List/slice raw-ptr walks
+        // — the one regression this fix must never introduce).
+        let pointee = match type_name.trim().strip_prefix("&unsafe ") {
+            Some(rest) => rest.trim(),
+            None => return DEFAULT_STRIDE,
+        };
+        match pointee {
+            "Byte" | "U8" | "UInt8" | "I8" | "Int8" => 1,
+            _ => DEFAULT_STRIDE,
+        }
+    }
+
     /// Emits VBC instructions for an intrinsic based on its codegen strategy.
+    ///
+    /// `ptr_elem_stride` is the byte stride for a pointer-arithmetic
+    /// intrinsic (see [`Self::ptr_intrinsic_byte_stride`]); callers that
+    /// do not resolve a pointer operand pass the default `8`.
     fn emit_intrinsic_instructions(
         &mut self,
         info: &IntrinsicInfo,
         args: &[Reg],
         dest: Reg,
+        ptr_elem_stride: u8,
     ) -> CodegenResult<()> {
         use crate::intrinsics::registry::{CodegenStrategy, IntrinsicCategory, IntrinsicHint};
 
@@ -25663,7 +25985,12 @@ impl VbcCodegen {
                 self.emit_intrinsic_opcode_with_size(*opcode, *size, args, dest);
             }
             CodegenStrategy::InlineSequence(seq_id) => {
-                self.emit_intrinsic_inline_sequence(*seq_id, args, dest, 8)?;
+                // `ptr_elem_stride` is 8 for every non-pointer intrinsic
+                // (the historical default) and only differs (→1) for a
+                // byte-buffer `ptr_offset`/`ptr_add`/`ptr_sub`, whose
+                // seq_id is PtrOffset/PtrSubSeq — so repurposing the
+                // width here is safe: each call carries a single seq_id.
+                self.emit_intrinsic_inline_sequence(*seq_id, args, dest, ptr_elem_stride)?;
             }
             CodegenStrategy::InlineSequenceWithWidth(seq_id, width) => {
                 self.emit_intrinsic_inline_sequence(*seq_id, args, dest, *width)?;
@@ -26341,14 +26668,34 @@ impl VbcCodegen {
             // `checked_add_signed`/`checked_sub`, trapping overflow.
             InlineSequenceId::PtrOffset => {
                 if args.len() >= 2 {
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, dest.0);
-                    Self::write_reg(&mut operands, args[0].0);
-                    Self::write_reg(&mut operands, args[1].0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x63, // PtrAdd
-                        operands,
-                    });
+                    if byte_width == 1 {
+                        // Byte-buffer pointer (`&unsafe Byte` / `*mut U8`):
+                        // `count` is already a byte count, so the target
+                        // address is exactly `ptr + count`.  The default
+                        // 0x63 PtrAdd path scales by the 8-byte Value slot,
+                        // which over-advances a byte buffer 8× (Text append
+                        // landed off-buffer → content loss / SIGBUS under
+                        // AOT).  `BinaryI::Add` is tier-agnostic — interp and
+                        // AOT both compute the raw byte address identically —
+                        // and `&unsafe` pointers are Tier-2 (no CBGR bound
+                        // check to preserve), so bypassing 0x63 is sound.
+                        self.ctx.emit(Instruction::BinaryI {
+                            op: BinaryIntOp::Add,
+                            dst: dest,
+                            a: args[0],
+                            b: args[1],
+                        });
+                        self.ctx.mark_raw_pointer(dest);
+                    } else {
+                        let mut operands = Vec::<u8>::new();
+                        Self::write_reg(&mut operands, dest.0);
+                        Self::write_reg(&mut operands, args[0].0);
+                        Self::write_reg(&mut operands, args[1].0);
+                        self.ctx.emit(Instruction::FfiExtended {
+                            sub_op: 0x63, // PtrAdd (element-scaled ×8)
+                            operands,
+                        });
+                    }
                 } else {
                     self.ctx.emit(Instruction::Mov {
                         dst: dest,
@@ -26361,14 +26708,26 @@ impl VbcCodegen {
             // SystemSubOpcode::PtrSub (0x64) does the checked negative walk.
             InlineSequenceId::PtrSubSeq => {
                 if args.len() >= 2 {
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, dest.0);
-                    Self::write_reg(&mut operands, args[0].0);
-                    Self::write_reg(&mut operands, args[1].0);
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x64, // PtrSub
-                        operands,
-                    });
+                    if byte_width == 1 {
+                        // Byte-buffer pointer: `ptr - count` bytes directly
+                        // (see the PtrOffset arm for the full rationale).
+                        self.ctx.emit(Instruction::BinaryI {
+                            op: BinaryIntOp::Sub,
+                            dst: dest,
+                            a: args[0],
+                            b: args[1],
+                        });
+                        self.ctx.mark_raw_pointer(dest);
+                    } else {
+                        let mut operands = Vec::<u8>::new();
+                        Self::write_reg(&mut operands, dest.0);
+                        Self::write_reg(&mut operands, args[0].0);
+                        Self::write_reg(&mut operands, args[1].0);
+                        self.ctx.emit(Instruction::FfiExtended {
+                            sub_op: 0x64, // PtrSub (element-scaled ×8)
+                            operands,
+                        });
+                    }
                 } else {
                     self.ctx.emit(Instruction::Mov {
                         dst: dest,

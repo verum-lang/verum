@@ -1,0 +1,158 @@
+// =============================================================================
+// core-tests/net/link_header/property_test.vr
+// =============================================================================
+//
+// Laws for RFC 8288 Link-header parse / find_rel / format:
+//
+//   L1  format ∘ parse round-trip preserves uris + params
+//   L2  RFC 8288 pagination fixture (GitHub-style next/last)
+//   L3  find_rel: present → Some (uri matches), absent → None,
+//       case-insensitive rel match, first-match-wins on duplicates
+//   L4  quoted and token param spellings parse identically
+//   L5  whitespace robustness around separators
+//   L6  MAX_LINK_ENTRIES cap: at-limit parses, past-limit rejected
+// =============================================================================
+
+mount core.net.link_header.{
+    LinkEntry, LinkHeaderError, parse, find_rel, format_link_header,
+    MAX_LINK_ENTRIES,
+};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.List;
+
+// =============================================================================
+// Section 1: L1 format ∘ parse round-trip
+// =============================================================================
+
+@test
+fn law_parse_format_round_trip() {
+    let src = "<https://api.example.com/page/2>; rel=\"next\"; title=\"second\", <https://api.example.com/page/34>; rel=\"last\"".clone();
+    let entries = parse(&src).unwrap();
+    assert_eq(entries.len(), 2);
+
+    let formatted = format_link_header(&entries);
+    let reparsed = parse(&formatted).unwrap();
+    assert_eq(reparsed.len(), entries.len());
+
+    let mut i = 0;
+    while i < entries.len() {
+        assert_eq(reparsed[i].uri.as_str(), entries[i].uri.as_str());
+        assert_eq(reparsed[i].params.len(), entries[i].params.len());
+        let mut j = 0;
+        while j < entries[i].params.len() {
+            let (n_a, v_a) = &entries[i].params[j];
+            let (n_b, v_b) = &reparsed[i].params[j];
+            assert_eq(n_b.as_str(), n_a.as_str());
+            assert_eq(v_b.as_str(), v_a.as_str());
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: L2 pagination fixture
+// =============================================================================
+
+@test
+fn law_pagination_fixture_rels_resolve() {
+    let src = "<https://api.example.com/page/2>; rel=\"next\", <https://api.example.com/page/34>; rel=\"last\"".clone();
+    let entries = parse(&src).unwrap();
+
+    match find_rel(&entries, "next") {
+        Maybe.Some(e) => assert_eq(e.uri.as_str(), "https://api.example.com/page/2"),
+        Maybe.None => assert(false),
+    }
+    match find_rel(&entries, "last") {
+        Maybe.Some(e) => assert_eq(e.uri.as_str(), "https://api.example.com/page/34"),
+        Maybe.None => assert(false),
+    }
+    assert(find_rel(&entries, "prev") is Maybe.None);
+}
+
+// =============================================================================
+// Section 3: L3 find_rel semantics
+// =============================================================================
+
+@test
+fn law_find_rel_case_insensitive() {
+    let src = "<https://x.example/a>; rel=\"NEXT\"".clone();
+    let entries = parse(&src).unwrap();
+    match find_rel(&entries, "next") {
+        Maybe.Some(e) => assert_eq(e.uri.as_str(), "https://x.example/a"),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn law_find_rel_first_match_wins() {
+    let src = "<https://x.example/first>; rel=\"next\", <https://x.example/second>; rel=\"next\"".clone();
+    let entries = parse(&src).unwrap();
+    match find_rel(&entries, "next") {
+        Maybe.Some(e) => assert_eq(e.uri.as_str(), "https://x.example/first"),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn law_find_rel_matches_token_inside_multi_rel() {
+    // rel value is a whitespace-separated token list (RFC 8288 §3.3).
+    let src = "<https://x.example/a>; rel=\"prev start\"".clone();
+    let entries = parse(&src).unwrap();
+    assert(find_rel(&entries, "start") is Maybe.Some);
+    assert(find_rel(&entries, "prev") is Maybe.Some);
+    assert(find_rel(&entries, "star") is Maybe.None);
+}
+
+// =============================================================================
+// Section 4: L4 quoted vs token spellings
+// =============================================================================
+
+@test
+fn law_quoted_and_token_rel_parse_identically() {
+    let quoted = parse(&"<https://x.example/a>; rel=\"next\"".clone()).unwrap();
+    let token = parse(&"<https://x.example/a>; rel=next".clone()).unwrap();
+    assert_eq(quoted.len(), 1);
+    assert_eq(token.len(), 1);
+    let (_, v_q) = &quoted[0].params[0];
+    let (_, v_t) = &token[0].params[0];
+    assert_eq(v_t.as_str(), v_q.as_str());
+}
+
+// =============================================================================
+// Section 5: L5 whitespace robustness
+// =============================================================================
+
+@test
+fn law_whitespace_insensitive_between_entries() {
+    let tight = parse(&"<https://x.example/a>;rel=next,<https://x.example/b>;rel=prev".clone()).unwrap();
+    let loose = parse(&"<https://x.example/a> ; rel=next ,  <https://x.example/b> ; rel=prev".clone()).unwrap();
+    assert_eq(tight.len(), 2);
+    assert_eq(loose.len(), 2);
+    assert_eq(tight[0].uri.as_str(), loose[0].uri.as_str());
+    assert_eq(tight[1].uri.as_str(), loose[1].uri.as_str());
+}
+
+// =============================================================================
+// Section 6: L6 entry-count cap
+// =============================================================================
+
+@test
+fn law_entry_cap_rejects_past_limit() {
+    let mut header = "".clone();
+    let mut i = 0;
+    while i < MAX_LINK_ENTRIES + 1 {
+        if i > 0 { header.push_str(", "); }
+        header.push_str("<https://x.example/e>; rel=next");
+        i = i + 1;
+    }
+    match parse(&header) {
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert(e is LinkHeaderError.TooManyEntries),
+    }
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

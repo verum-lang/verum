@@ -58,7 +58,24 @@ peer sending thousands of overlapping ranges forces O(N²)
 merge cost. 256 is the chosen ceiling. Pinned by
 `test_max_range_specs_value` so the constant doesn't drift.
 
-## 4. Action items landed in this branch
+## 4. Action items landed — net-conformance-20260705
+
+* `property_test.vr` (+24 laws) — the full RFC 7233/9110 pipeline is now
+  GREEN: `parse_range_header` shapes (Closed/Prefix/Suffix/multi) →
+  §14.1.2 resolution fixtures → merge/coalesce algebra (overlap +
+  adjacency + disjoint-sort) → clamp + satisfiability lattice →
+  merged-output fixpoint + sorted/gapped/bounded invariants →
+  `encode_content_range` byte-exact → CVE-2011-3192 spec-count cap.
+* This suite is GREEN because of the language-level **cross-module
+  `collection[i].field` OOB fix** — `merged[i].start` on a
+  `List<ResolvedRange>` returned from a cross-module free fn now
+  recovers its element type. See [[cross_module_collection_index_field]].
+* `regression_test.vr` — INLINE-AGG-REF-ARG pin (`@ignore`'d): passing an
+  inline `&RangeSet { specs }` aggregate literal as a call argument
+  crashes VBC codegen; the `let`-bound form lowers correctly (used in
+  `law_merged_output_is_fixpoint`).
+
+## Legacy action items — original landing branch
 
 * `core-tests/net/http_range/unit_test.vr` — 21 unit tests
   covering RangeSpec 3-variant construction + disjointness (5),

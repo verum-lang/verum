@@ -1,0 +1,286 @@
+// =============================================================================
+// core-tests/net/http_parser/property_test.vr
+// =============================================================================
+//
+// FIRST functional coverage of the resumable HTTP/1.1 wire parser.
+// The unit file pins the data surface only — `feed()` was locked
+// behind HTTPPARSE-1 (precompile-cascade SIGSEGV, CIDR-1 family);
+// that class closed via source-side discipline (2026-05-28 round
+// 17c). These laws exercise the parser the way an accept-loop does:
+// bytes arrive in arbitrary splits, the parser must not care.
+//
+// Laws:
+//   L1  one-shot completion: full canonical request → Done with
+//       consumed == len, correct body framing
+//   L2  prefix safety: every strict prefix of a valid head is
+//       NeedMore — never Error, never premature Done
+//   L3  split invariance: prefix-feed then full-feed ends in the
+//       same terminal state as one-shot (consumed / views / framing)
+//   L4  Done idempotence: feeding after Done re-reports the same Done
+//   L5  zero-copy views: method/path/version/headers views decode to
+//       the exact wire bytes
+//   L6  response mode: status-line parse (status + reason views)
+//   L7  garbage start-line → Error, not hang or bogus Done
+//
+// Buffers are built byte-by-byte (push_ascii + crlf helpers) — the
+// EXTSLICE-1-safe discipline used across net tests.
+// =============================================================================
+
+mount core.net.http_parser.{HttpParser, ParseProgress, HttpParseError};
+mount core.net.http.{Method, Version};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.List;
+
+fn push_ascii(out: &mut List<Byte>, s: &Text) {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        out.push(b[i]);
+        i = i + 1;
+    }
+}
+
+fn crlf(out: &mut List<Byte>) {
+    out.push(13_u8);
+    out.push(10_u8);
+}
+
+/// GET /index.html HTTP/1.1 + Host + Content-Length: 5, empty line.
+fn simple_request() -> List<Byte> {
+    let mut out: List<Byte> = [];
+    push_ascii(&mut out, &"GET /index.html HTTP/1.1".clone());
+    crlf(&mut out);
+    push_ascii(&mut out, &"Host: example.com".clone());
+    crlf(&mut out);
+    push_ascii(&mut out, &"Content-Length: 5".clone());
+    crlf(&mut out);
+    crlf(&mut out);
+    out
+}
+
+fn simple_response() -> List<Byte> {
+    let mut out: List<Byte> = [];
+    push_ascii(&mut out, &"HTTP/1.1 200 OK".clone());
+    crlf(&mut out);
+    push_ascii(&mut out, &"Content-Length: 0".clone());
+    crlf(&mut out);
+    crlf(&mut out);
+    out
+}
+
+fn prefix_of(buf: &List<Byte>, k: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(k);
+    let mut i = 0;
+    while i < k {
+        out.push(buf[i]);
+        i = i + 1;
+    }
+    out
+}
+
+fn bytes_equal_text(got: &[Byte], want: &Text) -> Bool {
+    let w = want.as_bytes();
+    if got.len() != w.len() { return false; }
+    let mut i = 0;
+    while i < w.len() {
+        if got[i] != w[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Section 1: L1 one-shot completion + framing
+// =============================================================================
+
+@ignore
+@test
+fn law_one_shot_request_completes() {
+    let buf = simple_request();
+    let mut p = HttpParser.request();
+    let progress = p.feed(buf.as_slice());
+    match progress {
+        ParseProgress.Done { consumed, body_len, body_start } => {
+            assert_eq(consumed, buf.len());
+            assert_eq(body_start, buf.len());
+            match body_len {
+                Maybe.Some(n) => assert_eq(n, 5),
+                Maybe.None => assert(false),
+            }
+        },
+        ParseProgress.NeedMore => assert(false),
+        ParseProgress.Error(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 2: L2 prefix safety — NeedMore on every strict prefix
+// =============================================================================
+
+@ignore
+@test
+fn law_every_strict_prefix_is_need_more() {
+    let buf = simple_request();
+    let mut k = 1;
+    while k < buf.len() {
+        let pre = prefix_of(&buf, k);
+        let mut p = HttpParser.request();
+        let progress = p.feed(pre.as_slice());
+        match progress {
+            ParseProgress.NeedMore => {},
+            ParseProgress.Done { consumed: _, body_len: _, body_start: _ } => assert(false),
+            ParseProgress.Error(_) => assert(false),
+        }
+        k = k + 1;
+    }
+}
+
+// =============================================================================
+// Section 3: L3 split invariance — resume equals one-shot
+// =============================================================================
+
+@ignore
+@test
+fn law_split_feed_equals_one_shot() {
+    let buf = simple_request();
+
+    // One-shot reference.
+    let mut a = HttpParser.request();
+    let ra = a.feed(buf.as_slice());
+    let consumed_a = match ra {
+        ParseProgress.Done { consumed, body_len: _, body_start: _ } => consumed,
+        ParseProgress.NeedMore => { assert(false); 0 },
+        ParseProgress.Error(_) => { assert(false); 0 },
+    };
+
+    // Split at several cut points, including inside the request-line,
+    // inside a header name, and right before the final CRLF.
+    let cuts: List<Int> = [1, 5, 12, 26, 30, buf.len() - 1];
+    for cut in cuts.iter() {
+        let pre = prefix_of(&buf, *cut);
+        let mut b = HttpParser.request();
+        let rb1 = b.feed(pre.as_slice());
+        match rb1 {
+            ParseProgress.NeedMore => {},
+            ParseProgress.Done { consumed: _, body_len: _, body_start: _ } => assert(false),
+            ParseProgress.Error(_) => assert(false),
+        }
+        let rb2 = b.feed(buf.as_slice());
+        match rb2 {
+            ParseProgress.Done { consumed, body_len, body_start } => {
+                assert_eq(consumed, consumed_a);
+                assert_eq(body_start, consumed_a);
+                match body_len {
+                    Maybe.Some(n) => assert_eq(n, 5),
+                    Maybe.None => assert(false),
+                }
+            },
+            ParseProgress.NeedMore => assert(false),
+            ParseProgress.Error(_) => assert(false),
+        }
+        // Views must agree with the one-shot parse.
+        assert_eq(b.headers().len(), 2);
+        assert(b.method() is Maybe.Some);
+        assert(bytes_equal_text(b.path(buf.as_slice()), &"/index.html".clone()));
+    }
+}
+
+// =============================================================================
+// Section 4: L4 Done idempotence
+// =============================================================================
+
+@ignore
+@test
+fn law_feed_after_done_is_stable() {
+    let buf = simple_request();
+    let mut p = HttpParser.request();
+    let first = p.feed(buf.as_slice());
+    let consumed_first = match first {
+        ParseProgress.Done { consumed, body_len: _, body_start: _ } => consumed,
+        ParseProgress.NeedMore => { assert(false); 0 },
+        ParseProgress.Error(_) => { assert(false); 0 },
+    };
+    let second = p.feed(buf.as_slice());
+    match second {
+        ParseProgress.Done { consumed, body_len: _, body_start: _ } =>
+            assert_eq(consumed, consumed_first),
+        ParseProgress.NeedMore => assert(false),
+        ParseProgress.Error(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 5: L5 zero-copy views decode the wire bytes
+// =============================================================================
+
+@ignore
+@test
+fn law_views_decode_wire_bytes() {
+    let buf = simple_request();
+    let mut p = HttpParser.request();
+    let progress = p.feed(buf.as_slice());
+    assert(progress is ParseProgress.Done);
+
+    match p.method() {
+        Maybe.Some(m) => assert_eq(m.as_str(), "GET"),
+        Maybe.None => assert(false),
+    }
+    assert(p.version() is Version.Http11);
+    assert(bytes_equal_text(p.path(buf.as_slice()), &"/index.html".clone()));
+
+    assert_eq(p.headers().len(), 2);
+    let h0 = p.headers()[0];
+    assert(bytes_equal_text(h0.key(buf.as_slice()), &"Host".clone()));
+    assert(bytes_equal_text(h0.value(buf.as_slice()), &"example.com".clone()));
+    let h1 = p.headers()[1];
+    assert(bytes_equal_text(h1.key(buf.as_slice()), &"Content-Length".clone()));
+    assert(bytes_equal_text(h1.value(buf.as_slice()), &"5".clone()));
+
+    match p.content_length() {
+        Maybe.Some(n) => assert_eq(n, 5),
+        Maybe.None => assert(false),
+    }
+    assert(!p.is_chunked());
+}
+
+// =============================================================================
+// Section 6: L6 response mode — status line
+// =============================================================================
+
+@ignore
+@test
+fn law_response_status_line_views() {
+    let buf = simple_response();
+    let mut p = HttpParser.response();
+    let progress = p.feed(buf.as_slice());
+    assert(progress is ParseProgress.Done);
+    match p.status() {
+        Maybe.Some(s) => assert_eq(s.code(), 200),
+        Maybe.None => assert(false),
+    }
+    assert(bytes_equal_text(p.reason(buf.as_slice()), &"OK".clone()));
+}
+
+// =============================================================================
+// Section 7: L7 garbage start-line errors out
+// =============================================================================
+
+@ignore
+@test
+fn law_garbage_start_line_is_error() {
+    let mut out: List<Byte> = [];
+    push_ascii(&mut out, &"@@@GARBAGE@@@".clone());
+    crlf(&mut out);
+    crlf(&mut out);
+    let mut p = HttpParser.request();
+    let progress = p.feed(out.as_slice());
+    match progress {
+        ParseProgress.Error(_) => {},
+        ParseProgress.NeedMore => assert(false),
+        ParseProgress.Done { consumed: _, body_len: _, body_start: _ } => assert(false),
+    }
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,71 @@
+// =============================================================================
+// core-tests/net/mod/regression_test.vr
+// =============================================================================
+//
+// Pinned defects for the `core.net` umbrella manifest. The prelude-glob
+// mount pathway lives here (and NOT in unit_test.vr) so each file
+// exercises exactly one import discipline:
+//
+//   * unit_test.vr       — `mount core.net.{Name, ...}` specific mounts.
+//   * regression_test.vr — `mount core.net.prelude.*` nested-glob mount.
+//
+// The glob is all-or-nothing: if the prelude submodule dropped ANY of its
+// 8 re-exported names (TcpStream / TcpListener / UdpSocket / SocketAddr /
+// IpAddr / lookup_host / resolve / Resolver), this file fails to compile.
+// Compilation of this file is therefore itself the reachability pin.
+// =============================================================================
+
+mount core.net.prelude.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// REGRESSION: double-hop re-export (prelude → umbrella → addr) must keep
+// the IMPL SURFACE, not just the type name. The umbrella-reexport-impl
+// class (Bug C family — cf. `mount core.sys.{MemProt}` resolving
+// `MemProt.NONE` to Unit because the umbrella mod.vr AST was a stub,
+// fixed 91d1c85b0) dropped impl blocks through re-export chains.
+// Constructing through the prelude glob and calling impl methods pins
+// the `core.net` analogue.
+@test
+fn regression_prelude_glob_impl_surface_survives() {
+    let ip = IpAddr.v4(10, 0, 0, 7);
+    assert(ip.is_ipv4());
+    assert(!ip.is_loopback());
+
+    let sa = SocketAddr.new_v4(Ipv4Addr.new(10, 0, 0, 7), 9000);
+    assert_eq(sa.port(), 9000);
+}
+
+// REGRESSION: prelude glob (`mount core.net.prelude.*`) resolves names
+// re-exported through TWO chained mounts:
+//   core/net/mod.vr:   public mount .addr.SocketAddr;
+//   prelude submodule: public mount super.SocketAddr;
+// Pre-fix the glob-mount handler in the precompile reexport scan was a
+// TODO (task #27) and every transitively re-exported name surfaced as
+// `unbound variable` at user sites despite living in the archive.
+@test
+fn regression_prelude_glob_socket_addr_resolves() {
+    let sa = SocketAddr.new_v4(Ipv4Addr.localhost(), 80);
+    assert(sa.is_ipv4());
+    assert_eq(sa.port(), 80);
+}
+
+// REGRESSION: live-transport TYPES re-exported through the prelude glob
+// bind in type position without construction (construction needs a
+// socket harness — tcp/udp audits). A dropped name would fail the mount,
+// a mis-bound name (e.g. resolving to Unit) fails the Maybe<T> type
+// application below.
+@test
+fn regression_prelude_glob_transport_type_names_bind() {
+    let r: Maybe<Resolver> = Maybe.None;
+    let t: Maybe<TcpStream> = Maybe.None;
+    let l: Maybe<TcpListener> = Maybe.None;
+    let u: Maybe<UdpSocket> = Maybe.None;
+    assert(r is Maybe.None);
+    assert(t is Maybe.None);
+    assert(l is Maybe.None);
+    assert(u is Maybe.None);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

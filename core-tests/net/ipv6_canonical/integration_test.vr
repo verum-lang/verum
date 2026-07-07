@@ -1,0 +1,90 @@
+// =============================================================================
+// core-tests/net/ipv6_canonical/integration_test.vr
+// =============================================================================
+//
+// Cross-type scenarios: RFC 5952 canonicalisation meeting
+// `core.net.addr.Ipv6Addr` — constructors, predicates, parse, and the
+// Display impl (which deliberately emits UNCOMPRESSED lowercase
+// groups; `format_ipv6` is the compressed canonical form — the two
+// must agree modulo spelling, which is exactly what
+// `equal_addresses` decides).
+// =============================================================================
+
+mount core.net.ipv6_canonical.{format_ipv6, parse, canonicalize, equal_addresses};
+mount core.net.addr.{Ipv6Addr};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: addr constructors → canonical text
+// =============================================================================
+
+@test
+fn integration_localhost_formats_canonical() {
+    let a = Ipv6Addr.localhost();
+    assert_eq(format_ipv6(&a).as_str(), "::1");
+}
+
+@test
+fn integration_unspecified_formats_canonical() {
+    let a = Ipv6Addr.unspecified();
+    assert_eq(format_ipv6(&a).as_str(), "::");
+}
+
+@test
+fn integration_constructed_segments_format_compressed() {
+    // 2001:db8::8:800:200c:417a — RFC 3849 doc prefix + RFC 4291 §2.2 example.
+    let a = Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0x8, 0x800, 0x200c, 0x417a);
+    assert_eq(format_ipv6(&a).as_str(), "2001:db8::8:800:200c:417a");
+}
+
+// =============================================================================
+// Section 2: Display (uncompressed) vs canonical (compressed) coherence
+// =============================================================================
+
+@test
+fn integration_display_and_canonical_are_equal_addresses() {
+    let a = Ipv6Addr.localhost();
+    let displayed = f"{a}";
+    // Display renders uncompressed groups; still the same address.
+    assert(equal_addresses(&displayed, &"::1".to_text()));
+}
+
+@test
+fn integration_display_of_doc_address_equal_to_canonical() {
+    let a = Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
+    let displayed = f"{a}";
+    let canon = format_ipv6(&a);
+    assert(equal_addresses(&displayed, &canon));
+}
+
+// =============================================================================
+// Section 3: addr.parse ∘ format_ipv6 round-trip through canonical text
+// =============================================================================
+
+@test
+fn integration_addr_parse_of_canonical_round_trips() {
+    let canon = canonicalize(&"2001:0DB8:0:0:0:0:0:1".to_text()).unwrap();
+    assert_eq(canon.as_str(), "2001:db8::1");
+    let re_parsed = Ipv6Addr.parse(&canon).unwrap();
+    assert_eq(format_ipv6(&re_parsed).as_str(), "2001:db8::1");
+}
+
+@test
+fn integration_link_local_predicate_survives_canonicalisation() {
+    let canon = canonicalize(&"FE80::1".to_text()).unwrap();
+    assert_eq(canon.as_str(), "fe80::1");
+    let a = Ipv6Addr.parse(&canon).unwrap();
+    assert(a.is_link_local());
+    assert(!a.is_loopback());
+}
+
+@test
+fn integration_loopback_predicate_survives_canonicalisation() {
+    let canon = canonicalize(&"0:0:0:0:0:0:0:1".to_text()).unwrap();
+    let a = Ipv6Addr.parse(&canon).unwrap();
+    assert(a.is_loopback());
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

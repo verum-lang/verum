@@ -301,12 +301,18 @@ fn expand_into(
     specs: &List<VarSpec>,
     vars: &Map<Text, TemplateValue>,
 ) {
-    // Precompute: which variables are defined + non-empty?
+    // Precompute: does any variable contribute output? Per RFC 6570
+    // §3.2.1 an empty STRING is a DEFINED value (it still triggers the
+    // operator's leader and emits `name=` for named ops), whereas an
+    // empty LIST has no members and contributes nothing — so it does
+    // NOT trigger the leader. `omits_expansion` draws exactly that line;
+    // the pre-fix `!is_empty_value` treated a defined empty string as
+    // absent, so `{?empty}` lost its `?` leader and its `=`.
     let mut any_defined: Bool = false;
     let mut i: Int = 0;
     while i < specs.len() {
         match vars.get(&specs[i].name) {
-            Maybe.Some(v) => if !is_empty_value(v) { any_defined = true; break; },
+            Maybe.Some(v) => if !omits_expansion(v) { any_defined = true; break; },
             Maybe.None    => {},
         }
         i = i + 1;
@@ -339,13 +345,11 @@ fn expand_into(
         let spec = &specs[k];
         match vars.get(&spec.name) {
             Maybe.Some(v) => {
-                if is_empty_value(v) {
-                    // Named operators still emit the name for empty strings.
-                    if op_is_named(op) {
-                        if !first { out.push(sep); }
-                        push_all(out, spec.name.as_bytes());
-                        first = false;
-                    }
+                // Empty LIST contributes nothing (treated as undefined
+                // for expansion). An empty STRING is a defined value —
+                // route it through emit_spec, which for named ops emits
+                // `name=` and for the rest emits nothing after the name.
+                if omits_expansion(v) {
                     k = k + 1;
                     continue;
                 }
@@ -395,19 +399,33 @@ fn emit_spec(out: &mut List<Byte>, op: &ExprOp, spec: &VarSpec, v: &TemplateValu
                     i = i + 1;
                 }
             } else {
-                // Join with ',' regardless of op (RFC 6570 §3.2.2).
-                let mut joined: List<Byte> = [];
+                // Join with ',' per RFC 6570 §3.2.2 — each VALUE is
+                // percent-encoded (per the operator's allowed set), but
+                // the ',' separators are LITERAL. Pre-fix the whole
+                // comma-joined string was passed through `encode_value`,
+                // which percent-encoded the separators too (comma is a
+                // sub-delim, not `unreserved`), so `{list}` over
+                // [red,green,blue] emitted `red%2Cgreen%2Cblue` instead
+                // of `red,green,blue`.
+                //
+                // The `display` copy (unencoded, comma-joined) feeds
+                // `emit_named_prefix`'s PathStyle empty-value check only.
+                let mut display: List<Byte> = [];
                 let mut i: Int = 0;
                 while i < items.len() {
-                    if i > 0 { joined.push(',' as Byte); }
-                    // EXTSLICE-1 discipline: byte-by-byte push.
+                    if i > 0 { display.push(',' as Byte); }
                     let __item_bytes = items[i].as_bytes();
                     let mut __k = 0;
-                    while __k < __item_bytes.len() { joined.push(__item_bytes[__k]); __k = __k + 1; }
+                    while __k < __item_bytes.len() { display.push(__item_bytes[__k]); __k = __k + 1; }
                     i = i + 1;
                 }
-                emit_named_prefix(out, op, spec, &joined);
-                encode_value(out, op, joined.as_slice());
+                emit_named_prefix(out, op, spec, &display);
+                let mut j: Int = 0;
+                while j < items.len() {
+                    if j > 0 { out.push(',' as Byte); }
+                    encode_value(out, op, items[j].as_bytes());
+                    j = j + 1;
+                }
             }
         },
     }
@@ -489,9 +507,13 @@ fn nibble_hex(n: Byte) -> Byte {
 // Helpers
 // =============================================================================
 
-fn is_empty_value(v: &TemplateValue) -> Bool {
+/// True when a value contributes NOTHING to an expansion — i.e. it is
+/// treated as undefined for RFC 6570 purposes. Only an empty LIST
+/// qualifies: an empty STRING is a defined value that still emits
+/// `name=` (named ops) or an empty value (the rest).
+fn omits_expansion(v: &TemplateValue) -> Bool {
     match v {
-        TemplateValue.Str(s) => s.as_bytes().len() == 0,
+        TemplateValue.Str(_) => false,
         TemplateValue.List_(items) => items.len() == 0,
     }
 }

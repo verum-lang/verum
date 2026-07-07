@@ -50,7 +50,27 @@ when a concrete caller demonstrates the need"). Tests pin only
 parse-acceptance of the `*` modifier; expansion semantics
 gated by URITPL-1.
 
-## 4. Action items landed in this branch
+## 4. Action items landed — net-conformance-20260705
+
+* **Two RFC 6570 fidelity fixes** (`core/net/uri_template.vr`):
+  * §3.2.2 `{list}` unexploded expansion percent-encoded the comma
+    SEPARATOR (`red%2Cgreen%2Cblue`); the comma joins values literally
+    (`red,green,blue`) — now each value is encoded individually with
+    literal `,` between them.
+  * §3.2.8 a defined empty STRING (`{?empty}` with `empty=""`) lost its
+    `?` leader and its `=` (rendered `empty`); an empty string is a
+    DEFINED value → `?empty=`. Split empty-string-defined from
+    empty-list-omitted via a new `omits_expansion` helper (used for the
+    leader decision AND the per-spec loop).
+* `property_test.vr` (+18 laws) — per-operator §3.2 spec fixtures
+  (Simple/Reserved/Fragment/Label/PathSeg/PathStyle/FormQuery/ContQuery)
+  + L4 prefix/explode + parse-error lattice.
+* `integration_test.vr` (+5) — Map-driven route templates
+  (GitHub-style `{owner}/{repo}/{number}`, query params, list segments,
+  partial variable sets). The `vars_from` helper uses tuple-INDEX
+  (`pairs[i].0`) — `let (k,v)=&pairs[i]` reads garbage.
+
+## Legacy action items — original landing branch
 
 * `core-tests/net/uri_template/unit_test.vr` — 10 unit tests
   over the data-surface: TemplateValue Str (3) + List_ (3) +

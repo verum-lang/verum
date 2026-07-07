@@ -317,3 +317,144 @@ fn prop_cidr_set_mixed_family_membership() {
     assert(!set.contains(&IpAddr.v4(192_u8, 168_u8, 1_u8, 1_u8)));
     assert(!set.contains(&IpAddr.v6(0xfe80, 0, 0, 0, 0, 0, 0, 1)));
 }
+
+// =============================================================================
+// Section N (2026-07-05): network_address / last_address / broadcast /
+// normalize / Eq / Display — laws for the block-boundary API
+// =============================================================================
+
+@test
+fn prop_network_address_v4_clears_host_bits() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 1_u8, 2_u8, 3_u8), prefix_len: 8 };
+    assert(c.network_address() == IpAddr.v4(10_u8, 0_u8, 0_u8, 0_u8));
+}
+
+@test
+fn prop_last_address_v4_sets_host_bits() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 1_u8, 2_u8, 3_u8), prefix_len: 8 };
+    assert(c.last_address() == IpAddr.v4(10_u8, 255_u8, 255_u8, 255_u8));
+}
+
+@test
+fn prop_block_boundaries_are_contained() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 4_u8, 77_u8), prefix_len: 22 };
+    assert(c.contains(&c.network_address()));
+    assert(c.contains(&c.last_address()));
+}
+
+@test
+fn prop_beyond_last_address_excluded() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 };
+    // 11.0.0.0 is one past 10.255.255.255.
+    assert(!c.contains(&IpAddr.v4(11_u8, 0_u8, 0_u8, 0_u8)));
+    assert(!c.contains(&IpAddr.v4(9_u8, 255_u8, 255_u8, 255_u8)));
+}
+
+@test
+fn prop_broadcast_v4_is_last_address() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(172_u8, 16_u8, 0_u8, 0_u8), prefix_len: 12 };
+    match c.broadcast_address() {
+        Maybe.Some(b) => assert(b == c.last_address()),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn prop_broadcast_v6_is_none() {
+    let c = Cidr.V6 { addr: Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), prefix_len: 32 };
+    assert(c.broadcast_address() is Maybe.None);
+}
+
+@test
+fn prop_prefix_zero_spans_whole_space_v4() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(203_u8, 0_u8, 113_u8, 9_u8), prefix_len: 0 };
+    assert(c.network_address() == IpAddr.v4(0_u8, 0_u8, 0_u8, 0_u8));
+    assert(c.last_address() == IpAddr.v4(255_u8, 255_u8, 255_u8, 255_u8));
+}
+
+@test
+fn prop_prefix_full_is_single_address_v4() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(203_u8, 0_u8, 113_u8, 9_u8), prefix_len: 32 };
+    assert(c.network_address() == IpAddr.v4(203_u8, 0_u8, 113_u8, 9_u8));
+    assert(c.last_address() == IpAddr.v4(203_u8, 0_u8, 113_u8, 9_u8));
+}
+
+@test
+fn prop_v6_partial_segment_boundary() {
+    // /36 splits segment 2: 0xabcd & 0xf000 = 0xa000.
+    let c = Cidr.V6 { addr: Ipv6Addr.new(0x2001, 0x0db8, 0xabcd, 0, 0, 0, 0, 5), prefix_len: 36 };
+    assert(c.network_address() == IpAddr.v6(0x2001, 0x0db8, 0xa000, 0, 0, 0, 0, 0));
+    assert(c.last_address() ==
+        IpAddr.v6(0x2001, 0x0db8, 0xafff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff));
+}
+
+@test
+fn prop_v6_full_prefix_is_single_address() {
+    let c = Cidr.V6 { addr: Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1), prefix_len: 128 };
+    assert(c.network_address() == IpAddr.v6(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1));
+    assert(c.last_address() == IpAddr.v6(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1));
+}
+
+@test
+fn prop_normalize_idempotent() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 1_u8, 2_u8, 3_u8), prefix_len: 8 };
+    let n1 = c.normalize();
+    let n2 = n1.normalize();
+    assert(n1 == n2);
+}
+
+@test
+fn prop_normalize_preserves_contains() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 1_u8, 2_u8, 3_u8), prefix_len: 8 };
+    let n = c.normalize();
+    let inside = IpAddr.v4(10_u8, 200_u8, 30_u8, 40_u8);
+    let outside = IpAddr.v4(11_u8, 0_u8, 0_u8, 1_u8);
+    assert(c.contains(&inside) == n.contains(&inside));
+    assert(c.contains(&outside) == n.contains(&outside));
+}
+
+@test
+fn prop_normalized_block_network_is_fixpoint() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 77_u8, 3_u8), prefix_len: 16 };
+    let n = c.normalize();
+    // normalize() sets the stored address to the block's network address
+    // and preserves the prefix, so the normalized block's network address
+    // is a fixpoint (equals the original's) and the prefix is unchanged.
+    // Assert via public accessors rather than a variant-payload
+    // destructure (which reads garbage under the tuple/variant
+    // payload-binding-on-matched-value defect).
+    assert_eq(n.prefix_len(), 16);
+    assert(n.network_address() == c.network_address());
+    assert(n.network_address() == IpAddr.v4(192_u8, 168_u8, 0_u8, 0_u8));
+}
+
+@test
+fn prop_cidr_eq_reflexive_and_field_sensitive() {
+    let a = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 };
+    let b = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 };
+    let c = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 9 };
+    let d = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 1_u8), prefix_len: 8 };
+    assert(a == a);
+    assert(a == b);
+    assert(!(a == c));
+    assert(!(a == d));
+}
+
+@test
+fn prop_cidr_eq_cross_family_false() {
+    let v4 = Cidr.V4 { addr: Ipv4Addr.new(0_u8, 0_u8, 0_u8, 0_u8), prefix_len: 0 };
+    let v6 = Cidr.V6 { addr: Ipv6Addr.new(0, 0, 0, 0, 0, 0, 0, 0), prefix_len: 0 };
+    assert(!(v4 == v6));
+}
+
+@test
+fn prop_display_v4_dotted_slash() {
+    let c = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 };
+    assert_eq(f"{c}".as_str(), "10.0.0.0/8");
+}
+
+@test
+fn prop_display_v6_canonical_compressed() {
+    let c = Cidr.V6 { addr: Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), prefix_len: 32 };
+    assert_eq(f"{c}".as_str(), "2001:db8::/32");
+}

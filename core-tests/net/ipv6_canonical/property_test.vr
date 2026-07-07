@@ -1,0 +1,224 @@
+// =============================================================================
+// core-tests/net/ipv6_canonical/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for RFC 5952 canonicalisation. The domain (2^128
+// addresses × unbounded spellings) is not exhaustible; the corpus below
+// samples every structural class the algorithm branches on:
+//
+//   * zero-run position: leading / interior / trailing / whole-address
+//   * zero-run length: 0, 1 (must NOT compress), 2, tie-pairs, maximal
+//   * group values: 0, 1, leading-zero forms, 4-digit, all-f
+//   * §5 v4-mapped tail
+//
+// Laws:
+//   L1  idempotence:      canonicalize ∘ canonicalize = canonicalize
+//   L2  fixpoint:         canonical fixtures are fixpoints of canonicalize
+//   L3  spelling classes: every spelling of one address canonicalises
+//                         to the same text
+//   L4  wrapper coherence: canonicalize(t) = format_ipv6(parse(t))
+//   L5  equal_addresses:  reflexive on valid inputs; symmetric;
+//                         constant across spellings; discriminates
+//                         distinct addresses; false on invalid input
+//   L6  lowercase:        canonical output never contains A-F
+// =============================================================================
+
+mount core.net.ipv6_canonical.{format_ipv6, parse, canonicalize, equal_addresses};
+mount core.net.addr.{Ipv6Addr};
+mount core.base.result.{Result, Ok, Err};
+
+// Corpus of (spelling, canonical) pairs. One row per structural class.
+fn corpus() -> List<(Text, Text)> {
+    [
+        // (input spelling, expected canonical)
+        ("::".to_text(), "::".to_text()),
+        ("0:0:0:0:0:0:0:0".to_text(), "::".to_text()),
+        ("::1".to_text(), "::1".to_text()),
+        ("0:0:0:0:0:0:0:1".to_text(), "::1".to_text()),
+        ("1::".to_text(), "1::".to_text()),
+        ("1:0:0:0:0:0:0:0".to_text(), "1::".to_text()),
+        // Interior run.
+        ("2001:0db8:0:0:0:0:0:1".to_text(), "2001:db8::1".to_text()),
+        ("2001:DB8::1".to_text(), "2001:db8::1".to_text()),
+        ("2001:db8::0:1".to_text(), "2001:db8::1".to_text()),
+        // §4.2.2 single zero group is NOT compressed.
+        ("1:0:2:3:4:5:6:7".to_text(), "1:0:2:3:4:5:6:7".to_text()),
+        // §4.2.3 tie → leftmost run.
+        ("1:0:0:2:0:0:3:4".to_text(), "1::2:0:0:3:4".to_text()),
+        // Longest run wins over an earlier shorter run.
+        ("1:0:0:2:0:0:0:3".to_text(), "1:0:0:2::3".to_text()),
+        // §4.1 leading zeros suppressed, §4.3 lowercase.
+        ("0001:0002:0003:0004:0005:0006:0007:0008".to_text(),
+         "1:2:3:4:5:6:7:8".to_text()),
+        ("ABCD:EF01:2345:6789:abcd:ef01:2345:6789".to_text(),
+         "abcd:ef01:2345:6789:abcd:ef01:2345:6789".to_text()),
+        // Maximal groups.
+        ("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff".to_text(),
+         "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff".to_text()),
+        // Trailing run of length 2 (compress) after non-zero head.
+        ("1:2:3:4:5:6:0:0".to_text(), "1:2:3:4:5:6::".to_text()),
+    ]
+}
+
+// =============================================================================
+// Section 1: L2 fixpoint + L1 idempotence over the corpus
+// =============================================================================
+
+@test
+fn law_canonical_fixtures_are_fixpoints() {
+    for pair in corpus().iter() {
+        let canon = pair.1.clone();
+        match canonicalize(&canon) {
+            Result.Ok(again) => assert_eq(again.as_str(), canon.as_str()),
+            Result.Err(_) => assert(false),
+        }
+    }
+}
+
+@test
+fn law_canonicalize_idempotent_over_corpus() {
+    for pair in corpus().iter() {
+        let spelling = pair.0.clone();
+        let once = canonicalize(&spelling).unwrap();
+        let twice = canonicalize(&once).unwrap();
+        assert_eq(twice.as_str(), once.as_str());
+    }
+}
+
+// =============================================================================
+// Section 2: L3 spelling classes collapse to one canonical text
+// =============================================================================
+
+@test
+fn law_spelling_classes_collapse() {
+    for pair in corpus().iter() {
+        let spelling = pair.0.clone(); let canon = pair.1.clone();
+        match canonicalize(&spelling) {
+            Result.Ok(got) => assert_eq(got.as_str(), canon.as_str()),
+            Result.Err(_) => assert(false),
+        }
+    }
+}
+
+@test
+fn law_uppercase_and_expanded_spellings_of_loopback_collapse() {
+    let spellings: List<Text> = [
+        "::1".to_text(),
+        "0:0:0:0:0:0:0:1".to_text(),
+        "0000:0000:0000:0000:0000:0000:0000:0001".to_text(),
+        "::0001".to_text(),
+        "0::1".to_text(),
+    ];
+    for s in spellings.iter() {
+        match canonicalize(s) {
+            Result.Ok(c) => assert_eq(c.as_str(), "::1"),
+            Result.Err(_) => assert(false),
+        }
+    }
+}
+
+// =============================================================================
+// Section 3: L4 wrapper coherence — canonicalize = format_ipv6 ∘ parse
+// =============================================================================
+
+@test
+fn law_canonicalize_equals_format_of_parse() {
+    for pair in corpus().iter() {
+        let spelling = pair.0.clone();
+        let via_canon = canonicalize(&spelling).unwrap();
+        let addr = parse(&spelling).unwrap();
+        let via_parse = format_ipv6(&addr);
+        assert_eq(via_canon.as_str(), via_parse.as_str());
+    }
+}
+
+// =============================================================================
+// Section 4: L5 equal_addresses laws
+// =============================================================================
+
+@test
+fn law_equal_addresses_reflexive_over_corpus() {
+    for pair in corpus().iter() {
+        let spelling = pair.0.clone();
+        assert(equal_addresses(&spelling, &spelling));
+    }
+}
+
+@test
+fn law_equal_addresses_constant_across_spellings() {
+    for pair in corpus().iter() {
+        let spelling = pair.0.clone(); let canon = pair.1.clone();
+        assert(equal_addresses(&spelling, &canon));
+        assert(equal_addresses(&canon, &spelling));
+    }
+}
+
+@test
+fn law_equal_addresses_discriminates_distinct() {
+    assert(!equal_addresses(&"::1".to_text(), &"::2".to_text()));
+    assert(!equal_addresses(&"1::".to_text(), &"::1".to_text()));
+    assert(!equal_addresses(&"2001:db8::1".to_text(), &"2001:db8::2".to_text()));
+}
+
+@test
+fn law_equal_addresses_false_on_invalid() {
+    assert(!equal_addresses(&"not-an-address".to_text(), &"::1".to_text()));
+    assert(!equal_addresses(&"::1".to_text(), &"not-an-address".to_text()));
+    assert(!equal_addresses(&"".to_text(), &"".to_text()));
+}
+
+// =============================================================================
+// Section 5: L6 lowercase invariant
+// =============================================================================
+
+@test
+fn law_canonical_output_is_lowercase() {
+    let inputs: List<Text> = [
+        "ABCD:EF01:2345:6789:ABCD:EF01:2345:6789".to_text(),
+        "2001:DB8::A".to_text(),
+        "FE80::1".to_text(),
+    ];
+    for s in inputs.iter() {
+        match canonicalize(s) {
+            Result.Ok(c) => {
+                // No byte in 'A'..='F' may survive.
+                let bytes = c.as_bytes();
+                let mut i = 0;
+                while i < bytes.len() {
+                    let b = bytes[i];
+                    assert(!(b >= ('A' as Byte) && b <= ('F' as Byte)));
+                    i = i + 1;
+                }
+            },
+            Result.Err(_) => assert(false),
+        }
+    }
+}
+
+// =============================================================================
+// Section 6: §5 v4-mapped tail preservation
+// =============================================================================
+
+@ignore
+@test
+fn law_v4_mapped_dotted_tail_preserved() {
+    match canonicalize(&"::ffff:192.168.1.1".to_text()) {
+        Result.Ok(c) => assert_eq(c.as_str(), "::ffff:192.168.1.1"),
+        Result.Err(_) => assert(false),
+    }
+}
+
+@ignore
+@test
+fn law_v4_mapped_hex_spelling_collapses_to_dotted() {
+    // 0xC0A8 = 192.168, 0x0101 = 1.1 — the pure-hex spelling of the
+    // same mapped address must canonicalise to the dotted-quad form.
+    match canonicalize(&"0:0:0:0:0:ffff:c0a8:101".to_text()) {
+        Result.Ok(c) => assert_eq(c.as_str(), "::ffff:192.168.1.1"),
+        Result.Err(_) => assert(false),
+    }
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,237 @@
+// =============================================================================
+// core-tests/net/http_cache/property_test.vr
+// =============================================================================
+//
+// Laws for the RFC 9111 caching pipeline: parse → current_age →
+// freshness_lifetime_sec → decide.
+//
+//   L1  directive parsing: booleans, numerics, unknown-ignored
+//   L2  §4.2.3 current_age formula: apparent-age vs Age header max,
+//       resident-time addition, clock-skew floor at 0
+//   L3  §4.2.1 lifetime precedence: s-maxage (shared only) > max-age
+//       > Expires; heuristic None when all absent
+//   L4  decision lattice: no-store > private@shared > no-cache >
+//       immutable > fresh/stale
+//   L5  stale grace: stale-while-revalidate window; stale-if-error
+//       only under upstream_error
+//   L6  Fresh(remaining) arithmetic is exact
+// =============================================================================
+
+mount core.net.http_cache.{
+    CacheControl, AgeInputs, DecisionInputs, CacheDecision,
+    parse, current_age, freshness_lifetime_sec, decide,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+fn age_at(date: UInt64, received: UInt64, request: UInt64, age_hdr: UInt64) -> AgeInputs {
+    AgeInputs {
+        now_unix: received,
+        date_header_unix: date,
+        response_received_unix: received,
+        request_unix: request,
+        age_header_sec: age_hdr,
+    }
+}
+
+// =============================================================================
+// Section 1: L1 directive parsing
+// =============================================================================
+
+@test
+fn law_parse_boolean_directives() {
+    let cc = parse(&"no-store, no-cache, public, must-revalidate, immutable".clone());
+    assert(cc.no_store);
+    assert(cc.no_cache);
+    assert(cc.public_);
+    assert(cc.must_revalidate);
+    assert(cc.immutable);
+    assert(!cc.private_);
+    assert(!cc.only_if_cached);
+}
+
+@test
+fn law_parse_numeric_directives() {
+    let cc = parse(&"max-age=3600, s-maxage=7200, stale-while-revalidate=30, stale-if-error=120".clone());
+    match cc.max_age { Maybe.Some(n) => assert(n == 3600_u64), Maybe.None => assert(false) }
+    match cc.s_maxage { Maybe.Some(n) => assert(n == 7200_u64), Maybe.None => assert(false) }
+    match cc.stale_while_revalidate { Maybe.Some(n) => assert(n == 30_u64), Maybe.None => assert(false) }
+    match cc.stale_if_error { Maybe.Some(n) => assert(n == 120_u64), Maybe.None => assert(false) }
+}
+
+@test
+fn law_unknown_directives_ignored() {
+    let cc = parse(&"max-age=60, x-unknown-extension=99, another".clone());
+    match cc.max_age { Maybe.Some(n) => assert(n == 60_u64), Maybe.None => assert(false) }
+    assert(!cc.no_store);
+    assert(!cc.no_cache);
+}
+
+// =============================================================================
+// Section 2: L2 current_age formula
+// =============================================================================
+
+@test
+fn law_age_is_max_of_apparent_and_header() {
+    // Apparent age (received - date) = 10; Age header = 3 → 10 wins.
+    let a = current_age(&age_at(1000_u64, 1010_u64, 1010_u64, 3_u64));
+    assert(a == 10_u64);
+    // Age header = 25 → 25 wins.
+    let b = current_age(&age_at(1000_u64, 1010_u64, 1010_u64, 25_u64));
+    assert(b == 25_u64);
+}
+
+@test
+fn law_age_adds_resident_time() {
+    // Stored at 1010, request at 1310 → +300 resident.
+    let a = current_age(&age_at(1000_u64, 1010_u64, 1310_u64, 0_u64));
+    assert(a == 310_u64);
+}
+
+@test
+fn law_age_clock_skew_floors_at_zero() {
+    // Origin Date AHEAD of receipt (skew): apparent age clamps to 0.
+    let a = current_age(&age_at(2000_u64, 1010_u64, 1010_u64, 0_u64));
+    assert(a == 0_u64);
+}
+
+// =============================================================================
+// Section 3: L3 lifetime precedence
+// =============================================================================
+
+@test
+fn law_smaxage_wins_for_shared_cache_only() {
+    let cc = parse(&"max-age=100, s-maxage=500".clone());
+    match freshness_lifetime_sec(&cc, Maybe.None, 0_u64, true) {
+        Maybe.Some(n) => assert(n == 500_u64),
+        Maybe.None => assert(false),
+    }
+    match freshness_lifetime_sec(&cc, Maybe.None, 0_u64, false) {
+        Maybe.Some(n) => assert(n == 100_u64),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn law_max_age_beats_expires() {
+    let cc = parse(&"max-age=100".clone());
+    match freshness_lifetime_sec(&cc, Maybe.Some(5000_u64), 1000_u64, false) {
+        Maybe.Some(n) => assert(n == 100_u64),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn law_expires_used_when_no_max_age() {
+    let cc = parse(&"public".clone());
+    match freshness_lifetime_sec(&cc, Maybe.Some(5000_u64), 1000_u64, false) {
+        Maybe.Some(n) => assert(n == 4000_u64),
+        Maybe.None => assert(false),
+    }
+    // Expires in the past → 0, not negative.
+    match freshness_lifetime_sec(&cc, Maybe.Some(500_u64), 1000_u64, false) {
+        Maybe.Some(n) => assert(n == 0_u64),
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn law_no_signals_means_no_lifetime() {
+    let cc = parse(&"public".clone());
+    assert(freshness_lifetime_sec(&cc, Maybe.None, 1000_u64, false) is Maybe.None);
+}
+
+// =============================================================================
+// Section 4: L4 decision lattice
+// =============================================================================
+
+fn decision_for(header: &Text, shared: Bool, request_at: UInt64, err: Bool) -> CacheDecision {
+    let cc = parse(header);
+    decide(&DecisionInputs {
+        resp_cc: cc,
+        age: age_at(1000_u64, 1000_u64, request_at, 0_u64),
+        expires_unix: Maybe.None,
+        shared_cache: shared,
+        upstream_error: err,
+    })
+}
+
+@test
+fn law_no_store_dominates_everything() {
+    let d = decision_for(&"no-store, max-age=1000, immutable".clone(), false, 1000_u64, false);
+    assert(d is CacheDecision.MustNotCache);
+}
+
+@test
+fn law_private_blocks_shared_cache_only() {
+    let d_shared = decision_for(&"private, max-age=1000".clone(), true, 1000_u64, false);
+    assert(d_shared is CacheDecision.MustNotCache);
+    let d_local = decision_for(&"private, max-age=1000".clone(), false, 1000_u64, false);
+    assert(d_local is CacheDecision.Fresh);
+}
+
+@test
+fn law_no_cache_forces_revalidation() {
+    let d = decision_for(&"no-cache, max-age=1000".clone(), false, 1000_u64, false);
+    assert(d is CacheDecision.MustRevalidate);
+}
+
+@test
+fn law_immutable_is_fresh_for_max_age() {
+    let d = decision_for(&"immutable, max-age=1000".clone(), false, 1000_u64, false);
+    match d {
+        CacheDecision.Fresh(n) => assert(n == 1000_u64),
+        CacheDecision.StaleServable(_) => assert(false),
+        CacheDecision.MustRevalidate => assert(false),
+        CacheDecision.MustNotCache => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 5: L5 stale grace windows
+// =============================================================================
+
+@test
+fn law_stale_while_revalidate_window() {
+    // max-age=100; request at age 150; swr=100 → StaleServable(50).
+    let d = decision_for(&"max-age=100, stale-while-revalidate=100".clone(), false, 1150_u64, false);
+    match d {
+        CacheDecision.StaleServable(n) => assert(n == 50_u64),
+        CacheDecision.Fresh(_) => assert(false),
+        CacheDecision.MustRevalidate => assert(false),
+        CacheDecision.MustNotCache => assert(false),
+    }
+}
+
+@test
+fn law_stale_if_error_needs_upstream_error() {
+    // Past swr-less lifetime; sie=100, age=150, limit=100.
+    let with_err = decision_for(&"max-age=100, stale-if-error=100".clone(), false, 1150_u64, true);
+    match with_err {
+        CacheDecision.StaleServable(n) => assert(n == 50_u64),
+        CacheDecision.Fresh(_) => assert(false),
+        CacheDecision.MustRevalidate => assert(false),
+        CacheDecision.MustNotCache => assert(false),
+    }
+    let without_err = decision_for(&"max-age=100, stale-if-error=100".clone(), false, 1150_u64, false);
+    assert(!(without_err is CacheDecision.StaleServable));
+}
+
+// =============================================================================
+// Section 6: L6 Fresh remaining arithmetic
+// =============================================================================
+
+@test
+fn law_fresh_remaining_exact() {
+    // max-age=1000, age at request = 400 → Fresh(600).
+    let d = decision_for(&"max-age=1000".clone(), false, 1400_u64, false);
+    match d {
+        CacheDecision.Fresh(n) => assert(n == 600_u64),
+        CacheDecision.StaleServable(_) => assert(false),
+        CacheDecision.MustRevalidate => assert(false),
+        CacheDecision.MustNotCache => assert(false),
+    }
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

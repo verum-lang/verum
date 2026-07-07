@@ -50,7 +50,17 @@ tests transition from @ignore'd-SIGSEGV to GREEN under `--interp`.
 CVE-2011-3192-class hardening — real-world headers carry ≤ 5
 directives. 64 is generous.
 
-## 4. Action items landed in this branch
+## 4. Action items landed — net-conformance-20260705
+
+* `property_test.vr` (+17 laws) — RFC 9111 pipeline: directive parsing
+  (booleans/numerics/unknown-ignored) → §4.2.3 `current_age` formula
+  (apparent-age vs Age header max, resident-time, clock-skew floor) →
+  §4.2.1 `freshness_lifetime_sec` precedence (s-maxage[shared] > max-age
+  > Expires) → `decide` lattice (no-store > private@shared > no-cache >
+  immutable > fresh/stale) + stale-while-revalidate / stale-if-error
+  grace windows. Pure data + arithmetic — GREEN both files.
+
+## Legacy action items — original landing branch
 
 * `core-tests/net/http_cache/unit_test.vr` — 23 unit tests
   covering CacheControl 16-field record construction +
