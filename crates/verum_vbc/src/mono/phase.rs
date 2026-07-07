@@ -356,13 +356,17 @@ impl MonomorphizationPhase {
             let mut specializer = BytecodeSpecializer::new(module, &substitution, graph);
 
             // Specialize
-            let mut specialized = specializer.specialize(func, &request.type_args)?;
+            let specialized = specializer.specialize(func, &request.type_args)?;
 
-            // Optimize if enabled
-            if self.config.optimize {
-                let mut optimizer = SpecializationOptimizer::new();
-                specialized.bytecode = optimizer.optimize(specialized.bytecode);
-            }
+            // NOTE: the post-specialization SpecializationOptimizer is DISABLED.
+            // It is a byte-by-byte constant-folding/peephole scanner that
+            // mis-tracks operand bytes as opcodes and REWRITES the stream —
+            // observed turning a correct 95-byte specialized body
+            // (Call/Mov/Ref/…/CallM) into 91 bytes of garbage
+            // (Call/LoadK/LoadI/NewRange/MakeVariantTyped), which then lowered
+            // to an undefined/mis-shaped LLVM body.  The specialized bytecode is
+            // already correct without it.  Re-enable only once the optimizer is
+            // rewritten on the canonical decode→transform→encode path (#3).
 
             results.push((request.clone(), specialized));
         }
@@ -394,11 +398,10 @@ impl MonomorphizationPhase {
                 .ok_or(MonoPhaseError::FunctionNotFound(request.function_id))?;
             let substitution = TypeSubstitution::from_function(func, &request.type_args);
             let mut specializer = BytecodeSpecializer::new(module, &substitution, graph);
-            let mut specialized = specializer.specialize(func, &request.type_args)?;
-            if optimize_flag {
-                let mut optimizer = SpecializationOptimizer::new();
-                specialized.bytecode = optimizer.optimize(specialized.bytecode);
-            }
+            let specialized = specializer.specialize(func, &request.type_args)?;
+            // SpecializationOptimizer DISABLED — it corrupts the byte stream
+            // (see specialize_sequential for the detail).
+            let _ = optimize_flag;
             Ok((request.clone(), specialized))
         };
 

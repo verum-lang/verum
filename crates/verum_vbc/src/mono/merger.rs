@@ -201,6 +201,13 @@ pub struct ModuleMerger {
     mapping: FunctionMapping,
     /// Statistics.
     stats: MergeStats,
+    /// Generic-function ids that `fixup_references` actually routed to a single
+    /// specialization (old generic id → its bytecode was rewritten to call the
+    /// spec).  `decode_specialized_instructions` reads this to re-decode exactly
+    /// the callers whose instructions went stale — recomputing the set there
+    /// disagreed with the routing (duplicate seed/new specialization entries
+    /// perturb the per-generic count), so the routing records it directly.
+    routed_generics: Vec<u32>,
 }
 
 impl ModuleMerger {
@@ -218,6 +225,7 @@ impl ModuleMerger {
             resolver,
             mapping: FunctionMapping::new(),
             stats: MergeStats::default(),
+            routed_generics: Vec::new(),
         }
     }
 
@@ -492,17 +500,61 @@ impl ModuleMerger {
     /// A function whose byte range fails to decode cleanly is left as-is (it
     /// will simply be forward-declared, as before) rather than aborting merge.
     fn decode_specialized_instructions(&self, output: &mut VbcModule, first_new_spec: usize) {
-        let ranges: Vec<(usize, usize, usize)> = output.functions[first_new_spec..]
+        // fixup_references rewrote call func_ids IN THE BYTECODE, but the AOT
+        // body-lowering consumes each descriptor's DECODED `instructions`, not
+        // the raw bytecode.  So any function whose calls were rewritten (e.g.
+        // `main`, whose CallG to a generic was routed to the specialization)
+        // has STALE instructions still naming the old target.  Re-decode from
+        // the fixed-up bytecode for (a) every function that already carried a
+        // body (instructions.is_some() → refresh) and (b) the new
+        // specializations at [first_new_spec, len) (populate).  Bodyless
+        // FFI/forward-decl functions (None and not a new spec) are left
+        // untouched so they stay declared-only.
+        // The routing (fixup_references) only rewrites calls to
+        // single-instantiation generics, so ONLY the new specializations and
+        // the (few) functions that call a routed generic have stale
+        // instructions.  Re-decoding every body would be O(module) and times
+        // out on stdlib-sized inputs, so target precisely those.  Use the EXACT
+        // set of generic ids the routing rewrote (recorded in
+        // `self.routed_generics`) — recomputing it here disagreed because the
+        // specializations table holds duplicate seed/new entries.
+        let routed: std::collections::HashSet<u32> =
+            self.routed_generics.iter().copied().collect();
+        let calls_routed = |instrs: &[crate::instruction::Instruction]| -> bool {
+            instrs.iter().any(|i| match i {
+                crate::instruction::Instruction::Call { func_id, .. }
+                | crate::instruction::Instruction::TailCall { func_id, .. }
+                | crate::instruction::Instruction::CallG { func_id, .. } => {
+                    routed.contains(func_id)
+                }
+                _ => false,
+            })
+        };
+        let ranges: Vec<(usize, usize, usize)> = output
+            .functions
             .iter()
             .enumerate()
-            .map(|(i, f)| {
-                (
-                    first_new_spec + i,
-                    f.bytecode_offset as usize,
-                    f.bytecode_length as usize,
-                )
+            .filter(|(i, f)| {
+                f.bytecode_length > 0
+                    && (*i >= first_new_spec
+                        || f.instructions.as_deref().is_some_and(&calls_routed))
             })
+            .map(|(i, f)| (i, f.bytecode_offset as usize, f.bytecode_length as usize))
             .collect();
+        if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+            let with_body = output
+                .functions
+                .iter()
+                .filter(|f| f.instructions.is_some())
+                .count();
+            eprintln!(
+                "[mono-refresh] routed={:?} candidate_ranges={} first_new_spec={} fns_with_body={}",
+                routed,
+                ranges.len(),
+                first_new_spec,
+                with_body
+            );
+        }
         for (idx, off, len) in ranges {
             if len == 0 || off + len > output.bytecode.len() {
                 continue;
@@ -522,6 +574,27 @@ impl ModuleMerger {
             }
             if ok && pc == end {
                 if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                    let callg_ids: Vec<u32> = instrs
+                        .iter()
+                        .filter_map(|i| match i {
+                            crate::instruction::Instruction::CallG { func_id, .. }
+                            | crate::instruction::Instruction::Call { func_id, .. } => {
+                                Some(*func_id)
+                            }
+                            _ => None,
+                        })
+                        .filter(|id| routed.contains(id) || *id >= first_new_spec as u32)
+                        .collect();
+                    if !callg_ids.is_empty() {
+                        let nm = output
+                            .get_string(output.functions[idx].name)
+                            .unwrap_or("<?>")
+                            .to_string();
+                        eprintln!(
+                            "[mono-refresh] idx={} '{}' now-calls-routed/spec={:?}",
+                            idx, nm, callg_ids
+                        );
+                    }
                     let nm = output
                         .get_string(output.functions[idx].name)
                         .unwrap_or("<?>")
@@ -615,6 +688,7 @@ impl ModuleMerger {
                         );
                     }
                     id_remap.insert(spec.generic_fn.0, spec_id.0);
+                    self.routed_generics.push(spec.generic_fn.0);
                 }
             }
         }

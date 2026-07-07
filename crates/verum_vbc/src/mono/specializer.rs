@@ -326,9 +326,11 @@ impl<'a> BytecodeSpecializer<'a> {
                 .is_some_and(|n| n.contains("future_poll_sync"));
         if trace_this {
             eprintln!(
-                "[mono-spec-body] specializing '{}' bytecode_len={}",
+                "[mono-spec-body] specializing id={} '{}' bytecode_len={} first_in_bytes={:02x?}",
+                func.id.0,
                 self.module.get_string(func.name).unwrap_or("?"),
-                bytecode.len()
+                bytecode.len(),
+                &bytecode[..bytecode.len().min(20)]
             );
         }
 
@@ -336,12 +338,6 @@ impl<'a> BytecodeSpecializer<'a> {
             self.stats.total_instructions += 1;
             let opcode_byte = bytecode[pc];
             let opcode = Opcode::from_byte(opcode_byte);
-
-            if trace_this {
-                // For Call/CallM, peek the callee/method id and print its
-                // string so we can see how `future.poll()` was compiled.
-                eprintln!("[mono-spec-body]   pc={} opcode={:?}", pc, opcode);
-            }
 
             match opcode {
                 // Generic call: rewrite to direct call
@@ -403,6 +399,15 @@ impl<'a> BytecodeSpecializer<'a> {
         }
 
         self.stats.bytes_output = output.len();
+
+        if trace_this {
+            eprintln!(
+                "[mono-spec-body] id={} OUTPUT len={} first_out_bytes={:02x?}",
+                func.id.0,
+                output.len(),
+                &output[..output.len().min(20)]
+            );
+        }
 
         Ok(SpecializedFunction {
             bytecode: output,
