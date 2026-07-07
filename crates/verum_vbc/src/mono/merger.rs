@@ -602,9 +602,23 @@ impl ModuleMerger {
                     }
                 }
 
-                // All other opcodes: skip their operands
+                // All other opcodes carry no FunctionId to rewrite — advance
+                // past the whole instruction using the CANONICAL decoder.  The
+                // previous hand-rolled `skip_instruction_operands` fell back to
+                // `min(pc + 4, end)` ("estimate 4 bytes") for any opcode it
+                // didn't enumerate — a wrong guess that desynchronised the
+                // fixup scan, after which a later operand byte could be
+                // mis-read as a call opcode and have its "func_id" clobbered,
+                // silently corrupting the merged module.
                 _ => {
-                    pc = self.skip_instruction_operands(opcode, bytecode, pc, end);
+                    let instr_start = pc - 1; // opcode byte (pc was advanced past it)
+                    let mut probe = instr_start;
+                    match crate::bytecode::decode_instruction(bytecode, &mut probe) {
+                        Ok(_) if probe > pc && probe <= end => pc = probe,
+                        // Undecodable / overruns the function — stop the scan
+                        // rather than risk clobbering unrelated bytes.
+                        _ => pc = end,
+                    }
                 }
             }
         }
@@ -751,167 +765,6 @@ impl ModuleMerger {
         }
 
         pos
-    }
-
-    /// Skips instruction operands for non-call opcodes.
-    fn skip_instruction_operands(
-        &self,
-        opcode: Opcode,
-        bytecode: &[u8],
-        pc: usize,
-        end: usize,
-    ) -> usize {
-        match opcode {
-            // No operands
-            Opcode::Nop | Opcode::RetV => pc,
-
-            // Single register
-            Opcode::LoadTrue
-            | Opcode::LoadFalse
-            | Opcode::LoadUnit
-            | Opcode::LoadNil
-            | Opcode::Ret => self.skip_register(bytecode, pc),
-
-            // Two registers
-            Opcode::Mov
-            | Opcode::Not
-            | Opcode::NegI
-            | Opcode::NegF
-            | Opcode::Bnot
-            | Opcode::Clone
-            | Opcode::Ref
-            | Opcode::RefMut
-            | Opcode::Deref
-            | Opcode::DerefMut
-            | Opcode::Inc
-            | Opcode::Dec => {
-                let pc = self.skip_register(bytecode, pc);
-                self.skip_register(bytecode, pc)
-            }
-
-            // Three registers
-            Opcode::AddI
-            | Opcode::SubI
-            | Opcode::MulI
-            | Opcode::DivI
-            | Opcode::ModI
-            | Opcode::AddF
-            | Opcode::SubF
-            | Opcode::MulF
-            | Opcode::DivF
-            | Opcode::ModF
-            | Opcode::AddG
-            | Opcode::SubG
-            | Opcode::MulG
-            | Opcode::DivG
-            | Opcode::Band
-            | Opcode::Bor
-            | Opcode::Bxor
-            | Opcode::Shl
-            | Opcode::Shr
-            | Opcode::Ushr
-            | Opcode::And
-            | Opcode::Or
-            | Opcode::Xor
-            | Opcode::EqI
-            | Opcode::NeI
-            | Opcode::LtI
-            | Opcode::LeI
-            | Opcode::GtI
-            | Opcode::GeI
-            | Opcode::EqF
-            | Opcode::NeF
-            | Opcode::LtF
-            | Opcode::LeF
-            | Opcode::GtF
-            | Opcode::GeF
-            | Opcode::EqG
-            | Opcode::CmpG
-            | Opcode::EqRef => {
-                let pc = self.skip_register(bytecode, pc);
-                let pc = self.skip_register(bytecode, pc);
-                self.skip_register(bytecode, pc)
-            }
-
-            // Register + immediate
-            Opcode::LoadI | Opcode::LoadSmallI => {
-                let pc = self.skip_register(bytecode, pc);
-                let (_, len) = self.read_varint(bytecode, pc);
-                pc + len
-            }
-
-            Opcode::LoadF => {
-                let pc = self.skip_register(bytecode, pc);
-                pc + 8 // 64-bit float
-            }
-
-            Opcode::LoadK => {
-                let pc = self.skip_register(bytecode, pc);
-                let (_, len) = self.read_varint(bytecode, pc);
-                pc + len
-            }
-
-            // Jumps: offset (4 bytes)
-            Opcode::Jmp => pc + 4,
-
-            // Conditional jumps: register + offset
-            Opcode::JmpIf | Opcode::JmpNot => {
-                let pc = self.skip_register(bytecode, pc);
-                pc + 4
-            }
-
-            // Compare-and-jump: two registers + offset
-            Opcode::JmpEq
-            | Opcode::JmpNe
-            | Opcode::JmpLt
-            | Opcode::JmpLe
-            | Opcode::JmpGt
-            | Opcode::JmpGe => {
-                let pc = self.skip_register(bytecode, pc);
-                let pc = self.skip_register(bytecode, pc);
-                pc + 4
-            }
-
-            // NEW: dst + type_id
-            Opcode::New => {
-                let pc = self.skip_register(bytecode, pc);
-                let (_, len) = self.read_varint(bytecode, pc);
-                pc + len
-            }
-
-            // NEW_G: dst + type_id + type_arg_count + type_args
-            Opcode::NewG => {
-                let pc = self.skip_register(bytecode, pc);
-                let (_, len) = self.read_varint(bytecode, pc);
-                let mut pc = pc + len;
-                if pc < end {
-                    let type_arg_count = bytecode[pc] as usize;
-                    pc += 1;
-                    for _ in 0..type_arg_count {
-                        pc = self.skip_type_ref(bytecode, pc, end);
-                    }
-                }
-                pc
-            }
-
-            // GET_F/SET_F: obj + field_idx
-            Opcode::GetF => {
-                let pc = self.skip_register(bytecode, pc);
-                let pc = self.skip_register(bytecode, pc);
-                let (_, len) = self.read_varint(bytecode, pc);
-                pc + len
-            }
-
-            Opcode::SetF => {
-                let pc = self.skip_register(bytecode, pc);
-                let (_, len) = self.read_varint(bytecode, pc);
-                let pc = pc + len;
-                self.skip_register(bytecode, pc)
-            }
-
-            // Default: estimate 4 bytes
-            _ => std::cmp::min(pc + 4, end),
-        }
     }
 
     /// Returns the function mapping.
