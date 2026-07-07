@@ -595,11 +595,29 @@ pub(in super::super) fn handle_drop_ref(
                 .get_type(type_id)
                 .and_then(|type_desc| type_desc.drop_fn)
                 .and_then(|drop_fn_id| {
-                    state
-                        .module
-                        .functions
-                        .get(drop_fn_id as usize)
-                        .map(|func| (drop_fn_id, func.register_count, func.bytecode_offset))
+                    state.module.functions.get(drop_fn_id as usize).and_then(|func| {
+                        // TYPE-ID-COLLISION-3 (FUNDAMENTAL, runtime guard). A
+                        // descriptor's drop_fn is a func-id baked at codegen
+                        // and NOT reliably remapped on the lazy run-path load
+                        // (finalize_module_from_state sets it by name at
+                        // mod.rs:6593 but never remaps it to the contiguous
+                        // module id). When the func-id space shifts (any extra
+                        // symbol mounted), a stale drop_fn indexes an unrelated
+                        // function: `List` (id 512) kept drop_fn=1231 which,
+                        // after a mount, pointed at `child_setup_stdio` —
+                        // dropping a `List<Byte>` ran process-spawn syscalls
+                        // and faulted. Every genuine Drop impl is registered as
+                        // `<Type>.drop` (mod.rs:6584), so a resolved drop_fn
+                        // whose name is not a `drop` is a mis-resolution: skip
+                        // it and fall through to the builtin List/tuple/CBGR
+                        // cleanup rather than executing arbitrary code.
+                        let name = state.module.strings.get(func.name).unwrap_or("");
+                        if name == "drop" || name.ends_with(".drop") {
+                            Some((drop_fn_id, func.register_count, func.bytecode_offset))
+                        } else {
+                            None
+                        }
+                    })
                 });
 
             if let Some((drop_fn_id, reg_count, _bytecode_offset)) = drop_info {

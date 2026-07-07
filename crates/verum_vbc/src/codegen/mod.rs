@@ -15864,17 +15864,27 @@ impl VbcCodegen {
                     tp.name = *mapped;
                 }
             }
-            // Remap drop_fn from sparse ID to contiguous 0-based ID
-            if let Some(drop_fn) = remapped_ty.drop_fn
-                && let Some(&new_id) = func_id_remap.get(&drop_fn)
-            {
-                remapped_ty.drop_fn = Some(new_id);
+            // Remap drop_fn from sparse ID to contiguous 0-based ID.
+            //
+            // TYPE-ID-COLLISION-3 (FUNDAMENTAL). A drop_fn/clone_fn that is
+            // NOT present in func_id_remap (its function was not linked into
+            // the final module — e.g. a lazily-loaded stdlib type whose Drop
+            // impl the reference-walker didn't pull in) must be CLEARED to
+            // None, NOT left at its stale sparse id. The old `if let …` left a
+            // dangling id: at runtime `module.functions[stale_id]` resolves to
+            // whatever unrelated function now occupies that contiguous slot,
+            // and DropRef executes it. Concretely `List` (id 512) kept
+            // drop_fn=1231 which, after the func-id space shifted, pointed at
+            // `child_setup_stdio` — dropping any `List<Byte>` ran process-spawn
+            // syscalls and faulted. Clearing to None falls through to the
+            // builtin List/tuple/CBGR cleanup, which is correct. Root of the
+            // net/cidr slice_text crash surfaced once the drop handler began
+            // resolving descriptors by id (TYPE-ID-COLLISION-2).
+            if let Some(drop_fn) = remapped_ty.drop_fn {
+                remapped_ty.drop_fn = func_id_remap.get(&drop_fn).copied();
             }
-            // Remap clone_fn from sparse ID to contiguous 0-based ID
-            if let Some(clone_fn) = remapped_ty.clone_fn
-                && let Some(&new_id) = func_id_remap.get(&clone_fn)
-            {
-                remapped_ty.clone_fn = Some(new_id);
+            if let Some(clone_fn) = remapped_ty.clone_fn {
+                remapped_ty.clone_fn = func_id_remap.get(&clone_fn).copied();
             }
             // Remap protocol method FunctionIds from sparse to contiguous 0-based IDs
             for proto_impl in remapped_ty.protocols.iter_mut() {
