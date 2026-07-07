@@ -272,7 +272,159 @@ pub(crate) struct FieldRefinementInfo {
     base_var_type: context::VarTypeKind,
 }
 
+impl VbcCodegen {
+    /// Simple display name of a TypeRef base (archive import leg of
+    /// REFINE-FIELD-DYNAMIC-BYPASS-1): enough for CmpF/CmpI selection.
+    fn type_ref_display_name(tr: &crate::types::TypeRef) -> String {
+        use crate::types::TypeRef as TR;
+        match tr {
+            TR::Concrete(tid) if *tid == crate::types::TypeId::FLOAT => "Float".into(),
+            TR::Concrete(tid) if *tid == crate::types::TypeId::INT => "Int".into(),
+            TR::Concrete(tid) if *tid == crate::types::TypeId::BOOL => "Bool".into(),
+            TR::Concrete(tid) if *tid == crate::types::TypeId::TEXT => "Text".into(),
+            _ => "Int".into(),
+        }
+    }
+
+
+    /// REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2 (archive import): re-hydrate
+    /// field refinement predicates from an archive TypeDescriptor into
+    /// `type_field_refinements` — shared by ALL FOUR archive-type import
+    /// paths (qualified/unqualified register + both protocol-remap
+    /// importers); the lazy loader reaches types through different ones
+    /// depending on mount shape. Parse failures fall open (unrefined).
+    fn hydrate_field_refinements(
+        &mut self,
+        ty: &crate::types::TypeDescriptor,
+        simple_name: &str,
+        archive_strings: Option<&crate::module::StringTable>,
+        names: &[String],
+    ) {
+        for (f, fname) in ty.fields.iter().zip(names.iter()) {
+            if std::env::var("VERUM_TRACE_REFSTAMP").is_ok() {
+                eprintln!(
+                    "[refstamp] import-see type={} field={} src_id={} present={}",
+                    simple_name,
+                    fname,
+                    f.refinement_src.0,
+                    f.refinement_src != crate::types::StringId::EMPTY
+                );
+            }
+            if f.refinement_src == crate::types::StringId::EMPTY {
+                continue;
+            }
+            let Some(pred_src) = archive_strings
+                .and_then(|st| st.get(f.refinement_src))
+                .map(|s| s.to_string())
+            else {
+                continue;
+            };
+            let binding = archive_strings
+                .and_then(|st| st.get(f.refinement_binding))
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "it".to_string());
+            let parser = verum_fast_parser::FastParser::new();
+            let Ok(pred_expr) =
+                parser.parse_expr_str(&pred_src, verum_ast::FileId::new(u32::MAX))
+            else {
+                continue;
+            };
+            let base_type_name = Self::type_ref_display_name(&f.type_ref);
+            let base_var_type = self.var_type_from_simple_name(&base_type_name);
+            self.type_field_refinements.insert(
+                (simple_name.to_string(), fname.clone()),
+                FieldRefinementInfo {
+                    pred_expr,
+                    binding,
+                    base_type_name,
+                    base_var_type,
+                },
+            );
+        }
+    }
+
+    /// Minimal AST-expr renderer for FIELD REFINEMENT predicates
+    /// (REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2). Covers the predicate
+    /// grammar subset (literals, paths, unary/binary chains, field
+    /// access, parens, simple calls); anything else returns None and
+    /// the field ships unrefined — fail-closed, never lossy-wrong.
+    fn render_predicate_expr(e: &verum_ast::Expr) -> Option<String> {
+        use verum_ast::expr::ExprKind as EK;
+        Some(match &e.kind {
+            EK::Literal(lit) => {
+                use verum_ast::literal::LiteralKind as LK;
+                match &lit.kind {
+                    LK::Int(i) => format!("{}", i.value),
+                    LK::Float(f) => format!("{:?}", f.value),
+                    LK::Bool(b) => format!("{}", b),
+                    LK::Text(verum_ast::literal::StringLit::Regular(t)) => {
+                        format!("{:?}", t.as_str())
+                    }
+                    _ => return None,
+                }
+            }
+            EK::Path(p) => format!("{}", p),
+            EK::Binary { op, left, right } => format!(
+                "{} {} {}",
+                Self::render_predicate_expr(left)?,
+                op.as_str(),
+                Self::render_predicate_expr(right)?
+            ),
+            EK::Unary { op, expr } => format!(
+                "{}{}",
+                op.as_str(),
+                Self::render_predicate_expr(expr)?
+            ),
+            EK::Paren(inner) => {
+                format!("({})", Self::render_predicate_expr(inner)?)
+            }
+            EK::Field { expr, field } => format!(
+                "{}.{}",
+                Self::render_predicate_expr(expr)?,
+                field.name
+            ),
+            EK::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
+                let mut rendered_args: Vec<String> = Vec::new();
+                for a in args.iter() {
+                    rendered_args.push(Self::render_predicate_expr(a)?);
+                }
+                format!(
+                    "{}.{}({})",
+                    Self::render_predicate_expr(receiver)?,
+                    method.name,
+                    rendered_args.join(", ")
+                )
+            }
+            _ => return None,
+        })
+    }
+
+    fn var_type_from_simple_name(&self, n: &str) -> context::VarTypeKind {
+        match n {
+            "Float" => context::VarTypeKind::Float,
+            "Bool" => context::VarTypeKind::Bool,
+            "Text" => context::VarTypeKind::Text,
+            _ => context::VarTypeKind::Int,
+        }
+    }
+}
+
 pub struct VbcCodegen {
+    /// REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: deferred field-refinement
+    /// stamps `(type_simple_name, field_name, predicate_src, binding)`.
+    /// Interning the predicate strings INLINE (mid-bake) shifted every
+    /// subsequent codegen StringId and tripped a latent positional
+    /// consumer (§40 class: `.lock` mis-dispatch on SpanFlags inside
+    /// MetaSpan's f-string Display chain). The queue is applied in
+    /// build_module right before the string_id_map is built — appended
+    /// ids, zero shift for pre-existing ones.
+    pending_refinement_stamps: Vec<(String, String, String, String)>,
+
     /// Codegen context with registers, labels, etc.
     ctx: CodegenContext,
 
@@ -1330,7 +1482,8 @@ impl VbcCodegen {
         let mut ctx = CodegenContext::new();
         ctx.target_os = config.target_config.target_os.to_string();
         Self {
-            ctx,
+
+            pending_refinement_stamps: Vec::new(),            ctx,
             config,
             functions: Vec::new(),
             types: Vec::new(),
@@ -4469,6 +4622,7 @@ impl VbcCodegen {
                         .unwrap_or_default()
                 })
                 .collect();
+            self.hydrate_field_refinements(&ty, &simple_name, archive_strings, &names);
             // **Type-name map unconditional population** (closes task #9
             // cross-mount race for archive-loaded types).
             //
@@ -10687,11 +10841,51 @@ impl VbcCodegen {
                     // Use the same global field index that SetF/GetF use
                     let field_idx = self.intern_field_name(&field_name);
 
+                    // REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: carry the
+                    // refinement predicate through the archive so a USER
+                    // cog constructing this type re-emits the runtime
+                    // Assert (phase 1 covered only same-compilation
+                    // fields; archive descriptors previously erased the
+                    // predicate entirely — the oracle NaN red-team hole).
+                    // DEFERRED stamp: interning the predicate strings
+                    // INLINE shifted every subsequent codegen StringId
+                    // (mid-bake) and tripped a latent positional
+                    // consumer (§40 class — `.lock` mis-dispatch inside
+                    // MetaSpan's Display chain). Queue by (type, field)
+                    // NAME; build_module applies the queue right before
+                    // the string_id_map is built — appended ids, zero
+                    // shift. Fail-closed: unrenderable → unrefined.
+                    if let verum_ast::ty::TypeKind::Refined { predicate, .. } = &field.ty.kind {
+                        if std::env::var("VERUM_TRACE_REFSTAMP").is_ok() {
+                            eprintln!(
+                                "[refstamp] queue-try type={} field={} rendered={:?}",
+                                type_name,
+                                field_name,
+                                Self::render_predicate_expr(&predicate.expr)
+                            );
+                        }
+                        if let Some(rendered) = Self::render_predicate_expr(&predicate.expr) {
+                            let bname = match &predicate.binding {
+                                verum_common::Maybe::Some(id) => id.name.to_string(),
+                                verum_common::Maybe::None => "it".to_string(),
+                            };
+                            self.pending_refinement_stamps.push((
+                                type_name.clone(),
+                                field_name.clone(),
+                                rendered,
+                                bname,
+                            ));
+                        }
+                    }
+                    let (refinement_src, refinement_binding) =
+                        (StringId::EMPTY, StringId::EMPTY);
                     type_desc.fields.push(crate::types::FieldDescriptor {
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: field_type_ref,
                         offset: field_idx * 8, // Use global field index * sizeof(Value)
                         visibility: crate::types::Visibility::Public,
+                        refinement_src,
+                        refinement_binding,
                     });
                 }
 
@@ -11087,7 +11281,9 @@ impl VbcCodegen {
                     type_ref: inner_type_ref,
                     offset: inner_field_idx * 8,
                     visibility: crate::types::Visibility::Public,
-                });
+                    refinement_src: StringId::EMPTY,
+                        refinement_binding: StringId::EMPTY,
+                    });
                 type_desc.size = 8; // single inner value (one Value-slot)
                 self.push_type_dedupe(type_desc);
 
@@ -11182,6 +11378,8 @@ impl VbcCodegen {
                         type_ref: inner_type_ref,
                         offset: field_idx * 8,
                         visibility: crate::types::Visibility::Public,
+                        refinement_src: StringId::EMPTY,
+                        refinement_binding: StringId::EMPTY,
                     });
                 }
                 type_desc.size = (types.len() as u32) * 8;
@@ -16365,6 +16563,45 @@ impl VbcCodegen {
         // IMPORTANT: Intern strings FIRST and build mapping from codegen index to module StringId.
         // Codegen uses simple indices (0, 1, 2...) while VbcModule uses byte offsets.
         // This mapping is needed for function names, constants, and any other StringIds.
+        // REFINE-FIELD-DYNAMIC-BYPASS-1 ph2: apply the deferred
+        // refinement stamps NOW — all other interning is done, so the
+        // two strings per refined field append at the tail and shift
+        // nothing. The type-table remap below then maps them to final
+        // module StringIds like every other field name.
+        {
+            let pending = std::mem::take(&mut self.pending_refinement_stamps);
+            if std::env::var("VERUM_TRACE_REFSTAMP").is_ok() {
+                eprintln!("[refstamp] apply count={}", pending.len());
+            }
+            for (tname, fname, pred, binding) in pending {
+                let pred_id = StringId(self.ctx.intern_string_raw(&pred));
+                let bind_id = StringId(self.ctx.intern_string_raw(&binding));
+                for td in self.types.iter_mut() {
+                    let matches_ty = self
+                        .ctx
+                        .strings
+                        .get(td.name.0 as usize)
+                        .map(|s| s == &tname)
+                        .unwrap_or(false);
+                    if !matches_ty {
+                        continue;
+                    }
+                    for f in td.fields.iter_mut() {
+                        let matches_f = self
+                            .ctx
+                            .strings
+                            .get(f.name.0 as usize)
+                            .map(|s| s == &fname)
+                            .unwrap_or(false);
+                        if matches_f {
+                            f.refinement_src = pred_id;
+                            f.refinement_binding = bind_id;
+                        }
+                    }
+                }
+            }
+        }
+
         let string_id_map: Vec<StringId> = self
             .ctx
             .strings
@@ -16490,6 +16727,22 @@ impl VbcCodegen {
             for field in &mut remapped_ty.fields {
                 if let Some(mapped) = string_id_map.get(field.name.0 as usize) {
                     field.name = *mapped;
+                }
+                // Refinement predicate carriage: same codegen-index →
+                // module-StringId remap as the field name (the exact
+                // hint.type_name lesson — unremapped ids read as byte
+                // offsets on the consumer side).
+                if field.refinement_src != StringId::EMPTY {
+                    if let Some(mapped) =
+                        string_id_map.get(field.refinement_src.0 as usize)
+                    {
+                        field.refinement_src = *mapped;
+                    }
+                    if let Some(mapped) =
+                        string_id_map.get(field.refinement_binding.0 as usize)
+                    {
+                        field.refinement_binding = *mapped;
+                    }
                 }
             }
             // Remap variant names AND each variant's inner field names
@@ -17224,6 +17477,28 @@ impl VbcCodegen {
             Some(s) => s.to_string(),
             None => return,
         };
+        // REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: hydrate field
+        // refinements on THIS import path too — the lazy loader
+        // reaches most stdlib types through the protocol-remap
+        // importer, not register_archive_type_qualified.
+        {
+            let field_names: Vec<String> = ty
+                .fields
+                .iter()
+                .map(|f| {
+                    archive_strings
+                        .get(f.name)
+                        .map(|s| s.to_string())
+                        .unwrap_or_default()
+                })
+                .collect();
+            self.hydrate_field_refinements(
+                ty,
+                &name_str,
+                Some(archive_strings),
+                &field_names,
+            );
+        }
         // First-wins for the `type_name_to_id` slot: user-defined or
         // earlier-archive registration owns it.  But — and this is
         // the load-bearing fix for stdlib variant-tag-collision —

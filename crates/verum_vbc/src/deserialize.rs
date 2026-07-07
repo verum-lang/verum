@@ -943,11 +943,28 @@ impl<'a> Deserializer<'a> {
  }
  })?;
 
+ // minor >= 3: refinement predicate carriage; older data has no
+ // trailing pair — default EMPTY (new-reader/old-data quadrant).
+ let (refinement_src, refinement_binding) = if self
+ .header
+ .as_ref()
+ .map_or(false, |h| h.version_minor >= 3)
+ {
+ (
+ StringId(decode_u32(self.data, &mut self.offset)?),
+ StringId(decode_u32(self.data, &mut self.offset)?),
+ )
+ } else {
+ (StringId::EMPTY, StringId::EMPTY)
+ };
+
  Ok(FieldDescriptor {
  name,
  type_ref,
  offset,
  visibility,
+ refinement_src,
+ refinement_binding,
  })
  }
 

@@ -424,6 +424,13 @@ impl Serializer {
         self.serialize_type_ref(&field.type_ref)?;
         encode_u32(field.offset, &mut self.output);
         self.output.push(field.visibility as u8);
+        // minor >= 3: refinement predicate carriage (REFINE-FIELD-
+        // DYNAMIC-BYPASS-1 phase 2). Fixed-width appends — the reader
+        // gates on header.version_minor, so pre-3 readers reject the
+        // archive cleanly via is_version_compatible rather than
+        // mis-parsing mid-stream.
+        encode_u32(field.refinement_src.0, &mut self.output);
+        encode_u32(field.refinement_binding.0, &mut self.output);
         Ok(())
     }
 

@@ -30,7 +30,7 @@ pub const VERSION_MAJOR: u16 = 2;
 /// use).  Reader/data quadrants: old-reader/new-data → clean reject via
 /// `is_version_compatible` (2 > VERSION_MINOR); new-reader/old-data (minor <=1)
 /// → skip, hints default empty; new/new → preserved; old/old → unaffected.
-pub const VERSION_MINOR: u16 = 2;
+pub const VERSION_MINOR: u16 = 3;
 
 /// Size of VBC header in bytes.
 /// 4 (magic) + 2 + 2 (version) + 4 (flags) + 4 (name) +
