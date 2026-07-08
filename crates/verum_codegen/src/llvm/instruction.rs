@@ -14401,7 +14401,8 @@ fn lower_call_method<'ctx>(
             || matches!(method_type_prefix, Some("Channel"))
             || WKT::Channel.matches(obj_type);
         // Map/Set/Deque: inline len/cap for direct field reads (NewG layout).
-        // Map len at MAP_LEN_OFFSET (32), cap at MAP_CAP_OFFSET (40).
+        // Map len at MAP_LEN_OFFSET (24), cap at MAP_CAP_OFFSET (32) —
+        // declared map.vr order (MAP-LAYOUT-REALIGN-1).
         let is_map = ctx.is_map_register(receiver.0)
             || matches!(method_type_prefix, Some(tn::MAP))
             || WKT::Map.matches(obj_type);
@@ -14415,7 +14416,7 @@ fn lower_call_method<'ctx>(
             let len_offset = if is_list {
                 super::runtime::LIST_LEN_OFFSET // offset 32 for List (NewG)
             } else if is_map {
-                super::runtime::MAP_LEN_OFFSET // offset 32 for Map (NewG)
+                super::runtime::MAP_LEN_OFFSET // offset 24 for Map (NewG, declared order)
             } else {
                 0u64 // offset 0 for Channel (flat layout)
             };
@@ -14471,7 +14472,7 @@ fn lower_call_method<'ctx>(
                     let cap_offset = if is_list {
                         super::runtime::LIST_CAP_OFFSET // offset 40
                     } else if is_map {
-                        super::runtime::MAP_CAP_OFFSET // offset 40
+                        super::runtime::MAP_CAP_OFFSET // offset 32 (declared order)
                     } else {
                         8u64 // Channel
                     };
@@ -17476,7 +17477,7 @@ fn lower_call_method<'ctx>(
             let len_offset = if is_list {
                 super::runtime::LIST_LEN_OFFSET // offset 32 for List (NewG)
             } else if is_map {
-                super::runtime::MAP_LEN_OFFSET // offset 32 for Map (NewG)
+                super::runtime::MAP_LEN_OFFSET // offset 24 for Map (NewG, declared order)
             } else {
                 0u64 // offset 0 for Channel (flat layout)
             };
@@ -17532,7 +17533,7 @@ fn lower_call_method<'ctx>(
                     let cap_offset = if is_list {
                         super::runtime::LIST_CAP_OFFSET // offset 40
                     } else if is_map {
-                        super::runtime::MAP_CAP_OFFSET // offset 40
+                        super::runtime::MAP_CAP_OFFSET // offset 32 (declared order)
                     } else {
                         8u64 // Channel
                     };
@@ -28866,11 +28867,12 @@ fn lower_len<'ctx>(
             return Ok(());
         }
         2 => {
-            // Map: NewG layout, fields {entries, len, cap, tombstones}.
-            // len at offset OBJECT_HEADER_SIZE + 1*8 = 32 (MAP_LEN_OFFSET).
+            // Map: NewG layout, fields {len, cap, entries, tombstones}
+            // (declared map.vr order — MAP-LAYOUT-REALIGN-1).
+            // len at offset OBJECT_HEADER_SIZE + 0*8 = 24 (MAP_LEN_OFFSET).
             let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "map_ptr")?;
             let i8_type = ctx.types().i8_type();
-            // SAFETY: GEP into the Map object (NewG layout) to read the length at MAP_LEN_OFFSET (32)
+            // SAFETY: GEP into the Map object (NewG layout) to read the length at MAP_LEN_OFFSET (24)
             let len_slot = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(
@@ -28915,8 +28917,8 @@ fn lower_len<'ctx>(
                 .builder()
                 .build_int_to_ptr(inner_i64, ctx.types().ptr_type(), "inner_map_ptr")
                 .or_llvm_err()?;
-            // Step 2: read len from inner Map's field 1
-            // SAFETY: GEP into the inner Map object (NewG layout) to read the length at MAP_LEN_OFFSET (32)
+            // Step 2: read len from inner Map's field 0 (declared order)
+            // SAFETY: GEP into the inner Map object (NewG layout) to read the length at MAP_LEN_OFFSET (24)
             let len_slot = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(
@@ -29121,16 +29123,16 @@ fn lower_len<'ctx>(
         return Ok(());
     }
 
-    // Map/Set len: read from MAP_LEN_OFFSET (32) — NewG layout with 24-byte header.
-    // Map field order: {entries, len, cap, tombstones} → len at offset 24 + 1*8 = 32.
-    // Set (C runtime): field order {len, cap, entries} → len at offset 24 + 0*8 = 24.
-    // However, when is_set_register is true, the Set may be from compiled set.vr (wraps Map)
-    // or C runtime. C runtime sets use SET_LEN_OFFSET (24). Compiled sets call Set.len()
-    // via CallM. For the register tracking fallback, use MAP_LEN_OFFSET.
+    // Map/Set len: read from MAP_LEN_OFFSET (24) — NewG layout with 24-byte header.
+    // Map field order: {len, cap, entries, tombstones} → len at offset 24 + 0*8 = 24
+    // (declared map.vr order — MAP-LAYOUT-REALIGN-1).
+    // Set: field order {len, cap, entries} → len at offset 24 + 0*8 = 24, so
+    // MAP_LEN_OFFSET now coincides with SET_LEN_OFFSET and this fallback is
+    // correct for both receivers.
     if ctx.is_map_register(arr.0) || ctx.is_set_register(arr.0) {
         let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
         let i8_type = ctx.types().i8_type();
-        // SAFETY: GEP into the Map/Set object (NewG layout) to read the length at MAP_LEN_OFFSET (32)
+        // SAFETY: GEP into the Map/Set object (NewG layout) to read the length at MAP_LEN_OFFSET (24)
         let len_slot = unsafe {
             ctx.builder()
                 .build_in_bounds_gep(
@@ -33577,14 +33579,15 @@ fn lower_iter_next<'ctx>(
             .or_llvm_err()?
             .into_int_value();
 
-        // Load entries_ptr from map[24] and cap from map[40]
-        // SAFETY: GEP into the Map object (NewG layout) to read the entries pointer at offset 24 (header + field 0)
+        // Load entries_ptr from map[MAP_ENTRIES_OFFSET] and cap from
+        // map[MAP_CAP_OFFSET] (declared map.vr order — MAP-LAYOUT-REALIGN-1).
+        // SAFETY: GEP into the Map object (NewG layout) to read the entries pointer at MAP_ENTRIES_OFFSET (40, header + field 2)
         let entries_gep = unsafe {
             ctx.builder()
                 .build_in_bounds_gep(
                     i8_type,
                     map_ptr,
-                    &[i64_type.const_int(24, false)],
+                    &[i64_type.const_int(super::runtime::MAP_ENTRIES_OFFSET, false)],
                     "entries_gep",
                 )
                 .or_llvm_err()?
@@ -33598,13 +33601,13 @@ fn lower_iter_next<'ctx>(
             .builder()
             .build_int_to_ptr(entries_i64, ptr_type, "entries_ptr")
             .or_llvm_err()?;
-        // SAFETY: GEP into the Map object (NewG layout) to read the capacity at MAP_CAP_OFFSET (40)
+        // SAFETY: GEP into the Map object (NewG layout) to read the capacity at MAP_CAP_OFFSET (32)
         let cap_gep = unsafe {
             ctx.builder()
                 .build_in_bounds_gep(
                     i8_type,
                     map_ptr,
-                    &[i64_type.const_int(40, false)],
+                    &[i64_type.const_int(super::runtime::MAP_CAP_OFFSET, false)],
                     "cap_gep",
                 )
                 .or_llvm_err()?

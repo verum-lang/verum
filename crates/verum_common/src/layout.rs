@@ -307,14 +307,29 @@ pub const LIST_PTR_OFFSET: u64 = object_field_offset(2); // 40
 /// Total `List<T>` object size: header + 3 fields = 48 bytes.
 pub const LIST_OBJECT_SIZE: u64 = OBJECT_HEADER_SIZE + 3 * VALUE_SLOT_SIZE;
 
-/// `Map<K, V>` field layout (C-runtime view): `{ entries, len, cap }`.
-/// (The compiled `map.vr` carries an extra `tombstones` field but the
-/// shared C runtime uses the 3-field projection.)
-pub const MAP_ENTRIES_OFFSET: u64 = object_field_offset(0); // 24
-pub const MAP_LEN_OFFSET: u64 = object_field_offset(1); // 32
-pub const MAP_CAP_OFFSET: u64 = object_field_offset(2); // 40
-/// Total `Map<K, V>` C-runtime object size: header + 3 fields = 48 bytes.
-pub const MAP_HEADER_SIZE: u64 = OBJECT_HEADER_SIZE + 3 * VALUE_SLOT_SIZE;
+/// `Map<K, V>` field layout: `{ len, cap, entries, tombstones }` — matches
+/// the stdlib `core/collections/map.vr` declaration (`len` slot0, `cap`
+/// slot1, `entries` slot2, `tombstones` slot3, load-bearing since
+/// 25d2f7af3) AND the Tier-0 interpreter intercepts (`[count, capacity,
+/// entries_ptr, tombstones]`, method_dispatch.rs). The previous
+/// `{ entries, len, cap }` "C-runtime view" here was stale drift — the
+/// deferred "task #11 Map sub-fix": AOT fixup bodies (fixup_map_get /
+/// contains_key / remove / insert) and lower_new_map used these slots
+/// while the compiled archive bodies (`Map.ensure_capacity` → `resize`
+/// → `swap_in_table`) wrote the declared slots, so `Map.insert`'s
+/// fixup read the entries POINTER as `cap`, masked the hash with
+/// `ptr-1`, read `len`(=0) as `entries` and dereferenced a wild slot
+/// address → EXC_BAD_ACCESS on the first insert of any
+/// compiled-constructed map (MAP-LAYOUT-REALIGN-1).
+pub const MAP_LEN_OFFSET: u64 = object_field_offset(0); // 24
+pub const MAP_CAP_OFFSET: u64 = object_field_offset(1); // 32
+pub const MAP_ENTRIES_OFFSET: u64 = object_field_offset(2); // 40
+pub const MAP_TOMBSTONES_OFFSET: u64 = object_field_offset(3); // 48
+/// Total `Map<K, V>` object size: header + 4 fields = 56 bytes.
+/// (The compiled stdlib bodies read AND write `tombstones` at slot 3 —
+/// the AOT allocator must reserve it; the old 48-byte "3-field
+/// projection" put slot-3 writes past the allocation.)
+pub const MAP_HEADER_SIZE: u64 = OBJECT_HEADER_SIZE + 4 * VALUE_SLOT_SIZE;
 
 /// `Set<T>` field layout: `{ len, cap, entries }`.
 pub const SET_LEN_OFFSET: u64 = object_field_offset(0); // 24
@@ -628,12 +643,17 @@ mod tests {
         assert_eq!(LIST_OBJECT_SIZE, OBJECT_HEADER_SIZE + 3 * VALUE_SLOT_SIZE);
         assert_eq!(LIST_OBJECT_SIZE, 48);
 
-        // Map<K, V> C-runtime projection { entries, len, cap } still uses
-        // the legacy slot order (lower_new_map hardcodes it) — its
-        // realignment to the declared { len, cap, entries } is tracked
-        // separately (task #11 Map sub-fix). len/cap happen to coincide
-        // with List's old slots, so only entries differs.
-        assert_eq!(MAP_HEADER_SIZE, LIST_OBJECT_SIZE);
+        // Map<K, V> { len, cap, entries, tombstones }: declared order
+        // (matches stdlib + interp intercepts). Realigned from the legacy
+        // { entries, len, cap } C-view (task #11 Map sub-fix /
+        // MAP-LAYOUT-REALIGN-1); the object now reserves the tombstones
+        // slot the compiled stdlib bodies read and write.
+        assert_eq!(MAP_LEN_OFFSET, object_field_offset(0));
+        assert_eq!(MAP_CAP_OFFSET, object_field_offset(1));
+        assert_eq!(MAP_ENTRIES_OFFSET, object_field_offset(2));
+        assert_eq!(MAP_TOMBSTONES_OFFSET, object_field_offset(3));
+        assert_eq!(MAP_HEADER_SIZE, OBJECT_HEADER_SIZE + 4 * VALUE_SLOT_SIZE);
+        assert_eq!(MAP_HEADER_SIZE, 56);
 
         // Set<T>: same 3-slot stride, different field semantics.
         assert_eq!(SET_LEN_OFFSET, object_field_offset(0));

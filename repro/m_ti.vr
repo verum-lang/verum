@@ -1,0 +1,1 @@
+fn main() { let mut m: Map<Text, Int> = Map.new(); m.insert(Text.from("x"), 2); print(f"ti len={m.len()}"); }

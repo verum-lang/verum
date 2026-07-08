@@ -86,15 +86,16 @@ pub const TEXT_PTR_OFFSET: u64 = 0;
 pub const TEXT_LEN_OFFSET: u64 = verum_common::layout::POINTER_SIZE;
 pub const TEXT_CAP_OFFSET: u64 = 2 * verum_common::layout::POINTER_SIZE;
 
-/// `Map<K, V>` C-runtime header size: header + 3 slots = 48 bytes.
-/// (The compiled map.vr carries an extra `tombstones` field but the
-/// shared C runtime uses the 3-field projection.)
+/// `Map<K, V>` object size: header + 4 slots (incl. `tombstones`) = 56 bytes.
 pub const MAP_HEADER_SIZE: u64 = verum_common::layout::MAP_HEADER_SIZE;
 
-/// `Map<K, V>` field byte offsets (NewG layout: `entries / len / cap`).
-pub const MAP_ENTRIES_OFFSET: u64 = verum_common::layout::MAP_ENTRIES_OFFSET;
+/// `Map<K, V>` field byte offsets (NewG layout, declared order:
+/// `len / cap / entries / tombstones` — matches compiled map.vr bodies
+/// and the Tier-0 interpreter; MAP-LAYOUT-REALIGN-1).
 pub const MAP_LEN_OFFSET: u64 = verum_common::layout::MAP_LEN_OFFSET;
 pub const MAP_CAP_OFFSET: u64 = verum_common::layout::MAP_CAP_OFFSET;
+pub const MAP_ENTRIES_OFFSET: u64 = verum_common::layout::MAP_ENTRIES_OFFSET;
+pub const MAP_TOMBSTONES_OFFSET: u64 = verum_common::layout::MAP_TOMBSTONES_OFFSET;
 
 /// `Set<T>` field byte offsets (NewG layout: `len / cap / entries`).
 pub const SET_LEN_OFFSET: u64 = verum_common::layout::SET_LEN_OFFSET;
@@ -590,7 +591,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i64_type = self.context.i64_type();
         let i8_type = self.context.i8_type();
 
-        // Allocate map object (48 bytes: 24-byte header + entries_ptr + len + cap)
+        // Allocate map object (56 bytes: 24-byte header + len + cap +
+        // entries_ptr + tombstones — declared map.vr order).
         let header_size = i64_type.const_int(MAP_HEADER_SIZE, false);
         let header_ptr = self.emit_checked_malloc(builder, module, header_size, "map_header")?;
 
@@ -618,7 +620,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             )
             .or_llvm_err()?;
 
-        // Initialize field 0 (offset 24): entries = entries_ptr
+        // Initialize `entries` (slot 2, offset 40) = entries_ptr
         // SAFETY: GEP into CBGR allocation header at a fixed structural offset; the header layout is defined by the allocator
         let entries_ptr_ptr = unsafe {
             builder
@@ -637,9 +639,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_store(entries_ptr_ptr, entries_as_int)
             .or_llvm_err()?;
 
-        // Initialize field 1 (offset 32): len = 0 (already zeroed by memset)
+        // `len` (slot 0, offset 24) and `tombstones` (slot 3, offset 48)
+        // are already zeroed by the memset.
 
-        // Initialize field 2 (offset 40): cap = DEFAULT_MAP_CAPACITY
+        // Initialize `cap` (slot 1, offset 32) = DEFAULT_MAP_CAPACITY
         // SAFETY: GEP at a known offset within a heap-allocated struct; the offset is within the allocation size
         let cap_ptr = unsafe {
             builder
@@ -2164,11 +2167,13 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// function body with correct offsets and probing logic.
     ///
 
-    /// Map layout (24-byte header + fields):
-    ///  offset 24: entries_ptr (i64)
-    ///  offset 32: len (i64)
-    ///  offset 40: cap (i64)
-    ///  offset 48: tombstones (i64)
+    /// Map layout (24-byte header + fields, declared map.vr order —
+    /// MAP-LAYOUT-REALIGN-1; must match compiled `ensure_capacity` /
+    /// `resize` / `swap_in_table` bodies and the Tier-0 interpreter):
+    ///  offset 24 (MAP_LEN_OFFSET):        len (i64)
+    ///  offset 32 (MAP_CAP_OFFSET):        cap (i64)
+    ///  offset 40 (MAP_ENTRIES_OFFSET):    entries_ptr (i64)
+    ///  offset 48 (MAP_TOMBSTONES_OFFSET): tombstones (i64)
     ///
 
     /// Slot layout (32 bytes, NO header):
@@ -2254,7 +2259,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(40, false)],
+                    &[i64_type.const_int(MAP_CAP_OFFSET, false)],
                     "cap_slot",
                 )
                 .or_llvm_err()?
@@ -2328,7 +2333,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(24, false)],
+                    &[i64_type.const_int(MAP_ENTRIES_OFFSET, false)],
                     "entries_slot",
                 )
                 .or_llvm_err()?
@@ -2638,7 +2643,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(40, false)],
+                    &[i64_type.const_int(MAP_CAP_OFFSET, false)],
                     "cap_slot",
                 )
                 .or_llvm_err()?
@@ -2708,7 +2713,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(24, false)],
+                    &[i64_type.const_int(MAP_ENTRIES_OFFSET, false)],
                     "entries_slot",
                 )
                 .or_llvm_err()?
@@ -3002,7 +3007,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(40, false)],
+                    &[i64_type.const_int(MAP_CAP_OFFSET, false)],
                     "cap_slot",
                 )
                 .or_llvm_err()?
@@ -3073,7 +3078,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(24, false)],
+                    &[i64_type.const_int(MAP_ENTRIES_OFFSET, false)],
                     "entries_slot",
                 )
                 .or_llvm_err()?
@@ -3227,7 +3232,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(32, false)],
+                    &[i64_type.const_int(MAP_LEN_OFFSET, false)],
                     "len_slot",
                 )
                 .or_llvm_err()?
@@ -3248,7 +3253,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(48, false)],
+                    &[i64_type.const_int(MAP_TOMBSTONES_OFFSET, false)],
                     "tomb_slot",
                 )
                 .or_llvm_err()?
@@ -3541,7 +3546,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(40, false)],
+                    &[i64_type.const_int(MAP_CAP_OFFSET, false)],
                     "cap_slot",
                 )
                 .or_llvm_err()?
@@ -3562,7 +3567,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(24, false)],
+                    &[i64_type.const_int(MAP_ENTRIES_OFFSET, false)],
                     "entries_slot",
                 )
                 .or_llvm_err()?
@@ -3899,7 +3904,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(48, false)],
+                    &[i64_type.const_int(MAP_TOMBSTONES_OFFSET, false)],
                     "tomb_slot",
                 )
                 .or_llvm_err()?
@@ -4077,7 +4082,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     self_ptr,
-                    &[i64_type.const_int(32, false)],
+                    &[i64_type.const_int(MAP_LEN_OFFSET, false)],
                     "len_slot",
                 )
                 .or_llvm_err()?
