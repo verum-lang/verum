@@ -16605,40 +16605,6 @@ fn lower_call_method<'ctx>(
     let param_count = llvm_fn.count_params() as usize;
     let param_types = llvm_fn.get_type().get_param_types();
 
-    // VBC-GENERIC-INSTANTIATION receiver deref: when the receiver is a
-    // `&`/`&mut` reference (e.g. `future.poll()` inside
-    // `future_poll_sync<F>(future: &mut F)`, where `&mut f` is a pointer to the
-    // STACK SLOT holding the heap object), the callee's body indexes fields off
-    // `self` as if `self` were the object pointer — so pass the underlying
-    // pointer, i.e. one load through the reference.  The interpreter's CallM
-    // dispatch performs this deref; the AOT did not, which made a devirtualized
-    // `poll` read stack garbage and null-deref in `Maybe.take`.  Instance
-    // methods only, and only for registers the param-setup marked as reference
-    // parameters.  Gated to the opt-in mono path.
-    if param_count > args.count as usize
-        && ctx.is_tracked_reference(receiver.0)
-        && std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some()
-    {
-        let i64ty = ctx.types().i64_type();
-        let ptrty = ctx.types().ptr_type();
-        let slot_i64 = as_i64(ctx, receiver_val, "recv_ref_slot")?;
-        let slot_ptr = ctx
-            .builder()
-            .build_int_to_ptr(slot_i64, ptrty, "recv_ref_ptr")
-            .or_llvm_err()?;
-        let obj = ctx
-            .builder()
-            .build_load(i64ty, slot_ptr, "recv_deref")
-            .or_llvm_err()?;
-        if std::env::var_os("VERUM_TRACE_MONO").is_some() {
-            eprintln!(
-                "[mono-recv-deref] method '{}' receiver reg {} is a tracked ref -> deref'd",
-                func_name, receiver.0
-            );
-        }
-        receiver_val = obj;
-    }
-
     // Inline struct adjustment: when calling a method on an inline struct
     // register (e.g., Slot within a Map's backing array), the pointer points
     // directly at the data (no object header). The callee method adds
