@@ -125,6 +125,35 @@ impl TypeChecker {
         self.check_expr_inner(expr, expected)
     }
 
+    /// If `resolved_expected` is a function type whose return type expands to a
+    /// `Type::Variant` that declares constructor `name`, return that return
+    /// type's head type name — the constructor's parent. This lets a bare
+    /// constructor used as a first-class function value (`and_then(Some)`)
+    /// resolve under glob / `mount core.prelude.*` imports, which register the
+    /// variant type but do NOT populate `variant_constructor_parents` (only the
+    /// first-declaration and core_metadata paths do). None otherwise.
+    fn ctor_parent_from_expected_fn_return(
+        &self,
+        resolved_expected: &Type,
+        name: &str,
+    ) -> Option<Text> {
+        let return_type = match resolved_expected {
+            Type::Function { return_type, .. } => return_type,
+            _ => return None,
+        };
+        let ret = self.unifier.apply(&**return_type);
+        let expanded = self.expand_generic_to_variant(&ret);
+        let Type::Variant(variants) = &expanded else {
+            return None;
+        };
+        variants.get(name)?;
+        match &ret {
+            Type::Named { path, .. } => path.as_ident().map(|i| Text::from(i.name.as_str())),
+            Type::Generic { name: n, .. } => Some(n.clone()),
+            _ => None,
+        }
+    }
+
     /// Inner implementation of check_expr.
     fn check_expr_inner(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         let _global_guard = GlobalDepthGuard::enter()?;
@@ -458,13 +487,70 @@ impl TypeChecker {
                 if path.segments.len() == 1
                     && let Some(verum_ast::ty::PathSegment::Name(ident)) =
                         path.segments.first()
-                    && self
+                    && (self
                         .variant_constructor_parents
                         .get(&Text::from(ident.name.as_str()))
-                        .is_some() =>
+                        .is_some()
+                        || self
+                            .ctor_parent_from_expected_fn_return(
+                                &self.unifier.apply(expected),
+                                ident.name.as_str(),
+                            )
+                            .is_some()) =>
             {
                 let constructor_name = ident.name.as_str();
                 let resolved_expected = self.unifier.apply(expected);
+                // Glob / `mount core.prelude.*` imports register the variant
+                // TYPE but NOT the ctor->parent map that the first-declaration
+                // path populates — so `variant_constructor_parents` misses the
+                // bare ctor under the prelude and this arm would never fire.
+                // Recover the parent from the EXPECTED fn's return variant (it
+                // is a Variant that declares this ctor) and register it, so the
+                // guard above admits us and try_resolve below (and any later
+                // lookup) succeeds under glob imports too.
+                if self
+                    .variant_constructor_parents
+                    .get(&Text::from(constructor_name))
+                    .is_none()
+                    && let Some(parent) =
+                        self.ctor_parent_from_expected_fn_return(&resolved_expected, constructor_name)
+                {
+                    self.variant_constructor_parents
+                        .entry(Text::from(constructor_name))
+                        .or_default()
+                        .push(parent);
+                }
+                // CTOR-AS-FN-1: a bare payload constructor used as a first-class
+                // FUNCTION value — `list.and_then(Some)`, `xs.map(Ok)` — where a
+                // `fn(payload...) -> Variant` is expected. Coerce it to its
+                // constructor-as-function type and unify with the expected fn,
+                // instead of falling to synth_and_check which reports E400
+                // "expected fn(_), found Some". Stdlib-agnostic (any variant in
+                // variant_constructor_parents). Runtime leg: CTOR-AS-FN-3 codegen.
+                // The expected arity comes from a concrete fn OR from a
+                // type-var carrying a function-type bound — the generic
+                // method-param case `and_then<F: fn(T) -> Maybe<U>>(f: F)`,
+                // where `F` is still an unresolved var when the `Some` arg is
+                // checked (this is the `mount core.prelude.*` path that reaches
+                // the method-call arg resolver before `F` concretises). Both
+                // drive the constructor-as-function coercion.
+                let expected_fn_arity = match &resolved_expected {
+                    Type::Function { params, .. } => Some(params.len()),
+                    Type::Var(tv) => match self.get_function_type_bound(tv) {
+                        verum_common::Maybe::Some(Type::Function { params, .. }) => {
+                            Some(params.len())
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(arity) = expected_fn_arity
+                    && let Some(ctor_ty) = self
+                        .try_resolve_variant_constructor_with_arity(constructor_name, Some(arity))
+                {
+                    self.unifier.unify(&ctor_ty, &resolved_expected, expr.span)?;
+                    return Ok(InferResult::new(ctor_ty));
+                }
                 let expanded_expected = self.expand_generic_to_variant(&resolved_expected);
                 if let Type::Variant(ref variants) = expanded_expected
                     && let Some(payload_ty) = variants.get(constructor_name)

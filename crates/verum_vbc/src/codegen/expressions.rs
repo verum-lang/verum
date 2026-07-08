@@ -1731,13 +1731,53 @@ impl VbcCodegen {
                             self.emit_make_variant(dest, tag, 0, parent.as_deref());
                             return Ok(Some(dest));
                         } else {
-                            // Variant with args — will be handled by compile_call
-                            let dest = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::LoadI {
-                                dst: dest,
-                                value: func_info.id.0 as i64,
-                            });
-                            return Ok(Some(dest));
+                            // CTOR-AS-FN-3: a payload constructor used as a
+                            // first-class function VALUE (`list.and_then(Some)`).
+                            // compile_call handles the CALLED form `Some(x)`
+                            // (MakeVariant); as a bare value the constructor has
+                            // no callable function (its func-id is a sentinel),
+                            // so LoadI'ing it left CallClosure with a
+                            // non-callable ("expected closure" / "Function not
+                            // found"). Synthesize `|__ctor_arg0..| Ctor(__ctor_arg0..)`
+                            // and compile it: the body's Call arm lowers to the
+                            // same MakeVariant, so CallClosure receives a real
+                            // closure. Completes constructor-as-function together
+                            // with the typecheck coercion CTOR-AS-FN-1.
+                            let _ = tag;
+                            let sp = ident.span;
+                            let mut params: verum_common::List<verum_ast::ClosureParam> =
+                                verum_common::List::new();
+                            let mut call_args: verum_common::List<verum_ast::Expr> =
+                                verum_common::List::new();
+                            for i in 0..func_info.param_count {
+                                let arg_ident =
+                                    verum_ast::Ident::new(format!("__ctor_arg{}", i), sp);
+                                params.push(verum_ast::ClosureParam {
+                                    pattern: verum_ast::Pattern {
+                                        kind: verum_ast::PatternKind::Ident {
+                                            by_ref: false,
+                                            mutable: false,
+                                            name: arg_ident.clone(),
+                                            subpattern: verum_common::Maybe::None,
+                                        },
+                                        span: sp,
+                                    },
+                                    ty: verum_common::Maybe::None,
+                                    span: sp,
+                                });
+                                call_args.push(verum_ast::Expr::ident(arg_ident));
+                            }
+                            let body = verum_ast::Expr::new(
+                                verum_ast::ExprKind::Call {
+                                    func: verum_common::Heap::new(verum_ast::Expr::ident(
+                                        ident.clone(),
+                                    )),
+                                    type_args: verum_common::List::new(),
+                                    args: call_args,
+                                },
+                                sp,
+                            );
+                            return self.compile_closure(&params, &body, None);
                         }
                     }
 
