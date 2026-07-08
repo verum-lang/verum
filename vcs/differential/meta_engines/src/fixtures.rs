@@ -271,6 +271,44 @@ pub fn all_fixtures() -> Vec<Fixture> {
             args: vec![],
             expect: Expectation::Agree,
         },
+        // --- union-coverage additions (parallel harness delta, 2026-07-08) ---
+        // Four agreement fixtures the parallel line verified but this corpus did
+        // not cover: the `||` operator, `==` equality, array-literal indexing,
+        // and tuple field access. All return a scalar, all observed agreeing in
+        // both engines. Kept paren-free so tree-walk's paren-quote gap
+        // (pin_paren_expr_quoted) doesn't mask them.
+        Fixture {
+            name: "agree_bool_or",
+            description: "bool or (|| operator; short-circuit-vs-eager agree with pure operands)",
+            source: "fn bo(a: Bool, b: Bool) -> Bool { a || b }",
+            fn_name: "bo",
+            args: vec![Arg::Bool(false), Arg::Bool(true)],
+            expect: Expectation::Agree,
+        },
+        Fixture {
+            name: "agree_cmp_eq",
+            description: "integer equality (== operator)",
+            source: "fn eq(a: Int, b: Int) -> Bool { a == b }",
+            fn_name: "eq",
+            args: vec![Arg::Int(4), Arg::Int(4)],
+            expect: Expectation::Agree,
+        },
+        Fixture {
+            name: "agree_array_index",
+            description: "array literal + index reduce to a scalar (indexing, not opaque list return)",
+            source: "fn ai() -> Int { let xs = [1, 2, 3]; xs[0] + xs[2] }",
+            fn_name: "ai",
+            args: vec![],
+            expect: Expectation::Agree,
+        },
+        Fixture {
+            name: "agree_tuple_field",
+            description: "tuple literal + field access reduce to a scalar",
+            source: "fn tf() -> Int { let p = (10, 20); p.0 + p.1 }",
+            fn_name: "tf",
+            args: vec![],
+            expect: Expectation::Agree,
+        },
         // ================= pinned known divergences =================
         Fixture {
             name: "pin_i64_wrap_vs_i128",
