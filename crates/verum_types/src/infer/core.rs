@@ -1647,9 +1647,47 @@ impl TypeChecker {
                 if vars.is_empty() {
                     TypeScheme::mono(fn_ty.clone())
                 } else {
-                    let var_list: List<crate::ty::TypeVar> =
-                        vars.iter().copied().collect();
-                    TypeScheme::poly(var_list, fn_ty.clone())
+                    // ARRAY-ITER-CONCRETIZE-1 (the sixth scheme-birth
+                    // path): metadata-loaded inherent methods carried
+                    // impl_var_count = 0 (constructor default), so the
+                    // receiver-arg→typevar bind loop's limit was 0 and
+                    // the element var of e.g. `implement<T> [T]`'s
+                    // iter() never bound — closure params typed
+                    // Item<var> → E103. DERIVE the impl-level count
+                    // from the signature itself: vars that occur in
+                    // the RECEIVER (self param's type) are bindable
+                    // from the receiver — order them FIRST so the
+                    // bind loop's zip lines up; method-level vars
+                    // (absent from the receiver) stay behind the
+                    // limit, preserving the protection the limit
+                    // exists for.
+                    let recv_vars: std::collections::HashSet<_> =
+                        if let crate::ty::Type::Function { params, .. } = &fn_ty {
+                            params
+                                .first()
+                                .map(|p| {
+                                    collect_type_vars(p).into_iter().collect()
+                                })
+                                .unwrap_or_default()
+                        } else {
+                            Default::default()
+                        };
+                    let mut var_list: List<crate::ty::TypeVar> = List::new();
+                    let mut impl_count = 0usize;
+                    for v in vars.iter() {
+                        if recv_vars.contains(v) {
+                            var_list.push(*v);
+                            impl_count += 1;
+                        }
+                    }
+                    for v in vars.iter() {
+                        if !recv_vars.contains(v) {
+                            var_list.push(*v);
+                        }
+                    }
+                    let mut s = TypeScheme::poly(var_list, fn_ty.clone());
+                    s.impl_var_count = impl_count;
+                    s
                 }
             };
             bucket.insert(method_name.clone(), scheme.clone());

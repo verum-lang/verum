@@ -4463,6 +4463,7 @@ impl TypeChecker {
                         // from being incorrectly bound to receiver type args during
                         // method call resolution.
                         method_scheme.impl_var_count = impl_type_vars.len();
+                        if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=modules.rs:4465 count={}", impl_type_vars.len()); }
 
                         // CRITICAL: Add type bounds for closure type inference
                         if !method_type_var_bounds.is_empty() {

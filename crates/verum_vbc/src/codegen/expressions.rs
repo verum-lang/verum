@@ -34111,12 +34111,60 @@ impl VbcCodegen {
         // the #17 bare-name class — regressing 42 interp Display-law
         // tests.  The AOT Display extraction gap is parked in task
         // #21 with the full evidence map.)
+        // TEXT-AOT Display leg (#21), IR-proven root: the const-seeded
+        // buffer object cannot GROW under AOT (push_str's realloc on a
+        // rodata-backed Text silently loses every write — fmt received
+        // the real formatter via passthrough, the writes just landed in
+        // an ungrowable object). Seed with a fresh HEAP Text via a
+        // QUALIFIED Text.new lookup (parent_type_name-pinned; the bare
+        // lookup mis-binds inside stdlib-merged suites — the #17
+        // class). Const-seed remains the fallback when Text.new isn't
+        // registered (prelude compilation) — old behavior, interp-fine.
         let buf_reg = self.ctx.alloc_temp();
-        let empty_const = self.ctx.add_const_string("");
-        self.ctx.emit(Instruction::LoadK {
-            dst: buf_reg,
-            const_id: empty_const.0,
-        });
+        let text_new_id: u32 = if let Some(info) = self
+            .ctx
+            .lookup_function("Text.new")
+            .filter(|i| {
+                i.param_count == 0
+                    && i.id.0 != u32::MAX
+                    && i.parent_type_name.as_deref() == Some("Text")
+            })
+        {
+            info.id.0
+        } else {
+            self.ctx
+                .functions
+                .iter()
+                .find_map(|(key, info)| {
+                    if info.param_count == 0
+                        && info.id.0 != u32::MAX
+                        && info.parent_type_name.as_deref() == Some("Text")
+                        && (key == "Text.new" || key.ends_with(".Text.new"))
+                    {
+                        Some(info.id.0)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(u32::MAX)
+        };
+        if text_new_id != u32::MAX {
+            let empty_args = self.ctx.registers.alloc_fresh();
+            self.ctx.emit(Instruction::Call {
+                dst: buf_reg,
+                func_id: text_new_id,
+                args: crate::instruction::RegRange {
+                    start: empty_args,
+                    count: 0,
+                },
+            });
+        } else {
+            let empty_const = self.ctx.add_const_string("");
+            self.ctx.emit(Instruction::LoadK {
+                dst: buf_reg,
+                const_id: empty_const.0,
+            });
+        }
 
         // Step 3: formatter = Formatter.new(&mut buf).  `Call` requires
         // args in a contiguous fresh-allocated block; we put the
@@ -34158,6 +34206,18 @@ impl VbcCodegen {
         //       `CallM` walks the canonical function table by name
         //       suffix at runtime and finds the impl regardless of
         //       which module owns it.
+        // Register-type hints for the arm's temps: the manually-emitted
+        // Call/record temps carry no return-type metadata, so under AOT
+        // the buf dst was UNMARKED -> RefMut materialized the ALLOCA
+        // address -> the formatter captured a stack slot and every
+        // write vanished (heap-seed alone still printed ""). The hints
+        // flow through the register_type_hints channel to the sticky
+        // map, which lower_ref_mut consults for heap passthrough.
+        // (An earlier 42-test scare around these hints was exonerated:
+        // it was the nondeterministic-bake canary class, since fixed.)
+        self.ctx.add_register_type_hint(buf_reg.0, "Text".to_string());
+        self.ctx.add_register_type_hint(formatter_reg.0, "Formatter".to_string());
+
         let fmt_result_reg = self.ctx.alloc_temp();
         if let Some(fid) = display_func_id {
             // Static-call shape: `Call(fid, args=[expr, &mut formatter])`.
