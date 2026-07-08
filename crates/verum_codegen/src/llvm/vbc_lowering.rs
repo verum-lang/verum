@@ -2690,6 +2690,22 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 // Mark list registers for List parameters so that GetE/SetE
                 // can correctly use header indirection.
                 if let Some(p) = vbc_func.descriptor.params.get(i) {
+                    // VBC-GENERIC-INSTANTIATION: register a reference-typed
+                    // parameter so the method-call lowering can deref a
+                    // `&`-receiver to the underlying object pointer before
+                    // passing it as `self` (a devirtualized `future.poll()` on
+                    // `future: &mut F` otherwise passes the &-slot and the
+                    // callee reads stack garbage).  Gated to the opt-in mono
+                    // path; `ReferenceInfo::parameter()` is conservative (no
+                    // Tier-1) so it cannot wrongly enable an optimization.
+                    if matches!(p.type_ref, TypeRef::Reference { .. })
+                        && std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some()
+                    {
+                        ctx.register_reference(
+                            i as u16,
+                            super::context::ReferenceInfo::parameter(),
+                        );
+                    }
                     // Unwrap Reference wrapper for type checking — &Map<K,V>
                     // should still be detected as a Map parameter.
                     let effective_type = match &p.type_ref {
