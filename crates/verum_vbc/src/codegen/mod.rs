@@ -13625,7 +13625,40 @@ impl VbcCodegen {
                     // and drive the call-site disambig push for closure
                     // arguments.  No-op when the param isn't a generic-param
                     // path or when the generic carries no fn bound.
-                    self.substitute_fn_bound_for_generic(resolved, ty, &func.generics, &method_generic_param_map)
+                    let resolved = self.substitute_fn_bound_for_generic(resolved, ty, &func.generics, &method_generic_param_map);
+                    // VBC-GENERIC-INSTANTIATION: `resolve_field_type_ref` STRIPS
+                    // `&`/`&mut` (correct for a field's storage layout, but a
+                    // PARAMETER's reference shape is what tells the AOT method
+                    // lowering to deref a `&`-receiver to the object pointer —
+                    // e.g. `future.poll()` on `future: &mut F`).  Re-wrap the
+                    // resolved type when the AST param type is a reference.
+                    // Gated to the opt-in mono path so the default descriptor /
+                    // archive encoding stays byte-identical.
+                    if std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some() {
+                        let (is_ref, mutable, tier) = match &ty.kind {
+                            verum_ast::ty::TypeKind::Reference { mutable, .. } => {
+                                (true, *mutable, CbgrTier::Tier0)
+                            }
+                            verum_ast::ty::TypeKind::CheckedReference { mutable, .. } => {
+                                (true, *mutable, CbgrTier::Tier1)
+                            }
+                            verum_ast::ty::TypeKind::UnsafeReference { mutable, .. } => {
+                                (true, *mutable, CbgrTier::Tier2)
+                            }
+                            _ => (false, false, CbgrTier::Tier0),
+                        };
+                        if is_ref {
+                            TypeRef::Reference {
+                                inner: Box::new(resolved),
+                                mutability: if mutable { Mutability::Mutable } else { Mutability::Immutable },
+                                tier,
+                            }
+                        } else {
+                            resolved
+                        }
+                    } else {
+                        resolved
+                    }
                 }
                 FunctionParamKind::SelfRefMut => TypeRef::Reference {
                     inner: Box::new(TypeRef::Concrete(parent_tid)),

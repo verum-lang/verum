@@ -1882,6 +1882,14 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             .unwrap_or(false)
     }
 
+    /// Whether a register is a tracked reference value (`&`/`&mut` from
+    /// Ref/RefMut or a reference parameter).  The method-call lowering uses
+    /// this to deref a `&`-receiver to the underlying object pointer before
+    /// passing it as `self` (see the receiver-deref in `lower_call_method`).
+    pub fn is_tracked_reference(&self, reg: u16) -> bool {
+        self.reference_registers.contains_key(&reg)
+    }
+
     /// Get the effective tier for a reference operation.
     ///
 
