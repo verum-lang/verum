@@ -25,10 +25,15 @@
 #   STRICT_IGNORED=1   treat an `ignored`-vs-`ok` mismatch as a divergence too
 #                      (default: an `ignored` test on either tier is skipped,
 #                      since a documented single-tier @ignore is intentional)
+#   BASELINE    path to a known-divergences allowlist (default:
+#               vcs/baselines/differential-tiers-baseline.txt). Only NEW
+#               divergences (regressions) beyond it are reported/failed, so the
+#               gate is blocking-usable even while a tier has documented gaps.
+#   BASELINE_WRITE=1   (re)generate the baseline from the current run and exit 0.
 #
 # EXIT STATUS
-#   0  every test agrees across tiers (no divergence)
-#   1  one or more divergences were found (details printed)
+#   0  no NEW divergence beyond the baseline (tiers agree modulo known gaps)
+#   1  one or more NEW divergences (tier regression) — details printed
 #   2  usage / environment error
 #
 set -uo pipefail
@@ -70,17 +75,39 @@ echo "[diff-tiers] interp reported $(wc -l < "$WORK/interp.txt" | tr -d ' ') tes
 join -t "$(printf '\t')" -a1 -a2 -e MISSING -o '0,1.2,2.2' \
     "$WORK/interp.txt" "$WORK/aot.txt" > "$WORK/joined.txt"
 
-STRICT_IGNORED="${STRICT_IGNORED:-0}" awk -F'\t' '
+# BASELINE: a file of KNOWN divergences (one `name<TAB>interp<TAB>aot` per line).
+# The gate reports only NEW divergences (regressions) against it — so the gate is
+# usable as a blocking CI check even while a tier has documented-broken areas
+# (today: the AOT generic-monomorphization / cross-module gaps, #34/#38). Regen
+# with BASELINE_WRITE=1 once a tier's known-gap set legitimately changes.
+BASELINE="${BASELINE:-$(cd "$(dirname "$0")/../baselines" 2>/dev/null && pwd)/differential-tiers-baseline.txt}"
+
+STRICT_IGNORED="${STRICT_IGNORED:-0}" awk -F'\t' \
+    -v baseline="$BASELINE" -v writeb="${BASELINE_WRITE:-0}" '
+    BEGIN {
+        if (writeb != "1" && baseline != "") {
+            while ((getline line < baseline) > 0)
+                if (line !~ /^#/ && line != "") known[line] = 1;
+            close(baseline);
+        }
+    }
     {
         name = $1; itier = $2; atier = $3;
         if (itier == atier) next;
         # A documented single-tier @ignore is intentional unless STRICT.
         if (ENVIRON["STRICT_IGNORED"] != "1" && (itier == "ignored" || atier == "ignored")) next;
-        printf "DIVERGENCE  %-64s interp=%-8s aot=%-8s\n", name, itier, atier;
+        key = name "\t" itier "\t" atier;
+        if (writeb == "1") { print key > baseline; w++; next; }
+        if (key in known)  { kb++; next; }          # known-gap divergence — suppressed
+        printf "NEW DIVERGENCE  %-64s interp=%-8s aot=%-8s\n", name, itier, atier;
         d++;
     }
     END {
-        if (d > 0) { printf "\n[diff-tiers] %d divergence(s) — TIER DIVERGENCE (kernel incident)\n", d; exit 1 }
-        else       { print  "[diff-tiers] no divergence — tiers agree"; exit 0 }
+        if (writeb == "1") {
+            printf "[diff-tiers] wrote %d baseline divergence(s) to %s\n", w+0, baseline; exit 0
+        }
+        if (kb > 0) printf "[diff-tiers] %d known-gap divergence(s) suppressed (baseline)\n", kb;
+        if (d > 0) { printf "\n[diff-tiers] %d NEW divergence(s) — TIER REGRESSION (kernel incident)\n", d; exit 1 }
+        else       { print  "[diff-tiers] no NEW divergence — tiers agree (modulo baseline)"; exit 0 }
     }
 ' "$WORK/joined.txt"

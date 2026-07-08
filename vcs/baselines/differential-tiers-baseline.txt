@@ -1,0 +1,7 @@
+# differential-tiers-baseline.txt — known interp-vs-AOT divergences.
+# Format: name<TAB>interp<TAB>aot   (one per line; # comments ignored).
+# The gate (vcs/scripts/differential-tiers.sh) fails only on NEW divergences
+# beyond this set, so it is blocking-usable while AOT has documented gaps
+# (#34 mono-dispatch, #38 cross-module/XMOD). Regenerate after a legitimate
+# known-gap change:  BASELINE_WRITE=1 make diff-core-tiers
+# Shrink toward empty as the AOT tier reaches parity.
