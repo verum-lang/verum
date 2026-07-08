@@ -1661,32 +1661,44 @@ impl TypeChecker {
                     // (absent from the receiver) stay behind the
                     // limit, preserving the protection the limit
                     // exists for.
-                    let recv_vars: std::collections::HashSet<_> =
-                        if let crate::ty::Type::Function { params, .. } = &fn_ty {
-                            params
-                                .first()
-                                .map(|p| {
-                                    collect_type_vars(p).into_iter().collect()
-                                })
-                                .unwrap_or_default()
-                        } else {
-                            Default::default()
-                        };
-                    let mut var_list: List<crate::ty::TypeVar> = List::new();
-                    let mut impl_count = 0usize;
-                    for v in vars.iter() {
-                        if recv_vars.contains(v) {
-                            var_list.push(*v);
-                            impl_count += 1;
-                        }
-                    }
-                    for v in vars.iter() {
-                        if !recv_vars.contains(v) {
-                            var_list.push(*v);
-                        }
-                    }
+                    // Receiver-position derivation is impossible here:
+                    // metadata signatures are PARAM-STRIPPED (fn_ty has
+                    // no params at all — traced p0 empty), so the
+                    // element var appears only in the return
+                    // (SliceIter<T>). For an INHERENT method the
+                    // impl-level generics mirror the TYPE's own
+                    // generic_params by construction (implement<T>
+                    // [T]), so derive the COUNT from the type
+                    // descriptor and cap by the vars actually present;
+                    // appearance order stands (the return-container
+                    // element is first for the iterator family).
+                    // REVERTED derivation (kept for the record): count
+                    // from type_desc.generic_params regressed 102 tests
+                    // — appearance-ordered vars put METHOD-level
+                    // generics first in many signatures, so the cap
+                    // binds receiver args onto them (the exact hazard
+                    // impl_var_count=0 protects). With PARAM-STRIPPED
+                    // metadata signatures the impl-vs-method split is
+                    // UNRECOVERABLE signature-side; the fix is a
+                    // METADATA CARRY (impl-generics count on the
+                    // method descriptor) — tracked in
+                    // ARRAY-ITER-CONCRETIZE-1.
+                    let impl_count = 0usize;
+                    let var_list: List<crate::ty::TypeVar> =
+                        vars.iter().copied().collect();
                     let mut s = TypeScheme::poly(var_list, fn_ty.clone());
                     s.impl_var_count = impl_count;
+                    if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
+                        let p0 = if let crate::ty::Type::Function { params, .. } = &fn_ty {
+                            params.first().map(|p| format!("{:?}", p)).unwrap_or_default()
+                        } else { String::new() };
+                        eprintln!(
+                            "[implvc-set] site=core.rs:metadata method={} impl_count={} p0={}",
+                            method_name.as_str(),
+                            impl_count,
+                            &p0[..p0.len().min(120)]
+                        );
+                    }
                     s
                 }
             };

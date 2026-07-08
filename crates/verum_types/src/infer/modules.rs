@@ -4208,6 +4208,14 @@ impl TypeChecker {
                 let self_type = self.ast_to_type_lenient(for_type);
                 let args = match &self_type {
                     Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                        // ARRAY-ITER-CONCRETIZE-1: surface the element as
+                        // the receiver's single type arg so the impl-level
+                        // var of `implement<T> [T]` binds (SliceIter<T>).
+                        Type::Array { element, .. } | Type::Slice { element } => {
+                            let mut l: List<Type> = List::new();
+                            l.push((**element).clone());
+                            l
+                        }
                     _ => List::new(),
                 };
                 self.set_current_self_type(Maybe::Some(self_type.clone()));
@@ -15046,6 +15054,14 @@ impl TypeChecker {
                 // when none of them match either.
                 let receiver_ty_args_for_gate: verum_common::List<Type> = match &recv_ty {
                     Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                        // ARRAY-ITER-CONCRETIZE-1: surface the element as
+                        // the receiver's single type arg so the impl-level
+                        // var of `implement<T> [T]` binds (SliceIter<T>).
+                        Type::Array { element, .. } | Type::Slice { element } => {
+                            let mut l: List<Type> = List::new();
+                            l.push((**element).clone());
+                            l
+                        }
                     _ => verum_common::List::new(),
                 };
                 if !self.inherent_method_pattern_allows(
@@ -17950,6 +17966,14 @@ impl TypeChecker {
                     // Bind type variables from receiver type args
                     let receiver_type_args: List<Type> = match &recv_ty {
                         Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                        // ARRAY-ITER-CONCRETIZE-1: surface the element as
+                        // the receiver's single type arg so the impl-level
+                        // var of `implement<T> [T]` binds (SliceIter<T>).
+                        Type::Array { element, .. } | Type::Slice { element } => {
+                            let mut l: List<Type> = List::new();
+                            l.push((**element).clone());
+                            l
+                        }
                         _ => {
                             // Also try recv_ty_raw
                             match &recv_ty_raw {
@@ -17961,6 +17985,14 @@ impl TypeChecker {
                         }
                     };
 
+                    if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
+                        eprintln!(
+                            "[self-bind] impl_vc={} fresh={} recv_args={}",
+                            impl_var_count,
+                            ordered_fresh_vars.len(),
+                            receiver_type_args.len()
+                        );
+                    }
                     let bind_limit = Self::resolve_bind_limit(
                         impl_var_count,
                         ordered_fresh_vars.len(),
@@ -18410,6 +18442,14 @@ impl TypeChecker {
             // Extract receiver type args for specialization checking
             let recv_type_args_for_check: List<Type> = match &recv_ty {
                 Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                        // ARRAY-ITER-CONCRETIZE-1: surface the element as
+                        // the receiver's single type arg so the impl-level
+                        // var of `implement<T> [T]` binds (SliceIter<T>).
+                        Type::Array { element, .. } | Type::Slice { element } => {
+                            let mut l: List<Type> = List::new();
+                            l.push((**element).clone());
+                            l
+                        }
                 _ => List::new(),
             };
 
@@ -18595,6 +18635,14 @@ impl TypeChecker {
                     // type vars from receiver type args. Method-level vars (like F in
                     // modify<F: Fn(T) -> T>) must NOT be bound from receiver type args —
                     // they are inferred from the method's arguments instead.
+                    if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
+                        eprintln!(
+                            "[self-bind] impl_vc={} fresh={} recv_args={}",
+                            impl_var_count,
+                            ordered_fresh_vars.len(),
+                            receiver_type_args.len()
+                        );
+                    }
                     let bind_limit = Self::resolve_bind_limit(
                         impl_var_count,
                         ordered_fresh_vars.len(),
