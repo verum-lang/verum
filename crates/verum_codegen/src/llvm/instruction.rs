@@ -4875,6 +4875,10 @@ pub fn lower_instruction<'ctx>(
             let vbc_mod = ctx.vbc_module().or_internal("CallG requires VBC module for function resolution")?;
             let func_desc = vbc_mod.get_function(FunctionId(*func_id)).or_internal_else(|| format!("CallG: function id {} not found", func_id))?;
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
+            // Clone what we need before the mutable-ctx calls below (func_desc
+            // borrows ctx immutably via vbc_module()).
+            let func_name_owned = func_name.to_string();
+            let return_type = func_desc.return_type.clone();
 
             let module = ctx.get_module();
 
@@ -4889,7 +4893,8 @@ pub fn lower_instruction<'ctx>(
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            if let Some(llvm_fn) = module.get_function(func_name) {
+            let mut produced_value = false;
+            if let Some(llvm_fn) = module.get_function(&func_name_owned) {
                 let call_site = ctx
                     .builder()
                     .build_call(llvm_fn, &arg_vals, "callg_result")
@@ -4897,12 +4902,25 @@ pub fn lower_instruction<'ctx>(
 
                 if let Some(ret_val) = call_site.try_as_basic_value().basic() {
                     ctx.set_register(dst.0, ret_val);
+                    produced_value = true;
                 } else {
                     ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 }
             } else {
                 // Function not found - return zero (may happen for unresolved generics)
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
+            }
+            // Track the result register's type from the (generic) return type,
+            // exactly as the direct-Call path does (see lower_call). Without
+            // this a generic call's result (e.g. `ready(x): ReadyFuture<T>`) was
+            // left un-classified, so a later `&mut result` fell into the scalar
+            // branch of lower_ref/lower_ref_mut (pointer-to-stack-slot) instead
+            // of the heap pass-through (the object pointer) — the exact
+            // representational split that made a devirtualized `future.poll()`
+            // read a stack slot and null-deref.  Marking here restores the
+            // heap-reference ≡ object-pointer coherence between tiers.
+            if produced_value {
+                mark_register_from_return_type(ctx, dst.0, &return_type);
             }
             let _ = type_args; // Consumed by monomorphization phase
             Ok(())
