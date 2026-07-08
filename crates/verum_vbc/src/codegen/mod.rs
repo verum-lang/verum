@@ -4952,7 +4952,27 @@ impl VbcCodegen {
             let existing = &self.types[idx];
             let existing_empty = existing.variants.is_empty() && existing.fields.is_empty();
             let new_richer = !ty.variants.is_empty() || !ty.fields.is_empty();
+            // ARRAY-ITER-CONCRETIZE-1 — protocol attachments are made
+            // IN-PLACE on whatever descriptor occupies the id slot at
+            // impl-collection time (`type_desc.protocols.push` in
+            // `collect_declarations`' Impl arm).  Both replacement
+            // branches below install a FRESH structural descriptor
+            // whose `protocols` is empty — silently wiping every
+            // attached `ProtocolImpl` (methods table AND the carried
+            // associated-type bindings).  Preserve them: a structural
+            // re-push refines SHAPE, it does not own the impl records.
+            // Only fires when the incoming has none — a descriptor
+            // arriving WITH protocols (import remap path) keeps its
+            // own.
+            let preserve_protocols = |slot: &mut crate::types::TypeDescriptor,
+                                      incoming: &mut crate::types::TypeDescriptor| {
+                if incoming.protocols.is_empty() && !slot.protocols.is_empty() {
+                    incoming.protocols = std::mem::take(&mut slot.protocols);
+                }
+            };
             if existing_empty && new_richer {
+                let mut ty = ty;
+                preserve_protocols(&mut self.types[idx], &mut ty);
                 self.types[idx] = ty;
             } else if !existing_empty {
                 // The existing descriptor has structure, but it can still be
@@ -4977,6 +4997,8 @@ impl VbcCodegen {
                             .sum::<usize>()
                 };
                 if richness(&ty) > richness(existing) {
+                    let mut ty = ty;
+                    preserve_protocols(&mut self.types[idx], &mut ty);
                     self.types[idx] = ty;
                 }
             }
@@ -6850,6 +6872,26 @@ impl VbcCodegen {
                 // Get the type name for qualified method registration
                 let type_name = self.extract_impl_type_name(&impl_decl.kind);
 
+                // ARRAY-ITER-CONCRETIZE-1 (a)-leg — STRUCTURAL impl
+                // targets (`implement<T> [T]`, `implement<T; N> [T; N]`)
+                // have no named type decl, so no TypeDescriptor ever
+                // existed for "Slice"/"Array": method descriptors lost
+                // their `parent_type` anchor, the archive metadata had
+                // no `meta.types["Slice"]` to catalogue methods on
+                // (every `&[Int].is_empty()`-style call E400'd at
+                // typecheck), and the impl-generics/assoc carries had
+                // no parent to read `type_params` from.  Materialise
+                // the fact codegen already holds: the impl target IS a
+                // type — synthesize its descriptor (once per module)
+                // with the impl block's generics as `type_params`, and
+                // every downstream consumer (parent_tid resolution,
+                // `method_generic_param_map` step 1, the metadata
+                // Pass-1/Pass-2 walks, the typechecker's lazy loader)
+                // works through the SAME machinery as named types.
+                if let Some(ref tn) = type_name {
+                    self.ensure_structural_impl_target_type(impl_decl, tn);
+                }
+
                 // Detect blanket impls: `implement<T: Base> Derived for T {}`.
                 // Deferred monomorphization — when a concrete type later
                 // `implement Base for Concrete`, we replay the blanket impl
@@ -7152,6 +7194,99 @@ impl VbcCodegen {
                                 })
                                 .collect();
 
+                            // Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1)
+                            // — CARRY the impl block's associated-type
+                            // bindings (`type Item = &T;`).  Resolve each
+                            // binding's AST type against the SAME
+                            // TypeParamId numbering the parent's method
+                            // descriptors use: parent `type_params` first
+                            // (mirrors `compile_function`'s
+                            // `method_generic_param_map` step 1), impl-block
+                            // generics after (sorted — mirrors the dice-6
+                            // fallback), so a binding's
+                            // `TypeRef::Generic(0)` IS the parent's first
+                            // generic param and the archive-driven
+                            // typechecker can substitute it from the
+                            // receiver's type args.  Pre-carry these
+                            // bindings were dropped at the VBC boundary —
+                            // `::Item<...>` projections over archive-loaded
+                            // iterator types could never resolve (E103 on
+                            // iterator-closure field access).
+                            let assoc_bindings: Vec<(StringId, crate::types::TypeRef)> = {
+                                let mut param_map: std::collections::HashMap<String, u16> =
+                                    std::collections::HashMap::new();
+                                let mut next_pid: u16 = 0;
+                                if let Some(&parent_tid) =
+                                    self.type_name_to_id.get(ty_name.as_str())
+                                {
+                                    if let Some(parent_desc) =
+                                        self.types.iter().find(|t| t.id == parent_tid)
+                                    {
+                                        for tp in parent_desc.type_params.iter() {
+                                            if let Some(n) =
+                                                self.ctx.strings.get(tp.name.0 as usize)
+                                            {
+                                                if !param_map.contains_key(n) {
+                                                    param_map.insert(n.clone(), next_pid);
+                                                    next_pid += 1;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                let mut impl_generics: Vec<String> = impl_decl
+                                    .generics
+                                    .iter()
+                                    .filter_map(|g| match &g.kind {
+                                        verum_ast::ty::GenericParamKind::Type {
+                                            name, ..
+                                        } => Some(name.name.to_string()),
+                                        _ => None,
+                                    })
+                                    .collect();
+                                impl_generics.sort_unstable();
+                                for g in impl_generics {
+                                    if !param_map.contains_key(&g) {
+                                        param_map.insert(g, next_pid);
+                                        next_pid += 1;
+                                    }
+                                }
+                                let resolved: Vec<(String, crate::types::TypeRef)> = impl_decl
+                                    .items
+                                    .iter()
+                                    .filter_map(|item| {
+                                        if let verum_ast::decl::ImplItemKind::Type {
+                                            name,
+                                            ty,
+                                            ..
+                                        } = &item.kind
+                                        {
+                                            Some((
+                                                name.name.to_string(),
+                                                self.resolve_field_type_ref(ty, &param_map),
+                                            ))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect();
+                                if std::env::var("VERUM_TRACE_ASSOC_ATTACH").is_ok() {
+                                    eprintln!(
+                                        "[assoc-attach] ty={} proto={} items={} resolved={:?}",
+                                        ty_name,
+                                        pn,
+                                        impl_decl.items.len(),
+                                        resolved
+                                    );
+                                }
+                                resolved
+                                    .into_iter()
+                                    .map(|(n, tref)| {
+                                        (StringId(self.ctx.intern_string_raw(&n)), tref)
+                                    })
+                                    .collect()
+                            };
+
                             // Push protocol impl onto the concrete type's descriptor
                             if let Some(&concrete_type_id) =
                                 self.type_name_to_id.get(ty_name.as_str())
@@ -7161,6 +7296,7 @@ impl VbcCodegen {
                                         type_desc.protocols.push(crate::types::ProtocolImpl {
                                             protocol: crate::types::ProtocolId(proto_type_id.0),
                                             methods: method_fn_ids,
+                                            associated_types: assoc_bindings,
                                         });
                                         break;
                                     }
@@ -8900,6 +9036,62 @@ impl VbcCodegen {
         };
 
         self.extract_impl_type_name_from_type(ty)
+    }
+
+    /// ARRAY-ITER-CONCRETIZE-1 (a)-leg — materialise a TypeDescriptor
+    /// for STRUCTURAL impl targets (`[T]` → "Slice", `[T; N]` →
+    /// "Array") the first time an impl block names one in this module.
+    ///
+    /// Named targets own their `type X is …;` decl and never reach the
+    /// synthesis (the `is_structural` gate); already-known names
+    /// short-circuit (idempotent across the multiple `implement<T>
+    /// [T]` blocks in one module).  The impl block's generic params
+    /// become the descriptor's `type_params` in declaration order —
+    /// the SAME numbering `method_generic_param_map` step 1 assigns —
+    /// so the impl-generics carry (`impl_generic_names`), the
+    /// associated-type carry, and the bare-`Self` projection fidelity
+    /// all apply to structural targets exactly as to named ones.
+    ///
+    /// The descriptor is a field-less Record — mirroring the
+    /// primitive method-catalogue stubs synthesized by
+    /// `archive_metadata` Pass 2.5 — because slices/arrays are
+    /// built-in VALUES at the VM layer; the descriptor exists to
+    /// anchor methods, impls, and generic-param facts.
+    fn ensure_structural_impl_target_type(
+        &mut self,
+        impl_decl: &verum_ast::decl::ImplDecl,
+        type_name: &str,
+    ) {
+        use verum_ast::decl::ImplKind;
+        let target_ty = match &impl_decl.kind {
+            ImplKind::Inherent(ty) => ty,
+            ImplKind::Protocol { for_type, .. } => for_type,
+        };
+        let is_structural = matches!(
+            &target_ty.kind,
+            verum_ast::ty::TypeKind::Slice(_) | verum_ast::ty::TypeKind::Array { .. }
+        );
+        if !is_structural || self.type_name_to_id.contains_key(type_name) {
+            return;
+        }
+        let type_id = self.alloc_user_type_id();
+        let name_sid = StringId(self.ctx.intern_string_raw(type_name));
+        let mut td = crate::types::TypeDescriptor::default();
+        td.id = type_id;
+        td.name = name_sid;
+        td.kind = crate::types::TypeKind::Record;
+        for g in impl_decl.generics.iter() {
+            if let verum_ast::ty::GenericParamKind::Type { name, .. } = &g.kind {
+                let pname = StringId(self.ctx.intern_string_raw(name.name.as_str()));
+                td.type_params.push(crate::types::TypeParamDescriptor {
+                    name: pname,
+                    id: crate::types::TypeParamId(td.type_params.len() as u16),
+                    ..Default::default()
+                });
+            }
+        }
+        self.type_name_to_id.insert(type_name.to_string(), type_id);
+        self.push_type_dedupe(td);
     }
 
     /// Helper to extract type name from a type.
@@ -11025,6 +11217,10 @@ impl VbcCodegen {
                             type_desc.protocols.push(crate::types::ProtocolImpl {
                                 protocol: crate::types::ProtocolId(super_id.0),
                                 methods: Vec::new(),
+                                // Super-protocol EDGES carry no impl
+                                // bindings — assoc types live on the
+                                // concrete `implement P for T` records.
+                                associated_types: Vec::new(),
                             });
                         }
                     }
@@ -12725,6 +12921,41 @@ impl VbcCodegen {
                 }
                 _ => TypeRef::Concrete(crate::types::TypeId::UNIT),
             };
+            // ARRAY-ITER-CONCRETIZE-1 / Pillar-3 increment 1 — bare-`Self`
+            // projection-base fidelity.  `Self.Item` in a materialised
+            // protocol-default method (`fn any(&self, f: fn(Self.Item) ->
+            // Bool)` from the Iterator protocol) has no `Self` entry in
+            // `generic_param_map`, so the base degraded to the
+            // `TypeId::PTR` unknown-carrier and serialised as
+            // `::Item<__opaque_type_14>` — an ORPHAN quantified var on the
+            // typechecker side (nothing binds it: the receiver's type args
+            // bind impl-level generics, not Self) → iterator-closure
+            // params stayed `Item<_>` → E103 on field access even with
+            // the impl-generics carry live.  Substitute the CONTEXTUAL
+            // fact codegen already holds: `Self` = the impl target
+            // applied to its own generic params, resolved through the
+            // SAME `generic_param_map` ids the rest of the signature
+            // uses — so `::Item<SliceIter<__generic_0>>` round-trips
+            // with its `T` unified with the carried impl var and the
+            // receiver bind concretises the whole projection.  Narrow
+            // by construction: only fires for a degraded (PTR/UNIT)
+            // resolution of a literally-bare `Self` base; protocol-side
+            // synthetic Self mappings (#131 Layer E, 0x4000+N) and
+            // genuine param-mapped bases keep their resolution.
+            let base_is_bare_self = match &ty.kind {
+                TypeKind::AssociatedType { base, .. } => Self::ast_type_is_bare_self(base),
+                TypeKind::Qualified { self_ty, .. } => Self::ast_type_is_bare_self(self_ty),
+                _ => false,
+            };
+            let base_ref = if base_is_bare_self
+                && matches!(
+                    &base_ref,
+                    TypeRef::Concrete(tid) if *tid == TypeId::PTR || *tid == TypeId::UNIT
+                ) {
+                self.impl_self_type_ref(generic_param_map).unwrap_or(base_ref)
+            } else {
+                base_ref
+            };
             return TypeRef::AssociatedProjection {
                 base: Box::new(base_ref),
                 assoc: assoc_str,
@@ -12758,6 +12989,48 @@ impl VbcCodegen {
         }
         // Fall back to standard resolution
         self.ast_type_to_type_ref(ty)
+    }
+
+    /// The impl target's `Self` as a structured [`TypeRef`]:
+    /// `Concrete(parent)` for non-generic targets, otherwise
+    /// `Instantiated { parent, [Generic(id)…] }` with each id resolved
+    /// through `generic_param_map` (the SAME ids the method signature's
+    /// other references to the impl generics carry — positional fallback
+    /// mirrors `method_generic_param_map`'s declaration-order numbering).
+    ///
+    /// `None` when codegen lacks the context (no current impl, or the
+    /// target type is not in the local table) — callers keep their
+    /// degraded fallback, preserving pre-fix behaviour.  See the
+    /// bare-`Self` projection-base fidelity block in
+    /// [`Self::resolve_field_type_ref`] for the consumer and rationale.
+    fn impl_self_type_ref(
+        &self,
+        generic_param_map: &std::collections::HashMap<String, u16>,
+    ) -> Option<TypeRef> {
+        let parent_name = self.ctx.current_impl_type_name.as_ref()?;
+        let &parent_tid = self.type_name_to_id.get(parent_name.as_str())?;
+        let parent_desc = self.types.iter().find(|t| t.id == parent_tid)?;
+        if parent_desc.type_params.is_empty() {
+            return Some(TypeRef::Concrete(parent_tid));
+        }
+        let args: Vec<TypeRef> = parent_desc
+            .type_params
+            .iter()
+            .enumerate()
+            .map(|(i, tp)| {
+                let pid = self
+                    .ctx
+                    .strings
+                    .get(tp.name.0 as usize)
+                    .and_then(|n| generic_param_map.get(n).copied())
+                    .unwrap_or(i as u16);
+                TypeRef::Generic(crate::types::TypeParamId(pid))
+            })
+            .collect();
+        Some(TypeRef::Instantiated {
+            base: parent_tid,
+            args,
+        })
     }
 
     /// This enables storing return type information for method dispatch prefixing.
@@ -13844,6 +14117,18 @@ impl VbcCodegen {
 
         // End function compilation
         let (instructions, register_count) = self.ctx.end_function();
+
+        // ARRAY-ITER-CONCRETIZE-1 — `end_function()` just RESET
+        // `ctx.current_impl_type_name`, but the DESCRIPTOR-population
+        // phase below (`method_generic_param_map` → param/return
+        // `resolve_field_type_ref`) still needs the impl target to
+        // resolve bare-`Self` projection bases (`Self.Item` →
+        // `Instantiated{parent, [Generic(i)…]}` instead of the
+        // `TypeId::PTR` unknown-carrier — see `impl_self_type_ref`).
+        // Re-arm it from the parameter for the remainder of this
+        // function; the next `begin_function`/`end_function` cycle
+        // re-clears it, so no state leaks across functions.
+        self.ctx.current_impl_type_name = impl_type_name.cloned();
 
         // Promote the descriptor's stored name to the FULL source-
         // module-qualified form (`sys.bitfield.test_bit` rather than
@@ -17044,6 +17329,22 @@ impl VbcCodegen {
                     tp.name = *mapped;
                 }
             }
+            // Remap the impl-carried associated-type binding NAMES
+            // (Pillar-3 increment 1 / ARRAY-ITER-CONCRETIZE-1) —
+            // same codegen-index → module-StringId remap as every
+            // other StringId field in this walker.  Without it the
+            // names written by `collect_declarations`' impl attach
+            // stay as codegen-time indices against the CANONICAL
+            // (sorted) string table, `module.strings.get(name)`
+            // resolves to None/garbage, and the archive-side
+            // metadata renderer silently drops the binding.
+            for pi in remapped_ty.protocols.iter_mut() {
+                for (name, _) in pi.associated_types.iter_mut() {
+                    if let Some(mapped) = string_id_map.get(name.0 as usize) {
+                        *name = *mapped;
+                    }
+                }
+            }
             // Remap drop_fn from sparse ID to contiguous 0-based ID.
             //
             // TYPE-ID-COLLISION-3 (FUNDAMENTAL). A drop_fn/clone_fn that is
@@ -17969,6 +18270,10 @@ impl VbcCodegen {
                 crate::types::ProtocolImpl {
                     protocol: new_protocol,
                     methods: pi.methods.clone(),
+                    // Import-remap preserves the carried bindings as-is
+                    // (TypeParamIds are parent-type-local, unaffected by
+                    // the protocol-id remap).
+                    associated_types: pi.associated_types.clone(),
                 }
             })
             .collect();

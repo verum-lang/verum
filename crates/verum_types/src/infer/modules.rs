@@ -15170,6 +15170,15 @@ impl TypeChecker {
                                 Type::Named { args, .. } | Type::Generic { args, .. } => {
                                     args.clone()
                                 }
+                                // ARRAY-ITER-CONCRETIZE-1: surface the element as
+                                // the receiver's single type arg so the impl-level
+                                // var of `implement<T> [T]` binds (SliceIter<T>) —
+                                // mirrors the sibling bind-site extractions.
+                                Type::Array { element, .. } | Type::Slice { element } => {
+                                    let mut l: List<Type> = List::new();
+                                    l.push((**element).clone());
+                                    l
+                                }
                                 _ => List::new(),
                             };
 
@@ -17987,7 +17996,8 @@ impl TypeChecker {
 
                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
                         eprintln!(
-                            "[self-bind] impl_vc={} fresh={} recv_args={}",
+                            "[self-bind] method={} impl_vc={} fresh={} recv_args={}",
+                            method.name.as_str(),
                             impl_var_count,
                             ordered_fresh_vars.len(),
                             receiver_type_args.len()
@@ -18577,6 +18587,20 @@ impl TypeChecker {
                     let receiver_type_args = match &recv_ty {
                         Type::Named { args, .. } => args.clone(),
                         Type::Generic { args, .. } => args.clone(),
+                        // ARRAY-ITER-CONCRETIZE-1: surface the element as
+                        // the receiver's single type arg so the impl-level
+                        // var of `implement<T> [T]` binds (SliceIter<T>).
+                        // This is THE binder the metadata-carried
+                        // impl_var_count feeds (the [self-bind] site) —
+                        // its sibling extraction sites already carry this
+                        // arm; without it recv_args=0 zeroed the
+                        // bind_limit for slice/array receivers and the
+                        // carry never fired.
+                        Type::Array { element, .. } | Type::Slice { element } => {
+                            let mut l: List<Type> = List::new();
+                            l.push((**element).clone());
+                            l
+                        }
                         // CRITICAL FIX: Handle Variant types with type parameters
                         // Variant types like Result<T, E> need to extract type args from their variants
                         // For Result<T, E>: Variant { "Ok" -> T, "Err" -> E }
@@ -18637,7 +18661,8 @@ impl TypeChecker {
                     // they are inferred from the method's arguments instead.
                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
                         eprintln!(
-                            "[self-bind] impl_vc={} fresh={} recv_args={}",
+                            "[self-bind] method={} impl_vc={} fresh={} recv_args={}",
+                            method.name.as_str(),
                             impl_var_count,
                             ordered_fresh_vars.len(),
                             receiver_type_args.len()

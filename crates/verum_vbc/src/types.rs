@@ -953,6 +953,26 @@ pub struct ProtocolImpl {
     pub protocol: ProtocolId,
     /// Methods implementing the protocol (function IDs).
     pub methods: Vec<u32>, // FunctionId.0
+    /// Associated-type bindings declared by the impl block
+    /// (`type Item = &T;` in `implement<T> Iterator for SliceIter<T>`),
+    /// resolved against the SAME TypeParamId numbering the parent
+    /// type's method descriptors use (parent `type_params` first) —
+    /// so a binding's `TypeRef::Generic(0)` is the parent's first
+    /// generic param by construction.
+    ///
+    /// Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1): pre-carry
+    /// these bindings were DROPPED at the VBC boundary, so the
+    /// archive-driven typechecker registered every stdlib protocol
+    /// impl with an empty associated-types map and
+    /// `try_find_associated_type` could never resolve
+    /// `::Item<SliceIter<T>>` — iterator-closure params stayed
+    /// `Item<_>` (E103) even when the receiver bound `T`.
+    ///
+    /// `#[serde(default)]` keeps freshly-built binaries able to
+    /// decode PRE-CARRY archives; the bake regenerates the artefact
+    /// pair wholesale under `PRECOMPILE_SCHEMA_VERSION` v11.
+    #[serde(default)]
+    pub associated_types: Vec<(StringId, TypeRef)>,
 }
 
 // ============================================================================
@@ -1933,6 +1953,7 @@ mod tests {
         td.protocols.push(ProtocolImpl {
             protocol: ProtocolId(100),
             methods: vec![1, 2, 3],
+            associated_types: Vec::new(),
         });
         assert_eq!(td.protocols.len(), 1);
         assert_eq!(td.protocols[0].methods.len(), 3);
@@ -2080,6 +2101,7 @@ mod tests {
         let pi = ProtocolImpl {
             protocol: ProtocolId(50),
             methods: vec![100, 101, 102],
+            associated_types: Vec::new(),
         };
         assert_eq!(pi.protocol, ProtocolId(50));
         assert_eq!(pi.methods.len(), 3);
@@ -2090,6 +2112,7 @@ mod tests {
         let pi = ProtocolImpl {
             protocol: ProtocolId(1),
             methods: vec![],
+            associated_types: Vec::new(),
         };
         assert!(pi.methods.is_empty());
     }
@@ -2372,6 +2395,7 @@ mod tests {
         let pi = ProtocolImpl {
             protocol: ProtocolId(50),
             methods: vec![1, 2, 3],
+            associated_types: Vec::new(),
         };
 
         let json = serde_json::to_string(&pi).unwrap();

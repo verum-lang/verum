@@ -1766,6 +1766,9 @@ impl<'s> CompilationPipeline<'s> {
                     Maybe::None
                 },
                 parent_type: Maybe::None,
+                // Pillar-3 increment 1 — cached path carries no parent
+                // type (see above), so no impl generics either.
+                impl_generic_names: List::new(),
                 // #97 — cached metadata path doesn't carry const
                 // markers; default to false (cached path is for
                 // user-side incremental compilation, not stdlib).

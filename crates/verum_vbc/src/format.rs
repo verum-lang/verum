@@ -30,7 +30,12 @@ pub const VERSION_MAJOR: u16 = 2;
 /// use).  Reader/data quadrants: old-reader/new-data → clean reject via
 /// `is_version_compatible` (2 > VERSION_MINOR); new-reader/old-data (minor <=1)
 /// → skip, hints default empty; new/new → preserved; old/old → unaffected.
-pub const VERSION_MINOR: u16 = 3;
+/// Version 2.4: additive `ProtocolImpl.associated_types` — per protocol-impl
+/// varint count + [u32 name-StringId, TypeRef]* carrying the impl block's
+/// `type Item = &T;` bindings (Pillar-3 increment 1 /
+/// ARRAY-ITER-CONCRETIZE-1).  Gated on minor >= 4 in the deserializer;
+/// pre-4 data decodes with empty bindings (the pre-carry behaviour).
+pub const VERSION_MINOR: u16 = 4;
 
 /// Size of VBC header in bytes.
 /// 4 (magic) + 2 + 2 (version) + 4 (flags) + 4 (name) +

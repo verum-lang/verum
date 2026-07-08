@@ -1547,10 +1547,30 @@ fn generic_var_scope_intern(name: &str) -> Option<crate::ty::TypeVar> {
 /// generic param linked to a projection over it (`F` ↔ `F.Output`).  Nesting is
 /// supported: the previous scope is saved and restored.
 pub(crate) fn with_generic_var_scope<R>(f: impl FnOnce() -> R) -> R {
+    with_generic_var_scope_capture(f).0
+}
+
+/// Like [`with_generic_var_scope`], but ALSO returns the scope's
+/// placeholder → `TypeVar` interning map (insertion-ordered =
+/// appearance order in the parsed signature).
+///
+/// Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1): the metadata
+/// scheme-birth site needs to know WHICH TypeVar each `__generic_i`
+/// placeholder produced so it can match the carried
+/// `FunctionDescriptor::impl_generic_names` (impl-level params are
+/// serialised as `__generic_i` with `i < impl_generic_names.len()`
+/// by construction — see the field's doc) and order impl-level vars
+/// first in the resulting `TypeScheme`.
+pub(crate) fn with_generic_var_scope_capture<R>(
+    f: impl FnOnce() -> R,
+) -> (R, indexmap::IndexMap<String, crate::ty::TypeVar>) {
     let prev = GENERIC_VAR_SCOPE.with(|s| s.borrow_mut().replace(indexmap::IndexMap::new()));
     let result = f();
+    let scope = GENERIC_VAR_SCOPE
+        .with(|s| s.borrow_mut().take())
+        .unwrap_or_default();
     GENERIC_VAR_SCOPE.with(|s| *s.borrow_mut() = prev);
-    result
+    (result, scope)
 }
 
 pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {

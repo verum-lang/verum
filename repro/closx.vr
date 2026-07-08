@@ -1,0 +1,14 @@
+// ARRAY-ITER-CONCRETIZE-1 canary: iterator closures over slice iter()
+// must see the concrete element type (impl-generics metadata carry,
+// Pillar-3 increment 1).  Pre-carry: `implement<T> [T]`'s metadata
+// scheme had impl_var_count=0, T never bound from the receiver, and
+// every closure param typed Item<_> — E103 on `e.hot`.
+type Ev is { hot: Bool, n: Int };
+
+fn main() {
+    let xs = [Ev { hot: true, n: 3 }, Ev { hot: false, n: 5 }, Ev { hot: true, n: 7 }];
+    let any_hot = xs.iter().any(|e| e.hot);
+    let all_pos = xs.iter().all(|e| e.n > 0);
+    let hot_count = xs.iter().filter(|e| e.hot).count();
+    print(f"any_hot={any_hot} all_pos={all_pos} hot_count={hot_count}");
+}
