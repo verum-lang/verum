@@ -9408,12 +9408,69 @@ impl TypeChecker {
                                     .read()
                                     .normalize_projection_type(&item_ty)
                             } else {
-                                return Err(TypeError::Other(
-                                    verum_common::Text::from(format!(
-                                        "Cannot iterate over type in comprehension: {}",
-                                        resolved_comprehension_iter
-                                    )),
-                                ));
+                                // COMPREHENSION-RANGE-ITER-1: mirror
+                                // infer_for_loop's iterator resolution.
+                                // Iterator-like Named/Generic types (name
+                                // contains "Iter", or Range/Chars/Keys/...)
+                                // yield an element type inferred from the
+                                // body. Without this, `[x*x for x in 1..5]`
+                                // (Range<Int>) failed "Cannot iterate" even
+                                // though the `for x in 1..5` loop form
+                                // resolves it. Prefer a carried element type
+                                // arg (Range<Int> -> Int); else a fresh var.
+                                let iter_name: Option<&str> =
+                                    match &resolved_comprehension_iter {
+                                        Type::Named { path, .. } => {
+                                            Self::path_type_name(path)
+                                                .or_else(|| Self::path_last_type_name(path))
+                                        }
+                                        Type::Generic { name, .. } => Some(name.as_str()),
+                                        _ => None,
+                                    };
+                                let is_iter_like = iter_name.is_some_and(|n| {
+                                    n.contains("Iter")
+                                        || n.contains("iter")
+                                        || matches!(
+                                            n,
+                                            "Range"
+                                                | "Components"
+                                                | "ReadDir"
+                                                | "Entries"
+                                                | "Chunks"
+                                                | "Windows"
+                                                | "Lines"
+                                                | "Chars"
+                                                | "Bytes"
+                                                | "Keys"
+                                                | "Values"
+                                                | "Items"
+                                                | "DirEntry"
+                                        )
+                                });
+                                if is_iter_like {
+                                    match &resolved_comprehension_iter {
+                                        Type::Generic { name, args }
+                                            if name.as_str() == "Range" && !args.is_empty() =>
+                                        {
+                                            args[0].clone()
+                                        }
+                                        Type::Named { path, args }
+                                            if !args.is_empty()
+                                                && Self::path_last_type_name(path)
+                                                    == Some("Range") =>
+                                        {
+                                            args[0].clone()
+                                        }
+                                        _ => Type::Var(TypeVar::fresh()),
+                                    }
+                                } else {
+                                    return Err(TypeError::Other(
+                                        verum_common::Text::from(format!(
+                                            "Cannot iterate over type in comprehension: {}",
+                                            resolved_comprehension_iter
+                                        )),
+                                    ));
+                                }
                             }
                         }
                     };
