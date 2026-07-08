@@ -11290,7 +11290,19 @@ impl TypeChecker {
                     ExprKind::Path(path) => {
                         if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
                             let var_name = id.name.as_str();
-                            self.borrow_tracker.borrow_immut(var_name, _span)?;
+                            // NLL-ARG-BORROW-1: an immutable borrow taken as a call
+                            // argument (`f(&x)`, incl. a generic-method arg synthesized
+                            // here rather than checked) is a TEMPORARY that ends when the
+                            // call returns.  Registering it persistently makes it linger
+                            // in the tracker and phantom-conflict with a later `x.mut()`
+                            // (e.g. `assert(a.is_disjoint(&b)); b.insert(2)` -> spurious
+                            // E310).  Mirror the check-mode path in expr.rs: use the
+                            // non-registering `borrow_immut_for_call` in call-arg context.
+                            if self.in_call_arg_context {
+                                self.borrow_tracker.borrow_immut_for_call(var_name, _span)?;
+                            } else {
+                                self.borrow_tracker.borrow_immut(var_name, _span)?;
+                            }
                         }
                     }
                     ExprKind::Field {
