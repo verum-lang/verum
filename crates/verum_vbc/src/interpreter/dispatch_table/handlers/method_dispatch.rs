@@ -2884,6 +2884,20 @@ pub(in super::super) fn handle_call_method(
     // they're the most-relevant candidates the dispatcher considered and
     // rejected (typically due to receiver-type mismatch or arity drift).
     let bare = method_name.rsplit('.').next().unwrap_or(&method_name).to_string();
+
+    // LIST-REALLOC-CANONICAL-1 companion: `is_null` on a raw `&unsafe T`
+    // pointer is purely an address test, even when the pointer targets a
+    // canonical heap object (which classifies the receiver as `Object`, so
+    // the earlier pointer-method block was skipped). The .vr `resize_buffer`
+    // calls `new_ptr.is_null()` on the backing that realloc returns; without
+    // this it panics "is_null not found on runtime kind Object" and
+    // List.reserve/resize fail. Answer it here from the raw address before
+    // the not-found panic.
+    if bare == "is_null" && receiver.is_ptr() {
+        state.set_reg(dst, Value::from_bool(receiver.as_ptr::<u8>().is_null()));
+        return Ok(DispatchResult::Continue);
+    }
+
     let suffix_candidates: Vec<(String, usize)> = {
         let dotted_bare = format!(".{}", bare);
         state

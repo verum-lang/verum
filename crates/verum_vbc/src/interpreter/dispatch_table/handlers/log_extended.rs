@@ -6,6 +6,10 @@ use super::super::DispatchResult;
 use super::bytecode_io::*;
 use crate::instruction::{LogSubOpcode, Opcode};
 use crate::value::Value;
+// LIST-REALLOC-CANONICAL-1: realloc must recognise interpreter-heap backing
+// objects (NewList/ListPush arrays) vs opaque std::alloc buffers.
+use super::super::super::heap;
+use crate::types::TypeId;
 
 /// LogExtended (0xBE) - Structured logging operations.
 ///
@@ -274,6 +278,49 @@ pub(in super::super) fn handle_mem_extended(
                 let a = state.get_reg(align_reg).as_i64() as usize;
                 if a == 0 { 8 } else { a }
             };
+
+            // LIST-REALLOC-CANONICAL-1: when `ptr` is an interpreter-heap
+            // object, the .vr `resize_buffer`'s realloc reached a CANONICAL
+            // collection backing (a NewList/ListPush array with an
+            // ObjectHeader + Value/byte slots), NOT a std::alloc buffer.
+            // `List.new`/`with_capacity`/`push`/`get` are intercepted onto
+            // `state.heap`, but `reserve`/`resize` run the .vr body which
+            // funnels through this realloc. Using std::alloc here freed the
+            // heap-object pointer via `std::alloc::dealloc` (an address the
+            // system allocator never returned -> heap corruption -> SIGABRT at
+            // drop) and copied from the header offset (data loss). Grow via
+            // `state.heap` exactly like `handle_list_push`: allocate a new
+            // backing, copy the data region at +OBJECT_HEADER_SIZE, and leave
+            // the old backing for the GC (never std::alloc::dealloc it).
+            if !ptr.is_null() && state.heap.contains(ptr as *const heap::ObjectHeader) {
+                let is_byte = {
+                    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+                    header.type_id == TypeId::BYTE_LIST
+                };
+                let elem_size = if is_byte {
+                    1usize
+                } else {
+                    std::mem::size_of::<Value>()
+                };
+                let new_cap_slots = new_size / elem_size.max(1);
+                let new_backing = if is_byte {
+                    state.heap.alloc(TypeId::BYTE_LIST, new_cap_slots)?
+                } else {
+                    state.heap.alloc_array(TypeId::UNIT, new_cap_slots)?
+                };
+                state.record_allocation();
+                let new_ptr = new_backing.as_ptr() as *mut u8;
+                let copy_bytes = old_size.min(new_size);
+                if copy_bytes > 0 {
+                    let old_data = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
+                    let new_data = unsafe { new_ptr.add(heap::OBJECT_HEADER_SIZE) };
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(old_data, new_data, copy_bytes);
+                    }
+                }
+                state.set_reg(dst, Value::from_ptr(new_ptr as *mut ()));
+                return Ok(DispatchResult::Continue);
+            }
 
             let new_layout =
                 std::alloc::Layout::from_size_align(new_size.max(1), align).map_err(|_| {
