@@ -34039,7 +34039,15 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
             // construction — passthrough, never the alloca (#21
             // Display leg: the f-string arm hints its buf/formatter
             // temps).
-            || ctx.sticky_type_hint(src.0).is_some();
+            || ctx.sticky_type_hint(src.0).is_some()
+            // A REF-typed PARAM already holds a reference — re-reffing
+            // it must pass the VALUE through, never the param slot's
+            // alloca. IR-proven root of the AOT Display gap: inside
+            // `<T>.fmt(self, f: &mut Formatter)` the body's
+            // `f.write_str(s)` re-refs the param; the alloca address
+            // went out as write_str's RECEIVER, so buffer reads hit
+            // fmt's STACK and every Display interpolation printed "".
+            || ctx.is_ref_param_register(src.0);
 
         if !is_heap_type {
             // Check for GetE element pointer first — if this register was
@@ -34129,7 +34137,15 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
             // construction — passthrough, never the alloca (#21
             // Display leg: the f-string arm hints its buf/formatter
             // temps).
-            || ctx.sticky_type_hint(src.0).is_some();
+            || ctx.sticky_type_hint(src.0).is_some()
+            // A REF-typed PARAM already holds a reference — re-reffing
+            // it must pass the VALUE through, never the param slot's
+            // alloca. IR-proven root of the AOT Display gap: inside
+            // `<T>.fmt(self, f: &mut Formatter)` the body's
+            // `f.write_str(s)` re-refs the param; the alloca address
+            // went out as write_str's RECEIVER, so buffer reads hit
+            // fmt's STACK and every Display interpolation printed "".
+            || ctx.is_ref_param_register(src.0);
 
         let src_val = ctx.get_register(src.0)?;
         let ptr = if !is_heap_type {
@@ -34247,7 +34263,15 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
             // construction — passthrough, never the alloca (#21
             // Display leg: the f-string arm hints its buf/formatter
             // temps).
-            || ctx.sticky_type_hint(src.0).is_some();
+            || ctx.sticky_type_hint(src.0).is_some()
+            // A REF-typed PARAM already holds a reference — re-reffing
+            // it must pass the VALUE through, never the param slot's
+            // alloca. IR-proven root of the AOT Display gap: inside
+            // `<T>.fmt(self, f: &mut Formatter)` the body's
+            // `f.write_str(s)` re-refs the param; the alloca address
+            // went out as write_str's RECEIVER, so buffer reads hit
+            // fmt's STACK and every Display interpolation printed "".
+            || ctx.is_ref_param_register(src.0);
 
         if !is_heap_type {
             if let Some(alloca_ptr) = ctx.get_alloca_ptr(src.0) {
@@ -34286,7 +34310,15 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
             // construction — passthrough, never the alloca (#21
             // Display leg: the f-string arm hints its buf/formatter
             // temps).
-            || ctx.sticky_type_hint(src.0).is_some();
+            || ctx.sticky_type_hint(src.0).is_some()
+            // A REF-typed PARAM already holds a reference — re-reffing
+            // it must pass the VALUE through, never the param slot's
+            // alloca. IR-proven root of the AOT Display gap: inside
+            // `<T>.fmt(self, f: &mut Formatter)` the body's
+            // `f.write_str(s)` re-refs the param; the alloca address
+            // went out as write_str's RECEIVER, so buffer reads hit
+            // fmt's STACK and every Display interpolation printed "".
+            || ctx.is_ref_param_register(src.0);
 
         let src_val = ctx.get_register(src.0)?;
         let ptr = if !is_heap_type {

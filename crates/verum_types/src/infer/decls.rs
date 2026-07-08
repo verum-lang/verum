@@ -5177,6 +5177,7 @@ impl TypeChecker {
                                     // Record how many ordered vars are impl-level so method-level params
                                     // (e.g., method's own <U>) aren't bound from receiver type args at call time.
                                     func_scheme.impl_var_count = type_param_names.len();
+                                    if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5179 count={}", type_param_names.len()); }
 
                                     // CRITICAL: Add type bounds to the TypeScheme for closure type inference
                                     if !method_type_var_bounds.is_empty() {
@@ -5368,6 +5369,7 @@ impl TypeChecker {
                                     // TypeVars and leaves impl_vars_outside free
                                     // (to be inferred from bounds / unification).
                                     method_scheme.impl_var_count = impl_vars_in_for_type.len();
+                                    if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5370 count={}", impl_vars_in_for_type.len()); }
 
                                     // CRITICAL: Add type bounds to the TypeScheme for closure type inference
                                     // This enables: fn map<U, F: fn(T) -> U>(self, f: F) -> Maybe<U>
@@ -5669,6 +5671,7 @@ impl TypeChecker {
                                 let mut method_scheme =
                                     self.ctx.generalize_with_vars(method_ty, &ordered_vars);
                                 method_scheme.impl_var_count = impl_vars_in_for_type.len();
+                                if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5671 count={}", impl_vars_in_for_type.len()); }
 
                                 // Add type bounds for closure type inference
                                 if !method_type_var_bounds.is_empty() {
@@ -5800,6 +5803,7 @@ impl TypeChecker {
                                 let mut method_scheme =
                                     self.ctx.generalize_with_vars(method_ty, &ordered_vars);
                                 method_scheme.impl_var_count = impl_vars_in_for_type.len();
+                                if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5802 count={}", impl_vars_in_for_type.len()); }
 
                                 // Add type bounds for closure type inference
                                 if !method_type_var_bounds.is_empty() {
