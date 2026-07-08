@@ -2038,6 +2038,25 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                         value
                     }
                 }
+                BasicValueEnum::PointerValue(v) if std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some() => {
+                    // Uniform i64 register model (this function's DOCUMENTED
+                    // contract: "All alloca slots uniformly use i64 ... pointers
+                    // → ptrtoint on store"). Coerce the pointer to i64 and fall
+                    // through to the register's SINGLE i64 slot. The
+                    // type-specific `alloca ptr` path below ORPHANS the slot
+                    // when the same VBC register is later written/read as i64
+                    // (two non-aliasing allocas r{}_ptr / r{}_i64) — the value
+                    // stored to one is invisible to a load from the other, so it
+                    // is silently lost across basic blocks. That is exactly why
+                    // future_poll_sync$mono returned its &mut-param (a stale i64
+                    // slot) instead of the Maybe.Some it constructed into the
+                    // ptr slot. One i64 slot per register removes the whole
+                    // class; consumers coerce back with inttoptr (as_ptr).
+                    self.builder
+                        .build_ptr_to_int(v, i64_ty, &format!("r{}_uni_p2i", reg))
+                        .expect("ptrtoint should not fail")
+                        .into()
+                }
                 BasicValueEnum::PointerValue(v) => {
                     // Store pointer through typed ptr alloca when possible.
                     // SROA can track pointer provenance through `alloca ptr`.
