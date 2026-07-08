@@ -499,6 +499,60 @@ impl ModuleMerger {
     /// their bodies (its body work-list filters on `instructions.is_some()`).
     /// A function whose byte range fails to decode cleanly is left as-is (it
     /// will simply be forward-declared, as before) rather than aborting merge.
+    /// Convert BYTE-relative jump offsets (as produced by the bytecode decoder)
+    /// to INSTRUCTION-relative offsets (`target_index - this_index`), which is
+    /// what the AOT body-lowering consumes. `positions[i]` is the start byte of
+    /// instruction `i` (relative to the function); the target byte of a jump is
+    /// `(end of this instruction) + byte_offset`.
+    fn convert_jump_offsets_byte_to_instr(
+        instrs: &mut [crate::instruction::Instruction],
+        positions: &[usize],
+        total_len: usize,
+    ) {
+        use crate::instruction::Instruction;
+        use std::collections::HashMap;
+        let byte_to_idx: HashMap<usize, i32> = positions
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| (p, i as i32))
+            .collect();
+        for i in 0..instrs.len() {
+            let end = if i + 1 < positions.len() {
+                positions[i + 1]
+            } else {
+                total_len
+            };
+            let to_instr = |off: i32| -> Option<i32> {
+                let target_byte = end as i64 + off as i64;
+                if target_byte < 0 {
+                    return None;
+                }
+                byte_to_idx.get(&(target_byte as usize)).map(|&j| j - i as i32)
+            };
+            match &mut instrs[i] {
+                Instruction::Jmp { offset }
+                | Instruction::JmpNot { offset, .. }
+                | Instruction::JmpIf { offset, .. }
+                | Instruction::JmpCmp { offset, .. } => {
+                    if let Some(o) = to_instr(*offset) {
+                        *offset = o;
+                    }
+                }
+                Instruction::CtxProvide { body_offset, .. } => {
+                    if let Some(o) = to_instr(*body_offset) {
+                        *body_offset = o;
+                    }
+                }
+                Instruction::TryBegin { handler_offset } => {
+                    if let Some(o) = to_instr(*handler_offset) {
+                        *handler_offset = o;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn decode_specialized_instructions(&self, output: &mut VbcModule, first_new_spec: usize) {
         // fixup_references rewrote call func_ids IN THE BYTECODE, but the AOT
         // body-lowering consumes each descriptor's DECODED `instructions`, not
@@ -560,10 +614,12 @@ impl ModuleMerger {
                 continue;
             }
             let mut instrs = Vec::new();
+            let mut positions = Vec::new();
             let mut pc = off;
             let end = off + len;
             let mut ok = true;
             while pc < end {
+                positions.push(pc - off);
                 match crate::bytecode::decode_instruction(&output.bytecode, &mut pc) {
                     Ok(instr) => instrs.push(instr),
                     Err(_) => {
@@ -573,6 +629,16 @@ impl ModuleMerger {
                 }
             }
             if ok && pc == end {
+                // Convert the decoder's BYTE-relative jump offsets to the
+                // INSTRUCTION-relative offsets the AOT body-lowering expects
+                // (vbc_lowering computes `target_index = index + offset`). The
+                // codegen path builds instruction-relative offsets directly, so
+                // a freshly-DECODED specialization must be converted to match —
+                // otherwise a byte offset (e.g. 23) is read as an instruction
+                // delta, the jump target lands out of range, and the match
+                // collapses (future_poll_sync's Poll->Maybe Pending arm became a
+                // reachable `unreachable`).
+                Self::convert_jump_offsets_byte_to_instr(&mut instrs, &positions, len);
                 if std::env::var_os("VERUM_TRACE_MONO").is_some() {
                     let callg_ids: Vec<u32> = instrs
                         .iter()
@@ -914,38 +980,36 @@ impl ModuleMerger {
 
     /// Writes a varint in place, padding with continuation bytes if needed.
     fn write_varint_in_place(&self, bytecode: &mut [u8], pc: usize, old_len: usize, value: u64) {
+        // Re-encode `value` into EXACTLY `old_len` bytes so the instruction's
+        // byte length is unchanged — an in-place func-id remap must not shift
+        // the bytes that follow, because jumps and later instructions are
+        // byte-addressed. A varint is a run of continuation bytes (bit 7 set)
+        // terminated by one clear byte, so EVERY byte except the last must have
+        // bit 7 set; the value's 7-bit groups are zero-extended into the pad.
+        //
+        // The previous version cleared bit 7 on an interior pad byte, so a
+        // remapped id smaller than the original (contiguous index < original
+        // sparse id) decoded in FEWER than old_len bytes. The leftover pad byte
+        // then mis-aligned the decoder and swallowed the FOLLOWING instruction —
+        // dropping the Jmp/JmpNot of future_poll_sync's `match Poll { Ready =>
+        // Some, Pending => None }`, so both arms ran straight-line, the last
+        // (None) won, and the AOT lowered a reachable `unreachable` → trap.
+        debug_assert!(old_len >= 1);
         let mut v = value;
-        let mut pos = pc;
-        let end = pc + old_len;
-
-        // Write varint bytes
-        while pos < end {
-            let byte = (v & 0x7F) as u8;
+        for i in 0..old_len {
+            let mut byte = (v & 0x7F) as u8;
             v >>= 7;
-
-            if pos + 1 < end && v > 0 {
-                // More bytes follow
-                bytecode[pos] = byte | 0x80;
-            } else if pos + 1 == end {
-                // Last byte - no continuation
-                bytecode[pos] = byte;
-            } else {
-                // Pad with continuation zeros if value is smaller than old encoding
-                bytecode[pos] = if v > 0 || pos + 1 < end - 1 {
-                    byte | 0x80
-                } else {
-                    byte
-                };
+            if i + 1 < old_len {
+                byte |= 0x80; // continuation on every byte but the last
             }
-            pos += 1;
+            bytecode[pc + i] = byte;
         }
-
-        // If we have leftover space, pad with continuation zeros then final zero
-        // This keeps the encoding length the same
-        while pos < end {
-            bytecode[pos] = if pos + 1 < end { 0x80 } else { 0x00 };
-            pos += 1;
-        }
+        debug_assert!(
+            v == 0,
+            "write_varint_in_place: value {} does not fit in {} varint bytes",
+            value,
+            old_len
+        );
     }
 
     /// Skips a TypeRef in bytecode.
