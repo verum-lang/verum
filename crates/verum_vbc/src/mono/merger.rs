@@ -283,6 +283,15 @@ impl ModuleMerger {
         // Copy dependencies
         output.dependencies = self.user_module.dependencies.clone();
 
+        // XMOD-BAND-RESOLVE (#38): carry the cross-module external-symbol name
+        // table (XMOD band-id → qualified name). XMOD band ids (0x2000_0000+)
+        // are placeholders, NOT module-local function ids, so they are not
+        // remapped by copy_user_functions and this table stays consistent after
+        // the merge. Without this copy, a mono-merged module reaches AOT codegen
+        // with an empty table and every cross-module call (mmap/munmap/close/…)
+        // degrades to a wrong-result const-zero stub.
+        output.external_function_names = self.user_module.external_function_names.clone();
+
         Ok(())
     }
 

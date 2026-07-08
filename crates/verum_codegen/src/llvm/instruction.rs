@@ -8980,27 +8980,57 @@ fn lower_call<'ctx>(
         None => match vbc_mod.get_function(FunctionId(func_id)) {
             Some(d) => d,
             None => {
-                let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
-                super::error::record_unresolved_generic_call(
-                    &cur_fn,
-                    format!(
-                        "Call fn-id {} (base {} + {}) missing in the VBC module table",
-                        resolved_id,
-                        ctx.func_id_base(),
-                        func_id
-                    ),
-                );
-                if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
-                    eprintln!(
-                        "[aot-unresolved] Call: fn_id={} (base {} + {}) miss in vbc_mod, const-zero in {}",
-                        resolved_id,
-                        ctx.func_id_base(),
-                        func_id,
-                        cur_fn
-                    );
+                // XMOD-BAND-RESOLVE (#38): a cross-module callee re-homed into
+                // the XMOD id band [0x2000_0000, 0x4000_0000) (module.rs:64) is
+                // not a valid function-table index, so both lookups above miss
+                // and — before this fix — the call degraded to a wrong-result /
+                // SIGSEGV const-zero stub (os_mmap→mmap, os_munmap→munmap,
+                // __platform_fd_close→close, ReadDir.drop→closedir). Recover the
+                // callee's qualified name from `external_function_names` (the
+                // lean name table already serialized in archive section 0x80 —
+                // NOT the reverted per-reference descriptor-stub explosion) and
+                // resolve it to a concrete function in the module, so the call
+                // lowers through the normal path (and its name-intercept /
+                // get_or_declare_ ABI routing) instead of const-zero'ing.
+                let xmod_recovered = if func_id >= verum_vbc::module::XMOD_CALL_ID_BAND_BASE
+                    && func_id < 0x4000_0000
+                {
+                    vbc_mod
+                        .external_function_names
+                        .iter()
+                        .find(|(fid, _)| fid.0 == func_id)
+                        .and_then(|(_, sid)| vbc_mod.get_string(*sid))
+                        .and_then(|name| vbc_mod.find_function_by_name(name))
+                        .and_then(|fid| vbc_mod.get_function(fid))
+                } else {
+                    None
+                };
+                match xmod_recovered {
+                    Some(d) => d,
+                    None => {
+                        let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
+                        super::error::record_unresolved_generic_call(
+                            &cur_fn,
+                            format!(
+                                "Call fn-id {} (base {} + {}) missing in the VBC module table",
+                                resolved_id,
+                                ctx.func_id_base(),
+                                func_id
+                            ),
+                        );
+                        if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
+                            eprintln!(
+                                "[aot-unresolved] Call: fn_id={} (base {} + {}) miss in vbc_mod, const-zero in {}",
+                                resolved_id,
+                                ctx.func_id_base(),
+                                func_id,
+                                cur_fn
+                            );
+                        }
+                        ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
+                        return Ok(());
+                    }
                 }
-                ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
-                return Ok(());
             }
         },
     };
