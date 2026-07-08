@@ -2234,6 +2234,21 @@ impl CodegenContext {
             }
             return;
         }
+        // ARCHIVE-SERIALIZE-DETERMINISM-1 dice-8: the name#arity
+        // mirror was created only INSIDE collision branches, so the
+        // KEY SET (→ interned-string set → bake bytes) depended on
+        // whether a same-name collision HAPPENED — which is
+        // arrival-order-dependent (byte-diff: broadcast_channel#1
+        // present in one bake, spawn_detached#1 in the other).
+        // Create the mirror UNCONDITIONALLY at first registration of
+        // any bare name: the key set becomes
+        // {bare, bare#arity, qualified…} regardless of collision
+        // history. Lookups already probe name#arity as a fallback,
+        // so extra mirrors are semantically inert.
+        if !name.contains('.') && !name.contains("::") {
+            let alt_key = format!("{}#{}", name, info.param_count);
+            self.functions.entry(alt_key).or_insert_with(|| info.clone());
+        }
         // **#17/#39 scope-aware mirror**: also record under the
         // (current_source_module, name) key so collision-prone lookups
         // can prefer the per-scope entry.  Only fires when scope is
