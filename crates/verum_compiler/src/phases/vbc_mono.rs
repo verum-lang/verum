@@ -67,8 +67,8 @@
 //! - `InstantiationGraph` - dependency tracking with topological ordering
 //! - `MonomorphizationResolver` - three-level resolution (core/cache/pending)
 //! - `BytecodeSpecializer` - full opcode coverage with type substitution
-//! - `ModuleMerger` - final module assembly (LLVM owns Tier-1 optimization of
-//!   the lowered IR, so there is no separate bytecode-level optimizer pass)
+//! - `SpecializationOptimizer` - constant folding, DCE, peephole optimization
+//! - `ModuleMerger` - final module assembly
 //!
 
 //! VBC monomorphization: specializes generic functions for concrete type
@@ -85,6 +85,7 @@ use verum_vbc::module::{FunctionId, VbcModule};
 use verum_vbc::mono::{
     InstantiationGraph, MonoPhaseConfig, MonomorphizationPhase as VbcMonoPhase, SourceLocation,
 };
+use verum_vbc::types::TypeRef;
 
 // ============================================================================
 // Monomorphization Phase
