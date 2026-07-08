@@ -20694,11 +20694,26 @@ impl TypeChecker {
             return Ok(left_ty.clone());
         }
 
-        // For type variables, default to Int for backward compatibility
+        // BITOP-DEFER-1: an operand still a type variable here (canonical
+        // case: `s.is_some() ^ s.is_none()`, whose Bool-returning method
+        // results arrive unbound) must NOT be force-defaulted to Int — that
+        // made `assert(Bool ^ Bool)` fail E400 "expected Bool, found Int"
+        // (base/maybe). A bitwise op is homogeneous (left, right and result
+        // share one type), so unify the operands and DEFER: if the other
+        // operand is already concrete the unify propagates it, and we
+        // re-resolve on the concrete type so a protocol/Int operand still
+        // drives the result; otherwise return the shared variable and let the
+        // surrounding context resolve it (a Bool position -> Bool, an Int
+        // position -> Int). Only when it is used in NO typed context does it
+        // stay a variable — handled by the caller's later defaulting, exactly
+        // as `&&`/`||` already defer to their Bool context.
         if matches!(left_ty, Type::Var(_)) {
-            self.unifier.unify(left_ty, &Type::int(), span)?;
-            self.unifier.unify(right_ty, &Type::int(), span)?;
-            return Ok(Type::int());
+            self.unifier.unify(left_ty, right_ty, span)?;
+            let resolved = self.unifier.apply(left_ty);
+            if !matches!(resolved, Type::Var(_)) {
+                return self.resolve_bitwise_op_type(&resolved, &resolved, protocol_name, span);
+            }
+            return Ok(resolved);
         }
 
         // For Int type, standard integer bitwise operations
