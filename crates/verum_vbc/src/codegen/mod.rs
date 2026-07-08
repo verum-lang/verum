@@ -13974,10 +13974,24 @@ impl VbcCodegen {
             }
         }
         // 2. Fallback: also inherit from ctx.generic_type_params.
-        for g in self.ctx.generic_type_params.iter() {
-            if !method_generic_param_map.contains_key(g) {
-                method_generic_param_map.insert(g.clone(), next_pid);
-                next_pid += 1;
+        // ARCHIVE-SERIALIZE-DETERMINISM-1 dice-6 (SEMANTIC): this is a
+        // HashSet — walk order is per-process, so method TypeParamIds
+        // (A↔E in `implement<A, E> Action<A, E>` methods) FLIPPED
+        // between bakes (byte-diff: Generic(0)/Generic(1) swapped in
+        // function descriptors — positional type_args semantics
+        // rolled dice). Sorted walk = declaration-independent but
+        // STABLE ids. (Step 1 — the authoritative parent-descriptor
+        // path — is declaration-ordered and unaffected; this fallback
+        // only fires when the parent map is unavailable.)
+        {
+            let mut fallback_generics: Vec<&String> =
+                self.ctx.generic_type_params.iter().collect();
+            fallback_generics.sort_unstable();
+            for g in fallback_generics {
+                if !method_generic_param_map.contains_key(g) {
+                    method_generic_param_map.insert(g.clone(), next_pid);
+                    next_pid += 1;
+                }
             }
         }
         // Function-level generics added after.
@@ -16804,6 +16818,21 @@ impl VbcCodegen {
             }
         }
 
+        // ARCHIVE-SERIALIZE-DETERMINISM-1 / ARCH-P2 increment 1:
+        // CANONICAL string table. The codegen-side interning order is
+        // arrival-order (parallel bake, registration walks) — five
+        // determinism waves chased individual walks; this ends the
+        // class: intern the FINAL module table in SORTED order and
+        // let string_id_map (which every consumer already remaps
+        // through) carry codegen-index → canonical-id. Byte-stable by
+        // construction regardless of interning order.
+        {
+            let mut sorted: Vec<&String> = self.ctx.strings.iter().collect();
+            sorted.sort_unstable();
+            for s in sorted {
+                module.intern_string(s);
+            }
+        }
         let string_id_map: Vec<StringId> = self
             .ctx
             .strings

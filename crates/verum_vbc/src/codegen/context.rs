@@ -2210,12 +2210,24 @@ impl CodegenContext {
                         .entry(existing_alt)
                         .or_insert(existing_info);
                 }
+                // Wave 5 (ARCHIVE-SERIALIZE-DETERMINISM-1): mirror the
+                // NEW entry too — the promotion branch created only the
+                // displaced party's alt, so the KEY SET still depended
+                // on arrival order (spawn_detached vs
+                // spawn_detached#1 flipped per bake).
+                self.functions.insert(alt_key.clone(), info.clone());
                 self.functions.insert(name, info);
                 return;
             }
             // Same alternative-arity precedence as the simple name:
             // first-wins under prefer_existing, last-wins otherwise.
             if self.prefer_existing_functions {
+                let existing_alt =
+                    format!("{}#{}", name, existing.param_count);
+                let existing_clone = existing.clone();
+                self.functions
+                    .entry(existing_alt)
+                    .or_insert(existing_clone);
                 self.functions.entry(alt_key).or_insert(info);
             } else {
                 self.functions.insert(alt_key, info);
