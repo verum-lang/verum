@@ -1689,6 +1689,101 @@ fn as_ptr<'ctx>(
     }
 }
 
+// ========================================================================
+// Coherent reference model — pointer tagging (gated by VERUM_ENABLE_MONO_AOT)
+// ========================================================================
+// A reference (`&x` / `&mut x`, i.e. Ref/RefMut) is the address of the
+// value's storage slot with bit 0 set. Heap object pointers are 8-aligned,
+// so bit 0 is always free to mark "this pointer is a reference, not the
+// object itself". Consumers that receive a possibly-referenced pointer
+// (field get/set, deref) branch on the tag: tagged → load the slot to reach
+// the referent; untagged → use directly. This makes the AOT's reference
+// representation match the interpreter's runtime `is_cbgr_ref`/`is_thin_ref`
+// unwrap (method_dispatch.rs, memory_collections.rs) — a reference is a slot
+// you LOAD-from / STORE-to, resolving `let old = *self; *self = None` (the
+// value is copied out before the slot is overwritten) and `future.poll()`
+// (the receiver reference is loaded to reach the object) coherently.
+
+/// True when the coherent (tagged) reference model is active.
+fn ref_tagging_enabled() -> bool {
+    std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some()
+}
+
+/// Set bit 0 on a slot-address i64 to mark it a reference.
+fn tag_ref<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    slot_i64: verum_llvm::values::IntValue<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let one = ctx.types().i64_type().const_int(1, false);
+    ctx.builder().build_or(slot_i64, one, name).or_llvm_err()
+}
+
+/// If `val` is a tagged reference, load the slot to reach the referent object;
+/// otherwise return it unchanged. Result is an i64 (the object pointer). Both
+/// select arms load a live 8-aligned address, so the dead load can't fault.
+fn deref_if_tagged<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    val: BasicValueEnum<'ctx>,
+    name: &str,
+) -> Result<BasicValueEnum<'ctx>> {
+    if !ref_tagging_enabled() {
+        return Ok(val);
+    }
+    let i64_ty = ctx.types().i64_type();
+    let v = as_i64(ctx, val, &format!("{}_i", name))?;
+    let one = i64_ty.const_int(1, false);
+    let bit = ctx
+        .builder()
+        .build_and(v, one, &format!("{}_bit", name))
+        .or_llvm_err()?;
+    let is_tagged = ctx
+        .builder()
+        .build_int_compare(IntPredicate::EQ, bit, one, &format!("{}_istag", name))
+        .or_llvm_err()?;
+    let mask = i64_ty.const_int(u64::MAX - 1, false);
+    let untagged = ctx
+        .builder()
+        .build_and(v, mask, &format!("{}_untag", name))
+        .or_llvm_err()?;
+    let slot_ptr = ctx
+        .builder()
+        .build_int_to_ptr(untagged, ctx.types().ptr_type(), &format!("{}_slot", name))
+        .or_llvm_err()?;
+    let loaded = ctx
+        .builder()
+        .build_load(i64_ty, slot_ptr, &format!("{}_load", name))
+        .or_llvm_err()?
+        .into_int_value();
+    let result = ctx
+        .builder()
+        .build_select(is_tagged, loaded, v, &format!("{}_sel", name))
+        .or_llvm_err()?;
+    Ok(result)
+}
+
+/// Clear bit 0 of a reference to recover its raw slot pointer (for storing
+/// through the reference / reading the slot).
+fn untag_slot_ptr<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    ref_val: BasicValueEnum<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::PointerValue<'ctx>> {
+    let i64_ty = ctx.types().i64_type();
+    let v = as_i64(ctx, ref_val, &format!("{}_i", name))?;
+    let untagged = if ref_tagging_enabled() {
+        let mask = i64_ty.const_int(u64::MAX - 1, false);
+        ctx.builder()
+            .build_and(v, mask, &format!("{}_untag", name))
+            .or_llvm_err()?
+    } else {
+        v
+    };
+    ctx.builder()
+        .build_int_to_ptr(untagged, ctx.types().ptr_type(), name)
+        .or_llvm_err()
+}
+
 /// Convert any value to i64, handling all types correctly.
 /// This is the SINGLE point where type coercion happens for integer operations.
 /// Pointers are converted via ptrtoint at point-of-use (not at register load),
@@ -4230,8 +4325,9 @@ pub fn lower_instruction<'ctx>(
                 ctx.set_register(dst.0, ptr.into());
             } else {
                 // Non-struct value (IntValue as heap pointer or PointerValue) in alloca mode.
-                // Convert to pointer and load through it.
-                let ptr = as_ptr(ctx, val, "deref_ptr")?;
+                // Convert to pointer and load through it. Coherent reference
+                // model: untag the reference to its raw slot pointer first.
+                let ptr = untag_slot_ptr(ctx, val, "deref_ptr")?;
                 if ref_is_float {
                     // Float pointee: load 8 bytes as f64 so the result register
                     // carries the actual IEEE double, then mark it float.
@@ -4770,7 +4866,9 @@ pub fn lower_instruction<'ctx>(
                     ctx.types().ptr_type().const_null()
                 }
             } else {
-                as_ptr(ctx, ref_val, "ref_ptr")?
+                // Coherent reference model: untag the reference to its raw slot
+                // pointer before storing through it (`*ref = value`).
+                untag_slot_ptr(ctx, ref_val, "ref_ptr")?
             };
 
             ctx.builder()
@@ -11985,6 +12083,18 @@ fn lower_call_method<'ctx>(
         .get_string(StringId(method_id))
         .unwrap_or("")
         .to_string();
+
+    // Coherent reference model: the built-in `deref` on a reference is the
+    // identity on the reference value — it yields the reference; the following
+    // `Deref` instruction (the `*` in `*self`) untags+loads it. Without this the
+    // AOT left the result unresolved (0) and `*self` loaded through null. The
+    // interpreter resolves `deref` via the Deref-protocol walk
+    // (method_dispatch.rs:2616); for the built-in reference this is a no-op.
+    if ref_tagging_enabled() && method_name_str == "deref" {
+        let recv_val = ctx.get_register(receiver.0)?;
+        ctx.set_register(dst.0, recv_val);
+        return Ok(());
+    }
 
     let mut resolved_func_name: Option<String> = None;
     let mut resolved_return_type: Option<TypeRef> = None;
@@ -31712,6 +31822,14 @@ fn lower_get_field<'ctx>(
 ) -> Result<()> {
     let field_idx = field_idx;
     let obj_val = ctx.get_register(obj.0)?;
+    // Coherent reference model: if the base is a tagged reference, load its slot
+    // to reach the object before GEP-ing the field. A stack struct is never a
+    // reference, so it bypasses.
+    let obj_val = if matches!(obj_val, BasicValueEnum::StructValue(_)) {
+        obj_val
+    } else {
+        deref_if_tagged(ctx, obj_val, "getf_base")?
+    };
     match obj_val {
         BasicValueEnum::StructValue(sv) if sv.get_type().count_fields() > field_idx => {
             // Stack struct with enough fields: use extract_value
@@ -32211,6 +32329,13 @@ fn lower_set_field<'ctx>(
     let field_idx = field_idx;
     let obj_val = ctx.get_register(obj.0)?;
     let new_val = ctx.get_register(value.0)?;
+    // Coherent reference model: a tagged-reference base is loaded to the object
+    // before storing the field (a stack struct bypasses).
+    let obj_val = if matches!(obj_val, BasicValueEnum::StructValue(_)) {
+        obj_val
+    } else {
+        deref_if_tagged(ctx, obj_val, "setf_base")?
+    };
     match obj_val {
         BasicValueEnum::StructValue(sv) if sv.get_type().count_fields() > field_idx => {
             // Check if this is a CBGR ref struct { ptr, i32, i32 }.
@@ -33129,6 +33254,24 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
     }
 
     let tier = ctx.get_effective_ref_tier(dst.0);
+
+    // Coherent reference model: `&mut x` is the TAGGED address of x's storage
+    // slot (bit 0 set), uniformly for heap and primitive referents. Deref /
+    // field-access untag+load to reach the value; DerefMut untags to store
+    // back. This is what lets `let old = *self; *self = None` (Maybe.take) copy
+    // the value out before overwriting the slot, and lets a method receiver
+    // that is a reference be loaded to the object at the use site.
+    if ref_tagging_enabled() {
+        if let Some(slot) = ctx.get_alloca_ptr(src.0) {
+            let slot_i64 = ctx
+                .builder()
+                .build_ptr_to_int(slot, ctx.types().i64_type(), "refmut_slot")
+                .or_llvm_err()?;
+            let tagged = tag_ref(ctx, slot_i64, "refmut_tagged")?;
+            ctx.set_register(dst.0, tagged.into());
+            return Ok(());
+        }
+    }
 
     if ctx.is_alloca_mode() {
         // In alloca mode, same logic as Ref: heap types pass through,
