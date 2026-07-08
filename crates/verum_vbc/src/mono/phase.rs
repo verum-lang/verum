@@ -356,17 +356,19 @@ impl MonomorphizationPhase {
             let mut specializer = BytecodeSpecializer::new(module, &substitution, graph);
 
             // Specialize
-            let specialized = specializer.specialize(func, &request.type_args)?;
+            let mut specialized = specializer.specialize(func, &request.type_args)?;
 
-            // NOTE: the post-specialization SpecializationOptimizer is DISABLED.
-            // It is a byte-by-byte constant-folding/peephole scanner that
-            // mis-tracks operand bytes as opcodes and REWRITES the stream —
-            // observed turning a correct 95-byte specialized body
-            // (Call/Mov/Ref/…/CallM) into 91 bytes of garbage
-            // (Call/LoadK/LoadI/NewRange/MakeVariantTyped), which then lowered
-            // to an undefined/mis-shaped LLVM body.  The specialized bytecode is
-            // already correct without it.  Re-enable only once the optimizer is
-            // rewritten on the canonical decode→transform→encode path (#3).
+            // Post-specialization bytecode optimization.  The optimizer now
+            // operates on the DECODED instruction stream (decode → normalize
+            // jump targets to instruction-relative → fold → encode-with-fixup),
+            // so it can no longer corrupt the byte stream the way the old
+            // byte-by-byte scanner did.  Bytecode-level optimization matters for
+            // BOTH tiers: the interpreter executes VBC directly (LLVM never sees
+            // it), and it shrinks the stream the AOT lowers.
+            if self.config.optimize {
+                let mut optimizer = SpecializationOptimizer::new();
+                specialized.bytecode = optimizer.optimize(specialized.bytecode);
+            }
 
             results.push((request.clone(), specialized));
         }
@@ -398,10 +400,13 @@ impl MonomorphizationPhase {
                 .ok_or(MonoPhaseError::FunctionNotFound(request.function_id))?;
             let substitution = TypeSubstitution::from_function(func, &request.type_args);
             let mut specializer = BytecodeSpecializer::new(module, &substitution, graph);
-            let specialized = specializer.specialize(func, &request.type_args)?;
-            // SpecializationOptimizer DISABLED — it corrupts the byte stream
-            // (see specialize_sequential for the detail).
-            let _ = optimize_flag;
+            let mut specialized = specializer.specialize(func, &request.type_args)?;
+            // Post-specialization optimization on the DECODED instruction
+            // stream (see specialize_sequential for the rationale).
+            if optimize_flag {
+                let mut optimizer = SpecializationOptimizer::new();
+                specialized.bytecode = optimizer.optimize(specialized.bytecode);
+            }
             Ok((request.clone(), specialized))
         };
 
