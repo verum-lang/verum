@@ -5142,6 +5142,32 @@ impl VbcCodegen {
                             self.ctx.functions.len()
                         );
                     }
+                    // LEN-FREE-FN-1: `len(x)` free-function form is sugar for
+                    // `x.len()`. We reach here ONLY after user-function
+                    // resolution has failed — so a user-defined `fn len` (e.g.
+                    // 053_variant_list_ops's `fn len(xs: IList)`) is resolved
+                    // first and never hits this fallback (no shadowing). The
+                    // typechecker accepts `len(x)`; emit the Len opcode with
+                    // the WKT length type-hint (same as the `.len()` method
+                    // path) instead of failing UndefinedFunction("len").
+                    if func_name == "len" && args.len() == 1 {
+                        let arg_reg = self
+                            .compile_expr(&args[0])?
+                            .or_internal("len() argument has no value")?;
+                        let result = self.ctx.alloc_temp();
+                        let hint = self
+                            .extract_expr_type_name(&args[0])
+                            .and_then(|tn| WKT::from_name(VbcCodegen::strip_generic_args(&tn)))
+                            .map(|wkt| wkt.len_type_hint())
+                            .unwrap_or(0);
+                        self.ctx.emit(Instruction::Len {
+                            dst: result,
+                            arr: arg_reg,
+                            type_hint: hint,
+                        });
+                        self.ctx.free_temp(arg_reg);
+                        return Ok(Some(result));
+                    }
                     return Err(CodegenError::with_span(
                         CodegenErrorKind::UndefinedFunction(func_name.clone()),
                         func.span,
