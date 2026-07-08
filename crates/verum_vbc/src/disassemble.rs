@@ -548,6 +548,8 @@ fn write_instruction(
         // ── CBGR ──
         Ref { dst, src } => write!(out, "REF       {}, {}", r(dst), r(src)),
         RefMut { dst, src } => write!(out, "REF_MUT   {}, {}", r(dst), r(src)),
+        RefLocal { dst, src } => write!(out, "REF_LOCAL {}, {}", r(dst), r(src)),
+        RefObj { dst, src } => write!(out, "REF_OBJ   {}, {}", r(dst), r(src)),
         Deref { dst, ref_reg } => write!(out, "DEREF     {}, {}", r(dst), r(ref_reg)),
         DerefMut { ref_reg, value } => write!(out, "DEREF_MUT {}, {}", r(ref_reg), r(value)),
         ChkRef { ref_reg } => write!(out, "CHK_REF   {}", r(ref_reg)),

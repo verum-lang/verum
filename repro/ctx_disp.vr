@@ -1,0 +1,14 @@
+// ARCH-P1-TYPED-REFS Display oracle (#21 AOT Display extraction gap).
+// SchemaErrorSeverity's `Display.fmt` lives in the ARCHIVED stdlib
+// (core.meta.contexts) and writes via `f.write_str(s)`.  The f-string
+// interpolation arm emits: buf = Text.new(); formatter =
+// Formatter.new(&mut buf); s.fmt(&mut formatter) — with Pillar-1 typed
+// refs the buf/formatter refs are RefObj (object identity), so under AOT
+// the write_str receiver chain reaches the OBJECT, not fmt's stack.
+// Expected BOTH tiers (--interp and --aot): [error]
+mount core.meta.{SchemaErrorSeverity};
+
+fn main() {
+    let s = SchemaErrorSeverity.Error;
+    print(f"[{s}]");
+}

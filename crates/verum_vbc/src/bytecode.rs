@@ -439,6 +439,19 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*src, output);
         }
 
+        // Typed reference splits (Pillar 1) — same operand shape as RefMut.
+        Instruction::RefLocal { dst, src } => {
+            output.push(Opcode::RefLocal.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*src, output);
+        }
+
+        Instruction::RefObj { dst, src } => {
+            output.push(Opcode::RefObj.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*src, output);
+        }
+
         Instruction::Deref { dst, ref_reg } => {
             output.push(Opcode::Deref.to_byte());
             encode_reg(*dst, output);
@@ -3703,6 +3716,19 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             Ok(Instruction::RefMut { dst, src })
         }
 
+        // Typed reference splits (Pillar 1) — same operand shape as RefMut.
+        Opcode::RefLocal => {
+            let dst = decode_reg(data, offset)?;
+            let src = decode_reg(data, offset)?;
+            Ok(Instruction::RefLocal { dst, src })
+        }
+
+        Opcode::RefObj => {
+            let dst = decode_reg(data, offset)?;
+            let src = decode_reg(data, offset)?;
+            Ok(Instruction::RefObj { dst, src })
+        }
+
         Opcode::Deref => {
             let dst = decode_reg(data, offset)?;
             let ref_reg = decode_reg(data, offset)?;
@@ -6843,6 +6869,30 @@ mod tests {
         test_roundtrip(&Instruction::RefUnsafe {
             dst: Reg(0),
             src: Reg(1),
+        });
+    }
+
+    /// Typed reference splits (Pillar 1): RefLocal (0x7A) / RefObj (0x7B)
+    /// must round-trip with the same operand shape as RefMut, including
+    /// wide-register encodings.
+    #[test]
+    fn test_typed_ref_roundtrip() {
+        test_roundtrip(&Instruction::RefLocal {
+            dst: Reg(0),
+            src: Reg(1),
+        });
+        test_roundtrip(&Instruction::RefObj {
+            dst: Reg(0),
+            src: Reg(1),
+        });
+        // Wide registers exercise the varint reg encoding.
+        test_roundtrip(&Instruction::RefLocal {
+            dst: Reg(300),
+            src: Reg(4095),
+        });
+        test_roundtrip(&Instruction::RefObj {
+            dst: Reg(300),
+            src: Reg(4095),
         });
     }
 

@@ -368,7 +368,13 @@ const fn build_dispatch_table() -> [Handler; 256] {
     table[0x77] = handle_drop_ref; // DropRef = 0x77 (drop reference)
     table[0x78] = handle_cbgr_extended; // CbgrExtended = 0x78 (CBGR extended ops)
     table[0x79] = handle_text_extended; // TextExtended = 0x79 (text parsing/conversion ops)
-    // 0x7A-0x7F: Reserved CBGR
+    // Typed reference splits (Pillar 1): same operand shape as RefMut and
+    // BOTH execute the existing RefMut path — the referent-class tag is
+    // Tier-1 lowering information only; Tier-0 CBGR semantics are unchanged
+    // by contract (zero interp risk).
+    table[0x7A] = handle_ref_mut; // RefLocal = 0x7A (typed: stack-local scalar referent)
+    table[0x7B] = handle_ref_mut; // RefObj = 0x7B (typed: heap-object referent)
+    // 0x7C-0x7F: Reserved CBGR
 
     // ========================================================================
     // Generic + Variant (0x80-0x8F) - matches instruction.rs

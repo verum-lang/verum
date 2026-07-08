@@ -4210,6 +4210,12 @@ pub fn lower_instruction<'ctx>(
 
         Instruction::RefMut { dst, src } => lower_ref_mut(ctx, *dst, *src),
 
+        // Typed reference splits (Pillar 1): the opcode CARRIES the referent
+        // class — lowering consults nothing but the opcode.
+        Instruction::RefLocal { dst, src } => lower_ref_local(ctx, *dst, *src),
+
+        Instruction::RefObj { dst, src } => lower_ref_obj(ctx, *dst, *src),
+
         Instruction::Deref { dst, ref_reg } => {
             let val = ctx.get_register(ref_reg.0)?;
             // A `List<Float>` element flows through the iterator chain as an i64
@@ -34218,7 +34224,48 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
     Ok(())
 }
 
+/// Referent class for the mutable-reference lowering family (Pillar 1,
+/// docs/architecture/tier-coherence-pillars.md).
+///
+/// The untyped `RefMut` opcode must GUESS whether the referent is a stack
+/// slot or a heap object from the per-register heuristic mark sets; the
+/// typed splits `RefLocal` / `RefObj` CARRY that fact from the VBC codegen
+/// (which resolved the referent type) — their lowering consults nothing but
+/// the opcode.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RefMutReferent {
+    /// Untyped `RefMut`: resolve via the heap-type heuristic mark family.
+    Heuristic,
+    /// `RefLocal`: statically a stack-local scalar slot — alloca-address
+    /// semantics (the non-heap branch), never passthrough.
+    ForcedLocal,
+    /// `RefObj`: statically a heap object — pointer MOV (value
+    /// passthrough), never the alloca address.
+    ForcedObj,
+}
+
+/// `RefLocal` (0x7A) — typed split of RefMut: referent is statically a
+/// stack-local scalar slot.  Reuses lower_ref_mut's non-heap branch.
+fn lower_ref_local<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
+    lower_ref_mut_family(ctx, dst, src, RefMutReferent::ForcedLocal)
+}
+
+/// `RefObj` (0x7B) — typed split of RefMut: referent is statically a heap
+/// object.  Tier-1 lowering is a pointer MOV (value passthrough).
+fn lower_ref_obj<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
+    lower_ref_mut_family(ctx, dst, src, RefMutReferent::ForcedObj)
+}
+
 fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
+    lower_ref_mut_family(ctx, dst, src, RefMutReferent::Heuristic)
+}
+
+fn lower_ref_mut_family<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Reg,
+    src: Reg,
+    referent: RefMutReferent,
+) -> Result<()> {
     // Mutable references to local allocations can still use Tier 1
     let has_slot = ctx.get_register_slot(src.0).is_some();
     let has_alloca = ctx.is_alloca_mode() && ctx.get_alloca_ptr(src.0).is_some();
@@ -34240,38 +34287,49 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
 
     let tier = ctx.get_effective_ref_tier(dst.0);
 
+    // Resolve the referent class ONCE.  Typed opcodes (Pillar 1) carry the
+    // class; only the untyped RefMut falls back to the heuristic mark
+    // family (the disease the typed split retires).
+    let treat_as_object = match referent {
+        RefMutReferent::ForcedObj => true,
+        RefMutReferent::ForcedLocal => false,
+        RefMutReferent::Heuristic => {
+            ctx.is_text_register(src.0)
+                || ctx.is_string_register(src.0)
+                || ctx.is_list_register(src.0)
+                || ctx.is_map_register(src.0)
+                || ctx.is_set_register(src.0)
+                || ctx.is_deque_register(src.0)
+                || ctx.is_btreemap_register(src.0)
+                || ctx.is_btreeset_register(src.0)
+                || ctx.is_binaryheap_register(src.0)
+                || ctx.is_chan_register(src.0)
+                || ctx.is_struct_register(src.0)
+                || ctx.is_inline_struct_register(src.0)
+                || ctx.get_obj_register_type(src.0).is_some()
+                || ctx.get_maybe_inner_type(src.0).is_some()
+                || ctx.is_variant_register(src.0)
+                // Sticky VBC-authored type hints (register_type_hints
+                // channel): a hinted register holds a heap object by
+                // construction — passthrough, never the alloca (#21
+                // Display leg: the f-string arm hints its buf/formatter
+                // temps).
+                || ctx.sticky_type_hint(src.0).is_some()
+                // A REF-typed PARAM already holds a reference — re-reffing
+                // it must pass the VALUE through, never the param slot's
+                // alloca. IR-proven root of the AOT Display gap: inside
+                // `<T>.fmt(self, f: &mut Formatter)` the body's
+                // `f.write_str(s)` re-refs the param; the alloca address
+                // went out as write_str's RECEIVER, so buffer reads hit
+                // fmt's STACK and every Display interpolation printed "".
+                || ctx.is_ref_param_register(src.0)
+        }
+    };
+
     if ctx.is_alloca_mode() {
-        // In alloca mode, same logic as Ref: heap types pass through,
-        // primitives use alloca address.
-        let is_heap_type = ctx.is_text_register(src.0)
-            || ctx.is_string_register(src.0)
-            || ctx.is_list_register(src.0)
-            || ctx.is_map_register(src.0)
-            || ctx.is_set_register(src.0)
-            || ctx.is_deque_register(src.0)
-            || ctx.is_btreemap_register(src.0)
-            || ctx.is_btreeset_register(src.0)
-            || ctx.is_binaryheap_register(src.0)
-            || ctx.is_chan_register(src.0)
-            || ctx.is_struct_register(src.0)
-            || ctx.is_inline_struct_register(src.0)
-            || ctx.get_obj_register_type(src.0).is_some()
-            || ctx.get_maybe_inner_type(src.0).is_some()
-            || ctx.is_variant_register(src.0)
-            // Sticky VBC-authored type hints (register_type_hints
-            // channel): a hinted register holds a heap object by
-            // construction — passthrough, never the alloca (#21
-            // Display leg: the f-string arm hints its buf/formatter
-            // temps).
-            || ctx.sticky_type_hint(src.0).is_some()
-            // A REF-typed PARAM already holds a reference — re-reffing
-            // it must pass the VALUE through, never the param slot's
-            // alloca. IR-proven root of the AOT Display gap: inside
-            // `<T>.fmt(self, f: &mut Formatter)` the body's
-            // `f.write_str(s)` re-refs the param; the alloca address
-            // went out as write_str's RECEIVER, so buffer reads hit
-            // fmt's STACK and every Display interpolation printed "".
-            || ctx.is_ref_param_register(src.0);
+        // In alloca mode: object referents pass through (pointer MOV),
+        // stack-local referents use the alloca address.
+        let is_heap_type = treat_as_object;
 
         if !is_heap_type {
             if let Some(alloca_ptr) = ctx.get_alloca_ptr(src.0) {
@@ -34289,36 +34347,10 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
             ctx.set_register(dst.0, ptr.into());
         }
     } else {
-        // Non-alloca mode: same primitive spill logic as Ref
-        let is_heap_type = ctx.is_text_register(src.0)
-            || ctx.is_string_register(src.0)
-            || ctx.is_list_register(src.0)
-            || ctx.is_map_register(src.0)
-            || ctx.is_set_register(src.0)
-            || ctx.is_deque_register(src.0)
-            || ctx.is_btreemap_register(src.0)
-            || ctx.is_btreeset_register(src.0)
-            || ctx.is_binaryheap_register(src.0)
-            || ctx.is_chan_register(src.0)
-            || ctx.is_struct_register(src.0)
-            || ctx.is_inline_struct_register(src.0)
-            || ctx.get_obj_register_type(src.0).is_some()
-            || ctx.get_maybe_inner_type(src.0).is_some()
-            || ctx.is_variant_register(src.0)
-            // Sticky VBC-authored type hints (register_type_hints
-            // channel): a hinted register holds a heap object by
-            // construction — passthrough, never the alloca (#21
-            // Display leg: the f-string arm hints its buf/formatter
-            // temps).
-            || ctx.sticky_type_hint(src.0).is_some()
-            // A REF-typed PARAM already holds a reference — re-reffing
-            // it must pass the VALUE through, never the param slot's
-            // alloca. IR-proven root of the AOT Display gap: inside
-            // `<T>.fmt(self, f: &mut Formatter)` the body's
-            // `f.write_str(s)` re-refs the param; the alloca address
-            // went out as write_str's RECEIVER, so buffer reads hit
-            // fmt's STACK and every Display interpolation printed "".
-            || ctx.is_ref_param_register(src.0);
+        // Non-alloca mode: same primitive spill logic as Ref.  Object
+        // referents skip the spill; scalar referents spill to a fresh
+        // alloca before the CBGR ref wrap.
+        let is_heap_type = treat_as_object;
 
         let src_val = ctx.get_register(src.0)?;
         let ptr = if !is_heap_type {

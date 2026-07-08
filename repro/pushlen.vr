@@ -1,0 +1,10 @@
+// pushlen canary: Text.new() heap seed + push mutation + print + len
+// must agree across tiers (Text-ABI / typed-ref regression guard).
+// Expected BOTH tiers: xy then 2.
+fn main() {
+    let mut t = Text.new();
+    t.push('x');
+    t.push('y');
+    print(t);
+    print(t.len());
+}
