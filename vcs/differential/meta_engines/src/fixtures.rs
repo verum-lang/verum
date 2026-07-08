@@ -324,20 +324,33 @@ pub fn all_fixtures() -> Vec<Fixture> {
         },
         Fixture {
             name: "pin_int_float_mixed",
-            description: "Int + Float: VBC PANICS (float-op on int operand), tree-walk errors cleanly",
+            description: "Int + Float: VBC silently yields NaN, tree-walk errors cleanly",
             source: "fn mx(a: Int, b: Float) -> Float { a + b }",
             fn_name: "mx",
             args: vec![Arg::Int(1), Arg::Float(2.5)],
             expect: Expectation::Pinned {
                 shape: PinShape::Outcome {
-                    vbc: OutcomeKind::Panic,
+                    // PROFILE-PROBED like the i128-overflow pin: the
+                    // VBC interpreter's float-extract asserts under
+                    // debug (panic 'Expected float, got Some(1)') and
+                    // reads the Int's NaN-boxed bits as a quiet NaN
+                    // under release (silent corruption).
+                    vbc: if cfg!(debug_assertions) {
+                        OutcomeKind::Panic
+                    } else {
+                        OutcomeKind::Value
+                    },
                     tree: OutcomeKind::Error,
                 },
-                note: "both engines reject mixed Int+Float, in different shapes: VBC codegen \
-                       emits a float add whose int operand trips an interpreter panic \
-                       ('Expected float, got Some(1)') — a compiler-process crash, not a \
-                       diagnostic; tree-walk MetaValueOps::add has no (Int, Float) arm and \
-                       returns 'Type mismatch in addition'. Observed 2026-07-07.",
+                note: "DRIFT HISTORY the harness caught live: on 2026-07-07 VBC PANICKED \
+                       ('Expected float, got Some(1)' — a compiler-process crash); by \
+                       2026-07-08 (main @ waves 1-8 + BITOP-DEFER-1 era) the same input \
+                       yields Float(NaN) SILENTLY — the int operand's NaN-boxed bits read \
+                       as a quiet NaN. Panic→silent-NaN is the WORSE direction (silent \
+                       corruption); tree-walk still errors cleanly ('Type mismatch in \
+                       addition'). CONVERGENCE TARGET (Pillar 4): a clean diagnostic on \
+                       BOTH engines — when the VBC engine gains proper mixed-arith \
+                       rejection or coercion, this pin flips again and MUST be revisited.",
             },
         },
         Fixture {
