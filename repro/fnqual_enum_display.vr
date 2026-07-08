@@ -1,0 +1,30 @@
+// FUNC-REGISTRY-QUALIFICATION-1 phase-2 probe — an f-string that
+// Displays a user enum routes through try_emit_display_dispatch's
+// `Formatter.new` resolution (resolve_function_key's first consumer).
+//
+// Expected output (both tiers, base and phase-2):
+//   sig=go then=wait
+//   halt=stop
+mount core.base.protocols.{Display, Formatter, FormatError};
+mount core.base.result.{Result, Ok, Err};
+
+type Signal is Go | Stop | Wait;
+
+implement Display for Signal {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Go => "go",
+            Stop => "stop",
+            Wait => "wait",
+        };
+        f.write_str(s)
+    }
+}
+
+fn main() {
+    let a = Signal.Go;
+    let b = Signal.Wait;
+    print(f"sig={a} then={b}");
+    let c = Signal.Stop;
+    print(f"halt={c}");
+}

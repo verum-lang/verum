@@ -33387,50 +33387,31 @@ impl VbcCodegen {
         // canonical record constructor.  Like `<Type>.fmt`, the
         // stdlib Formatter impl may be linked under a fully-
         // qualified key (e.g. `core.base.protocols.Formatter.new`)
-        // rather than the bare `Formatter.new` form.  Try the
-        // bare lookup first (fast path for modules that mount
-        // Formatter directly), then fall back to a suffix scan
-        // pinned by `parent_type_name == "Formatter"` AND
-        // `param_count == 1` (the `&mut Text` buffer arg).
-        let formatter_new_id: u32 = if let Some(info) = self
-            .ctx
-            .lookup_function("Formatter.new")
-            .filter(|i| i.param_count == 1 && i.id.0 != u32::MAX)
-        {
-            info.id.0
-        } else {
-            // Scan the function table for `*.Formatter.new` with
-            // matching parent + arity.  Costs O(N) once per
-            // f-string interpolated expression — interpolation
-            // is a rare opcode in the hot path, the linear walk
-            // is acceptable.
-            let parent_suffix_new = ".Formatter.new";
-            self.ctx
-                .functions
-                .iter()
-                .find_map(|(key, info)| {
-                    if info.param_count != 1 || info.id.0 == u32::MAX {
-                        return None;
-                    }
-                    let matches_parent = info
-                        .parent_type_name
-                        .as_deref()
-                        .map(|p| p == "Formatter")
-                        .unwrap_or(false)
-                        && key.ends_with(".new");
-                    if matches_parent || key.ends_with(parent_suffix_new) {
-                        if trace {
-                            eprintln!(
-                                "[display-dispatch] Formatter.new scan matched key='{}'",
-                                key
-                            );
-                        }
-                        Some(info.id.0)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(u32::MAX)
+        // rather than the bare `Formatter.new` form.
+        //
+        // FUNC-REGISTRY-QUALIFICATION-1 (phase 2): resolution goes
+        // through `resolve_function_key` — exact key first (fast
+        // path for modules that mount Formatter directly), then the
+        // deterministic qualified-suffix scan pinned by
+        // `parent_type == "Formatter"` AND `arity == 1` (the
+        // `&mut Text` buffer arg).  This replaced the hand-rolled
+        // `*.Formatter.new` table walk that the helper generalises;
+        // trace resolution with `VERUM_TRACE_FN_RESOLVE=Formatter`.
+        let formatter_new_id: u32 = match self.ctx.resolve_function_key(
+            "Formatter.new",
+            Some(1),
+            Some("Formatter"),
+        ) {
+            Some((key, info)) => {
+                if trace {
+                    eprintln!(
+                        "[display-dispatch] Formatter.new resolved via key='{}' (id={})",
+                        key, info.id.0
+                    );
+                }
+                info.id.0
+            }
+            None => u32::MAX,
         };
         if formatter_new_id == u32::MAX {
             if trace {

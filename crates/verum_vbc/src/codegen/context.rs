@@ -2059,6 +2059,54 @@ impl CodegenContext {
                 self.functions.get(&name).map(|e| (e.id.0, e.param_count)),
             );
         }
+        // FUNC-REGISTRY-QUALIFICATION-1 (phase 2) — module-qualified
+        // mirror key.  Every bare simple-name registration that happens
+        // while a source-module scope is active ALSO lands under its
+        // qualified `<module>.<name>` key, so collision-prone bare
+        // slots (the documented THREE bare `range` registrations; bare
+        // `Text.new` mis-binding inside stdlib-merged suite contexts)
+        // stay recoverable: qualified consumers (`resolve_function_key`'s
+        // suffix scan, the archive loader's canonical forms, the
+        // stub-descriptor emitters' longest-dotted name preference)
+        // can always reach the per-module entry even after the bare
+        // slot was claimed by another module's same-name function.
+        //
+        // Discipline mirrors the metadata layer (METADATA-DETERMINISM-1,
+        // commit 54d0ae1d4): the qualified slot is strictly additive
+        // and FIRST-WINS (`or_insert`) — it never replaces an existing
+        // entry, and the bare slot's collision policy below is
+        // untouched.  Runs BEFORE the arity-collision branch so a
+        // registration demoted to `<name>#<arity>` still gets its
+        // qualified key (the FFI `write`-3-arity class loses only the
+        // bare slot, not its module identity).
+        //
+        // Gates:
+        //  * bare names only — dotted names (`Type.method`, module
+        //    paths), `::`-qualified forms and `name#arity` alt-keys
+        //    already carry their own qualification;
+        //  * variant constructors excluded — their canonical qualified
+        //    form is `<ParentType>.<Variant>` (registered separately);
+        //    module-qualifying the bare alias would double-count them
+        //    in the `.{variant}` suffix-scan disambiguators
+        //    (`find_variant_by_suffix_and_args` returns None on
+        //    ambiguity, so a duplicate key can flip a unique match
+        //    into a miss);
+        //  * `main` (single-file user compiles) excluded — mirrors the
+        //    `compile_function` dot-qualified registration discipline
+        //    in `codegen/mod.rs`.
+        if let Some(scope) = &self.current_source_module
+            && !scope.is_empty()
+            && scope.as_str() != "main"
+            && info.variant_tag.is_none()
+            && !name.contains('.')
+            && !name.contains("::")
+            && !name.contains('#')
+        {
+            let qualified = format!("{}.{}", scope, name);
+            self.functions
+                .entry(qualified)
+                .or_insert_with(|| info.clone());
+        }
         if let Some(existing) = self.functions.get(&name)
             && existing.param_count != info.param_count
         {
@@ -2410,6 +2458,138 @@ impl CodegenContext {
         // Check arity-qualified key directly
         let alt_key = format!("{}#{}", name, arity);
         self.functions.get(&alt_key)
+    }
+
+    /// FUNC-REGISTRY-QUALIFICATION-1 (phase 2) — qualified-aware
+    /// function-key resolution.  Returns the winning `(key, info)`
+    /// pair so callers (and the trace) can see WHICH registration
+    /// form resolved.
+    ///
+    /// Resolution order:
+    ///  1. exact key `name`;
+    ///  2. canonical `<parent_type>.<leaf>` key (when `parent_type`
+    ///     is given and `name` isn't already rooted at it);
+    ///  3. arity alt-key `<name>#<arity>` (when `arity` is given);
+    ///  4. qualified-suffix scan: any key ending in `.<name>` — or,
+    ///     with `parent_type`, `.<parent>.<leaf>` / a
+    ///     `parent_type_name`-pinned `.<leaf>` — with the
+    ///     lexicographically-smallest key winning (deterministic
+    ///     across rebakes, unlike a raw HashMap-order `find`).
+    ///
+    /// Filters applied at every stage: `arity` (when `Some`) must
+    /// equal `param_count`, and the `u32::MAX` placeholder id is
+    /// never a valid resolution target.  `parent_type` additionally
+    /// pins stage-1 hits to entries that are actually the parent's
+    /// (keyed under `<parent>.` or carrying a matching
+    /// `parent_type_name`) — a bare first-wins squatter from another
+    /// module falls through to the qualified stages instead of
+    /// mis-binding (the bare-`Text.new`-inside-stdlib-merged-suites
+    /// class).
+    ///
+    /// This is the shared replacement for the per-site hand-rolled
+    /// "bare lookup, then walk the table for `.<Type>.<method>`"
+    /// pattern; first consumer is `try_emit_display_dispatch`'s
+    /// `Formatter.new` resolution in `expressions.rs`.
+    ///
+    /// Diagnostics: `VERUM_TRACE_FN_RESOLVE=<substr>` prints
+    /// `key -> resolution` (or MISS) for every call whose `name`
+    /// contains `<substr>`; empty or `1` traces all calls.
+    pub fn resolve_function_key(
+        &self,
+        name: &str,
+        arity: Option<usize>,
+        parent_type: Option<&str>,
+    ) -> Option<(&str, &FunctionInfo)> {
+        let trace = match std::env::var("VERUM_TRACE_FN_RESOLVE") {
+            Ok(f) => f.is_empty() || f == "1" || name.contains(&f),
+            Err(_) => false,
+        };
+        let emit_hit = |stage: &str, key: &str, info: &FunctionInfo| {
+            if trace {
+                eprintln!(
+                    "[fn-resolve] '{}' (arity={:?}, parent={:?}) -> '{}' via {} (id={}, arity={})",
+                    name, arity, parent_type, key, stage, info.id.0, info.param_count,
+                );
+            }
+        };
+        let leaf = name.rsplit('.').next().unwrap_or(name);
+        let accepts = |info: &FunctionInfo| -> bool {
+            info.id.0 != u32::MAX && arity.map(|a| info.param_count == a).unwrap_or(true)
+        };
+        // Stage 1: exact key.
+        if let Some((key, info)) = self.functions.get_key_value(name) {
+            let parent_ok = match parent_type {
+                None => true,
+                Some(p) => {
+                    name.starts_with(&format!("{}.", p))
+                        || info.parent_type_name.as_deref() == Some(p)
+                }
+            };
+            if parent_ok && accepts(info) {
+                emit_hit("exact", key, info);
+                return Some((key.as_str(), info));
+            }
+        }
+        // Stage 2: canonical `<parent>.<leaf>` form.
+        if let Some(p) = parent_type {
+            let canonical = format!("{}.{}", p, leaf);
+            if canonical != name
+                && let Some((key, info)) = self.functions.get_key_value(&canonical)
+                && accepts(info)
+            {
+                emit_hit("canonical", key, info);
+                return Some((key.as_str(), info));
+            }
+        }
+        // Stage 3: arity alt-key (the `name#arity` demotion slot).
+        if let Some(a) = arity {
+            let alt = format!("{}#{}", name, a);
+            if let Some((key, info)) = self.functions.get_key_value(&alt)
+                && accepts(info)
+            {
+                emit_hit("arity-alt", key, info);
+                return Some((key.as_str(), info));
+            }
+        }
+        // Stage 4: deterministic qualified-suffix scan.
+        let dotted_suffix = format!(".{}", name);
+        let parent_suffix = parent_type.map(|p| format!(".{}.{}", p, leaf));
+        let leaf_suffix = format!(".{}", leaf);
+        let mut best: Option<(&String, &FunctionInfo)> = None;
+        for (key, info) in self.functions.iter() {
+            if !accepts(info) {
+                continue;
+            }
+            let matched = match (parent_type, &parent_suffix) {
+                (Some(p), Some(ps)) => {
+                    key.ends_with(ps.as_str())
+                        || (info.parent_type_name.as_deref() == Some(p)
+                            && key.ends_with(leaf_suffix.as_str()))
+                }
+                _ => key.ends_with(dotted_suffix.as_str()),
+            };
+            if !matched {
+                continue;
+            }
+            let replace = match best {
+                Some((best_key, _)) => key.as_str() < best_key.as_str(),
+                None => true,
+            };
+            if replace {
+                best = Some((key, info));
+            }
+        }
+        if let Some((key, info)) = best {
+            emit_hit("suffix-scan", key, info);
+            return Some((key.as_str(), info));
+        }
+        if trace {
+            eprintln!(
+                "[fn-resolve] '{}' (arity={:?}, parent={:?}) -> MISS",
+                name, arity, parent_type,
+            );
+        }
+        None
     }
 
     /// Search for a function whose name ends with the given suffix.
@@ -3271,6 +3451,145 @@ mod tests {
             parent_type_name: Some(parent.to_string()),
             ..Default::default()
         }
+    }
+
+    /// Construct a minimal plain-function `FunctionInfo` for the
+    /// FUNC-REGISTRY-QUALIFICATION-1 tests.
+    fn plain_info(id: u32, arity: usize) -> FunctionInfo {
+        FunctionInfo {
+            id: FunctionId(id),
+            param_count: arity,
+            ..Default::default()
+        }
+    }
+
+    /// FUNC-REGISTRY-QUALIFICATION-1 (phase 2): a bare registration
+    /// under an active source-module scope mirrors into the qualified
+    /// `<module>.<name>` key; the qualified slot is first-wins and a
+    /// later same-name registration from another scope gets its OWN
+    /// qualified key without disturbing the first.
+    #[test]
+    fn register_function_mirrors_module_qualified_key() {
+        let mut ctx = CodegenContext::new();
+        ctx.current_source_module = Some("core.iter.range".to_string());
+        ctx.register_function("range".to_string(), plain_info(7, 1));
+
+        assert!(ctx.lookup_function("range").is_some());
+        let q = ctx
+            .lookup_function("core.iter.range.range")
+            .expect("bare registration must mirror the qualified key");
+        assert_eq!(q.id.0, 7);
+
+        // Second same-name registration from a different scope: its
+        // qualified key lands under ITS module; the first module's
+        // qualified slot is untouched (first-wins, never replaced).
+        ctx.current_source_module = Some("core.rand".to_string());
+        ctx.register_function("range".to_string(), plain_info(9, 1));
+        assert_eq!(ctx.lookup_function("core.iter.range.range").unwrap().id.0, 7);
+        assert_eq!(ctx.lookup_function("core.rand.range").unwrap().id.0, 9);
+
+        // No scope / "main" scope: no mirror.
+        let mut ctx2 = CodegenContext::new();
+        ctx2.register_function("free_fn".to_string(), plain_info(1, 0));
+        assert!(ctx2.functions.keys().all(|k| !k.contains('.')));
+        ctx2.current_source_module = Some("main".to_string());
+        ctx2.register_function("other_fn".to_string(), plain_info(2, 0));
+        assert!(ctx2.lookup_function("main.other_fn").is_none());
+    }
+
+    /// The qualified mirror must skip variant constructors (their
+    /// canonical qualified form is `<ParentType>.<Variant>`; a
+    /// module-qualified alias would double-count them in the
+    /// `.{variant}` suffix-scan disambiguators) and dotted /
+    /// already-qualified names.
+    #[test]
+    fn qualified_mirror_skips_variants_and_dotted_names() {
+        let mut ctx = CodegenContext::new();
+        ctx.current_source_module = Some("core.base.ordering".to_string());
+
+        ctx.register_function("Lt".to_string(), variant_info("Ordering", 0, 0));
+        assert!(ctx.lookup_function("core.base.ordering.Lt").is_none());
+
+        ctx.register_function("Ordering.cmp".to_string(), plain_info(4, 2));
+        assert!(ctx
+            .lookup_function("core.base.ordering.Ordering.cmp")
+            .is_none());
+
+        // The suffix-scan disambiguator that motivated the variant
+        // exclusion still sees exactly one `.Lt` entry after a
+        // qualified `Ordering.Lt` registration.
+        ctx.register_function("Ordering.Lt".to_string(), variant_info("Ordering", 0, 0));
+        assert_eq!(ctx.find_variant_by_suffix_and_args("Lt", 0), Some(0));
+    }
+
+    /// `resolve_function_key`: exact key wins when present and
+    /// arity-compatible; otherwise the deterministic qualified-suffix
+    /// scan recovers the module-qualified registration.
+    #[test]
+    fn resolve_function_key_exact_then_qualified_scan() {
+        let mut ctx = CodegenContext::new();
+        // Archive shape: only the module-qualified key exists.
+        ctx.register_function(
+            "core.base.protocols.Formatter.new".to_string(),
+            plain_info(11, 1),
+        );
+
+        let (key, info) = ctx
+            .resolve_function_key("Formatter.new", Some(1), Some("Formatter"))
+            .expect("suffix scan must resolve the qualified Formatter.new");
+        assert_eq!(key, "core.base.protocols.Formatter.new");
+        assert_eq!(info.id.0, 11);
+
+        // Arity filter: no 3-arg Formatter.new anywhere.
+        assert!(ctx
+            .resolve_function_key("Formatter.new", Some(3), Some("Formatter"))
+            .is_none());
+
+        // Deterministic pick: with TWO qualified matches the
+        // lexicographically-smallest key wins.
+        ctx.register_function("zzz.fmt.Formatter.new".to_string(), plain_info(13, 1));
+        let (key, info) = ctx
+            .resolve_function_key("Formatter.new", Some(1), Some("Formatter"))
+            .unwrap();
+        assert_eq!(key, "core.base.protocols.Formatter.new");
+        assert_eq!(info.id.0, 11);
+
+        // Exact key wins once the bare form exists.
+        ctx.register_function("Formatter.new".to_string(), plain_info(12, 1));
+        let (key, info) = ctx
+            .resolve_function_key("Formatter.new", Some(1), Some("Formatter"))
+            .unwrap();
+        assert_eq!(key, "Formatter.new");
+        assert_eq!(info.id.0, 12);
+    }
+
+    /// `resolve_function_key` with a parent pin must NOT resolve to a
+    /// bare same-name squatter from an unrelated module (the bare
+    /// `Text.new`-mis-bind class) — it falls through to the qualified
+    /// scan and finds the parent's real entry.
+    #[test]
+    fn resolve_function_key_parent_pin_skips_bare_squatter() {
+        let mut ctx = CodegenContext::new();
+        // Bare `new` squatter (0-ary, unrelated module won first-wins).
+        ctx.register_function("new".to_string(), plain_info(3, 0));
+        // The real ctor, qualified-only.
+        ctx.register_function(
+            "core.base.protocols.Formatter.new".to_string(),
+            plain_info(11, 1),
+        );
+
+        let (key, info) = ctx
+            .resolve_function_key("new", Some(1), Some("Formatter"))
+            .expect("parent-pinned scan must recover the qualified ctor");
+        assert_eq!(key, "core.base.protocols.Formatter.new");
+        assert_eq!(info.id.0, 11);
+
+        // Placeholder-id entries are never resolution targets.
+        let mut ctx2 = CodegenContext::new();
+        ctx2.register_function("Widget.make".to_string(), plain_info(u32::MAX, 1));
+        assert!(ctx2
+            .resolve_function_key("Widget.make", Some(1), Some("Widget"))
+            .is_none());
     }
 
     /// Reproduces the `IoError` collision documented in the bug class

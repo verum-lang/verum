@@ -730,6 +730,16 @@ fn register_module(
             is_transparent_wrapper: true,
             param_closure_return_type_names: Vec::new(),
         };
+        // FUNC-REGISTRY-QUALIFICATION-1 (phase 2): the synthetic
+        // newtype ctor registers under the BARE type name only —
+        // ALSO mirror it under the qualified `<module>.<TypeName>`
+        // key (first-wins, never replacing) so qualified consumers
+        // (`resolve_function_key`'s suffix scan) can always reach
+        // it.  Same canonical-name synthesis as Pass 3.
+        let qualified_ctor = merge_module_and_simple_name(module_name, &type_name);
+        if ctx.lookup_function(&qualified_ctor).is_none() {
+            ctx.register_function(qualified_ctor, info.clone());
+        }
         ctx.register_function(type_name.clone(), info);
         stats.functions_registered += 1;
         // Mirror the codegen-local newtype-tracking caches that
@@ -5053,6 +5063,15 @@ fn register_module_filtered(
             is_transparent_wrapper: true,
             param_closure_return_type_names: Vec::new(),
         };
+        // FUNC-REGISTRY-QUALIFICATION-1 (phase 2): mirror the bare
+        // newtype-ctor registration under its qualified
+        // `<module>.<TypeName>` key (first-wins, never replacing) —
+        // same discipline as the `populate_ctx_from_archive` Pass-5
+        // site.
+        let qualified_ctor = merge_module_and_simple_name(module_name, &type_name);
+        if ctx.lookup_function(&qualified_ctor).is_none() {
+            ctx.register_function(qualified_ctor, info.clone());
+        }
         ctx.register_function(type_name.clone(), info);
         ctx.newtype_names.insert(type_name.clone());
         if let Some(first_field) = ty.fields.first()
