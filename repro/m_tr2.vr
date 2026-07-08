@@ -1,0 +1,2 @@
+type Pair is { a: Int, b: Int };
+fn main() { let mut m: Map<Text, Pair> = Map.new(); m.insert(Text.from("x"), Pair { a: 1, b: 2 }); print(f"tr2 len={m.len()}"); }

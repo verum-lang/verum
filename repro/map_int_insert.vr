@@ -1,0 +1,16 @@
+// Control repro: Int-keyed Map.new()+insert under AOT.
+// If the Map header-layout drift theory holds, this crashes identically to
+// the Text/TokenStream repro (key/value types are irrelevant).
+
+fn main() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 100);
+    let n = m.len();
+    print(f"len={n}");
+    let got = m.get(1);
+    if got is Maybe.Some {
+        print("got=some");
+    } else {
+        print("got=none");
+    }
+}

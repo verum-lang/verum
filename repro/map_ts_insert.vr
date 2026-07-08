@@ -1,0 +1,31 @@
+// Minimal repro for AOT Map.insert SIGSEGV with Map<Text, TokenStream>
+// (meta/contexts/unit_test::test_pattern_match_with_one_capture).
+// Interp: expected green.  AOT: expected EXC_BAD_ACCESS inside Map.insert pre-fix.
+
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.token.{TokenStream};
+
+fn ssp() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn ets() -> TokenStream {
+    TokenStream { tokens: List.new(), span: ssp() }
+}
+
+fn main() {
+    let mut caps: Map<Text, TokenStream> = Map.new();
+    caps.insert(Text.from("x"), ets());
+    let n = caps.len();
+    print(f"len={n}");
+    let got = caps.get(Text.from("x"));
+    if got is Maybe.Some {
+        print("got=some");
+    } else {
+        print("got=none");
+    }
+}

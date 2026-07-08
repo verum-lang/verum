@@ -1,0 +1,2 @@
+type Rec2 is { tokens: List<Int>, span: Int };
+fn main() { let mut m: Map<Int, Rec2> = Map.new(); m.insert(1, Rec2 { tokens: List.new(), span: 0 }); print(f"ir len={m.len()}"); }

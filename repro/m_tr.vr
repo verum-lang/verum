@@ -1,0 +1,2 @@
+type Rec2 is { tokens: List<Int>, span: Int };
+fn main() { let mut m: Map<Text, Rec2> = Map.new(); m.insert(Text.from("x"), Rec2 { tokens: List.new(), span: 0 }); print(f"tr len={m.len()}"); }
