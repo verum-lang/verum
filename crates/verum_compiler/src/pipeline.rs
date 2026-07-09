@@ -1961,6 +1961,19 @@ impl<'s> CompilationPipeline<'s> {
                     ctx.enabled_contexts = parsed.enabled_contexts;
                 }
 
+                // ARCH-P4 step (ii): under VERUM_META_ENGINE=vbc the
+                // expression evaluates on the VBC engine first; a
+                // scalar-decodable success SKIPS the tree-walk, any
+                // failure falls back (fail-closed hybrid — semantics
+                // never silently change; divergences belong to the
+                // differential harness). Default engine unchanged.
+                if crate::meta::vbc_eval::vbc_meta_engine_selected() {
+                    if crate::meta::vbc_eval::vbc_eval_meta_expr(&body_expr, body_expr.span)
+                        .is_ok()
+                    {
+                        continue;
+                    }
+                }
                 match ctx.ast_expr_to_meta_expr(&body_expr) {
                     Ok(meta_expr) => {
                         if let Err(e) = ctx.eval_meta_expr(&meta_expr) {
@@ -2088,6 +2101,14 @@ impl<'s> CompilationPipeline<'s> {
             ExprKind::MetaFunction { name, args } if name.as_str() == "const" => {
                 // @const { ... } block — evaluate arguments
                 for arg in args.iter() {
+                    // ARCH-P4 step (ii): VBC-engine-first under the
+                    // flag; fail-closed to the tree-walk (see the
+                    // sibling @meta gate above).
+                    if crate::meta::vbc_eval::vbc_meta_engine_selected() {
+                        if crate::meta::vbc_eval::vbc_eval_meta_expr(arg, arg.span).is_ok() {
+                            continue;
+                        }
+                    }
                     let mut ctx = self
                         .fresh_meta_ctx_with_version_stamp()
                         .with_registry(std::sync::Arc::new(self.meta_registry.clone()))

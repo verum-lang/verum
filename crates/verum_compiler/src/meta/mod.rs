@@ -77,6 +77,7 @@ pub mod sandbox;
 pub mod value_ops;
 
 // VBC execution for staged metaprogramming
+pub mod vbc_eval;
 pub mod vbc_executor;
 
 // Re-export main types for convenient access
