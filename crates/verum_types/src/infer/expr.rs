@@ -3558,6 +3558,21 @@ impl TypeChecker {
                     // for the type name (e.g., `RegistryError` in `RegistryError.PackageNotFound`)
                     //
 
+                    // CTOR-AS-FN (#31, THE prelude root): a bare PAYLOAD-
+                    // constructor name in VALUE position is the constructor
+                    // FUNCTION, not the type. Under `mount core.prelude.*`
+                    // the leaf re-export registers "Some"/"Ok"/"Err" in the
+                    // TYPE table, so this stdlib-type-on-miss arm resolved
+                    // them to `Named("Some")` BEFORE the correct
+                    // try_resolve_variant_constructor arm below could run —
+                    // producing `E400 expected 'fn(..)', found 'Some'` for
+                    // `m.and_then(Some)` / `let f: fn(Int)->Maybe<Int> = Some`
+                    // (and cascading ~30 base/maybe property tests). Payload
+                    // ctors yield their fn type; unit ctors (`None`) fall
+                    // through unchanged (params.is_empty() → None).
+                    if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &Type::Unknown) {
+                        return Ok(ctor_fn);
+                    }
                     // IMPORTANT: If this type has generic parameters but was referenced without
                     // explicit type arguments, create fresh type variables for the missing params.
                     // This enables proper inference for types like `PendingFuture<T>` used as `PendingFuture`.

@@ -1411,6 +1411,22 @@ impl Unifier {
             ))));
         }
         let result = self.unify_impl(t1, t2, span);
+        // VERUM_TRACE_CTOR: pinpoint the raise path for the #31 class — a
+        // bare constructor name unified as a nominal type ("found 'Some'").
+        // One choke point instead of instrumenting every Mismatch site.
+        if self.unify_depth == 1
+            && let Err(crate::TypeError::Mismatch { ref actual, .. }) = result
+            && std::env::var("VERUM_TRACE_CTOR").is_ok()
+            && (actual.as_str() == "Some" || actual.as_str() == "Ok" || actual.as_str() == "Err")
+        {
+            eprintln!(
+                "[ctor-trace] unify MISMATCH actual={:?} t1={:?} t2={:?}\n{}",
+                actual,
+                t1,
+                t2,
+                std::backtrace::Backtrace::force_capture()
+            );
+        }
         self.unify_depth -= 1;
         result
     }
