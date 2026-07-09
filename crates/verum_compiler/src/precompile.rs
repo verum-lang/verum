@@ -245,6 +245,22 @@ fn write_core_metadata_alongside_archive(
         // is declared at `core/base/maybe.vr:606`.
         scan_implementation_protocol_args(&mut metadata, root, verbose);
 
+        // Fully-qualified free-fn keys at FILE-module granularity
+        // (2026-07-09).  `metadata.functions` keys free functions by
+        // bare name (first-wins) plus a `<archive_module>.<name>`
+        // qualified key — but the archive module is the DIRECTORY
+        // ("core.time"), not the file-declared module
+        // ("core.time.duration_parse").  Two consequences: (a) the
+        // typechecker's fully-qualified call resolution
+        // (`core.time.duration_parse.parse(x)`) can never hit, and
+        // (b) same-named free fns in sibling files of one directory
+        // (duration_parse.parse vs rfc3339.parse) COLLIDE and the
+        // loser vanishes from the metadata entirely.  This source
+        // walk re-registers every public top-level free fn under its
+        // file-declared dotted module key, rebuilding the descriptor
+        // from the AST so collision-dropped functions are recovered.
+        inject_declared_module_free_fn_keys(&mut metadata, root, verbose);
+
         // **Audit-driven fundamental fix (Task #44)** — capture
         // `extends` clause from every protocol declaration so
         // `metadata.protocols[X].super_protocols` is populated.
@@ -2132,6 +2148,204 @@ fn find_workspace_root(start: &Path) -> Result<PathBuf> {
                 start.display()
             ),
         }
+    }
+}
+
+/// Register every PUBLIC top-level free function under its
+/// FILE-declared dotted module key
+/// (`core.time.duration_parse.parse`), rebuilding the descriptor
+/// from the parsed AST.
+///
+/// Rationale (2026-07-09): the archive-side Pass 2 keys free fns by
+/// bare name (first-wins) + `<archive_module>.<name>` where
+/// `archive_module` is the per-DIRECTORY compile unit.  File-grained
+/// qualification is lost, and same-named free fns in sibling files
+/// (duration_parse.parse / rfc3339.parse under `core.time`) collide —
+/// the loser has NO descriptor anywhere.  This walk restores both:
+/// the fully-qualified key the typechecker's module-path call
+/// resolution probes, and the collision-dropped descriptors.
+///
+/// Type strings are rendered best-effort from the AST in the same
+/// dialect `parse_descriptor_type_string` consumes; exotic shapes
+/// degrade to their head name (same contract as the archive's
+/// `__opaque_type_N` precedent).  First-wins: existing keys are
+/// never overwritten.
+fn inject_declared_module_free_fn_keys(
+    metadata: &mut verum_types::core_metadata::CoreMetadata,
+    root: &Path,
+    verbose: bool,
+) {
+    fn render_type(ty: &verum_ast::ty::Type) -> String {
+        use verum_ast::ty::TypeKind as K;
+        match &ty.kind {
+            K::Unit => "Unit".to_string(),
+            K::Never => "Never".to_string(),
+            K::Bool => "Bool".to_string(),
+            K::Int => "Int".to_string(),
+            K::Float => "Float".to_string(),
+            K::Char => "Char".to_string(),
+            K::Text => "Text".to_string(),
+            K::Path(path) => path.last_segment_name().to_string(),
+            K::Generic { base, args } => {
+                let rendered: Vec<String> = args
+                    .iter()
+                    .filter_map(|a| match a {
+                        verum_ast::ty::GenericArg::Type(t) => Some(render_type(t)),
+                        _ => None,
+                    })
+                    .collect();
+                if rendered.is_empty() {
+                    render_type(base)
+                } else {
+                    format!("{}<{}>", render_type(base), rendered.join(", "))
+                }
+            }
+            K::Reference { inner, .. }
+            | K::CheckedReference { inner, .. }
+            | K::UnsafeReference { inner, .. } => render_type(inner),
+            K::Tuple(types) => {
+                let rendered: Vec<String> = types.iter().map(render_type).collect();
+                format!("({})", rendered.join(", "))
+            }
+            K::Slice(inner) => format!("List<{}>", render_type(inner)),
+            // Exotic shapes degrade to an opaque head — same class as
+            // the archive's `__opaque_type_N` strings.
+            _ => "__opaque_src".to_string(),
+        }
+    }
+
+    fn visit_dir(
+        root: &Path,
+        dir: &Path,
+        metadata: &mut verum_types::core_metadata::CoreMetadata,
+        injected: &mut usize,
+    ) {
+        use verum_ast::ItemKind;
+        use verum_common::{List, Maybe, Text};
+        use verum_types::core_metadata::{FunctionDescriptor, GenericParam, ParamDescriptor};
+
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
+            if path.is_dir() {
+                visit_dir(root, &path, metadata, injected);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("vr") {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            // Quick filter: no public fn, nothing to do.
+            if !content.contains("public fn ") {
+                continue;
+            }
+            let mut parser = verum_fast_parser::Parser::new(&content);
+            let module = match parser.parse_module() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let rel_path = match path.strip_prefix(root) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+            let source_module = crate::stdlib_index::file_path_to_module_path(&rel_str);
+
+            for item in &module.items {
+                let ItemKind::Function(fd) = &item.kind else {
+                    continue;
+                };
+                if !matches!(fd.visibility, verum_ast::decl::Visibility::Public) {
+                    continue;
+                }
+                let simple = fd.name.name.as_str();
+                let qualified: Text = format!("{}.{}", source_module, simple).into();
+                if metadata.functions.contains_key(&qualified) {
+                    continue;
+                }
+                let params: List<ParamDescriptor> = fd
+                    .params
+                    .iter()
+                    .filter_map(|p| match &p.kind {
+                        verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } => {
+                            let pname = match &pattern.kind {
+                                verum_ast::pattern::PatternKind::Ident { name, .. } => {
+                                    name.name.as_str().to_string()
+                                }
+                                _ => "_".to_string(),
+                            };
+                            Some(ParamDescriptor {
+                                name: Text::from(pname.as_str()),
+                                ty: Text::from(render_type(ty).as_str()),
+                            })
+                        }
+                        // Free functions have no self; skip any
+                        // receiver-shaped params defensively.
+                        _ => None,
+                    })
+                    .collect();
+                let return_type: Text = match &fd.return_type {
+                    Maybe::Some(t) => Text::from(render_type(t).as_str()),
+                    Maybe::None => Text::from("Unit"),
+                };
+                let generic_params: List<GenericParam> = fd
+                    .generics
+                    .iter()
+                    .filter_map(|g| {
+                        let name = match &g.kind {
+                            verum_ast::ty::GenericParamKind::Type { name, .. } => {
+                                name.name.as_str().to_string()
+                            }
+                            verum_ast::ty::GenericParamKind::HigherKinded { name, .. } => {
+                                name.name.as_str().to_string()
+                            }
+                            _ => return None,
+                        };
+                        Some(GenericParam {
+                            name: Text::from(name.as_str()),
+                            bounds: List::new(),
+                            default: Maybe::None,
+                            type_bounds: List::new(),
+                        })
+                    })
+                    .collect();
+                let descriptor = FunctionDescriptor {
+                    name: Text::from(simple),
+                    module_path: Text::from(source_module.as_str()),
+                    generic_params,
+                    params,
+                    return_type,
+                    contexts: List::new(),
+                    is_async: fd.is_async,
+                    is_unsafe: fd.is_unsafe,
+                    intrinsic_id: Maybe::None,
+                    parent_type: Maybe::None,
+                    impl_generic_names: List::new(),
+                    is_const: false,
+                    decl_span: Maybe::None,
+                };
+                metadata.functions.insert(qualified, descriptor);
+                *injected += 1;
+            }
+        }
+    }
+
+    let mut injected: usize = 0;
+    visit_dir(root, root, metadata, &mut injected);
+    if verbose {
+        eprintln!(
+            "verum stdlib precompile: injected {} file-module-qualified free-fn keys",
+            injected
+        );
     }
 }
 
