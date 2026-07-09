@@ -6113,7 +6113,7 @@ impl TypeChecker {
     /// e.g. `pure` leaf functions), the caller recurses into this source
     /// module against the live `ModuleRegistry`, whose AST carries the real
     /// declaration — the same path a direct `mount <source>.{item}` takes.
-    fn reexport_source_module_for(&self, module_path: &str, item_name: &str) -> Option<Text> {
+    pub(super) fn reexport_source_module_for(&self, module_path: &str, item_name: &str) -> Option<Text> {
         let metadata = match &self.core_metadata {
             Maybe::Some(m) => m,
             Maybe::None => return None,
@@ -11342,6 +11342,158 @@ impl TypeChecker {
             }
         }
         None
+    }
+
+    /// MOUNT-TYPE-AUTHORITY-1 — authoritative bare type-NAME
+    /// resolution for explicitly mounted names.
+    ///
+    /// `&mut` companion to [`Self::lookup_type_mount_scoped`]: the
+    /// read-only ctx/registry probe first, then the mount-scoped
+    /// METADATA lazy load
+    /// ([`Self::ensure_mounted_type_loaded_qualified`]) for stdlib
+    /// types that are mounted but not yet registered anywhere in
+    /// ctx.  Returns `None` (caller falls back to the flat
+    /// simple-name path) when:
+    /// * the name is not explicitly mounted,
+    /// * the mount is ambiguous (multiple sources — the caller's
+    ///   ambiguity check surfaces `AmbiguousName` first),
+    /// * an import walk is in flight (`imports_in_progress` /
+    ///   `glob_imports_in_progress` non-empty): mid-import the
+    ///   checker resolves OTHER modules' signatures, and the USER
+    ///   file's mount set must not leak into a stranger module's
+    ///   own-name resolution,
+    /// * no descriptor exists under the qualified metadata key.
+    pub(crate) fn resolve_type_name_mount_scoped(
+        &mut self,
+        name: &str,
+    ) -> Option<Type> {
+        if !self.imports_in_progress.is_empty()
+            || !self.glob_imports_in_progress.is_empty()
+        {
+            return None;
+        }
+        let name_text = verum_common::Text::from(name);
+        let sources = self.imported_names.get(&name_text)?;
+        if sources.len() != 1 {
+            return None;
+        }
+        let source = sources.iter().next()?.clone();
+        let trace_guard = std::env::var("VERUM_TRACE_MOUNT_AUTH")
+            .is_ok_and(|v| v == "1" || v == name);
+        // Lexical-scope guard: an in-scope generic type parameter
+        // (registered as `Type::Var` during fn/impl/protocol
+        // checking) or a registration-time self-referential
+        // `Named(name)` placeholder in the flat slot must win over a
+        // same-named mount — innermost binding first.  The self-ref
+        // Named case is also the deliberate alias/record indirection
+        // shape, for which the mount-scoped result would be the
+        // IDENTICAL `Named(name)` anyway, so skipping loses nothing.
+        if let Some(existing) = self.ctx.lookup_type(name) {
+            match existing {
+                Type::Var(_) => {
+                    if trace_guard {
+                        eprintln!(
+                            "[mount-auth] '{}': lexical guard (Var) — deferring to flat",
+                            name
+                        );
+                    }
+                    return None;
+                }
+                Type::Named { path, args }
+                    if args.is_empty()
+                        && path.segments.len() == 1
+                        && path
+                            .as_ident()
+                            .is_some_and(|id| id.name.as_str() == name) =>
+                {
+                    if trace_guard {
+                        eprintln!(
+                            "[mount-auth] '{}': lexical guard (self-ref Named) — deferring to flat",
+                            name
+                        );
+                    }
+                    return None;
+                }
+                _ => {}
+            }
+        }
+        // An OPAQUE QUALIFIED self-referential Named (e.g. the
+        // qualified-key placeholder `Named(core.base.Ordering)` —
+        // whether spelled as a multi-segment path OR as a single
+        // Ident with embedded dots) is unusable as a resolution
+        // result: no alias chain expands a dotted head, so an
+        // annotation typed with it mismatches every value.  Treat
+        // it as a soft miss: prefer the metadata-descriptor load,
+        // fall back to it only when metadata has nothing.
+        let trace = std::env::var("VERUM_TRACE_MOUNT_AUTH")
+            .is_ok_and(|v| v == "1" || v == name);
+        let mut scoped_fallback: Option<Type> = None;
+        if let Some(ty) = self.lookup_type_mount_scoped(name, "") {
+            if !Self::is_opaque_qualified_self_ref(&ty, name) {
+                if trace {
+                    eprintln!(
+                        "[mount-auth] '{}': lookup_type_mount_scoped -> {:?}",
+                        name, ty
+                    );
+                }
+                return Some(ty);
+            }
+            if trace {
+                eprintln!(
+                    "[mount-auth] '{}': scoped hit OPAQUE (soft miss): {:?}",
+                    name, ty
+                );
+            }
+            scoped_fallback = Some(ty);
+        }
+        let source_str = source.as_str();
+        let canonical = source_str
+            .strip_prefix("cog.")
+            .unwrap_or(source_str)
+            .to_string();
+        if canonical.is_empty() || canonical == "cog" {
+            return scoped_fallback;
+        }
+        let loaded =
+            self.ensure_mounted_type_loaded_qualified(name, canonical.as_str());
+        if trace {
+            eprintln!(
+                "[mount-auth] '{}': metadata loader (canonical='{}') -> {:?} (fallback: {:?})",
+                name, canonical, loaded, scoped_fallback
+            );
+        }
+        loaded.or(scoped_fallback)
+    }
+
+    /// MOUNT-TYPE-AUTHORITY-1 helper — true when `ty` is an opaque
+    /// QUALIFIED self-referential `Named` marker for `name`: an
+    /// argument-less Named whose dotted display ends in `.<name>`
+    /// but is not exactly `<name>`.  Covers BOTH marker spellings —
+    /// a multi-segment path (`core` `.` `base` `.` `Ordering`) and a
+    /// single Ident carrying the dots (`"core.base.Ordering"`).  A
+    /// plain self-referential `Named(<name>)` (the deliberate
+    /// alias/record indirection value) is NOT opaque.
+    pub(crate) fn is_opaque_qualified_self_ref(ty: &Type, name: &str) -> bool {
+        if let Type::Named { path, args } = ty
+            && args.is_empty()
+        {
+            let joined = path
+                .segments
+                .iter()
+                .filter_map(|s| match s {
+                    verum_ast::ty::PathSegment::Name(id) => {
+                        Some(id.name.as_str())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(".");
+            if joined == name {
+                return false;
+            }
+            return joined.ends_with(&format!(".{}", name));
+        }
+        false
     }
 
     /// Lookup a record type from a path.

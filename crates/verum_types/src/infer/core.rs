@@ -1038,6 +1038,244 @@ impl TypeChecker {
         }
     }
 
+    /// MOUNT-TYPE-AUTHORITY-1 — mount-scoped lazy type load.
+    ///
+    /// Load the stdlib type that the file's `mount <module>.{Name}`
+    /// actually names, via the OWNING-MODULE-QUALIFIED metadata key
+    /// (`<module>.<Name>` — always emitted by
+    /// `archive_metadata::register_module_metadata` alongside the
+    /// collision-prone simple slot), and register it under that
+    /// qualified ctx key.
+    ///
+    /// This is the TYPE-layer companion of
+    /// `resolve_function_via_metadata_reexports` (the D1 free-fn
+    /// fix): the archive-driven stdlib loader builds every module's
+    /// `ModuleInfo` around a synthetic EMPTY AST, so the AST-walking
+    /// type importer inside `import_type_export` finds no
+    /// declaration to register — a mounted type's only durable home
+    /// is `core_metadata.types`.  When TWO stdlib modules declare
+    /// the same simple type name, `metadata.types[<simple>]` holds
+    /// only one of them (deterministic collision policy at the
+    /// bake), so the lazy `ensure_stdlib_type_loaded` can hand a
+    /// mounted file the OTHER module's type.  Resolving through the
+    /// qualified key is collision-immune.
+    ///
+    /// Follows one `module_reexports` hop so umbrella mounts
+    /// (`mount core.x.{Name}` where `core/x/mod.vr` re-exports
+    /// `Name` from `core.x.leaf`) resolve to the defining module's
+    /// key — same discipline as `reexport_source_module_for`.
+    ///
+    /// Registers ONLY qualified ctx slots — the flat simple-name
+    /// table is left untouched, so unmounted files (and every other
+    /// simple-name consumer) keep today's behavior.  Idempotent:
+    /// re-probes `ctx.lookup_type(<qualified>)` first.
+    ///
+    /// Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`: the
+    /// mapping comes from `imported_names` (caller) + metadata keys,
+    /// never from type-name knowledge.
+    pub(crate) fn ensure_mounted_type_loaded_qualified(
+        &mut self,
+        name: &str,
+        canonical_module: &str,
+    ) -> Option<Type> {
+        let metadata = match &self.core_metadata {
+            Maybe::Some(m) => m.clone(),
+            Maybe::None => return None,
+        };
+        let direct_key: Text =
+            format!("{}.{}", canonical_module, name).into();
+        // A ctx hit is only a usable RESOLUTION result when it is
+        // not an opaque QUALIFIED self-referential Named placeholder
+        // (published under qualified keys as either a multi-segment
+        // path or a single dotted Ident; no alias chain expands a
+        // dotted head, so annotations typed with one mismatch every
+        // value).  Skip those and continue to the metadata
+        // descriptor.
+        let usable = |ty: &Type, name: &str| -> bool {
+            !Self::is_opaque_qualified_self_ref(ty, name)
+        };
+        if let Some(ty) = self.ctx.lookup_type(direct_key.as_str())
+            && usable(ty, name)
+        {
+            return Some(ty.clone());
+        }
+
+        // Candidate module prefixes, most-specific first.
+        //
+        // The mount path names the LEAF `.vr` module
+        // (`core.meta.diakrisis_attrs`) while the archive's
+        // `module.types` tables — hence the qualified keys in
+        // `metadata.types` — are keyed by the enclosing ARCHIVE
+        // module (directory-granular: the alias above lives under
+        // `core.meta.EffectKind`).  Walking the ancestor prefixes
+        // bridges the two key spaces without any name knowledge.
+        // Each prefix is probed as-is and with the first segment
+        // stripped — the embedded-stdlib key spaces are
+        // inconsistent about the leading `core.` segment (see
+        // `resolve_function_via_metadata_reexports`).
+        //
+        // A re-export hop target (umbrella `mount core.x.{Name}`
+        // where `core/x/mod.vr` re-exports from `core.x.leaf`) is
+        // appended and expanded the same way.
+        let mut prefixes: Vec<String> = Vec::new();
+        let push_with_ancestors = |root: &str, out: &mut Vec<String>| {
+            let mut cur = root.to_string();
+            loop {
+                if !cur.is_empty() && !out.iter().any(|p| p == &cur) {
+                    out.push(cur.clone());
+                    if let Some(stripped) = cur.split_once('.').map(|(_, rest)| rest)
+                        && !stripped.is_empty()
+                        && !out.iter().any(|p| p == stripped)
+                    {
+                        out.push(stripped.to_string());
+                    }
+                }
+                match cur.rfind('.') {
+                    Some(pos) => cur.truncate(pos),
+                    None => break,
+                }
+            }
+        };
+        push_with_ancestors(canonical_module, &mut prefixes);
+        if let Some(source_module) =
+            self.reexport_source_module_for(canonical_module, name)
+        {
+            push_with_ancestors(source_module.as_str(), &mut prefixes);
+        }
+
+        let mut owning_key = direct_key.clone();
+        let mut desc = None;
+        for prefix in &prefixes {
+            let key: Text = format!("{}.{}", prefix, name).into();
+            if let Some(ty) = self.ctx.lookup_type(key.as_str())
+                && usable(ty, name)
+            {
+                return Some(ty.clone());
+            }
+            if let Some(d) = metadata.types.get(&key) {
+                desc = Some(d.clone());
+                owning_key = key;
+                break;
+            }
+        }
+        let desc = desc?;
+
+        // Run the standard SIMPLE-name lazy load first (bounded
+        // transitive drain, mirror of `resolve_type_name` step 1.5).
+        // This preserves every bare-keyed auxiliary registration the
+        // flat path would have produced — `__struct_fields_<name>`,
+        // variant-constructor signatures, inherent methods, protocol
+        // impls, transitive dependency types.  Idempotent.  In the
+        // non-colliding case (metadata's simple slot holds this same
+        // descriptor) the qualified `define_type` below is the only
+        // net addition; in the colliding case the bare slots behave
+        // exactly as today while the RESOLUTION (our return value +
+        // the qualified keys) is mount-accurate.
+        let name_text = Text::from(name);
+        let mut pending: Vec<Text> = Vec::new();
+        self.ensure_stdlib_type_loaded(&name_text, &mut pending);
+        let mut bound = 256usize;
+        while let Some(next) = pending.pop() {
+            bound = bound.saturating_sub(1);
+            if bound == 0 {
+                break;
+            }
+            self.ensure_stdlib_type_loaded(&next, &mut pending);
+        }
+
+        // Non-colliding fast path: when the metadata SIMPLE slot
+        // holds THIS SAME descriptor (module_path + name + kind
+        // match), the flat path already resolves the mounted name
+        // correctly — return the bare ctx registration VERBATIM and
+        // register NO qualified keys.  Every §Y consumer's hit/miss
+        // pattern then stays byte-identical to pre-fix behavior for
+        // unique names.  (Registering qualified ctx keys for a
+        // unique GENERIC record flipped `lookup_record_type`'s
+        // mount-scoped probe from miss to hit with a value shape its
+        // record-literal consumer can't use — meta/contexts
+        // `ParseResult<Int>` E103.)  The qualified machinery below
+        // engages for genuine collisions only.
+        if let Some(simple_desc) = metadata.types.get(&name_text)
+            && simple_desc.module_path == desc.module_path
+            && simple_desc.name == desc.name
+            && std::mem::discriminant(&simple_desc.kind)
+                == std::mem::discriminant(&desc.kind)
+        {
+            if let Some(existing) = self.ctx.lookup_type(name) {
+                return Some(existing.clone());
+            }
+            return Some(self.type_descriptor_to_type(&desc));
+        }
+
+        let ty = self.type_descriptor_to_type(&desc);
+        self.ctx.define_type(owning_key.clone(), ty.clone());
+        if owning_key != direct_key {
+            // Publish under the mount-path key too so subsequent
+            // probes (this fn + `lookup_type_mount_scoped`'s direct
+            // qualified probe) fast-path.
+            self.ctx.define_type(direct_key.clone(), ty.clone());
+        }
+
+        // Qualified record-fields key for the mount-scoped record
+        // consumers: `lookup_record_type` probes
+        // `<module>.__struct_fields_<name>` (via
+        // `lookup_type_mount_scoped(name, "__struct_fields_")`)
+        // before the bare slot, so a COLLIDING mounted record's
+        // field map must exist under the qualified key — the bare
+        // `__struct_fields_<name>` written by the simple-slot load
+        // above may describe the other module's same-named record.
+        if !desc.is_transparent_wrapper
+            && let crate::core_metadata::TypeDescriptorKind::Record { fields } = &desc.kind
+            && !fields.is_empty()
+        {
+            let mut field_map: indexmap::IndexMap<Text, Type> =
+                indexmap::IndexMap::new();
+            for f in fields.iter() {
+                let field_ty = if f.ty.is_empty() {
+                    Type::Var(crate::ty::TypeVar::fresh())
+                } else {
+                    crate::infer::helpers::parse_descriptor_type_string(f.ty.as_str())
+                };
+                field_map.insert(f.name.clone(), field_ty);
+            }
+            let owning_prefix = owning_key
+                .as_str()
+                .strip_suffix(name)
+                .unwrap_or("")
+                .to_string();
+            if !owning_prefix.is_empty() {
+                let fields_key: Text = format!(
+                    "{}__struct_fields_{}",
+                    owning_prefix, name
+                )
+                .into();
+                if self.ctx.lookup_type(fields_key.as_str()).is_none() {
+                    self.ctx
+                        .define_type(fields_key, Type::Record(field_map.clone()));
+                }
+            }
+            if owning_key != direct_key {
+                let direct_prefix = direct_key
+                    .as_str()
+                    .strip_suffix(name)
+                    .unwrap_or("")
+                    .to_string();
+                if !direct_prefix.is_empty() {
+                    let fields_key: Text = format!(
+                        "{}__struct_fields_{}",
+                        direct_prefix, name
+                    )
+                    .into();
+                    if self.ctx.lookup_type(fields_key.as_str()).is_none() {
+                        self.ctx
+                            .define_type(fields_key, Type::Record(field_map));
+                    }
+                }
+            }
+        }
+        Some(ty)
+    }
+
     /// Register the body of a single stdlib protocol from
     /// `metadata.protocols[name]` into `protocol_checker`.  Idempotent
     /// (no-op if `protocol_checker.get_protocol(name)` already returns
@@ -2473,6 +2711,19 @@ impl TypeChecker {
         }
 
         for (name, desc) in metadata.types.iter() {
+            // MOUNT-TYPE-AUTHORITY-1: the archive→metadata convert
+            // publishes a QUALIFIED `<module>.<Name>` mirror key for
+            // every type (collision-immune slot for mount-scoped
+            // resolution).  Those mirrors are not distinct types —
+            // sweeping them into the orphan tail would re-register
+            // constructors / consts / static methods under dotted
+            // parent names.  Skip them here; qualified entries that
+            // a producer DELIBERATELY put into
+            // `type_declaration_order` (core_loader) still flow
+            // through the ordered loop above.
+            if name.as_str().contains('.') {
+                continue;
+            }
             if !seen.contains(name) {
                 seen.insert(name);
                 out.push((name, desc));

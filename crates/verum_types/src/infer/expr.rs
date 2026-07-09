@@ -7324,6 +7324,71 @@ impl TypeChecker {
                 return Ok(InferResult::new(ty));
             }
 
+            // Strategy 1.5 (MOUNT-TYPE-AUTHORITY-1): when the file
+            // explicitly MOUNTS `type_name`, the mounted module's
+            // type is authoritative for `Type.Variant` ctor syntax
+            // too — mirror of the annotation-side step 0.5 in
+            // `resolve_type_name`.  Without this, a value-position
+            // `EffectKind.Pure` written via a mounted alias name
+            // resolved through the flat last-write-wins slot below
+            // and found the OTHER module's same-named enum.  Falls
+            // through to the flat strategies when the mounted type
+            // isn't a variant carrying this constructor.
+            if let Some(mounted_ty) = self.resolve_type_name_mount_scoped(type_name) {
+                let resolved = match &mounted_ty {
+                    // Alias descriptors resolve to a Named forward —
+                    // chase one level so `EffectKind` (alias of
+                    // `DiakrisisEffectKind`) exposes its variants.
+                    // The target may not be ctx-registered yet (the
+                    // mount-scoped loader only ensures the mounted
+                    // name's own closure) — lazy-load it through the
+                    // standard simple-slot path before probing.
+                    Type::Named { path, args } if args.is_empty() => {
+                        if let Some(target) = path.as_ident() {
+                            let target_name: verum_common::Text =
+                                target.name.clone();
+                            if self.ctx.lookup_type(target_name.as_str()).is_none() {
+                                let mut pending: Vec<verum_common::Text> = Vec::new();
+                                self.ensure_stdlib_type_loaded(&target_name, &mut pending);
+                                let mut bound = 64usize;
+                                while let Some(next) = pending.pop() {
+                                    bound = bound.saturating_sub(1);
+                                    if bound == 0 {
+                                        break;
+                                    }
+                                    self.ensure_stdlib_type_loaded(&next, &mut pending);
+                                }
+                            }
+                            self.ctx
+                                .lookup_type(target_name.as_str())
+                                .cloned()
+                                .unwrap_or(mounted_ty.clone())
+                        } else {
+                            mounted_ty.clone()
+                        }
+                    }
+                    _ => mounted_ty.clone(),
+                };
+                if let Type::Variant(variants) = &resolved
+                    && let Some(payload_ty) = variants.get(field_name)
+                {
+                    if matches!(payload_ty, Type::Unit) {
+                        return Ok(InferResult::new(resolved.clone()));
+                    } else {
+                        let params = match payload_ty {
+                            Type::Tuple(tuple_types) => tuple_types.clone(),
+                            _ => {
+                                let mut p = List::new();
+                                p.push(payload_ty.clone());
+                                p
+                            }
+                        };
+                        let constructor_ty = Type::function(params, resolved.clone());
+                        return Ok(InferResult::new(constructor_ty));
+                    }
+                }
+            }
+
             // Strategy 2: Look up type name and check if it's a Variant
             // This handles cross-file imported variant types like RegistryError
             if let Maybe::Some(ty) = self.ctx.lookup_type(type_name)

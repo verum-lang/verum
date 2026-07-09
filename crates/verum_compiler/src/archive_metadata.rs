@@ -126,10 +126,23 @@ fn register_module_metadata(
             None => continue,
         };
 
-        if meta.types.contains_key(&type_name) {
-            collect_type_impls(ty, module, &mut meta.implementations, &type_id_to_name);
-            continue;
-        }
+        // MOUNT-TYPE-AUTHORITY-1: a colliding simple name must NOT
+        // skip descriptor construction.  The historic early-continue
+        // here (`if meta.types.contains_key(&type_name) { … continue; }`)
+        // made the collision policy at the insert below unreachable
+        // for every cross-module same-name pair (only the first
+        // sorted-walk registrant ever built a descriptor), and —
+        // worse — dropped the collision loser's QUALIFIED
+        // `<module>.<Name>` key entirely, so mount-scoped consumers
+        // had NO collision-immune slot to resolve through.  Live
+        // regression: `core.action.effects` `EffectKind` (variant,
+        // sorts first) vs `core.meta.diakrisis_attrs` `EffectKind`
+        // (alias, sorts second) — the alias vanished from metadata
+        // and every file that explicitly mounted it type-checked
+        // against the action enum.  Fall through instead: both the
+        // qualified key and the simple slot apply the RANKED
+        // collision policy documented at the insert below.
+        let simple_slot_was_occupied = meta.types.contains_key(&type_name);
 
         let kind = match ty.kind {
             TypeKind::Record => {
@@ -501,32 +514,68 @@ fn register_module_metadata(
             // failed with `cannot index type 'FileDesc'`.
             is_transparent_wrapper: ty.is_transparent_wrapper,
         };
-        // Collision policy for the SIMPLE name slot (deterministic,
-        // documented): an ALIAS descriptor wins over a non-alias —
-        // an alias is a deliberate name-forward while a same-named
-        // record merely collides; the only exercised consumer (the
-        // checker's lazy alias hop) needs the alias. Ties keep the
-        // first (sorted-walk) occupant. The QUALIFIED key
-        // `<module>.<Name>` is always inserted so no descriptor is
-        // ever lost (future consumers resolve qualified — the full
-        // #17-ph2 shape).
-        let qualified_key: Text =
-            format!("{}.{}", module_name, type_name).into();
-        meta.types.insert(qualified_key, descriptor.clone());
-        let incoming_is_alias =
-            matches!(descriptor.kind, TypeDescriptorKind::Alias { .. });
-        let insert_simple = match meta.types.get(&type_name) {
-            None => true,
-            Some(existing) => {
-                let existing_is_alias =
-                    matches!(existing.kind, TypeDescriptorKind::Alias { .. });
-                incoming_is_alias && !existing_is_alias
+        // Collision policy (deterministic, documented):
+        //
+        // * SIMPLE slot — strict FIRST-WINS in sorted-walk order,
+        //   byte-identical to the pre-MOUNT-TYPE-AUTHORITY-1
+        //   behavior (the early-continue skipped every repeat, so
+        //   the first registrant always owned the slot).  The simple
+        //   slot is the global last-resort surface for UNMOUNTED
+        //   files; scores of suites pin its historic owners, so its
+        //   occupancy must not change.  Files that MOUNT a collision
+        //   loser resolve through the qualified keys instead — that
+        //   is the fix.
+        //
+        // * QUALIFIED `<module>.<Name>` key — RANKED, order-
+        //   independent within the module walk:
+        //     2  forward alias  (`type Span is MetaSpan;` — target's
+        //        base name differs from the alias's own name; a
+        //        deliberate name-forward)
+        //     1  structural     (record / variant / protocol / …)
+        //     0  self-forward alias (`Ordering` →
+        //        `core.base.Ordering` — re-export plumbing emitted
+        //        alongside the real declaration in the SAME archive
+        //        module; its target renders as a DOTTED name the
+        //        checker cannot chase, so it must never own the
+        //        qualified slot when the module also carries the
+        //        structural descriptor)
+        //   A slot is replaced only by a STRICTLY higher-ranked
+        //   incoming descriptor; ties keep the first occupant.
+        let rank = |kind: &TypeDescriptorKind, name: &Text| -> u8 {
+            match kind {
+                TypeDescriptorKind::Alias { target } => {
+                    let base = target
+                        .as_str()
+                        .split('<')
+                        .next()
+                        .unwrap_or("");
+                    let last_seg =
+                        base.rsplit('.').next().unwrap_or(base).trim();
+                    if last_seg == name.as_str() { 0 } else { 2 }
+                }
+                _ => 1,
             }
         };
-        if insert_simple {
+        let incoming_rank = rank(&descriptor.kind, &type_name);
+        let qualified_key: Text =
+            format!("{}.{}", module_name, type_name).into();
+        let insert_qualified = match meta.types.get(&qualified_key) {
+            None => true,
+            Some(existing) => incoming_rank > rank(&existing.kind, &type_name),
+        };
+        if insert_qualified {
+            meta.types.insert(qualified_key, descriptor.clone());
+        }
+        if !simple_slot_was_occupied {
             meta.types.insert(type_name.clone(), descriptor);
         }
-        meta.type_declaration_order.push(type_name);
+        // Declaration-order list records each SIMPLE name once —
+        // collision repeats (which now fall through to here for
+        // their qualified insert) must not duplicate the entry the
+        // first registrant already pushed.
+        if !simple_slot_was_occupied {
+            meta.type_declaration_order.push(type_name);
+        }
 
         collect_type_impls(ty, module, &mut meta.implementations, &type_id_to_name);
     }
@@ -1253,5 +1302,86 @@ mod tests {
         assert_eq!(meta.types.len(), decoded.types.len());
         assert_eq!(meta.functions.len(), decoded.functions.len());
         assert_eq!(meta.protocols.len(), decoded.protocols.len());
+    }
+
+    /// MOUNT-TYPE-AUTHORITY-1 regression contract, name-agnostic:
+    ///
+    /// 1. **No descriptor is ever lost** — every named type in every
+    ///    archive module's type table has its qualified
+    ///    `<module>.<Name>` key in `meta.types`.  The historic
+    ///    early-continue on a taken simple slot dropped the
+    ///    collision loser's qualified key entirely, so a file that
+    ///    explicitly mounted the losing type had no
+    ///    collision-immune slot to resolve through.
+    /// 2. **Qualified slot never trades structure for a
+    ///    self-forward alias** — when an archive module's type table
+    ///    carries BOTH a structural descriptor and a self-forward
+    ///    re-export alias for the same name (declaration + re-export
+    ///    plumbing in one directory-granular module), the qualified
+    ///    slot must hold the structural one.  A self-forward alias's
+    ///    target renders as a DOTTED name the checker cannot chase —
+    ///    letting it own `core.base.Ordering` broke every mounted
+    ///    `Ordering` annotation.
+    ///
+    /// The SIMPLE slot is deliberately NOT asserted here: it is
+    /// strict first-wins (sorted-walk order), byte-identical to the
+    /// pre-fix behavior, and pinned by the existing suite corpus.
+    #[test]
+    fn collision_keeps_qualified_keys_and_structural_qualified_slot() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        let meta = archive_to_core_metadata(archive);
+
+        let mut checked = 0usize;
+        let mut has_structural: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for entry in archive.index.iter() {
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for ty in &module.types {
+                let Some(type_name) = module.strings.get(ty.name) else {
+                    continue;
+                };
+                let qualified = format!("{}.{}", entry.name, type_name);
+                assert!(
+                    meta.types.contains_key(&Text::from(qualified.as_str())),
+                    "qualified key '{}' missing from metadata.types — a \
+                     collision dropped a descriptor",
+                    qualified
+                );
+                if !matches!(ty.kind, TypeKind::Alias) {
+                    has_structural.insert(qualified.clone());
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked > 100, "expected >100 archive types, got {checked}");
+
+        for (key, desc) in meta.types.iter() {
+            let Some((_, simple)) = key.as_str().rsplit_once('.') else {
+                continue;
+            };
+            if simple.is_empty() || !has_structural.contains(key.as_str()) {
+                continue;
+            }
+            if let TypeDescriptorKind::Alias { target } = &desc.kind {
+                let base = target.as_str().split('<').next().unwrap_or("");
+                let last_seg = base.rsplit('.').next().unwrap_or(base).trim();
+                assert!(
+                    last_seg != simple,
+                    "qualified slot '{}' holds a SELF-FORWARD alias \
+                     ('{}' -> '{}') while the module also declares the \
+                     structural type — the ranked qualified policy \
+                     regressed",
+                    key,
+                    simple,
+                    target,
+                );
+            }
+        }
     }
 }

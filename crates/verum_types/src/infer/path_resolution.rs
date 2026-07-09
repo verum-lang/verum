@@ -74,8 +74,41 @@ impl TypeChecker {
                 return Ok(ty.clone());
             }
         }
+
+        // Step 0.5: MOUNT-TYPE-AUTHORITY-1 — a file's explicitly
+        // MOUNTED type names are authoritative for that file's
+        // bare-name resolution (mirror of the VBC codegen context's
+        // `explicit_mount_names` discipline on the function side, at
+        // the type layer).  When the file wrote
+        // `mount <module>.{Name}`, `Name` in ITS signatures and
+        // annotations means `<module>.Name` — never whichever
+        // same-named type from an unrelated module happens to own
+        // the flat `type_defs` slot (Step 1) or the last-wins simple
+        // slot in `core_metadata.types` (Step 1.5's lazy load).
+        // Unmounted names skip this in one map probe; declaring
+        // modules still win via Step 0 above.
+        if let Some(ty) = self.resolve_type_name_mount_scoped(name) {
+            if std::env::var("VERUM_TRACE_MOUNT_AUTH")
+                .is_ok_and(|v| v == "1" || v == name)
+            {
+                eprintln!(
+                    "[mount-auth] resolve_type_name('{}') step 0.5 -> {:?}",
+                    name, ty
+                );
+            }
+            return Ok(ty);
+        }
+
         // Step 1: Try current module first (fast path)
         if let Maybe::Some(ty) = self.ctx.lookup_type(name) {
+            if std::env::var("VERUM_TRACE_MOUNT_AUTH")
+                .is_ok_and(|v| v == "1" || v == name)
+            {
+                eprintln!(
+                    "[mount-auth] resolve_type_name('{}') step 1 flat -> {:?}",
+                    name, ty
+                );
+            }
             return Ok(ty.clone());
         }
 
