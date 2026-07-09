@@ -9687,18 +9687,69 @@ pub(super) fn dispatch_array_method(
             for i in 0..len {
                 elems.push(get_array_element(ptr, header, i)?);
             }
-            elems.sort_by(|a, b| {
-                // Try integer comparison first, then float, then bitwise
-                if a.is_int() && !a.is_bool() && b.is_int() && !b.is_bool() {
-                    a.as_i64().cmp(&b.as_i64())
-                } else if a.is_float() && b.is_float() {
-                    a.as_f64()
-                        .partial_cmp(&b.as_f64())
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                } else {
-                    a.to_bits().cmp(&b.to_bits())
+            // ORD-DISPATCH (2026-07-09): heap-record elements used to
+            // fall into the `to_bits()` arm below — a raw NaN-box
+            // (pointer) comparison, so a `List<Duration>` never sorted
+            // by value. Resolve the element type's user `cmp` (Ord
+            // impl) once and insertion-sort through it (the same
+            // sync-call discipline as `sort_by`; Vec::sort_by cannot
+            // re-enter the interpreter). Primitive elements keep the
+            // native fast path.
+            let record_cmp_fn: Option<FunctionId> = elems.first().and_then(|v| {
+                if !v.is_regular_ptr() || v.is_nil() {
+                    return None;
                 }
+                let p0 = v.as_ptr::<u8>();
+                let h0 = unsafe { heap::ObjectHeader::ref_or_stub(p0) };
+                let tname = state
+                    .module
+                    .types
+                    .iter()
+                    .find(|td| td.id.0 == h0.type_id.0)
+                    .and_then(|td| state.module.get_string(td.name))
+                    .map(|s| s.to_string())?;
+                state
+                    .module
+                    .find_function_by_name(&format!("{}.cmp", tname))
             });
+            if let Some(cmp_fid) = record_cmp_fn {
+                let greater_tag = verum_common::well_known_types::ordering_tag_for_std(
+                    std::cmp::Ordering::Greater,
+                );
+                for i in 1..elems.len() {
+                    let key = elems[i];
+                    let mut j = i;
+                    while j > 0 {
+                        let ord_val =
+                            call_function_sync(state, cmp_fid, &[elems[j - 1], key])?;
+                        let is_greater = ord_val.is_regular_ptr()
+                            && !ord_val.is_nil()
+                            && unsafe {
+                                heap::variant_tag(ord_val.as_ptr::<u8>()) == greater_tag
+                            };
+                        if is_greater {
+                            elems[j] = elems[j - 1];
+                            j -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    elems[j] = key;
+                }
+            } else {
+                elems.sort_by(|a, b| {
+                    // Try integer comparison first, then float, then bitwise
+                    if a.is_int() && !a.is_bool() && b.is_int() && !b.is_bool() {
+                        a.as_i64().cmp(&b.as_i64())
+                    } else if a.is_float() && b.is_float() {
+                        a.as_f64()
+                            .partial_cmp(&b.as_f64())
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    } else {
+                        a.to_bits().cmp(&b.to_bits())
+                    }
+                });
+            }
             // Write back
             if header.type_id == TypeId::LIST {
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
