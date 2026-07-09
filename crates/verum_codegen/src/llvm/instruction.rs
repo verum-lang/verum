@@ -2827,7 +2827,29 @@ pub fn lower_instruction<'ctx>(
             let vbc_mod = ctx
                 .vbc_module()
                 .or_internal("NewClosure requires VBC module")?;
-            let func_desc = vbc_mod.get_function(FunctionId(*func_id)).or_internal_else(|| format!(
+            // XMOD-BAND-RESOLVE (#38, NewClosure arm): mirror lower_call's
+            // recovery — a cross-module closure target re-homed into the XMOD
+            // id band [0x2000_0000, 0x4000_0000) is not a table index; recover
+            // the qualified name from external_function_names and resolve it.
+            // Pre-fix every such NewClosure errored out and SKIPPED lowering
+            // of the entire enclosing function ("Skipping function '…':
+            // NewClosure: function id 5368709xx not found" — the
+            // TcpStream.connect_* class).
+            let xmod_closure_fid = if *func_id
+                >= verum_vbc::module::XMOD_CALL_ID_BAND_BASE
+                && *func_id < 0x4000_0000
+            {
+                vbc_mod
+                    .external_function_names
+                    .iter()
+                    .find(|(fid, _)| fid.0 == *func_id)
+                    .and_then(|(_, sid)| vbc_mod.get_string(*sid))
+                    .and_then(|name| vbc_mod.find_function_by_name(name))
+            } else {
+                None
+            };
+            let effective_fn_id = xmod_closure_fid.map(|f| f.0).unwrap_or(*func_id);
+            let func_desc = vbc_mod.get_function(FunctionId(effective_fn_id)).or_internal_else(|| format!(
                     "NewClosure: function id {} not found",
                     func_id
                 ))?;
@@ -32214,6 +32236,13 @@ fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
     if ctx.is_chan_register(src.0) {
         ctx.mark_chan_register(dst.0);
     }
+    // #18: propagate the scalar-slot-ref marker through copies so
+    // deref_if_lone_ref still fires when the compare consumes a MOV'd
+    // copy of a local `&x` (Ref/RefMut spill) — without this, `x == r`
+    // compared the value against the slot ADDRESS.
+    if ctx.is_ref_param_register(src.0) {
+        ctx.mark_ref_param_register(dst.0);
+    }
     if ctx.is_range_register(src.0) {
         ctx.mark_range_register(dst.0);
     }
@@ -34283,6 +34312,11 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
                         .build_ptr_to_int(alloca, ctx.types().i64_type(), "ref_prim_ptr")
                         .or_llvm_err()?;
                     ctx.set_register(dst.0, ptr_as_i64.into());
+                    // #18: a locally-produced scalar ref holds the ADDRESS of a
+                    // stack slot — mark it so compare lowering (deref_if_lone_ref)
+                    // dereferences it, exactly as scalar-&-params are marked.
+                    // Without this, `x == r` compared 5 against the slot address.
+                    ctx.mark_ref_param_register(dst.0);
                 } else if let BasicValueEnum::PointerValue(pv) = val {
                     // PointerValue that's NOT a heap type — this is a generic
                     // type parameter compiled as `ptr` (value-as-pointer via
@@ -34306,6 +34340,11 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
                         .build_ptr_to_int(alloca, ctx.types().i64_type(), "ref_prim_ptr")
                         .or_llvm_err()?;
                     ctx.set_register(dst.0, ptr_as_i64.into());
+                    // #18: a locally-produced scalar ref holds the ADDRESS of a
+                    // stack slot — mark it so compare lowering (deref_if_lone_ref)
+                    // dereferences it, exactly as scalar-&-params are marked.
+                    // Without this, `x == r` compared 5 against the slot address.
+                    ctx.mark_ref_param_register(dst.0);
                 } else {
                     // Float/other — pass through as fallback.
                     ctx.set_register(dst.0, val);
@@ -34363,6 +34402,9 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
                 ctx.builder()
                     .build_store(alloca, iv)
                     .or_llvm_err()?;
+                // #18: scalar-slot ref — mark for compare-time deref
+                // (deref_if_lone_ref), mirroring scalar-&-param marking.
+                ctx.mark_ref_param_register(dst.0);
                 alloca
             } else if let BasicValueEnum::FloatValue(fv) = src_val {
                 let alloca = ctx
@@ -34372,6 +34414,7 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
                 ctx.builder()
                     .build_store(alloca, fv)
                     .or_llvm_err()?;
+                ctx.mark_ref_param_register(dst.0);
                 alloca
             } else {
                 as_ptr(ctx, src_val, "ptr")?
@@ -34485,6 +34528,9 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
                     .build_ptr_to_int(alloca_ptr, ctx.types().i64_type(), "refmut_alloca")
                     .or_llvm_err()?;
                 ctx.set_register(dst.0, slot_i64.into());
+                // #18: scalar-slot ref — mark for compare-time deref
+                // (deref_if_lone_ref), mirroring scalar-&-param marking.
+                ctx.mark_ref_param_register(dst.0);
             } else {
                 let ptr = as_ptr(ctx, ctx.get_register(src.0)?, "ptr")?;
                 ctx.set_register(dst.0, ptr.into());
@@ -34535,6 +34581,9 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
                 ctx.builder()
                     .build_store(alloca, iv)
                     .or_llvm_err()?;
+                // #18: scalar-slot ref — mark for compare-time deref
+                // (deref_if_lone_ref), mirroring scalar-&-param marking.
+                ctx.mark_ref_param_register(dst.0);
                 alloca
             } else if let BasicValueEnum::FloatValue(fv) = src_val {
                 let alloca = ctx
@@ -34544,6 +34593,7 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
                 ctx.builder()
                     .build_store(alloca, fv)
                     .or_llvm_err()?;
+                ctx.mark_ref_param_register(dst.0);
                 alloca
             } else {
                 as_ptr(ctx, src_val, "ptr")?

@@ -143,6 +143,14 @@ impl TypeChecker {
         };
         let ret = self.unifier.apply(&**return_type);
         let expanded = self.expand_generic_to_variant(&ret);
+        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+            eprintln!(
+                "[ctor-trace] ctor_parent_from_expected_fn_return: name={:?} ret={:?} expanded_is_variant={}",
+                name,
+                ret,
+                matches!(&expanded, Type::Variant(_)),
+            );
+        }
         let Type::Variant(variants) = &expanded else {
             return None;
         };
@@ -152,6 +160,45 @@ impl TypeChecker {
             Type::Generic { name: n, .. } => Some(n.clone()),
             _ => None,
         }
+    }
+
+    /// CTOR-AS-FN-SYNTH (#31): a bare PAYLOAD constructor used as a VALUE is a
+    /// first-class function `fn(payload...) -> Variant`. The synth path
+    /// (`infer_expr_path`) otherwise yields the ctor's nominal binding type
+    /// (`Named("Some")`), which mismatches wherever a function is expected —
+    /// the `m.and_then(Some)` / `let f: fn(Int) -> Maybe<Int> = Some` class
+    /// (the annotated-let and method-arg flows SYNTH the expr; check_expr's
+    /// bare-ctor coercion arm is never consulted). The called form `Some(x)`
+    /// never reaches `infer_expr_path` (the Call arm resolves the ctor
+    /// directly), and 0-arg ctors (`None`) keep their variant VALUE typing
+    /// (`params.is_empty()` → no override). Returns None when `name` is not a
+    /// registered payload constructor.
+    fn bare_payload_ctor_as_fn(&self, name: &str, resolved_ty: &Type) -> Option<Type> {
+        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+            eprintln!(
+                "[ctor-trace] bare_payload_ctor_as_fn: name={:?} resolved={:?} in_parents={}",
+                name,
+                resolved_ty,
+                self.variant_constructor_parents
+                    .contains_key(&Text::from(name)),
+            );
+        }
+        if matches!(resolved_ty, Type::Function { .. }) {
+            return None;
+        }
+        if !self
+            .variant_constructor_parents
+            .contains_key(&Text::from(name))
+        {
+            return None;
+        }
+        let ctor_ty = self.try_resolve_variant_constructor_with_arity(name, None)?;
+        if let Type::Function { ref params, .. } = ctor_ty
+            && !params.is_empty()
+        {
+            return Some(ctor_ty);
+        }
+        None
     }
 
     /// Inner implementation of check_expr.
@@ -500,6 +547,16 @@ impl TypeChecker {
             {
                 let constructor_name = ident.name.as_str();
                 let resolved_expected = self.unifier.apply(expected);
+                if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                    eprintln!(
+                        "[ctor-trace] bare-ctor CHECK arm: name={:?} expected={:?} in_parents={}",
+                        constructor_name,
+                        resolved_expected,
+                        self.variant_constructor_parents
+                            .get(&Text::from(constructor_name))
+                            .is_some(),
+                    );
+                }
                 // Glob / `mount core.prelude.*` imports register the variant
                 // TYPE but NOT the ctor->parent map that the first-declaration
                 // path populates — so `variant_constructor_parents` misses the
@@ -3441,12 +3498,19 @@ impl TypeChecker {
                 if name == "Greater" || name == "Less" || name == "Equal" {
                     // eprintln!("[DEBUG infer_path_expr] Looked up '{}' in env: scheme={:?}, ty={:?}, resolved={:?}", name, scheme, ty, resolved_ty);
                 }
+                // CTOR-AS-FN-SYNTH (#31): see bare_payload_ctor_as_fn.
+                if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty) {
+                    return Ok(ctor_fn);
+                }
                 Ok(resolved_ty)
             } else {
                 // Try module-level function lookup
                 if let Maybe::Some(scheme) = self.lookup_function_in_module(name) {
                     let ty = scheme.instantiate();
                     let resolved_ty = self.unifier.apply(&ty);
+                    if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty) {
+                        return Ok(ctor_fn);
+                    }
                     Ok(resolved_ty)
                 } else if {
                     // #128 — lookup-on-miss for stdlib types in
@@ -5720,6 +5784,9 @@ impl TypeChecker {
                     // When we have e.g. `wrapper: Wrapper<τ59>` and τ59 was unified with Text,
                     // we need to return `Wrapper<Text>` so field access works correctly.
                     let resolved_ty = self.unifier.apply(&ty);
+                    if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty) {
+                        return Ok(InferResult::new(ctor_fn));
+                    }
                     Ok(InferResult::new(resolved_ty))
                 }
                 None => {
@@ -5727,6 +5794,10 @@ impl TypeChecker {
                     if let Maybe::Some(scheme) = self.lookup_function_in_module(name) {
                         let ty = scheme.instantiate();
                         let resolved_ty = self.unifier.apply(&ty);
+                        if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty)
+                        {
+                            return Ok(InferResult::new(ctor_fn));
+                        }
                         Ok(InferResult::new(resolved_ty))
                     } else {
                         Err(TypeError::UnboundVariable {
