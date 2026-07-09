@@ -121,21 +121,29 @@ public type FormallySDefinable is protocol {
 /// proof body can drop the operational-corollary apply step.
 ///
 
-/// Proof in paper (now reflected in ensures):
-///  1. φ_X presents X ∈ Ob(Syn(F)) for some F ⊆ S.
-///  2. By (R2) and (R5a), Syn(F) is Grothendieck construction
-///  over Mod(F). [HTT 5.1.4]
-///  3. Hence Syn(F) ∈ S_S_global<S> by O2 (Grothendieck closure)
-///  with closure_depth ≥ 1 (one O2 application beyond the base).
-///  4. Therefore X ∈ Ob(Syn(F)) ⊆ S_S_global<S> ⊆ S_S<S>.
+/// Proof in paper (post-audit form; now reflected in ensures):
+///  1. By the Morita-reducibility clause of the paper's notation
+///  convention, X presented by φ_X *is* the pointed structure
+///  (Syn(S), [φ_X]) in StrCat_{S,n}.
+///  2. [φ_X] ∈ Ob(Syn(S)), so the pair lies in S_S^local by the
+///  FIRST clause of Definition 3.3 — no closure operation needed;
+///  closure_depth = 0.
+///  3. If φ_X is native to a proper sub-theory F ↪ S, the induced
+///  interpretation functor Syn(ι_F) : Syn(F) → Syn(S) carries
+///  [φ_X]_F to [φ_X]; the pointing may equivalently be taken over F.
+///  4. Therefore X ∈ S_S^local ⊆ S_S^global ⊆ S_S (the local base is
+///  stage 0 of the closure, so global membership holds a fortiori).
+/// (The pre-audit route through a "Grothendieck construction over
+/// Mod(F)" at depth ≥ 1 is retired: it was both unnecessary and
+/// imprecise. Membership is definitional.)
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")
-@framework(msfs, "MSFS Lemma 3.4 — S-definability (CRITICAL: formally S-definable ⟹ X ∈ S_S^global, depth ≥ 1)")
+@framework(msfs, "MSFS Lemma 3.4 — S-definability (CRITICAL: formally S-definable ⟹ X ∈ S_S^local ⊆ S_S, depth 0)")
 public axiom msfs_lemma_3_4_s_definability(
     x: &FormallySDefinable,
 ) -> &SSMembership
     requires x.has_phi_x_witness()
-    ensures  result.is_in_s_s_global() && result.closure_depth() >= 1;
+    ensures  result.is_in_s_s_local() && result.is_in_s_s_global() && result.closure_depth() >= 0;
 
 // =============================================================================
 // Step-2/3 intermediate axiom for Lemma 3.4's operational corollary
@@ -179,7 +187,7 @@ public axiom msfs_lemma_3_4_s_definability(
 /// re-statement, this axiom is promoted to a @theorem.
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")
-@framework(msfs, "MSFS Lemma 3.4 Steps 2+3 — Syn(F) is Grothendieck construction over Mod(F) [HTT 5.1.4] ⟹ S_S_global via O2 closure")
+@framework(msfs, "MSFS auxiliary O2 construction (pre-audit Lemma 3.4 route, retained as a constructive membership result) — Syn(F) via Grothendieck/O2 ⟹ S_S_global, depth ≥ 1")
 public axiom msfs_lemma_3_4_grothendieck_o2_bridge(
     x: &FormallySDefinable,
     membership: &SSMembership,
@@ -227,7 +235,7 @@ public axiom msfs_lemma_3_4_grothendieck_o2_bridge(
 @verify(formal)
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")
-@framework(msfs, "MSFS Lemma 3.4 (operational, 3-step structural body) — output lives in S_S_global")
+@framework(msfs, "MSFS auxiliary O2 route (operational, 3-step structural body; NOT the canonical Lemma 3.4 proof post-audit) — constructed membership lives in S_S_global")
 public theorem msfs_lemma_3_4_outputs_in_s_s_global(
     x: &FormallySDefinable,
     membership: &SSMembership,

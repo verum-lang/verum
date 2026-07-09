@@ -190,9 +190,15 @@ public axiom msfs_theorem_10_4_step_a_eps_fully_faithful(
 public type EssentialSurjectivityWitness is protocol {
     /// For every (F, C, ι, r) ∈ E, the reflector r has invertible counit
     /// ε_r : r∘ι ⇒ id_Syn(F) (Riehl-Verity 2.1.11).
+    /// Counit ε_r : r ∘ ι ⇒ id is invertible in ℰ itself (left adjoint
+    /// to a fully faithful ι) — true before any localization.
     fn reflector_counit_invertible(self) -> Bool;
 
     /// Composite (id_F, ι) ∘ (id_F, r) ≃ id_E via gauge_E equivalence.
+    /// The composite ι ∘ r becomes equivalent to the identity *in the
+    /// gauge_ℰ-localization* 𝔐_ℰ = ℰ[ℛ_ℰ⁻¹] (paper Definition gauge-E):
+    /// the reflection (id_F, r) lies in the localizing class ℛ_ℰ and is
+    /// therefore inverted. NOT invertibility of the unit in ℰ.
     fn gauge_equivalent_to_identity(self) -> Bool;
 };
 

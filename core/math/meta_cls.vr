@@ -89,8 +89,13 @@ public axiom msfs_definition_9_1_meta_cls_witness(w: &MetaClsWitness) -> Bool
 ///  (Max-3) Depth stratification: ω-indexed filtration
 ///  `F^(0) ↪ F^(1) ↪ ⋯` with `F ≃_2 colim_{n<ω} F^(n)` and
 ///  a depth function satisfying the predicativity condition.
-///  (Max-4) Intensional completeness: `\II_F : F^op → S_int` exists
-///  with (I-1)..(I-4) of Theorem 8.6.
+///  (Max-4) Intensional completeness with conservativity: `\II_F : F^op → S_int`
+///  exists with (I-1)..(I-4) of Theorem 8.6, and the pair `(Cl_F, \II_F)`
+///  is jointly conservative: parallel 1-morphisms identified by both
+///  are equal up to invertible 2-cell. (Joint conservativity is an
+///  axiom of maximality, not a consequence of (I-3)–(I-4); the canonical
+///  classifier F_S^* satisfies it by construction. Paper Definition 9.2,
+///  post-audit form.)
 ///
 
 /// The `as_meta_cls()` projection exposes the underlying Meta_Cls
@@ -100,6 +105,11 @@ public type MetaClsTopWitness is protocol {
     fn max_2_gauge_fullness(self) -> Bool;
     fn max_3_depth_stratification(self) -> Bool;
     fn max_4_intensional_completeness(self) -> Bool;
+
+    /// (Max-4, conservativity clause) — the pair `(Cl_F, \II_F)` separates
+    /// parallel 1-morphisms (jointly conservative). Required by the
+    /// faithfulness step of Theorem 9.3 (meta-categoricity).
+    fn max_4_joint_conservativity(self) -> Bool;
 
     /// Underlying Meta_Cls membership (every Max-1..4 saturator is
     /// already in Meta_Cls per Definition 9.2).
@@ -113,10 +123,12 @@ public axiom msfs_definition_9_2_meta_cls_top_witness(w: &MetaClsTopWitness) -> 
           && w.max_2_gauge_fullness()
           && w.max_3_depth_stratification()
           && w.max_4_intensional_completeness()
+          && w.max_4_joint_conservativity()
     ensures  w.max_1_full_classification()
           && w.max_2_gauge_fullness()
           && w.max_3_depth_stratification()
-          && w.max_4_intensional_completeness();
+          && w.max_4_intensional_completeness()
+          && w.max_4_joint_conservativity();
 
 // =============================================================================
 // 3. Theorem 9.3 — Meta-Categoricity 5-step bridges

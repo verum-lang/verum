@@ -369,10 +369,13 @@ public axiom msfs_f_s_implies_formal_s_definable(
 /// pattern that (Π_{4, S, n}) forbids*. Hence `false`.
 ///
 
-/// **Architectural note (M0.7-A).** The signature here consumes the
-/// concrete S_S^global membership predicate — `is_in_s_s_global() &&
-/// closure_depth() >= 1` — rather than only the formal-S-definability
-/// witness. This makes the kernel-recheck trail honest: Theorem 5.1's
+/// **Architectural note (M0.7-A, post-audit).** The signature here
+/// consumes the concrete S_S membership predicate — local OR global
+/// (`S_S = S_S^local ∪ S_S^global`), `closure_depth() >= 0` — rather
+/// than only the formal-S-definability witness. Post-audit the
+/// canonical Lemma 3.4 route is the definitional pointing
+/// (S_S^local, depth 0); the constructive O2 route (global, depth ≥ 1)
+/// remains admissible. This makes the kernel-recheck trail honest: Theorem 5.1's
 /// proof body must produce an SSMembership AND discharge the Lemma 3.4
 /// operational corollary BEFORE the Π_4-violation step can fire. The
 /// pre-M0.7-A signature trivially accepted any FormallySDefinable
@@ -396,7 +399,7 @@ public axiom msfs_f_s_implies_formal_s_definable(
 /// machine-checked by `verum audit --kernel-discharged-axioms`.
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")
-@framework(msfs, "MSFS Theorem 5.1 step 2 — id_X is (∞,n)-equivalence onto image with target in S_S^global, violating (Π_4)")
+@framework(msfs, "MSFS Theorem 5.1 step 2 — id_X is (∞,n)-equivalence onto image with target in S_S (local or global), violating (Π_4)")
 @kernel_discharge("kernel_whitehead_promote_strict")
 @kernel_discharge("kernel_truncate_to_level_strict")
 public axiom msfs_id_x_violates_pi_4(
@@ -405,6 +408,6 @@ public axiom msfs_id_x_violates_pi_4(
 ) -> Bool
     requires candidate.cond_F_S().has_phi_X()
           && candidate.cond_Pi_4().is_irreducible_in_s_s()
-          && ss_witness.is_in_s_s_global()
-          && ss_witness.closure_depth() >= 1
+          && (ss_witness.is_in_s_s_local() || ss_witness.is_in_s_s_global())
+          && ss_witness.closure_depth() >= 0
     ensures false;
