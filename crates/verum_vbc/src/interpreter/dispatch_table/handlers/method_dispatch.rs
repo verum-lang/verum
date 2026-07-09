@@ -5210,6 +5210,81 @@ pub(super) fn dispatch_primitive_method(
                         }
                         return Ok(Some(Value::from_bool(result)));
                     }
+                    "find" => {
+                        // find(predicate) -> Maybe<&T> — the missing sibling
+                        // of the `any`/`all` arms above
+                        // (LISTITER-DEVIRT-NEXT-1, `.find` leg).  Same
+                        // element addressing as `any`; on the first
+                        // predicate hit yields `Some(<ThinRef to element>)`
+                        // — the exact payload discipline the `next` arm
+                        // above uses for list/array blobs — and advances
+                        // `front_idx` past the hit (`find` consumes up to
+                        // AND including the found element; a miss consumes
+                        // the iterator).  Without this arm a CallM `find`
+                        // on an iterator blob fell through to the compiled
+                        // stdlib `ListIter.find` (Iterator protocol
+                        // default), whose predicate-ref plumbing over
+                        // intercept-yielded elements panics with "field
+                        // access out of bounds … data size 0" (the blob is
+                        // not the record layout the body was compiled
+                        // against).  Pinned by
+                        // `core-tests/meta/reflection/integration_test.vr::
+                        // integration_get_attribute_nonempty_closure_crash`.
+                        let source_ptr = unsafe { (*iter_data).as_ptr::<u8>() };
+                        let front_idx = unsafe { (*iter_data.add(1)).as_i64() } as usize;
+                        let back_idx = unsafe { (*iter_data.add(2)).as_i64() } as usize;
+                        let caller_base = state.reg_base();
+                        let predicate = state.registers.get(caller_base, Reg(args.start.0));
+
+                        let mut found: Option<Value> = None;
+                        for i in front_idx..back_idx {
+                            let elem_ptr = match iter_type {
+                                ITER_TYPE_LIST => {
+                                    let list_header = unsafe {
+                                        source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                                    };
+                                    let backing_ptr =
+                                        unsafe { (*list_header.add(2)).as_ptr::<u8>() };
+                                    (backing_ptr as usize)
+                                        + heap::OBJECT_HEADER_SIZE
+                                        + i * std::mem::size_of::<Value>()
+                                }
+                                ITER_TYPE_ARRAY => {
+                                    (source_ptr as usize)
+                                        + heap::OBJECT_HEADER_SIZE
+                                        + i * std::mem::size_of::<Value>()
+                                }
+                                _ => 0,
+                            };
+                            let thin_ref = ThinRef::new(
+                                elem_ptr as *mut u8,
+                                state.cbgr_epoch as u32,
+                                state.cbgr_epoch as u16,
+                                Capabilities::READ_ONLY,
+                            );
+                            let elem_ref = Value::from_thin_ref(thin_ref);
+                            let test_result =
+                                call_closure_sync(state, predicate, &[elem_ref])?;
+                            if test_result.as_bool() {
+                                found = Some(elem_ref);
+                                // Consume up to AND including the hit.
+                                unsafe {
+                                    *iter_data.add(1) = Value::from_i64((i + 1) as i64);
+                                }
+                                break;
+                            }
+                        }
+                        return Ok(Some(match found {
+                            Some(v) => make_some_value(state, v)?,
+                            None => {
+                                // Miss — the scan consumed the iterator.
+                                unsafe {
+                                    *iter_data.add(1) = Value::from_i64(back_idx as i64);
+                                }
+                                make_none_value(state)?
+                            }
+                        }));
+                    }
                     "for_each" => {
                         // for_each(closure) - calls closure on each element
                         let source_ptr = unsafe { (*iter_data).as_ptr::<u8>() };

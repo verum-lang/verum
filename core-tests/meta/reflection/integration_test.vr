@@ -213,34 +213,34 @@ fn integration_field_visibility_and_kind_read_back() {
 // an empty list") — now an infinite loop instead of a crash. No safe
 // happy path until the builtin-redirect leg fixes that dispatch.
 
-/// RE-PINNED 2026-07-09 — REFL-CLOSURE-XREC-1 runtime leg LANDED but a
-/// SECOND, distinct defect keeps this red: the archive compile
-/// devirtualises `self.attributes.iter().any(...)` to a direct
-/// `Call ListIter.any` (stdlib body), whose `ListIter.next` loop reads
-/// the RUNTIME List layout through the stdlib `{ptr, len, cap}` field
-/// offsets and never yields `None` → infinite `ListIter.next` loop
-/// (VERUM_TRACE_CALLS-proven: FieldInfo.has_attribute → ListIter.any →
-/// ListIter.next forever). Pre-fix the same broken iteration surfaced
-/// as the closure's OOB crash ("size-0 view … even on an empty list" —
-/// an empty list must never reach the closure at all); the field-index
-/// fix (closure now resolves `a.name` → Attribute LOCAL idx 0, see
-/// [FIELDSHIFT] FieldInfo.has_attribute$closure$13) turned it into the
-/// hang. Promote when the stdlib-ListIter-vs-runtime-List dispatch
-/// defect (builtin-redirect family, expressions.rs
-/// try_redirect_resolved_to_builtin) is fixed.
-@ignore
+/// UN-PINNED 2026-07-09 — LISTITER-DEVIRT-NEXT-1 fixed at the root:
+/// `WellKnownType::has_runtime_inline_dispatch` now classifies the
+/// native-blob iterator types (ListIter/ListIterMut/SliceIter/
+/// SliceIterMut/MapIter/SetIter), so BOTH codegen devirt funnels
+/// (`try_redirect_resolved_to_builtin` on the typechecker-resolved
+/// path and the CallM-lowering devirt shortcut's
+/// `type_prefix_intercepted_by_runtime`) keep `.iter().any(...)` on
+/// the CallM path.  The runtime iterator-blob intercept then handles
+/// `any`/`next` against the real native layout — the archive body
+/// takes the exact path user-side `xs.iter().any(...)` takes.
+/// History: this surface previously hung (archive devirtualised
+/// `self.attributes.iter().any(...)` to a direct `Call ListIter.any`
+/// whose `ListIter.next` misread the runtime List layout and never
+/// yielded `None`).  This test is the REGRESSION PIN for that defect.
 @test
 fn integration_has_attribute_nonempty_closure_crash() {
     let f = field_with([attr(Text.from("derive"), AttributeStyle.Call)]);
     assert(f.has_attribute(Text.from("derive")));
 }
 
-/// RE-PINNED 2026-07-09 — REFL-CLOSURE-XREC-1 runtime leg landed; still
-/// red for the SAME residual defect as has_attribute above
-/// (`ListIter.find` → `ListIter.next` infinite loop on the runtime List
-/// layout). The closure-param field-index half is fixed
-/// (get_attribute$closure$14 resolves `a.name` → Attribute LOCAL idx 0).
-@ignore
+/// UN-PINNED 2026-07-09 — fixed together with has_attribute above
+/// (LISTITER-DEVIRT-NEXT-1).  `.find` has no iterator-blob intercept
+/// arm, so post-fix it flows CallM → compiled `ListIter.find`
+/// (protocol default) — whose inner `self.next()` is now ALSO CallM
+/// in the re-baked archive and hits the blob `next` intercept, so the
+/// loop terminates.  REGRESSION PIN for the `.find` leg of the
+/// defect (this leg also covered the user-side
+/// `xs.iter().find(...)` hang, same root).
 @test
 fn integration_get_attribute_nonempty_closure_crash() {
     let f = field_with([attr(Text.from("repr"), AttributeStyle.Call)]);

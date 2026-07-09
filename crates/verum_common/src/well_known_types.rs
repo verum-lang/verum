@@ -303,6 +303,40 @@ impl WellKnownType {
         ) {
             return true;
         }
+        // Iterator types over the NATIVE-represented containers
+        // (LISTITER-DEVIRT-NEXT-1).  The runtime `iter`/`iter_mut`
+        // intercepts on List/Array/Slice/Map/Set (all in the TypeId
+        // semantic band, i.e. native runtime representations) construct
+        // a NATIVE iterator blob `[source_ptr, front_idx, back_idx,
+        // iter_type]` tagged `TypeId::UNIT` — NEVER the stdlib record
+        // layout these types declare in `.vr` (`ListIter { ptr, end }`
+        // …).  A devirtualised static `Call` to a compiled body such as
+        // `ListIter.any` / `ListIter.next` therefore reads record field
+        // offsets against the blob and never observes termination
+        // (`next` never yields `None` → infinite loop — proven via
+        // VERUM_TRACE_CALLS on the archive-compiled
+        // `FieldInfo.has_attribute`).  Method dispatch on these types
+        // MUST stay on the CallM path so the interpreter's iterator-blob
+        // intercept (`dispatch_primitive_method`, `TypeId::UNIT` +
+        // 4-value layout branch) handles it — the exact path user-side
+        // `xs.iter().any(...)` already takes.
+        //
+        // Deliberately EXCLUDED: record-backed iterator/adapter types
+        // whose constructors are NOT runtime-intercepted and whose
+        // compiled bodies are therefore correct — `Chars` (the `chars`
+        // intercept was removed; `Text.chars()` builds a real record),
+        // `EnumerateIter`/`TakeIter`/`ZipIter`/… adapter records,
+        // `SliceEnumerate`, `DequeIter`/`DequeIterMut`,
+        // `MapIterMut`/`MapValuesMut` (no `iter_mut`/`values_mut` map
+        // intercepts), and the BTree family.  Pinned by
+        // `core-tests/meta/reflection/integration_test.vr::
+        // integration_{has,get}_attribute_nonempty_closure_crash`.
+        if matches!(
+            name,
+            "ListIter" | "ListIterMut" | "SliceIter" | "SliceIterMut" | "MapIter" | "SetIter"
+        ) {
+            return true;
+        }
         // CBGR reference tier types — handled by the runtime's
         // ref-deref / ref-write intercept path, not by user-side
         // stdlib bodies.
