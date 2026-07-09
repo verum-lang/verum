@@ -16216,6 +16216,22 @@ fn lower_call_method<'ctx>(
         return Ok(());
     }
 
+    // VERUM_AOT_TRACE_CALLM=1: dump the dispatch decision state for every
+    // CallM — the resolution here is multi-strategy and a miss is a SILENT
+    // const-zero (see the `resolved_func_name == None` arm below), which
+    // makes mis-dispatch invisible without this trace.
+    if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
+        eprintln!(
+            "[callm] method={:?} skip_compiled={} dispatch_target={:?} recv_r{} type_name={:?} obj_type={:?}",
+            method_name_str,
+            skip_compiled_lookup,
+            dispatch_target,
+            receiver.0,
+            receiver_type_name,
+            ctx.get_obj_register_type(receiver.0),
+        );
+    }
+
     // Strategy 1: Try method_id as FunctionId directly
     if !skip_compiled_lookup && let Some(func_desc) = vbc_mod.get_function(FunctionId(method_id)) {
         let fname = vbc_mod.get_string(func_desc.name).unwrap_or("").to_string();
@@ -16332,6 +16348,21 @@ fn lower_call_method<'ctx>(
                                         .rsplit('.')
                                         .next()
                                         .map_or(false, |s| s == t)
+                            } else if let Some(obj_t) = ctx.get_obj_register_type(receiver.0)
+                            {
+                                // OBJ-TYPE-DISPATCH (#34): consult the
+                                // construction-stamped object type (NEW/NewG,
+                                // Mov-propagated) exactly as the Strategy-2
+                                // arm does — see the comment there. Without
+                                // this, an obj-tracked user receiver is
+                                // rejected by the else-arm below and the call
+                                // silently const-zeros.
+                                vbc_resolved
+                                    || obj_t == func_type_prefix
+                                    || obj_t
+                                        .rsplit('.')
+                                        .next()
+                                        .map_or(false, |s| s == func_type_prefix)
                             } else if vbc_resolved {
                                 true
                             } else {
@@ -16519,6 +16550,29 @@ fn lower_call_method<'ctx>(
                             // explicit Some(t) branch the receiver type drives
                             // a strict equality check.
                             vbc_resolved || t == func_type_prefix
+                        } else if let Some(obj_t) = ctx.get_obj_register_type(receiver.0) {
+                            // OBJ-TYPE-DISPATCH (#34): the receiver carries
+                            // object-type tracking stamped at construction
+                            // (NEW/NewG, Mov-propagated) — the AOT analogue of
+                            // the interpreter's heap-header type_id recovery
+                            // in handle_call_method. Pre-fix this arm never
+                            // consulted it: a user-typed receiver
+                            // (obj_t = "P") with no RegisterTypeMap entry fell
+                            // through to the reject-else below — and, because
+                            // the obj tracking EXISTS, `has_no_tracking` was
+                            // false, so the unique-suffix fallback was also
+                            // disabled. Every `p.method()` on a user struct
+                            // silently const-zeroed at AOT while the
+                            // interpreter dispatched correctly. Same
+                            // strict-equality discipline as the tracked branch
+                            // above (trailing segment tolerated for qualified
+                            // names).
+                            vbc_resolved
+                                || obj_t == func_type_prefix
+                                || obj_t
+                                    .rsplit('.')
+                                    .next()
+                                    .map_or(false, |s| s == func_type_prefix)
                         } else if vbc_resolved {
                             // VBC's static resolution already picked this
                             // function — trust it (covers the common case
@@ -16572,6 +16626,12 @@ fn lower_call_method<'ctx>(
                         }
                     }
                 };
+                if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
+                    eprintln!(
+                        "[callm]   S2 candidate={:?} receiver_matches={} (recv type_name={:?})",
+                        fname, receiver_matches, receiver_type_name
+                    );
+                }
                 if !receiver_matches {
                     continue;
                 }
@@ -16603,6 +16663,15 @@ fn lower_call_method<'ctx>(
                 }
                 let pc = llvm_fn_candidate.count_params() as u32;
                 let ac = args.count as u32;
+                if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
+                    eprintln!(
+                        "[callm]   S2 candidate={:?} blocks={} pc={} ac={}",
+                        fname,
+                        llvm_fn_candidate.count_basic_blocks(),
+                        pc,
+                        ac
+                    );
+                }
                 if pc == ac || pc == ac + 1 {
                     // Look up return type from the VBC function table
                     let ret_ty = vbc_mod
@@ -17449,6 +17518,27 @@ fn lower_call_method<'ctx>(
             // When stdlib .vr files are compiled to VBC, they may contain
             // CallM instructions for methods whose target modules aren't
             // yet compiled into this LLVM module. Return 0/null and continue.
+            //
+            // OBS: record the degrade (same discipline as `lower_call`'s
+            // unresolved paths) — pre-fix this const-zero was completely
+            // SILENT, which let the #34 instance-method mis-dispatch class
+            // (every `p.method()` on a user struct returning 0) go
+            // undiagnosed. The record surfaces in the codegen-warn summary
+            // and hard-errors under VERUM_STRICT_MONO.
+            let cur_fn = ctx.function_name().as_str().to_string();
+            super::error::record_unresolved_generic_call(
+                &cur_fn,
+                format!(
+                    "CallM method '{}' unresolved at codegen — degraded to a const-zero stub",
+                    method_name_str
+                ),
+            );
+            if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
+                eprintln!(
+                    "[callm]   UNRESOLVED -> const-zero: method={:?} in fn {}",
+                    method_name_str, cur_fn
+                );
+            }
             ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
             return Ok(());
         }
