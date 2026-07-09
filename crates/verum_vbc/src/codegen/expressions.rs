@@ -5894,21 +5894,26 @@ impl VbcCodegen {
                 _ => None,
             }
         }
-        let mut bindings: std::collections::BTreeMap<u32, crate::types::TypeId> =
+        let mut bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
             std::collections::BTreeMap::new();
         for (i, ptr) in param_trs.iter().enumerate() {
             if let Some(tp_id) = outer_type_param(ptr) {
                 if let Some(arg) = args.get(i) {
                     if let Some(concrete) = self.infer_expr_type_name(arg) {
-                        let base = strip_ref(&concrete);
-                        let base = base.split('<').next().unwrap_or(&base).trim().to_string();
+                        let stripped = strip_ref(&concrete);
+                        let base = stripped.split('<').next().unwrap_or(&stripped).trim();
                         if base.is_empty()
-                            || verum_common::well_known_types::looks_like_type_param(&base)
+                            || verum_common::well_known_types::looks_like_type_param(base)
                         {
                             continue;
                         }
-                        if let Some(&tid) = self.type_name_to_id.get(base.as_str()) {
-                            bindings.entry(tp_id).or_insert(tid);
+                        // Preserve the FULL instantiation (e.g. `ReadyFuture<Text>`
+                        // → Instantiated{RF,[Text]}) rather than collapsing to the
+                        // bare base id.  Monomorphization needs the args to resolve
+                        // associated types (`F.Output = Text`) and text-mark the
+                        // payload, so `print` emits the string, not the pointer-int.
+                        if let Some(tr) = self.type_name_to_type_ref_mono(&stripped) {
+                            bindings.entry(tp_id).or_insert(tr);
                         }
                     }
                 }
@@ -5931,13 +5936,64 @@ impl VbcCodegen {
         if bindings.is_empty() {
             return None;
         }
-        let type_args: Vec<crate::types::TypeRef> = bindings
-            .into_values()
-            .map(crate::types::TypeRef::Concrete)
-            .collect();
+        let type_args: Vec<crate::types::TypeRef> = bindings.into_values().collect();
         self.pending_specializations
             .push((func_id, type_args.clone()));
         Some(type_args)
+    }
+
+    /// Parse a (possibly generic) type NAME like `ReadyFuture<Text>` or
+    /// `Map<Text, List<Int>>` into a `TypeRef`, preserving instantiation args so
+    /// monomorphization can recover associated types (`F.Output`, `I.Item`).
+    /// Returns None when the base name is unknown or a bare type parameter.
+    fn type_name_to_type_ref_mono(&self, name: &str) -> Option<crate::types::TypeRef> {
+        let name = name.trim();
+        if let Some(lt) = name.find('<') {
+            let base_name = name[..lt].trim();
+            let close = name.rfind('>')?;
+            if close <= lt {
+                return None;
+            }
+            let base_id = *self.type_name_to_id.get(base_name)?;
+            let inner = &name[lt + 1..close];
+            let args: Vec<crate::types::TypeRef> = Self::split_top_level_commas(inner)
+                .into_iter()
+                .filter_map(|a| self.type_name_to_type_ref_mono(a.trim()))
+                .collect();
+            Some(crate::types::TypeRef::Instantiated {
+                base: base_id,
+                args,
+            })
+        } else if verum_common::well_known_types::looks_like_type_param(name) {
+            None
+        } else {
+            self.type_name_to_id
+                .get(name)
+                .map(|&id| crate::types::TypeRef::Concrete(id))
+        }
+    }
+
+    /// Split a generic argument list on top-level commas, respecting `<>` nesting
+    /// (so `Text, List<Int>` splits into `["Text", "List<Int>"]`, not three).
+    fn split_top_level_commas(s: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut depth = 0i32;
+        let mut start = 0usize;
+        for (i, c) in s.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    out.push(s[start..i].to_string());
+                    start = i + c.len_utf8();
+                }
+                _ => {}
+            }
+        }
+        if start < s.len() {
+            out.push(s[start..].to_string());
+        }
+        out
     }
 
     /// Compiles an array element reference (`&arr[idx]` or `&mut arr[idx]`) for FFI calls.

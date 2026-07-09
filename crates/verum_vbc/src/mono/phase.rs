@@ -358,8 +358,14 @@ impl MonomorphizationPhase {
             // Specialize
             let mut specialized = specializer.specialize(func, &request.type_args)?;
 
-            // Optimize if enabled
-            if self.config.optimize {
+            // Post-specialization bytecode optimization.  The optimizer now
+            // operates on the DECODED instruction stream (decode → normalize
+            // jump targets to instruction-relative → fold → encode-with-fixup),
+            // so it can no longer corrupt the byte stream the way the old
+            // byte-by-byte scanner did.  Bytecode-level optimization matters for
+            // BOTH tiers: the interpreter executes VBC directly (LLVM never sees
+            // it), and it shrinks the stream the AOT lowers.
+            if self.config.optimize && std::env::var_os("VERUM_DISABLE_MONO_OPT").is_none() {
                 let mut optimizer = SpecializationOptimizer::new();
                 specialized.bytecode = optimizer.optimize(specialized.bytecode);
             }
@@ -395,7 +401,9 @@ impl MonomorphizationPhase {
             let substitution = TypeSubstitution::from_function(func, &request.type_args);
             let mut specializer = BytecodeSpecializer::new(module, &substitution, graph);
             let mut specialized = specializer.specialize(func, &request.type_args)?;
-            if optimize_flag {
+            // Post-specialization optimization on the DECODED instruction
+            // stream (see specialize_sequential for the rationale).
+            if optimize_flag && std::env::var_os("VERUM_DISABLE_MONO_OPT").is_none() {
                 let mut optimizer = SpecializationOptimizer::new();
                 specialized.bytecode = optimizer.optimize(specialized.bytecode);
             }
