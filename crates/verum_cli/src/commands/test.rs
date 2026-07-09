@@ -1830,11 +1830,20 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     };
 
     let mut interp = Interpreter::new(module);
-    // Disable tier-0 safety caps — test runners frequently push past
-    // the 100M instruction / 30s timeout defaults, especially for
-    // @property-style tests that iterate internally.
+    // TEST-DEADLINE-INTERP-1: replace the unbounded run (caps fully
+    // disabled — one runtime hang froze the whole suite; the ListIter
+    // devirt loop demonstrated it live) with a WALL-CLOCK deadline via
+    // the interpreter's own timeout cap: the manifest/test timeout when
+    // configured, else a 120s default (property tests iterate
+    // internally — the old 30s default was the reason caps were
+    // disabled; 120s keeps them un-throttled while bounding hangs).
+    // Instruction cap stays off — time is the honest budget.
     interp.state.config.max_instructions = 0;
-    interp.state.config.timeout_ms = 0;
+    interp.state.config.timeout_ms = if _cfg.timeout_secs > 0 {
+        _cfg.timeout_secs.saturating_mul(1000)
+    } else {
+        120_000
+    };
 
     // Run global ctors before executing the test function.  Without
     // this, `__tls_init_*` synthetic functions never populate their
