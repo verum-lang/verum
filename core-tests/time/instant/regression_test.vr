@@ -17,9 +17,13 @@ mount core.time.instant.{Instant};
 // overflow. Duration is signed; adding -1s equals subtracting 1s.
 @test
 fn regression_f_checked_add_negative_duration_moves_back() {
-    let now = Instant.now();
+    // Anchor well away from the monotonic epoch: the canonical clock
+    // is process-relative, so a raw `Instant.now()` can be closer
+    // than 1s to nanos=0 and a legitimate backwards move would hit
+    // the below-epoch guard.
+    let now = Instant.now().checked_add(Duration.secs(100)).unwrap();
     let back = now.checked_add(Duration.secs(-1));
-    assert(back.is_some(), "adding -1s to a live instant is representable");
+    assert(back.is_some(), "adding -1s to an anchored instant is representable");
     let expected = now.checked_sub(Duration.secs(1)).unwrap();
     assert_eq(back.unwrap().as_nanos(), expected.as_nanos());
 }
@@ -28,7 +32,7 @@ fn regression_f_checked_add_negative_duration_moves_back() {
 // mirroring checked_add with the magnitude.
 @test
 fn regression_f_checked_sub_negative_duration_moves_forward() {
-    let now = Instant.now();
+    let now = Instant.now().checked_add(Duration.secs(100)).unwrap();
     let fwd = now.checked_sub(Duration.secs(-1));
     assert(fwd.is_some());
     let expected = now.checked_add(Duration.secs(1)).unwrap();
