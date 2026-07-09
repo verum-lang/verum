@@ -421,13 +421,25 @@ impl ModuleMerger {
                     })
                 })
                 .unwrap_or_else(|| format!("mono_fn_{}", request.function_id.0));
+            fn mangle_tr(t: &TypeRef) -> String {
+                match t {
+                    TypeRef::Concrete(id) => id.0.to_string(),
+                    TypeRef::Instantiated { base, args } => {
+                        let inner: Vec<String> = args.iter().map(mangle_tr).collect();
+                        if inner.is_empty() {
+                            base.0.to_string()
+                        } else {
+                            format!("{}i{}", base.0, inner.join("_"))
+                        }
+                    }
+                    TypeRef::Generic(tp) => format!("g{}", tp.0),
+                    _ => "x".to_string(),
+                }
+            }
             let mangle: String = request
                 .type_args
                 .iter()
-                .map(|t| match t {
-                    TypeRef::Concrete(id) => id.0.to_string(),
-                    _ => "x".to_string(),
-                })
+                .map(mangle_tr)
                 .collect::<Vec<_>>()
                 .join("_");
             let spec_name = format!("{}$mono${}", generic_name, mangle);
@@ -473,6 +485,22 @@ impl ModuleMerger {
             new_func.is_generic = false;
             new_func.instructions = None;
 
+            // Resolve associated-type projections in the inherited return type:
+            // `Maybe<F.Output>` with F = ReadyFuture<Text> → `Maybe<Text>`. The
+            // AOT text-marks a call's result from the callee's return type
+            // (mark_register_from_return_type); an unresolved `F.Output` leaves
+            // the payload unmarked so `print` formats it as the raw pointer-int
+            // instead of the string. Future::Output ≡ poll's `Poll<Output>`
+            // inner, Iterator::Item ≡ next's inner — read from the concrete
+            // impl's method signature.
+            new_func.return_type = Self::resolve_ret_projections(
+                &new_func.return_type,
+                &request.type_args,
+                output,
+                &self.user_module,
+                self.stdlib.as_deref(),
+            );
+
             output.functions.push(new_func);
 
             // Record mapping
@@ -492,6 +520,185 @@ impl ModuleMerger {
         }
 
         Ok(())
+    }
+
+    /// Resolve `AssociatedProjection` nodes in a specialized function's return
+    /// type using the concrete `type_args`: substitute generic params, then
+    /// recover e.g. `F.Output` from the concrete `F`'s protocol method
+    /// signature. Leaves any projection it can't resolve untouched.
+    fn resolve_ret_projections(
+        ty: &TypeRef,
+        type_args: &[TypeRef],
+        output: &VbcModule,
+        user_module: &VbcModule,
+        stdlib: Option<&VbcModule>,
+    ) -> TypeRef {
+        match ty {
+            TypeRef::Generic(tp) => type_args
+                .get(tp.0 as usize)
+                .cloned()
+                .unwrap_or_else(|| ty.clone()),
+            TypeRef::AssociatedProjection { base, assoc } => {
+                let rbase =
+                    Self::resolve_ret_projections(base, type_args, output, user_module, stdlib);
+                Self::resolve_assoc_via_method(&rbase, assoc, output, user_module, stdlib).unwrap_or(
+                    TypeRef::AssociatedProjection {
+                        base: Box::new(rbase),
+                        assoc: assoc.clone(),
+                    },
+                )
+            }
+            TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
+                base: *base,
+                args: args
+                    .iter()
+                    .map(|a| {
+                        Self::resolve_ret_projections(a, type_args, output, user_module, stdlib)
+                    })
+                    .collect(),
+            },
+            TypeRef::Reference {
+                inner,
+                mutability,
+                tier,
+            } => TypeRef::Reference {
+                inner: Box::new(Self::resolve_ret_projections(
+                    inner, type_args, output, user_module, stdlib,
+                )),
+                mutability: *mutability,
+                tier: *tier,
+            },
+            _ => ty.clone(),
+        }
+    }
+
+    /// Recover `<base>.<assoc>` from `base`'s concrete protocol-method return
+    /// types: Future::Output is the sole arg of `poll(...) -> Poll<Output>`,
+    /// Iterator::Item the sole arg of `next(...) -> Maybe<Item>`. The impl's
+    /// method return carries `Output` as an impl generic (e.g. `Poll<T>`), so
+    /// substitute the concrete base's type args into it. Returns None when the
+    /// projection can't be recovered (caller keeps it unresolved).
+    fn resolve_assoc_via_method(
+        base: &TypeRef,
+        assoc: &str,
+        output: &VbcModule,
+        user_module: &VbcModule,
+        stdlib: Option<&VbcModule>,
+    ) -> Option<TypeRef> {
+        let trace = std::env::var_os("VERUM_TRACE_MONO").is_some();
+        let (tid, targs): (TypeId, &[TypeRef]) = match base {
+            TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+            TypeRef::Concrete(id) => (*id, &[]),
+            _ => return None,
+        };
+        // The type_arg id is a MERGED-module id; resolve it against `output`
+        // (the module being built and lowered) first, source modules as fallback.
+        let td = match output
+            .get_type(tid)
+            .or_else(|| user_module.get_type(tid))
+            .or_else(|| stdlib.and_then(|s| s.get_type(tid)))
+        {
+            Some(td) => td,
+            None => {
+                if trace {
+                    eprintln!("[mono-assoc] type#{} NOT FOUND", tid.0);
+                }
+                return None;
+            }
+        };
+        let want_method = match assoc {
+            "Output" => "poll",
+            "Item" => "next",
+            _ => return None,
+        };
+        for pi in &td.protocols {
+            for &m in &pi.methods {
+                if m == u32::MAX {
+                    continue;
+                }
+                let (fd, home): (&FunctionDescriptor, &VbcModule) =
+                    if let Some(f) = output.get_function(FunctionId(m)) {
+                        (f, output)
+                    } else if let Some(f) = user_module.get_function(FunctionId(m)) {
+                        (f, user_module)
+                    } else if let Some(f) = stdlib.and_then(|s| s.get_function(FunctionId(m))) {
+                        (f, stdlib.unwrap())
+                    } else {
+                        continue;
+                    };
+                let mname = home.get_string(fd.name).unwrap_or("");
+                let short = mname.rsplit('.').next().unwrap_or(mname);
+                if short != want_method {
+                    continue;
+                }
+                if let TypeRef::Instantiated { args, .. } = &fd.return_type {
+                    if let Some(inner) = args.first() {
+                        let resolved = Self::subst_type_params(inner, targs);
+                        if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                            eprintln!(
+                                "[mono-assoc] type#{}.{} → {:?} (via {} return {:?})",
+                                tid.0, assoc, resolved, short, fd.return_type
+                            );
+                        }
+                        return Some(resolved);
+                    }
+                }
+            }
+        }
+        // Fallback: the protocol-impl method list may not carry `poll`/`next`
+        // (it can record a coincidental method id after import remapping).
+        // Find the method by NAME — `<Type>.<method>` — across the merged and
+        // source modules. `<Type>` is matched exactly (as a `.`-delimited
+        // segment) so `SelectReadyFuture.poll` doesn't match `ReadyFuture`.
+        let tn = output
+            .get_type_name(tid)
+            .or_else(|| user_module.get_type_name(tid))
+            .or_else(|| stdlib.and_then(|s| s.get_type_name(tid)))?;
+        let exact = format!("{tn}.{want_method}");
+        let suffix = format!(".{tn}.{want_method}");
+        let modules: Vec<&VbcModule> = std::iter::once(output)
+            .chain(std::iter::once(user_module))
+            .chain(stdlib)
+            .collect();
+        for home in modules {
+            for f in &home.functions {
+                let fname = home.get_string(f.name).unwrap_or("");
+                if fname == exact || fname.ends_with(&suffix) {
+                    if let TypeRef::Instantiated { args, .. } = &f.return_type {
+                        if let Some(inner) = args.first() {
+                            let resolved = Self::subst_type_params(inner, targs);
+                            if trace {
+                                eprintln!(
+                                    "[mono-assoc-byname] {} -> {:?} (from {} return {:?})",
+                                    fname, resolved, tn, f.return_type
+                                );
+                            }
+                            return Some(resolved);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Substitute `Generic(n)` with `args[n]` — maps an impl method's generic
+    /// (`Poll<T>`'s `T`) to the concrete base type's Nth type argument.
+    fn subst_type_params(ty: &TypeRef, args: &[TypeRef]) -> TypeRef {
+        match ty {
+            TypeRef::Generic(tp) => args
+                .get(tp.0 as usize)
+                .cloned()
+                .unwrap_or_else(|| ty.clone()),
+            TypeRef::Instantiated { base, args: iargs } => TypeRef::Instantiated {
+                base: *base,
+                args: iargs
+                    .iter()
+                    .map(|a| Self::subst_type_params(a, args))
+                    .collect(),
+            },
+            _ => ty.clone(),
+        }
     }
 
     /// Decode `instructions` for the functions in `[first_new_spec, len)` from

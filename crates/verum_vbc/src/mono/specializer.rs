@@ -685,8 +685,14 @@ impl<'a> BytecodeSpecializer<'a> {
         } else {
             return None;
         };
-        let TypeRef::Concrete(tid) = self.substitution.get(TypeParamId(0))? else {
-            return None;
+        // Devirtualize on the receiver's BASE type. A monomorphized receiver
+        // like `ReadyFuture<Text>` is carried as `Instantiated { base, args }`
+        // (the args preserve the payload type for associated-type resolution);
+        // the concrete method lives on the base `ReadyFuture.poll`.
+        let tid = match self.substitution.get(TypeParamId(0))? {
+            TypeRef::Concrete(id) => id,
+            TypeRef::Instantiated { base, .. } => base,
+            _ => return None,
         };
         let type_name = self.module.get_type_name(*tid)?;
         let concrete = format!("{}.{}", type_name, method);
