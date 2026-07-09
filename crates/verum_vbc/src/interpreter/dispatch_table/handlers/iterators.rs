@@ -472,8 +472,24 @@ pub(in super::super) fn handle_iter_next(
             // Read map/set header: [count, capacity, entries_ptr]
             let map_header = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let capacity = unsafe { (*map_header.add(1)).as_i64() } as usize;
-            let entries_ptr = unsafe { (*map_header.add(2)).as_ptr::<u8>() };
+            let entries_val = unsafe { *map_header.add(2) };
 
+            // A never-inserted Map/Set is lazily allocated: `Map.new()` /
+            // `Set.new()` store `entries: null_ptr(), cap: 0` and only
+            // materialise the entry buffer on first insert.  Iterating that
+            // state must report exhaustion, not dereference the null/non-
+            // pointer entries slot (was an ICE: `Expected pointer, got
+            // Some(1)` — empty-map-iteration defect).
+            if capacity == 0 || !entries_val.is_ptr() {
+                unsafe {
+                    *iter_data.add(1) = Value::from_i64(capacity as i64);
+                }
+                state.set_reg(dst, Value::unit());
+                state.set_reg(has_next_dst, Value::from_bool(false));
+                return Ok(DispatchResult::Continue);
+            }
+
+            let entries_ptr = entries_val.as_ptr::<u8>();
             let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
             // Inspect the source's type_id to decide element shape:
