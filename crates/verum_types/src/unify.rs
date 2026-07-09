@@ -1540,9 +1540,16 @@ impl Unifier {
             | (Char, Char)
             | (Text, Text) => Ok(Substitution::new()),
 
-            // Numeric widening: Int → Float (safe, no precision loss for small ints)
-            // This allows `fn f(x: Float) { ... }; f(42)` without explicit cast.
-            (Int, Float) | (Float, Int) => Ok(Substitution::new()),
+            // VBC-MIXED-ARITH-SILENT-NAN-1: the blanket Int~Float
+            // "widening" arm was REMOVED — the runtime implements NO
+            // numeric coercion (Tier-0 float-extract asserts in debug
+            // and reads NaN-boxed Int bits as quiet NaN in release;
+            // Tier-1 emits the raw float op), so every unification
+            // this arm permitted was a latent silent-NaN. Literal
+            // convenience (`f(42)` with `f(x: Float)`) belongs to the
+            // LITERAL adaptation paths (check_expr literal-coercion),
+            // which type the literal AT the expectation instead of
+            // pretending two distinct runtime representations unify.
 
             // Char → Text widening: a single character can be used where text is expected
             // This allows `let s: Text = 'a';` without explicit conversion.
