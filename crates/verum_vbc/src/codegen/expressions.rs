@@ -3286,6 +3286,28 @@ impl VbcCodegen {
                 Ok(None)
             }
 
+            // Tuple-field assignment: `t.0 = v`, including through a
+            // chain like `xs[i].1 = v`. Tuples share the object layout
+            // with positional fields, so this is a SetF with
+            // field_idx = index — symmetric with the read side
+            // (compile_tuple_index) and the compound-assignment arm.
+            ExprKind::TupleIndex { expr: base, index } => {
+                let base_reg = self
+                    .compile_expr(base)?
+                    .or_internal("tuple index base has no value")?;
+
+                self.ctx.emit(Instruction::SetF {
+                    obj: base_reg,
+                    field_idx: *index,
+                    value: value_reg,
+                });
+
+                self.ctx.free_temp(base_reg);
+                self.ctx.free_temp(value_reg);
+
+                Ok(None)
+            }
+
             _ => Err(CodegenError::unsupported_expr("assignment target")),
         }
     }
@@ -10045,9 +10067,13 @@ impl VbcCodegen {
             };
 
             if !receiver_is_primitive_numeric {
+                // Duration / Instant were removed from this list when the
+                // §G unboxed-representation alias rows were deleted from
+                // `register_stdlib_intrinsics` (see codegen/mod.rs) — their
+                // methods now always dispatch to the Verum bodies, which
+                // operate on the heap-record representation coherently on
+                // every tier.
                 static INTRINSIC_TYPES: &[&str] = &[
-                    "Duration",
-                    "Instant",
                     "Stopwatch",
                     "PerfCounter",
                     "DeadlineTimer",
@@ -10079,54 +10105,34 @@ impl VbcCodegen {
                     None
                 };
 
-                // For known receiver type: dispatch directly to that type's intrinsic.
-                // For unknown receiver type: collect all matches and only use if unambiguous.
-                let mut found_match: Option<crate::intrinsics::registry::InlineSequenceId> = None;
-                let mut ambiguous = false;
-
-                for type_name in INTRINSIC_TYPES {
-                    // If we know the receiver type, skip non-matching types
-                    if let Some(ref rtn) = receiver_type_name
-                        && rtn.as_str() != *type_name
-                    {
-                        continue;
-                    }
-
-                    // Use "." separator to match how intrinsics are registered (e.g., "Duration.saturating_add")
-                    let qualified = format!("{}.{}", type_name, method.name);
+                // Inline-sequence dispatch fires ONLY on a KNOWN receiver
+                // type match. The former unknown-receiver "unambiguous
+                // single match" fallback was a name-keyed hazard: when
+                // the §G closure removed the Duration/Instant rows,
+                // `PerfCounter.as_nanos` became the sole remaining
+                // `.as_nanos` entry, and every method-chain receiver the
+                // type inference could not name (`m.unwrap().as_nanos()`)
+                // silently inlined PerfCounter's identity `Mov` — the
+                // accessor hop vanished and callers compared record
+                // pointers. Unknown receivers now take the ordinary
+                // runtime dispatch path, which is always correct.
+                if let Some(ref rtn) = receiver_type_name
+                    && INTRINSIC_TYPES.contains(&rtn.as_str())
+                {
+                    let qualified = format!("{}.{}", rtn, method.name);
                     if let Some(func_info) = self.ctx.lookup_function(&qualified).cloned()
                         && let Some(ref intrinsic_name) = func_info.intrinsic_name
                         && let Some(info) = lookup_intrinsic(intrinsic_name)
                         && let CodegenStrategy::InlineSequence(seq_id) = info.intrinsic.strategy
                     {
-                        if receiver_type_name.is_some() {
-                            // Known type match: dispatch immediately
-                            let mut inline_args = vec![receiver_reg];
-                            for i in 0..args.len() {
-                                inline_args.push(Reg(args_start.0 + i as u16));
-                            }
-                            self.emit_intrinsic_inline_sequence(seq_id, &inline_args, result, 0)?;
-                            self.ctx.free_temp(receiver_reg);
-                            return Ok(Some(result));
+                        let mut inline_args = vec![receiver_reg];
+                        for i in 0..args.len() {
+                            inline_args.push(Reg(args_start.0 + i as u16));
                         }
-                        // Unknown type: track match for ambiguity check
-                        if found_match.is_some() {
-                            ambiguous = true;
-                        } else {
-                            found_match = Some(seq_id);
-                        }
+                        self.emit_intrinsic_inline_sequence(seq_id, &inline_args, result, 0)?;
+                        self.ctx.free_temp(receiver_reg);
+                        return Ok(Some(result));
                     }
-                }
-
-                // For unknown receiver type, only dispatch if unambiguous (exactly one match)
-                if !ambiguous && let Some(seq_id) = found_match {
-                    let mut inline_args = vec![receiver_reg];
-                    for i in 0..args.len() {
-                        inline_args.push(Reg(args_start.0 + i as u16));
-                    }
-                    self.emit_intrinsic_inline_sequence(seq_id, &inline_args, result, 0)?;
-                    self.ctx.free_temp(receiver_reg);
-                    return Ok(Some(result));
                 }
             }
         }
@@ -11503,12 +11509,17 @@ impl VbcCodegen {
         // Per crates/verum_types/src/CLAUDE.md — "NEVER hardcode
         // stdlib/core type knowledge in the compiler". This list
         // shrinks to the minimum that's legitimately type-specific.
+        // NOTE (§G closure, 2026-07-09): `as_nanos` / `as_micros` /
+        // `as_millis` / `as_secs` were removed from this list.
+        // `core.time.Duration` is SIGNED (`-> Int`) since the Option-B
+        // refactor, so classifying its accessor chains as `uint64$…`
+        // mis-dispatched every negative-duration chain.  (The
+        // `sys.*.time.Duration` twins do return `UInt64`, but a
+        // name-keyed list cannot distinguish the two — that collision
+        // is part of the duplicate-type-name debt, see
+        // `core-tests/time/duration/audit.md`.)  `as_secs_f64` returns
+        // `Float` and never belonged here.
         const UINT64_METHODS: &[&str] = &[
-            "as_nanos",
-            "as_micros",
-            "as_millis",
-            "as_secs",
-            "as_secs_f64",
             "to_bits",
             "elapsed_nanos",
             "elapsed_micros",
@@ -11716,10 +11727,11 @@ impl VbcCodegen {
                     return format!("{}.{}", ret_base, outer_method_name.name);
                 }
 
-                // Fallback heuristics based on type name patterns
-                if type_name.contains("Duration") && method_name_str == "as_nanos" {
-                    return format!("uint64${}", outer_method_name.name);
-                }
+                // Fallback heuristics based on type name patterns.
+                // (The former `Duration…as_nanos → uint64$…` arm was
+                // removed with the §G closure: core Duration.as_nanos
+                // returns signed Int, so uint64$ dispatch corrupted
+                // negative-duration chains.)
                 // If receiver is Result and inner method is ok/err, outer method should use Maybe
                 if type_name.starts_with("Result")
                     && (method_name_str == "ok" || method_name_str == "err")

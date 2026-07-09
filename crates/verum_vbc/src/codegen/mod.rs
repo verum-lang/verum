@@ -2811,32 +2811,29 @@ impl VbcCodegen {
             ("char_is_alphanumeric", 1, "char_is_alphanumeric"),
             ("rdtsc", 0, "rdtsc"),
             ("catch_unwind", 1, "catch_unwind"),
-            // Duration impl methods (registered as "Duration.method" by collect_all_declarations)
-            ("Duration.from_nanos", 1, "time_duration_from_nanos"),
-            ("Duration.from_micros", 1, "time_duration_from_micros"),
-            ("Duration.from_millis", 1, "time_duration_from_millis"),
-            ("Duration.from_secs", 1, "time_duration_from_secs"),
-            ("Duration.as_nanos", 1, "time_duration_as_nanos"),
-            ("Duration.as_micros", 1, "time_duration_as_micros"),
-            ("Duration.as_millis", 1, "time_duration_as_millis"),
-            ("Duration.as_secs", 1, "time_duration_as_secs"),
-            ("Duration.is_zero", 1, "time_duration_is_zero"),
-            ("Duration.add", 2, "time_duration_add"),
-            ("Duration.saturating_add", 2, "time_duration_saturating_add"),
-            ("Duration.saturating_sub", 2, "time_duration_saturating_sub"),
-            ("Duration.subsec_nanos", 1, "time_duration_subsec_nanos"),
-            // Instant impl methods. `Instant` is a single-field
-            // `{nanos: Int}` record represented UNBOXED (the generic
-            // `add`/`sub` intercepts below make `Instant ± Duration`
-            // integer arithmetic), so these intrinsics operate on the raw
-            // nanos. `duration_since` returns `Maybe<Duration>` — its
-            // inline sequence (`InstantDurationSince`) builds the canonical
-            // `Maybe` variant directly (see `emit_inline_sequence`), it does
-            // NOT lower to a bare subtraction. Pinned by
-            // `core-tests/time/instant` §D.
-            ("Instant.now", 0, "time_instant_now"),
-            ("Instant.elapsed", 1, "time_instant_elapsed"),
-            ("Instant.duration_since", 2, "time_instant_duration_since"),
+            // Duration / Instant impl methods are NOT intercepted.
+            //
+            // HISTORY (§G single-field-record-unboxing family, closed
+            // 2026-07-09): `Duration.as_secs` / `from_millis` / … and
+            // `Instant.now` / `elapsed` / `duration_since` used to be
+            // aliased to `time_duration_*` / `time_instant_*` inline
+            // sequences that assumed the receiver register held the RAW
+            // nanos Int (single-field-record unboxed representation).
+            // Constructors compiled from the Verum bodies allocate a
+            // heap RECORD, so every intercepted accessor divided /
+            // compared the heap POINTER (e.g. `Duration.millis(1500)
+            // .as_secs()` returned `heap_addr / 1e9` ≈ 34).  Two
+            // representations of one type with partial interception is
+            // structurally incoherent; the Verum source bodies in
+            // `core/time/{duration,instant}.vr` are now the ONLY
+            // implementation surface on every tier.  A future
+            // transparent-newtype optimisation must be a typed,
+            // whole-path representation contract (construction, field
+            // access, method dispatch, pattern match), not a name-keyed
+            // alias table.  Pinned by
+            // `core-tests/time/duration/regression_test.vr §G` and
+            // `core-tests/time/instant/regression_test.vr`.
+            //
             // Free time functions
             ("monotonic_nanos", 0, "monotonic_nanos"),
             ("monotonic_micros", 0, "time_monotonic_micros"),
@@ -17004,6 +17001,15 @@ impl VbcCodegen {
             let mut idx: HashMap<String, Vec<(String, FunctionInfo)>> = HashMap::new();
             for (name, info) in self.ctx.functions.iter() {
                 if info.id.0 >= SENTINEL_THRESHOLD {
+                    continue;
+                }
+                // Dice-9 (ARCHIVE-SERIALIZE-DETERMINISM-1): `name#arity`
+                // MIRROR keys are lookup aliases, not identities — a stub
+                // minted under one leaked the alt spelling into the
+                // module string table (broadcast_channel#1 present in
+                // one bake, absent in the other, from byte 1842 on).
+                // Canonical identity = the bare/qualified key only.
+                if name.contains('#') {
                     continue;
                 }
                 let last_seg = match name.rfind('.') {
