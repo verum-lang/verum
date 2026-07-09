@@ -7261,10 +7261,39 @@ impl VbcCodegen {
                                             ..
                                         } = &item.kind
                                         {
-                                            Some((
-                                                name.name.to_string(),
-                                                self.resolve_field_type_ref(ty, &param_map),
-                                            ))
+                                            let inner_ref =
+                                                self.resolve_field_type_ref(ty, &param_map);
+                                            // `resolve_field_type_ref` STRIPS
+                                            // reference wrappers (its param-
+                                            // descriptor convention) — but an
+                                            // assoc binding's `&` is LOAD-
+                                            // BEARING: `type Item = &T;` must
+                                            // round-trip as `&T`, or every
+                                            // for-loop element / iterator-
+                                            // closure param resolved through
+                                            // the carried binding types as the
+                                            // VALUE and `*a` fails "Cannot
+                                            // dereference non-reference type"
+                                            // (the meta/span + meta/contexts
+                                            // property-suite regression
+                                            // shape).  Re-wrap from the AST —
+                                            // the #41 scalar-&-param pattern.
+                                            let tref = match &ty.kind {
+                                                verum_ast::ty::TypeKind::Reference {
+                                                    mutable,
+                                                    ..
+                                                } => crate::types::TypeRef::Reference {
+                                                    inner: Box::new(inner_ref),
+                                                    mutability: if *mutable {
+                                                        crate::types::Mutability::Mutable
+                                                    } else {
+                                                        crate::types::Mutability::Immutable
+                                                    },
+                                                    tier: crate::types::CbgrTier::Tier0,
+                                                },
+                                                _ => inner_ref,
+                                            };
+                                            Some((name.name.to_string(), tref))
                                         } else {
                                             None
                                         }
