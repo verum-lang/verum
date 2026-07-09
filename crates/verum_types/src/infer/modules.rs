@@ -19808,7 +19808,7 @@ impl TypeChecker {
         {
             // Check if this is a module path by recursively extracting path segments
             let module_segments = self.extract_module_path_from_field(inner_expr, inner_field);
-            if let Some(segments) = module_segments {
+            if let Some(segments) = &module_segments {
                 // Check if the first segment is an inline module
                 if self
                     .inline_modules
@@ -19831,48 +19831,145 @@ impl TypeChecker {
                         span,
                     };
 
-                    // Resolve through inline module - this will check visibility
-                    let func_result = self.resolve_inline_module_path(&module_path, span)?;
+                    // Resolve through inline module — NON-FATAL: the
+                    // inline-module tree covers only source-loaded
+                    // modules, so a miss here (Err) must fall through
+                    // to the global-registry / CoreMetadata arm below
+                    // rather than aborting the whole method-call
+                    // inference (pre-fix the `?` surfaced as
+                    // `unbound variable: core` for archive-loaded
+                    // stdlib paths whose ROOT happened to be an inline
+                    // module in this pipeline).
+                    match self.resolve_inline_module_path(&module_path, span) {
+                        Ok(func_result) => {
+                            // Never propagation: if resolution returned Never, propagate it
+                            if matches!(func_result.ty, Type::Never) {
+                                return Ok(Some(InferResult::new(Type::Never)));
+                            }
 
-                    // Never propagation: if resolution returned Never, propagate it
-                    if matches!(func_result.ty, Type::Never) {
-                        return Ok(Some(InferResult::new(Type::Never)));
+                            // The result should be a function type - call it with args
+                            if let Type::Function {
+                                params,
+                                return_type,
+                                ..
+                            } = &func_result.ty
+                            {
+                                // Check argument count
+                                // Allow ±1 tolerance for self-param counting inconsistencies
+                                // and default parameter handling in method resolution
+                                if args.len() > params.len() + 1
+                                    || (args.len() + 1 < params.len() && params.len() > 1)
+                                {
+                                    return Err(TypeError::WrongArgCount {
+                                        method: method.name.clone(),
+                                        expected: params.len(),
+                                        actual: args.len(),
+                                        span,
+                                    });
+                                }
+
+                                // Type check each argument
+                                for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                    let resolved_param = self.unifier.apply(param_ty);
+                                    self.check_expr(arg, &resolved_param)?;
+                                }
+
+                                let resolved_return = self.unifier.apply(return_type);
+                                return Ok(Some(InferResult::new(resolved_return)));
+                            }
+                            // Non-function resolution: fall through to
+                            // the global-registry arm below.
+                        }
+                        Err(_) => {
+                            // Miss — fall through to the global-registry arm.
+                        }
                     }
+                }
+            }
 
-                    // The result should be a function type - call it with args
-                    if let Type::Function {
-                        params,
-                        return_type,
-                        ..
-                    } = &func_result.ty
-                    {
-                        // Check argument count
-                        // Allow ±1 tolerance for self-param counting inconsistencies
-                        // and default parameter handling in method resolution
-                        if args.len() > params.len() + 1
-                            || (args.len() + 1 < params.len() && params.len() > 1)
-                        {
-                            return Err(TypeError::WrongArgCount {
-                                method: method.name.clone(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
-                        }
-
-                        // Type check each argument
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(Some(InferResult::new(resolved_return)));
-                    } else {
-                        return Err(TypeError::NotAFunction {
-                            ty: format!("{}", func_result.ty).into(),
-                            span,
+            // Fully-qualified module-path call through the GLOBAL
+            // registry: `core.time.duration_parse.parse(x)`.  The script
+            // and test pipelines load the stdlib from the archive, so
+            // `core` is NOT an inline module and the arm above never
+            // fires — pre-fix the receiver chain fell through to
+            // synth_expr and died with `unbound variable: core`.
+            // Archive loading registers functions under their dotted
+            // module form, in places with the `core.` root stripped
+            // (see `archive_ctx_loader::register_module`), so probe
+            // progressively-stripped prefixes, most-qualified first.
+            // Guarded on the base segment NOT being a bound value, so a
+            // genuine field chain (`self.cfg.parser.parse(...)`) is
+            // never hijacked.
+            if let Some(segments) = &module_segments
+                && segments.len() >= 2
+            {
+                let base_bound = self.ctx.env.lookup(segments[0]).is_some();
+                if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
+                    eprintln!(
+                        "[qualpath] segments={:?} base_bound={} meta={}",
+                        segments,
+                        base_bound,
+                        self.core_metadata().is_some()
+                    );
+                }
+                if base_bound {
+                    // A genuine value binding shadows module-path
+                    // interpretation (`self.cfg.parser.parse(...)`
+                    // class) — leave it to ordinary field inference.
+                    return Ok(None);
+                }
+                let joined = segments.join(".");
+                let mut candidates: Vec<String> =
+                    vec![format!("{}.{}", joined, method.name)];
+                let mut rest = joined.as_str();
+                while let Some((_, tail)) = rest.split_once('.') {
+                    candidates.push(format!("{}.{}", tail, method.name));
+                    rest = tail;
+                }
+                for cand in &candidates {
+                    let scheme = self
+                        .ctx
+                        .env
+                        .lookup(cand.as_str())
+                        .cloned()
+                        .or_else(|| {
+                            if let Maybe::Some(s) = self.lookup_function_in_module(cand.as_str()) {
+                                Some(s)
+                            } else {
+                                None
+                            }
+                        })
+                        .or_else(|| {
+                            // CoreMetadata carries module-qualified
+                            // free-fn descriptors (keys like
+                            // `core.time.duration_parse.parse`) that
+                            // are never eagerly registered in env —
+                            // resolve them lazily here.
+                            self.core_metadata().and_then(|meta| {
+                                meta.functions
+                                    .get(&verum_common::Text::from(cand.as_str()))
+                                    .map(Self::scheme_from_function_descriptor)
+                            })
                         });
+                    if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
+                        eprintln!("[qualpath]   cand={} hit={}", cand, scheme.is_some());
+                    }
+                    if let Some(scheme) = scheme {
+                        let func_type = self.unifier.apply(&scheme.instantiate());
+                        if let Type::Function {
+                            params,
+                            return_type,
+                            ..
+                        } = &func_type
+                            && params.len() == args.len()
+                        {
+                            for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                let resolved_param = self.unifier.apply(param_ty);
+                                self.check_expr(arg, &resolved_param)?;
+                            }
+                            let resolved_return = self.unifier.apply(return_type);
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
                     }
                 }
             }

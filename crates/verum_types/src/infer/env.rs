@@ -276,49 +276,54 @@ impl TypeChecker {
             if self.ctx.env.lookup(qualified_name.as_str()).is_some() {
                 continue;
             }
-            // Build function type from descriptor params + return.
-            // Skip `self` receiver when present.
-            let to_type =
-                |s: &verum_common::Text| -> crate::ty::Type {
-                    crate::infer::helpers::parse_descriptor_type_string(s.as_str())
-                };
-            // Parse params AND return under ONE generic-var scope so a param
-            // `F` and a projection `F.Output` in the return share one TypeVar.
-            let (params, return_ty): (verum_common::List<crate::ty::Type>, crate::ty::Type) =
-                crate::infer::helpers::with_generic_var_scope(|| {
-                    let params: verum_common::List<crate::ty::Type> = fd
-                        .params
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, p)| {
-                            if i == 0 && p.name.as_str() == "self" {
-                                None
-                            } else {
-                                Some(to_type(&p.ty))
-                            }
-                        })
-                        .collect();
-                    let return_ty = to_type(&fd.return_type);
-                    (params, return_ty)
-                });
-            let fn_ty = crate::ty::Type::function(params, return_ty);
-            // Wrap in poly scheme so generic params get fresh
-            // instantiation at each call site (same rationale as
-            // inherent_methods registration).
-            let scheme = {
-                use crate::dependent_helpers::collect_type_vars;
-                let vars = collect_type_vars(&fn_ty);
-                if vars.is_empty() {
-                    crate::context::TypeScheme::mono(fn_ty)
-                } else {
-                    let var_list: verum_common::List<crate::ty::TypeVar> =
-                        vars.iter().copied().collect();
-                    crate::context::TypeScheme::poly(var_list, fn_ty)
-                }
-            };
+            let scheme = Self::scheme_from_function_descriptor(fd);
             self.ctx
                 .env
                 .insert(verum_common::Text::from(qualified_name.as_str()), scheme);
+        }
+    }
+
+    /// Build a callable [`TypeScheme`] from a metadata
+    /// [`FunctionDescriptor`]: parse params (skipping a leading
+    /// `self` receiver) and the return type under ONE generic-var
+    /// scope (so a param `F` and a projection `F.Output` share one
+    /// TypeVar), then wrap in a poly scheme when type vars are
+    /// present so each call site instantiates fresh.  Shared by the
+    /// eager `<Type>.<method>` registration above and the lazy
+    /// fully-qualified module-path call resolution
+    /// (`modules.rs::try_resolve_module_call`).
+    pub(super) fn scheme_from_function_descriptor(
+        fd: &crate::core_metadata::FunctionDescriptor,
+    ) -> crate::context::TypeScheme {
+        let to_type = |s: &verum_common::Text| -> crate::ty::Type {
+            crate::infer::helpers::parse_descriptor_type_string(s.as_str())
+        };
+        let (params, return_ty): (verum_common::List<crate::ty::Type>, crate::ty::Type) =
+            crate::infer::helpers::with_generic_var_scope(|| {
+                let params: verum_common::List<crate::ty::Type> = fd
+                    .params
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, p)| {
+                        if i == 0 && p.name.as_str() == "self" {
+                            None
+                        } else {
+                            Some(to_type(&p.ty))
+                        }
+                    })
+                    .collect();
+                let return_ty = to_type(&fd.return_type);
+                (params, return_ty)
+            });
+        let fn_ty = crate::ty::Type::function(params, return_ty);
+        use crate::dependent_helpers::collect_type_vars;
+        let vars = collect_type_vars(&fn_ty);
+        if vars.is_empty() {
+            crate::context::TypeScheme::mono(fn_ty)
+        } else {
+            let var_list: verum_common::List<crate::ty::TypeVar> =
+                vars.iter().copied().collect();
+            crate::context::TypeScheme::poly(var_list, fn_ty)
         }
     }
 
@@ -10650,6 +10655,49 @@ impl TypeChecker {
     /// ARCHITECTURAL RULE: This function MUST NOT contain hardcoded knowledge
     /// of stdlib types like Duration, Time, Text, etc. All operator behavior
     /// is discovered through protocol implementations.
+
+    /// VBC-MIXED-ARITH-SILENT-NAN-1: mixed Int/Float arithmetic has NO
+    /// coercion in Verum (semantic honesty — no hidden magic); the
+    /// runtime produced a silent NaN (release) or panicked (debug), so
+    /// no working code can depend on it. Reject with a directed fix.
+    /// Int LITERALS still adapt to a Float context via the existing
+    /// literal-coercion (1.0 + 2 stays legal); only non-literal mixes
+    /// are errors.
+    fn reject_mixed_numeric(
+        &mut self,
+        left_ty: &Type,
+        right: &verum_ast::Expr,
+        op_name: &str,
+        span: verum_ast::Span,
+    ) -> Result<Option<InferResult>> {
+        let right_is_int_literal = matches!(&right.kind, ExprKind::Literal(lit)
+            if matches!(lit.kind, verum_ast::literal::LiteralKind::Int(_)));
+        if right_is_int_literal {
+            return Ok(None);
+        }
+        let right_result = self.synth_expr(right)?;
+        let right_ty = Self::deref_for_binop(&right_result.ty);
+        let mixed = matches!(
+            (left_ty, &right_ty),
+            (Type::Int, Type::Float) | (Type::Float, Type::Int)
+        );
+        if mixed {
+            return Err(TypeError::OtherWithCode {
+                code: verum_common::Text::from("E402"),
+                msg: verum_common::Text::from(format!(
+                    "mixed Int/Float arithmetic: '{}' requires both operands \
+of the same numeric type (no implicit coercion) — convert explicitly \
+with .to_float() or .to_int() (at {:?})",
+                    op_name, span
+                )),
+            });
+        }
+        // Right already synthesized and compatible-or-unifiable: unify
+        // instead of re-checking (avoids double side effects).
+        self.unifier.unify(left_ty, &right_ty, span)?;
+        Ok(Some(InferResult::new(left_ty.clone())))
+    }
+
     pub(super) fn infer_binop(
         &mut self,
         op: BinOp,
@@ -10673,7 +10721,16 @@ impl TypeChecker {
 
                 // First handle primitive types efficiently
                 match left_ty {
-                    Type::Int | Type::Float | Type::Text => {
+                    Type::Text => {
+                        self.check_expr(right, left_ty)?;
+                        return Ok(InferResult::new(left_ty.clone()));
+                    }
+                    Type::Int | Type::Float => {
+                        if let Some(r) =
+                            self.reject_mixed_numeric(left_ty, right, "+", _span)?
+                        {
+                            return Ok(r);
+                        }
                         self.check_expr(right, left_ty)?;
                         return Ok(InferResult::new(left_ty.clone()));
                     }
@@ -10725,6 +10782,11 @@ impl TypeChecker {
                 // First handle primitive types efficiently
                 match left_ty {
                     Type::Int | Type::Float => {
+                        if let Some(r) = self.reject_mixed_numeric(
+                            left_ty, right, "*//%", _span,
+                        )? {
+                            return Ok(r);
+                        }
                         self.check_expr(right, left_ty)?;
                         return Ok(InferResult::new(left_ty.clone()));
                     }
