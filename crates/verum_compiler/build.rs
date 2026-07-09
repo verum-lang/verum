@@ -1404,6 +1404,16 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         "crates/verum_vbc/src/intrinsics/lowering.rs",
         "crates/verum_vbc/src/codegen/expressions.rs",
         "crates/verum_vbc/src/codegen/statements.rs",
+        // `well_known_types.rs` owns `has_runtime_inline_dispatch` —
+        // the predicate that decides whether codegen DEVIRTUALISES a
+        // method call to a static `Call` or keeps it on `CallM` for the
+        // runtime intercepts.  That decision is baked into every
+        // archive-compiled stdlib body (e.g. whether
+        // `FieldInfo.has_attribute` calls `ListIter.any` statically or
+        // via CallM — LISTITER-DEVIRT-NEXT-1), so a change here MUST
+        // invalidate the precompiled `runtime.vbca` like the other
+        // codegen sources do.
+        "crates/verum_common/src/well_known_types.rs",
         // `mod.rs` carries the function-registration / TypeRef-resolution
         // logic (`register_function`, `register_impl_function`,
         // `resolve_field_type_ref`, …) — changes here affect what
