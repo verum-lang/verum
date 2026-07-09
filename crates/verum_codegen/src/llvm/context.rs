@@ -2111,32 +2111,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                     // alloca's uniform type so mem2reg can promote it.
                     // The corresponding load_register coerces back to
                     // ptr via `inttoptr` if the consumer needs ptr.
-                    // **UNIFORM-I64-SLOT-1 (2026-07-09, non-mono leg of
-                    // 47385396d)**: NEVER create a ptr-typed register
-                    // slot.  The former "ptr era" allocas (`r{N}_ptr`)
-                    // interacted with the IntValue arm's era-recreate
-                    // below to ORPHAN values across basic blocks: in
-                    //   match m { Some(v) => Result.Ok(v),
-                    //             None    => Result.Err(-1) }
-                    // the Ok arm stored the result variant into
-                    // `%r1_ptr` (ptr era), the Err arm's `Mov r1←r3`
-                    // arrived as an i64 (r3's slot was already uniform
-                    // i64 holding ptr bits) which flipped r1 to a FRESH
-                    // `%r1_i64` — and the merge block loaded `%r1_i64`,
-                    // UNINITIALIZED on the Ok path.  The function then
-                    // returned stale stack that happened to alias the
-                    // Maybe argument, whose Some-tag equals Result's
-                    // Err-tag — every expression-bodied
-                    // `Maybe→Result` mapper (stdlib `ok_or` included)
-                    // silently produced Err/zeroed values at AOT
-                    // (probe_mres2.vr; AOT duration_parse/cron parser
-                    // epidemic).
-                    //
-                    // ONE i64 slot per register for the whole function:
-                    // pointers are stored ptrtoint'd; every consumer
-                    // already coerces on demand (`as_ptr` handles
-                    // IntValue via inttoptr).  Mem2reg promotability is
-                    // preserved (single uniform type per slot).
+                    let ptr_type = self.types.ptr_type();
                     if let Some(&existing_ptr) = self.alloca_registers.get(&reg) {
                         let existing_ty = self
                             .alloca_register_types
@@ -2144,13 +2119,11 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                             .copied()
                             .unwrap_or(BasicTypeEnum::IntType(i64_ty));
                         if matches!(existing_ty, BasicTypeEnum::PointerType(_)) {
-                            // Legacy ptr-typed alloca (e.g. created by a
-                            // param-materialisation path) — store the
-                            // pointer directly, keeping that slot's
-                            // uniform type.
+                            // Alloca is already ptr-typed — store directly.
                             let _ = self.builder.build_store(existing_ptr, v);
                         } else {
-                            // Uniform i64 slot — coerce ptr to i64.
+                            // Type conflict — coerce ptr to i64 and store
+                            // into the existing i64-typed alloca.
                             let v_i64 = self
                                 .builder
                                 .build_ptr_to_int(
@@ -2160,35 +2133,38 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                                 )
                                 .expect("ptrtoint should not fail");
                             let _ = self.builder.build_store(existing_ptr, v_i64);
+                            // Don't update alloca_register_types — it
+                            // stays at its uniform i64 to preserve
+                            // mem2reg promotability.
+                            return;
                         }
-                        return;
-                    }
-                    // First use — create the UNIFORM i64 slot and store
-                    // the pointer ptrtoint'd.
-                    let entry = self
-                        .function
-                        .get_first_basic_block()
-                        .expect("function must have entry block");
-                    let saved_block = self.builder.get_insert_block();
-                    if let Some(first_instr) = entry.get_first_instruction() {
-                        self.builder.position_before(&first_instr);
                     } else {
-                        self.builder.position_at_end(entry);
+                        let entry = self
+                            .function
+                            .get_first_basic_block()
+                            .expect("function must have entry block");
+                        let saved_block = self.builder.get_insert_block();
+                        if let Some(first_instr) = entry.get_first_instruction() {
+                            self.builder.position_before(&first_instr);
+                        } else {
+                            self.builder.position_at_end(entry);
+                        }
+                        let alloca = self
+                            .builder
+                            .build_alloca(
+                                BasicTypeEnum::PointerType(ptr_type),
+                                &format!("r{}_ptr", reg),
+                            )
+                            .expect("alloca should not fail");
+                        if let Some(block) = saved_block {
+                            self.builder.position_at_end(block);
+                        }
+                        self.alloca_registers.insert(reg, alloca);
+                        self.alloca_register_types.insert(reg, ptr_type.into());
+                        let _ = self.builder.build_store(alloca, v);
                     }
-                    let alloca = self
-                        .builder
-                        .build_alloca(BasicTypeEnum::IntType(i64_ty), &format!("r{}_slot", reg))
-                        .expect("alloca should not fail");
-                    if let Some(block) = saved_block {
-                        self.builder.position_at_end(block);
-                    }
-                    self.alloca_registers.insert(reg, alloca);
-                    self.alloca_register_types.insert(reg, i64_ty.into());
-                    let v_i64 = self
-                        .builder
-                        .build_ptr_to_int(v, i64_ty, &format!("r{}_ptr_to_i64", reg))
-                        .expect("ptrtoint should not fail");
-                    let _ = self.builder.build_store(alloca, v_i64);
+                    self.alloca_register_types
+                        .insert(reg, BasicTypeEnum::PointerType(ptr_type));
                     return;
                 }
                 BasicValueEnum::FloatValue(v) => {
