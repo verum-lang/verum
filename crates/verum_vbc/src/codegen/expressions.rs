@@ -1179,7 +1179,17 @@ impl VbcCodegen {
                 body,
                 return_type,
                 ..
-            } => self.compile_closure(params, body, return_type.as_ref()),
+            } => {
+                // Span key identifies this exact closure node so it can
+                // claim pending adapter element-type hints
+                // (REFL-CLOSURE-XREC-1); degenerate spans never claim.
+                let hint_key = if expr.span.start == 0 && expr.span.end == 0 {
+                    None
+                } else {
+                    Some(((expr.span.start as u64) << 32) | (expr.span.end as u64))
+                };
+                self.compile_closure(params, body, return_type.as_ref(), hint_key)
+            }
 
             // === Optional chaining: obj?.field ===
             ExprKind::OptionalChain { expr: base, field } => {
@@ -1777,7 +1787,7 @@ impl VbcCodegen {
                                 },
                                 sp,
                             );
-                            return self.compile_closure(&params, &body, None);
+                            return self.compile_closure(&params, &body, None, None);
                         }
                     }
 
@@ -7983,6 +7993,25 @@ impl VbcCodegen {
         args: &verum_common::List<Expr>,
         resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
     ) -> CodegenResult<Option<Reg>> {
+        // ──────────────────────────────────────────────────────────
+        // REFL-CLOSURE-XREC-1 (runtime leg): iterator-adapter calls with a
+        // closure argument stash span-keyed element-type hints derived from
+        // the receiver ONCE, up front — every downstream branch
+        // (pre-resolved static path, CallM cascade, builtin intercepts)
+        // funnels the closure arg through `compile_expr` →
+        // `compile_closure`, which claims the hints iff the span key
+        // matches that exact closure node. Mirrors the for-loop binder
+        // typing in `compile_for` (`for r in xs.iter() { r.hot }`), fixing
+        // `xs.iter().map(|p| p.x)` closure params falling to
+        // `resolve_field_index`'s global-intern fallback (wrong offsets →
+        // runtime "field access out of bounds").
+        for arg in args.iter() {
+            if matches!(arg.kind, ExprKind::Closure { .. }) {
+                self.set_adapter_closure_param_hints(receiver, method.name.as_str(), arg);
+                break;
+            }
+        }
+
         // ──────────────────────────────────────────────────────────
         // **Phase 0a — chained `<TypeName>.<Variant>.<method>()` materialisation.**
         //
@@ -22681,6 +22710,189 @@ impl VbcCodegen {
 
     // ==================== Closure ====================
 
+    /// REFL-CLOSURE-XREC-1 (runtime leg): for a known iterator-adapter
+    /// method, returns which USER params of its closure argument carry the
+    /// receiver's ELEMENT type. `None` = not an adapter (no hint).
+    ///
+    /// Mirrors the shape families:
+    ///   * `|elem| ...`            → element at position 0
+    ///   * `|acc, elem| ...`       → element at position 1 (fold/scan)
+    ///   * `|elem_a, elem_b| ...`  → elements at 0 and 1 (reduce/sort_by/...)
+    fn adapter_closure_elem_param_positions(method: &str) -> Option<&'static [usize]> {
+        match method {
+            "map" | "filter" | "any" | "all" | "find" | "position" | "for_each"
+            | "flat_map" | "filter_map" | "find_map" | "map_while" | "take_while"
+            | "skip_while" | "inspect" | "partition" | "max_by_key" | "min_by_key"
+            | "sort_by_key" | "retain" => Some(&[0]),
+            "fold" | "try_fold" | "scan" => Some(&[1]),
+            "reduce" | "sort_by" | "max_by" | "min_by" | "dedup_by" => Some(&[0, 1]),
+            _ => None,
+        }
+    }
+
+    /// REFL-CLOSURE-XREC-1 (runtime leg): derive the ELEMENT type name of
+    /// an iterator-adapter receiver, mirroring the for-loop binder typing
+    /// in `compile_for` (`for r in xs.iter() { r.hot }` works because the
+    /// binder is typed from the container's element).
+    ///
+    /// `xs.iter().map(...)` / `.iter_mut()` / `.into_iter()` hop to the
+    /// CONTAINER (`xs`) exactly as `compile_for` does — and the hop loops
+    /// through element-PRESERVING adapter links (`filter` / `take_while` /
+    /// `skip_while` / `inspect` / `take` / `skip` / `rev` / `step_by` /
+    /// `fuse` / `cycle` / `peekable` / `cloned` / `copied` / `dedup`), so
+    /// `xs.iter().filter(…).map(|p| p.x)` still reaches `xs`. A direct
+    /// container receiver (`xs.retain(...)`) resolves as-is. The element
+    /// is then:
+    ///   * `[T; N]` / `[T]` (after `&`-stripping)             → `T`
+    ///   * `List<T>` / `Set<T>` / `Deque<T>` / `BinaryHeap<T>`
+    ///     / `BTreeSet<T>` / `Array<T>`                       → `T`
+    ///   * iterator wrappers `SliceIter<T>` / `ListIter<T>`
+    ///     / `ListIterMut<T>` / `SetIter<T>` / `DequeIter<T>` → `T`
+    ///
+    /// Returns `Some` only when the element resolves to a REGISTERED
+    /// RECORD (via `record_key_is_authoritative`, generic args stripped) —
+    /// the exact case where local field-index resolution applies. Every
+    /// other shape (primitives, type params, sum types, unknown,
+    /// element-CHANGING upstream adapters like `map`/`enumerate`/`zip`)
+    /// fails open to today's behavior (global intern + warn).
+    fn adapter_receiver_element_type(&self, receiver: &Expr) -> Option<String> {
+        // Hop `container.iter()`-family receivers to the container itself
+        // (mirroring `compile_for`'s `container_for_element`), walking
+        // through element-preserving adapter links on the way.
+        let mut container: &Expr = receiver;
+        loop {
+            match &container.kind {
+                ExprKind::MethodCall {
+                    receiver: inner,
+                    method,
+                    ..
+                } if matches!(
+                    method.name.as_str(),
+                    "iter"
+                        | "iter_mut"
+                        | "into_iter"
+                        | "filter"
+                        | "take_while"
+                        | "skip_while"
+                        | "inspect"
+                        | "take"
+                        | "skip"
+                        | "rev"
+                        | "step_by"
+                        | "fuse"
+                        | "cycle"
+                        | "peekable"
+                        | "cloned"
+                        | "copied"
+                        | "dedup"
+                ) =>
+                {
+                    container = inner.as_ref();
+                }
+                _ => break,
+            }
+        }
+        let ty = self
+            .infer_expr_type_name(container)
+            .or_else(|| self.extract_expr_type_name(container))?;
+
+        // Strip reference wrappers (`&`, `&mut`, `&checked`, `&unsafe`).
+        let mut t: &str = ty.trim();
+        loop {
+            let stripped = t
+                .trim_start_matches("&mut ")
+                .trim_start_matches("&checked ")
+                .trim_start_matches("&unsafe ")
+                .trim_start_matches('&')
+                .trim_start();
+            if stripped == t {
+                break;
+            }
+            t = stripped;
+        }
+
+        // Slice / array shapes: `[T]`, `[T; N]`.
+        let elem = if let Some(inner) = t.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            let e = inner.split(';').next().unwrap_or(inner).trim();
+            if e.is_empty() {
+                return None;
+            }
+            e.to_string()
+        } else {
+            // Element-carrying generic containers and iterator wrappers
+            // (first type arg = element).
+            let base = t.split('<').next().unwrap_or(t);
+            if !matches!(
+                base,
+                "List"
+                    | "Set"
+                    | "Deque"
+                    | "BinaryHeap"
+                    | "BTreeSet"
+                    | "Array"
+                    | "SliceIter"
+                    | "ListIter"
+                    | "ListIterMut"
+                    | "SetIter"
+                    | "DequeIter"
+            ) {
+                return None;
+            }
+            self.extract_inner_types(t)
+                .first()
+                .cloned()
+                .filter(|s| !s.trim().is_empty())?
+        };
+
+        // Only hint elements that resolve to a registered record — the
+        // case local field-index resolution is FOR. Everything else keeps
+        // today's behavior.
+        let elem_base = elem.split('<').next().unwrap_or(&elem).trim();
+        if elem_base.is_empty() {
+            return None;
+        }
+        let authoritative = self.record_key_is_authoritative(elem_base)
+            || self
+                .resolve_record_type_key(elem_base)
+                .is_some_and(|q| self.record_key_is_authoritative(&q));
+        if !authoritative {
+            return None;
+        }
+        Some(elem)
+    }
+
+    /// REFL-CLOSURE-XREC-1 (runtime leg): if `arg` is a closure argument of
+    /// iterator-adapter `method` over `receiver`, stash span-keyed
+    /// element-type hints for the closure's element-carrying params in
+    /// `ctx.closure_param_type_hints`. Consumed by `compile_closure` iff
+    /// the dispatching closure node's span key matches `arg`'s — so the
+    /// hints can be set once at `compile_method_call` entry and reach the
+    /// closure through WHICHEVER compile branch (pre-resolved static,
+    /// CallM cascade, builtin intercept) eventually compiles it, without
+    /// ever mis-applying to a different closure.
+    fn set_adapter_closure_param_hints(&mut self, receiver: &Expr, method: &str, arg: &Expr) {
+        if !matches!(arg.kind, ExprKind::Closure { .. }) {
+            return;
+        }
+        // Degenerate spans (synthesized nodes) can't be used as identity.
+        if arg.span.start == 0 && arg.span.end == 0 {
+            return;
+        }
+        let Some(positions) = Self::adapter_closure_elem_param_positions(method) else {
+            return;
+        };
+        let Some(elem_ty) = self.adapter_receiver_element_type(receiver) else {
+            return;
+        };
+        let max = positions.iter().max().copied().unwrap_or(0);
+        let mut hints: Vec<Option<String>> = vec![None; max + 1];
+        for &p in positions {
+            hints[p] = Some(elem_ty.clone());
+        }
+        let key = ((arg.span.start as u64) << 32) | (arg.span.end as u64);
+        self.ctx.closure_param_type_hints = Some((key, hints));
+    }
+
     /// Compiles a closure expression.
     ///
 
@@ -22688,12 +22900,34 @@ impl VbcCodegen {
     /// 1. Analyzing the body to find free variables (variables referenced but not defined locally)
     /// 2. Compiling the closure body as a separate function with captures as first parameters
     /// 3. Emitting NewClosure instruction with the function ID and captured values
+    ///
+    /// `hint_key` is the dispatching closure NODE's span key
+    /// (`(span.start << 32) | span.end`) used to claim pending
+    /// adapter-element param hints (REFL-CLOSURE-XREC-1) — `None` for
+    /// synthesized closures, which never claim hints.
     pub(crate) fn compile_closure(
         &mut self,
         params: &verum_common::List<verum_ast::ClosureParam>,
         body: &Expr,
         return_type: Option<&verum_ast::ty::Type>,
+        hint_key: Option<u64>,
     ) -> CodegenResult<Option<Reg>> {
+        // REFL-CLOSURE-XREC-1 (runtime leg): claim the pending adapter
+        // element-type hints IFF they were derived for exactly this
+        // closure node. Unmatched entries stay pending (they belong to an
+        // enclosing adapter call whose closure arg compiles later).
+        let claim_hints = matches!(
+            (hint_key, self.ctx.closure_param_type_hints.as_ref()),
+            (Some(key), Some((pending_key, _))) if *pending_key == key
+        );
+        let elem_hints: Option<Vec<Option<String>>> = if claim_hints {
+            self.ctx
+                .closure_param_type_hints
+                .take()
+                .map(|(_, hints)| hints)
+        } else {
+            None
+        };
         // Step 1: Extract parameter info for the closure
         // For simple ident patterns, use the name directly
         // For complex patterns (tuple, etc.), generate synthetic names
@@ -22807,6 +23041,7 @@ impl VbcCodegen {
             &complex_patterns,
             body,
             return_type,
+            elem_hints.as_deref(),
         )?;
 
         // Step 5: Emit NewClosure instruction
@@ -22901,6 +23136,7 @@ impl VbcCodegen {
         complex_patterns: &[(usize, &verum_ast::Pattern)],
         body: &Expr,
         return_type_ast: Option<&verum_ast::ty::Type>,
+        elem_hints: Option<&[Option<String>]>,
     ) -> CodegenResult<u32> {
         // Generate unique name for closure function
         let closure_name = format!(
@@ -22980,6 +23216,34 @@ impl VbcCodegen {
                 }
             }
             let _ = i;
+        }
+
+        // REFL-CLOSURE-XREC-1 (runtime leg): type the adapter-closure's
+        // element-carrying params from the receiver's element type — the
+        // same `variable_type_names` channel the for-loop binder uses
+        // (`compile_for`) — so field accesses in the body (`p.x`) resolve
+        // LOCAL field indices instead of falling through
+        // `resolve_field_index(None, …)` to the GLOBAL intern table, whose
+        // index is not positional (runtime "field access out of bounds …
+        // exceeds object data size"). Hints were claimed span-exactly in
+        // `compile_closure`; explicit AST annotations and complex
+        // (destructuring) patterns are left to their existing paths.
+        if let Some(hints) = elem_hints {
+            for (i, hint) in hints.iter().enumerate() {
+                let Some(elem_ty) = hint else { continue };
+                if param_type_names.get(i).is_some_and(|t| t.is_some()) {
+                    continue;
+                }
+                if complex_patterns.iter().any(|(idx, _)| *idx == i) {
+                    continue;
+                }
+                let Some(pname) = params.get(i) else { continue };
+                self.ctx
+                    .variable_type_names
+                    .insert(pname.clone(), elem_ty.clone());
+                let var_type = self.type_name_to_var_type(elem_ty);
+                self.ctx.register_variable_type(pname, var_type);
+            }
         }
 
         // Pin `current_return_type_name` to the closure's declared return
