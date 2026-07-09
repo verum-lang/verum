@@ -189,6 +189,12 @@ impl VbcEscapeAnalyzer {
                     let tier = self.decide_tier(dst.0, src.0, &provenance, &escaping);
                     results.push((offset, tier));
                 }
+                // Typed reference splits (Pillar 1): same escape/tier rules
+                // as the untyped RefMut they were emitted in place of.
+                Instruction::RefLocal { dst, src } | Instruction::RefObj { dst, src } => {
+                    let tier = self.decide_tier(dst.0, src.0, &provenance, &escaping);
+                    results.push((offset, tier));
+                }
                 _ => {}
             }
         }
@@ -308,9 +314,13 @@ impl VbcEscapeAnalyzer {
                     provenance.insert(dst.0, RegisterProvenance::Unknown);
                 }
 
-                // Ref/RefMut: the destination is a reference (not a value).
-                // Mark as Unknown so references-to-references stay conservative.
-                Instruction::Ref { dst, .. } | Instruction::RefMut { dst, .. } => {
+                // Ref/RefMut (and the Pillar-1 typed splits): the destination
+                // is a reference (not a value).  Mark as Unknown so
+                // references-to-references stay conservative.
+                Instruction::Ref { dst, .. }
+                | Instruction::RefMut { dst, .. }
+                | Instruction::RefLocal { dst, .. }
+                | Instruction::RefObj { dst, .. } => {
                     provenance.insert(dst.0, RegisterProvenance::Unknown);
                 }
 

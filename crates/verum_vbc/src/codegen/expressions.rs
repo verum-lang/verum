@@ -84,6 +84,17 @@ fn resolve_numeric_type_alias(type_name: &str) -> Option<&'static str> {
     }
 }
 
+/// Pillar 1 (typed references) emission gate.
+///
+/// Typed reference opcodes (`RefObj` for statically-known heap-object
+/// referents) are emitted unless the kill-switch env `VERUM_NO_TYPED_REFS`
+/// is set, which falls back to the untyped `RefMut` emission for one
+/// release (docs/architecture/tier-coherence-pillars.md, Pillar 1
+/// migration step 4).
+pub(crate) fn typed_refs_enabled() -> bool {
+    std::env::var_os("VERUM_NO_TYPED_REFS").is_none()
+}
+
 /// Resolve compile-time static constants for primitive types.
 /// Returns the constant value as i128 for TypeName.CONSTANT() calls.
 /// Compile-time type property value.
@@ -10800,12 +10811,31 @@ impl VbcCodegen {
         let actual_receiver =
             if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
                 if func_info.takes_self_mut_ref {
-                    // Create a mutable reference to the receiver
+                    // Create a mutable reference to the receiver.
+                    //
+                    // Pillar 1 (typed refs): when the receiver register is a
+                    // ref-typed OBJECT param (`f: &mut Formatter` — the
+                    // body-side Display leg: `f.write_str(s)` inside
+                    // `fmt(&self, f)` re-refs the param), the referent class
+                    // is statically known — emit the typed `RefObj` so
+                    // Tier-1 passes the object pointer through BY OPCODE
+                    // instead of re-guessing via the heuristic mark family
+                    // (the archived-body re-ref lowered as an ALLOCA
+                    // address, so write_str received fmt's stack and every
+                    // AOT Display interpolation printed "").  Tier-0
+                    // executes RefObj on the RefMut path unchanged.
                     let ref_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::RefMut {
-                        dst: ref_reg,
-                        src: receiver_reg,
-                    });
+                    if typed_refs_enabled() && self.ctx.is_object_ref_param_reg(receiver_reg.0) {
+                        self.ctx.emit(Instruction::RefObj {
+                            dst: ref_reg,
+                            src: receiver_reg,
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::RefMut {
+                            dst: ref_reg,
+                            src: receiver_reg,
+                        });
+                    }
                     // The original receiver_reg will be freed below, but ref_reg is the actual receiver
                     ref_reg
                 } else {
@@ -11915,10 +11945,21 @@ impl VbcCodegen {
                 // `cbgr.rs:273` already decodes CBGR refs correctly.
                 let wrapped = if i == 0 && func_info.takes_self_mut_ref {
                     let ref_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::RefMut {
-                        dst: ref_reg,
-                        src: arg_val,
-                    });
+                    // Pillar 1 (typed refs): mirror the CallM-path receiver
+                    // wrapping — a ref-typed OBJECT param re-ref carries its
+                    // referent class in the opcode (RefObj = Tier-1 pointer
+                    // passthrough; Tier-0 unchanged on the RefMut path).
+                    if typed_refs_enabled() && self.ctx.is_object_ref_param_reg(arg_val.0) {
+                        self.ctx.emit(Instruction::RefObj {
+                            dst: ref_reg,
+                            src: arg_val,
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::RefMut {
+                            dst: ref_reg,
+                            src: arg_val,
+                        });
+                    }
                     self.ctx.free_temp(arg_val);
                     ref_reg
                 } else {
@@ -23588,9 +23629,22 @@ impl VbcCodegen {
 
         match tier {
             CbgrTier::Tier0 => {
-                // Standard managed reference with CBGR validation
+                // Standard managed reference with CBGR validation.
+                //
+                // Pillar 1 (typed refs): an explicit `&mut f` where `f` is a
+                // ref-typed OBJECT param is a re-ref of a reference — the
+                // referent class is statically known, so carry it in the
+                // opcode (RefObj = Tier-1 pointer passthrough; Tier-0
+                // executes the RefMut path unchanged).  The immutable arm
+                // stays untyped: RefObj maps to the MUTABLE CBGR encoding
+                // at Tier-0, so converting `Ref` would change capability
+                // semantics.
                 if is_mut {
-                    self.ctx.emit(Instruction::RefMut { dst, src });
+                    if typed_refs_enabled() && self.ctx.is_object_ref_param_reg(src.0) {
+                        self.ctx.emit(Instruction::RefObj { dst, src });
+                    } else {
+                        self.ctx.emit(Instruction::RefMut { dst, src });
+                    }
                 } else {
                     self.ctx.emit(Instruction::Ref { dst, src });
                 }
@@ -34477,6 +34531,16 @@ impl VbcCodegen {
             });
         }
 
+        // Pillar 1 (typed references): the referents of every ref this arm
+        // emits are STATICALLY KNOWN heap objects — `buf` is the Text.new()
+        // result (or the const-seed, which the sticky-hint heuristic also
+        // classified as object) and `formatter` is the Formatter record.
+        // Emit the typed `RefObj` so Tier-1 lowers a pointer passthrough BY
+        // OPCODE CONTRACT instead of re-guessing via the sticky-hint mark
+        // family; Tier-0 executes RefObj on the RefMut path unchanged.
+        // Kill-switch: VERUM_NO_TYPED_REFS=1 falls back to untyped RefMut.
+        let typed_refs = typed_refs_enabled();
+
         // Step 3: formatter = Formatter.new(&mut buf).  `Call` requires
         // args in a contiguous fresh-allocated block; we put the
         // `&mut buf` CBGR ref at slot 0.  (A direct-object pass was
@@ -34484,10 +34548,17 @@ impl VbcCodegen {
         // — both tiers went empty.  The AOT-side fix is in the RefMut
         // LOWERING: heap-ptr pass-through.)
         let new_arg_block = self.ctx.registers.alloc_fresh();
-        self.ctx.emit(Instruction::RefMut {
-            dst: new_arg_block,
-            src: buf_reg,
-        });
+        if typed_refs {
+            self.ctx.emit(Instruction::RefObj {
+                dst: new_arg_block,
+                src: buf_reg,
+            });
+        } else {
+            self.ctx.emit(Instruction::RefMut {
+                dst: new_arg_block,
+                src: buf_reg,
+            });
+        }
         let formatter_reg = self.ctx.alloc_temp();
         self.ctx.emit(Instruction::Call {
             dst: formatter_reg,
@@ -34540,10 +34611,17 @@ impl VbcCodegen {
                 dst: call_args_start,
                 src: expr_reg,
             });
-            self.ctx.emit(Instruction::RefMut {
-                dst: Reg(call_args_start.0 + 1),
-                src: formatter_reg,
-            });
+            if typed_refs {
+                self.ctx.emit(Instruction::RefObj {
+                    dst: Reg(call_args_start.0 + 1),
+                    src: formatter_reg,
+                });
+            } else {
+                self.ctx.emit(Instruction::RefMut {
+                    dst: Reg(call_args_start.0 + 1),
+                    src: formatter_reg,
+                });
+            }
             self.ctx.emit(Instruction::Call {
                 dst: fmt_result_reg,
                 func_id: fid,
@@ -34555,10 +34633,17 @@ impl VbcCodegen {
         } else {
             // Dynamic-call shape.
             let fmt_arg_reg = self.ctx.registers.alloc_fresh();
-            self.ctx.emit(Instruction::RefMut {
-                dst: fmt_arg_reg,
-                src: formatter_reg,
-            });
+            if typed_refs {
+                self.ctx.emit(Instruction::RefObj {
+                    dst: fmt_arg_reg,
+                    src: formatter_reg,
+                });
+            } else {
+                self.ctx.emit(Instruction::RefMut {
+                    dst: fmt_arg_reg,
+                    src: formatter_reg,
+                });
+            }
             let fmt_method_id = self.intern_string("fmt");
             self.ctx.emit(Instruction::CallM {
                 dst: fmt_result_reg,

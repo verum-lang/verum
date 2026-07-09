@@ -35,7 +35,16 @@ pub const VERSION_MAJOR: u16 = 2;
 /// `type Item = &T;` bindings (Pillar-3 increment 1 /
 /// ARRAY-ITER-CONCRETIZE-1).  Gated on minor >= 4 in the deserializer;
 /// pre-4 data decodes with empty bindings (the pre-carry behaviour).
-pub const VERSION_MINOR: u16 = 4;
+/// Version 2.5: additive typed-reference opcodes `RefLocal` (0x7A) and
+/// `RefObj` (0x7B) — Pillar 1 (tier-coherence-pillars.md).  The checker/VBC
+/// codegen carries the referent class (stack-local scalar slot vs heap
+/// object) instead of Tier-1 re-guessing it from per-register heuristic mark
+/// sets.  Tier-0 executes both via the existing RefMut handler (zero
+/// semantic change); Tier-1 lowers RefObj as pointer passthrough and
+/// RefLocal as alloca-address.  Old readers reject 2.5 modules via
+/// `is_version_compatible` (5 > VERSION_MINOR) — they cannot execute the
+/// new opcodes.  Emission kill-switch: VERUM_NO_TYPED_REFS=1.
+pub const VERSION_MINOR: u16 = 5;
 
 /// Size of VBC header in bytes.
 /// 4 (magic) + 2 + 2 (version) + 4 (flags) + 4 (name) +

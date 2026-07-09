@@ -245,6 +245,24 @@ pub struct CodegenContext {
     /// closure bodies alongside `variable_type_names`.
     pub reference_bindings: std::collections::HashSet<String>,
 
+    /// Parameter REGISTERS whose declared param type is a REFERENCE to a
+    /// statically-known HEAP OBJECT (`f: &mut Formatter`, `&self` on a
+    /// record impl, …) — Pillar 1 carried fact
+    /// (docs/architecture/tier-coherence-pillars.md).  A re-ref of such a
+    /// param (the `&mut self` receiver wrapping for `f.write_str(..)`, or
+    /// an explicit `&mut f`) emits the typed `RefObj` opcode instead of
+    /// untyped `RefMut`, so Tier-1 lowers a pointer passthrough BY OPCODE
+    /// CONTRACT instead of re-deriving object-ness from heuristic mark
+    /// sets.  Tier-0 executes RefObj on the RefMut path unchanged.
+    ///
+    /// Populated per-function at compile_function entry (param i ↔ register
+    /// i via `alloc_parameters`); cleared by `begin_function`; saved and
+    /// restored across closure bodies — closures re-use low register
+    /// indices for their own params, so inheriting the outer set would
+    /// mis-tag them (unlike the name-keyed `reference_bindings`, which IS
+    /// deliberately inherited for captured-variable deref semantics).
+    pub object_ref_param_regs: std::collections::HashSet<u16>,
+
     /// Snapshot of `variable_type_names` from the last compiled function body.
     /// Preserved across function boundaries so the playground can read bindings
     /// after compilation (the main map gets cleared between functions).
@@ -580,6 +598,9 @@ pub struct ClosureCompilationContext {
     pub variable_type_names: HashMap<String, String>,
     /// Saved reference-binding names (for the `*reference` Deref lowering).
     pub reference_bindings: std::collections::HashSet<String>,
+    /// Saved object-ref param registers (Pillar 1 typed-ref emission) —
+    /// register-keyed, so the closure body must NOT inherit them.
+    pub object_ref_param_regs: std::collections::HashSet<u16>,
 }
 
 /// Entry in the constant pool.
@@ -1200,6 +1221,7 @@ impl CodegenContext {
             constant_types: HashMap::new(),
             variable_type_names: HashMap::new(),
             reference_bindings: std::collections::HashSet::new(),
+            object_ref_param_regs: std::collections::HashSet::new(),
             last_function_variable_types: HashMap::new(),
             closure_param_type_hints: None,
             match_scrutinee_type: None,
@@ -1974,6 +1996,9 @@ impl CodegenContext {
             self.last_function_variable_types = self.variable_type_names.clone();
         }
         self.variable_type_names.clear();
+        // Pillar 1: register-keyed — must not leak across functions (and
+        // closures re-use low register indices for their own params).
+        self.object_ref_param_regs.clear();
         self.generic_type_params.clear();
         self.const_generic_params.clear();
         self.byte_array_vars.clear();
@@ -2034,6 +2059,19 @@ impl CodegenContext {
     /// mirroring `collect_debug_variables`.
     pub fn collect_register_type_hints(&self) -> Vec<(u16, String)> {
         self.registers.collect_type_hints()
+    }
+
+    /// Marks a parameter register whose declared type is a reference to a
+    /// statically-known heap object (Pillar 1 typed-ref emission).
+    pub fn mark_object_ref_param_reg(&mut self, reg: u16) {
+        self.object_ref_param_regs.insert(reg);
+    }
+
+    /// True when `reg` is a parameter register whose declared type is a
+    /// reference to a statically-known heap object — a re-ref of it emits
+    /// the typed `RefObj` opcode (Pillar 1).
+    pub fn is_object_ref_param_reg(&self, reg: u16) -> bool {
+        self.object_ref_param_regs.contains(&reg)
     }
 
     /// Atomically save+override the variant-disambiguation context
@@ -3037,6 +3075,7 @@ impl CodegenContext {
             defer_stack: self.defer_stack.clone(),
             variable_type_names: self.variable_type_names.clone(),
             reference_bindings: self.reference_bindings.clone(),
+            object_ref_param_regs: self.object_ref_param_regs.clone(),
         }
     }
 
@@ -3053,6 +3092,7 @@ impl CodegenContext {
         self.defer_stack = saved.defer_stack;
         self.variable_type_names = saved.variable_type_names;
         self.reference_bindings = saved.reference_bindings;
+        self.object_ref_param_regs = saved.object_ref_param_regs;
     }
 
     /// Looks up a function by qualified name (e.g., "module::function" or "Type::method").

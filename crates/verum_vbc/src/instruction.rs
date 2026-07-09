@@ -465,10 +465,18 @@ pub enum Opcode {
 
     /// Format: `[0x79] [sub_opcode:u8] [operands...]`
     TextExtended = 0x79,
-    /// Reserved CBGR.
-    Cbgr7A = 0x7A,
-    /// Reserved CBGR.
-    Cbgr7B = 0x7B,
+    /// Create mutable reference to a STACK-LOCAL SCALAR slot (typed split of
+    /// `RefMut` — Pillar 1, tier-coherence-pillars.md).  Emitted only when
+    /// the checker/codegen statically knows the referent is a scalar local.
+    /// Tier-0: identical CBGR register-ref semantics to `RefMut`.  Tier-1:
+    /// alloca-address semantics — no heap-type heuristics consulted.
+    RefLocal = 0x7A,
+    /// Create mutable reference carrying HEAP-OBJECT IDENTITY (typed split
+    /// of `RefMut` — Pillar 1).  Emitted only when the checker/codegen
+    /// statically knows the referent is a heap object (Text/List/record/…).
+    /// Tier-0: identical CBGR register-ref semantics to `RefMut`.  Tier-1:
+    /// pointer MOV (value passthrough) — no heap-type heuristics consulted.
+    RefObj = 0x7B,
     /// Reserved CBGR.
     Cbgr7C = 0x7C,
     /// Reserved CBGR.
@@ -11069,6 +11077,8 @@ impl Opcode {
             // CBGR (0x70-0x7F)
             Opcode::Ref => "REF",
             Opcode::RefMut => "REF_MUT",
+            Opcode::RefLocal => "REF_LOCAL",
+            Opcode::RefObj => "REF_OBJ",
             Opcode::Deref => "DEREF",
             Opcode::DerefMut => "DEREF_MUT",
             Opcode::ChkRef => "CHK_REF",
@@ -11803,6 +11813,26 @@ pub enum Instruction {
         /// Destination register for mutable reference.
         dst: Reg,
         /// Source value register.
+        src: Reg,
+    },
+    /// Create mutable reference to a stack-local scalar slot (typed split of
+    /// `RefMut` — Pillar 1).  Tier-0 executes the RefMut path unchanged;
+    /// Tier-1 lowers to the alloca-address semantics without consulting
+    /// heap-type heuristics.
+    RefLocal {
+        /// Destination register for the reference.
+        dst: Reg,
+        /// Source value register (statically known scalar local).
+        src: Reg,
+    },
+    /// Create mutable reference carrying heap-object identity (typed split
+    /// of `RefMut` — Pillar 1).  Tier-0 executes the RefMut path unchanged;
+    /// Tier-1 lowers to a pointer MOV (value passthrough) without consulting
+    /// heap-type heuristics.
+    RefObj {
+        /// Destination register for the reference.
+        dst: Reg,
+        /// Source value register (statically known heap object).
         src: Reg,
     },
     /// Dereference (read through reference).
@@ -15109,6 +15139,10 @@ mod tests {
         assert_eq!(Opcode::RefMut.to_byte(), 0x71);
         assert_eq!(Opcode::Deref.to_byte(), 0x72);
         assert_eq!(Opcode::ChkRef.to_byte(), 0x74);
+        // Typed reference splits (Pillar 1) — pinned to the reclaimed
+        // reserved CBGR bytes; format v2.4.
+        assert_eq!(Opcode::RefLocal.to_byte(), 0x7A);
+        assert_eq!(Opcode::RefObj.to_byte(), 0x7B);
 
         // Tensor (0xF0-0xFF) — Phase 4: 0xF0-0xF7 + 0xFE/0xFF reclaimed
         // (legacy TensorNew/Binop/Unop/Matmul/Reduce/Reshape/Transpose/
