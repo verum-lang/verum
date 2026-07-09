@@ -8992,7 +8992,8 @@ fn lower_call<'ctx>(
                 // resolve it to a concrete function in the module, so the call
                 // lowers through the normal path (and its name-intercept /
                 // get_or_declare_ ABI routing) instead of const-zero'ing.
-                let xmod_recovered = if func_id >= verum_vbc::module::XMOD_CALL_ID_BAND_BASE
+                let xmod_name: Option<&str> = if func_id
+                    >= verum_vbc::module::XMOD_CALL_ID_BAND_BASE
                     && func_id < 0x4000_0000
                 {
                     vbc_mod
@@ -9000,14 +9001,77 @@ fn lower_call<'ctx>(
                         .iter()
                         .find(|(fid, _)| fid.0 == func_id)
                         .and_then(|(_, sid)| vbc_mod.get_string(*sid))
-                        .and_then(|name| vbc_mod.find_function_by_name(name))
-                        .and_then(|fid| vbc_mod.get_function(fid))
                 } else {
                     None
                 };
+                let xmod_recovered = xmod_name
+                    .and_then(|name| vbc_mod.find_function_by_name(name))
+                    .and_then(|fid| vbc_mod.get_function(fid));
                 match xmod_recovered {
                     Some(d) => d,
                     None => {
+                        // XMOD Phase 2 (#38): the recovered callee is a BODYLESS
+                        // FFI extern pruned from the function table
+                        // (`find_function_by_name` → None): a libSystem symbol
+                        // declared in core/sys/*/libsystem.vr with no Verum body
+                        // (os_munmap→munmap, __platform_fd_close→close,
+                        // Child.read_stdout→read, sleep_ms→nanosleep,
+                        // ReadDir.drop→closedir). Such a symbol can only be
+                        // resolved by NAME to the native C symbol. Route the
+                        // last path segment through the canonical
+                        // syscall-registry ABI (`POSIX_SYSCALLS`) — the same
+                        // source of truth `predeclare_all` seeds — and emit the
+                        // call directly, instead of degrading to a wrong-result
+                        // const-zero stub.
+                        if let Some(qname) = xmod_name {
+                            let c_name = qname.rsplit('.').next().unwrap_or(qname);
+                            if let Some(sig) = super::syscall_registry::lookup_sig(c_name)
+                                && sig.args.len() == args.count as usize
+                                && let Some(cfn) = super::syscall_registry::get_or_declare(
+                                    ctx.get_module(),
+                                    ctx.llvm_context(),
+                                    c_name,
+                                )
+                            {
+                                let mut call_args: Vec<BasicMetadataValueEnum> =
+                                    Vec::with_capacity(sig.args.len());
+                                for (i, abi) in sig.args.iter().enumerate() {
+                                    let raw = ctx.get_register(args.start.0 + i as u16)?;
+                                    match abi {
+                                        super::syscall_registry::AbiTy::Ptr => {
+                                            call_args.push(
+                                                as_ptr(ctx, raw, "xmod_arg_ptr")?.into(),
+                                            );
+                                        }
+                                        _ => {
+                                            call_args.push(
+                                                as_i64(ctx, raw, "xmod_arg_i64")?.into(),
+                                            );
+                                        }
+                                    }
+                                }
+                                let raw_ret = ctx
+                                    .builder()
+                                    .build_call(cfn, &call_args, "xmod_posix_call")
+                                    .or_llvm_err()?
+                                    .basic_value_or("xmod posix call: expected return value")?;
+                                let result: BasicValueEnum =
+                                    if let BasicValueEnum::PointerValue(pv) = raw_ret {
+                                        ctx.builder()
+                                            .build_ptr_to_int(
+                                                pv,
+                                                ctx.types().i64_type(),
+                                                "xmod_ret_i64",
+                                            )
+                                            .or_llvm_err()?
+                                            .into()
+                                    } else {
+                                        raw_ret
+                                    };
+                                ctx.set_register(dst.0, result);
+                                return Ok(());
+                            }
+                        }
                         let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
                         super::error::record_unresolved_generic_call(
                             &cur_fn,

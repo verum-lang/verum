@@ -146,6 +146,22 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
         ret: AbiTy::I64,
     },
+    // C: int munmap(void *addr, size_t length)
+    // (#38 Phase 2: `core.mem.allocator.os_munmap` calls the bodyless
+    // libSystem extern `munmap` cross-module; the XMOD band-id name
+    // recovery in `lower_call` routes it here.)
+    SyscallSig {
+        name: "munmap",
+        args: &[AbiTy::Ptr, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: int closedir(DIR *dirp)
+    // (#38 Phase 2: `ReadDir.drop` → `sys_closedir` → bodyless `closedir`.)
+    SyscallSig {
+        name: "closedir",
+        args: &[AbiTy::Ptr],
+        ret: AbiTy::I64,
+    },
     // C: int access(const char *pathname, int mode)
     SyscallSig {
         name: "access",

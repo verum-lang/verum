@@ -945,7 +945,7 @@ impl VbcCodegen {
         } else {
             None
         };
-        let init_reg = if let Some(expr) = value {
+        let mut init_reg = if let Some(expr) = value {
             self.compile_expr(expr)?
         } else {
             // No initializer - use unit
@@ -955,6 +955,45 @@ impl VbcCodegen {
         };
         if let Some(saved) = saved_return_type {
             self.ctx.current_return_type_name = saved;
+        }
+
+        // MUT-LITERAL-OWNED (#17): a MUTABLE binding initialized from a plain
+        // string literal must own its text. At AOT `LoadK "lit"` materialises
+        // the SHARED RODATA `verum_text_const_*` global `{ptr,len,cap=0}` —
+        // an immutable OBJECT; the first mutating method (`s.push_str(..)` →
+        // `Text.grow`) stores `self.ptr/self.cap` into that rodata header →
+        // EXC_BAD_ACCESS. The `cap == 0` "immutable literal" contract cannot
+        // cover the header itself, so the ownership copy belongs HERE, at the
+        // mutable-binding boundary. `Concat(lit, "")` is the tier-coherent
+        // copy primitive: the interpreter still yields the same text value
+        // (NaN-boxed copy semantics — zero behavior change), while the AOT
+        // lowers to `verum_text_concat`, which allocates a fresh WRITABLE
+        // flat heap text. Immutable bindings and direct literal uses keep the
+        // zero-allocation static-literal fast path.
+        if let (
+            verum_ast::PatternKind::Ident { mutable: true, .. },
+            Some(verum_ast::Expr {
+                kind: verum_ast::ExprKind::Literal(lit),
+                ..
+            }),
+            Some(lit_reg),
+        ) = (&pattern.kind, value, init_reg)
+            && matches!(lit.kind, verum_ast::LiteralKind::Text(_))
+        {
+            let empty_reg = self.ctx.alloc_temp();
+            let empty_const = self.ctx.add_const_string("");
+            self.ctx.emit(Instruction::LoadK {
+                dst: empty_reg,
+                const_id: empty_const.0,
+            });
+            let owned_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Concat {
+                dst: owned_reg,
+                a: lit_reg,
+                b: empty_reg,
+            });
+            self.ctx.free_temp(empty_reg);
+            init_reg = Some(owned_reg);
         }
 
         // Bind pattern
