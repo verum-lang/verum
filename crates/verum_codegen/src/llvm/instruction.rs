@@ -16479,11 +16479,29 @@ fn lower_call_method<'ctx>(
                     && !ctx.is_chan_register(receiver.0)
                     && receiver_type_name.is_none()
                     && ctx.get_obj_register_type(receiver.0).is_none();
+                // SUFFIX-UNIQUE-DISPATCH (#34): the blanket `has_no_tracking`
+                // allowance below is only sound when the method suffix is
+                // UNAMBIGUOUS in the module. Pre-fix, an untracked receiver
+                // accepted the FIRST `.{method}` candidate in index order —
+                // for a multi-impl method that is a wrong-type dispatch and
+                // memory corruption: `Maybe.fmt` formatting its (untracked
+                // generic) payload resolved bare `fmt` to `Deque.fmt`, which
+                // then wrote through garbage `{ptr,len,cap}` fields
+                // (EXC_BAD_ACCESS in Text.grow/memmove). Same discipline as
+                // the `_` arm's collision check below.
+                let suffix_unique = if let Some(idx) = ctx.func_name_index() {
+                    idx.find_by_suffix(&suffix).len() <= 1
+                } else {
+                    true
+                };
+                let untracked_unique = has_no_tracking && suffix_unique;
                 let receiver_matches = match func_type_prefix {
-                    "List" => vbc_resolved || ctx.is_list_register(receiver.0) || has_no_tracking,
-                    "Map" => vbc_resolved || ctx.is_map_register(receiver.0) || has_no_tracking,
-                    "Set" => vbc_resolved || ctx.is_set_register(receiver.0) || has_no_tracking,
-                    "Deque" => vbc_resolved || ctx.is_deque_register(receiver.0) || has_no_tracking,
+                    "List" => vbc_resolved || ctx.is_list_register(receiver.0) || untracked_unique,
+                    "Map" => vbc_resolved || ctx.is_map_register(receiver.0) || untracked_unique,
+                    "Set" => vbc_resolved || ctx.is_set_register(receiver.0) || untracked_unique,
+                    "Deque" => {
+                        vbc_resolved || ctx.is_deque_register(receiver.0) || untracked_unique
+                    }
                     "BTreeMap" => {
                         vbc_resolved
                             || ctx.is_btreemap_register(receiver.0)
