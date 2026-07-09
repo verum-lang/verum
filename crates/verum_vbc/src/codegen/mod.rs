@@ -13308,6 +13308,37 @@ impl VbcCodegen {
 
     /// The `impl_type_name` parameter is Some for functions inside impl blocks,
     /// allowing us to look up the function by its qualified name (e.g., "List.new").
+    /// Pillar 1 (typed references): classify a `&`-param's REFERENT type
+    /// name as a statically-known HEAP OBJECT.
+    ///
+    /// Object referents (records, variants, Text, collections, protocol
+    /// objects) make a param re-ref emit the typed `RefObj` opcode — Tier-1
+    /// lowers a pointer passthrough BY OPCODE CONTRACT.  Scalar referents
+    /// (`&mut Int` — the #41 scalar-`&T` writeback class) and
+    /// runtime-polymorphic generics keep untyped `RefMut` (conservative:
+    /// heuristic lowering).  Primitive-name recognition delegates to the
+    /// drift-pinned `well_known_types` registry via
+    /// `primitive_path_ident_to_typekind`; non-nominal shapes (`(A, B)`,
+    /// `[T]`, `fn(..)`, `&unsafe `-prefixed carrier names) stay
+    /// conservative via the leading-uppercase check.
+    fn type_name_is_static_object(&self, name: &str) -> bool {
+        let base = name.split('<').next().unwrap_or("").trim();
+        if base.is_empty() || base == "Self" {
+            return false;
+        }
+        if let Some(tk) = Self::primitive_path_ident_to_typekind(base) {
+            // Text is heap-object shaped; every other primitive is a raw
+            // scalar register value (alloca/slot semantics on re-ref).
+            return matches!(tk, verum_ast::ty::TypeKind::Text);
+        }
+        if self.ctx.generic_type_params.contains(base)
+            || self.ctx.const_generic_params.contains(base)
+        {
+            return false;
+        }
+        base.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+    }
+
     fn compile_function(
         &mut self,
         func: &FunctionDecl,
@@ -13513,26 +13544,51 @@ impl VbcCodegen {
         // (which applies only to `*value`). Cleared per-function; a stale
         // set would mis-lower an unrelated function's `*x`.
         self.ctx.reference_bindings.clear();
-        for ((param_name, _), param) in params_with_mutability.iter().zip(func.params.iter()) {
+        for (i, ((param_name, _), param)) in params_with_mutability
+            .iter()
+            .zip(func.params.iter())
+            .enumerate()
+        {
             use verum_ast::FunctionParamKind;
-            let is_ref = match &param.kind {
+            // For reference-typed params, also capture the REFERENT's type
+            // name (Pillar 1: a re-ref of an object-referent param emits
+            // the typed RefObj — see `object_ref_param_regs`).
+            let (is_ref, referent_name): (bool, Option<String>) = match &param.kind {
                 FunctionParamKind::SelfRef
                 | FunctionParamKind::SelfRefMut
                 | FunctionParamKind::SelfRefChecked
                 | FunctionParamKind::SelfRefCheckedMut
                 | FunctionParamKind::SelfRefUnsafe
-                | FunctionParamKind::SelfRefUnsafeMut => true,
-                FunctionParamKind::Regular { ty, .. } => matches!(
-                    &ty.kind,
-                    verum_ast::ty::TypeKind::Reference { .. }
-                        | verum_ast::ty::TypeKind::CheckedReference { .. }
-                        | verum_ast::ty::TypeKind::UnsafeReference { .. }
-                        | verum_ast::ty::TypeKind::GenRef { .. }
-                ),
-                _ => false,
+                | FunctionParamKind::SelfRefUnsafeMut => {
+                    (true, impl_type_name.cloned())
+                }
+                FunctionParamKind::Regular { ty, .. } => match &ty.kind {
+                    verum_ast::ty::TypeKind::Reference { inner, .. }
+                    | verum_ast::ty::TypeKind::CheckedReference { inner, .. }
+                    | verum_ast::ty::TypeKind::UnsafeReference { inner, .. }
+                    | verum_ast::ty::TypeKind::GenRef { inner } => {
+                        let raw = Self::extract_type_name_from_ast(inner);
+                        let resolved = if let Some(concrete) = impl_type_name {
+                            Self::substitute_self_in_type_name(&raw, concrete)
+                        } else {
+                            raw
+                        };
+                        (true, Some(resolved))
+                    }
+                    _ => (false, None),
+                },
+                _ => (false, None),
             };
             if is_ref {
                 self.ctx.reference_bindings.insert(param_name.clone());
+                // Pillar 1: param i occupies register i (`alloc_parameters`).
+                // Mark object-referent ref-params so re-refs emit RefObj.
+                if referent_name
+                    .as_deref()
+                    .is_some_and(|n| self.type_name_is_static_object(n))
+                {
+                    self.ctx.mark_object_ref_param_reg(i as u16);
+                }
             }
         }
 
