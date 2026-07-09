@@ -1,6 +1,6 @@
 # AOT known-failure baseline (AOT-DETERMINISM-GATE-1).
 # One test id per line. Regenerate: vcs/scripts/aot-determinism-gate.sh --update-baseline
-# Updated: 2026-07-08T19:32:33Z filter=meta/
+# Updated: 2026-07-09T12:23:50Z filter=meta/
 meta/attribute/unit_test::test_meta_attribute_value_as_ident_match
 meta/contexts/property_test::law_format_message_always_prefix
 meta/contexts/property_test::law_format_sections_iff_fields_populated
@@ -8,11 +8,7 @@ meta/contexts/unit_test::test_meta_parse_error_display_delegates_to_format
 meta/contexts/unit_test::test_meta_parse_error_format_both_lines_composition
 meta/contexts/unit_test::test_meta_parse_error_format_expected_line_composition
 meta/contexts/unit_test::test_meta_parse_error_format_found_line_composition
-meta/contexts/unit_test::test_pattern_match_with_one_capture
 meta/contexts/unit_test::test_schema_error_display_format
-meta/contexts/unit_test::test_schema_error_severity_display_error
-meta/contexts/unit_test::test_schema_error_severity_display_info
-meta/contexts/unit_test::test_schema_error_severity_display_warning
 meta/diakrisis_attrs/integration_test::test_parse_autopoietic_both_present
 meta/diakrisis_attrs/integration_test::test_parse_autopoietic_epsilon_int_value_rejected
 meta/diakrisis_attrs/integration_test::test_parse_autopoietic_missing_depth_rejected
