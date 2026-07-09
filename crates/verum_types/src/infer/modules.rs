@@ -13860,9 +13860,35 @@ impl TypeChecker {
             if path.segments.len() == 1
                 && matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(ident))
                     if self.module_aliases.contains_key(&ident.name)));
+        // Same bypass for MULTI-SEGMENT module paths
+        // (`core.time.duration_parse.parse(x)` — the base is a Field
+        // chain or a multi-segment Path of bare Names whose root has
+        // no value binding).  synth_expr on such a base dies with
+        // `unbound variable: <root>` before the first-call resolution
+        // (`try_resolve_module_call`'s global-registry arm) ever runs.
+        let base_is_module_path = !base_is_module_alias && {
+            let root_name: Option<&str> = match &current_receiver.kind {
+                ExprKind::Path(path) if path.segments.len() >= 2 => {
+                    match path.segments.first() {
+                        Some(verum_ast::ty::PathSegment::Name(ident)) => {
+                            Some(ident.name.as_str())
+                        }
+                        _ => None,
+                    }
+                }
+                ExprKind::Field { expr, field } => self
+                    .extract_module_path_from_field(expr, field)
+                    .and_then(|segs| segs.first().copied()),
+                _ => None,
+            };
+            match root_name {
+                Some(root) => self.ctx.env.lookup(root).is_none(),
+                None => false,
+            }
+        };
         let old_call_context = self.in_call_arg_context;
         self.in_call_arg_context = true;
-        let mut current_ty = if base_is_module_alias {
+        let mut current_ty = if base_is_module_alias || base_is_module_path {
             Type::Var(TypeVar::fresh())
         } else {
             let base_result = self.synth_expr(current_receiver)?;
@@ -19903,74 +19929,116 @@ impl TypeChecker {
             if let Some(segments) = &module_segments
                 && segments.len() >= 2
             {
-                let base_bound = self.ctx.env.lookup(segments[0]).is_some();
-                if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
-                    eprintln!(
-                        "[qualpath] segments={:?} base_bound={} meta={}",
-                        segments,
-                        base_bound,
-                        self.core_metadata().is_some()
-                    );
+                let seg_vec: Vec<&str> = segments.to_vec();
+                if let Some(r) =
+                    self.try_resolve_global_module_fn_call(&seg_vec, method, args)?
+                {
+                    return Ok(Some(r));
                 }
-                if base_bound {
-                    // A genuine value binding shadows module-path
-                    // interpretation (`self.cfg.parser.parse(...)`
-                    // class) — leave it to ordinary field inference.
-                    return Ok(None);
-                }
-                let joined = segments.join(".");
-                let mut candidates: Vec<String> =
-                    vec![format!("{}.{}", joined, method.name)];
-                let mut rest = joined.as_str();
-                while let Some((_, tail)) = rest.split_once('.') {
-                    candidates.push(format!("{}.{}", tail, method.name));
-                    rest = tail;
-                }
-                for cand in &candidates {
-                    let scheme = self
-                        .ctx
-                        .env
-                        .lookup(cand.as_str())
-                        .cloned()
-                        .or_else(|| {
-                            if let Maybe::Some(s) = self.lookup_function_in_module(cand.as_str()) {
-                                Some(s)
-                            } else {
-                                None
-                            }
-                        })
-                        .or_else(|| {
-                            // CoreMetadata carries module-qualified
-                            // free-fn descriptors (keys like
-                            // `core.time.duration_parse.parse`) that
-                            // are never eagerly registered in env —
-                            // resolve them lazily here.
-                            self.core_metadata().and_then(|meta| {
-                                meta.functions
-                                    .get(&verum_common::Text::from(cand.as_str()))
-                                    .map(Self::scheme_from_function_descriptor)
-                            })
-                        });
-                    if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
-                        eprintln!("[qualpath]   cand={} hit={}", cand, scheme.is_some());
+            }
+        }
+
+        // Same resolution for a MULTI-SEGMENT PATH receiver — some
+        // parses produce `core.time.duration_parse` as one Path with
+        // three Name segments rather than a Field chain.
+        if let ExprKind::Path(path) = &receiver.kind
+            && path.segments.len() >= 2
+        {
+            let mut seg_vec: Vec<&str> = Vec::with_capacity(path.segments.len());
+            let mut all_names = true;
+            for seg in path.segments.iter() {
+                match seg {
+                    verum_ast::ty::PathSegment::Name(id) => seg_vec.push(id.name.as_str()),
+                    _ => {
+                        all_names = false;
+                        break;
                     }
-                    if let Some(scheme) = scheme {
-                        let func_type = self.unifier.apply(&scheme.instantiate());
-                        if let Type::Function {
-                            params,
-                            return_type,
-                            ..
-                        } = &func_type
-                            && params.len() == args.len()
-                        {
-                            for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                let resolved_param = self.unifier.apply(param_ty);
-                                self.check_expr(arg, &resolved_param)?;
-                            }
-                            let resolved_return = self.unifier.apply(return_type);
-                            return Ok(Some(InferResult::new(resolved_return)));
-                        }
+                }
+            }
+            if all_names
+                && let Some(r) =
+                    self.try_resolve_global_module_fn_call(&seg_vec, method, args)?
+            {
+                return Ok(Some(r));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Resolve `<dotted.module.path>.fn(args)` against the global
+    /// registries: env, module function tables, and (lazily) the
+    /// CoreMetadata free-fn descriptors registered under file-declared
+    /// module keys.  Probes progressively-stripped prefixes,
+    /// most-qualified first.  Guarded on the base segment not being a
+    /// bound VALUE so genuine field chains
+    /// (`self.cfg.parser.parse(...)`) are never hijacked.
+    fn try_resolve_global_module_fn_call(
+        &mut self,
+        segments: &[&str],
+        method: &Ident,
+        args: &[Expr],
+    ) -> Result<Option<InferResult>> {
+        let base_bound = self.ctx.env.lookup(segments[0]).is_some();
+        if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
+            eprintln!(
+                "[qualpath] segments={:?} base_bound={} meta={}",
+                segments,
+                base_bound,
+                self.core_metadata().is_some()
+            );
+        }
+        if base_bound {
+            return Ok(None);
+        }
+        let joined = segments.join(".");
+        let mut candidates: Vec<String> = vec![format!("{}.{}", joined, method.name)];
+        let mut rest = joined.as_str();
+        while let Some((_, tail)) = rest.split_once('.') {
+            candidates.push(format!("{}.{}", tail, method.name));
+            rest = tail;
+        }
+        for cand in &candidates {
+            let scheme = self
+                .ctx
+                .env
+                .lookup(cand.as_str())
+                .cloned()
+                .or_else(|| {
+                    if let Maybe::Some(s) = self.lookup_function_in_module(cand.as_str()) {
+                        Some(s)
+                    } else {
+                        None
                     }
+                })
+                .or_else(|| {
+                    // CoreMetadata carries module-qualified free-fn
+                    // descriptors (keys like
+                    // `core.time.duration_parse.parse`) that are never
+                    // eagerly registered in env — resolve them lazily.
+                    self.core_metadata().and_then(|meta| {
+                        meta.functions
+                            .get(&verum_common::Text::from(cand.as_str()))
+                            .map(Self::scheme_from_function_descriptor)
+                    })
+                });
+            if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
+                eprintln!("[qualpath]   cand={} hit={}", cand, scheme.is_some());
+            }
+            if let Some(scheme) = scheme {
+                let func_type = self.unifier.apply(&scheme.instantiate());
+                if let Type::Function {
+                    params,
+                    return_type,
+                    ..
+                } = &func_type
+                    && params.len() == args.len()
+                {
+                    for (arg, param_ty) in args.iter().zip(params.iter()) {
+                        let resolved_param = self.unifier.apply(param_ty);
+                        self.check_expr(arg, &resolved_param)?;
+                    }
+                    let resolved_return = self.unifier.apply(return_type);
+                    return Ok(Some(InferResult::new(resolved_return)));
                 }
             }
         }
