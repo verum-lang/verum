@@ -341,9 +341,11 @@ impl<'a> BytecodeSpecializer<'a> {
                 .is_some_and(|n| n.contains("future_poll_sync"));
         if trace_this {
             eprintln!(
-                "[mono-spec-body] specializing '{}' bytecode_len={}",
+                "[mono-spec-body] specializing id={} '{}' bytecode_len={} first_in_bytes={:02x?}",
+                func.id.0,
                 self.module.get_string(func.name).unwrap_or("?"),
-                bytecode.len()
+                bytecode.len(),
+                &bytecode[..bytecode.len().min(20)]
             );
         }
 
@@ -351,12 +353,6 @@ impl<'a> BytecodeSpecializer<'a> {
             self.stats.total_instructions += 1;
             let opcode_byte = bytecode[pc];
             let opcode = Opcode::from_byte(opcode_byte);
-
-            if trace_this {
-                // For Call/CallM, peek the callee/method id and print its
-                // string so we can see how `future.poll()` was compiled.
-                eprintln!("[mono-spec-body]   pc={} opcode={:?}", pc, opcode);
-            }
 
             match opcode {
                 // Generic call: rewrite to direct call
@@ -418,6 +414,15 @@ impl<'a> BytecodeSpecializer<'a> {
         }
 
         self.stats.bytes_output = output.len();
+
+        if trace_this {
+            eprintln!(
+                "[mono-spec-body] id={} OUTPUT len={} first_out_bytes={:02x?}",
+                func.id.0,
+                output.len(),
+                &output[..output.len().min(20)]
+            );
+        }
 
         // task #41: carry the substituted param descriptors so the merged
         // specialized FunctionDescriptor exposes them to the AOT param loop
@@ -713,8 +718,14 @@ impl<'a> BytecodeSpecializer<'a> {
         } else {
             return None;
         };
-        let TypeRef::Concrete(tid) = self.substitution.get(TypeParamId(0))? else {
-            return None;
+        // Devirtualize on the receiver's BASE type. A monomorphized receiver
+        // like `ReadyFuture<Text>` is carried as `Instantiated { base, args }`
+        // (the args preserve the payload type for associated-type resolution);
+        // the concrete method lives on the base `ReadyFuture.poll`.
+        let tid = match self.substitution.get(TypeParamId(0))? {
+            TypeRef::Concrete(id) => id,
+            TypeRef::Instantiated { base, .. } => base,
+            _ => return None,
         };
         let type_name = self.module.get_type_name(*tid)?;
         let concrete = format!("{}.{}", type_name, method);

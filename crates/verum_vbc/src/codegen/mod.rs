@@ -18016,16 +18016,29 @@ impl VbcCodegen {
         if !self.pending_specializations.is_empty() {
             use std::collections::HashSet;
             let trace = std::env::var_os("VERUM_TRACE_MONO").is_some();
+            // Structural dedup key: a bare `Concrete(id)` keys on the id, but a
+            // monomorphized `Instantiated{base,[args]}` (e.g. ReadyFuture<Text>)
+            // must fold its args in — else ReadyFuture<Text> and ReadyFuture<Int>
+            // both collapse to one key and only one specialization is seeded.
+            fn mono_type_key(t: &crate::types::TypeRef) -> u32 {
+                use crate::types::TypeRef;
+                match t {
+                    TypeRef::Concrete(id) => id.0,
+                    TypeRef::Instantiated { base, args } => {
+                        let mut h = base.0.wrapping_mul(0x9E37_79B1) ^ 0x8000_0000;
+                        for a in args {
+                            h = h.wrapping_mul(31).wrapping_add(mono_type_key(a));
+                        }
+                        h
+                    }
+                    TypeRef::Generic(tp) => (tp.0 as u32) ^ 0x4000_0000,
+                    _ => u32::MAX,
+                }
+            }
             let mut seen: HashSet<(u32, Vec<u32>)> = HashSet::new();
             for (raw_fn_id, type_args) in std::mem::take(&mut self.pending_specializations) {
                 let fn_id = func_id_remap.get(&raw_fn_id).copied().unwrap_or(raw_fn_id);
-                let key_ids: Vec<u32> = type_args
-                    .iter()
-                    .map(|t| match t {
-                        crate::types::TypeRef::Concrete(id) => id.0,
-                        _ => u32::MAX,
-                    })
-                    .collect();
+                let key_ids: Vec<u32> = type_args.iter().map(mono_type_key).collect();
                 if !seen.insert((fn_id, key_ids)) {
                     continue;
                 }
