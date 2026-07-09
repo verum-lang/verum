@@ -1,0 +1,6 @@
+fn main() {
+    let s = Text.from("DIAKRISIS_axiom");
+    let l = s.to_lowercase();
+    print(f"lower={l}");
+    if l.starts_with("diakrisis_") { print("prefix ok"); } else { print("prefix FAIL"); }
+}

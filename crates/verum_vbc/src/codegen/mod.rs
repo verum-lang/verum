@@ -17003,15 +17003,12 @@ impl VbcCodegen {
                 if info.id.0 >= SENTINEL_THRESHOLD {
                     continue;
                 }
-                // Dice-9 (ARCHIVE-SERIALIZE-DETERMINISM-1): `name#arity`
-                // MIRROR keys are lookup aliases, not identities — a stub
-                // minted under one leaked the alt spelling into the
-                // module string table (broadcast_channel#1 present in
-                // one bake, absent in the other, from byte 1842 on).
-                // Canonical identity = the bare/qualified key only.
-                if name.contains('#') {
-                    continue;
-                }
+                // NOTE (dice-9 post-mortem): both skipping '#' mirror
+                // keys AND normalizing their spelling at stub-intern
+                // regressed 39 arity-disambiguation-dependent tests —
+                // the alt spelling is LOAD-BEARING at runtime. Which
+                // spelling a stub gets is the remaining per-bake dice;
+                // resolved wholesale by the ARCH-P2 canonical writer.
                 let last_seg = match name.rfind('.') {
                     Some(p) => name[p + 1..].to_string(),
                     None => name.clone(),
@@ -17218,7 +17215,29 @@ impl VbcCodegen {
 
         // Sort functions by ID so array index matches function ID
         // (closures compiled during parent functions may be pushed out of order)
-        self.functions.sort_by_key(|f| f.descriptor.id.0);
+        // ARCH-P2 canonical writer (increment 2): sort functions by
+        // NAME-canonical key, id second (ids are per-process interning
+        // artifacts; names are the identity). The contiguous re-id +
+        // func_id_remap below then makes FUNCTION IDS THEMSELVES
+        // name-canonical, and the existing instruction rewriter
+        // propagates them — bake function sections become byte-stable
+        // regardless of registration/completion order. Falls back to
+        // id-order under VERUM_NO_CANONICAL_WRITER=1.
+        if std::env::var("VERUM_NO_CANONICAL_WRITER").is_ok() {
+            self.functions.sort_by_key(|f| f.descriptor.id.0);
+        } else {
+            let key_of = |f: &crate::module::VbcFunction| -> (String, u32) {
+                (
+                    self.ctx
+                        .strings
+                        .get(f.descriptor.name.0 as usize)
+                        .cloned()
+                        .unwrap_or_default(),
+                    f.descriptor.id.0,
+                )
+            };
+            self.functions.sort_by(|a, b| key_of(a).cmp(&key_of(b)));
+        }
 
         // **Duplicate-id collapse, the load-bearing dispatch fix.**
         //

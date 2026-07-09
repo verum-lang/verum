@@ -12799,6 +12799,28 @@ fn lower_call_method<'ctx>(
         .next()
         .unwrap_or(&method_name_str);
 
+    // `as_slice` / `as_mut_slice` are IDENTITY casts — mirror of the
+    // Tier-0 interceptor (`method_dispatch.rs`: "a Verum slice and a
+    // List share the same {ObjectHeader, data...} memory layout, the
+    // distinction is purely type-system").  Pre-fix, AOT compiled the
+    // stdlib body (`slice_from_raw_parts(self.ptr, self.len)`), which
+    // built a Pack and MARKED the register byte-stride — but a
+    // List<T>'s backing buffer holds 8-byte NaN-boxed Values, so every
+    // dynamic read past index 0 returned the high bytes of element 0
+    // (observed: List<Byte> [51,48,115] read as 51,0,0 — the root of
+    // the AOT duration_parse/cron/rfc3339 parser failures).  Identity
+    // keeps the receiver's LIST header, so lower_get_element's runtime
+    // type-id branch takes the Value-stride list path, and Len reads
+    // the same offset (List len@32 == Pack len@32) either way.
+    if bare_method_early == "as_slice" || bare_method_early == "as_mut_slice" {
+        let recv_val = ctx.get_register(receiver.0)?;
+        ctx.set_register(dst.0, recv_val);
+        if ctx.is_list_register(receiver.0) {
+            ctx.mark_list_register(dst.0);
+        }
+        return Ok(());
+    }
+
     // ============================================================
     // PROTOCOL DISPATCH (dyn:Protocol.method)
     // When VBC codegen detects &dyn Protocol receiver, it prefixes
@@ -17624,17 +17646,47 @@ fn lower_call_method<'ctx>(
     let func_name = match resolved_func_name {
         Some(name) => name,
         None => {
-            // Gracefully handle unresolved methods from stdlib modules.
-            // When stdlib .vr files are compiled to VBC, they may contain
-            // CallM instructions for methods whose target modules aren't
-            // yet compiled into this LLVM module. Return 0/null and continue.
-            //
-            // OBS: record the degrade (same discipline as `lower_call`'s
-            // unresolved paths) — pre-fix this const-zero was completely
-            // SILENT, which let the #34 instance-method mis-dispatch class
-            // (every `p.method()` on a user struct returning 0) go
-            // undiagnosed. The record surfaces in the codegen-warn summary
-            // and hard-errors under VERUM_STRICT_MONO.
+            // RUNTIME type-id dispatch fallback (2026-07-09).  A CallM
+            // the static resolver could not name used to degrade to a
+            // SILENT const-zero stub — measured at 4210 sites in a
+            // hello-world-sized binary, this was the dominant source
+            // of wrong-value (not crashing) AOT behaviour: every
+            // `binding.method()` on a match-arm/loop binding whose type
+            // the tracker lost returned 0.  Build the same runtime
+            // type-id switch `dyn:` dispatch uses, over every compiled
+            // `Type.method` candidate with a matching arity.
+            let mut entries: Vec<(u32, String)> = Vec::new();
+            if let Some(vbc) = ctx.vbc_module() {
+                for type_desc in &vbc.types {
+                    let tname = vbc.get_string(type_desc.name).unwrap_or("");
+                    if tname.is_empty() {
+                        continue;
+                    }
+                    let qual = format!("{}.{}", tname, bare_method_early);
+                    if let Some(f) = ctx.get_module().get_function(&qual) {
+                        if f.count_basic_blocks() > 0 {
+                            let pc = f.count_params() as usize;
+                            if pc == args.count as usize + 1 {
+                                entries.push((type_desc.id.0, qual));
+                            }
+                        }
+                    }
+                }
+            }
+            if !entries.is_empty() {
+                if std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some() {
+                    eprintln!(
+                        "[callm]   UNRESOLVED -> runtime type switch over {} candidates: method={:?} in fn {}",
+                        entries.len(),
+                        method_name_str,
+                        ctx.function_name().as_str()
+                    );
+                }
+                return build_runtime_type_switch(ctx, receiver, *args, dst, &entries);
+            }
+            // No candidate anywhere in the module: keep the recorded
+            // const-zero degrade (surfaces in the codegen-warn summary
+            // and hard-errors under VERUM_STRICT_MONO).
             let cur_fn = ctx.function_name().as_str().to_string();
             super::error::record_unresolved_generic_call(
                 &cur_fn,
@@ -28004,6 +28056,147 @@ fn lower_try_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
 ///
 
 /// Gets the current exception value and stores it in the destination register.
+/// Build a RUNTIME type-id switch dispatch for a method call whose
+/// target could not be statically resolved (2026-07-09).
+///
+/// Mirrors the `dyn:Protocol.method` switch shape: load the receiver's
+/// object-header type_id, switch over every `(type_id, "Type.method")`
+/// candidate, call the matching compiled body (receiver + args, with
+/// int↔ptr coercion per the target's signature), and PHI-merge the
+/// i64-coerced results.  Default arm yields 0 (same value the old
+/// const-zero stub produced — but now ONLY for receivers whose runtime
+/// type has no candidate, instead of for every call site the static
+/// resolver couldn't name).
+fn build_runtime_type_switch<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    receiver: Reg,
+    args: verum_vbc::RegRange,
+    dst: Reg,
+    entries: &[(u32, String)],
+) -> Result<()> {
+    let i64_type = ctx.types().i64_type();
+    let ptr_type = ctx.types().ptr_type();
+    let receiver_val = ctx.get_register(receiver.0)?;
+
+    // Read type_id from the object header (first word at the pointer).
+    let recv_i64 = as_i64(ctx, receiver_val, "rts_recv_i64")?;
+    let recv_ptr = ctx
+        .builder()
+        .build_int_to_ptr(recv_i64, ptr_type, "rts_recv_ptr")
+        .or_llvm_err()?;
+    let type_id_val = ctx
+        .builder()
+        .build_load(i64_type, recv_ptr, "rts_type_id")
+        .or_llvm_err()?
+        .into_int_value();
+
+    let mut arg_vals: Vec<BasicMetadataValueEnum> = Vec::new();
+    arg_vals.push(receiver_val.into());
+    for i in 0..args.count {
+        let r = Reg(args.start.0 + i as u16);
+        let val = ctx.get_register(r.0)?;
+        let coerced = as_i64(ctx, val, &format!("rts_arg{}", i))?;
+        arg_vals.push(coerced.into());
+    }
+
+    let current_fn = ctx.function();
+    let llvm_cx = ctx.llvm_context();
+    let merge_bb = llvm_cx.append_basic_block(current_fn, "rts_merge");
+    let default_bb = llvm_cx.append_basic_block(current_fn, "rts_default");
+
+    let mut cases = Vec::new();
+    let mut case_blocks = Vec::new();
+    for (tid, fname) in entries {
+        let bb = llvm_cx.append_basic_block(current_fn, &format!("rts_{}", tid));
+        cases.push((i64_type.const_int(*tid as u64, false), bb));
+        case_blocks.push((bb, fname.clone()));
+    }
+
+    ctx.builder()
+        .build_switch(type_id_val, default_bb, &cases)
+        .or_llvm_err()?;
+
+    ctx.builder().position_at_end(default_bb);
+    ctx.builder()
+        .build_unconditional_branch(merge_bb)
+        .or_llvm_err()?;
+    let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
+    incoming.push((i64_type.const_zero().into(), default_bb));
+
+    for (bb, fname) in &case_blocks {
+        ctx.builder().position_at_end(*bb);
+        let target_fn = ctx.get_module().get_function(fname).or_missing_fn(fname)?;
+        let pc = target_fn.count_params() as usize;
+        let raw_args: Vec<BasicMetadataValueEnum> = if pc == arg_vals.len() {
+            arg_vals.clone()
+        } else if pc + 1 == arg_vals.len() {
+            arg_vals[1..].to_vec()
+        } else {
+            arg_vals.clone()
+        };
+        let call_args: Vec<BasicMetadataValueEnum> = raw_args
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| -> Result<BasicMetadataValueEnum<'ctx>> {
+                if i < pc {
+                    let expected = target_fn
+                        .get_nth_param(i as u32)
+                        .or_internal(&format!("missing param {}", i))?
+                        .get_type();
+                    let arg_bv: BasicValueEnum =
+                        (*arg).try_into().unwrap_or(i64_type.const_zero().into());
+                    if arg_bv.is_int_value() && expected.is_pointer_type() {
+                        let coerced = ctx
+                            .builder()
+                            .build_int_to_ptr(arg_bv.into_int_value(), ptr_type, "rts_arg_ptr")
+                            .or_llvm_err()?;
+                        Ok(coerced.into())
+                    } else if arg_bv.is_pointer_value() && expected.is_int_type() {
+                        let coerced = ctx
+                            .builder()
+                            .build_ptr_to_int(arg_bv.into_pointer_value(), i64_type, "rts_arg_i64")
+                            .or_llvm_err()?;
+                        Ok(coerced.into())
+                    } else {
+                        Ok(*arg)
+                    }
+                } else {
+                    Ok(*arg)
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let result = ctx
+            .builder()
+            .build_call(target_fn, &call_args, "rts_call")
+            .or_llvm_err()?;
+        let ret_val = result
+            .try_as_basic_value()
+            .basic()
+            .unwrap_or(i64_type.const_zero().into());
+        let ret_i64: BasicValueEnum = if ret_val.is_pointer_value() {
+            ctx.builder()
+                .build_ptr_to_int(ret_val.into_pointer_value(), i64_type, "rts_ret_i64")
+                .or_llvm_err()?
+                .into()
+        } else {
+            ret_val
+        };
+        ctx.builder()
+            .build_unconditional_branch(merge_bb)
+            .or_llvm_err()?;
+        incoming.push((ret_i64, *bb));
+    }
+
+    ctx.builder().position_at_end(merge_bb);
+    let phi = ctx.builder().build_phi(i64_type, "rts_result").or_llvm_err()?;
+    for (val, bb) in &incoming {
+        phi.add_incoming(&[(&(*val), *bb)]);
+    }
+    ctx.set_register(dst.0, phi.as_basic_value());
+    Ok(())
+}
+
 fn lower_get_exception<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg) -> Result<()> {
     // Call verum_exception_get() to retrieve the exception value from the C runtime
     let module = ctx.get_module();
