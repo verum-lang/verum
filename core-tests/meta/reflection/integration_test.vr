@@ -199,20 +199,35 @@ fn integration_field_visibility_and_kind_read_back() {
 }
 
 // =============================================================================
-// Section 2: has_attribute / get_attribute — pinned closure-over-record defect
+// Section 2: has_attribute / get_attribute — pinned stdlib-ListIter defect
 // =============================================================================
 //
-// Both crash under --interp regardless of list contents: the crash is in
-// the closure body (`a.name`), which the runtime reaches even for an
-// empty list (`ListIter.any` invokes the closure path with a size-0
-// element view).  So there is no "safe" happy path to test live — the
-// whole method surface is pinned until REFL-CLOSURE-XREC-1 closes.
+// History: originally pinned for REFL-CLOSURE-XREC-1 (closure param
+// `a` resolved fields via the GLOBAL intern index → OOB crash). That
+// leg landed 2026-07-09 (adapter-closure params are typed from the
+// receiver's element via the for-binder channel). The surface stays
+// pinned for the RESIDUAL defect the crash was masking: the archive
+// devirtualises `.iter().any/find` to the stdlib `ListIter.any/find`
+// bodies, whose `ListIter.next` misreads the runtime List layout and
+// never yields `None` (this is why the closure was reached "even for
+// an empty list") — now an infinite loop instead of a crash. No safe
+// happy path until the builtin-redirect leg fixes that dispatch.
 
-/// PINNED — REFL-CLOSURE-XREC-1 (audit §3.2).
-/// `FieldInfo.has_attribute` crashes: the `.any(|a| a.name == name)`
-/// closure receives `a` as a size-0 view ("field access out of bounds
-/// ... object data size 0"), even on an empty list.  Promote when
-/// closure element-type propagation for cross-module records lands.
+/// RE-PINNED 2026-07-09 — REFL-CLOSURE-XREC-1 runtime leg LANDED but a
+/// SECOND, distinct defect keeps this red: the archive compile
+/// devirtualises `self.attributes.iter().any(...)` to a direct
+/// `Call ListIter.any` (stdlib body), whose `ListIter.next` loop reads
+/// the RUNTIME List layout through the stdlib `{ptr, len, cap}` field
+/// offsets and never yields `None` → infinite `ListIter.next` loop
+/// (VERUM_TRACE_CALLS-proven: FieldInfo.has_attribute → ListIter.any →
+/// ListIter.next forever). Pre-fix the same broken iteration surfaced
+/// as the closure's OOB crash ("size-0 view … even on an empty list" —
+/// an empty list must never reach the closure at all); the field-index
+/// fix (closure now resolves `a.name` → Attribute LOCAL idx 0, see
+/// [FIELDSHIFT] FieldInfo.has_attribute$closure$13) turned it into the
+/// hang. Promote when the stdlib-ListIter-vs-runtime-List dispatch
+/// defect (builtin-redirect family, expressions.rs
+/// try_redirect_resolved_to_builtin) is fixed.
 @ignore
 @test
 fn integration_has_attribute_nonempty_closure_crash() {
@@ -220,9 +235,11 @@ fn integration_has_attribute_nonempty_closure_crash() {
     assert(f.has_attribute(Text.from("derive")));
 }
 
-/// PINNED — REFL-CLOSURE-XREC-1 (audit §3.2).
-/// `FieldInfo.get_attribute` shares the `.find(|a| a.name == name)`
-/// closure pattern and the same crash.
+/// RE-PINNED 2026-07-09 — REFL-CLOSURE-XREC-1 runtime leg landed; still
+/// red for the SAME residual defect as has_attribute above
+/// (`ListIter.find` → `ListIter.next` infinite loop on the runtime List
+/// layout). The closure-param field-index half is fixed
+/// (get_attribute$closure$14 resolves `a.name` → Attribute LOCAL idx 0).
 @ignore
 @test
 fn integration_get_attribute_nonempty_closure_crash() {

@@ -156,8 +156,12 @@ impl VbcCodegen {
                                     };
 
                                 // Compile as closure with capture analysis
-                                if let Some(closure_reg) =
-                                    self.compile_closure(&closure_params, &body_expr, return_type)?
+                                if let Some(closure_reg) = self.compile_closure(
+                                    &closure_params,
+                                    &body_expr,
+                                    return_type,
+                                    None,
+                                )?
                                 {
                                     let fn_name = func.name.name.to_string();
                                     let name_reg = self.ctx.define_var(&fn_name, false);
