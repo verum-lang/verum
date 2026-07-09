@@ -1,0 +1,43 @@
+// =============================================================================
+// core-tests/text/cow/regression_test.vr
+// =============================================================================
+// @test: regression
+// @level: L1
+// @tags: text, cow, static-const, abi, pillar-5
+// @timeout: 30000
+//
+// ARCH-P5 contract pin: Text's representation tag (cap == 0 marks a
+// static/immutable literal — text.vr's documented layout) with
+// COW growth. Mutating a const-seeded Text must PROMOTE to a heap
+// buffer (never write into rodata, never lose writes — the 2026-07
+// Display-buffer disease), and const concat must build fresh heap
+// text. Green on BOTH tiers is the acceptance (the AOT leg rode the
+// P1 typed-reference landing).
+
+@test
+fn test_const_text_cow_promotion() {
+    let mut s = Text.from("abc");
+    s.push('d');
+    s.push_str("ef");
+    assert_eq(s.len(), 6);
+    assert_eq(s, Text.from("abcdef"));
+}
+
+@test
+fn test_const_concat_fresh_heap() {
+    let t = "xyz";
+    let u = t.concat("!");
+    assert_eq(u.len(), 4);
+    assert_eq(u, Text.from("xyz!"));
+}
+
+@test
+fn test_repeated_growth_across_boundary() {
+    let mut s = Text.from("");
+    let mut i = 0;
+    while i < 40 {
+        s.push('x');
+        i = i + 1;
+    }
+    assert_eq(s.len(), 40);
+}
