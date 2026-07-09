@@ -9,13 +9,16 @@
 
 mount core.tracing.{
     TraceId, SpanId, SpanContext, TraceFlags, TraceState,
-    AttributeValue, AttributeSet, Resource,
-    Sampler, SamplingDecision, SamplingResult,
+    AttributeValue, AttributeKind, AttributeSet, Resource,
+    Sampler, SamplingDecision, SamplingResult, SamplerHandle,
     AlwaysOn, AlwaysOff, TraceIdRatio, ParentBased,
-    SpanExporter, ExportResult, NoopExporter, StdoutExporter,
-    SpanProcessor, SimpleProcessor, BatchProcessor,
-    Span, SpanKind, SpanStatus, StatusCode, SpanEvent, SpanLink, SpanData,
-    Tracer, TracerProvider, NoopTracer,
+    always_on, always_off, trace_id_ratio, parent_based,
+    TraceExportResult, ExportError, ExportErrorKind,
+    SpanExporter, ExporterHandle, NoopExporter, StdoutExporter, InMemoryExporter,
+    SpanProcessor, ProcessorHandle, SimpleProcessor, BatchProcessor, CompositeProcessor,
+    Span, SpanKind, SpanStatus, SpanStatusCode, SpanEvent, SpanLink, SpanData,
+    IdGenerator, DefaultIdGenerator, IdGeneratorHandle, default_id_generator,
+    Tracer, TracerHandle, TracerProvider, TracerProviderBuilder, NoopTracer,
     get_tracer, global_tracer_provider, set_global_tracer_provider,
     TextMapPropagator, W3CTraceContext,
     inject_traceparent, extract_traceparent,
@@ -24,17 +27,25 @@ mount core.tracing.{
 mount core.tracing.processor.{BatchConfig};
 mount core.time.duration.{Duration};
 
-// Identifier shape — generation, hex codec.
+// Identifier shape — generation, hex codec, protocol impls.
 fn typecheck_ids() -> (TraceId, SpanId) {
     let tid = generate_trace_id();
     let sid = generate_span_id();
     let _hex_t = tid.to_hex();
     let _hex_s = sid.to_hex();
+    let _same = tid.eq(&tid) && sid.eq(&sid);
     (tid, sid)
 }
 
 fn typecheck_id_from_hex(hex: &[Byte]) -> Maybe<TraceId> {
     TraceId.from_hex(hex)
+}
+
+fn typecheck_id_generator() -> IdGeneratorHandle {
+    let g = default_id_generator();
+    let _t = g.new_trace_id();
+    let _s = g.new_span_id();
+    g
 }
 
 // Context + flags + state.
@@ -56,45 +67,63 @@ fn typecheck_resource() -> Resource {
         .with_attribute("deployment.env".into(), AttributeValue.Text("prod".into()))
 }
 
-// Attribute values — all primitive shapes.
+// Attribute values — all primitive shapes; set() reports storage.
 fn typecheck_attribute_values() -> AttributeSet {
     let mut s = AttributeSet.new();
-    s.set("a.text".into(), AttributeValue.Text("v".into()));
-    s.set("a.bool".into(), AttributeValue.Bool(true));
-    s.set("a.int".into(), AttributeValue.Int(42));
-    s.set("a.float".into(), AttributeValue.Float(3.14));
+    let _stored = s.set("a.text".into(), AttributeValue.Text("v".into()));
+    let _ = s.set("a.bool".into(), AttributeValue.Bool(true));
+    let _ = s.set("a.int".into(), AttributeValue.Int(42));
+    let _ = s.set("a.float".into(), AttributeValue.Float(3.14));
     s
 }
 
-// Samplers.
+// Structured export errors.
+fn typecheck_export_errors() -> TraceExportResult {
+    let e = ExportError.transport("reset".into());
+    let _k: ExportErrorKind = e.kind();
+    let _retry = e.is_retryable();
+    TraceExportResult.Success.combine(TraceExportResult.Failure(e))
+}
+
+// Samplers — protocol-form unit samplers + handle dispatch.
 fn typecheck_samplers(parent: &SpanContext, trace_id: &TraceId, attrs: &AttributeSet) {
     let on = AlwaysOn.new();
     let off = AlwaysOff.new();
     let ratio = TraceIdRatio.new(0.1);
-    let pb = ParentBased.new(Heap.new(AlwaysOn.new()) as Heap<dyn Sampler>);
+    let pb = ParentBased.new(always_on());
     let _a = on.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
     let _b = off.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
     let _c = ratio.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
     let _d = pb.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
+    let handle: SamplerHandle = parent_based(trace_id_ratio(0.5));
+    let _e = handle.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
+    let _factories = (always_off(), handle.clone());
 }
 
-// Exporters.
-fn typecheck_exporters() -> (NoopExporter, StdoutExporter) {
-    (NoopExporter.new(), StdoutExporter.new())
+// Exporters — concrete types + handle dispatch.
+fn typecheck_exporters() -> (NoopExporter, StdoutExporter, InMemoryExporter) {
+    (NoopExporter.new(), StdoutExporter.new(), InMemoryExporter.new())
 }
 
-fn typecheck_export(exp: &NoopExporter, spans: &List<SpanData>) -> ExportResult {
+fn typecheck_export(exp: &NoopExporter, spans: &List<SpanData>) -> TraceExportResult {
     exp.export(spans)
 }
 
-// Processors.
-fn typecheck_simple_processor(exporter: Heap<dyn SpanExporter>) -> SimpleProcessor {
-    SimpleProcessor.new(exporter)
+fn typecheck_exporter_handle(spans: &List<SpanData>) -> TraceExportResult {
+    let h = ExporterHandle.in_memory(InMemoryExporter.new());
+    h.export(spans)
+        .combine(h.force_flush(Duration.from_secs(1)))
+        .combine(h.shutdown(Duration.from_secs(1)))
 }
 
-fn typecheck_batch_processor(exporter: Heap<dyn SpanExporter>) -> BatchProcessor {
+// Processors — concrete types + handle dispatch.
+fn typecheck_simple_processor() -> SimpleProcessor {
+    SimpleProcessor.new(ExporterHandle.noop())
+}
+
+fn typecheck_batch_processor() -> BatchProcessor {
     BatchProcessor.with_config(
-        exporter,
+        ExporterHandle.noop(),
         BatchConfig.default()
             .with_queue_size(4096)
             .with_max_export_batch_size(256)
@@ -102,28 +131,38 @@ fn typecheck_batch_processor(exporter: Heap<dyn SpanExporter>) -> BatchProcessor
     )
 }
 
+fn typecheck_processor_handles() -> ProcessorHandle {
+    let mut children: List<ProcessorHandle> = List.new();
+    children.push(ProcessorHandle.simple(ExporterHandle.stdout()));
+    children.push(ProcessorHandle.noop());
+    ProcessorHandle.composite(children)
+}
+
 // Tracer + TracerProvider.
 fn typecheck_tracer_provider() -> TracerProvider {
     TracerProvider.builder()
         .with_resource(Resource.service(&"svc".into(), &"1.0".into()))
-        .with_sampler(Heap.new(AlwaysOn.new()) as Heap<dyn Sampler>)
-        .with_processor(
-            Heap.new(SimpleProcessor.new(
-                Heap.new(NoopExporter.new()) as Heap<dyn SpanExporter>,
-            )) as Heap<dyn SpanProcessor>,
-        )
+        .with_sampler(always_on())
+        .with_id_generator(default_id_generator())
+        .with_processor(ProcessorHandle.simple(ExporterHandle.noop()))
         .build()
+}
+
+fn typecheck_provider_lifecycle(provider: &TracerProvider) -> TraceExportResult {
+    provider.force_flush(Duration.from_secs(1))
+        .combine(provider.shutdown(Duration.from_secs(5)))
 }
 
 fn typecheck_global() {
     set_global_tracer_provider(typecheck_tracer_provider());
     let _provider = global_tracer_provider();
-    let _tracer = get_tracer(&"my.instrumentation".into(), &"1.0".into());
+    let _tracer: TracerHandle = get_tracer(&"my.instrumentation".into(), &"1.0".into());
 }
 
-// Full start-span flow using a concrete NoopTracer.
-fn typecheck_span_flow() {
-    let tracer = NoopTracer.new("scope".into(), "1.0".into());
+// Full start-span flow using a TracerHandle. end() delivers the frozen
+// SpanData to the attached processor and returns nothing.
+fn typecheck_span_flow(provider: &TracerProvider) {
+    let tracer = provider.tracer(&"scope".into(), &"1.0".into());
     let parent = SpanContext.invalid();
     let attrs = AttributeSet.new();
     let links: List<SpanLink> = List.new();
@@ -131,7 +170,17 @@ fn typecheck_span_flow() {
     span.set_attribute("http.method".into(), AttributeValue.Text("GET".into()));
     span.add_event_now("request.received".into());
     span.set_status(SpanStatus.ok());
-    let _data = span.end();
+    let _recording = span.is_recording();
+    span.end();
+}
+
+// NoopTracer keeps the concrete protocol-form surface.
+fn typecheck_noop_tracer() {
+    let tracer = NoopTracer.new("scope".into(), "1.0".into());
+    let parent = SpanContext.invalid();
+    let links: List<SpanLink> = List.new();
+    let span = tracer.start_span(&"handle".into(), SpanKind.KindInternal, AttributeSet.new(), links, &parent);
+    span.end();
 }
 
 // W3C traceparent / tracestate codec.

@@ -5,7 +5,7 @@
 // `core/tracing/span.vr` — OTel SpanKind + SpanStatusCode ADTs.
 // =============================================================================
 
-mount core.tracing.span.{SpanKind, SpanStatusCode};
+mount core.tracing.data.{SpanKind, SpanStatusCode};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 

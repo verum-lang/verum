@@ -94,33 +94,52 @@ implement AttributeSet {
     public fn len(&self) -> Int { self.entries.len() }
     public fn is_empty(&self) -> Bool { self.entries.is_empty() }
 
-    /// Look up a key (first match).
-    public fn get(&self, key: &Text) -> Maybe<&AttributeValue> {
+    /// Look up a key (first match). Returns an owned copy —
+    /// reference-returning accessors crash the AOT tier today (known
+    /// compiler class), and attribute values are small.
+    public fn get(&self, key: &Text) -> Maybe<AttributeValue> {
         let mut i = 0;
         while i < self.entries.len() {
             if self.entries[i].0 == *key {
-                return Maybe.Some(&self.entries[i].1);
+                return Maybe.Some(self.entries[i].1.clone());
             }
             i = i + 1;
         }
         Maybe.None
     }
 
-    /// Insert or replace. Silently drops if over ATTRIBUTE_COUNT_LIMIT.
-    public fn set(&mut self, key: Text, value: AttributeValue) {
+    /// Insert or replace. Returns true when the value was stored
+    /// (inserted or replaced); false when the insert was dropped
+    /// because the set is at ATTRIBUTE_COUNT_LIMIT. Instrumentation
+    /// never fails on over-limit — the indicator is for callers that
+    /// track drop counts.
+    public fn set(&mut self, key: Text, value: AttributeValue) -> Bool {
         let mut i = 0;
         while i < self.entries.len() {
             if self.entries[i].0 == key {
-                self.entries[i].1 = value;
-                return;
+                // Whole-element replacement via List.set — indexed
+                // assignments (both `xs[i].1 = v` and `xs[i] = v`) are
+                // not lowerable by the VBC codegen today.
+                self.entries.set(i, (key, value));
+                return true;
             }
             i = i + 1;
         }
-        if self.entries.len() >= ATTRIBUTE_COUNT_LIMIT { return; }
+        if self.entries.len() >= ATTRIBUTE_COUNT_LIMIT { return false; }
         self.entries.push((key, value));
+        true
     }
 
-    public fn entries(&self) -> &List<(Text, AttributeValue)> { &self.entries }
+    /// Owned snapshot of the ordered entries (see get()).
+    public fn entries(&self) -> List<(Text, AttributeValue)> {
+        let mut out = List.with_capacity(self.entries.len());
+        let mut i = 0;
+        while i < self.entries.len() {
+            out.push((self.entries[i].0.clone(), self.entries[i].1.clone()));
+            i = i + 1;
+        }
+        out
+    }
 
     public fn clone(&self) -> AttributeSet {
         let mut out = List.with_capacity(self.entries.len());
@@ -130,6 +149,42 @@ implement AttributeSet {
             i = i + 1;
         }
         AttributeSet { entries: out }
+    }
+}
+
+// =============================================================================
+// Equality — order-sensitive (insertion order is part of the contract)
+// =============================================================================
+
+implement Eq for AttributeValue {
+    fn eq(&self, other: &AttributeValue) -> Bool {
+        match (self, other) {
+            (AttributeValue.Text(a), AttributeValue.Text(b)) => a == b,
+            (AttributeValue.Bool(a), AttributeValue.Bool(b)) => a == b,
+            (AttributeValue.Int(a), AttributeValue.Int(b)) => a == b,
+            (AttributeValue.Float(a), AttributeValue.Float(b)) => a == b,
+            (AttributeValue.TextArray(a), AttributeValue.TextArray(b)) => text_lists_eq(a, b),
+            (AttributeValue.BoolArray(a), AttributeValue.BoolArray(b)) => bool_lists_eq(a, b),
+            (AttributeValue.IntArray(a), AttributeValue.IntArray(b)) => int_lists_eq(a, b),
+            (AttributeValue.FloatArray(a), AttributeValue.FloatArray(b)) => float_lists_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
+implement Eq for AttributeSet {
+    /// Two sets are equal iff they hold the same (key, value) pairs in
+    /// the same insertion order. Order sensitivity keeps equality O(n)
+    /// and matches the set's ordered-entries export contract.
+    fn eq(&self, other: &AttributeSet) -> Bool {
+        if self.entries.len() != other.entries.len() { return false; }
+        let mut i = 0;
+        while i < self.entries.len() {
+            if self.entries[i].0 != other.entries[i].0 { return false; }
+            if !self.entries[i].1.eq(&other.entries[i].1) { return false; }
+            i = i + 1;
+        }
+        true
     }
 }
 
@@ -143,4 +198,44 @@ fn clone_text_list(xs: &List<Text>) -> List<Text> {
         i = i + 1;
     }
     out
+}
+
+fn text_lists_eq(a: &List<Text>, b: &List<Text>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn bool_lists_eq(a: &List<Bool>, b: &List<Bool>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn int_lists_eq(a: &List<Int>, b: &List<Int>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn float_lists_eq(a: &List<Float>, b: &List<Float>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
 }

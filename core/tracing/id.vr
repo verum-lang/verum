@@ -1,8 +1,19 @@
 // =============================================================================
-// tracing/id.vr — TraceId (128-bit) / SpanId (64-bit)
+// tracing/id.vr — TraceId (128-bit) / SpanId (64-bit) + IdGenerator
 // =============================================================================
 // Opaque identifiers per OpenTelemetry + W3C Trace Context. Stored as
 // fixed-size byte arrays for zero-copy hex encoding / decoding.
+//
+
+// Generation draws 64-bit words from the platform CSPRNG intrinsic, so
+// identifiers are truly random — the property W3C Trace Context Level 2
+// expects and TraceIdRatio sampling (keyed on the low 63 bits) depends
+// on.
+//
+
+// The `IdGenerator` protocol makes the scheme pluggable: installations
+// that need CSPRNG-grade ids (or vendor formats such as X-Ray) install
+// their own generator on the TracerProvider.
 // =============================================================================
 
 @arch_module(
@@ -13,7 +24,6 @@
 module core.tracing.id;
 
 mount core.*;
-mount core.sync.atomic.{AtomicU64};
 
 // =============================================================================
 // TraceId — 16 bytes
@@ -57,9 +67,8 @@ implement TraceId {
         out
     }
 
-    /// Decode from a 32-character lowercase hex string. Case-insensitive
-    /// for the hex digits; returns Maybe.None if length is wrong or any byte
-    /// is non-hex.
+    /// Decode from a 32-character hex string (case-insensitive digits).
+    /// Returns Maybe.None if length is wrong or any byte is non-hex.
     public fn from_hex(hex: &[Byte]) -> Maybe<TraceId> {
         if hex.len() != 32 { return Maybe.None; }
         let mut bytes: [UInt8; 16] = [0; 16];
@@ -74,6 +83,37 @@ implement TraceId {
     }
 
     public fn as_bytes(&self) -> &[UInt8; 16] { &self.bytes }
+}
+
+implement Eq for TraceId {
+    fn eq(&self, other: &TraceId) -> Bool {
+        let mut i = 0;
+        while i < 16 {
+            if self.bytes[i] != other.bytes[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+}
+
+implement Hash for TraceId {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(read_u64_be(&self.bytes, 0) as Int);
+        hasher.write_int(read_u64_be(&self.bytes, 8) as Int);
+    }
+}
+
+implement Display for TraceId {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.to_hex())
+    }
+}
+
+implement Debug for TraceId {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let hex = self.to_hex();
+        f.write_str(f"TraceId({hex})")
+    }
 }
 
 // =============================================================================
@@ -130,30 +170,59 @@ implement SpanId {
     public fn as_bytes(&self) -> &[UInt8; 8] { &self.bytes }
 }
 
+implement Eq for SpanId {
+    fn eq(&self, other: &SpanId) -> Bool {
+        let mut i = 0;
+        while i < 8 {
+            if self.bytes[i] != other.bytes[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+}
+
+implement Hash for SpanId {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(read_u64_be(&self.bytes, 0) as Int);
+    }
+}
+
+implement Display for SpanId {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.to_hex())
+    }
+}
+
+implement Debug for SpanId {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let hex = self.to_hex();
+        f.write_str(f"SpanId({hex})")
+    }
+}
+
 // =============================================================================
-// Generation — per-thread monotonic counter xor'd with a per-process seed
+// Generation — platform CSPRNG via the `random_u64` intrinsic
 // =============================================================================
 //
 
-// Random uniqueness is not required by W3C — only "unique within a trace
-// with sufficiently high probability". We use:
-//
+// Identifiers draw from the same intrinsic `core.security.util.rng.
+// fill_secure` uses for NIST DRBG output: `random_u64` returns 64 bits
+// of platform randomness through the canonical value path — no buffer
+// marshalling, no cross-module call, no FFI gate. Random ids satisfy
+// the W3C Trace Context Level 2 randomness expectation and spread
+// uniformly across the low 63 bits TraceIdRatio keys on.
 
-//  seed_hi = process-start wall-clock-nanos (constant per process)
-//  seed_lo = atomic counter (incremented per ID)
-//
-
-// This yields ~2^64 unique ids per process lifetime with no syscall per
-// emission (the seed is read once at module init; counter is a single
-// CAS), totalling ~20ns per TraceId.
-
-static TRACE_COUNTER: AtomicU64 = AtomicU64.new(0);
-static SPAN_COUNTER: AtomicU64 = AtomicU64.new(0);
+@inline(always)
+fn random_word() -> UInt64 {
+    @intrinsic("random_u64")
+}
 
 /// Generate a new TraceId. Guaranteed non-zero.
 public fn generate_trace_id() -> TraceId {
-    let hi = process_start_nanos();
-    let lo = TRACE_COUNTER.fetch_add(1, Ordering.Relaxed) + 1;
+    let hi = random_word();
+    let mut lo = random_word();
+    // All-zero is the reserved invalid value (probability 2^-128).
+    if hi == 0 && lo == 0 { lo = 1; }
     let mut bytes: [UInt8; 16] = [0; 16];
     write_u64_be(&mut bytes, 0, hi);
     write_u64_be(&mut bytes, 8, lo);
@@ -162,10 +231,89 @@ public fn generate_trace_id() -> TraceId {
 
 /// Generate a new SpanId. Guaranteed non-zero.
 public fn generate_span_id() -> SpanId {
-    let lo = SPAN_COUNTER.fetch_add(1, Ordering.Relaxed) + 1;
+    let mut w = random_word();
+    if w == 0 { w = 1; }
     let mut bytes: [UInt8; 8] = [0; 8];
-    write_u64_be(&mut bytes, 0, lo);
+    write_u64_be(&mut bytes, 0, w);
     SpanId { bytes: bytes }
+}
+
+// =============================================================================
+// IdGenerator protocol — pluggable id source for the SDK tracer
+// =============================================================================
+
+public type IdGenerator is protocol {
+    /// Produce a new, valid (non-zero) TraceId.
+    fn new_trace_id(&self) -> TraceId;
+
+    /// Produce a new, valid (non-zero) SpanId.
+    fn new_span_id(&self) -> SpanId;
+
+    /// Human-readable identifier for diagnostics.
+    fn description(&self) -> Text;
+};
+
+/// Default generator — the process-wide SplitMix64 stream above.
+public type DefaultIdGenerator is ();
+
+implement DefaultIdGenerator {
+    public fn new() -> DefaultIdGenerator { () }
+}
+
+implement IdGenerator for DefaultIdGenerator {
+    fn new_trace_id(&self) -> TraceId { generate_trace_id() }
+    fn new_span_id(&self) -> SpanId { generate_span_id() }
+    fn description(&self) -> Text { "DefaultIdGenerator".into() }
+}
+
+/// Closed-world dispatch over id generators. `IghCustom` carries a
+/// user-defined generator behind the IdGenerator protocol — NOTE:
+/// invoking a custom generator requires protocol-object dispatch,
+/// which the VBC interpreter does not implement yet; construction and
+/// configuration work, invocation panics until the language gap
+/// closes.
+public type IdGeneratorHandle is
+    | IghDefault
+    | IghCustom(Shared<dyn IdGenerator>);
+
+implement IdGeneratorHandle {
+    public fn new_trace_id(&self) -> TraceId {
+        match self {
+            IdGeneratorHandle.IghDefault => generate_trace_id(),
+            IdGeneratorHandle.IghCustom(g) => g.new_trace_id(),
+        }
+    }
+
+    public fn new_span_id(&self) -> SpanId {
+        match self {
+            IdGeneratorHandle.IghDefault => generate_span_id(),
+            IdGeneratorHandle.IghCustom(g) => g.new_span_id(),
+        }
+    }
+
+    public fn description(&self) -> Text {
+        match self {
+            IdGeneratorHandle.IghDefault => "DefaultIdGenerator".into(),
+            IdGeneratorHandle.IghCustom(g) => g.description(),
+        }
+    }
+
+    public fn clone(&self) -> IdGeneratorHandle {
+        match self {
+            IdGeneratorHandle.IghDefault => IdGeneratorHandle.IghDefault,
+            IdGeneratorHandle.IghCustom(g) => IdGeneratorHandle.IghCustom(g.clone()),
+        }
+    }
+}
+
+/// Factory used by TracerProviderBuilder as the default.
+public fn default_id_generator() -> IdGeneratorHandle {
+    IdGeneratorHandle.IghDefault
+}
+
+/// Wrap a user-defined generator (see the IghCustom note above).
+public fn custom_id_generator(generator: Shared<dyn IdGenerator>) -> IdGeneratorHandle {
+    IdGeneratorHandle.IghCustom(generator)
 }
 
 // =============================================================================
@@ -205,6 +353,13 @@ fn write_u64_be(buf: &mut [UInt8], offset: Int, value: UInt64) {
     buf[offset + 7] = (value & 0xFF) as UInt8;
 }
 
-fn process_start_nanos() -> UInt64 {
-    @intrinsic("verum.process.start_nanos") as UInt64
+@inline
+fn read_u64_be(buf: &[UInt8], offset: Int) -> UInt64 {
+    let mut n: UInt64 = 0;
+    let mut i = 0;
+    while i < 8 {
+        n = (n << 8) | (buf[offset + i] as UInt64);
+        i = i + 1;
+    }
+    n
 }

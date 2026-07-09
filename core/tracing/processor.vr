@@ -1,19 +1,29 @@
 // =============================================================================
-// tracing/processor.vr — SpanProcessor protocol + Simple + Batch
+// tracing/processor.vr — SpanProcessor protocol, Simple / Batch /
+//                        Composite implementations, and the
+//                        ProcessorHandle closed-world dispatch enum
 // =============================================================================
-// A processor sits between the Tracer and the Exporter. Two in-tree
-// variants:
+// A processor sits between the span lifecycle and the exporter:
 //
 
-// - SimpleProcessor: forwards each SpanData synchronously on end().
-//  Lowest latency, no back-pressure, 0 allocation. Good for dev.
+// - SimpleProcessor: forwards each sampled SpanData synchronously on
+//   on_end(). Lowest latency, no buffering. Dev / tests / low volume.
 //
 
-// - BatchProcessor: buffers SpanData in a bounded queue, flushes on
-//  (a) queue fills to max_export_batch_size, (b) scheduled_delay
-//  elapses, (c) explicit force_flush(). Good for production.
+// - BatchProcessor: bounded queue + worker task. Flushes when the batch
+//   reaches max_export_batch_size, when scheduled_delay elapses, on
+//   force_flush(), and on shutdown(). Queue-full drops the span (per
+//   OTel default policy) and counts it. Production default.
 //
 
+// - CompositeProcessor: fans out to several processors, giving each its
+//   own copy of the SpanData; aggregates results first-failure-wins.
+//
+
+// The pipeline dispatches through `ProcessorHandle` — a closed variant
+// enum with a `PhCustom(Shared<dyn SpanProcessor>)` escape hatch for
+// user-defined processors, pending protocol-object dispatch support in
+// the VBC interpreter.
 // Spec: https://opentelemetry.io/docs/specs/otel/trace/sdk/#span-processor
 // =============================================================================
 
@@ -27,28 +37,36 @@ module core.tracing.processor;
 mount core.*;
 mount core.async.channel.{Sender, Receiver, bounded};
 mount core.async.task.{spawn_detached};
-mount core.sync.mutex.{Mutex};
+mount core.async.timer.{sleep};
+mount core.sync.atomic.{AtomicU64, MemoryOrdering};
 mount core.time.duration.{Duration};
-mount core.tracing.span.{Span, SpanData};
+mount core.time.instant.{Instant};
+mount core.time.{Time};
 mount core.tracing.context.{SpanContext};
-mount core.tracing.exporter.{SpanExporter, TraceExportResult};
+mount core.tracing.data.{SpanData, TraceExportResult, ExportError};
+mount core.tracing.exporter.{ExporterHandle};
 
 // =============================================================================
-// Protocol
+// Protocol — the contract PhCustom processors implement
 // =============================================================================
+//
+
+// NOTE: on_start receives the new span's CONTEXT (not the live Span
+// handle). This keeps the module graph acyclic — the Span type lives
+// above the processors, which sit directly on the frozen-data layer.
 
 public type SpanProcessor is protocol {
-    /// Called as a span is started (may attach parent-context).
-    fn on_start(&self, span: &Span, parent: &SpanContext);
+    /// Called synchronously when a recording span starts.
+    fn on_start(&self, context: &SpanContext, parent: &SpanContext);
 
-    /// Called as a span is ended — processor takes ownership of SpanData.
+    /// Called synchronously when a recording span ends — the processor
+    /// takes ownership of the frozen SpanData.
     fn on_end(&self, span: SpanData);
 
-    /// Flush. Blocks up to `timeout`.
+    /// Flush any buffered spans. Blocks up to `timeout`.
     fn force_flush(&self, timeout: Duration) -> TraceExportResult;
 
-    /// Shutdown. Drains remaining spans up to `timeout` then calls
-    /// exporter shutdown.
+    /// Drain remaining spans up to `timeout`, then release resources.
     fn shutdown(&self, timeout: Duration) -> TraceExportResult;
 };
 
@@ -57,49 +75,39 @@ public type SpanProcessor is protocol {
 // =============================================================================
 
 public type SimpleProcessor is {
-    exporter: Heap<dyn SpanExporter>,
+    exporter: ExporterHandle,
 };
 
 implement SimpleProcessor {
-    public fn new(exporter: Heap<dyn SpanExporter>) -> SimpleProcessor {
+    public fn new(exporter: ExporterHandle) -> SimpleProcessor {
         SimpleProcessor { exporter: exporter }
     }
-}
 
-implement SpanProcessor for SimpleProcessor {
-    fn on_start(&self, _span: &Span, _parent: &SpanContext) {}
-
-    fn on_end(&self, span: SpanData) {
+    /// Uniquely-named workers so handle dispatch resolves on any
+    /// receiver-tracking tier.
+    public fn simple_on_end(&self, span: SpanData) {
+        // Exporters receive sampled spans only; RecordOnly spans are
+        // recorded (attributes work) but never exported.
+        if !span.context().is_sampled() { return; }
         let mut buf: List<SpanData> = List.with_capacity(1);
         buf.push(span);
-        // Result intentionally discarded — simple processor is fire-and-forget.
+        // Fire-and-forget by design: a failed dev-exporter write must
+        // never fail the traced request.
         let _ = self.exporter.export(&buf);
     }
 
-    fn force_flush(&self, timeout: Duration) -> TraceExportResult {
+    public fn simple_force_flush(&self, timeout: Duration) -> TraceExportResult {
         self.exporter.force_flush(timeout)
     }
 
-    fn shutdown(&self, timeout: Duration) -> TraceExportResult {
+    public fn simple_shutdown(&self, timeout: Duration) -> TraceExportResult {
         self.exporter.shutdown(timeout)
     }
 }
 
 // =============================================================================
-// BatchProcessor — buffered + worker-task export
+// BatchConfig
 // =============================================================================
-//
-
-// Configuration:
-//  max_queue_size — bounded channel capacity (default 2048)
-//  scheduled_delay — flush interval (default 5s)
-//  max_export_batch_size — size at which to export early (default 512)
-//  export_timeout — per-export timeout (default 30s)
-//
-
-// Architecture: producer (caller of on_end) sends SpanData over a bounded
-// channel. Single consumer task drains, batches, invokes exporter. On
-// queue-full we drop (per OTel SDK default policy).
 
 public type BatchConfig is {
     max_queue_size: Int,
@@ -130,61 +138,7 @@ implement BatchConfig {
     public fn with_export_timeout(mut self, d: Duration) -> BatchConfig {
         self.export_timeout = d; self
     }
-}
 
-public type BatchProcessor is {
-    sender: Sender<BatchMessage>,
-    exporter: Heap<dyn SpanExporter>,
-    config: BatchConfig,
-}
-
-type BatchMessage is
-    | BatchSpan(SpanData)
-    | BatchFlush
-    | BatchShutdown;
-
-implement BatchProcessor {
-    public fn new(exporter: Heap<dyn SpanExporter>) -> BatchProcessor {
-        BatchProcessor.with_config(exporter, BatchConfig.default())
-    }
-
-    public fn with_config(exporter: Heap<dyn SpanExporter>, config: BatchConfig) -> BatchProcessor {
-        let (sender, receiver) = bounded<BatchMessage>(config.max_queue_size);
-        let exporter_clone = exporter.clone();
-        let cfg_clone = config.clone();
-        spawn_detached(async move {
-            run_worker(receiver, exporter_clone, cfg_clone).await;
-        });
-        BatchProcessor {
-            sender: sender,
-            exporter: exporter,
-            config: config,
-        }
-    }
-}
-
-implement SpanProcessor for BatchProcessor {
-    fn on_start(&self, _span: &Span, _parent: &SpanContext) {}
-
-    fn on_end(&self, span: SpanData) {
-        // Non-blocking send — drop on full queue per OTel policy.
-        let _ = self.sender.try_send(BatchMessage.BatchSpan(span));
-    }
-
-    fn force_flush(&self, timeout: Duration) -> TraceExportResult {
-        // Send a flush sentinel; the worker drains buffered spans on receipt.
-        let _ = self.sender.try_send(BatchMessage.BatchFlush);
-        self.exporter.force_flush(timeout)
-    }
-
-    fn shutdown(&self, timeout: Duration) -> TraceExportResult {
-        let _ = self.sender.try_send(BatchMessage.BatchShutdown);
-        self.exporter.shutdown(timeout)
-    }
-}
-
-// Config clone helper
-implement BatchConfig {
     public fn clone(&self) -> BatchConfig {
         BatchConfig {
             max_queue_size: self.max_queue_size,
@@ -195,42 +149,337 @@ implement BatchConfig {
     }
 }
 
+// =============================================================================
+// BatchProcessor — bounded queue + worker task
+// =============================================================================
+//
+
+// Producers (on_end callers) do one non-blocking try_send. The single
+// consumer task batches and exports. Control operations (flush /
+// shutdown) send a sentinel carrying a reply channel and wait for the
+// worker's confirmation up to the caller's timeout — they are drain
+// barriers, not fire-and-forget signals.
+
+public type BatchProcessor is {
+    sender: Sender<BatchMessage>,
+    config: BatchConfig,
+    /// Spans dropped because the queue was full. Relaxed counter —
+    /// observability, not synchronisation.
+    dropped: AtomicU64,
+};
+
+type BatchMessage is
+    | BatchSpan(SpanData)
+    | BatchFlush(Sender<TraceExportResult>, Duration)
+    | BatchShutdown(Sender<TraceExportResult>, Duration);
+
+implement BatchProcessor {
+    public fn new(exporter: ExporterHandle) -> BatchProcessor {
+        BatchProcessor.with_config(exporter, BatchConfig.default())
+    }
+
+    /// Spawns the worker task — requires the async runtime.
+    public fn with_config(exporter: ExporterHandle, config: BatchConfig) -> BatchProcessor {
+        let (sender, receiver) = bounded<BatchMessage>(config.max_queue_size);
+        let worker_config = config.clone();
+        spawn_detached(async move {
+            run_worker(receiver, exporter, worker_config).await;
+        });
+        BatchProcessor {
+            sender: sender,
+            config: config,
+            dropped: AtomicU64.new(0),
+        }
+    }
+
+    /// Number of spans dropped so far because the queue was full.
+    public fn dropped_spans(&self) -> Int {
+        self.dropped.load(MemoryOrdering.Relaxed) as Int
+    }
+
+    /// Uniquely-named workers so handle dispatch resolves on any
+    /// receiver-tracking tier.
+    public fn batch_on_end(&self, span: SpanData) {
+        if !span.context().is_sampled() { return; }
+        // Non-blocking: drop on full queue per OTel policy — losing a
+        // span is preferred over stalling the request path.
+        match self.sender.try_send(BatchMessage.BatchSpan(span)) {
+            Result.Ok(_) => {}
+            Result.Err(_) => {
+                let _ = self.dropped.fetch_add(1, MemoryOrdering.Relaxed);
+            }
+        }
+    }
+
+    public fn batch_force_flush(&self, timeout: Duration) -> TraceExportResult {
+        let (reply_tx, mut reply_rx) = bounded<TraceExportResult>(1);
+        match self.sender.send_timeout(BatchMessage.BatchFlush(reply_tx, timeout), timeout) {
+            Result.Ok(_) => {}
+            Result.Err(_) => {
+                return TraceExportResult.Failure(ExportError.queue_full());
+            }
+        }
+        wait_reply(&mut reply_rx, timeout)
+    }
+
+    public fn batch_shutdown(&self, timeout: Duration) -> TraceExportResult {
+        let (reply_tx, mut reply_rx) = bounded<TraceExportResult>(1);
+        match self.sender.send_timeout(BatchMessage.BatchShutdown(reply_tx, timeout), timeout) {
+            Result.Ok(_) => {}
+            Result.Err(_) => {
+                // Queue unreachable — worker already gone or hopelessly
+                // backed up.
+                return TraceExportResult.Failure(ExportError.shut_down());
+            }
+        }
+        wait_reply(&mut reply_rx, timeout)
+    }
+}
+
+/// Bounded wait for the worker's confirmation. Polls the reply channel
+/// with a 1 ms sleep so the (sync) call never blocks past the caller's
+/// deadline even if the worker hangs inside an exporter.
+fn wait_reply(rx: &mut Receiver<TraceExportResult>, timeout: Duration) -> TraceExportResult {
+    let deadline = Instant.now() + timeout;
+    loop {
+        match rx.try_recv() {
+            Result.Ok(r) => return r,
+            Result.Err(_) => {}
+        }
+        if Instant.now() >= deadline {
+            return TraceExportResult.Failure(ExportError.timeout(
+                "batch worker did not confirm within the deadline".into(),
+            ));
+        }
+        Time.sleep_ms(1);
+    }
+}
+
 // -------------------------------------------------------------------------
-// Worker task — drains the channel and invokes exporter in batches
+// Worker task — drains the channel, batches, enforces scheduled_delay
 // -------------------------------------------------------------------------
 
+type WorkerEvent is
+    | EvMsg(Maybe<BatchMessage>)
+    | EvTick;
+
 async fn run_worker(
-    receiver: Receiver<BatchMessage>,
-    exporter: Heap<dyn SpanExporter>,
+    mut receiver: Receiver<BatchMessage>,
+    exporter: ExporterHandle,
     config: BatchConfig,
 ) {
     let mut batch: List<SpanData> = List.with_capacity(config.max_export_batch_size);
+    // Deadline-based cadence: flush at fixed scheduled_delay intervals
+    // regardless of message traffic (a per-iteration timer would reset
+    // on every span and starve under steady load).
+    let mut deadline = Instant.now() + config.scheduled_delay;
     loop {
-        match receiver.recv().await {
-            Maybe.Some(BatchMessage.BatchSpan(s)) => {
-                batch.push(s);
-                if batch.len() >= config.max_export_batch_size {
-                    flush_batch(&exporter, &mut batch, config.max_export_batch_size);
+        let wait = deadline.saturating_duration_since(Instant.now());
+        let ev = select {
+            m = receiver.recv_fut().await => WorkerEvent.EvMsg(m),
+            _tick = sleep(wait).await => WorkerEvent.EvTick,
+        };
+        match ev {
+            WorkerEvent.EvTick => {
+                let _ = flush_batch(&exporter, &mut batch, config.max_export_batch_size);
+                deadline = Instant.now() + config.scheduled_delay;
+            }
+            WorkerEvent.EvMsg(m) => {
+                match m {
+                    Maybe.None => {
+                        // Channel closed — all senders gone. Final drain.
+                        let _ = flush_batch(&exporter, &mut batch, config.max_export_batch_size);
+                        return;
+                    }
+                    Maybe.Some(msg) => {
+                        match msg {
+                            BatchMessage.BatchSpan(s) => {
+                                batch.push(s);
+                                if batch.len() >= config.max_export_batch_size {
+                                    let _ = flush_batch(&exporter, &mut batch, config.max_export_batch_size);
+                                    deadline = Instant.now() + config.scheduled_delay;
+                                }
+                            }
+                            BatchMessage.BatchFlush(reply, t) => {
+                                let r = flush_batch(&exporter, &mut batch, config.max_export_batch_size)
+                                    .combine(exporter.force_flush(t));
+                                let _ = reply.try_send(r);
+                                deadline = Instant.now() + config.scheduled_delay;
+                            }
+                            BatchMessage.BatchShutdown(reply, t) => {
+                                let r = flush_batch(&exporter, &mut batch, config.max_export_batch_size)
+                                    .combine(exporter.shutdown(t));
+                                let _ = reply.try_send(r);
+                                return;
+                            }
+                        }
+                    }
                 }
-            }
-            Maybe.Some(BatchMessage.BatchFlush) => {
-                flush_batch(&exporter, &mut batch, config.max_export_batch_size);
-            }
-            Maybe.Some(BatchMessage.BatchShutdown) => {
-                flush_batch(&exporter, &mut batch, config.max_export_batch_size);
-                return;
-            }
-            Maybe.None => {
-                // Channel closed — sender side gone, no more spans.
-                flush_batch(&exporter, &mut batch, config.max_export_batch_size);
-                return;
             }
         }
     }
 }
 
-fn flush_batch(exporter: &Heap<dyn SpanExporter>, batch: &mut List<SpanData>, cap: Int) {
-    if batch.is_empty() { return; }
-    let _ = exporter.export(batch);
+fn flush_batch(
+    exporter: &ExporterHandle,
+    batch: &mut List<SpanData>,
+    cap: Int,
+) -> TraceExportResult {
+    if batch.is_empty() { return TraceExportResult.Success; }
+    let out = exporter.export(batch);
     *batch = List.with_capacity(cap);
+    out
+}
+
+// =============================================================================
+// CompositeProcessor — fans SpanData out to multiple processors
+// =============================================================================
+
+public type CompositeProcessor is {
+    children: List<ProcessorHandle>,
+};
+
+implement CompositeProcessor {
+    public fn new(children: List<ProcessorHandle>) -> CompositeProcessor {
+        CompositeProcessor { children: children }
+    }
+
+    /// Uniquely-named workers so handle dispatch resolves on any
+    /// receiver-tracking tier.
+    public fn fanout_on_start(&self, context: &SpanContext, parent: &SpanContext) {
+        let mut i = 0;
+        while i < self.children.len() {
+            self.children[i].on_start(context, parent);
+            i = i + 1;
+        }
+    }
+
+    public fn fanout_on_end(&self, span: SpanData) {
+        // Each downstream processor owns its SpanData; the last one
+        // takes the original to save a deep copy.
+        let n = self.children.len();
+        if n == 0 { return; }
+        let mut i = 0;
+        while i + 1 < n {
+            self.children[i].on_end(span.clone());
+            i = i + 1;
+        }
+        self.children[n - 1].on_end(span);
+    }
+
+    public fn fanout_force_flush(&self, timeout: Duration) -> TraceExportResult {
+        let mut acc = TraceExportResult.Success;
+        let mut i = 0;
+        while i < self.children.len() {
+            acc = acc.combine(self.children[i].force_flush(timeout));
+            i = i + 1;
+        }
+        acc
+    }
+
+    public fn fanout_shutdown(&self, timeout: Duration) -> TraceExportResult {
+        let mut acc = TraceExportResult.Success;
+        let mut i = 0;
+        while i < self.children.len() {
+            acc = acc.combine(self.children[i].shutdown(timeout));
+            i = i + 1;
+        }
+        acc
+    }
+}
+
+// =============================================================================
+// ProcessorHandle — closed-world dispatch over the in-tree processors
+// =============================================================================
+
+public type ProcessorHandle is
+    /// Discard everything (detached spans, tests).
+    | PhNoop
+    /// Synchronous per-span export.
+    | PhSimple(Shared<SimpleProcessor>)
+    /// Bounded queue + worker task.
+    | PhBatch(Shared<BatchProcessor>)
+    /// Fan-out to several processors.
+    | PhComposite(Shared<CompositeProcessor>)
+    /// User-defined processor behind the SpanProcessor protocol. NOTE:
+    /// invoking a custom processor requires protocol-object dispatch,
+    /// which the VBC interpreter does not implement yet — construction
+    /// and configuration work, invocation panics until the language
+    /// gap closes.
+    | PhCustom(Shared<dyn SpanProcessor>);
+
+implement ProcessorHandle {
+    public fn noop() -> ProcessorHandle { ProcessorHandle.PhNoop }
+
+    public fn simple(exporter: ExporterHandle) -> ProcessorHandle {
+        ProcessorHandle.PhSimple(Shared.new(SimpleProcessor.new(exporter)))
+    }
+
+    /// Spawns the worker task — requires the async runtime.
+    public fn batch(exporter: ExporterHandle) -> ProcessorHandle {
+        ProcessorHandle.PhBatch(Shared.new(BatchProcessor.new(exporter)))
+    }
+
+    /// Spawns the worker task — requires the async runtime.
+    public fn batch_with(exporter: ExporterHandle, config: BatchConfig) -> ProcessorHandle {
+        ProcessorHandle.PhBatch(Shared.new(BatchProcessor.with_config(exporter, config)))
+    }
+
+    public fn composite(children: List<ProcessorHandle>) -> ProcessorHandle {
+        ProcessorHandle.PhComposite(Shared.new(CompositeProcessor.new(children)))
+    }
+
+    public fn custom(processor: Shared<dyn SpanProcessor>) -> ProcessorHandle {
+        ProcessorHandle.PhCustom(processor)
+    }
+
+    public fn on_start(&self, context: &SpanContext, parent: &SpanContext) {
+        match self {
+            ProcessorHandle.PhNoop => {}
+            ProcessorHandle.PhSimple(_) => {}
+            ProcessorHandle.PhBatch(_) => {}
+            ProcessorHandle.PhComposite(p) => p.fanout_on_start(context, parent),
+            ProcessorHandle.PhCustom(p) => p.on_start(context, parent),
+        }
+    }
+
+    public fn on_end(&self, span: SpanData) {
+        match self {
+            ProcessorHandle.PhNoop => {}
+            ProcessorHandle.PhSimple(p) => p.simple_on_end(span),
+            ProcessorHandle.PhBatch(p) => p.batch_on_end(span),
+            ProcessorHandle.PhComposite(p) => p.fanout_on_end(span),
+            ProcessorHandle.PhCustom(p) => p.on_end(span),
+        }
+    }
+
+    public fn force_flush(&self, timeout: Duration) -> TraceExportResult {
+        match self {
+            ProcessorHandle.PhNoop => TraceExportResult.Success,
+            ProcessorHandle.PhSimple(p) => p.simple_force_flush(timeout),
+            ProcessorHandle.PhBatch(p) => p.batch_force_flush(timeout),
+            ProcessorHandle.PhComposite(p) => p.fanout_force_flush(timeout),
+            ProcessorHandle.PhCustom(p) => p.force_flush(timeout),
+        }
+    }
+
+    public fn shutdown(&self, timeout: Duration) -> TraceExportResult {
+        match self {
+            ProcessorHandle.PhNoop => TraceExportResult.Success,
+            ProcessorHandle.PhSimple(p) => p.simple_shutdown(timeout),
+            ProcessorHandle.PhBatch(p) => p.batch_shutdown(timeout),
+            ProcessorHandle.PhComposite(p) => p.fanout_shutdown(timeout),
+            ProcessorHandle.PhCustom(p) => p.shutdown(timeout),
+        }
+    }
+
+    public fn clone(&self) -> ProcessorHandle {
+        match self {
+            ProcessorHandle.PhNoop => ProcessorHandle.PhNoop,
+            ProcessorHandle.PhSimple(p) => ProcessorHandle.PhSimple(p.clone()),
+            ProcessorHandle.PhBatch(p) => ProcessorHandle.PhBatch(p.clone()),
+            ProcessorHandle.PhComposite(p) => ProcessorHandle.PhComposite(p.clone()),
+            ProcessorHandle.PhCustom(p) => ProcessorHandle.PhCustom(p.clone()),
+        }
+    }
 }

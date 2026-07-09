@@ -2,10 +2,12 @@
 // core-tests/tracing/exporter/unit_test.vr
 // =============================================================================
 //
-// `core/tracing/exporter.vr` — OpenTelemetry SpanExporter surface.
+// `core/tracing/error.vr` + `core/tracing/exporter.vr` — structured
+// export errors (ExportError / ExportErrorKind) and the
+// TraceExportResult ADT the exporter surface reports through.
 // =============================================================================
 
-mount core.tracing.exporter.TraceExportResult;
+mount core.tracing.data.{TraceExportResult, ExportError, ExportErrorKind};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -21,7 +23,7 @@ fn test_trace_export_result_success_variant() {
 
 @test
 fn test_trace_export_result_failure_variant() {
-    let r: TraceExportResult = TraceExportResult.Failure("network timeout".to_text());
+    let r: TraceExportResult = TraceExportResult.Failure(ExportError.transport("network timeout".into()));
     assert(r is TraceExportResult.Failure);
 }
 
@@ -33,8 +35,18 @@ fn test_trace_export_result_success_disjoint_failure() {
 
 @test
 fn test_trace_export_result_failure_disjoint_success() {
-    let r: TraceExportResult = TraceExportResult.Failure("io".to_text());
+    let r: TraceExportResult = TraceExportResult.Failure(ExportError.transport("io".into()));
     assert(!(r is TraceExportResult.Success));
+}
+
+@test
+fn test_trace_export_result_is_success_is_failure() {
+    let ok: TraceExportResult = TraceExportResult.Success;
+    let bad: TraceExportResult = TraceExportResult.Failure(ExportError.queue_full());
+    assert(ok.is_success());
+    assert(!ok.is_failure());
+    assert(bad.is_failure());
+    assert(!bad.is_success());
 }
 
 // =============================================================================
@@ -43,21 +55,103 @@ fn test_trace_export_result_failure_disjoint_success() {
 
 @test
 fn test_trace_export_result_failure_payload_round_trip() {
-    let r: TraceExportResult = TraceExportResult.Failure("connection refused".to_text());
+    let r: TraceExportResult = TraceExportResult.Failure(ExportError.transport("connection refused".into()));
     match r {
-        TraceExportResult.Failure(reason) => assert_eq(reason, "connection refused"),
-        TraceExportResult.Success         => panic("expected Failure"),
+        TraceExportResult.Failure(err) => assert_eq(err.message(), "connection refused".into()),
+        TraceExportResult.Success => panic("expected Failure"),
     }
 }
 
 // =============================================================================
-// Section 3: Match exhaustiveness
+// Section 3: ExportError constructors — kind + retryability contract
+// =============================================================================
+
+@test
+fn test_export_error_timeout_is_retryable() {
+    let e = ExportError.timeout("deadline".into());
+    assert(e.kind() is ExportErrorKind.Timeout);
+    assert(e.is_retryable());
+}
+
+@test
+fn test_export_error_transport_is_retryable() {
+    let e = ExportError.transport("reset".into());
+    assert(e.kind() is ExportErrorKind.Transport);
+    assert(e.is_retryable());
+}
+
+@test
+fn test_export_error_serialization_is_permanent() {
+    let e = ExportError.serialization("bad encoding".into());
+    assert(e.kind() is ExportErrorKind.Serialization);
+    assert(!e.is_retryable());
+}
+
+@test
+fn test_export_error_queue_full_is_retryable() {
+    let e = ExportError.queue_full();
+    assert(e.kind() is ExportErrorKind.QueueFull);
+    assert(e.is_retryable());
+}
+
+@test
+fn test_export_error_shut_down_is_permanent() {
+    let e = ExportError.shut_down();
+    assert(e.kind() is ExportErrorKind.ShutDown);
+    assert(!e.is_retryable());
+}
+
+@test
+fn test_export_error_internal_is_permanent() {
+    let e = ExportError.internal("invariant".into());
+    assert(e.kind() is ExportErrorKind.Internal);
+    assert(!e.is_retryable());
+}
+
+@test
+fn test_export_error_clone_preserves_fields() {
+    let e = ExportError.transport("boom".into());
+    let c = e.clone();
+    assert(c.kind() is ExportErrorKind.Transport);
+    assert_eq(c.message(), "boom".into());
+    assert(c.is_retryable());
+}
+
+// =============================================================================
+// Section 4: First-failure aggregation (combine)
+// =============================================================================
+
+@test
+fn test_result_combine_success_then_failure() {
+    let r = TraceExportResult.Success
+        .combine(TraceExportResult.Failure(ExportError.queue_full()));
+    assert(r.is_failure());
+}
+
+@test
+fn test_result_combine_failure_keeps_first_error() {
+    let first = TraceExportResult.Failure(ExportError.timeout("first".into()));
+    let r = first.combine(TraceExportResult.Failure(ExportError.transport("second".into())));
+    match r {
+        TraceExportResult.Failure(err) => assert_eq(err.message(), "first".into()),
+        TraceExportResult.Success => panic("expected Failure"),
+    }
+}
+
+@test
+fn test_result_combine_success_chain_stays_success() {
+    let r = TraceExportResult.Success.combine(TraceExportResult.Success);
+    assert(r.is_success());
+}
+
+// =============================================================================
+// Section 5: Match exhaustiveness
 // =============================================================================
 
 fn describe(r: &TraceExportResult) -> Text {
     match r {
-        TraceExportResult.Success     => "success".to_text(),
-        TraceExportResult.Failure(_)  => "failure".to_text(),
+        TraceExportResult.Success => "success".to_text(),
+        TraceExportResult.Failure(_) => "failure".to_text(),
     }
 }
 
@@ -68,7 +162,7 @@ fn test_trace_export_result_describe_success() {
 
 @test
 fn test_trace_export_result_describe_failure() {
-    assert_eq(describe(&TraceExportResult.Failure("x".to_text())), "failure");
+    assert_eq(describe(&TraceExportResult.Failure(ExportError.internal("x".into()))), "failure");
 }
 
 fn main() {}

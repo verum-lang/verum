@@ -1,9 +1,16 @@
 // =============================================================================
-// tracing/sampler.vr — Sampler protocol + standard samplers
+// tracing/sampler.vr — Sampler protocol, standard samplers, and the
+//                      SamplerHandle closed-world dispatch enum
 // =============================================================================
 // Head-based sampling decision. Consulted by Tracer.start_span() with the
 // parent context and span attributes; returns RecordAndSample / RecordOnly /
 // Drop plus an updated TraceState.
+//
+
+// The SDK dispatches through `SamplerHandle` — a closed variant enum
+// with a `ShCustom(Shared<dyn Sampler>)` escape hatch for user-defined
+// samplers, pending protocol-object dispatch support in the VBC
+// interpreter.
 // Spec: https://opentelemetry.io/docs/specs/otel/trace/sdk/#sampler
 // =============================================================================
 
@@ -16,9 +23,9 @@ module core.tracing.sampler;
 
 mount core.*;
 mount core.tracing.id.{TraceId};
-mount core.tracing.context.{SpanContext, TraceFlags, TraceState};
+mount core.tracing.context.{SpanContext, TraceState};
 mount core.tracing.attribute.{AttributeSet};
-mount core.tracing.span.{SpanKind};
+mount core.tracing.data.{SpanKind};
 
 // =============================================================================
 // Types
@@ -27,14 +34,14 @@ mount core.tracing.span.{SpanKind};
 public type SamplingDecision is
     /// Drop — span is not recorded nor sampled.
     | Drop
-    /// Record but do not sample (for internal aggregation only).
+    /// Record but do not sample (local inspection only, never exported).
     | RecordOnly
-    /// Record AND include in sampled output (with sampled flag set).
+    /// Record AND include in sampled output (sets the sampled flag).
     | RecordAndSample;
 
 public type SamplingResult is {
     decision: SamplingDecision,
-    /// Overrides for the new span's TraceState (may clone / modify parent).
+    /// TraceState for the new span's context (may clone / modify parent).
     trace_state: TraceState,
 };
 
@@ -44,15 +51,19 @@ implement SamplingResult {
     }
 
     public fn decision(&self) -> SamplingDecision { self.decision }
-    public fn trace_state(&self) -> &TraceState { &self.trace_state }
+
+    /// Owned copy — see the module note on reference-returning
+    /// accessors and the AOT tier.
+    public fn trace_state(&self) -> TraceState { self.trace_state.clone() }
 }
 
 // =============================================================================
-// Protocol
+// Protocol — the contract ShCustom samplers implement
 // =============================================================================
 
 public type Sampler is protocol {
-    /// Decide whether to sample. Pure function — no side effects.
+    /// Decide whether to sample. Pure function — no side effects; runs
+    /// inline on whatever thread starts the span.
     fn should_sample(
         &self,
         parent: &SpanContext,
@@ -67,7 +78,7 @@ public type Sampler is protocol {
 };
 
 // =============================================================================
-// AlwaysOn — every span sampled
+// AlwaysOn / AlwaysOff — protocol-form unit samplers
 // =============================================================================
 
 public type AlwaysOn is ();
@@ -85,15 +96,11 @@ implement Sampler for AlwaysOn {
         _kind: SpanKind,
         _attributes: &AttributeSet,
     ) -> SamplingResult {
-        SamplingResult.new(SamplingDecision.RecordAndSample, parent.trace_state().clone())
+        SamplingResult.new(SamplingDecision.RecordAndSample, parent.trace_state())
     }
 
     fn description(&self) -> Text { "AlwaysOnSampler".into() }
 }
-
-// =============================================================================
-// AlwaysOff — nothing sampled
-// =============================================================================
 
 public type AlwaysOff is ();
 
@@ -110,41 +117,83 @@ implement Sampler for AlwaysOff {
         _kind: SpanKind,
         _attributes: &AttributeSet,
     ) -> SamplingResult {
-        SamplingResult.new(SamplingDecision.Drop, parent.trace_state().clone())
+        SamplingResult.new(SamplingDecision.Drop, parent.trace_state())
     }
 
     fn description(&self) -> Text { "AlwaysOffSampler".into() }
 }
 
 // =============================================================================
-// TraceIdRatio — deterministic ratio sampling by TraceId high 64 bits
+// TraceIdRatio — deterministic ratio sampling on the trace id's low bits
 // =============================================================================
 //
 
-// Sample if trace_id_high_u64 < ratio_threshold, where ratio_threshold
-// scales the u64 space by `ratio` ∈ [0.0, 1.0]. Identical TraceIds will
-// always produce the same decision, so parent + child spans agree.
+// Keyed on the LOW 8 bytes of the TraceId, masked to 63 bits, following
+// the OTel consistent-probability guidance (the low bytes are the ones
+// W3C Trace Context Level 2 designates as random). Sampled iff
+// key < ratio · 2^63. The 63-bit domain makes ratio = 1.0 exact with no
+// integer overflow: the bound 2^63 fits UInt64 and every masked key is
+// strictly below it.
+//
+
+// Identical TraceIds always produce the same decision, so all services
+// in a trace agree without coordination.
 
 public type TraceIdRatio is {
     ratio: Float,
-    threshold: UInt64,
+    /// Sampling bound in the 63-bit key domain: ratio · 2^63.
+    bound: UInt64,
 };
 
 implement TraceIdRatio {
     public fn new(ratio: Float) -> TraceIdRatio {
         let r = if ratio < 0.0 { 0.0 } else if ratio > 1.0 { 1.0 } else { ratio };
-        let threshold = (r * (18446744073709551615.0 as Float)) as UInt64;
-        TraceIdRatio { ratio: r, threshold: threshold }
+        // Float→UInt64 casts clamp at 2^63-1 (they route through the
+        // signed domain) and wide integer literals mis-lower in baked
+        // stdlib modules, so the r == 1.0 bound is composed by shift:
+        // 2^63 is strictly above every 63-bit key.
+        let bound = if r >= 1.0 {
+            (1 as UInt64) << 63
+        } else {
+            (r * 9223372036854775808.0) as UInt64
+        };
+        TraceIdRatio { ratio: r, bound: bound }
     }
 
-    fn trace_id_high(bytes: &[UInt8; 16]) -> UInt64 {
+    /// Low 8 bytes of the trace id, big-endian, masked to 63 bits.
+    fn trace_id_key(bytes: &[UInt8; 16]) -> UInt64 {
         let mut n: UInt64 = 0;
-        let mut i = 0;
-        while i < 8 {
+        let mut i = 8;
+        while i < 16 {
             n = (n << 8) | (bytes[i] as UInt64);
             i = i + 1;
         }
-        n
+        // 2^63-1 composed by shift — wide integer literals mis-lower
+        // in baked stdlib modules.
+        n & (((1 as UInt64) << 63) - 1)
+    }
+
+    public fn ratio(&self) -> Float { self.ratio }
+
+    public fn clone(&self) -> TraceIdRatio {
+        TraceIdRatio { ratio: self.ratio, bound: self.bound }
+    }
+}
+
+implement TraceIdRatio {
+    /// Uniquely-named decision worker so handle dispatch resolves on
+    /// any receiver-tracking tier.
+    public fn ratio_decide(&self, parent: &SpanContext, trace_id: &TraceId) -> SamplingResult {
+        let key = TraceIdRatio.trace_id_key(trace_id.as_bytes());
+        if key < self.bound {
+            SamplingResult.new(SamplingDecision.RecordAndSample, parent.trace_state())
+        } else {
+            SamplingResult.new(SamplingDecision.Drop, parent.trace_state())
+        }
+    }
+
+    public fn ratio_describe(&self) -> Text {
+        f"TraceIdRatioSampler{{ratio={self.ratio}}}"
     }
 }
 
@@ -157,46 +206,42 @@ implement Sampler for TraceIdRatio {
         _kind: SpanKind,
         _attributes: &AttributeSet,
     ) -> SamplingResult {
-        let high = TraceIdRatio.trace_id_high(trace_id.as_bytes());
-        if high < self.threshold {
-            SamplingResult.new(SamplingDecision.RecordAndSample, parent.trace_state().clone())
-        } else {
-            SamplingResult.new(SamplingDecision.Drop, parent.trace_state().clone())
-        }
+        self.ratio_decide(parent, trace_id)
     }
 
     fn description(&self) -> Text {
-        f"TraceIdRatioSampler{{ratio={self.ratio}}}"
+        self.ratio_describe()
     }
 }
 
 // =============================================================================
-// ParentBased — defer to parent; fall back to `root` for remote / missing
+// ParentBased — defer to parent; fall back to `root` for missing parent
 // =============================================================================
 
 public type ParentBased is {
-    root: Heap<dyn Sampler>,
-    remote_parent_sampled: Heap<dyn Sampler>,
-    remote_parent_not_sampled: Heap<dyn Sampler>,
-    local_parent_sampled: Heap<dyn Sampler>,
-    local_parent_not_sampled: Heap<dyn Sampler>,
+    root: SamplerHandle,
+    remote_parent_sampled: SamplerHandle,
+    remote_parent_not_sampled: SamplerHandle,
+    local_parent_sampled: SamplerHandle,
+    local_parent_not_sampled: SamplerHandle,
 };
 
 implement ParentBased {
-    /// Convenience — all-AlwaysOn/Off derivatives of `root`.
-    public fn new(root: Heap<dyn Sampler>) -> ParentBased {
+    /// OTel default wiring: sampled parents → AlwaysOn, unsampled
+    /// parents → AlwaysOff; `root` decides for parentless spans.
+    public fn new(root: SamplerHandle) -> ParentBased {
         ParentBased {
             root: root,
-            remote_parent_sampled: Heap.new(AlwaysOn.new()),
-            remote_parent_not_sampled: Heap.new(AlwaysOff.new()),
-            local_parent_sampled: Heap.new(AlwaysOn.new()),
-            local_parent_not_sampled: Heap.new(AlwaysOff.new()),
+            remote_parent_sampled: SamplerHandle.ShAlwaysOn,
+            remote_parent_not_sampled: SamplerHandle.ShAlwaysOff,
+            local_parent_sampled: SamplerHandle.ShAlwaysOn,
+            local_parent_not_sampled: SamplerHandle.ShAlwaysOff,
         }
     }
-}
 
-implement Sampler for ParentBased {
-    fn should_sample(
+    /// Uniquely-named decision worker so handle dispatch resolves on
+    /// any receiver-tracking tier.
+    public fn parent_decide(
         &self,
         parent: &SpanContext,
         trace_id: &TraceId,
@@ -208,35 +253,108 @@ implement Sampler for ParentBased {
             return self.root.should_sample(parent, trace_id, name, kind, attributes);
         }
         let sampled = parent.is_sampled();
-        let sampler = if parent.is_remote() {
+        let delegate = if parent.is_remote() {
             if sampled { &self.remote_parent_sampled } else { &self.remote_parent_not_sampled }
         } else {
             if sampled { &self.local_parent_sampled } else { &self.local_parent_not_sampled }
         };
-        sampler.should_sample(parent, trace_id, name, kind, attributes)
+        delegate.should_sample(parent, trace_id, name, kind, attributes)
     }
 
-    fn description(&self) -> Text {
+    public fn parent_describe(&self) -> Text {
         f"ParentBased{{root={self.root.description()}}}"
     }
 }
 
 // =============================================================================
-// Factory functions used in the tracing.mod re-exports
+// SamplerHandle — closed-world dispatch over the in-tree samplers
 // =============================================================================
 
-public fn always_on() -> Heap<dyn Sampler> {
-    Heap.new(AlwaysOn.new()) as Heap<dyn Sampler>
+public type SamplerHandle is
+    /// Sample everything.
+    | ShAlwaysOn
+    /// Sample nothing.
+    | ShAlwaysOff
+    /// Deterministic ratio on the trace id's low 63 bits.
+    | ShRatio(TraceIdRatio)
+    /// Follow the parent's decision; delegate to nested handles.
+    | ShParentBased(Shared<ParentBased>)
+    /// User-defined sampler behind the Sampler protocol. NOTE: invoking
+    /// a custom sampler requires protocol-object dispatch, which the
+    /// VBC interpreter does not implement yet — construction and
+    /// configuration work, invocation panics until the language gap
+    /// closes.
+    | ShCustom(Shared<dyn Sampler>);
+
+implement SamplerHandle {
+    public fn should_sample(
+        &self,
+        parent: &SpanContext,
+        trace_id: &TraceId,
+        name: &Text,
+        kind: SpanKind,
+        attributes: &AttributeSet,
+    ) -> SamplingResult {
+        match self {
+            SamplerHandle.ShAlwaysOn => {
+                SamplingResult.new(SamplingDecision.RecordAndSample, parent.trace_state())
+            }
+            SamplerHandle.ShAlwaysOff => {
+                SamplingResult.new(SamplingDecision.Drop, parent.trace_state())
+            }
+            SamplerHandle.ShRatio(r) => {
+                r.ratio_decide(parent, trace_id)
+            }
+            SamplerHandle.ShParentBased(p) => {
+                p.parent_decide(parent, trace_id, name, kind, attributes)
+            }
+            SamplerHandle.ShCustom(s) => {
+                s.should_sample(parent, trace_id, name, kind, attributes)
+            }
+        }
+    }
+
+    public fn description(&self) -> Text {
+        match self {
+            SamplerHandle.ShAlwaysOn => "AlwaysOnSampler".into(),
+            SamplerHandle.ShAlwaysOff => "AlwaysOffSampler".into(),
+            SamplerHandle.ShRatio(r) => r.ratio_describe(),
+            SamplerHandle.ShParentBased(p) => p.parent_describe(),
+            SamplerHandle.ShCustom(s) => s.description(),
+        }
+    }
+
+    public fn clone(&self) -> SamplerHandle {
+        match self {
+            SamplerHandle.ShAlwaysOn => SamplerHandle.ShAlwaysOn,
+            SamplerHandle.ShAlwaysOff => SamplerHandle.ShAlwaysOff,
+            SamplerHandle.ShRatio(r) => SamplerHandle.ShRatio(r.clone()),
+            SamplerHandle.ShParentBased(p) => SamplerHandle.ShParentBased(p.clone()),
+            SamplerHandle.ShCustom(s) => SamplerHandle.ShCustom(s.clone()),
+        }
+    }
 }
 
-public fn always_off() -> Heap<dyn Sampler> {
-    Heap.new(AlwaysOff.new()) as Heap<dyn Sampler>
+// =============================================================================
+// Factory functions — ready-to-install SamplerHandle values
+// =============================================================================
+
+public fn always_on() -> SamplerHandle {
+    SamplerHandle.ShAlwaysOn
 }
 
-public fn trace_id_ratio(ratio: Float) -> Heap<dyn Sampler> {
-    Heap.new(TraceIdRatio.new(ratio)) as Heap<dyn Sampler>
+public fn always_off() -> SamplerHandle {
+    SamplerHandle.ShAlwaysOff
 }
 
-public fn parent_based(root: Heap<dyn Sampler>) -> Heap<dyn Sampler> {
-    Heap.new(ParentBased.new(root)) as Heap<dyn Sampler>
+public fn trace_id_ratio(ratio: Float) -> SamplerHandle {
+    SamplerHandle.ShRatio(TraceIdRatio.new(ratio))
+}
+
+public fn parent_based(root: SamplerHandle) -> SamplerHandle {
+    SamplerHandle.ShParentBased(Shared.new(ParentBased.new(root)))
+}
+
+public fn custom_sampler(sampler: Shared<dyn Sampler>) -> SamplerHandle {
+    SamplerHandle.ShCustom(sampler)
 }

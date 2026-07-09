@@ -189,7 +189,7 @@ fn test_attribute_set_with_capacity_is_empty() {
 @test
 fn test_attribute_set_set_then_get() {
     let mut s = AttributeSet.new();
-    s.set("env".clone(), AttributeValue.Text("prod".clone()));
+    let _ = s.set("env".clone(), AttributeValue.Text("prod".clone()));
     let key = "env".clone();
     let got = s.get(&key);
     match got {
@@ -201,17 +201,17 @@ fn test_attribute_set_set_then_get() {
 @test
 fn test_attribute_set_set_increments_len() {
     let mut s = AttributeSet.new();
-    s.set("a".clone(), AttributeValue.Int(1));
+    let _ = s.set("a".clone(), AttributeValue.Int(1));
     assert_eq(s.len(), 1);
-    s.set("b".clone(), AttributeValue.Int(2));
+    let _ = s.set("b".clone(), AttributeValue.Int(2));
     assert_eq(s.len(), 2);
 }
 
 @test
 fn test_attribute_set_set_same_key_replaces() {
     let mut s = AttributeSet.new();
-    s.set("k".clone(), AttributeValue.Int(1));
-    s.set("k".clone(), AttributeValue.Int(2));
+    let _ = s.set("k".clone(), AttributeValue.Int(1));
+    let _ = s.set("k".clone(), AttributeValue.Int(2));
     // Length stays 1 — same key replaced not appended.
     assert_eq(s.len(), 1);
 }
@@ -234,9 +234,9 @@ fn test_attribute_set_get_missing_returns_none() {
 @test
 fn test_attribute_set_clone_preserves_len() {
     let mut s = AttributeSet.new();
-    s.set("a".clone(), AttributeValue.Int(1));
-    s.set("b".clone(), AttributeValue.Int(2));
-    s.set("c".clone(), AttributeValue.Int(3));
+    let _ = s.set("a".clone(), AttributeValue.Int(1));
+    let _ = s.set("b".clone(), AttributeValue.Int(2));
+    let _ = s.set("c".clone(), AttributeValue.Int(3));
     let c = s.clone();
     assert_eq(c.len(), 3);
 }
@@ -244,7 +244,7 @@ fn test_attribute_set_clone_preserves_len() {
 @test
 fn test_attribute_set_clone_preserves_lookup() {
     let mut s = AttributeSet.new();
-    s.set("color".clone(), AttributeValue.Text("blue".clone()));
+    let _ = s.set("color".clone(), AttributeValue.Text("blue".clone()));
     let c = s.clone();
     let key = "color".clone();
     let got = c.get(&key);

@@ -370,9 +370,6 @@ public type MetaAttributeValue is
     /// Raw tokens (for complex cases)
     | Tokens(TokenStream);
 
-/// Public alias — short canonical name for macro / quote-API users.
-public type AttributeValue is MetaAttributeValue;
-
 implement MetaAttributeValue {
     /// Create identifier value
     public fn ident(name: Text) -> Self {

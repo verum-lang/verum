@@ -34,8 +34,8 @@ implement Resource {
     /// is by far the most common resource shape.
     public fn service(name: &Text, version: &Text) -> Resource {
         let mut attrs = AttributeSet.new();
-        attrs.set("service.name".into(), AttributeValue.Text(name.clone()));
-        attrs.set("service.version".into(), AttributeValue.Text(version.clone()));
+        let _ = attrs.set("service.name".into(), AttributeValue.Text(name.clone()));
+        let _ = attrs.set("service.version".into(), AttributeValue.Text(version.clone()));
         Resource {
             attributes: attrs,
             schema_url: Maybe.None,
@@ -55,7 +55,7 @@ implement Resource {
     }
 
     public fn with_attribute(mut self, key: Text, value: AttributeValue) -> Resource {
-        self.attributes.set(key, value);
+        let _ = self.attributes.set(key, value);
         self
     }
 
@@ -66,7 +66,7 @@ implement Resource {
         let entries = other.attributes.entries();
         let mut i = 0;
         while i < entries.len() {
-            merged.set(entries[i].0.clone(), entries[i].1.clone());
+            let _ = merged.set(entries[i].0.clone(), entries[i].1.clone());
             i = i + 1;
         }
         Resource {
@@ -81,8 +81,16 @@ implement Resource {
         }
     }
 
-    public fn attributes(&self) -> &AttributeSet { &self.attributes }
-    public fn schema_url(&self) -> &Maybe<Text> { &self.schema_url }
+    /// Owned copies — see the module note on reference-returning
+    /// accessors and the AOT tier.
+    public fn attributes(&self) -> AttributeSet { self.attributes.clone() }
+
+    public fn schema_url(&self) -> Maybe<Text> {
+        match &self.schema_url {
+            Maybe.Some(u) => Maybe.Some(u.clone()),
+            Maybe.None => Maybe.None,
+        }
+    }
 
     /// Hot-path shortcut for `self.attributes().len()`. Avoids the
     /// two-step access through the AttributeSet borrow.
@@ -103,22 +111,11 @@ implement Resource {
 
 implement Eq for Resource {
     /// Two resources compare equal iff their attribute sets compare
-    /// equal AND their schema_url Maybe-values match.  Equality on
-    /// AttributeSet itself routes through the existing AttributeSet
-    /// surface (insertion-order + value-equal per the set's contract).
+    /// equal (same keys AND values, in insertion order — delegated to
+    /// AttributeSet's Eq) and their schema_url values match.
     fn eq(&self, other: &Resource) -> Bool {
-        if self.attributes.len() != other.attributes.len() {
+        if !self.attributes.eq(&other.attributes) {
             return false;
-        }
-        let a_entries = self.attributes.entries();
-        let b_entries = other.attributes.entries();
-        let mut i = 0;
-        while i < a_entries.len() {
-            if a_entries[i].0 != b_entries[i].0 {
-                return false;
-            }
-            // AttributeValue payload comparison — delegate to its Eq.
-            i = i + 1;
         }
         match (&self.schema_url, &other.schema_url) {
             (Maybe.Some(u1), Maybe.Some(u2)) => u1 == u2,

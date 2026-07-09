@@ -81,12 +81,13 @@ implement TraceState {
     public fn len(&self) -> Int { self.entries.len() }
     public fn is_empty(&self) -> Bool { self.entries.is_empty() }
 
-    /// Look up a key (first match wins).
-    public fn get(&self, key: &Text) -> Maybe<&Text> {
+    /// Look up a key (first match wins). Owned copy — see the module
+    /// note on reference-returning accessors and the AOT tier.
+    public fn get(&self, key: &Text) -> Maybe<Text> {
         let mut i = 0;
         while i < self.entries.len() {
             if self.entries[i].0 == *key {
-                return Maybe.Some(&self.entries[i].1);
+                return Maybe.Some(self.entries[i].1.clone());
             }
             i = i + 1;
         }
@@ -124,7 +125,16 @@ implement TraceState {
         TraceState { entries: entries }
     }
 
-    public fn entries(&self) -> &List<(Text, Text)> { &self.entries }
+    /// Owned snapshot of the ordered members.
+    public fn entries(&self) -> List<(Text, Text)> {
+        let mut out = List.with_capacity(self.entries.len());
+        let mut i = 0;
+        while i < self.entries.len() {
+            out.push((self.entries[i].0.clone(), self.entries[i].1.clone()));
+            i = i + 1;
+        }
+        out
+    }
 }
 
 // =============================================================================
@@ -171,10 +181,13 @@ implement SpanContext {
         !self.trace_id.is_invalid() && !self.span_id.is_invalid()
     }
 
-    public fn trace_id(&self) -> &TraceId { &self.trace_id }
-    public fn span_id(&self) -> &SpanId { &self.span_id }
+    // Owned-value accessors (ids are 16/8-byte PODs; the trace state
+    // is usually empty) — reference-returning methods crash the AOT
+    // tier today (known compiler class).
+    public fn trace_id(&self) -> TraceId { self.trace_id }
+    public fn span_id(&self) -> SpanId { self.span_id }
     public fn flags(&self) -> TraceFlags { self.flags }
-    public fn trace_state(&self) -> &TraceState { &self.trace_state }
+    public fn trace_state(&self) -> TraceState { self.trace_state.clone() }
     public fn is_remote(&self) -> Bool { self.is_remote }
 
     public fn is_sampled(&self) -> Bool { self.flags.is_sampled() }
@@ -188,13 +201,4 @@ implement SpanContext {
             is_remote: self.is_remote,
         }
     }
-}
-
-/// Shared invalid-context constant — use as default for root spans.
-public const INVALID_SPAN_CONTEXT_VAL: () = ();
-
-/// Function form matching the re-export (constants with complex types
-/// cannot always be imported directly).
-public fn INVALID_SPAN_CONTEXT() -> SpanContext {
-    SpanContext.invalid()
 }

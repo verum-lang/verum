@@ -55,10 +55,6 @@ public type TextMapPropagator is protocol {
 
 public type W3CTraceContext is ();
 
-const TRACEPARENT_FIELD: &'static Text = "traceparent";
-const TRACESTATE_FIELD: &'static Text = "tracestate";
-const TRACEPARENT_VERSION: &'static Text = "00";
-
 /// Maximum number of tracestate list members. W3C Trace Context §3.3.1.4
 /// specifies "MUST NOT include more than 32 list-members" — anything past
 /// the cap MUST be dropped. We surface that as a hard parser cap so a
@@ -83,22 +79,25 @@ implement TextMapPropagator for W3CTraceContext {
     ) {
         if !context.is_valid() { return; }
         let tp = encode_traceparent(context);
-        headers.push((TRACEPARENT_FIELD.into(), tp));
-        if !context.trace_state().is_empty() {
-            let ts = encode_tracestate(context.trace_state());
-            headers.push((TRACESTATE_FIELD.into(), ts));
+        headers.push(("traceparent".into(), tp));
+        let state = context.trace_state();
+        if !state.is_empty() {
+            let ts = encode_tracestate(&state);
+            headers.push(("tracestate".into(), ts));
         }
     }
 
     fn extract(&self, headers: &List<(Text, Text)>) -> SpanContext {
-        let tp = find_header(headers, TRACEPARENT_FIELD);
+        let tp_name: Text = "traceparent".into();
+        let ts_name: Text = "tracestate".into();
+        let tp = find_header(headers, &tp_name);
         match tp {
             Maybe.None => SpanContext.invalid(),
             Maybe.Some(raw) => {
                 match decode_traceparent(raw.as_bytes()) {
                     Maybe.None => SpanContext.invalid(),
                     Maybe.Some((trace_id, span_id, flags)) => {
-                        let ts_raw = find_header(headers, TRACESTATE_FIELD);
+                        let ts_raw = find_header(headers, &ts_name);
                         let trace_state = match ts_raw {
                             Maybe.Some(r) => decode_tracestate(r.as_bytes()),
                             Maybe.None => TraceState.empty(),
@@ -146,7 +145,7 @@ public fn extract_traceparent(raw: &Text) -> SpanContext {
 
 fn encode_traceparent(context: &SpanContext) -> Text {
     let mut out = Text.with_capacity(55);
-    out.push_str(TRACEPARENT_VERSION);
+    out.push_str("00");
     out.push('-');
     out.push_str(&context.trace_id().to_hex());
     out.push('-');
@@ -163,9 +162,11 @@ fn decode_traceparent(bytes: &[Byte]) -> Maybe<(TraceId, SpanId, TraceFlags)> {
     if bytes[2] != 0x2D || bytes[35] != 0x2D || bytes[52] != 0x2D { return Maybe.None; }
     let trace_id = TraceId.from_hex(&bytes[3..35])?;
     let span_id = SpanId.from_hex(&bytes[36..52])?;
+    // W3C §3.2.2.3 / §3.2.2.4: all-zero trace-id or parent-id means the
+    // header MUST be ignored.
+    if trace_id.is_invalid() { return Maybe.None; }
+    if span_id.is_invalid() { return Maybe.None; }
     let flags_byte = decode_byte_hex(bytes[53], bytes[54])?;
-    // "00" (invalid version) already rejected implicitly; v1-v255 are
-    // reserved and we reject them per spec §3.2.2.2.
     Maybe.Some((trace_id, span_id, TraceFlags.new(flags_byte)))
 }
 

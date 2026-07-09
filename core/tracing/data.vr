@@ -1,0 +1,368 @@
+// =============================================================================
+// tracing/data.vr — frozen span data + shared pipeline value types
+// =============================================================================
+// The pure-data layer every pipeline stage consumes: SpanKind, status,
+// events, links, the frozen SpanData, and the structured
+// TraceExportResult / ExportError every stage reports through.
+//
+
+// This module sits BELOW the span handle, the processors, and the
+// exporters, so all of them can share these types without cycles.
+// Spec: https://opentelemetry.io/docs/specs/otel/trace/api/#span
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1")
+)
+module core.tracing.data;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.time.system_time.{SystemTime};
+mount core.tracing.id.{SpanId};
+mount core.tracing.context.{SpanContext};
+mount core.tracing.attribute.{AttributeSet};
+mount core.tracing.resource.{Resource};
+
+// =============================================================================
+// SpanKind — role of the span in the trace
+// =============================================================================
+
+public type SpanKind is
+    /// Default — no specific role.
+    | KindInternal
+    /// Outgoing synchronous or async request.
+    | KindClient
+    /// Handling of an incoming request.
+    | KindServer
+    /// Producing a message for asynchronous delivery.
+    | KindProducer
+    /// Consuming a message from asynchronous delivery.
+    | KindConsumer;
+
+// =============================================================================
+// SpanStatus — final status
+// =============================================================================
+
+public type SpanStatusCode is
+    | Unset
+    | Ok
+    | Error;
+
+public type SpanStatus is {
+    code: SpanStatusCode,
+    description: Maybe<Text>,
+};
+
+implement SpanStatus {
+    public fn unset() -> SpanStatus {
+        SpanStatus { code: SpanStatusCode.Unset, description: Maybe.None }
+    }
+
+    public fn ok() -> SpanStatus {
+        SpanStatus { code: SpanStatusCode.Ok, description: Maybe.None }
+    }
+
+    public fn error(description: Text) -> SpanStatus {
+        SpanStatus { code: SpanStatusCode.Error, description: Maybe.Some(description) }
+    }
+
+    public fn code(&self) -> SpanStatusCode { self.code }
+
+    /// Owned copy — reference-returning accessors crash the AOT tier
+    /// today (known compiler class), and status descriptions are tiny.
+    public fn description(&self) -> Maybe<Text> {
+        match &self.description {
+            Maybe.Some(d) => Maybe.Some(d.clone()),
+            Maybe.None => Maybe.None,
+        }
+    }
+
+    public fn clone(&self) -> SpanStatus {
+        SpanStatus {
+            code: self.code,
+            description: match &self.description {
+                Maybe.Some(d) => Maybe.Some(d.clone()),
+                Maybe.None => Maybe.None,
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Structured pipeline errors — every stage (processor, exporter,
+// provider) reports through TraceExportResult
+// =============================================================================
+
+public type ExportErrorKind is
+    /// Deadline elapsed before the operation completed.
+    | Timeout
+    /// I/O or network failure while shipping spans.
+    | Transport
+    /// A span could not be encoded into the wire format.
+    | Serialization
+    /// A bounded pipeline queue rejected the payload.
+    | QueueFull
+    /// The component has already been shut down.
+    | ShutDown
+    /// Invariant violation inside the pipeline itself.
+    | Internal;
+
+public type ExportError is {
+    kind: ExportErrorKind,
+    message: Text,
+    retryable: Bool,
+};
+
+implement ExportError {
+    public fn new(kind: ExportErrorKind, message: Text, retryable: Bool) -> ExportError {
+        ExportError { kind: kind, message: message, retryable: retryable }
+    }
+
+    /// Deadline elapsed. Retryable: the payload may still be exportable.
+    public fn timeout(message: Text) -> ExportError {
+        ExportError { kind: ExportErrorKind.Timeout, message: message, retryable: true }
+    }
+
+    /// Transport-level failure (connection refused, reset, DNS, ...).
+    public fn transport(message: Text) -> ExportError {
+        ExportError { kind: ExportErrorKind.Transport, message: message, retryable: true }
+    }
+
+    /// Encoding failure — retrying the same payload cannot succeed.
+    public fn serialization(message: Text) -> ExportError {
+        ExportError { kind: ExportErrorKind.Serialization, message: message, retryable: false }
+    }
+
+    /// Bounded queue full — the caller may retry after back-off.
+    public fn queue_full() -> ExportError {
+        ExportError {
+            kind: ExportErrorKind.QueueFull,
+            message: "bounded export queue is full".into(),
+            retryable: true,
+        }
+    }
+
+    /// Component already shut down — permanent.
+    public fn shut_down() -> ExportError {
+        ExportError {
+            kind: ExportErrorKind.ShutDown,
+            message: "exporter or processor already shut down".into(),
+            retryable: false,
+        }
+    }
+
+    /// Pipeline invariant violation — permanent, indicates a bug.
+    public fn internal(message: Text) -> ExportError {
+        ExportError { kind: ExportErrorKind.Internal, message: message, retryable: false }
+    }
+
+    public fn kind(&self) -> ExportErrorKind { self.kind }
+
+    /// Owned copy (see SpanStatus.description).
+    public fn message(&self) -> Text { self.message.clone() }
+
+    public fn is_retryable(&self) -> Bool { self.retryable }
+
+    public fn clone(&self) -> ExportError {
+        ExportError {
+            kind: self.kind,
+            message: self.message.clone(),
+            retryable: self.retryable,
+        }
+    }
+}
+
+implement Display for ExportError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let kind = match self.kind {
+            ExportErrorKind.Timeout => "timeout",
+            ExportErrorKind.Transport => "transport",
+            ExportErrorKind.Serialization => "serialization",
+            ExportErrorKind.QueueFull => "queue-full",
+            ExportErrorKind.ShutDown => "shut-down",
+            ExportErrorKind.Internal => "internal",
+        };
+        let retry = if self.retryable { "retryable" } else { "permanent" };
+        f.write_str(f"export error [{kind}, {retry}]: {self.message}")
+    }
+}
+
+public type TraceExportResult is
+    | Success
+    | Failure(ExportError);
+
+implement TraceExportResult {
+    public fn is_success(&self) -> Bool {
+        match self {
+            TraceExportResult.Success => true,
+            TraceExportResult.Failure(_) => false,
+        }
+    }
+
+    public fn is_failure(&self) -> Bool { !self.is_success() }
+
+    /// First-failure composition: keeps an existing failure, otherwise
+    /// adopts `other`. Used to aggregate multi-stage / multi-processor
+    /// results without losing the earliest error.
+    public fn combine(self, other: TraceExportResult) -> TraceExportResult {
+        match self {
+            TraceExportResult.Failure(e) => TraceExportResult.Failure(e),
+            TraceExportResult.Success => other,
+        }
+    }
+
+    public fn clone(&self) -> TraceExportResult {
+        match self {
+            TraceExportResult.Success => TraceExportResult.Success,
+            TraceExportResult.Failure(e) => TraceExportResult.Failure(e.clone()),
+        }
+    }
+}
+
+// =============================================================================
+// SpanEvent — timestamped annotation on the span
+// =============================================================================
+
+public type SpanEvent is {
+    name: Text,
+    timestamp: Instant,
+    attributes: AttributeSet,
+};
+
+implement SpanEvent {
+    public fn new(name: Text, timestamp: Instant, attributes: AttributeSet) -> SpanEvent {
+        SpanEvent { name: name, timestamp: timestamp, attributes: attributes }
+    }
+
+    public fn name(&self) -> Text { self.name.clone() }
+    public fn timestamp(&self) -> Instant { self.timestamp }
+    public fn attributes(&self) -> AttributeSet { self.attributes.clone() }
+}
+
+// =============================================================================
+// SpanLink — reference to another span (typically a different trace)
+// =============================================================================
+
+public type SpanLink is {
+    context: SpanContext,
+    attributes: AttributeSet,
+};
+
+implement SpanLink {
+    public fn new(context: SpanContext, attributes: AttributeSet) -> SpanLink {
+        SpanLink { context: context, attributes: attributes }
+    }
+
+    public fn context(&self) -> SpanContext { self.context.clone() }
+    public fn attributes(&self) -> AttributeSet { self.attributes.clone() }
+}
+
+// =============================================================================
+// SpanData — frozen exported form
+// =============================================================================
+
+public type SpanData is {
+    name: Text,
+    context: SpanContext,
+    parent_span_id: Maybe<SpanId>,
+    kind: SpanKind,
+    start_time: Instant,
+    /// Wall-clock at span start — the anchor exporters use to map the
+    /// monotonic duration onto absolute (epoch) timestamps.
+    start_system_time: SystemTime,
+    end_time: Instant,
+    attributes: AttributeSet,
+    events: List<SpanEvent>,
+    links: List<SpanLink>,
+    status: SpanStatus,
+    resource: Shared<Resource>,
+    instrumentation_scope: Text,
+    instrumentation_version: Text,
+};
+
+implement SpanData {
+    public fn duration(&self) -> Duration {
+        self.end_time - self.start_time
+    }
+
+    /// Wall-clock end derived from the start anchor + duration.
+    public fn end_system_time(&self) -> SystemTime {
+        match self.start_system_time.checked_add(self.duration()) {
+            Maybe.Some(t) => t,
+            Maybe.None => self.start_system_time,
+        }
+    }
+
+    // Owned-copy accessors: reference-returning methods crash the AOT
+    // tier today (known compiler class). SpanData is an export
+    // artifact consumed once per stage — the copies are cheap and the
+    // costs are documented in the module docs.
+    public fn name(&self) -> Text { self.name.clone() }
+    public fn context(&self) -> SpanContext { self.context.clone() }
+    public fn parent_span_id(&self) -> Maybe<SpanId> { self.parent_span_id }
+    public fn kind(&self) -> SpanKind { self.kind }
+    public fn start_time(&self) -> Instant { self.start_time }
+    public fn start_system_time(&self) -> SystemTime { self.start_system_time }
+    public fn end_time(&self) -> Instant { self.end_time }
+    public fn attributes(&self) -> AttributeSet { self.attributes.clone() }
+    public fn events(&self) -> List<SpanEvent> { clone_event_list(&self.events) }
+    public fn links(&self) -> List<SpanLink> { clone_link_list(&self.links) }
+    public fn status(&self) -> SpanStatus { self.status.clone() }
+    public fn resource(&self) -> Shared<Resource> { self.resource.clone() }
+    public fn instrumentation_scope(&self) -> Text { self.instrumentation_scope.clone() }
+    public fn instrumentation_version(&self) -> Text { self.instrumentation_version.clone() }
+
+    /// Deep copy. Used by fan-out processors that hand each downstream
+    /// processor its own instance.
+    public fn clone(&self) -> SpanData {
+        SpanData {
+            name: self.name.clone(),
+            context: self.context.clone(),
+            parent_span_id: self.parent_span_id,
+            kind: self.kind,
+            start_time: self.start_time,
+            start_system_time: self.start_system_time,
+            end_time: self.end_time,
+            attributes: self.attributes.clone(),
+            events: clone_event_list(&self.events),
+            links: clone_link_list(&self.links),
+            status: self.status.clone(),
+            resource: self.resource.clone(),
+            instrumentation_scope: self.instrumentation_scope.clone(),
+            instrumentation_version: self.instrumentation_version.clone(),
+        }
+    }
+}
+
+/// Deep-copy a list of events (SpanEvent has owned Text + AttributeSet).
+public fn clone_event_list(src: &List<SpanEvent>) -> List<SpanEvent> {
+    let mut out = List.with_capacity(src.len());
+    let mut i = 0;
+    while i < src.len() {
+        out.push(SpanEvent {
+            name: src[i].name.clone(),
+            timestamp: src[i].timestamp,
+            attributes: src[i].attributes.clone(),
+        });
+        i = i + 1;
+    }
+    out
+}
+
+/// Deep-copy a list of links.
+public fn clone_link_list(src: &List<SpanLink>) -> List<SpanLink> {
+    let mut out = List.with_capacity(src.len());
+    let mut i = 0;
+    while i < src.len() {
+        out.push(SpanLink {
+            context: src[i].context.clone(),
+            attributes: src[i].attributes.clone(),
+        });
+        i = i + 1;
+    }
+    out
+}

@@ -1,0 +1,407 @@
+// =============================================================================
+// core-tests/tracing/pipeline/unit_test.vr
+// =============================================================================
+//
+// End-to-end pipeline conformance over the SYNCHRONOUS path:
+//   TracerProvider → SdkTracer → Span.end() → ProcessorHandle.simple →
+//   ExporterHandle.in_memory.
+//
+// This is the suite that pins the wiring contract: a span that ends MUST
+// arrive at the exporter, exactly once, with the right identity, status,
+// attributes, and sampling flags.
+// =============================================================================
+
+mount core.tracing.tracer.{TracerProvider, TracerHandle, NoopTracer};
+mount core.tracing.processor.{ProcessorHandle};
+mount core.tracing.exporter.{ExporterHandle, InMemoryExporter};
+mount core.tracing.span.{Span, SpanInner};
+mount core.tracing.data.{SpanKind, SpanStatus, SpanStatusCode, SpanLink, SpanData};
+mount core.tracing.sampler.{SamplingDecision, TraceIdRatio, always_on, always_off, trace_id_ratio};
+mount core.tracing.attribute.{AttributeSet, AttributeValue};
+mount core.tracing.context.{SpanContext, TraceFlags, TraceState};
+mount core.tracing.resource.{Resource};
+mount core.tracing.id.{TraceId, SpanId, generate_trace_id, generate_span_id};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.time.system_time.{SystemTime};
+mount core.base.maybe.{Maybe, Some, None};
+
+// -----------------------------------------------------------------------------
+// Harness helpers
+// -----------------------------------------------------------------------------
+
+fn make_provider(exporter: &InMemoryExporter) -> TracerProvider {
+    TracerProvider.builder()
+        .with_resource(Resource.service(&"pipeline-test".into(), &"1.0".into()))
+        .with_sampler(always_on())
+        .with_processor(ProcessorHandle.simple(ExporterHandle.in_memory(exporter.clone())))
+        .build()
+}
+
+fn start_simple_span(provider: &TracerProvider, name: &Text) -> Span {
+    let tracer = provider.tracer(&"suite".into(), &"1".into());
+    let links: List<SpanLink> = List.new();
+    tracer.start_span(name, SpanKind.KindServer, AttributeSet.new(), links, &SpanContext.invalid())
+}
+
+// =============================================================================
+// Section 1: end() delivers exactly one SpanData to the exporter
+// =============================================================================
+
+@test
+fn test_end_delivers_span_to_exporter() {
+    let exporter = InMemoryExporter.new();
+    let provider = make_provider(&exporter);
+    let span = start_simple_span(&provider, &"work".into());
+    span.end();
+    let got = exporter.take();
+    assert_eq(got.len(), 1);
+    assert_eq(got[0].name(), "work".into());
+}
+
+@test
+fn test_end_is_idempotent_single_export() {
+    let exporter = InMemoryExporter.new();
+    let provider = make_provider(&exporter);
+    let span = start_simple_span(&provider, &"once".into());
+    span.end();
+    span.end();
+    span.end();
+    assert_eq(exporter.len(), 1);
+}
+
+@test
+fn test_exported_span_carries_identity_and_kind() {
+    let exporter = InMemoryExporter.new();
+    let provider = make_provider(&exporter);
+    let span = start_simple_span(&provider, &"identity".into());
+    let ctx = span.context();
+    span.end();
+    let got = exporter.take();
+    assert_eq(got.len(), 1);
+    let got_ctx = got[0].context();
+    assert(got_ctx.trace_id().eq(&ctx.trace_id()));
+    assert(got_ctx.span_id().eq(&ctx.span_id()));
+    assert(got[0].kind() is SpanKind.KindServer);
+    assert(got[0].context().is_sampled());
+    assert(got[0].parent_span_id() is Maybe.None);
+}
+
+@test
+fn test_exported_span_carries_attributes_events_status() {
+    let exporter = InMemoryExporter.new();
+    let provider = make_provider(&exporter);
+    let span = start_simple_span(&provider, &"detail".into());
+    span.set_attribute("http.method".into(), AttributeValue.Text("GET".into()));
+    span.set_attribute("http.status_code".into(), AttributeValue.Int(200));
+    span.add_event_now("validated".into());
+    span.set_status(SpanStatus.ok());
+    span.end();
+    let got = exporter.take();
+    assert_eq(got.len(), 1);
+    assert_eq(got[0].attributes().len(), 2);
+    assert_eq(got[0].events().len(), 1);
+    assert(got[0].status().code() is SpanStatusCode.Ok);
+    let attrs_out = got[0].attributes();
+    let method = attrs_out.get(&"http.method".into());
+    assert(method is Maybe.Some);
+}
+
+@test
+fn test_mutation_after_end_is_ignored() {
+    let exporter = InMemoryExporter.new();
+    let provider = make_provider(&exporter);
+    let span = start_simple_span(&provider, &"frozen".into());
+    span.set_attribute("kept".into(), AttributeValue.Int(1));
+    span.end();
+    span.set_attribute("dropped".into(), AttributeValue.Int(2));
+    span.add_event_now("late".into());
+    span.update_name("renamed".into());
+    let got = exporter.take();
+    assert_eq(got.len(), 1);
+    assert_eq(got[0].name(), "frozen".into());
+    assert_eq(got[0].attributes().len(), 1);
+    assert_eq(got[0].events().len(), 0);
+}
+
+// =============================================================================
+// Section 2: status transition lattice survives the pipeline
+// =============================================================================
+
+@test
+fn test_status_error_wins_over_ok() {
+    let exporter = InMemoryExporter.new();
+    let provider = make_provider(&exporter);
+    let span = start_simple_span(&provider, &"status1".into());
+    span.set_status(SpanStatus.ok());
+    span.set_status(SpanStatus.error("boom".into()));
+    span.end();
+    let got = exporter.take();
+    assert(got[0].status().code() is SpanStatusCode.Error);
+}
+
+@test
+fn test_status_error_is_final() {
+    let exporter = InMemoryExporter.new();
+    let provider = make_provider(&exporter);
+    let span = start_simple_span(&provider, &"status2".into());
+    span.set_status(SpanStatus.error("first".into()));
+    span.set_status(SpanStatus.ok());
+    span.end();
+    let got = exporter.take();
+    assert(got[0].status().code() is SpanStatusCode.Error);
+}
+
+// =============================================================================
+// Section 3: parent linkage
+// =============================================================================
+
+@test
+fn test_child_span_inherits_trace_and_links_parent() {
+    let exporter = InMemoryExporter.new();
+    let provider = make_provider(&exporter);
+    let tracer = provider.tracer(&"suite".into(), &"1".into());
+    let links1: List<SpanLink> = List.new();
+    let parent = tracer.start_span(
+        &"parent".into(), SpanKind.KindServer, AttributeSet.new(), links1, &SpanContext.invalid(),
+    );
+    let parent_ctx = parent.context();
+    let links2: List<SpanLink> = List.new();
+    let child = tracer.start_span(
+        &"child".into(), SpanKind.KindInternal, AttributeSet.new(), links2, &parent_ctx,
+    );
+    let child_ctx = child.context();
+    assert(child_ctx.trace_id().eq(&parent_ctx.trace_id()));
+    assert(!child_ctx.span_id().eq(&parent_ctx.span_id()));
+    child.end();
+    parent.end();
+    let got = exporter.take();
+    assert_eq(got.len(), 2);
+    // Child exported first (ended first): its parent_span_id must be
+    // the parent's span id.
+    match got[0].parent_span_id() {
+        Maybe.Some(pid) => assert(pid.eq(&parent_ctx.span_id())),
+        Maybe.None => panic("child must carry parent_span_id"),
+    }
+}
+
+// =============================================================================
+// Section 4: sampling — Drop keeps a valid context, exports nothing;
+// recording-but-unsampled spans are never exported
+// =============================================================================
+
+@test
+fn test_dropped_span_keeps_valid_context_and_exports_nothing() {
+    let exporter = InMemoryExporter.new();
+    let provider = TracerProvider.builder()
+        .with_sampler(always_off())
+        .with_processor(ProcessorHandle.simple(ExporterHandle.in_memory(exporter.clone())))
+        .build();
+    let span = start_simple_span(&provider, &"dropped".into());
+    // Traceparent continuity: the context MUST stay valid and unsampled.
+    let ctx = span.context();
+    assert(ctx.is_valid());
+    assert(!ctx.is_sampled());
+    assert(!span.is_recording());
+    span.set_attribute("ignored".into(), AttributeValue.Int(1));
+    span.end();
+    assert_eq(exporter.len(), 0);
+}
+
+@test
+fn test_record_only_span_records_but_never_exports() {
+    // A recording span whose context is NOT sampled models the
+    // RecordOnly decision: the processor receives it on end(), but the
+    // exporter must never see it.
+    let exporter = InMemoryExporter.new();
+    let unsampled_ctx = SpanContext.new(
+        generate_trace_id(), generate_span_id(),
+        TraceFlags.default(), TraceState.empty(), false,
+    );
+    let inner = SpanInner {
+        name: "record-only".into(),
+        parent_span_id: Maybe.None,
+        kind: SpanKind.KindInternal,
+        start_time: Instant.now(),
+        start_system_time: SystemTime.now(),
+        end_time: Maybe.None,
+        attributes: AttributeSet.new(),
+        events: List.new(),
+        links: List.new(),
+        status: SpanStatus.unset(),
+        resource: Shared.new(Resource.empty()),
+        instrumentation_scope: "suite".into(),
+        instrumentation_version: "1".into(),
+    };
+    let span = Span.recording(
+        unsampled_ctx,
+        inner,
+        ProcessorHandle.simple(ExporterHandle.in_memory(exporter.clone())),
+    );
+    assert(span.is_recording());
+    assert(!span.context().is_sampled());
+    span.set_attribute("recorded".into(), AttributeValue.Int(1));
+    span.end();
+    // Recording but unsampled: processor received it, exporter must not.
+    assert_eq(exporter.len(), 0);
+}
+
+// =============================================================================
+// Section 5: TraceIdRatio — deterministic on the low-63-bit key
+// =============================================================================
+
+fn trace_id_with_low_byte(b: UInt8) -> TraceId {
+    let mut bytes: [UInt8; 16] = [0; 16];
+    bytes[0] = 1;      // keep the id valid regardless of the low half
+    bytes[15] = b;
+    TraceId.from_bytes(bytes)
+}
+
+@test
+fn test_ratio_zero_drops_everything() {
+    let s = TraceIdRatio.new(0.0);
+    let parent = SpanContext.invalid();
+    let attrs = AttributeSet.new();
+    let r = s.should_sample(&parent, &trace_id_with_low_byte(0), &"n".into(), SpanKind.KindInternal, &attrs);
+    assert(r.decision() is SamplingDecision.Drop);
+}
+
+@test
+fn test_ratio_one_samples_everything() {
+    let s = TraceIdRatio.new(1.0);
+    let parent = SpanContext.invalid();
+    let attrs = AttributeSet.new();
+    // Even the maximal 63-bit key is strictly below the 2^63 bound.
+    let mut bytes: [UInt8; 16] = [0; 16];
+    let mut i = 8;
+    while i < 16 {
+        bytes[i] = 0xFF;
+        i = i + 1;
+    }
+    let max_key_id = TraceId.from_bytes(bytes);
+    let r = s.should_sample(&parent, &max_key_id, &"n".into(), SpanKind.KindInternal, &attrs);
+    assert(r.decision() is SamplingDecision.RecordAndSample);
+}
+
+@test
+fn test_ratio_low_key_sampled_at_small_ratio() {
+    let s = TraceIdRatio.new(0.01);
+    let parent = SpanContext.invalid();
+    let attrs = AttributeSet.new();
+    // Key 0 is below every non-zero bound.
+    let r = s.should_sample(&parent, &trace_id_with_low_byte(0), &"n".into(), SpanKind.KindInternal, &attrs);
+    assert(r.decision() is SamplingDecision.RecordAndSample);
+}
+
+@test
+fn test_ratio_is_deterministic_per_trace_id() {
+    let s = TraceIdRatio.new(0.5);
+    let parent = SpanContext.invalid();
+    let attrs = AttributeSet.new();
+    let id = generate_trace_id();
+    let a = s.should_sample(&parent, &id, &"n".into(), SpanKind.KindInternal, &attrs);
+    let b = s.should_sample(&parent, &id, &"n".into(), SpanKind.KindInternal, &attrs);
+    let both_sampled = (a.decision() is SamplingDecision.RecordAndSample)
+        && (b.decision() is SamplingDecision.RecordAndSample);
+    let both_dropped = (a.decision() is SamplingDecision.Drop)
+        && (b.decision() is SamplingDecision.Drop);
+    assert(both_sampled || both_dropped);
+}
+
+// =============================================================================
+// Section 6: generated ids — validity, uniqueness, low-bit spread
+// =============================================================================
+
+fn low_key_of(id: &TraceId) -> UInt64 {
+    let b = id.as_bytes();
+    let mut n: UInt64 = 0;
+    let mut i = 8;
+    while i < 16 {
+        n = (n << 8) | (b[i] as UInt64);
+        i = i + 1;
+    }
+    n
+}
+
+@test
+fn test_generated_trace_ids_valid_and_unique() {
+    let mut ids: List<TraceId> = List.new();
+    let mut i = 0;
+    while i < 64 {
+        let id = generate_trace_id();
+        assert(!id.is_invalid());
+        let mut j = 0;
+        while j < ids.len() {
+            assert(!ids[j].eq(&id));
+            j = j + 1;
+        }
+        ids.push(id);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_generated_span_ids_valid_and_unique() {
+    let mut ids: List<SpanId> = List.new();
+    let mut i = 0;
+    while i < 64 {
+        let id = generate_span_id();
+        assert(!id.is_invalid());
+        let mut j = 0;
+        while j < ids.len() {
+            assert(!ids[j].eq(&id));
+            j = j + 1;
+        }
+        ids.push(id);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_generated_trace_ids_spread_across_ratio_key() {
+    // Regression pin for the constant-low-word defect class: the ratio
+    // key (low 8 bytes) must differ across generated ids, otherwise
+    // TraceIdRatio degenerates to all-or-nothing per process.
+    let ka = low_key_of(&generate_trace_id());
+    let kb = low_key_of(&generate_trace_id());
+    assert(ka != kb);
+}
+
+// =============================================================================
+// Section 7: NoopTracer propagates the parent context
+// =============================================================================
+
+@test
+fn test_noop_tracer_passes_parent_context_through() {
+    let tracer = NoopTracer.new("noop".into(), "1".into());
+    let parent = SpanContext.new(
+        generate_trace_id(), generate_span_id(),
+        TraceFlags.sampled(), TraceState.empty(), true,
+    );
+    let links: List<SpanLink> = List.new();
+    let span = tracer.start_span(&"x".into(), SpanKind.KindInternal, AttributeSet.new(), links, &parent);
+    let ctx = span.context();
+    assert(ctx.is_valid());
+    assert(ctx.trace_id().eq(&parent.trace_id()));
+    assert(ctx.span_id().eq(&parent.span_id()));
+    assert(!span.is_recording());
+}
+
+// =============================================================================
+// Section 8: provider lifecycle — flush / shutdown over the handles
+// =============================================================================
+
+@test
+fn test_provider_force_flush_and_shutdown_succeed() {
+    let exporter = InMemoryExporter.new();
+    let provider = make_provider(&exporter);
+    let span = start_simple_span(&provider, &"lifecycle".into());
+    span.end();
+    let flushed = provider.force_flush(Duration.from_secs(1));
+    assert(flushed.is_success());
+    let down = provider.shutdown(Duration.from_secs(1));
+    assert(down.is_success());
+    assert_eq(exporter.len(), 1);
+}
+
+fn main() {}

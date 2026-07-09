@@ -1,36 +1,51 @@
 // =============================================================================
 // tracing/mod.vr — Distributed tracing (OpenTelemetry-compatible)
 // =============================================================================
-// Layer: 4.9 (depends on core, text, collections, async, sync, time, net)
-// Spec: docs/detailed/tracing-architecture.md
-//  https://opentelemetry.io/docs/specs/otel/trace/api/
+// Layer: 4.9 (depends on core, text, collections, async, sync, time)
+// Spec: https://opentelemetry.io/docs/specs/otel/trace/api/
 // =============================================================================
 //
 
 // OpenTelemetry-compatible tracing primitives. Provides:
 //
 
-// - TraceId / SpanId — opaque identifiers (128-bit / 64-bit)
-// - SpanContext — trace_id + span_id + flags + trace_state (W3C Trace Context)
-// - Span — unit of work, attributes, events, links, status
-// - Tracer — span factory with parent-context propagation
-// - Sampler — head-based sampling decision
-// - SpanProcessor — on-start / on-end pipeline stage
-// - SpanExporter — pluggable sink (stdout, OTLP/gRPC, OTLP/HTTP, Jaeger)
+// - TraceId / SpanId — opaque identifiers (128-bit / 64-bit) + the
+//   pluggable IdGenerator protocol and IdGeneratorHandle
+// - SpanContext — trace_id + span_id + flags + trace_state (W3C)
+// - Span — unit of work: attributes, events, links, status; delivers
+//   its frozen SpanData to the processor pipeline on end()
+// - TracerHandle / TracerProvider — span factories + configuration root
+// - SamplerHandle — head-based sampling decision (AlwaysOn / AlwaysOff /
+//   TraceIdRatio / ParentBased / custom)
+// - ProcessorHandle — on_start / on_end pipeline stage (Simple / Batch /
+//   Composite / custom)
+// - ExporterHandle — pluggable sink (stdout, in-memory; OTLP et al.
+//   live in separate cogs behind the SpanExporter protocol)
 // - TextMapPropagator — W3C traceparent / tracestate header codec
-// - Resource — process-wide attributes (service.name, service.version, ...)
+// - Resource — process-wide attributes (service.name, ...)
+// - TraceExportResult / ExportError — structured pipeline errors
 //
 
 // # Design choices
 //
 
-// - Zero runtime dependencies beyond core + sync + time.
-// - SpanContext is a 32-byte POD for cheap propagation.
-// - TextMapPropagator encodes/decodes in-place into caller-provided
-//  List<Byte> buffers — zero allocation for the hot path.
-// - The global Tracer is behind an AtomicPtr for safe late-initialisation.
-// - Span attributes / events are append-only `List`s allocated per-span;
-//  reuse is via ObjectPool<Span> when the BatchProcessor releases.
+// - Zero runtime dependencies beyond core + sync + time (+ async for
+//   the batch processor's worker task).
+// - Pipeline stages dispatch through closed-world handle enums
+//   (SamplerHandle / ProcessorHandle / ExporterHandle /
+//   IdGeneratorHandle / TracerHandle) with `*Custom(Shared<dyn ...>)`
+//   escape variants carrying user implementations of the public
+//   protocols. The enums exist because protocol-object dispatch is not
+//   yet operational in the VBC interpreter; the Custom variants make
+//   the pipeline forward-compatible with it at zero API cost.
+// - Span hoists its immutable SpanContext out of the lock: propagation
+//   and formatting never contend with mutators. Sampled-out spans are
+//   non-recording but carry a VALID context, so traceparent
+//   continuity survives dropped hops.
+// - Span.end() delivers the frozen SpanData to the attached processor;
+//   dropping the span without end() loses it by design (OTel).
+// - The global TracerProvider is a mutex-guarded slot: set once at
+//   startup, resolve tracers once per component.
 //
 
 // # Minimal usage
@@ -42,22 +57,31 @@
 
 // // Configure once at startup
 // set_global_tracer_provider(
-//  TracerProvider.builder()
-//  .with_resource(Resource.service("weft-edge", "1.0"))
-//  .with_sampler(Sampler.parent_based(Sampler.always_on()))
-//  .with_processor(BatchProcessor.new(StdoutExporter.new()))
-//  .build()
+//     TracerProvider.builder()
+//         .with_resource(Resource.service(&"weft-edge".into(), &"1.0".into()))
+//         .with_sampler(parent_based(always_on()))
+//         .with_processor(ProcessorHandle.simple(ExporterHandle.stdout()))
+//         .build()
 // );
 //
 
 // // Use anywhere
-// let tracer = get_tracer("edge.handler", "1.0");
-// let span = tracer.start_span("handle_request");
-// span.set_attribute("http.method", AttributeValue.Text("GET"));
-// span.set_attribute("http.path", AttributeValue.Text(&path));
+// let tracer = get_tracer(&"edge.handler".into(), &"1.0".into());
+// let span = tracer.start_span(
+//     &"handle_request".into(),
+//     SpanKind.KindServer,
+//     AttributeSet.new(),
+//     List.new(),
+//     &SpanContext.invalid(),   // or a context extracted from headers
+// );
+// span.set_attribute("http.method".into(), AttributeValue.Text("GET".into()));
 // // ... work ...
-// span.set_status(SpanStatus.Ok);
-// span.end();
+// span.set_status(SpanStatus.ok());
+// span.end();   // freezes + delivers to the processor pipeline
+//
+
+// // On orderly exit
+// let _ = global_tracer_provider().shutdown(Duration.from_secs(5));
 // ```
 // =============================================================================
 
@@ -72,6 +96,7 @@ public module id;
 public module context;
 public module attribute;
 public module resource;
+public module data;
 public module sampler;
 public module exporter;
 public module processor;
@@ -88,48 +113,74 @@ public mount .id.TraceId;
 public mount .id.SpanId;
 public mount .id.generate_trace_id;
 public mount .id.generate_span_id;
+public mount .id.IdGenerator;
+public mount .id.DefaultIdGenerator;
+public mount .id.IdGeneratorHandle;
+public mount .id.default_id_generator;
+public mount .id.custom_id_generator;
 
 // Context
 public mount .context.SpanContext;
 public mount .context.TraceFlags;
 public mount .context.TraceState;
-public mount .context.INVALID_SPAN_CONTEXT;
 
 // Attribute
 public mount .attribute.AttributeValue;
+public mount .attribute.AttributeKind;
 public mount .attribute.AttributeSet;
 
 // Resource
 public mount .resource.Resource;
 
+// Frozen data + structured pipeline errors
+public mount .data.SpanKind;
+public mount .data.SpanStatus;
+public mount .data.SpanStatusCode;
+public mount .data.SpanEvent;
+public mount .data.SpanLink;
+public mount .data.SpanData;
+public mount .data.TraceExportResult;
+public mount .data.ExportError;
+public mount .data.ExportErrorKind;
+
 // Sampler
 public mount .sampler.Sampler;
 public mount .sampler.SamplingDecision;
 public mount .sampler.SamplingResult;
+public mount .sampler.SamplerHandle;
 public mount .sampler.AlwaysOn;
 public mount .sampler.AlwaysOff;
 public mount .sampler.TraceIdRatio;
 public mount .sampler.ParentBased;
+public mount .sampler.always_on;
+public mount .sampler.always_off;
+public mount .sampler.trace_id_ratio;
+public mount .sampler.parent_based;
+public mount .sampler.custom_sampler;
 
 // Exporter + processor
 public mount .exporter.SpanExporter;
-public mount .exporter.ExportResult;
+public mount .exporter.ExporterHandle;
 public mount .exporter.NoopExporter;
 public mount .exporter.StdoutExporter;
+public mount .exporter.InMemoryExporter;
 public mount .processor.SpanProcessor;
+public mount .processor.ProcessorHandle;
 public mount .processor.SimpleProcessor;
 public mount .processor.BatchProcessor;
+public mount .processor.BatchConfig;
+public mount .processor.CompositeProcessor;
 
-// Span + tracer
+// Span
 public mount .span.Span;
-public mount .span.SpanKind;
-public mount .span.SpanStatus;
-public mount .span.StatusCode;
-public mount .span.SpanEvent;
-public mount .span.SpanLink;
-public mount .span.SpanData;
+public mount .span.SpanInner;
+
+// Tracer
 public mount .tracer.Tracer;
+public mount .tracer.TracerHandle;
 public mount .tracer.TracerProvider;
+public mount .tracer.TracerProviderBuilder;
+public mount .tracer.SdkTracer;
 public mount .tracer.NoopTracer;
 public mount .tracer.get_tracer;
 public mount .tracer.global_tracer_provider;

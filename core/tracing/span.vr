@@ -1,10 +1,11 @@
 // =============================================================================
-// tracing/span.vr — Span primary type + SpanKind / SpanStatus / SpanEvent
+// tracing/span.vr — the Span handle instrumenters use
 // =============================================================================
-// A Span is a unit of work. It has a start and end timestamp, zero-or-more
-// attributes, events, links, and a final status. Spans are immutable
-// after `end()`; the finished SpanData is what flows through the
-// processor → exporter pipeline.
+// A Span is a unit of work. The frozen SpanData (tracing/data.vr) is
+// what flows down the pipeline; this module owns the live, mutable
+// handle: attribute / event / link / status mutation, the
+// frozen-after-end contract, and delivery into the attached
+// ProcessorHandle on end().
 // Spec: https://opentelemetry.io/docs/specs/otel/trace/api/#span
 // =============================================================================
 
@@ -17,173 +18,99 @@ module core.tracing.span;
 
 mount core.*;
 mount core.time.instant.{Instant};
-mount core.time.duration.{Duration};
+mount core.time.system_time.{SystemTime};
 mount core.sync.mutex.{Mutex};
 mount core.sync.atomic.{AtomicBool, MemoryOrdering};
-mount core.tracing.id.{TraceId, SpanId};
-mount core.tracing.context.{SpanContext, TraceFlags, TraceState};
+mount core.tracing.id.{SpanId};
+mount core.tracing.context.{SpanContext};
 mount core.tracing.attribute.{AttributeValue, AttributeSet};
 mount core.tracing.resource.{Resource};
+mount core.tracing.data.{SpanData, SpanKind, SpanStatus, SpanStatusCode, SpanEvent, SpanLink, clone_event_list, clone_link_list};
+mount core.tracing.processor.{ProcessorHandle};
 
 // =============================================================================
-// SpanKind — role of the span in the trace
-// =============================================================================
-
-public type SpanKind is
-    /// Default — no specific role.
-    | KindInternal
-    /// Outgoing synchronous or async request.
-    | KindClient
-    /// Handling of an incoming request.
-    | KindServer
-    /// Producing a message for asynchronous delivery.
-    | KindProducer
-    /// Consuming a message from asynchronous delivery.
-    | KindConsumer;
-
-// =============================================================================
-// SpanStatus — final status
-// =============================================================================
-
-public type SpanStatusCode is
-    | Unset
-    | Ok
-    | Error;
-
-public type SpanStatus is {
-    code: SpanStatusCode,
-    description: Maybe<Text>,
-};
-
-implement SpanStatus {
-    public fn unset() -> SpanStatus {
-        SpanStatus { code: SpanStatusCode.Unset, description: Maybe.None }
-    }
-
-    public fn ok() -> SpanStatus {
-        SpanStatus { code: SpanStatusCode.Ok, description: Maybe.None }
-    }
-
-    public fn error(description: Text) -> SpanStatus {
-        SpanStatus { code: SpanStatusCode.Error, description: Maybe.Some(description) }
-    }
-
-    public fn code(&self) -> SpanStatusCode { self.code }
-    public fn description(&self) -> &Maybe<Text> { &self.description }
-}
-
-// =============================================================================
-// SpanEvent — timestamped annotation on the span
-// =============================================================================
-
-public type SpanEvent is {
-    name: Text,
-    timestamp: Instant,
-    attributes: AttributeSet,
-};
-
-implement SpanEvent {
-    public fn new(name: Text, timestamp: Instant, attributes: AttributeSet) -> SpanEvent {
-        SpanEvent { name: name, timestamp: timestamp, attributes: attributes }
-    }
-
-    public fn name(&self) -> &Text { &self.name }
-    public fn timestamp(&self) -> Instant { self.timestamp }
-    public fn attributes(&self) -> &AttributeSet { &self.attributes }
-}
-
-// =============================================================================
-// SpanLink — reference to another span (typically a different trace)
-// =============================================================================
-
-public type SpanLink is {
-    context: SpanContext,
-    attributes: AttributeSet,
-};
-
-implement SpanLink {
-    public fn new(context: SpanContext, attributes: AttributeSet) -> SpanLink {
-        SpanLink { context: context, attributes: attributes }
-    }
-
-    public fn context(&self) -> &SpanContext { &self.context }
-    public fn attributes(&self) -> &AttributeSet { &self.attributes }
-}
-
-// =============================================================================
-// SpanData — frozen exported form
-// =============================================================================
-
-public type SpanData is {
-    name: Text,
-    context: SpanContext,
-    parent_span_id: Maybe<SpanId>,
-    kind: SpanKind,
-    start_time: Instant,
-    end_time: Instant,
-    attributes: AttributeSet,
-    events: List<SpanEvent>,
-    links: List<SpanLink>,
-    status: SpanStatus,
-    resource: Shared<Resource>,
-    instrumentation_scope: Text,
-    instrumentation_version: Text,
-};
-
-implement SpanData {
-    public fn duration(&self) -> Duration {
-        self.end_time - self.start_time
-    }
-
-    public fn name(&self) -> &Text { &self.name }
-    public fn context(&self) -> &SpanContext { &self.context }
-    public fn parent_span_id(&self) -> &Maybe<SpanId> { &self.parent_span_id }
-    public fn kind(&self) -> SpanKind { self.kind }
-    public fn start_time(&self) -> Instant { self.start_time }
-    public fn end_time(&self) -> Instant { self.end_time }
-    public fn attributes(&self) -> &AttributeSet { &self.attributes }
-    public fn events(&self) -> &List<SpanEvent> { &self.events }
-    public fn links(&self) -> &List<SpanLink> { &self.links }
-    public fn status(&self) -> &SpanStatus { &self.status }
-    public fn resource(&self) -> &Resource { &self.resource }
-    public fn instrumentation_scope(&self) -> &Text { &self.instrumentation_scope }
-    public fn instrumentation_version(&self) -> &Text { &self.instrumentation_version }
-}
-
-// =============================================================================
-// Span — mutable handle the instrumenter uses
+// Span — handle the instrumenter uses
 // =============================================================================
 //
 
+// Ownership model:
+// - `context` is immutable and lives on the handle — propagation and
+//   Debug/Display never touch the mutex.
+// - `recording` is fixed at construction: non-recording spans (sampled
+//   out / no-op) short-circuit every mutator before any lock.
+// - `processor` is the delivery target `end()` hands the frozen
+//   SpanData to; detached spans carry ProcessorHandle.noop().
+//
+
 // Invariants:
-// - Mutation after `end()` is silently ignored (idempotent semantics).
-// - Internal Mutex serialises attribute / event / link mutation;
-//  a single-writer fast path would require a separate non-blocking
-//  design — acceptable trade-off given attribute count ≤ 128 per span.
+// - Mutation after `end()` is silently ignored (OTel frozen-after-end).
+// - `ended_flag` is the lock-free fast path; the authoritative check is
+//   `end_time` under the lock (end() may win the race between the
+//   atomic load and the lock acquisition).
 
 public const SPAN_EVENT_LIMIT: Int = 128;
 public const SPAN_LINK_LIMIT: Int = 128;
 
 public type Span is {
-    /// Fast-path flag mirroring `inner.recording`. Lets every hot
-    /// mutator (set_attribute / add_event / add_link / set_status /
-    /// update_name) skip the mutex acquisition on a sampled-out span.
-    /// Set once at construction; immutable for the span's lifetime.
-    recording_flag: AtomicBool,
-    /// Fast-path flag mirroring `inner.end_time.is_some()`. Updated
-    /// once by `end()` / `end_at()`. Subsequent mutations short-circuit
-    /// without locking — the canonical "second-call no-op" semantics
-    /// of OTel spans, made cheap.
+    context: SpanContext,
+    recording: Bool,
     ended_flag: AtomicBool,
-    inner: Shared<Mutex<SpanInner>>,
+    inner: SpanBody,
+    processor: ProcessorHandle,
 };
+
+/// Mutex as a DIRECT record field (the channel-module idiom), with
+/// per-operation methods so the guard never crosses an expression
+/// boundary: `Shared<SpanCell>` receivers dispatch methods correctly,
+/// while field access through Shared and bare `Shared<Mutex<T>>`
+/// locking both mis-lower in stdlib-baked code.
+public type SpanCell is {
+    state: Mutex<SpanInner>,
+};
+
+implement SpanCell {
+    public fn cell_set_attribute(&self, key: Text, value: AttributeValue) {
+        let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        guard.locked_set_attribute(key, value);
+    }
+
+    public fn cell_add_event(&self, name: Text, attributes: AttributeSet) {
+        let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        guard.locked_add_event(name, attributes);
+    }
+
+    public fn cell_add_link(&self, link: SpanLink) {
+        let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        guard.locked_add_link(link);
+    }
+
+    public fn cell_set_status(&self, new_status: SpanStatus) {
+        let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        guard.locked_set_status(new_status);
+    }
+
+    public fn cell_update_name(&self, name: Text) {
+        let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        guard.locked_update_name(name);
+    }
+
+    public fn cell_finish(&self, context: &SpanContext, ts: Instant) -> Maybe<SpanData> {
+        let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        guard.locked_finish(context, ts)
+    }
+
+    public fn cell_name(&self) -> Text {
+        let guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        guard.locked_name()
+    }
+}
 
 public type SpanInner is {
     name: Text,
-    context: SpanContext,
     parent_span_id: Maybe<SpanId>,
     kind: SpanKind,
     start_time: Instant,
+    start_system_time: SystemTime,
     end_time: Maybe<Instant>,
     attributes: AttributeSet,
     events: List<SpanEvent>,
@@ -192,87 +119,115 @@ public type SpanInner is {
     resource: Shared<Resource>,
     instrumentation_scope: Text,
     instrumentation_version: Text,
-    recording: Bool,
+};
+
+/// Single-variant wrapper: method calls through a Shared-typed FIELD
+/// bind `self` to the outer record in stdlib-baked code, while
+/// match-payload receivers bind correctly. Every access matches the
+/// cell out first.
+public type SpanBody is
+    | Body(Shared<SpanCell>);
+
+implement SpanBody {
+    public fn body_set_attribute(&self, key: Text, value: AttributeValue) {
+        match self {
+            SpanBody.Body(cell) => cell.cell_set_attribute(key, value),
+        }
+    }
+
+    public fn body_add_event(&self, name: Text, attributes: AttributeSet) {
+        match self {
+            SpanBody.Body(cell) => cell.cell_add_event(name, attributes),
+        }
+    }
+
+    public fn body_add_link(&self, link: SpanLink) {
+        match self {
+            SpanBody.Body(cell) => cell.cell_add_link(link),
+        }
+    }
+
+    public fn body_set_status(&self, new_status: SpanStatus) {
+        match self {
+            SpanBody.Body(cell) => cell.cell_set_status(new_status),
+        }
+    }
+
+    public fn body_update_name(&self, name: Text) {
+        match self {
+            SpanBody.Body(cell) => cell.cell_update_name(name),
+        }
+    }
+
+    public fn body_finish(&self, context: &SpanContext, ts: Instant) -> Maybe<SpanData> {
+        match self {
+            SpanBody.Body(cell) => cell.cell_finish(context, ts),
+        }
+    }
+
+    public fn body_name(&self) -> Text {
+        match self {
+            SpanBody.Body(cell) => cell.cell_name(),
+        }
+    }
 }
 
 implement Span {
-    /// Construct a span handle from an already-initialised inner.
-    /// Used by Tracer.start_span; instrumenters never call this directly.
-    public fn from_inner(inner: SpanInner) -> Span {
-        let recording = inner.recording;
-        let ended = inner.end_time.is_some();
+    /// Construct a recording span. Used by the SDK tracer; instrumenters
+    /// obtain spans through `Tracer.start_span`.
+    public fn recording(
+        context: SpanContext,
+        inner: SpanInner,
+        processor: ProcessorHandle,
+    ) -> Span {
         Span {
-            recording_flag: AtomicBool.new(recording),
-            ended_flag: AtomicBool.new(ended),
-            inner: Shared.new(Mutex.new(inner)),
-        }
-    }
-
-    /// Construct a no-op span (for Drop sampling). Records nothing.
-    public fn noop() -> Span {
-        let inner = SpanInner {
-            name: "".into(),
-            context: SpanContext.invalid(),
-            parent_span_id: Maybe.None,
-            kind: SpanKind.KindInternal,
-            start_time: Instant.now(),
-            end_time: Maybe.None,
-            attributes: AttributeSet.new(),
-            events: List.new(),
-            links: List.new(),
-            status: SpanStatus.unset(),
-            resource: Shared.new(Resource.empty()),
-            instrumentation_scope: "".into(),
-            instrumentation_version: "".into(),
-            recording: false,
-        };
-        Span {
-            recording_flag: AtomicBool.new(false),
+            context: context,
+            recording: true,
             ended_flag: AtomicBool.new(false),
-            inner: Shared.new(Mutex.new(inner)),
+            inner: SpanBody.Body(Shared.new(SpanCell { state: Mutex.new(inner) })),
+            processor: processor,
         }
     }
 
-    /// Get a copy of the SpanContext for propagation.
+    /// Construct a non-recording span that still carries a (possibly
+    /// valid) context. Sampled-out spans use this so `traceparent`
+    /// propagation keeps working across the dropped hop.
+    public fn non_recording(context: SpanContext) -> Span {
+        Span {
+            context: context,
+            recording: false,
+            ended_flag: AtomicBool.new(false),
+            inner: SpanBody.Body(Shared.new(SpanCell { state: Mutex.new(empty_inner()) })),
+            processor: ProcessorHandle.noop(),
+        }
+    }
+
+    /// Non-recording span with an invalid context — the "tracing is not
+    /// configured at all" span.
+    public fn noop() -> Span {
+        Span.non_recording(SpanContext.invalid())
+    }
+
+    /// Copy of the SpanContext for propagation. Lock-free — the context
+    /// is immutable on the handle.
     public fn context(&self) -> SpanContext {
-        let guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
-        let inner: &SpanInner = &*guard;
-        inner.context.clone()
+        self.context.clone()
     }
 
-    /// Cheap fast-path: returns false iff the span is not recording
-    /// or has been ended, with no mutex acquisition. Hot mutators
-    /// gate on this to skip the lock entirely on no-op spans.
-    @inline
-    fn is_active(&self) -> Bool {
-        self.recording_flag.load(MemoryOrdering.Relaxed)
-            && !self.ended_flag.load(MemoryOrdering.Relaxed)
-    }
-
+    /// True while the span records mutations: constructed recording AND
+    /// not yet ended. Lock-free.
     public fn is_recording(&self) -> Bool {
-        // Atomic-only — no lock acquisition. Mirrors the doc semantics
-        // (recording AND not ended).
-        self.is_active()
+        self.recording && !self.ended_flag.load(MemoryOrdering.Relaxed)
     }
 
     public fn set_attribute(&self, key: Text, value: AttributeValue) {
-        if !self.is_active() { return; }
-        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
-        let inner: &mut SpanInner = &mut *guard;
-        // Re-check under the lock: end() may have completed between the
-        // fast-path load and the lock acquisition, in which case the
-        // attribute would land in a span we promised to leave frozen.
-        if !inner.recording || inner.end_time.is_some() { return; }
-        inner.attributes.set(key, value);
+        if !self.is_recording() { return; }
+        self.inner.body_set_attribute(key, value);
     }
 
     public fn add_event(&self, name: Text, attributes: AttributeSet) {
-        if !self.is_active() { return; }
-        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
-        let inner: &mut SpanInner = &mut *guard;
-        if !inner.recording || inner.end_time.is_some() { return; }
-        if inner.events.len() >= SPAN_EVENT_LIMIT { return; }
-        inner.events.push(SpanEvent.new(name, Instant.now(), attributes));
+        if !self.is_recording() { return; }
+        self.inner.body_add_event(name, attributes);
     }
 
     public fn add_event_now(&self, name: Text) {
@@ -280,162 +235,185 @@ implement Span {
     }
 
     public fn add_link(&self, link: SpanLink) {
-        if !self.is_active() { return; }
-        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
-        let inner: &mut SpanInner = &mut *guard;
-        if !inner.recording || inner.end_time.is_some() { return; }
-        if inner.links.len() >= SPAN_LINK_LIMIT { return; }
-        inner.links.push(link);
+        if !self.is_recording() { return; }
+        self.inner.body_add_link(link);
     }
 
     public fn set_status(&self, new_status: SpanStatus) {
-        if !self.is_active() { return; }
-        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
-        let inner: &mut SpanInner = &mut *guard;
-        if !inner.recording || inner.end_time.is_some() { return; }
-        // Per OTel spec §5.1.5: Ok can only transition from Unset;
-        // Error is final.
-        let cur_code = inner.status.code();
-        let new_code = new_status.code();
-        let should_set = match cur_code {
-            SpanStatusCode.Error => false,
-            SpanStatusCode.Ok => match new_code { SpanStatusCode.Error => true, _ => false },
-            SpanStatusCode.Unset => true,
-        };
-        if should_set {
-            inner.status = new_status;
-        }
+        if !self.is_recording() { return; }
+        self.inner.body_set_status(new_status);
     }
 
     public fn update_name(&self, name: Text) {
-        if !self.is_active() { return; }
-        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
-        let inner: &mut SpanInner = &mut *guard;
-        if !inner.recording || inner.end_time.is_some() { return; }
-        inner.name = name;
+        if !self.is_recording() { return; }
+        self.inner.body_update_name(name);
     }
 
     /// Record an exception as an event "exception" with attributes
-    /// exception.type, exception.message, exception.stacktrace.
-    /// (Convenience — matches OTel semantic conventions.)
+    /// exception.type and exception.message, per OTel semantic
+    /// conventions.
     public fn record_exception(&self, type_name: &Text, message: &Text) {
-        // Skip the AttributeSet allocations entirely on a no-op span.
-        if !self.is_active() { return; }
+        // Skip the AttributeSet allocations entirely on inactive spans.
+        if !self.is_recording() { return; }
         let mut attrs = AttributeSet.new();
-        attrs.set("exception.type".into(), AttributeValue.Text(type_name.clone()));
-        attrs.set("exception.message".into(), AttributeValue.Text(message.clone()));
+        let _ = attrs.set("exception.type".into(), AttributeValue.Text(type_name.clone()));
+        let _ = attrs.set("exception.message".into(), AttributeValue.Text(message.clone()));
         self.add_event("exception".into(), attrs);
     }
 
-    /// Finalise. After this call, further mutations are silently dropped.
-    /// Returns the frozen SpanData (which processors consume).
-    /// Idempotent — second call returns None.
-    public fn end(&self) -> Maybe<SpanData> {
-        // Fast-path idempotency: if already ended, skip the lock.
-        if self.ended_flag.load(MemoryOrdering.Acquire) { return Maybe.None; }
-        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
-        let inner: &mut SpanInner = &mut *guard;
-        if inner.end_time.is_some() { return Maybe.None; }
-        let now = Instant.now();
-        inner.end_time = Maybe.Some(now);
-        // Publish the ended state with Release so concurrent fast-path
-        // readers using Acquire see the freeze.
-        self.ended_flag.store(true, MemoryOrdering.Release);
-        Maybe.Some(freeze(inner, now))
+    /// Finalise at the current instant. The frozen SpanData is delivered
+    /// to the attached processor. Idempotent — subsequent calls are
+    /// no-ops; mutations after `end()` are silently dropped.
+    public fn end(&self) {
+        self.finish(Instant.now());
     }
 
-    /// End with an explicit timestamp (for replay / test scenarios).
-    public fn end_at(&self, ts: Instant) -> Maybe<SpanData> {
-        if self.ended_flag.load(MemoryOrdering.Acquire) { return Maybe.None; }
-        let mut guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
-        let inner: &mut SpanInner = &mut *guard;
-        if inner.end_time.is_some() { return Maybe.None; }
-        inner.end_time = Maybe.Some(ts);
-        self.ended_flag.store(true, MemoryOrdering.Release);
-        Maybe.Some(freeze(inner, ts))
+    /// End with an explicit timestamp (replay / test scenarios).
+    public fn end_at(&self, ts: Instant) {
+        self.finish(ts);
+    }
+
+    fn finish(&self, ts: Instant) {
+        if !self.recording { return; }
+        // Fast-path idempotency: already ended → skip the lock.
+        if self.ended_flag.load(MemoryOrdering.Acquire) { return; }
+        let data: Maybe<SpanData> = self.inner.body_finish(&self.context, ts);
+        // Deliver OUTSIDE the span lock: the processor may do arbitrary
+        // work (synchronous export) and must never run under our mutex.
+        match data {
+            Maybe.Some(d) => {
+                self.ended_flag.store(true, MemoryOrdering.Release);
+                self.processor.on_end(d);
+            }
+            Maybe.None => {
+                self.ended_flag.store(true, MemoryOrdering.Release);
+            }
+        }
     }
 }
 
-// Formatting — matches the pre-refactor core.context.standard Span
-// output so existing logs keep the same shape.
+// Formatting — lock-free on the hoisted context; the name snapshot
+// takes the inner lock only for recording spans.
 
 implement Debug for Span {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        let ctx = self.context();
-        let tid = ctx.trace_id().to_hex();
-        let sid = ctx.span_id().to_hex();
-        let guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
-        let inner: &SpanInner = &*guard;
-        f.write_str(f"Span {{ trace_id: \"{tid}\", span_id: \"{sid}\", name: \"{inner.name}\" }}")
+        let tid = self.context.trace_id().to_hex();
+        let sid = self.context.span_id().to_hex();
+        let name = span_name_snapshot(self);
+        f.write_str(f"Span {{ trace_id: \"{tid}\", span_id: \"{sid}\", name: \"{name}\" }}")
     }
 }
 
 implement Display for Span {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        let ctx = self.context();
-        let tid = ctx.trace_id().to_hex();
-        let sid = ctx.span_id().to_hex();
-        let guard = (&*self.inner).lock().unwrap_or_else(|p| p.into_inner());
-        let inner: &SpanInner = &*guard;
-        f.write_str(f"[{tid}:{sid}] {inner.name}")
+        let tid = self.context.trace_id().to_hex();
+        let sid = self.context.span_id().to_hex();
+        let name = span_name_snapshot(self);
+        f.write_str(f"[{tid}:{sid}] {name}")
     }
 }
 
-fn span_status_code(inner: &SpanInner) -> SpanStatusCode {
-    inner.status.code()
+fn span_name_snapshot(span: &Span) -> Text {
+    if !span.recording { return "".into(); }
+    span.inner.body_name()
 }
 
-fn write_status(inner: &mut SpanInner, s: SpanStatus) {
-    inner.status = s;
-}
+// =============================================================================
+// Locked mutation methods
+// =============================================================================
+//
 
-fn freeze(inner: &SpanInner, end: Instant) -> SpanData {
-    SpanData {
-        name: inner.name.clone(),
-        context: inner.context.clone(),
-        parent_span_id: inner.parent_span_id,
-        kind: inner.kind,
-        start_time: inner.start_time,
-        end_time: end,
-        attributes: inner.attributes.clone(),
-        events: clone_events(&inner.events),
-        links: clone_links(&inner.links),
-        status: SpanStatus {
-            code: inner.status.code(),
-            description: match inner.status.description() {
-                Maybe.Some(d) => Maybe.Some(d.clone()),
-                Maybe.None => Maybe.None,
-            }
-        },
-        resource: inner.resource.clone(),
-        instrumentation_scope: inner.instrumentation_scope.clone(),
-        instrumentation_version: inner.instrumentation_version.clone(),
+// Every guarded access is a METHOD CALL on the mutex guard: the guard
+// auto-derefs to SpanInner at dispatch time, and the `locked_` names
+// are globally unique so the call resolves even for an untracked
+// receiver. (Passing `&mut *guard` to a helper function does NOT
+// unwrap the guard in the current interpreter — argument-position
+// deref is a known gap.)
+
+implement SpanInner {
+    public fn locked_set_attribute(&mut self, key: Text, value: AttributeValue) {
+        if self.end_time.is_some() { return; }
+        let _ = self.attributes.set(key, value);
+    }
+
+    public fn locked_add_event(&mut self, name: Text, attributes: AttributeSet) {
+        if self.end_time.is_some() { return; }
+        if self.events.len() >= SPAN_EVENT_LIMIT { return; }
+        self.events.push(SpanEvent.new(name, Instant.now(), attributes));
+    }
+
+    public fn locked_add_link(&mut self, link: SpanLink) {
+        if self.end_time.is_some() { return; }
+        if self.links.len() >= SPAN_LINK_LIMIT { return; }
+        self.links.push(link);
+    }
+
+    public fn locked_set_status(&mut self, new_status: SpanStatus) {
+        if self.end_time.is_some() { return; }
+        // Per OTel spec §5.1.5: Ok can only be set from Unset; Error
+        // wins over Ok; Error is final.
+        let should_set = match self.status.code() {
+            SpanStatusCode.Error => false,
+            SpanStatusCode.Ok => match new_status.code() {
+                SpanStatusCode.Error => true,
+                _ => false,
+            },
+            SpanStatusCode.Unset => true,
+        };
+        if should_set {
+            self.status = new_status;
+        }
+    }
+
+    public fn locked_update_name(&mut self, name: Text) {
+        if self.end_time.is_some() { return; }
+        self.name = name;
+    }
+
+    /// Freeze in place: stamps end_time and returns the frozen SpanData
+    /// (None when already ended).
+    public fn locked_finish(&mut self, context: &SpanContext, ts: Instant) -> Maybe<SpanData> {
+        if self.end_time.is_some() { return Maybe.None; }
+        self.end_time = Maybe.Some(ts);
+        Maybe.Some(SpanData {
+            name: self.name.clone(),
+            context: context.clone(),
+            parent_span_id: self.parent_span_id,
+            kind: self.kind,
+            start_time: self.start_time,
+            start_system_time: self.start_system_time,
+            end_time: ts,
+            attributes: self.attributes.clone(),
+            events: clone_event_list(&self.events),
+            links: clone_link_list(&self.links),
+            status: self.status.clone(),
+            resource: self.resource.clone(),
+            instrumentation_scope: self.instrumentation_scope.clone(),
+            instrumentation_version: self.instrumentation_version.clone(),
+        })
+    }
+
+    public fn locked_name(&self) -> Text {
+        self.name.clone()
     }
 }
 
-fn clone_events(src: &List<SpanEvent>) -> List<SpanEvent> {
-    let mut out = List.with_capacity(src.len());
-    let mut i = 0;
-    while i < src.len() {
-        out.push(SpanEvent {
-            name: src[i].name.clone(),
-            timestamp: src[i].timestamp,
-            attributes: src[i].attributes.clone(),
-        });
-        i = i + 1;
+/// Minimal storage for non-recording spans — never mutated, never
+/// frozen (every path gates on `recording` first).
+fn empty_inner() -> SpanInner {
+    SpanInner {
+        name: "".into(),
+        parent_span_id: Maybe.None,
+        kind: SpanKind.KindInternal,
+        start_time: Instant.now(),
+        start_system_time: SystemTime.now(),
+        end_time: Maybe.None,
+        attributes: AttributeSet.new(),
+        events: List.new(),
+        links: List.new(),
+        status: SpanStatus.unset(),
+        resource: Shared.new(Resource.empty()),
+        instrumentation_scope: "".into(),
+        instrumentation_version: "".into(),
     }
-    out
-}
-
-fn clone_links(src: &List<SpanLink>) -> List<SpanLink> {
-    let mut out = List.with_capacity(src.len());
-    let mut i = 0;
-    while i < src.len() {
-        out.push(SpanLink {
-            context: src[i].context.clone(),
-            attributes: src[i].attributes.clone(),
-        });
-        i = i + 1;
-    }
-    out
 }
