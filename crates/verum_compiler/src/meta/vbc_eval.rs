@@ -74,10 +74,35 @@ fn decode_const(
         Ok(ConstValue::Float(value.as_f64()))
     } else if let Some(s) = state.read_text(value) {
         Ok(ConstValue::Text(Text::from(s.as_str())))
+    } else if let Some(elems) = state.list_elements(value) {
+        // Structural decode, step-(iii) increment: lists decode
+        // recursively (depth-bounded — meta values are finite by
+        // construction; a cycle would already have hung the
+        // interpreter run that produced them).
+        let mut out: List<ConstValue> = List::new();
+        for e in elems {
+            out.push(decode_const(state, e)?);
+        }
+        Ok(ConstValue::Array(out))
+    } else if let Some(entries) = state.map_entries(value) {
+        // Maps decode with TEXT keys (the meta value model's map is
+        // Text-keyed — OrderedMap<Text, MetaValue>); non-text keys
+        // fail closed.
+        let mut out: verum_common::OrderedMap<Text, ConstValue> =
+            verum_common::OrderedMap::new();
+        for (k, v) in entries {
+            let key = state.read_text(k).ok_or_else(|| {
+                "vbc meta engine: non-Text map key — tree-walk fallback"
+                    .to_string()
+            })?;
+            out.insert(Text::from(key.as_str()), decode_const(state, v)?);
+        }
+        Ok(ConstValue::Map(out))
     } else {
         Err(
-            "vbc meta engine: non-scalar result — structural decode is the \
-             tracked step-(ii) remainder; tree-walk fallback"
+            "vbc meta engine: undecodable result (records/opaque) — \
+             tree-walk fallback; the record leg is the remaining \
+             step-(iii) item"
                 .to_string(),
         )
     }
