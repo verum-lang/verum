@@ -27,7 +27,7 @@ module core.database.sqlite.native.l1_pager.wal_pager;
 //
 // Reader visibility: foreground reads use the live `WalState`'s
 // `frame_index`; consistent-snapshot reads call `snapshot_wal` and
-// then use `WalReaderSnapshot::newest_frame_for` so the reader
+// then use `WalReaderSnapshot.newest_frame_for` so the reader
 // sees a stable view even while the writer keeps appending.
 // =============================================================================
 
@@ -125,7 +125,7 @@ implement WalPager {
 /// micro-optimisation the .shm protocol shipped.  Post-#167 the
 /// live reader path is the canonical .shm consumer; the writer's
 /// frame_index stays as authoritative bookkeeping + the source for
-/// `WalReaderSnapshot::frame_index` (snapshots intentionally use
+/// `WalReaderSnapshot.frame_index` (snapshots intentionally use
 /// the frozen map for salt-rotation isolation, not .shm).
 public fn wal_pager_read(
     p: &mut WalPager,

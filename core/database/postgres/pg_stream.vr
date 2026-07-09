@@ -31,8 +31,8 @@
 // Caller pattern:
 //
 //   match conn.stream {
-//       PgStream::PsPlain(_) => write_all(&mut tcp, bytes),
-//       PgStream::PsTls(_)   => stream.write(bytes),  // unified
+//       PgStream.PsPlain(_) => write_all(&mut tcp, bytes),
+//       PgStream.PsTls(_)   => stream.write(bytes),  // unified
 //   }
 //
 // In practice every wire-site uses the unified `read` / `write`
@@ -164,7 +164,7 @@ implement PgStream {
 // =============================================================================
 
 /// Drive a TLS client handshake over an existing TCP stream. On
-/// success, returns a `PgStream::PsTls(...)` ready for encrypted
+/// success, returns a `PgStream.PsTls(...)` ready for encrypted
 /// reads / writes. On failure, the underlying TCP stream is consumed
 /// (caller cannot recover plaintext use of it — TLS handshake state
 /// is opaque post-failure per RFC 8446 §6.2).

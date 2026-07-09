@@ -73,9 +73,9 @@ mount super.super.judgment.{Derivation, type_of};
 /// Construct a T-Pi-Form derivation from two sub-derivations.
 ///
 
-/// Returns `Maybe::Maybe.Some(d)` when both premises type as universes (the
+/// Returns `Maybe.Maybe.Some(d)` when both premises type as universes (the
 /// elaborator presents the universe levels n, m). Returns
-/// `Maybe::Maybe.None` when the premises don't establish universe membership.
+/// `Maybe.Maybe.None` when the premises don't establish universe membership.
 public fn introduce_pi_form(
     ctx: Context,
     domain_d: Derivation,

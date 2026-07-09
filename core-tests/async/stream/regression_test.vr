@@ -66,7 +66,7 @@ fn regression_interval_zero_period_construct() {
 //      until the codegen-level fix lands.
 //   3. Same function — the variant type-id gate now accepts BOTH
 //      synthetic ids (`>= 0x8000`) AND well-known typed ids
-//      (`TypeId::MAYBE = 515`, `TypeId::RESULT = 516`).  Pre-fix the
+//      (`TypeId.MAYBE = 515`, `TypeId.RESULT = 516`).  Pre-fix the
 //      well-known typed Maybe was rejected (515 < 0x8000), so the
 //      intrinsic dispatcher returned `Result.Ok(Maybe.None)` and the user-side
 //      body ran.

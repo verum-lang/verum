@@ -41,7 +41,7 @@ fn regression_char_from_digit_returns_lowercase_pinned() {
 
 // REGRESSION: pre-fix `(N as Byte).<method>(M as Byte)` collapsed every
 // primitive-sized-int cast receiver to the Int handler because the codegen's
-// `effective_method_name` cascade had no `ExprKind::Cast` arm — receivers
+// `effective_method_name` cascade had no `ExprKind.Cast` arm — receivers
 // fell through to the final bare-`method.name` else arm, and the runtime
 // CallM dispatcher resolved by the receiver's NaN-boxed Int kind alone.
 //
@@ -73,8 +73,8 @@ fn regression_as_byte_cast_wrapping_add_uses_u8_modulo_pinned() {
     assert_eq((255 as Byte).wrapping_add(255 as Byte), 254 as Byte);
 }
 
-// Cast-as-receiver, `checked_add` — must overflow at u8::MAX.
-// Pre-fix returned Maybe.Some(256) (Int.checked_add no overflow until i64::MAX).
+// Cast-as-receiver, `checked_add` — must overflow at u8.MAX.
+// Pre-fix returned Maybe.Some(256) (Int.checked_add no overflow until i64.MAX).
 @test
 fn regression_as_byte_cast_checked_add_overflows_at_u8_max_pinned() {
     assert_eq((100 as Byte).checked_add(50 as Byte), Maybe.Some(150 as Byte));
@@ -82,11 +82,11 @@ fn regression_as_byte_cast_checked_add_overflows_at_u8_max_pinned() {
     assert_eq((200 as Byte).checked_add(100 as Byte), Maybe.None);
 }
 
-// Cast-as-receiver, `saturating_add` — must saturate at u8::MAX.
+// Cast-as-receiver, `saturating_add` — must saturate at u8.MAX.
 // Pre-fix returned 256 / 260 / 510 etc. (`(255 as Byte).saturating_add(1 as
 // Byte)` returned `256`) because the parser wraps `(N as Byte)` in
 // `Paren { inner: Cast { … } }`, and Case 7's paren-wrapped fallback
-// in `compile_method_call::effective_method_name` formatted the qualified
+// in `compile_method_call.effective_method_name` formatted the qualified
 // name as `Byte.saturating_add`.  The devirtualization shortcut at the
 // bottom of `compile_method_call` then looked up the qualified name,
 // found it tagged with `intrinsic_name` (via `register_stdlib_intrinsics`
@@ -96,7 +96,7 @@ fn regression_as_byte_cast_checked_add_overflows_at_u8_max_pinned() {
 // `width=64` (i64 semantics) — collapsing u8 saturation.
 //
 // Closed by extending Case 7's paren-wrapped fallback with an explicit
-// `ExprKind::Cast { ty, .. }` arm (Case 7c) that mirrors Case 6c's
+// `ExprKind.Cast { ty, .. }` arm (Case 7c) that mirrors Case 6c's
 // width-suffixed format dispatch (`byte$<method>` / `int32$<method>` /
 // `uint64$<method>` for sized-int targets).  The `byte$saturating_add`
 // CallM form (a) bypasses the devirt path entirely
@@ -256,19 +256,19 @@ fn regression_unit_receiver_dispatch_pinned() {
 // REGRESSION: same defect class on let-binding form — `let a = 255 as Byte;`
 // then `a.method(b)` also routed through Int's handler because the cast's
 // target type wasn't propagated when the binding's RHS expression type was
-// extracted.  The let-binding RHS type-inference (`compile_let::expr_type`)
-// folded primitive integer widths to `VarTypeKind::Int`, losing the Byte
+// extracted.  The let-binding RHS type-inference (`compile_let.expr_type`)
+// folded primitive integer widths to `VarTypeKind.Int`, losing the Byte
 // specificity even though `extract_expr_type_name` carried the target.
 //
 // CLOSED 2026-05-28 — fundamental fix in `crates/verum_vbc/src/codegen/
-// statements.rs::compile_let` (~line 336): added a `cast_target_var_type`
+// statements.rs.compile_let` (~line 336): added a `cast_target_var_type`
 // carve-out that inspects the RHS expression for `Cast { ty: <sized-int> }`
 // (with Paren peel) BEFORE the generic `infer_expr_type_kind` fallback and
-// returns `Some(VarTypeKind::Byte / Int32 / UInt64)` for every aliased
+// returns `Some(VarTypeKind.Byte / Int32 / UInt64)` for every aliased
 // spelling.  Resolution order: `annotation_type > cast_target_var_type >
 // expr_type > Unknown` — annotated `let x: T = expr` retains the existing
 // contract that the annotation wins, while unannotated `let x = N as T`
-// now records `VarTypeKind::T` width identical to the annotated form.
+// now records `VarTypeKind.T` width identical to the annotated form.
 //
 // Architectural rule pinned: `let a = N as TargetType;` and `let a:
 // TargetType = N as TargetType;` MUST be dispatch-equivalent at every
@@ -288,21 +288,21 @@ fn regression_let_bound_as_cast_propagates_type_pinned() {
 
 // CLOSE-OUT: companion pin for the Int32 / UInt64 width arms of the same
 // fix. Without the cast-target carve-out, `let x = N as Int32` / `as
-// UInt64` similarly collapsed to `VarTypeKind::Int` — closing the
+// UInt64` similarly collapsed to `VarTypeKind.Int` — closing the
 // alias-spelling matrix end-to-end.
 @test
 fn regression_let_bound_as_cast_propagates_int32_pinned() {
     let x = 2_147_483_647 as Int32;
     let y = 1 as Int32;
-    // wrapping_add on Int32 wraps at i32::MAX; pre-fix collapsed to i64
+    // wrapping_add on Int32 wraps at i32.MAX; pre-fix collapsed to i64
     // and the assertion returned `2147483648`.
     assert_eq(x.wrapping_add(y), -2_147_483_648 as Int32);
 }
 
 @test
 fn regression_let_bound_as_cast_propagates_uint64_pinned() {
-    let x = 18_446_744_073_709_551_615_u64 as UInt64;  // u64::MAX
+    let x = 18_446_744_073_709_551_615_u64 as UInt64;  // u64.MAX
     let y = 1_u64 as UInt64;
-    // wrapping_add on UInt64 wraps at u64::MAX; same fix path.
+    // wrapping_add on UInt64 wraps at u64.MAX; same fix path.
     assert_eq(x.wrapping_add(y), 0_u64 as UInt64);
 }

@@ -15,7 +15,7 @@ mount core.collections.multiset.Multiset;
 // =============================================================================
 
 // REGRESSION (§A.1): `Multiset.from([...])` raises
-//   CodegenError::UndefinedFunction("Multiset.from")
+//   CodegenError.UndefinedFunction("Multiset.from")
 // at every user-side call site despite the body compiling cleanly
 // inside the stdlib.  Same shape as the closed task #24/#25/#26
 // cross-module Call name-table cascade — `from` is a constructor

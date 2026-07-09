@@ -25,7 +25,7 @@ module core.database.sqlite.native.l6_session.statement_lifecycle;
 // All operations are pure where possible; mutation is confined to
 // the `PreparedStatement.state: VdbeState` (the interpreter's
 // register file + cursor table) and to the per-statement
-// `bindings` (`ParamBindings` from `l4_vdbe::bindings`).
+// `bindings` (`ParamBindings` from `l4_vdbe.bindings`).
 // =============================================================================
 
 mount core.*;

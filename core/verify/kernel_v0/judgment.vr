@@ -18,13 +18,13 @@
 // over derivations, rules introduce + eliminate them, the soundness
 // theorem unpacks them. Phase 3 (#154) close: this Verum-side
 // Judgment becomes the source of truth for what the Rust-side
-// `proof_checker::infer` decides.
+// `proof_checker.infer` decides.
 //
 
 // **Faithfulness mirror**
 //
 
-//  Rust-side `proof_checker::infer(ctx, term) -> Result<Term, _>`
+//  Rust-side `proof_checker.infer(ctx, term) -> Result<Term, _>`
 //  → Verum-side `Derivation { ctx, term, type, witness }`
 //
 
@@ -65,7 +65,7 @@ public type Judgment is {
 /// value of the claimed type.
 ///
 
-/// **The 10-rule roster** (mirrors `verum_kernel::soundness::canonical_rules`):
+/// **The 10-rule roster** (mirrors `verum_kernel.soundness.canonical_rules`):
 ///
 
 ///  Proved structurally (foundation):
@@ -168,7 +168,7 @@ public type Derivation is
 ///
 
 /// The four cases mirror the def_eq rules in
-/// `verum_kernel::proof_checker`:
+/// `verum_kernel.proof_checker`:
 public type DefinitionalEquality is
     /// **Refl**: every term is equal to itself.
     | Refl { term: CoreTerm }

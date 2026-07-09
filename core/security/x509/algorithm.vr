@@ -6,7 +6,7 @@
 // =============================================================================
 //
 
-// AlgorithmIdentifier ::= SEQUENCE {
+// AlgorithmIdentifier .= SEQUENCE {
 //  algorithm OBJECT IDENTIFIER,
 //  parameters ANY DEFINED BY algorithm OPTIONAL
 // }
@@ -68,7 +68,7 @@ public type SignatureAlg is
     | Ed448Sig
     | Unknown(Oid);
 
-/// RFC 8017 §A.2.3 RSASSA-PSS-params ::= SEQUENCE {
+/// RFC 8017 §A.2.3 RSASSA-PSS-params .= SEQUENCE {
 ///  hashAlgorithm [0] HashAlgorithm DEFAULT sha1,
 ///  maskGenAlgorithm [1] MaskGenAlgorithm DEFAULT mgf1SHA1,
 ///  saltLength [2] INTEGER DEFAULT 20,

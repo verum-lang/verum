@@ -42,8 +42,8 @@ public fn clz(x: UInt64) -> UInt32;
 // Count leading zeros for 32-bit integer.
 //
 // Implemented via the 64-bit `clz` intrinsic with a 32-bit width
-// adjustment.  The Tier-0 interpreter's `ArithSubOpcode::Clz` handler
-// uses `u64::leading_zeros()` — a 64-bit op — so a 32-bit input zero-
+// adjustment.  The Tier-0 interpreter's `ArithSubOpcode.Clz` handler
+// uses `u64.leading_zeros()` — a 64-bit op — so a 32-bit input zero-
 // extended into the 64-bit register has 32 extra leading zeros that
 // must be subtracted to recover the 32-bit count.
 //
@@ -146,17 +146,17 @@ public fn lowest_bit(x: UInt64) -> UInt64 {
 // arity.  Pre-fix `@intrinsic("llvm.fshl.i64")` was a 3-arg funnel-shift
 // — annotating a 2-arg `rotl(x, n)` with it created an arity mismatch
 // that `lookup_intrinsic` could not silently bridge; the dispatcher
-// fell through to the bodyless function (empty body → `Value::default()
+// fell through to the bodyless function (empty body → `Value.default()
 // = Unit`) and every bare-name `mount core.intrinsics.bitwise.rotl;`
 // call site collided onto THIS broken declaration (sibling name shadow
 // — bare lookup first-wins).
 //
 // Canonical 2-arg `rotate_left` / `rotate_right` in
 // `crates/verum_vbc/src/intrinsics/registry.rs` map to the dedicated
-// `ArithSubOpcode::RotateLeft` (0x55) / `RotateRight` (0x56) — single
+// `ArithSubOpcode.RotateLeft` (0x55) / `RotateRight` (0x56) — single
 // instruction on x86 (`rolq` / `rorq`) and ARM (`ror`).  fshl is the
 // 3-arg funnel-shift; its registry entry lives under `fshl_u64` and
-// the public stdlib surface is `core/intrinsics/bitwise.vr::fshl<T>`.
+// the public stdlib surface is `core/intrinsics/bitwise.vr.fshl<T>`.
 @inline(always)
 @intrinsic("rotate_left")
 public fn rotl(x: UInt64, n: UInt32) -> UInt64;

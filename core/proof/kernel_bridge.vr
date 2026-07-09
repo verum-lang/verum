@@ -8,29 +8,29 @@
 //
 
 //  * Kernel layer: 19 dispatcher entries in
-//  `verum_kernel::intrinsic_dispatch::available_intrinsics()`,
+//  `verum_kernel.intrinsic_dispatch.available_intrinsics()`,
 //  each backed by an algorithmic current surface in the corresponding
-//  `verum_kernel::*` module. Coverage verified by
+//  `verum_kernel.*` module. Coverage verified by
 //  `verum audit --kernel-intrinsics`.
 //
 
 //  * Verum-bridge layer: every `kernel_*` axiom below has a
-//  matching dispatcher entry; `verum_kernel::intrinsic_dispatch::
+//  matching dispatcher entry; `verum_kernel.intrinsic_dispatch.
 //  missing_dispatchers()` reports zero gaps.
 //
 
-//  * MSFS proof bodies: `core/math/syn_mod.vr::
+//  * MSFS proof bodies: `core/math/syn_mod.vr.
 //  syn_mod_lemma_3_4_steps_2_3` and
-//  `core/math/concrete_accessible.vr::
+//  `core/math/concrete_accessible.vr.
 //  grothendieck_construction_n_1_constructive` now reference
 //  the kernel-discharge route inline; downstream theorems pick
 //  up the kernel coverage transitively.
 //
 
-//  * Tactic dispatcher: `verum_smt::industrial_fast_path::
+//  * Tactic dispatcher: `verum_smt.industrial_fast_path.
 //  dispatch_by_name` routes `apply lia/decide/induction/
 //  congruence/eauto` to the deterministic kernel tactics in
-//  `verum_kernel::tactics_industrial`, falling back to Z3 on
+//  `verum_kernel.tactics_industrial`, falling back to Z3 on
 //  `Open` outcomes.
 //
 
@@ -58,7 +58,7 @@
 // `lurie_htt_5_1_4_syn_is_grothendieck` as an opaque paper-citation
 // axiom; with this module the @theorem chain can route through
 // `kernel_grothendieck_construction` whose ensures matches the
-// kernel-checked output of `verum_kernel::grothendieck::build_grothendieck`.
+// kernel-checked output of `verum_kernel.grothendieck.build_grothendieck`.
 //
 
 // **Audit surface.** `verum audit --kernel-bridge` walks this module
@@ -126,7 +126,7 @@ module core.proof.kernel_bridge;
 //
 
 // **Discharge surface mapping.** Each strict bridge corresponds to a
-// `verum_kernel::intrinsic_dispatch` dispatcher entry; the dispatcher's
+// `verum_kernel.intrinsic_dispatch` dispatcher entry; the dispatcher's
 // argument-validation logic is now redundant for the strict-form callers
 // (the K-Refine rule has already filtered pathological inputs before
 // the dispatcher ever sees them). The dispatcher remains useful for
@@ -162,7 +162,7 @@ public type True is Bool{== true};
 // -----------------------------------------------------------------------------
 
 /// **STRICT — Grothendieck construction (HTT 5.1.4).**
-/// Discharges via `verum_kernel::grothendieck::build_grothendieck`;
+/// Discharges via `verum_kernel.grothendieck.build_grothendieck`;
 /// `StrictPos` precondition encoded in the argument type.
 @framework(msfs, "Strict bridge — Grothendieck (HTT 5.1.4) over StrictPos diagrams")
 public axiom kernel_grothendieck_construction_strict(num_fibres: StrictPos) -> Bool
@@ -258,10 +258,10 @@ public axiom kernel_saft_adjunction_strict(
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::yoneda::yoneda_embedding(c)` returns a
+/// `verum_kernel.yoneda.yoneda_embedding(c)` returns a
 /// `YonedaEmbedding` with `is_fully_faithful = true` and the
 /// fullness level certified at every level up to `c.level`.
-@framework(msfs, "Bridge — kernel yoneda::yoneda_embedding (HTT 1.2.1, fully-faithful)")
+@framework(msfs, "Bridge — kernel yoneda.yoneda_embedding (HTT 1.2.1, fully-faithful)")
 public axiom kernel_yoneda_embedding() -> Bool
     requires true
     ensures  true;
@@ -270,10 +270,10 @@ public axiom kernel_yoneda_embedding() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::yoneda::build_kan_extension(f, p, ...)` returns
+/// `verum_kernel.yoneda.build_kan_extension(f, p, ...)` returns
 /// `Maybe.Some(KanExtension)` iff `f` is fully-faithful AND target has
 /// appropriate colimits.
-@framework(msfs, "Bridge — kernel yoneda::build_kan_extension (HTT 4.3.3.7)")
+@framework(msfs, "Bridge — kernel yoneda.build_kan_extension (HTT 4.3.3.7)")
 public axiom kernel_kan_extension() -> Bool
     requires true
     ensures  true;
@@ -291,8 +291,8 @@ public axiom kernel_kan_extension() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::cartesian_fibration::build_straightening_equivalence(c)`.
-@framework(msfs, "Bridge — kernel cartesian_fibration::build_straightening_equivalence (HTT 3.2.0.1)")
+/// `verum_kernel.cartesian_fibration.build_straightening_equivalence(c)`.
+@framework(msfs, "Bridge — kernel cartesian_fibration.build_straightening_equivalence (HTT 3.2.0.1)")
 public axiom kernel_straightening_equivalence() -> Bool
     requires true
     ensures  true;
@@ -306,9 +306,9 @@ public axiom kernel_straightening_equivalence() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::grothendieck::build_grothendieck(diagram)` returns
+/// `verum_kernel.grothendieck.build_grothendieck(diagram)` returns
 /// `Maybe.Some(GrothendieckConstruction)` for every well-formed input.
-@framework(msfs, "Bridge — kernel grothendieck::build_grothendieck (HTT 5.1.4)")
+@framework(msfs, "Bridge — kernel grothendieck.build_grothendieck (HTT 5.1.4)")
 public axiom kernel_grothendieck_construction() -> Bool
     requires true
     ensures  true;
@@ -322,8 +322,8 @@ public axiom kernel_grothendieck_construction() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::adjoint_functor::build_adjunction(...)`.
-@framework(msfs, "Bridge — kernel adjoint_functor::build_adjunction (HTT 5.5.2.9)")
+/// `verum_kernel.adjoint_functor.build_adjunction(...)`.
+@framework(msfs, "Bridge — kernel adjoint_functor.build_adjunction (HTT 5.5.2.9)")
 public axiom kernel_saft_adjunction() -> Bool
     requires true
     ensures  true;
@@ -337,8 +337,8 @@ public axiom kernel_saft_adjunction() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::reflective_subcategory::build_reflective_subcategory(...)`.
-@framework(msfs, "Bridge — kernel reflective_subcategory::build_reflective_subcategory (HTT 5.2.7 + Lemma 10.3)")
+/// `verum_kernel.reflective_subcategory.build_reflective_subcategory(...)`.
+@framework(msfs, "Bridge — kernel reflective_subcategory.build_reflective_subcategory (HTT 5.2.7 + Lemma 10.3)")
 public axiom kernel_reflective_subcategory_aft() -> Bool
     requires true
     ensures  true;
@@ -357,9 +357,9 @@ public axiom kernel_reflective_subcategory_aft() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::whitehead::whitehead_promote(criterion, audit)`
+/// `verum_kernel.whitehead.whitehead_promote(criterion, audit)`
 /// produces an `InfinityEquivalence` without touching `audit`.
-@framework(msfs, "Bridge — kernel whitehead::whitehead_promote (HTT 1.2.4.3, empty BridgeAudit)")
+@framework(msfs, "Bridge — kernel whitehead.whitehead_promote (HTT 1.2.4.3, empty BridgeAudit)")
 public axiom kernel_whitehead_promote() -> Bool
     requires true
     ensures  true;
@@ -376,8 +376,8 @@ public axiom kernel_whitehead_promote() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::limits_colimits::compute_colimit_in_psh(diagram)`.
-@framework(msfs, "Bridge — kernel limits_colimits::compute_colimit_in_psh (HTT 5.1.2.3)")
+/// `verum_kernel.limits_colimits.compute_colimit_in_psh(diagram)`.
+@framework(msfs, "Bridge — kernel limits_colimits.compute_colimit_in_psh (HTT 5.1.2.3)")
 public axiom kernel_compute_colimit() -> Bool
     requires true
     ensures  true;
@@ -387,7 +387,7 @@ public axiom kernel_compute_colimit() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::limits_colimits::{build_pullback, build_pushout,
+/// `verum_kernel.limits_colimits.{build_pullback, build_pushout,
 /// build_equaliser, build_coequaliser}`.
 @framework(msfs, "Bridge — kernel limits_colimits specialised builders (HTT 4.4)")
 public axiom kernel_specialised_limits() -> Bool
@@ -407,8 +407,8 @@ public axiom kernel_specialised_limits() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::truncation::truncate_to_level(x, c, n)`.
-@framework(msfs, "Bridge — kernel truncation::truncate_to_level (HTT 5.5.6)")
+/// `verum_kernel.truncation.truncate_to_level(x, c, n)`.
+@framework(msfs, "Bridge — kernel truncation.truncate_to_level (HTT 5.5.6)")
 public axiom kernel_truncate_to_level() -> Bool
     requires true
     ensures  true;
@@ -424,8 +424,8 @@ public axiom kernel_truncate_to_level() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::factorisation::build_epi_mono_factorisation(c)`.
-@framework(msfs, "Bridge — kernel factorisation::build_epi_mono_factorisation (HTT 5.2.8.4)")
+/// `verum_kernel.factorisation.build_epi_mono_factorisation(c)`.
+@framework(msfs, "Bridge — kernel factorisation.build_epi_mono_factorisation (HTT 5.2.8.4)")
 public axiom kernel_epi_mono_factorisation() -> Bool
     requires true
     ensures  true;
@@ -438,8 +438,8 @@ public axiom kernel_epi_mono_factorisation() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::factorisation::build_n_truncation_factorisation(c, n)`.
-@framework(msfs, "Bridge — kernel factorisation::build_n_truncation_factorisation (HTT 5.2.8.16)")
+/// `verum_kernel.factorisation.build_n_truncation_factorisation(c, n)`.
+@framework(msfs, "Bridge — kernel factorisation.build_n_truncation_factorisation (HTT 5.2.8.16)")
 public axiom kernel_n_truncation_factorisation() -> Bool
     requires true
     ensures  true;
@@ -457,8 +457,8 @@ public axiom kernel_n_truncation_factorisation() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::pronk_fractions::build_bicat_of_fractions(c, w, axioms)`.
-@framework(diakrisis, "Bridge — kernel pronk_fractions::build_bicat_of_fractions (Pronk 1996, BF1–BF5)")
+/// `verum_kernel.pronk_fractions.build_bicat_of_fractions(c, w, axioms)`.
+@framework(diakrisis, "Bridge — kernel pronk_fractions.build_bicat_of_fractions (Pronk 1996, BF1–BF5)")
 public axiom kernel_pronk_bicat_fractions() -> Bool
     requires true
     ensures  true;
@@ -476,8 +476,8 @@ public axiom kernel_pronk_bicat_fractions() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::infinity_topos::build_infinity_topos(...)`.
-@framework(msfs, "Bridge — kernel infinity_topos::build_infinity_topos (HTT 6.1)")
+/// `verum_kernel.infinity_topos.build_infinity_topos(...)`.
+@framework(msfs, "Bridge — kernel infinity_topos.build_infinity_topos (HTT 6.1)")
 public axiom kernel_infinity_topos() -> Bool
     requires true
     ensures  true;
@@ -495,9 +495,9 @@ public axiom kernel_infinity_topos() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::zfc_self_recognition::required_meta_theory(rule)`
+/// `verum_kernel.zfc_self_recognition.required_meta_theory(rule)`
 /// returns a `MetaTheoryRequirements` record.
-@framework(diakrisis, "Bridge — kernel zfc_self_recognition::required_meta_theory (VVA §16.5 Phase 5)")
+@framework(diakrisis, "Bridge — kernel zfc_self_recognition.required_meta_theory (VVA §16.5 Phase 5)")
 public axiom kernel_zfc_self_recognition() -> Bool
     requires true
     ensures  true;
@@ -511,8 +511,8 @@ public axiom kernel_zfc_self_recognition() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::godel_coding::{cantor_pair, PrimitiveRecursive::eval,
-/// MuRecursive::eval, GodelEncoding::encode}`.
+/// `verum_kernel.godel_coding.{cantor_pair, PrimitiveRecursive.eval,
+/// MuRecursive.eval, GodelEncoding.encode}`.
 @framework(diakrisis, "Bridge — kernel godel_coding (Yanofsky 2003 / Gödel 1931)")
 public axiom kernel_godel_coding() -> Bool
     requires true
@@ -525,11 +525,11 @@ public axiom kernel_godel_coding() -> Bool
 /// `tactic_lia` (LIA), `tactic_decide` (truth-table tautology),
 /// `tactic_induction` (ℕ-induction), `tactic_congruence` (EUF),
 /// `tactic_eauto` (depth-bounded back-chain). Each returns a
-/// re-checkable `TacticOutcome::{Closed, Open}`.
+/// re-checkable `TacticOutcome.{Closed, Open}`.
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::tactics_industrial::{tactic_lia, tactic_decide,
+/// `verum_kernel.tactics_industrial.{tactic_lia, tactic_decide,
 /// tactic_induction, tactic_congruence, tactic_eauto}`.
 @framework(verum, "Bridge — kernel tactics_industrial (5 deterministic tactics)")
 public axiom kernel_tactics_industrial() -> Bool
@@ -545,8 +545,8 @@ public axiom kernel_tactics_industrial() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::cross_format_gate::evaluate_gate(report)`.
-@framework(verum, "Bridge — kernel cross_format_gate::evaluate_gate (4-format CI)")
+/// `verum_kernel.cross_format_gate.evaluate_gate(report)`.
+@framework(verum, "Bridge — kernel cross_format_gate.evaluate_gate (4-format CI)")
 public axiom kernel_cross_format_gate() -> Bool
     requires true
     ensures  true;
@@ -555,13 +555,13 @@ public axiom kernel_cross_format_gate() -> Bool
 ///
 
 /// HTT (Lurie 2009) + AR 1994 chapter-by-chapter mechanisation
-/// status enumeration with `MechanisationStatus::{Mechanised,
+/// status enumeration with `MechanisationStatus.{Mechanised,
 /// Partial, AxiomCited, Pending, OutOfScopeForMsfs}` per section.
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::mechanisation_roadmap::{htt_roadmap,
-/// adamek_rosicky_roadmap, CoverageReport::compute}`.
+/// `verum_kernel.mechanisation_roadmap.{htt_roadmap,
+/// adamek_rosicky_roadmap, CoverageReport.compute}`.
 @framework(verum, "Bridge — kernel mechanisation_roadmap (HTT + AR 1994 coverage)")
 public axiom kernel_mechanisation_roadmap() -> Bool
     requires true
@@ -581,7 +581,7 @@ public axiom kernel_mechanisation_roadmap() -> Bool
 ///
 
 /// Kernel discharge:
-/// `verum_kernel::mechanisation_roadmap::msfs_self_contained()`
+/// `verum_kernel.mechanisation_roadmap.msfs_self_contained()`
 /// computes the predicate from the live roadmap data; this bridge
 /// surfaces it through the kernel intrinsic dispatcher
 /// (`kernel_msfs_self_contained`) so a Verum-language @theorem can

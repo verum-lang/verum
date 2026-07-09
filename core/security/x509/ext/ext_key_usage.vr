@@ -3,8 +3,8 @@
 // =============================================================================
 //
 
-// ExtKeyUsageSyntax ::= SEQUENCE SIZE (1..MAX) OF KeyPurposeId
-// KeyPurposeId ::= OBJECT IDENTIFIER
+// ExtKeyUsageSyntax .= SEQUENCE SIZE (1..MAX) OF KeyPurposeId
+// KeyPurposeId .= OBJECT IDENTIFIER
 //
 
 // Most relevant id-kp values for WebPKI:

@@ -50,7 +50,7 @@ implement GitUrl {
             Result.Ok(GitUrl(s))
         } else {
             Result.Err(ShellError.SpawnFailed {
-                command: "<GitUrl::parse>".into(),
+                command: "<GitUrl.parse>".into(),
                 reason:  f"invalid git URL: {s}",
             })
         }
@@ -74,7 +74,7 @@ implement GitRefspec {
             Result.Ok(GitRefspec(s))
         } else {
             Result.Err(ShellError.SpawnFailed {
-                command: "<GitRefspec::parse>".into(),
+                command: "<GitRefspec.parse>".into(),
                 reason:  f"invalid git refspec: {s}",
             })
         }
@@ -98,7 +98,7 @@ implement GitBranch {
             Result.Ok(GitBranch(s))
         } else {
             Result.Err(ShellError.SpawnFailed {
-                command: "<GitBranch::parse>".into(),
+                command: "<GitBranch.parse>".into(),
                 reason:  f"invalid git branch: {s}",
             })
         }

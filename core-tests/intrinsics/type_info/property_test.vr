@@ -261,7 +261,7 @@ fn law_unsigned_min_zero_max_all_ones() {
     assert_eq(UInt32.min, 0);
     assert_eq(UInt32.max, 4294967295);
     assert_eq(UInt64.min, 0);
-    // u64::MAX doesn't fit a decimal Int literal — pin via the bit pattern:
+    // u64.MAX doesn't fit a decimal Int literal — pin via the bit pattern:
     // all-ones reinterprets as Int -1.
     let m = UInt64.max;
     assert_eq(m as Int, -1);

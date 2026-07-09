@@ -136,7 +136,7 @@ implement MysqlStream {
 // =============================================================================
 
 /// Drive a TLS client handshake over an existing TCP stream. On
-/// success, returns a `MysqlStream::MsTls(...)` ready for encrypted
+/// success, returns a `MysqlStream.MsTls(...)` ready for encrypted
 /// reads/writes. Bridged through `block_on` because
 /// `TlsStream.connect` is async and MysqlConnection is currently
 /// synchronous.

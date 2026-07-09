@@ -161,7 +161,7 @@ public type LiftResult is {
 // -----------------------------------------------------------------------------
 
 /// Lift `vdbe` to an SSA program (pass 1 only — pending phis must be
-/// resolved by `phi_insertion::resolve_pending_phis(...)` before the
+/// resolved by `phi_insertion.resolve_pending_phis(...)` before the
 /// SSA program is consumed by the optimizer).
 public fn lift_vdbe_to_ssa(vdbe: &VdbeProgram) -> LiftResult {
     // Build CFG skeleton (block boundaries).
@@ -376,10 +376,10 @@ fn lift_straight_line(
         Divide(a, b, d)   => arith(prog, rs, span, a, b, d, ArithOp.DivOp, pending),
         Remainder(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.RemOp, pending),
 
-        BitAnd(a, b, d)    => bitwise(prog, rs, span, a, b, d, BitOp::AndOp, pending),
-        BitOr(a, b, d)     => bitwise(prog, rs, span, a, b, d, BitOp::OrOp, pending),
-        ShiftLeft(a, b, d) => bitwise(prog, rs, span, a, b, d, BitOp::ShlOp, pending),
-        ShiftRight(a, b, d) => bitwise(prog, rs, span, a, b, d, BitOp::ShrOp, pending),
+        BitAnd(a, b, d)    => bitwise(prog, rs, span, a, b, d, BitOp.AndOp, pending),
+        BitOr(a, b, d)     => bitwise(prog, rs, span, a, b, d, BitOp.OrOp, pending),
+        ShiftLeft(a, b, d) => bitwise(prog, rs, span, a, b, d, BitOp.ShlOp, pending),
+        ShiftRight(a, b, d) => bitwise(prog, rs, span, a, b, d, BitOp.ShrOp, pending),
         BitNot(s, d) => {
             let av = read_reg(prog, rs, span, s, pending);
             let dst = mint(prog, SkInt);

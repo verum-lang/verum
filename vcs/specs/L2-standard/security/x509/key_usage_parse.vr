@@ -7,7 +7,7 @@
 
 // RFC 5280 §4.2.1.3 KeyUsage decoded from a raw DER BIT STRING.
 //
-//   KeyUsage ::= BIT STRING {
+//   KeyUsage .= BIT STRING {
 //       digitalSignature   (0),   -- 0x80 of byte 0
 //       nonRepudiation     (1),   -- 0x40
 //       keyEncipherment    (2),   -- 0x20

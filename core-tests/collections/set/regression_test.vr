@@ -12,7 +12,7 @@ mount core.prelude.*;
 //
 //   Pre-fix history: the stdlib type decl `Set<T> is { inner: Map<T, ()> }`
 //   is a 1-field record. The VBC runtime intercept allocates Set with
-//   `TypeId::SET` AND the same 4-slot Map-shape header
+//   `TypeId.SET` AND the same 4-slot Map-shape header
 //   `[len@0, cap@1, entries_ptr@2, tombstones@3]` directly (no inner
 //   pointer indirection).
 //
@@ -34,7 +34,7 @@ mount core.prelude.*;
 //     * `Set.is_disjoint(&other)`                 — SIGSEGV before fix
 //
 //   All seven now route through the canonical
-//   `cbgr_helpers::resolve_arg_value` which handles every Verum ref
+//   `cbgr_helpers.resolve_arg_value` which handles every Verum ref
 //   shape (CBGR register-ref, mutable raw-pointer-ref, ThinRef).
 //
 //   The non-intercepted methods that still touch `self.inner` in the

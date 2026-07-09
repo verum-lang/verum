@@ -25,7 +25,7 @@ mount .poll.*;
 mount .waker.*;
 mount .future.*;
 // `spawn_blocking` routes through the dedicated blocking thread
-// pool (`core.runtime.pool::ThreadPool`) rather than the async
+// pool (`core.runtime.pool.ThreadPool`) rather than the async
 // executor's worker pool — see the BlockingState/BlockingFuture
 // section below for the architectural rationale.
 mount core.runtime.pool.{ThreadPool};
@@ -246,7 +246,7 @@ where F.Output: Send
 //
 
 // `spawn_blocking` runs CPU-intensive or blocking I/O work on a
-// **dedicated** thread pool (`core.runtime.pool::ThreadPool`),
+// **dedicated** thread pool (`core.runtime.pool.ThreadPool`),
 // distinct from the async executor's worker pool. Pre-fix the
 // implementation was `spawn(lazy(f))` — the work ran on the async
 // pool and consumed a worker thread for its full duration,
@@ -268,7 +268,7 @@ where F.Output: Send
 // task's `arg`. The pool's `func: fn(Int) -> Int` recovers the
 // box via `Heap.from_raw` (taking ownership), runs the closure,
 // writes the result, and is dropped — the same type-erasure
-// pattern that `AsyncRuntime::spawn` uses for its `poll_fn`
+// pattern that `AsyncRuntime.spawn` uses for its `poll_fn`
 // (executor.vr:465 + :468).
 
 // Cross-thread coordination state for blocking work.
@@ -338,7 +338,7 @@ type BlockingArg<F, T> is {
 // Spawn a blocking operation on a dedicated thread pool.
 //
 
-// The closure runs on `core.runtime.pool::ThreadPool`'s global
+// The closure runs on `core.runtime.pool.ThreadPool`'s global
 // pool (distinct from the async executor's worker pool). The
 // returned `JoinHandle` polls a completion flag set by the
 // pool task — the async executor's workers stay free for other
@@ -355,7 +355,7 @@ public fn spawn_blocking<F: fn() -> T + Send, T: Send>(f: F) -> JoinHandle<T> {
     // `fn(Int) -> Int` callback reconstructs the box, runs the
     // closure, writes the result, sets `done`, and the box is
     // dropped at end of callback. Same pattern as
-    // `AsyncRuntime::spawn`'s poll_fn type-erasure (executor.vr:465).
+    // `AsyncRuntime.spawn`'s poll_fn type-erasure (executor.vr:465).
     let arg_box = Heap.new(BlockingArg {
         state: state.clone(),
         f:     f,

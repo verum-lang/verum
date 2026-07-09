@@ -59,7 +59,7 @@ implement TypeOid {
 }
 
 // Core OID dictionary — stable across vendors; per-vendor maps live in
-// adapter modules (e.g. `core.database.postgres.types::oid_to_pg_type`).
+// adapter modules (e.g. `core.database.postgres.types.oid_to_pg_type`).
 public const OID_NULL:        Int = 0;
 public const OID_BOOL:        Int = 1;
 public const OID_INT2:        Int = 2;

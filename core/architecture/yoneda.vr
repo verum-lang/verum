@@ -2,7 +2,7 @@
 // core.architecture.yoneda — Yoneda-equivalence checker surface
 // =============================================================================
 //
-// **Verum-native mirror of `verum_kernel::arch_yoneda`.**
+// **Verum-native mirror of `verum_kernel.arch_yoneda`.**
 //
 // ## Yoneda equivalence
 //

@@ -153,7 +153,7 @@ implement Url {
     // O(N) work to a fixed budget and prevents denial-of-service via
     // attacker-supplied gigabyte-scale URL strings.
     public fn parse(s: &Text) -> Result<Url, UrlError> {
-        // scheme ::= ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+        // scheme .= ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
         let bytes = s.as_bytes();
         let n = bytes.len();
         if n == 0 {

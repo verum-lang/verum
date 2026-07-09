@@ -14,7 +14,7 @@
 // handle RESP framing + connection pool + cluster redirects.
 // Upper layers (`commands.vr`, `pubsub.vr`, `stream.vr`,
 // `transaction.vr`, `script.vr`) provide typed surfaces. Every
-// command goes through `client::exec` (or `exec_bytes` for binary-
+// command goes through `client.exec` (or `exec_bytes` for binary-
 // safe), which acquires a pool slot, writes the framed RESP, reads
 // one reply, releases the slot.
 //

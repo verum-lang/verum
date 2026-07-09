@@ -407,7 +407,7 @@ fn parametrised_to_int_truth_table(x: Ordering, expected: Int) {
 
 /// CLOSED 2026-05-29: Iterator-item method dispatch on `&T` receiver
 /// now resolves correctly via the for-loop binder type registration at
-/// `crates/verum_vbc/src/codegen/expressions.rs::compile_for` (lines
+/// `crates/verum_vbc/src/codegen/expressions.rs.compile_for` (lines
 /// ~11901-11935). The binder's `variable_type_names["ord"]` is set to
 /// the iterator-element type (`Ordering` from `List<Ordering>`),
 /// letting the method-dispatch Case 1a fallback's `_ =>` arm look up

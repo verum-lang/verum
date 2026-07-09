@@ -55,7 +55,7 @@ public type AsyncPoolConfig is {
     min_size: Int,
     max_size: Int,
     /// Per-connection mailbox depth (passed straight into
-    /// `AsyncPgConnection::connect`). Caps in-flight requests
+    /// `AsyncPgConnection.connect`). Caps in-flight requests
     /// per connection; raises pipeline ceiling without raising
     /// connection count.
     mailbox_capacity: Int,

@@ -331,7 +331,7 @@ implement Ipv6Addr {
             return Result.Err(AddrParseError.InvalidFormat);
         }
 
-        // Check for IPv4-mapped address (::ffff:x.x.x.x or ::x.x.x.x)
+        // Check for IPv4-mapped address (.ffff:x.x.x.x or .x.x.x.x)
         if let Maybe.Some(idx) = s.rfind('.') {
             // Contains a dot - might be IPv4 suffix
             if let Maybe.Some(colon_idx) = s.rfind(':') {
@@ -341,7 +341,7 @@ implement Ipv6Addr {
                     let mut segments = [0; 8];
 
                     if prefix == ":" || prefix == "" {
-                        // Pure IPv4-compatible (::x.x.x.x)
+                        // Pure IPv4-compatible (.x.x.x.x)
                         let (a, b, c, d) = ipv4.octets();
                         segments[6] = ((a as Int) << 8) | (b as Int);
                         segments[7] = ((c as Int) << 8) | (d as Int);
@@ -350,7 +350,7 @@ implement Ipv6Addr {
                             segments[4], segments[5], segments[6], segments[7]
                         ));
                     } else if prefix == ":ffff" || prefix == "::ffff" {
-                        // IPv4-mapped (::ffff:x.x.x.x)
+                        // IPv4-mapped (.ffff:x.x.x.x)
                         let (a, b, c, d) = ipv4.octets();
                         segments[5] = 0xFFFF;
                         segments[6] = ((a as Int) << 8) | (b as Int);
@@ -364,19 +364,19 @@ implement Ipv6Addr {
             }
         }
 
-        // Split by :: (double-colon abbreviation)
+        // Split by . (double-colon abbreviation)
         let parts = s.split("::");
         let num_parts = parts.len();
 
         if num_parts > 2 {
-            // More than one :: is invalid per RFC 4291
+            // More than one . is invalid per RFC 4291
             return Result.Err(AddrParseError.InvalidFormat);
         }
 
         let mut segments = [0; 8];
 
         if num_parts == 1 {
-            // No :: abbreviation - must have exactly 8 colon-separated groups
+            // No . abbreviation - must have exactly 8 colon-separated groups
             let groups = s.split(":");
             if groups.len() != 8 {
                 return Result.Err(AddrParseError.InvalidFormat);
@@ -388,7 +388,7 @@ implement Ipv6Addr {
                 i = i + 1;
             }
         } else {
-            // Has :: - need to determine how many zeros to insert
+            // Has . - need to determine how many zeros to insert
             let left = &parts[0];
             let right = &parts[1];
 
@@ -406,7 +406,7 @@ implement Ipv6Addr {
 
             let total_groups = left_groups.len() + right_groups.len();
             if total_groups > 7 {
-                // Too many groups (8 is max, :: takes at least 1 slot)
+                // Too many groups (8 is max, . takes at least 1 slot)
                 return Result.Err(AddrParseError.InvalidFormat);
             }
 

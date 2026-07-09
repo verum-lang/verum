@@ -6,8 +6,8 @@
 // repro that returned `nil` / the wrong shape before the fix.  See `audit.md`.
 //
 // Root cause (all closed): the conversion intrinsics were fully implemented at
-// the codegen/interp/LLVM levels (InlineSequenceId::{Sext,Zext,Fpext,Fptrunc,
-// IntTrunc,F*ToBits} + ArithSubOpcode::F*{To,From}Bits) but were UNREACHABLE
+// the codegen/interp/LLVM levels (InlineSequenceId.{Sext,Zext,Fpext,Fptrunc,
+// IntTrunc,F*ToBits} + ArithSubOpcode.F*{To,From}Bits) but were UNREACHABLE
 // from the intrinsic surface:
 //   * `sext`/`zext`/`fpext`/`fptrunc`/`trunc` aliased to names with no registry
 //     entry (the real entries are width-typed: `i32_to_i64`, `u32_to_u64`,

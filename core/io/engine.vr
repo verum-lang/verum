@@ -172,7 +172,7 @@ implement IoEngine {
     }
 
     /// Non-consuming check: has `fd` fired for `event` since the
-    /// last `poll`?  Used by `core/net/tcp.vr::AsyncIoReady.poll`
+    /// last `poll`?  Used by `core/net/tcp.vr.AsyncIoReady.poll`
     /// to drive Future readiness without removing the entry from
     /// the session's ready queue (so subsequent re-polls see it
     /// until the caller explicitly consumes via `take_ready`).

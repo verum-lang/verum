@@ -21,8 +21,8 @@
 //     (`bitfield.USIZE_BITS`) — the bare-mount selective-const form
 //     remains gated on task #15.
 //   * The integration suite intentionally avoids hardware
-//     `Bitfield`-protocol round-trips: `Bitfield::SIZE_BYTES` and
-//     `Bitfield::as_bytes` are produced by the `@bitfield` codegen pass,
+//     `Bitfield`-protocol round-trips: `Bitfield.SIZE_BYTES` and
+//     `Bitfield.as_bytes` are produced by the `@bitfield` codegen pass,
 //     which is hardware-target-specific. That surface is locked down by
 //     `vcs/specs/L3-extended/` integration suites.
 // =============================================================================

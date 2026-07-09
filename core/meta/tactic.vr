@@ -24,7 +24,7 @@
 //
 
 // ```text
-//  M ::= ⌜e⌝ quote an expression as data
+//  M .= ⌜e⌝ quote an expression as data
 //  | ▸M splice data back to expression
 //  | reflect(g) reify a goal as data
 //  | custom(F, M) invoke a registered elaborator

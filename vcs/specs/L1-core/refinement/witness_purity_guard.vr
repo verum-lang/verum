@@ -14,7 +14,7 @@
 // not see. Verum's computational-properties system
 // (`crates/verum_types/src/computational_properties.rs`) tracks
 // Pure / IO / Async / Fallible / Mutates effects per-function and
-// surfaces them on the `Function::properties` field.
+// surfaces them on the `Function.properties` field.
 //
 // **Audit reference:** vcs/red-team/round-2-implementation.md §6.2.
 //

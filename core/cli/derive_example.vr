@@ -9,7 +9,7 @@
 // Demonstrates the canonical user-facing surface for vcli: a record
 // type decorated with `@command(...)` whose fields carry `@flag(...)`
 // or `@arg(...)` attributes. The compiler's `DeriveCommand` macro pass
-// (in `verum_compiler::derives::cli_command`) lowers the type into a
+// (in `verum_compiler.derives.cli_command`) lowers the type into a
 // freestanding `__cli_spec_for_<TypeName>() -> CommandSpec` factory.
 //
 // Once macro expansion is wired through the full pipeline the user

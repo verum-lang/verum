@@ -364,7 +364,7 @@ fn log_dispatched(cmd: &Text) {
     eprint(f"$ {cmd}\n");
 }
 
-/// Async-friendly wrapper around Child::wait_with_output. Yields to the
+/// Async-friendly wrapper around Child.wait_with_output. Yields to the
 /// executor between status checks so other tasks can progress.
 async fn wait_with_output_async(child: &Child) -> Result<Output, Text> {
     // Synchronous wait_with_output is acceptable on the runtime's worker

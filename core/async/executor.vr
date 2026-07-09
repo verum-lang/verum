@@ -55,7 +55,7 @@ mount core.intrinsics.platform.{spin_hint};
 // Phase 1B (#325): worker-pool thread spawning. Pulls in
 // `Thread.spawn` + `ThreadBuilder` + `ThreadJoinHandle` so
 // `start_worker_pool` can fan out the configured worker count.
-// `ThreadError::SpawnFailed` is the runtime-observable signal
+// `ThreadError.SpawnFailed` is the runtime-observable signal
 // that triggers the graceful single-threaded fallback (Hazard 4
 // — Tier 0 interpreter mode + any platform / resource failure).
 mount core.runtime.thread.{Thread, ThreadBuilder, ThreadJoinHandle, ThreadError};
@@ -124,7 +124,7 @@ public type AsyncRuntimeConfig is {
     /// Stack size for spawned tasks in bytes
     task_stack_size: Int,
     /// Number of OS worker threads in the work-stealing scheduler.
-    /// 0 = auto-detect via `num_cpus::get()` (the documented
+    /// 0 = auto-detect via `num_cpus.get()` (the documented
     /// default). >0 = manifest-pinned override from
     /// `[runtime].async_worker_threads` in Verum.toml. Currently
     /// the executor is single-threaded cooperative — this field
@@ -151,7 +151,7 @@ public type RuntimeConfig is AsyncRuntimeConfig;
 
 // Manifest→runtime bridge (#261). Each getter loads from a
 // const-initialised LLVM global emitted by
-// `platform_ir.rs::emit_runtime_globals` whose initial value flows
+// `platform_ir.rs.emit_runtime_globals` whose initial value flows
 // from `LanguageFeatures.runtime` in Verum.toml at codegen time.
 // Returning 0 means "use stdlib auto-detect" (num_cpus, platform
 // stack size); >0 overrides the historical default.
@@ -192,7 +192,7 @@ implement AsyncRuntimeConfig {
         let stack = if manifest_stack > 0 { manifest_stack } else { 1024 * 1024 };
         // Read manifest worker-threads override. 0 stays in the
         // config field as "auto-detect"; the future multi-threaded
-        // scheduler resolves 0 via `num_cpus::get()` at startup.
+        // scheduler resolves 0 via `num_cpus.get()` at startup.
         let workers = verum_get_runtime_async_worker_threads();
         AsyncRuntimeConfig {
             max_tasks: 10000,
@@ -290,7 +290,7 @@ implement Default for AsyncRuntimeConfig {
     /// trait body recurses into itself rather than dispatching to
     /// the inherent constructor. Pre-fix this caused
     /// `Stack overflow: depth 16384 exceeds maximum 16384` the
-    /// instant any caller hit `AsyncRuntimeConfig::default()` via
+    /// instant any caller hit `AsyncRuntimeConfig.default()` via
     /// the Default-bound-generic path. Inlining the inherent body
     /// breaks the cycle deterministically without depending on
     /// dispatch-table disambiguation.
@@ -427,7 +427,7 @@ const CHASE_LEV_MASK: Int = 255;
 ///     stealer observes any concurrent owner-side decrement.
 ///
 /// **Slot storage**: each slot is an `AtomicInt` holding the
-/// raw pointer of a `Heap<TaskEntry>` (`Heap::into_raw(...)` as
+/// raw pointer of a `Heap<TaskEntry>` (`Heap.into_raw(...)` as
 /// Int). Per-slot atomicity prevents torn reads under the C11
 /// model when stealer-load races with owner-store.
 public type ChaseLevDeque is {
@@ -473,7 +473,7 @@ implement ChaseLevDeque {
     /// `task` at the failure site, leaking the inner
     /// `future_ptr`'s heap-allocated TaskState (`Heap<TaskState>`
     /// has no Drop hook for the type-erased state).  The Result
-    /// shape is the same pattern Tokio's `LocalQueue::push_back`
+    /// shape is the same pattern Tokio's `LocalQueue.push_back`
     /// uses for the identical failure mode.
     public fn push_local(
         &self,
@@ -607,7 +607,7 @@ implement ChaseLevDeque {
 /// "false sharing" — costing ~30 ns per write on modern CPUs.
 /// Aligning to 64 bytes places each slot on its own cache line,
 /// eliminating the false-sharing tax. Same trick Tokio's
-/// `worker::Core` uses (`#[repr(align(128))]` on AMD Zen which
+/// `worker.Core` uses (`#[repr(align(128))]` on AMD Zen which
 /// has 128-byte effective lines for some operations; 64 is the
 /// safe industry default).
 @repr(align = 64)
@@ -721,7 +721,7 @@ public type WorkerPool is {
     /// threads. Empty when start_worker_pool fell back to
     /// single-threaded mode (interpreter mode / spawn failure).
     /// `shutdown` extracts the entire WorkerPool via
-    /// `Maybe::take` and joins handles AFTER releasing the
+    /// `Maybe.take` and joins handles AFTER releasing the
     /// `worker_pool` Mutex — Hazard 6 mitigation, prevents
     /// Drop-time deadlock when a worker tries to access
     /// `worker_pool` while shutdown holds the lock.
@@ -1080,7 +1080,7 @@ implement AsyncRuntime {
     ///
     /// **Hazard 4 (Tier 0 / interpreter mode)**: this graceful-
     /// fallback path is what makes Phase 1B safe in interpreter
-    /// mode — `Thread.spawn` may return `Err::SpawnFailed`
+    /// mode — `Thread.spawn` may return `Err.SpawnFailed`
     /// (libffi pthread limitations under interpretation) and the
     /// runtime degrades silently to single-threaded behaviour.
     public fn start_worker_pool(&self) -> Int {
@@ -1465,7 +1465,7 @@ implement AsyncRuntime {
     ///  1. Set the runtime-level `shutdown` flag (visible to
     ///  workers via Acquire load).
     ///  2. Extract the WorkerPool from `worker_pool` Mutex via
-    ///  `Maybe::take` while holding the lock briefly. Set the
+    ///  `Maybe.take` while holding the lock briefly. Set the
     ///  pool-level `shutdown_flag` and call `notify_all` to
     ///  wake every parked worker.
     ///  3. Release the worker_pool lock.
@@ -2810,15 +2810,15 @@ public fn timeout_ms_raw<F: Future>(future: F, timeout_ms: UInt64) -> ExecutorTi
 
 /// Use this for CPU-intensive || blocking I/O operations that would
 /// otherwise block the async runtime. Routes through
-/// `core.async.task::spawn_blocking` which submits to
-/// `core.runtime.pool::ThreadPool` (distinct from the async
+/// `core.async.task.spawn_blocking` which submits to
+/// `core.runtime.pool.ThreadPool` (distinct from the async
 /// executor's worker pool) and returns a `JoinHandle` whose
 /// underlying `BlockingFuture` polls a completion flag — async
 /// workers stay free between polls.
 ///
 
 /// Pre-fix this was the same `spawn(lazy(f))` placeholder as
-/// `task.vr::spawn_blocking` (closed in commit 14ba223f); both
+/// `task.vr.spawn_blocking` (closed in commit 14ba223f); both
 /// modules now share the same load-bearing implementation
 /// rather than maintaining parallel stubs.
 ///
@@ -2833,7 +2833,7 @@ public fn spawn_blocking<T: Send, F: fn() -> T + Send>(f: F) -> JoinHandle<T> {
     // Delegate to the canonical implementation in task.vr —
     // single source of truth for the pool-routed BlockingFuture
     // pattern. Both spawn_blocking exports (this one and
-    // task.vr::spawn_blocking) resolve to identical behaviour.
+    // task.vr.spawn_blocking) resolve to identical behaviour.
     core.async.task.spawn_blocking(f)
 }
 
@@ -2912,7 +2912,7 @@ const RUNTIME_WAKER_VTABLE: RawWakerVTable = RawWakerVTable {
 
 // Verified zero production callers via grep across `core/` +
 // `crates/` before removal. The actually-used environment
-// accessor lives in `core/runtime/mod.rs::current_env() ->
+// accessor lives in `core/runtime/mod.rs.current_env() ->
 // &ExecutionEnv` (different namespace, different type — that's
 // the one `core/runtime/spawn.vr:823` consumes). Async-side
 // callers that need the runtime should use `current_runtime()`
@@ -2937,7 +2937,7 @@ const RUNTIME_WAKER_VTABLE: RawWakerVTable = RawWakerVTable {
 /// ```
 ///
 
-/// SAFETY: SLOT_RUNTIME is set in `AsyncRuntime::block_on` before
+/// SAFETY: SLOT_RUNTIME is set in `AsyncRuntime.block_on` before
 /// any future polls, and cleared after the main future completes.
 /// The `&AsyncRuntime` is valid for the entire `block_on` body —
 /// the TLS slot stores the pointer received from `&self`, whose

@@ -6,7 +6,7 @@
 //
 // V0:
 //   1. CREATE TYPE smoke_named AS (n int4, s text, big int8).
-//   2. SELECT ROW(99, 'beta', 1234567890)::smoke_named.
+//   2. SELECT ROW(99, 'beta', 1234567890).smoke_named.
 //   3. CompositeRegistry.register(schema for smoke_named — caller
 //      supplies field names + OIDs since V0 doesn't introspect
 //      pg_type yet).

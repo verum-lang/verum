@@ -1,27 +1,34 @@
 // =============================================================================
 // qtt.vr — Quantitative Type Theory Resource Tracking
 // =============================================================================
-//
-
 // Layer: Standard Library / Types
 //
-
-// Surface for `verum_types.qtt_usage` + `verum_types.qtt_walker`.
-// QTT assigns every binding a *quantity* describing how many
-// times it may be used. The type system enforces these counts
-// at compile time, preventing resource leaks (Linear used zero
-// times) and aliasing violations (Linear used twice).
+// Source-level mirror of the compiler kernel's `verum_types.qtt_usage`
+// + `verum_types.qtt_walker`, kept API-parallel so resource-aware
+// user code (linear-session DSLs, capability tokens, one-shot
+// handles) reasons with the same algebra the kernel enforces.
 //
-
+// QTT (Atkey-McBride) assigns every binding a *quantity* describing
+// how many times it may be used. The type system enforces these
+// counts at compile time, preventing resource leaks (Linear used
+// zero times) and aliasing violations (Linear used twice).
+//
 // ## Quantities
 //
-
-//  * `Zero` — erased; usable only at the type level
-//  * `One` — linear; exactly once at runtime
-//  * `Many` — unrestricted; any number of times
-//  * `AtMost(n)`— affine; at most n times
+//  * `Zero`      — erased; usable only at the type level
+//  * `One`       — linear; exactly once at runtime
+//  * `Many`      — unrestricted; any number of times
+//  * `AtMost(n)` — affine; at most n times
 //
-
+// ## Structure
+//
+//  1. Quantity algebra — the (add, mul) resource semiring with
+//     saturation, the sub-quantity lattice, canonical forms.
+//  2. Usage tracking — `UsageMap` observation contexts and their
+//     two merge modes: sequential (pointwise add) and branching
+//     (pointwise max), mirroring the kernel's walker.
+//  3. Violation detection — checking observed usage against
+//     declared quantities, per binding and per context.
 // =============================================================================
 
 @arch_module(
@@ -30,6 +37,9 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.types.qtt;
+
+mount core.*;
+mount core.collections.map.{Map};
 
 // =============================================================================
 // 1. Quantity algebra
@@ -50,10 +60,9 @@ public type Quantity is
 public const QTT_SATURATION: Int = 1 << 30;
 
 /// Normalise a quantity into canonical form:
-///  * `AtMost { n: 0 }` ↔ `Zero` (zero uses allowed in either case)
+///  * `AtMost { n: 0 }` ↦ `Zero` (both admit only zero uses)
 ///  * `AtMost { n: m }` for `m > QTT_SATURATION` collapses to `Many`
 ///
-
 /// `AtMost { n: 1 }` is intentionally NOT normalised to `One` — they
 /// differ semantically: `One` requires exactly one runtime occurrence,
 /// `AtMost { n: 1 }` admits zero occurrences too. The lattice isn't
@@ -81,7 +90,6 @@ public fn allows(q: Quantity, uses: Int{>= 0}) -> Bool {
 
 /// Additive composition (sequential composition).
 ///
-
 /// `add_quantity(p, q)` is the cumulative count when one binding
 /// is used `p` times and then `q` times — the natural pattern for
 /// `let`-sequencing. Identity is `Zero`; absorbing element is
@@ -89,8 +97,7 @@ public fn allows(q: Quantity, uses: Int{>= 0}) -> Bool {
 /// `QTT_SATURATION` so the `Int{>= 0}` refinement on `AtMost.n` is
 /// never violated by overflow on AtMost(big) + AtMost(big). Both
 /// inputs and the output are run through `normalize_quantity` so
-/// `AtMost(0) + One` correctly returns `One` (was `AtMost(1)` due
-/// to skipped Zero-identity short-circuit).
+/// `AtMost(0) + One` correctly returns `One`.
 public fn add_quantity(a: Quantity, b: Quantity) -> Quantity {
     let na = normalize_quantity(a);
     let nb = normalize_quantity(b);
@@ -123,23 +130,20 @@ fn saturating_at_most(a: Int, b: Int) -> Quantity {
 
 /// Multiplicative composition (scaling under a binder).
 ///
-
 /// When a parameter `x: A` is used `outer` times in the function's
 /// body, and `A` itself was bound with quantity `inner`, the
 /// effective usage of `A` from the call site is `outer × inner`.
 ///
-
 /// Identity is `One`. Absorbing element is `Zero`. `Many × q`
 /// saturates to `Many` (positive q); `Many × Zero == Zero` because
 /// "infinite uses of an erased value" is still erased.
 ///
-
 /// ```text
-///  One × q = q (identity)
-///  q × One = q (identity)
-///  Zero × q = Zero (absorbing)
-///  q × Zero = Zero (absorbing)
-///  Many × Many = Many
+///  One × q          = q      (identity)
+///  q × One          = q      (identity)
+///  Zero × q         = Zero   (absorbing)
+///  q × Zero         = Zero   (absorbing)
+///  Many × Many      = Many
 ///  Many × AtMost(_) = Many
 ///  AtMost(_) × Many = Many
 ///  AtMost(a) × AtMost(b) = AtMost(a · b)
@@ -191,14 +195,12 @@ public fn bottom_quantity() -> Quantity {
 /// Subquantity ordering: `is_sub(a, b)` is true iff every usage
 /// pattern allowed by `a` is also allowed by `b`. The lattice is:
 ///
-
 /// ```text
 ///  Zero ≤ One ≤ AtMost(n) ≤ Many
-///  ⌣
+///          ⌣
 ///  (AtMost(n) ≤ AtMost(m) when n ≤ m)
 /// ```
 ///
-
 /// Used by inference to decide when to promote a binding's
 /// declared quantity to a more permissive one (e.g. coercing a
 /// `One` argument into a `Many` parameter is sound, the other way
@@ -239,37 +241,6 @@ public fn quantity_eq(a: Quantity, b: Quantity) -> Bool {
     }
 }
 
-implement Display for Quantity {
-    /// Compact canonical short-forms for log lines:
-    ///   * `[Zero]` for the erased quantity
-    ///   * `[1]` for the linear quantity
-    ///   * `[Many]` for the cardinal (unrestricted) quantity
-    ///   * `[≤N]` for affine bounded with N as the cap
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        match self {
-            Quantity.Zero => f.write_str("[Zero]"),
-            Quantity.One => f.write_str("[1]"),
-            Quantity.Many => f.write_str("[Many]"),
-            Quantity.AtMost { n } => f.write_str(f"[≤{n}]".as_str()),
-        }
-    }
-}
-
-implement Debug for Quantity {
-    /// Same canonical short-forms as Display.
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        Display.fmt(self, f)
-    }
-}
-
-implement Eq for Quantity {
-    /// Use the `quantity_eq` decision procedure (post-normalisation
-    /// + structural compare).
-    fn eq(&self, other: &Quantity) -> Bool {
-        quantity_eq(*self, *other)
-    }
-}
-
 // =============================================================================
 // 2. Usage tracking
 // =============================================================================
@@ -282,6 +253,76 @@ public type TrackedBinding is {
     name: Text,
     declared: Quantity,
 };
+
+/// An observation context: how many times each tracked binding has
+/// been used along one control-flow path. Mirrors the kernel
+/// walker's usage map (`verum_types.qtt_usage.UsageMap`).
+///
+/// No `Display`/`Eq` impls: the map has no canonical entry order —
+/// compare through `usage_of`, render per-binding.
+public type UsageMap is { counts: Map<Text, Int> };
+
+/// Empty observation context — no binding used yet.
+public fn usage_empty() -> UsageMap {
+    UsageMap { counts: Map.new() }
+}
+
+/// Record one more use of `name` in this context.
+public fn record_use(usage: &mut UsageMap, name: Text) {
+    let current = match usage.counts.get(name.clone()) {
+        Maybe.Some(c) => c,
+        Maybe.None => 0,
+    };
+    usage.counts.insert(name, current + 1);
+}
+
+/// How many times has `name` been used in this context? Bindings
+/// never recorded have been used zero times.
+public fn usage_of(usage: &UsageMap, name: Text) -> Int {
+    match usage.counts.get(name) {
+        Maybe.Some(c) => c,
+        Maybe.None => 0,
+    }
+}
+
+/// Merge two contexts observed **in sequence** (`stmt1; stmt2`):
+/// usage counts add pointwise — a binding used twice before and
+/// once after has been used three times.
+public fn merge_sequential(a: &UsageMap, b: &UsageMap) -> UsageMap {
+    let mut out: Map<Text, Int> = Map.new();
+    for (name, count) in a.counts.iter() {
+        out.insert(name.clone(), count.clone());
+    }
+    for (name, count) in b.counts.iter() {
+        let existing = match out.get(name.clone()) {
+            Maybe.Some(c) => c,
+            Maybe.None => 0,
+        };
+        out.insert(name.clone(), existing + count.clone());
+    }
+    UsageMap { counts: out }
+}
+
+/// Merge two contexts observed on **alternative branches**
+/// (`if`/`else`, `match` arms): only one branch runs, so the
+/// pessimistic bound is the pointwise maximum.
+public fn merge_branches_max(a: &UsageMap, b: &UsageMap) -> UsageMap {
+    let mut out: Map<Text, Int> = Map.new();
+    for (name, count) in a.counts.iter() {
+        out.insert(name.clone(), count.clone());
+    }
+    for (name, count) in b.counts.iter() {
+        let existing = match out.get(name.clone()) {
+            Maybe.Some(c) => c,
+            Maybe.None => 0,
+        };
+        let incoming = count.clone();
+        if incoming > existing {
+            out.insert(name.clone(), incoming);
+        }
+    }
+    UsageMap { counts: out }
+}
 
 // =============================================================================
 // 3. Violation detection
@@ -300,8 +341,7 @@ public type QttViolation is
 /// Check a single binding against its observed usage. Normalises
 /// the declared quantity first so `AtMost(0)` collapses to the
 /// `Zero` arm and produces `ErasedUsedAtRuntime` for any observed
-/// runtime occurrence — was producing the more generic `OverUse`
-/// for the same case.
+/// runtime occurrence.
 public fn check_binding(name: Text, declared: Quantity, observed: Int{>= 0}) -> Maybe<QttViolation> {
     let normalized = normalize_quantity(declared);
     match normalized {
@@ -326,8 +366,55 @@ public fn check_binding(name: Text, declared: Quantity, observed: Int{>= 0}) -> 
     }
 }
 
+/// Check every tracked binding of a scope against an observation
+/// context. Returns all violations in binding order — empty list
+/// means the scope is QTT-sound. Mirrors the kernel's
+/// `qtt_usage.check_usage`.
+public fn check_usage(bindings: List<TrackedBinding>, usage: &UsageMap) -> List<QttViolation> {
+    let mut violations: List<QttViolation> = List.new();
+    let mut i: Int = 0;
+    while i < bindings.len() {
+        let b = bindings[i].clone();
+        let observed = usage_of(usage, b.name.clone());
+        let declared = normalize_quantity(b.declared.clone());
+        match declared {
+            Quantity.Zero => {
+                if observed > 0 {
+                    violations.push(QttViolation.ErasedUsedAtRuntime { binding: b.name.clone() });
+                }
+            },
+            Quantity.One => {
+                if observed == 0 {
+                    violations.push(QttViolation.UnderUse {
+                        binding: b.name.clone(),
+                        declared: Quantity.One,
+                    });
+                } else if observed > 1 {
+                    violations.push(QttViolation.OverUse {
+                        binding: b.name.clone(),
+                        observed,
+                        declared: Quantity.One,
+                    });
+                }
+            },
+            Quantity.Many => {},
+            Quantity.AtMost { n } => {
+                if observed > n {
+                    violations.push(QttViolation.OverUse {
+                        binding: b.name.clone(),
+                        observed,
+                        declared: Quantity.AtMost { n },
+                    });
+                }
+            },
+        }
+        i = i + 1;
+    }
+    violations
+}
+
 // =============================================================================
-// Foundation Protocol Impls — Display + Debug + Eq for Quantity
+// Foundation Protocol Impls — Eq + Clone + Display + Debug for Quantity
 // =============================================================================
 
 implement Eq for Quantity {
@@ -337,15 +424,7 @@ implement Eq for Quantity {
     /// stays distinct from `One` (the lattice isn't total around 1
     /// — see `normalize_quantity` doc).
     fn eq(&self, other: &Quantity) -> Bool {
-        let a = normalize_quantity(self.clone());
-        let b = normalize_quantity(other.clone());
-        match (a, b) {
-            (Quantity.Zero,                Quantity.Zero)                => true,
-            (Quantity.One,                 Quantity.One)                 => true,
-            (Quantity.Many,                Quantity.Many)                => true,
-            (Quantity.AtMost { n: na },    Quantity.AtMost { n: nb })    => na == nb,
-            _ => false,
-        }
+        quantity_eq(self.clone(), other.clone())
     }
 }
 
@@ -362,9 +441,9 @@ implement Clone for Quantity {
 
 implement Display for Quantity {
     /// Renders quantities in their algebraic notation:
-    ///  `Zero` → `0` (erased — no runtime occurrence)
-    ///  `One` → `1` (linear — exactly one occurrence)
-    ///  `Many` → `ω` (unrestricted — any number)
+    ///  `Zero`         → `0`  (erased — no runtime occurrence)
+    ///  `One`          → `1`  (linear — exactly one occurrence)
+    ///  `Many`         → `ω`  (unrestricted — any number)
     ///  `AtMost { n }` → `≤n` (bounded affine)
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
@@ -390,7 +469,7 @@ implement Debug for Quantity {
 }
 
 // =============================================================================
-// Foundation Protocol Impls — Display + Debug + Eq + Clone for UsageCount / TrackedBinding / QttViolation
+// Foundation Protocol Impls — UsageCount / TrackedBinding / QttViolation
 // =============================================================================
 
 implement Eq for UsageCount {
@@ -461,6 +540,26 @@ implement Eq for QttViolation {
              QttViolation.ErasedUsedAtRuntime { binding: bb }) =>
                 ba == bb,
             _ => false,
+        }
+    }
+}
+
+implement Clone for QttViolation {
+    fn clone(&self) -> QttViolation {
+        match self {
+            QttViolation.OverUse { binding, observed, declared } =>
+                QttViolation.OverUse {
+                    binding: binding.clone(),
+                    observed: *observed,
+                    declared: declared.clone(),
+                },
+            QttViolation.UnderUse { binding, declared } =>
+                QttViolation.UnderUse {
+                    binding: binding.clone(),
+                    declared: declared.clone(),
+                },
+            QttViolation.ErasedUsedAtRuntime { binding } =>
+                QttViolation.ErasedUsedAtRuntime { binding: binding.clone() },
         }
     }
 }

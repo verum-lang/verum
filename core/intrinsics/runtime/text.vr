@@ -41,7 +41,7 @@ public fn text_byte_len(text: &Text) -> Int;
 
 /// Borrow Text as a byte slice without copying.
 ///
-/// Routes through the canonical `TextSubOpcode::AsBytes` runtime handler,
+/// Routes through the canonical `TextSubOpcode.AsBytes` runtime handler,
 /// which materialises a FatRef view over all three Text representations
 /// (small-string inline NaN-box, builder-layout `{ptr, len, cap}` heap
 /// object, and heap-string `[ObjectHeader][len:u64][bytes...]`).  Use this

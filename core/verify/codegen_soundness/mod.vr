@@ -8,7 +8,7 @@
 //
 
 // Each kernel-discharge axiom in this module mirrors one entry in
-// `verum_kernel::codegen_attestation::manifest()`. The Rust manifest
+// `verum_kernel.codegen_attestation.manifest()`. The Rust manifest
 // is the canonical roster; these .vr files are the source-level
 // declarations that downstream proofs / corpora can `mount` to cite
 // the codegen invariants in their own proof bodies.

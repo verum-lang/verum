@@ -315,7 +315,7 @@ fn cmp_eq(a: &Register, b: &Register) -> Bool {
 
 /// Collect `n_keys` consecutive registers starting at `key_reg` into
 /// a fresh `List<Register>`.  Used by Idx{GT,GE,LT,LE} (#164) to
-/// build the comparison RHS handed to `CursorTable::cmp_current_key_to`.
+/// build the comparison RHS handed to `CursorTable.cmp_current_key_to`.
 fn collect_key_values(state: &VdbeState, key_reg: Int, n_keys: Int) -> List<Register> {
     let mut out: List<Register> = List.new();
     let mut i: Int = 0;

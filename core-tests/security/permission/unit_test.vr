@@ -107,7 +107,7 @@ fn test_permission_scope_time_name() {
 // =============================================================================
 // Section 3: to_wire_tag() — stable u32 wire encoding
 //
-//   The ordering MUST match `verum_vbc::interpreter::permission::PermissionScope`
+//   The ordering MUST match `verum_vbc.interpreter.permission.PermissionScope`
 //   so the @intrinsic boundary transcribes directly. Drift here would
 //   silently mis-route permission decisions.
 // =============================================================================

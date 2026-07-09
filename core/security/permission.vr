@@ -7,9 +7,9 @@
 //
 
 // Stdlib-side surface for the runtime permission router that lives
-// in `verum_vbc::interpreter::permission::PermissionRouter`. Every
+// in `verum_vbc.interpreter.permission.PermissionRouter`. Every
 // `Syscall`-category intrinsic — and any other intrinsic the
-// compiler tags with `IntrinsicHint::RequiresPermission` — routes
+// compiler tags with `IntrinsicHint.RequiresPermission` — routes
 // through `check_permission` before its handler executes. A
 // `Deny` short-circuits the gated operation into a structured
 // `PermissionDenied` error instead of running the underlying
@@ -121,7 +121,7 @@ implement PermissionScope {
     }
 
     /// Stable u32 wire tag used to bridge the Rust-side router.
-    /// The ordering matches `verum_vbc::interpreter::permission::PermissionScope`
+    /// The ordering matches `verum_vbc.interpreter.permission.PermissionScope`
     /// so the value passed across the @intrinsic boundary
     /// transcribes directly.
     public fn to_wire_tag(self) -> UInt32 {

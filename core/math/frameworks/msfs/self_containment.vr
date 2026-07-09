@@ -17,7 +17,7 @@
 // ---------------
 //
 
-//  1. The kernel-side `mechanisation_roadmap::msfs_self_contained()`
+//  1. The kernel-side `mechanisation_roadmap.msfs_self_contained()`
 //  function decides the property at the data level (over the
 //  live HTT + AR roadmap entries).
 //  2. The bridge axiom `kernel_msfs_self_contained` in
@@ -69,7 +69,7 @@ mount core.proof.kernel_bridge.{
 ///
 
 /// The two methods record (a) the Boolean self-containment flag
-/// (mirrors `verum_kernel::mechanisation_roadmap::msfs_self_contained()`)
+/// (mirrors `verum_kernel.mechanisation_roadmap.msfs_self_contained()`)
 /// and (b) the count of unmechanised dependencies (must be zero
 /// for the predicate to hold).
 public type MsfsSelfContainmentWitness is protocol {
@@ -102,7 +102,7 @@ public type MsfsSelfContainmentWitness is protocol {
 ///  K-Univ, K-Pos, K-Norm, K-FwAx, K-Adj-Unit,
 ///  K-Adj-Counit) decompose into ZFC + 2-inacc per
 ///  `kernel_zfc_self_recognition` (mirrors
-///  `verum_kernel::zfc_self_recognition::required_meta_theory`).
+///  `verum_kernel.zfc_self_recognition.required_meta_theory`).
 ///
 
 ///  Step 2 — Roadmap closure: every MSFS-scope HTT and AR
@@ -137,7 +137,7 @@ public theorem msfs_self_containment_theorem(
     proof {
         // Step 1 — Self-recognition: kernel rules ↔ ZFC + 2-inacc
         //  decomposition. The bridge axiom puts
-        //  `verum_kernel::zfc_self_recognition::SelfRecognitionAudit`
+        //  `verum_kernel.zfc_self_recognition.SelfRecognitionAudit`
         //  on the proof-recheck stack — every cited
         //  kernel rule is verified to lift to ZFC + 2-inacc.
         apply kernel_zfc_self_recognition();
@@ -147,7 +147,7 @@ public theorem msfs_self_containment_theorem(
         apply kernel_mechanisation_roadmap();
         // Step 3 — Self-containment witness. This is the load-bearing
         //  dispatcher: the kernel calls
-        //  `mechanisation_roadmap::msfs_self_contained()` and
+        //  `mechanisation_roadmap.msfs_self_contained()` and
         //  surfaces the result as a Bool. When the dispatcher
         //  returns false (e.g. a future commit re-introduces an
         //  AxiomCited entry), Verum REJECTS this @theorem at

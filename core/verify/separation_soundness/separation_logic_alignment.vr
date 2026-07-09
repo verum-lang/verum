@@ -8,7 +8,7 @@
 //
 
 //  * `core/logic/separation.vr` — user-facing smart constructors + types.
-//  * `verum_kernel::separation_logic` — Rust-side decision procedures.
+//  * `verum_kernel.separation_logic` — Rust-side decision procedures.
 //
 
 // The two MUST stay structurally aligned: any kernel-side enum
@@ -19,7 +19,7 @@
 
 // This module records the kernel-discharge axiom that the alignment
 // holds. It's admitted-with-IOU citing the structural cardinality
-// pins in `verum_kernel::separation_logic::tests::kernel_heap_predicate_has_six_variants`
+// pins in `verum_kernel.separation_logic.tests.kernel_heap_predicate_has_six_variants`
 // — those pins fail CI if the alignment ever breaks.
 //
 
@@ -28,7 +28,7 @@
 
 //  for every `HeapPredicate` constructor in `core/logic/separation.vr`,
 //  there is a unique corresponding constructor in
-//  `verum_kernel::separation_logic::HeapPredicate` such that the
+//  `verum_kernel.separation_logic.HeapPredicate` such that the
 //  classification predicates (`is_emp` / `is_pure` /
 //  `is_separating_conjunction`) agree.
 //
@@ -47,13 +47,13 @@ mount core.prelude.{Bool};
 /// alignment.**
 ///
 /// Status: `AdmittedWithIou` citing the structural-cardinality pins
-/// in `verum_kernel::separation_logic::tests`. The dispatcher
+/// in `verum_kernel.separation_logic.tests`. The dispatcher
 /// recognises this name and returns `Decision { holds: true }` so
 /// the audit gate's kernel-discharged-axiom walker counts it as a
 /// kernel-side discharge. Foreign-tool re-checking is N/A — this
 /// is an internal Verum invariant about its own infrastructure,
 /// not a paper-cited mathematical theorem.
-@framework(verum_internal, "verum_kernel::separation_logic::tests::{kernel_heap_predicate_has_six_variants, kernel_capability_has_four_variants_aligned_with_vr_surface, frame_rule_executor_admits_with_iou_for_vr_side_compatible_goal} — structural-cardinality pins lock the .vr-side / kernel-side surface alignment. CI fails on any kernel enum variant addition that doesn't get echoed on the .vr side.")
+@framework(verum_internal, "verum_kernel.separation_logic.tests.{kernel_heap_predicate_has_six_variants, kernel_capability_has_four_variants_aligned_with_vr_surface, frame_rule_executor_admits_with_iou_for_vr_side_compatible_goal} — structural-cardinality pins lock the .vr-side / kernel-side surface alignment. CI fails on any kernel enum variant addition that doesn't get echoed on the .vr side.")
 @kernel_discharge("kernel_separation_logic_alignment_is_sound")
 public axiom kernel_separation_logic_alignment_is_sound() -> Bool
     ensures true;

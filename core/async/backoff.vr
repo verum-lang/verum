@@ -241,7 +241,7 @@ fn random_u64_in(lo: UInt64, hi: UInt64) -> UInt64 {
 
 fn random_u64() -> UInt64 {
     // Backoff jitter sourced from CSPRNG via the `random_u64` VBC
-    // intrinsic — direct libc::getentropy on a Rust-side 8-byte
+    // intrinsic — direct libc.getentropy on a Rust-side 8-byte
     // buffer.  Bypasses the broken pointer-marshalling chain
     // through `sys.common.random_bytes → safe_getentropy →
     // unsafe { getentropy(buf, len) }` that silently misroutes

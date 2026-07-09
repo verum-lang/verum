@@ -261,7 +261,7 @@ fn backend_read(b: &mut WalBackend, buf: &mut List<Byte>, offset: Int) -> Result
 
 // -----------------------------------------------------------------------------
 // Helpers — explicit Maybe<Int> return so the matcher dispatches on
-// a sum-typed value (Verum's inline `Map<Int,Int>::get` confuses
+// a sum-typed value (Verum's inline `Map<Int,Int>.get` confuses
 // pattern selection — see wal_state.vr for the same workaround).
 // -----------------------------------------------------------------------------
 

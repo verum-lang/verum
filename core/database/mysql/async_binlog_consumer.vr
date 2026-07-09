@@ -18,7 +18,7 @@
 // "Async TableMapCache lifecycle — caller pairs ROW events
 // with cached TABLE_MAP by hand (or via a non-actor utility)".
 //
-// Mirrors the PG `core.database.postgres.async_pgoutput::
+// Mirrors the PG `core.database.postgres.async_pgoutput.
 // AsyncPgoutputConsumer` shape: a thin async wrapper that
 // owns the schema cache + lifts wire events into typed
 // changes. Same architecture, different protocol.

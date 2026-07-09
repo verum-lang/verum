@@ -6,8 +6,8 @@
 //
 
 // SQLite grammar:
-//  with_clause ::= WITH [RECURSIVE] cte_def (',' cte_def)*
-//  cte_def ::= name '(' col_list? ')' [AS [MATERIALIZED | NOT MATERIALIZED] '(' select ')']
+//  with_clause .= WITH [RECURSIVE] cte_def (',' cte_def)*
+//  cte_def .= name '(' col_list? ')' [AS [MATERIALIZED | NOT MATERIALIZED] '(' select ')']
 //
 
 // =============================================================================

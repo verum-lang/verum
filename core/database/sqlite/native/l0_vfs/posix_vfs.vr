@@ -534,7 +534,7 @@ implement VfsProtocol for PosixVfs {
         // which callers (WAL salt generator) would silently use as
         // zero bytes — letting an attacker forge WAL frames with
         // predictable checksums. Now every entropy-fetch failure
-        // surfaces as `Result.Err(VfsError::IoError)` so callers MUST
+        // surfaces as `Result.Err(VfsError.IoError)` so callers MUST
         // explicitly handle the no-entropy case.
         if len <= 0 {
             return Result.Ok(List.new());

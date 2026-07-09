@@ -10,7 +10,7 @@
 // matches the RFC 8448 §A.1 vector-derived form closes the wire-
 // contract gap between warp's key schedule and the rustls reference.
 //
-// HkdfLabel ::= struct {
+// HkdfLabel .= struct {
 //     uint16 length;
 //     opaque label<7..255> = "tls13 " + Label;
 //     opaque ctx_buf<0..255>;

@@ -388,7 +388,7 @@ public fn winsock_close(fd: FileDesc) -> Result<(), OSError> {
 /// of the bare name `recv` so the call site resolves deterministically.
 /// Prior to this fix, the bare `recv(fd, buf, 0)` call resolved through
 /// glob mounts to a 2-arg `recv` from another module (e.g.
-/// `core/concurrency/session.vr::recv`) and `vbc_lowering` rejected
+/// `core/concurrency/session.vr.recv`) and `vbc_lowering` rejected
 /// the call with "wrong number of arguments for recv: expected 2,
 /// found 3" — blocking every AOT build that pulled in winsock2.
 public fn winsock_read(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {

@@ -110,8 +110,8 @@ fn regression_clone_independence_on_text() {
 
 // =============================================================================
 // REGRESSION §F: Default protocol returns canonical zero / empty value.
-// Defects here silently change `T::default()` semantics across
-// stdlib consumers (e.g. mem::take).
+// Defects here silently change `T.default()` semantics across
+// stdlib consumers (e.g. mem.take).
 // =============================================================================
 
 @test

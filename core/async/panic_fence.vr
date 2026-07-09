@@ -8,14 +8,14 @@
 
 // `core.intrinsics.control.catch_unwind` catches unwinding panics
 // from synchronous closures. Async code lives inside Future poll
-// loops — a panic during `Future::poll` unwinds the executor's
+// loops — a panic during `Future.poll` unwinds the executor's
 // task, dropping the connection silently with NO 500 response, NO
 // metric emission, and NO log entry. The classic "bad request
 // vanishes into the void" production-debugging hell.
 //
 
 // `PanicFence<F>` wraps any `Future` so that panics during
-// `F::poll` are caught and surfaced as `Result.Err(IntrinsicPanicInfo)`
+// `F.poll` are caught and surfaced as `Result.Err(IntrinsicPanicInfo)`
 // in the wrapper's `Output`. The connection survives; the
 // runtime stays healthy; the panic becomes structured data the
 // caller routes through their normal error-handling paths.
@@ -65,7 +65,7 @@
 // `PanicFence<F>` is a Future, so it composes with every other
 // Future combinator. The fence is local to the wrapped future —
 // it does NOT catch panics from sibling spawned tasks, just from
-// `F::poll`. Use one fence per inviolate boundary (typically:
+// `F.poll`. Use one fence per inviolate boundary (typically:
 // one per per-request handler call, one per per-connection
 // pipeline call). Don't blanket-fence the entire executor — the
 // runtime's own panic paths (out-of-memory, stack overflow) are
@@ -94,7 +94,7 @@ mount core.intrinsics.control.{catch_unwind, IntrinsicPanicInfo};
 
 /// Once a panic is caught, the inner future is dropped — a
 /// future that panicked is considered logically dead, the
-/// fence yields `Poll::Ready(Result.Err(...))` once and never re-polls
+/// fence yields `Poll.Ready(Result.Err(...))` once and never re-polls
 /// the inner. Re-polling a panicking future would be unsound
 /// (its internal state may be partially observed; the panic
 /// safety contract requires we never resume from such a state).
@@ -122,7 +122,7 @@ implement<F: Future> Future for PanicFence<F> {
 
         // Catch panics from the inner future's poll. catch_unwind
         // returns Result.Err(panic_info) on unwind; we surface that as
-        // Poll::Ready(Result.Err(panic_info)).
+        // Poll.Ready(Result.Err(panic_info)).
         //
 
         // Borrow-checker note: `catch_unwind` takes ownership of
@@ -130,7 +130,7 @@ implement<F: Future> Future for PanicFence<F> {
         // is `&mut Context` — passed by mutable reference, the
         // closure captures the reference, not the Context itself.
         // The Verum borrow-checker enforces that no concurrent
-        // poll can race against this one (Future::poll requires
+        // poll can race against this one (Future.poll requires
         // `&mut self`), so the closure has exclusive access.
         let poll_result = catch_unwind(|| f.poll(cx));
 
@@ -157,7 +157,7 @@ implement<F: Future> Future for PanicFence<F> {
 /// Wrap any Future in a panic fence.
 ///
 
-/// The returned future yields `Result<F::Output, IntrinsicPanicInfo>`
+/// The returned future yields `Result<F.Output, IntrinsicPanicInfo>`
 /// — `Result.Ok(value)` when the inner resolved cleanly, `Result.Err(panic)`
 /// when the inner unwound during a `poll` call.
 ///

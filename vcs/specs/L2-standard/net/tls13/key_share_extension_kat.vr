@@ -11,7 +11,7 @@
 //   * ServerHello:            KeyShareServerHello { KeyShareEntry }
 //   * HelloRetryRequest:      KeyShareHelloRetryRequest { NamedGroup }
 //
-// KeyShareEntry ::= NamedGroup (u16) || opaque key_exchange<1..2^16-1>
+// KeyShareEntry .= NamedGroup (u16) || opaque key_exchange<1..2^16-1>
 //
 // Extension frame: ext_type (u16=0x33) || outer u16 length || payload.
 

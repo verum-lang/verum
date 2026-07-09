@@ -596,7 +596,7 @@ public fn parse_parameter_description(payload: List<Byte>)
 
 /// Dispatch a `PgFrame` to the right parser. The DataRow path needs the
 /// per-column format vector from a preceding RowDescription, which is
-/// caller state — pass it in or use `Vec::new()` to default to text.
+/// caller state — pass it in or use `Vec.new()` to default to text.
 public fn parse_backend(frame: PgFrame, data_row_formats: &List<Int>) -> Result<BackendMessage, BackendDecodeError> {
     let tag = frame.tag();
     let payload = frame.into_payload();

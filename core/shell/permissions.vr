@@ -144,7 +144,7 @@ fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
     // otherwise be misparsed by the colon-splitter; CIDR is checked
     // BEFORE the colon-splitter so `/N` isn't read as part of host.
     // Bare IPv6 literals are detected by `is_v6_literal` (multiple
-    // colons or `::`) so a single `:` still reads as `host:port`.
+    // colons or `.`) so a single `:` still reads as `host:port`.
     if pattern.starts_with("[") {
         return bracketed_v6_matches(pattern, host, port);
     }
@@ -263,7 +263,7 @@ fn bracketed_v6_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
 // (sign-extension does not affect bitand/bitor/shl/shr identity).
 type Ipv6Addr is { hi: Int, lo: Int };
 
-// Heuristic: a textual IPv6 literal contains either `::` (the
+// Heuristic: a textual IPv6 literal contains either `.` (the
 // zero-run shorthand) or two-or-more `:` separators. Single-colon
 // strings are read as `host:port`, hostnames have no colons.
 fn is_v6_literal(text: &Text) -> Bool {
@@ -306,21 +306,21 @@ fn mask_top_bits_u64(bits: Int) -> Int {
 // Parse RFC 4291 IPv6 textual form. Supports:
 //  * Full form: 2001:0db8:85a3:0000:0000:8a2e:0370:7334
 //  * Compressed form: 2001:db8::8a2e:370:7334
-//  * Loopback: ::1
-//  * Unspecified: ::
-//  * IPv4-mapped tail: ::ffff:192.168.1.1 (last 32 bits = IPv4)
+//  * Loopback: .1
+//  * Unspecified: .
+//  * IPv4-mapped tail: .ffff:192.168.1.1 (last 32 bits = IPv4)
 //
 
 // Returns Maybe.None on any malformed input: unrecognised characters,
-// >4 hex chars per group, multiple `::` zones, total != 8 groups,
+// >4 hex chars per group, multiple `.` zones, total != 8 groups,
 // or invalid IPv4 tail.
 fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
     if text.is_empty() { return Maybe.None; }
 
-    // Reject inputs with more than one `::` zone — `split(":")` can't
+    // Reject inputs with more than one `.` zone — `split(":")` can't
     // distinguish "a:::b" (illegal) from "a::b" (legal) on its own
     // because both produce ≥3 consecutive empties. RFC 4291 §2.2
-    // permits exactly one `::`, anywhere.
+    // permits exactly one `.`, anywhere.
     if let Maybe.Some(first) = text.find("::") {
         let after: Text = text.slice(first + 2, text.len()).into();
         if after.find("::").is_some() { return Maybe.None; }
@@ -347,9 +347,9 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
         groups = rebuilt;
     }
 
-    // Locate the empty-group span (the `::` zone). Empty groups can
-    // appear at most ONE contiguous run, but the leading/trailing `::`
-    // produces TWO adjacent empties (e.g. `::1` -> ["", "", "1"]).
+    // Locate the empty-group span (the `.` zone). Empty groups can
+    // appear at most ONE contiguous run, but the leading/trailing `.`
+    // produces TWO adjacent empties (e.g. `.1` -> ["", "", "1"]).
     let n = groups.len();
     let mut first_empty: Maybe<Int> = Maybe.None;
     let mut last_empty:  Maybe<Int> = Maybe.None;
@@ -362,7 +362,7 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
             empty_count = empty_count + 1;
         } else if last_empty.is_some() {
             // Non-empty AFTER the empty-zone closes — verify no further
-            // empties follow (would indicate two separate `::`).
+            // empties follow (would indicate two separate `.`).
             let mut k: Int = idx + 1;
             while k < n {
                 if groups[k].is_empty() { return Maybe.None; }
@@ -383,7 +383,7 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
             }
         }
     } else {
-        // `::` zone present. zeros_to_fill = 8 - non-empty groups.
+        // `.` zone present. zeros_to_fill = 8 - non-empty groups.
         let real_groups = n - empty_count;
         let zeros_to_fill = 8 - real_groups;
         if zeros_to_fill < 1 || zeros_to_fill > 8 { return Maybe.None; }

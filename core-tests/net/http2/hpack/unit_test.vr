@@ -434,7 +434,7 @@ fn test_hpack_encoder_construct() {
 // inside `List.extend_from_slice`: `SliceIter` yields `&self.slice[front]`
 // element-REFERENCES whose backing derivation is wrong for a parameter slice
 // whose provenance is not a List backing array.  Fixed by rewriting
-// `core/collections/list.vr::extend_from_slice` to index-by-value
+// `core/collections/list.vr.extend_from_slice` to index-by-value
 // (`slice[i].clone()`).  See defect-class-catalogue §9.
 //
 // These exercise the RAW codec.  `HpackEncoder.new()` now DEFAULTS to raw

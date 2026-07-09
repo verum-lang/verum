@@ -11,7 +11,7 @@
 //
 //   * IoUringAcceptConfig + builder methods + defaults
 //   * IoUringAcceptStrategy protocol
-//   * BlockingAcceptStrategy — today's behaviour (calls TcpListener::accept)
+//   * BlockingAcceptStrategy — today's behaviour (calls TcpListener.accept)
 //   * MultiShotAcceptStrategy — V1 placeholder, panics on dispatch
 //   * select_accept_strategy() — picks Blocking on every triple today
 //   * IoUringTelemetry counters

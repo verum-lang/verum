@@ -103,7 +103,7 @@ fn regression_sys_context_error_match_arms_route_correctly() {
     // **Idiom note**: use `tags[i]` (Index protocol → `&T` → auto-deref
     // to `T` in `assert_eq`'s `T: Eq` context), NOT `*tags.get(i)` —
     // the latter pattern routes through `List.get -> Maybe<T>` which
-    // does not auto-unwrap under `UnOp::Deref` (sum-type identity-deref
+    // does not auto-unwrap under `UnOp.Deref` (sum-type identity-deref
     // is intentional per `interpreter/dispatch_table/handlers/cbgr.rs`
     // `handle_deref` line ~244; auto-unwrapping single-field variants
     // would silently break `match *self` for sum types like IpAddr).

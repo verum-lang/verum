@@ -23,7 +23,7 @@
 // **Layered consumers.** Higher-level adapters compose against
 // `RedisClient` to expose typed surfaces:
 //
-//   - `core.cache.adapters.redis` — implements `core.cache.types::
+//   - `core.cache.adapters.redis` — implements `core.cache.types.
 //     CacheBackend` for cache use-cases (GET / SET-with-TTL / DEL /
 //     INCR / EXPIRE).
 //   - `core.queue.adapters.redis_streams` — implements an event-

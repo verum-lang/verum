@@ -6,10 +6,14 @@ Verifies that .vr files use correct Verum syntax, not Rust syntax.
 
 Checks for:
 1. Turbofish syntax `::<` - should use `<` instead
-2. Double colon paths `::` - should use `.` for paths
-3. Rust-style attributes `#[...]` - should use `@` prefix
-4. Rust keywords (struct, enum, impl, trait) - should use Verum equivalents
-5. Rust macros with `!` suffix - should use `@` prefix or built-in functions
+2. Rust-style attributes `#[...]` - should use `@` prefix
+3. Rust keywords (struct, enum, impl, trait) - should use Verum equivalents
+4. Rust macros with `!` suffix - should use `@` prefix or built-in functions
+
+NOTE: general double-colon paths (`Foo::bar`, kernel-ref comments) are handled
+by the dedicated, DATA-aware gate `check_no_double_colon.py` (which excludes
+IPv6 / SQL-cast / URI literals that legitimately contain `::`). A naive `::`
+regex here would false-flag that data, so it is intentionally NOT checked here.
 
 Usage:
     python check_syntax_compliance.py [directory]

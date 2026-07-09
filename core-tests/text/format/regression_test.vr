@@ -153,7 +153,7 @@ fn guard_format_hex_zero_is_zero_digit() {
 // value.  The current Tier-0 codegen does NOT do this — it passes the
 // CBGR pointer bits as the `self: Int` arg, so `format_radix_signed`
 // formats the pointer instead.  Pinned `@ignore` because the fix lives
-// in `crates/verum_vbc/src/codegen/expressions.rs::compile_method_call`'s
+// in `crates/verum_vbc/src/codegen/expressions.rs.compile_method_call`'s
 // receiver-handling for primitive value-self methods through `&Primitive`
 // references.  When the fix lands, removing `@ignore` flips this green.
 // =============================================================================

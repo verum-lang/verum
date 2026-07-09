@@ -12,7 +12,7 @@ module core.database.sqlite.native.l1_pager.wal_page_arena;
 // Spec: sqlite-native.md §8.2 (page-cache backing) +
 //       docs/detailed/cbgr-implementation.md (CBGR memory model)
 //
-// Pre-fix: `page_cache::CachedFrame` carried `data: List<Byte>` —
+// Pre-fix: `page_cache.CachedFrame` carried `data: List<Byte>` —
 // every cached page allocated a fresh `List<Byte>` on miss, dropped
 // it on eviction, and the next miss re-allocated.  At 4 KB pages
 // and a hot-loop workload doing ~10K page reads/sec, the page
@@ -34,11 +34,11 @@ module core.database.sqlite.native.l1_pager.wal_page_arena;
 //     `PageHandle` captures the generation at alloc time; reads
 //     and writes verify it before touching the slot.  A handle
 //     into a freed-and-recycled slot reads as a generation
-//     mismatch — caller observes `Maybe::Maybe.None` instead of stale
+//     mismatch — caller observes `Maybe.Maybe.None` instead of stale
 //     bytes, exactly the use-after-free guarantee CBGR exists
 //     to provide.
 //   * **No raw pointers** — the slab models the same bump-arena
-//     pattern as `core.mem.arena::GenerationalArena` but stays
+//     pattern as `core.mem.arena.GenerationalArena` but stays
 //     in safe Verum (no `__alloc_zeroed_raw`).  The
 //     architectural shape is identical; the cross-module bridge
 //     (deferred) wraps a real GenerationalArena with the same
@@ -227,7 +227,7 @@ implement PageSlab {
         if !self.handle_is_live(&h) { return; }
         let s = &mut self.slots[h.slot_idx];
         s.in_use = false;
-        // Bump generation with wrap-around at i32::MAX so callers
+        // Bump generation with wrap-around at i32.MAX so callers
         // that compare generations don't see false-positive matches
         // after a billion+ alloc cycles.  Skip 0 (reserved as the
         // "uninitialised" sentinel) on wrap.

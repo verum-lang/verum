@@ -9,7 +9,7 @@
 //               terminated at the END of the index, not at the
 //               actual upper-bound key.  Post-fix the cursor's
 //               current key is compared against `key_reg..+n_keys`
-//               via `CursorTable::cmp_current_key_to`, returning
+//               via `CursorTable.cmp_current_key_to`, returning
 //               Maybe<Int> (None on cursor EOF, Some(c) for sign
 //               of cursor.key − bound).  This spec exercises the
 //               comparator surface directly so range-scan

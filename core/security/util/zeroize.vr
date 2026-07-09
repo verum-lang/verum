@@ -24,7 +24,7 @@
 //
 
 // `secure_zero` routes through a dedicated VBC opcode
-// (`FfiSubOpcode::CSecureZero` = 0xA3) that lowers to
+// (`FfiSubOpcode.CSecureZero` = 0xA3) that lowers to
 // `llvm.memset.p0.i64(..., i1 true)` — the volatile flag tells the
 // optimiser the call is observable, and every pass preserves it.
 //

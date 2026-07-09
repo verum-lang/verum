@@ -8,14 +8,14 @@
 // Covers SQLite 3.28+ window-function grammar:
 //
 
-//  frame_spec ::= (ROWS | RANGE | GROUPS) frame_bound_clause [EXCLUDE exclude]
-//  frame_bound_clause ::= BETWEEN frame_bound AND frame_bound | frame_bound
-//  frame_bound ::= UNBOUNDED PRECEDING
+//  frame_spec .= (ROWS | RANGE | GROUPS) frame_bound_clause [EXCLUDE exclude]
+//  frame_bound_clause .= BETWEEN frame_bound AND frame_bound | frame_bound
+//  frame_bound .= UNBOUNDED PRECEDING
 //  | expr PRECEDING
 //  | CURRENT ROW
 //  | expr FOLLOWING
 //  | UNBOUNDED FOLLOWING
-//  exclude ::= NO OTHERS | CURRENT ROW | GROUP | TIES
+//  exclude .= NO OTHERS | CURRENT ROW | GROUP | TIES
 //
 
 // =============================================================================

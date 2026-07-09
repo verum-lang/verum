@@ -158,7 +158,7 @@ implement<C: Capability> TypedConnection<C> {
     public fn tx_depth(&self) -> Int { self.inner.tx_depth() }
 
     /// Capability name as text — for logging / diagnostics.
-    public fn capability_name(&self) -> Text { C::capability_name() }
+    public fn capability_name(&self) -> Text { C.capability_name() }
 }
 
 // -----------------------------------------------------------------------------

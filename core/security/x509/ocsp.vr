@@ -8,25 +8,25 @@
 // RFC 6960 Online X509Certificate Status Protocol:
 //
 
-//  OCSPRequest ::= SEQUENCE {
+//  OCSPRequest .= SEQUENCE {
 //  tbsRequest TBSRequest,
 //  optionalSignature [0] EXPLICIT Signature OPTIONAL
 //  }
 //
 
-//  OCSPResponse ::= SEQUENCE {
+//  OCSPResponse .= SEQUENCE {
 //  responseStatus OCSPResponseStatus,
 //  responseBytes [0] EXPLICIT ResponseBytes OPTIONAL
 //  }
 //
 
-//  ResponseBytes ::= SEQUENCE {
+//  ResponseBytes .= SEQUENCE {
 //  responseType OBJECT IDENTIFIER, -- id-pkix-ocsp-basic
 //  response OCTET STRING -- DER BasicOCSPResponse
 //  }
 //
 
-//  BasicOCSPResponse ::= SEQUENCE {
+//  BasicOCSPResponse .= SEQUENCE {
 //  tbsResponseData ResponseData,
 //  signatureAlgorithm AlgorithmIdentifier,
 //  signature BIT STRING,
@@ -34,7 +34,7 @@
 //  }
 //
 
-//  ResponseData ::= SEQUENCE {
+//  ResponseData .= SEQUENCE {
 //  version [0] EXPLICIT Version DEFAULT v1,
 //  responderID ResponderID,
 //  producedAt GeneralizedTime,
@@ -43,7 +43,7 @@
 //  }
 //
 
-//  SingleResponse ::= SEQUENCE {
+//  SingleResponse .= SEQUENCE {
 //  certID CertID,
 //  certStatus CertStatus,
 //  thisUpdate GeneralizedTime,
@@ -52,7 +52,7 @@
 //  }
 //
 
-//  CertStatus ::= CHOICE {
+//  CertStatus .= CHOICE {
 //  good [0] IMPLICIT NULL,
 //  revoked [1] IMPLICIT RevokedInfo,
 //  unknown [2] IMPLICIT UnknownInfo

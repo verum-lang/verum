@@ -1568,7 +1568,7 @@ public fn decode_composite(slice: &ArenaSlice) -> Result<PgComposite, DbError> {
 /// Encode a composite/record value into the arena buffer. Each field is
 /// supplied as `(type_oid, payload)` where `payload == Maybe.None` represents
 /// SQL NULL.  Returns false on arena exhaustion or if any payload is
-/// invalid (length > i32::MAX is rejected here even though i32 is signed
+/// invalid (length > i32.MAX is rejected here even though i32 is signed
 /// — PG's wire protocol caps each field at 1 GiB).
 ///
 /// V0 boundary: callers supply pre-encoded field payloads.  Encoding a

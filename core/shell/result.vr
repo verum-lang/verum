@@ -116,7 +116,7 @@ implement ShellResult {
     // ── Convert to error if non-zero exit ────────────────────────────────────
 
     /// Returns `Result.Ok(self)` if the process exited successfully, otherwise
-    /// `Result.Err(ShellError::NonZeroExit { … })` carrying status + stderr.
+    /// `Result.Err(ShellError.NonZeroExit { … })` carrying status + stderr.
     public fn ok(self) -> Result<ShellResult, ShellError> {
         if self.status.success() {
             Result.Ok(self)

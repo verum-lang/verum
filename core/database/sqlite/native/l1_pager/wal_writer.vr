@@ -23,7 +23,7 @@ module core.database.sqlite.native.l1_pager.wal_writer;
 //     fresh WAL file, write the file header, return the writer.
 //   * `wal_writer_open(backend)` — open an existing WAL file,
 //     decode the header, and return a writer.  The caller must
-//     run `wal_reader::recover_state` afterward to rebuild the
+//     run `wal_reader.recover_state` afterward to rebuild the
 //     `frame_index` from the on-disk frame stream.
 //   * `wal_writer_append_frame(self, page_no, page_data,
 //                              commit_db_size)` — encode a frame
@@ -133,7 +133,7 @@ public type affine WalWriter is {
 ///
 /// `page_size` must be a power of two in [512, 65536] OR the
 /// sentinel 1 (which encodes 65536 in u16).  Returns
-/// `PagerError::InvalidPageSize` otherwise.
+/// `PagerError.InvalidPageSize` otherwise.
 public fn wal_writer_create(
     backend: WalBackend,
     page_size: Int,
@@ -242,7 +242,7 @@ fn bytes_to_u32_be(b: &List<Byte>, off: Int) -> u32 {
 
 /// Open an existing WAL file.  Reads + decodes the header but does
 /// NOT walk the frame stream — the caller (typically
-/// `wal_reader::recover_state`) follows up to rebuild the
+/// `wal_reader.recover_state`) follows up to rebuild the
 /// `frame_index` from disk and update `mx_frame` / `n_backfill` to
 /// the actual on-disk reality.
 public fn wal_writer_open(
@@ -313,7 +313,7 @@ implement WalWriter {
 
 /// Recovery seam (#163) — overwrite the writer's in-memory
 /// WalIndex with one rebuilt from the on-disk frame stream.
-/// Used by `wal_reader::recover_state` after walking the WAL
+/// Used by `wal_reader.recover_state` after walking the WAL
 /// file end-to-end so the post-reopen writer state matches
 /// the pre-crash invariant: every appended frame is in the
 /// index, the header reflects the last-commit mx_frame.
@@ -364,7 +364,7 @@ public fn wal_writer_append_frame(
     // by the page payload.  The prefix bytes are the FIRST 8 of the
     // frame header — salt1/salt2 are NOT fed into the rolling
     // accumulator (they're just identity tags for the WAL session).
-    // This matches `journal/writer.vr::append` and the SQLite
+    // This matches `journal/writer.vr.append` and the SQLite
     // walformat.html spec §6.4.
     let prefix = encode_frame_prefix_8(page_no as u32, commit_db_size as u32);
     let after_prefix = wal_running_checksum(w.running.clone(), prefix.as_slice());
@@ -511,7 +511,7 @@ where V: SqliteVfs
 }
 
 /// Override the rolling-checksum state after recovery.  Used by
-/// `wal_reader::recover_state` once it has walked the on-disk frame
+/// `wal_reader.recover_state` once it has walked the on-disk frame
 /// stream and verified each frame's checksum chain end-to-end.
 /// Without this seam the writer would re-start the chain from the
 /// file-header initial value — breaking integrity on the very next

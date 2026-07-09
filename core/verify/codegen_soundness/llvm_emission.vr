@@ -33,7 +33,7 @@ mount core.prelude.{Bool};
 /// **Kernel-discharge bridge: LLVM IR emission preserves operational
 /// semantics.**
 ///
-/// Manifest entry: `CodegenPassId::LlvmEmission`. Status:
+/// Manifest entry: `CodegenPassId.LlvmEmission`. Status:
 /// `AdmittedWithIou` citing Vellvm. The emitted LLVM module is
 /// bisimilar to the input post-regalloc IR under Vellvm's operational
 /// semantics.

@@ -4,7 +4,7 @@
 //
 // Tests for `core.collections.set` — Set<T: Hash + Eq>, the canonical
 // hash-set primitive (stdlib decl: Set { inner: Map<T, ()> }; runtime
-// intercept layout: TypeId::SET with `[count, capacity, entries_ptr]`).
+// intercept layout: TypeId.SET with `[count, capacity, entries_ptr]`).
 //
 // Method-level coverage focuses on methods with explicit runtime
 // intercepts in `crates/verum_vbc/src/interpreter/dispatch_table/handlers/

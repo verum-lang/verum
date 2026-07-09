@@ -186,7 +186,7 @@ public fn registry_meta_classifier_unique(r: FrameworkRegistry) -> Bool {
 /// Populate a registry with the canonical Standard frameworks shipped
 /// in the Verum baseline. Reads ν / τ values from the prescriptive
 /// canonical-coordinate table (matching `core.theory_interop.coord
-/// ::known_ordinal` / `known_tau` lookup).
+/// .known_ordinal` / `known_tau` lookup).
 ///
 
 /// Order: meta-classifier first, then coordinate-point frameworks
@@ -469,7 +469,7 @@ public fn populate_experimental(_r: &mut FrameworkRegistry) {
 /// list`.
 ///
 /// The cross-side pin test
-/// `crates/verum_kernel/tests/k_arch_v_alignment.rs::pin_registry_covers_mod_mounts`
+/// `crates/verum_kernel/tests/k_arch_v_alignment.rs.pin_registry_covers_mod_mounts`
 /// asserts the registry size matches the mount-count after this
 /// call; adding a new `public mount core.math.frameworks.X` in
 /// `mod.vr` therefore requires extending this aggregate (or one of

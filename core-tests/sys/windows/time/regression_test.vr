@@ -80,14 +80,14 @@ fn wx_time_reg_filetime_unit_is_100ns() {
 }
 
 // =============================================================================
-// LOCK-IN — sub saturates at zero (must NOT wrap around to ~u64::MAX)
+// LOCK-IN — sub saturates at zero (must NOT wrap around to ~u64.MAX)
 // =============================================================================
 
 @test
 fn wx_time_reg_sub_saturates_not_wraps() {
     // REGRESSION/LOCK-IN: sub is documented saturating. If the guard in
     // sub() regressed to a bare `self.0 - other.0`, an unsigned underflow
-    // would wrap to a near-u64::MAX value instead of clamping to zero.
+    // would wrap to a near-u64.MAX value instead of clamping to zero.
     let small = WindowsDuration.from_nanos(30_u64);
     let big = WindowsDuration.from_nanos(100_u64);
     assert_eq(small.sub(big).as_nanos(), 0_u64);

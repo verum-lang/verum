@@ -16,7 +16,7 @@
 // Determinism. The PRNG state lives inside `RetryPolicy.seed` —
 // `seed == 0` draws from a process-default LCG, anything non-zero
 // gives reproducible attempt scheduling for DST tests. The actual
-// jitter math is in `RetryPolicy::jittered_delay_ms` so this module
+// jitter math is in `RetryPolicy.jittered_delay_ms` so this module
 // stays free of timing logic.
 //
 

@@ -2,7 +2,7 @@
 // core-tests/sys/init/property_test.vr
 // =============================================================================
 //
-// Algebraic / structural laws for `core.sys.init::InitError`.
+// Algebraic / structural laws for `core.sys.init.InitError`.
 //
 // The 6-variant InitError is a small, finite domain — exhaust the
 // reflexivity / symmetry / transitivity laws of Eq across the whole

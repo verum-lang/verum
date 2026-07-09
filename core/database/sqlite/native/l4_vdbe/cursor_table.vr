@@ -601,7 +601,7 @@ implement CursorTable {
     }
 
     /// Compare the cursor's current key (first `n_keys` columns of
-    /// the current row) against `key_values`.  Returns `Maybe::Maybe.None`
+    /// the current row) against `key_values`.  Returns `Maybe.Maybe.None`
     /// if the cursor is exhausted or the slot is invalid; otherwise
     /// `Maybe.Some(c)` where c is -1 / 0 / +1 from comparing column-by-
     /// column under the type-class ordering used by `cmp_register`

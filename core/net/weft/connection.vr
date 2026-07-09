@@ -86,8 +86,8 @@ public type ConnectionConfig is {
     /// `arena_pool.vr` into the connection lifecycle).
     ///
     /// Per-request arena allocation is the production-grade
-    /// pattern for HTTP servers — Tokio/Hyper's `bytes::Bytes`
-    /// pool, axum's `RequestExt::extensions()`, .NET's
+    /// pattern for HTTP servers — Tokio/Hyper's `bytes.Bytes`
+    /// pool, axum's `RequestExt.extensions()`, .NET's
     /// `MemoryPool<T>.Shared` all ship the same primitive.  Each
     /// request gets a fresh arena handed to it; the arena lives
     /// exactly for the request's lifetime; at end-of-request
@@ -128,7 +128,7 @@ implement ConnectionConfig {
             // standard CBGR-managed heap path. Operators wire a
             // Shared<ArenaPool> at server construction for
             // production deployments where per-request arena
-            // allocation is desired (Tokio/Hyper bytes::Bytes
+            // allocation is desired (Tokio/Hyper bytes.Bytes
             // equivalent — Phase-5 killer feature per spec §4.3).
             arena_pool: Maybe.None,
         }
@@ -443,7 +443,7 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
         // Pre-fix `read_cancellable` blocked indefinitely under a
         // slowloris drip-feed; the only escape was the listener-wide
         // shutdown token. Post-fix the read races against a timer;
-        // the loser is a bounded ConnError::ReadTimeout that closes
+        // the loser is a bounded ConnError.ReadTimeout that closes
         // the connection cleanly with 408.
         //
 

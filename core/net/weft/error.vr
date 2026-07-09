@@ -194,27 +194,6 @@ implement IntoResponse for WeftError {
     }
 }
 
-implement Debug for WeftError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        match self {
-            BadRequest(m)         => f.write_str(f"WeftError.BadRequest({m})"),
-            RouteNotFound         => f.write_str("WeftError.RouteNotFound"),
-            MethodNotAllowed      => f.write_str("WeftError.MethodNotAllowed"),
-            ExtractionRejected(m) => f.write_str(f"WeftError.ExtractionRejected({m})"),
-            Timeout               => f.write_str("WeftError.Timeout"),
-            Overloaded            => f.write_str("WeftError.Overloaded"),
-            UpstreamIo(m)         => f.write_str(f"WeftError.UpstreamIo({m})"),
-            Internal(m)           => f.write_str(f"WeftError.Internal({m})"),
-        }
-    }
-}
-
-implement Display for WeftError {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(self.public_message())
-    }
-}
-
 /// Extractor rejection sum-type. Every `FromRequest` impl's `Rejection`
 /// must implement `IntoResponse`; this one covers the common cases.
 public type ExtractRejection is

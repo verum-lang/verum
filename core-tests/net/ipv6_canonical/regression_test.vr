@@ -27,7 +27,7 @@ fn regression_format_ipv4_mapped_zero() {
 
 @test
 fn regression_format_ipv4_mapped_canonical() {
-    // ::ffff:192.168.1.1 → IPv6 segs [0,0,0,0,0,0xffff,0xc0a8,0x0101]
+    // .ffff:192.168.1.1 → IPv6 segs [0,0,0,0,0,0xffff,0xc0a8,0x0101]
     let a = Ipv6Addr.new(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101);
     let s = format_ipv6(&a);
     assert_eq(s.as_str(), "::ffff:192.168.1.1");
@@ -35,7 +35,7 @@ fn regression_format_ipv4_mapped_canonical() {
 
 @test
 fn regression_format_ipv4_mapped_max() {
-    // ::ffff:255.255.255.255
+    // .ffff:255.255.255.255
     let a = Ipv6Addr.new(0, 0, 0, 0, 0, 0xffff, 0xffff, 0xffff);
     let s = format_ipv6(&a);
     assert_eq(s.as_str(), "::ffff:255.255.255.255");

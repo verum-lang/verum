@@ -126,8 +126,8 @@ public const ET_DELETE_ROWS_V2:          Int = 0x20;
 /// `binlog_row_value_options=PARTIAL_JSON`). Same wire prefix
 /// as ET_UPDATE_ROWS_V2; the AFTER tuple's JSON columns may
 /// be DIFFs instead of full values. Decoded via
-/// `binlog_rows::decode_rows_event_body(buf, RkPartialUpdate)`;
-/// JSON-diff sequence parsed via `binlog_rows::decode_json_diff`.
+/// `binlog_rows.decode_rows_event_body(buf, RkPartialUpdate)`;
+/// JSON-diff sequence parsed via `binlog_rows.decode_json_diff`.
 public const ET_PARTIAL_UPDATE_ROWS_V2:  Int = 0x29;
 public const ET_GTID:                    Int = 0x21;
 public const ET_ANONYMOUS_GTID:          Int = 0x22;

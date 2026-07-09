@@ -16,7 +16,7 @@
 // **Soundness lemma** (PROVED — structurally trivial)
 //
 
-//  Whenever the elaborator constructs a `Derivation::Var { context,
+//  Whenever the elaborator constructs a `Derivation.Var { context,
 //  index, result_type }` with `context.lookup(index) = result_type`,
 //  the term `Var(index)` denotes the value at the corresponding
 //  position in the categorical model's environment.
@@ -57,8 +57,8 @@ mount super.super.judgment.{Derivation};
 /// Construct a T-Var derivation when the context lookup succeeds.
 ///
 
-/// Returns `Maybe::Maybe.Some(derivation)` when `Γ.lookup(i)` is `Maybe.Some(T)`,
-/// `Maybe::Maybe.None` when the index is out of bounds (free variable —
+/// Returns `Maybe.Maybe.Some(derivation)` when `Γ.lookup(i)` is `Maybe.Some(T)`,
+/// `Maybe.Maybe.None` when the index is out of bounds (free variable —
 /// the elaborator rejects).
 ///
 
@@ -104,8 +104,8 @@ public fn introduce_var(
 /// foundation case, not a derived form.
 ///
 
-/// **Status**: Proved (matches `verum_kernel::soundness::canonical_rules`
-/// classification "K-Var → LemmaStatus::Proved"). Discharged by
+/// **Status**: Proved (matches `verum_kernel.soundness.canonical_rules`
+/// classification "K-Var → LemmaStatus.Proved"). Discharged by
 /// `verum audit --kernel-soundness`.
 ///
 

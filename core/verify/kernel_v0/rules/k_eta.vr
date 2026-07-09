@@ -75,7 +75,7 @@ mount super.super.judgment.{Derivation, DefinitionalEquality};
 /// η-equality witness.
 ///
 
-/// The `equality_witness` is a `DefinitionalEquality::Eta` (or a
+/// The `equality_witness` is a `DefinitionalEquality.Eta` (or a
 /// composition via `Trans`) proving `original_type ≡_η new_type`.
 ///
 
@@ -116,7 +116,7 @@ public fn introduce_eta(
 /// `core/verify/kernel_v0/lemmas/eta.vr` (Phase-1 work).
 ///
 
-/// **Note**: η-equivalence in `verum_kernel::proof_checker` is
+/// **Note**: η-equivalence in `verum_kernel.proof_checker` is
 /// already implemented constructively (commit 5b6c97a9 added the
 /// `is_free_in` + `shift_down` + `eta_match` helpers). This
 /// admitted lemma covers the SEMANTIC soundness step, not the

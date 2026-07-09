@@ -504,7 +504,7 @@ const PATH_MAX_BYTES: Int = 4096;
 
 /// I/O chunk size for streaming file copy.  8 KiB balances the
 /// system-call overhead per chunk against stack pressure; matches
-/// `core.io.buffer::DEFAULT_BUF_CAPACITY`.
+/// `core.io.buffer.DEFAULT_BUF_CAPACITY`.
 const FILE_COPY_CHUNK_SIZE: Int = 8192;
 
 /// Iterator over directory entries.

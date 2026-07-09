@@ -14,7 +14,7 @@
 //   1. WarpQuicConfig.server(...) compiles and exposes the expected
 //      builder-style `with_max_concurrent_requests` / `with_alpn` /
 //      `with_idle_timeout` setters.
-//   2. WarpH3Server<H>::bind compiles against a minimal Handler.
+//   2. WarpH3Server<H>.bind compiles against a minimal Handler.
 //   3. shutdown_token() and shutdown() are present on the server.
 //
 // The full integration runs are blocked by the transport wire-up

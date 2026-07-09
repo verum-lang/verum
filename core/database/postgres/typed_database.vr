@@ -449,7 +449,7 @@ implement<C: Capability> Database<PgPool, C> {
 
 // -----------------------------------------------------------------------------
 // Construction shortcuts — wire PgPool directly into Database<PgPool, C>
-// without the user having to remember the Shared::new + from_pool dance.
+// without the user having to remember the Shared.new + from_pool dance.
 // -----------------------------------------------------------------------------
 
 /// Construct a read-write-transactional database from a freshly

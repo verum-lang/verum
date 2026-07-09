@@ -19,7 +19,7 @@
 // `sh#"..."` interpolation against a raw `Tainted<Text>` is a type
 // error: only `Text` (untainted) is acceptable. Phase 0 ships the
 // runtime tracking; the compile-time refusal is wired in
-// `core.shell.escape::ShellEscape` which only implements coercion for
+// `core.shell.escape.ShellEscape` which only implements coercion for
 // the untainted side.
 //
 
@@ -52,7 +52,7 @@ public type Tainted<T> is {
 implement<T> Tainted<T> {
     /// Construct from a raw value with an explicit origin label.
     /// Intended for runtime use only — user code goes through
-    /// `Tainted::from_arg` / `Tainted::from_flag`.
+    /// `Tainted.from_arg` / `Tainted.from_flag`.
     public fn new(inner: T, origin: Text) -> Tainted<T> {
         Tainted { inner: inner, origin: origin }
     }

@@ -125,7 +125,7 @@ public mount archive.tar.{
 // ArchiveEntry — universal entry record (mirrors `TarEntry`'s scope)
 // =============================================================================
 //
-// This is the *protocol-level* entry view used by `Archive::pack /
+// This is the *protocol-level* entry view used by `Archive.pack /
 // unpack`. Per-format adapters convert between this universal record
 // and their format-specific representation (e.g., TarEntry for tar).
 public type ArchiveEntry is {

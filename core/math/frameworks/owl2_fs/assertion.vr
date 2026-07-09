@@ -18,7 +18,7 @@
 // data_property_axiom, data_range, object_property_axiom, key,
 // datatype_definition, count): mirror the shape used here — take the
 // W3C entity arguments by parameter, write the membership predicate
-// in the `ensures` clause, route through `Interpretation::*` so SMT
+// in the `ensures` clause, route through `Interpretation.*` so SMT
 // dispatch remains framework-agnostic.
 // =============================================================================
 

@@ -17,7 +17,7 @@ mount core.base.maybe.{Maybe, Some, None};
 //
 //   When formatting `Poll<T>` (or any user-defined two-variant sum)
 //   via `f"{p:?}"`, the runtime walks
-//   `interpreter::dispatch_table::handlers::debug.rs::
+//   `interpreter.dispatch_table.handlers.debug.rs.
 //   format_variant_for_print_depth` and reaches the global tag-scan
 //   fallback.  That fallback picks the FIRST non-protocol type-
 //   descriptor with a matching variant tag — which for tag 0 / 1 is
@@ -116,7 +116,7 @@ fn regression_poll_from_maybe_none_routes_to_pending() {
 // §C  Receiver-aware method-chain resolution lifted above hardcoded
 //     MAYBE_RETURNING_METHODS table
 //
-//   `crates/verum_vbc/src/codegen/expressions.rs::
+//   `crates/verum_vbc/src/codegen/expressions.rs.
 //   determine_method_return_type_prefix` carried a hardcoded
 //   `MAYBE_RETURNING_METHODS` / `MAYBE_METHODS` table that fired
 //   BEFORE the receiver-type-based lookup.  For any chained

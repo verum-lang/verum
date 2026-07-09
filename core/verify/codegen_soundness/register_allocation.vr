@@ -34,7 +34,7 @@ mount core.prelude.{Bool};
 /// **Kernel-discharge bridge: register allocation preserves observable
 /// behaviour.**
 ///
-/// Manifest entry: `CodegenPassId::RegisterAllocation`. Status:
+/// Manifest entry: `CodegenPassId.RegisterAllocation`. Status:
 /// `AdmittedWithIou` citing George-Appel iterated-coalescing.
 /// Specific allocators (e.g. linear scan) carry their own attestations
 /// in addition to this generic one.

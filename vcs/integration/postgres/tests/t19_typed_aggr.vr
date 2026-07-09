@@ -10,8 +10,8 @@
 //   1. int4[] round-trip — INSERT a List<TypedValue>(int4[1, 2, 3])
 //      via prepared statement; SELECT it back; assert decoded shape.
 //   2. text[] round-trip — same with strings.
-//   3. int4range — SELECT '[5, 10)'::int4range and decode.
-//   4. tstzrange — SELECT '[2026-01-01, 2026-12-31)'::tstzrange and
+//   3. int4range — SELECT '[5, 10)'.int4range and decode.
+//   4. tstzrange — SELECT '[2026-01-01, 2026-12-31)'.tstzrange and
 //      decode.
 // =============================================================================
 

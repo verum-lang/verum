@@ -171,7 +171,7 @@ implement<T: TypedRow> TypedRow for Maybe<T> {
         match &row[0] {
             TvNull => Result.Ok(Maybe.None),
             _ => {
-                let v = T::from_typed_row(row, desc)?;
+                let v = T.from_typed_row(row, desc)?;
                 Result.Ok(Maybe.Some(v))
             }
         }
@@ -202,7 +202,7 @@ implement<A: TypedRow> TypedRow for (A,) {
         desc: &Maybe<RowDescription>,
     ) -> Result<(A,), DbError> {
         expect_arity(row, 1)?;
-        let a = A::from_typed_row(&slice_one(row, 0), desc)?;
+        let a = A.from_typed_row(&slice_one(row, 0), desc)?;
         Result.Ok((a,))
     }
 }
@@ -213,8 +213,8 @@ implement<A: TypedRow, B: TypedRow> TypedRow for (A, B) {
         desc: &Maybe<RowDescription>,
     ) -> Result<(A, B), DbError> {
         expect_arity(row, 2)?;
-        let a = A::from_typed_row(&slice_one(row, 0), desc)?;
-        let b = B::from_typed_row(&slice_one(row, 1), desc)?;
+        let a = A.from_typed_row(&slice_one(row, 0), desc)?;
+        let b = B.from_typed_row(&slice_one(row, 1), desc)?;
         Result.Ok((a, b))
     }
 }
@@ -225,9 +225,9 @@ implement<A: TypedRow, B: TypedRow, C: TypedRow> TypedRow for (A, B, C) {
         desc: &Maybe<RowDescription>,
     ) -> Result<(A, B, C), DbError> {
         expect_arity(row, 3)?;
-        let a = A::from_typed_row(&slice_one(row, 0), desc)?;
-        let b = B::from_typed_row(&slice_one(row, 1), desc)?;
-        let c = C::from_typed_row(&slice_one(row, 2), desc)?;
+        let a = A.from_typed_row(&slice_one(row, 0), desc)?;
+        let b = B.from_typed_row(&slice_one(row, 1), desc)?;
+        let c = C.from_typed_row(&slice_one(row, 2), desc)?;
         Result.Ok((a, b, c))
     }
 }
@@ -240,10 +240,10 @@ implement<A: TypedRow, B: TypedRow, C: TypedRow, D: TypedRow>
         desc: &Maybe<RowDescription>,
     ) -> Result<(A, B, C, D), DbError> {
         expect_arity(row, 4)?;
-        let a = A::from_typed_row(&slice_one(row, 0), desc)?;
-        let b = B::from_typed_row(&slice_one(row, 1), desc)?;
-        let c = C::from_typed_row(&slice_one(row, 2), desc)?;
-        let d = D::from_typed_row(&slice_one(row, 3), desc)?;
+        let a = A.from_typed_row(&slice_one(row, 0), desc)?;
+        let b = B.from_typed_row(&slice_one(row, 1), desc)?;
+        let c = C.from_typed_row(&slice_one(row, 2), desc)?;
+        let d = D.from_typed_row(&slice_one(row, 3), desc)?;
         Result.Ok((a, b, c, d))
     }
 }
@@ -267,7 +267,7 @@ public fn decode_field<T: TypedRow>(
     idx: Int,
     desc: &Maybe<RowDescription>,
 ) -> Result<T, DbError> {
-    T::from_typed_row(&slice_one(row, idx), desc)
+    T.from_typed_row(&slice_one(row, idx), desc)
 }
 
 /// Validate `row.len() == want`; produce a TypedRow arity error
@@ -309,7 +309,7 @@ public fn rows_typed<R: TypedRow>(
     let mut out: List<R> = List.with_capacity(result.rows.len());
     let mut i: Int = 0;
     while i < (result.rows.len() as Int) {
-        let r = R::from_typed_row(&result.rows[i], &result.row_description);
+        let r = R.from_typed_row(&result.rows[i], &result.row_description);
         match r {
             Result.Ok(v)  => { out.push(v); }
             Result.Err(e) => {

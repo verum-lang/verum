@@ -535,7 +535,7 @@ implement RdcwBackend {
         let timeout: UInt32 = if timeout_ms < 0 { WIN_INFINITE } else { timeout_ms as UInt32 };
         for w in self.watches.iter_mut() {
             let mut bytes_returned: UInt32 = 0;
-            let mut overlapped = Overlapped::zero();
+            let mut overlapped = Overlapped.zero();
             let filter = FILE_NOTIFY_CHANGE_FILE_NAME
                        | FILE_NOTIFY_CHANGE_DIR_NAME
                        | FILE_NOTIFY_CHANGE_LAST_WRITE

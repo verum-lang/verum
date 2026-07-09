@@ -88,10 +88,10 @@ fn regression_b_eq_ignore_ascii_case_non_letter_pinned() {
 // §C — Char.from_digit hex returns wrong char (audit.md §C)
 // REGRESSION: `Char.from_digit(10, 16)` returns 'A' (codepoint 65)
 // instead of 'a' (codepoint 97).  The user-side body at
-// `core/text/char.vr::from_digit` correctly uses `'a' as Int + digit - 10`
+// `core/text/char.vr.from_digit` correctly uses `'a' as Int + digit - 10`
 // for digit >= 10, and the Tier-0 dispatch_primitive_method intercept
 // at `crates/verum_vbc/.../method_dispatch.rs:3412` uses Rust's
-// `char::from_digit` which returns lowercase — yet the runtime path
+// `char.from_digit` which returns lowercase — yet the runtime path
 // surfaces uppercase.  Empirically confirmed 2026-05-16 against the
 // freshly-built binary embedding the latest precompiled stdlib
 // archive.  Root cause is *higher* in the dispatch chain — likely an
@@ -148,7 +148,7 @@ fn regression_c_from_digit_hex_boundary_pinned() {
 // for the obvious inputs.
 // =============================================================================
 
-// CLOSED 2026-05-19 — CharSubOpcode::GeneralCategory intrinsic now
+// CLOSED 2026-05-19 — CharSubOpcode.GeneralCategory intrinsic now
 // wraps the computed tag in a proper `GeneralCategory` unit variant
 // (via `alloc_unit_variant` + `lookup_type_id_by_name`) so the
 // `is GeneralCategory.X` operator's variant-tag check sees a real

@@ -120,7 +120,7 @@ public fn dst_wrapped_pager_open(
     };
     // Derive a separate seed for the schedule so fault choices are
     // statistically independent of any op-stream draws done by the
-    // higher-level harness.  Matches `dst::harness::harness_from_seed`.
+    // higher-level harness.  Matches `dst.harness.harness_from_seed`.
     let mut sched_seed = seed_from_u64(seed + 1_i64);
     let schedule = generate_schedule(&mut sched_seed, total_ops, &default_density());
     Result.Ok(DstWrappedPager {

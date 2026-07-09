@@ -31,7 +31,7 @@ type GeneratedTest is {
 
 fn make_precondition_test(fn_name: Text, index: Int, pred: Text) -> GeneratedTest {
     GeneratedTest {
-        name: f"{fn_name}::contract::requires_{index}",
+        name: f"{fn_name}.contract.requires_{index}",
         fn_name: fn_name,
         predicate: pred,
         kind: ContractTestKind.Precondition,
@@ -40,7 +40,7 @@ fn make_precondition_test(fn_name: Text, index: Int, pred: Text) -> GeneratedTes
 
 fn make_postcondition_test(fn_name: Text, index: Int, pred: Text) -> GeneratedTest {
     GeneratedTest {
-        name: f"{fn_name}::contract::ensures_{index}",
+        name: f"{fn_name}.contract.ensures_{index}",
         fn_name: fn_name,
         predicate: pred,
         kind: ContractTestKind.Postcondition,
@@ -55,12 +55,12 @@ fn abs_spec(n: Int) -> Int {
 
 fn test_precondition_test_name() {
     let t = make_precondition_test("abs_spec", 1, "n >= 0");
-    assert_eq(t.name, "abs_spec::contract::requires_1");
+    assert_eq(t.name, "abs_spec.contract.requires_1");
 }
 
 fn test_postcondition_test_name() {
     let t = make_postcondition_test("abs_spec", 1, "result >= 0");
-    assert_eq(t.name, "abs_spec::contract::ensures_1");
+    assert_eq(t.name, "abs_spec.contract.ensures_1");
 }
 
 fn test_precondition_kind() {

@@ -170,7 +170,7 @@ public theorem effect_state_is_not_commutative() -> Bool
         // is_commutative_effect's StateEffect arm returns false;
         // negation of the call equals true. Decidable by pattern-match.
         // The negative-commutativity SEPARATING WITNESS lives in
-        // `core.action.monads.state::state_is_not_commutative`.
+        // `core.action.monads.state.state_is_not_commutative`.
         true
     }
 }

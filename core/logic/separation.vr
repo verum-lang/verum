@@ -7,7 +7,7 @@
 //
 
 // User-facing surface for the separation-logic kernel
-// (`verum_kernel::separation_logic`). Reynolds 2002 / O'Hearn 2007
+// (`verum_kernel.separation_logic`). Reynolds 2002 / O'Hearn 2007
 // style: heap-shaped propositions + separating conjunction +
 // frame rule + Hoare triples.
 //
@@ -55,7 +55,7 @@
 // Local reasoning: a command's effect on its footprint doesn't
 // disturb invariants on disjoint heap fragments. Verum's verifier
 // applies the frame rule via
-// `verum_kernel::separation_logic::execute_frame_rule` when a Hoare
+// `verum_kernel.separation_logic.execute_frame_rule` when a Hoare
 // triple's pre/post is canonical separating-conjunction shape.
 //
 
@@ -82,7 +82,7 @@
 //
 
 // All decision procedures over [`HeapPredicate`] live in the kernel
-// (`verum_kernel::separation_logic::dispatch_separation_goal`). This
+// (`verum_kernel.separation_logic.dispatch_separation_goal`). This
 // module provides ONLY the propositional surface — smart constructors
 // + classification predicates — that user proof bodies cite. The
 // dispatcher's verdict is what closes a separation goal.
@@ -103,7 +103,7 @@ mount core.logic.linear.{LinForm};
 // =============================================================================
 
 /// A heap-shaped proposition. Conceptually `Heap → Prop`; mirrors
-/// `verum_kernel::separation_logic::HeapPredicate` so the .vr-side
+/// `verum_kernel.separation_logic.HeapPredicate` so the .vr-side
 /// and kernel-side surfaces stay structurally aligned.
 ///
 /// Standard combinators are surfaced explicitly so the verification
@@ -224,7 +224,7 @@ public fn is_separating_conjunction(p: HeapPredicate) -> Bool {
 /// `pre` is the heap shape it requires; `post` is the heap shape it
 /// guarantees.
 ///
-/// Mirrors `verum_kernel::separation_logic::HoareTriple`. The kernel
+/// Mirrors `verum_kernel.separation_logic.HoareTriple`. The kernel
 /// consumes this via [`from_hoare_triple`] adapter to surface as a
 /// generic `VerificationGoal`.
 public type HoareTriple is {
@@ -245,7 +245,7 @@ public fn hoare(pre: HeapPredicate, command: Text, post: HeapPredicate) -> Hoare
 
 /// Heap permission for the three-tier reference model.
 ///
-/// Mirrors `verum_kernel::separation_logic::Capability` so user code
+/// Mirrors `verum_kernel.separation_logic.Capability` so user code
 /// can talk about reference-tier permissions in proof bodies.
 ///
 ///  * `Read` — the function may dereference the heap location but

@@ -12,7 +12,7 @@
 // the config-file lookup, and finally the declared default.
 //
 // Phase 3 ships with TOML / JSON file support (via `core.encoding.{toml,json}`).
-// YAML and CBOR plug in trivially via the same `ConfigSource::File` arm.
+// YAML and CBOR plug in trivially via the same `ConfigSource.File` arm.
 //
 
 // =============================================================================
@@ -76,7 +76,7 @@ public type FilePathOrPath is
 // ResolvedConfig — final lookup table
 // =============================================================================
 
-/// Result of `ConfigResolver::resolve`. Lookup fields by their declared
+/// Result of `ConfigResolver.resolve`. Lookup fields by their declared
 /// `config_path` (or flag long-name as fallback).
 public type ResolvedConfig is {
     values: Map<Text, ResolvedValue>,

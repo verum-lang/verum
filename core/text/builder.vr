@@ -87,7 +87,7 @@ implement TextBuilder {
     }
 
     /// Create a new TextBuilder pre-sized for `cap` bytes. The hint is
-    /// a byte count (matching Rust's `String::with_capacity` and the
+    /// a byte count (matching Rust's `String.with_capacity` and the
     /// underlying `Text.with_capacity`); the previous chunk-list
     /// implementation interpreted this as a chunk count, but the
     /// single-buffer redesign collapses that to the byte size that

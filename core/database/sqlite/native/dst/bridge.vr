@@ -146,7 +146,7 @@ public fn op_to_sql(op: &DbOp) -> Maybe<Text> {
 
 // `drive` is intentionally storage-agnostic: it takes a `step_runner`
 // callback that the caller wires to a real Database.execute(). This
-// matches the same pattern as `session::apply` — keeps the bridge
+// matches the same pattern as `session.apply` — keeps the bridge
 // independent of the L7 facade so it can be tested with a mock
 // step_runner without standing up a full database.
 //

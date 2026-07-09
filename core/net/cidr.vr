@@ -14,7 +14,7 @@
 //  10.0.0.0/8 — IPv4 /8
 //  192.168.1.0/24 — IPv4 /24
 //  2001:db8::/32 — IPv6 /32
-//  ::ffff:10.0.0.0/104 — IPv4-mapped v6
+//  .ffff:10.0.0.0/104 — IPv4-mapped v6
 //
 
 // This module ships:
@@ -126,7 +126,7 @@ public fn parse(text: &Text) -> Result<Cidr, CidrError> {
 
     // Parse prefix length — closure-free dispatch. The previous
     // `.ok_or_else(|| ...)?` chain triggered the CIDR-1 precompile-
-    // cascade SIGSEGV class (LLVM SmallVector::grow_pod during
+    // cascade SIGSEGV class (LLVM SmallVector.grow_pod during
     // closure-desugaring through-Result `?` operator). Inline the
     // match for closure-free codegen.
     let prefix_len: Int = match parse_int(len_text.as_bytes()) {
@@ -209,7 +209,7 @@ implement Cidr {
 
     /// The first address of the block — host bits cleared.
     ///
-    /// `10.1.2.3/8` → `10.0.0.0`; `2001:db8::5/32` → `2001:db8::`.
+    /// `10.1.2.3/8` → `10.0.0.0`; `2001:db8::5/32` → `2001:db8.`.
     public fn network_address(&self) -> IpAddr {
         match self {
             Cidr.V4 { addr, prefix_len } => {
@@ -457,7 +457,7 @@ fn slice_text(src: &[Byte], start: Int, end: Int) -> Text {
     // root cause: extend_from_slice(&src[start..end]) followed by
     // from_utf8_unchecked(out.as_slice()) chains through three
     // List-payload intrinsic dispatch paths and triggers the LLVM
-    // SmallVector::grow_pod SIGSEGV in cidr.parse precompile cascade.
+    // SmallVector.grow_pod SIGSEGV in cidr.parse precompile cascade.
     // The byte-by-byte push pattern uses the canonical push codegen
     // that works for all other stdlib parsers.
     let len = end - start;

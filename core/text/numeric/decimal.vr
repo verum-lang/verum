@@ -271,7 +271,7 @@ implement Decimal {
     ///   * `ScaleOutOfRange`  — `precision` outside [0, MAX_SCALE].
     ///   * `Overflow`         — long-division step exceeds i64
     ///                          (typically when both operands are
-    ///                          near i64::MAX magnitude AND the
+    ///                          near i64.MAX magnitude AND the
     ///                          requested precision is large).
     public fn div(
         &self,
@@ -577,7 +577,7 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
         let b = bytes[i] as Int;
         if b >= ('0' as Int) && b <= ('9' as Int) {
             // Detect overflow before adding the new digit.  i64
-            // bound check: coef * 10 + d > i64::MAX ⇒ overflow.
+            // bound check: coef * 10 + d > i64.MAX ⇒ overflow.
             let d = b - ('0' as Int);
             let c10 = match checked_mul(coef, 10) {
                 Maybe.Some(v) => v,
@@ -647,10 +647,10 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
 /// Align two decimals to a common scale (the larger of the two).
 /// Returns `(a_coef_aligned, b_coef_aligned, common_scale)` or
 /// Overflow if the alignment multiplication exceeds i64 range.
-/// Absolute value of an i64 with safe handling of i64::MIN.  The
-/// canonical `-x` of i64::MIN overflows back to itself; for div's
+/// Absolute value of an i64 with safe handling of i64.MIN.  The
+/// canonical `-x` of i64.MIN overflows back to itself; for div's
 /// magnitude extraction we need a graceful path.  V0 saturates at
-/// i64::MAX in the degenerate i64::MIN case — div with i64::MIN
+/// i64.MAX in the degenerate i64.MIN case — div with i64.MIN
 /// dividend would already overflow at the `× 10` step anyway, so
 /// this saturation is unobservable in practice.
 fn abs_int(x: Int) -> Int {
@@ -716,14 +716,14 @@ fn checked_sub(a: Int, b: Int) -> Maybe<Int> {
 }
 
 /// Checked i64 mul.  Returns Maybe.None on overflow.  Uses the absolute-
-/// value-bound approach: |a * b| ≤ i64::MAX ⟹ |a| ≤ i64::MAX / |b|.
+/// value-bound approach: |a * b| ≤ i64.MAX ⟹ |a| ≤ i64.MAX / |b|.
 fn checked_mul(a: Int, b: Int) -> Maybe<Int> {
     if a == 0 || b == 0 { return Maybe.Some(0); }
-    // Special-case i64::MIN: -i64::MIN overflows.  Verum Int =
+    // Special-case i64.MIN: -i64.MIN overflows.  Verum Int =
     // i64; the magic constant is 2^63 = 9223372036854775808 which
-    // is one greater than i64::MAX.  Take any operand at MIN and
+    // is one greater than i64.MAX.  Take any operand at MIN and
     // any non-{0,1,-1} other ⇒ overflow.
-    let i64_min: Int = -9223372036854775807 - 1;  // i64::MIN
+    let i64_min: Int = -9223372036854775807 - 1;  // i64.MIN
     if a == i64_min {
         if b == 0 { return Maybe.Some(0); }
         if b == 1 { return Maybe.Some(a); }

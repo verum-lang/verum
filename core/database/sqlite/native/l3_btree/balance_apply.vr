@@ -20,7 +20,7 @@ module core.database.sqlite.native.l3_btree.balance_apply;
 //
 // All appliers are PURE — input pages come in via `pages_in`,
 // output pages come out via `outcome.updated_pages`.  The
-// caller (typically `btree_ops::insert_with_rebalance`) writes
+// caller (typically `btree_ops.insert_with_rebalance`) writes
 // the updated pages back through the pager.  Pure separation
 // keeps the algorithm deterministic + trivially testable.
 //

@@ -48,7 +48,7 @@ mount core.sys.context_ops.{
 @test
 fn test_tls_slot_count_canonical() {
     // V-LLSI per-thread arena ceiling. The constant value is documented
-    // by `core/sys/common.vr::MAX_CONTEXT_SLOTS` and mirrored here at
+    // by `core/sys/common.vr.MAX_CONTEXT_SLOTS` and mirrored here at
     // the TLS surface. Drift between the two would silently halve the
     // per-thread arena while compiling cleanly — pin both ends.
     assert_eq(TLS_SLOT_COUNT, 256);

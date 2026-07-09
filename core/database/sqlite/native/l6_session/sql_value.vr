@@ -260,7 +260,7 @@ public fn sql_text_from_utf16(units: &List<Int>) -> SqlValue {
 
 /// Truncate a Float64 toward zero, clamping to i64 range.  Matches
 /// SQLite's `sqlite3VdbeIntegerAffinity`: large reals saturate at
-/// i64::MAX/MIN; NaN coerces to 0.
+/// i64.MAX/MIN; NaN coerces to 0.
 fn float_to_i64_trunc(x: Float64) -> Int64 {
     if x != x { return 0_i64; }  // NaN
     let max_f: Float64 = 9223372036854775807.0_f64;

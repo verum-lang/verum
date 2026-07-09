@@ -200,7 +200,7 @@ mount core.io.{IoError};
 
 // Unified TCP-listen intrinsic family (#25 cascade). These dispatch
 // through the same opcode in interpreter and AOT mode — the
-// interpreter side calls `std::net::TcpListener::bind` and returns a
+// interpreter side calls `std.net.TcpListener.bind` and returns a
 // real kernel fd via `into_raw_fd()`; the AOT side lowers to the
 // `verum_tcp_listen_v2` LLVM helper which emits inet_pton +
 // socket+setsockopt+bind+listen IR directly. Both paths produce a
@@ -1066,7 +1066,7 @@ const DEFAULT_BACKLOG: Int = 1024;
 /// page-cluster size most kernels read in one go; larger buffers
 /// rarely fill in a single non-blocking call so the extra stack
 /// pressure is wasted.  Single source of truth so the four sites in
-/// AsyncRead::poll_read + AsyncWrite::poll_write cannot drift.
+/// AsyncRead.poll_read + AsyncWrite.poll_write cannot drift.
 const STREAM_CHUNK_SIZE: Int = 65536;
 
 implement TcpListener {
@@ -1123,7 +1123,7 @@ implement TcpListener {
     /// family. Replaces the previous socket+setsockopt+bind+listen
     /// chain that was dispatched through libsystem in interpreter
     /// mode. Both interpreter and AOT mode now converge on the same
-    /// intrinsic — the interpreter calls `std::net::TcpListener::bind`
+    /// intrinsic — the interpreter calls `std.net.TcpListener.bind`
     /// (returning a real kernel fd via `into_raw_fd()`), AOT lowers to
     /// the `verum_tcp_listen_v2` LLVM helper that emits
     /// inet_pton+socket+setsockopt+bind+listen IR directly. The

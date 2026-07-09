@@ -272,7 +272,7 @@ const SUN_PATH_MAX: Int = 104;
 const SUN_PATH_MAX: Int = 108;
 
 /// Stack-allocated chunk size for non-blocking poll_read / poll_write.
-/// Mirrors `core.net.tcp::STREAM_CHUNK_SIZE` so the two stream
+/// Mirrors `core.net.tcp.STREAM_CHUNK_SIZE` so the two stream
 /// implementations cannot drift on read/write upper bounds.
 const STREAM_CHUNK_SIZE: Int = 65536;
 

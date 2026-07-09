@@ -338,7 +338,7 @@ public type VfsProtocol is protocol {
     fn access(&self, path: &Text, kind: AccessKind) -> Result<Bool, VfsError>;
     fn full_pathname(&self, path: &Text) -> Result<Text, VfsError>;
     /// Cryptographic-grade entropy from the OS. Errors are
-    /// surfaced as `Result.Err(VfsError::IoError)` rather than swallowed
+    /// surfaced as `Result.Err(VfsError.IoError)` rather than swallowed
     /// — pre-fix the signature returned a bare `List<Byte>` and
     /// callers receiving an empty list (entropy-source failure)
     /// silently used zero bytes for WAL salts, an exploitable

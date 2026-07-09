@@ -2,7 +2,7 @@
 // core.architecture.phase — ATS-V phase 6.5 surface
 // =============================================================================
 //
-// **Verum-native mirror of `verum_kernel::arch_phase`.**
+// **Verum-native mirror of `verum_kernel.arch_phase`.**
 //
 // ATS-V phase sits between type inference (Phase 4-6) and VBC
 // codegen (Phase 7) in the compilation pipeline.  Its job:
@@ -54,7 +54,7 @@ mount super.parse.ArchParseError;
 // =============================================================================
 
 /// Per-module result of running ATS-V phase.  Mirrors
-/// `verum_kernel::arch_phase::ModuleArchResult`.
+/// `verum_kernel.arch_phase.ModuleArchResult`.
 public type ModuleArchResult is {
     module_name: Text,
     shape: Maybe<Shape>,
@@ -73,7 +73,7 @@ public fn module_arch_result_is_load_bearing(r: ModuleArchResult) -> Bool {
 // =============================================================================
 
 /// Aggregated ATS-V phase report across all modules.  Mirrors
-/// `verum_kernel::arch_phase::ArchPhaseReport`.
+/// `verum_kernel.arch_phase.ArchPhaseReport`.
 public type ArchPhaseReport is {
     modules: List<ModuleArchResult>,
 };
@@ -169,7 +169,7 @@ public fn composition_verification_is_load_bearing(
 
 /// **ATS-V phase 6.5 dispatch.**
 ///
-/// Discharges the kernel-side `verum_kernel::arch_phase::run_arch_phase`
+/// Discharges the kernel-side `verum_kernel.arch_phase.run_arch_phase`
 /// driver.  Soundness contract (spec §3 + §17.5):
 ///   * **No early exit**: walks every module regardless of earlier
 ///     violations — agents need complete rosters.
@@ -177,7 +177,7 @@ public fn composition_verification_is_load_bearing(
 ///     the default Shape and pass vacuously.
 ///   * **Diagnostic completeness**: every violation carries the stable
 ///     RFC code (ATS-V-AP-NNN) + human message + auto-fix suggestion.
-@framework(ats_v, "ATS-V phase orchestrator — Phase 6.5 of the compilation pipeline, sitting between type inference (Phases 4-6) and VBC codegen (Phase 7). Walks every module, extracts @arch_module(...) attributes via the canonical 13-field roster, builds Shapes via arch_parse, runs the full 32-anti-pattern catalog, aggregates violations into ArchPhaseReport without early-exit. Modules without an @arch_module(...) annotation use the default Shape and pass vacuously. Kernel implementation: crates/verum_kernel/src/arch_phase.rs. Compiler wiring: crates/verum_compiler/src/pipeline/ats_v_phase.rs::phase_ats_v.")
+@framework(ats_v, "ATS-V phase orchestrator — Phase 6.5 of the compilation pipeline, sitting between type inference (Phases 4-6) and VBC codegen (Phase 7). Walks every module, extracts @arch_module(...) attributes via the canonical 13-field roster, builds Shapes via arch_parse, runs the full 32-anti-pattern catalog, aggregates violations into ArchPhaseReport without early-exit. Modules without an @arch_module(...) annotation use the default Shape and pass vacuously. Kernel implementation: crates/verum_kernel/src/arch_phase.rs. Compiler wiring: crates/verum_compiler/src/pipeline/ats_v_phase.rs.phase_ats_v.")
 @kernel_discharge("kernel_arch_phase_orchestrator")
 public axiom kernel_arch_phase_orchestrator() -> Bool
     ensures true;

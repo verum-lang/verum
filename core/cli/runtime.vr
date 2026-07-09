@@ -14,9 +14,9 @@
 //
 
 // The runtime intentionally returns `Result<ExitCode, ParseError>` from
-// `try_run` so the caller can choose between `process::exit` and library-
+// `try_run` so the caller can choose between `process.exit` and library-
 // style usage. `run_or_exit` is the convenience wrapper that prints help
-// or error to stderr and calls `env::exit` with the appropriate code.
+// or error to stderr and calls `env.exit` with the appropriate code.
 //
 
 // Phase 0 ships:
@@ -160,7 +160,7 @@ implement App {
         }
     }
 
-    /// Register a named handler. The name must match a `HandlerRef::NamedHandler`
+    /// Register a named handler. The name must match a `HandlerRef.NamedHandler`
     /// somewhere in the spec.
     public fn register(mut self, name: Text, h: Handler) -> App {
         self.registry = self.registry.register(name, h);
@@ -174,7 +174,7 @@ implement App {
     }
 
     /// Parse argv and dispatch. Returns the chosen exit code. Does not
-    /// itself call `env::exit`; callers can decide whether to exit or
+    /// itself call `env.exit`; callers can decide whether to exit or
     /// continue (useful in REPL hosts).
     public fn try_run(&self, argv: List<Text>) -> Result<ExitCode, ParseError> {
         let outcome = parse_argv(&self.spec, argv)?;

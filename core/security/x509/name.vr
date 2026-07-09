@@ -6,15 +6,15 @@
 // =============================================================================
 //
 
-// Name ::= CHOICE { rdnSequence RDNSequence }
-// RDNSequence ::= SEQUENCE OF RelativeDistinguishedName
-// RelativeDistinguishedName ::= SET SIZE (1..MAX) OF AttributeTypeAndValue
-// AttributeTypeAndValue ::= SEQUENCE { type AttributeType, value AttributeValue }
-// AttributeType ::= OBJECT IDENTIFIER
-// AttributeValue ::= ANY
+// Name .= CHOICE { rdnSequence RDNSequence }
+// RDNSequence .= SEQUENCE OF RelativeDistinguishedName
+// RelativeDistinguishedName .= SET SIZE (1..MAX) OF AttributeTypeAndValue
+// AttributeTypeAndValue .= SEQUENCE { type AttributeType, value AttributeValue }
+// AttributeType .= OBJECT IDENTIFIER
+// AttributeValue .= ANY
 //
 
-// DirectoryString ::= CHOICE {
+// DirectoryString .= CHOICE {
 //  teletexString TeletexString (SIZE (1..MAX)),
 //  printableString PrintableString (SIZE (1..MAX)),
 //  universalString UniversalString (SIZE (1..MAX)),

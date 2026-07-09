@@ -24,7 +24,7 @@ mount core.time.duration.{Duration};
 // CLOSED via Option B (signed Duration refactor) — drop `.max(0)` from
 // every Verum-body constructor + Sub/Mul operator impls + from_secs_f64
 // early-return.  Duration is now signed (matches `Go time.Duration` /
-// `Java Duration` / `C++ chrono::duration` semantics; aligns with the
+// `Java Duration` / `C++ chrono.duration` semantics; aligns with the
 // runtime intrinsic identity surface; preserves the duration_parse
 // "-15m" negative-input contract).  See [duration/audit.md §A].
 //

@@ -20,7 +20,7 @@ module core.database.sqlite.native.l5_sql.plan_passes;
 // Post-fix: this module re-implements the highest-value passes
 // directly on `PlanNode`, using fn-typed pass functions (no `dyn`
 // requirement; matches the language-architecture pattern used by
-// `l4_vdbe::optimizer`).  The pipeline runs every pass to fixed
+// `l4_vdbe.optimizer`).  The pipeline runs every pass to fixed
 // point; each pass returns `(new_plan, n_edits)` so the runner
 // converges when a full sweep produces zero edits.
 //

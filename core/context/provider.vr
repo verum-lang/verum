@@ -130,7 +130,7 @@ implement<T: Clone> Provider<T> {
         }
         match &self.cached {
             Maybe.Some(value) => value,
-            Maybe.None => unreachable("Provider::get_ref: self.cached must be Some after the populate match"),
+            Maybe.None => unreachable("Provider.get_ref: self.cached must be Some after the populate match"),
         }
     }
 

@@ -136,7 +136,7 @@ fn main() {
     // Scenario 2 (mid-batch error) deferred — needs the affine
     // PipelineHandle drain primitive to inspect per-handle outcomes.
     // Tracked as a follow-up integration test once
-    // List<affine T>::drain lands in core.collections.
+    // List<affine T>.drain lands in core.collections.
     // -------------------------------------------------------------------------
 }
 

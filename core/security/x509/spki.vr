@@ -6,7 +6,7 @@
 // =============================================================================
 //
 
-// SubjectPublicKeyInfo ::= SEQUENCE {
+// SubjectPublicKeyInfo .= SEQUENCE {
 //  algorithm AlgorithmIdentifier,
 //  subjectPublicKey BIT STRING
 // }
@@ -17,7 +17,7 @@
 //
 
 //  * RSA (rsaEncryption):
-//  -- RFC 3279 §2.3.1, RFC 8017 §A.1.1 RSAPublicKey ::= SEQUENCE {
+//  -- RFC 3279 §2.3.1, RFC 8017 §A.1.1 RSAPublicKey .= SEQUENCE {
 //  modulus INTEGER,
 //  publicExponent INTEGER
 //  }
@@ -25,7 +25,7 @@
 
 //  * EC (id-ecPublicKey):
 //  -- RFC 5480 §2.2
-//  ECPoint ::= OCTET STRING
+//  ECPoint .= OCTET STRING
 //  The BIT STRING contents is the uncompressed EC point:
 //  0x04 || X || Y (length = 1 + 2*field_size)
 //  Compressed forms (0x02 / 0x03) MAY be accepted by decoders but

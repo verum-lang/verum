@@ -173,7 +173,7 @@ mount core.net.weft.error.{IntoResponse};
 
 /// Request-handling protocol. The `Error` associated type lets
 /// middleware type-route on handler-specific failure modes
-/// (red-team §8): a `RetryLayer<H> where H::Error: RetryClassify`
+/// (red-team §8): a `RetryLayer<H> where H.Error: RetryClassify`
 /// statically reaches only handlers whose error converts to a
 /// retry classification.
 ///

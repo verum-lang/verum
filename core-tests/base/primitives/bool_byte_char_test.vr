@@ -284,10 +284,10 @@ fn test_byte_is_ascii_alphanumeric() {
 @test
 fn test_byte_is_ascii_whitespace() {
     // ASCII whitespace per the canonical contract pinned at
-    // `core/base/primitives.vr::is_ascii_whitespace` and
-    // `core/text/char.vr::is_ascii_whitespace`:
+    // `core/base/primitives.vr.is_ascii_whitespace` and
+    // `core/text/char.vr.is_ascii_whitespace`:
     //   { 0x09 HT, 0x0A LF, 0x0C FF, 0x0D CR, 0x20 SPACE }
-    // This matches Rust's `u8::is_ascii_whitespace` convention.
+    // This matches Rust's `u8.is_ascii_whitespace` convention.
     // Note that 0x0B (vertical tab) is NOT in the set — historical
     // POSIX behaviour, also matched by Rust.
     assert((32 as Byte).is_ascii_whitespace());   // space
@@ -658,7 +658,7 @@ fn test_char_from_digit() {
 
     // Base 16 — Char.from_digit returns LOWERCASE letters for digits
     // 10..=35, matching the canonical contract pinned at
-    // `core/text/char.vr::from_digit` and the standard `from_digit`
+    // `core/text/char.vr.from_digit` and the standard `from_digit`
     // convention shared with Rust / Swift / Python.  Callers that need
     // uppercase should call `.to_ascii_uppercase()` on the result.
     assert_eq(Char.from_digit(0, 16), Maybe.Some('0'));

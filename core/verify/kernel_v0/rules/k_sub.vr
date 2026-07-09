@@ -90,7 +90,7 @@ mount super.super.judgment.{Derivation};
 /// `Univ(from_level)` to `Univ(to_level)` when `from_level ≤ to_level`.
 ///
 
-/// Returns `Maybe::Maybe.None` when the level inequality fails (the
+/// Returns `Maybe.Maybe.None` when the level inequality fails (the
 /// elaborator rejects).
 public fn introduce_sub(
     ctx: Context,

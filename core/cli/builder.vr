@@ -85,7 +85,7 @@ implement AppBuilder {
         self
     }
 
-    /// Add a subcommand built via `AppBuilder::build`.
+    /// Add a subcommand built via `AppBuilder.build`.
     public fn subcommand(mut self, sc: CommandSpec) -> AppBuilder {
         self.spec.subcommands.push(sc);
         self

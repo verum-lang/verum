@@ -155,8 +155,8 @@ public fn occurs_in(term: &CoreTerm, target: Int{>= 0}) -> Bool {
 /// the strict-positivity check.
 ///
 
-/// Returns `Maybe::Maybe.Some(derivation)` when all constructor types are
-/// strictly positive; `Maybe::Maybe.None` when any constructor fails the
+/// Returns `Maybe.Maybe.Some(derivation)` when all constructor types are
+/// strictly positive; `Maybe.Maybe.None` when any constructor fails the
 /// check (rejected by the elaborator with a well-formedness error).
 ///
 
@@ -209,8 +209,8 @@ public fn introduce_pos(
 /// Berardi measure (Berardi 1998 §3.4).
 ///
 
-/// **Status**: Proved (matches `verum_kernel::soundness::canonical_rules`
-/// classification "K-Pos → LemmaStatus::Proved"). Discharged by
+/// **Status**: Proved (matches `verum_kernel.soundness.canonical_rules`
+/// classification "K-Pos → LemmaStatus.Proved"). Discharged by
 /// `verum audit --kernel-soundness`.
 ///
 

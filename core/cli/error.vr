@@ -35,9 +35,9 @@ mount core.base.string_distance;
 // ExitCode — sysexits.h-aligned (clig.dev §exit-codes)
 // =============================================================================
 
-/// Recommended exit codes. Construct via `ExitCode::ok()` / `::usage()` /
-/// custom via `ExitCode::custom(n)`. Convert to a raw `Int` via `.code()`
-/// before passing to `env::exit`.
+/// Recommended exit codes. Construct via `ExitCode.ok()` / `.usage()` /
+/// custom via `ExitCode.custom(n)`. Convert to a raw `Int` via `.code()`
+/// before passing to `env.exit`.
 public type ExitCode is
     | Ok                        // 0  — success
     | GenericError              // 1  — generic error

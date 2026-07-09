@@ -134,7 +134,7 @@ implement<V: Eq + Hash, L> AdjacencyList<V, L> {
     //
 
     // Naming convention: `_ref` suffix means "no ownership transfer",
-    // matching `core.collections.map.Map::get` (returns `Maybe<&V>`).
+    // matching `core.collections.map.Map.get` (returns `Maybe<&V>`).
     // -------------------------------------------------------------
 
     /// Borrow the canonical vertex list. Zero-clone.
@@ -142,9 +142,9 @@ implement<V: Eq + Hash, L> AdjacencyList<V, L> {
         &self.vertex_list
     }
 
-    /// Borrow the outgoing-edge list for `v`. Returns `Maybe::Maybe.None`
+    /// Borrow the outgoing-edge list for `v`. Returns `Maybe.Maybe.None`
     /// only if `v` was never seen by the builder; an isolated vertex
-    /// (no edges) returns `Maybe::Some` of an empty list reference.
+    /// (no edges) returns `Maybe.Some` of an empty list reference.
     public fn out_edges_ref(&self, v: &V) -> Maybe<&List<Edge<V, L>>> {
         self.out_edges.get(v)
     }

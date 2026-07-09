@@ -78,7 +78,7 @@ mount super.super.judgment.{Derivation, DefinitionalEquality};
 /// β-equality witness.
 ///
 
-/// The `equality_witness` is a `DefinitionalEquality::Beta` (or a
+/// The `equality_witness` is a `DefinitionalEquality.Beta` (or a
 /// composition via `Trans`) proving `original_type ≡_β new_type`.
 public fn introduce_beta(
     ctx: Context,

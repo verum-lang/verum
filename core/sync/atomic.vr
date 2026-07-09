@@ -104,7 +104,7 @@ public type MemoryOrdering is
 
 implement MemoryOrdering {
     /// Canonical short-form name.  Mirrors the LLVM ordering token used
-    /// in the underlying atomic intrinsics and the Rust `std::sync::atomic::Ordering`
+    /// in the underlying atomic intrinsics and the Rust `std.sync.atomic.Ordering`
     /// variants.  Useful for state-machine assertion messages
     /// (e.g. `assert_eq(o.name(), "Acquire")`).
     public fn name(&self) -> Text {

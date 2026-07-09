@@ -28,7 +28,7 @@
 //   (`crates/verum_vbc/src/serialize.rs` /
 //   `crates/verum_vbc/src/deserialize.rs`).
 // Phase 4: user-side replay in
-//   `crates/verum_compiler/src/archive_ctx_loader.rs::replay_mount_aliases`.
+//   `crates/verum_compiler/src/archive_ctx_loader.rs.replay_mount_aliases`.
 //
 // This test pins the contract that the four-phase chain holds end-to-end:
 // a program that depends on stdlib mount-rename aliases must AOT-compile

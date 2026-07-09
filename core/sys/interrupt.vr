@@ -340,7 +340,7 @@ implement CpuContext {
         // No @cfg matched — porting to a new architecture requires a
         // CpuContext layout for it. Fail loud at the call-site rather
         // than silently returning garbage from `unreachable()`.
-        unreachable("CpuContext::zero: no register layout for this target architecture")
+        unreachable("CpuContext.zero: no register layout for this target architecture")
     }
 
     /// Initialize context to start at a function with a given stack.

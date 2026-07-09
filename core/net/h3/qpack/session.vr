@@ -175,7 +175,7 @@ implement QpackSession {
         headers: &List<QpackHeaderField>,
     ) -> Result<List<Byte>, QpackSessionError> {
         // Heuristic 32 bytes/header for typical name+value with
-        // Huffman coding (cf. encoder::encode_field_section).
+        // Huffman coding (cf. encoder.encode_field_section).
         let mut body: List<Byte> = List.with_capacity(headers.len() * 32 + 16);
 
         // Plan per-header emission:

@@ -2,7 +2,7 @@
 // storage/mod.vr — abstract object-storage subsystem
 // =============================================================================
 // Universal object-store abstraction. Concrete adapters implement
-// `core.storage.types::ObjectStore` over specific backends:
+// `core.storage.types.ObjectStore` over specific backends:
 //
 //   - `core.storage.s3` — S3-compatible (AWS S3, MinIO, R2, Wasabi, B2)
 //   - (future: gcs, azure_blob, local_filesystem)

@@ -8,7 +8,7 @@
 //   §1  Static-shape composition — heap constants line up with sibling
 //       allocator / size_class constants.
 //   §2  Live heap_alloc round-trip via the public `Heap<T>` surface —
-//       `Heap.new(value)` lands in `LocalHeap::alloc` for sizes ≤
+//       `Heap.new(value)` lands in `LocalHeap.alloc` for sizes ≤
 //       LARGE_THRESHOLD, exercising the thread-local fast path.
 //   §3  Free-list churn — repeated alloc/drop cycles must recycle pages
 //       and not exhaust process memory.
@@ -46,7 +46,7 @@ fn integration_page_header_leaves_room() {
 // -----------------------------------------------------------------------------
 // §2  Live heap_alloc round-trip via Heap<T>
 //
-// `Heap.new(small_value)` → `cbgr_alloc(layout)` → `LocalHeap::alloc`
+// `Heap.new(small_value)` → `cbgr_alloc(layout)` → `LocalHeap.alloc`
 // (for sizes ≤ LARGE_THRESHOLD).  The thread-local heap services the
 // allocation from its direct-lookup table when wsize ≤ 128.
 // -----------------------------------------------------------------------------

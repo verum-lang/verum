@@ -208,7 +208,7 @@ fn sql_text_literal(t: &Text) -> Text {
 }
 
 // Connection helpers — these route through the canonical pg connection
-// API. Because `MigrationStore::execute_sql` operates at the textual-SQL
+// API. Because `MigrationStore.execute_sql` operates at the textual-SQL
 // level (not the typed `sql#"..."` meta-fn level), we use the raw
 // statement-execution path that postgres/connection.vr exposes for
 // dynamic SQL.

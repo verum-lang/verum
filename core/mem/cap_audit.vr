@@ -230,7 +230,7 @@ implement CapEvent {
     /// which was technically equivalent under the invariant that
     /// callers must pass equal generation values for non-bump events
     /// — but the test surface
-    /// `core-tests/mem/cap_audit/regression_test.vr::regression_bumped_generation_matrix`
+    /// `core-tests/mem/cap_audit/regression_test.vr.regression_bumped_generation_matrix`
     /// constructs events with `(generation_before=1, generation_after=2)`
     /// for ALL six `CapEventKind` variants and expects only Revoke /
     /// GenBump to return true.  Switching to a kind-based check makes

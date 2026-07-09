@@ -179,7 +179,7 @@ pub async fn watch_native(pattern: &Text)
                 Result.Err(_) => return Result.Ok(core.shell.result.ShellResult.from_error(
                     core.shell.result.ShellError.SpawnFailed {
                         command: f"watch_native({pattern_owned})",
-                        reason:  "FsWatcher::new failed".into(),
+                        reason:  "FsWatcher.new failed".into(),
                     })),
             };
             for p in initial.iter() {

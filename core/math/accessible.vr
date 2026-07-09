@@ -230,7 +230,7 @@ public axiom accessible_eq_models_of_accessible_theory<kappa: RegularCardinal>(
 /// MSFS Convention 1.1 setup with `U_1 ⊂ U_2` Grothendieck universes
 /// is precisely the κ_1-accessible / κ_2-accessible split; see the
 /// `KappaAccessibleInfCategory` alias below for the accessor used by
-/// `core.math.syn_mod.GrothendieckOverMod::is_kappa_S_accessible()`.
+/// `core.math.syn_mod.GrothendieckOverMod.is_kappa_S_accessible()`.
 public type AccessibleInfCategory<kappa: RegularCardinal> is protocol extends InfinityCategory {
     /// Witness that C has all κ-filtered ∞-colimits.
     fn has_kappa_filtered_infinity_colimits(&self) -> Bool;
@@ -241,7 +241,7 @@ public type AccessibleInfCategory<kappa: RegularCardinal> is protocol extends In
 };
 
 /// Convenience alias used by syn_mod.vr's
-/// `GrothendieckOverMod::is_kappa_S_accessible` — the accessibility
+/// `GrothendieckOverMod.is_kappa_S_accessible` — the accessibility
 /// view at the (∞, n)-level. n_F is the categorical depth from the
 /// underlying Rich-S Lambek-Scott data.
 public type KappaAccessibleInfCategory<kappa: RegularCardinal> is protocol

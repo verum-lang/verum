@@ -11,7 +11,7 @@ module core.database.sqlite.native.l3_btree.record_compare;
 // Layer: 3
 // Spec: sqlite-native.md §10.4 (key ordering) + §9.5 (collation)
 //
-// Pre-fix: `comparator.vr::cmp_bytes` byte-compared the entire SQLite
+// Pre-fix: `comparator.vr.cmp_bytes` byte-compared the entire SQLite
 // record blob — sound for INTEGER PRIMARY KEY indices but WRONG for
 // every TEXT-keyed index.  Two TEXT values that compare equal under
 // NOCASE (e.g. `"Hello"` vs `"hello"`) compare unequal byte-wise; the

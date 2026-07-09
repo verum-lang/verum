@@ -8,7 +8,7 @@
 // RFC 8446 §4.2:
 //
 
-//  Extension ::= struct {
+//  Extension .= struct {
 //  ExtensionType extension_type;
 //  opaque extension_data<0..2^16-1>;
 //  }
@@ -191,7 +191,7 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
         Extension.ServerNameExt { names } => {
             put_u16(out, EXT_SERVER_NAME);
             vec_u16(out, |b| {
-                // ServerNameList ::= ServerName server_name_list<1..2^16-1>
+                // ServerNameList .= ServerName server_name_list<1..2^16-1>
                 vec_u16(b, |b2| {
                     let mut i: Int = 0;
                     while i < names.len() {

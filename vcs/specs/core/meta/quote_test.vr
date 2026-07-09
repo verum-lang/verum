@@ -583,7 +583,7 @@ fn test_convenience_join_with_multiple_streams() {
     streams.push(s3);
     let sep = QuoteBuilder.new().operator("::").build();
     let result = join_with(streams, sep);
-    // foo :: bar :: baz => 3 idents + 2 seps (2 tokens each) = 7 tokens
+    // foo . bar . baz => 3 idents + 2 seps (2 tokens each) = 7 tokens
     assert(result.len() >= 5);
 }
 

@@ -22,7 +22,7 @@ mount core.base.maybe.{Maybe, Some, None};
 // §B — task #13 CLOSED — `is`-operator on single-variant sum
 //
 // CLOSED 2026-05-15 by an architectural fix in the parser
-// (`crates/verum_fast_parser/src/decl.rs::parse_type_decl_body`).
+// (`crates/verum_fast_parser/src/decl.rs.parse_type_decl_body`).
 //
 // **Root cause (architectural)**: per `grammar/verum.ebnf` §2.4,
 // the `type X = Y;` form (with the `=` sigil) is a TYPE ALIAS, and
@@ -36,7 +36,7 @@ mount core.base.maybe.{Maybe, Some, None};
 //
 // Pre-fix the parser collapsed `type X is OnlyVariant;` (bare
 // identifier, no payload, no leading `|`) into
-// `TypeDeclBody::Alias(OnlyVariant)` — silently turning a
+// `TypeDeclBody.Alias(OnlyVariant)` — silently turning a
 // single-variant sum into an alias to a (typically non-existent)
 // type.  The downstream typechecker / codegen / runtime then saw
 // `SemaphoreError` as an alias, NOT as a variant type:
@@ -44,11 +44,11 @@ mount core.base.maybe.{Maybe, Some, None};
 //     because the destructure-tag path tolerated alias resolution.
 //   - `e.eq(&other)` worked because Eq was an inherent impl.
 //   - `e is SemaphoreError.Closed` returned `false` because the
-//     `is`-operator path strictly required a Type::Variant.
+//     `is`-operator path strictly required a Type.Variant.
 //
 // The fix changes the single-bare-name `is`-form arm at
-// `decl.rs:3384` to emit `TypeDeclBody::Variant(vec![variant])`
-// instead of `TypeDeclBody::Alias`.  Both forms produce identical
+// `decl.rs:3384` to emit `TypeDeclBody.Variant(vec![variant])`
+// instead of `TypeDeclBody.Alias`.  Both forms produce identical
 // AST:
 //
 //     type X is | Closed;     -- explicit leading pipe

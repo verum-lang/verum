@@ -448,7 +448,7 @@ public fn op_seek(
 
 /// Mirror of L4 `Insert(cursor_id, data_reg, key_reg, flags)` opcode.
 /// Caller has already encoded the cell payload (header + key + data)
-/// per `l2_record::encode_cell`.  This bridge function then drives
+/// per `l2_record.encode_cell`.  This bridge function then drives
 /// `btree_insert_at_cursor` which handles the full ripple.
 public fn op_insert(
     c: &mut BtreeCursor,

@@ -68,7 +68,7 @@ fn regression_heap_wrapper_field_resolves_to_inner_list() {
 //   narrow `< 256` user-defined check. Those types satisfied
 //   `is_value_array && !is_user_defined_struct` and erroneously routed
 //   to the array `len` intercept which read
-//   `header.size / sizeof::<Value>()` — for `BinaryHeap` (1-slot
+//   `header.size / sizeof<Value>()` — for `BinaryHeap` (1-slot
 //   record) this returned `1` instead of dispatching to the user-
 //   defined `BinaryHeap.len` body.
 //

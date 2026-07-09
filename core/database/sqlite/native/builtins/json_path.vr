@@ -13,8 +13,8 @@
 //
 
 // Path grammar (matches SQLite):
-//  path ::= '$' segment*
-//  segment ::= '.' name | '.[' INDEX ']' | '[' INDEX ']'
+//  path .= '$' segment*
+//  segment .= '.' name | '.[' INDEX ']' | '[' INDEX ']'
 //
 
 // Names allow alphanumeric + underscore; quoted form ".\"name with spaces\""

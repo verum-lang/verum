@@ -15,7 +15,7 @@
 // Postgres-specific note: the connection's BackendKeyData (process_id,
 // secret_key) is captured per-connection at startup and lives inside
 // the wrapped PgConnection, so a CancelRequest on a busy connection
-// works end-to-end through `PooledConnection<PgConnection>::conn_ref`.
+// works end-to-end through `PooledConnection<PgConnection>.conn_ref`.
 // =============================================================================
 
 @arch_module(

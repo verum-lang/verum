@@ -7,7 +7,7 @@
 // =============================================================================
 //
 // **Purpose.** Production-grade client for MeiliSearch v1.x. Implements
-// `core.search.types::SearchIndex` over the REST API (HTTPS / HTTP).
+// `core.search.types.SearchIndex` over the REST API (HTTPS / HTTP).
 // Composes against `core.net.http` for transport — no bespoke HTTP.
 //
 // **Authentication.** Supports the master key (admin) + API key

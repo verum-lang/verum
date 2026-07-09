@@ -31,7 +31,7 @@ mount core.base.maybe.{Maybe, Some, None};
 //   `crates/verum_vbc/src/codegen/mod.rs`).  Pre-fix every non-
 //   `Regular` `FunctionParamKind` (the entire `SelfValue` / `SelfRef`
 //   / `SelfRefMut` / checked / unsafe / own family) was serialised
-//   into the archive as `TypeRef::Concrete(TypeId::UNIT)` — the
+//   into the archive as `TypeRef.Concrete(TypeId.UNIT)` — the
 //   reference + mutability + tier taxonomy was erased at the
 //   serialisation boundary.  Now each variant encodes as
 //   `Concrete(parent_tid)` (value receivers) or

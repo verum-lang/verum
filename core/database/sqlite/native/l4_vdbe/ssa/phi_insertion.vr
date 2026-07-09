@@ -12,7 +12,7 @@ module core.database.sqlite.native.l4_vdbe.ssa.phi_insertion;
 // Spec: sqlite-native.md §4.4
 //
 // Pass 2 of SSA construction.  Resolves the `PendingPhi` placeholders
-// produced by `from_register_vm::lift_vdbe_to_ssa` (pass 1).
+// produced by `from_register_vm.lift_vdbe_to_ssa` (pass 1).
 //
 // Algorithm (Cytron / Ferrante / Rosen / Wegman / Zadeck 1991):
 //

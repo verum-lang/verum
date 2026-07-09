@@ -98,7 +98,7 @@ fn serialize_with_cells() {
 }
 
 // -----------------------------------------------------------------------------
-// 3. apply_balance_decision::Merge actually concatenates cells
+// 3. apply_balance_decision.Merge actually concatenates cells
 // -----------------------------------------------------------------------------
 
 fn merge_concatenates_cells() {

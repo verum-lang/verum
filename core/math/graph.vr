@@ -445,7 +445,7 @@ public fn dijkstra<V, W, G>(g: &G, start: V) -> Map<V, W>
     // every remaining vertex is unreachable from `start`.
     loop {
         // Find unvisited vertex with minimum dist. The Map's iter
-        // yields (K, V) pairs (verum_common::Map<K,V>::iter signature),
+        // yields (K, V) pairs (verum_common.Map<K,V>.iter signature),
         // so destructure rather than field-access.
         let mut next_vertex: Maybe<V> = Maybe.None;
         let mut next_dist: Maybe<W> = Maybe.None;

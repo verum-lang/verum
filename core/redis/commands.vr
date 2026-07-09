@@ -4,12 +4,12 @@
 // Layer: 4 (Redis subsystem)
 //
 // **Purpose.** Type-safe builders for Redis commands. Each command
-// is a thin wrapper around `client::exec` that:
+// is a thin wrapper around `client.exec` that:
 //   - Constructs the RESP argv from typed inputs.
 //   - Decodes the reply into the canonical Verum type for the
 //     command (Int, Text, Bytes, List<Text>, Map<Text, Text>, etc.).
 //   - Maps "this key does not exist" replies (NullBulk / Nil) to
-//     `Maybe::Maybe.None` for read-side commands.
+//     `Maybe.Maybe.None` for read-side commands.
 //
 // Coverage (Redis ≥ 6.0):
 //   * Strings    : GET / SET / SETEX / SETNX / DEL / EXISTS / INCR /

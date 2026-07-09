@@ -87,7 +87,7 @@ fn integration_error_sentinels_chain_consistently() {
 //
 // POSIX FHS guarantees `/tmp` is world-writable.  The interpreter's
 // real-file-IO implementation (`state.open_files` table backed by
-// `std::fs`) writes via `__file_write_string_raw` and reads via
+// `std.fs`) writes via `__file_write_string_raw` and reads via
 // `__file_read_to_string_raw`.  Cleanup on every code path.
 // =============================================================================
 

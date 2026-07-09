@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: sqlite, native, l1_pager, wal_reader, wal_index, recovery, multi_reader
 // @timeout: 15000
-// @description: wal_reader::recover_state → WalIndex publish (#165).
+// @description: wal_reader.recover_state → WalIndex publish (#165).
 //               Pre-fix `recover_state` walked the WAL frame stream
 //               and rebuilt `writer.state.frame_index` (the writer's
 //               own in-memory page→frame map) but NEVER published

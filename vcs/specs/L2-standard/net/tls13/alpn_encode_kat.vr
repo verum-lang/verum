@@ -11,7 +11,7 @@
 //       ExtensionType ext_type = application_layer_protocol_negotiation (16);
 //       opaque<2..2^16-1> extension_data = u16_length_prefixed(
 //           ProtocolName protocol_name_list<2..2^16-1>;
-//           ProtocolName ::= opaque<1..255>;
+//           ProtocolName .= opaque<1..255>;
 //       );
 //   }
 //

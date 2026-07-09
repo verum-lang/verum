@@ -5,9 +5,9 @@
 // =============================================================================
 //
 
-// X509Certificate ::= SEQUENCE { ... extensions [3] EXPLICIT Extensions OPTIONAL }
-// Extensions ::= SEQUENCE SIZE (1..MAX) OF Extension
-// Extension ::= SEQUENCE {
+// X509Certificate .= SEQUENCE { ... extensions [3] EXPLICIT Extensions OPTIONAL }
+// Extensions .= SEQUENCE SIZE (1..MAX) OF Extension
+// Extension .= SEQUENCE {
 //  extnID OBJECT IDENTIFIER,
 //  critical BOOLEAN DEFAULT FALSE,
 //  extnValue OCTET STRING
@@ -192,7 +192,7 @@ fn dispatch(ext: RawExtension, out: &mut ExtensionSet) -> Result<(), DerError> {
 // AKI / SKI — small enough to live inline
 // =============================================================================
 
-/// AKI ::= SEQUENCE { keyIdentifier [0] IMPLICIT OCTET STRING OPTIONAL,
+/// AKI .= SEQUENCE { keyIdentifier [0] IMPLICIT OCTET STRING OPTIONAL,
 ///  authorityCertIssuer [1] IMPLICIT GeneralNames OPTIONAL,
 ///  authorityCertSerialNumber [2] IMPLICIT INTEGER OPTIONAL }
 ///

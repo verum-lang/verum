@@ -7,17 +7,17 @@
 
 // RFC 8446 §4.2.11 pre_shared_key extension body on ClientHello:
 //
-//   OfferedPsks ::= {
+//   OfferedPsks .= {
 //       PskIdentity identities<7..2^16-1>,   -- 1+ identities
 //       PskBinderEntry binders<33..2^16-1>,   -- 1+ binders
 //   }
 //
-//   PskIdentity ::= {
+//   PskIdentity .= {
 //       opaque identity<1..2^16-1>,
 //       uint32 obfuscated_ticket_age,
 //   }
 //
-//   PskBinderEntry ::= opaque<32..255>;   -- HMAC-Hash output
+//   PskBinderEntry .= opaque<32..255>;   -- HMAC-Hash output
 //
 // Binder length prefix is u8; identity length prefix is u16.
 // obfuscated_ticket_age is 4-byte big-endian.

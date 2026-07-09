@@ -66,10 +66,10 @@ module core.proof.reflection;
 // SMT-LIB v2.6 simple-symbol grammar:
 //
 
-//  simple_symbol_first ::= letter | "~" | "!" | "@" | "$" | "%"
+//  simple_symbol_first .= letter | "~" | "!" | "@" | "$" | "%"
 //  | "^" | "&" | "*" | "_" | "+" | "="
 //  | "<" | ">" | "." | "?" | "/" | "-"
-//  simple_symbol_rest ::= simple_symbol_first | digit
+//  simple_symbol_rest .= simple_symbol_first | digit
 //
 
 // We accept this grammar literally; quoted-symbol form (|foo bar|)

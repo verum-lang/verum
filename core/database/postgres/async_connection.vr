@@ -39,7 +39,7 @@
 //
 // Out of V0 (each follow-up):
 //   * `prepare` / `execute_prepared` (PG extended-query is
-//     scaffolded; needs PgRequest::Prepare + Execute variants).
+//     scaffolded; needs PgRequest.Prepare + Execute variants).
 //   * Pipeline (sync `PgPipeline` keeps being the only path).
 //   * Replication / COPY / NOTIFY (each its own sub-protocol —
 //     async dispatch loop differs and gets its own actor tier).

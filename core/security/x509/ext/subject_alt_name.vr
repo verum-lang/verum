@@ -3,9 +3,9 @@
 // =============================================================================
 //
 
-// SubjectAltName ::= GeneralNames
-// GeneralNames ::= SEQUENCE SIZE (1..MAX) OF GeneralName
-// GeneralName ::= CHOICE {
+// SubjectAltName .= GeneralNames
+// GeneralNames .= SEQUENCE SIZE (1..MAX) OF GeneralName
+// GeneralName .= CHOICE {
 //  otherName [0] OtherName,
 //  rfc822Name [1] IA5String,
 //  dNSName [2] IA5String,

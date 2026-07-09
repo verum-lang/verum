@@ -2,7 +2,7 @@
 // core.architecture.counterfactual — Counterfactual reasoning engine surface
 // =============================================================================
 //
-// **Verum-native mirror of `verum_kernel::arch_counterfactual`.**
+// **Verum-native mirror of `verum_kernel.arch_counterfactual`.**
 //
 // ## What the counterfactual engine does
 //

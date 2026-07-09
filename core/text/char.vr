@@ -252,7 +252,7 @@ implement Char {
     /// shared with Rust / Swift / Python.  Callers that need
     /// uppercase output should call `.to_ascii_uppercase()` on the
     /// result.  Pinned by
-    /// `core-tests/text/char/regression_test.vr::regression_c_from_digit_hex_pinned`.
+    /// `core-tests/text/char/regression_test.vr.regression_c_from_digit_hex_pinned`.
     public fn from_digit(digit: Int, radix: Int) -> Maybe<Char> {
         assert(radix >= 2 && radix <= 36, "radix must be 2..=36");
 
@@ -293,7 +293,7 @@ implement Char {
 
     // NOTE (TEXT-AOT-CHARS-PUSH-1 / FUNC-REGISTRY-QUALIFICATION-1):
     // the branchy `encode_utf8` that lived here DUPLICATED
-    // `core/base/primitives.vr::Char.encode_utf8` (the CharExtended
+    // `core/base/primitives.vr.Char.encode_utf8` (the CharExtended
     // 0x50 intrinsic wrapper). Two same-name+arity definitions made
     // the AOT name+arity dedup keep the positionally-last, BODYLESS
     // occurrence -> `@Char.encode_utf8` lowered to a `ret 0` stub ->

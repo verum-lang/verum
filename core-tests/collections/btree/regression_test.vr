@@ -157,7 +157,7 @@ fn regression_btreemap_get_or_default_present() {
 // `match m.first_key_value() { ... }` on an empty BTreeMap panics
 // with "method 'deref' not found on receiver of runtime kind `Float`"
 // — suggests the empty-state implementation returns a sentinel that
-// the Maybe<(&K,&V)>::deref / is-Maybe.None dispatch doesn't recognise.
+// the Maybe<(&K,&V)>.deref / is-Maybe.None dispatch doesn't recognise.
 //
 // Likely cascades from §A.
 // =============================================================================

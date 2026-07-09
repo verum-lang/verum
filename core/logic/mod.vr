@@ -12,7 +12,7 @@
 //  * `kripke.vr` — Kripke semantics for modal logic. World-relation
 //  models for ◻/◇ modalities, used by the temporal-logic
 //  verification path (LTL/CTL backends in
-//  `verum_smt::temporal_logic`) and by the epistemic-logic
+//  `verum_smt.temporal_logic`) and by the epistemic-logic
 //  library in `core.math.epistemic`.
 //
 
@@ -27,7 +27,7 @@
 //  `∗`, points-to `↦`, frame rule. The verification surface for
 //  stateful programs (mutating heap, concurrent threads,
 //  IO-bearing operations). Mirrors
-//  `verum_kernel::separation_logic` so user proof bodies cite
+//  `verum_kernel.separation_logic` so user proof bodies cite
 //  the same heap-predicate vocabulary the kernel dispatcher
 //  consumes (#161).
 //

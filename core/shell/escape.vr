@@ -26,7 +26,7 @@
 
 // Threat model: shell injection. Every `${expr}` interpolation in a `sh#`
 // tagged literal is rewritten by the compiler into a call to the appropriate
-// `ShellEscape::shell_quote` impl, so no untrusted byte can ever reach the
+// `ShellEscape.shell_quote` impl, so no untrusted byte can ever reach the
 // shell parser unwrapped. Direct, unquoted bytes are reachable only via the
 // explicit `$unsafe{...}` opt-out which requires a `unsafe` block.
 //
@@ -45,7 +45,7 @@ mount core.text.format.{Formatter, FormatError};
 //
 
 // Different shells have incompatible quoting rules. ShellFlavour selects
-// the strategy used by `Escaper::quote_for`. Default for `sh#"..."` literals
+// the strategy used by `Escaper.quote_for`. Default for `sh#"..."` literals
 // is `Posix` on Unix and `Cmd` on Windows; explicit override available.
 
 public type ShellFlavour is

@@ -560,7 +560,7 @@ implement TextFormatter {
     //
     // Indexed iteration (`while i < n`) rather than `for b in bytes` —
     // the `for x in &[T]` form on a slice value (e.g. one produced by
-    // `Text.as_bytes()`) trips an LLVM `SmallVectorBase::grow_pod`
+    // `Text.as_bytes()`) trips an LLVM `SmallVectorBase.grow_pod`
     // SIGSEGV in the slice-iter lowering (task #9 / task #11 share
     // root).  Indexed access mirrors the canonical stdlib pattern
     // (`utf8_validate` / `kmp_failure_table`) and is uniformly

@@ -320,7 +320,7 @@ public type ArgSpec is {
     completion:     CompletionSource,
     interactive:    InteractivePolicy,
     hidden:         Bool,
-    /// Тип-маркер от FromArg::arg_kind() для default-completion / placeholder.
+    /// Тип-маркер от FromArg.arg_kind() для default-completion / placeholder.
     kind_hint:      Text,           // "Path" | "Hostname" | "Generic" | ...
 };
 

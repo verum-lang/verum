@@ -436,10 +436,10 @@ public fn size_class_index(size: Int) -> Maybe<Int> {
 ///
 /// **Workaround**: body inlines the lookup via match instead of
 /// `SIZE_CLASSES[idx]` — bare-name `SIZE_CLASSES` collides with
-/// `core/mem/size_class.vr::SIZE_CLASSES` (73-element table) and the
+/// `core/mem/size_class.vr.SIZE_CLASSES` (73-element table) and the
 /// archive-load first-wins picks the wrong table.  Match-based body
 /// is collision-immune.  Pinned by
-/// `core-tests/mem/allocator/regression_test.vr::regression_size_class_round_trip_exact`.
+/// `core-tests/mem/allocator/regression_test.vr.regression_size_class_round_trip_exact`.
 /// Until mount-scope-aware const resolution lands (#39 in MEMORY.md),
 /// this inline match is the canonical fix.
 @inline

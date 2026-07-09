@@ -201,7 +201,7 @@ public mount .heap.{
     get_heap_stats,
     // PAGE_HEADER_SIZE now lives in `core.mem.size_class` (re-exported
     // via the .size_class.{...} mount above).  Pre-fix it was declared
-    // in heap.vr but `size_class.vr::blocks_per_page` silently
+    // in heap.vr but `size_class.vr.blocks_per_page` silently
     // hardcoded 64 — fixed by hoisting the constant down to the
     // lowest-used layer.
     DIRECT_LOOKUP_SIZE,

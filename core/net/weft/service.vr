@@ -52,7 +52,7 @@
 // replacement for the underlying state machine. Library authors
 // (middleware, executors, custom-Future combinators) sometimes need
 // the raw poll-based interface. Application code should reach for
-// `ready()` + `Permit::dispatch` exclusively; the type system makes
+// `ready()` + `Permit.dispatch` exclusively; the type system makes
 // that the path of least resistance.
 
 @arch_module(
@@ -75,7 +75,7 @@ mount core.async.waker.{Context};
 /// `poll_ready` is mandatory — §5.1 rationale.
 ///
 
-/// **Prefer `ready()` + `Permit::dispatch` for application code.**
+/// **Prefer `ready()` + `Permit.dispatch` for application code.**
 /// The raw `poll_ready` / `call` pair is the implementer-facing
 /// state machine; the Permit wrapper is the safe caller-facing
 /// surface.
@@ -121,7 +121,7 @@ public type Service<Req, Resp> is protocol {
 /// The only way to construct a `Permit` is through the `ready()`
 /// free function, which awaits a successful `poll_ready`. The
 /// only way to use a `Permit` is `dispatch`, which moves it
-/// (releasing the inner borrow) and forwards to `Service::call`.
+/// (releasing the inner borrow) and forwards to `Service.call`.
 public type Permit<S: Service<Req, Resp>, Req, Resp> is {
     /// Borrow of the underlying service. The borrow's lifetime
     /// equals the Permit's lifetime; on `dispatch` the Permit is
@@ -146,7 +146,7 @@ implement<S: Service<Req, Resp>, Req, Resp> Permit<S, Req, Resp> {
 // ready() — earn a Permit
 // =============================================================================
 
-/// Future that pumps `Service::poll_ready` until it returns
+/// Future that pumps `Service.poll_ready` until it returns
 /// `Ready(Result.Ok(()))`, then resolves with a `Permit`. Internal
 /// driver for `ready()`.
 type PollReadyFuture<S: Service<Req, Resp>, Req, Resp> is {

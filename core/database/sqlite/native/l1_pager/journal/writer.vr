@@ -23,7 +23,7 @@ module core.database.sqlite.native.l1_pager.journal.writer;
 //
 
 // `WalWriter` is sync — the L1 actor that wraps it (`l1_pager/actor.vr`)
-// makes that async via `core.async.task::block_on_io`. Direct callers
+// makes that async via `core.async.task.block_on_io`. Direct callers
 // in tests can use this surface as-is.
 // =============================================================================
 

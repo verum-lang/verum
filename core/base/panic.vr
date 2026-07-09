@@ -22,7 +22,7 @@ mount core.intrinsics.{spin_hint, catch_unwind};
 // (mount-rename doesn't surface to AOT codegen).  The only call site
 // uses fully-qualified `core.intrinsics.unreachable()` instead.
 // Explicit Result/Ok/Err mounts ensure AOT codegen's catch_unwind
-// internal Result::Ok/Result::Err lookup succeeds — these are
+// internal Result.Ok/Result.Err lookup succeeds — these are
 // implicitly in scope via prelude but the codegen's variant-tag
 // lookup needs them in the local function table.
 mount core.base.result.{Result, Ok, Err};

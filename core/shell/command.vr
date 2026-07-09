@@ -7,7 +7,7 @@
 //
 
 // `ShellCommand` is the materialised type of `sh#"..."` tagged literals. The
-// type-inference layer (verum_types::infer) maps every `sh` tag to
+// type-inference layer (verum_types.infer) maps every `sh` tag to
 // `ShellCommand`; the macro-expansion layer lowers the literal into a
 // `ShellCommand { text: <concat> }` constructor. Together they give the
 // surface its load-bearing semantics:

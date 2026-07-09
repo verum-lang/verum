@@ -38,10 +38,10 @@ mount core.collections.list.List;
 //
 // Evidence: `verum test --interp --filter test_sink_accepts_bytes` shows
 // `runtime: NullPointerAt { op: "opcode 0x66", site: "sys.linux.syscall.write" }`
-// — the function executed IS `sys.linux.syscall.write`, not `Sink::write`.
+// — the function executed IS `sys.linux.syscall.write`, not `Sink.write`.
 //
 // Tracking task #17/#39: mount-scope-aware `lookup_function` for method-call
-// dispatch sites in `crates/verum_vbc/src/codegen/expressions.rs::compile_method_call`
+// dispatch sites in `crates/verum_vbc/src/codegen/expressions.rs.compile_method_call`
 // and the resolved-call-target fast path
 // `compile_resolved_call_target_with_receiver`.
 //
@@ -222,7 +222,7 @@ fn regression_chain_reads_across_boundary() {
 // =============================================================================
 
 // CLOSED 2026-05-24 — compile_try alias resolution.  Pre-fix
-// `IoResult<Int>` failed `WKT::Result.matches("IoResult")` (alias not
+// `IoResult<Int>` failed `WKT.Result.matches("IoResult")` (alias not
 // resolved before classifier).  Now `?` correctly classifies aliased
 // Result types and preserves StreamError.kind through Err propagation.
 @test

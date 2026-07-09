@@ -300,7 +300,7 @@ public theorem grothendieck_construction_n_1_constructive(
         //
 
         //  The accessibility-grounded route from
-        //  syn_mod::msfs_definition_3_3_o2_via_accessibility
+        //  syn_mod.msfs_definition_3_3_o2_via_accessibility
         //  chains: AR 1.26 closure + kappa-accessible bridge
         //  → SSMembership in S_S^global.
         //
@@ -312,9 +312,9 @@ public theorem grothendieck_construction_n_1_constructive(
 
         // **Kernel discharge** (2026-04-29): the AR 1.26 closure
         // step now has a direct algorithmic counterpart in
-        // `verum_kernel::accessibility::build_filtered_colimit`
+        // `verum_kernel.accessibility.build_filtered_colimit`
         // (V0 module), surfaced through
-        // `core.proof.kernel_bridge::kernel_specialised_limits`
+        // `core.proof.kernel_bridge.kernel_specialised_limits`
         // for proof-DSL invocation.
         let set_witness = SetCategory { _phantom: 0 };
         // Step 2 — Apply AR 1.26 closure to set_witness.
@@ -325,9 +325,9 @@ public theorem grothendieck_construction_n_1_constructive(
 
         // **Kernel discharge.** The (∞,1)-topos structure of
         // S_S^global is now backed by
-        // `verum_kernel::infinity_topos::build_infinity_topos`
+        // `verum_kernel.infinity_topos.build_infinity_topos`
         // (HTT 6.1 Giraud axioms) — see
-        // `core.proof.kernel_bridge::kernel_infinity_topos`.
+        // `core.proof.kernel_bridge.kernel_infinity_topos`.
         apply kappa_accessible_lands_in_s_s_global(&set_witness);
     };
 

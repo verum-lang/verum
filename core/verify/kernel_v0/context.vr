@@ -6,7 +6,7 @@
 // The bootstrap kernel's typing context: an ordered stack of types
 // corresponding to bound variables, with index 0 being the
 // innermost (most-recent) binder. Mirrors
-// `verum_kernel::proof_checker::Context` exactly.
+// `verum_kernel.proof_checker.Context` exactly.
 //
 
 // **De Bruijn convention**
@@ -33,14 +33,14 @@
 // new binder onto the inner end. The Verum implementation backing
 // it is `List<CoreTerm>`, with the convention that the *last*
 // element is the most-recent binder. This matches the Rust-side
-// `Vec<Term>` representation in `proof_checker::Context`.
+// `Vec<Term>` representation in `proof_checker.Context`.
 //
 
 // **Faithfulness invariant**
 //
 
 //  Rust-side → this module's API:
-//  Context::new() → Context.empty()
+//  Context.new() → Context.empty()
 //  ctx.lookup(i) → ctx.lookup(i)
 //  ctx.extend(ty) → ctx.extend(ty)
 //  ctx.depth() → ctx.depth()
@@ -87,7 +87,7 @@ implement Context {
     ///
     /// **Compositionality**: returning a fresh value (not mutating in
     /// place) means typing rules can be expressed declaratively without
-    /// thread-through-state. Matches the Rust-side `Context::extend`
+    /// thread-through-state. Matches the Rust-side `Context.extend`
     /// signature.
     public fn extend(&self, ty: CoreTerm) -> Context
         ensures result.types.len() == self.types.len() + 1
@@ -98,13 +98,13 @@ implement Context {
     }
 
     /// Look up the type of de Bruijn index `i` in the context. Returns
-    /// `Maybe::Maybe.None` if `i` is out of bounds (free variable rejected by
+    /// `Maybe.Maybe.None` if `i` is out of bounds (free variable rejected by
     /// the elaborator).
     ///
     /// **Crucially**: the returned type IS NOT yet shifted. Callers
     /// that need the type in the OUTER frame (most do) must shift_up
     /// by `i + 1`. This is the same contract as the Rust-side
-    /// `Context::lookup`. The shift is delegated to the term-ops
+    /// `Context.lookup`. The shift is delegated to the term-ops
     /// module so the context here is purely structural.
     public fn lookup(&self, i: Int{>= 0}) -> Maybe<CoreTerm>
         requires i < self.types.len() || i >= self.types.len()
@@ -120,14 +120,14 @@ implement Context {
     }
 
     /// Look up + shift in one step. Mirrors the Rust-side
-    /// `Context::lookup` which performs the shift internally. Used by
+    /// `Context.lookup` which performs the shift internally. Used by
     /// the T-Var inference rule: `ctx ⊢ Var(i) : shift_up(ctx[i], i+1)`.
     ///
     /// (The shift is the standard de Bruijn move-into-context-frame
     /// operation. Defined in core_term_ops.vr; this signature documents
     /// the contract.)
     public fn lookup_shifted(&self, i: Int{>= 0}) -> Maybe<CoreTerm> {
-        // Implementation calls into core_term_ops::shift_up after the
+        // Implementation calls into core_term_ops.shift_up after the
         // raw lookup. Composed here so consumers can use either form
         // depending on whether they need the raw or shifted view.
         return self.lookup(i);  // Forward to raw lookup; shift is deferred to core_term_ops.

@@ -58,7 +58,7 @@ mount core.intrinsics.atomic.{
 // `core.base.memory.{ptr_offset}`) keep working.  Internal callers in
 // this file (Heap/Shared/MaybeUninit body sites) use the bare names
 // directly — they resolve to the mounted intrinsics, which emit the
-// `DirectOpcode` strategies from `verum_vbc::intrinsics::registry`
+// `DirectOpcode` strategies from `verum_vbc.intrinsics.registry`
 // inline.
 //
 // History: the previous design declared `public fn ptr_read<T>(...) {
@@ -76,7 +76,7 @@ mount core.intrinsics.atomic.{
 // intrinsics directly eliminates the bare-name collision; bare
 // `ptr_read(...)` in this file now resolves unambiguously to the
 // archive-loaded `core.intrinsics.memory.ptr_read` whose body is
-// `@intrinsic("ptr_read", ptr)` — emitting `Opcode::Deref` inline.
+// `@intrinsic("ptr_read", ptr)` — emitting `Opcode.Deref` inline.
 public mount core.intrinsics.memory.{
     ptr_read,
     ptr_write,

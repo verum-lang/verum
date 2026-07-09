@@ -6,7 +6,7 @@
 // =============================================================================
 //
 // **Purpose.** Thin adapter exposing the multi-purpose
-// `core.redis.RedisClient` as a `core.cache.types::CacheBackend`.
+// `core.redis.RedisClient` as a `core.cache.types.CacheBackend`.
 // Composition, not duplication: the heavy lifting (RESP protocol,
 // connection pool, cluster redirects) lives in `core.redis`; this
 // adapter just routes the abstract Cache primitives to the
@@ -25,7 +25,7 @@
     lifecycle:     Lifecycle.Theorem("v0.1"),
     declarations: ShapeDeclarations {
         purpose: Maybe.Some(Purpose {
-            role: "thin adapter exposing core.redis as core.cache.types::CacheBackend".to_text(),
+            role: "thin adapter exposing core.redis as core.cache.types.CacheBackend".to_text(),
             k_min: CveThresholdK.FullWitness,
             v_min: CveThresholdV.NamedCertification,
             e_min: CveThresholdE.StructurallyReady,

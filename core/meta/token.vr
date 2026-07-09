@@ -693,7 +693,7 @@ implement Delimiter {
 /// Punctuation spacing
 @repr(UInt8)
 public type Spacing is
-    /// Followed by another punct (no space): `&&`, `::`, `->`, etc.
+    /// Followed by another punct (no space): `&&`, `.`, `->`, etc.
     | Joint
     /// Followed by space or non-punct
     | Alone;

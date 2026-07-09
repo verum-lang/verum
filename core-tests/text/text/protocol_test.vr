@@ -169,7 +169,7 @@ fn iterator_lines_empty_text_yields_nothing() {
 
 @test
 fn iterator_lines_trailing_newline_does_not_emit_empty() {
-    // Mirrors Rust's `str::lines`: a trailing '\n' is consumed, not
+    // Mirrors Rust's `str.lines`: a trailing '\n' is consumed, not
     // emitted as an empty line.
     let s: Text = "a\n";
     let mut it: Lines = s.lines();
@@ -929,7 +929,7 @@ fn concat_empty_rhs_returns_lhs() {
 // `[ObjectHeader][len:i64][cap:i64][data_ptr]` shape the intercept
 // assumes.  Investigation needed at
 // `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
-// text_static_runtime.rs::"join"` arm.
+// text_static_runtime.rs."join"` arm.
 
 @test
 fn join_empty_list_yields_empty() {
@@ -1058,7 +1058,7 @@ fn cmp_empty_versus_non_empty() {
 // =============================================================================
 //
 // Pre-fix, calling `s.rfind(&needle)` from user-side code crashed the
-// LLVM lowering at `SmallVectorBase::grow_pod` (task #9).  Closed
+// LLVM lowering at `SmallVectorBase.grow_pod` (task #9).  Closed
 // transitively when the stdlib bodies that used `for byte in bytes`
 // over a `&[Byte]` slice were migrated to the canonical indexed-while
 // pattern (Hasher.write + Formatter.write_bytes), eliminating the

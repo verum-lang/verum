@@ -63,7 +63,7 @@ mount core.collections.List;
 // Inlined: use core.sys.common.random_bytes(...) directly (task #11).
 
 // CSPRNG-backed entropy fill. Routes through the `random_u64` VBC
-// intrinsic in 8-byte chunks (direct libc::getentropy on a Rust-side
+// intrinsic in 8-byte chunks (direct libc.getentropy on a Rust-side
 // buffer) to bypass the broken pointer-marshalling chain through
 // `sys.common.random_bytes → safe_getentropy → unsafe { getentropy }`
 // that silently misroutes Pointer-tagged buf values.

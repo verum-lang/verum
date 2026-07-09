@@ -30,7 +30,7 @@ fn law_stackframe_round_trip_pinned_witnesses() {
         ("main",  "x.vr",  1,    1),
         ("alpha", "a.vr",  100,  50),
         ("",      "",      0,    0),
-        ("nested::deep", "long/path.vr", 99999, 1),
+        ("nested.deep", "long/path.vr", 99999, 1),
     ];
     for c in cases.iter() {
         let (f, file, line, col) = (*c);

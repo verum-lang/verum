@@ -137,8 +137,8 @@ public fn introduce_fwax(
 /// vacuously.
 ///
 
-/// **Status**: Proved (matches `verum_kernel::soundness::canonical_rules`
-/// classification "K-FwAx → LemmaStatus::Proved"). Discharged by
+/// **Status**: Proved (matches `verum_kernel.soundness.canonical_rules`
+/// classification "K-FwAx → LemmaStatus.Proved"). Discharged by
 /// `verum audit --kernel-soundness`.
 ///
 

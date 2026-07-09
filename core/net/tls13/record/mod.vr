@@ -8,7 +8,7 @@
 // Two shapes live on the wire:
 //
 
-//  TLSPlaintext ::= struct {
+//  TLSPlaintext .= struct {
 //  ContentType opaque_type;
 //  ProtocolVersion legacy_record_version; // always 0x0303
 //  uint16 length; // ≤ 2^14
@@ -16,7 +16,7 @@
 //  };
 //
 
-//  TLSCiphertext ::= struct {
+//  TLSCiphertext .= struct {
 //  ContentType opaque_type = application_data; // always 23
 //  ProtocolVersion legacy_record_version = 0x0303;
 //  uint16 length; // ≤ 2^14 + 256
@@ -24,7 +24,7 @@
 //  };
 //
 
-//  TLSInnerPlaintext ::= struct {
+//  TLSInnerPlaintext .= struct {
 //  opaque content[TLSPlaintext.length];
 //  ContentType type;
 //  uint8 zeros[length_of_padding];

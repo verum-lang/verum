@@ -9,13 +9,13 @@
 //
 // 1. **Result.Ok(()) — Unit-payload Call gate** — the bidirectional Call arm in
 //    `check_expr_inner` gated single-payload variant constructor checks on
-//    `!matches!(payload_ty, Type::Unit)`, so `Result.Ok(())` (1-arg call with Unit
+//    `!matches!(payload_ty, Type.Unit)`, so `Result.Ok(())` (1-arg call with Unit
 //    payload) fell through to the arity-only synth path.  Arity-1 matched
 //    multiple `Result.Ok(_)` parents in `variant_constructor_parents` (canonical
 //    collision: `Result.Ok(T)` vs `core.security.zk.halo2.prover.ProveResult
 //    .Ok(Proof)`); first-registered-wins picked the wrong parent and
 //    check_expr against the wrong payload type ("expected Proof, found Unit").
-//    Fix: drop the `!Type::Unit` gate so single-payload always takes the
+//    Fix: drop the `!Type.Unit` gate so single-payload always takes the
 //    bidirectional path regardless of payload type.
 //
 // 2. **Bare-path variant constructor — no Path arm in check_expr_inner** —

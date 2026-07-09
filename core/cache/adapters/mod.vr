@@ -1,7 +1,7 @@
 // =============================================================================
 // cache/adapters/mod.vr — concrete cache backends
 // =============================================================================
-// Re-exports adapters that implement `core.cache.types::CacheBackend`
+// Re-exports adapters that implement `core.cache.types.CacheBackend`
 // over concrete data stores. Each adapter is a thin wrapper —
 // the heavy lifting lives in the underlying subsystem
 // (`core.redis`, `core.memcached`, future in-memory LRU).

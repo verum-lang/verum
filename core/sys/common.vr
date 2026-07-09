@@ -570,7 +570,7 @@ fn align_pointer(ptr: &unsafe Byte, alignment: Int) -> &unsafe Byte {
 // Pre-fix this file declared `mmap_intrinsic`/`munmap_intrinsic`/
 // `gettid_intrinsic` as `@intrinsic("sys_mmap")`/`("sys_munmap")`/
 // `("sys_gettid")` extern stubs that DUPLICATED the canonical
-// declarations in `darwin/libsystem.vr::safe_mmap`/`safe_munmap`/
+// declarations in `darwin/libsystem.vr.safe_mmap`/`safe_munmap`/
 // `safe_gettid`.  Both routed to the same VBC opcode, so the
 // duplication was harmless at runtime, but violated the "single
 // canonical home per intrinsic" architectural invariant.

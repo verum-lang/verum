@@ -43,7 +43,7 @@ mount core.collections.list.List;
 
 // CLOSED §A 2026-05-25 (multi-layer fix):
 //
-// 1. `core/io/path.vr::push` extracts both `component.inner.clone()` and
+// 1. `core/io/path.vr.push` extracts both `component.inner.clone()` and
 //    `self.path.inner.clone()` to locals, mutates the local via
 //    single-step `push`/`push_str`, writes back via single-level
 //    `self.path = Path { inner: local }` — single-level field write-back
@@ -67,7 +67,7 @@ fn regression_pathbuf_push_text_equality_drift() {
 // =============================================================================
 // §B-ignored — Char-typed `public const` value-load
 //
-// `extract_const_literal_value` now handles `LiteralKind::Char`, but the
+// `extract_const_literal_value` now handles `LiteralKind.Char`, but the
 // downstream load-site for mount-imported stdlib consts still doesn't
 // reach the `__const_val_N` LoadI fast-path.  `MAIN_SEPARATOR` reads
 // back to a value that's NOT 47.  Path.vr inlines literal '/' as the

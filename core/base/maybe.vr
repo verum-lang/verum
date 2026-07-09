@@ -38,9 +38,9 @@ implement<T> IntCoercible for Maybe<T> {}
 //
 //   1. Type checker accepts `let x: T = *maybe_t` via the
 //      `IntCoercible for Maybe<T>` impl above.
-//   2. Codegen `UnOp::Deref` dispatches `*receiver` through the
+//   2. Codegen `UnOp.Deref` dispatches `*receiver` through the
 //      generic user-Deref-protocol path in
-//      `crates/verum_vbc/src/codegen/expressions.rs::compile_unary`
+//      `crates/verum_vbc/src/codegen/expressions.rs.compile_unary`
 //      (no Maybe special-case — CLAUDE.md "no hardcoded stdlib
 //      knowledge in compiler" rule).
 //   3. Runtime `handle_deref` (`cbgr.rs:~244`) intentionally
@@ -54,7 +54,7 @@ implement<T> IntCoercible for Maybe<T> {}
 // generic Deref-protocol dispatch finds `Maybe.deref`, returns `&T`
 // (which `assert_eq<T: Eq>` auto-derefs at the comparison site
 // through the same `&_ < _` machinery validated by
-// `core-tests/base/primitives/comparison_test.vr::*ref_a < b`).
+// `core-tests/base/primitives/comparison_test.vr.*ref_a < b`).
 //
 // Other sum types (IpAddr, custom variants) without their own
 // `Deref` impl keep the existing identity-deref behaviour — the

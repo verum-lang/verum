@@ -18,6 +18,20 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Job 0: Verum-syntax gate. Pure Python, no build — the fastest merge blocker.
+  # grammar/verum.ebnf knows only `.` for paths; `::` is a Rust porting artefact
+  # the parser only tolerates as error-recovery. This keeps it out of .vr sources
+  # (IPv6 / SQL-cast / URI / script DATA excluded). See the script's header.
+  # ---------------------------------------------------------------------------
+  vr-syntax:
+    name: Verum syntax gate (no Rust `::`)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No Rust-style `::` in .vr sources
+        run: python3 vcs/scripts/check_no_double_colon.py --check
+
+  # ---------------------------------------------------------------------------
   # Job 1: compile + unit tests on Linux (x86_64 + aarch64) and macOS.
   # Linux-arm64 matters because aarch64 uses a different kernel syscall
   # table from x86_64 — see sys/linux/arch.vr. Blocks merge.

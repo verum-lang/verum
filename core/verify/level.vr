@@ -49,7 +49,7 @@ mount core.{Maybe, Text};
 ///
 
 /// **Coherent variants (M4.E)** mirror the Rust-side
-/// `verum_ast::attr::VerificationMode::{Coherent, CoherentStatic,
+/// `verum_ast.attr.VerificationMode.{Coherent, CoherentStatic,
 /// CoherentRuntime}` introduced for VVA-6 (operational coherence
 /// checker). Pre-M4.E the stdlib `VerificationLevel` had only the
 /// 9 base strategies; the Coherent triple lived only on the Rust
@@ -242,7 +242,7 @@ public fn emits_certificate(level: VerificationLevel) -> Bool {
 
 /// True iff the level requires the operational-coherence checker
 /// (VVA-6 stdlib preview). Mirrors the Rust-side dispatch fork in
-/// `verum_smt::coherence` for the three Coherent strategies.
+/// `verum_smt.coherence` for the three Coherent strategies.
 public fn requires_coherence_checker(level: VerificationLevel) -> Bool {
     match level {
         VerificationLevel.CoherentStatic  => true,

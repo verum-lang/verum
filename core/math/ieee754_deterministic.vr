@@ -7,7 +7,7 @@
 //
 
 // Canonical *correctly-rounded* libm subset for use under the
-// `@deterministic_fp` attribute (`crates/verum_ast::attr::DeterministicFpAttr`).
+// `@deterministic_fp` attribute (`crates/verum_ast.attr.DeterministicFpAttr`).
 //
 
 // # The problem with system libm

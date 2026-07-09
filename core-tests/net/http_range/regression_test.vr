@@ -107,7 +107,7 @@ fn regression_encode_unsatisfiable_simple() {
 // `resolve_and_merge(&RangeSet { specs: specs }, total)` — crashes the
 // COMPILER (SIGSEGV in VBC codegen), while binding it to a `let` first
 // (`let rs = RangeSet { specs }; resolve_and_merge(&rs, total)`) lowers
-// correctly. property_test.vr::law_merged_output_is_fixpoint uses the
+// correctly. property_test.vr.law_merged_output_is_fixpoint uses the
 // let-bind form. @ignore'd because it crashes at COMPILE time (the whole
 // suite dies); flips to a live pin once the inline-aggregate-reference
 // argument codegen is fixed.

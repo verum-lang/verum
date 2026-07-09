@@ -289,7 +289,7 @@ fn is_supported_alg(s: &Text) -> Bool {
 // The JWKS is `{"keys": [Jwk, …]}` per RFC 7517. Each Jwk has a
 // `kty` (key type), an optional `kid` (key identifier), and a
 // type-specific set of crypto parameters. We decode into the
-// existing `core.security.jwt::JwtKey` so the verification side
+// existing `core.security.jwt.JwtKey` so the verification side
 // requires no additional adapter.
 
 @derive(Clone, Debug)
@@ -378,7 +378,7 @@ fn parse_jwks(value: &JsonValue) -> Result<Jwks, JwksError> {
 }
 
 /// Parse a single JWK into a `JwtKey`. Delegates to
-/// `core.security.jwt::JwtKey::from_jwk_object` for the actual
+/// `core.security.jwt.JwtKey.from_jwk_object` for the actual
 /// per-algorithm decoding (RSA n+e, EC x+y+crv, OKP x+crv).
 fn parse_jwk(obj: &JsonObject) -> Result<JwtKey, Text> {
     JwtKey.from_jwk_object(obj).map_err(|e| f"{e}")

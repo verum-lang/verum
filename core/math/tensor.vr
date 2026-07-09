@@ -2137,7 +2137,7 @@ public fn masked_max<T: Numeric>(
     mask: &DynTensor<Bool>,
 ) -> T {
     // Use a very small sentinel for masked-out positions so they
-    // never win the max. T::MIN would be ideal but Numeric doesn't
+    // never win the max. T.MIN would be ideal but Numeric doesn't
     // expose it; this works for IEEE float and most signed ints.
     let neg_inf = full_like(x, -((1 as T) << ((T.size as Int) * 8 - 2)));
     let masked = where_tensor(mask, x, &neg_inf);

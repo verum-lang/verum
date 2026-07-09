@@ -97,7 +97,7 @@ implement Eq for RecordEncodeError {
 // =============================================================================
 //
 
-// TLSInnerPlaintext ::= struct {
+// TLSInnerPlaintext .= struct {
 //  opaque content[TLSPlaintext.length];
 //  ContentType type;
 //  uint8 zeros[length_of_padding];

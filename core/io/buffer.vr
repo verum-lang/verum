@@ -283,7 +283,7 @@ fn __fd_close_raw_buf(fd: Int) {
 }
 
 // -----------------------------------------------------------------------------
-// BufReader::from_fd — convenience constructor
+// BufReader.from_fd — convenience constructor
 // -----------------------------------------------------------------------------
 
 implement BufReader<FdReader> {
@@ -306,7 +306,7 @@ implement BufReader<FdReader> {
 implement<R: Read> BufReader<R> {
     /// Read a single line (up to and including '\n'), returning `Maybe.None` at EOF.
     /// The returned `Text` includes the trailing newline; callers strip it
-    /// if they need to (`core.shell.stream::strip_trailing_newline`).
+    /// if they need to (`core.shell.stream.strip_trailing_newline`).
     public fn read_line(&mut self) -> IoResult<Maybe<Text>> {
         let mut bytes: List<Byte> = [];
         loop {

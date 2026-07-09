@@ -7,13 +7,13 @@
 // Phase 1B+ (#330) — executable Tier 0 pin asserting
 // `AsyncRuntime.new()` and the worker-pool accessors actually work
 // in interpreter mode.  Pre-fix this test would deadlock-recurse
-// in `AsyncRuntimeConfig::default()` (Default-impl→inherent-default
+// in `AsyncRuntimeConfig.default()` (Default-impl→inherent-default
 // dispatch collision) AND fail FFI dispatch on
 // `verum_get_runtime_*` getters (extern fn declarations resolved
 // via dlsym, which doesn't have the symbols at interpreter
 // runtime).  Both fixes land together — the trait-default body is
 // inlined to break the recursion; an interpreter-side intercept
-// at FfiExtended::CallFfiC returns the documented-default 0 for
+// at FfiExtended.CallFfiC returns the documented-default 0 for
 // the getter family (matching what AOT-with-no-manifest produces).
 
 mount core.async.executor.{AsyncRuntime, AsyncRuntimeConfig};

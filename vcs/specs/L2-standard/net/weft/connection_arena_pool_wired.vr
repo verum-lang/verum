@@ -9,7 +9,7 @@
 // surface contract.  Mirrors #315's BufferPool wiring pattern: the
 // arena_pool→connection wiring closes another structural
 // connectivity gap where `ArenaPool` (Phase-5 killer feature for
-// the Weft hot path per spec §4.3 — Tokio/Hyper bytes::Bytes
+// the Weft hot path per spec §4.3 — Tokio/Hyper bytes.Bytes
 // equivalent) was defined but no other weft module referenced it.
 //
 // Post-fix `serve_one_message` acquires a fresh `ArenaLease` for

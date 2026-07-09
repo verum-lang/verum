@@ -342,7 +342,7 @@ public type Iterator is protocol {
 
     /// Panics if `size <= 0`. Same precondition as `step_by` —
     /// a non-positive chunk size has no sensible semantic and
-    /// the underlying ChunksIter::next would either silently
+    /// the underlying ChunksIter.next would either silently
     /// return Maybe.None forever (size <= 0 → empty chunk → Maybe.None) or
     /// (for size_hint) divide by zero in `(inner + step - 1) / step`.
     /// Audit #12 fix.
@@ -412,7 +412,7 @@ public type Iterator is protocol {
     // `while let Maybe.Some(...)` (not bare `Some`) so cross-module
     // monomorphisation can't resolve bare-name to a sibling
     // variant (e.g. `RetryBackoff.None`, `Poll.Pending`).  See the
-    // bare-variant defect class doc in `core/collections/list.vr::
+    // bare-variant defect class doc in `core/collections/list.vr.
     // filter_map`.
     fn all<P: fn(&Self.Item) -> Bool>(&mut self, predicate: P) -> Bool {
         while let Maybe.Some(ref x) = self.next() {
@@ -2564,7 +2564,7 @@ implement<A: Iterator, B: Iterator> IntoIterator for ZipLongestIter<A, B> {
 
 /// Range iterator over `[start, end)` (exclusive) or `[start, end]`
 /// (inclusive). The third field `inclusive` discriminates the two
-/// forms, matching the runtime's `TypeId::RANGE` (517) layout
+/// forms, matching the runtime's `TypeId.RANGE` (517) layout
 /// `[current, end, inclusive]` that codegen emits for both `..` and
 /// `..=` syntax. Keeping both shapes under one type lets the runtime
 /// IterNew/IterNext fast-path and the user-side Iterator impl share
@@ -2584,7 +2584,7 @@ implement<T> RangeLike for Range<T> {}
 /// only at the free-function `range_inclusive(start, end)` construction
 /// site — the `(start..=end)` syntactic form lowers to `Range<T>` with
 /// `inclusive: true` (handled by codegen `compile_range` and the
-/// runtime's `TypeId::RANGE` (517) fast-path) and is the canonical
+/// runtime's `TypeId.RANGE` (517) fast-path) and is the canonical
 /// form for inclusive iteration. `RangeInclusive` is retained for
 /// imports that name it explicitly.
 public type RangeInclusive<T> is { current: T, end: T, done: Bool };
@@ -2696,7 +2696,7 @@ implement Iterator for Range<Int> {
         // **2026-05-28 update**: per probe, `(1..=N)` is actually
         // typed as `RangeInclusive<T>` at method dispatch (NOT
         // `Range<T>` with inclusive=true), so the bug surfaces in
-        // `RangeInclusive<Int>::next` (line ~3219), not here.  This
+        // `RangeInclusive<Int>.next` (line ~3219), not here.  This
         // body is kept for the codegen-level `Range<T>` fast-path used
         // by `for` loops which DO yield the boundary correctly via
         // the runtime IterNext handler.

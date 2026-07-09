@@ -31,7 +31,7 @@
 //
 
 //  3. **Synchronous-flag pass-through** — `pager_commit` consults
-//  `PagerConfig.sync` and translates to `VfsProtocol::sync` via
+//  `PagerConfig.sync` and translates to `VfsProtocol.sync` via
 //  the appropriate `SyncFlags` (NORMAL/FULL/EXTRA). PRAGMA
 //  `synchronous` flips this knob.
 //

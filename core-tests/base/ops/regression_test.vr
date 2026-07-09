@@ -120,7 +120,7 @@ fn regression_predicates_mutually_exclusive_for_break() {
 
 // =============================================================================
 // REGRESSION §D: Try protocol works on Maybe — `match maybe { Some =>
-// Continue(value), Maybe.None => Break(()) }` shape via Try::branch.
+// Continue(value), Maybe.None => Break(()) }` shape via Try.branch.
 // =============================================================================
 
 @test

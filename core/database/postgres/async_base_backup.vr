@@ -20,7 +20,7 @@
 //
 //   The actor:
 //     1. Pre-start: opens PgReplicationConnection (physical mode)
-//        + issues BASE_BACKUP via base_backup::start (sync). Both
+//        + issues BASE_BACKUP via base_backup.start (sync). Both
 //        run inside spawn_blocking; the await on the join handle
 //        yields to the executor while connect + handshake + the
 //        BASE_BACKUP command + tablespace-metadata read all run.

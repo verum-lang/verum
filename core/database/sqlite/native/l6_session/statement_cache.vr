@@ -220,7 +220,7 @@ implement StatementCache {
 /// which Verum's analyser treats as a partial-move out of the
 /// `entries` field when the value type is affine (CachedSlot
 /// carries `Heap<VdbeProgram>`).  We sidestep by building a fresh
-/// map excluding the LRU key — `Heap::clone` is a pointer copy so
+/// map excluding the LRU key — `Heap.clone` is a pointer copy so
 /// the rebuild is cheap.
 fn evict_lru_entry(cache: &mut StatementCache) {
     let lru_key = match find_lru_key(&cache.entries) {

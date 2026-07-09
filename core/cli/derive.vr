@@ -11,11 +11,11 @@
 // This module documents how the (Phase 1) `@command`, `@arg`, `@flag`,
 // `@subcommand`, `@value`, `@group` derive attributes desugar into
 // `CommandSpec` / `ArgSpec` / `FlagSpec` constructions. The desugaring
-// itself happens in `verum_compiler::derives::cli`, but the helper
+// itself happens in `verum_compiler.derives.cli`, but the helper
 // constructors here let the meta1 stage emit *minimum* `mount` paths
 // rather than reach across crate boundaries.
 //
-// Until the macro pass lands, hand-written code uses `cli::builder` to
+// Until the macro pass lands, hand-written code uses `cli.builder` to
 // produce identical specs. The two paths converge on the same `CommandSpec`
 // shape — every test against a hand-built spec is also a test against
 // the future macro pass.
@@ -35,11 +35,11 @@
 //     s.version = Maybe.Some("1.0");
 //     s = field_to_arg_or_flag(s, "field_name", FieldType, attrs);
 //     ...
-//     s.handler = HandlerRef.NamedHandler("Cli::__main");
+//     s.handler = HandlerRef.NamedHandler("Cli.__main");
 //     s
 // }
 //
-// @arg(help = "...") field: T   — desugars to ArgSpec via FromArg::arg_kind()
+// @arg(help = "...") field: T   — desugars to ArgSpec via FromArg.arg_kind()
 // @flag(short = 'v', long = "verbose")
 //   field: Bool                 — desugars to FlagSpec.switch
 //   field: Maybe<T>             — FlagSpec.value with arity Optional
@@ -175,8 +175,8 @@ public fn arg_from_meta(
     b.build()
 }
 
-/// Build a `HandlerRef::NamedHandler` from a fully-qualified Verum path.
-/// The macro emitter mangles `Cli::main` → `"Cli__main"` and registers
+/// Build a `HandlerRef.NamedHandler` from a fully-qualified Verum path.
+/// The macro emitter mangles `Cli.main` → `"Cli__main"` and registers
 /// it in the runtime registry; this helper just wraps the string.
 public fn handler_ref(name: Text) -> HandlerRef {
     HandlerRef.NamedHandler(name)

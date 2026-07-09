@@ -54,7 +54,7 @@ implement PredicateRegistry {
     }
 
     /// Register a predicate under `name` (typically the field's mangled
-    /// fully-qualified path, e.g. `"Cli::port"`).
+    /// fully-qualified path, e.g. `"Cli.port"`).
     public fn register(mut self, name: Text, p: TextPredicate) -> PredicateRegistry {
         self.by_name.insert(name, p);
         self

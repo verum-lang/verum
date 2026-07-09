@@ -66,7 +66,7 @@ public type TxResult is
 /// observe intermediate values between MULTI and EXEC (the typical
 /// optimistic-concurrency loop with `WATCH key; v = GET key; if
 /// v ok then MULTI; SET key new; EXEC end`), use the lower-level
-/// API in `client::exec_pipeline` directly.
+/// API in `client.exec_pipeline` directly.
 pub async fn run_simple(
     client:        &RedisClient,
     watch_keys:    &[Text],

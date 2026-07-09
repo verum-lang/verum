@@ -381,7 +381,7 @@ implement SqliteConnection {
     }
 
     /// Copy up to `pages` source pages into the destination. Returns
-    /// `BackupOutcome::BoOk` while progress remains, `BoDone` on
+    /// `BackupOutcome.BoOk` while progress remains, `BoDone` on
     /// completion, `BoFailed { code, reason }` on I/O failure.
     public fn backup_step(
         &mut self,

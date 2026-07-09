@@ -5,7 +5,7 @@
 // LOCK-IN pins for URITPL-1 — calling `UriTemplate.parse(&Text)` or
 // `UriTemplate.expand(&self, &Map<Text, TemplateValue>)` from a USER
 // test module triggers an LLVM-level SIGSEGV inside
-// `llvm::SmallVectorBase<unsigned long long>::grow_pod` during the
+// `llvm.SmallVectorBase<unsigned long long>.grow_pod` during the
 // precompile cascade for `uri_template.vr`. Same crash signature
 // family as CIDR-1.
 //

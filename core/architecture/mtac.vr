@@ -2,7 +2,7 @@
 // core.architecture.mtac — Modal-Temporal Architectural Calculus
 // =============================================================================
 //
-// **Verum-native mirror of `verum_kernel::arch_mtac`.**
+// **Verum-native mirror of `verum_kernel.arch_mtac`.**
 //
 // ## Why MTAC
 //
@@ -50,7 +50,7 @@
 // ## Cross-side alignment
 //
 // Every variant corresponds 1:1 with a Rust-side enum variant in
-// `verum_kernel::arch_mtac::*`.  The cross-side pin test in
+// `verum_kernel.arch_mtac.*`.  The cross-side pin test in
 // `crates/verum_kernel/tests/k_arch_v_alignment.rs` enumerates the
 // canonical roster (variant counts, tag strings, helper presence)
 // and fails CI on any drift.
@@ -123,7 +123,7 @@ public type Decision is {
 /// distinguish before/after).
 ///
 /// Five canonical observer kinds, each with its own projection
-/// surface (see `core.architecture.yoneda::ShapeObservation`):
+/// surface (see `core.architecture.yoneda.ShapeObservation`):
 ///   * `EndUser`     — public-interface view
 ///   * `PeerCog`     — composition partners + boundary capabilities
 ///   * `Stakeholder` — deployment-level concerns
@@ -289,7 +289,7 @@ public fn time_point_tag(tp: TimePoint) -> Text {
 /// Chronological partial order: `self ≤ other`.  Returns `false`
 /// when the two points are not comparable (different
 /// counterfactual branches, or mixed concrete-historical against
-/// counterfactual).  Mirrors `verum_kernel::arch_mtac::TimePoint::precedes`.
+/// counterfactual).  Mirrors `verum_kernel.arch_mtac.TimePoint.precedes`.
 public fn time_point_precedes(a: TimePoint, b: TimePoint) -> Bool {
     match (a, b) {
         (Past(x), Past(y))          => x <= y,
@@ -325,7 +325,7 @@ public fn observer_tag(o: Observer) -> Text {
 /// Full canonical observer roster — exactly 5 entries (Yoneda
 /// invariant: every architectural shape is uniquely determined by
 /// what these 5 observers see).  Adding a 6th observer requires
-/// RFC ATS-V-007 + kernel-side `Observer::full_canonical_roster`
+/// RFC ATS-V-007 + kernel-side `Observer.full_canonical_roster`
 /// update + pin-test bump.
 public fn observer_full_canonical_roster() -> List<Observer> {
     [
@@ -384,7 +384,7 @@ public fn arch_proposition_tag(p: ArchProposition) -> Text {
 
 /// True iff this witness is a left-adjoint of `other`'s right-adjoint.
 /// Structural mirror equality of (forward_name, backward_name) pairs.
-/// Mirrors `verum_kernel::arch_mtac::AdjunctionWitness::is_adjoint_of`.
+/// Mirrors `verum_kernel.arch_mtac.AdjunctionWitness.is_adjoint_of`.
 ///
 /// Soundness contract (spec §20.6): when `f.is_adjoint_of(g) ∧
 /// g.is_adjoint_of(f)`, the pair `(F, G)` constitutes a bona fide

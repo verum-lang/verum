@@ -11,7 +11,7 @@
 mount core.base.{Text, List, Maybe}
 mount core.io.{print}
 
-// MockEntry mirrors mock.rs::MockEntry value/noop/forbidden classification.
+// MockEntry mirrors mock.rs.MockEntry value/noop/forbidden classification.
 type MockKind is
     | Value { json: Text }
     | Noop

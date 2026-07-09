@@ -388,7 +388,7 @@ fn test_sockaddr_types() {
         sin6_family: 30,  // AF_INET6
         sin6_port: 443,
         sin6_flowinfo: 0,
-        sin6_addr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],  // ::1
+        sin6_addr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],  // .1
         sin6_scope_id: 0,
     };
 

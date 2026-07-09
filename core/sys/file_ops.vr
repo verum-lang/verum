@@ -33,7 +33,7 @@ mount core.intrinsics.runtime.os.{
 // Default file-creation mode
 // =============================================================================
 // rw-r--r-- — POSIX-canonical default for newly-created files.  Matches
-// `core.io.file::DEFAULT_FILE_MODE` so the two file-creation paths
+// `core.io.file.DEFAULT_FILE_MODE` so the two file-creation paths
 // (sys layer + io layer) cannot drift.
 const DEFAULT_FILE_MODE: Int = 0o644;
 

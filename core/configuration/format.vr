@@ -54,7 +54,7 @@ mount configuration.error.{ConfigError, FormatId};
 // Each format's adapter encodes its options as a tagged variant over
 // `ConfigValue` (typically a small ConfigTable with documented keys). This
 // avoids per-format generic parameter pollution while preserving a typed
-// surface at the call site (`TomlOptions::default().with_strict(true)`).
+// surface at the call site (`TomlOptions.default().with_strict(true)`).
 public type FormatOptions is {
     payload: ConfigValue,
 };

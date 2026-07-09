@@ -85,7 +85,7 @@ mount core.*;
 /// path through `sys.common.random_bytes → safe_getentropy → unsafe { getentropy(buf, len) }`
 /// which silently misroutes when the buf register holds a Pointer-tagged
 /// `&unsafe Byte` (the FFI dispatch consumed it as a sign-extended i64
-/// address, so libc::getentropy faulted with EFAULT).  `random_u64`
+/// address, so libc.getentropy faulted with EFAULT).  `random_u64`
 /// returns a 64-bit value through the canonical Int-tagged Value path —
 /// no buffer marshalling, no pointer extraction, no FFI permission gate.
 public fn fill_secure(buf: &mut List<Byte>) {

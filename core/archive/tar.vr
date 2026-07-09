@@ -7,7 +7,7 @@
 //
 // Implements the `core.archive.Archive` protocol (see `archive/mod.vr`)
 // for the USTAR + PAX-extended format. Composes with `core/compress/*`
-// for `.tar.gz`, `.tar.zst`, etc., via `archive::with_compress()`.
+// for `.tar.gz`, `.tar.zst`, etc., via `archive.with_compress()`.
 // =============================================================================
 //
 // **USTAR format (POSIX 1003.1-1988).** A 512-byte header per file

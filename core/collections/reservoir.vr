@@ -137,7 +137,7 @@ implement<T> Reservoir<T> {
 
 fn random_u64() -> UInt64 {
     // Route through the `random_u64` VBC intrinsic, which lowers to
-    // FfiExtended sub_op 0x47 — a direct libc::getentropy call on a
+    // FfiExtended sub_op 0x47 — a direct libc.getentropy call on a
     // Rust-side 8-byte buffer.  Bypasses the broken Verum-side
     // pointer-marshalling chain through `sys.common.random_bytes →
     // safe_getentropy → unsafe { getentropy(buf, len) }` that silently

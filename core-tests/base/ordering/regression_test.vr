@@ -86,7 +86,7 @@ fn test_iterator_rebind_reverse() {
 //
 // Symptom: `xs[0].cmp(&xs[1])` for `xs = [5, 2]` returned `Less` instead of
 // `Greater` because the intercept fell through to `other_val.as_i64()` on a
-// `Value::from_ptr(elem_ptr)` and ended up comparing the receiver `5`
+// `Value.from_ptr(elem_ptr)` and ended up comparing the receiver `5`
 // against the pointer ADDRESS (a large positive Int).
 //
 // Blast radius: bubble-sort on indexed lists, every `for byte in bytes`
@@ -207,8 +207,8 @@ fn regression_display_does_not_break_primitives() {
 // =============================================================================
 // REGRESSION (task #11, 2026-05-15): protocol default-method monomorphisation
 // `Self → concrete-type` substitution.  `extract_type_name` /
-// `extract_type_name_from_ast` mis-handled `PathSegment::SelfValue`:
-// the first returned `Maybe.None` (only matched `PathSegment::Name`), the
+// `extract_type_name_from_ast` mis-handled `PathSegment.SelfValue`:
+// the first returned `Maybe.None` (only matched `PathSegment.Name`), the
 // second fell through to `format!("{}", path)` which renders Self as
 // lowercase "self" (the Path Display impl).  `substitute_self_in_type_name`
 // then never matched — every `register_impl_function` for a default
@@ -220,7 +220,7 @@ fn regression_display_does_not_break_primitives() {
 // type's same-named field index — surfaced as "field index N exceeds
 // object data size M" panics.
 //
-// Closed by canonicalising `PathSegment::SelfValue` → `"Self"` (Pascal-
+// Closed by canonicalising `PathSegment.SelfValue` → `"Self"` (Pascal-
 // case canonical) in both extractors so `substitute_self_in_type_name`'s
 // word-boundary substitution fires correctly at registration time.
 // =============================================================================

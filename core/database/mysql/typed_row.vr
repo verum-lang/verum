@@ -127,7 +127,7 @@ implement<T: MysqlTypedRow> MysqlTypedRow for Maybe<T> {
         match &row[0] {
             RvNull => Result.Ok(Maybe.None),
             _ => {
-                let v = T::from_mysql_row(row)?;
+                let v = T.from_mysql_row(row)?;
                 Result.Ok(Maybe.Some(v))
             }
         }
@@ -160,13 +160,13 @@ public fn decode_field<T: MysqlTypedRow>(
     row: &List<RowValue>,
     idx: Int,
 ) -> Result<T, DbError> {
-    T::from_mysql_row(&slice_one(row, idx))
+    T.from_mysql_row(&slice_one(row, idx))
 }
 
 implement<A: MysqlTypedRow> MysqlTypedRow for (A,) {
     fn from_mysql_row(row: &List<RowValue>) -> Result<(A,), DbError> {
         expect_arity(row, 1)?;
-        let a = A::from_mysql_row(&slice_one(row, 0))?;
+        let a = A.from_mysql_row(&slice_one(row, 0))?;
         Result.Ok((a,))
     }
 }
@@ -174,8 +174,8 @@ implement<A: MysqlTypedRow> MysqlTypedRow for (A,) {
 implement<A: MysqlTypedRow, B: MysqlTypedRow> MysqlTypedRow for (A, B) {
     fn from_mysql_row(row: &List<RowValue>) -> Result<(A, B), DbError> {
         expect_arity(row, 2)?;
-        let a = A::from_mysql_row(&slice_one(row, 0))?;
-        let b = B::from_mysql_row(&slice_one(row, 1))?;
+        let a = A.from_mysql_row(&slice_one(row, 0))?;
+        let b = B.from_mysql_row(&slice_one(row, 1))?;
         Result.Ok((a, b))
     }
 }
@@ -185,9 +185,9 @@ implement<A: MysqlTypedRow, B: MysqlTypedRow, C: MysqlTypedRow>
 {
     fn from_mysql_row(row: &List<RowValue>) -> Result<(A, B, C), DbError> {
         expect_arity(row, 3)?;
-        let a = A::from_mysql_row(&slice_one(row, 0))?;
-        let b = B::from_mysql_row(&slice_one(row, 1))?;
-        let c = C::from_mysql_row(&slice_one(row, 2))?;
+        let a = A.from_mysql_row(&slice_one(row, 0))?;
+        let b = B.from_mysql_row(&slice_one(row, 1))?;
+        let c = C.from_mysql_row(&slice_one(row, 2))?;
         Result.Ok((a, b, c))
     }
 }
@@ -197,10 +197,10 @@ implement<A: MysqlTypedRow, B: MysqlTypedRow, C: MysqlTypedRow, D: MysqlTypedRow
 {
     fn from_mysql_row(row: &List<RowValue>) -> Result<(A, B, C, D), DbError> {
         expect_arity(row, 4)?;
-        let a = A::from_mysql_row(&slice_one(row, 0))?;
-        let b = B::from_mysql_row(&slice_one(row, 1))?;
-        let c = C::from_mysql_row(&slice_one(row, 2))?;
-        let d = D::from_mysql_row(&slice_one(row, 3))?;
+        let a = A.from_mysql_row(&slice_one(row, 0))?;
+        let b = B.from_mysql_row(&slice_one(row, 1))?;
+        let c = C.from_mysql_row(&slice_one(row, 2))?;
+        let d = D.from_mysql_row(&slice_one(row, 3))?;
         Result.Ok((a, b, c, d))
     }
 }
@@ -219,7 +219,7 @@ public fn rows_typed_my<R: MysqlTypedRow>(
     let mut out: List<R> = List.with_capacity(rows.len());
     let mut i: Int = 0;
     while i < (rows.len() as Int) {
-        let r = R::from_mysql_row(&rows[i].columns);
+        let r = R.from_mysql_row(&rows[i].columns);
         match r {
             Result.Ok(v)  => { out.push(v); }
             Result.Err(e) => {

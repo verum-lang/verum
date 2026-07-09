@@ -95,8 +95,8 @@ public type BloomFilter is {
 // admitting ~3.5×10^14 items — far past any plausible workload.
 public const MAX_BLOOM_CAPACITY: Int = 1_000_000_000_000;  // 10^12
 
-/// Validation failure for [`BloomFilter::try_with_target`] /
-/// [`BloomFilter::try_new`]. Surfaced as a typed error so the caller
+/// Validation failure for [`BloomFilter.try_with_target`] /
+/// [`BloomFilter.try_new`]. Surfaced as a typed error so the caller
 /// can branch on the specific cause rather than parsing strings.
 public type BloomError is
     | EmptyCapacity

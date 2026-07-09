@@ -50,7 +50,7 @@ fn test_serde_error_unknown_field() {
 type Point is { x: Int, y: Int };
 
 // Note: Concrete Serializer/Deserializer impls require backend-specific
-// types (verum_codegen::serde_helpers etc.). These tests verify the
+// types (verum_codegen.serde_helpers etc.). These tests verify the
 // PROTOCOL SHAPE compiles cleanly — actual serialization round-trips are
 // in core-tests/encoding/<backend>.
 

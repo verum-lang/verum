@@ -145,7 +145,7 @@ implement Readiness {
     /// `self.checks.lock()` ACROSS the `c.is_ready().await` boundary
     /// inside the loop. Holding a non-async Mutex across `.await`
     /// is a classic deadlock pattern: any task that called
-    /// `Readiness::add()` while a check's future was suspended
+    /// `Readiness.add()` while a check's future was suspended
     /// would deadlock the runtime. Under the multi-threaded
     /// scheduler (#271) this becomes a true cross-thread deadlock.
     ///

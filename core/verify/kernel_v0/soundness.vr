@@ -40,13 +40,13 @@
 
 //  - For PROVED lemmas (k_var, k_univ, k_fwax, k_pos): the lemma's
 //  proof body is structurally trivial; the dispatcher returns
-//  `LemmaStatus::Proved` immediately.
+//  `LemmaStatus.Proved` immediately.
 //
 
 //  - For ADMITTED lemmas (k_pi_form, k_lam_intro, k_app_elim,
 //  k_beta, k_eta, k_sub): the lemma's proof body cites an IOU
 //  (substitution-lemma, Church-Rosser, funext, etc.); the
-//  dispatcher returns `LemmaStatus::Admitted { iou: <reason> }`.
+//  dispatcher returns `LemmaStatus.Admitted { iou: <reason> }`.
 //
 
 // The aggregator `kernel_soundness` then composes them: it iterates
@@ -90,7 +90,7 @@ mount super.rules.k_sub.{k_sub_sound};
 
 /// **Per-rule soundness status** — what the dispatcher reports for
 /// each of the 10 kernel rules. Mirrors
-/// `verum_kernel::soundness::canonical_rules::LemmaStatus`.
+/// `verum_kernel.soundness.canonical_rules.LemmaStatus`.
 ///
 
 /// **Status progression** (lifecycle of an IOU):

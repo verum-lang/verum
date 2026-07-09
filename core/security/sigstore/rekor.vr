@@ -33,7 +33,7 @@
 // (binary tree with domain-separated leaf vs node hashes). The
 // inclusion proof is verified by recomputing the root hash from the
 // leaf + audit hashes; we delegate to
-// `core.security.transparency_log.merkle::verify_inclusion`.
+// `core.security.transparency_log.merkle.verify_inclusion`.
 //
 // **Categorical structure.** Rekor's API forms a free monoid over
 // entry submissions: the log-index sequence is total, integrated_

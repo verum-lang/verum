@@ -146,7 +146,7 @@ public type WalIndexHdr is {
     n_page: u32,
     /// Rolling-Fossil-checksum state at end of last commit
     /// (s1, s2 packed into a single struct).  Matches the
-    /// `WalChecksum` carried by `wal_writer::WalWriter.running`.
+    /// `WalChecksum` carried by `wal_writer.WalWriter.running`.
     frame_cksum_s1: u32,
     frame_cksum_s2: u32,
     /// Active WAL salts (mirror of the WAL-file header's salt1/salt2

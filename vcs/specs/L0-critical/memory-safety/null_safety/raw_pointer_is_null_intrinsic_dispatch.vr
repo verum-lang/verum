@@ -25,7 +25,7 @@
 // `&unsafe T` / `*const T` / `*mut T` as a raw pointer, the flag
 // propagates through `compile_pattern_bind`'s Mov, and
 // `compile_method_call` intercepts `is_null` on raw-pointer
-// receivers and emits `Instruction::Call` to the registered
+// receivers and emits `Instruction.Call` to the registered
 // stdlib-intrinsic function `is_null` (mapped to `ptr_is_null`
 // at codegen/mod.rs:1656).
 //

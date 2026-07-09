@@ -403,7 +403,7 @@ fn test_io_result_err() {
 fn test_io_result_propagates_via_question_mark() {
     // Validates that `?` on an Err short-circuits without panicking;
     // full kind-preservation through `?` is pinned via
-    // regression_test.vr::regression_question_mark_preserves_kind.
+    // regression_test.vr.regression_question_mark_preserves_kind.
     // (This file exhibits a file-level codegen state interaction
     // between test functions that masks the alias-resolved kind
     // recovery; pinned for separate investigation.)

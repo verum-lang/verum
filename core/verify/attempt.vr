@@ -48,7 +48,7 @@ type VerificationOutcome is
 //
 
 // This is the user-space mirror of
-// `verum_verification.level.VerificationLevel::evaluate_attempt`
+// `verum_verification.level.VerificationLevel.evaluate_attempt`
 // extended to the VVA §2.3 nine-strategy ladder.
 //
 

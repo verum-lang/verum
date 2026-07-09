@@ -5,7 +5,7 @@
 
 // This module is the syntactic substrate that the kernel-soundness theorems
 // quantify over. It MUST stay structurally faithful to the Rust-side
-// `verum_kernel::CoreTerm` / `CoreType` / `UniverseLevel` enums in
+// `verum_kernel.CoreTerm` / `CoreType` / `UniverseLevel` enums in
 // `crates/verum_kernel/src/term.rs:31-419` — every variant on the Rust side
 // has exactly one mirror constructor here, and the field names match.
 //
@@ -52,7 +52,7 @@ module core.verify.kernel_soundness.model;
 /// of two sub-levels, plus the propositional universe `Prop`.
 ///
 
-/// Mirror of `verum_kernel::UniverseLevel` (term.rs:407-418).
+/// Mirror of `verum_kernel.UniverseLevel` (term.rs:407-418).
 public type UniverseLevel is
     | Concrete { level: Int }
     | Variable { name: Text }
@@ -79,7 +79,7 @@ public pure fn universe_concrete_level(u: UniverseLevel) -> Maybe<Int> {
 }
 
 // =============================================================================
-// FrameworkId — provenance for axioms (mirror of verum_kernel::FrameworkId)
+// FrameworkId — provenance for axioms (mirror of verum_kernel.FrameworkId)
 // =============================================================================
 
 /// Framework attribution for a `CoreTerm.Axiom`. Every axiom records
@@ -97,7 +97,7 @@ public type FrameworkId is {
 /// The kernel's `SmtProof(SmtCertificate)` carries the full certificate
 /// payload. At the meta-theoretic layer we only need to know that *some*
 /// certificate exists and where it came from — the replay logic itself
-/// is at the Rust layer in `verum_kernel::replay_smt_cert`.
+/// is at the Rust layer in `verum_kernel.replay_smt_cert`.
 ///
 
 /// `solver_tag` records which backend produced the cert ("z3", "cvc5",
@@ -116,7 +116,7 @@ public type SmtCertificateRef is {
 /// A term in Verum-Core, the explicit typed calculus the kernel checks.
 ///
 
-/// Variants are listed in the same order as `verum_kernel::CoreTerm`
+/// Variants are listed in the same order as `verum_kernel.CoreTerm`
 /// (term.rs:31-377) so a side-by-side review is mechanical. Categories
 /// (mirroring the `KernelRule` enum at proof_tree.rs:694-787):
 ///
@@ -240,7 +240,7 @@ public type CoreTerm is
     | Sharp { inner: Heap<CoreTerm> };
 
 // =============================================================================
-// CoreType — structural type heads (mirror of verum_kernel::CoreType)
+// CoreType — structural type heads (mirror of verum_kernel.CoreType)
 // =============================================================================
 
 /// A structural view of a type used by kernel diagnostics. This is a
@@ -249,7 +249,7 @@ public type CoreTerm is
 /// reports without copying the underlying term.
 ///
 
-/// Mirror of `verum_kernel::CoreType` (term.rs:386-403).
+/// Mirror of `verum_kernel.CoreType` (term.rs:386-403).
 public type CoreType is
     | UniverseTy { level: UniverseLevel }
     | PiTy

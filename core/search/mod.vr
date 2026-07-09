@@ -2,7 +2,7 @@
 // search/mod.vr — abstract search subsystem
 // =============================================================================
 // Universal search abstraction. Concrete adapters implement
-// `core.search.types::SearchIndex` over specific engines:
+// `core.search.types.SearchIndex` over specific engines:
 //
 //   - `core.search.meilisearch` — MeiliSearch v1 REST.
 //   - (future: elasticsearch, typesense, sqlite_fts5, in_memory)

@@ -10,7 +10,7 @@
 // The foundation-profiles audit gate walks every `@framework(<name>,
 // "<citation>")` attribute in the project, classifies the citation
 // by its underlying logical foundation
-// (`verum_kernel::foundation_profile::FoundationProfile`), and
+// (`verum_kernel.foundation_profile.FoundationProfile`), and
 // surfaces cross-foundation conflicts.  This pin documents the live
 // MSFS-corpus headline distribution and the canonical 10-profile
 // classifier surface.
@@ -63,7 +63,7 @@
 // **Why this pin is type-check (not run)**
 //
 // Same rationale as `kernel_v0_roster_pin.vr`: the audit gate runs
-// in Rust (`verum_cli::audit::audit_foundation_profiles_with_format`)
+// in Rust (`verum_cli.audit.audit_foundation_profiles_with_format`)
 // and walks the project's `.vr` files; vtest cannot invoke it
 // directly today.  This pin documents the manifest invariants
 // (10-profile classifier surface, 5-foundation MSFS distribution,
@@ -72,7 +72,7 @@
 //
 // TODO(vcs-runner): once `vtest` gains an `// @audit-cmd: ...`
 // directive, upgrade to `// @test: integration` + JSON-shape
-// assertions on `foundation-profiles.json::by_foundation`.
+// assertions on `foundation-profiles.json.by_foundation`.
 
 fn pin_foundation_profile_classifier_size() {
     // The classifier MUST expose exactly 10 distinct
@@ -82,7 +82,7 @@ fn pin_foundation_profile_classifier_size() {
     let classifier_variant_count: Int = 10;
     assert(classifier_variant_count == 10,
            "FoundationProfile classifier surface drift: expected 10 \
-            distinct variants in verum_kernel::foundation_profile");
+            distinct variants in verum_kernel.foundation_profile");
 }
 
 fn pin_foundation_msfs_distinct_families() {
@@ -114,7 +114,7 @@ fn pin_foundation_msfs_total_citations() {
 
 fn pin_foundation_conflict_matrix_size() {
     // Two ordered conflict pairs are pinned in
-    // `FoundationProfile::conflicts_with`:
+    // `FoundationProfile.conflicts_with`:
     //   (MlttUip, Hott) and (MlttUip, Cubical).
     // Symmetric closure adds (Hott, MlttUip) and (Cubical, MlttUip)
     // → 4 directed conflict edges total in the symmetric matrix.

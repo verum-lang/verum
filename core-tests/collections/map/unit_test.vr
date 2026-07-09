@@ -7,7 +7,7 @@
 //
 // Stdlib decl: `type Map<K, V> is { entries: &unsafe Slot, len: Int,
 // cap: Int, tombstones: Int }` (4 fields).
-// Runtime intercept: TypeId::MAP with `[count, capacity, entries_ptr]`
+// Runtime intercept: TypeId.MAP with `[count, capacity, entries_ptr]`
 // (3 slots). Same wrapper-record-vs-direct-shape drift class as Set,
 // pinned in regression §A. Coverage targets the runtime-intercepted API
 // surface (new, insert, contains_key, len, is_empty, clear, get, remove).

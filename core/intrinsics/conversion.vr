@@ -155,7 +155,7 @@ public fn int_to_bytes<T, const N: USize>(x: T) -> [Byte; N] { @intrinsic("to_ne
 // These route to the dedicated width-typed bit-reinterpret intrinsics rather
 // than the generic `bitcast`: a Float Value is NaN-boxed in the Tier-0
 // interpreter (its bits are NOT directly the IEEE encoding), so the reinterpret
-// is a real opcode (`ArithSubOpcode::F{32,64}{To,From}Bits`), not a no-op move.
+// is a real opcode (`ArithSubOpcode.F{32,64}{To,From}Bits`), not a no-op move.
 /// Float32 to bits (reinterpret as UInt32)
 public fn f32_to_bits(x: Float32) -> UInt32 { @intrinsic("f32_to_bits", x) }
 /// Float32 from bits (reinterpret UInt32 as Float32)

@@ -83,7 +83,7 @@ fn check_arith() -> Result<Bool, BigDecimalError> {
 }
 
 fn check_arith_beyond_i64() -> Result<Bool, BigDecimalError> {
-    // 10^20 + 1 — well beyond i64::MAX (~9.2 × 10^18).  V0 Decimal
+    // 10^20 + 1 — well beyond i64.MAX (~9.2 × 10^18).  V0 Decimal
     // can't even REPRESENT this.
     let huge = parse_bigdecimal(&"100000000000000000000".clone())?;
     let one = BigDecimal.one();

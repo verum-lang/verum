@@ -7,7 +7,7 @@
 //
 // Regression for Issue #6 (root fix in
 // crates/verum_vbc/src/codegen/expressions.rs
-// ::determine_method_return_type_prefix UINT64_METHODS list).
+// .determine_method_return_type_prefix UINT64_METHODS list).
 //
 // `list.len()` / `text.len()` / `slice.len()` return `Int` per their
 // stdlib declarations. Prior to the fix, the prefix resolver had

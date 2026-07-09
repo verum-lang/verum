@@ -328,7 +328,7 @@ implement SignalRegistry {
             // a descriptive panic instead of a generic unwrap.
             let g = REGISTRY.lock().unwrap_or_else(|p| p.into_inner());
             g.as_ref()
-                .expect("signal::spawn_poller — REGISTRY must be Some by API contract; called outside ensure_registry?")
+                .expect("signal.spawn_poller — REGISTRY must be Some by API contract; called outside ensure_registry?")
                 .clone()
         };
 

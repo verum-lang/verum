@@ -132,7 +132,7 @@ module super_outer.middle1.middle2.middle3.deep {
 fn deep_recursion_witness(n: Int) -> Int {
     // No-op recursion — exercises the call-stack until try_push_frame
     // returns Err(StackOverflow) at max_depth. The interpreter
-    // surfaces this as InterpreterError::StackOverflow which the
+    // surfaces this as InterpreterError.StackOverflow which the
     // verum-test harness sees as a graceful failure, NOT a SIGSEGV.
     if n <= 0 { 0 } else { deep_recursion_witness(n - 1) + 1 }
 }

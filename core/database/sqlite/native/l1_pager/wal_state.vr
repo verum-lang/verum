@@ -76,8 +76,8 @@ public type affine WalState is {
 /// Initial WAL state for a freshly-created WAL file.  Salts are
 /// random in production (Fossil PRNG); for the foundation pass we
 /// seed with a deterministic well-known pair so tests are
-/// reproducible — `wal_writer::open_for_create` overrides with
-/// real randomness when wired through a Vfs::random_bytes call.
+/// reproducible — `wal_writer.open_for_create` overrides with
+/// real randomness when wired through a Vfs.random_bytes call.
 public fn wal_state_new(page_size: Int) -> WalState {
     WalState {
         salt1: 0xDEADBEEF as u32,
@@ -92,7 +92,7 @@ public fn wal_state_new(page_size: Int) -> WalState {
 }
 
 /// Construct a WalState from an existing WAL file header (used by
-/// recovery — `wal_reader::recover_state_from_header` returns this
+/// recovery — `wal_reader.recover_state_from_header` returns this
 /// after walking the frame stream and rebuilding `frame_index`).
 public fn wal_state_from_header(
     hdr: &WalFileHeader,
@@ -193,7 +193,7 @@ implement WalState {
     }
 
     /// Mark frames `[1 .. through_frame]` as checkpointed.  Called
-    /// by `wal_writer::checkpoint_drain` after the frames have been
+    /// by `wal_writer.checkpoint_drain` after the frames have been
     /// flushed to the main DB file.
     public fn advance_backfill(&mut self, through_frame: Int) {
         if through_frame > self.mx_frame { return; }
@@ -213,7 +213,7 @@ implement WalState {
         self.n_backfill = 0;
         self.frame_index = Map.new();
         self.last_commit_db_size = 0;
-        // Wrap-around increment at u32::MAX is correct — checkpoint_seq
+        // Wrap-around increment at u32.MAX is correct — checkpoint_seq
         // is an opaque change counter, not an absolute monotonic.
         let cur: Int = self.checkpoint_seq as Int;
         self.checkpoint_seq = ((cur + 1) % 4294967296) as u32;

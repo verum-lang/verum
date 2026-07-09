@@ -2,7 +2,7 @@
 // core.architecture.adjunction — Adjunction analyzer for refactoring
 // =============================================================================
 //
-// **Verum-native mirror of `verum_kernel::arch_adjunction`.**
+// **Verum-native mirror of `verum_kernel.arch_adjunction`.**
 //
 // ## Refactoring as adjunction
 //

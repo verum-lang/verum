@@ -45,7 +45,7 @@
 //
 // **Why this pin is type-check (not run)**
 //
-// The audit gate itself executes in Rust (`verum_cli::audit::
+// The audit gate itself executes in Rust (`verum_cli.audit.
 // audit_kernel_v0_roster_with_format`) and walks files on disk;
 // invoking it requires either spawning the `verum` binary or
 // linking against `verum_cli`.  Neither is available from the
@@ -94,7 +94,7 @@ fn pin_kernel_v0_filenames() {
     // The 10 rule files MUST exist under
     // `core/verify/kernel_v0/rules/`.  Pinned name list mirrors the
     // `rules_dir.join("k_<n>.vr")` calls in
-    // crates/verum_kernel/src/soundness/kernel_v0_manifest.rs::manifest().
+    // crates/verum_kernel/src/soundness/kernel_v0_manifest.rs.manifest().
     let rule_files: Int = 10;
     assert(rule_files == 10,
            "kernel_v0: 10 k_*.vr rule files must exist on disk");

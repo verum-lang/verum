@@ -304,7 +304,7 @@ fn regression_m_from_utf8_invalid_returns_err_pinned() {
 // on receiver of runtime kind 'Object'" — cross-module dispatch collapse,
 // same class as §D (function-id collision in archive remap).
 //
-// Fundamental fix: `core/text/text.vr::into_bytes` now uses the canonical
+// Fundamental fix: `core/text/text.vr.into_bytes` now uses the canonical
 // indexed-while push pattern over `self.as_bytes()` (audit §4 architectural
 // rule for slice iteration in stdlib bodies). No dependency on the
 // cross-module `List.extend_from_slice` dispatch — eliminates the whole
@@ -516,7 +516,7 @@ fn guard_to_int_roundtrip() {
 // =============================================================================
 //
 // Pre-fix, `Text.with_capacity(64).capacity()` returned 0 because
-// `core/text/text.vr::capacity()` body called `text_byte_len(self)`
+// `core/text/text.vr.capacity()` body called `text_byte_len(self)`
 // for every representation, silently losing the `cap` field on builder-
 // layout Text values.
 //
@@ -566,17 +566,17 @@ fn regression_reserve_grows_reported_capacity() {
 // Pre-fix, `Text.join(&parts, &sep)` returned empty for any non-empty
 // `parts: List<Text>`.  Two bugs in the Tier-0 intercept at
 // `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
-// text_static_runtime.rs::"join"`:
+// text_static_runtime.rs."join"`:
 //
 // 1. The len field was read as a raw `i64` instead of through
-//    `Value::as_i64()` — skipping the NaN-box unwrap.
+//    `Value.as_i64()` — skipping the NaN-box unwrap.
 // 2. The element data pointer was read at `after_header + 16` as a
 //    direct element-data pointer, but the canonical List layout
 //    stores the backing-array OBJECT pointer in field 2, and the
 //    element data begins at `backing_ptr + OBJECT_HEADER_SIZE`.
 //
 // Fix: align with the canonical List<T> heap layout used by
-// `method_dispatch.rs::list_push` —
+// `method_dispatch.rs.list_push` —
 //   `[ObjectHeader][len: Value(i64)][cap: Value(i64)][backing: Value(ptr)]`
 //   where `backing` points to an ObjectHeader-prefixed element array.
 //
@@ -643,11 +643,11 @@ fn regression_default_hasher_distinguishes_inputs() {
 // `IndexOutOfBounds(0, 0)`.
 //
 // Root cause: `RefField` (emitted by `&record.field`) lowers to a
-// `Value::from_ptr(field_ptr)` tracked in `state.cbgr_mutable_ptrs`.
+// `Value.from_ptr(field_ptr)` tracked in `state.cbgr_mutable_ptrs`.
 // `dispatch_method_call`, `handle_get_index`, and `handle_set_index`
 // each had `is_cbgr_ref` and `is_thin_ref` deref branches but lacked
 // the parallel branch for the heap-interior-pointer shape.  When the
-// receiver/array was Value::from_ptr-in-cbgr_mutable_ptrs, the
+// receiver/array was Value.from_ptr-in-cbgr_mutable_ptrs, the
 // downstream dispatcher (`dispatch_array_method`, etc.) treated the
 // interior ptr as the object base and read the wrong header.
 //
@@ -767,7 +767,7 @@ fn regression_x_result_bool_ok_false_destructure() {
 // `push_byte` calls the receiver legitimately holds a PARTIAL UTF-8 code
 // point (e.g. just 0xCE, the lead byte of 'Ω'). The Tier-0 push-family
 // intercepts round-tripped that intermediate through a Rust String +
-// `Value::from_small_string`, packing INVALID UTF-8 into the NaN-boxed
+// `Value.from_small_string`, packing INVALID UTF-8 into the NaN-boxed
 // SmallString: debug builds panicked at value.rs:1516 ("SmallString
 // contains invalid UTF-8: [206]") on the next extract; release builds
 // silently dropped the pending bytes (mojibake/empty results). Fixed by

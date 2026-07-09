@@ -468,7 +468,7 @@ public type EngineIoError is
     ;
 
 /// Public alias — short canonical name. Distinct from
-/// `core.io.protocols::IoError` (which is an interface trait);
+/// `core.io.protocols.IoError` (which is an interface trait);
 /// this concrete enum is the io-engine-side error variant.
 public type IoError is EngineIoError;
 

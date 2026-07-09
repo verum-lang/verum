@@ -10,7 +10,7 @@
 // resource references. KubeResource is a marker protocol so that
 // `KubectlCmd<Pod>` differs at the type level from `KubectlCmd<ConfigMap>`,
 // disallowing semantically incoherent constructions like
-// `KubectlCmd<ConfigMap>::Logs { ... }` (configmaps don't produce logs).
+// `KubectlCmd<ConfigMap>.Logs { ... }` (configmaps don't produce logs).
 //
 
 // =============================================================================
@@ -95,7 +95,7 @@ implement KubeName {
         let r = Regex.new("""^[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?$""").unwrap();
         if r.is_match(&s) { Result.Ok(KubeName(s)) }
         else { Result.Err(ShellError.SpawnFailed {
-            command: "<KubeName::parse>".into(),
+            command: "<KubeName.parse>".into(),
             reason:  f"invalid kubernetes name: {s}",
         }) }
     }
@@ -108,7 +108,7 @@ implement KubeNamespace {
         let r = Regex.new("""^[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?$""").unwrap();
         if r.is_match(&s) { Result.Ok(KubeNamespace(s)) }
         else { Result.Err(ShellError.SpawnFailed {
-            command: "<KubeNamespace::parse>".into(),
+            command: "<KubeNamespace.parse>".into(),
             reason:  f"invalid namespace: {s}",
         }) }
     }
@@ -186,7 +186,7 @@ implement<R: KubeResource> KubectlCmd<R> {
             }
             Logs { pod, namespace, container, follow, tail, since } => {
                 if !R.supports_logs() {
-                    panic("KubectlCmd::Logs invoked for resource that does not support logs");
+                    panic("KubectlCmd.Logs invoked for resource that does not support logs");
                 }
                 let mut args: List<Text> = ["kubectl".into(), "logs".into(), pod.as_text().clone()];
                 ns_flag(&mut args, namespace);
@@ -198,7 +198,7 @@ implement<R: KubeResource> KubectlCmd<R> {
             }
             Exec { pod, namespace, container, cmd, tty } => {
                 if !R.supports_exec() {
-                    panic("KubectlCmd::Exec invoked for resource that does not support exec");
+                    panic("KubectlCmd.Exec invoked for resource that does not support exec");
                 }
                 let mut args: List<Text> = ["kubectl".into(), "exec".into(), pod.as_text().clone()];
                 ns_flag(&mut args, namespace);

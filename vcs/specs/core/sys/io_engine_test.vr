@@ -250,7 +250,7 @@ fn test_socket_addr() {
 
     // IPv6 address
     let v6 = SocketAddr.V6 {
-        addr: [0 as UInt8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],  // ::1
+        addr: [0 as UInt8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],  // .1
         port: 443 as UInt16,
         flowinfo: 0 as UInt32,
         scope_id: 0 as UInt32,
@@ -259,7 +259,7 @@ fn test_socket_addr() {
     match v6 {
         SocketAddr.V6 { addr, port, flowinfo, scope_id } => {
             assert(port == 443_u16);
-            assert(addr[15] == 1_u8);  // Last byte is 1 for ::1
+            assert(addr[15] == 1_u8);  // Last byte is 1 for .1
             assert(flowinfo == 0_u32);
             assert(scope_id == 0_u32);
         }

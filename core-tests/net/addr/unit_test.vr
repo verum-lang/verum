@@ -808,7 +808,7 @@ fn test_addr_parse_error_disjoint_octet_vs_port() {
 // =============================================================================
 // Ipv4Addr Display/Debug render dotted-decimal (`a.b.c.d`); Ipv6Addr
 // renders the eight 16-bit groups in lowercase hex separated by `:`
-// (NOT RFC 5952 `::`-compressed — that canonical form lives in
+// (NOT RFC 5952 `.`-compressed — that canonical form lives in
 // `core.net.ipv6_canonical`). IpAddr forwards to the active variant.
 // SocketAddrV4/V6 append `:port`. Display == Debug for all of these
 // (the Display impl delegates to fmt_debug).

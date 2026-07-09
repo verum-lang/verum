@@ -255,7 +255,7 @@ public fn sasl_response(client_message: &[Byte]) -> List<Byte> {
 //
 
 // Naming convention for portal / statement names: Spindle uses the
-// 16-hex-char `s<fingerprint_hex>` slot from `PreparedQuery::server_
+// 16-hex-char `s<fingerprint_hex>` slot from `PreparedQuery.server_
 // name()`; an empty Text means "use the unnamed default slot" and is
 // only safe when no other request is in flight.
 

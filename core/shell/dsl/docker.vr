@@ -31,7 +31,7 @@ implement DockerImage {
             Result.Ok(DockerImage(s))
         } else {
             Result.Err(ShellError.SpawnFailed {
-                command: "<DockerImage::parse>".into(),
+                command: "<DockerImage.parse>".into(),
                 reason:  f"invalid docker image: {s}",
             })
         }
@@ -50,7 +50,7 @@ implement DockerTag {
         let r = Regex.new("""^[a-zA-Z0-9._\\-]{1,128}$""").unwrap();
         if r.is_match(&s) { Result.Ok(DockerTag(s)) }
         else { Result.Err(ShellError.SpawnFailed {
-            command: "<DockerTag::parse>".into(),
+            command: "<DockerTag.parse>".into(),
             reason:  f"invalid docker tag: {s}",
         }) }
     }

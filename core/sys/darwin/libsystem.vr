@@ -1275,7 +1275,7 @@ public fn safe_munmap(addr: Int, len: Int) -> Result<(), OSError> {
 
 // T0.7.1 — `@intrinsic("sys_madvise")` + `@vbc_direct_lowering`
 // removed. Together they wired safe_madvise into the AOT
-// `FfiSubOpcode::SysMadvise` opcode-handler that expected three
+// `FfiSubOpcode.SysMadvise` opcode-handler that expected three
 // explicit operand registers; the inlined operand-3 lookup hit
 // `InvalidRegister(2)` in the 5 thin madvise_* wrappers below
 // because their 2-arg frame had no slot 2 yet allocated when the

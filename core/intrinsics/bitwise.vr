@@ -68,8 +68,8 @@ public fn ashr<T>(x: T, n: UInt32) -> T { @intrinsic("ashr", x, n) }
 /// Rotate left
 ///
 /// Routed through the canonical 2-arg `@intrinsic("rotate_left", x, n)`
-/// which maps to `InlineSequenceId::RotateLeft` (2-operand
-/// `ArithSubOpcode::RotateLeft` at 0x55).  Pre-fix the body used
+/// which maps to `InlineSequenceId.RotateLeft` (2-operand
+/// `ArithSubOpcode.RotateLeft` at 0x55).  Pre-fix the body used
 /// `@intrinsic("fshl", x, x, n)` (3-operand funnel-shift), which made
 /// the user-side `compile_imported_intrinsic_call` arity-mismatch path
 /// silently drop the third argument and return Unit instead of the

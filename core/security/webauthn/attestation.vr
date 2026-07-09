@@ -162,7 +162,7 @@ fn verify_none(att_stmt: &CborValue) -> Result<VerifiedAttestation, WebAuthnErro
 //
 // Spec (WebAuthn §8.2):
 //
-//   attStmt ::= {
+//   attStmt .= {
 //     "alg":  <COSE alg>,
 //     "sig":  <bytes — signature over (authData || clientDataHash)>,
 //     "x5c":  <optional — array of DER-encoded X.509 certs leaf-first>
@@ -236,7 +236,7 @@ fn verify_packed_with_x5c(
 //
 // Spec (WebAuthn §8.6):
 //
-//   attStmt ::= {
+//   attStmt .= {
 //     "x5c": <array — must contain exactly 1 cert>,
 //     "sig": <bytes — ECDSA-P-256 signature>
 //   }
@@ -301,7 +301,7 @@ fn verify_fido_u2f(
 //
 // Spec (Apple Anonymous Attestation, FIDO Alliance):
 //
-//   attStmt ::= { "x5c": <chain> }
+//   attStmt .= { "x5c": <chain> }
 //
 //   nonce_to_hash = authData || clientDataHash
 //   expected_nonce = SHA-256(nonce_to_hash)

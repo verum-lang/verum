@@ -441,7 +441,7 @@ implement<T> Deque<T> {
         let mut high = self.len;
         while low < high {
             let mid = low + (high - low) / 2;
-            let item = self.get(mid).expect("Deque::binary_search: mid < high ≤ self.len — get is_some");
+            let item = self.get(mid).expect("Deque.binary_search: mid < high ≤ self.len — get is_some");
             match item.cmp(value) {
                 Ordering.Less => { low = mid + 1; },
                 Ordering.Greater => { high = mid; },
@@ -463,7 +463,7 @@ implement<T> Deque<T> {
         let mut high = self.len;
         while low < high {
             let mid = low + (high - low) / 2;
-            let item = self.get(mid).expect("Deque::binary_search: mid < high ≤ self.len — get is_some");
+            let item = self.get(mid).expect("Deque.binary_search: mid < high ≤ self.len — get is_some");
             match f(item) {
                 Ordering.Less => { low = mid + 1; },
                 Ordering.Greater => { high = mid; },
@@ -1300,7 +1300,7 @@ implement<T> Deque<T> {
             return false;
         }
         for i in range(0, prefix.len) {
-            if self.get(i).expect("Deque: i in range(0, self.len) — get is_some") != prefix.get(i).expect("Deque::starts_with: i < prefix.len — get is_some") {
+            if self.get(i).expect("Deque: i in range(0, self.len) — get is_some") != prefix.get(i).expect("Deque.starts_with: i < prefix.len — get is_some") {
                 return false;
             }
         }
@@ -1316,7 +1316,7 @@ implement<T> Deque<T> {
         }
         let offset = self.len - suffix.len;
         for i in range(0, suffix.len) {
-            if self.get(offset + i).expect("Deque::ends_with: offset+i < self.len (offset = self.len - suffix.len, i < suffix.len)") != suffix.get(i).expect("Deque::ends_with: i < suffix.len") {
+            if self.get(offset + i).expect("Deque.ends_with: offset+i < self.len (offset = self.len - suffix.len, i < suffix.len)") != suffix.get(i).expect("Deque.ends_with: i < suffix.len") {
                 return false;
             }
         }

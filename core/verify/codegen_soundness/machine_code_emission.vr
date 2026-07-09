@@ -37,7 +37,7 @@ mount core.prelude.{Bool};
 /// **Kernel-discharge bridge: machine-code emission preserves
 /// observable behaviour.**
 ///
-/// Manifest entry: `CodegenPassId::MachineCodeEmission`. Status:
+/// Manifest entry: `CodegenPassId.MachineCodeEmission`. Status:
 /// `AdmittedWithIou` — boundary attestation. The emitted object
 /// code's I/O trace agrees with the LLVM IR's I/O trace under
 /// the host ABI, by LLVM-backend correctness + version pinning.

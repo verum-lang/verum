@@ -18,7 +18,7 @@ mount core.collections.list.List;
 // Multi-day fix in Range iterator + Iterator default-method dispatch.
 // =============================================================================
 
-@ignore("Range::1..=N.sum() drops upper bound; (1..=10).sum() returns 45 instead of 55.")
+@ignore("Range.1..=N.sum() drops upper bound; (1..=10).sum() returns 45 instead of 55.")
 @test
 fn regression_pin_range_inclusive_sum_includes_upper_bound() {
     let total: Int = (1..=10).sum();
@@ -26,12 +26,12 @@ fn regression_pin_range_inclusive_sum_includes_upper_bound() {
 }
 
 // =============================================================================
-// REGRESSION §B: `take(&mut x)` swaps x with T::default() and returns the
-// old value. Per the canonical mem::take contract, this is the standard
+// REGRESSION §B: `take(&mut x)` swaps x with T.default() and returns the
+// old value. Per the canonical mem.take contract, this is the standard
 // "move-and-zero" pattern.
 //
 // CLOSED 2026-05-29 via method-vs-free-fn shadow filter at
-// `crates/verum_vbc/src/codegen/expressions.rs::compile_call`. Pre-fix
+// `crates/verum_vbc/src/codegen/expressions.rs.compile_call`. Pre-fix
 // the bare-name `take(&mut x)` lookup hit hash-table first-wins on the
 // simple key `take` and resolved to one of `Cell.take` / `OnceCell.take`
 // / `Set.take` / `Args.take` / `Vars.take` / `ErrorChain.take` /
@@ -52,7 +52,7 @@ fn regression_pin_take_resets_to_default() {
     let mut x: Int = 42;
     let taken = take(&mut x);
     assert_eq(taken, 42);
-    assert_eq(x, 0);   // T::default() for Int == 0
+    assert_eq(x, 0);   // T.default() for Int == 0
 }
 
 // =============================================================================

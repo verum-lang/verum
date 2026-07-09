@@ -133,7 +133,7 @@ public type PartialOrd is protocol extends PartialEq {
 
 /// Blanket: every total-order type is also a partial-order type
 /// — `partial_cmp` always returns `Maybe.Some(cmp)` since totals never
-/// produce `Maybe::Maybe.None`.  Lets primitives (Int / Byte / Char /
+/// produce `Maybe.Maybe.None`.  Lets primitives (Int / Byte / Char /
 /// UInt8..128 / Int8..128 / USize / ISize / Bool) and any user
 /// type that implements `Ord` automatically satisfy `PartialOrd`
 /// without 16+ repetitive `implement PartialOrd for X` blocks.
@@ -142,7 +142,7 @@ public type PartialOrd is protocol extends PartialEq {
 /// `Float` / `Float32` / `Float64` retain their explicit
 /// `PartialOrd` impls because they're NOT `Ord` (NaN breaks
 /// totality) and need bespoke `partial_cmp` that returns
-/// `Maybe::Maybe.None` on NaN.
+/// `Maybe.Maybe.None` on NaN.
 implement<T: Ord> PartialOrd for T {
     fn partial_cmp(&self, other: &T) -> Maybe<Ordering> {
         Maybe.Some(self.cmp(other))
@@ -218,7 +218,7 @@ implement Hasher for DefaultHasher {
         //
         // Indexed iteration (`while i < n`) rather than `for byte in bytes`
         // — the `for x in &[T]` form on a slice trips an LLVM
-        // `SmallVectorBase::grow_pod` SIGSEGV in the slice-iter
+        // `SmallVectorBase.grow_pod` SIGSEGV in the slice-iter
         // lowering (task #9, shared root with task #11 / #11 was the
         // hash-defect manifestation).  Indexed access mirrors the
         // canonical stdlib pattern (utf8_validate / kmp_failure_table)
@@ -1060,7 +1060,7 @@ public type ShrAssign<Rhs> is protocol {
 /// method should `implement Length` so that callers can write
 /// `len(x)` (the refinement-contract idiom in Dafny/Z3-style specs)
 /// without colliding with module-local free `len(...)` overloads
-/// such as `core.database.sqlite.native.cte_api.clause::len(&WithClause)`.
+/// such as `core.database.sqlite.native.cte_api.clause.len(&WithClause)`.
 ///
 /// **Why a protocol** (rather than a single non-generic free fn):
 ///

@@ -3,7 +3,7 @@
 // =============================================================================
 //
 
-// KeyUsage ::= BIT STRING {
+// KeyUsage .= BIT STRING {
 //  digitalSignature (0),
 //  nonRepudiation (1), -- recent editions of X.509 use contentCommitment
 //  keyEncipherment (2),

@@ -57,7 +57,7 @@ public type VfsInjection is
                                     // I/O perf).  `(seed, total_ops)`
                                     // deterministically derives the
                                     // FaultSchedule via
-                                    // `dst::fault::generate_schedule`.
+                                    // `dst.fault.generate_schedule`.
                                     // Closes #154.
 
 /// Open a pager with the named VFS.  Returns the same `Pager` shape

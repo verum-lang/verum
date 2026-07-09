@@ -17,7 +17,7 @@
 //   1. `separation_logic_alignment` — .vr-side surface (HeapPredicate /
 //      HoareTriple / Capability in `core/logic/separation.vr`)
 //      structurally aligns with the kernel-side surface
-//      (`verum_kernel::separation_logic`). CI-pinned cardinality.
+//      (`verum_kernel.separation_logic`). CI-pinned cardinality.
 //
 // Future entries land here as #161 progresses:
 //   * `frame_rule_soundness` — Reynolds 2002 / O'Hearn 2007.

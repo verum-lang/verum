@@ -107,7 +107,7 @@ fn regression_timer_interval_period_getter_does_not_stack_overflow() {
 // = ["ts"]` before `core.async.timer.Timeout<F>` (3-field record)
 // could claim the simple-name slot.  Under first-wins, the host
 // record's 3-field layout was silently shadowed.  `Timeout.new`'s
-// precompiled body then emitted `Instruction::New { field_count: 1 }`
+// precompiled body then emitted `Instruction.New { field_count: 1 }`
 // (one slot, 8 bytes of data) and the subsequent SetF for field
 // index 2 (or 5 after Sleep nested allocation) wrote past the
 // allocation — exact failure mode this regression pinned.
@@ -118,7 +118,7 @@ fn regression_timer_interval_period_getter_does_not_stack_overflow() {
 // updated:
 //   (1) `compile_record`'s `alloc_slots` resolution
 //       (expressions.rs:~15517) — emits
-//       `Instruction::New { field_count }` from
+//       `Instruction.New { field_count }` from
 //       `TypeDescriptor.fields.len()`.
 //   (2) `resolve_field_index` (mod.rs:~12886) — strips generic args
 //       (`Timeout<ReadyFuture>` → `Timeout`), looks up the
@@ -170,7 +170,7 @@ fn regression_timer_timeout_factory_does_not_field_write_out_of_bounds() {
 // candidates that already agree on parameter count.
 //
 // Companion fix: path-suffix narrowing probe in
-// `process_import_tree::Path` for the case where the source module
+// `process_import_tree.Path` for the case where the source module
 // declares `module <leaf>;` (single-segment) and the user's mount is
 // the file-path-canonical multi-segment form.
 

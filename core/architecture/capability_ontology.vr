@@ -46,7 +46,7 @@ mount core.prelude.{Bool, Text};
 /// the kernel uses to validate declared usages.
 public type CapabilityRegistration is {
  /// Stable canonical name — what cogs reference via
- /// `Capability::CustomCapability(name)`.
+ /// `Capability.CustomCapability(name)`.
     name: Text,
  /// Human-readable description (review aid + LSP hover).
     description: Text,

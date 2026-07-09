@@ -9,7 +9,7 @@
 
 // `FromArg` is the central protocol: any type that knows how to materialise
 // itself from a single argv token implements it. The runtime calls
-// `FromArg::from_arg(text)` once per slot. Built-in implementations cover
+// `FromArg.from_arg(text)` once per slot. Built-in implementations cover
 // every primitive plus `Path`, `Maybe<T: FromArg>`, and `List<T: FromArgList>`.
 //
 
@@ -21,7 +21,7 @@
 
 // `ArgKind` is a hint enum used by help-renderer and completion-emitters
 // to pick a sensible placeholder name and default completion source —
-// `ArgKind::Path` ⇒ placeholder `<PATH>` and shell `_files` completion.
+// `ArgKind.Path` ⇒ placeholder `<PATH>` and shell `_files` completion.
 //
 
 // =============================================================================

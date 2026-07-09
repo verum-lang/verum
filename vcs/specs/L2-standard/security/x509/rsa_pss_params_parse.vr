@@ -7,7 +7,7 @@
 
 // RFC 8017 §A.2.3 RSASSA-PSS-params decode via parse_signature_alg:
 //
-//   RSASSA-PSS-params ::= SEQUENCE {
+//   RSASSA-PSS-params .= SEQUENCE {
 //       hashAlgorithm      [0] HashAlgorithm DEFAULT sha1,
 //       maskGenAlgorithm   [1] MaskGenAlgorithm DEFAULT mgf1SHA1,
 //       saltLength         [2] INTEGER DEFAULT 20,

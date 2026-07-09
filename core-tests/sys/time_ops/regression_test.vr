@@ -12,8 +12,8 @@
 //       the bodyless declaration left over by an early emit path had
 //       i32 return, the AOT path narrowed the result to i32 silently,
 //       and the high bits (the actual time-since-epoch) were lost.
-//       The new `syscall_registry::predeclare_all` at
-//       `vbc_lowering::lower_module` Phase 0.4 (commit 9a1a892b7)
+//       The new `syscall_registry.predeclare_all` at
+//       `vbc_lowering.lower_module` Phase 0.4 (commit 9a1a892b7)
 //       installs the canonical declaration FIRST so no later path
 //       can race to declare it with the wrong shape.
 //

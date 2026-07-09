@@ -27,7 +27,7 @@ mount core.base.result.{Result, Ok, Err};
 // §A — Decimal.neg / from_parts(negative scale) panic with `Int.neg not found`
 //       — CLOSED 2026-05-15 by task #20 §A fix.
 //
-// Root cause: `compile_unary` for `UnOp::Neg` checked `has_neg_method`
+// Root cause: `compile_unary` for `UnOp.Neg` checked `has_neg_method`
 // FIRST and routed through `CallM("neg")` whenever `<T>.neg` was
 // registered — including `Int.neg` from `implement Neg for Int` in
 // primitives.vr.  The CallM had no runtime intercept for primitive
@@ -37,7 +37,7 @@ mount core.base.result.{Result, Ok, Err};
 // Fix (two layers, defense-in-depth):
 //   1. Codegen: for primitive integer / float operands, ALWAYS emit
 //      `UnaryI{Neg}` / `UnaryF{Neg}` directly.  Canonical predicate
-//      `type_names::is_integer_type` / `is_float_type` covers every
+//      `type_names.is_integer_type` / `is_float_type` covers every
 //      spelling (Int / Int8..128 / UInt8..128 / IntSize / USize /
 //      Rust-style i8..i128 / f32..f64).  User types with `Neg`
 //      protocol impls still route through `CallM("neg")`.
@@ -57,7 +57,7 @@ fn regression_a_decimal_neg_panic_pinned() {
 // =============================================================================
 // §B — Cross-module record-layout loss in match destructure — CLOSED 2026-05-15
 //
-// Pre-fix: `archive_ctx_loader::primitive_typeid_name` recognised only
+// Pre-fix: `archive_ctx_loader.primitive_typeid_name` recognised only
 // the 16 numeric/scalar primitive TypeIds. Cross-module generic
 // carriers (Maybe, Result, List, …) had `return_type_name = Maybe.None`
 // in their archive FunctionInfo because `type_ref_simple_name`

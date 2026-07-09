@@ -146,7 +146,7 @@ public fn decode_schema_row(row: &List<Register>) -> Result<SchemaRow, SchemaRow
 /// Convert a decoded SchemaRow into a TableMeta when its kind is
 /// `SrkTable` or `SrkView`.  Parses the embedded CREATE statement
 /// via the L5 parser to recover columns + primary-key info, then
-/// delegates to `schema_cache::table_meta_from_create` (the
+/// delegates to `schema_cache.table_meta_from_create` (the
 /// canonical converter).  Falls back to an empty-column TableMeta
 /// if the SQL fails to parse OR is not a CREATE TABLE statement
 /// (views legitimately fall here — `parse_one` handles only DML
@@ -318,4 +318,4 @@ public fn load_schema_from_rows(
 
 // CREATE-table column extraction now lives in
 // `parse_table_meta_from_sql` above — it parses via L5 then
-// delegates to schema_cache::table_meta_from_create.
+// delegates to schema_cache.table_meta_from_create.

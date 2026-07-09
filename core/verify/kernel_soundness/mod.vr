@@ -12,7 +12,7 @@
 // **Module layout.**
 //
 
-//  * `model.vr` — inductive Verum-side mirror of `verum_kernel::CoreTerm`,
+//  * `model.vr` — inductive Verum-side mirror of `verum_kernel.CoreTerm`,
 //  `CoreType`, `UniverseLevel`. The substrate the
 //  theorems quantify over.
 //  * `judgment.vr` — `Context`, `Judgment` (Γ ⊢ t : T), `SideCondition`,
@@ -29,7 +29,7 @@
 //
 
 // **Audit-gate integration.** `verum audit --kernel-soundness` walks
-// the `theorem.vr::corpus_rows()` list, runs each `Proved` lemma's
+// the `theorem.vr.corpus_rows()` list, runs each `Proved` lemma's
 // proof through the kernel re-checker, and emits the two foreign-
 // tool exports (`kernel_soundness.v` for Coq and `KernelSoundness.lean`
 // for Lean 4). Foreign re-checking is OPTIONAL at audit time — the

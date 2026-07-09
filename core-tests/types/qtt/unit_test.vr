@@ -15,12 +15,17 @@
 //   * top_quantity / bottom_quantity
 //   * is_sub — subquantity ordering
 //   * quantity_eq — structural eq
+//   * UsageMap — observation contexts: usage_empty / record_use /
+//     usage_of / merge_sequential (pointwise add) /
+//     merge_branches_max (pointwise max)
 // =============================================================================
 
 mount core.types.qtt.{
     Quantity, normalize_quantity, allows, add_quantity, mul_quantity,
     top_quantity, bottom_quantity, is_sub, quantity_eq,
     QTT_SATURATION,
+    UsageMap, usage_empty, record_use, usage_of,
+    merge_sequential, merge_branches_max,
 };
 
 // =============================================================================
@@ -272,4 +277,71 @@ fn test_quantity_eq_one_neq_many() {
 @test
 fn test_quantity_eq_zero_neq_many() {
     assert(!quantity_eq(Quantity.Zero, Quantity.Many));
+}
+
+// =============================================================================
+// Section 8: UsageMap — observation-context algebra
+// =============================================================================
+
+@test
+fn test_usage_empty_has_zero_uses() {
+    let u = usage_empty();
+    assert_eq(usage_of(&u, "x"), 0);
+}
+
+@test
+fn test_record_use_increments() {
+    let mut u = usage_empty();
+    record_use(&mut u, "x");
+    assert_eq(usage_of(&u, "x"), 1);
+    record_use(&mut u, "x");
+    assert_eq(usage_of(&u, "x"), 2);
+}
+
+@test
+fn test_record_use_tracks_bindings_independently() {
+    let mut u = usage_empty();
+    record_use(&mut u, "x");
+    record_use(&mut u, "y");
+    record_use(&mut u, "y");
+    assert_eq(usage_of(&u, "x"), 1);
+    assert_eq(usage_of(&u, "y"), 2);
+    assert_eq(usage_of(&u, "z"), 0);
+}
+
+@test
+fn test_merge_sequential_adds_pointwise() {
+    let mut a = usage_empty();
+    record_use(&mut a, "x");
+    record_use(&mut a, "x");
+    record_use(&mut a, "y");
+    let mut b = usage_empty();
+    record_use(&mut b, "x");
+    record_use(&mut b, "z");
+    let m = merge_sequential(&a, &b);
+    assert_eq(usage_of(&m, "x"), 3);
+    assert_eq(usage_of(&m, "y"), 1);
+    assert_eq(usage_of(&m, "z"), 1);
+}
+
+@test
+fn test_merge_branches_max_takes_pointwise_max() {
+    let mut a = usage_empty();
+    record_use(&mut a, "x");
+    record_use(&mut a, "x");
+    let mut b = usage_empty();
+    record_use(&mut b, "x");
+    record_use(&mut b, "y");
+    let m = merge_branches_max(&a, &b);
+    assert_eq(usage_of(&m, "x"), 2);
+    assert_eq(usage_of(&m, "y"), 1);
+}
+
+@test
+fn test_merge_sequential_identity_is_empty() {
+    let mut a = usage_empty();
+    record_use(&mut a, "x");
+    let e = usage_empty();
+    let m = merge_sequential(&a, &e);
+    assert_eq(usage_of(&m, "x"), 1);
 }

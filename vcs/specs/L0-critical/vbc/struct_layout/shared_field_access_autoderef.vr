@@ -25,7 +25,7 @@
 // ArenaPool field reads in particular).
 //
 // Post-fix the GetF handler peeks at the receiver's TypeId; if it's
-// `TypeId::SHARED`, advance `ptr` past the refcount slot to reach
+// `TypeId.SHARED`, advance `ptr` past the refcount slot to reach
 // the inner T (mirrors the existing method-dispatch auto-deref at
 // method_dispatch.rs:457-560), re-read the header, then proceed
 // with the normal field-offset bounds check + read.

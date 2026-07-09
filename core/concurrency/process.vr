@@ -22,7 +22,7 @@
 //
 
 // ```text
-//  P, Q ::= 0 (terminated process)
+//  P, Q .= 0 (terminated process)
 //  | P | Q (parallel composition)
 //  | (νx) P (restriction: x is fresh in P)
 //  | x⟨y⟩.P (send y on x, continue as P)

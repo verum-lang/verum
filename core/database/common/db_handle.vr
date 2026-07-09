@@ -183,7 +183,7 @@ implement<P, C: Capability> Database<P, C> {
     /// Diagnostic name of the capability ("read", "read_write_tx",
     /// "admin", ...).
     public fn capability_name(&self) -> Text {
-        C::cap_name()
+        C.cap_name()
     }
 }
 

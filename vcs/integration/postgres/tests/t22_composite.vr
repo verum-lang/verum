@@ -12,7 +12,7 @@
 //   3. Field-by-field assertion: int4(42), text("spindle"),
 //      float8(1.5).
 //   4. CREATE TYPE smoke_pair AS (n int4, s text); SELECT
-//      ROW(99, 'beta')::smoke_pair AS p — user-defined composite
+//      ROW(99, 'beta').smoke_pair AS p — user-defined composite
 //      with allocated OID. Decode via decode_composite_at after
 //      classifying the column OID via row_description.
 // =============================================================================

@@ -22,7 +22,7 @@ mount core.prelude.*;
 //   with bodies. They register correctly during stdlib precompile and
 //   work in stdlib-internal code (`core/net/weft/metrics.vr`,
 //   `core/verify/kernel_soundness/rules.vr`), but FAIL with
-//   `CodegenError::UndefinedFunction("List.from")` at every user-side
+//   `CodegenError.UndefinedFunction("List.from")` at every user-side
 //   call site because the cross-module function-name table propagated
 //   to user-side bytecode misses these IDs.
 //

@@ -711,7 +711,7 @@ public fn wraparound_count() -> Int {
 /// can pin every transition without depending on global cumulative state
 /// from earlier tests in the same process.
 ///
-/// Symmetric counterpart to `cap_audit_ring::reset_for_tests`.
+/// Symmetric counterpart to `cap_audit_ring.reset_for_tests`.
 public fn reset_for_tests() {
     // Reset the scalar shadows (record-cell write through
     // `&mut GLOBAL_EPOCH.<field>` is unimplemented; see scalar-shadow

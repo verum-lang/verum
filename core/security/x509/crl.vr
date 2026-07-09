@@ -8,14 +8,14 @@
 // RFC 5280 §5 CRL (X509Certificate Revocation List) structure:
 //
 
-//  CertificateList ::= SEQUENCE {
+//  CertificateList .= SEQUENCE {
 //  tbsCertList TBSCertList,
 //  signatureAlgorithm AlgorithmIdentifier,
 //  signatureValue BIT STRING
 //  }
 //
 
-//  TBSCertList ::= SEQUENCE {
+//  TBSCertList .= SEQUENCE {
 //  version Version OPTIONAL, -- v2 (integer 1)
 //  signature AlgorithmIdentifier,
 //  issuer Name,

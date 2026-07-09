@@ -80,7 +80,7 @@ fn prop_cidr_v4_monotone_full_chain() {
 
 @test
 fn prop_cidr_v6_monotone_128_to_0() {
-    // /128 (host) ⊆ /0 (any) for ::1 must both hold.
+    // /128 (host) ⊆ /0 (any) for .1 must both hold.
     let ip = IpAddr.v6(0, 0, 0, 0, 0, 0, 0, 1);
     let net128 = Cidr.V6 { addr: Ipv6Addr.localhost(), prefix_len: 128 };
     let net0 = Cidr.V6 { addr: Ipv6Addr.unspecified(), prefix_len: 0 };

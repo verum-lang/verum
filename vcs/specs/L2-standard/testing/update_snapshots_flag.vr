@@ -5,8 +5,8 @@
 // @snapshot: greeting_roundtrip
 // @description: Pins the --update-snapshots auto-regenerate contract (#69).
 //               When `verum test --update-snapshots` is passed:
-//                 1. Missing .snap files are CREATED (SnapshotResult::Created).
-//                 2. Existing .snap files are OVERWRITTEN (SnapshotResult::Updated).
+//                 1. Missing .snap files are CREATED (SnapshotResult.Created).
+//                 2. Existing .snap files are OVERWRITTEN (SnapshotResult.Updated).
 //                 3. Without the flag, a missing .snap returns Missing.
 //                 4. Without the flag, a changed output returns Mismatch.
 //                 5. compare_or_update(…, update=true) writes the file.

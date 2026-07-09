@@ -37,7 +37,7 @@ mount core.cli.error.ExitCode;
 // =============================================================================
 
 /// Build the canonical demo CLI spec. Returns a fully-described
-/// `CommandSpec` ready to be passed to `App::from_spec`.
+/// `CommandSpec` ready to be passed to `App.from_spec`.
 public fn build_demo_spec() -> CommandSpec {
     let verbose = FlagBuilder.switch("verbose".to_text(),
                                      "Enable verbose output".to_text())

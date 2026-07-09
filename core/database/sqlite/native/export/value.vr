@@ -6,13 +6,13 @@
 // Export modules consume `ExportValue`, a five-variant sum that
 // matches SQLite storage classes (NULL / INTEGER / REAL / TEXT /
 // BLOB) with the ROLE of textual SQL-literal rendering.  Distinct
-// from `l6_session::sql_value::SqlValue` (the SQLite-C-API-shaped
+// from `l6_session.sql_value.SqlValue` (the SQLite-C-API-shaped
 // value used by `sqlite3_column_*` / `sqlite3_bind_*`); the
 // `from_sql_value` adapter at the bottom of this file lifts the
 // canonical SqlValue into ExportValue for dump-pipeline use.
 //
 // Renamed from `SqlValue` (#162) to eliminate the variant-name
-// clash with `l6_session::sql_value::SqlValue` — pattern-matching
+// clash with `l6_session.sql_value.SqlValue` — pattern-matching
 // across modules used to dispatch unpredictably depending on
 // import order.  Each type now reflects its role: SqlValue = API
 // surface, ExportValue = rendering surface.
@@ -176,7 +176,7 @@ fn push(dst: &mut Text, s: &Text) {
 // Bridge from the canonical L6 SqlValue (#162)
 // -----------------------------------------------------------------------------
 
-/// Lift a canonical `l6_session::sql_value::SqlValue` into the
+/// Lift a canonical `l6_session.sql_value.SqlValue` into the
 /// rendering-surface `ExportValue`.  The conversion is structural
 /// + total — every variant maps 1-to-1.  Use this at the dump-
 /// pipeline boundary to keep the rendering layer decoupled from

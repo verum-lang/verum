@@ -7,7 +7,7 @@
 
 // RFC 5280 §4.2.1.9 BasicConstraints wire decode:
 //
-//   BasicConstraints ::= SEQUENCE {
+//   BasicConstraints .= SEQUENCE {
 //       cA                  BOOLEAN DEFAULT FALSE,
 //       pathLenConstraint   INTEGER (0..MAX) OPTIONAL
 //   }

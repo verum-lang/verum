@@ -2,7 +2,7 @@
 // core.architecture.parse — ATS-V @arch_module(...) parser surface
 // =============================================================================
 //
-// **Verum-native mirror of `verum_kernel::arch_parse`.**
+// **Verum-native mirror of `verum_kernel.arch_parse`.**
 //
 // The parser converts the AST representation of `@arch_module(...)`
 // named-args into a canonical `Shape`.  This cog mirrors only the
@@ -41,7 +41,7 @@ mount core.prelude.{Bool, Maybe, Text};
 
 /// Errors produced by `parse_arch_module` on malformed
 /// `@arch_module(...)` argument lists.  Mirrors
-/// `verum_kernel::arch_parse::ArchParseError`.
+/// `verum_kernel.arch_parse.ArchParseError`.
 public type ArchParseError is
     /// Field name not in the canonical roster.  `suggestion` is a
     /// Levenshtein-style hint when the parser found a near-miss.
@@ -85,7 +85,7 @@ public fn arch_parse_error_tag(e: ArchParseError) -> Text {
 // =============================================================================
 
 /// Full canonical list of `@arch_module(...)` field names.  The
-/// parser at `arch_parse::parse_arch_module` matches on these
+/// parser at `arch_parse.parse_arch_module` matches on these
 /// strings; any drift between this list and the parser breaks
 /// `@arch_module(...)` declarations from Verum source.  Pinned by
 /// `crates/verum_kernel/tests/k_arch_v_alignment.rs`.

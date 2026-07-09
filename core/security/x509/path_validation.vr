@@ -7,7 +7,7 @@
 // =============================================================================
 //
 // **Purpose.** Implement RFC 5280 §6.1 "Basic Path Validation"
-// algorithm precisely. The existing `chain.vr::validate_chain` does
+// algorithm precisely. The existing `chain.vr.validate_chain` does
 // the practical TLS subset; this module implements the by-the-book
 // algorithm with state machine, policy tree, full name constraints,
 // and critical-extension recognition. Used when the caller needs

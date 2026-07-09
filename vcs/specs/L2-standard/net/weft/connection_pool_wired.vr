@@ -14,7 +14,7 @@
 //     allocations — K heap allocations + K CBGR-refs per request
 //     frame on a slowloris-paced peer.
 //   * No path for the kernel-pinned io_uring registered-buffer
-//     contract that `bufpool::register_with_iouring` set up.
+//     contract that `bufpool.register_with_iouring` set up.
 //
 // Post-fix `serve_one_message` hoists the chunk allocation out of
 // the loop (clear-and-reuse semantics — O(1) allocations per

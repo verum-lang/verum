@@ -8,7 +8,7 @@
 //   1. INSERT a row with INT + TEXT + BIGINT cells.
 //   2. PREPARE + EXECUTE a SELECT pulling those columns back.
 //   3. typed_prepared_rows decodes raw cell bytes into List<List<RowValue>>.
-//   4. rows_typed_my::<(Int, Text, Int)> lifts each row into the typed
+//   4. rows_typed_my<(Int, Text, Int)> lifts each row into the typed
 //      tuple shape; assert exact values round-trip.
 // =============================================================================
 
@@ -120,7 +120,7 @@ fn main() {
             k = k + 1;
         }
         let lifted: List<(Int, Text, Int)> = expect_ok(
-            rows_typed_my::<(Int, Text, Int)>(&decoded),
+            rows_typed_my<(Int, Text, Int)>(&decoded),
             &"rows_typed_my::<(Int, Text, Int)> failed".clone(),
         );
         expect_eq_int(lifted.len() as Int, 2, &"lifted len".clone());

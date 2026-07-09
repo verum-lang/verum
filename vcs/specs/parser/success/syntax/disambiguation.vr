@@ -145,7 +145,7 @@ fn map_literal() {
 }
 
 // =============================================================================
-// DOUBLE COLON DISAMBIGUATION: :: path vs :. lens
+// DOUBLE COLON DISAMBIGUATION: . path vs :. lens
 // =============================================================================
 
 // Path resolution

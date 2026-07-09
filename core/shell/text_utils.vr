@@ -90,7 +90,7 @@ public fn sed_replace_re(text: &Text, rx: &Regex, replacement: &Text) -> Text {
 }
 
 /// Apply substitution to every line independently. Useful when the text is
-/// already split (e.g. from `ShellResult::lines()`).
+/// already split (e.g. from `ShellResult.lines()`).
 public fn sed_each_line(lines: &List<Text>, pattern: &Text, replacement: &Text) -> List<Text> {
     let mut out: List<Text> = [];
     for line in lines.iter() {

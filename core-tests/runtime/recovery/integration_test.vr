@@ -29,7 +29,7 @@ mount core.runtime.recovery.{
 // un-ignored + green):
 //
 //   §F  RECOVERY-RETRYPOLICY-NEW-OOB — root cause was a bare `-> Self` static
-//       return type serialized as USize (TypeId::PTR aliases USIZE), so
+//       return type serialized as USize (TypeId.PTR aliases USIZE), so
 //       `let p = T.new()` recorded p:USize → field-OOB. FIXED in codegen:
 //       ast_type_to_type_ref_self_aware + compile_record Self-resolution +
 //       current_impl_type_name ctx field. (Also closed env §A EnvTaskId.main

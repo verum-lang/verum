@@ -854,7 +854,7 @@ implement<T: Clone> Stream for StreamRepeatN<T> {
                 Poll.Ready(self.value.take())
             } else {
                 Poll.Ready(Maybe.Some(self.value.as_ref()
-                    .expect("Stream::repeat poll_next: self.value is_some until remaining hits 0 (which takes the take-branch above)")
+                    .expect("Stream.repeat poll_next: self.value is_some until remaining hits 0 (which takes the take-branch above)")
                     .clone()))
             }
         } else {
@@ -1396,7 +1396,7 @@ implement<S: Stream> StreamPeekable<S> {
             // Reaching `Maybe.None` here means either the guard was
             // bypassed by another path or `peeked` was concurrently
             // mutated — both are bugs; surface them with context.
-            Maybe.None => unreachable("StreamPeekable::peek: self.peeked must be Some after the populate-guard ran"),
+            Maybe.None => unreachable("StreamPeekable.peek: self.peeked must be Some after the populate-guard ran"),
         }
     }
 }

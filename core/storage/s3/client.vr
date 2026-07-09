@@ -9,7 +9,7 @@
 //
 // **Purpose.** Production-grade client for AWS S3 + S3-compatible
 // object stores (MinIO, Cloudflare R2, Wasabi, GCS S3-mode, Backblaze
-// B2 S3 endpoint). Implements `core.storage.types::ObjectStore`.
+// B2 S3 endpoint). Implements `core.storage.types.ObjectStore`.
 //
 // **Authentication.** AWS Signature V4 via
 // `core.storage.s3.signing`. Supports permanent IAM-user keys + STS

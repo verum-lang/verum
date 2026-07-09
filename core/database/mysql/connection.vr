@@ -1666,7 +1666,7 @@ fn drive_tls_upgrade(
     let tls_config = build_tls_config(config);
     let upgraded = match &mut conn.stream {
         MsPlain(_) => {
-            // Move the TcpStream out via std::mem::replace-style
+            // Move the TcpStream out via std.mem.replace-style
             // pattern. We synthesise a placeholder TcpStream from
             // a sentinel fd so the type-checker is happy; that
             // placeholder is dropped immediately after the swap.
@@ -1698,12 +1698,12 @@ fn swap_to_tls(
     server_name: &Text,
     tls_config: &TlsConfig,
 ) -> Result<(), DbError> {
-    // Use mem::replace via a synthetic placeholder. We rely on
+    // Use mem.replace via a synthetic placeholder. We rely on
     // `MsPlain(...)` carrying ONLY the TcpStream (no extra fields
     // to preserve), so the take-and-replace is the natural
     // shape.
     //
-    // Verum doesn't expose mem::replace as such; we approximate
+    // Verum doesn't expose mem.replace as such; we approximate
     // by pattern-matching, cloning the TCP fd via try_clone, and
     // letting the original drop on the swap. For TLS this is
     // semantically clean because the underlying TCP socket lives

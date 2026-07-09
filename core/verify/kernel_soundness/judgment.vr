@@ -174,7 +174,7 @@ public type Derivation is {
 // =============================================================================
 
 /// The 35 kernel inference rules, named to match the Rust-side
-/// `verum_kernel::proof_tree::KernelRule` enum (proof_tree.rs:694-787).
+/// `verum_kernel.proof_tree.KernelRule` enum (proof_tree.rs:694-787).
 /// Categorisation matches the `CoreTerm` variant categorisation in
 /// `model.vr`.
 ///

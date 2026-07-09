@@ -51,7 +51,7 @@ fn regression_a_is_match_absent_pinned() {
 // §B — find_all NullPointerAt opcode 0x66 (audit.md §B)
 // REGRESSION: every find_all panics with NullPointerAt opcode 0x66.
 // Opcode 0x66 is `SetIdx` (set list index) — likely the runtime's
-// `List::push` is writing through a null pointer when the regex
+// `List.push` is writing through a null pointer when the regex
 // intrinsic returns its result list.
 // =============================================================================
 

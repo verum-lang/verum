@@ -29,7 +29,7 @@ module core.database.sqlite.native.hooks_api.callback_registry;
 //   * `has_*_callback(reg) -> Bool` — fast presence check (used
 //     by fire_*_hook hot path to skip dispatch when no callback).
 //
-// The dispatcher (`hooks_api::dispatcher::fire_*_hook`) accepts a
+// The dispatcher (`hooks_api.dispatcher.fire_*_hook`) accepts a
 // `&mut HookCallbacks` parameter; when a typed callback is
 // installed it invokes it directly (zero FFI cost) and uses the
 // returned typed decision.  Falls back to the FFI opaque-handle

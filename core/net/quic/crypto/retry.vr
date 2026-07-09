@@ -8,7 +8,7 @@
 // RFC 9001 §5.8:
 //
 
-//  Retry_Pseudo-Packet ::= {
+//  Retry_Pseudo-Packet .= {
 //  ODCID Length (u8)
 //  Original Destination QuicConnection ID (0..160 bits)
 //  Retry Packet (bytes without the integrity tag)
@@ -58,7 +58,7 @@ public const RETRY_INTEGRITY_NONCE_V1: [Byte; 12] = [
 ///
 
 /// AES-128-GCM over empty plaintext: the tag is the only meaningful
-/// output (ciphertext is empty). `Aes128Gcm::encrypt` is infallible
+/// output (ciphertext is empty). `Aes128Gcm.encrypt` is infallible
 /// for well-formed inputs (key + 12-byte iv hold the contract); the
 /// function therefore returns the tag directly without a `Result`.
 public fn compute_retry_integrity_tag(pseudo: &[Byte]) -> [Byte; 16] {

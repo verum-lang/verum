@@ -191,7 +191,7 @@ public type TableMapEvent is {
 // =============================================================================
 // Optional metadata field tags (MySQL 8.0+ binlog_row_metadata=FULL)
 // =============================================================================
-// Source: src/sql/log_event.cc Table_map_log_event::Optional_metadata_fields.
+// Source: src/sql/log_event.cc Table_map_log_event.Optional_metadata_fields.
 
 public const TM_META_SIGNEDNESS:                Int = 1;
 public const TM_META_DEFAULT_CHARSET:           Int = 2;
@@ -495,7 +495,7 @@ fn parse_str_value_table(
 }
 
 /// Per-column metadata layout per MySQL src/sql/log_event_server.cc
-/// (Table_map_log_event::save_field_metadata). Returns (meta_value,
+/// (Table_map_log_event.save_field_metadata). Returns (meta_value,
 /// bytes_consumed). meta_value packs whatever the type needs into
 /// a single Int so downstream decoders can dispatch without
 /// allocating intermediate structs.

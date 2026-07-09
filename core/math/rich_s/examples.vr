@@ -21,7 +21,7 @@
 
 // The `n_S` value is captured per-axiom because §7 (vertical
 // absoluteness) consumes it directly. ∞ is encoded as `-1` in
-// keeping with `lib.math.frameworks.msfs.key_symbols::n_level`.
+// keeping with `lib.math.frameworks.msfs.key_symbols.n_level`.
 // =============================================================================
 
 @arch_module(
@@ -40,7 +40,7 @@ mount core.math.rich_s.conditions.{RichS};
 
 // Each `<theory> ∈ R-S` admission is now witness-parameterised over
 // a `R: RichS` carrier instance. The ensures clause asserts the
-// theory's claimed `n_S` value via the `R::n_S()` protocol method —
+// theory's claimed `n_S` value via the `R.n_S()` protocol method —
 // kernel-checkable rather than `ensures true`. The (R1)–(R5)
 // concrete proofs live outside Verum (literature-cited per theory);
 // this admission records the membership FACT.
@@ -52,7 +52,7 @@ mount core.math.rich_s.conditions.{RichS};
 //  n_Eff = -1, n_Lurie = -1, n_cohesive = -1, n_NCG = -1,
 //  n_motivic = -1.
 // (-1 is the wire-level encoding of ∞ per
-// `core.math.frameworks.msfs.key_symbols::n_level`.)
+// `core.math.frameworks.msfs.key_symbols.n_level`.)
 
 // =============================================================================
 // (R1)–(R5) admission axioms per canonical theory — V3 form

@@ -2,7 +2,7 @@
 // core.architecture.types — ATS-V architectural primitives
 // =============================================================================
 //
-// **Verum-native mirror of `verum_kernel::arch`.**
+// **Verum-native mirror of `verum_kernel.arch`.**
 //
 // ## What ATS-V is
 //
@@ -40,7 +40,7 @@
 // ## Cross-side pin (kernel ↔ Verum alignment)
 //
 // Every type, every variant, every helper function in this cog has
-// a 1:1 counterpart in the Rust-side `verum_kernel::arch::*`
+// a 1:1 counterpart in the Rust-side `verum_kernel.arch.*`
 // module.  Drift in either direction breaks the architectural
 // type-checker phase that walks `@arch_module(...)` declarations.
 //
@@ -165,7 +165,7 @@ public type ExpirationPolicy is
 /// ergonomic constructor preventing bare-millis literal-spam at
 /// `@arch_module` declaration sites.
 ///
-/// Composes `core.time.duration::Duration.as_millis`.
+/// Composes `core.time.duration.Duration.as_millis`.
 public fn expiration_after_duration(d: &core.time.duration.Duration) -> ExpirationPolicy {
     ExpirationPolicy.AfterDuration(d.as_millis())
 }
@@ -242,7 +242,7 @@ public type Capability is
 // =============================================================================
 //
 // Convenience builders that produce Capability values from typed
-// `core.time.duration::Duration` and other natural inputs. Use these
+// `core.time.duration.Duration` and other natural inputs. Use these
 // at `@arch_module` declaration sites to keep capability lists
 // readable; the canonical variants above remain available for
 // programmatic construction.
@@ -515,8 +515,8 @@ public type Foundation is
 ///   * `MultiTier` — cog runs on any of the listed tiers.
 ///
 /// **Variant naming pin**: `Check` (not `TierCheck`). Mirrors
-/// `verum_kernel::arch::Tier::Check` — the kernel parser at
-/// `arch_parse::parse_tier` accepts the bare segment `"Check"` and
+/// `verum_kernel.arch.Tier.Check` — the kernel parser at
+/// `arch_parse.parse_tier` accepts the bare segment `"Check"` and
 /// rejects `"TierCheck"`. Any drift here breaks `@arch_module(at_tier
 /// = Tier.Check)` declarations.
 public type Tier is
@@ -1223,7 +1223,7 @@ public type Shape is {
 // =============================================================================
 
 /// Schema bundled into a `Capability.Custom` variant — mirrors
-/// `verum_kernel::arch::CapabilitySchema`.  Distinct from
+/// `verum_kernel.arch.CapabilitySchema`.  Distinct from
 /// `core.architecture.capability_ontology.CapabilityRegistration`,
 /// which is a registry-side record carrying `name` + `deprecation`;
 /// `CapabilitySchema` is the inline payload the kernel constructs
@@ -1261,7 +1261,7 @@ public fn capability_schema_inferred_default() -> CapabilitySchema {
 
 /// Stable diagnostic tag — single token used in audit JSON,
 /// anti-pattern messages, dual-audience surfaces (spec §32.4).
-/// Mirrors `verum_kernel::arch::Tier::tag`.
+/// Mirrors `verum_kernel.arch.Tier.tag`.
 public fn tier_tag(t: Tier) -> Text {
     match t {
         Interp        => "interp",
@@ -1274,7 +1274,7 @@ public fn tier_tag(t: Tier) -> Text {
 
 /// True iff `caller_tier` can call into `callee_tier` without
 /// violating tier discipline (spec §4.7).  Mirrors
-/// `verum_kernel::arch::Tier::compatible_with`.
+/// `verum_kernel.arch.Tier.compatible_with`.
 ///
 /// **Soundness**: identity always; MultiTier is reflexive set-membership;
 /// Check is incompatible with any executable tier (Check is type-check-only,
@@ -1390,7 +1390,7 @@ public fn lifecycle_tag(lc: Lifecycle) -> Text {
 
 /// CVE §3.5 single-character status code — for compact rendering
 /// in cross-format outputs and stable error codes.  Mirrors
-/// `verum_kernel::arch::Lifecycle::cve_glyph`.
+/// `verum_kernel.arch.Lifecycle.cve_glyph`.
 public fn lifecycle_cve_glyph(lc: Lifecycle) -> Text {
     match lc {
         Hypothesis(_)     => "H",
@@ -1503,7 +1503,7 @@ public fn capability_tag(c: Capability) -> Text {
 /// Default shape for cogs without `@arch_module` per spec §6.1
 /// (smart default inference).  Soft-mode trivial — vacuously
 /// passes every anti-pattern check.  Mirrors
-/// `verum_kernel::arch::Shape::default_for_unannotated`.
+/// `verum_kernel.arch.Shape.default_for_unannotated`.
 public fn shape_default_for_unannotated() -> Shape {
     Shape {
         exposes: [],

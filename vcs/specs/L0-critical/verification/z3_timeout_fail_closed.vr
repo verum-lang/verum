@@ -13,7 +13,7 @@
 // (silently lifts a refinement obligation the solver could not discharge).
 //
 // Audit trail: vcs/red-team/round-1-architecture.md §5.1 documents
-// the 9 SatResult::Unknown consumer sites; this guardrail pins the
+// the 9 SatResult.Unknown consumer sites; this guardrail pins the
 // surface-level invariant they jointly enforce.
 //
 // Companion tests:

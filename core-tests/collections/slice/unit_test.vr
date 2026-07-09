@@ -270,7 +270,7 @@ fn test_slice_max_empty_none() {
 }
 
 // =============================================================================
-// Section 6: Iteration — iter / SliceIter::next
+// Section 6: Iteration — iter / SliceIter.next
 // =============================================================================
 
 @test

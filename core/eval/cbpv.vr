@@ -6,7 +6,7 @@
 // Layer: Standard Library / Evaluation
 //
 
-// User-facing surface for the CBPV analysis core (`verum_types::
+// User-facing surface for the CBPV analysis core (`verum_types.
 // cbpv`). Levy's call-by-push-value separates *values* from
 // *computations*. Both call-by-value and call-by-name λ-calculi
 // embed into CBPV through systematic translations, and effects
@@ -22,8 +22,8 @@
 //
 
 // ```text
-//  V ::= x | λx. C | thunk C (values)
-//  C ::= return V (lift value to trivial computation)
+//  V .= x | λx. C | thunk C (values)
+//  C .= return V (lift value to trivial computation)
 //  | V to x. C (sequence: bind producer's value)
 //  | force V
 //  | V₁ V₂ (application — V₁ is a thunk-of-fn)

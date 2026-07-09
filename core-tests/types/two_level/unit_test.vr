@@ -10,13 +10,14 @@
 //   * Layer 2-variant (Fibrant / Strict) + Eq + variant disjointness
 //   * layer_flows_to truth table — `Fibrant ≼ Strict` ordering rule
 //   * layer_mix truth table — strictness-contagion rule (Strict wins)
+//   * layer_mix_all — n-ary fold (empty ↦ Fibrant identity)
 //   * LayerVerdict 3-variant (LayerOk / StrictInFibrant / LevelMismatch)
 //     + Eq matrix
 //   * Layer-flow soundness via check_layer_flow boundary cases (deferred
 //     to integration after cross-module record-return fix)
 // =============================================================================
 
-mount core.types.two_level.{Layer, LayerVerdict, layer_flows_to, layer_mix};
+mount core.types.two_level.{Layer, LayerVerdict, layer_flows_to, layer_mix, layer_mix_all};
 
 // =============================================================================
 // Section 1: Layer 2-variant
@@ -226,4 +227,35 @@ fn test_layer_verdict_eq_cross_variant_false() {
     let ok: LayerVerdict = LayerVerdict.LayerOk;
     let lm: LayerVerdict = LayerVerdict.LevelMismatch { from_level: 0, to_level: 0 };
     assert(!(ok == lm));
+}
+
+// =============================================================================
+// Section 5: layer_mix_all — n-ary strictness contagion
+// =============================================================================
+
+@test
+fn test_layer_mix_all_empty_is_fibrant() {
+    let ls: List<Layer> = List.new();
+    let m = layer_mix_all(ls);
+    assert(m is Layer.Fibrant);
+}
+
+@test
+fn test_layer_mix_all_all_fibrant_stays_fibrant() {
+    let mut ls: List<Layer> = List.new();
+    ls.push(Layer.Fibrant);
+    ls.push(Layer.Fibrant);
+    ls.push(Layer.Fibrant);
+    let m = layer_mix_all(ls);
+    assert(m is Layer.Fibrant);
+}
+
+@test
+fn test_layer_mix_all_single_strict_contaminates() {
+    let mut ls: List<Layer> = List.new();
+    ls.push(Layer.Fibrant);
+    ls.push(Layer.Strict);
+    ls.push(Layer.Fibrant);
+    let m = layer_mix_all(ls);
+    assert(m is Layer.Strict);
 }

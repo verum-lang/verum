@@ -11,12 +11,12 @@
 //
 // Canonical-form rules tested (§4):
 //   * §4.1 Leading zeros suppressed
-//   * §4.2.1 Longest run of zero groups compressed with `::`
+//   * §4.2.1 Longest run of zero groups compressed with `.`
 //   * §4.2.2 Single zero group NOT compressed
 //   * §4.2.3 Ties → leftmost run wins
 //   * §4.3 All hex digits lowercase
 //
-// §5 IPv4-mapped form `::ffff:a.b.c.d` is pinned in
+// §5 IPv4-mapped form `.ffff:a.b.c.d` is pinned in
 // `regression_test.vr` behind IPV6CAN-1 — calling
 // `format_ipv6(&v4_mapped)` triggers a precompile SIGSEGV through
 // the byte-string-literal + high-index octet-access path in
@@ -63,7 +63,7 @@ fn test_format_suppresses_leading_zeros() {
 
 @test
 fn test_format_compresses_trailing_zeros() {
-    // 2001:db8:0:0:0:0:0:0 → 2001:db8::
+    // 2001:db8:0:0:0:0:0:0 → 2001:db8.
     let a = Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0);
     let s = format_ipv6(&a);
     assert_eq(s.as_str(), "2001:db8::");

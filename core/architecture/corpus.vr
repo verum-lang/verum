@@ -2,7 +2,7 @@
 // core.architecture.corpus — ATS-V cross-cog corpus invariants
 // =============================================================================
 //
-// **Verum-native mirror of `verum_kernel::arch_corpus`.**
+// **Verum-native mirror of `verum_kernel.arch_corpus`.**
 //
 // Individual `@arch_module(...)` declarations cover per-cog
 // invariants — capability discipline, lifecycle integrity, etc.
@@ -42,7 +42,7 @@ mount core.prelude.{Bool, Int, List, Text};
 // =============================================================================
 
 /// Stable enumeration of corpus-level invariants.  Mirrors
-/// `verum_kernel::arch_corpus::CorpusInvariant`.
+/// `verum_kernel.arch_corpus.CorpusInvariant`.
 public type CorpusInvariant is
     | NoCircularDependencies
     | FoundationConsistency
@@ -102,7 +102,7 @@ public type CorpusViolation is {
 // =============================================================================
 
 /// Aggregated cross-cog verification report.  Mirrors
-/// `verum_kernel::arch_corpus::CorpusReport`.
+/// `verum_kernel.arch_corpus.CorpusReport`.
 public type CorpusReport is {
     total_cogs: Int,
     violations: List<CorpusViolation>,
@@ -128,7 +128,7 @@ public fn corpus_report_is_load_bearing(r: CorpusReport) -> Bool {
 
 /// **Corpus-level architectural verification.**
 ///
-/// Discharges `verum_kernel::arch_corpus::verify_corpus` —
+/// Discharges `verum_kernel.arch_corpus.verify_corpus` —
 /// walks every (cog_name, Shape) pair through all 4 baseline
 /// invariants and aggregates structured violations.
 ///

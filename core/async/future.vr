@@ -223,13 +223,13 @@ public type FutureExt is protocol extends Future {
 
     /// For genuine async work — anything involving timers, IO, or
     /// inter-task coordination — use the runtime executor
-    /// (`verum_runtime::block_on`) which builds a thread-park waker
+    /// (`verum_runtime.block_on`) which builds a thread-park waker
     /// so the thread suspends on Pending and unparks on wake. The
     /// stdlib does not yet ship a thread-aware waker primitive, so
     /// this method intentionally stays minimal.
     ///
 
-    /// On Pending we call `thread::yield_now()` so the OS scheduler
+    /// On Pending we call `thread.yield_now()` so the OS scheduler
     /// gets a chance to run other threads — keeps the CPU from
     /// pinning at 100% in the (already-incorrect) async-future
     /// case while a synchronous-completion future converges.

@@ -2,7 +2,7 @@
 // core-tests/sys/init/integration_test.vr
 // =============================================================================
 //
-// Cross-stdlib integration tests for `core.sys.init::InitError`.
+// Cross-stdlib integration tests for `core.sys.init.InitError`.
 // =============================================================================
 
 mount core.prelude.*;

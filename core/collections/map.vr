@@ -457,7 +457,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Get value by key.
     ///
     /// Returns `Maybe.Some(value)` when `key` is present, `Maybe.None` otherwise —
-    /// industry-standard semantics matching Rust `HashMap::get`,
+    /// industry-standard semantics matching Rust `HashMap.get`,
     /// Java `Map.get` (with `Optional` wrapping), Scala `Map.get`.
     ///
     /// The previous lossy `get(K) -> V` (zero-on-miss) signature was
@@ -465,7 +465,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// any `V` whose zero is also a legitimate domain value. Every
     /// caller that needs an explicit fallback now reads as
     /// `m.get(k).unwrap_or(default)` — the fallback is visible at the
-    /// call site, no implicit V::default().
+    /// call site, no implicit V.default().
     ///
     /// Takes key by value because `&K` deref through the Tier-0 VBC
     /// interpreter currently lowers to a silent always-false probe at
@@ -760,7 +760,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     ///
     /// Returns `Maybe.Some(prior_value)` when `key` was present (and the
     /// entry has been deleted), `Maybe.None` when the key was absent.
-    /// Industry-standard semantics matching Rust `HashMap::remove`,
+    /// Industry-standard semantics matching Rust `HashMap.remove`,
     /// Java `Map.remove` (returns the prior value).
     ///
     /// Takes key by value for the same reason as `get` — see that

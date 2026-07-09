@@ -2,7 +2,7 @@
 // core-tests/sys/fs_watch/property_test.vr
 // =============================================================================
 //
-// Algebraic / structural laws for `core.sys.fs_watch::FsEventKind`.
+// Algebraic / structural laws for `core.sys.fs_watch.FsEventKind`.
 // =============================================================================
 
 mount core.prelude.*;

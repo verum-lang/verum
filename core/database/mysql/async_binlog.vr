@@ -39,7 +39,7 @@
 //     (sync impl in connection.vr; async constructor honours the
 //     setting on first wire setup).
 //   * Async TableMapCache lifecycle — see
-//     `core.database.mysql.async_binlog_consumer::AsyncMysqlBinlogConsumer`
+//     `core.database.mysql.async_binlog_consumer.AsyncMysqlBinlogConsumer`
 //     (attach_table_map_cache wraps an open AsyncMysqlBinlogStream
 //     with an internally-managed cache + typed BinlogChange
 //     surface).

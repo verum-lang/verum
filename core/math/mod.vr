@@ -123,7 +123,7 @@
 //   * @arch_module(foundation, stratum, lifecycle) — every cog in
 //     this directory carries the self-attestation declaration.
 //     The cross-side pin test at
-//     `crates/verum_kernel/tests/k_arch_v_alignment.rs::
+//     `crates/verum_kernel/tests/k_arch_v_alignment.rs.
 //      pin_math_cogs_have_arch_module` asserts coverage.
 //
 // Foundation tag conventions are documented in

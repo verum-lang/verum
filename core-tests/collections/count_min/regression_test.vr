@@ -9,7 +9,7 @@ mount core.collections.count_min.{CountMinSketch, CountMinError};
 // §A — CountMinSketch construction CLOSED 2026-05-17 via CSPRNG
 // dispatch fix (task #13) — fill_secure now routes through
 // `random_u64` intrinsic instead of the broken
-// `core.sys.common.random_bytes → safe_getentropy → libc::getentropy`
+// `core.sys.common.random_bytes → safe_getentropy → libc.getentropy`
 // pointer-marshalling chain.
 // =============================================================================
 

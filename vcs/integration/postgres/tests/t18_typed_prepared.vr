@@ -54,7 +54,7 @@ fn main() {
     );
     expect_eq_int(res.rows.len() as Int, 1, &"row count".clone());
     let pair: (Int, Int) = expect_ok(
-        TypedRow::from_typed_row(&res.rows[0], &res.row_description),
+        TypedRow.from_typed_row(&res.rows[0], &res.row_description),
         &"TypedRow (Int, Int) decode failed".clone(),
     );
     expect_eq_int(pair.0, 20, &"sum".clone());
@@ -117,7 +117,7 @@ fn main() {
     );
     expect_eq_int(res3.rows.len() as Int, 1, &"row count 3".clone());
     let m: Maybe<Int> = expect_ok(
-        TypedRow::from_typed_row(&res3.rows[0], &res3.row_description),
+        TypedRow.from_typed_row(&res3.rows[0], &res3.row_description),
         &"Maybe<Int> NULL decode failed".clone(),
     );
     expect(
@@ -157,7 +157,7 @@ fn main() {
         );
         expect_eq_int(ares.rows.len() as Int, 1, &"async row count".clone());
         let n: Int = expect_ok(
-            TypedRow::from_typed_row(&ares.rows[0], &ares.row_description),
+            TypedRow.from_typed_row(&ares.rows[0], &ares.row_description),
             &"async TypedRow Int decode failed".clone(),
         );
         expect_eq_int(n, 3_000_000_000_000, &"async int8 sum".clone());

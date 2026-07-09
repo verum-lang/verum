@@ -15,9 +15,9 @@
 // skipped entirely.
 //
 // The audit-pinned recipe is the bit-flip pattern
-// `(((!n) as UInt64) + 1_u64)` from `sqlite_version_fmt::int_to_text`,
+// `(((!n) as UInt64) + 1_u64)` from `sqlite_version_fmt.int_to_text`,
 // applied to every formatter that handles negatives. Documented in
-// `core/text/format.vr::int_to_text` docstring as "Handles every
+// `core/text/format.vr.int_to_text` docstring as "Handles every
 // `Int` including `Int.MIN`".
 //
 // This test pins the contract by comparing `int_to_text(Int.MIN)`

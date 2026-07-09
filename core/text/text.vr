@@ -290,7 +290,7 @@ implement Text {
 
     /// Inherent static-method form of the `From<&str> for Text`
     /// protocol implementation — used at call sites that prefer the
-    /// `Text.from(literal)` shape over `From::from(literal)` or
+    /// `Text.from(literal)` shape over `From.from(literal)` or
     /// protocol dispatch (which lenient-stubs in the current
     /// codegen when the receiver type cannot be tracked).
     ///
@@ -362,7 +362,7 @@ implement Text {
     /// (`core/database/sqlite/...`, ~72 call sites) and other modules
     /// were written against an earlier API revision that exposed
     /// `Text.from_bytes`; the rename to `from_utf8` (matching Rust's
-    /// `String::from_utf8` for semantic honesty) left those call sites
+    /// `String.from_utf8` for semantic honesty) left those call sites
     /// referencing a removed name. Pre-fix, every reference was
     /// lenient-skipped at precompile-stub time, and any runtime call
     /// would panic-stub through `[lenient] SKIP top-level fn braille_char`.
@@ -374,7 +374,7 @@ implement Text {
 
     /// Create text from a byte slice, replacing any invalid UTF-8
     /// sequences with the Unicode replacement character (U+FFFD).
-    /// Mirrors Rust's `String::from_utf8_lossy` semantics: well-formed
+    /// Mirrors Rust's `String.from_utf8_lossy` semantics: well-formed
     /// inputs pass through verbatim; ill-formed inputs decode lossily
     /// rather than raise an error. Used by `core.io.process.Output`'s
     /// `stdout()` / `stderr()` accessors and by any caller that needs
@@ -388,7 +388,7 @@ implement Text {
         // sequence) becomes a single U+FFFD replacement character
         // (3 bytes UTF-8 = 0xEF 0xBF 0xBD). This matches the
         // WHATWG Encoding Standard's "replacement" behaviour, which
-        // is what `String::from_utf8_lossy` implements.
+        // is what `String.from_utf8_lossy` implements.
         let mut buf: List<Byte> = [];
         let mut i: Int = 0;
         let len = bytes.len();
@@ -553,11 +553,11 @@ implement Text {
     /// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
     /// text_static_runtime.rs` and returns the true capacity by
     /// reading the underlying representation directly.  Pinned by
-    /// `core-tests/text/text/regression_test.vr::regression_*_reports_capacity`.
+    /// `core-tests/text/text/regression_test.vr.regression_*_reports_capacity`.
     ///
     /// `@no_inline` is critical: without it, the Verum compiler
     /// folds the single-intrinsic body into the caller's bytecode,
-    /// emitting `TextExtended::ByteLen` directly and bypassing the
+    /// emitting `TextExtended.ByteLen` directly and bypassing the
     /// Tier-0 intercept.  The intercept can only fire when the call
     /// reaches the interpreter as `Call(Text.capacity_fid)`.
     @no_inline
@@ -917,7 +917,7 @@ implement Text {
     /// Find last occurrence of substring. Returns the byte start of
     /// the *rightmost* match (overlapping matches included — same
     /// semantics as the previous reverse-scan implementation, and
-    /// matches Rust's `str::rfind`). Linear-time via forward KMP
+    /// matches Rust's `str.rfind`). Linear-time via forward KMP
     /// with track-last + failure-function fallback after each
     /// match — pre-fix this was nested O(n·m).
     public fn rfind(&self, needle: &Text) -> Maybe<Int> {
@@ -1232,7 +1232,7 @@ implement Text {
     ///
 
     /// Empty pattern is a no-op: returns a clone of `self` unchanged
-    /// (matches Rust's `str::replace` semantics — replacing the empty
+    /// (matches Rust's `str.replace` semantics — replacing the empty
     /// string with anything would be ill-defined).
     public fn replace(&self, pattern: &Text, replacement: &Text) -> Text {
         let bytes = self.as_bytes();
@@ -1924,7 +1924,7 @@ implement Text {
             // Per-step overflow guard against UInt64.MAX.
             // mag * radix + digit must fit in UInt64. The canonical
             // Knuth pre-check is back in service after VBC-side
-            // `BinaryIntOp::UDiv` / `UModI` landed (commits adding
+            // `BinaryIntOp.UDiv` / `UModI` landed (commits adding
             // 0x1B/0x1C opcodes + handler wiring) — `(UInt64.MAX) /
             // radix` now yields the correct unsigned quotient
             // (1844674407370955161 for radix=10) instead of 0 from

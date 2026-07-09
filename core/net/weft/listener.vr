@@ -84,7 +84,7 @@ public type ListenerConfig is {
     /// internet-exposed deployments). Default 100.
     per_ip_max: Int,
     /// Optional io_uring multi-shot accept config (§6.17). `Maybe.None`
-    /// keeps the existing `TcpListener::accept` path; `Maybe.Some(cfg)`
+    /// keeps the existing `TcpListener.accept` path; `Maybe.Some(cfg)`
     /// opts the listener into the strategy selected by
     /// `io_uring_accept.select_accept_strategy(target_triple, cfg)`.
     /// V0 (#316.3) accepts the field but the selector falls through
@@ -121,7 +121,7 @@ implement ListenerConfig {
     /// per spec §6.17. The supplied `IoUringAcceptConfig` is handed
     /// to `select_accept_strategy()` at startup; on non-Linux targets
     /// or when V1 isn't yet wired the listener silently falls through
-    /// to today's `TcpListener::accept` path — caller-side behaviour
+    /// to today's `TcpListener.accept` path — caller-side behaviour
     /// is unchanged either way. Default for new `ListenerConfig`s
     /// remains `Maybe.None` (no behavioural change to existing call sites).
     public fn with_io_uring_strategy(self, cfg: IoUringAcceptConfig) -> ListenerConfig {

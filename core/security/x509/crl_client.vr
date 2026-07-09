@@ -9,21 +9,21 @@
 // **Purpose.** End-to-end CRL client: extract CRL distribution
 // points (CDP) from a certificate's `cRLDistributionPoints`
 // extension (RFC 5280 §4.2.1.13), fetch each candidate URL, parse
-// the resulting CRL via `core.security.x509.crl::parse_crl`, verify
+// the resulting CRL via `core.security.x509.crl.parse_crl`, verify
 // the CRL signature against the issuer, check freshness against
 // thisUpdate/nextUpdate, look up the cert's serial.
 //
 // **CDP extension structure (RFC 5280 §4.2.1.13).**
 //
-//   CRLDistributionPoints ::= SEQUENCE SIZE (1..MAX) OF DistributionPoint
+//   CRLDistributionPoints .= SEQUENCE SIZE (1..MAX) OF DistributionPoint
 //
-//   DistributionPoint ::= SEQUENCE {
+//   DistributionPoint .= SEQUENCE {
 //        distributionPoint       [0] EXPLICIT DistributionPointName OPTIONAL,
 //        reasons                 [1] IMPLICIT ReasonFlags OPTIONAL,
 //        cRLIssuer               [2] IMPLICIT GeneralNames OPTIONAL
 //   }
 //
-//   DistributionPointName ::= CHOICE {
+//   DistributionPointName .= CHOICE {
 //        fullName                [0] IMPLICIT GeneralNames,
 //        nameRelativeToCRLIssuer [1] IMPLICIT RelativeDistinguishedName
 //   }

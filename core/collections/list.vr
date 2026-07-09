@@ -467,7 +467,7 @@ implement<T> List<T> {
         // Safe-operation pop_front: `self.get(0)` resolves through the
         // runtime intercept (canonical [len@0, cap@1, backing_ptr@2]
         // layout); `self.remove(0)` is likewise intercepted at
-        // `method_dispatch.rs::remove`. The original raw `self.ptr`
+        // `method_dispatch.rs.remove`. The original raw `self.ptr`
         // + `memmove` body assumed `self.ptr` pointed past the heap
         // object's ObjectHeader, but codegen actually resolves
         // `self.ptr` to the start of the backing heap object — so
@@ -903,7 +903,7 @@ implement<T> List<T> {
     // `Maybe<Int>`.  Cross-module bare-name collision on `index_of`
     // dispatched List's body against slice callsites expecting
     // `Maybe<Int>`, breaking
-    // `core-tests/collections/slice/regression_test.vr::regression_slice_position_misdispatches_to_iterator_predicate_form`.
+    // `core-tests/collections/slice/regression_test.vr.regression_slice_position_misdispatches_to_iterator_predicate_form`.
     // Until #17/#39 mount-scope-aware dispatch fully closes, siblings
     // sharing a simple name MUST agree on signature shape.
     public fn index_of(&self, value: &T) -> Maybe<Int>
@@ -2094,7 +2094,7 @@ implement<T> List<T> {
         // variants (`RetryBackoff.None`, `Poll.Pending` etc.) when
         // this generic body is monomorphised in a consumer module
         // where the bare-name shadow differs.  Pinned by
-        // `core-tests/base/iterator/regression_test.vr::regression_bare_none_in_closure_body`.
+        // `core-tests/base/iterator/regression_test.vr.regression_bare_none_in_closure_body`.
         let mut result: List<U> = List.new();
         for i in range(0, self.len) {
             let item: &T = unsafe { &*self.ptr.offset(i) };

@@ -4,7 +4,7 @@
 //
 // LOCK-IN pins for `core.runtime.env`:
 //   §1  ExecutionTier.overhead_ns CBGR cost contract (15/8/3/0 ns) — must
-//       agree with verum_vbc::cbgr overhead targets + CLAUDE.md "< 15ns".
+//       agree with verum_vbc.cbgr overhead targets + CLAUDE.md "< 15ns".
 //   §2  requires_epoch ⟹ requires_generation tier invariant.
 //   §3  audit.md §A — EnvTaskId.main() field-write-OOB (the wide-record
 //       static-method shadow / field-shift codegen class, task #17/#39).
@@ -65,7 +65,7 @@ fn env_reg_epoch_implies_generation_all_tiers() {
 //
 // EnvTaskId is a 2-field record { id: UInt64, parent_id: Maybe<UInt64> }.
 // `EnvTaskId.main() -> Self` had its bare `-> Self` return serialized as USize
-// (TypeId::PTR aliases USIZE), so the construction wrote field index 2 past the
+// (TypeId.PTR aliases USIZE), so the construction wrote field index 2 past the
 // 2-field data size. FIXED in codegen (commit d2ef54aef, landed main 1bd782ec1):
 // ast_type_to_type_ref_self_aware substitutes the concrete impl type for a bare
 // `-> Self` return descriptor. Tests below un-ignored + green on main.

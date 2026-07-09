@@ -193,7 +193,7 @@ public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
             // pager's commit path runs FIRST (drains dirty frames
             // through the backend's sync discipline), then the cache
             // generation bump invalidates stale snapshots. If the
-            // pager-side commit fails (`PagerError::IoError` /
+            // pager-side commit fails (`PagerError.IoError` /
             // `Busy` / `Locked`), the actor surfaces it via `Failed`
             // and DOES NOT advance the visible generation — readers
             // continue to see the last durable state.

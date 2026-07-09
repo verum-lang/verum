@@ -20,7 +20,7 @@
 //
 // **Audit findings (2026-04-28):**
 //
-//   * `core/base/protocols.vr::DefaultHasher` uses FxHash with `state: 0`
+//   * `core/base/protocols.vr.DefaultHasher` uses FxHash with `state: 0`
 //     (no per-process random seed). Docstring: "this default is for
 //     compiler-internal / trusted-input use." Means: determinism YES,
 //     HashDoS resistance NO. The latter is documented; users who need

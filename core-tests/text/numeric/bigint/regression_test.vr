@@ -80,13 +80,13 @@ fn guard_parse_simple_positive() {
 // =============================================================================
 //
 // Root cause: when `&self.field` is passed across a function boundary
-// (`clone_digits(&self.digits)`), the resulting `Value::from_ptr`
+// (`clone_digits(&self.digits)`), the resulting `Value.from_ptr`
 // interior pointer was not auto-derefed by `dispatch_method_call`,
 // `handle_get_index`, or `handle_set_index`.  Callee dispatchers
 // then treated the parent-record header as the receiver — every
 // `src.len()` / `src[i]` mis-routed.  Fix: added the same deref
 // branch already present for `is_cbgr_ref` and `is_thin_ref` to
-// also handle `Value::from_ptr`-in-`cbgr_mutable_ptrs`.
+// also handle `Value.from_ptr`-in-`cbgr_mutable_ptrs`.
 //
 // Pins now exercise positive-magnitude paths. Negative-magnitude
 // paths are gated on task #20 (`from_int(-N)` returns empty digits

@@ -6,8 +6,8 @@
 //
 
 // Path grammar (simplified):
-//  path ::= '$' segment*
-//  segment ::= '.' name | '[' index ']'
+//  path .= '$' segment*
+//  segment .= '.' name | '[' index ']'
 //
 
 // Examples: $.foo, $[0], $.foo.bar[2], $.items[#-1] (last), $.**.bar (tree wildcard)

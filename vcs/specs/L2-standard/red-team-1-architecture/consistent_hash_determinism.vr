@@ -8,7 +8,7 @@
 // hash-iter full audit (#207 sub-deliverable 8) to
 // `ConsistentHashRing` (Ketama-compatible).
 //
-// Pre-fix history (memory-recorded): consistent_hash::vnode_position
+// Pre-fix history (memory-recorded): consistent_hash.vnode_position
 // computed Ketama positions via SHA256 over `name || "-" || idx`;
 // any non-determinism in that derivation breaks consistent-hash
 // across producers (every node assignment shifts).

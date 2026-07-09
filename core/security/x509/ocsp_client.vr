@@ -10,31 +10,31 @@
 // **Purpose.** End-to-end OCSP client: build a CertID request,
 // POST to the responder URL extracted from the cert's AIA extension
 // (or supplied by the caller), parse the response via
-// `core.security.x509.ocsp::parse_ocsp_response`, verify the
+// `core.security.x509.ocsp.parse_ocsp_response`, verify the
 // responder's signature (issuer-signed or delegated-via-id-pkix-
 // ocsp-signing), check freshness against thisUpdate/nextUpdate,
 // return the per-cert `CertStatus`.
 //
 // **OCSP request structure (RFC 6960 §4.1.1).**
 //
-//   OCSPRequest ::= SEQUENCE {
+//   OCSPRequest .= SEQUENCE {
 //       tbsRequest                  TBSRequest,
 //       optionalSignature   [0]     EXPLICIT Signature OPTIONAL
 //   }
 //
-//   TBSRequest ::= SEQUENCE {
+//   TBSRequest .= SEQUENCE {
 //       version           [0] EXPLICIT Version DEFAULT v1,
 //       requestorName     [1] EXPLICIT GeneralName OPTIONAL,
 //       requestList                  SEQUENCE OF Request,
 //       requestExtensions [2] EXPLICIT Extensions OPTIONAL
 //   }
 //
-//   Request ::= SEQUENCE {
+//   Request .= SEQUENCE {
 //       reqCert                CertID,
 //       singleRequestExtensions [0] EXPLICIT Extensions OPTIONAL
 //   }
 //
-//   CertID ::= SEQUENCE {
+//   CertID .= SEQUENCE {
 //       hashAlgorithm   AlgorithmIdentifier,
 //       issuerNameHash  OCTET STRING, -- Hash of issuer's DN
 //       issuerKeyHash   OCTET STRING, -- Hash of issuer's public key
@@ -250,7 +250,7 @@ fn peek_tlv(der: &[Byte], off: Int) -> Maybe<(Byte, Int, Int, Int)> {
 }
 
 fn encode_alg_id(oid: &Oid) -> List<Byte> {
-    // AlgorithmIdentifier ::= SEQUENCE { OID, NULL }
+    // AlgorithmIdentifier .= SEQUENCE { OID, NULL }
     // We emit an explicit NULL parameters field — required by RFC 6960
     // for SHA-1/SHA-256 CertID hash algorithms.
     let mut w = DerWriter.new();
@@ -319,8 +319,8 @@ public fn extract_ocsp_url(cert: &X509Certificate) -> Maybe<Text> {
 }
 
 fn aia_extract_ocsp_url(der: &[Byte]) -> Maybe<Text> {
-    // AIA ::= SEQUENCE OF AccessDescription
-    // AccessDescription ::= SEQUENCE { accessMethod OID, accessLocation GeneralName }
+    // AIA .= SEQUENCE OF AccessDescription
+    // AccessDescription .= SEQUENCE { accessMethod OID, accessLocation GeneralName }
     // For OCSP: accessMethod = 1.3.6.1.5.5.7.48.1, accessLocation = uri ([6] IA5String)
     let outer = match peek_tlv(der, 0) {
         Maybe.Some((tag, _, c_off, c_end)) => {
@@ -595,7 +595,7 @@ fn verify_response_signature(
     let _ = basic;
     let _ = issuer;
     // TODO once parse_ocsp_response is real: do the actual verify
-    // via `core.security.x509.chain::verify_signature` against
+    // via `core.security.x509.chain.verify_signature` against
     // basic.raw_tbs_response_data + basic.signature using either
     // issuer.tbs.spki or a delegated responder cert's SPKI.
     Result.Ok(false)

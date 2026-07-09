@@ -140,7 +140,7 @@ public fn mode_blocks_writers(mode: PagerCheckpointMode) -> Bool {
 /// **For real WAL drain, use `run_checkpoint`** which issues a
 /// `Checkpoint(mode)` request to the pager actor (the actor calls
 /// `pager_commit` which performs the durable flush — see
-/// `actor.vr::pager_apply`).
+/// `actor.vr.pager_apply`).
 public fn plan_checkpoint(
     mode: PagerCheckpointMode,
     available_frames: Int,

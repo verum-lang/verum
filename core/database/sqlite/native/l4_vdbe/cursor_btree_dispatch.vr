@@ -20,7 +20,7 @@ module core.database.sqlite.native.l4_vdbe.cursor_btree_dispatch;
 //      and sort buffers.  Lives in `cursor_table.vr` directly.
 //
 //   2. **B-tree path** (CskBtree) — real pager-backed cursor.
-//      Dispatches through `cursor_btree_bridge::op_*` against an
+//      Dispatches through `cursor_btree_bridge.op_*` against an
 //      injected PageStore.  Production data path.
 //
 // This module ships per-opcode functions that dispatch on the slot's
@@ -87,7 +87,7 @@ public type AdvanceResult is {
 // -----------------------------------------------------------------------------
 
 /// Dispatch a Column(cursor_id, col_idx) opcode.  When the slot is
-/// CskBtree AND `pages` is Some, routes through cursor_btree_bridge::
+/// CskBtree AND `pages` is Some, routes through cursor_btree_bridge.
 /// op_column.  Otherwise falls back to CursorTable's row-store path
 /// (peek_cell).  RNull on any error path.
 public fn dispatch_column(

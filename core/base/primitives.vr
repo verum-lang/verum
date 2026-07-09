@@ -1726,7 +1726,7 @@ implement Char {
     /// should call `.to_ascii_uppercase()` on the result.
     ///
     /// Pinned by
-    /// `core-tests/text/char/regression_test.vr::regression_c_from_digit_hex_pinned`.
+    /// `core-tests/text/char/regression_test.vr.regression_c_from_digit_hex_pinned`.
     ///
     /// Architectural rule: there must be exactly ONE `Char.from_digit`
     /// definition in the stdlib — `core/text/char.vr:from_digit` is

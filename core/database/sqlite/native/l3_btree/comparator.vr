@@ -105,7 +105,7 @@ public type CellKey is
 ///
 /// **Note**: this entry point does BYTE-comparison on records
 /// (`SkRecord` / `CkRecord`).  For collation-aware comparison, use
-/// `record_compare::cmp_records_with_schema(...)` directly with a
+/// `record_compare.cmp_records_with_schema(...)` directly with a
 /// `RecordSchema` — that path is what index seeks should drive.
 /// This entry remains for table-scan / rowid-only paths and as
 /// fallback for legacy callers without a schema.

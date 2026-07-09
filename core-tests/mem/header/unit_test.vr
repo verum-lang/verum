@@ -10,7 +10,7 @@
 // Tests here do NOT touch actual allocations — for that, see the
 // allocator/ and arena/ test directories.  The header tests pin the
 // value-level shape so that drift between Verum-side and Rust-side
-// (`verum_cbgr::header::*`) is detectable from Verum's own test suite.
+// (`verum_cbgr.header.*`) is detectable from Verum's own test suite.
 //
 // Companion files:
 //   property_test.vr     — flag-set laws, generation/epoch wraparound

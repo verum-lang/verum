@@ -394,7 +394,7 @@ fn check_required_reachable(
     }
 }
 
-/// `required_no_conflict` — extends `verify::check_required_not_conflicting`
+/// `required_no_conflict` — extends `verify.check_required_not_conflicting`
 /// with the multi-hop transitive case: if A is required, A requires B,
 /// and B conflicts with C, and C is also required → unreachable.
 /// We handle this by running the same SAT query as `required_reachable`

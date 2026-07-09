@@ -615,7 +615,7 @@ implement Display for Path {
 /// assert_eq(path.as_path().to_str(), "/home/user/file.txt");
 /// ```
 // PathBuf embeds a Path so the #112 method-dispatch retry can walk
-// `Deref::Target = Path` transparently. The semantics match Rust's
+// `Deref.Target = Path` transparently. The semantics match Rust's
 // PathBuf-Deref-Path pattern: every Path method is callable directly
 // on a PathBuf without an explicit `.as_path()` hop.
 public type PathBuf is {
@@ -856,7 +856,7 @@ implement PathBuf {
 // `join`, `join_str`, `with_extension`, `with_file_name`, `iter`,
 // `components`, `ancestors`, `strip_prefix`, …) is callable directly
 // on a PathBuf without `.as_path()`. The compiler-side retry walks
-// `PathBuf::Deref::Target = Path` and resolves the method against
+// `PathBuf.Deref.Target = Path` and resolves the method against
 // Path's surface.
 implement Deref for PathBuf {
     type Target is Path;

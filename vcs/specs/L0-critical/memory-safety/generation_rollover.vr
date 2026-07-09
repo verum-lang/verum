@@ -16,7 +16,7 @@
 //   * combined budget: 32 + 16 = 48 bits ≈ 2.8 × 10^14 distinct allocations
 //
 // On the 48-bit budget exhaustion (epoch == 0xFFFF and another wraparound
-// requested), `core/mem/header.vr::increment_generation` issues a HARD
+// requested), `core/mem/header.vr.increment_generation` issues a HARD
 // PANIC ("AllocationHeader epoch overflow ..."). This is the soundness
 // defense — silently wrapping epoch to 0 would let a freshly-stamped
 // allocation collide with a long-dead reference's (gen=GEN_INITIAL,
@@ -37,9 +37,9 @@ mount core.mem.header.{
 mount core.mem.capability.{CAP_OWNED};
 
 // -----------------------------------------------------------------------------
-// Invariant 1: GEN_MAX is exactly 0xFFFF_FFFE (one less than UInt32::MAX).
+// Invariant 1: GEN_MAX is exactly 0xFFFF_FFFE (one less than UInt32.MAX).
 // -----------------------------------------------------------------------------
-// The off-by-one against UInt32::MAX is deliberate: it leaves a single
+// The off-by-one against UInt32.MAX is deliberate: it leaves a single
 // sentinel value (0xFFFFFFFF) reserved for "post-wraparound transient"
 // detection by the CAS recovery loop.
 @test

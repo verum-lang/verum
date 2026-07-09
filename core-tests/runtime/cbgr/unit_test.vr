@@ -102,7 +102,7 @@ fn test_cbgr_epoch_self_consistent() {
 // documented Tier0_Full check.  See `core-tests/runtime/cbgr/audit.md §A`.
 //
 // Real (gen, epoch) tracking lives at the per-ThinRef header level
-// (`crates/verum_vbc/src/value.rs:1603` ThinRef::generation offset
+// (`crates/verum_vbc/src/value.rs:1603` ThinRef.generation offset
 // + `crates/verum_vbc/src/interpreter/state.rs:634` state.cbgr_epoch);
 // the user-side surface in `core.runtime.cbgr` is currently a
 // placeholder reading global-zero state.

@@ -12,9 +12,9 @@
 // connecting:
 //
 
-//  • The R-S layer (`core.math.rich_s.conditions::RichS`) — abstract
+//  • The R-S layer (`core.math.rich_s.conditions.RichS`) — abstract
 //  metatheory protocol with `syn()` accessor.
-//  • The S_S layer (`core.math.s_definable::class_s_s`) — class S_S
+//  • The S_S layer (`core.math.s_definable.class_s_s`) — class S_S
 //  of S-definable categorical structures with closure operations.
 //  • The L_Abs layer (`core.math.absolute_layer`) — three conditions
 //  (F_S), (Π_4), (Π_3-max) and the joint candidate carrier.
@@ -130,7 +130,7 @@ public type SubTheoryInclusion is protocol {
 /// maps, higher morphisms are coherence isomorphisms.
 ///
 
-/// Companion to RichS::syn() which already exposes Syn(F). Mod(F)
+/// Companion to RichS.syn() which already exposes Syn(F). Mod(F)
 /// was previously implicit in the LambekScottAdjunction witness;
 /// extracting it explicitly is what allows Step 2 of Lemma 3.4
 /// to talk about "Mod(F)" as a first-class object.
@@ -157,7 +157,7 @@ public axiom mod_of_sub_theory(inclusion: &SubTheoryInclusion) -> &InfinityNCat
 // `(∞, n_S)`-equivalence onto the initial S-structured (∞, n_S)-
 // category, and whose COUNIT `ε : Syn ∘ Mod ⇒ id_Mod` evaluates
 // each model. Pre-Phase-2 the adjunction was a single bare witness
-// (`RichS::r5b_lambek_scott()`); Phase 2 surfaces the unit + counit
+// (`RichS.r5b_lambek_scott()`); Phase 2 surfaces the unit + counit
 // as separate witness-typed axioms so downstream consumers can
 // reason about each direction independently.
 
@@ -273,11 +273,11 @@ public type GrothendieckOverMod is protocol {
 /// for HTT 5.1.4 + the next for Definition 3.3 O2) makes the structural
 /// content visible to the kernel-recheck and to `verum audit
 /// --framework-axioms` — both citations now appear separately.
-/// **Kernel-discharged** via `verum_kernel::grothendieck::build_grothendieck`
+/// **Kernel-discharged** via `verum_kernel.grothendieck.build_grothendieck`
 /// (V0 algorithmic surface). The `@kernel_discharge` attribute below
 /// is machine-checked by `verum audit --kernel-discharged-axioms`:
 /// every cited dispatcher name MUST exist in
-/// `verum_kernel::intrinsic_dispatch::available_intrinsics()`.
+/// `verum_kernel.intrinsic_dispatch.available_intrinsics()`.
 @framework(lurie_htt, "HTT 5.1.4 — Syn(F) is Grothendieck construction ∫_{M ⊨ F} M over Mod(F)")
 @kernel_discharge("kernel_grothendieck_construction_strict")
 public axiom lurie_htt_5_1_4_syn_is_grothendieck(
@@ -330,7 +330,7 @@ public axiom msfs_definition_3_3_o2_lands_in_global(
 
 // The Phase 1 axiom above takes the GrothendieckOverMod witness on faith
 // (its `is_kappa_S_accessible()` flag is a bare bool). Phase 2 wires the
-// witness to `core.math.accessible::KappaAccessibleInfCategory` so the
+// witness to `core.math.accessible.KappaAccessibleInfCategory` so the
 // kernel can re-check the depth-bound contract through TWO structural
 // axioms (this @theorem + the AR 1.26 closure law) instead of one
 // paper-citation black box.
@@ -462,10 +462,10 @@ public theorem syn_mod_lemma_3_4_steps_2_3(
         //
 
         // **Kernel discharge.** This step is now backed by the
-        // algorithmic builder `verum_kernel::grothendieck::build_grothendieck`
-        // surfaced via `core.proof.kernel_bridge::kernel_grothendieck_construction`.
+        // algorithmic builder `verum_kernel.grothendieck.build_grothendieck`
+        // surfaced via `core.proof.kernel_bridge.kernel_grothendieck_construction`.
         // The kernel intrinsic `kernel_grothendieck_construction` (see
-        // `verum_kernel::intrinsic_dispatch`) decides the construction
+        // `verum_kernel.intrinsic_dispatch`) decides the construction
         // for any non-empty S-indexed diagram — `verum audit
         // --kernel-intrinsics` lists the dispatch table.
         let realization = lurie_htt_5_1_4_syn_is_grothendieck(inclusion);
@@ -475,11 +475,11 @@ public theorem syn_mod_lemma_3_4_steps_2_3(
         //
 
         // **Kernel discharge.** Backed by
-        // `verum_kernel::limits_colimits::compute_colimit_in_psh`
+        // `verum_kernel.limits_colimits.compute_colimit_in_psh`
         // (gates Definition 3.3 closure under colimits) +
-        // `verum_kernel::infinity_topos::build_infinity_topos`
+        // `verum_kernel.infinity_topos.build_infinity_topos`
         // (gates §3 S_S^global is an (∞,1)-topos) — see
-        // `core.proof.kernel_bridge::{kernel_compute_colimit,
+        // `core.proof.kernel_bridge.{kernel_compute_colimit,
         // kernel_infinity_topos}`.
         apply msfs_definition_3_3_o2_lands_in_global(realization, membership);
     };

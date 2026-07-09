@@ -31,7 +31,7 @@
 
 // Pre-M4.E the corresponding `@verify(coherent)` markers in the
 // MSFS / Diakrisis corpus dispatched through `verum audit --coherent`
-// which reported `Status::Pending` for every row — the audit surface
+// which reported `Status.Pending` for every row — the audit surface
 // shipped before the stdlib carrier did. Post-M4.E the carrier is
 // in place; downstream theorems can construct concrete CoherenceCerts
 // and the audit walker can classify decidability properly when the

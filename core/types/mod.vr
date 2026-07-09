@@ -2,36 +2,42 @@
 // core/types/mod.vr — Stdlib surface for advanced type-system features
 // =============================================================================
 // Layer: Standard Library / Types
-// =============================================================================
 //
-
 // Type-system extensions that live BEYOND the Layer-0 base types
-// (`core.base.{Maybe, Result, Heap, Shared, …}`) — these are the
-// research-grade type machinery the language exposes for users
-// who want to encode richer invariants in types:
+// (`core.base.{Maybe, Result, Heap, Shared, …}`) — the research-grade
+// type machinery the language exposes for users who want to encode
+// richer invariants in types. Each submodule is the source-level
+// mirror of its compiler-kernel implementation in `verum_types`,
+// referenced below in Verum dot-path notation, not Rust-style paths,
+// kept API-parallel so user-space tooling reasons with the same
+// algebra the kernel enforces:
 //
-
-//  * `poly_kinds.vr` — universe-polymorphic kind machinery for
-//  higher-kinded protocols (HKT) and kind-indexed type families.
+//  * `poly_kinds` — universe-polymorphic kind machinery for
+//    higher-kinded protocols (HKT) and kind-indexed type families.
+//    Mirrors `verum_types.poly_kinds`.
 //
-
-//  * `qtt.vr` — Quantitative Type Theory (Atkey-McBride) resource
-//  tracking. Multiplicities `0` (erased) / `1` (linear) / `ω`
-//  (unrestricted) annotated on type parameters and bindings,
-//  gating the kernel's relevance + linearity checks.
+//  * `qtt` — Quantitative Type Theory (Atkey-McBride) resource
+//    tracking. Multiplicities `0` (erased) / `1` (linear) / `ω`
+//    (unrestricted) / `≤n` (affine) with the usage-context algebra.
+//    Mirrors `verum_types.{qtt_usage, qtt_walker}`.
 //
-
-//  * `two_level.vr` — Two-Level Type Theory (Annenkov-Capriotti-
-//  Kraus-Sattler) — runs an inner cubical-univalent type theory
-//  alongside an outer set-truncated meta-theory, so static-vs-
-//  runtime hygiene is encoded in the type system rather than
-//  the syntax of meta-programs.
+//  * `two_level` — Two-Level Type Theory (Annenkov-Capriotti-
+//    Kraus-Sattler): fibrant (HoTT/cubical) vs strict (UIP-holding)
+//    universe layers, so static-vs-runtime hygiene is encoded in
+//    the type system rather than the syntax of meta-programs.
+//    Mirrors `verum_types.two_level`.
 //
-
 // Usage is opt-in: most user code lives entirely at the base-types
-// layer. These modules are surfaced so research-grade Verum
-// programs (formal-methods libraries, dependently-typed kernels,
-// resource-aware DSLs) can pull them in explicitly.
+// layer, and `core.types` is deliberately NOT in the root prelude.
+// Research-grade Verum programs (formal-methods libraries,
+// dependently-typed kernels, resource-aware DSLs) pull it in
+// explicitly.
+//
+// NOTE on the namespace: the compiler also injects the short-form
+// primitive aliases (`U8`, `I32`, `F64`, …) under `core.types.*` —
+// `mount core.types.{U8, F64};` resolves through that injection,
+// not through this file. See the stdlib mount audit for the
+// canonical alias list.
 // =============================================================================
 
 @arch_module(
@@ -44,3 +50,33 @@ module core.types;
 public module poly_kinds;
 public module qtt;
 public module two_level;
+
+// =============================================================================
+// Flat re-exports — the curated surface, so `mount core.types.{…};`
+// reaches the headline types and operations without spelling the
+// submodule path. Full algebras stay in their submodules.
+// =============================================================================
+
+// Kind algebra (higher-kinded machinery).
+public mount .poly_kinds.{
+    Kind, KindSubst, KindError, KindApplication,
+    k_type, k_constraint, k_arrow, k_var,
+    kind_unify, kind_apply, kind_compose, apply_args,
+};
+
+// Quantitative Type Theory (resource multiplicities).
+public mount .qtt.{
+    Quantity, TrackedBinding, UsageMap, QttViolation,
+    add_quantity, mul_quantity, is_sub,
+    usage_empty, record_use, usage_of,
+    merge_sequential, merge_branches_max,
+    check_binding, check_usage,
+};
+
+// Two-Level Type Theory (fibrant/strict stratification).
+public mount .two_level.{
+    Layer, StratifiedUniverse, LayerVerdict,
+    layer_flows_to, layer_mix, layer_mix_all,
+    stratified_fibrant, stratified_strict,
+    universe_coerces_to, check_layer_flow,
+};

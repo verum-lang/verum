@@ -15,7 +15,7 @@
 //   * Open binlog stream from earliest GTID.
 //   * Cache TABLE_MAP for the affected table.
 //   * On WRITE_ROWS_V2, decode_with_table_map → DrSimple(rows).
-//   * Lift via rows_typed_my::<(Int, Text, Text)>.
+//   * Lift via rows_typed_my<(Int, Text, Text)>.
 //   * Assert tuple values.
 // =============================================================================
 
@@ -117,7 +117,7 @@ fn main() {
                                         DrSimple(rows) => {
                                             // Lift each row into (Int, Text, Text).
                                             let lifted = expect_ok(
-                                                rows_typed_my::<(Int, Text, Text)>(&rows),
+                                                rows_typed_my<(Int, Text, Text)>(&rows),
                                                 &"rows_typed_my failed".clone(),
                                             );
                                             let mut k: Int = 0;

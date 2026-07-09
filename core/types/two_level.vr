@@ -1,16 +1,13 @@
 // =============================================================================
 // two_level.vr — Two-Level Type Theory (2LTT)
 // =============================================================================
-//
-
 // Layer: Standard Library / Types
 //
-
-// Surface for `verum_types.two_level`. Voevodsky/ACK stratification
-// of universes into fibrant (HoTT/cubical) and strict
-// (UIP-holding, decidable equality) layers.
-//
-
+// Source-level mirror of the compiler kernel's `verum_types.two_level`,
+// kept API-parallel. Voevodsky/ACK stratification of universes into
+// fibrant (HoTT/cubical) and strict (UIP-holding, decidable equality)
+// layers, with the flow order, the strictness-contagion mix, and the
+// layer-flow soundness gate.
 // =============================================================================
 
 @arch_module(
@@ -46,6 +43,19 @@ public fn layer_mix(a: Layer, b: Layer) -> Layer {
         (_, Layer.Strict) => Layer.Strict,
         _ => Layer.Fibrant,
     }
+}
+
+/// Mix a whole list of layers: Strict iff any element is Strict.
+/// The fold identity is `Fibrant` (the mix-monoid unit), so the
+/// empty list is fibrant. Mirrors the kernel's `mix_layers`.
+public fn layer_mix_all(layers: List<Layer>) -> Layer {
+    let mut acc = Layer.Fibrant;
+    let mut i: Int = 0;
+    while i < layers.len() {
+        acc = layer_mix(acc, layers[i].clone());
+        i = i + 1;
+    }
+    acc
 }
 
 /// A stratified universe: a layer + a level (natural number).
@@ -111,6 +121,18 @@ implement Clone for Layer {
 
 implement Copy for Layer {}
 
+implement Ord for Layer {
+    /// Total order coinciding with the flow relation:
+    /// `Fibrant < Strict`, so `layer_flows_to(a, b)` ⟺ `a <= b`.
+    fn cmp(&self, other: &Layer) -> Ordering {
+        match (self, other) {
+            (Layer.Fibrant, Layer.Strict) => Ordering.Less,
+            (Layer.Strict, Layer.Fibrant) => Ordering.Greater,
+            _ => Ordering.Equal,
+        }
+    }
+}
+
 implement Display for Layer {
     /// Renders the layer name in the standard 2LTT notation.
     /// `Fibrant` → `fibrant` (carries identity types via paths)
@@ -173,6 +195,21 @@ implement Eq for LayerVerdict {
              LayerVerdict.LevelMismatch { from_level: fb, to_level: tb }) =>
                 fa == fb && ta == tb,
             _ => false,
+        }
+    }
+}
+
+implement Clone for LayerVerdict {
+    fn clone(&self) -> LayerVerdict {
+        match self {
+            LayerVerdict.LayerOk => LayerVerdict.LayerOk,
+            LayerVerdict.StrictInFibrant { universe } =>
+                LayerVerdict.StrictInFibrant { universe: universe.clone() },
+            LayerVerdict.LevelMismatch { from_level, to_level } =>
+                LayerVerdict.LevelMismatch {
+                    from_level: *from_level,
+                    to_level: *to_level,
+                },
         }
     }
 }

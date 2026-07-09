@@ -80,7 +80,7 @@ implement PageStore {
     }
 
     /// Fetch page bytes.  Returns `Maybe.None` if the page is absent —
-    /// caller surfaces this as `BtreeError::PageNotFound`.
+    /// caller surfaces this as `BtreeError.PageNotFound`.
     public fn fetch(&self, page_no: Int) -> Maybe<List<Byte>> {
         match self.pages.get(&page_no) {
             Maybe.Some(bs) => Maybe.Some(clone_bytes(bs)),

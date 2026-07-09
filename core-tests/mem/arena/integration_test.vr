@@ -13,7 +13,7 @@
 //
 // Live arena lifecycle tests run unconditionally as of task #8 close
 // (2026-05-24).  The fundamental fix lives at
-// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/log_extended.rs::handle_mem_extended`
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/log_extended.rs.handle_mem_extended`
 // where `_operand_len` is now authoritative — the handler force-aligns
 // PC to `operand_start + operand_len` after the sub-op handler returns,
 // tolerating short-operand emissions from intrinsic calls whose Verum
@@ -60,7 +60,7 @@ fn probe_arenaconfig_fixed_field_access() {
 // Probe: bypass the method, read the field directly.  Closed by
 // task #8 fundamental fix (commit forthcoming) — handler-side
 // `_operand_len`-bounded PC advancement in
-// `interpreter/dispatch_table/handlers/log_extended.rs::handle_mem_extended`
+// `interpreter/dispatch_table/handlers/log_extended.rs.handle_mem_extended`
 // realigns past `__alloc_zeroed_raw(size)`'s short-operand emission,
 // which was desynchronising the PC for the rest of the
 // `GenerationalArena.new` body and surfacing as a downstream

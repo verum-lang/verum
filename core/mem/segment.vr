@@ -727,7 +727,7 @@ public type SegmentError is
     /// typed error rather than `unreachable()` so a future cross-
     /// compile to an unsupported target is propagable, not a runtime
     /// panic from inside the segment hot path. Mirrors
-    /// AllocError::UnsupportedOs in core/mem/allocator.vr.
+    /// AllocError.UnsupportedOs in core/mem/allocator.vr.
     | UnsupportedOs { op: Text }
     ;
 
@@ -924,7 +924,7 @@ fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
     // No @cfg block matched: cross-compiled to an OS we don't
     // have a segment lowering for. Surface as a typed error so the
     // caller can fall back to a different allocator or refuse the
-    // op explicitly (cf. AllocError::UnsupportedOs in allocator.vr).
+    // op explicitly (cf. AllocError.UnsupportedOs in allocator.vr).
     Result.Err(SegmentError.UnsupportedOs { op: "os_alloc_segment" })
 }
 

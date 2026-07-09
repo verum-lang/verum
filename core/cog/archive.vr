@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 3 (Cog tooling)
 // Dependencies: core, base, security/hash/sha256, encoding/varint
-// Bridges: verum_vbc::archive (kernel side, via @intrinsic)
+// Bridges: verum_vbc.archive (kernel side, via @intrinsic)
 // =============================================================================
 //
 // **Purpose.** Read .vbca archive files (the on-disk representation
@@ -12,7 +12,7 @@
 // without re-implementing the byte-level format.
 //
 // **Format.** The .vbca on-disk layout (matches kernel
-// `verum_vbc::archive::write_archive`):
+// `verum_vbc.archive.write_archive`):
 //
 //     +---------------------+  offset 0
 //     | Magic "VBCA"  (4)   |
@@ -65,7 +65,7 @@ mount encoding.hex.{encode as hex_encode};
 mount io.path.{Path, PathBuf};
 
 // =============================================================================
-// Constants — match kernel `verum_vbc::archive`
+// Constants — match kernel `verum_vbc.archive`
 // =============================================================================
 
 public const ARCHIVE_MAGIC: [Byte; 4] = [0x56, 0x42, 0x43, 0x41]; // "VBCA"
@@ -111,7 +111,7 @@ public type ModuleEntry is {
 
 /// A complete decoded archive — header + per-module index + raw bytes.
 /// The `module_data` parallel-array layout matches kernel
-/// `verum_vbc::archive::VbcArchive` so the kernel-bridged decode can
+/// `verum_vbc.archive.VbcArchive` so the kernel-bridged decode can
 /// hand the bytes back without reshape.
 @derive(Debug, Clone)
 public type CogArchive is {
@@ -403,7 +403,7 @@ fn slice_bytes(bytes: &List<Byte>, offset: Int, len: Int) -> List<Byte> {
 //
 // The intrinsic owns the bincode wire format; this user-side surface
 // just transforms the kernel's flat tuple representation into typed
-// `ModuleEntry` records. Kernel-side: `verum_vbc::archive::read_archive`'s
+// `ModuleEntry` records. Kernel-side: `verum_vbc.archive.read_archive`'s
 // index-decode path, exposed verbatim as `vbc_archive_decode_index`.
 //
 // Returns `Result<List<ModuleEntry>, Text>` where Text is a kernel

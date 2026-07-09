@@ -453,7 +453,7 @@ fn annotate_filter(
     let mut child_ann = annotate_node(&**child, stats);
     // Heuristic predicate selectivity (foundation pass — see note at
     // top of file).  0.3 mirrors SQLite's default for unknown WHERE
-    // predicates and matches `planner_cost::selectivity::DEFAULT`.
+    // predicates and matches `planner_cost.selectivity.DEFAULT`.
     let _ = predicate;
     let sel: Float64 = 0.3;
 

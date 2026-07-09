@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: stdlib-runtime, collections, bloom, validation
 
-// Validation surface for `BloomFilter::try_with_target`. Pre-fix
+// Validation surface for `BloomFilter.try_with_target`. Pre-fix
 // the constructor accepted negative or zero capacity (divide-by-
 // zero in compute_k) and out-of-range fp_rate_ppm (degenerate
 // math). The fallible variant now surfaces a structured BloomError

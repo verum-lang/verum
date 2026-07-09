@@ -11,7 +11,7 @@
 //
 // Duration values can be negative — `Duration.secs(-1)` represents "one
 // second backwards" relative to a reference instant.  This matches
-// `Go time.Duration`, `Java java.time.Duration`, and `C++ chrono::duration`
+// `Go time.Duration`, `Java java.time.Duration`, and `C++ chrono.duration`
 // semantics, and aligns with the runtime intrinsic identity surface used
 // by `time_duration_from_nanos` and friends.
 //
@@ -76,7 +76,7 @@ public const MICROS_PER_SEC: Int = 1_000_000;
 
 /// Negative durations represent past-relative spans (e.g.
 /// `Duration.secs(-3600)` is "one hour before").  This matches
-/// `Go time.Duration` / `Java Duration` / `C++ chrono::duration`
+/// `Go time.Duration` / `Java Duration` / `C++ chrono.duration`
 /// semantics and aligns with the runtime intrinsic identity surface
 /// (`time_duration_from_nanos` etc. are pure identity / scale-multiply).
 ///
@@ -419,7 +419,7 @@ implement Add for Duration {
 
     fn add(self, other: Duration) -> Duration {
         // Typed-local extraction pattern (see Sub impl) — forces
-        // BinaryIntOp::Add over the field arithmetic.  Without it,
+        // BinaryIntOp.Add over the field arithmetic.  Without it,
         // the codegen has historically dispatched Duration+Duration via
         // Float addition, producing NaN-boxed payloads.  This is
         // routed via the `time_duration_add` intrinsic at Tier 0, but
@@ -445,8 +445,8 @@ implement Sub for Duration {
         // pre-fix `.max(0)` clamp inadvertently masked NaN→0; removing
         // it exposed the underlying codegen defect.  Loading the fields
         // into typed Int locals before the arithmetic forces the
-        // BinaryIntOp::Sub path.  Same workaround pattern as
-        // `core/base/iterator.vr` Range<Int>::next.
+        // BinaryIntOp.Sub path.  Same workaround pattern as
+        // `core/base/iterator.vr` Range<Int>.next.
         let a_ns: Int = self.nanos;
         let b_ns: Int = other.nanos;
         let diff_ns: Int = a_ns - b_ns;
@@ -532,7 +532,7 @@ implement IntCoercible for Duration {}
 // `UInt64` / `USize` for nanosecond-bound APIs, and with
 // `Instant` (the other stdlib sized-numeric) for elapsed-time
 // arithmetic.  The marker eliminates the previous hardcoded
-// fallback at `verum_compiler::stdlib_coercion_registry::
+// fallback at `verum_compiler.stdlib_coercion_registry.
 // SIZED_NUMERIC_STDLIB_NAMES`.
 implement SizedNumeric for Duration {}
 

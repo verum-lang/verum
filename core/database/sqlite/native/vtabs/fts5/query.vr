@@ -7,16 +7,16 @@
 // FTS5 MATCH grammar (subset we support):
 //
 
-//  query ::= expr
-//  expr ::= term
+//  query .= expr
+//  expr .= term
 //  | '(' expr ')'
 //  | expr 'AND' expr
 //  | expr 'OR' expr
 //  | 'NOT' expr
 //  | expr 'NEAR' '(' N ')' expr
 //  | '"' phrase '"'
-//  term ::= IDENT
-//  phrase ::= IDENT (' ' IDENT)*
+//  term .= IDENT
+//  phrase .= IDENT (' ' IDENT)*
 //
 
 // The executor runs the AST against an `Index`, returning a

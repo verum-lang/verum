@@ -12,7 +12,7 @@
 // runs *after* path building (`path_validation.vr`).
 //
 // Path building is a graph-search problem; the existing
-// `chain.vr::validate_chain` requires the caller to pre-order the
+// `chain.vr.validate_chain` requires the caller to pre-order the
 // chain — this module fills that gap when only a flat bag of certs
 // is available (TLS handshake, S/MIME, OCSP responder bundles,
 // Sigstore Fulcio chains, mTLS clients, etc.).
@@ -70,7 +70,7 @@ mount core.security.x509.trust_store.{TrustStore};
 // =============================================================================
 
 /// Maximum number of certificates in any single discovered path.
-/// Matches `chain::MAX_CHAIN_LENGTH`.
+/// Matches `chain.MAX_CHAIN_LENGTH`.
 public const MAX_PATH_LENGTH: Int = 16;
 
 /// Maximum number of candidate issuers explored at any level. Cross-
@@ -103,7 +103,7 @@ public fn candidate_path_length(p: &CandidatePath) -> Int {
 }
 
 /// Concatenate EE + intermediates into a single ordered list (handy
-/// for handing off to `path_validation::validate`).
+/// for handing off to `path_validation.validate`).
 public fn candidate_path_to_list(p: &CandidatePath) -> List<X509Certificate> {
     let mut out: List<X509Certificate> = List.with_capacity(candidate_path_length(p));
     out.push(p.ee.clone());

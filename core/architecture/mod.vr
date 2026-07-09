@@ -12,7 +12,7 @@
 //      grammar/verum.ebnf generic `identifier(args)` form).
 //
 //   2. THIS library — Verum-native `type X is variant_list`
-//      declarations that mirror the kernel-side `verum_kernel::arch*`
+//      declarations that mirror the kernel-side `verum_kernel.arch*`
 //      primitives.  Both sides stay aligned via the cross-side pin
 //      test in `crates/verum_kernel/tests/k_arch_v_alignment.rs`,
 //      which fails CI on any drift.

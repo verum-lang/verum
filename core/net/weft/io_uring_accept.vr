@@ -10,7 +10,7 @@
 // THIS IS A V0 SCAFFOLD. The architectural surface lives here so the
 // future io_uring driver can land as a one-file diff. No accept loop
 // behaviour changes today; every existing call site keeps using
-// `TcpListener::accept` synchronously through `BlockingAcceptStrategy`.
+// `TcpListener.accept` synchronously through `BlockingAcceptStrategy`.
 //
 
 // # Why multi-shot accept?
@@ -42,7 +42,7 @@
 //  128, no fixed-fd index.
 //  * `IoUringAcceptStrategy` — the protocol Listener drives.
 //  * `BlockingAcceptStrategy` — V0 fallback wrapping
-//  `TcpListener::accept`. Always works. Today's behaviour.
+//  `TcpListener.accept`. Always works. Today's behaviour.
 //  * `MultiShotAcceptStrategy` — V1 placeholder. `next_accept()`
 //  panics on dispatch with a "not yet wired" message so accidental
 //  V0 selection fails LOUDLY rather than silently degrading.
@@ -222,7 +222,7 @@ implement Clone for IoUringAcceptConfig {
 /// The pluggable accept driver. Implementors:
 ///
 
-///  * `BlockingAcceptStrategy` — synchronous `TcpListener::accept`,
+///  * `BlockingAcceptStrategy` — synchronous `TcpListener.accept`,
 ///  today's behaviour, works on every platform.
 ///  * `MultiShotAcceptStrategy` — V1 placeholder; will be backed by
 ///  `io_uring_prep_accept` + `IORING_OP_ACCEPT_MULTI` once the
@@ -361,7 +361,7 @@ implement Clone for IoUringTelemetryAtomics {
 // BlockingAcceptStrategy — V0 fallback, today's behaviour
 // =============================================================================
 
-/// Synchronous fallback that delegates to `TcpListener::accept`
+/// Synchronous fallback that delegates to `TcpListener.accept`
 /// through the existing `accept_cancellable` cancellation-aware
 /// wrapper. This is the strategy `select_accept_strategy()` returns
 /// today on every platform (because MultiShot is unwired); once V1

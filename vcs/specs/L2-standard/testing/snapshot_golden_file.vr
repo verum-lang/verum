@@ -30,7 +30,7 @@ implement SnapshotName {
     }
 }
 
-// SnapshotResult mirrors snapshot.rs::SnapshotResult.
+// SnapshotResult mirrors snapshot.rs.SnapshotResult.
 type SnapshotResult is
     | Match
     | Created

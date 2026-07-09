@@ -26,7 +26,7 @@ fn exercise_canonical() -> Result<(), Ipv6CanonicalError> {
     let _ = loop_c;
 
     // Single-zero group NOT compressed per §4.2.2.
-    // 2001:db8:0:1.1 — 5th group is single zero, should NOT become ::.
+    // 2001:db8:0:1.1 — 5th group is single zero, should NOT become ..
     let _ = canonicalize(&Text.from("2001:db8:0:1:1:1:1:1"))?;
 
     // IPv4-mapped form preserved.

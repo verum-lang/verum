@@ -3,7 +3,7 @@
 // =============================================================================
 //
 
-// BasicConstraints ::= SEQUENCE {
+// BasicConstraints .= SEQUENCE {
 //  cA BOOLEAN DEFAULT FALSE,
 //  pathLenConstraint INTEGER (0..MAX) OPTIONAL
 // }

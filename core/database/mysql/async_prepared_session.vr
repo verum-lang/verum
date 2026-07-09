@@ -6,7 +6,7 @@
 // =============================================================================
 //
 // Mirror of `core/database/postgres/pg_prepared_session.vr` for
-// MySQL. Sync `prepared.vr::PreparedSession` already wraps the
+// MySQL. Sync `prepared.vr.PreparedSession` already wraps the
 // MysqlStmtCache LRU; this module's job is to provide the same
 // shape over the async actor surface and dispatch through the
 // AsyncMysqlConnection.
@@ -22,7 +22,7 @@
 //   the slot (e.g. after stmt-cache eviction on the server side
 //   or DDL invalidating a plan) — drop the cache entry, re-
 //   prepare, and retry the execute once. Mirror of sync
-//   PreparedSession::query_cached recovery.
+//   PreparedSession.query_cached recovery.
 // =============================================================================
 
 @arch_module(
@@ -183,7 +183,7 @@ fn clone_stmt(s: &MysqlPreparedStatement) -> MysqlPreparedStatement {
 }
 
 /// Detect MySQL's ER_UNKNOWN_STMT_HANDLER (1243). Mirror of sync
-/// PreparedSession::is_unknown_stmt_handler — probes the
+/// PreparedSession.is_unknown_stmt_handler — probes the
 /// adapter-specific error text since DbError doesn't carry an
 /// errno field.
 fn is_unknown_stmt_handler(e: &DbError) -> Bool {

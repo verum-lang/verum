@@ -29,7 +29,7 @@
 //  └─→ on cancel → child.kill() and exit producer loop
 //
 
-//  Consumer awaits `Receiver::recv()`. Backpressure is implicit: if buffer
+//  Consumer awaits `Receiver.recv()`. Backpressure is implicit: if buffer
 //  is full and policy is `Block`, the producer's `send_async` future stays
 //  pending until consumer drains, naturally throttling the kernel pipe and
 //  eventually the writing process.

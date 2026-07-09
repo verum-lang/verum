@@ -267,7 +267,7 @@ public fn wal_frame_header_parse(buf: &[Byte]) -> Result<WalFrameHeader, Text> {
 /// power-of-two ≥ 512, and headers are 24/32 bytes both multiples of 8).
 ///
 
-/// Per SQLite source `wal.c::walChecksumBytes` (NOT the public
+/// Per SQLite source `wal.c.walChecksumBytes` (NOT the public
 /// walformat.html prose, which is misleading):
 ///
 

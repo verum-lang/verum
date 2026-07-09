@@ -2,7 +2,7 @@
 // core.architecture.composition — ATS-V composition algebra surface
 // =============================================================================
 //
-// **Verum-native mirror of `verum_kernel::arch_composition`.**
+// **Verum-native mirror of `verum_kernel.arch_composition`.**
 //
 // Composition is a **typed operation**: `compose(A, B)` either
 // yields a new `Shape` for the composed unit, or rejects with one
@@ -68,7 +68,7 @@ mount super.anti_patterns.AntiPatternViolation;
 // =============================================================================
 
 /// Outcome of composing two Shapes.  Mirrors
-/// `verum_kernel::arch_composition::CompositionResult`.
+/// `verum_kernel.arch_composition.CompositionResult`.
 public type CompositionResult is
     | Composed(Shape)
     | Rejected(List<AntiPatternViolation>);

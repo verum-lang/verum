@@ -423,7 +423,7 @@ implement BigInt {
         if self.is_zero() { return Maybe.Some(0); }
         let i64_max: Int = 9223372036854775807;
         let n = self.digits.len() as Int;
-        // i64::MAX = 9_223_372_036_854_775_807 — three base-10^9
+        // i64.MAX = 9_223_372_036_854_775_807 — three base-10^9
         // chunks max for any i64-bounded magnitude.  Reject up
         // front if more than three.
         if n > 3 { return Maybe.None; }
@@ -431,10 +431,10 @@ implement BigInt {
         let mut acc: Int = 0;
         let mut k: Int = n - 1;
         while k >= 0 {
-            // acc * BIGINT_BASE + digit ≤ i64::MAX?  Each step:
+            // acc * BIGINT_BASE + digit ≤ i64.MAX?  Each step:
             //   acc_next = acc * BIGINT_BASE + digit
             // With BIGINT_BASE = 10^9, acc * 10^9 must fit.  Bound:
-            //   acc ≤ i64::MAX / 10^9 ≈ 9.22 × 10^9
+            //   acc ≤ i64.MAX / 10^9 ≈ 9.22 × 10^9
             if acc > i64_max / BIGINT_BASE { return Maybe.None; }
             let scaled = acc * BIGINT_BASE;
             let next = scaled + self.digits[k];
@@ -442,12 +442,12 @@ implement BigInt {
             acc = next;
             k = k - 1;
         }
-        // For negatives, the magnitude must be ≤ -i64::MIN = i64::MAX + 1.
-        // We compute the magnitude as i64 (≤ i64::MAX), so the only
+        // For negatives, the magnitude must be ≤ -i64.MIN = i64.MAX + 1.
+        // We compute the magnitude as i64 (≤ i64.MAX), so the only
         // edge case is `digits = [0, 0, 9_223_372_036]` magnitude
-        // 9_223_372_036_000_000_000 ≤ i64::MAX < 9_223_372_036_854_775_808.
-        // We accept any magnitude ≤ i64::MAX for both signs (i64::MIN
-        // representation requires magnitude i64::MAX + 1, which we
+        // 9_223_372_036_000_000_000 ≤ i64.MAX < 9_223_372_036_854_775_808.
+        // We accept any magnitude ≤ i64.MAX for both signs (i64.MIN
+        // representation requires magnitude i64.MAX + 1, which we
         // cannot construct via this i64 accumulator — caller gets
         // Maybe.None for that single edge case).
         if self.sign { Maybe.Some(-acc) } else { Maybe.Some(acc) }
@@ -1254,7 +1254,7 @@ fn pad_chunk_to_9(v: Int) -> Text {
 }
 
 
-/// Absolute-value of an i64 with safe i64::MIN saturation.  Mirrors
+/// Absolute-value of an i64 with safe i64.MIN saturation.  Mirrors
 /// the helper in `decimal.vr`; duplicated here to keep this module
 /// self-contained.
 fn abs_int(x: Int) -> Int {

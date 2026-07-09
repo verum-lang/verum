@@ -420,7 +420,7 @@ fn test_uint32_min_max() {
 
 @test
 fn test_uint64_max_is_all_ones() {
-    // u64::MAX exceeds the decimal Int literal range — pin the bit pattern.
+    // u64.MAX exceeds the decimal Int literal range — pin the bit pattern.
     let m = UInt64.max;
     assert((m as Int) == -1);
 }
