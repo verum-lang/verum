@@ -255,7 +255,10 @@ implement Duration {
     ///
 
     /// This is the nanoseconds remaining after whole seconds are removed.
-    /// Always in range [0, 999_999_999].
+    /// SIGNED, matching `as_secs` truncation toward zero: for a negative
+    /// duration the result is in (-999_999_999, 0], for a non-negative
+    /// one in [0, 999_999_999].  The decomposition identity always holds:
+    /// `as_secs() * NANOS_PER_SEC + subsec_nanos() == as_nanos()`.
     @inline(always)
     public fn subsec_nanos(&self) -> Int {
         self.nanos % NANOS_PER_SEC
@@ -374,6 +377,13 @@ implement Duration {
     public fn checked_mul(&self, rhs: Int) -> Maybe<Duration> {
         if rhs == 0 || self.nanos == 0 {
             return Maybe.Some(Duration.zero());
+        }
+        // Int.MIN * -1 is the one product the re-derivation check below
+        // cannot classify: the multiply wraps back to Int.MIN and the
+        // verifying division Int.MIN / -1 itself overflows. Reject it
+        // before any arithmetic runs.
+        if self.nanos == Int.min_value() && rhs == -1 {
+            return Maybe.None;
         }
         let res = self.nanos * rhs;
         // Overflow check: if res / rhs != self.nanos, overflow occurred.
@@ -544,8 +554,20 @@ implement Hash for Duration {
 
 implement Debug for Duration {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        let secs = self.as_secs();
-        let subsec_nanos = self.subsec_nanos();
+        // Signed rendering: format the MAGNITUDE with the existing unit
+        // selection and emit one leading '-' for negative durations.
+        // Pre-fix, `-1.5s` rendered as "-1.-500s" (both components
+        // carried the sign through the f-string).  Int.MIN cannot be
+        // negated — render it directly as a raw nanosecond count.
+        if self.nanos == Int.min_value() {
+            return f.write_str(f"{self.nanos}ns");
+        }
+        if self.nanos < 0 {
+            f.write_str("-")?;
+        }
+        let total = if self.nanos < 0 { -self.nanos } else { self.nanos };
+        let secs = total / NANOS_PER_SEC;
+        let subsec_nanos = total % NANOS_PER_SEC;
 
         if secs == 0 {
             if subsec_nanos == 0 {

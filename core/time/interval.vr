@@ -75,18 +75,22 @@ implement Interval {
 
     /// The first tick will fire after one period has elapsed.
     public fn new(period: Duration) -> Interval {
+        // Duration is SIGNED; a negative period would walk next_tick_ns
+        // backwards forever. Clamp to zero (= tick immediately).
+        let p = if period.as_nanos() < 0 { Duration.zero() } else { period };
         let now = Time.monotonic();
         Interval {
-            period: period,
-            next_tick_ns: now + period.as_nanos(),
+            period: p,
+            next_tick_ns: now + p.as_nanos(),
         }
     }
 
     /// Create an interval that fires immediately on the first tick.
     public fn immediate(period: Duration) -> Interval {
+        let p = if period.as_nanos() < 0 { Duration.zero() } else { period };
         let now = Time.monotonic();
         Interval {
-            period: period,
+            period: p,
             next_tick_ns: now,
         }
     }
@@ -166,7 +170,9 @@ implement AsyncInterval {
     /// Create a new async interval with the given period.
     public fn new(period: Duration) -> AsyncInterval {
         let now = Time.monotonic();
-        let period_ns = period.as_nanos();
+        // Same signed-period clamp as Interval.new.
+        let raw_ns = period.as_nanos();
+        let period_ns = if raw_ns < 0 { 0 } else { raw_ns };
         AsyncInterval {
             period_ns: period_ns,
             next_tick_ns: now + period_ns,

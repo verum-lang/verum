@@ -50,14 +50,13 @@ mount time.duration.{Duration, NANOS_PER_SEC, NANOS_PER_MILLI, NANOS_PER_MICRO, 
 // - Windows: GetSystemTimePreciseAsFileTime()
 // =============================================================================
 
-@cfg(target_os = "linux")
-mount sys.linux.time.realtime_nanos;
-
-@cfg(target_os = "macos")
-mount sys.darwin.time.realtime_nanos;
-
-@cfg(target_os = "windows")
-mount sys.windows.time.realtime_nanos;
+// Same single-source rule as `instant.vr` (2026-07-09): the
+// `realtime_nanos` intrinsic is the one wall-clock read for all of
+// core.time — Tier 0 dispatches it natively, AOT lowers it to the
+// platform CLOCK_REALTIME read from the target triple. The previous
+// `sys.<os>.time.realtime_nanos` mounts routed through per-platform
+// Verum bodies that the interpreter could not execute faithfully.
+mount core.intrinsics.runtime.time.{realtime_nanos};
 
 // =============================================================================
 // SystemTime
@@ -114,8 +113,9 @@ implement SystemTime {
     /// Get the duration since the Unix epoch.
     ///
 
-    /// Returns Maybe.None if the time is before the epoch (rare, but possible
-    /// on misconfigured systems).
+    /// `Duration` is signed: a pre-epoch SystemTime yields a negative
+    /// duration (`Duration.new` composes `secs * 1e9 + nanos`, exact
+    /// for the normalised `nanos ∈ [0, 1e9)` representation).
     @inline(always)
     public fn duration_since_epoch(&self) -> Duration {
         Duration.new(self.secs, self.nanos)
@@ -155,34 +155,71 @@ implement SystemTime {
         SystemTime.now().duration_since(self)
     }
 
-    /// Add a duration to this time.
-    public fn checked_add(&self, duration: Duration) -> Maybe<SystemTime> {
-        let total_nanos = self.nanos + duration.subsec_nanos();
-        let extra_secs = total_nanos / NANOS_PER_SEC;
-        let remaining_nanos = total_nanos % NANOS_PER_SEC;
+    /// Add a signed duration to this time.
+    ///
 
-        let new_secs = self.secs + duration.as_secs() + extra_secs;
-        if new_secs < self.secs {
-            // Overflow
+    /// SystemTime is a signed timeline (`from_timestamp(-100)` is a
+    /// valid pre-epoch instant), so results before the epoch are
+    /// representable; `Maybe.None` signals Int64 overflow of the
+    /// seconds component only.  The representation invariant
+    /// `nanos ∈ [0, 999_999_999]` is preserved via carry
+    /// normalisation — pre-fix, adding a negative duration produced a
+    /// negative `nanos` field and corrupted every accessor downstream.
+    public fn checked_add(&self, duration: Duration) -> Maybe<SystemTime> {
+        // Component split keeps all arithmetic far from Int64 range for
+        // any wall-clock plausible `secs` (|dur secs| ≤ ~292 years·10⁹).
+        let add_secs = duration.as_secs();
+        let mut nanos = self.nanos + duration.subsec_nanos();
+        let mut carry = 0;
+        if nanos >= NANOS_PER_SEC {
+            nanos = nanos - NANOS_PER_SEC;
+            carry = 1;
+        }
+        if nanos < 0 {
+            nanos = nanos + NANOS_PER_SEC;
+            carry = -1;
+        }
+        let step = add_secs + carry;
+        let new_secs = self.secs + step;
+        // Signed-overflow detection on the seconds sum (sign-flip rule).
+        let same_sign = (self.secs < 0) == (step < 0);
+        let sign_flipped = (new_secs < 0) != (self.secs < 0);
+        if same_sign && sign_flipped {
             Maybe.None
         } else {
-            Maybe.Some(SystemTime { secs: new_secs, nanos: remaining_nanos })
+            Maybe.Some(SystemTime { secs: new_secs, nanos: nanos })
         }
     }
 
-    /// Subtract a duration from this time.
-    public fn checked_sub(&self, duration: Duration) -> Maybe<SystemTime> {
-        let total_nanos = self.secs * NANOS_PER_SEC + self.nanos;
-        let dur_nanos = duration.as_nanos();
+    /// Subtract a signed duration from this time.
+    ///
 
-        if dur_nanos > total_nanos {
+    /// Mirror of `checked_add` — pre-epoch results are valid;
+    /// `Maybe.None` signals Int64 overflow only.  (The historical
+    /// "None when the result precedes the epoch" behaviour was
+    /// inconsistent with `from_timestamp` accepting negative
+    /// timestamps; pinned in `core-tests/time/system_time/`.)
+    public fn checked_sub(&self, duration: Duration) -> Maybe<SystemTime> {
+        let sub_secs = duration.as_secs();
+        let mut nanos = self.nanos - duration.subsec_nanos();
+        let mut carry = 0;
+        if nanos >= NANOS_PER_SEC {
+            nanos = nanos - NANOS_PER_SEC;
+            carry = 1;
+        }
+        if nanos < 0 {
+            nanos = nanos + NANOS_PER_SEC;
+            carry = -1;
+        }
+        // step = -sub_secs + carry, computed without negating Int.MIN.
+        let new_secs = self.secs - sub_secs + carry;
+        let step_negative = sub_secs > 0 || (sub_secs == 0 && carry < 0);
+        let same_sign = (self.secs < 0) == step_negative;
+        let sign_flipped = (new_secs < 0) != (self.secs < 0);
+        if same_sign && sign_flipped {
             Maybe.None
         } else {
-            let res_nanos = total_nanos - dur_nanos;
-            Maybe.Some(SystemTime {
-                secs: res_nanos / NANOS_PER_SEC,
-                nanos: res_nanos % NANOS_PER_SEC,
-            })
+            Maybe.Some(SystemTime { secs: new_secs, nanos: nanos })
         }
     }
 
@@ -211,11 +248,23 @@ implement SystemTime {
     }
 
     /// Create from Unix timestamp in milliseconds.
+    ///
+
+    /// Handles pre-epoch (negative) inputs with floor semantics so the
+    /// `nanos ∈ [0, 999_999_999]` representation invariant holds:
+    /// `from_timestamp_millis(-1500)` is `{secs: -2, nanos: 5e8}`,
+    /// and `timestamp_millis()` round-trips exactly.
     @inline(always)
     public fn from_timestamp_millis(ms: Int) -> SystemTime {
+        let mut secs = ms / MILLIS_PER_SEC;
+        let mut rem = ms % MILLIS_PER_SEC;
+        if rem < 0 {
+            rem = rem + MILLIS_PER_SEC;
+            secs = secs - 1;
+        }
         SystemTime {
-            secs: ms / MILLIS_PER_SEC,
-            nanos: (ms % MILLIS_PER_SEC) * NANOS_PER_MILLI,
+            secs: secs,
+            nanos: rem * NANOS_PER_MILLI,
         }
     }
 }

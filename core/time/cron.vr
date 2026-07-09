@@ -171,8 +171,15 @@ implement CronExpr {
     /// for pathological inputs that admit no firing within the
     /// next ~8 years (beyond which the brute-force search gives up).
     public fn next_after_unix(&self, after_unix: Int) -> Result<Int, CronError> {
-        // Start at the next minute boundary after `after_unix`.
-        let mut t = ((after_unix / 60) + 1) * 60;
+        // Start at the next minute boundary strictly after `after_unix`.
+        // Floor division (same defect class as `decompose`): for
+        // pre-epoch inputs, truncating `/60` rounds toward zero and
+        // skips a whole minute (next_after_unix(-100) said 0, not -60).
+        let mut base_min = after_unix / 60;
+        if after_unix < 0 && base_min * 60 != after_unix {
+            base_min = base_min - 1;
+        }
+        let mut t = (base_min + 1) * 60;
         let max_iters = 60 * 24 * 366 * 8;   // 8 years of minutes
         let mut guard: Int = 0;
         while guard < max_iters {
@@ -365,8 +372,15 @@ type CronParts is {
 /// handling (cron specs are deployment-local so callers shift
 /// `after_unix` into local-time before calling).
 fn decompose(unix: Int) -> CronParts {
-    let total_days = unix / 86400;
-    let time_of_day = unix - total_days * 86400;
+    // Euclidean day split (same defect class as rfc3339.decompose_unix):
+    // truncating division misplaces pre-1970 instants by one day and
+    // yields a negative time-of-day. Normalise to floor semantics.
+    let mut total_days = unix / 86400;
+    let mut time_of_day = unix - total_days * 86400;
+    if time_of_day < 0 {
+        time_of_day = time_of_day + 86400;
+        total_days = total_days - 1;
+    }
     let hour = time_of_day / 3600;
     let minute = (time_of_day % 3600) / 60;
 

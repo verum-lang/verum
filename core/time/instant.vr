@@ -53,14 +53,18 @@ mount time.duration.{Duration, NANOS_PER_SEC, NANOS_PER_MILLI};
 // - Windows: QueryPerformanceCounter()
 // =============================================================================
 
-@cfg(target_os = "linux")
-mount sys.linux.time.monotonic_nanos;
-
-@cfg(target_os = "macos")
-mount sys.darwin.time.monotonic_nanos;
-
-@cfg(target_os = "windows")
-mount sys.windows.time.monotonic_nanos;
+// ONE canonical monotonic source for all of core.time (2026-07-09).
+// Pre-fix this file mounted `sys.<os>.time.monotonic_nanos` while
+// `core/time/mod.vr` (Time.now / Time.monotonic) used the
+// `core.intrinsics.runtime.time.monotonic_nanos` intrinsic — two
+// monotonic clocks with DIFFERENT unspecified epochs (process-start
+// vs boot) inside one program. Any arithmetic mixing `Instant`
+// readings with `Time.monotonic` deadlines was incoherent (pinned by
+// `core-tests/time/mod/integration_test.vr::
+// test_instant_bracketed_by_monotonic_reads`). The intrinsic
+// dispatches natively at Tier 0 and lowers to the platform
+// CLOCK_MONOTONIC read in AOT — per-tier consistent by construction.
+mount core.intrinsics.runtime.time.{monotonic_nanos};
 
 // =============================================================================
 // Instant
@@ -174,15 +178,37 @@ implement Instant {
     /// Add a duration to this instant.
     ///
 
-    /// # Panics
-    /// May panic on overflow (far future times).
+    /// `Duration` is SIGNED: adding a negative duration moves the
+    /// instant backwards, mirroring `checked_sub` with the magnitude.
+    /// Returns `Maybe.None` on Int64 overflow (far future) or when the
+    /// result would precede the monotonic clock's epoch (nanos < 0).
     public fn checked_add(&self, duration: Duration) -> Maybe<Instant> {
-        let res = self.nanos + duration.as_nanos();
-        if res < self.nanos {
-            // Overflow
-            Maybe.None
+        let d = duration.as_nanos();
+        if d >= 0 {
+            let res = self.nanos + d;
+            if res < self.nanos {
+                // Signed overflow past Int64.MAX
+                Maybe.None
+            } else {
+                Maybe.Some(Instant { nanos: res })
+            }
         } else {
-            Maybe.Some(Instant { nanos: res })
+            // Negative span — same invariant as checked_sub: the
+            // monotonic counter never goes below its epoch (nanos >= 0).
+            // Pre-fix this arm returned Maybe.None unconditionally
+            // (the `res < self.nanos` test misreads a legitimate
+            // backwards move as overflow).
+            if d == Int.min_value() {
+                // |Int.MIN| is unrepresentable; the move is always
+                // below the epoch for any real monotonic reading.
+                return Maybe.None;
+            }
+            let back = -d;
+            if back > self.nanos {
+                Maybe.None
+            } else {
+                Maybe.Some(Instant { nanos: self.nanos - back })
+            }
         }
     }
 
@@ -204,13 +230,31 @@ implement Instant {
     /// Subtract a duration from this instant.
     ///
 
-    /// Returns Maybe.None if the result would be before the epoch.
+    /// `Duration` is SIGNED: subtracting a negative duration moves the
+    /// instant forwards, mirroring `checked_add` with the magnitude.
+    /// Returns Maybe.None if the result would be before the epoch
+    /// (nanos < 0) or past Int64.MAX.
     public fn checked_sub(&self, duration: Duration) -> Maybe<Instant> {
-        let dur_nanos = duration.as_nanos();
-        if dur_nanos > self.nanos {
-            Maybe.None
+        let d = duration.as_nanos();
+        if d >= 0 {
+            if d > self.nanos {
+                Maybe.None
+            } else {
+                Maybe.Some(Instant { nanos: self.nanos - d })
+            }
         } else {
-            Maybe.Some(Instant { nanos: self.nanos - dur_nanos })
+            if d == Int.min_value() {
+                // |Int.MIN| is unrepresentable as a positive step; the
+                // forward move always overflows Int64.
+                return Maybe.None;
+            }
+            let forward = -d;
+            let res = self.nanos + forward;
+            if res < self.nanos {
+                Maybe.None
+            } else {
+                Maybe.Some(Instant { nanos: res })
+            }
         }
     }
 }

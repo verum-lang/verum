@@ -283,8 +283,17 @@ fn compose_unix(y: Int, m: Int, d: Int, h: Int, mi: Int, s: Int) -> Int {
 }
 
 fn decompose_unix(unix: Int) -> (Int, Int, Int, Int, Int, Int) {
-    let total_days = unix / 86400;
-    let rem = unix - total_days * 86400;
+    // Euclidean day split: `/` truncates toward zero, so a naive
+    // `unix / 86400` puts every pre-1970 timestamp on the WRONG day
+    // with a negative time-of-day (format_utc(-1) rendered as
+    // "1970-01-01T00:00:01Z" because push_padded drops the sign).
+    // Normalise to total_days = floor(unix/86400), rem ∈ [0, 86400).
+    let mut total_days = unix / 86400;
+    let mut rem = unix - total_days * 86400;
+    if rem < 0 {
+        rem = rem + 86400;
+        total_days = total_days - 1;
+    }
     let hour = rem / 3600;
     let minute = (rem % 3600) / 60;
     let second = rem % 60;

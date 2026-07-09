@@ -406,6 +406,13 @@ implement Int {
         // meaningful product is ~584 years in ns (5.8e18), well
         // within range — we just flag egregious overflow.
         if *self == 0 || rhs == 0 { return Maybe.Some(0); }
+        // Int.MIN * -1: the product wraps back to Int.MIN and the
+        // verifying division Int.MIN / -1 itself overflows — reject
+        // before any arithmetic runs (same guard as Duration.checked_mul).
+        if (*self == Int.min_value() && rhs == -1)
+            || (rhs == Int.min_value() && *self == -1) {
+            return Maybe.None;
+        }
         let result = *self * rhs;
         if rhs != 0 && result / rhs != *self { return Maybe.None; }
         Maybe.Some(result)

@@ -79,24 +79,14 @@ mount core.intrinsics.runtime.time.{
     sleep_ns,
 };
 
-// Platform-specific sleep that returns remaining time (for signal handling)
-@cfg(target_os = "linux")
-mount sys.linux.time.{
-    sleep as sys_sleep,
-    Duration as SysDuration,
-};
-
-@cfg(target_os = "macos")
-mount sys.darwin.time.{
-    sleep as sys_sleep,
-    Duration as SysDuration,
-};
-
-@cfg(target_os = "windows")
-mount sys.windows.time.{
-    sleep as sys_sleep,
-    Duration as SysDuration,
-};
+// NOTE (2026-07-09): `Time.sleep` goes through the `sleep_ns`
+// intrinsic above — ONE implementation surface that the interpreter
+// dispatches natively and AOT lowers per-platform from the target
+// triple. The previous detour through `sys.<os>.time.sleep as
+// sys_sleep` + `Duration as SysDuration` silently no-opped at Tier 0
+// (the platform body never slept in the interpreter), which made
+// `Interval.tick()` spin instead of block — caught by the first real
+// tick()/sleep tests in `core-tests/time/mod/`.
 
 // =============================================================================
 // Time namespace (static methods)
@@ -160,8 +150,13 @@ implement Time {
     /// Time.sleep(Duration.millis(100));
     /// ```
     public fn sleep(duration: Duration) {
-        let sys_dur = SysDuration.from_nanos(duration.as_nanos() as UInt64);
-        let _ = sys_sleep(sys_dur);
+        // Duration is SIGNED. A negative or zero span sleeps for zero
+        // time — without this clamp, `negative as UInt64` reinterprets
+        // the two's-complement bits as an astronomically large
+        // nanosecond count and nanosleep never returns.
+        let ns = duration.as_nanos();
+        if ns <= 0 { return; }
+        sleep_ns(ns as UInt64);
     }
 
     /// Sleep for the specified number of milliseconds.
