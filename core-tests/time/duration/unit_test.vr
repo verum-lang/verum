@@ -461,4 +461,45 @@ fn test_display_equals_debug_zero() {
         "Display renders identically to Debug");
 }
 
+// =============================================================================
+// Section 14: Remaining constructor/accessor surface (coverage close, 2026-07-09)
+// =============================================================================
+
+@test
+fn test_max_value_constructor() {
+    let d = Duration.max_value();
+    assert_eq(d.as_nanos(), Int.max_value());
+}
+
+@test
+fn test_from_minutes_alias_equals_mins() {
+    assert_eq(Duration.from_minutes(3).as_nanos(), Duration.mins(3).as_nanos());
+}
+
+@test
+fn test_from_hours_alias_equals_hours() {
+    assert_eq(Duration.from_hours(2).as_nanos(), Duration.hours(2).as_nanos());
+}
+
+@test
+fn test_as_secs_f64_whole() {
+    let d = Duration.secs(3);
+    let f = d.as_secs_f64();
+    assert(f > 2.999 && f < 3.001, "3s reads as 3.0 fractional seconds");
+}
+
+@test
+fn test_as_secs_f64_fractional() {
+    let d = Duration.millis(1500);
+    let f = d.as_secs_f64();
+    assert(f > 1.499 && f < 1.501, "1500ms reads as 1.5 fractional seconds");
+}
+
+@test
+fn test_as_secs_f64_negative() {
+    let d = Duration.millis(-1500);
+    let f = d.as_secs_f64();
+    assert(f < -1.499 && f > -1.501, "signed duration keeps its sign in f64");
+}
+
 fn main() {}

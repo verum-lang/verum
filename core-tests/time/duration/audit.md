@@ -117,7 +117,7 @@ move and is the surgical-minimal closure of this audit entry.
 (parser dependency preserved) + §C (signed-arithmetic operator pins)
 + §D (operator-method-dispatch shadow regression pins).
 
-### §G — Single-field-record unboxing inconsistency (NEW 2026-05-27)
+### §G — Single-field-record unboxing inconsistency (NEW 2026-05-27) — CLOSED 2026-07-09
 
 **Surface** (discovered during §A/§D close-out): the tier-0 intrinsic
 inline sequences for `DurationAsSecs` / `DurationAsMillis` / `DurationAsMicros`
@@ -151,6 +151,32 @@ and unbox before applying the inline-sequence arithmetic.  Either:
 
 **Tracked here as §G**; not blocking any §A / §C / §D / §E / §F
 test surface because the raw-field-access workaround is non-invasive.
+
+**CLOSED 2026-07-09 — single-representation contract.** The chosen
+fundamental resolution is the third option, inverted: instead of
+forcing all paths UNBOXED, ALL paths are now the honest heap-record
+representation and the raw-Int intrinsic alias surface was deleted.
+Concretely (`crates/verum_vbc`):
+
+* `register_stdlib_intrinsics` no longer aliases `Duration.from_*`,
+  `Duration.as_*`, `is_zero`, `add`, `saturating_*`, `subsec_nanos`,
+  `Instant.now/elapsed/duration_since` to inline sequences — the Verum
+  bodies in `core/time/{duration,instant}.vr` are the ONLY
+  implementation surface, identically on Tier 0 and AOT (which lowers
+  the same VBC).
+* `Duration`/`Instant` removed from the codegen `INTRINSIC_TYPES`
+  interception list; the `as_*` names removed from the `uint64$`
+  chain-dispatch heuristic (core Duration accessors are SIGNED);
+  the `Duration…as_nanos → uint64$` fallback removed.
+
+By the time of closure the defect had grown worse than the 2026-05-27
+snapshot: the short-form ctors compiled to heap records while the
+accessors stayed intercepted, so `Duration.millis(1500).as_secs()`
+divided a heap pointer (returned ≈34) in the script pipeline, and
+45/93 duration tests failed. Pinned by `regression_test.vr §G`
+(both ctor families, record literal, operator result, negative
+identity). The performance-recovery follow-up is a TYPED
+transparent-newtype design — see `mod/audit.md` D4.
 
 ### §F — Operator-method-dispatch shadow surfaced 2026-05-27 — CLOSED via VBC runtime fix
 
@@ -278,7 +304,7 @@ caller sites — deferred to a focused follow-up commit.
 1 sampled test (`test_zero_is_zero_nanos`) confirmed green 2026-05-27
 in 27.7s.  4 lock-in `regression_test.vr` tests validated 2026-05-27.
 
-## §H — Duration `+`/`-`/`*`/`/` operators produce WRONG values (pre-existing, 2026-05-30)
+## §H — Duration `+`/`-`/`*`/`/` operators produce WRONG values (pre-existing, 2026-05-30) — CLOSED 2026-07-09 with §G
 
 The "complete" status above is **FALSE under the current binary** — the
 same stale-green hazard that masked `instant` §D. Running the operator

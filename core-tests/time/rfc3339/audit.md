@@ -115,3 +115,13 @@ tests all green at module API surface.
 
 1 sampled test (`test_parse_utc_z_timestamp`) confirmed green
 2026-05-27 in 45.7s.
+
+## Landed 2026-07-09 — pre-epoch formatting (floor division)
+
+`decompose_unix` used truncating division: every pre-1970 timestamp
+formatted a day late with the time-of-day sign silently dropped by
+`push_padded` (`format_utc(-1)` → "1970-01-01T00:00:01Z"). Fixed with
+Euclidean day-split normalisation; parse→format round-trip for
+negative unix seconds pinned in `regression_test.vr §E`. Residual
+scope note: RFC 3339 constrains years to 0000–9999; year-negative
+rendering remains out of contract (push_padded is magnitude-only).

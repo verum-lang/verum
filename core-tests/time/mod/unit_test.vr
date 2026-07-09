@@ -1,0 +1,167 @@
+// =============================================================================
+// core-tests/time/mod/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/time/mod.vr` — the `Time` namespace (static
+// methods over the platform clocks) and the module's re-export manifest.
+//
+// Section map:
+//   1. Time.now / Time.monotonic — monotonic clock reads
+//   2. Time.sleep / sleep_ms / sleep_secs — blocking sleeps
+//   3. Signed-Duration sleep contract (negative/zero spans return
+//      immediately; pre-fix `negative as UInt64` slept ~forever)
+//   4. Re-export manifest — every public mount is reachable
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.mod.{Time};
+mount core.time.duration.{Duration};
+mount core.time.instant.{Instant};
+mount core.time.system_time.{SystemTime, SystemTimeError};
+mount core.time.interval.{Interval, AsyncInterval, interval, interval_ms};
+mount core.time.cron.{CronExpr, CronError};
+mount core.time.rfc3339.{Rfc3339Time, Rfc3339Error};
+mount core.time.duration_parse.{DurationParseError};
+
+// =============================================================================
+// Section 1: Time.now / Time.monotonic
+// =============================================================================
+
+@test
+fn test_now_returns_positive_duration() {
+    let d = Time.now();
+    assert(d.as_nanos() > 0, "monotonic clock reads a positive nanosecond count");
+}
+
+@test
+fn test_monotonic_returns_positive_nanos() {
+    let ns = Time.monotonic();
+    assert(ns > 0, "raw monotonic nanoseconds are positive");
+}
+
+@test
+fn test_monotonic_is_non_decreasing() {
+    let a = Time.monotonic();
+    let b = Time.monotonic();
+    assert(b >= a, "monotonic clock never goes backwards");
+}
+
+@test
+fn test_now_is_non_decreasing() {
+    let a = Time.now();
+    let b = Time.now();
+    assert(b.as_nanos() >= a.as_nanos(), "Time.now durations are ordered");
+}
+
+@test
+fn test_now_and_monotonic_share_the_clock() {
+    let before = Time.monotonic();
+    let mid = Time.now();
+    let after = Time.monotonic();
+    assert(mid.as_nanos() >= before, "Time.now sits after the preceding monotonic read");
+    assert(mid.as_nanos() <= after, "Time.now sits before the following monotonic read");
+}
+
+// =============================================================================
+// Section 2: Time.sleep / sleep_ms / sleep_secs
+// =============================================================================
+
+@test
+fn test_sleep_ms_blocks_at_least_requested() {
+    let start = Time.monotonic();
+    Time.sleep_ms(20);
+    let elapsed_ns = Time.monotonic() - start;
+    // Allow generous scheduling jitter downwards is NOT allowed —
+    // nanosleep guarantees at-least semantics.
+    assert(elapsed_ns >= 15_000_000, f"slept {elapsed_ns}ns, expected >= ~20ms");
+}
+
+@test
+fn test_sleep_duration_blocks_at_least_requested() {
+    let start = Time.monotonic();
+    Time.sleep(Duration.millis(20));
+    let elapsed_ns = Time.monotonic() - start;
+    assert(elapsed_ns >= 15_000_000, f"slept {elapsed_ns}ns, expected >= ~20ms");
+}
+
+@test
+fn test_sleep_secs_zero_returns_promptly() {
+    let start = Time.monotonic();
+    Time.sleep_secs(0);
+    let elapsed_ns = Time.monotonic() - start;
+    assert(elapsed_ns < 1_000_000_000, "sleep_secs(0) must not block for a second");
+}
+
+// =============================================================================
+// Section 3: Signed-Duration sleep contract
+// =============================================================================
+
+// REGRESSION: pre-fix, `Time.sleep(Duration.millis(-5))` reinterpreted
+// the negative nanosecond count via `as UInt64` into an astronomically
+// large sleep — the call never returned. The clamp added to
+// `Time.sleep` returns immediately for any non-positive span.
+@test
+fn test_sleep_negative_duration_returns_immediately() {
+    let start = Time.monotonic();
+    Time.sleep(Duration.millis(-5));
+    let elapsed_ns = Time.monotonic() - start;
+    assert(elapsed_ns < 1_000_000_000, "negative-span sleep must not block");
+}
+
+@test
+fn test_sleep_zero_duration_returns_immediately() {
+    let start = Time.monotonic();
+    Time.sleep(Duration.zero());
+    let elapsed_ns = Time.monotonic() - start;
+    assert(elapsed_ns < 1_000_000_000, "zero-span sleep must not block");
+}
+
+// =============================================================================
+// Section 4: Re-export manifest — every public mount is reachable
+// =============================================================================
+
+@test
+fn test_reexport_duration_reachable() {
+    let d = Duration.secs(1);
+    assert_eq(d.as_nanos(), 1_000_000_000);
+}
+
+@test
+fn test_reexport_instant_reachable() {
+    let i = Instant.now();
+    assert(i.as_nanos() > 0);
+}
+
+@test
+fn test_reexport_system_time_reachable() {
+    let st = SystemTime.from_timestamp(42);
+    assert_eq(st.timestamp(), 42);
+}
+
+@test
+fn test_reexport_interval_reachable() {
+    let iv = Interval.new(Duration.millis(100));
+    assert_eq(iv.period().as_nanos(), 100_000_000);
+}
+
+@test
+fn test_reexport_interval_factories_reachable() {
+    let a = interval(Duration.millis(50));
+    let b = interval_ms(50);
+    assert_eq(a.period_ns, b.period_ns);
+}
+
+@test
+fn test_reexport_cron_reachable() {
+    let c = CronExpr.parse(&"* * * * *".to_text());
+    assert(c.is_ok());
+}
+
+@test
+fn test_reexport_rfc3339_time_reachable() {
+    let t = Rfc3339Time { unix_seconds: 0, nanos: 0, offset_minutes: 0 };
+    assert_eq(t.unix_seconds, 0);
+}
+
+fn main() {
+}

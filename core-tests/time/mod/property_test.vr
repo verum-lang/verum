@@ -1,0 +1,73 @@
+// =============================================================================
+// core-tests/time/mod/property_test.vr
+// =============================================================================
+//
+// Laws for the `Time` namespace. The domain is a live clock, so the
+// laws are stated over repeated sampling rather than exhaustive input
+// enumeration (documented sampling rationale: monotonicity and
+// at-least-sleep are the only universally quantifiable contracts the
+// platform guarantees).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.mod.{Time};
+mount core.time.duration.{Duration};
+
+// Law: monotonic reads form a non-decreasing sequence.
+@test
+fn law_monotonic_non_decreasing_across_samples() {
+    let mut prev = Time.monotonic();
+    let mut i = 0;
+    while i < 100 {
+        let cur = Time.monotonic();
+        assert(cur >= prev, f"sample {i}: monotonic went backwards ({prev} -> {cur})");
+        prev = cur;
+        i = i + 1;
+    }
+}
+
+// Law: Time.now() is Duration-typed sugar over the same clock, so its
+// nanosecond image obeys the same ordering.
+@test
+fn law_now_non_decreasing_across_samples() {
+    let mut prev = Time.now().as_nanos();
+    let mut i = 0;
+    while i < 100 {
+        let cur = Time.now().as_nanos();
+        assert(cur >= prev, f"sample {i}: Time.now went backwards");
+        prev = cur;
+        i = i + 1;
+    }
+}
+
+// Law: sleep(t) blocks for at least t (nanosleep at-least semantics),
+// for every positive t. Sampled at three magnitudes.
+@test
+fn law_sleep_at_least_requested_sampled() {
+    let samples: List<Int> = [1, 5, 15];
+    for ms in samples.iter() {
+        let req = *ms;
+        let start = Time.monotonic();
+        Time.sleep_ms(req);
+        let elapsed = Time.monotonic() - start;
+        // 25% scheduling-grace downwards only against OS timer
+        // coarseness; nanosleep still promises at-least.
+        assert(elapsed >= req * 750_000,
+               f"sleep_ms({req}) elapsed only {elapsed}ns");
+    }
+}
+
+// Law: non-positive spans never block (clamp contract).
+@test
+fn law_non_positive_sleep_is_immediate_sampled() {
+    let samples: List<Int> = [0, -1, -1000, -86_400_000];
+    for ms in samples.iter() {
+        let start = Time.monotonic();
+        Time.sleep(Duration.millis(*ms));
+        let elapsed = Time.monotonic() - start;
+        assert(elapsed < 1_000_000_000, f"sleep({ms}ms) blocked");
+    }
+}
+
+fn main() {
+}

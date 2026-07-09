@@ -64,8 +64,10 @@ fn test_parse_subsecond_padding_to_9_digits() {
 
 @test
 fn test_parse_positive_offset() {
-    // +03:00 — UTC is 3 hours earlier
-    let t = parse(&"2026-01-01T03:00:00+03:00".to_text()).unwrap();
+    // +03:00 — UTC is 3 hours earlier.  (Test-bug fix 2026-07-09: the
+    // original used a 2026 date with an expectation of unix 0 — the
+    // epoch-anchored form the comment always described is 1970.)
+    let t = parse(&"1970-01-01T03:00:00+03:00".to_text()).unwrap();
     assert_eq(t.offset_minutes, 180);
     // unix_seconds = local - offset*60 = (3h in unix) - 3h = 0
     assert_eq(t.unix_seconds, 0);
@@ -73,8 +75,10 @@ fn test_parse_positive_offset() {
 
 @test
 fn test_parse_negative_offset() {
-    // 2026-01-01T00:00:00-05:00 → UTC is 5h later
-    let t = parse(&"2026-01-01T00:00:00-05:00".to_text()).unwrap();
+    // 1970-01-01T00:00:00-05:00 → UTC is 5h later.  (Test-bug fix
+    // 2026-07-09: original used a 2026 date with an epoch-anchored
+    // expectation.)
+    let t = parse(&"1970-01-01T00:00:00-05:00".to_text()).unwrap();
     assert_eq(t.offset_minutes, -300);
     // unix_seconds = 0 - (-300*60) = 18000
     assert_eq(t.unix_seconds, 18000);

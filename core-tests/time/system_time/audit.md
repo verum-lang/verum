@@ -125,3 +125,18 @@ surface for the realtime intrinsic.
 6 sampled tests confirmed green 2026-05-27 — 1 baseline
 (`test_unix_epoch_secs_is_zero`, 44.8s) + 5 batch
 (`test_unix_epoch_*`, all green in 146.5s wall).
+
+## Landed 2026-07-09 — signed-timeline + carry normalisation
+
+* `checked_add`/`checked_sub` rewritten with carry normalisation: the
+  `nanos ∈ [0, 1e9)` representation invariant now holds for SIGNED
+  durations (pre-fix, `+(-500ms)` produced a negative `nanos` field and
+  corrupted every accessor downstream). `Maybe.None` now signals Int64
+  overflow ONLY — pre-epoch results are valid instants, consistent with
+  `from_timestamp(-100)` (semantics change; the old
+  `test_checked_sub_before_epoch_returns_none` pin was updated and the
+  new contract is pinned in `regression_test.vr §B–§D`).
+* `from_timestamp_millis` normalises negative inputs with floor
+  semantics (`-1500 → {secs: -2, nanos: 5e8}`; round-trip exact).
+* `duration_since_epoch` doc no longer claims a `Maybe` return; a
+  pre-epoch SystemTime yields a negative signed Duration.

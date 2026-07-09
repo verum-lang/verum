@@ -102,3 +102,12 @@ tests all green at module API surface.
 
 1 sampled test (`test_parse_all_wildcards`) confirmed green
 2026-05-27 in 41.4s.
+
+## Landed 2026-07-09 — pre-epoch schedule evaluation (floor division)
+
+Same truncating-division class as rfc3339: `decompose` produced a
+negative time-of-day (never matches any mask) and `next_after_unix`'s
+minute alignment skipped a boundary for negative inputs
+(`next_after_unix(-100)` → 0 instead of -60). Both normalised to floor
+semantics; pinned in `regression_test.vr §E` (minute boundary, strict
+inequality at an exact boundary, and a pre-epoch daily schedule).

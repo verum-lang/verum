@@ -271,3 +271,15 @@ precompile + relink), and a concurrent session was observed editing
 arithmetic-consistency work (gated). Do **not**
 mark instant stable until §D closes and the 8 tests are GREEN under
 both tiers.
+
+## §E / §D residuals — CLOSED 2026-07-09 with the §G single-representation contract
+
+The `Instant.now / elapsed / duration_since` raw-Int intrinsic alias
+rows were deleted together with the Duration rows (see
+`duration/audit.md §G` for the full narrative). Instant is now the
+honest `{nanos: Int}` heap record on every construction path and every
+tier; `Instant ± Duration` dispatches the `Add`/`Sub` protocol bodies.
+Additionally (2026-07-09): `checked_add`/`checked_sub` gained signed-
+Duration arms (adding a negative span moves back — pre-fix
+`checked_add(-1s)` returned `Maybe.None` unconditionally), pinned in
+`regression_test.vr §F`, with the record round-trip pinned in §G there.

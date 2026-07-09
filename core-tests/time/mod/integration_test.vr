@@ -1,0 +1,85 @@
+// =============================================================================
+// core-tests/time/mod/integration_test.vr
+// =============================================================================
+//
+// `Time` meeting the rest of core.time: Instant, Duration, Interval.
+// The Time namespace and Instant must observe the SAME monotonic clock,
+// and sleeps must be visible through Instant.elapsed().
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.mod.{Time};
+mount core.time.duration.{Duration};
+mount core.time.instant.{Instant};
+mount core.time.interval.{Interval};
+
+// Time.monotonic and Instant.now read the same clock: an Instant taken
+// between two raw reads is bracketed by them.
+@test
+fn test_instant_bracketed_by_monotonic_reads() {
+    let before = Time.monotonic();
+    let instant = Instant.now();
+    let after = Time.monotonic();
+    assert(instant.as_nanos() >= before, "Instant.now >= preceding Time.monotonic");
+    assert(instant.as_nanos() <= after, "Instant.now <= following Time.monotonic");
+}
+
+// A Time.sleep is visible through Instant.elapsed measurement.
+@test
+fn test_sleep_visible_through_instant_elapsed() {
+    let start = Instant.now();
+    Time.sleep_ms(20);
+    let elapsed = start.elapsed();
+    assert(elapsed.as_nanos() >= 15_000_000,
+           f"Instant.elapsed saw only {elapsed.as_nanos()}ns across a 20ms sleep");
+}
+
+// Interval.tick() (which sleeps via Time.sleep internally) blocks until
+// the period boundary and reports exactly one elapsed period on a
+// prompt caller.
+@test
+fn test_interval_tick_blocks_one_period() {
+    let mut iv = Interval.new(Duration.millis(20));
+    let start = Time.monotonic();
+    let ticks = iv.tick();
+    let elapsed = Time.monotonic() - start;
+    assert(ticks >= 1, "tick() reports at least one period");
+    assert(elapsed >= 10_000_000, f"tick() returned after {elapsed}ns, expected ~20ms");
+}
+
+// Interval.immediate fires without blocking on the first tick.
+@test
+fn test_interval_immediate_first_tick_prompt() {
+    let mut iv = Interval.immediate(Duration.millis(500));
+    let start = Time.monotonic();
+    let ticks = iv.tick();
+    let elapsed = Time.monotonic() - start;
+    assert(ticks >= 1);
+    assert(elapsed < 400_000_000, f"immediate tick blocked for {elapsed}ns");
+}
+
+// A slow caller (sleeping past several periods) sees the missed periods
+// reported by the next tick.
+@test
+fn test_interval_tick_reports_missed_periods() {
+    let mut iv = Interval.new(Duration.millis(5));
+    let _ = iv.tick();
+    // Miss ~4 periods.
+    Time.sleep_ms(22);
+    let ticks = iv.tick();
+    assert(ticks >= 2, f"slow caller saw {ticks} periods, expected >= 2");
+}
+
+// Zero-period interval ticks immediately and reports one period.
+@test
+fn test_interval_zero_period_ticks_immediately() {
+    let mut iv = Interval.new(Duration.zero());
+    let start = Time.monotonic();
+    let ticks = iv.tick();
+    let elapsed = Time.monotonic() - start;
+    assert_eq(ticks, 1);
+    assert(elapsed < 1_000_000_000, "zero-period tick must not block");
+}
+
+fn main() {
+}

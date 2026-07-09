@@ -1,0 +1,75 @@
+// =============================================================================
+// core-tests/time/system_time/regression_test.vr
+// =============================================================================
+//
+// Regression pins for surfaced defects in `core.time.system_time`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.duration.{Duration};
+mount core.time.system_time.{SystemTime};
+
+// REGRESSION §B (2026-07-09): checked_add with a NEGATIVE duration
+// produced a negative `nanos` field (the [0, 1e9) representation
+// invariant broke) because the carry was computed with truncating
+// division. from_timestamp(100) + (-500ms) must be 99.5s exactly.
+@test
+fn regression_b_checked_add_negative_duration_normalises_nanos() {
+    let st = SystemTime.from_timestamp(100);
+    let r = st.checked_add(Duration.millis(-500));
+    assert(r.is_some());
+    let t = r.unwrap();
+    assert_eq(t.timestamp_millis(), 99_500);
+    assert_eq(t.timestamp(), 99);
+}
+
+// REGRESSION §B2: subtracting a negative duration moves forwards.
+@test
+fn regression_b_checked_sub_negative_duration_moves_forward() {
+    let st = SystemTime.from_timestamp(100);
+    let r = st.checked_sub(Duration.millis(-500));
+    assert(r.is_some());
+    assert_eq(r.unwrap().timestamp_millis(), 100_500);
+}
+
+// REGRESSION §C (2026-07-09): from_timestamp_millis(-1500) produced
+// {secs: -1, nanos: -5e8} (invariant violation). Floor normalisation
+// gives {secs: -2, nanos: 5e8} and the round-trip identity holds.
+@test
+fn regression_c_from_timestamp_millis_negative_normalises() {
+    let st = SystemTime.from_timestamp_millis(-1500);
+    assert_eq(st.timestamp_millis(), -1500);
+    assert_eq(st.timestamp(), -2);
+}
+
+// REGRESSION §C2: positive sub-second round-trip stays exact.
+@test
+fn regression_c_from_timestamp_millis_positive_round_trip() {
+    let st = SystemTime.from_timestamp_millis(1500);
+    assert_eq(st.timestamp_millis(), 1500);
+    assert_eq(st.timestamp(), 1);
+}
+
+// REGRESSION §D (2026-07-09): pre-epoch results are representable —
+// checked_sub across the epoch returns Some (None = overflow only).
+@test
+fn regression_d_checked_sub_signed_timeline() {
+    let epoch = SystemTime.UNIX_EPOCH();
+    let r = epoch.checked_sub(Duration.secs(1));
+    assert(r.is_some());
+    assert_eq(r.unwrap().timestamp(), -1);
+}
+
+// REGRESSION §D2: duration_since still reports the gap correctly when
+// one side is pre-epoch.
+@test
+fn regression_d_duration_since_across_epoch() {
+    let before = SystemTime.from_timestamp(-30);
+    let after = SystemTime.from_timestamp(30);
+    let d = after.duration_since(&before);
+    assert(d.is_ok());
+    assert_eq(d.unwrap().as_secs(), 60);
+}
+
+fn main() {
+}

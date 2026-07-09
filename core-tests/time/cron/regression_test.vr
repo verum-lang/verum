@@ -1,0 +1,43 @@
+// =============================================================================
+// core-tests/time/cron/regression_test.vr
+// =============================================================================
+//
+// Regression pins for surfaced defects in `core.time.cron`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.cron.{CronExpr, CronError};
+
+// REGRESSION §E (2026-07-09): truncating division in both `decompose`
+// and the minute-boundary alignment of `next_after_unix` mishandled
+// pre-epoch instants: next_after_unix(-100) returned 0 (skipping the
+// -60 boundary), and decompose produced a negative time-of-day that
+// could never match any field mask.
+@test
+fn regression_e_next_after_pre_epoch_minute_boundary() {
+    let cron = CronExpr.parse(&"* * * * *".to_text()).unwrap();
+    let next = cron.next_after_unix(-100);
+    assert(next.is_ok());
+    assert_eq(next.unwrap(), -60);
+}
+
+@test
+fn regression_e_next_after_pre_epoch_exact_boundary_is_strict() {
+    let cron = CronExpr.parse(&"* * * * *".to_text()).unwrap();
+    let next = cron.next_after_unix(-60);
+    assert(next.is_ok());
+    assert_eq(next.unwrap(), 0);
+}
+
+@test
+fn regression_e_pre_epoch_daily_schedule_matches() {
+    // 1969-12-31 (a Wednesday) midnight schedule: from 1969-12-30
+    // 12:00:00 (-131_400s? compute: 1969-12-31T00:00:00Z = -86400),
+    // asking from -100_000 must land exactly on -86_400.
+    let cron = CronExpr.parse(&"0 0 * * *".to_text()).unwrap();
+    let next = cron.next_after_unix(-100_000);
+    assert(next.is_ok());
+    assert_eq(next.unwrap(), -86_400);
+}
+
+fn main() {}

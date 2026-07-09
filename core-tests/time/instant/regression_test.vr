@@ -1,0 +1,67 @@
+// =============================================================================
+// core-tests/time/instant/regression_test.vr
+// =============================================================================
+//
+// Regression pins for surfaced defects in `core.time.instant`.
+// (§D duration_since Maybe-collapse pins live in unit_test; this file
+// pins the 2026-07-09 signed-Duration arithmetic closure.)
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.duration.{Duration};
+mount core.time.instant.{Instant};
+
+// REGRESSION §F (2026-07-09): checked_add with a NEGATIVE duration
+// returned Maybe.None unconditionally — the overflow test
+// `res < self.nanos` misread every legitimate backwards move as
+// overflow. Duration is signed; adding -1s equals subtracting 1s.
+@test
+fn regression_f_checked_add_negative_duration_moves_back() {
+    let now = Instant.now();
+    let back = now.checked_add(Duration.secs(-1));
+    assert(back.is_some(), "adding -1s to a live instant is representable");
+    let expected = now.checked_sub(Duration.secs(1)).unwrap();
+    assert_eq(back.unwrap().as_nanos(), expected.as_nanos());
+}
+
+// REGRESSION §F2: checked_sub with a NEGATIVE duration moves forward,
+// mirroring checked_add with the magnitude.
+@test
+fn regression_f_checked_sub_negative_duration_moves_forward() {
+    let now = Instant.now();
+    let fwd = now.checked_sub(Duration.secs(-1));
+    assert(fwd.is_some());
+    let expected = now.checked_add(Duration.secs(1)).unwrap();
+    assert_eq(fwd.unwrap().as_nanos(), expected.as_nanos());
+}
+
+// REGRESSION §F3: the below-epoch invariant still holds — moving back
+// past nanos=0 is rejected, whichever spelling is used.
+@test
+fn regression_f_below_epoch_rejected_both_spellings() {
+    let now = Instant.now();
+    let n = now.as_nanos();
+    let too_far = Duration.from_nanos(n + 1);
+    assert(now.checked_sub(too_far).is_none());
+    let too_far_neg = Duration.from_nanos(-(n + 1));
+    assert(now.checked_add(too_far_neg).is_none());
+}
+
+// REGRESSION §G family (2026-07-09): Instant.now / elapsed /
+// duration_since were intercepted by raw-Int inline sequences while
+// the record constructors ran Verum bodies — mixing representations.
+// Pin the full round-trip: now → add → duration_since → Duration
+// arithmetic, all through the (sole) record representation.
+@test
+fn regression_g_record_representation_round_trip() {
+    let a = Instant.now();
+    let b = a.checked_add(Duration.millis(250)).unwrap();
+    let d = b.duration_since(a);
+    assert(d.is_some());
+    assert_eq(d.unwrap().as_millis(), 250);
+    // Sanity: the clock read is uptime-scaled, not pointer bits.
+    assert(a.as_nanos() < 4_000_000_000_000_000_000);
+}
+
+fn main() {
+}

@@ -121,12 +121,17 @@ fn test_duration_since_self_is_zero() {
 
 @test
 fn test_went_backwards_carries_duration() {
-    let later   = SystemTime.from_timestamp(100);
-    let earlier = SystemTime.from_timestamp(200);
+    // (Test-bug fix 2026-07-09: the operands were swapped —
+    // `duration_since` errs when SELF precedes the argument.)
+    let earlier = SystemTime.from_timestamp(100);
+    let later   = SystemTime.from_timestamp(200);
     let err = earlier.duration_since(&later).unwrap_err();
     match err {
         SystemTimeError.WentBackwards(d) => {
             assert_eq(d.as_secs(), 100);
+        },
+        SystemTimeError.Overflow => {
+            assert(false, "expected WentBackwards, got Overflow");
         },
     }
 }
@@ -158,10 +163,15 @@ fn test_checked_sub_subtracts_seconds() {
 }
 
 @test
-fn test_checked_sub_before_epoch_returns_none() {
+fn test_checked_sub_crossing_epoch_yields_pre_epoch_time() {
+    // SEMANTICS CHANGE (2026-07-09): SystemTime is a signed timeline —
+    // `from_timestamp(-100)` was always accepted, so checked_sub
+    // returning None for pre-epoch results was inconsistent. None now
+    // signals Int64 overflow only (matches Rust/Go/Java).
     let t = SystemTime.from_timestamp(10);
     let result = t.checked_sub(Duration.secs(100));
-    assert(result.is_none());
+    assert(result.is_some());
+    assert_eq(result.unwrap().timestamp(), -90);
 }
 
 // =============================================================================

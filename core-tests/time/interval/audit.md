@@ -112,3 +112,17 @@ shape; live-blocking-tick paths gated on §A above).
 
 1 sampled test (`test_interval_new_stores_period`) confirmed green
 2026-05-27 in 43.1s.
+
+## Landed 2026-07-09 — signed-period clamp + first real tick() coverage
+
+* Duration is signed: a negative period walked `next_tick_ns`
+  backwards forever. `Interval.new` / `Interval.immediate` /
+  `AsyncInterval.new` clamp the period at zero; pinned in
+  `regression_test.vr §A`.
+* `tick()` finally has behavioural coverage (blocking one period,
+  immediate first tick, missed-period reporting, zero-period
+  promptness) — in `core-tests/time/mod/integration_test.vr`, since the
+  scenarios exercise `Time.sleep`/`Time.monotonic` integration. The
+  earlier suite only pinned period STORAGE, a stale-green hazard: a
+  `tick()` that slept forever (see `mod/audit.md §A`) would have gone
+  unnoticed.

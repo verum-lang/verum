@@ -185,4 +185,96 @@ fn regression_d_dot_sub_dispatches_to_user_method() {
         "Duration.sub() method-call dispatches to user impl (not ptr arith)");
 }
 
+// =============================================================================
+// §G  SINGLE-REPRESENTATION CONTRACT — CLOSED 2026-07-09
+// =============================================================================
+//
+// PRE-CLOSE STATE: `register_stdlib_intrinsics` aliased the `from_*`
+// constructors and every accessor (`as_secs`/`as_nanos`/…/`is_zero`/
+// `subsec_nanos`) plus `add`/`saturating_*` to raw-Int inline
+// sequences, while the short-form constructors (`Duration.millis`,
+// `secs`, `nanos`, record literals, operator-impl results) compiled
+// their Verum bodies and allocated heap RECORDS.  Every intercepted
+// accessor then divided/compared the heap POINTER:
+// `Duration.millis(1500).as_secs()` returned `heap_addr / 1e9` (≈34),
+// Debug rendered garbage like "38.774s", and SystemTime/Instant
+// arithmetic that consumed `subsec_nanos()` corrupted downstream.
+//
+// CLOSED by deleting the alias rows — the Verum bodies in
+// `core/time/duration.vr` are the single implementation surface on
+// every tier.  These pins go through BOTH construction families and
+// every accessor so any future re-introduction of a partial intercept
+// fails loudly.
+
+@test
+fn regression_g_accessors_on_short_form_ctor() {
+    let d = Duration.millis(1500);
+    assert_eq(d.as_secs(), 1);
+    assert_eq(d.as_millis(), 1500);
+    assert_eq(d.as_micros(), 1_500_000);
+    assert_eq(d.as_nanos(), 1_500_000_000);
+    assert_eq(d.subsec_nanos(), 500_000_000);
+    assert(!d.is_zero());
+}
+
+@test
+fn regression_g_accessors_on_long_form_ctor() {
+    let d = Duration.from_millis(1500);
+    assert_eq(d.as_secs(), 1);
+    assert_eq(d.as_nanos(), 1_500_000_000);
+}
+
+@test
+fn regression_g_accessors_on_record_literal() {
+    let d = Duration { nanos: 1_500_000_000 };
+    assert_eq(d.as_secs(), 1);
+    assert_eq(d.subsec_nanos(), 500_000_000);
+}
+
+@test
+fn regression_g_accessors_on_operator_result() {
+    let d = Duration.secs(2) - Duration.millis(500);
+    assert_eq(d.as_millis(), 1500);
+    assert_eq(d.as_secs(), 1);
+}
+
+@test
+fn regression_g_negative_accessor_identity() {
+    // Signed decomposition identity — also guards against unsigned
+    // (`uint64$`) chain dispatch on the accessor results.
+    let d = Duration.millis(-1500);
+    assert_eq(d.as_secs(), -1);
+    assert_eq(d.subsec_nanos(), -500_000_000);
+    assert_eq(d.as_secs() * 1_000_000_000 + d.subsec_nanos(), d.as_nanos());
+}
+
+// =============================================================================
+// §H  Signed Debug formatting + checked_mul MIN guard — 2026-07-09
+// =============================================================================
+
+// REGRESSION §H1: Debug for -1.5s rendered "-1.-500s" (both components
+// carried the sign). Now: one leading '-', magnitude components.
+@test
+fn regression_h_debug_negative_fractional() {
+    let d = Duration.millis(-1500);
+    let s = f"{d}";
+    assert_eq(s, "-1.500s".to_text());
+}
+
+@test
+fn regression_h_debug_negative_subsecond() {
+    let d = Duration.millis(-500);
+    let s = f"{d}";
+    assert_eq(s, "-500ms".to_text());
+}
+
+// REGRESSION §H2: checked_mul(Int.MIN nanos, -1) previously executed
+// `Int.MIN * -1` (wraps) then `Int.MIN / -1` (overflow) inside the
+// verification step. Guarded to return Maybe.None before arithmetic.
+@test
+fn regression_h_checked_mul_min_by_negative_one_is_none() {
+    let d = Duration.nanos(Int.min_value());
+    assert(d.checked_mul(-1).is_none());
+}
+
 fn main() {}

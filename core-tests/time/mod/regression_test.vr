@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/time/mod/regression_test.vr
+// =============================================================================
+//
+// Regression pins for surfaced defects in `core/time/mod.vr`.
+// Every regression names its defect; details in audit.md.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.mod.{Time};
+mount core.time.duration.{Duration};
+
+// REGRESSION §A (2026-07-09): `Time.sleep(negative)` hung forever.
+// `duration.as_nanos() as UInt64` reinterpreted the two's-complement
+// bits of a negative span as ~1.8e19 nanoseconds and nanosleep never
+// returned. Fixed by the non-positive clamp in `Time.sleep`.
+@test
+fn regression_a_negative_sleep_does_not_hang() {
+    let start = Time.monotonic();
+    Time.sleep(Duration.secs(-3600));
+    let elapsed = Time.monotonic() - start;
+    assert(elapsed < 1_000_000_000, "negative-hour sleep returned immediately");
+}
+
+// REGRESSION §B (2026-07-09, §G intercept family): `Time.now()` builds
+// a Duration via `Duration.from_nanos(monotonic_nanos() as Int)`. When
+// `Duration.from_nanos` was intercepted by the raw-Int inline sequence
+// while accessors ran Verum bodies (or vice versa), the two
+// representations mixed and accessor arithmetic read heap-pointer
+// bits. This pins the constructor→accessor round-trip through the
+// live-clock path.
+@test
+fn regression_b_now_round_trips_through_accessors() {
+    let d = Time.now();
+    let ns = d.as_nanos();
+    let secs = d.as_secs();
+    let subsec = d.subsec_nanos();
+    assert(ns > 0, "live clock is positive");
+    assert_eq(secs * 1_000_000_000 + subsec, ns,
+              "decomposition identity holds for a clock-derived Duration");
+    // A monotonic clock reads far less than 10 years of uptime; a
+    // heap-pointer-as-nanos read is orders of magnitude larger on
+    // 64-bit platforms (>= 4e18) or wildly inconsistent with `ns`.
+    assert(secs < 315_360_000, f"as_secs()={secs} looks like pointer bits");
+}
+
+fn main() {
+}

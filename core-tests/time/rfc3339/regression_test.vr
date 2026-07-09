@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/time/rfc3339/regression_test.vr
+// =============================================================================
+//
+// Regression pins for surfaced defects in `core.time.rfc3339`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.rfc3339.{Rfc3339Time, Rfc3339Error, parse, format_utc};
+
+// REGRESSION §E (2026-07-09): pre-1970 timestamps formatted with
+// truncating (not floor) division in decompose_unix. format_utc(-1)
+// rendered "1970-01-01T00:00:01Z" — off by a day AND with the
+// negative second's sign silently dropped by push_padded.
+@test
+fn regression_e_format_pre_epoch_second() {
+    let s = format_utc(-1, 0);
+    assert_eq(s, "1969-12-31T23:59:59Z".to_text());
+}
+
+@test
+fn regression_e_format_pre_epoch_arbitrary() {
+    // -86_399 = 1969-12-31T00:00:01Z
+    let s = format_utc(-86_399, 0);
+    assert_eq(s, "1969-12-31T00:00:01Z".to_text());
+}
+
+@test
+fn regression_e_format_exact_day_boundary_unaffected() {
+    let s = format_utc(-86_400, 0);
+    assert_eq(s, "1969-12-31T00:00:00Z".to_text());
+}
+
+// Round-trip through parse: pre-epoch formatting must re-parse to the
+// same unix instant.
+@test
+fn regression_e_pre_epoch_round_trip() {
+    let samples: List<Int> = [-1, -59, -3600, -86_401, -31_536_000];
+    for ts in samples.iter() {
+        let s = format_utc(*ts, 0);
+        let parsed = parse(&s);
+        assert(parsed.is_ok(), f"re-parse failed for {ts}: {s}");
+        assert_eq(parsed.unwrap().unix_seconds, *ts);
+    }
+}
+
+fn main() {
+}

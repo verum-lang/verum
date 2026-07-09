@@ -1,0 +1,47 @@
+// =============================================================================
+// core-tests/time/interval/regression_test.vr
+// =============================================================================
+//
+// Regression pins for surfaced defects in `core.time.interval`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.duration.{Duration};
+mount core.time.interval.{Interval, AsyncInterval};
+mount core.time.mod.{Time};
+
+// REGRESSION §A (2026-07-09): a NEGATIVE period (Duration is signed)
+// walked `next_tick_ns` backwards on every tick — `tick()` never slept
+// and the deadline receded forever. Constructors now clamp the period
+// at zero.
+@test
+fn regression_a_negative_period_clamped_interval() {
+    let iv = Interval.new(Duration.millis(-100));
+    assert_eq(iv.period().as_nanos(), 0);
+}
+
+@test
+fn regression_a_negative_period_clamped_immediate() {
+    let iv = Interval.immediate(Duration.millis(-100));
+    assert_eq(iv.period().as_nanos(), 0);
+}
+
+@test
+fn regression_a_negative_period_clamped_async() {
+    let iv = AsyncInterval.new(Duration.millis(-100));
+    assert_eq(iv.period_ns, 0);
+}
+
+// REGRESSION §A2: a clamped (zero-period) interval still ticks
+// promptly and never blocks.
+@test
+fn regression_a_negative_period_tick_does_not_block() {
+    let mut iv = Interval.new(Duration.millis(-100));
+    let start = Time.monotonic();
+    let ticks = iv.tick();
+    let elapsed = Time.monotonic() - start;
+    assert(ticks >= 1);
+    assert(elapsed < 1_000_000_000, "clamped interval tick must not block");
+}
+
+fn main() {}
