@@ -1220,17 +1220,60 @@ impl TypeChecker {
                 }
             }
 
-            let associated_types: verum_common::Map<Text, Type> = impl_desc
-                .associated_types
-                .iter()
-                .map(|(name, type_name)| {
-                    let ty = Type::Named {
-                        path: Self::text_to_path(type_name),
-                        args: List::new(),
-                    };
-                    (name.clone(), ty)
-                })
-                .collect();
+            // Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1) — parse
+            // the carried associated-type bindings STRUCTURALLY and
+            // register the impl's `for_type` WITH positional generic
+            // args.  The archive renders bindings against the parent
+            // type's `type_params` order (`type Item = &T;` on
+            // `implement<T> Iterator for SliceIter<T>` →
+            // `"&__generic_0"`), so parsing the synthesized target
+            // args `__generic_0..k` and the binding values under ONE
+            // interning scope links them: `for_type =
+            // SliceIter<Var_a>` and `Item = &Var_a` share `Var_a`,
+            // and the protocol-checker's `build_type_substitution`
+            // then binds `Var_a := Rec` from the RECEIVER's args when
+            // resolving `::Item<SliceIter<Rec>>` — exactly the
+            // AST-driven impl-registration shape (`Generic{ListIter,
+            // [Var]}` cross-matching arm).  Pre-carry this path built
+            // `Named{path: "&T"}` garbage from `text_to_path` and an
+            // ARGLESS for_type, so `try_find_associated_type` never
+            // resolved an archive-loaded iterator's Item and closure
+            // params stayed `Item<_>` (E103).
+            let assoc_arg_count = metadata
+                .types
+                .get(&impl_desc.target_type)
+                .map(|td| td.generic_params.len())
+                .unwrap_or(0);
+            let ((for_type_registered, associated_types), _assoc_scope): (
+                (Type, verum_common::Map<Text, Type>),
+                _,
+            ) = crate::infer::helpers::with_generic_var_scope_capture(|| {
+                let args: List<Type> = (0..assoc_arg_count)
+                    .map(|i| {
+                        crate::infer::helpers::parse_descriptor_type_string(&format!(
+                            "__generic_{}",
+                            i
+                        ))
+                    })
+                    .collect();
+                let for_type = Type::Named {
+                    path: Self::text_to_path(&impl_desc.target_type),
+                    args,
+                };
+                let assoc: verum_common::Map<Text, Type> = impl_desc
+                    .associated_types
+                    .iter()
+                    .map(|(name, type_text)| {
+                        (
+                            name.clone(),
+                            crate::infer::helpers::parse_descriptor_type_string(
+                                type_text.as_str(),
+                            ),
+                        )
+                    })
+                    .collect();
+                (for_type, assoc)
+            });
 
             let methods: verum_common::Map<Text, Type> = {
                 let pc = self.protocol_checker.read();
@@ -1266,7 +1309,11 @@ impl TypeChecker {
             let protocol_impl = ProtocolImpl {
                 protocol: Self::text_to_path(&impl_desc.protocol),
                 protocol_args,
-                for_type,
+                // Args-ful shape (see the carry comment above) — the
+                // argless `for_type` above serves only the
+                // idempotence probe; `get_implementations`' base-key
+                // fallback matches both shapes.
+                for_type: for_type_registered,
                 where_clauses: List::new(),
                 methods,
                 associated_types,
@@ -1486,6 +1533,26 @@ impl TypeChecker {
             | Type::UnsafeReference { inner, .. } => {
                 Self::push_referenced_type_names(inner, out)
             }
+            // ARRAY-ITER-CONCRETIZE-1 (a)-leg — structural receivers
+            // lazy-load their method-catalogue descriptors.  Codegen
+            // now materialises "Slice"/"Array" TypeDescriptors for
+            // `implement<T> [T]`-style blocks
+            // (`ensure_structural_impl_target_type`), and the method
+            // lookup's `get_fallback_type_names` maps Array→Slice —
+            // mirror that naming here so `lazy_load_receiver_methods`
+            // populates the buckets before the lookup runs.  A name
+            // absent from metadata is a no-op in
+            // `ensure_stdlib_type_loaded`, so this is inert for
+            // metadata that predates the synthesis.
+            Type::Array { element, .. } => {
+                out.push(Text::from("Array"));
+                out.push(Text::from("Slice"));
+                Self::push_referenced_type_names(element, out);
+            }
+            Type::Slice { element } => {
+                out.push(Text::from("Slice"));
+                Self::push_referenced_type_names(element, out);
+            }
             Type::Tuple(elems) => {
                 for e in elems.iter() {
                     Self::push_referenced_type_names(e, out);
@@ -1568,8 +1635,10 @@ impl TypeChecker {
             // populates the bucket.
             // Parse params AND return under ONE generic-var scope so a param
             // `F` and a projection `F.Output` in the return share one TypeVar.
-            let (params, return_ty): (List<Type>, Type) =
-                crate::infer::helpers::with_generic_var_scope(|| {
+            // Capture the scope's placeholder→TypeVar map: the impl-generics
+            // carry below matches `__generic_i` placeholders by index.
+            let ((params, return_ty), scope_vars): ((List<Type>, Type), _) =
+                crate::infer::helpers::with_generic_var_scope_capture(|| {
                     let params: List<Type> = fn_desc
                         .params
                         .iter()
@@ -1647,45 +1716,79 @@ impl TypeChecker {
                 if vars.is_empty() {
                     TypeScheme::mono(fn_ty.clone())
                 } else {
-                    // ARRAY-ITER-CONCRETIZE-1 (the sixth scheme-birth
-                    // path): metadata-loaded inherent methods carried
-                    // impl_var_count = 0 (constructor default), so the
-                    // receiver-arg→typevar bind loop's limit was 0 and
-                    // the element var of e.g. `implement<T> [T]`'s
-                    // iter() never bound — closure params typed
-                    // Item<var> → E103. DERIVE the impl-level count
-                    // from the signature itself: vars that occur in
-                    // the RECEIVER (self param's type) are bindable
-                    // from the receiver — order them FIRST so the
-                    // bind loop's zip lines up; method-level vars
-                    // (absent from the receiver) stay behind the
+                    // ARRAY-ITER-CONCRETIZE-1 / Pillar-3 increment 1
+                    // (the sixth scheme-birth path): metadata-loaded
+                    // inherent methods used to carry impl_var_count = 0
+                    // (constructor default), so the receiver-arg→typevar
+                    // bind loop's limit was 0 and the element var of
+                    // e.g. `implement<T> [T]`'s iter() never bound —
+                    // closure params typed Item<var> → E103.
+                    //
+                    // TWO signature-side derivations were FALSIFIED
+                    // before this carry (kept for the record):
+                    //  * receiver-position — impossible: the receiver
+                    //    is skipped/UNIT-sentineled at serialisation,
+                    //    so the element var appears only in the return
+                    //    (SliceIter<T>);
+                    //  * count from type_desc.generic_params — regressed
+                    //    102 tests: appearance-ordered vars put METHOD-
+                    //    level generics first in many signatures, so
+                    //    the cap bound receiver args onto them (the
+                    //    exact hazard impl_var_count=0 protects).
+                    //
+                    // The fix is the metadata CARRY: descriptors now
+                    // record `impl_generic_names` (the impl block's
+                    // ordered generic params — see the writer in
+                    // `verum_compiler::archive_metadata`).  VBC codegen
+                    // numbers impl-level params FIRST when resolving
+                    // method TypeRefs, so the serialised placeholder
+                    // `__generic_i` is impl-level iff
+                    // `i < impl_generic_names.len()`.  Match the
+                    // captured scope map against that contract:
+                    // impl-level vars (sorted by placeholder index)
+                    // go FIRST in the scheme's var list so the bind
+                    // loop's positional zip lines receiver args up
+                    // with them; method-level vars stay behind the
                     // limit, preserving the protection the limit
                     // exists for.
-                    // Receiver-position derivation is impossible here:
-                    // metadata signatures are PARAM-STRIPPED (fn_ty has
-                    // no params at all — traced p0 empty), so the
-                    // element var appears only in the return
-                    // (SliceIter<T>). For an INHERENT method the
-                    // impl-level generics mirror the TYPE's own
-                    // generic_params by construction (implement<T>
-                    // [T]), so derive the COUNT from the type
-                    // descriptor and cap by the vars actually present;
-                    // appearance order stands (the return-container
-                    // element is first for the iterator family).
-                    // REVERTED derivation (kept for the record): count
-                    // from type_desc.generic_params regressed 102 tests
-                    // — appearance-ordered vars put METHOD-level
-                    // generics first in many signatures, so the cap
-                    // binds receiver args onto them (the exact hazard
-                    // impl_var_count=0 protects). With PARAM-STRIPPED
-                    // metadata signatures the impl-vs-method split is
-                    // UNRECOVERABLE signature-side; the fix is a
-                    // METADATA CARRY (impl-generics count on the
-                    // method descriptor) — tracked in
-                    // ARRAY-ITER-CONCRETIZE-1.
-                    let impl_count = 0usize;
-                    let var_list: List<crate::ty::TypeVar> =
-                        vars.iter().copied().collect();
+                    //
+                    // PREFIX-CONTIGUITY GUARD: the bind loop zips
+                    // receiver type-args positionally, so partial
+                    // coverage is only sound when the matched indices
+                    // are exactly 0..m.  A method mentioning only the
+                    // SECOND impl param (e.g. Map's `values() ->
+                    // Values<V>`) must NOT bind V := args[0] (that's
+                    // K's slot) — such schemes conservatively keep
+                    // impl_var_count = 0 (today's behaviour).
+                    let impl_k = fn_desc.impl_generic_names.len();
+                    let mut impl_ordered: Vec<(usize, crate::ty::TypeVar)> = Vec::new();
+                    if impl_k > 0 {
+                        for (placeholder, tv) in scope_vars.iter() {
+                            if let Some(rest) = placeholder.strip_prefix("__generic_") {
+                                if let Ok(i) = rest.parse::<usize>() {
+                                    if i < impl_k {
+                                        impl_ordered.push((i, *tv));
+                                    }
+                                }
+                            }
+                        }
+                        impl_ordered.sort_by_key(|(i, _)| *i);
+                        if !impl_ordered
+                            .iter()
+                            .enumerate()
+                            .all(|(pos, (i, _))| pos == *i)
+                        {
+                            impl_ordered.clear();
+                        }
+                    }
+                    let impl_count = impl_ordered.len();
+                    let mut var_list: List<crate::ty::TypeVar> =
+                        impl_ordered.iter().map(|(_, tv)| *tv).collect();
+                    for tv in vars.iter() {
+                        if !impl_ordered.iter().any(|(_, iv)| iv == tv) {
+                            var_list.push(*tv);
+                        }
+                    }
                     let mut s = TypeScheme::poly(var_list, fn_ty.clone());
                     s.impl_var_count = impl_count;
                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
@@ -1693,9 +1796,10 @@ impl TypeChecker {
                             params.first().map(|p| format!("{:?}", p)).unwrap_or_default()
                         } else { String::new() };
                         eprintln!(
-                            "[implvc-set] site=core.rs:metadata method={} impl_count={} p0={}",
+                            "[implvc-set] site=core.rs:metadata method={} impl_count={} k={} p0={}",
                             method_name.as_str(),
                             impl_count,
+                            impl_k,
                             &p0[..p0.len().min(120)]
                         );
                     }
@@ -2227,18 +2331,49 @@ impl TypeChecker {
 
         // Register protocol implementations via protocol_checker
         for impl_desc in metadata.implementations.iter() {
-            // Convert associated types from impl descriptor
-            let associated_types: verum_common::Map<verum_common::Text, Type> = impl_desc
-                .associated_types
-                .iter()
-                .map(|(name, type_name)| {
-                    let ty = Type::Named {
-                        path: Self::text_to_path(type_name),
-                        args: verum_common::List::new(),
-                    };
-                    (name.clone(), ty)
-                })
-                .collect();
+            // Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1) — parse
+            // the carried bindings structurally and give `for_type`
+            // positional generic-var args, mirroring the LAZY path
+            // (`register_stdlib_impls_for_target`'s twin block above;
+            // see its comment for the full contract).  One shared
+            // interning scope links `for_type = SliceIter<Var_a>`
+            // with `Item = &Var_a` so the receiver's type args
+            // substitute through `build_type_substitution`.
+            let assoc_arg_count = metadata
+                .types
+                .get(&impl_desc.target_type)
+                .map(|td| td.generic_params.len())
+                .unwrap_or(0);
+            let ((for_type_registered, associated_types), _assoc_scope): (
+                (Type, verum_common::Map<verum_common::Text, Type>),
+                _,
+            ) = crate::infer::helpers::with_generic_var_scope_capture(|| {
+                let args: verum_common::List<Type> = (0..assoc_arg_count)
+                    .map(|i| {
+                        crate::infer::helpers::parse_descriptor_type_string(&format!(
+                            "__generic_{}",
+                            i
+                        ))
+                    })
+                    .collect();
+                let for_type = Type::Named {
+                    path: Self::text_to_path(&impl_desc.target_type),
+                    args,
+                };
+                let assoc: verum_common::Map<verum_common::Text, Type> = impl_desc
+                    .associated_types
+                    .iter()
+                    .map(|(name, type_text)| {
+                        (
+                            name.clone(),
+                            crate::infer::helpers::parse_descriptor_type_string(
+                                type_text.as_str(),
+                            ),
+                        )
+                    })
+                    .collect();
+                (for_type, assoc)
+            });
 
             // Look up the protocol definition to get method types
             // The protocol was registered in the previous loop, so we can look it up
@@ -2274,10 +2409,10 @@ impl TypeChecker {
             let protocol_impl = ProtocolImpl {
                 protocol: Self::text_to_path(&impl_desc.protocol),
                 protocol_args: verum_common::List::new(),
-                for_type: Type::Named {
-                    path: Self::text_to_path(&impl_desc.target_type),
-                    args: verum_common::List::new(),
-                },
+                // Args-ful shape (see the carry comment above) —
+                // `get_implementations`' base-key fallback matches
+                // both arg-less and args-ful query shapes.
+                for_type: for_type_registered,
                 where_clauses: verum_common::List::new(),
                 methods,
                 associated_types,

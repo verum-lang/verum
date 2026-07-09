@@ -4605,11 +4605,32 @@ impl ProtocolChecker {
                 let mut subst_map = Map::new();
                 let _ = self.unify_types(&impl_.for_type, ty, &mut subst_map);
 
+                // ARRAY-ITER-CONCRETIZE-1 — `Self` in a method
+                // signature IS the RECEIVER.  Substituting
+                // `impl_.for_type` (whose generic params are still
+                // free vars from impl registration) left protocol-
+                // default signatures like `fn any(f: fn(Self.Item) ->
+                // Bool)` as `::Item<SliceIter<Var>>` — an unresolvable
+                // projection over an unbound var, so iterator-closure
+                // params stayed `Item<_>` (E103) no matter what the
+                // impl carried.  Substitute the CONCRETE receiver
+                // (deref'd — method dispatch is over the pointee), so
+                // `::Item<SliceIter<Rec>>` resolves through the impl's
+                // carried associated-type bindings.  The receiver
+                // always unifies with `for_type` (that's how the impl
+                // was selected), so this is strictly more concrete.
+                let self_ty = match ty {
+                    Type::Reference { inner, .. }
+                    | Type::CheckedReference { inner, .. }
+                    | Type::UnsafeReference { inner, .. } => (**inner).clone(),
+                    other => other.clone(),
+                };
+
                 // Add Self mapping for Self references in method signatures
-                subst_map.insert(Text::from("Self"), impl_.for_type.clone());
+                subst_map.insert(Text::from("Self"), self_ty.clone());
 
                 // Add T0 mapping for TypeVar(0) which represents Self in protocol methods
-                subst_map.insert(Text::from("T0"), impl_.for_type.clone());
+                subst_map.insert(Text::from("T0"), self_ty);
 
                 // Add associated type mappings to resolve Self.Item projections
                 for (assoc_name, assoc_ty) in impl_.associated_types.iter() {
@@ -7494,6 +7515,18 @@ impl ProtocolChecker {
                 type_key,
                 impls.len()
             );
+            for impl_ in impls.iter() {
+                eprintln!(
+                    "[assoc-trace]   impl proto={} for_type_key={} assoc_keys={:?}",
+                    self.extract_protocol_name(&impl_.protocol).as_str(),
+                    self.make_type_key(&impl_.for_type).as_str(),
+                    impl_
+                        .associated_types
+                        .keys()
+                        .map(|k| k.as_str())
+                        .collect::<Vec<_>>()
+                );
+            }
         }
 
         // Two-pass resolution: first try direct (non-blanket) impls for concrete answers,

@@ -486,6 +486,37 @@ pub struct FunctionDescriptor {
     #[serde(default)]
     pub parent_type: Maybe<Text>,
 
+    /// Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1) — ordered
+    /// impl-block generic-param names carried on METHOD descriptors.
+    ///
+    /// For a method of `implement<T> [T] { ... }` this is `["T"]`;
+    /// empty for free functions and methods of non-generic impls.
+    /// Source: the parent type's VBC `TypeDescriptor.type_params`
+    /// (codegen registers the impl block's `<T>` into the parent
+    /// descriptor during the type-decl pass, and numbers method
+    /// `TypeRef::Generic(id)` slots with impl-level params FIRST —
+    /// `compile_function`'s `method_generic_param_map`).  The
+    /// serialised param/return strings therefore spell impl-level
+    /// generics as `__generic_i` with `i < impl_generic_names.len()`,
+    /// which is exactly the contract the metadata scheme-birth site
+    /// (`register_inherent_methods_from_metadata`) uses to order
+    /// impl-level TypeVars first and set `TypeScheme::impl_var_count`.
+    ///
+    /// Without this carry the impl-vs-method generic split is
+    /// UNRECOVERABLE from the signature strings alone (the receiver
+    /// is skipped/UNIT-sentineled at serialisation, so the element
+    /// var of slice `iter()` appears only in the return container) —
+    /// `impl_var_count` stayed 0 and receiver args never bound,
+    /// yielding `Item<var>` E103s on iterator-closure params (#26
+    /// seventh-layer hunt).
+    ///
+    /// `#[serde(default)]` keeps old sidecars decodable by self-
+    /// describing formats; the bincode-embedded artefact pair is
+    /// regenerated wholesale via the `PRECOMPILE_SCHEMA_VERSION`
+    /// bump that accompanied this field.
+    #[serde(default)]
+    pub impl_generic_names: List<Text>,
+
     /// `true` when this descriptor represents a `const` (or `static`)
     /// declaration converted to a zero-arg function during codegen.
     /// The typechecker registers these as values (`insert_mono`)

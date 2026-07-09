@@ -374,6 +374,17 @@ impl Serializer {
             for &method in &proto_impl.methods {
                 encode_u32(method, &mut self.output);
             }
+            // minor >= 4: associated-type bindings (`type Item = &T;`)
+            // — varint count + [u32 name-StringId, TypeRef]*.  The
+            // reader gates on header.version_minor, so pre-4 readers
+            // reject the archive cleanly via is_version_compatible
+            // rather than mis-parsing mid-stream (Pillar-3 increment 1
+            // / ARRAY-ITER-CONCRETIZE-1).
+            encode_varint(proto_impl.associated_types.len() as u64, &mut self.output);
+            for (name, tref) in &proto_impl.associated_types {
+                encode_u32(name.0, &mut self.output);
+                self.serialize_type_ref(tref)?;
+            }
         }
 
         // Alias target (TypeKind::Alias only — encoded for every

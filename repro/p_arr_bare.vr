@@ -1,0 +1,6 @@
+type Rec is { hot: Bool };
+fn main() {
+    let xs = [Rec { hot: true }];
+    let any_hot = xs.iter().any(|r| r.hot);
+    print(f"any={any_hot}");
+}

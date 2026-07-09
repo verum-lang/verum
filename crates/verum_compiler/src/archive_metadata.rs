@@ -718,6 +718,31 @@ fn register_module_metadata(
             (params, return_type)
         };
 
+        // Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1) — CARRY the
+        // impl-block generic names on method descriptors.  The parent
+        // type's `type_params` ARE the impl-block generics: the
+        // type-decl pass registers `implement<T> [T]`'s `<T>` into the
+        // parent TypeDescriptor, and `compile_function`'s
+        // `method_generic_param_map` numbers exactly those params
+        // FIRST (ids `0..k`) when resolving method param/return
+        // TypeRefs — so the serialised `__generic_i` placeholders
+        // with `i < k` are impl-level BY CONSTRUCTION.  The
+        // typechecker's metadata scheme-birth site uses this to
+        // order impl-level TypeVars first and set `impl_var_count`
+        // (the split is unrecoverable from the strings alone —
+        // see the field's doc in `verum_types::core_metadata`).
+        let impl_generic_names: List<Text> = fn_desc
+            .parent_type
+            .and_then(|tid| module.types.iter().find(|t| t.id.0 == tid.0))
+            .map(|parent_ty| {
+                parent_ty
+                    .type_params
+                    .iter()
+                    .filter_map(|tp| module.strings.get(tp.name).map(Text::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let descriptor = FunctionDescriptor {
             name: simple_name.clone(),
             module_path: module_path.clone(),
@@ -731,6 +756,7 @@ fn register_module_metadata(
             is_unsafe: false,
             intrinsic_id: Maybe::None,
             parent_type: parent_type.clone(),
+            impl_generic_names,
             // #97 — round-trip the const-storage marker.
             is_const: fn_desc.is_const,
             // #101 — span population deferred to source-walk pass.
@@ -1035,12 +1061,30 @@ fn collect_type_impls(
             Some(s) => Text::from(s.as_str()),
             None => continue,
         };
+        // Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1) — render the
+        // impl block's carried associated-type bindings (`type Item =
+        // &T;` → `"&__generic_0"`).  The `__generic_i` ids follow the
+        // parent type's `type_params` order (codegen's binding-time
+        // param map), so the typechecker's metadata reader can link
+        // them to the receiver's type args positionally.
+        let associated_types: OrderedMap<Text, Text> = {
+            let mut m = OrderedMap::new();
+            for (name_sid, tref) in proto_impl.associated_types.iter() {
+                if let Some(n) = module.strings.get(*name_sid) {
+                    m.insert(
+                        Text::from(n),
+                        Text::from(type_ref_to_text(tref, type_id_to_name)),
+                    );
+                }
+            }
+            m
+        };
         let descriptor = ImplementationDescriptor {
             protocol: protocol_name,
             target_type: target_name.clone(),
             generic_params: List::new(),
             where_clause: List::new(),
-            associated_types: OrderedMap::new(),
+            associated_types,
             methods: proto_impl
                 .methods
                 .iter()

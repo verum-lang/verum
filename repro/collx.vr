@@ -1,0 +1,12 @@
+// ARRAY-ITER-CONCRETIZE-1 canary: element fields must flow through
+// map/fold chains on slice iterators (impl-generics metadata carry,
+// Pillar-3 increment 1).  Pre-carry this failed E103 on `p.x`
+// (closure param typed Item<_> because SliceIter<T>'s T never bound).
+type Pt is { x: Int, y: Int };
+
+fn main() {
+    let ps = [Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }];
+    let sum_x = ps.iter().fold(0, |acc, p| acc + p.x);
+    let sums: List<Int> = ps.iter().map(|p| p.x + p.y).collect();
+    print(f"sum_x={sum_x} a={sums[0]} b={sums[1]}");
+}

@@ -603,6 +603,23 @@ fn convert_function_descriptor(
         None => Maybe::None,
     };
 
+    // Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1) — carry the
+    // impl-block generic names (the parent type's `type_params`; see
+    // `archive_metadata.rs`'s Pass-2 twin site for the full contract).
+    // Lookup is by-id (`find`) rather than positional `get` — the
+    // authoritative pattern for TypeId resolution.
+    let impl_generic_names: List<Text> = match vbc_fn.parent_type {
+        Some(tid) => match module.types.iter().find(|t| t.id.0 == tid.0) {
+            Some(parent) => parent
+                .type_params
+                .iter()
+                .map(|tp| get_string(&module.strings, tp.name))
+                .collect(),
+            None => List::new(),
+        },
+        None => List::new(),
+    };
+
     Ok(FunctionDescriptor {
         name,
         module_path: module_path.clone(),
@@ -614,6 +631,7 @@ fn convert_function_descriptor(
         is_unsafe: false, // Would need VBC metadata for this
         intrinsic_id: Maybe::None,
         parent_type,
+        impl_generic_names,
         // #97 — round-trip the const-storage marker so the archive-
         // driven typechecker treats `public const X` as a value
         // rather than a callable.

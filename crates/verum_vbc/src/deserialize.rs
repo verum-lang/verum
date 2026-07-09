@@ -268,6 +268,7 @@ const MAX_FIELDS_PER_DESCRIPTOR: usize = 4 * 1024;
 const MAX_VARIANTS_PER_DESCRIPTOR: usize = 4 * 1024;
 const MAX_PROTOCOLS_PER_DESCRIPTOR: usize = 256;
 const MAX_METHODS_PER_PROTOCOL_IMPL: usize = 4 * 1024;
+const MAX_ASSOC_TYPES_PER_PROTOCOL_IMPL: usize = 256;
 
 /// Type-param-level architectural upper bounds. Each type
 /// parameter can declare protocol bounds (`fn f<T: P + Q>`) and
@@ -850,7 +851,40 @@ impl<'a> Deserializer<'a> {
  for _ in 0..methods_count {
  methods.push(decode_u32(self.data, &mut self.offset)?);
  }
- protocols.push(ProtocolImpl { protocol, methods });
+ // minor >= 4: associated-type bindings (`type Item = &T;`)
+ // — varint count + [u32 name-StringId, TypeRef]*.  Pre-4
+ // data has no bindings — default EMPTY (new-reader/old-data
+ // quadrant); old-reader/new-data rejects cleanly via
+ // is_version_compatible.  Pillar-3 increment 1
+ // (ARRAY-ITER-CONCRETIZE-1).
+ let associated_types = if self
+ .header
+ .as_ref()
+ .map_or(false, |h| h.version_minor >= 4)
+ {
+ let assoc_count = decode_varint(self.data, &mut self.offset)? as usize;
+ if assoc_count > MAX_ASSOC_TYPES_PER_PROTOCOL_IMPL {
+ return Err(VbcError::TableTooLarge {
+ field: "assoc_types_count",
+ count: assoc_count.min(u32::MAX as usize) as u32,
+ max: MAX_ASSOC_TYPES_PER_PROTOCOL_IMPL as u32,
+ });
+ }
+ let mut assoc = Vec::with_capacity(assoc_count);
+ for _ in 0..assoc_count {
+ let name = StringId(decode_u32(self.data, &mut self.offset)?);
+ let tref = self.parse_type_ref()?;
+ assoc.push((name, tref));
+ }
+ assoc
+ } else {
+ Vec::new()
+ };
+ protocols.push(ProtocolImpl {
+ protocol,
+ methods,
+ associated_types,
+ });
  }
 
  // Alias target (Option<TypeRef>) — encoded for every
