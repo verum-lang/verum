@@ -81,7 +81,19 @@ mirror policy; the §40 latent class entirely; #27 as a hunt (the
 canonical writer replaces per-site sorts); metadata collision
 policy (54d0ae1d4) becomes a compatibility shim then retires.
 
-**Migration.** Staged: (1) canonical-id computation + DUAL keying
+**Sequencing constraint discovered 2026-07-09 (nine determinism
+waves + two falsified canonicalization attempts):** runtime
+bare-suffix dispatch tie-breaks by LOWEST FUNCTION ID, and stub
+spelling (`name#arity`) is load-bearing for arity disambiguation —
+so id/name canonicalization FLIPS dispatch winners (39-test
+signature) until dispatch resolution is made name-deterministic.
+Revised order: (0) name-deterministic dispatch tie-breaks (qualified
+resolution everywhere the bare scan wins today), THEN id
+canonicalization. Waves 1-8 (landed) killed the string-table and
+semantic (TypeParamId) dice; the function-section dice remain gated
+on step (0).
+
+**Migration.** Staged: (0) dispatch tie-break determinism; (1) canonical-id computation + DUAL keying
 (new key added alongside old, warn on divergence); (2) flip readers
 to canonical; (3) canonical serializer (archive major bump);
 (4) retire old keys. Acceptance at each stage: byte-identical
