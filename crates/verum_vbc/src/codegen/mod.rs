@@ -15696,6 +15696,12 @@ impl VbcCodegen {
                     candidates.push((type_n.clone(), pos));
                 }
             }
+            // ARCH-P2: the map walk above is per-process-ordered; every
+            // downstream pick (scope-prefer first-match, most-fields
+            // first-wins tie) inherited that order — the LAST byte dice
+            // (per-bake GetF/MakeVariant operand flips, K/L residual 346
+            // bytes). Canonical order: type-name ascending.
+            candidates.sort_by(|a, b| a.0.cmp(&b.0));
             if candidates.len() == 1 {
                 let (ref type_n, pos) = candidates[0];
                 if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
