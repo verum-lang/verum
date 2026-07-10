@@ -644,6 +644,13 @@ impl Serializer {
             encode_u32(hint.type_name.0, &mut self.output);
         }
 
+        // v2.6 — RETNAME-CARRY-1: source-level rendered return-type name,
+        // carried verbatim so the loader never re-derives it from the
+        // lossy lowered TypeRef (PTR carrier → "USize", Instantiated →
+        // base-only).  Fixed-size optional u32; reader gates on format
+        // minor >= 6.
+        self.serialize_optional_u32(desc.return_type_name.map(|s| s.0));
+
         Ok(())
     }
 

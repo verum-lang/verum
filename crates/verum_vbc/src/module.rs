@@ -1388,6 +1388,27 @@ pub struct FunctionDescriptor {
     /// with no such hints. Serialized only at VBC format minor >= 2.
     #[serde(default)]
     pub register_type_hints: Vec<RegisterTypeHint>,
+
+    /// Source-level rendered return-type name carried VERBATIM across the
+    /// precompile → archive → load round-trip (`"Ordering"`,
+    /// `"Maybe<Char>"`, `"Result<(BigInt, BigInt), BigIntError>"`).
+    ///
+    /// Carried-fact contract (RETNAME-CARRY-1): the loader-side
+    /// re-derivation `type_ref_simple_name(&return_type)` is LOSSY twice
+    /// over — (a) a source type that wasn't in `type_name_to_id` at its
+    /// module's bake moment lowers to the `TypeId::PTR` carrier and
+    /// re-derives as `"USize"` (integer-shaped!), so every downstream
+    /// `let x = f();` records an integer binding and method dispatch
+    /// emits `Int.<method>` for a record receiver; (b) `Instantiated`
+    /// refs re-derive base-only (`"Maybe"`, args dropped), so match-arm
+    /// payload typing can't recover `Char` from `Maybe<Char>`.  This
+    /// field is written straight from the AST-rendered
+    /// `FunctionInfo.return_type_name` at bake and preferred by
+    /// `archive_ctx_loader` over any re-derivation.  `None` for
+    /// functions without a declared return type (legacy archives
+    /// decode as `None` via `serde(default)` and keep the old path).
+    #[serde(default)]
+    pub return_type_name: Option<StringId>,
 }
 
 /// Debug information for a local variable or parameter.
@@ -1457,6 +1478,7 @@ impl Default for FunctionDescriptor {
             intrinsic_name: None,
             is_const: false,
             register_type_hints: Vec::new(),
+            return_type_name: None,
         }
     }
 }
@@ -2531,6 +2553,7 @@ mod precompile_extension_tests {
             intrinsic_name: None,
             is_const: false,
             register_type_hints: Vec::new(),
+            return_type_name: None,
         };
         // Backwards-compat field is filled with the existing layout.
         let _ = &mut desc;
@@ -2583,6 +2606,7 @@ mod precompile_extension_tests {
             intrinsic_name: None,
             is_const: false,
             register_type_hints: Vec::new(),
+            return_type_name: None,
         };
         m.functions.push(desc);
 

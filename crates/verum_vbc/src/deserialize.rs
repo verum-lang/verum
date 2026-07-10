@@ -1317,6 +1317,15 @@ impl<'a> Deserializer<'a> {
  Vec::new()
  };
 
+ // v2.6 — RETNAME-CARRY-1: source-level return-type name (optional
+ // StringId).  Version-gated; pre-6 archives decode as `None` and
+ // the loader keeps the legacy TypeRef re-derivation.
+ let return_type_name = if fmt_minor >= 6 {
+ self.parse_optional_u32()?.map(StringId)
+ } else {
+ None
+ };
+
  Ok(FunctionDescriptor {
  id,
  name,
@@ -1352,6 +1361,7 @@ impl<'a> Deserializer<'a> {
  intrinsic_name,
  is_const,
  register_type_hints,
+ return_type_name,
  })
  }
 

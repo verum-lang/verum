@@ -440,7 +440,34 @@ fn register_module(
         // Return-type base name + inner generics drive the variant
         // disambiguator (closes out the same code path #300 fixed
         // for source-driven compilation).
-        let return_type_name = type_ref_simple_name(&fn_desc.return_type, module);
+        //
+        // RETNAME-CARRY-1: prefer the archive-carried source-level name
+        // (verbatim AST rendering, generics intact) over the lossy
+        // TypeRef re-derivation — `type_ref_simple_name` collapses the
+        // PTR carrier to "USize" (integer-shaped ⇒ Int method dispatch
+        // on record receivers) and drops generic args ("Maybe<Char>" →
+        // "Maybe").  Legacy archives without the field fall through to
+        // the old derivation.
+        let return_type_name = fn_desc
+            .return_type_name
+            .and_then(|sid| module.strings.get(sid).map(|s| s.to_string()))
+            .or_else(|| type_ref_simple_name(&fn_desc.return_type, module));
+        // RETNAME-CARRY-1 oracle: VERUM_TRACE_RETNAME=<substr> prints the
+        // carried-vs-derived resolution for matching function names.
+        if let Ok(w) = std::env::var("VERUM_TRACE_RETNAME")
+            && let Some(fname) = module.strings.get(fn_desc.name)
+            && fname.contains(w.as_str())
+        {
+            eprintln!(
+                "[retname/populate] fn='{}' carried_sid={:?} carried={:?} final={:?}",
+                fname,
+                fn_desc.return_type_name,
+                fn_desc
+                    .return_type_name
+                    .and_then(|sid| module.strings.get(sid)),
+                return_type_name,
+            );
+        }
         let return_type_inner = type_ref_inner_generics(&fn_desc.return_type, module);
 
         // Remap each archive function to a globally-unique id slot.
@@ -2444,6 +2471,24 @@ fn compute_merge_keep_sets(
     //   3. the 2-segment `Type.method` suffix of deep promoted names.
     // Owned keys because form 2 is synthesised.
     let mut name_to_loc: HashMap<String, (usize, u32)> = HashMap::new();
+    // CALLM-KEEP-CLOSURE-1: method-DISPATCH resolution indexes.  The
+    // fixpoint below follows `Call`-family edges by func-id/name, but a
+    // `CallM` edge carries only a METHOD-NAME StringId and resolves at
+    // RUNTIME against the receiver — invisible to a func-id closure.
+    // Any body reachable ONLY through method dispatch (every
+    // `implement <Proto> for <Primitive>` — `Int.fmt_debug`,
+    // `Int.to_text`, `Bool.fmt`, … — plus all `dyn:Proto.method`
+    // targets) was silently pruned, and the runtime's bare-suffix
+    // fallback then executed an ARBITRARY same-suffix body from another
+    // type (observed: `f"{n:?}"` → `Text.fmt_debug` on an Int receiver
+    // → `""`).  Index every function under (a) its 2-segment
+    // `Type.method` suffix and (b) its bare method name, so the CallM
+    // arm of the fixpoint can keep every candidate the runtime's
+    // dispatch tiers could legitimately pick.  Presence-only guarantee:
+    // over-keeping is safe (the merge remap still routes dispatch);
+    // under-keeping is the defect class this closes.
+    let mut methods_by_suffix2: HashMap<String, Vec<(usize, u32)>> = HashMap::new();
+    let mut methods_by_bare: HashMap<String, Vec<(usize, u32)>> = HashMap::new();
     for (idx, (_entry_name, module)) in decoded.iter().enumerate() {
         let name_by_id: HashMap<StringId, &str> =
             module.strings.iter().map(|(s, id)| (id, s)).collect();
@@ -2455,6 +2500,16 @@ fn compute_merge_keep_sets(
             desc_by_id.insert(f.id.0, f);
             if let Some(n) = name_by_id.get(&f.name) {
                 fn_name_by_id.insert(f.id.0, *n);
+                let segs: Vec<&str> = n.split('.').collect();
+                if segs.len() >= 2 {
+                    let suffix2 =
+                        format!("{}.{}", segs[segs.len() - 2], segs[segs.len() - 1]);
+                    methods_by_suffix2.entry(suffix2).or_default().push((idx, f.id.0));
+                    methods_by_bare
+                        .entry(segs[segs.len() - 1].to_string())
+                        .or_default()
+                        .push((idx, f.id.0));
+                }
             }
         }
         let mut external_name_by_id: HashMap<u32, &str> =
@@ -2642,6 +2697,36 @@ fn compute_merge_keep_sets(
         for tid in wanted_tids {
             keep_type_surface!(idx, tid);
         }
+        // CALLM-KEEP-CLOSURE-1 seed: PRIMITIVE-impl method surface is
+        // unconditionally live.  Primitives (Int / Float / Bool / Char /
+        // Text / Byte / sized ints) carry NO TypeDescriptor in
+        // `module.types`, so neither the glue rule nor the wanted-type
+        // rule above can reach `implement <Proto> for Int` bodies — yet
+        // user code and dyn dispatch can invoke them on any primitive
+        // value with ZERO static reference inside the kept graph
+        // (`f"{n:?}"` → dyn:Debug.fmt_debug → `Int.fmt_debug`).  The
+        // surface is bounded (a few hundred bodies stdlib-wide).
+        {
+            use verum_common::well_known_types::type_names as tn;
+            let prim_fids: Vec<u32> = aux[idx]
+                .fn_name_by_id
+                .iter()
+                .filter(|(_fid, n)| {
+                    let segs: Vec<&str> = n.split('.').collect();
+                    if segs.len() < 2 {
+                        return false;
+                    }
+                    let owner = segs[segs.len() - 2];
+                    tn::is_integer_type(owner)
+                        || tn::is_float_type(owner)
+                        || matches!(owner, "Bool" | "Char" | "Text" | "Unit")
+                })
+                .map(|(fid, _)| *fid)
+                .collect();
+            for fid in prim_fids {
+                push_fn!(idx, fid);
+            }
+        }
     }
 
     // ---- fixpoint ----
@@ -2750,6 +2835,44 @@ fn compute_merge_keep_sets(
                 | Instruction::NewG { type_id, .. }
                 | Instruction::MakeVariantTyped { type_id, .. } => {
                     keep_type_surface!(idx, *type_id);
+                }
+                // CALLM-KEEP-CLOSURE-1: method-dispatch edge.  `method_id`
+                // is a STRING-table id naming the dispatch key — either
+                // qualified (`Text.replace`, rooted spellings) or bare /
+                // protocol-dynamic (`fmt_debug`, `dyn:Debug.fmt_debug`).
+                // The runtime resolves it against the receiver's RUNTIME
+                // type, so the keep set must contain every candidate the
+                // dispatch tiers could pick: exact 2-segment matches for
+                // qualified keys, all same-suffix methods for bare keys.
+                // Presence-only over-keep — dispatch precision is the
+                // runtime's job; ABSENCE is what mis-routed
+                // `f"{n:?}"` onto `Text.fmt_debug`.
+                Instruction::CallM { method_id, .. } => {
+                    if let Some(raw) =
+                        aux[idx].name_by_id.get(&StringId(*method_id)).copied()
+                    {
+                        let name = raw
+                            .strip_prefix("dyn:")
+                            .or_else(|| raw.strip_prefix("ctx:"))
+                            .unwrap_or(raw);
+                        let locs: Option<&Vec<(usize, u32)>> = if name.contains('.') {
+                            let segs: Vec<&str> = name.split('.').collect();
+                            let suffix2 = format!(
+                                "{}.{}",
+                                segs[segs.len() - 2],
+                                segs[segs.len() - 1]
+                            );
+                            methods_by_suffix2.get(&suffix2)
+                        } else {
+                            methods_by_bare.get(name)
+                        };
+                        if let Some(locs) = locs {
+                            let locs = locs.clone();
+                            for (eidx, efid) in locs {
+                                push_fn!(eidx, efid);
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -4701,7 +4824,28 @@ fn register_module_filtered(
             .iter()
             .map(|p| extract_closure_return_type_from_typeref(&p.type_ref, module))
             .collect();
-        let return_type_name = type_ref_simple_name(&fn_desc.return_type, module);
+        // RETNAME-CARRY-1: archive-carried source-level name wins over
+        // the lossy TypeRef re-derivation (see the sibling site in
+        // `populate_ctx_from_archive`).
+        let return_type_name = fn_desc
+            .return_type_name
+            .and_then(|sid| module.strings.get(sid).map(|s| s.to_string()))
+            .or_else(|| type_ref_simple_name(&fn_desc.return_type, module));
+        // RETNAME-CARRY-1 oracle (filtered-load leg).
+        if let Ok(w) = std::env::var("VERUM_TRACE_RETNAME")
+            && let Some(fname) = module.strings.get(fn_desc.name)
+            && fname.contains(w.as_str())
+        {
+            eprintln!(
+                "[retname/filtered] fn='{}' carried_sid={:?} carried={:?} final={:?}",
+                fname,
+                fn_desc.return_type_name,
+                fn_desc
+                    .return_type_name
+                    .and_then(|sid| module.strings.get(sid)),
+                return_type_name,
+            );
+        }
         let return_type_inner = type_ref_inner_generics(&fn_desc.return_type, module);
         // #87 — restore the intrinsic-name marker that was serialised
         // on the archive side.  Mirrors the populate_ctx_from_archive

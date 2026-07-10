@@ -44,7 +44,16 @@ pub const VERSION_MAJOR: u16 = 2;
 /// RefLocal as alloca-address.  Old readers reject 2.5 modules via
 /// `is_version_compatible` (5 > VERSION_MINOR) — they cannot execute the
 /// new opcodes.  Emission kill-switch: VERUM_NO_TYPED_REFS=1.
-pub const VERSION_MINOR: u16 = 5;
+/// Version 2.6: additive `FunctionDescriptor.return_type_name` — trailing
+/// fixed-size optional u32 StringId carrying the SOURCE-LEVEL rendered
+/// return-type name verbatim ("Ordering", "Maybe<Char>",
+/// "Result<(BigInt, BigInt), E>") — RETNAME-CARRY-1.  The loader-side
+/// re-derivation from the lowered TypeRef was lossy (PTR carrier →
+/// "USize" → integer-shaped bindings → `Int.<method>` dispatch on record
+/// receivers; Instantiated → base-only, generic args dropped).  Gated on
+/// minor >= 6 in the deserializer; pre-6 data decodes as `None` and keeps
+/// the legacy derivation.
+pub const VERSION_MINOR: u16 = 6;
 
 /// Size of VBC header in bytes.
 /// 4 (magic) + 2 + 2 (version) + 4 (flags) + 4 (name) +

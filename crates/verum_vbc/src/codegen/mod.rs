@@ -8187,6 +8187,14 @@ impl VbcCodegen {
         if let Some(ref rt) = ret_type {
             descriptor.return_type = rt.clone();
         }
+        // RETNAME-CARRY-1 — carry the AST-rendered source-level return-type
+        // name verbatim into the archive.  The loader-side re-derivation
+        // from the lowered TypeRef is lossy (PTR carrier → "USize",
+        // Instantiated → base-only); this is the authoritative fact.
+        descriptor.return_type_name = func_info
+            .return_type_name
+            .as_ref()
+            .map(|n| StringId(self.intern_string(n)));
         // #87 — propagate the intrinsic-name marker into the
         // archive-side descriptor.  Carries `__const_val_<N>` and
         // similar inline-constant markers across the precompile →
@@ -12250,6 +12258,11 @@ impl VbcCodegen {
             let name_id = StringId(self.intern_string(&const_qualified_name));
             let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
             descriptor.id = info.id;
+            // RETNAME-CARRY-1 — carry the source-level return-type name.
+            descriptor.return_type_name = info
+                .return_type_name
+                .as_ref()
+                .map(|n| StringId(self.intern_string(n)));
             descriptor.is_const = true;
             if let Some(ref iname) = info.intrinsic_name {
                 descriptor.intrinsic_name = Some(StringId(self.intern_string(iname)));
@@ -12376,6 +12389,11 @@ impl VbcCodegen {
             let name_id = StringId(self.intern_string(&const_descriptor_name));
             let mut descriptor = FunctionDescriptor::new(name_id);
             descriptor.id = func_info.id;
+            // RETNAME-CARRY-1 — carry the source-level return-type name.
+            descriptor.return_type_name = func_info
+                .return_type_name
+                .as_ref()
+                .map(|n| StringId(self.intern_string(n)));
             descriptor.register_count = register_count;
             descriptor.locals_count = 0;
             // #97 — propagate the const-storage marker into the
@@ -12803,18 +12821,25 @@ impl VbcCodegen {
         // Extract the content between < and >
         let inner = &type_name[open_pos + 1..close_pos];
 
-        // Split by comma, handling nested generics
+        // Split by comma, handling nested generics AND tuple / slice
+        // groupings.  TUPLE-TYPE-TRACK-1: `Result<(BigInt, BigInt), E>`
+        // must split as ["(BigInt, BigInt)", "E"] — the pre-fix
+        // `<>`-only depth counter split inside the tuple parens and the
+        // Ok-arm binding was typed as the corrupt fragment "(BigInt",
+        // so every downstream field access fell through to the global
+        // field-name scan (PgNumeric's `digits`@4 beat BigInt's
+        // `digits`@1 on the most-fields tie-break → OOB `GetF`).
         let mut result = Vec::new();
-        let mut depth = 0;
+        let mut depth = 0i32;
         let mut current = String::new();
 
         for c in inner.chars() {
             match c {
-                '<' => {
+                '<' | '(' | '[' => {
                     depth += 1;
                     current.push(c);
                 }
-                '>' => {
+                '>' | ')' | ']' => {
                     depth -= 1;
                     current.push(c);
                 }
@@ -12838,6 +12863,59 @@ impl VbcCodegen {
         }
 
         result
+    }
+
+    /// TUPLE-TYPE-TRACK-1: element type of a RENDERED tuple type name.
+    /// `tuple_element_type_name("(BigInt, BigInt)", 0)` → `Some("BigInt")`.
+    ///
+    /// The split is depth-aware over `<>`, `()` and `[]` so nested
+    /// generics / tuples / slices survive (`(Maybe<Char>, (Int, Int))`).
+    /// Reference-wrapped tuples project through the pointee — a `.N`
+    /// access on `&(A, B)` reads the element, same as on the value.
+    /// Returns `None` when `tuple` is not a tuple rendering or the
+    /// index is out of range — callers keep their legacy fallback.
+    pub(crate) fn tuple_element_type_name(tuple: &str, index: usize) -> Option<String> {
+        let mut t = tuple.trim();
+        loop {
+            let next = t
+                .strip_prefix("&mut ")
+                .or_else(|| t.strip_prefix("&checked "))
+                .or_else(|| t.strip_prefix("&unsafe "))
+                .or_else(|| t.strip_prefix('&'))
+                .map(str::trim);
+            match next {
+                Some(n) if n != t => t = n,
+                _ => break,
+            }
+        }
+        if !(t.starts_with('(') && t.ends_with(')')) || t.len() < 2 {
+            return None;
+        }
+        let inner = &t[1..t.len() - 1];
+        let mut depth = 0i32;
+        let mut current = String::new();
+        let mut elems: Vec<String> = Vec::new();
+        for c in inner.chars() {
+            match c {
+                '<' | '(' | '[' => {
+                    depth += 1;
+                    current.push(c);
+                }
+                '>' | ')' | ']' => {
+                    depth -= 1;
+                    current.push(c);
+                }
+                ',' if depth == 0 => {
+                    elems.push(current.trim().to_string());
+                    current.clear();
+                }
+                _ => current.push(c),
+            }
+        }
+        if !current.trim().is_empty() {
+            elems.push(current.trim().to_string());
+        }
+        elems.get(index).filter(|s| !s.is_empty()).cloned()
     }
 
     /// Converts a full AST Type to a VBC TypeRef.
@@ -13470,22 +13548,53 @@ impl VbcCodegen {
                 if args.is_empty() {
                     Some(base_name)
                 } else {
-                    // Build the full type string with generic arguments
-                    let arg_strs: Vec<String> = args
-                        .iter()
-                        .filter_map(|arg| match arg {
+                    // Build the full type string with generic arguments.
+                    //
+                    // ARITY-HONEST rendering (TUPLE-TYPE-TRACK-1 leg 2): an
+                    // unrenderable type arg must NOT be silently dropped —
+                    // the pre-fix `filter_map` rendered
+                    // `Result<(BigInt, BigInt), BigIntError>` as
+                    // `Result<BigIntError>` (the tuple arg vanished), so
+                    // every consumer that positions payload types by
+                    // generic-arg INDEX (match-arm binding, Ok/Err payload
+                    // recovery) read the ERROR type as the Ok payload.
+                    // Base-only is honest-lossy; wrong-arity is corrupting.
+                    let mut arg_strs: Vec<String> = Vec::with_capacity(args.len());
+                    for arg in args.iter() {
+                        let rendered = match arg {
                             verum_ast::ty::GenericArg::Type(ty) => self.extract_type_name(ty),
                             verum_ast::ty::GenericArg::Const(_) => None,
                             verum_ast::ty::GenericArg::Lifetime(_) => None,
                             verum_ast::ty::GenericArg::Binding(_) => None,
-                        })
-                        .collect();
-                    if arg_strs.is_empty() {
-                        Some(base_name)
-                    } else {
-                        Some(format!("{}<{}>", base_name, arg_strs.join(", ")))
+                        };
+                        match rendered {
+                            Some(s) => arg_strs.push(s),
+                            None => return Some(base_name),
+                        }
+                    }
+                    Some(format!("{}<{}>", base_name, arg_strs.join(", ")))
+                }
+            }
+            // Tuple types render positionally — `(BigInt, BigInt)` — so the
+            // carried return-type name keeps enough structure for
+            // `tuple_element_type_name` to project `pair.0` / `pair.1`
+            // (TUPLE-TYPE-TRACK-1).  An unrenderable element degrades the
+            // WHOLE tuple to None (arity honesty, same rule as Generic).
+            TypeKind::Tuple(elements) => {
+                if elements.is_empty() {
+                    return None; // unit — no dispatchable name
+                }
+                let mut elems: Vec<String> = Vec::with_capacity(elements.len());
+                for e in elements.iter() {
+                    match self.extract_type_name(e) {
+                        Some(s) => elems.push(s),
+                        None => return None,
                     }
                 }
+                // Single-element tuples still need the trailing comma-free
+                // paren form to round-trip through the paren-aware
+                // splitters; `(T)` is unambiguous for our consumers.
+                Some(format!("({})", elems.join(", ")))
             }
             TypeKind::Reference { inner, .. } => {
                 // For reference types, extract the inner type name
@@ -14422,6 +14531,11 @@ impl VbcCodegen {
         let name_id = StringId(self.intern_string(&descriptor_name));
         let mut descriptor = FunctionDescriptor::new(name_id);
         descriptor.id = func_info.id;
+        // RETNAME-CARRY-1 — carry the source-level return-type name.
+        descriptor.return_type_name = func_info
+            .return_type_name
+            .as_ref()
+            .map(|n| StringId(self.intern_string(n)));
         descriptor.register_count = register_count;
         descriptor.locals_count = params_with_mutability.len() as u16;
         descriptor.optimization_hints.is_pure = func.is_pure;
@@ -14943,6 +15057,11 @@ impl VbcCodegen {
         let name_id = StringId(self.intern_string(&descriptor_name));
         let mut descriptor = FunctionDescriptor::new(name_id);
         descriptor.id = func_info.id;
+        // RETNAME-CARRY-1 — carry the source-level return-type name.
+        descriptor.return_type_name = func_info
+            .return_type_name
+            .as_ref()
+            .map(|n| StringId(self.intern_string(n)));
         descriptor.register_count = register_count;
         descriptor.locals_count = params_with_mutability.len() as u16;
         if let Some(ref ret_type) = func_info.return_type {
@@ -15893,14 +16012,36 @@ impl VbcCodegen {
                         best = c;
                     }
                 }
-                if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                    tracing::debug!(
-                        "[FIELD] scan: field '{}' ambiguous, picked {}.{} idx {} (most fields)",
-                        field_name,
-                        best.0,
-                        field_name,
-                        best.1
+                // FIELD-GUESS-LOUD-1: a position-DISAGREEING multi-candidate
+                // guess is a latent wrong-offset read/write — the guess is
+                // deterministic (canonical order + most-fields) but has no
+                // semantic basis.  Surface it once per (fn, field) at `warn`
+                // exactly like the global-intern fallback below, so every
+                // residual site is visible in stdlib-precompile CI logs.
+                // The D2 shape this pins: `pair.0.digits` with a lost tuple
+                // type picked `PgNumeric.digits`@4 over `BigInt.digits`@1
+                // and read 40 bytes into a 16-byte object.  Architectural
+                // retirement (runtime by-name field access on BOTH tiers)
+                // is tracked as FIELD-ACCESS-BYNAME-1.
+                {
+                    let key = (
+                        format!(
+                            "fn:{}",
+                            self.ctx.current_function.as_deref().unwrap_or("?")
+                        ),
+                        field_name.to_string(),
                     );
+                    if self.field_intern_fallbacks.insert(key) {
+                        tracing::warn!(
+                            "[field-guess] '{}' has {} position-disagreeing candidates; guessed {}.{} idx {} (most fields) in fn `{}` — see FIELD-ACCESS-BYNAME-1",
+                            field_name,
+                            candidates.len(),
+                            best.0,
+                            field_name,
+                            best.1,
+                            self.ctx.current_function.as_deref().unwrap_or("?"),
+                        );
+                    }
                 }
                 return best.1 as u32;
             }
@@ -16858,6 +16999,13 @@ impl VbcCodegen {
             descriptor.id = crate::module::FunctionId(id);
             descriptor.register_count = 1;
             descriptor.locals_count = info.param_count as u16;
+            // RETNAME-CARRY-1 — stubs carry the declared return-type name too;
+            // user-side bindings typed from a pre-overlay stub lookup must not
+            // degrade to the lossy TypeRef re-derivation.
+            descriptor.return_type_name = info
+                .return_type_name
+                .as_ref()
+                .map(|n| StringId(self.ctx.intern_string_raw(n)));
             for (i, pname) in info.param_names.iter().enumerate() {
                 let pname_to_use = if pname.is_empty() {
                     format!("_arg{}", i)
@@ -17124,6 +17272,13 @@ impl VbcCodegen {
             descriptor.id = crate::module::FunctionId(id);
             descriptor.register_count = 1;
             descriptor.locals_count = info.param_count as u16;
+            // RETNAME-CARRY-1 — stubs carry the declared return-type name too;
+            // user-side bindings typed from a pre-overlay stub lookup must not
+            // degrade to the lossy TypeRef re-derivation.
+            descriptor.return_type_name = info
+                .return_type_name
+                .as_ref()
+                .map(|n| StringId(self.ctx.intern_string_raw(n)));
             // Populate ParamDescriptors — placeholder names + UNIT
             // type refs.  Arity is the only field the dispatch path
             // checks for stub descriptors; the body is `RetV` so
@@ -17401,6 +17556,13 @@ impl VbcCodegen {
                 descriptor.id = info.id;
                 descriptor.register_count = 1;
                 descriptor.locals_count = info.param_count as u16;
+                // RETNAME-CARRY-1 — stubs carry the declared return-type name too;
+                // user-side bindings typed from a pre-overlay stub lookup must not
+                // degrade to the lossy TypeRef re-derivation.
+                descriptor.return_type_name = info
+                    .return_type_name
+                    .as_ref()
+                    .map(|n| StringId(self.ctx.intern_string_raw(n)));
                 for (i, pname) in info.param_names.iter().enumerate() {
                     let pname_to_use = if pname.is_empty() {
                         format!("_arg{}", i)
@@ -18097,6 +18259,21 @@ impl VbcCodegen {
             if let Some(codegen_iname) = descriptor.intrinsic_name {
                 let codegen_idx = codegen_iname.0 as usize;
                 descriptor.intrinsic_name = string_id_map.get(codegen_idx).copied();
+            }
+
+            // RETNAME-CARRY-1: same codegen-index → module-StringId remap
+            // for the carried return-type name.  The bake sites intern via
+            // `self.intern_string` (codegen-local index); without this
+            // translation the serialised descriptor pointed past the
+            // module table and the loader read `carried = None`, silently
+            // falling back to the lossy TypeRef re-derivation — the exact
+            // failure the field exists to close (observed live via
+            // VERUM_TRACE_RETNAME: `carried_sid=Some(207) carried=None
+            // final="USize"` for compare_ascii_nocase → Int.reverse
+            // misdispatch).
+            if let Some(codegen_rname) = descriptor.return_type_name {
+                let codegen_idx = codegen_rname.0 as usize;
+                descriptor.return_type_name = string_id_map.get(codegen_idx).copied();
             }
 
             // Register-type hints: same codegen-index → module-StringId

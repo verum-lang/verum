@@ -285,6 +285,7 @@ fn test_roundtrip_function_descriptor() {
         intrinsic_name: None,
         is_const: false,
         register_type_hints: Vec::new(),
+        return_type_name: None,
     };
 
     // Add some dummy bytecode
@@ -345,6 +346,7 @@ fn intrinsic_name_marker_survives_round_trip() {
         intrinsic_name: Some(iname),
         is_const: true,
         register_type_hints: Vec::new(),
+        return_type_name: None,
     });
     module.header.function_table_count = 1;
 
