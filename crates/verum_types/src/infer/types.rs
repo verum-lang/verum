@@ -1874,7 +1874,39 @@ impl TypeChecker {
                                 false
                             };
 
-                        if is_module_path || is_inline_module {
+                        // GLOBAL module root (2026-07-10, task #12): the
+                        // archive/test pipelines load the stdlib without
+                        // inline modules, so `core.runtime.env.T` /
+                        // `core.time.duration.Duration` in TYPE position
+                        // reached the associated-type arm below and came
+                        // back as the reversed nested projection
+                        // `T<env<runtime<core>>>` — every type-annotated
+                        // fully-qualified path failed E400. Module
+                        // segments are lowercase by grammar convention
+                        // (types / generic params are uppercase — the
+                        // `T.Item` assoc chains keep their route), so a
+                        // lowercase root that is NOT a bound type is a
+                        // module path; `resolve_qualified_type` has the
+                        // matching last-uppercase-segment fallbacks.
+                        let is_global_module_root = if let Some(
+                            verum_ast::ty::PathSegment::Name(ident),
+                        ) = segments.first()
+                        {
+                            ident
+                                .name
+                                .as_str()
+                                .chars()
+                                .next()
+                                .is_some_and(|c| c.is_lowercase())
+                                && matches!(
+                                    self.ctx.lookup_type(ident.name.as_str()),
+                                    Maybe::None
+                                )
+                        } else {
+                            false
+                        };
+
+                        if is_module_path || is_inline_module || is_global_module_root {
                             // This is a module-qualified path, not an associated type
                             // Reconstruct the full path and resolve via module path resolution
                             // The full segments include the assoc_name as the final segment
