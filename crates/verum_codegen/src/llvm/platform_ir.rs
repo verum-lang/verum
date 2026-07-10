@@ -10429,6 +10429,92 @@ impl<'ctx> PlatformIR<'ctx> {
         Ok(())
     }
 
+    /// Call an FFI function whose DECLARED signature may use `i32`
+    /// (POSIX `int`) where this emitter naturally holds `i64`s
+    /// (task #16 verifier hygiene). The stdlib FFI extern
+    /// (`core/sys/darwin/libsystem.vr`) correctly declares
+    /// `kevent`/`kqueue` with `Int32` params/return; when that
+    /// declaration wins the module name, the platform-IR helpers'
+    /// raw-i64 calls produced VERIFIER-INVALID IR ("Call parameter
+    /// type does not match function signature", "Both operands to
+    /// ICmp are not of the same type", "Function return type does
+    /// not match operand type of return inst") — and invalid IR is
+    /// exactly what destabilises the pass pipeline. Coerce every
+    /// int argument to the callee's declared parameter width and
+    /// widen a sub-64-bit int result back to `i64` so the call is
+    /// valid against WHICHEVER declaration won.
+    fn call_ffi_adapted(
+        &self,
+        builder: &Builder<'ctx>,
+        callee: FunctionValue<'ctx>,
+        args: &[BasicMetadataValueEnum<'ctx>],
+        name: &str,
+    ) -> super::error::Result<IntValue<'ctx>> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let mut adapted: Vec<BasicMetadataValueEnum<'ctx>> = Vec::with_capacity(args.len());
+        for (i, a) in args.iter().enumerate() {
+            let expected = callee.get_nth_param(i as u32).map(|p| p.get_type());
+            let av: BasicValueEnum<'ctx> = match (*a).try_into() {
+                Ok(v) => v,
+                Err(_) => {
+                    adapted.push(*a);
+                    continue;
+                }
+            };
+            let coerced: BasicValueEnum<'ctx> = match (av, expected) {
+                (BasicValueEnum::IntValue(iv), Some(exp)) if exp.is_int_type() => {
+                    let want = exp.into_int_type();
+                    if iv.get_type() == want {
+                        iv.into()
+                    } else if iv.get_type().get_bit_width() > want.get_bit_width() {
+                        builder
+                            .build_int_truncate(iv, want, &format!("{}_arg{}_trunc", name, i))
+                            .or_llvm_err()?
+                            .into()
+                    } else {
+                        builder
+                            .build_int_s_extend(iv, want, &format!("{}_arg{}_sext", name, i))
+                            .or_llvm_err()?
+                            .into()
+                    }
+                }
+                (BasicValueEnum::IntValue(iv), Some(exp)) if exp.is_pointer_type() => builder
+                    .build_int_to_ptr(iv, ptr_type, &format!("{}_arg{}_p", name, i))
+                    .or_llvm_err()?
+                    .into(),
+                (BasicValueEnum::PointerValue(pv), Some(exp)) if exp.is_int_type() => builder
+                    .build_ptr_to_int(
+                        pv,
+                        exp.into_int_type(),
+                        &format!("{}_arg{}_i", name, i),
+                    )
+                    .or_llvm_err()?
+                    .into(),
+                _ => av,
+            };
+            adapted.push(coerced.into());
+        }
+        let ret = builder
+            .build_call(callee, &adapted, name)
+            .or_llvm_err()?
+            .basic_value_or("expected basic value")?;
+        match ret {
+            BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() < 64 => builder
+                .build_int_s_extend(iv, i64_type, &format!("{}_widen", name))
+                .or_llvm_err(),
+            BasicValueEnum::IntValue(iv) => Ok(iv),
+            BasicValueEnum::PointerValue(pv) => builder
+                .build_ptr_to_int(pv, i64_type, &format!("{}_p2i", name))
+                .or_llvm_err(),
+            other => Err(super::error::LlvmLoweringError::internal(format!(
+                "call_ffi_adapted: unexpected return value {:?}",
+                other
+            ))),
+        }
+    }
+
     /// Ensure kqueue/kevent syscalls are declared.
     fn ensure_kqueue_declared(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
@@ -10485,11 +10571,7 @@ impl<'ctx> PlatformIR<'ctx> {
         builder.position_at_end(entry);
 
         // Call kqueue()
-        let kq_fd = builder
-            .build_call(kqueue_fn, &[], "kq")
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
+        let kq_fd = self.call_ffi_adapted(&builder, kqueue_fn, &[], "kq")?;
 
         // Alloc 8 bytes for struct
         let eng_ptr = builder
@@ -10657,9 +10739,9 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(flags_p_r, i16_type.const_int(5, false))
             .or_llvm_err()?; // EV_ADD(1)|EV_ENABLE(4)
-        let ret_r = builder
-            .build_call(
-                kevent_fn,
+        let ret_r = self.call_ffi_adapted(
+            &builder,
+            kevent_fn,
                 &[
                     kq_fd.into(),
                     kev_r.into(),
@@ -10668,11 +10750,8 @@ impl<'ctx> PlatformIR<'ctx> {
                     i64_type.const_zero().into(),
                     ptr_type.const_null().into(),
                 ],
-                "ret_r",
-            )
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
+            "ret_r",
+            )?;
         // Return 0 on success, -1 on failure
         let ok_r = builder
             .build_int_compare(IntPredicate::SGE, ret_r, i64_type.const_zero(), "ok_r")
@@ -10719,9 +10798,9 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(flags_p_w, i16_type.const_int(5, false))
             .or_llvm_err()?; // EV_ADD(1)|EV_ENABLE(4)
-        let ret_w = builder
-            .build_call(
-                kevent_fn,
+        let ret_w = self.call_ffi_adapted(
+            &builder,
+            kevent_fn,
                 &[
                     kq_fd.into(),
                     kev_w.into(),
@@ -10730,11 +10809,8 @@ impl<'ctx> PlatformIR<'ctx> {
                     i64_type.const_zero().into(),
                     ptr_type.const_null().into(),
                 ],
-                "ret_w",
-            )
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
+            "ret_w",
+            )?;
         let ok_w = builder
             .build_int_compare(IntPredicate::SGE, ret_w, i64_type.const_zero(), "ok_w")
             .or_llvm_err()?;
@@ -10852,9 +10928,9 @@ impl<'ctx> PlatformIR<'ctx> {
                 .or_llvm_err()?
         };
         builder.build_store(ns_p, nsecs).or_llvm_err()?;
-        let ret_to = builder
-            .build_call(
-                kevent_fn,
+        let ret_to = self.call_ffi_adapted(
+            &builder,
+            kevent_fn,
                 &[
                     kq_fd.into(),
                     ptr_type.const_null().into(),
@@ -10863,18 +10939,15 @@ impl<'ctx> PlatformIR<'ctx> {
                     max.into(),
                     ts.into(),
                 ],
-                "ret_to",
-            )
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
+            "ret_to",
+            )?;
         builder.build_return(Some(&ret_to)).or_llvm_err()?;
 
         // no_timeout: pass NULL for timeout (block indefinitely, for timeout_ns < 0)
         builder.position_at_end(no_timeout);
-        let ret_nt = builder
-            .build_call(
-                kevent_fn,
+        let ret_nt = self.call_ffi_adapted(
+            &builder,
+            kevent_fn,
                 &[
                     kq_fd.into(),
                     ptr_type.const_null().into(),
@@ -10883,11 +10956,8 @@ impl<'ctx> PlatformIR<'ctx> {
                     max.into(),
                     ptr_type.const_null().into(),
                 ],
-                "ret_nt",
-            )
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
+            "ret_nt",
+            )?;
         builder.build_return(Some(&ret_nt)).or_llvm_err()?;
         Ok(())
     }
@@ -10961,9 +11031,9 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_store(flags_p, i16_type.const_int(2, false))
             .or_llvm_err()?; // EV_DELETE=2
 
-        let ret = builder
-            .build_call(
-                kevent_fn,
+        let ret = self.call_ffi_adapted(
+            &builder,
+            kevent_fn,
                 &[
                     kq_fd.into(),
                     kev.into(),
@@ -10972,11 +11042,8 @@ impl<'ctx> PlatformIR<'ctx> {
                     i64_type.const_zero().into(),
                     ptr_type.const_null().into(),
                 ],
-                "ret",
-            )
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
+            "ret",
+            )?;
         let ok = builder
             .build_int_compare(IntPredicate::SGE, ret, i64_type.const_zero(), "ok")
             .or_llvm_err()?;
@@ -11229,9 +11296,9 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_store(flags1, i16_type.const_int(5, false))
             .or_llvm_err()?;
 
-        let ret = builder
-            .build_call(
-                kevent_fn,
+        let ret = self.call_ffi_adapted(
+            &builder,
+            kevent_fn,
                 &[
                     kq_fd.into(),
                     kevs.into(),
@@ -11240,11 +11307,8 @@ impl<'ctx> PlatformIR<'ctx> {
                     i64_type.const_zero().into(),
                     ptr_type.const_null().into(),
                 ],
-                "ret",
-            )
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
+            "ret",
+            )?;
         let ok = builder
             .build_int_compare(IntPredicate::SGE, ret, i64_type.const_zero(), "ok")
             .or_llvm_err()?;
