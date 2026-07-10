@@ -465,6 +465,22 @@ implement Iterator for RangeGenerator {
     }
 }
 
+implement RangeGenerator {
+    /// Live-state predicate for the sync-generator contract
+    /// (`has_next` reports terminal vs. live state; see the
+    /// RepeatGenerator note below and the pinned tests in
+    /// core-tests/async/generator/unit_test.vr).
+    public fn has_next(&self) -> Bool {
+        self.current < self.end
+    }
+
+    /// Terminate the generator: subsequent `has_next` reports false
+    /// and `next` yields `Maybe.None`.
+    public fn close(&mut self) {
+        self.current = self.end;
+    }
+}
+
 /// Create an infinite generator that yields the same value.
 ///
 
@@ -505,6 +521,12 @@ implement<T: Clone> RepeatGenerator<T> {
     /// RepeatGenerator only implements `Iterator`.  Pinned by
     /// `regression_generator_repeat_initial_state_is_live`.
     public fn has_next(&self) -> Bool { true }
+
+    /// Best-effort `close` for the repeating generator (documented by the
+    /// pinned contract test: the close->false transition may relax to
+    /// best-effort for value-repeating generators — the type carries no
+    /// terminal state, so `close` is a no-op).
+    public fn close(&mut self) {}
 }
 
 /// Create a generator that yields values from successive function calls.
@@ -546,6 +568,19 @@ implement<T: Clone, F: fn(&T) -> T> Iterator for SuccessorGenerator<T, F> {
             }
             Maybe.None => Maybe.None,
         }
+    }
+}
+
+implement<T: Clone, F: fn(&T) -> T> SuccessorGenerator<T, F> {
+    /// Live-state predicate for the sync-generator contract.
+    public fn has_next(&self) -> Bool {
+        self.current.is_some()
+    }
+
+    /// Terminate the generator: drops the seed so `has_next` reports
+    /// false and `next` yields `Maybe.None`.
+    public fn close(&mut self) {
+        self.current = Maybe.None;
     }
 }
 
