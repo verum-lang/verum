@@ -427,12 +427,17 @@ pub(in super::super) fn handle_char_extended(
             let bytes_val = state.get_reg(bytes_reg);
             let idx = state.get_reg(idx_reg).as_i64();
 
-            // Recover the byte slice. Three cases:
-            //   1. FatRef: ptr + len (canonical `&[Byte]` from
-            //      `Text.as_bytes`).
-            //   2. List heap object: `[ObjectHeader][len:i64][cap:i64][data:ptr-or-inline]`.
-            //   3. Anything else: bail out as U+FFFD.
-            let (ptr, slice_len): (*const u8, u64) = if bytes_val.is_fat_ref() {
+            // Recover the byte slice. Four cases:
+            //   1. BYTE_SLICE byte view — the canonical `&[Byte]` from
+            //      `Text.as_bytes()` (ARCH-P5), raw `{ptr, len}` payload.
+            //   2. FatRef: ptr + len (generic byte-stride slices).
+            //   3. List heap object: `[ObjectHeader][len:i64][cap:i64][data:ptr-or-inline]`.
+            //   4. Anything else: bail out as U+FFFD.
+            let (ptr, slice_len): (*const u8, u64) = if let Some((p, l)) =
+                crate::interpreter::heap::value_as_byte_slice(&bytes_val)
+            {
+                (p as *const u8, l)
+            } else if bytes_val.is_fat_ref() {
                 let fr = bytes_val.as_fat_ref();
                 (fr.ptr() as *const u8, fr.len())
             } else if bytes_val.is_ptr() && !bytes_val.is_nil() {

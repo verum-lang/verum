@@ -270,6 +270,26 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
                 return format_list_for_print_depth(state, base_ptr, depth + 1);
             }
 
+            // BYTE_SLICE byte view (`Text.as_bytes()`, ARCH-P5):
+            // format like a byte list `[104, 101, …]`.  Without this
+            // arm the raw `{ptr, len}` payload words would be read as
+            // record fields.
+            if header.type_id == crate::types::TypeId::BYTE_SLICE {
+                // SAFETY: header TypeId proves the 16-byte raw payload
+                // shape; producer contract guarantees `len` readable
+                // bytes at `p`.
+                let (p, len) = unsafe { heap::byte_slice_payload(base_ptr) };
+                let shown = (len as usize).min(256);
+                let mut parts = Vec::with_capacity(shown);
+                for i in 0..shown {
+                    parts.push(format!("{}", unsafe { *p.add(i) }));
+                }
+                if (len as usize) > shown {
+                    parts.push("...".to_string());
+                }
+                return format!("[{}]", parts.join(", "));
+            }
+
             // Map: type_id == MAP (513)
             if header.type_id == crate::types::TypeId::MAP {
                 return format_map_for_print_depth(state, base_ptr, depth + 1);

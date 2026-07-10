@@ -2733,19 +2733,17 @@ impl InterpreterState {
         if value.is_small_string() {
             return Some(value.as_small_string().as_str().to_string());
         }
-        // FatRef-encoded Text — `Text.from_utf8_unchecked` and struct-literal
-        // Text builders produce a `FatRef { ptr = bytes, metadata = byte_len }`
-        // with NO ObjectHeader. Recognized with the same `len <= 1_000_000`
-        // heuristic as the canonical `is_heap_string`, so every Text-reading
-        // site agrees (previously such Text marshaled as `Unknown` / `Int`).
-        if value.is_fat_ref() {
-            let fr = value.as_fat_ref();
-            let p = fr.ptr();
-            let len = fr.len();
-            if p.is_null() || len > 1_000_000 {
-                return None;
-            }
-            // SAFETY: a FatRef Text addresses `len` bytes at `p`.
+        // BYTE_SLICE (528) byte view — `Text.as_bytes()` produces a
+        // representation-tagged `[ObjectHeader][ptr][len]` object
+        // (ARCH-P5, see `heap::value_as_byte_slice`).  Reading it as
+        // text mirrors the retired FatRef-as-Text arm's semantics with
+        // a carried type fact instead of the `len <= 1_000_000`
+        // heuristic.  No Text VALUE is FatRef-encoded anymore —
+        // `Text.from_utf8_unchecked` and the struct-literal builders
+        // all produce Text-shaped heap records.
+        if let Some((p, len)) = crate::interpreter::heap::value_as_byte_slice(&value) {
+            // SAFETY: the BYTE_SLICE producer contract guarantees `len`
+            // readable bytes at `p` (never-null).
             let bytes = unsafe { std::slice::from_raw_parts(p as *const u8, len as usize) };
             return Some(String::from_utf8_lossy(bytes).into_owned());
         }

@@ -265,6 +265,68 @@ pub unsafe fn write_closure_data_header(data: *mut u8, func_id: u32, capture_cou
     }
 }
 
+// ============================================================================
+// BYTE_SLICE (528) byte-view helpers (ARCH-P5)
+// ============================================================================
+//
+// A BYTE_SLICE heap object is the representation-tagged borrowed byte
+// view produced by `Text.as_bytes()` (TextExtended::AsBytes) and by
+// re-slicing an existing BYTE_SLICE (CbgrExtended RefSlice /
+// SliceSubslice / SliceSplitAt).  Layout:
+//
+//   [ObjectHeader (24, type_id = TypeId::BYTE_SLICE)][ptr: i64][len: i64]
+//
+// Both payload slots are RAW machine words (NOT NaN-boxed Values) —
+// bit-identical to the Tier-1 (AOT) slice Pack `{ptr@24, len@32}`
+// stamped by `lower_pack_typed`, so the two tiers share ONE object
+// form.  Consumers dispatch on the header TypeId via
+// [`value_as_byte_slice`]; this retires the `len <= 1_000_000`
+// FatRef-as-Text heuristic at every former consumer arm.
+//
+// `ptr` is NEVER null: empty views point at [`empty_byte_slice_ptr`]
+// (mirrors the AOT `verum_text_get_ptr` never-null contract).
+
+/// Stable, never-null pointer for zero-length byte views.
+#[inline]
+pub fn empty_byte_slice_ptr() -> *mut u8 {
+    static EMPTY: [u8; 1] = [0];
+    EMPTY.as_ptr() as *mut u8
+}
+
+/// Read the `(ptr, len)` payload of a BYTE_SLICE object base pointer.
+///
+/// # Safety
+/// `base` must point to a live heap object whose header TypeId is
+/// `TypeId::BYTE_SLICE` (the two raw i64 payload slots must be
+/// initialized — every producer writes both).
+#[inline]
+pub unsafe fn byte_slice_payload(base: *const u8) -> (*mut u8, u64) {
+    let data = unsafe { base.add(OBJECT_HEADER_SIZE) };
+    let ptr = unsafe { *(data as *const u64) } as *mut u8;
+    let len = unsafe { *(data.add(8) as *const u64) };
+    (ptr, len)
+}
+
+/// Canonical classifier: if `v` is a pointer to a BYTE_SLICE heap
+/// object, return its `(ptr, len)` byte range; `None` for every other
+/// value shape.  This is the single inspection API all typed
+/// BYTE_SLICE consumer arms use — no site re-implements the header
+/// probe.
+#[inline]
+pub fn value_as_byte_slice(v: &Value) -> Option<(*mut u8, u64)> {
+    if !v.is_ptr() || v.is_nil() || v.is_boxed_int() {
+        return None;
+    }
+    let base = v.as_ptr::<u8>();
+    // SAFETY: try_type_id rejects null / misaligned / special-marker
+    // payloads; a BYTE_SLICE-stamped header implies the 16-byte raw
+    // payload contract documented on `byte_slice_payload`.
+    match unsafe { ObjectHeader::try_type_id(base) } {
+        Some(TypeId::BYTE_SLICE) => Some(unsafe { byte_slice_payload(base) }),
+        _ => None,
+    }
+}
+
 bitflags! {
     /// Object flags for runtime state.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -843,6 +905,31 @@ impl Heap {
     ) -> InterpreterResult<Object> {
         let size = length * std::mem::size_of::<Value>();
         self.alloc(element_type, size)
+    }
+
+    /// Allocates a BYTE_SLICE byte-view object (ARCH-P5) over an
+    /// existing byte buffer: `[ObjectHeader(BYTE_SLICE)][ptr: i64]
+    /// [len: i64]` with RAW (non-NaN-boxed) payload slots.  Canonical
+    /// producer surface for `Text.as_bytes()` and BYTE_SLICE
+    /// re-slicing — see the module-level BYTE_SLICE helper docs.
+    ///
+    /// A null `ptr` is normalized to [`empty_byte_slice_ptr`] with
+    /// `len = 0` so the never-null contract holds at every producer.
+    pub fn alloc_byte_slice(&mut self, ptr: *mut u8, len: u64) -> InterpreterResult<Object> {
+        let (ptr, len) = if ptr.is_null() {
+            (empty_byte_slice_ptr(), 0)
+        } else {
+            (ptr, len)
+        };
+        self.alloc_with_init(TypeId::BYTE_SLICE, 16, |data| {
+            // SAFETY: `data` is the freshly-allocated 16-byte payload;
+            // both raw i64 slots are within it.
+            unsafe {
+                let slots = data.as_mut_ptr() as *mut u64;
+                *slots = ptr as u64;
+                *slots.add(1) = len;
+            }
+        })
     }
 
     /// Frees an object.

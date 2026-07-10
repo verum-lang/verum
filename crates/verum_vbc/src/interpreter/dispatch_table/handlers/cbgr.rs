@@ -1216,7 +1216,9 @@ pub(in super::super) fn handle_cbgr_extended(
             // Create a FatRef directly from a raw pointer + length, with
             // elem_size=1 (byte slice). Used to lower the generic
             // `slice_from_raw_parts<T>` stdlib intrinsic when the pointer
-            // does not point to an ObjectHeader (e.g. Text.as_bytes()).
+            // does not point to an ObjectHeader (raw buffer addresses).
+            // NOTE: `Text.as_bytes()` no longer produces this shape — it
+            // allocates a typed BYTE_SLICE (528) object (ARCH-P5).
             //
 
             // Format: dst:reg, ptr:reg, len:reg
@@ -1291,6 +1293,24 @@ pub(in super::super) fn handle_cbgr_extended(
                 );
                 new_fat_ref.reserved = fat_ref.reserved;
                 state.set_reg(dst, Value::from_fat_ref(new_fat_ref));
+                return Ok(DispatchResult::Continue);
+            }
+
+            // BYTE_SLICE fast-path (ARCH-P5).  `&buf[pos..]` where `buf`
+            // is a `text.as_bytes()` byte view (the HttpParser.feed
+            // re-slice pattern) — produce a NEW BYTE_SLICE object
+            // `{ptr + start, len}` (stride 1).  Without this arm, the
+            // generic pointer path below would probe the 528 header,
+            // skip it, and treat the raw `{ptr, len}` payload words as
+            // element data.
+            if let Some((base, _src_len)) = heap::value_as_byte_slice(&src) {
+                // SAFETY: `base` addresses the source view's bytes;
+                // `start` was bounds-established by the compiler-emitted
+                // range checks that precede RefSlice.
+                let new_ptr = unsafe { base.add(start) };
+                let obj = state.heap.alloc_byte_slice(new_ptr, len)?;
+                state.record_allocation();
+                state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 return Ok(DispatchResult::Continue);
             }
 
@@ -1463,6 +1483,10 @@ pub(in super::super) fn handle_cbgr_extended(
                 // For ThinRef, extract the pointer directly
                 let thin_ref = slice.as_thin_ref();
                 Value::from_ptr(thin_ref.ptr)
+            } else if let Some((p, _len)) = heap::value_as_byte_slice(&slice) {
+                // BYTE_SLICE byte view (ARCH-P5): the underlying data
+                // pointer is payload slot 0, NOT the object base.
+                Value::from_ptr(p)
             } else if slice.is_ptr() {
                 // Already a raw pointer, just pass through
                 slice
@@ -1480,12 +1504,15 @@ pub(in super::super) fn handle_cbgr_extended(
             let dst = read_reg(state)?;
             let slice_reg = read_reg(state)?;
 
-            // Get slice value and extract length from FatRef
+            // Get slice value and extract length from FatRef or a
+            // BYTE_SLICE byte-view object (ARCH-P5).
             let slice = state.get_reg(slice_reg);
             let len = if slice.is_fat_ref() {
                 slice.as_fat_ref().len() as i64
+            } else if let Some((_p, l)) = heap::value_as_byte_slice(&slice) {
+                l as i64
             } else {
-                // For non-FatRef values, return 0 (or could be error)
+                // For non-slice values, return 0 (or could be error)
                 0
             };
             state.set_reg(dst, Value::from_i64(len));
@@ -1531,6 +1558,17 @@ pub(in super::super) fn handle_cbgr_extended(
                         length: len,
                     });
                 }
+            } else if let Some((base, len)) = heap::value_as_byte_slice(&slice) {
+                // BYTE_SLICE byte view (ARCH-P5): bounds-checked raw
+                // byte read, zero-extended into the Int NaN-box.
+                if (index as u64) < len {
+                    Value::from_i64(unsafe { *base.add(index) } as i64)
+                } else {
+                    return Err(crate::interpreter::InterpreterError::IndexOutOfBounds {
+                        index: index as i64,
+                        length: len as usize,
+                    });
+                }
             } else {
                 Value::nil()
             };
@@ -1565,6 +1603,9 @@ pub(in super::super) fn handle_cbgr_extended(
                     }),
                     _ => unsafe { *(base as *const Value).add(index) },
                 }
+            } else if let Some((base, _len)) = heap::value_as_byte_slice(&slice) {
+                // BYTE_SLICE byte view (ARCH-P5): unchecked raw byte read.
+                Value::from_i64(unsafe { *base.add(index) } as i64)
             } else {
                 Value::nil()
             };
@@ -1610,6 +1651,24 @@ pub(in super::super) fn handle_cbgr_extended(
                     );
                     new_fat_ref.reserved = fat_ref.reserved;
                     Value::from_fat_ref(new_fat_ref)
+                } else {
+                    return Err(crate::interpreter::InterpreterError::IndexOutOfBounds {
+                        index: end as i64,
+                        length: len as usize,
+                    });
+                }
+            } else if let Some((base, len)) = heap::value_as_byte_slice(&src) {
+                // BYTE_SLICE byte view (ARCH-P5): bounds-checked
+                // re-slice producing a NEW BYTE_SLICE object
+                // `{ptr + start, end - start}` (stride 1) — covers
+                // subslice-of-subslice chains.
+                if start <= end && end <= len {
+                    // SAFETY: `start <= len` verified above; the source
+                    // view addresses `len` bytes at `base`.
+                    let new_ptr = unsafe { base.add(start as usize) };
+                    let obj = state.heap.alloc_byte_slice(new_ptr, end - start)?;
+                    state.record_allocation();
+                    Value::from_ptr(obj.as_ptr() as *mut u8)
                 } else {
                     return Err(crate::interpreter::InterpreterError::IndexOutOfBounds {
                         index: end as i64,
@@ -1662,6 +1721,26 @@ pub(in super::super) fn handle_cbgr_extended(
 
                     state.set_reg(dst1, Value::from_fat_ref(left_ref));
                     state.set_reg(dst2, Value::from_fat_ref(right_ref));
+                } else {
+                    return Err(crate::interpreter::InterpreterError::IndexOutOfBounds {
+                        index: mid as i64,
+                        length: len as usize,
+                    });
+                }
+            } else if let Some((base, len)) = heap::value_as_byte_slice(&src) {
+                // BYTE_SLICE byte view (ARCH-P5): split into TWO new
+                // BYTE_SLICE objects `{ptr, mid}` / `{ptr + mid,
+                // len - mid}` (stride 1).
+                if mid <= len {
+                    let left = state.heap.alloc_byte_slice(base, mid)?;
+                    state.record_allocation();
+                    // SAFETY: `mid <= len` verified above; the source
+                    // view addresses `len` bytes at `base`.
+                    let right_ptr = unsafe { base.add(mid as usize) };
+                    let right = state.heap.alloc_byte_slice(right_ptr, len - mid)?;
+                    state.record_allocation();
+                    state.set_reg(dst1, Value::from_ptr(left.as_ptr() as *mut u8));
+                    state.set_reg(dst2, Value::from_ptr(right.as_ptr() as *mut u8));
                 } else {
                     return Err(crate::interpreter::InterpreterError::IndexOutOfBounds {
                         index: mid as i64,

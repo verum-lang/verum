@@ -56,25 +56,22 @@ pub(super) fn extract_string(value: &Value, state: &InterpreterState) -> String 
 
     if value.is_small_string() {
         value.as_small_string().as_str().to_string()
-    } else if value.is_fat_ref() {
-        // **FatRef Text canonical form** (task #4): `Text.from_utf8_unchecked`
-        // produces a FatRef { ptr, metadata=byte_len } pointing at the
-        // byte payload directly — same shape as the AsBytes handler at
-        // `text_extended.rs:240` returns.  Without this branch, equality /
-        // comparison / hash via the Text-method intercepts at
-        // `method_dispatch.rs:6401+` fell into the trailing
-        // `<value:N>` debug-format fallback and `"hello" ==
-        // Text.from_utf8_unchecked("hello".as_bytes())` returned false
-        // despite both having identical bytes.
-        let fr = value.as_fat_ref();
-        let p = fr.ptr();
-        let len = fr.len() as usize;
-        if p.is_null() || len == 0 {
+    } else if let Some((p, len)) = heap::value_as_byte_slice(value) {
+        // **BYTE_SLICE byte view** (ARCH-P5): `Text.as_bytes()`
+        // produces a representation-tagged `[ObjectHeader][ptr][len]`
+        // object.  Reading it as text keeps equality / comparison /
+        // hash via the Text-method intercepts working on byte views —
+        // the semantics the retired `len <= 1_000_000` FatRef-as-Text
+        // heuristic arm provided, now dispatched on a carried type
+        // fact.  No Text VALUE is FatRef-encoded anymore
+        // (`Text.from_utf8_unchecked` and every struct-literal builder
+        // produce Text-shaped heap records), so no FatRef arm remains.
+        let len = len as usize;
+        if len == 0 {
             return String::new();
         }
-        if len > 1_000_000 {
-            return String::new();
-        }
+        // SAFETY: the BYTE_SLICE producer contract guarantees `len`
+        // readable bytes at `p` (never-null).
         let bytes = unsafe { std::slice::from_raw_parts(p, len) };
         String::from_utf8_lossy(bytes).to_string()
     } else if value.is_ptr() {
@@ -202,13 +199,15 @@ pub(super) fn extract_text_bytes(value: &Value, state: &InterpreterState) -> Vec
         // `as_bytes` (NOT `as_str`) — must tolerate a partial code point.
         return v.as_small_string().as_bytes().to_vec();
     }
-    if v.is_fat_ref() {
-        let fr = v.as_fat_ref();
-        let p = fr.ptr();
-        let len = fr.len() as usize;
-        if p.is_null() || len == 0 || len > 1_000_000 {
+    // BYTE_SLICE byte view (ARCH-P5) — typed replacement for the
+    // retired FatRef-as-Text heuristic arm.
+    if let Some((p, len)) = heap::value_as_byte_slice(&v) {
+        let len = len as usize;
+        if len == 0 {
             return Vec::new();
         }
+        // SAFETY: BYTE_SLICE producer contract — `len` readable bytes
+        // at `p` (never-null).
         return unsafe { std::slice::from_raw_parts(p, len) }.to_vec();
     }
     if v.is_ptr() {
@@ -295,20 +294,6 @@ pub(super) fn is_heap_string(v: &Value) -> bool {
     if v.is_small_string() {
         return false;
     }
-    // FatRef-encoded Text — `Text.from_utf8_unchecked` and every
-    // struct-literal Text-builder path produce a `FatRef { ptr, metadata
-    // = byte_len }` directly (no ObjectHeader, no TEXT TypeId).  Without
-    // recognising this shape as string-like, `deep_value_eq` would fall
-    // into the "type mismatch: one is string, other is not" branch and
-    // return false for `a == c` where `a = "hello"` (small_string) and
-    // `c = Text.from_utf8_unchecked("hello".as_bytes())` (FatRef Text).
-    // Closes task #4 — Text literal != Text.from(literal) equality
-    // defect.  Pairs with the `is_fat_ref` branch in `extract_string`
-    // and `resolve_string_value` so all three sites agree.
-    if v.is_fat_ref() {
-        let fr = v.as_fat_ref();
-        return !fr.ptr().is_null() && fr.len() <= 1_000_000;
-    }
     if !v.is_ptr() || v.is_nil() || v.is_boxed_int() {
         return false;
     }
@@ -321,8 +306,17 @@ pub(super) fn is_heap_string(v: &Value) -> bool {
         return false;
     }
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-    // TEXT type or the concat type (0x0001)
-    header.type_id == crate::types::TypeId::TEXT || header.type_id == crate::types::TypeId(0x0001)
+    // TEXT type, the concat type (0x0001), or a BYTE_SLICE byte view
+    // (ARCH-P5).  The BYTE_SLICE arm keeps `deep_value_eq`'s
+    // string-likeness classification treating `Text.as_bytes()`
+    // results as byte-comparable text — the semantics the retired
+    // `len <= 1_000_000` FatRef heuristic arm provided (no Text VALUE
+    // is FatRef-encoded anymore).  Pairs with the BYTE_SLICE branches
+    // in `extract_string` and `resolve_string_value` so all three
+    // sites agree.
+    header.type_id == crate::types::TypeId::TEXT
+        || header.type_id == crate::types::TypeId(0x0001)
+        || header.type_id == crate::types::TypeId::BYTE_SLICE
 }
 
 /// Check if a Value is an integer that represents a string table ID.
@@ -344,17 +338,18 @@ pub(super) fn resolve_string_value(v: &Value, state: &InterpreterState) -> Strin
     if v.is_small_string() {
         return v.as_small_string().as_str().to_string();
     }
-    // FatRef Text — same shape as the `is_heap_string` FatRef branch
-    // above.  Required for cross-representation equality to find the
-    // bytes when `Text.from_utf8_unchecked` produces FatRef-encoded
-    // Text values.
-    if v.is_fat_ref() {
-        let fr = v.as_fat_ref();
-        let p = fr.ptr();
-        let len = fr.len() as usize;
-        if p.is_null() || len == 0 || len > 1_000_000 {
+    // BYTE_SLICE byte view (ARCH-P5) — same classification as the
+    // `is_heap_string` BYTE_SLICE branch above, so cross-
+    // representation equality finds the bytes of `Text.as_bytes()`
+    // results.  Typed replacement for the retired FatRef-as-Text
+    // heuristic arm.
+    if let Some((p, len)) = heap::value_as_byte_slice(v) {
+        let len = len as usize;
+        if len == 0 {
             return String::new();
         }
+        // SAFETY: BYTE_SLICE producer contract — `len` readable bytes
+        // at `p` (never-null).
         let bytes = unsafe { std::slice::from_raw_parts(p, len) };
         return String::from_utf8_lossy(bytes).to_string();
     }
@@ -451,8 +446,10 @@ pub(super) fn is_array_type_id(type_id: u32) -> bool {
 /// correct. The duplicate is now deleted.
 /// Normalize a byte-addressable value to a `(ptr, len)` byte range, for
 /// cross-representation byte-slice equality (#20):
-///  * a byte/raw-slice FatRef (`Text.as_bytes()`, `reserved != 0`) → its
-///    `(ptr, len)` directly;
+///  * a BYTE_SLICE byte-view object (`Text.as_bytes()`, ARCH-P5) → its
+///    raw `{ptr, len}` payload;
+///  * a byte/raw-slice FatRef (`reserved != 0`, generic
+///    `slice_from_raw_parts` output) → its `(ptr, len)` directly;
 ///  * a const-bytes `U8` heap object (`b"..."`, load_constant mod.rs:792)
 ///    → bytes at `OBJECT_HEADER_SIZE`, length in `header.size`.
 ///
@@ -465,6 +462,9 @@ fn byte_slice_of(v: &Value, _state: &InterpreterState) -> Option<(*const u8, usi
             return None;
         }
         return Some((fr.ptr() as *const u8, fr.len() as usize));
+    }
+    if let Some((p, len)) = heap::value_as_byte_slice(v) {
+        return Some((p as *const u8, len as usize));
     }
     if v.is_regular_ptr() {
         let ptr = v.as_ptr::<u8>();
@@ -481,6 +481,14 @@ fn byte_slice_of(v: &Value, _state: &InterpreterState) -> Option<(*const u8, usi
         }
     }
     None
+}
+
+/// `true` when `v` is a BYTE_SLICE byte-view object (ARCH-P5).  Trigger
+/// predicate for routing equality straight to byte-range comparison —
+/// shared by `deep_value_eq` and `handle_eqg` so both entry points
+/// treat `Text.as_bytes()` results identically.
+pub(super) fn is_byte_slice_value(v: &Value) -> bool {
+    heap::value_as_byte_slice(v).is_some()
 }
 
 pub(crate) fn deep_value_eq(
@@ -639,15 +647,17 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     // the existing type-specific branches.)
 
     // Byte-slice equality across representations (#20). If EITHER operand
-    // is a byte/raw-element slice FatRef (`Text.as_bytes()`, reserved != 0),
-    // normalize BOTH to byte ranges and compare — covers
-    // `as_bytes() == as_bytes()` (both FatRef) AND the mixed
+    // is a BYTE_SLICE byte-view object (`Text.as_bytes()`, ARCH-P5) or a
+    // byte/raw-element slice FatRef (reserved != 0, generic
+    // `slice_from_raw_parts` output), normalize BOTH to byte ranges and
+    // compare — covers `as_bytes() == as_bytes()` AND the mixed
     // `as_bytes() == b"lit"`, where the byte-string literal is a const-bytes
     // U8 heap object (TypeId::U8, bytes at OBJECT_HEADER_SIZE, length in
-    // header.size), NOT a FatRef — so the both-FatRef branch below missed it
-    // and `subtype.as_bytes() == b"*"` (select_best_media wildcard) was
-    // always false.
-    if (va.is_fat_ref() && va.as_fat_ref().reserved != 0)
+    // header.size) — the reason `subtype.as_bytes() == b"*"`
+    // (select_best_media wildcard) was historically always false.
+    if is_byte_slice_value(va)
+        || is_byte_slice_value(vb)
+        || (va.is_fat_ref() && va.as_fat_ref().reserved != 0)
         || (vb.is_fat_ref() && vb.as_fat_ref().reserved != 0)
     {
         if let (Some((pa, la)), Some((pb, lb))) =
@@ -688,12 +698,13 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         if fat_a.is_null() || fat_b.is_null() {
             return false;
         }
-        // Byte-slice FatRefs (`reserved == 1`, produced by `Text.as_bytes()`
-        // — see text_extended.rs) point at raw BYTES, not a `Value`.
-        // Dereferencing `ptr()` as `*const Value` (the value-ref path below)
-        // reads a byte as a NaN-boxed word → garbage compare. Compare the
-        // `[ptr, ptr+len)` byte ranges directly so `text_eq(a, b) =
-        // a.as_bytes() == b.as_bytes()` is correct.
+        // Byte-slice FatRefs (`reserved == 1` — generic raw slices from
+        // `slice_from_raw_parts` / RefSliceRaw; `Text.as_bytes()` now
+        // produces typed BYTE_SLICE objects handled above) point at raw
+        // BYTES, not a `Value`.  Dereferencing `ptr()` as `*const Value`
+        // (the value-ref path below) reads a byte as a NaN-boxed word →
+        // garbage compare.  Compare the `[ptr, ptr+len)` byte ranges
+        // directly.
         if fat_a.reserved == 1 || fat_b.reserved == 1 {
             if fat_a.len() != fat_b.len() {
                 return false;

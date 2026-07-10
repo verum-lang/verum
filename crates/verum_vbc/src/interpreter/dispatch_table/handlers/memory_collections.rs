@@ -700,6 +700,69 @@ pub(in super::super) fn handle_get_index(
         arr_val
     };
 
+    // BYTE_SLICE byte view (ARCH-P5): typed arm reading through the
+    // raw `{ptr, len}` payload.  Placed AFTER the reference auto-deref
+    // so both a direct byte-view value and a `&view` CBGR/thin ref
+    // land here, and BEFORE the generic heap-object path — the payload
+    // words are NOT NaN-boxed element Values.  Two index shapes:
+    //   * Int — bounds-checked raw byte read (`text.as_bytes()[i]`).
+    //   * Range object — re-slice producing a NEW BYTE_SLICE view
+    //     `{ptr + start, end - start}` (`bytes[a..b]`), mirroring the
+    //     CbgrExtended SliceSubslice semantics.
+    if let Some((base, len)) = heap::value_as_byte_slice(&arr_val) {
+        let idx_raw = state.get_reg(idx);
+        if idx_raw.is_int() {
+            let idx_val = idx_raw.as_i64();
+            if idx_val < 0 || (idx_val as u64) >= len {
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "Slice index out of bounds: index {} but length is {}",
+                        idx_val, len
+                    ),
+                });
+            }
+            // SAFETY: bounds-checked above; the view addresses `len`
+            // bytes at `base` (never-null producer contract).
+            let byte = unsafe { *base.add(idx_val as usize) };
+            state.set_reg(dst, Value::from_i64(byte as i64));
+            return Ok(DispatchResult::Continue);
+        }
+        // Range index: `[ObjectHeader][start][end][inclusive]` RANGE object.
+        if idx_raw.is_ptr() && !idx_raw.is_nil() {
+            let idx_ptr = idx_raw.as_ptr::<u8>();
+            if unsafe { heap::ObjectHeader::try_type_id(idx_ptr) } == Some(TypeId::RANGE) {
+                let range_data =
+                    unsafe { idx_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                let start = unsafe { *range_data }.as_i64().max(0) as u64;
+                let mut end = unsafe { *range_data.add(1) }.as_i64().max(0) as u64;
+                let inclusive = unsafe { *range_data.add(2) };
+                if inclusive.is_bool() && inclusive.as_bool() {
+                    end += 1;
+                }
+                if start > end || end > len {
+                    return Err(InterpreterError::Panic {
+                        message: format!(
+                            "Index out of bounds: slice [{}..{}] exceeds length {}",
+                            start, end, len
+                        ),
+                    });
+                }
+                // SAFETY: `start <= len` verified above.
+                let new_ptr = unsafe { base.add(start as usize) };
+                let obj = state.heap.alloc_byte_slice(new_ptr, end - start)?;
+                state.record_allocation();
+                state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+                return Ok(DispatchResult::Continue);
+            }
+        }
+        return Err(InterpreterError::InvalidOperand {
+            message: format!(
+                "GetE: byte-slice index must be Int or Range, got tag={:?}",
+                idx_raw.tag()
+            ),
+        });
+    }
+
     if !arr_val.is_ptr() {
         // Transparent newtype access: .0 on a scalar value returns the value itself.
         let idx_val = state.get_reg(idx);
@@ -1338,6 +1401,12 @@ pub(in super::super) fn handle_array_len(
         header_size / 4
     } else if header.type_id == TypeId::U64 {
         header_size / 8
+    } else if header.type_id == TypeId::BYTE_SLICE {
+        // BYTE_SLICE byte view (ARCH-P5): `{ptr: i64, len: i64}` raw
+        // payload — len is slot 1.  `text.as_bytes().len()`.
+        // SAFETY: header TypeId proves the 16-byte raw payload shape.
+        let (_p, len) = unsafe { heap::byte_slice_payload(ptr) };
+        len as usize
     } else if header.type_id.is_list_like() {
         // LIST and BYTE_LIST share the [len, cap, backing_ptr] header
         // shape — both read len from slot 0 of the header data.
