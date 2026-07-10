@@ -202,6 +202,30 @@ impl TypeChecker {
     }
 
 
+
+    /// EXHAUSTIVENESS-DEEP-EXPAND (#41): expand nested variant payloads for
+    /// the exhaustiveness scrutinee. `expand_generic_to_variant` only opens
+    /// the TOP level (`Poll<Result<Int, P>>` -> `Ready(Result<Int, P>) |
+    /// Pending`), so nested-constructor coverage (`Ready(Ok(_)) |
+    /// Ready(Err(_))`) could not be proven — the payload stayed a closed
+    /// `Generic{Result}` and 13 async tests hard-failed with
+    /// "`Ready(_)` not covered". Recursively expand payloads (bounded depth
+    /// guards against recursive types like Tree/List).
+    fn expand_scrut_deep(&self, ty: &Type, depth: u8) -> Type {
+        let expanded = self.expand_generic_to_variant(ty);
+        if depth == 0 {
+            return expanded;
+        }
+        if let Type::Variant(vs) = &expanded {
+            let deep: indexmap::IndexMap<verum_common::Text, Type> = vs
+                .iter()
+                .map(|(n, p)| (n.clone(), self.expand_scrut_deep(p, depth - 1)))
+                .collect();
+            return Type::Variant(deep);
+        }
+        expanded
+    }
+
     /// EXHAUSTIVENESS-UNRESOLVED-PAYLOAD (#41): true when the scrutinee's
     /// variant payloads contain an UNRESOLVED type — a unification var, a
     /// bare generic type param (`T`), or an associated-type projection
@@ -221,6 +245,12 @@ impl TypeChecker {
                         || args.iter().any(unresolved)
                 }
                 Type::Named { args, .. } => args.iter().any(unresolved),
+                // A payload may itself be an EXPANDED variant/tuple/record
+                // (expand_generic_to_variant inlines `Result<F.Output, E>`
+                // into `Ok(::Output[F]) | Err(E)`), so recurse structurally.
+                Type::Variant(vs) => vs.iter().any(|(_, p)| unresolved(p)),
+                Type::Tuple(elems) => elems.iter().any(unresolved),
+                Type::Record(fields) => fields.iter().any(|(_, t)| unresolved(t)),
                 Type::Reference { inner, .. }
                 | Type::CheckedReference { inner, .. }
                 | Type::UnsafeReference { inner, .. } => unresolved(inner),
@@ -503,7 +533,7 @@ impl TypeChecker {
                 // covered.  `expand_generic_to_variant` substitutes the args
                 // (`Ready(Unit)`), so the `()` pattern is recognised as
                 // exhaustive; non-variant types pass through unchanged.
-                let resolved_scrut = self.expand_generic_to_variant(&applied_scrut_chk);
+                let resolved_scrut = self.expand_scrut_deep(&applied_scrut_chk, 3);
                 let should_check = matches!(&resolved_scrut, Type::Variant(_) | Type::Bool);
                 let has_guards = arms.iter().any(|arm| arm.guard.is_some());
                 // Check if patterns contain complex forms the exhaustiveness checker can't handle
@@ -527,6 +557,13 @@ impl TypeChecker {
                                 .join(", ");
                             let msg =
                                 format!("non-exhaustive patterns: `{}` not covered", witness_str);
+                            if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                                eprintln!(
+                                    "[ctor-trace] E0601(check) scrut={:?} unresolved={}",
+                                    resolved_scrut,
+                                    Self::scrut_has_unresolved_payload(&resolved_scrut)
+                                );
+                            }
                             if has_complex_patterns
                                 || Self::scrut_has_unresolved_payload(&resolved_scrut)
                             {
@@ -4751,7 +4788,7 @@ impl TypeChecker {
                     // (see the check_expr path above): a bare `lookup_type` would
                     // leave `Poll`'s `Ready(T)` payload unsubstituted, breaking
                     // `Poll.Ready(())` exhaustiveness over `Poll<Unit>`.
-                    let resolved_scrut = self.expand_generic_to_variant(&applied_scrut);
+                    let resolved_scrut = self.expand_scrut_deep(&applied_scrut, 3);
                     let should_check_exhaustiveness =
                         matches!(&resolved_scrut, Type::Variant(_) | Type::Bool);
                     // Don't check if any arm has a guard (guards make analysis imprecise)
@@ -4779,6 +4816,13 @@ impl TypeChecker {
                                         "non-exhaustive patterns: `{}` not covered",
                                         witness_str
                                     );
+                                    if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                                        eprintln!(
+                                            "[ctor-trace] E0601(infer) scrut={:?} unresolved={}",
+                                            resolved_scrut,
+                                            Self::scrut_has_unresolved_payload(&resolved_scrut)
+                                        );
+                                    }
                                     if has_complex_patterns
                                         || Self::scrut_has_unresolved_payload(&resolved_scrut)
                                     {
