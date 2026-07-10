@@ -2001,6 +2001,20 @@ impl TypeContext {
     /// Add a type definition (unqualified, for backward compatibility)
     pub fn define_type(&mut self, name: impl Into<Text>, ty: Type) {
         let name = name.into();
+        // TYPE-REDEFINE TRAP (#41): overwriting a registered VARIANT type's
+        // definition with a DIFFERENT shape (e.g. an applied instance
+        // replacing the template) poisons every later use of the type.
+        // VERUM_TRACE_CTOR-gated diagnostic.
+        if std::env::var("VERUM_TRACE_CTOR").is_ok()
+            && let Some(prev) = self.type_defs.get(&name)
+            && matches!(prev, Type::Variant(_))
+            && format!("{:?}", prev) != format!("{:?}", ty)
+        {
+            eprintln!(
+                "[ctor-trace] TYPE-REDEFINE {:?}\n  prev={:?}\n  new ={:?}",
+                name, prev, ty
+            );
+        }
         self.type_defs.insert(name, ty);
     }
 
