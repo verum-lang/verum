@@ -21088,16 +21088,25 @@ impl VbcCodegen {
                         // constructor in the collision set. Try to find the parent type
                         // via qualified name search so method dispatch resolves correctly.
                         if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                            // Search for any "TypeName.VariantName" entry matching this name
+                            // Search for any "TypeName.VariantName" entry matching this name.
+                            // ARCH-P2: first HashMap match was a per-bake dice when a
+                            // variant name collides across equal-arity types — the
+                            // returned parent flips the qualified CallM dispatch
+                            // target. Lexicographically-smallest key wins.
                             let suffix = format!(".{}", name);
+                            let mut best: Option<(&String, &String)> = None;
                             for (fn_name, fn_info) in &self.ctx.functions {
                                 if fn_name.ends_with(&suffix)
                                     && fn_info.variant_tag.is_some()
                                     && fn_info.param_count == args.len()
                                     && let Some(ref parent_type) = fn_info.parent_type_name
+                                    && best.map(|(b, _)| fn_name < b).unwrap_or(true)
                                 {
-                                    return Some(parent_type.clone());
+                                    best = Some((fn_name, parent_type));
                                 }
+                            }
+                            if let Some((_, parent_type)) = best {
+                                return Some(parent_type.clone());
                             }
                         }
                         if name.chars().next().is_some_and(|c| c.is_uppercase()) {
@@ -34474,6 +34483,11 @@ impl VbcCodegen {
         // to the desired parent.
         let parent_suffix_a = format!(".{}.fmt", base);
         if !display_signal {
+            // ARCH-P2: the first HashMap match was a per-bake dice when a
+            // type has >1 fmt registration (bare + module-rooted) with
+            // distinct ids — the emitted static-dispatch func-id operand
+            // flipped. Lexicographically-smallest key wins.
+            let mut best: Option<(&String, u32)> = None;
             for (key, info) in self.ctx.functions.iter() {
                 if info.param_count != 2 || info.id.0 == u32::MAX {
                     continue;
@@ -34485,16 +34499,20 @@ impl VbcCodegen {
                     .unwrap_or(false)
                     && key.ends_with(".fmt");
                 let matches_key_suffix = key.ends_with(parent_suffix_a.as_str());
-                if matches_parent || matches_key_suffix {
-                    display_signal = true;
-                    display_func_id = Some(info.id.0);
-                    if trace {
-                        eprintln!(
-                            "[display-dispatch] function-table scan matched key='{}' (parent={:?})",
-                            key, info.parent_type_name
-                        );
-                    }
-                    break;
+                if (matches_parent || matches_key_suffix)
+                    && best.map(|(b, _)| key < b).unwrap_or(true)
+                {
+                    best = Some((key, info.id.0));
+                }
+            }
+            if let Some((key, fid)) = best {
+                display_signal = true;
+                display_func_id = Some(fid);
+                if trace {
+                    eprintln!(
+                        "[display-dispatch] function-table scan matched key='{}' (canonical min-key)",
+                        key
+                    );
                 }
             }
         }

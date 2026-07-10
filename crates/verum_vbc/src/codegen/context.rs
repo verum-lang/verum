@@ -1228,7 +1228,15 @@ impl TierContext {
 
         let mut decisions = Map::new();
 
-        for (ref_id, tier) in &result.decisions {
+        // ARCH-P2: result.decisions is a HashMap; two RefIds collapsing
+        // to one span-derived ExprId made the surviving tier last-wins in
+        // hash order. Sorted RefId walk → deterministic collision winner
+        // (highest RefId, stable across bakes).
+        let mut ordered: Vec<(&verum_cbgr::tier_types::RefId, _)> =
+            result.decisions.iter().collect();
+        ordered.sort_by_key(|(rid, _)| rid.0);
+
+        for (ref_id, tier) in ordered {
             // Convert from verum_cbgr::tier_types::CbgrTier to verum_vbc::types::CbgrTier
             let vbc_tier = match tier.to_vbc_tier() {
                 AnalysisTier::Tier0 => CbgrTier::Tier0,
@@ -1250,9 +1258,13 @@ impl TierContext {
             decisions.insert(expr_id, vbc_tier);
         }
 
-        // Extract Tier0 reasons from the analysis result
+        // Extract Tier0 reasons from the analysis result (same sorted
+        // walk as `decisions` above — one collision discipline).
         let mut tier0_reasons = Map::new();
-        for (ref_id, tier) in &result.decisions {
+        let mut ordered_reasons: Vec<(&verum_cbgr::tier_types::RefId, _)> =
+            result.decisions.iter().collect();
+        ordered_reasons.sort_by_key(|(rid, _)| rid.0);
+        for (ref_id, tier) in ordered_reasons {
             if let Some(reason) = tier.reason() {
                 let expr_id = if let Some((start, end)) = result.get_span(*ref_id) {
                     ExprId(((start as u64) << 32) | (end as u64))
@@ -3192,12 +3204,18 @@ impl CodegenContext {
     /// prefers the one whose parent_type_name matches the current function's return
     /// type. If no return type context is available, returns the match only if unique.
     pub fn find_function_by_suffix(&self, suffix: &str) -> Option<&FunctionInfo> {
-        let mut matches: Vec<&FunctionInfo> = Vec::new();
-        for (_name, info) in &self.functions {
-            if _name.ends_with(suffix) {
-                matches.push(info);
+        let mut keyed: Vec<(&String, &FunctionInfo)> = Vec::new();
+        for (name, info) in &self.functions {
+            if name.ends_with(suffix) {
+                keyed.push((name, info));
             }
         }
+        // ARCH-P2: the disambiguation loops below return the FIRST
+        // parent==base entry — hash order made the pick a per-bake dice
+        // when a parent has both a bare and a module-rooted registration
+        // with distinct ids. Canonical order: key ascending.
+        keyed.sort_by(|a, b| a.0.cmp(b.0));
+        let matches: Vec<&FunctionInfo> = keyed.into_iter().map(|(_, i)| i).collect();
 
         if matches.len() == 1 {
             return Some(matches[0]);
@@ -3275,15 +3293,21 @@ impl CodegenContext {
     pub fn find_variant_by_suffix_and_args(&self, name: &str, arg_count: usize) -> Option<u32> {
         let suffix = format!(".{}", name);
         // Collect all matches with their parent type names for disambiguation.
-        let mut matches: Vec<(u32, Option<String>)> = Vec::new();
+        // ARCH-P2: keyed + sorted — the first-parent-match loops below
+        // inherited hash order (per-bake MakeVariant tag dice when one
+        // parent carries duplicate registrations). Canonical: key order.
+        let mut keyed: Vec<(&String, u32, Option<String>)> = Vec::new();
         for (fn_name, fn_info) in &self.functions {
             if fn_name.ends_with(&suffix)
                 && fn_info.param_count == arg_count
                 && let Some(tag) = fn_info.variant_tag
             {
-                matches.push((tag, fn_info.parent_type_name.clone()));
+                keyed.push((fn_name, tag, fn_info.parent_type_name.clone()));
             }
         }
+        keyed.sort_by(|a, b| a.0.cmp(b.0));
+        let matches: Vec<(u32, Option<String>)> =
+            keyed.into_iter().map(|(_, t, p)| (t, p)).collect();
         if matches.len() == 1 {
             return Some(matches[0].0);
         }
