@@ -63,12 +63,37 @@ pub fn get_runtime_archive() -> Option<&'static VbcArchive> {
                     Some(archive)
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        target: "embedded_stdlib_vbc",
-                        "failed to decode embedded stdlib archive: {} — falling back to source compile",
-                        e
-                    );
-                    None
+                    // #45: an EMBEDDED archive that fails to decode is a
+                    // build-system inconsistency (stale archive vs current
+                    // serialization format — the varint incident surfaced
+                    // as a silent source-compile fallback plus a misleading
+                    // "no archive embedded" downstream).  The architecture
+                    // directive is ONE stdlib source — the embedded archive
+                    // — so this must be loud and actionable, not a silent
+                    // fallback that masks the format drift.
+                    if std::env::var("VERUM_ALLOW_STDLIB_SOURCE_FALLBACK").is_ok() {
+                        tracing::warn!(
+                            target: "embedded_stdlib_vbc",
+                            "failed to decode embedded stdlib archive: {} — \
+                             VERUM_ALLOW_STDLIB_SOURCE_FALLBACK set, falling back to source compile",
+                            e
+                        );
+                        None
+                    } else {
+                        panic!(
+                            "FATAL: this compiler binary embeds a precompiled stdlib archive \
+                             ({} KB) that failed to decode: {}\n\
+                             This is a build-system inconsistency — the embedded archive was \
+                             generated with an older serialization format than this reader.\n\
+                             Fix: regenerate and re-embed the archive:\n\
+                             \x20   verum stdlib precompile --out <CARGO_TARGET_DIR>/precompiled-stdlib/runtime.vbca\n\
+                             \x20   touch crates/verum_compiler/build.rs && cargo build -p verum_cli\n\
+                             Escape hatch (slow, compiles stdlib from source): \
+                             VERUM_ALLOW_STDLIB_SOURCE_FALLBACK=1",
+                            EMBEDDED_RUNTIME_VBC.len() / 1024,
+                            e,
+                        );
+                    }
                 }
             }
         })

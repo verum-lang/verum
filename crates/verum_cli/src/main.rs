@@ -3018,6 +3018,20 @@ fn run_command(cli: Cli) -> Result<()> {
                 PathTarget::SingleFile(file_path) => {
                     verum_error::crash::set_input_file(file_path.as_str());
                     ui::status("Building", file_path.as_str());
+                    // #45: thread the emit mode through — pre-fix the
+                    // single-file path dropped --emit-asm/--emit-llvm/
+                    // --emit-bc entirely (only the manifest path passed
+                    // them), so the flags were silently dead for
+                    // `verum build file.vr`.
+                    let emit_mode = if emit_asm {
+                        verum_compiler::options::EmitMode::Assembly
+                    } else if emit_llvm {
+                        verum_compiler::options::EmitMode::LlvmIr
+                    } else if emit_bc {
+                        verum_compiler::options::EmitMode::Bitcode
+                    } else {
+                        verum_compiler::options::EmitMode::Binary
+                    };
                     return commands::file::build(
                         file_path.as_str(),
                         None,
@@ -3027,6 +3041,7 @@ fn run_command(cli: Cli) -> Result<()> {
                         false,
                         emit_vbc,
                         target.as_ref().map(|t| t.as_str()),
+                        emit_mode,
                     );
                 }
                 PathTarget::Project => {}

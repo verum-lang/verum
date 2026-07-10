@@ -897,6 +897,27 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
     let version_major = u16::from_le_bytes(buf2);
     reader.read_exact(&mut buf2)?;
     let version_minor = u16::from_le_bytes(buf2);
+    // #45: enforce the archive-level version contract. Pre-fix the
+    // version was read into the header and never validated, so a
+    // format change surfaced as a garbled decode deep inside module
+    // deserialization instead of one precise, actionable error.
+    // Same policy as the module-level gate (deserialize.rs):
+    // exact major, minor no newer than this reader.
+    if version_major != ARCHIVE_VERSION_MAJOR || version_minor > ARCHIVE_VERSION_MINOR {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "archive format version {}.{} is incompatible with this reader \
+                 (supports {}.0 through {}.{}) — regenerate the archive with \
+                 `verum stdlib precompile`",
+                version_major,
+                version_minor,
+                ARCHIVE_VERSION_MAJOR,
+                ARCHIVE_VERSION_MAJOR,
+                ARCHIVE_VERSION_MINOR,
+            ),
+        ));
+    }
     reader.read_exact(&mut buf4)?;
     let flags = ArchiveFlags::from_bits_truncate(u32::from_le_bytes(buf4));
     reader.read_exact(&mut buf4)?;
@@ -1080,6 +1101,43 @@ mod tests {
             "error must identify the offending field, got: {}",
             msg,
         );
+    }
+
+    /// #45: version gate — an archive stamped with a NEWER format
+    /// version than this reader supports must be rejected at the
+    /// header with an actionable message, not garble deep inside
+    /// module deserialization (the varint-incident failure mode).
+    #[test]
+    fn test_read_archive_rejects_incompatible_version() {
+        for (major, minor) in [
+            (ARCHIVE_VERSION_MAJOR + 1, 0),
+            (ARCHIVE_VERSION_MAJOR, ARCHIVE_VERSION_MINOR + 1),
+        ] {
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&ARCHIVE_MAGIC);
+            payload.extend_from_slice(&major.to_le_bytes());
+            payload.extend_from_slice(&minor.to_le_bytes());
+            payload.extend_from_slice(&0u32.to_le_bytes()); // flags
+            payload.extend_from_slice(&0u32.to_le_bytes()); // module_count
+            payload.extend_from_slice(&0u64.to_le_bytes()); // index_offset
+            payload.extend_from_slice(&0u64.to_le_bytes()); // index_size
+
+            let result = read_archive(io::Cursor::new(payload));
+            assert!(
+                result.is_err(),
+                "version {}.{} must be rejected (reader supports {}.{})",
+                major,
+                minor,
+                ARCHIVE_VERSION_MAJOR,
+                ARCHIVE_VERSION_MINOR,
+            );
+            let msg = format!("{}", result.err().unwrap());
+            assert!(
+                msg.contains("verum stdlib precompile"),
+                "error must carry the regeneration instruction, got: {}",
+                msg,
+            );
+        }
     }
 
     /// Hostile name_len in the index entry — would request a u32::MAX

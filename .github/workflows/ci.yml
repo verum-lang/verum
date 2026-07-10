@@ -152,6 +152,59 @@ jobs:
           path: vcs/reports/
 
   # ---------------------------------------------------------------------------
+  # Job 3b: STRICT-gate baseline (#45). AOT-compiles a stdlib-heavy smoke
+  # program with VERUM_STRICT_MONO + VERUM_STRICT_SIGNATURES so the two
+  # silent-degradation classes (mono fallback-to-unspecialized, arity-
+  # collision / skip-body forward declarations) are VISIBLE in CI on every
+  # push. Advisory (continue-on-error) until the drift backlog is zero —
+  # then remove `continue-on-error` to make it blocking, same lifecycle as
+  # the lint job below.
+  # ---------------------------------------------------------------------------
+  strict-gates:
+    name: STRICT gates (mono + signatures, advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: vcs-runner
+
+      - name: Build verum CLI
+        run: cargo build -p verum_cli --release --locked
+
+      - name: AOT smoke under STRICT gates
+        continue-on-error: true
+        env:
+          VERUM_STRICT_MONO: "1"
+          VERUM_STRICT_SIGNATURES: "1"
+          VERUM_NO_OBJECT_CACHE: "1"
+        run: |
+          cat > /tmp/strict_smoke.vr <<'EOF'
+          fn main() {
+              let xs: List<Int> = [3, 1, 2];
+              let total = xs.iter().fold(0, fn(acc: Int, x: Int) -> Int { acc + x });
+              let m: Maybe<Text> = Maybe.Some(f"total={total}");
+              match m {
+                  Maybe.Some(s) => print(s),
+                  Maybe.None => print("none"),
+              }
+          }
+          EOF
+          ./target/release/verum build /tmp/strict_smoke.vr
+
+  # ---------------------------------------------------------------------------
   # Job 4: Lint + format. Both rustfmt and clippy run advisory (visible in UI,
   # non-blocking) until Phase 3 of the production-readiness push lands the
   # one-shot reformat and eliminates the warning backlog. At that point remove

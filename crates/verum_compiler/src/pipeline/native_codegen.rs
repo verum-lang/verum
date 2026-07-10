@@ -177,6 +177,16 @@ impl<'s> CompilationPipeline<'s> {
                     std::sync::Arc::new(mono_module)
                 }
                 Err(diagnostics) => {
+                    // #45: VERUM_STRICT_MONO=1 (CI) turns the silent
+                    // fallback-to-unspecialized into a hard error so
+                    // monomorphization drift cannot pass a green build.
+                    if std::env::var("VERUM_STRICT_MONO").is_ok() {
+                        return Err(anyhow::anyhow!(
+                            "monomorphization failed under VERUM_STRICT_MONO ({} diagnostics): {:?}",
+                            diagnostics.len(),
+                            diagnostics
+                        ));
+                    }
                     // Log warnings but fall back to unspecialized module
                     for d in diagnostics.iter() {
                         warn!("Monomorphization warning: {:?}", d);
@@ -428,7 +438,13 @@ impl<'s> CompilationPipeline<'s> {
             );
             if super::aot_object_cache::bypassed(
                 self.session.options().lto,
-                self.session.options().emit_ir,
+                // Any non-Binary emit mode needs the LIVE LLVM module /
+                // target machine to produce its artifact (.ll/.bc/.s/.o
+                // next to the input) — a cache hit would skip the whole
+                // lowering leg and silently emit nothing (#45: the
+                // --emit-llvm flag was dead).
+                self.session.options().emit_ir
+                    || self.session.options().emit_mode != crate::options::EmitMode::Binary,
             ) {
                 None
             } else if !self.project_modules.is_empty() {
@@ -475,6 +491,34 @@ impl<'s> CompilationPipeline<'s> {
                 needs_metal
             }
         };
+
+        // #45: terminal emit modes (asm / obj) REPLACE the executable as
+        // the final pipeline artifact — short-circuit before runtime-stub
+        // generation and linking (the EmitMode::meta().is_terminal
+        // contract; LlvmIr/Bitcode emit *alongside* the binary and fall
+        // through).  The .s was written next to the input inside
+        // `lower_optimize_and_emit_object`; the .o is copied from the
+        // build dir here.
+        let emit_mode = self.session.options().emit_mode;
+        if emit_mode.meta().is_terminal && emit_mode != crate::options::EmitMode::Binary {
+            let artifact = self
+                .session
+                .options()
+                .input
+                .with_extension(emit_mode.meta().extension);
+            if emit_mode == crate::options::EmitMode::Object {
+                std::fs::copy(&obj_path, &artifact).with_context(|| {
+                    format!("Failed to copy object file to {}", artifact.display())
+                })?;
+            }
+            info!(
+                "Generated {} artifact: {} ({:.2}s)",
+                emit_mode.meta().name,
+                artifact.display(),
+                start.elapsed().as_secs_f64()
+            );
+            return Ok(artifact);
+        }
 
         // Runtime compilation: LLVM IR provides core runtime (allocator, text, etc.)
         // ALL runtime functions are now pure LLVM IR (platform_ir.rs + tensor_ir.rs + metal_ir.rs).
@@ -901,6 +945,21 @@ impl<'s> CompilationPipeline<'s> {
             // operands.
             let has_ir_issues = lowering.has_arity_collisions() || lowering.skip_body_count() > 0;
 
+            // #45: VERUM_STRICT_SIGNATURES=1 (CI) refuses to ship a
+            // module with signature drift.  Arity-collided / skip-body
+            // functions are forward-declared without bodies — the binary
+            // links but the calls resolve to garbage at runtime, and the
+            // degraded tiered pass pipeline masks the drift.  Strict mode
+            // makes the drift a build error so CI catches the class.
+            if has_ir_issues && std::env::var("VERUM_STRICT_SIGNATURES").is_ok() {
+                return Err(anyhow::anyhow!(
+                    "signature drift under VERUM_STRICT_SIGNATURES: \
+                     arity_collisions={}, skip_body_functions={}",
+                    lowering.has_arity_collisions(),
+                    lowering.skip_body_count(),
+                ));
+            }
+
             // Pass-pipeline STRING selection is hoisted into
             // `phase_generate_native` (it participates in the
             // object-cache key) and arrives via the `passes`
@@ -1121,6 +1180,46 @@ impl<'s> CompilationPipeline<'s> {
         target_machine
             .write_to_file(lowering.module(), FileType::Object, &obj_path)
             .map_err(|e| anyhow::anyhow!("Failed to write object file: {}", e))?;
+
+        // #45: consume `options.emit_mode` — the CLI parsed
+        // --emit-llvm/--emit-asm/--emit-bc into the enum but nothing in
+        // the pipeline ever read it, so every mode was silently dead.
+        // User-facing artifacts land NEXT TO THE INPUT (the emit_vbc
+        // convention), not in the build dir.  Runs on the live-module
+        // leg only; the object-cache bypass upstream guarantees non-
+        // Binary modes always reach here.
+        match self.session.options().emit_mode {
+            crate::options::EmitMode::LlvmIr => {
+                // Same file-writer path as the VERUM_DUMP_IR diagnostic
+                // above — LLVMPrintModuleToFile tolerates skip-body /
+                // arity-collision modules (unlike the get_ir() STRING
+                // printer, which has a TypeFinder SIGSEGV history and
+                // stays guarded).
+                let ll_path = self.session.options().input.with_extension("ll");
+                lowering
+                    .write_ir_to_file(&ll_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to write LLVM IR: {}", e))?;
+                info!("  Wrote LLVM IR: {}", ll_path.display());
+            }
+            crate::options::EmitMode::Bitcode => {
+                let bc_path = self.session.options().input.with_extension("bc");
+                if lowering.module().write_bitcode_to_path(&bc_path) {
+                    info!("  Wrote LLVM bitcode: {}", bc_path.display());
+                } else {
+                    warn!("Failed to write LLVM bitcode to {}", bc_path.display());
+                }
+            }
+            crate::options::EmitMode::Assembly => {
+                let asm_path = self.session.options().input.with_extension("s");
+                target_machine
+                    .write_to_file(lowering.module(), FileType::Assembly, &asm_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to write assembly: {}", e))?;
+                info!("  Wrote assembly: {}", asm_path.display());
+            }
+            // Object artifact is copied from the build dir by the caller's
+            // terminal short-circuit; Binary emits nothing extra.
+            crate::options::EmitMode::Object | crate::options::EmitMode::Binary => {}
+        }
 
         // Emit LLVM bitcode when LTO is enabled for cross-module optimization
         if self.session.options().lto {

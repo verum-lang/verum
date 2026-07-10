@@ -63,6 +63,7 @@ pub fn build(
     show_costs: bool,
     emit_vbc: bool,
     target_triple: Option<&str>,
+    emit_mode: verum_compiler::options::EmitMode,
 ) -> Result<(), CliError> {
     let start = std::time::Instant::now();
 
@@ -94,6 +95,7 @@ pub fn build(
         optimization_level: opt_level,
         output_format: OutputFormat::Human,
         emit_vbc,
+        emit_mode,
         language_features,
         target_triple: target_triple.map(|t| t.into()),
         ..Default::default()
