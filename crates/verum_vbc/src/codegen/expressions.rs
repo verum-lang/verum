@@ -22588,6 +22588,33 @@ impl VbcCodegen {
                 use verum_ast::expr::BinOp;
                 match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => {
+                        // Operator overloading (task #17): a NON-primitive
+                        // named operand makes the whole expression
+                        // non-primitive — the arms below must not claim
+                        // `Int` just because the OTHER operand is an Int
+                        // literal.  Pre-fix, `let halved = d / 2;`
+                        // (d: Duration) registered halved's VarTypeKind as
+                        // Int, and the follow-up `halved * 2` hit
+                        // compile_binary's primitive fast path — a raw
+                        // BinaryI Mul on the record POINTER.  Returning
+                        // None lets the NAME-based operator-method
+                        // dispatch decide.
+                        let overloaded_operand = |e: &Expr| -> bool {
+                            self.extract_expr_type_name(e)
+                                .map(|n| {
+                                    let base =
+                                        n.split('<').next().unwrap_or(&n).to_string();
+                                    !(verum_common::well_known_types::type_names::is_numeric_type(&base)
+                                        || base == "Bool"
+                                        || base == "Char"
+                                        || base == "Text"
+                                        || base == "Float")
+                                })
+                                .unwrap_or(false)
+                        };
+                        if overloaded_operand(left) || overloaded_operand(right) {
+                            return None;
+                        }
                         let left_kind = self.infer_expr_type_kind(left);
                         let right_kind = self.infer_expr_type_kind(right);
                         // If either is Float, result is Float
