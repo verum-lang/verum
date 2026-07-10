@@ -938,19 +938,37 @@ implement Eq for RecvError {
     }
 }
 
+// Identity Deref: field access through Shared<ChannelInner> lowers to
+// an explicit `ChannelInner.deref()` call in baked code; the identity
+// implementation satisfies it and hands back a correctly-typed
+// receiver for the subsequent field read.
+implement Deref for ChannelInner {
+    type Target is ChannelInner;
+
+    fn deref(&self) -> &ChannelInner {
+        self
+    }
+}
+
 // =============================================================================
 // Channel Constructors
 // =============================================================================
 
 // Create unbounded channel.
 public fn channel<T>() -> (Sender<T>, Receiver<T>) {
+    // Typed locals + mounted-name statics: the relative qualified form
+    // `sync.mutex.Mutex.new(Maybe.None as Maybe<Waker>)` mis-lowers at
+    // runtime (NPE inside the constructor) — cast-typed variant
+    // literals and relative module paths are both fragile here.
+    let no_waker: Maybe<Waker> = Maybe.None;
+    let no_wakers: List<Waker> = List.new();
     let inner = Shared.new(ChannelInner {
         queue: Deque.new(),
         capacity: Maybe.None,
         closed: AtomicBool.new(false),
         sender_count: AtomicInt.new(1),
-        receiver_waker: sync.mutex.Mutex.new(Maybe.None as Maybe<Waker>),
-        sender_wakers: sync.mutex.Mutex.new(List.new() as List<Waker>),
+        receiver_waker: Mutex.new(no_waker),
+        sender_wakers: Mutex.new(no_wakers),
         notify_seq: AtomicInt.new(0),
     });
 
@@ -961,13 +979,15 @@ public fn channel<T>() -> (Sender<T>, Receiver<T>) {
 public fn bounded<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
     assert(capacity > 0, "Channel capacity must be positive");
 
+    let no_waker: Maybe<Waker> = Maybe.None;
+    let no_wakers: List<Waker> = List.new();
     let inner = Shared.new(ChannelInner {
         queue: Deque.with_capacity(capacity),
         capacity: Maybe.Some(capacity),
         closed: AtomicBool.new(false),
         sender_count: AtomicInt.new(1),
-        receiver_waker: sync.mutex.Mutex.new(Maybe.None as Maybe<Waker>),
-        sender_wakers: sync.mutex.Mutex.new(List.new() as List<Waker>),
+        receiver_waker: Mutex.new(no_waker),
+        sender_wakers: Mutex.new(no_wakers),
         notify_seq: AtomicInt.new(0),
     });
 
