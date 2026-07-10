@@ -143,7 +143,7 @@ impl TypeChecker {
         };
         let ret = self.unifier.apply(&**return_type);
         let expanded = self.expand_generic_to_variant(&ret);
-        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+        if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] ctor_parent_from_expected_fn_return: name={:?} ret={:?} expanded_is_variant={}",
                 name,
@@ -174,7 +174,7 @@ impl TypeChecker {
     /// (`params.is_empty()` → no override). Returns None when `name` is not a
     /// registered payload constructor.
     fn bare_payload_ctor_as_fn(&self, name: &str, resolved_ty: &Type) -> Option<Type> {
-        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+        if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] bare_payload_ctor_as_fn: name={:?} resolved={:?} in_parents={}",
                 name,
@@ -557,7 +557,7 @@ impl TypeChecker {
                                 .join(", ");
                             let msg =
                                 format!("non-exhaustive patterns: `{}` not covered", witness_str);
-                            if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                            if crate::ctor_trace_enabled() {
                                 eprintln!(
                                     "[ctor-trace] E0601(check) scrut={:?} unresolved={}",
                                     resolved_scrut,
@@ -619,7 +619,7 @@ impl TypeChecker {
             {
                 let constructor_name = ident.name.as_str();
                 let resolved_expected = self.unifier.apply(expected);
-                if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                if crate::ctor_trace_enabled() {
                     eprintln!(
                         "[ctor-trace] bare-ctor CHECK arm: name={:?} expected={:?} in_parents={}",
                         constructor_name,
@@ -2543,7 +2543,7 @@ impl TypeChecker {
                 // in their unifier-applied forms — pinpoints which side
                 // carries a stale ctor instantiation
                 // (GENERIC-CTOR-FRESHNESS-1).
-                if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                if crate::ctor_trace_enabled() {
                     eprintln!(
                         "[ctor-trace] Assign unify: left={:?} right={:?}",
                         self.unifier.apply(left_ty),
@@ -4816,7 +4816,7 @@ impl TypeChecker {
                                         "non-exhaustive patterns: `{}` not covered",
                                         witness_str
                                     );
-                                    if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                                    if crate::ctor_trace_enabled() {
                                         eprintln!(
                                             "[ctor-trace] E0601(infer) scrut={:?} unresolved={}",
                                             resolved_scrut,

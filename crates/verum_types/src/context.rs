@@ -2005,7 +2005,7 @@ impl TypeContext {
         // definition with a DIFFERENT shape (e.g. an applied instance
         // replacing the template) poisons every later use of the type.
         // VERUM_TRACE_CTOR-gated diagnostic.
-        if std::env::var("VERUM_TRACE_CTOR").is_ok()
+        if crate::ctor_trace_enabled()
             && let Some(prev) = self.type_defs.get(&name)
             && matches!(prev, Type::Variant(_))
             && format!("{:?}", prev) != format!("{:?}", ty)

@@ -246,6 +246,16 @@ pub mod type_registry; // AST → Type mapping for codegen
 pub mod unify;
 pub mod variance;
 
+/// Cached gate for the `VERUM_TRACE_CTOR` diagnostics (template-var-capture
+/// forensics: TEMPLATE-PIN / TYPE-REDEFINE traps, bind log, ctor-arm traces).
+/// The env var is read ONCE per process — several of these diagnostics sit on
+/// the hottest unifier path (`bind_var`), where a per-call `env::var` lookup
+/// is a measurable cost.
+pub fn ctor_trace_enabled() -> bool {
+    static ONCE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ONCE.get_or_init(|| std::env::var("VERUM_TRACE_CTOR").is_ok())
+}
+
 // New features (Spec compliance)
 pub mod affine; // Spec 1.12: Affine type system
 pub mod aliasing; // Spec 4.2.3: Reference aliasing detection

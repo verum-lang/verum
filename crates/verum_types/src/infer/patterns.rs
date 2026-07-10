@@ -727,10 +727,43 @@ impl TypeChecker {
                 // resolves to a known variant type in scope, prefer the
                 // qualifier's variants — overrides the scrutinee-derived
                 // variant set.
-                if let Some(q) = qualifier_name {
-                    if let Option::Some(def_ty) = self.ctx.lookup_type(q) {
-                        if let Type::Variant(variants) = def_ty.clone() {
-                            expanded_ty = Type::Variant(variants);
+                //
+                // QUALIFIED-OVERRIDE GUARD (#41, the third capture door):
+                // the override exists to pick the RIGHT type's variants in
+                // multi-type contexts (`recover`), NOT to replace the
+                // scrutinee's correctly-substituted payloads. The raw
+                // type_defs entry is a REGISTRY VAR INSTANCE
+                // ({Left: Var(n), Right: Var(n+1)}); binding a pattern
+                // against it let the first concrete match pin those shared
+                // vars globally — `SelectResult<Int,Int>` then poisoned a
+                // later `SelectResult<Int,Text>` ("expected 'Text', found
+                // 'Int'"). Only take the override when the scrutinee-derived
+                // expansion is NOT already a variant set containing this
+                // pattern's tag; when it is, the scrutinee expansion is
+                // authoritative (its payloads carry the instance's own
+                // substituted types).
+                let scrutinee_has_tag = match &expanded_ty {
+                    Type::Variant(vs) => {
+                        let tag_name = path
+                            .segments
+                            .last()
+                            .and_then(|s| match s {
+                                verum_ast::ty::PathSegment::Name(id) => {
+                                    Some(id.name.as_str())
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or("");
+                        vs.keys().any(|k| k.as_str() == tag_name)
+                    }
+                    _ => false,
+                };
+                if !scrutinee_has_tag {
+                    if let Some(q) = qualifier_name {
+                        if let Option::Some(def_ty) = self.ctx.lookup_type(q) {
+                            if let Type::Variant(variants) = def_ty.clone() {
+                                expanded_ty = freshen_template_vars(&Type::Variant(variants));
+                            }
                         }
                     }
                 }
@@ -766,7 +799,7 @@ impl TypeChecker {
                             .unwrap_or("");
                         if let Option::Some(def_ty) = self.ctx.lookup_type(inner_type_name) {
                             if let Type::Variant(variants) = def_ty.clone() {
-                                expanded_ty = Type::Variant(variants);
+                                expanded_ty = freshen_template_vars(&Type::Variant(variants));
                             }
                         }
                     }
@@ -788,7 +821,7 @@ impl TypeChecker {
                         .unwrap_or("");
                     if let Option::Some(def_ty) = self.ctx.lookup_type(named_type_name) {
                         if let Type::Variant(variants) = def_ty.clone() {
-                            expanded_ty = Type::Variant(variants);
+                            expanded_ty = freshen_template_vars(&Type::Variant(variants));
                         }
                     }
                 }
@@ -798,7 +831,7 @@ impl TypeChecker {
                     // Look up the variant constructor
                     match variants.get(tag) {
                         Some(payload_ty) => {
-                            if std::env::var("VERUM_TRACE_CTOR").is_ok()
+                            if crate::ctor_trace_enabled()
                                 && (tag == "Right" || tag == "Left")
                             {
                                 eprintln!(
@@ -977,7 +1010,13 @@ impl TypeChecker {
                             _ => None,
                         });
                     if let Some(variant_ty) = direct {
-                        expanded_ty = variant_ty;
+                        // TEMPLATE-VAR-FRESHEN (#41 third door): the raw
+                        // `lookup_type` Variant carries the registry's shared
+                        // template vars; binding a payload against them lets
+                        // the FIRST concrete match pin the var process-wide
+                        // (e.g. SelectResult<Int,Int> pins T=Int, then a later
+                        // SelectResult<Int,Text> reads Int).  Freshen per use.
+                        expanded_ty = freshen_template_vars(&variant_ty);
                     } else {
                         // Fallback: `get_constructors` registry for
                         // stdlib types whose Variant payload lives in
@@ -1114,7 +1153,7 @@ impl TypeChecker {
                                 // Found a variant type - substitute type args and use it
                                 // For now, we'll use the variant directly (type args handled later)
                                 let _ = args; // Used below in substitution
-                                expanded_ty = Type::Variant(variants);
+                                expanded_ty = freshen_template_vars(&Type::Variant(variants));
                             }
                         }
                     }

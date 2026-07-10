@@ -4191,7 +4191,7 @@ impl TypeChecker {
         }
 
         let impl_blocks = self.find_impl_blocks_for_type(ast, type_name);
-        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+        if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] import_impl_blocks: type={:?} src={:?} blocks={}",
                 type_name,
@@ -4431,7 +4431,7 @@ impl TypeChecker {
                         };
 
                         // Collect for later registration (after scope exit)
-                        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                        if crate::ctor_trace_enabled() {
                             eprintln!(
                                 "[ctor-trace] import_impl_blocks: static reg {:?}",
                                 qualified_name
@@ -13398,7 +13398,7 @@ impl TypeChecker {
         name: &str,
         expected_arity: Option<usize>,
     ) -> Option<Type> {
-        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+        if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] try_resolve_variant_constructor_with_arity('{}', {:?})",
                 name, expected_arity
@@ -14479,7 +14479,7 @@ impl TypeChecker {
     /// `type_args` contains explicit type arguments for generic method calls like `obj.method<T>()`.
     #[allow(clippy::too_many_arguments)]
     fn infer_method_call_inner_impl_traced_entry(&self, receiver: &Expr, method: &Ident) {
-        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+        if crate::ctor_trace_enabled() {
             let recv = match &receiver.kind {
                 ExprKind::Path(p) => format!("{}", p),
                 other => format!("<{:?}>", std::mem::discriminant(other)),
@@ -14499,7 +14499,7 @@ impl TypeChecker {
         skip_static_lookup: bool,
     ) -> Result<InferResult> {
         self.infer_method_call_inner_impl_traced_entry(receiver, method);
-        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+        if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace]   skip_static_lookup={} precomputed={:?}",
                 skip_static_lookup,
@@ -14644,7 +14644,7 @@ impl TypeChecker {
                 if parent_matches {
                     if let Some(params) = params_opt {
                         if params.len() == args.len() {
-                            if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                            if crate::ctor_trace_enabled() {
                                 eprintln!(
                                     "[ctor-trace] qualified-ctor branch: {}.{} params={:?} return={:?}",
                                     recv_type_name, method.name, params, return_type,

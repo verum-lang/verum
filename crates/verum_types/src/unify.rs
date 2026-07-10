@@ -1416,7 +1416,7 @@ impl Unifier {
         // One choke point instead of instrumenting every Mismatch site.
         if self.unify_depth == 1
             && let Err(crate::TypeError::Mismatch { ref actual, .. }) = result
-            && std::env::var("VERUM_TRACE_CTOR").is_ok()
+            && crate::ctor_trace_enabled()
             && (actual.as_str() == "Some" || actual.as_str() == "Ok" || actual.as_str() == "Err")
         {
             eprintln!(
@@ -3233,13 +3233,27 @@ impl Unifier {
                                 });
                             }
 
+                            // TEMPLATE-VAR-CAPTURE (#41): same discipline as
+                            // the Generic↔Variant arm — extracted args may BE
+                            // template/registry vars when the actual variant
+                            // is unsubstituted; freshen them (one consistent
+                            // substitution) so a concrete match cannot bind
+                            // the registry copy globally.
+                            let mut freshen = Substitution::new();
+                            for ex in extracted_args.iter() {
+                                for v in ex.free_vars() {
+                                    if !freshen.contains_key(&v) {
+                                        freshen.insert(v, Type::Var(TypeVar::fresh()));
+                                    }
+                                }
+                            }
                             // Unify each Named arg with the corresponding extracted arg
                             let mut subst = Substitution::new();
                             for (named_arg, extracted_arg) in args.iter().zip(extracted_args.iter())
                             {
                                 let s = self.unify_inner(
                                     &named_arg.apply_subst(&subst),
-                                    &extracted_arg.apply_subst(&subst),
+                                    &extracted_arg.apply_subst(&freshen).apply_subst(&subst),
                                     span,
                                 )?;
                                 subst = subst.compose(&s);
@@ -4667,11 +4681,19 @@ impl Unifier {
             return Ok(Substitution::new());
         }
 
+        // FULL BIND LOG (#41 door-3): under the ctor trace, log every var
+        // binding compactly so redefine-instance var ids (from the
+        // TYPE-REDEFINE trap) can be joined against their binding sites in a
+        // single run.
+        if crate::ctor_trace_enabled() {
+            eprintln!("[ctor-trace] bind v{} := {:?}", var.id(), ty);
+        }
+
         // TEMPLATE-PIN TRAP (#41): binding a var that BELONGS to a registered
         // type's declaration (type_var_orders) pins the TEMPLATE globally —
         // always a bug upstream (a registry template leaked into unification
         // unfreshened). Gated diagnostic to locate the leaking door.
-        if std::env::var("VERUM_TRACE_CTOR").is_ok()
+        if crate::ctor_trace_enabled()
             && self
                 .type_var_orders
                 .iter()
