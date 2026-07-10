@@ -16448,17 +16448,13 @@ impl VbcCodegen {
     }
 
     /// Interns a string and returns its ID.
+    ///
+    /// Delegates to the context's interning authority — this was an
+    /// O(n) linear-scan duplicate that bypassed both the intern map
+    /// and the ARCH-P2 dice tracing (`VERUM_TRACE_STRDICE`); every
+    /// string-table entry must flow through ONE door.
     fn intern_string(&mut self, s: &str) -> u32 {
-        // Check if already interned
-        for (i, existing) in self.ctx.strings.iter().enumerate() {
-            if existing == s {
-                return i as u32;
-            }
-        }
-
-        let id = self.ctx.strings.len() as u32;
-        self.ctx.strings.push(s.to_string());
-        id
+        self.ctx.intern_string_raw(s)
     }
 
     /// Walk every emitted function's instruction stream collecting
@@ -16728,6 +16724,35 @@ impl VbcCodegen {
     /// **Pin**: `finalize_module_from_state` (stdlib bootstrap) calls
     /// this with `include_callm=false`; `finalize_module` (user
     /// compile) calls the unconditional variant via the alias above.
+    /// ARCH-P2 canonical id→name choice, shared by EVERY site that picks
+    /// one serialized name for a FunctionId out of its `ctx.functions`
+    /// key set (stub descriptors, `external_function_names`, const
+    /// force-emission). HashMap walk order is per-process, so any
+    /// first-seen/tie-kept choice is a bake dice — this comparator is a
+    /// TOTAL ORDER over the key set (order-free by construction):
+    ///   1. more dots wins (most-qualified — the identity-bearing form,
+    ///      and the trailing segment recovers the canonical bare name);
+    ///   2. equal dots: a non-`#` spelling beats a `name#arity` mirror
+    ///      (dice-9: `#` is kept ONLY when it's the sole spelling);
+    ///   3. still tied: lexicographically smallest.
+    /// Byte-diff evidence: `on_signal` vs `on_signal#2`,
+    /// `restore_interrupts` vs `restore_interrupts#1` flipped per bake in
+    /// module string tables via the equal-dots tie falling through to
+    /// first-seen (both spellings have zero dots).
+    fn canonical_name_better(new: &str, cur: &str) -> bool {
+        let nd = new.matches('.').count();
+        let cd = cur.matches('.').count();
+        if nd != cd {
+            return nd > cd;
+        }
+        let nh = new.contains('#');
+        let ch = cur.contains('#');
+        if nh != ch {
+            return !nh;
+        }
+        new < cur
+    }
+
     fn emit_missing_stub_descriptors_with_callm(&mut self, include_callm: bool) {
         use std::collections::{HashMap, HashSet};
         // 1. Collect referenced FunctionIds from emitted bytecode.
@@ -16775,6 +16800,7 @@ impl VbcCodegen {
         // collapses the work to O(N_referenced) typical few-tens —
         // most `ctx.functions` entries never get called by user code
         // and don't need a stub at all.
+        let canonically_better = Self::canonical_name_better;
         let mut id_to_name: HashMap<u32, String> = HashMap::new();
         for (name, info) in self.ctx.functions.iter() {
             // Skip sentinel-id entries (FFI extern, newtype ctor —
@@ -16809,9 +16835,7 @@ impl VbcCodegen {
             id_to_name
                 .entry(info.id.0)
                 .and_modify(|existing| {
-                    let existing_dots = existing.matches('.').count();
-                    let new_dots = name.matches('.').count();
-                    if new_dots > existing_dots {
+                    if canonically_better(name, existing) {
                         *existing = name.clone();
                     }
                 })
@@ -16847,6 +16871,11 @@ impl VbcCodegen {
             referenced.insert(info.id.0);
             id_to_name
                 .entry(info.id.0)
+                .and_modify(|existing| {
+                    if canonically_better(name, existing) {
+                        *existing = name.clone();
+                    }
+                })
                 .or_insert_with(|| name.clone());
         }
         for id in referenced {
@@ -16864,6 +16893,21 @@ impl VbcCodegen {
                 Some(i) => i.clone(),
                 None => continue,
             };
+            if let Ok(m) = std::env::var("VERUM_TRACE_STRDICE")
+                && !m.is_empty() && name.contains(&m)
+            {
+                let keys: Vec<&String> = self
+                    .ctx
+                    .functions
+                    .iter()
+                    .filter(|(_, i)| i.id.0 == id)
+                    .map(|(k, _)| k)
+                    .collect();
+                eprintln!(
+                    "[strdice-stub/id] id={} chosen={:?} keys-of-id={:?} module={:?}",
+                    id, name, keys, self.config.module_name
+                );
+            }
             // Use the QUALIFIED name as descriptor.name when ctx
             // tracks one — `find_function_by_name`/`_by_unique_bare_suffix`
             // both honour `.suffix` matching against fully-qualified
@@ -17027,6 +17071,42 @@ impl VbcCodegen {
             }
             idx
         };
+        // ARCH-P2 canonical stub naming: the serialized stub NAME for a
+        // FunctionId used to be whichever ctx.functions KEY the bucket
+        // walk met first for that id — bare vs `name#arity` vs qualified
+        // flipped with registration arrival order (rayon feeds the
+        // parallel bake in completion order), which flipped the string
+        // table and thus the bake bytes (`on_signal` vs `on_signal#2`,
+        // `restore_interrupts` vs `restore_interrupts#1`, one of the
+        // `sys_close` cfg-twins gaining an extra key…). Choose the name
+        // by a RANKED rule over the id's full key SET instead — order-
+        // free by construction:
+        //   rank 0: source-qualified (dotted) — the identity-bearing form
+        //   rank 1: bare simple name
+        //   rank 2: `name#arity` mirror — kept ONLY when it is the id's
+        //           sole spelling (dice-9: the arity spelling is load-
+        //           bearing for ids that have no other key; ids that DO
+        //           have a dotted/bare key resolved fine under either
+        //           spelling historically, so collapsing to the ranked
+        //           winner is runtime-neutral there).
+        //   ties within a rank: lexicographically smallest key.
+        let canonical_stub_name: HashMap<u32, String> = {
+            let mut best: HashMap<u32, &String> = HashMap::new();
+            for (name, info) in self.ctx.functions.iter() {
+                if info.id.0 >= SENTINEL_THRESHOLD {
+                    continue;
+                }
+                match best.get(&info.id.0) {
+                    Some(cur) if !canonically_better(name, cur) => {}
+                    _ => {
+                        best.insert(info.id.0, name);
+                    }
+                }
+            }
+            best.into_iter()
+                .map(|(id, name)| (id, name.clone()))
+                .collect()
+        };
         // ARCHIVE-SERIALIZE-DETERMINISM-1: HashSet walk order is
         // per-process; sort ids so stub emission order is bake-stable.
         let mut method_names: Vec<u32> = method_names.into_iter().collect();
@@ -17097,7 +17177,28 @@ impl VbcCodegen {
                 if !stub_synthesised.insert(info.id.0) {
                     continue;
                 }
-                let name_id = StringId(self.ctx.intern_string_raw(&qualified_name));
+                // Canonical name (ranked over the id's key set) — NOT the
+                // bucket-walk key, which is arrival-order-dependent.
+                let stub_name = canonical_stub_name
+                    .get(&info.id.0)
+                    .cloned()
+                    .unwrap_or(qualified_name);
+                if let Ok(m) = std::env::var("VERUM_TRACE_STRDICE")
+                    && !m.is_empty() && stub_name.contains(&m)
+                {
+                    let keys: Vec<&String> = self
+                        .ctx
+                        .functions
+                        .iter()
+                        .filter(|(_, i)| i.id.0 == info.id.0)
+                        .map(|(k, _)| k)
+                        .collect();
+                    eprintln!(
+                        "[strdice-stub/callm] id={} chosen={:?} keys-of-id={:?} module={:?}",
+                        info.id.0, stub_name, keys, self.config.module_name
+                    );
+                }
+                let name_id = StringId(self.ctx.intern_string_raw(&stub_name));
                 let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
                 descriptor.id = info.id;
                 descriptor.register_count = 1;
@@ -17948,14 +18049,12 @@ impl VbcCodegen {
                 ctx_id_to_name
                     .entry(info.id.0)
                     .and_modify(|existing| {
-                        // Prefer the longest dotted (qualified) name —
-                        // canonical form for cross-module lookup at
-                        // user-side merge. Mirrors
-                        // `emit_missing_stub_descriptors`'s longest-wins
-                        // tie-break.
-                        let existing_dots = existing.matches('.').count();
-                        let new_dots = name.matches('.').count();
-                        if new_dots > existing_dots {
+                        // Canonical ranked choice (see canonical_name_better):
+                        // the previous dots-only rule left EQUAL-dot ties
+                        // (bare vs `name#arity`, both zero dots) to HashMap
+                        // walk order — the `on_signal`/`on_signal#2` byte
+                        // dice in every module's external-name table.
+                        if Self::canonical_name_better(name, existing) {
                             *existing = name.clone();
                         }
                     })

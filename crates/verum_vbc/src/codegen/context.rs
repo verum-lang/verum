@@ -1866,6 +1866,24 @@ impl CodegenContext {
         if let Some(&id) = self.string_intern.get(value) {
             id
         } else {
+            // ARCH-P2 dice tracing: VERUM_TRACE_STRDICE=<substr> prints
+            // provenance for the FIRST intern of any matching string —
+            // byte-diff localization of nondeterministic bakes ends at
+            // a string-table delta; this names the interning code path.
+            {
+                static MARKER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+                if let Some(m) = MARKER.get_or_init(|| std::env::var("VERUM_TRACE_STRDICE").ok())
+                    && !m.is_empty() && value.contains(m.as_str())
+                {
+                    let bt = std::backtrace::Backtrace::force_capture().to_string();
+                    let frames: Vec<&str> = bt
+                        .lines()
+                        .filter(|l| l.contains("verum_"))
+                        .take(12)
+                        .collect();
+                    eprintln!("[strdice] intern {:?}\n{}", value, frames.join("\n"));
+                }
+            }
             let id = self.strings.len() as u32;
             self.strings.push(value.to_string());
             self.string_intern.insert(value.to_string(), id);
@@ -1875,15 +1893,9 @@ impl CodegenContext {
 
     /// Adds a string constant and returns its ID.
     pub fn add_const_string(&mut self, value: &str) -> ConstId {
-        // Intern the string
-        let string_id = if let Some(&id) = self.string_intern.get(value) {
-            id
-        } else {
-            let id = self.strings.len() as u32;
-            self.strings.push(value.to_string());
-            self.string_intern.insert(value.to_string(), id);
-            id
-        };
+        // Single interning authority — was a duplicated inline copy of
+        // intern_string_raw (drift risk + bypassed the dice tracing).
+        let string_id = self.intern_string_raw(value);
 
         // Check for existing string constant
         for (i, c) in self.constants.iter().enumerate() {
