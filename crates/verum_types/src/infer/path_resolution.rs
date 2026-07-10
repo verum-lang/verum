@@ -983,6 +983,22 @@ impl TypeChecker {
                 }
 
                 if !found && is_last {
+                    // STATIC-OVER-MODULE-ITEM (#40): a selectively-imported
+                    // TYPE can be registered as an inline module too
+                    // (`mount core.base.result.{Validated}`), so
+                    // `Validated.valid(42)` routes HERE — and the item scan
+                    // above only sees the module stub's AST items, never the
+                    // impl-block statics that import_impl_blocks_for_type
+                    // registered in env under the QUALIFIED key
+                    // ("Validated.valid"). Pre-fix this arm raised
+                    // `unbound variable: valid` and every static on such a
+                    // type was unreachable (base/result: 166 failures).
+                    // Before erroring, consult the qualified env scheme —
+                    // exactly Strategy 3's discipline.
+                    let qualified = segments.join(".");
+                    if let Some(scheme) = self.ctx.env.lookup(qualified.as_str()) {
+                        return Ok(InferResult::new(scheme.instantiate()));
+                    }
                     return Err(TypeError::UnboundVariable {
                         name: verum_common::Text::from(segment_name),
                         span,
@@ -1041,8 +1057,39 @@ impl TypeChecker {
                     // and `x` is a field, not a module path.
                     let name = ident.name.as_str();
                     if self.ctx.env.lookup(name).is_some() {
-                        // First segment is a variable - convert path to field access chain
-                        return self.resolve_variable_field_access(path, span);
+                        // STATIC-OVER-FIELD (#40): the first segment being an
+                        // env binding does NOT always mean variable-field
+                        // access. A selectively-imported TYPE name lands in
+                        // env too (`mount core.base.result.{Validated}` binds
+                        // "Validated"), and its impl-block statics are
+                        // registered under the QUALIFIED key
+                        // ("Validated.valid"). Pre-fix, `Validated.valid(42)`
+                        // took the field-access branch and died with
+                        // `unbound variable: valid` before Strategy 3's
+                        // qualified env lookup could fire — every static on a
+                        // selectively-imported sum type was unreachable
+                        // (base/result: 166 failures). When the full
+                        // qualified path IS a registered env scheme, prefer
+                        // it; a genuine variable (`p.x.y`) never has a
+                        // qualified "p.x.y" env key, so field access is
+                        // unaffected.
+                        let qualified = path
+                            .segments
+                            .iter()
+                            .filter_map(|s| {
+                                if let PathSegment::Name(id) = s {
+                                    Some(id.name.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(".");
+                        if self.ctx.env.lookup(qualified.as_str()).is_none() {
+                            // First segment is a variable - convert path to field access chain
+                            return self.resolve_variable_field_access(path, span);
+                        }
+                        // fall through: Strategy 3 resolves the qualified static
                     }
 
                     // Check if first segment is an inline module

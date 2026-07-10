@@ -4138,6 +4138,14 @@ impl TypeChecker {
         }
 
         let impl_blocks = self.find_impl_blocks_for_type(ast, type_name);
+        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+            eprintln!(
+                "[ctor-trace] import_impl_blocks: type={:?} src={:?} blocks={}",
+                type_name,
+                source_module_path,
+                impl_blocks.len()
+            );
+        }
 
         // #[cfg(debug_assertions)]
         // eprintln!(
@@ -4370,6 +4378,12 @@ impl TypeChecker {
                         };
 
                         // Collect for later registration (after scope exit)
+                        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                            eprintln!(
+                                "[ctor-trace] import_impl_blocks: static reg {:?}",
+                                qualified_name
+                            );
+                        }
                         static_method_registrations.push((qualified_name.clone(), method_scheme));
 
                         tracing::debug!(
