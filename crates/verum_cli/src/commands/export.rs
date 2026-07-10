@@ -597,7 +597,22 @@ fn extract_simple_proof_body(body: &Maybe<verum_ast::ProofBody>) -> Option<Simpl
             // assistants don't understand `super.` qualifiers; the
             // basename suffices because the corpus uses globally
             // unique theorem names.
-            let lemma_text = Text::from(strip_module_qualifier(format_expr(lemma).as_str()));
+            //
+            // The lemma expression may pretty-print as a full call —
+            // `msfs_theorem_5_1_afnt_alpha(candidate)` — when the AST
+            // models `apply f(x)` as Apply{lemma: Call(f, x)}. Verum
+            // call syntax is not valid in any target assistant, so
+            // truncate at the first '(' and keep only the name; the
+            // argument identifiers are Verum-side witnesses that do
+            // not exist in the statement-level certificate anyway.
+            let lemma_raw = format_expr(lemma);
+            let lemma_name = lemma_raw
+                .as_str()
+                .split('(')
+                .next()
+                .unwrap_or(lemma_raw.as_str())
+                .trim();
+            let lemma_text = Text::from(strip_module_qualifier(lemma_name));
             let arg_texts: Vec<Text> = args
                 .iter()
                 .map(|a| Text::from(strip_module_qualifier(format_expr(a).as_str())))
@@ -609,6 +624,25 @@ fn extract_simple_proof_body(body: &Maybe<verum_ast::ProofBody>) -> Option<Simpl
         }
         _ => Some(SimpleProofBody::Other),
     }
+}
+
+
+/// Comment-safe rendering of interpolated metadata (theorem names,
+/// framework citations, paths) for block-comment formats. A citation
+/// like `T-2f**)` contains `*)` and closes a Coq comment early
+/// (observed: "illegal begin of vernac" on the Diakrisis 136.T
+/// citation); Dedukti's `(; … ;)` has the same failure mode with
+/// `;)`. Newlines are flattened for the line-comment formats too.
+fn comment_safe_coq(s: &str) -> String {
+    s.replace("*)", "* )").replace("(*", "( *").replace('\n', " ")
+}
+
+fn comment_safe_dedukti(s: &str) -> String {
+    s.replace(";)", "; )").replace("(;", "( ;").replace('\n', " ")
+}
+
+fn comment_safe_line(s: &str) -> String {
+    s.replace('\n', " ")
 }
 
 /// Strip a Verum relative-mount qualifier from a name expression so
@@ -673,8 +707,8 @@ fn coq_body_for_proof(proof: &Option<SimpleProofBody>) -> String {
 // then the CoreTerm path , then admitted fallback.
 // -----------------------------------------------------------------------------
 
-fn lean_body_for_decl(d: &Declaration) -> String {
-    if let Some(body) = lean_body_from_simple(&d.proof_body) {
+fn lean_body_for_decl(d: &Declaration, emitted: &std::collections::HashSet<String>) -> String {
+    if let Some(body) = lean_body_from_simple(&d.proof_body, emitted) {
         return body;
     }
     if let Some(t) = &d.core_proof {
@@ -689,8 +723,8 @@ fn lean_body_for_decl(d: &Declaration) -> String {
     String::from(":= sorry")
 }
 
-fn coq_body_for_decl(d: &Declaration) -> String {
-    if let Some(body) = coq_body_from_simple(&d.proof_body) {
+fn coq_body_for_decl(d: &Declaration, emitted: &std::collections::HashSet<String>) -> String {
+    if let Some(body) = coq_body_from_simple(&d.proof_body, emitted) {
         return body;
     }
     if let Some(t) = &d.core_proof {
@@ -716,8 +750,8 @@ fn agda_body_for_decl(d: &Declaration) -> String {
     String::from("= ?")
 }
 
-fn dedukti_body_for_decl(d: &Declaration) -> String {
-    if let Some(body) = dedukti_body_from_simple(&d.proof_body) {
+fn dedukti_body_for_decl(d: &Declaration, emitted: &std::collections::HashSet<String>) -> String {
+    if let Some(body) = dedukti_body_from_simple(&d.proof_body, emitted) {
         return body;
     }
     if let Some(t) = &d.core_proof {
@@ -750,29 +784,50 @@ fn metamath_body_for_decl(d: &Declaration) -> String {
 /// SimpleApply → Lean body (extracted from `lean_body_for_proof` so
 /// it can be composed with the V2 CoreTerm path). Returns `None`
 /// when SimpleApply isn't applicable.
-fn lean_body_from_simple(proof: &Option<SimpleProofBody>) -> Option<String> {
-    if let Some(SimpleProofBody::SimpleApply { lemma, args }) = proof {
-        let mut s = String::from(":= ");
-        s.push_str(lemma.as_str());
-        for a in args {
-            s.push(' ');
-            s.push_str(a.as_str());
+fn lean_body_from_simple(
+    proof: &Option<SimpleProofBody>,
+    emitted: &std::collections::HashSet<String>,
+) -> Option<String> {
+    if let Some(SimpleProofBody::SimpleApply { lemma, args: _ }) = proof {
+        // Statement-level Prop scaffold: the referenced lemma is
+        // itself `: Prop`, so a bare term reference discharges the
+        // goal. Verum argument identifiers don't exist in the
+        // certificate and are dropped. Lean 4 also rejects forward
+        // references, so a not-yet-emitted lemma degrades to `sorry`
+        // with the provenance kept in a comment.
+        let target = mangle(lemma);
+        if emitted.contains(&target) {
+            return Some(format!(":= {}", target));
         }
-        return Some(s);
+        return Some(format!(
+            ":= sorry -- via {} (forward reference at statement level)",
+            target
+        ));
     }
     None
 }
 
-fn coq_body_from_simple(proof: &Option<SimpleProofBody>) -> Option<String> {
-    if let Some(SimpleProofBody::SimpleApply { lemma, args }) = proof {
-        let mut s = String::from("Proof. apply ");
-        s.push_str(lemma.as_str());
-        for a in args {
-            s.push(' ');
-            s.push_str(a.as_str());
+/// SimpleApply → Coq body. Every exported statement is the `Prop`
+/// scaffold `Theorem X : Prop.`, so the referenced lemma (itself of
+/// type `Prop`) discharges the goal by `exact` — `apply` with Verum
+/// argument identifiers is neither valid Coq nor meaningful at
+/// statement level. `emitted` guards declaration order: Coq rejects
+/// forward references, so a lemma not yet emitted in this file
+/// degrades to an `Admitted.` scaffold that keeps the provenance in
+/// a comment instead of failing `coqc` outright.
+fn coq_body_from_simple(
+    proof: &Option<SimpleProofBody>,
+    emitted: &std::collections::HashSet<String>,
+) -> Option<String> {
+    if let Some(SimpleProofBody::SimpleApply { lemma, args: _ }) = proof {
+        let target = mangle(lemma);
+        if emitted.contains(&target) {
+            return Some(format!("Proof. exact {}. Qed.", target));
         }
-        s.push_str(". Qed.");
-        return Some(s);
+        return Some(format!(
+            "(* via {} — forward reference at statement level *)\nAdmitted.",
+            target
+        ));
     }
     None
 }
@@ -790,16 +845,23 @@ fn agda_body_from_simple(proof: &Option<SimpleProofBody>) -> Option<String> {
     None
 }
 
-fn dedukti_body_from_simple(proof: &Option<SimpleProofBody>) -> Option<String> {
-    if let Some(SimpleProofBody::SimpleApply { lemma, args }) = proof {
-        // Dedukti term-mode application: lemma applied to args.
-        let mut s = String::from(":= ");
-        s.push_str(lemma.as_str());
-        for a in args {
-            s.push(' ');
-            s.push_str(a.as_str());
+fn dedukti_body_from_simple(
+    proof: &Option<SimpleProofBody>,
+    emitted: &std::collections::HashSet<String>,
+) -> Option<String> {
+    if let Some(SimpleProofBody::SimpleApply { lemma, args: _ }) = proof {
+        // Dedukti is strictly declare-before-use and the certificate
+        // carries only this corpus's declarations — a lemma that is
+        // not (yet) in the file (stdlib-side name or forward
+        // reference) cannot be referenced; the caller then emits the
+        // bare statement form. Verum argument identifiers do not
+        // exist in the certificate and are dropped (statement-level
+        // Prop scaffold, same as the Coq/Lean lowerings).
+        let target = mangle(lemma);
+        if emitted.contains(&target) {
+            return Some(format!(":= {}", target));
         }
-        return Some(s);
+        return None;
     }
     None
 }
@@ -1057,6 +1119,11 @@ fn emit_dedukti(
     out.push_str("Prop : Type.\n\n");
 
     let by_framework = group_by_framework(decls);
+    // Declare-before-use tracking (same as emit_coq/emit_lean):
+    // Dedukti rejects references to names not yet declared in the
+    // file, and stdlib-side lemma names are not in the certificate
+    // at all — such theorems fall back to the bare statement form.
+    let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (framework_key, group) in &by_framework {
         if let Some(fw) = framework_key {
             out.push_str(&format!("(; ---- framework: {} ---- ;)\n", fw.as_str()));
@@ -1068,8 +1135,8 @@ fn emit_dedukti(
                 out.push_str(&format!(
                     "(; {} — {} — {} :: {} ;)\n",
                     d.kind,
-                    fw.name.as_str(),
-                    fw.citation.as_str(),
+                    comment_safe_dedukti(fw.name.as_str()),
+                    comment_safe_dedukti(fw.citation.as_str()),
                     d.source.display(),
                 ));
             } else {
@@ -1082,6 +1149,7 @@ fn emit_dedukti(
             match d.kind {
                 "axiom" => {
                     out.push_str(&format!("{} : Prop.\n\n", mangle(&d.name)));
+                    emitted.insert(mangle(&d.name));
                 }
                 _ => {
                     // V2 decision tree:
@@ -1091,7 +1159,7 @@ fn emit_dedukti(
                     let proof = replay_or_admitted(replay_registry, "dedukti", d, "(; admitted ;)");
                     if proof.starts_with("(;") {
                         // No replay hit; try V2 decl-aware path.
-                        let v2_body = dedukti_body_for_decl(d);
+                        let v2_body = dedukti_body_for_decl(d, &emitted);
                         if v2_body.is_empty() {
                             out.push_str(&format!("{} : Prop. {}\n\n", mangle(&d.name), proof));
                         } else {
@@ -1101,9 +1169,11 @@ fn emit_dedukti(
                                 v2_body
                             ));
                         }
+                        emitted.insert(mangle(&d.name));
                     } else {
                         // Lowered λΠ-term — emit as a `def`.
                         out.push_str(&format!("def {} : Prop := {}.\n\n", mangle(&d.name), proof));
+                        emitted.insert(mangle(&d.name));
                     }
                 }
             }
@@ -1163,6 +1233,10 @@ fn emit_coq(
     emit_coq_imports(decls, &mut out);
 
     let by_framework = group_by_framework(decls);
+    // Declaration-order tracking for the SimpleApply lowering: Coq
+    // rejects forward references, so `exact <lemma>` is emitted only
+    // for lemmas already present earlier in this file.
+    let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (framework_key, group) in &by_framework {
         if let Some(fw) = framework_key {
             out.push_str(&format!("(* ==== framework: {} ==== *)\n", fw.as_str()));
@@ -1174,14 +1248,15 @@ fn emit_coq(
                 out.push_str(&format!(
                     "(* {} — {} — {} :: {} *)\n",
                     d.kind,
-                    fw.name.as_str(),
-                    fw.citation.as_str(),
+                    comment_safe_coq(fw.name.as_str()),
+                    comment_safe_coq(fw.citation.as_str()),
                     d.source.display(),
                 ));
             }
             match d.kind {
                 "axiom" => {
                     out.push_str(&format!("Axiom {} : Prop.\n\n", mangle(&d.name)));
+                    emitted.insert(mangle(&d.name));
                 }
                 _ => {
                     // Three-step decision (M0.D Phase 1.5, mirror of
@@ -1193,13 +1268,14 @@ fn emit_coq(
                     let proof_body = if replayed != "Proof. Admitted." {
                         replayed
                     } else {
-                        coq_body_for_decl(d)
+                        coq_body_for_decl(d, &emitted)
                     };
                     out.push_str(&format!(
                         "Theorem {} : Prop.\n{}\n\n",
                         mangle(&d.name),
                         proof_body
                     ));
+                    emitted.insert(mangle(&d.name));
                 }
             }
         }
@@ -1354,6 +1430,9 @@ fn emit_lean(
     }
 
     let by_framework = group_by_framework(decls);
+    // Same declaration-order tracking as emit_coq: Lean 4 rejects
+    // forward references at term level.
+    let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (framework_key, group) in &by_framework {
         if let Some(fw) = framework_key {
             out.push_str(&format!("-- ==== framework: {} ====\n", fw.as_str()));
@@ -1365,14 +1444,15 @@ fn emit_lean(
                 out.push_str(&format!(
                     "-- {} — {} — {} :: {}\n",
                     d.kind,
-                    fw.name.as_str(),
-                    fw.citation.as_str(),
+                    comment_safe_line(fw.name.as_str()),
+                    comment_safe_line(fw.citation.as_str()),
                     d.source.display(),
                 ));
             }
             match d.kind {
                 "axiom" => {
                     out.push_str(&format!("axiom {} : Prop\n\n", mangle(&d.name)));
+                    emitted.insert(mangle(&d.name));
                 }
                 _ => {
                     // Three-step decision (M0.D Phase 1.5):
@@ -1393,9 +1473,13 @@ fn emit_lean(
                         // No cert; route through the V2 decl-aware
                         // body emitter — SimpleApply (M0.D) → CoreTerm
                         // lower (M-EXPORT V2) → `:= sorry`.
-                        lean_body_for_decl(d)
+                        lean_body_for_decl(d, &emitted)
                     };
-                    out.push_str(&format!("theorem {} : Prop {}\n\n", mangle(&d.name), body));
+                    // Lean 4 rejects `theorem X : Prop := …` — a theorem's
+                    // TYPE must itself be a proposition, and `Prop` is a
+                    // Sort. Statement-level scaffolds therefore emit `def`.
+                    out.push_str(&format!("def {} : Prop {}\n\n", mangle(&d.name), body));
+                    emitted.insert(mangle(&d.name));
                 }
             }
         }
@@ -1492,8 +1576,8 @@ fn emit_agda(
                 out.push_str(&format!(
                     "-- {} — {} — {} :: {}\n",
                     d.kind,
-                    fw.name.as_str(),
-                    fw.citation.as_str(),
+                    comment_safe_line(fw.name.as_str()),
+                    comment_safe_line(fw.citation.as_str()),
                     d.source.display(),
                 ));
             }
@@ -2160,7 +2244,7 @@ mod format_tests {
     #[test]
     fn lean_body_for_decl_uses_core_proof_when_simple_apply_absent() {
         let d = decl_with_core_proof();
-        let body = lean_body_for_decl(&d);
+        let body = lean_body_for_decl(&d, &std::collections::HashSet::new());
         // V2 path: lower the CoreTerm via proof_export::lean.
         assert!(
             body.contains("fun (x : Nat) => x"),
@@ -2172,7 +2256,7 @@ mod format_tests {
     #[test]
     fn coq_body_for_decl_uses_core_proof_when_simple_apply_absent() {
         let d = decl_with_core_proof();
-        let body = coq_body_for_decl(&d);
+        let body = coq_body_for_decl(&d, &std::collections::HashSet::new());
         assert!(
             body.contains("fun (x : Nat) => x"),
             "coq V2 body must contain lowered lambda; got {body:?}"
@@ -2196,7 +2280,7 @@ mod format_tests {
     #[test]
     fn dedukti_body_for_decl_uses_core_proof_when_simple_apply_absent() {
         let d = decl_with_core_proof();
-        let body = dedukti_body_for_decl(&d);
+        let body = dedukti_body_for_decl(&d, &std::collections::HashSet::new());
         assert!(
             body.contains("x : Nat => x"),
             "dedukti V2 body must contain λΠ-form lowered term; got {body:?}"
@@ -2229,8 +2313,8 @@ mod format_tests {
             proof_body: None,
             core_proof: None,
         };
-        assert_eq!(lean_body_for_decl(&d), ":= sorry");
-        assert_eq!(coq_body_for_decl(&d), "Admitted.");
+        assert_eq!(lean_body_for_decl(&d, &std::collections::HashSet::new()), ":= sorry");
+        assert_eq!(coq_body_for_decl(&d, &std::collections::HashSet::new()), "Admitted.");
         assert_eq!(agda_body_for_decl(&d), "= ?");
         assert_eq!(dedukti_body_for_decl(&d), "");
         assert_eq!(metamath_body_for_decl(&d), "");
@@ -2252,7 +2336,7 @@ mod format_tests {
             }),
             core_proof: Some(id_lam_core()),
         };
-        let body = lean_body_for_decl(&d);
+        let body = lean_body_for_decl(&d, &std::collections::HashSet::new());
         assert_eq!(body, ":= trivial");
         // Make sure the V2 lambda did NOT leak through.
         assert!(!body.contains("fun"));
@@ -2275,8 +2359,8 @@ mod format_tests {
                 "<unsupported-expr>",
             ))),
         };
-        assert_eq!(lean_body_for_decl(&d), ":= sorry");
-        assert_eq!(coq_body_for_decl(&d), "Admitted.");
+        assert_eq!(lean_body_for_decl(&d, &std::collections::HashSet::new()), ":= sorry");
+        assert_eq!(coq_body_for_decl(&d, &std::collections::HashSet::new()), "Admitted.");
         assert_eq!(agda_body_for_decl(&d), "= ?");
         assert_eq!(dedukti_body_for_decl(&d), "");
         assert_eq!(metamath_body_for_decl(&d), "");

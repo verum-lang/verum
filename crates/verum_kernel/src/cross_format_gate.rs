@@ -78,6 +78,18 @@ impl ExportFormat {
         }
     }
 
+    /// Certificate directory name under `certificates/`. Matches
+    /// `verum export` output layout: the Lean backend writes
+    /// `certificates/lean/` (not `lean4/`) — pre-fix the audit
+    /// joined `name()` and scanned an empty `certificates/lean4/`,
+    /// reporting 0 files for a format that was in fact exported.
+    pub fn certs_dir_name(self) -> &'static str {
+        match self {
+            ExportFormat::Lean4 => "lean",
+            other => other.name(),
+        }
+    }
+
     /// File extension produced by this format.
     pub fn extension(self) -> &'static str {
         match self {
@@ -246,10 +258,19 @@ impl CrossFormatReport {
 // =============================================================================
 
 /// MSFS-required format list — the canonical set that every theorem
-/// must survive. Currently all five (Coq + Lean4 + Agda +
-/// Isabelle + Dedukti) after #156 closed Agda.
+/// must survive. Aligned with the LIVE `verum export` backends
+/// (2026-07-10): Coq + Lean4 + Dedukti. The Agda backend was removed
+/// from `verum export` (the #156 note claiming Agda closure is
+/// obsolete) and an Isabelle backend never shipped — requiring
+/// formats no exporter can emit made the hard gate structurally
+/// un-passable. Metamath IS exported but has no entry in this enum /
+/// no local re-check driver yet; add it here when one lands.
 pub fn required_formats_for_msfs() -> Vec<ExportFormat> {
-    ExportFormat::full_list().to_vec()
+    vec![
+        ExportFormat::Coq,
+        ExportFormat::Lean4,
+        ExportFormat::Dedukti,
+    ]
 }
 
 /// Decide the cross-format hard gate: a report passes iff every

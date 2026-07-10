@@ -487,7 +487,9 @@ impl ForeignSystemChecker for IsabelleChecker {
     }
 }
 
-/// Dedukti — `kontroli check <file>.dk` (newer) or `dkcheck` (legacy).
+/// Dedukti — `kocheck <file>.dk` (kontroli's CLI binary; the crate
+/// `kontroli` is a library, its installable executable is `kocheck`),
+/// or `dkcheck` (legacy OCaml checker).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DeduktiChecker;
 
@@ -496,15 +498,41 @@ impl ForeignSystemChecker for DeduktiChecker {
         ExportFormat::Dedukti
     }
     fn is_available(&self) -> bool {
-        is_tool_on_path("kontroli") || is_tool_on_path("dkcheck")
+        is_tool_on_path("kocheck") || is_tool_on_path("kontroli") || is_tool_on_path("dkcheck")
     }
     fn install_hint(&self) -> &'static str {
-        "cargo install kontroli  /  opam install dedukti"
+        "cargo install kocheck  /  opam install dedukti"
     }
     fn check_file(&self, path: &Path) -> CheckResult {
+        // kocheck derives a Dedukti MODULE NAME from the given file
+        // path; absolute paths (slashes, dots, dashes) are not valid
+        // module identifiers and die with the opaque `Error: Module`.
+        // Run from the certificate's parent directory with the bare
+        // file name instead.
+        let dir = path
+            .parent()
+            .map(|d| d.to_string_lossy().to_string());
+        let file_name = path
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
         let p = path.to_string_lossy();
-        if is_tool_on_path("kontroli") {
-            run_external_tool("kontroli", &[&p], self.install_hint(), 4096)
+        if is_tool_on_path("kocheck") {
+            run_external_tool_in_dir(
+                "kocheck",
+                &[&file_name],
+                dir.as_deref(),
+                self.install_hint(),
+                4096,
+            )
+        } else if is_tool_on_path("kontroli") {
+            run_external_tool_in_dir(
+                "kontroli",
+                &[&file_name],
+                dir.as_deref(),
+                self.install_hint(),
+                4096,
+            )
         } else if is_tool_on_path("dkcheck") {
             run_external_tool("dkcheck", &[&p], self.install_hint(), 4096)
         } else {

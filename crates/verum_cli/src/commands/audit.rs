@@ -14038,7 +14038,9 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
 
     for f in &formats {
         let dir_name = f.name();
-        let certs_dir = manifest_dir.join("certificates").join(dir_name);
+        let certs_dir = manifest_dir
+            .join("certificates")
+            .join(f.certs_dir_name());
         let extension = f.extension();
 
         let checker = match checker_for(*f) {
