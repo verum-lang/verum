@@ -16,7 +16,7 @@
 // =============================================================================
 
 mount core.async.stream.{
-    Stream,
+    Stream, StreamEmpty,
     stream_once, stream_empty, stream_repeat_n, stream_from_fn,
 };
 mount core.async.poll.{Poll};
