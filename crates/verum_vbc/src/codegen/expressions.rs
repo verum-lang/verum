@@ -21649,11 +21649,9 @@ impl VbcCodegen {
                 let is_never =
                     |t: &str| t == "!" || t == "Never" || t == "never";
                 let scrutinee_type = self.extract_expr_type_name(scrutinee);
-                let mut never_seen: Option<String> = None;
                 for arm in arms.iter() {
                     if let Some(t) = self.extract_expr_type_name(&arm.body) {
                         if is_never(&t) {
-                            never_seen = Some(t);
                             continue;
                         }
                         return Some(t);
@@ -21666,13 +21664,18 @@ impl VbcCodegen {
                         scrutinee_type.as_deref(),
                     ) {
                         if is_never(&t) {
-                            never_seen = Some(t);
                             continue;
                         }
                         return Some(t);
                     }
                 }
-                never_seen
+                // NEVER-ABSORB-1 (corrected): a never-typed arm contributes
+                // NOTHING to the join — including as a fallback.  Returning
+                // "!" when the value-producing arms were merely UNDERIVABLE
+                // typed real bindings as `!` (the baked `Text.remove`
+                // compiled `ch.len_utf8()` as `!.len_utf8`).  Unknown is
+                // honest; downstream keeps its untyped-receiver path.
+                None
             }
             // Literal expressions: infer type from literal kind
             ExprKind::Literal(lit) => {

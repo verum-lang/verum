@@ -897,6 +897,27 @@ impl<'s> CompilationPipeline<'s> {
                             }
                             verum_common::Maybe::None => None,
                         };
+                        // SELF-MUT-STUB-CARRY-1: the AST fn is IN HAND here —
+                        // derive the `&mut self`-receiver fact instead of
+                        // hardcoding `false`.  A stage-1 stub is the
+                        // first-wins registry entry for every canonical
+                        // stdlib method in prelude-only compiles (no
+                        // explicit `mount` of the owner type), so a `false`
+                        // here made the call-site skip the RefMut receiver
+                        // wrap: `c.make_ascii_uppercase()` passed `c` BY
+                        // VALUE, the baked body's `DEREF_MUT` wrote into the
+                        // callee-frame copy, and every `&mut self` stdlib
+                        // method was a silent no-op — but ONLY in files
+                        // without the owner-type mount (mount-set-dependent
+                        // semantics, the worst kind).
+                        let stub_takes_self_mut_ref = matches!(
+                            func.params.first().map(|p| &p.kind),
+                            Some(
+                                verum_ast::decl::FunctionParamKind::SelfRefMut
+                                    | verum_ast::decl::FunctionParamKind::SelfRefCheckedMut
+                                    | verum_ast::decl::FunctionParamKind::SelfRefUnsafeMut
+                            )
+                        );
                         let info = FunctionInfo {
                             id: stub_id,
                             param_count,
@@ -912,7 +933,7 @@ impl<'s> CompilationPipeline<'s> {
                             parent_type_name: Some(target_type_name.clone()),
                             variant_payload_types: None,
                             is_partial_pattern: false,
-                            takes_self_mut_ref: false,
+                            takes_self_mut_ref: stub_takes_self_mut_ref,
                             return_type_name: stub_return_type_name,
                             return_type_inner: None,
                             is_const: false,
