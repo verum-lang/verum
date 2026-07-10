@@ -1619,7 +1619,14 @@ implement Text {
         res
     }
 
-    /// Split from the right, returning parts in left-to-right order.
+    /// Split from the right, yielding parts RIGHTMOST-FIRST.
+    ///
+    /// `"a,b,c".rsplit(",")` → `["c", "b", "a"]` — the industry-standard
+    /// (Rust `str::rsplit`) contract.  Rightmost-first order is what makes
+    /// `rsplit` a distinct operation from `split`; the pre-fix trailing
+    /// `reverse()` returned left-to-right parts, making full `rsplit`
+    /// indistinguishable from `split` (RSPLIT-ORDER-1, pinned in
+    /// `core-tests/text/text/regression_test.vr`).
     public fn rsplit(&self, sep: &Text) -> List<Text> {
         let mut res = List.new();
         let mut end = self.len();
@@ -1641,11 +1648,15 @@ implement Text {
             res.push(self.clone());
         }
 
-        res.reverse();
         res
     }
 
-    /// Split from the right into at most n parts.
+    /// Split from the right into at most `n` parts, RIGHTMOST-FIRST.
+    ///
+    /// `"a,b,c,d".rsplitn(2, ",")` → `["d", "a,b,c"]` — the last split
+    /// piece first, the unsplit remainder (leftmost run) as the FINAL
+    /// element.  Matches Rust `str::rsplitn`; sibling contract of
+    /// `rsplit` (RSPLIT-ORDER-1).
     public fn rsplitn(&self, n: Int, sep: &Text) -> List<Text> {
         let mut res = List.new();
         let mut end = self.len();
@@ -1667,8 +1678,6 @@ implement Text {
             res.push(self.slice(0, end));
         }
 
-        // Reverse to get left-to-right order
-        res.reverse();
         res
     }
 
@@ -3099,33 +3108,25 @@ implement Text {
     }
 
     /// Convert ASCII uppercase to lowercase in-place.
+    ///
+    /// Implemented as rebuild-and-assign: `*self` re-binds to a freshly
+    /// built Text, which is representation-correct for EVERY Text form
+    /// (SSO-inline value, static literal with `cap == 0`, heap record).
+    /// The previous raw-pointer path (`as_ptr` + byte `memset`) violated
+    /// the Text representation contract three ways — it silently no-oped
+    /// on SSO values (mutated a materialised copy), aliased immutable
+    /// static storage on literals, and stomped value-stride offsets on
+    /// heap records — pinned in
+    /// `core-tests/text/text/regression_test.vr` (MAKE-ASCII-INPLACE-1).
     public fn make_ascii_lowercase(&mut self) {
-        let bytes = self.as_bytes();
-        let len = bytes.len();
-        let ptr = self.as_ptr();
-        for i in range(0, len) {
-            let b = bytes[i];
-            if (b as Int) >= 65 && (b as Int) <= 90 {
-                unsafe {
-                    memset(ptr_offset(ptr, i), (b as Int + 32) as Byte, 1);
-                }
-            }
-        }
+        *self = self.to_ascii_lowercase();
     }
 
     /// Convert ASCII lowercase to uppercase in-place.
+    /// See `make_ascii_lowercase` for the representation-contract note
+    /// (MAKE-ASCII-INPLACE-1).
     public fn make_ascii_uppercase(&mut self) {
-        let bytes = self.as_bytes();
-        let len = bytes.len();
-        let ptr = self.as_ptr();
-        for i in range(0, len) {
-            let b = bytes[i];
-            if (b as Int) >= 97 && (b as Int) <= 122 {
-                unsafe {
-                    memset(ptr_offset(ptr, i), (b as Int - 32) as Byte, 1);
-                }
-            }
-        }
+        *self = self.to_ascii_uppercase();
     }
 
     /// Split keeping the separator at the end of each part.
