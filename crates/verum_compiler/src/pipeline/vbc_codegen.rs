@@ -432,16 +432,42 @@ impl<'s> CompilationPipeline<'s> {
                 }
             };
         }
+        // USER-COG SIBLINGS (task #18, 2026-07-10): a multi-file
+        // project's sibling `.vr` files were loaded for the TYPE
+        // CHECKER (`load_project_modules` → `self.project_modules`)
+        // but never reached VBC codegen — "the user module is the
+        // ONLY AST that goes through codegen" held for the ENTRY
+        // file only.  Every cross-module call into a sibling
+        // (`mount cog.helper.{Widget}; Widget.make(7)`) type-checked
+        // and then died at runtime with "method 'make' not found …
+        // No registered function ends with the bare method name",
+        // because `Widget.make` was never compiled.  Feed the
+        // siblings through the SAME phase sequence as the entry
+        // module — all declarations across all modules FIRST (so
+        // cross-module static binding resolves), then all bodies.
+        let sibling_modules: Vec<std::sync::Arc<verum_ast::Module>> =
+            self.project_modules.values().cloned().collect();
         step_mark!("collect_protocol_definitions");
         codegen.collect_protocol_definitions(module);
+        for sib in &sibling_modules {
+            codegen.collect_protocol_definitions(sib);
+        }
         step_mark!("collect_non_protocol_declarations");
         codegen
             .collect_non_protocol_declarations(module)
             .map_err(|e| {
                 anyhow::anyhow!("VBC codegen error (user declarations): {}", e)
             })?;
+        for sib in &sibling_modules {
+            codegen.collect_non_protocol_declarations(sib).map_err(|e| {
+                anyhow::anyhow!("VBC codegen error (project-module declarations): {}", e)
+            })?;
+        }
         step_mark!("mark_user_defined_types");
         codegen.mark_user_defined_types(module);
+        for sib in &sibling_modules {
+            codegen.mark_user_defined_types(sib);
+        }
         step_mark!("resolve_pending_imports");
         codegen.resolve_pending_imports();
         step_mark!("compile_pending_default_methods");
@@ -455,6 +481,11 @@ impl<'s> CompilationPipeline<'s> {
         codegen
             .compile_module_items(module)
             .map_err(|e| anyhow::anyhow!("VBC codegen error (user bodies): {}", e))?;
+        for sib in &sibling_modules {
+            codegen.compile_module_items(sib).map_err(|e| {
+                anyhow::anyhow!("VBC codegen error (project-module bodies): {}", e)
+            })?;
+        }
         step_mark!("compile_module_items DONE");
         if trace_path {
             eprintln!(
