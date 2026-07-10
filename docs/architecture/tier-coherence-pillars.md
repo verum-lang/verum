@@ -99,6 +99,23 @@ to canonical; (3) canonical serializer (archive major bump);
 (4) retire old keys. Acceptance at each stage: byte-identical
 double-bakes + the full canary battery.
 
+**BYTE-IDENTITY MILESTONE (2026-07-10).** Double-bakes of the stdlib
+precompiler now produce IDENTICAL sha256 for BOTH artifacts
+(runtime.vbca AND runtime.core_metadata) — the §27/§40-adjacent
+serialization-nondeterminism class is CLOSED end-to-end. The kill
+sequence (11.4M divergent bytes → 0): step-0b bodied-beats-stub +
+name-canonical fn sort; ONE module-level canonical_name_better at
+every id→name selection (3 stub paths incl. stage-3 emission AND
+recording, external_function_names, const force-emission); a
+systematic peer sweep's 7 first-match/hash-order sites (field-index
+scans ×2, find_variant_with_suffix, extract_expr_type_name,
+display fmt-scan, suffix-fn disambiguation, debug-var arg_index);
+and the metadata writer's synthesized-primitives hash-order walks.
+Guard evidence: canaries + cow 7/7 + bytes 18/18 + storage 42/45
++ meta corpus green; unit fail-sets unchanged. Stage (1) dual
+keying landed (canonical_index, VERUM_TRACE_CANON); stages (2)-(4)
+remain.
+
 **Stage 1 landed (2026-07-10).** `CodegenContext.canonical_index`
 (verum_vbc codegen registration layer) dual-keys every PRIMARY
 function registration — `register_function` +
