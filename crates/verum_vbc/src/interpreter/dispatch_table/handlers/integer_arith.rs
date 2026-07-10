@@ -30,8 +30,24 @@ pub(in super::super) fn handle_addi(
         return Ok(DispatchResult::Continue);
     }
 
-    // Slow path: string concatenation fallback
-    if val_a.is_small_string() || val_b.is_small_string() {
+    // ADDI-RESOLVE-1: resolve reference shapes BEFORE classifying the
+    // slow path.  `acc += &(*w).clone()` reaches AddI with a CBGR ref
+    // to the clone's TEMP register on the RHS; the pre-fix
+    // classification saw neither a small string nor an inline int and
+    // fell into the integer-extract arm — summing NaN-box/pointer BITS
+    // and rendering `acc` as a number ("26826347891").  Refs are never
+    // inline ints, so the fast path above is unaffected.
+    let val_a = super::cbgr_helpers::resolve_arg_value(state, val_a);
+    let val_b = super::cbgr_helpers::resolve_arg_value(state, val_b);
+
+    // Slow path: string concatenation fallback.  Heap Texts count —
+    // an accumulator that outgrew the 6-byte small-string form must
+    // keep concatenating, not fall into the integer-extract arm.
+    if val_a.is_small_string()
+        || val_b.is_small_string()
+        || super::string_helpers::is_heap_string(&val_a)
+        || super::string_helpers::is_heap_string(&val_b)
+    {
         let a_str = format_value_for_print(state, val_a);
         let b_str = format_value_for_print(state, val_b);
         let concat = format!("{}{}", a_str, b_str);

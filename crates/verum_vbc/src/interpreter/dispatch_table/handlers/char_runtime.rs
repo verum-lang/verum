@@ -205,6 +205,21 @@ pub(in super::super) fn try_intercept_char_encode(
     let buf_val_raw = state.registers.get(caller_base, buf_reg);
     let buf_val = super::cbgr_helpers::resolve_arg_value(state, buf_val_raw);
 
+    // SLICE-ELEM-WRITE-1 (scope narrowing): this intercept only
+    // understands FatRef slices and ThinRef byte windows.  A buf that
+    // resolves to a bare HEAP OBJECT pointer has a per-type element
+    // representation (LIST = boxed Values, `[Int; N]` payload = raw
+    // i64, …) that the header-probing writers below historically
+    // mis-guessed — writing NaN-BOXED Values where the SET_E/GET_E
+    // paths use RAW ints, so every UTF-16 unit read back as box bits
+    // (0x7FF9_…_0041).  The compiled `Char.encode_utf16` body is
+    // dispatchable by its QUALIFIED name and its `buf[i] = code`
+    // writes now go through the representation-correct SET_E handler —
+    // defer to it instead of guessing here.
+    if !buf_val.is_fat_ref() && !buf_val.is_thin_ref() {
+        return Ok(None);
+    }
+
     match kind {
         EncodeKind::Utf8 => {
             let mut tmp = [0u8; 4];
@@ -231,7 +246,55 @@ enum EncodeKind {
     Utf16,
 }
 
+/// SLICE-ELEM-WRITE-1: write one integer element into a FatRef slice
+/// honoring its `reserved` elem-size tag — the EXACT inverse of the
+/// `handle_get_index` FatRef read path (`0` = NaN-boxed `Value`,
+/// `1/2/4/8` = raw little-int of that width).  Pre-fix the encode
+/// intercepts fell into the header-probing pointer branch for FatRef
+/// buffers (FatRef also passes `is_ptr()`) and stored NaN-BOXED
+/// `Value`s where the `[Int; N]` read path expects RAW i64 — every
+/// element read back as the box bits (`Text.encode_utf16("A")[0] ==
+/// 0x7FF9_0000_0000_0041`, then `Text.from_utf16` → InvalidCharConversion).
+/// Writer and reader MUST consult the same tag; this helper is the
+/// writer twin.
+fn write_fat_ref_int_element(fat: &crate::value::FatRef, index: usize, v: i64) {
+    let base_ptr = fat.ptr();
+    if base_ptr.is_null() || index >= fat.len() as usize {
+        return;
+    }
+    match fat.reserved {
+        0 => unsafe {
+            *(base_ptr as *mut Value).add(index) = Value::from_i64(v);
+        },
+        1 => unsafe {
+            *base_ptr.add(index) = v as u8;
+        },
+        2 => unsafe {
+            std::ptr::write_unaligned((base_ptr as *mut u16).add(index), v as u16);
+        },
+        4 => unsafe {
+            std::ptr::write_unaligned((base_ptr as *mut u32).add(index), v as u32);
+        },
+        8 => unsafe {
+            std::ptr::write_unaligned((base_ptr as *mut i64).add(index), v);
+        },
+        _ => unsafe {
+            *(base_ptr as *mut Value).add(index) = Value::from_i64(v);
+        },
+    }
+}
+
 fn write_utf8_bytes_to_buf(buf_val: Value, src: &[u8; 4], n_bytes: usize) {
+    // FatRef slices FIRST — they also pass `is_ptr()`, so this check
+    // must precede the header-probing pointer branch (same ordering
+    // rule as `handle_get_index`).
+    if buf_val.is_fat_ref() {
+        let fat = buf_val.as_fat_ref();
+        for (i, b) in src.iter().enumerate().take(n_bytes) {
+            write_fat_ref_int_element(&fat, i, *b as i64);
+        }
+        return;
+    }
     if !buf_val.is_ptr() || buf_val.is_nil() {
         if buf_val.is_thin_ref() {
             let thin = buf_val.as_thin_ref();
@@ -286,6 +349,28 @@ fn write_utf8_bytes_to_buf(buf_val: Value, src: &[u8; 4], n_bytes: usize) {
 }
 
 fn write_utf16_units_to_buf(buf_val: Value, src: &[u16; 2], n_units: usize) {
+    // SLICE-ELEM-WRITE-1 oracle: classify the buffer value on demand.
+    if std::env::var("VERUM_TRACE_ENCBUF").is_ok() {
+        eprintln!(
+            "[encbuf/u16] fat={} thin={} ptr={} nil={} raw=0x{:016x}",
+            buf_val.is_fat_ref(),
+            buf_val.is_thin_ref(),
+            buf_val.is_ptr(),
+            buf_val.is_nil(),
+            buf_val.to_bits(),
+        );
+    }
+    // FatRef slices FIRST — see write_utf8_bytes_to_buf / SLICE-ELEM-WRITE-1.
+    // `Text.encode_utf16`'s `[Int; 2]` scratch arrives as a FatRef with
+    // `reserved == 8` (raw i64 elements); the code-unit VALUE (not its
+    // NaN-boxed bits) must land in each slot.
+    if buf_val.is_fat_ref() {
+        let fat = buf_val.as_fat_ref();
+        for (i, u) in src.iter().enumerate().take(n_units) {
+            write_fat_ref_int_element(&fat, i, *u as i64);
+        }
+        return;
+    }
     if !buf_val.is_ptr() || buf_val.is_nil() {
         if buf_val.is_thin_ref() {
             let thin = buf_val.as_thin_ref();

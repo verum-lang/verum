@@ -1097,6 +1097,76 @@ pub(in super::super) fn handle_set_index(
     use super::super::handlers::cbgr_helpers::{
         decode_cbgr_ref as decode_cbgr_ref2, is_cbgr_ref as is_cbgr_ref2,
     };
+    // SET_E-FATREF-1: FatRef (slice) writes FIRST — the exact mirror of
+    // `handle_get_index`'s FatRef read branch, honoring the `reserved`
+    // elem-size tag (0 = NaN-boxed Value, 1/2/4/8 = raw little-int).
+    // Pre-fix SET_E had NO FatRef branch at all: a FatRef also passes
+    // `is_ptr()`, so `buf[i] = v` through a `&mut [Int]` slice fell into
+    // the header-probing object path, read the FatRef struct bytes as an
+    // ObjectHeader, and stored NaN-BOXED Values where the elem_size=8
+    // read path expects RAW i64 — `Char.encode_utf16`'s `buf[0] = code`
+    // wrote box bits that read back as 0x7FF9_…_0041 (audit text/text
+    // §Z4; read/write representation asymmetry is a kernel-soundness
+    // class, so the write side must consult the SAME tag the read side
+    // does).
+    {
+        let target = if is_cbgr_ref2(&arr_val) {
+            let (abs_index, _gen) = decode_cbgr_ref2(arr_val.as_i64());
+            state.registers.get_absolute(abs_index)
+        } else {
+            arr_val
+        };
+        if target.is_fat_ref() {
+            let fat = target.as_fat_ref();
+            let idx_val = state.get_reg(idx).as_i64();
+            let len = fat.len() as i64;
+            if idx_val < 0 || idx_val >= len {
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "Slice index out of bounds: index {} but length is {}",
+                        idx_val, len
+                    ),
+                });
+            }
+            let base_ptr = fat.ptr();
+            if base_ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+            let value = state.get_reg(val);
+            let i = idx_val as usize;
+            match fat.reserved {
+                0 => unsafe {
+                    *(base_ptr as *mut Value).add(i) = value;
+                },
+                1 => unsafe {
+                    *base_ptr.add(i) = value.as_i64() as u8;
+                },
+                2 => unsafe {
+                    std::ptr::write_unaligned(
+                        (base_ptr as *mut u16).add(i),
+                        value.as_i64() as u16,
+                    );
+                },
+                4 => unsafe {
+                    std::ptr::write_unaligned(
+                        (base_ptr as *mut u32).add(i),
+                        value.as_i64() as u32,
+                    );
+                },
+                8 => unsafe {
+                    std::ptr::write_unaligned(
+                        (base_ptr as *mut i64).add(i),
+                        value.as_i64(),
+                    );
+                },
+                _ => unsafe {
+                    *(base_ptr as *mut Value).add(i) = value;
+                },
+            }
+            state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+            return Ok(DispatchResult::Continue);
+        }
+    }
     let arr_val = if is_cbgr_ref2(&arr_val) {
         let (abs_index, _gen) = decode_cbgr_ref2(arr_val.as_i64());
         state.registers.get_absolute(abs_index)
