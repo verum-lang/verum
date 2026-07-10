@@ -99,6 +99,31 @@ to canonical; (3) canonical serializer (archive major bump);
 (4) retire old keys. Acceptance at each stage: byte-identical
 double-bakes + the full canary battery.
 
+**Stage 1 landed (2026-07-10).** `CodegenContext.canonical_index`
+(verum_vbc codegen registration layer) dual-keys every PRIMARY
+function registration — `register_function` +
+`register_function_authoritative` — by fully-qualified path (the
+`compile_function` descriptor-promotion derivation:
+`current_source_module` prefixes bare names; dotted/`$`-nested
+spellings kept as-is), each path holding every DISTINCT blake3
+signature-surface fingerprint (param_count/names, return-type name,
+async/generator/const flags, parent type, variant tag; ids
+deliberately excluded).  Vec len > 1 per path IS the divergence
+corpus; `name#arity` mirrors never land canonically; the
+`compile_function` emit path back-fills a descriptor body
+fingerprint (promoted name + instruction count + register count —
+encoded byte-length only exists at serialization and joins when
+descriptors are keyed in stage 2).  NO reader consults the index:
+winners/lookups byte-identical to pre-stage-1.
+`VERUM_TRACE_CANON=1` (or `=<substring>` path filter) warns
+`[canon-diverge]` the moment a path gains a second fingerprint and
+emits the `[canon-report]` canonical-vs-bare sweep (ghost bare
+winners whose id no canonical entry knows + cross-module simple-name
+claims; 50-line cap) at `build_module` — the one finalize seam every
+compile path converges on.  Stage 2
+flips readers (bare-key lookups resolve through the canonical
+index) once the corpus is characterized.
+
 ---
 
 ## Pillar 3 — One generic-signature truth (end the split brain)

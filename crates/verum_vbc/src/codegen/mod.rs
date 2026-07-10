@@ -6335,6 +6335,41 @@ impl VbcCodegen {
         self.build_module()
     }
 
+    /// **ARCH-P2 stage 1** — env-gated canonical-vs-bare consistency
+    /// report, emitted where the module is finalized (after every
+    /// registration has run).  Called from `build_module`, the one
+    /// seam every compile path converges on (`compile_module`,
+    /// `compile_module_with_mounts`, `compile_function_bodies`,
+    /// `finalize_module` / `finalize_module_from_state`).  Pure
+    /// diagnostics: the sweep is O(functions) so it runs ONLY under
+    /// `VERUM_TRACE_CANON` (registration itself is hot — 28K entries
+    /// on mounted scripts), and output is capped at 50 finding
+    /// lines.  See `CodegenContext::canonical_vs_bare_report` /
+    /// `canonical_divergences` and
+    /// `docs/architecture/tier-coherence-pillars.md` Pillar 2.
+    fn emit_canonical_report_if_traced(&self) {
+        if std::env::var("VERUM_TRACE_CANON").is_err() {
+            return;
+        }
+        let divergences = self.ctx.canonical_divergences();
+        let report = self.ctx.canonical_vs_bare_report();
+        eprintln!(
+            "[canon-report] canonical_paths={} divergent_paths={} findings={}",
+            self.ctx.canonical_index.len(),
+            divergences.len(),
+            report.len()
+        );
+        for line in report.iter().take(50) {
+            eprintln!("[canon-report] {}", line);
+        }
+        if report.len() > 50 {
+            eprintln!(
+                "[canon-report] ... {} more findings suppressed (cap 50)",
+                report.len() - 50
+            );
+        }
+    }
+
     /// Compile a module's items into the codegen's accumulated state
     /// WITHOUT producing a finalised `VbcModule`.  Pairs with
     /// [`Self::finalize_module_from_state`] for the multi-file
@@ -14641,6 +14676,25 @@ impl VbcCodegen {
             descriptor.contexts.push(crate::types::ContextRef(ctx_id));
         }
 
+        // ARCH-P2 stage 1 — enrich the canonical entry with the
+        // emit-time body fingerprint.  Registration-time fingerprints
+        // cover only the signature surface (no body exists yet); the
+        // finalized descriptor is the first body-shaped artifact this
+        // decl produces.  `descriptor_name` is the promoted
+        // fully-qualified path — the same derivation
+        // `canonical_qualified_path` applied at registration.  The
+        // encoded bytecode byte-length exists only at serialization
+        // time (`bytecode_length` is still 0 here); it joins the
+        // fingerprint when descriptors are keyed canonically (stage 2
+        // prep).  Purely additive: no descriptor field, no lookup, no
+        // serialized byte changes.
+        self.ctx.enrich_canonical_body_fingerprint(
+            &descriptor_name,
+            func_info.id,
+            instructions.len(),
+            register_count,
+        );
+
         let vbc_func = VbcFunction::new(descriptor, instructions);
 
         self.push_function_dedup(vbc_func);
@@ -17266,6 +17320,11 @@ impl VbcCodegen {
 
     /// Builds the final VBC module.
     fn build_module(&mut self) -> CodegenResult<VbcModule> {
+        // ARCH-P2 stage 1: canonical-vs-bare consistency sweep at THE
+        // module-finalize seam (env-gated diagnostics; no behavior
+        // change — every registration has run by this point).
+        self.emit_canonical_report_if_traced();
+
         let mut module = VbcModule::new(self.config.module_name.clone());
 
         // IMPORTANT: Intern strings FIRST and build mapping from codegen index to module StringId.
