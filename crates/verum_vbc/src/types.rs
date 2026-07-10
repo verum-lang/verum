@@ -203,6 +203,24 @@ impl TypeId {
     /// vocabulary (push/pop/get/set/len/slice/iter/clone) of `LIST`.
     pub const BYTE_LIST: TypeId = TypeId(527);
 
+    /// Borrowed byte view `{ptr: *u8, len: i64}` produced by
+    /// `Text.as_bytes()` (and future byte-view ops).  ARCH-P5:
+    /// representation-tagged byte slice.
+    ///
+    /// Layout: payload = TWO RAW i64 slots (`ptr`, `len`) after the
+    /// 24-byte ObjectHeader — bit-identical to the Tier-1 (AOT) slice
+    /// Pack shape `{ptr@24, len@32}`, so both tiers stamp ONE object
+    /// form and every consumer can dispatch on this TypeId instead of
+    /// the retired `len <= 1_000_000` FatRef-as-Text heuristic.
+    ///
+    /// The slots are RAW machine words, NOT NaN-boxed `Value`s:
+    /// generic Value-per-slot reads would misinterpret the pointer
+    /// word.  Consumers must go through the typed BYTE_SLICE arms
+    /// (`heap::value_as_byte_slice` in the interpreter).  `ptr` is
+    /// never null — empty views point at a static empty buffer,
+    /// mirroring `verum_text_get_ptr` semantics.
+    pub const BYTE_SLICE: TypeId = TypeId(528);
+
     /// First semantic type ID (for range checks).
     pub const FIRST_SEMANTIC: u32 = 512;
 
@@ -228,7 +246,7 @@ impl TypeId {
     pub fn is_iterable(self) -> bool {
         matches!(
             self.0,
-            512 | 513 | 514 | 517 | 518 | 527 // LIST, MAP, SET, RANGE, ARRAY, BYTE_LIST
+            512 | 513 | 514 | 517 | 518 | 527 | 528 // LIST, MAP, SET, RANGE, ARRAY, BYTE_LIST, BYTE_SLICE
         )
     }
 
@@ -2642,6 +2660,27 @@ mod tests {
         // defence against accidental drift.
         assert_eq!(TypeId::HEAP, TypeId(519), "Heap TypeId drifted");
         assert_eq!(TypeId::SHARED, TypeId(520), "Shared TypeId drifted");
+    }
+
+    #[test]
+    fn byte_slice_typeid_pinned() {
+        // ARCH-P5 cross-tier drift pin: the BYTE_SLICE TypeId is
+        // stamped into object headers by BOTH tiers (Tier-0
+        // `TextExtended::AsBytes` heap allocation and Tier-1
+        // `lower_pack_typed` at the AOT AsBytes lowering).  The AOT
+        // side imports this constant (`verum_vbc::types::TypeId::
+        // BYTE_SLICE`), so pinning the raw value here pins both tiers
+        // at once.
+        assert_eq!(TypeId::BYTE_SLICE, TypeId(528), "BYTE_SLICE TypeId drifted");
+        assert!(
+            TypeId::BYTE_SLICE.is_iterable(),
+            "BYTE_SLICE must be iterable (ITER_TYPE_BYTE_SLICE arm in iterators.rs)"
+        );
+        // NOT array-dispatchable: consumers go through the typed
+        // BYTE_SLICE arms (raw i64 slots), not the generic
+        // Value-per-element array surface.
+        assert!(!TypeId::BYTE_SLICE.is_array_dispatchable());
+        assert!(!TypeId::BYTE_SLICE.is_list_like());
     }
 
     #[test]

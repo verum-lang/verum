@@ -151,7 +151,8 @@ pub(in super::super) fn handle_text_extended(
             state.set_reg(dst, Value::from_bool(true));
         }
         Some(TextSubOpcode::AsBytes) => {
-            // Borrow a Text as a byte slice (FatRef with elem_size=1),
+            // Borrow a Text as a byte slice — a BYTE_SLICE (528) heap
+            // object `[ObjectHeader][ptr: i64][len: i64]` (ARCH-P5) —
             // handling small-string, heap-string, and reference forms.
             //
 
@@ -167,7 +168,6 @@ pub(in super::super) fn handle_text_extended(
             use super::super::super::heap;
             use super::super::handlers::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
             use crate::types::TypeId;
-            use crate::value::{Capabilities, FatRef};
 
             // Auto-deref: CBGR register-ref → absolute register, ThinRef → pointee.
             if is_cbgr_ref(&text) {
@@ -211,20 +211,20 @@ pub(in super::super) fn handle_text_extended(
                 }
             }
 
-            // FatRef representation: `Text.from_utf8_unchecked` (and every
-            // struct-literal Text-builder path) materialises the Text value
-            // at runtime as a `FatRef { ptr: byte_data, metadata: byte_len, ... }`
-            // — the Verum-level `{ptr, len, cap}` triple is collapsed into
-            // the FatRef's flat shape.  `as_bytes()` on such a value is
-            // already its own byte view; rebuild it as a `&[Byte]` FatRef
-            // with the byte-element stride marker (`reserved = 1`).
-            //
-            // This is the canonical heap-Text path — without it, the handler
-            // saw `is_ptr() == false` and fell through to `(null, 0)`, which
-            // is exactly the zero-length-slice defect that cascaded into
-            // `Hash for Text` collisions and `Eq for Text` vacuous-equality
-            // for every `Text.from(literal)` round-trip.
-            let (ptr, len): (*mut u8, u64) = if text.is_fat_ref() {
+            // Defensive input arms for values that are ALREADY byte
+            // views: a BYTE_SLICE object (a view of a view shares the
+            // same `(ptr, len)`) and the legacy raw-slice FatRef shape
+            // (generic `slice_from_raw_parts` output).  Since the
+            // BYTE_SLICE migration (ARCH-P5) no Text VALUE is
+            // FatRef-encoded — `Text.from_utf8_unchecked` and the
+            // struct-literal builders all produce Text-shaped heap
+            // records — so the FatRef arm only normalizes stray byte
+            // slices, it no longer carries the Text representation.
+            let (ptr, len): (*mut u8, u64) = if let Some((p, l)) =
+                heap::value_as_byte_slice(&text)
+            {
+                (p, l)
+            } else if text.is_fat_ref() {
                 let fr = text.as_fat_ref();
                 (fr.ptr(), fr.len())
             } else if text.is_small_string() {
@@ -331,15 +331,17 @@ pub(in super::super) fn handle_text_extended(
                 (std::ptr::null_mut(), 0)
             };
 
-            let mut fat_ref = FatRef::slice(
-                ptr,
-                0,
-                (state.cbgr_epoch & 0xFFFF) as u16,
-                Capabilities::MUT_EXCLUSIVE,
-                len,
-            );
-            fat_ref.reserved = 1; // byte-sized elements
-            state.set_reg(dst, Value::from_fat_ref(fat_ref));
+            // ARCH-P5: materialize the byte view as a BYTE_SLICE (528)
+            // heap object — `[ObjectHeader][ptr: i64][len: i64]`, raw
+            // slots, bit-identical to the Tier-1 AsBytes Pack — instead
+            // of a bare `FatRef { reserved = 1 }`.  This is the typed
+            // producer that retires the `len <= 1_000_000`
+            // FatRef-as-Text heuristic at every consumer.  Null/empty
+            // ptr is normalized to a static empty buffer inside
+            // `alloc_byte_slice` (never-null contract).
+            let obj = state.heap.alloc_byte_slice(ptr, len)?;
+            state.record_allocation();
+            state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
         }
         None => {
             return Err(InterpreterError::InvalidBytecode {

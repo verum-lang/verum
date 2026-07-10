@@ -37,6 +37,14 @@ const ITER_TYPE_BYTE_LIST: i64 = 5;
 /// Iteration semantics are therefore IDENTICAL between the native
 /// lowering and the codegen protocol-loop lowering.
 const ITER_TYPE_PROTOCOL: i64 = 6;
+/// BYTE_SLICE (528) byte-view iteration (ARCH-P5): `for b in
+/// text.as_bytes()`.  The source object's payload is TWO RAW i64
+/// slots `{ptr, len}` — NOT NaN-boxed Values — so IterNext reads them
+/// as raw words and yields one zero-extended byte per step.  Before
+/// the typed byte view existed, a byte-slice iterable reached the
+/// ITER_TYPE_LIST fallback and its FatRef marker payload was read as
+/// a List header → SIGSEGV.
+const ITER_TYPE_BYTE_SLICE: i64 = 7;
 
 // ============================================================================
 // Iterator + Range Operations
@@ -151,6 +159,7 @@ pub(in super::super) fn handle_iter_new(
                 TypeId::ARRAY => ITER_TYPE_ARRAY,
                 TypeId::RANGE => ITER_TYPE_RANGE,
                 TypeId::BYTE_LIST => ITER_TYPE_BYTE_LIST,
+                TypeId::BYTE_SLICE => ITER_TYPE_BYTE_SLICE,
                 TypeId::LIST => ITER_TYPE_LIST,
                 // Non-builtin heap object.  If its type is an Iterator
                 // record (resolvable 1-arg `<Type>.next` with a real
@@ -441,6 +450,31 @@ pub(in super::super) fn handle_iter_next(
             }
 
             state.set_reg(dst, element);
+            state.set_reg(has_next_dst, Value::from_bool(true));
+        }
+        ITER_TYPE_BYTE_SLICE => {
+            // BYTE_SLICE byte-view iteration (ARCH-P5).  Payload is
+            // TWO RAW i64 slots `{ptr, len}` — read as raw words, then
+            // yield the byte at `current_idx`, zero-extended.
+            // SAFETY: IterNew type-discriminated on the BYTE_SLICE
+            // header stamp, which proves the 16-byte raw payload shape.
+            let (base, len) = unsafe { heap::byte_slice_payload(source_ptr) };
+
+            if current_idx >= len as usize {
+                state.set_reg(dst, Value::unit());
+                state.set_reg(has_next_dst, Value::from_bool(false));
+                return Ok(DispatchResult::Continue);
+            }
+
+            // SAFETY: bounds-checked above; the view addresses `len`
+            // bytes at `base` (never-null producer contract).
+            let byte_value = unsafe { *base.add(current_idx) };
+
+            unsafe {
+                *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);
+            }
+
+            state.set_reg(dst, Value::from_i64(byte_value as i64));
             state.set_reg(has_next_dst, Value::from_bool(true));
         }
         ITER_TYPE_BYTE_LIST => {

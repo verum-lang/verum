@@ -1929,11 +1929,34 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Packs multiple values into a tuple (allocated on heap).
     /// Layout: [header (24 bytes)][values:Value...]
+    /// Stamps the canonical TUPLE TypeId (521) — see
+    /// [`Self::lower_pack_typed`] for representation-tagged variants
+    /// (BYTE_SLICE byte views, ARCH-P5).
     pub fn lower_pack(
         &self,
         builder: &Builder<'ctx>,
         module: &Module<'ctx>,
         values: &[IntValue<'ctx>],
+    ) -> Result<PointerValue<'ctx>> {
+        self.lower_pack_typed(builder, module, values, verum_vbc::types::TypeId::TUPLE.0)
+    }
+
+    /// Lower a Pack with an explicit header TypeId stamp (ARCH-P5).
+    ///
+
+    /// Same `[header (24 bytes)][values:Value...]` layout as
+    /// [`Self::lower_pack`], with the caller-chosen TypeId stamped at
+    /// header offset 0.  The AsBytes lowering uses this with
+    /// `verum_vbc::types::TypeId::BYTE_SLICE` so `Text.as_bytes()`
+    /// produces the SAME representation-tagged object form as the
+    /// Tier-0 interpreter (`Heap::alloc_byte_slice`) — one cross-tier
+    /// byte-view shape, no `len <= 1M` consumer heuristics.
+    pub fn lower_pack_typed(
+        &self,
+        builder: &Builder<'ctx>,
+        module: &Module<'ctx>,
+        values: &[IntValue<'ctx>],
+        type_id: u32,
     ) -> Result<PointerValue<'ctx>> {
         let i64_type = self.context.i64_type();
 
@@ -1951,7 +1974,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ptr-vs-tag heuristic misrouted slices stored in record fields
         // to the Text arm and returned header noise as the "length";
         // Chars/ByteIter then iterated zero times). Zero the header and
-        // stamp the canonical TUPLE TypeId (521 — verum_vbc::types) so
+        // stamp the requested TypeId (canonical TUPLE 521 for plain
+        // Packs, BYTE_SLICE 528 for byte views — verum_vbc::types) so
         // Pack objects are runtime-identifiable, mirroring the
         // interpreter's typed heap allocations.
         let i32_type = self.context.i32_type();
@@ -1973,7 +1997,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .or_llvm_err()?;
         }
         builder
-            .build_store(tuple_ptr, i32_type.const_int(521, false))
+            .build_store(tuple_ptr, i32_type.const_int(type_id as u64, false))
             .or_llvm_err()?;
 
         // Store each value
@@ -4279,13 +4303,28 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // and returned its own PTR word as the "length" (garbage like
         // 4309396287), collapsing every AOT text iterator to zero
         // iterations (TEXT-AOT-CHARS-PUSH-1 leg 1).
-        let is_pack = builder
+        //
+        // ARCH-P5: the AsBytes lowering stamps its slice Pack with
+        // BYTE_SLICE (528, `lower_pack_typed`) — same `{ptr@24,
+        // len@32}` shape, so it takes the identical pack_len path.
+        let is_tuple_pack = builder
             .build_int_compare(
                 verum_llvm::IntPredicate::EQ,
                 field0,
-                i64_type.const_int(521, false),
-                "is_pack",
+                i64_type.const_int(verum_vbc::types::TypeId::TUPLE.0 as u64, false),
+                "is_tuple_pack",
             )
+            .or_llvm_err()?;
+        let is_byte_slice = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::EQ,
+                field0,
+                i64_type.const_int(verum_vbc::types::TypeId::BYTE_SLICE.0 as u64, false),
+                "is_byte_slice",
+            )
+            .or_llvm_err()?;
+        let is_pack = builder
+            .build_or(is_tuple_pack, is_byte_slice, "is_pack")
             .or_llvm_err()?;
         builder
             .build_conditional_branch(is_pack, pack_path, heuristic_path)

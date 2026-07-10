@@ -87,11 +87,29 @@ pub(in super::super) fn try_intercept_default_hasher(
 
     match method {
         "write" if arg_count == 2 => {
-            // arg[1] is `&[Byte]` (typically FatRef).  Auto-deref
-            // CBGR-ref / ThinRef first.
+            // arg[1] is `&[Byte]` — a BYTE_SLICE byte view
+            // (`Text.as_bytes()`, ARCH-P5), a generic byte-stride
+            // FatRef (`slice_from_raw_parts`), or a heap-string Text
+            // view.  Auto-deref CBGR-ref / ThinRef first.
             let raw = state.registers.get(caller_base, Reg(args_start_reg + 1));
             let bytes_val = deref_self(state, raw);
-            let bytes: Vec<u8> = if bytes_val.is_fat_ref() {
+            let bytes: Vec<u8> = if let Some((p, n)) = heap::value_as_byte_slice(&bytes_val) {
+                // Typed BYTE_SLICE arm — replaces the retired
+                // `len <= 1M` heuristic for `as_bytes()` inputs
+                // (`Hash for Text` routes `hasher.write(self.as_bytes())`
+                // through here).
+                let n = n as usize;
+                if n > 0 {
+                    // SAFETY: BYTE_SLICE producer contract — `n`
+                    // readable bytes at `p` (never-null).
+                    unsafe { std::slice::from_raw_parts(p, n) }.to_vec()
+                } else {
+                    Vec::new()
+                }
+            } else if bytes_val.is_fat_ref() {
+                // Generic byte-slice FatRef (`&[Byte]` from
+                // `slice_from_raw_parts` — a slice-typed argument
+                // position, NOT the retired FatRef-as-Text class).
                 let fr = bytes_val.as_fat_ref();
                 let p = fr.ptr();
                 let n = fr.len() as usize;

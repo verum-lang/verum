@@ -4,7 +4,7 @@ use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
-use super::string_helpers::{deep_value_eq, extract_string};
+use super::string_helpers::{deep_value_eq, extract_string, is_byte_slice_value};
 use crate::instruction::Reg;
 use crate::module::FunctionId;
 use crate::types::StringId;
@@ -202,15 +202,19 @@ pub(in super::super) fn handle_eqg(
         );
     }
 
-    // A byte/raw-element slice FatRef operand (`Text.as_bytes()`,
-    // reserved != 0) has no nominal `.eq` — its equality is purely
-    // structural over byte ranges. Route straight to the byte-slice-aware
-    // `deep_value_eq` (#20), bypassing the type-name dispatch below, which
-    // would otherwise resolve the OTHER operand's runtime type (e.g. the
-    // `U8` const-bytes object from `b"..."`) and dispatch that type's `.eq`
-    // — the reason `subtype.as_bytes() == b"*"` (select_best_media
-    // wildcard) was always false.
-    if (va.is_fat_ref() && va.as_fat_ref().reserved != 0)
+    // A byte-slice operand — a BYTE_SLICE byte-view object
+    // (`Text.as_bytes()`, ARCH-P5) or a byte/raw-element slice FatRef
+    // (reserved != 0, generic `slice_from_raw_parts` output) — has no
+    // nominal `.eq`: its equality is purely structural over byte
+    // ranges. Route straight to the byte-slice-aware `deep_value_eq`
+    // (#20), bypassing the type-name dispatch below, which would
+    // otherwise resolve the OTHER operand's runtime type (e.g. the
+    // `U8` const-bytes object from `b"..."`) and dispatch that type's
+    // `.eq` — the reason `subtype.as_bytes() == b"*"`
+    // (select_best_media wildcard) was always false.
+    if is_byte_slice_value(&va)
+        || is_byte_slice_value(&vb)
+        || (va.is_fat_ref() && va.as_fat_ref().reserved != 0)
         || (vb.is_fat_ref() && vb.as_fat_ref().reserved != 0)
     {
         let result = deep_value_eq(&va, &vb, state);
@@ -316,10 +320,10 @@ pub(in super::super) fn handle_eqg(
 /// comment in `handle_eqg`).
 fn runtime_type_name_for_eq(v: &Value, state: &InterpreterState) -> Option<String> {
     use crate::interpreter::heap;
-    // A byte/raw-element slice FatRef (`Text.as_bytes()`, `reserved != 0`)
-    // carries the FAT_REF_MARKER payload in `as_ptr::<u8>()`, which
-    // `ObjectHeader::ref_or_stub` would then dereference → SIGSEGV (reached
-    // by `Text.as_bytes() == <slice>` through EqG's protocol_id-0
+    // A byte/raw-element slice FatRef (`reserved != 0`, generic
+    // `slice_from_raw_parts` output) carries the FAT_REF_MARKER payload
+    // in `as_ptr::<u8>()`, which `ObjectHeader::ref_or_stub` would then
+    // dereference → SIGSEGV (reached through EqG's protocol_id-0
     // fallback). It has no nominal pointee type; return None so the
     // operands fall through to `deep_value_eq`, which byte-compares slices.
     // NOTE: kept narrow to byte/raw slices — NOT all non-`is_regular_ptr`
@@ -328,6 +332,14 @@ fn runtime_type_name_for_eq(v: &Value, state: &InterpreterState) -> Option<Strin
     // dispatches (broadening to `!is_regular_ptr` regressed custom-Ord/Eq
     // by diverting reference comparisons to structural `deep_value_eq`).
     if v.is_fat_ref() && v.as_fat_ref().reserved != 0 {
+        return None;
+    }
+    // BYTE_SLICE byte-view objects (`Text.as_bytes()`, ARCH-P5) are
+    // structural byte ranges, not nominal-`Eq` carriers — same
+    // fall-through-to-`deep_value_eq` contract as the raw-slice FatRef
+    // arm above (the handle_eqg entry trigger already routes them, this
+    // arm keeps the protocol_id-0 fallback consistent).
+    if is_byte_slice_value(v) {
         return None;
     }
     if !v.is_ptr() || v.is_nil() {

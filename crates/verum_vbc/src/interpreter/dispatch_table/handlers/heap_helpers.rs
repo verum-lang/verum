@@ -230,6 +230,17 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
     } else {
         v
     };
+    // BYTE_SLICE byte view (`Text.as_bytes()`, ARCH-P5): raw
+    // `{ptr, len}` payload — the canonical typed `&[Byte]` shape.
+    if let Some((p, len)) = heap::value_as_byte_slice(&unwrapped) {
+        let len = len as usize;
+        if len == 0 {
+            return Vec::new();
+        }
+        // SAFETY: BYTE_SLICE producer contract — `len` readable bytes
+        // at `p` (never-null).
+        return unsafe { std::slice::from_raw_parts(p, len) }.to_vec();
+    }
     if unwrapped.is_fat_ref() {
         let fr = unwrapped.as_fat_ref();
         let len = fr.len() as usize;
@@ -298,6 +309,11 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
 pub(super) fn read_buffer_capacity(v: Value) -> Option<usize> {
     if v.is_fat_ref() {
         return Some(v.as_fat_ref().len() as usize);
+    }
+    // BYTE_SLICE byte view (ARCH-P5): the declared length is payload
+    // slot 1.
+    if let Some((_p, len)) = heap::value_as_byte_slice(&v) {
+        return Some(len as usize);
     }
     if v.is_ptr() && !v.is_nil() {
         let ptr = v.as_ptr::<u8>();

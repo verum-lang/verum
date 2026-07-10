@@ -212,6 +212,8 @@ fn format_type_id(module: &VbcModule, tid: TypeId) -> String {
         TypeId::TUPLE => "Tuple".to_string(),
         TypeId::DEQUE => "Deque".to_string(),
         TypeId::CHANNEL => "Channel".to_string(),
+        TypeId::BYTE_LIST => "ByteList".to_string(),
+        TypeId::BYTE_SLICE => "ByteSlice".to_string(),
         _ => {
             // User-defined type — look up name
             module

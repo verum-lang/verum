@@ -109,7 +109,10 @@ pub use cbgr_heap::{CbgrHeap, CbgrHeapStats, CbgrObject, CbgrObjectFlags, CbgrOb
 pub use dispatch_table::{
     DispatchResult, dispatch_loop_table, dispatch_loop_table_with_entry_depth,
 };
-pub use heap::{Heap, HeapStats, OBJECT_HEADER_SIZE, Object, ObjectFlags, ObjectHeader};
+pub use heap::{
+    Heap, HeapStats, OBJECT_HEADER_SIZE, Object, ObjectFlags, ObjectHeader, byte_slice_payload,
+    empty_byte_slice_ptr, value_as_byte_slice,
+};
 // Tier-0 work-stealing thread pool — `T-DEFER-VBC-EXEC-MT` V0
 // foundation; see `worker_pool.rs` module-level docs.
 pub use worker_pool::{SubmitError, WorkItem, WorkerPool};

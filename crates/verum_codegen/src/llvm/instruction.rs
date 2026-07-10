@@ -20654,8 +20654,13 @@ fn lower_text_extended<'ctx>(
         }
         0x34 => {
             // AsBytes — borrow a Text as a byte slice
-            // Layout: produces the same slice Pack object the rest of the
-            // AOT pipeline expects for `&[Byte]`: [24-byte header][ptr:i64][len:i64].
+            // Layout: produces the slice Pack object the rest of the
+            // AOT pipeline expects for `&[Byte]`: [24-byte header][ptr:i64][len:i64],
+            // header-stamped with the representation tag BYTE_SLICE (528,
+            // `verum_vbc::types::TypeId::BYTE_SLICE` via `lower_pack_typed`)
+            // instead of the generic TUPLE — ARCH-P5: bit-identical to the
+            // Tier-0 interpreter's `Heap::alloc_byte_slice` object, so both
+            // tiers stamp ONE cross-tier byte-view form.
             // The Text runtime struct is `{ptr: i64, len: i64, cap: i64}`, so we
             // simply reuse the stored ptr/len. The helper `verum_text_get_ptr`
             // substitutes an empty-string pointer for nulls to keep downstream
@@ -20713,10 +20718,17 @@ fn lower_text_extended<'ctx>(
                 .or_llvm_err()?
                 .into_int_value();
 
-            // Pack (ptr, len) into the standard slice object used by Len/GetE.
+            // Pack (ptr, len) into the standard slice object used by
+            // Len/GetE, stamped BYTE_SLICE (no magic number — the
+            // TypeId constant is the cross-tier drift pin, see
+            // `byte_slice_typeid_pinned` in verum_vbc).
             let runtime = RuntimeLowering::new(ctx.llvm_context());
-            let slice_ptr =
-                runtime.lower_pack(ctx.builder(), module, &[ptr_as_i64.into(), len_val.into()])?;
+            let slice_ptr = runtime.lower_pack_typed(
+                ctx.builder(),
+                module,
+                &[ptr_as_i64.into(), len_val.into()],
+                TypeId::BYTE_SLICE.0,
+            )?;
             ctx.set_register(dst, slice_ptr.into());
             ctx.mark_slice_register(dst);
             Ok(())
@@ -22934,14 +22946,30 @@ fn lower_char_extended<'ctx>(
                     .build_load(i32_ty, buf_obj, "enc_hdr_tid")
                     .or_llvm_err()?
                     .into_int_value();
-                let is_pack = ctx
+                // Slice Pack stamps: TUPLE (521, as_mut_slice shapes) or
+                // BYTE_SLICE (528, ARCH-P5 byte views) — identical
+                // {ptr@24, len@32} layout.
+                let is_tuple_pack = ctx
                     .builder()
                     .build_int_compare(
                         IntPredicate::EQ,
                         tid,
-                        i32_ty.const_int(521, false),
-                        "enc_is_pack",
+                        i32_ty.const_int(TypeId::TUPLE.0 as u64, false),
+                        "enc_is_tuple_pack",
                     )
+                    .or_llvm_err()?;
+                let is_byte_slice = ctx
+                    .builder()
+                    .build_int_compare(
+                        IntPredicate::EQ,
+                        tid,
+                        i32_ty.const_int(TypeId::BYTE_SLICE.0 as u64, false),
+                        "enc_is_byte_slice",
+                    )
+                    .or_llvm_err()?;
+                let is_pack = ctx
+                    .builder()
+                    .build_or(is_tuple_pack, is_byte_slice, "enc_is_pack")
                     .or_llvm_err()?;
                 let pack_slot = unsafe {
                     ctx.builder()
@@ -29088,14 +29116,30 @@ fn lower_get_element<'ctx>(
         .build_load(i32_type, arr_ptr, "gete_hdr_tid")
         .or_llvm_err()?
         .into_int_value();
-    let is_pack = ctx
+    // Slice Pack stamps: TUPLE (521) or BYTE_SLICE (528, ARCH-P5 —
+    // the AsBytes lowering's representation tag) — identical
+    // {ptr@24, len@32} layout, same byte-stride read.
+    let is_tuple_pack = ctx
         .builder()
         .build_int_compare(
             IntPredicate::EQ,
             tid,
-            i32_type.const_int(521, false),
-            "gete_is_pack",
+            i32_type.const_int(TypeId::TUPLE.0 as u64, false),
+            "gete_is_tuple_pack",
         )
+        .or_llvm_err()?;
+    let is_byte_slice = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::EQ,
+            tid,
+            i32_type.const_int(TypeId::BYTE_SLICE.0 as u64, false),
+            "gete_is_byte_slice",
+        )
+        .or_llvm_err()?;
+    let is_pack = ctx
+        .builder()
+        .build_or(is_tuple_pack, is_byte_slice, "gete_is_pack")
         .or_llvm_err()?;
     ctx.builder()
         .build_conditional_branch(is_pack, bb_pack, bb_orig)
@@ -29335,14 +29379,29 @@ fn lower_len<'ctx>(
                 .build_load(i32_type, arr_ptr, "len_hdr_tid")
                 .or_llvm_err()?
                 .into_int_value();
-            let is_pack = ctx
+            // Slice Pack stamps: TUPLE (521) or BYTE_SLICE (528,
+            // ARCH-P5 AsBytes tag) — both read len from the Pack slot.
+            let is_tuple_pack = ctx
                 .builder()
                 .build_int_compare(
                     IntPredicate::EQ,
                     tid,
-                    i32_type.const_int(521, false),
-                    "len_is_pack",
+                    i32_type.const_int(TypeId::TUPLE.0 as u64, false),
+                    "len_is_tuple_pack",
                 )
+                .or_llvm_err()?;
+            let is_byte_slice = ctx
+                .builder()
+                .build_int_compare(
+                    IntPredicate::EQ,
+                    tid,
+                    i32_type.const_int(TypeId::BYTE_SLICE.0 as u64, false),
+                    "len_is_byte_slice",
+                )
+                .or_llvm_err()?;
+            let is_pack = ctx
+                .builder()
+                .build_or(is_tuple_pack, is_byte_slice, "len_is_pack")
                 .or_llvm_err()?;
             // SAFETY: GEP into the object to read either the list len
             // slot (24) or the Pack len slot (32); both are within the
@@ -29560,14 +29619,29 @@ fn lower_len<'ctx>(
             .build_load(i32_type, arr_ptr, "len_hdr_tid")
             .or_llvm_err()?
             .into_int_value();
-        let is_pack = ctx
+        // Slice Pack stamps: TUPLE (521) or BYTE_SLICE (528, ARCH-P5
+        // AsBytes tag) — both read len from the Pack slot (@32).
+        let is_tuple_pack = ctx
             .builder()
             .build_int_compare(
                 IntPredicate::EQ,
                 tid,
-                i32_type.const_int(521, false),
-                "len_is_pack",
+                i32_type.const_int(TypeId::TUPLE.0 as u64, false),
+                "len_is_tuple_pack",
             )
+            .or_llvm_err()?;
+        let is_byte_slice = ctx
+            .builder()
+            .build_int_compare(
+                IntPredicate::EQ,
+                tid,
+                i32_type.const_int(TypeId::BYTE_SLICE.0 as u64, false),
+                "len_is_byte_slice",
+            )
+            .or_llvm_err()?;
+        let is_pack = ctx
+            .builder()
+            .build_or(is_tuple_pack, is_byte_slice, "len_is_pack")
             .or_llvm_err()?;
         // SAFETY: GEP into the object to read either the list len slot or the Pack len slot (32); both in-bounds for either shape.
         let len_slot = unsafe {

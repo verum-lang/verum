@@ -622,15 +622,18 @@ fn alloc_text_builder_with_bytes(
 /// Returns the byte budget the buffer can hold without reallocating.
 ///
 ///   * small-string (NaN-boxed inline): byte_len
-///   * FatRef Text (immutable byte view): byte_len
+///   * BYTE_SLICE byte view (immutable, ARCH-P5): byte_len
 ///   * heap-string flat layout `[hdr][len:u64][bytes…]`: byte_len
 ///   * builder layout `[hdr]{ptr,len,cap}` (24-byte payload): cap (field2)
 fn text_capacity_value(v: &Value) -> i64 {
     if v.is_small_string() {
         return v.as_small_string().len() as i64;
     }
-    if v.is_fat_ref() {
-        return v.as_fat_ref().len() as i64;
+    // BYTE_SLICE byte view (ARCH-P5): an immutable borrow's capacity
+    // is its length — typed replacement for the retired FatRef-as-Text
+    // heuristic arm.
+    if let Some((_p, len)) = heap::value_as_byte_slice(v) {
+        return len as i64;
     }
     if !v.is_ptr() || v.is_nil() {
         return 0;
