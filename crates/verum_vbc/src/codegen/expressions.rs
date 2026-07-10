@@ -9132,6 +9132,31 @@ impl VbcCodegen {
                         return self.compile_static_method_call(&info, args);
                     }
                 }
+                // L0-STATIC-ARITY (#42, 891_impl_methods): when a USER type
+                // name collides with a stdlib type (user `Counter` vs
+                // `core.metrics.Counter`), the bare qualified key
+                // `Counter.new` resolves to whichever registration won
+                // (stdlib's 0-arity `new`), the arity mismatches, and the
+                // call collapsed to the LoadNil stub below — a SILENT
+                // miscompile (`let c = Counter.new(3)` became `LOAD_NIL` and
+                // every downstream field/method access null-deref'd at
+                // runtime). Before degrading, consult the `name#arity`
+                // mirror (determinism wave 8 registers one for every
+                // overload set): an exact-arity, non-variant candidate is an
+                // unambiguous direct call.
+                if is_type_ns {
+                    let qualified = parts.join(".");
+                    if let Some(info) = self
+                        .ctx
+                        .lookup_function_with_arity(&qualified, args.len())
+                        .cloned()
+                        && info.param_count == args.len()
+                        && info.variant_tag.is_none()
+                        && info.intrinsic_name.is_none()
+                    {
+                        return self.compile_static_method_call(&info, args);
+                    }
+                }
                 if (is_module_ns || is_type_ns) && !receiver_is_known_value {
                     let result = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadNil { dst: result });
@@ -21428,6 +21453,49 @@ impl VbcCodegen {
         use verum_ast::ty::PathSegment;
 
         match &expr.kind {
+            // Operator expression on a NON-primitive left operand:
+            // resolve through the operator-method impl the binary
+            // compiler will dispatch to (`{T}.{op}`), preferring its
+            // declared return type — `Instant - Instant` correctly
+            // infers `Duration` this way.  Falls back to the left
+            // operand's type (operator impls overwhelmingly return
+            // Self).  Pre-fix, `let halved = d / 2;` recorded NO type
+            // for `halved`, and the follow-up `halved * 2` fell into
+            // compile_binary's `unknown op primitive → raw BinaryI`
+            // arm — an integer multiply on the record POINTER
+            // (task #17, time/duration divide_then_multiply).
+            ExprKind::Binary { op, left, .. } => {
+                use verum_ast::expr::BinOp;
+                let method = match op {
+                    BinOp::Add => "add",
+                    BinOp::Sub => "sub",
+                    BinOp::Mul => "mul",
+                    BinOp::Div => "div",
+                    BinOp::Rem => "rem",
+                    _ => return None,
+                };
+                let left_name = self
+                    .extract_expr_type_name(left)
+                    .or_else(|| self.infer_expr_type_name(left))?;
+                let base = left_name.split('<').next().unwrap_or(&left_name);
+                if verum_common::well_known_types::type_names::is_numeric_type(base)
+                    || base == "Bool"
+                    || base == "Char"
+                    || base == "Text"
+                    || base == "Float"
+                {
+                    return None;
+                }
+                let qualified = format!("{}.{}", base, method);
+                if let Some(info) = self.ctx.lookup_function(&qualified) {
+                    if let Some(ret) = info.return_type_name.clone() {
+                        return Some(ret);
+                    }
+                    return Some(left_name);
+                }
+                None
+            }
+
             // Variable reference: look up in variable_type_names
             ExprKind::Path(path) => {
                 if path.segments.len() == 1 {
