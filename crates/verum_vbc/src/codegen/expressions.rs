@@ -1803,7 +1803,26 @@ impl VbcCodegen {
                     }
 
                     // Check if this is a static/constant (0-param function)
-                    if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator
+                    // FN-AS-VALUE (task #23): only CONSTANTS evaluate on
+                    // read. A genuine zero-param FUNCTION referenced in
+                    // value position must become a callable value
+                    // (NewClosure below), exactly like fns with params —
+                    // the historical `Call`-on-read made
+                    // `let f = test_fn; f()` invoke the fn at the BINDING
+                    // (interp then failed call_closure on the Unit result;
+                    // AOT called twice and SIGSEGV'd), which broke every
+                    // vtest indirect test invocation at Tier-1. Constants
+                    // are compiled as 0-param fns and carry the dedicated
+                    // `is_const` marker (#97 const storage strategy);
+                    // variant ctors / sentinels / __const_ encodings are
+                    // handled inside this arm before the final Call.
+                    if func_info.param_count == 0
+                        && !func_info.is_async
+                        && !func_info.is_generator
+                        && (func_info.is_const
+                            || func_info.variant_tag.is_some()
+                            || func_info.intrinsic_name.is_some()
+                            || func_info.id.0 == u32::MAX / 2)
                     {
                         if let Ok(reg) = self.ctx.get_var_reg(name) {
                             return Ok(Some(reg));
@@ -1901,6 +1920,9 @@ impl VbcCodegen {
                 // These are valid in expressions like @intrinsic("size_of", T) but don't
                 // have a runtime value. Return a type reference placeholder.
                 if self.ctx.generic_type_params.contains(&name.to_string()) {
+                    if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+                        eprintln!("[tpcall] bare-TP LoadNil: {}", name);
+                    }
                     let dest = self.ctx.alloc_temp();
                     // Load type parameter index as a marker (will be handled by intrinsic)
                     self.ctx.emit(Instruction::LoadNil { dst: dest });
@@ -4745,6 +4767,84 @@ impl VbcCodegen {
                 return self.compile_indirect_call(func, args);
             }
         };
+
+        // #44-B: `T.method(args)` — a static call on a GENERIC TYPE PARAM
+        // (typechecker stamp `StaticCall{"T.default"}`). No registered
+        // function can ever match a type-param prefix, so pre-fix the
+        // resolution miss collapsed the WHOLE call into the bare-`T`
+        // LoadNil stub (compile_simple_path's generic-param arm) — e.g.
+        // Maybe.flatten's None arm compiled to `LoadNil` and returned nil.
+        // Emit the witness form instead: LoadT{Generic(idx)} + CallM. At
+        // runtime a CallG-delivered witness resolves T and the CallM
+        // dispatches {ConcreteType}.method statically; with no witness
+        // LoadT yields nil and the dispatcher's nil fallback keeps the
+        // erased-T identity for default/zero/one.
+        if let ExprKind::Path(path) = &func.kind
+            && path.segments.len() == 2
+            && let (PathSegment::Name(tp_ident), PathSegment::Name(method_ident)) =
+                (&path.segments[0], &path.segments[1])
+            // Constrained to the identity-fallback-covered set: for OTHER
+            // `T.method()` shapes the legacy behavior is a silent
+            // LoadNil-collapse of the whole call; replacing that with a
+            // CallM would turn silent nils into runtime panics wherever no
+            // witness reaches the frame (cycle-4 regression fingerprint).
+            && matches!(method_ident.name.as_str(), "default" | "zero" | "one")
+        {
+            let tp_name = tp_ident.name.as_str();
+            if let Some(idx) = self
+                .ctx
+                .generic_type_params_ordered
+                .iter()
+                .position(|p| p == tp_name)
+            {
+                if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+                    eprintln!("[tpcall] compile_call intercept: {}.{} idx={}", tp_name, method_ident.name.as_str(), idx);
+                }
+                let recv = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadT {
+                    dst: recv,
+                    type_ref: crate::types::TypeRef::Generic(
+                        crate::types::TypeParamId(idx as u16),
+                    ),
+                });
+                // Compile arguments into a contiguous block.
+                let mut arg_regs: Vec<Reg> = Vec::with_capacity(args.len());
+                for a in args.iter() {
+                    let r = self
+                        .compile_expr(a)?
+                        .or_internal("type-param method call: arg has no value")?;
+                    arg_regs.push(r);
+                }
+                let args_start = if !arg_regs.is_empty() {
+                    let first = self.ctx.registers.alloc_fresh();
+                    for _ in 1..arg_regs.len() {
+                        self.ctx.registers.alloc_fresh();
+                    }
+                    for (i, &src) in arg_regs.iter().enumerate() {
+                        let dst = Reg(first.0 + i as u16);
+                        if src != dst {
+                            self.ctx.emit(Instruction::Mov { dst, src });
+                        }
+                    }
+                    first
+                } else {
+                    Reg(0)
+                };
+                let method_id = self.ctx.intern_string_raw(method_ident.name.as_str());
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CallM {
+                    dst: result,
+                    receiver: recv,
+                    method_id,
+                    args: crate::instruction::RegRange {
+                        start: args_start,
+                        count: args.len() as u8,
+                    },
+                });
+                self.ctx.free_temp(recv);
+                return Ok(Some(result));
+            }
+        }
 
         // Handle built-in functions
         if let Some(result) = self.try_compile_builtin(&func_name, args)? {
@@ -8339,6 +8439,9 @@ impl VbcCodegen {
                     _ => None,
                 };
                 if let Some(idx) = witness_idx {
+                    if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+                        eprintln!("[tpcall] task17 witness: method={} idx={}", method.name.as_str(), idx);
+                    }
                     let recv = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadT {
                         dst: recv,
@@ -11143,6 +11246,17 @@ impl VbcCodegen {
             let _ = method_id;
         } else {
             // Fallback: emit string-keyed dynamic CallM.
+            //
+            // #44-B note: an experimental generic-witness devirtualization
+            // here (CallM → CallG when the resolved callee is generic and
+            // witnesses derive) REGRESSED collections/list 158/0 → 153/5 and
+            // base/result 212/18 → 207/23 in cycle-4 verification: WKT
+            // receivers' method semantics live partly in the runtime's
+            // builtin intercepts (the devirt denylist above exists for
+            // exactly this reason), and a direct CallG to the stdlib body
+            // bypasses them. Witness delivery for WKT-intercepted methods
+            // needs a channel that PRESERVES CallM dispatch — deliberately
+            // not attempted here.
             self.ctx.emit(Instruction::CallM {
                 dst: result,
                 receiver: actual_receiver,
@@ -20495,6 +20609,15 @@ impl VbcCodegen {
                 // Then try to resolve the field's declared type
                 if let Some(base_type) = self.extract_expr_type_name(base) {
                     let field_name = field.name.to_string();
+                    // TUPLE-TYPE-TRACK-1: numeric projection on a tuple-typed
+                    // base (`pair.0` where pair: "(BigInt, BigInt)") — the
+                    // element type is positional, never in the field tables.
+                    if let Ok(idx) = field_name.parse::<usize>()
+                        && let Some(elem) =
+                            VbcCodegen::tuple_element_type_name(&base_type, idx)
+                    {
+                        return Some(elem);
+                    }
                     // Try exact match first
                     if let Some(ft) = self
                         .type_field_type_names
@@ -21378,9 +21501,27 @@ impl VbcCodegen {
                 expr: scrutinee,
                 arms,
             } => {
+                // NEVER-ABSORB-1: `!`-typed arms (panic / unreachable /
+                // return-diverging bodies) never produce the match's VALUE —
+                // the never type is absorbing in the arm-type join.  Pre-fix,
+                // `let ch = match m { Some(c) => c, None => panic("…") };`
+                // could type `ch` from the panic arm as "!" whenever the
+                // first arm's type wasn't derivable, and every method call
+                // on the binding compiled to `!.method` (runtime "method
+                // not found on receiver of kind Int" for a Char receiver —
+                // text/text `Text.remove` §len_utf8).  Skip never-typed
+                // arms; only if EVERY arm is never-typed is the match
+                // itself never-typed.
+                let is_never =
+                    |t: &str| t == "!" || t == "Never" || t == "never";
                 let scrutinee_type = self.extract_expr_type_name(scrutinee);
+                let mut never_seen: Option<String> = None;
                 for arm in arms.iter() {
                     if let Some(t) = self.extract_expr_type_name(&arm.body) {
+                        if is_never(&t) {
+                            never_seen = Some(t);
+                            continue;
+                        }
                         return Some(t);
                     }
                     // Body has no directly-derivable type — try to derive
@@ -21390,10 +21531,14 @@ impl VbcCodegen {
                         &arm.body,
                         scrutinee_type.as_deref(),
                     ) {
+                        if is_never(&t) {
+                            never_seen = Some(t);
+                            continue;
+                        }
                         return Some(t);
                     }
                 }
-                None
+                never_seen
             }
             // Literal expressions: infer type from literal kind
             ExprKind::Literal(lit) => {
@@ -21983,6 +22128,14 @@ impl VbcCodegen {
                 // type, then look the field's static type up in the
                 // codegen-side type → field-name → field-type-name table.
                 if let Some(base_type) = self.infer_expr_type_name(base) {
+                    // TUPLE-TYPE-TRACK-1: numeric projection on a
+                    // tuple-typed base (`pair.0` on "(BigInt, BigInt)").
+                    if let Ok(idx) = field_name.parse::<usize>()
+                        && let Some(elem) =
+                            VbcCodegen::tuple_element_type_name(&base_type, idx)
+                    {
+                        return Some(elem);
+                    }
                     if let Some(ft) = self
                         .type_field_type_names
                         .get(&(base_type.clone(), field_name.clone()))
