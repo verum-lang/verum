@@ -105,7 +105,7 @@ async fn run_parallel_tasks(n: Int) -> Int {
 // ============================================================================
 
 // Test 4.1: Simple async block
-fn test_async_block() -> Int {
+async fn test_async_block() -> Int {
     let future = async {
         let x = 10;
         let y = 20;
@@ -115,7 +115,7 @@ fn test_async_block() -> Int {
 }
 
 // Test 4.2: Async block with computation
-fn test_complex_async_block(n: Int) -> Int {
+async fn test_complex_async_block(n: Int) -> Int {
     let computation = async {
         let a = n * 2;
         let b = a + 5;
@@ -139,7 +139,7 @@ async fn async_with_block(x: Int) -> Int {
 // ============================================================================
 
 // Test 5.1: Simple async closure
-fn test_async_closure() -> Int {
+async fn test_async_closure() -> Int {
     let async_square = async |x: Int| -> Int {
         x * x
     };
@@ -147,7 +147,7 @@ fn test_async_closure() -> Int {
 }
 
 // Test 5.2: Async closure with multiple parameters
-fn test_multi_param_async_closure() -> Int {
+async fn test_multi_param_async_closure() -> Int {
     let async_add = async |a: Int, b: Int| -> Int {
         a + b
     };
@@ -155,7 +155,7 @@ fn test_multi_param_async_closure() -> Int {
 }
 
 // Test 5.3: Nested async closures
-fn test_nested_async_closures() -> Int {
+async fn test_nested_async_closures() -> Int {
     let outer = async || -> Int {
         let inner = async || -> Int {
             42
@@ -281,7 +281,7 @@ async fn complex_async_mix(x: Int) -> Int {
 // ============================================================================
 
 // Test 9.1: Store future and await later
-fn test_delayed_await() -> Int {
+async fn test_delayed_await() -> Int {
     let future1 = simple_fetch(5);
     let future2 = simple_fetch(10);
 
@@ -296,7 +296,7 @@ fn test_delayed_await() -> Int {
 }
 
 // Test 9.2: Conditional await
-fn test_conditional_await(condition: Bool) -> Int {
+async fn test_conditional_await(condition: Bool) -> Int {
     let future = simple_fetch(42);
 
     if condition {
@@ -459,11 +459,11 @@ fn main() {
     print("------------------------------------------------------------------------");
 
     print("Test 4.1: Simple async block");
-    let r4_1 = test_async_block();
+    let r4_1 = test_async_block().await;
     print(f"  Result = {r4_1}");
 
     print("\nTest 4.2: Complex async block");
-    let r4_2 = test_complex_async_block(5);
+    let r4_2 = test_complex_async_block(5).await;
     print(f"  Result = {r4_2}");
 
     print("\nTest 4.3: Async block in async function");
@@ -477,15 +477,15 @@ fn main() {
     print("------------------------------------------------------------------------");
 
     print("Test 5.1: Simple async closure");
-    let r5_1 = test_async_closure();
+    let r5_1 = test_async_closure().await;
     print(f"  Result = {r5_1}");
 
     print("\nTest 5.2: Multi-param async closure");
-    let r5_2 = test_multi_param_async_closure();
+    let r5_2 = test_multi_param_async_closure().await;
     print(f"  Result = {r5_2}");
 
     print("\nTest 5.3: Nested async closures");
-    let r5_3 = test_nested_async_closures();
+    let r5_3 = test_nested_async_closures().await;
     print(f"  Result = {r5_3}");
 
     print("\nTest 5.4: Async closure with spawn");
@@ -553,15 +553,15 @@ fn main() {
     print("------------------------------------------------------------------------");
 
     print("Test 9.1: Store and await later");
-    let r9_1 = test_delayed_await();
+    let r9_1 = test_delayed_await().await;
     print(f"  Result = {r9_1}");
 
     print("\nTest 9.2: Conditional await - true");
-    let r9_2 = test_conditional_await(true);
+    let r9_2 = test_conditional_await(true).await;
     print(f"  Result = {r9_2}");
 
     print("\nTest 9.3: Conditional await - false");
-    let r9_3 = test_conditional_await(false);
+    let r9_3 = test_conditional_await(false).await;
     print(f"  Result = {r9_3}\n");
 
     // ========================================================================
