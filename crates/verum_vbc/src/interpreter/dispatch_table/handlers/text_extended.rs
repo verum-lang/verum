@@ -156,11 +156,11 @@ pub(in super::super) fn handle_text_extended(
             // handling small-string, heap-string, and reference forms.
             //
 
-            // The runtime representation of Text is not the same as the
-            // Verum struct `{ptr, len, cap}`:
+            // The runtime representation of Text:
             //  small string → 6 bytes packed into the NaN-boxed Value itself
-            //  heap string → pointer to `[ObjectHeader][len:u64][bytes...]`
-            // Reading `self.ptr` via GetF is wrong in both cases, so we
+            //  heap string → pointer to the canonical TEXT record
+            //  `[ObjectHeader]{ptr, len, cap}[bytes…]` (ARCH-P5 final leg)
+            // Reading `self.ptr` via GetF is wrong for small strings, so we
             // materialise the byte view here. References (`&Text`) first
             // deref to reach the underlying Text value.
             let text_reg = read_reg(state)?;
@@ -203,7 +203,7 @@ pub(in super::super) fn handle_text_extended(
                                 unsafe {
                                     heap::ObjectHeader::try_type_id(derefed.as_ptr::<u8>())
                                 },
-                                Some(TypeId::TEXT) | Some(TypeId(0x0001))
+                                Some(TypeId::TEXT)
                             ));
                     if yields_text {
                         text = derefed;
@@ -253,74 +253,21 @@ pub(in super::super) fn handle_text_extended(
                     // empty-byte-slice failure path.
                     None => return Ok(DispatchResult::Continue),
                 };
-                if header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001) {
-                    // Two coexisting Text layouts under the same TypeId:
+                if header.type_id == TypeId::TEXT {
+                    // Canonical heap Text record `{ptr, len, cap}` —
+                    // ARCH-P5 final leg: every producer (runtime AND
+                    // struct-literal codegen) emits the record, so the
+                    // former `[len:u64][bytes…]` dual-layout branches
+                    // are retired.  `text_record_payload` carries the
+                    // field-0 encoding tolerance (NaN-boxed ptr / Nil /
+                    // Int-boxed address / raw pointer bits — the
+                    // `Text.from_utf8_unchecked` struct-literal path).
                     //
-                    //   * **builder** `{ptr, len, cap}` — 24-byte payload object,
-                    //     field 0 = ptr (Value::from_ptr OR raw `*mut u8` —
-                    //     depends on how the struct-literal codegen handed off
-                    //     the `&unsafe Byte` field; both layouts coexist at
-                    //     present), field 1 = Value::from_i64(len),
-                    //     field 2 = Value::from_i64(cap).
-                    //   * **heap string** `[ObjectHeader][len:u64][bytes…]` —
-                    //     `header.size = 8 + N` where N is the byte count.
-                    //
-                    // Disambiguation: at `header.size == 24` the layouts can
-                    // collide with a 16-byte heap-string.  The primary
-                    // disambiguator is `field1` — a builder ALWAYS has the
-                    // canonical `Value::from_i64(len)` in slot 1, whereas a
-                    // 16-byte heap-string's "field1" is the second 8 bytes of
-                    // its raw payload (rarely a valid NaN-box Int tag).
-                    //
-                    // Field 0 is then treated representation-agnostically:
-                    // accept either a NaN-boxed `Value::from_ptr(...)` (the
-                    // typed-store path) or a raw `*mut u8` (the historical
-                    // path that bypasses the NaN-box for `&unsafe Byte`
-                    // fields).  Reading the same 8 bytes as both — first as
-                    // `Value` to query the NaN tag, then as `u64` to recover
-                    // the raw pointer when the NaN tag is absent — keeps the
-                    // handler correct under either codegen choice without
-                    // forcing a parallel struct-literal-store rewrite.
-                    let data_ptr = unsafe { base.add(heap::OBJECT_HEADER_SIZE) };
-                    let header_size = header.size as usize;
-                    if header_size == 24 {
-                        let field0 = unsafe { *(data_ptr as *const Value) };
-                        let field1 = unsafe { *(data_ptr as *const Value).add(1) };
-                        if field1.is_int() {
-                            // Builder layout — len lives in field1 either way.
-                            let builder_len = field1.as_i64() as u64;
-                            let builder_ptr = if field0.is_nil() {
-                                std::ptr::null_mut()
-                            } else if field0.is_ptr() {
-                                // NaN-boxed pointer.
-                                field0.as_ptr::<u8>()
-                            } else {
-                                // Raw `*mut u8` stored without NaN-box.  The
-                                // first 8 bytes ARE the address bits; cast
-                                // directly.  This is the path
-                                // `Text.from_utf8_unchecked` exercises since
-                                // its `let ptr = alloc(...)` produces a raw
-                                // pointer that the struct-literal codegen
-                                // stores byte-for-byte into field 0.
-                                let raw = unsafe { *(data_ptr as *const u64) };
-                                raw as *mut u8
-                            };
-                            (builder_ptr, builder_len)
-                        } else {
-                            // Heap-string with exactly 16 payload bytes — the
-                            // ambiguity collapses by field1's failure to
-                            // classify as Int.
-                            let len_ptr = data_ptr as *const u64;
-                            let len = unsafe { *len_ptr };
-                            let bytes_ptr = unsafe { data_ptr.add(8) };
-                            (bytes_ptr, len)
-                        }
-                    } else {
-                        // Heap string layout: [ObjectHeader][len:u64][bytes...]
-                        let len_ptr = data_ptr as *const u64;
-                        let len = unsafe { *len_ptr };
-                        let bytes_ptr = unsafe { data_ptr.add(8) };
-                        (bytes_ptr, len)
+                    // SAFETY: TEXT header established via try_from_ptr;
+                    // producers guarantee the record payload contract.
+                    match unsafe { heap::text_record_payload(base) } {
+                        Some((p, l)) => (p as *mut u8, l as u64),
+                        None => (std::ptr::null_mut(), 0),
                     }
                 } else {
                     // Unknown pointer type — return empty slice rather than

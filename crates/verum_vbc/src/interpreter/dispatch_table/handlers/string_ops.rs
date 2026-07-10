@@ -1,7 +1,6 @@
 //! String operation handlers for VBC interpreter.
 
 use super::super::super::error::InterpreterResult;
-use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::super::format_value_for_print;
@@ -11,6 +10,26 @@ use crate::value::Value;
 // ============================================================================
 // String Operations
 // ============================================================================
+
+/// Store a Rust string as a Text Value: small-string optimized when it
+/// fits the 6-byte NaN box, otherwise ONE canonical heap Text record
+/// `[ObjectHeader(TEXT)]{ptr, len, cap=0}[bytes…]` (ARCH-P5 final leg —
+/// the legacy `TypeId(0x0001)` `[len:u64][bytes…]` form is retired).
+#[inline]
+fn store_string_result(
+    state: &mut InterpreterState,
+    dst: crate::instruction::Reg,
+    s: &str,
+) -> InterpreterResult<DispatchResult> {
+    if let Some(small) = Value::from_small_string(s) {
+        state.set_reg(dst, small);
+    } else {
+        let obj = state.heap.alloc_text(s.as_bytes())?;
+        state.record_allocation();
+        state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+    }
+    Ok(DispatchResult::Continue)
+}
 
 /// ToString (0x7A) - Convert value to string.
 ///
@@ -27,34 +46,7 @@ pub(in super::super) fn handle_to_string(
     // Convert value to string
     let string_repr = format_value_for_print(state, value);
 
-    // Store as a string - try small string optimization first
-    if let Some(small_str_value) = Value::from_small_string(&string_repr) {
-        state.set_reg(dst, small_str_value);
-    } else {
-        // Need to allocate on heap
-        let bytes = string_repr.as_bytes();
-        let len = bytes.len();
-
-        // Allocate string data on heap: [len: u64][bytes...]
-        let alloc_size = 8 + len;
-        let obj = state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?; // String type
-        state.record_allocation();
-        let base_ptr = obj.as_ptr() as *mut u8;
-
-        unsafe {
-            let data_offset = heap::OBJECT_HEADER_SIZE;
-            // Store length
-            let len_ptr = base_ptr.add(data_offset) as *mut u64;
-            *len_ptr = len as u64;
-            // Store bytes
-            let bytes_ptr = base_ptr.add(data_offset + 8);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
-        }
-
-        state.set_reg(dst, Value::from_ptr(base_ptr));
-    }
-
-    Ok(DispatchResult::Continue)
+    store_string_result(state, dst, &string_repr)
 }
 
 /// Concat (0x7B) - Concatenate strings.
@@ -78,29 +70,7 @@ pub(in super::super) fn handle_concat(
 
     let result = format!("{}{}", a_str, b_str);
 
-    // Store result - try small string optimization first
-    if let Some(small_str_value) = Value::from_small_string(&result) {
-        state.set_reg(dst, small_str_value);
-    } else {
-        let bytes = result.as_bytes();
-        let len = bytes.len();
-        let alloc_size = 8 + len;
-        let obj = state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?;
-        state.record_allocation();
-        let base_ptr = obj.as_ptr() as *mut u8;
-
-        unsafe {
-            let data_offset = heap::OBJECT_HEADER_SIZE;
-            let len_ptr = base_ptr.add(data_offset) as *mut u64;
-            *len_ptr = len as u64;
-            let bytes_ptr = base_ptr.add(data_offset + 8);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
-        }
-
-        state.set_reg(dst, Value::from_ptr(base_ptr));
-    }
-
-    Ok(DispatchResult::Continue)
+    store_string_result(state, dst, &result)
 }
 
 /// CharToStr (0xCB) - Convert Char to string.
@@ -125,31 +95,9 @@ pub(in super::super) fn handle_char_to_str(
         '\u{FFFD}' // replacement character for invalid codepoints
     };
 
-    // Create string from the character
+    // Create string from the character (1-4 bytes — always fits the
+    // small-string box; the heap path is defensive only).
     let string_repr = c.to_string();
 
-    // Store as a string - try small string optimization first (1-4 bytes for a char is always small)
-    if let Some(small_str_value) = Value::from_small_string(&string_repr) {
-        state.set_reg(dst, small_str_value);
-    } else {
-        // Shouldn't happen for single char, but handle just in case
-        let bytes = string_repr.as_bytes();
-        let len = bytes.len();
-        let alloc_size = 8 + len;
-        let obj = state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?;
-        state.record_allocation();
-        let base_ptr = obj.as_ptr() as *mut u8;
-
-        unsafe {
-            let data_offset = heap::OBJECT_HEADER_SIZE;
-            let len_ptr = base_ptr.add(data_offset) as *mut u64;
-            *len_ptr = len as u64;
-            let bytes_ptr = base_ptr.add(data_offset + 8);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
-        }
-
-        state.set_reg(dst, Value::from_ptr(base_ptr));
-    }
-
-    Ok(DispatchResult::Continue)
+    store_string_result(state, dst, &string_repr)
 }

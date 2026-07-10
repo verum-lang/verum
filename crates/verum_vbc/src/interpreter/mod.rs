@@ -110,8 +110,9 @@ pub use dispatch_table::{
     DispatchResult, dispatch_loop_table, dispatch_loop_table_with_entry_depth,
 };
 pub use heap::{
-    Heap, HeapStats, OBJECT_HEADER_SIZE, Object, ObjectFlags, ObjectHeader, byte_slice_payload,
-    empty_byte_slice_ptr, value_as_byte_slice,
+    Heap, HeapStats, OBJECT_HEADER_SIZE, Object, ObjectFlags, ObjectHeader, TEXT_RECORD_SIZE,
+    byte_slice_payload, empty_byte_slice_ptr, text_record_cap, text_record_payload,
+    value_as_byte_slice, value_as_text_record,
 };
 // Tier-0 work-stealing thread pool — `T-DEFER-VBC-EXEC-MT` V0
 // foundation; see `worker_pool.rs` module-level docs.
@@ -560,8 +561,9 @@ impl Interpreter {
     /// `value` is not text.
     ///
     /// The inverse of [`alloc_string`](Self::alloc_string): it handles the
-    /// inline small-string form and the heap form this interpreter produces
-    /// (`TypeId(0x0001)` object whose payload is `[len: u64][utf8 bytes]`).
+    /// inline small-string form, the BYTE_SLICE byte view, and the canonical
+    /// heap Text record (`TypeId::TEXT` object whose payload is the
+    /// `{ptr, len, cap}` triple — see `Heap::alloc_text`).
     /// Used by the scripting engine to marshal a script's `Text` result out of
     /// the (about-to-be-dropped) script interpreter into the host.
     pub fn read_text(&self, value: Value) -> Option<String> {
@@ -569,27 +571,19 @@ impl Interpreter {
     }
 
     /// Allocates a string on the interpreter heap and returns it as a Value.
+    ///
+    /// Small strings (<= 6 bytes) are NaN-boxed inline; larger strings
+    /// become ONE self-contained canonical heap Text record
+    /// `[ObjectHeader(TEXT)]{ptr, len, cap=0}[bytes…]` (ARCH-P5 final
+    /// leg — the legacy `TypeId(0x0001)` `[len:u64][bytes…]` form is
+    /// retired).
     pub fn alloc_string(&mut self, s: &str) -> InterpreterResult<Value> {
         if let Some(small) = Value::from_small_string(s) {
             return Ok(small);
         }
-        let bytes = s.as_bytes();
-        let len = bytes.len();
-        let alloc_size = 8 + len;
-        let obj = self
-            .state
-            .heap
-            .alloc(crate::types::TypeId(0x0001), alloc_size)?;
+        let obj = self.state.heap.alloc_text(s.as_bytes())?;
         self.state.record_allocation();
-        let base_ptr = obj.as_ptr() as *mut u8;
-        unsafe {
-            let data_offset = heap::OBJECT_HEADER_SIZE;
-            let len_ptr = base_ptr.add(data_offset) as *mut u64;
-            *len_ptr = len as u64;
-            let bytes_ptr = base_ptr.add(data_offset + 8);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
-        }
-        Ok(Value::from_ptr(base_ptr))
+        Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
     }
 
     /// Allocates a List<Text> from Rust strings and returns it as a Value.

@@ -38,20 +38,10 @@ pub(in super::super) fn handle_addi(
         let result = if let Some(small) = Value::from_small_string(&concat) {
             small
         } else {
-            let bytes = concat.as_bytes();
-            let len = bytes.len();
-            let alloc_size = 8 + len;
-            let obj = state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?;
+            // Canonical heap Text record (ARCH-P5 final leg).
+            let obj = state.heap.alloc_text(concat.as_bytes())?;
             state.record_allocation();
-            let base_ptr = obj.as_ptr() as *mut u8;
-            unsafe {
-                let data_offset = crate::interpreter::heap::OBJECT_HEADER_SIZE;
-                let len_ptr = base_ptr.add(data_offset) as *mut u64;
-                *len_ptr = len as u64;
-                let bytes_ptr = base_ptr.add(data_offset + 8);
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
-            }
-            Value::from_ptr(base_ptr)
+            Value::from_ptr(obj.as_ptr() as *mut u8)
         };
         state.set_reg(dst, result);
     } else {

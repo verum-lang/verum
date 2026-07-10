@@ -695,11 +695,13 @@ pub(crate) fn load_constant(
             // `__rodata` Text globals from #92).
             //
             // First load for `const_id` realises the Value (small-
-            // string-optimized via NaN box, or heap-allocated
-            // `[len:u64][bytes...]` blob).  Subsequent loads return
-            // the cached Value directly — zero allocation, zero
-            // memcpy.  The realised allocation is module-lifetime
-            // (never freed); for SSO values there's nothing to pin.
+            // string-optimized via NaN box, or ONE canonical heap Text
+            // record `{ptr, len, cap=0}` — ARCH-P5 final leg; `cap == 0`
+            // is the same immutable-literal marker the AOT rodata Text
+            // globals carry).  Subsequent loads return the cached Value
+            // directly — zero allocation, zero memcpy.  The realised
+            // allocation is module-lifetime (never freed); for SSO
+            // values there's nothing to pin.
             //
             // The cache lives on `InterpreterState` because the
             // module is shared (`Arc<VbcModule>`) and may be
@@ -715,25 +717,12 @@ pub(crate) fn load_constant(
                 if let Some(small) = Value::from_small_string(&s) {
                     small
                 } else {
-                    // Heap-allocate the `[len: u64][bytes...]` blob —
-                    // happens at most once per ConstId per
-                    // InterpreterState lifetime.
-                    let bytes = s.as_bytes();
-                    let len = bytes.len();
-                    let alloc_size = 8 + len;
-                    let obj = state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?;
+                    // Heap-allocate the canonical Text record — happens
+                    // at most once per ConstId per InterpreterState
+                    // lifetime.
+                    let obj = state.heap.alloc_text(s.as_bytes())?;
                     state.record_allocation();
-                    let base_ptr = obj.as_ptr() as *mut u8;
-                    // SAFETY: obj was just allocated with size 8 + len. Writing the length
-                    // as u64 at data_offset, then copying `len` bytes of string data after it.
-                    unsafe {
-                        let data_offset = super::heap::OBJECT_HEADER_SIZE;
-                        let len_ptr = base_ptr.add(data_offset) as *mut u64;
-                        *len_ptr = len as u64;
-                        let bytes_ptr = base_ptr.add(data_offset + 8);
-                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
-                    }
-                    Value::from_ptr(base_ptr)
+                    Value::from_ptr(obj.as_ptr() as *mut u8)
                 }
             } else {
                 Value::from_small_string("").unwrap_or(Value::nil())

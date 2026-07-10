@@ -458,7 +458,7 @@ fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) ->
         return extract_string(&unwrapped, state);
     }
     // Heap-string TEXT shape: route to extract_string directly.
-    if header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001) {
+    if header.type_id == TypeId::TEXT {
         return extract_string(&unwrapped, state);
     }
     // Try Path { inner: Text } — read field 0.
@@ -475,9 +475,7 @@ fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) ->
                 .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
         {
             let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
-            if inner_header.type_id == TypeId::TEXT
-                || inner_header.type_id == TypeId(0x0001)
-            {
+            if inner_header.type_id == TypeId::TEXT {
                 return extract_string(&field0, state);
             }
             // PathBuf { path: Path { inner: Text } } — drill once more.
@@ -491,9 +489,7 @@ fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) ->
                 if inner_field0.is_ptr() && !inner_field0.is_nil() {
                     let deeper_ptr = inner_field0.as_ptr::<u8>();
                     let deeper_header = unsafe { heap::ObjectHeader::ref_or_stub(deeper_ptr) };
-                    if deeper_header.type_id == TypeId::TEXT
-                        || deeper_header.type_id == TypeId(0x0001)
-                    {
+                    if deeper_header.type_id == TypeId::TEXT {
                         return extract_string(&inner_field0, state);
                     }
                 }

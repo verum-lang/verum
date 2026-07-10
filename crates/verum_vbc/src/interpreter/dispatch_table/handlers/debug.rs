@@ -206,60 +206,22 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
             let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
             let data_offset = heap::OBJECT_HEADER_SIZE;
 
-            // Heap-allocated string: type_id == TEXT (4) or 0x0001 (legacy).
-            //
-
-            // Two layouts can land under this type_id:
-            //
-
-            //  **Compact** — `[header | len:u64 | bytes[len]]`.
-            //  Emitted by `load_constant` for text literals.
-            //
-
-            //  **Struct** — `[header | ptr:Value | len:Value | cap:Value]`.
-            //  Produced by the stdlib's `Text { ptr, len, cap }` record
-            //  literal (see `core/text/text.vr:170`). Each field is a
-            //  NaN-boxed `Value` and `header.size == 24`. Same dual-layout
-            //  dispatch is mirrored in `string_helpers::format_value_for_print`.
-            if header.type_id == crate::types::TypeId::TEXT
-                || header.type_id == crate::types::TypeId(0x0001)
-            {
-                unsafe {
-                    // Prefer the struct layout when the header advertises
-                    // exactly 24 bytes of payload and the first two fields
-                    // look like well-formed Values (pointer-or-nil + integer).
-                    if header.size as usize == 24 {
-                        let field0 = *(base_ptr.add(data_offset) as *const crate::value::Value);
-                        let field1 =
-                            *((base_ptr.add(data_offset) as *const crate::value::Value).add(1));
-                        if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
-                            let builder_ptr = if field0.is_nil() {
-                                std::ptr::null::<u8>()
-                            } else {
-                                field0.as_ptr::<u8>() as *const u8
-                            };
-                            let builder_len = field1.as_i64() as usize;
-                            if builder_ptr.is_null() || builder_len == 0 {
-                                return String::new();
-                            }
-                            if builder_len <= 1 << 30 {
-                                let bytes = std::slice::from_raw_parts(builder_ptr, builder_len);
-                                if let Ok(s) = std::str::from_utf8(bytes) {
-                                    return s.to_string();
-                                }
-                            }
-                        }
+            // Heap-allocated string: type_id == TEXT (4) — the canonical
+            // `[header | ptr:Value | len:Value | cap:Value | bytes…]`
+            // record every producer emits (ARCH-P5 final leg; the legacy
+            // `TypeId(0x0001)` `[len:u64][bytes]` compact form is
+            // retired).  `heap::text_record_payload` carries the field-0
+            // encoding tolerance shared by every heap-Text reader.
+            if header.type_id == crate::types::TypeId::TEXT {
+                // SAFETY: TEXT header established; producers guarantee
+                // the record payload contract.
+                if let Some((b_ptr, b_len)) = unsafe { heap::text_record_payload(base_ptr) } {
+                    if b_ptr.is_null() || b_len == 0 {
+                        return String::new();
                     }
-
-                    // Compact layout: `[header | len:u64 | bytes[len]]`.
-                    let len_ptr = base_ptr.add(data_offset) as *const u64;
-                    let len = *len_ptr as usize;
-                    if len <= 65536 {
-                        let bytes_ptr = base_ptr.add(data_offset + 8);
-                        let bytes = std::slice::from_raw_parts(bytes_ptr, len);
-                        if let Ok(s) = std::str::from_utf8(bytes) {
-                            return s.to_string();
-                        }
+                    let bytes = unsafe { std::slice::from_raw_parts(b_ptr, b_len) };
+                    if let Ok(s) = std::str::from_utf8(bytes) {
+                        return s.to_string();
                     }
                 }
                 return "<invalid string>".to_string();

@@ -3942,26 +3942,10 @@ pub(in super::super) fn make_oserror_variant_with_msg(
     let msg_val = if let Some(small) = Value::from_small_string(msg) {
         small
     } else {
-        // Allocate heap string: [len: u64][bytes...]
-        let bytes = msg.as_bytes();
-        let len = bytes.len();
-        let alloc_size = 8 + len;
-        let str_obj = state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?;
+        // Canonical heap Text record (ARCH-P5 final leg).
+        let str_obj = state.heap.alloc_text(msg.as_bytes())?;
         state.record_allocation();
-        let base_ptr = str_obj.as_ptr() as *mut u8;
-        // SAFETY: `str_obj` was just returned from `alloc` with `alloc_size`
-        // bytes of data storage (`8 + len`), so we have 8 bytes for the
-        // length prefix and `len` bytes for the UTF-8 payload. `bytes` is a
-        // live slice produced by `msg.as_bytes()` that does not overlap the
-        // fresh allocation.
-        unsafe {
-            let data_offset = super::super::super::heap::OBJECT_HEADER_SIZE;
-            let len_ptr = base_ptr.add(data_offset) as *mut u64;
-            *len_ptr = len as u64;
-            let bytes_ptr = base_ptr.add(data_offset + 8);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
-        }
-        Value::from_ptr(base_ptr)
+        Value::from_ptr(str_obj.as_ptr() as *mut u8)
     };
 
     let code_val = Value::from_i64(code as i64);

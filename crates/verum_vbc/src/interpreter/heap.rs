@@ -327,6 +327,146 @@ pub fn value_as_byte_slice(v: &Value) -> Option<(*mut u8, u64)> {
     }
 }
 
+// ============================================================================
+// TEXT (4) canonical heap-record helpers (ARCH-P5 final leg)
+// ============================================================================
+//
+// ONE heap Text layout.  Every interpreter-side heap Text producer
+// (`Interpreter::alloc_string`, `load_constant`'s string-constant
+// realisation, concat / to_string / char_to_str, the FFI OSError
+// message builder, the Text mutator intercepts, …) allocates a SINGLE
+// self-contained object:
+//
+//   [ObjectHeader (24, type_id = TypeId::TEXT, size = 24 + storage)]
+//   [ptr: Value (NaN-boxed *u8)] [len: Value (Int)] [cap: Value (Int)]
+//   [utf8 bytes …]                                   ^ payload offset 24
+//
+// The three payload slots ARE the language-level `Text {ptr, len, cap}`
+// record (core/text/text.vr:194) exactly as the stdlib's struct-literal
+// builders produce it — GetF/SetF and every .vr method body read the
+// same fields the runtime wrote.  `ptr` points at payload+24 INSIDE the
+// same allocation (self-contained: the object carries its bytes), and
+// Tier-1 (AOT) has always used this record (`verum_text_alloc` /
+// `verum_text_get_ptr` read `{ptr@0, len@8, cap@16}`).
+//
+// Two producer flavours, distinguished ONLY by the `cap` field — the
+// exact semantic text.vr pins at text.vr:25 ("cap == 0 indicates
+// static/immutable string literal"):
+//
+//   * [`Heap::alloc_text`] — immutable: `size = 24 + byte_len`,
+//     `cap = 0`.  `Text.grow` (text.vr:1069) only dealloc's `self.ptr`
+//     when `cap > 0` and `push_*` grows BEFORE the first write when
+//     `len >= cap`, so the interior pointer is never written past `len`
+//     and never reaches the .vr allocator's dealloc.  Mutation
+//     COW-promotes into a fresh allocator buffer (grow copies the
+//     bytes, then repoints ptr/cap at owned storage) — the same
+//     contract AOT rodata Text literals carry (`{ptr, len, cap=0}`).
+//     Empty text uses [`empty_byte_slice_ptr`] (never-null, never
+//     written: push grows first, truncate early-returns on len 0).
+//
+//   * [`Heap::alloc_text_with_capacity`] — capacity-carrying (the
+//     `with_capacity` / `reserve` intercepts): `size = 24 + cap + 1`,
+//     `cap > 0`.  The byte region reserves `cap + 1` bytes so
+//     text.vr's owned-buffer convention (a `cap`-capacity buffer has
+//     `cap + 1` bytes for the NUL terminator; `push_byte` writes at
+//     `len` then NUL at `len + 1` with `len < cap`) holds in-bounds.
+//     When .vr `grow` eventually runs past `cap` it allocates a FRESH
+//     buffer, copies, and calls `dealloc(self.ptr, cap+1, 1)` on the
+//     interior pointer — a no-op at Tier-0 (`CbgrDealloc` is an
+//     intentional leak, ffi_extended.rs), so the record's inline
+//     storage simply goes dormant and dies with the object.
+//
+// This retires the legacy `TypeId(0x0001)` `[len: u64][bytes…]` form —
+// the LAST dual representation in the Text ABI (the FatRef-as-Text
+// heuristic was retired by the BYTE_SLICE(528) campaign).  The legacy
+// reader arms are DELETED, not deprecated: archives never carry live
+// heap Text objects (`Constant::String` is a string-table id realised
+// by `load_constant` at runtime — serialize.rs:656 encodes the id
+// only) and Tier-1 never produced the form, so nothing can resurrect
+// a 0x0001 object once the interpreter producers are converted.
+
+/// Payload size of the `Text {ptr, len, cap}` record head (three
+/// 8-byte slots).  Bytes of a self-contained Text start at this
+/// offset into the payload.
+pub const TEXT_RECORD_SIZE: usize = 24;
+
+/// Read `(bytes_ptr, byte_len)` from a canonical TEXT record payload.
+///
+/// Field 0 (`ptr`) tolerates every encoding the struct-literal codegen
+/// and the runtime producers are known to emit (the same tolerance the
+/// former AsBytes dual-layout reader carried):
+///   * `Value::nil()` — no buffer (`Text.new()`): returns null.
+///   * NaN-boxed `Value::from_ptr(..)` — the typed-store / runtime path.
+///   * NaN-boxed `Value::from_i64(addr)` — an address that flowed
+///     through an Int-typed slot (the `cbgr_alloc` tuple path).
+///   * RAW pointer bits — the historical struct-literal store for
+///     `&unsafe Byte` fields (`Text.from_utf8_unchecked`).
+///
+/// Returns `None` when field 1 (`len`) does not classify as a
+/// NaN-boxed Int — a builder record ALWAYS carries `Value::from_i64(len)`
+/// in slot 1, so a non-Int slot means the object is not a Text record.
+///
+/// # Safety
+/// `base` must point to a live heap object whose header TypeId is
+/// `TypeId::TEXT` and whose payload is at least [`TEXT_RECORD_SIZE`]
+/// bytes (every canonical producer guarantees both).
+#[inline]
+pub unsafe fn text_record_payload(base: *const u8) -> Option<(*const u8, usize)> {
+    let data = unsafe { base.add(OBJECT_HEADER_SIZE) };
+    let f0 = unsafe { *(data as *const Value) };
+    let f1 = unsafe { *((data as *const Value).add(1)) };
+    if !f1.is_int() {
+        return None;
+    }
+    let len = f1.as_i64().max(0) as usize;
+    let ptr: *const u8 = if f0.is_nil() {
+        std::ptr::null()
+    } else if f0.is_ptr() {
+        f0.as_ptr::<u8>() as *const u8
+    } else if f0.is_int() {
+        f0.as_i64() as usize as *const u8
+    } else {
+        // Raw pointer bits stored without NaN-box.
+        (unsafe { *(data as *const u64) }) as *const u8
+    };
+    Some((ptr, len))
+}
+
+/// Read the `cap` field (slot 2) of a canonical TEXT record payload.
+/// Tolerates a NaN-boxed Int or raw machine-word storage.
+///
+/// # Safety
+/// Same contract as [`text_record_payload`].
+#[inline]
+pub unsafe fn text_record_cap(base: *const u8) -> i64 {
+    let data = unsafe { base.add(OBJECT_HEADER_SIZE) };
+    let f2 = unsafe { *((data as *const Value).add(2)) };
+    if f2.is_int() {
+        f2.as_i64()
+    } else {
+        (unsafe { *((data as *const u64).add(2)) }) as i64
+    }
+}
+
+/// Canonical classifier: if `v` is a pointer to a TEXT heap record,
+/// return its `(bytes_ptr, byte_len)`; `None` for every other value
+/// shape.  The single inspection API for heap-Text consumer arms —
+/// no site re-implements the header probe or the field-0 tolerance.
+#[inline]
+pub fn value_as_text_record(v: &Value) -> Option<(*const u8, usize)> {
+    if !v.is_ptr() || v.is_nil() || v.is_boxed_int() {
+        return None;
+    }
+    let base = v.as_ptr::<u8>();
+    // SAFETY: try_type_id rejects null / misaligned / special-marker
+    // payloads; a TEXT-stamped header implies the record contract
+    // documented on `text_record_payload`.
+    match unsafe { ObjectHeader::try_type_id(base) } {
+        Some(TypeId::TEXT) => unsafe { text_record_payload(base) },
+        _ => None,
+    }
+}
+
 bitflags! {
     /// Object flags for runtime state.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -930,6 +1070,82 @@ impl Heap {
                 *slots.add(1) = len;
             }
         })
+    }
+
+    /// Allocates the canonical IMMUTABLE heap Text record (ARCH-P5
+    /// final leg): ONE self-contained object
+    /// `[ObjectHeader(TEXT, size = 24 + byte_len)]{ptr, len, cap=0}[bytes…]`
+    /// with `ptr` addressing the bytes at payload offset
+    /// [`TEXT_RECORD_SIZE`] inside the SAME allocation.  `cap == 0` is
+    /// text.vr's static/immutable marker — mutation COW-promotes (see
+    /// the module-level TEXT helper docs for the invariant argument).
+    ///
+    /// Empty input normalizes `ptr` to [`empty_byte_slice_ptr`]
+    /// (never-null; never written — `push_*` grows before the first
+    /// write and `truncate` early-returns at `len == 0`).
+    ///
+    /// The single producer surface replacing every legacy
+    /// `TypeId(0x0001)` `[len:u64][bytes…]` allocation.
+    pub fn alloc_text(&mut self, bytes: &[u8]) -> InterpreterResult<Object> {
+        let len = bytes.len();
+        let obj = self.alloc(TypeId::TEXT, TEXT_RECORD_SIZE + len)?;
+        let base = obj.as_ptr() as *mut u8;
+        // SAFETY: the object was just allocated with `24 + len` payload
+        // bytes: three 8-byte record slots followed by `len` bytes of
+        // UTF-8 storage.  All writes below are within that region.
+        unsafe {
+            let data = base.add(OBJECT_HEADER_SIZE);
+            let bytes_dst = data.add(TEXT_RECORD_SIZE);
+            let ptr_v = if len == 0 {
+                Value::from_ptr(empty_byte_slice_ptr())
+            } else {
+                Value::from_ptr(bytes_dst)
+            };
+            let slots = data as *mut Value;
+            *slots = ptr_v;
+            *slots.add(1) = Value::from_i64(len as i64);
+            *slots.add(2) = Value::from_i64(0); // cap == 0: immutable/static marker
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_dst, len);
+        }
+        Ok(obj)
+    }
+
+    /// Allocates the canonical CAPACITY-CARRYING heap Text record
+    /// (the `Text.with_capacity` / `Text.reserve` intercept surface):
+    /// `[ObjectHeader(TEXT, size = 24 + cap + 1)]{ptr, len, cap}[storage…]`
+    /// where `cap >= max(len, 1)` and the byte region reserves
+    /// `cap + 1` bytes, honouring text.vr's owned-buffer convention (a
+    /// cap-capacity buffer has `cap + 1` bytes so `push_byte`'s
+    /// write-at-`len` + NUL-at-`len+1` stays in-bounds for `len < cap`).
+    ///
+    /// `cap > 0` marks the record grow-capable; when .vr `grow`
+    /// eventually reallocates past `cap` its `dealloc` of the interior
+    /// pointer is a Tier-0 no-op (`CbgrDealloc` intentional leak) and
+    /// the inline storage goes dormant.
+    pub fn alloc_text_with_capacity(
+        &mut self,
+        bytes: &[u8],
+        cap: usize,
+    ) -> InterpreterResult<Object> {
+        let len = bytes.len();
+        let cap = cap.max(len).max(1);
+        let obj = self.alloc(TypeId::TEXT, TEXT_RECORD_SIZE + cap + 1)?;
+        let base = obj.as_ptr() as *mut u8;
+        // SAFETY: the object was just allocated with `24 + cap + 1`
+        // payload bytes (`cap >= len`); the record slots and the
+        // `len`-byte copy below are within that region.  `alloc`
+        // zero-fills, so the `[len, cap]` tail (incl. the NUL slot)
+        // is already zeroed.
+        unsafe {
+            let data = base.add(OBJECT_HEADER_SIZE);
+            let bytes_dst = data.add(TEXT_RECORD_SIZE);
+            let slots = data as *mut Value;
+            *slots = Value::from_ptr(bytes_dst);
+            *slots.add(1) = Value::from_i64(len as i64);
+            *slots.add(2) = Value::from_i64(cap as i64);
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_dst, len);
+        }
+        Ok(obj)
     }
 
     /// Frees an object.

@@ -679,10 +679,14 @@ pub(in super::super) fn handle_call_method(
     // capacity so subsequent push_* avoids re-allocation.  The
     // user-side body calls `Text.grow` which SetF's field 0 on a
     // small-string receiver and null-derefs.  This intercept
-    // migrates the receiver from small-string → builder layout
-    // `[hdr]{ptr,len,cap}` in place via the CBGR-ref writeback
-    // discipline (mirrors push_str).  After the call, `self` holds
-    // a builder-layout value with the existing bytes preserved and
+    // migrates the receiver to the canonical capacity-carrying TEXT
+    // record (`Heap::alloc_text_with_capacity` — ONE self-contained
+    // allocation `{ptr, len, cap}[storage…]`, ARCH-P5 final leg) via
+    // the CBGR-ref writeback discipline (mirrors push_str).  After
+    // the call, `self` holds a record with the existing bytes
+    // preserved IN PLACE (the former builder stored field0 = a
+    // pointer to a separate heap-string OBJECT header, which every
+    // record reader then misread as a bytes pointer) and
     // `cap = max(old_cap, len + additional)`.
     //
     // Pinned by `core-tests/text/text/regression_test.vr::
@@ -698,34 +702,22 @@ pub(in super::super) fn handle_call_method(
             state.set_reg(dst, Value::unit());
             return Ok(DispatchResult::Continue);
         }
-        let bytes = extract_string(&dispatch_receiver, state);
+        // Byte-exact extraction (a reserve may land mid-code-point
+        // during byte-wise construction; extract_string would lossy-
+        // replace the partial sequence).
+        let bytes = super::string_helpers::extract_text_bytes(&dispatch_receiver, state);
         let current_len = bytes.len() as i64;
         // Compute current capacity via the same dispatch-by-
-        // representation logic as the "capacity" arm below — read
-        // field2 if builder layout, else byte_len.
+        // representation logic as the "capacity" arm below — record
+        // cap when grow-capable, else byte_len.
         let current_cap = text_capacity_of(&dispatch_receiver, current_len);
         let needed_cap = current_len + additional;
         let new_cap = if needed_cap > current_cap { needed_cap } else { current_cap };
-        // Carry the existing bytes across.  field0 holds a fresh
-        // heap-string Value for the bytes; field1 = len; field2 = cap.
-        let bytes_val = if bytes.is_empty() {
-            Value::nil()
-        } else {
-            alloc_string_value(state, &bytes)?
-        };
-        // Allocate the builder layout — 24-byte payload, TypeId::TEXT,
-        // disambiguator field1 = Int(len) so the AsBytes / capacity
-        // intercepts route through the builder branch.
-        let obj = state.heap.alloc(TypeId::TEXT, 24)?;
+        let obj = state
+            .heap
+            .alloc_text_with_capacity(&bytes, new_cap.max(0) as usize)?;
         state.record_allocation();
-        let base = obj.as_ptr() as *mut u8;
-        unsafe {
-            let data_ptr = base.add(heap::OBJECT_HEADER_SIZE) as *mut Value;
-            *data_ptr = bytes_val;
-            *data_ptr.add(1) = Value::from_i64(current_len);
-            *data_ptr.add(2) = Value::from_i64(new_cap);
-        }
-        let new_value = Value::from_ptr(base);
+        let new_value = Value::from_ptr(obj.as_ptr() as *mut u8);
         // Writeback via CBGR ref to the caller-frame slot.
         if is_cbgr_ref(&receiver) {
             let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
@@ -1277,7 +1269,7 @@ pub(in super::super) fn handle_call_method(
                     false
                 } else {
                     let header = unsafe { heap::ObjectHeader::ref_or_stub(p) };
-                    header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001)
+                    header.type_id == TypeId::TEXT
                 }
             }
         };
@@ -1580,7 +1572,7 @@ pub(in super::super) fn handle_call_method(
                 let ptr = receiver.as_ptr::<u8>();
                 if !ptr.is_null() {
                     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-                    header.type_id == crate::types::TypeId::TEXT || header.type_id.0 == 0x0001
+                    header.type_id == crate::types::TypeId::TEXT
                 } else {
                     false
                 }
@@ -3159,8 +3151,12 @@ fn func_id_parent_compatible_with_receiver(
 ///
 ///   * small-string (NaN-boxed inline): byte_len
 ///   * BYTE_SLICE byte view (immutable, ARCH-P5): byte_len
-///   * heap-string flat layout `[hdr][len:u64][bytes…]`: byte_len
-///   * builder layout `[hdr]{ptr,len,cap}` (24-byte payload): field2 (cap)
+///   * canonical TEXT record `[hdr]{ptr,len,cap}[bytes…]`: `cap` when
+///     `cap > 0` (grow-capable — `with_capacity` / `reserve`),
+///     otherwise byte_len (`cap == 0` is text.vr's static/immutable
+///     marker; immutable representations report their length, matching
+///     the small-string / BYTE_SLICE convention above and the retired
+///     flat-layout fallback).
 ///
 /// Shared between the `"capacity"` intercept arm (`dispatch_primitive_method`)
 /// and the `reserve` intercept (which needs the current capacity to
@@ -3186,20 +3182,17 @@ fn text_capacity_of(v: &Value, byte_len_fallback: i64) -> i64 {
         return byte_len_fallback;
     }
     let header = unsafe { heap::ObjectHeader::ref_or_stub(base) };
-    if header.type_id != TypeId::TEXT && header.type_id != TypeId(0x0001) {
+    if header.type_id != TypeId::TEXT {
         return byte_len_fallback;
     }
-    let data_ptr = unsafe { base.add(heap::OBJECT_HEADER_SIZE) };
-    let header_size = header.size as usize;
-    if header_size == 24 {
-        let field1 = unsafe { *(data_ptr as *const Value).add(1) };
-        if field1.is_int() {
-            let field2 = unsafe { *(data_ptr as *const Value).add(2) };
-            if field2.is_int() {
-                return field2.as_i64();
-            }
-            return unsafe { *(data_ptr as *const u64).add(2) } as i64;
+    // SAFETY: TEXT header established; producers guarantee the record
+    // payload contract.
+    if let Some((_p, len)) = unsafe { heap::text_record_payload(base) } {
+        let cap = unsafe { heap::text_record_cap(base) };
+        if cap > 0 {
+            return cap;
         }
+        return len as i64;
     }
     byte_len_fallback
 }
@@ -3755,19 +3748,9 @@ pub(super) fn dispatch_primitive_method(
         if let Some(small_str_value) = Value::from_small_string(&string_repr) {
             return Ok(Some(small_str_value));
         } else {
-            let bytes = string_repr.as_bytes();
-            let len = bytes.len();
-            let alloc_size = 8 + len;
-            let obj = state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?;
+            // Canonical heap Text record (ARCH-P5 final leg).
+            let obj = state.heap.alloc_text(string_repr.as_bytes())?;
             state.record_allocation();
-            let base_ptr = obj.as_ptr() as *mut u8;
-            unsafe {
-                let data_offset = heap::OBJECT_HEADER_SIZE;
-                let len_ptr = base_ptr.add(data_offset) as *mut u64;
-                *len_ptr = len as u64;
-                let bytes_ptr = base_ptr.add(data_offset + 8);
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
-            }
             return Ok(Some(Value::from_ptr(obj.as_ptr() as *mut u8)));
         }
     }
@@ -4615,21 +4598,23 @@ pub(super) fn dispatch_primitive_method(
         let ptr = receiver.as_ptr::<u8>();
         let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
 
-        // Check for heap string (Text) type - these have special layout: [len: u64][bytes...]
-        let is_heap_string = header.type_id == crate::types::TypeId::TEXT
-            || header.type_id == crate::types::TypeId(0x0001);
+        // Check for heap string (Text) type — the canonical
+        // `{ptr, len, cap}` record (ARCH-P5 final leg): byte length is
+        // record field 1.
+        let is_heap_string = header.type_id == crate::types::TypeId::TEXT;
         if is_heap_string {
             match method {
-                "len" => {
-                    // Heap string layout: [ObjectHeader][len: u64][bytes...]
-                    let len_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const u64 };
-                    let len = unsafe { *len_ptr } as i64;
-                    return Ok(Some(Value::from_i64(len)));
-                }
-                "is_empty" => {
-                    let len_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const u64 };
-                    let len = unsafe { *len_ptr };
-                    return Ok(Some(Value::from_bool(len == 0)));
+                "len" | "is_empty" => {
+                    // SAFETY: TEXT header established; producers
+                    // guarantee the record payload contract.
+                    let len = unsafe { heap::text_record_payload(ptr) }
+                        .map(|(_p, l)| l as i64)
+                        .unwrap_or(0);
+                    return Ok(Some(if method == "len" {
+                        Value::from_i64(len)
+                    } else {
+                        Value::from_bool(len == 0)
+                    }));
                 }
                 _ => {} // Fall through to other method handling
             }
