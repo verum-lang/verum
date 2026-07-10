@@ -4016,6 +4016,49 @@ impl Unifier {
                 self.unify_inner(b1, &b2_renamed, span)
             }
 
+            // RANK2-SUBSUMPTION (#41): Forall vs concrete. Pre-fix there was
+            // NO arm here (only Exists↔concrete and Forall↔Forall), so every
+            // rank-2 annotation check fell to the catch-all Mismatch:
+            // `let _: fn<B: P>(B) -> B.Assoc = generic_fn;` failed
+            // "expected '∀_. fn(_) -> _', found 'fn(_) -> _'" — the
+            // async_iterator integration family. Standard predicative
+            // subsumption, two directions:
+            //
+            // * ACTUAL is ∀, a mono type is required — using a polymorphic
+            //   value at a concrete type: INSTANTIATE the binders with fresh
+            //   unification vars and unify the body.
+            (Forall { vars, body }, ty) => {
+                let mut inst = Substitution::new();
+                for v in vars.iter() {
+                    inst.insert(*v, Type::Var(TypeVar::fresh()));
+                }
+                let body_inst = body.apply_subst(&inst);
+                self.unify_inner(&body_inst, ty, span)
+            }
+            // * A ∀ is REQUIRED, actual is a (freshly instantiated) mono
+            //   type: SKOLEMIZE the expected binders into rigid constants —
+            //   the actual's fresh unification vars may bind to them, i.e.
+            //   the actual must be GENUINELY polymorphic; an attempt to pin
+            //   a concrete type fails against the rigid skolem.
+            (ty, Forall { vars, body }) => {
+                let mut skolemize = Substitution::new();
+                for v in vars.iter() {
+                    let skolem_name = format!("?skolem${:?}", TypeVar::fresh());
+                    skolemize.insert(
+                        *v,
+                        Type::Named {
+                            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                                skolem_name,
+                                span,
+                            )),
+                            args: verum_common::List::new(),
+                        },
+                    );
+                }
+                let body_sk = body.apply_subst(&skolemize);
+                self.unify_inner(ty, &body_sk, span)
+            }
+
             // TypeApp - higher-kinded type applications (e.g., F<Int> where F is a type constructor)
             // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
             (
