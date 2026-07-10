@@ -214,7 +214,7 @@ fn integration_field_visibility_and_kind_read_back() {
 // happy path until the builtin-redirect leg fixes that dispatch.
 
 /// UN-PINNED 2026-07-09 — LISTITER-DEVIRT-NEXT-1 fixed at the root:
-/// `WellKnownType::has_runtime_inline_dispatch` now classifies the
+/// `WellKnownType.has_runtime_inline_dispatch` now classifies the
 /// native-blob iterator types (ListIter/ListIterMut/SliceIter/
 /// SliceIterMut/MapIter/SetIter), so BOTH codegen devirt funnels
 /// (`try_redirect_resolved_to_builtin` on the typechecker-resolved

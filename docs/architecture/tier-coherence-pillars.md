@@ -153,6 +153,32 @@ landed in the harness crate); (step iii) the evaluator is deleted;
 the harness corpus becomes the regression gate (agree-set must be
 100% of retained semantics; pins become executable spec).
 
+**Convergence map (2026-07-10).** Landed under the
+`VERUM_META_ENGINE=vbc` fail-closed gate (any engine error falls
+back to the tree-walk; divergences belong to the harness):
+  * @meta zero-arg bodies (pipeline.rs phase_meta_evaluation) ✓
+  * @const blocks (collect_const_blocks_from_expr) ✓
+  * async task expressions (meta/async_executor execute_task_expr) ✓
+  * value domain: scalars + Text exactly; lists/maps structurally;
+    records as declared-order field tuples via
+    `InterpreterState::record_named_fields` (matches the tree-walk's
+    record→tuple reduction; the SOURCE-order divergence is pinned by
+    `probe_record_field_order`) ✓
+  * enclosing-module TYPE declarations ride into the synthetic
+    module (`execute_raw_with_items`) so record-typed meta code
+    compiles ✓
+
+**Step-iv boundary (dies last, with the evaluator).** Call families
+whose ARGUMENTS are AST values (`ConstValue::Expr` /
+`MetaValue::Expr`) — macro expansion (`pipeline/macros.rs`
+execute_user_meta_fn ×2) and the TokenStream mode — cannot route
+until MetaValue's AST variants get a VBC value representation.
+The hygiene lift-evaluator hook (`set_lift_evaluator`) has NO
+callers — dormant API, nothing to route. Deleting the evaluator
+(step iii's tail) is gated on: default engine flip after a full
+release-cycle corpus soak with 0 NEW divergences, THEN the AST-value
+representation lands, THEN the delete.
+
 **Kills.** 238KB of divergent semantics; every pinned divergence
 as a user-visible inconsistency; the discarded-@meta-result drops.
 
@@ -179,6 +205,26 @@ print) read the tag, not heuristics. Tier-0's NaN-box maps 1:1.
 **Kills.** is_text_object heuristics; const-grow crash class;
 SSO-poisoning producers (already fixed producer-side — becomes
 type-level impossible); the byte-blob special case.
+
+**Landed (2026-07-10).**
+  * COW growth: const-Text promotion on first mutation verified
+    present (text.vr cap==0 static tag) and PINNED both tiers
+    (core-tests/text/cow, 3/3).
+  * BYTE_SLICE(528): `Text.as_bytes()` now stamps ONE cross-tier
+    object `[ObjectHeader(528)][ptr:i64][len:i64]` — Tier-0 heap
+    alloc mirrors Tier-1 `lower_pack_typed`; the `len <= 1_000_000`
+    FatRef-as-Text heuristic is RETIRED at every Text sink
+    (read_text / extract_string / eq / hash / capacity); generic
+    `&[T]` slice FatRefs (cbgr re-slice ops) remain untouched.
+    Cross-tier drift pinned (`byte_slice_typeid_pinned` +
+    codegen stamp pin); 18 .vr probes green (interp);
+    pre-existing `for b in text.as_bytes()` SIGSEGV fixed by
+    construction.
+  * Remaining tail: unify the legacy heap-Text form
+    (TypeId 0x0001 `[len][bytes]`, produced by alloc_string/concat)
+    with the canonical TEXT `{ptr,len,cap}` record so exactly ONE
+    heap layout survives; then the two-layout branch in read_text
+    and twins retires the same way the FatRef arm did.
 
 ---
 

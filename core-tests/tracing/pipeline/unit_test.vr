@@ -14,6 +14,7 @@
 mount core.tracing.tracer.{TracerProvider, TracerHandle, NoopTracer};
 mount core.tracing.processor.{ProcessorHandle};
 mount core.tracing.exporter.{ExporterHandle, InMemoryExporter};
+mount core.async.channel.{bounded, Sender, Receiver};
 mount core.tracing.span.{Span, SpanInner};
 mount core.tracing.data.{SpanKind, SpanStatus, SpanStatusCode, SpanLink, SpanData};
 mount core.tracing.sampler.{SamplingDecision, TraceIdRatio, always_on, always_off, trace_id_ratio};
@@ -30,11 +31,29 @@ mount core.base.maybe.{Maybe, Some, None};
 // Harness helpers
 // -----------------------------------------------------------------------------
 
-fn make_provider(exporter: &InMemoryExporter) -> TracerProvider {
+/// Test-side sink: the channel is instantiated HERE (caller compile
+/// context) because cross-module generic instantiation inside the
+/// baked stdlib does not materialize yet.
+fn sink_pair() -> (InMemoryExporter, Receiver<Text>) {
+    let (tx, rx) = bounded<Text>(256);
+    (InMemoryExporter.from_sender(tx), rx)
+}
+
+fn take_all_lines(rx: &mut Receiver<Text>) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    loop {
+        match rx.try_recv() {
+            Result.Ok(s) => { out.push(s); }
+            Result.Err(_) => { return out; }
+        }
+    }
+}
+
+fn make_provider(exporter: InMemoryExporter) -> TracerProvider {
     TracerProvider.builder()
         .with_resource(Resource.service(&"pipeline-test".into(), &"1.0".into()))
         .with_sampler(always_on())
-        .with_processor(ProcessorHandle.simple(ExporterHandle.in_memory(exporter.clone())))
+        .with_processor(ProcessorHandle.simple(ExporterHandle.in_memory(exporter)))
         .build()
 }
 
@@ -50,78 +69,76 @@ fn start_simple_span(provider: &TracerProvider, name: &Text) -> Span {
 
 @test
 fn test_end_delivers_span_to_exporter() {
-    let exporter = InMemoryExporter.new();
-    let provider = make_provider(&exporter);
+    let (exporter, mut sink) = sink_pair();
+    let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"work".into());
     span.end();
-    let got = exporter.take();
+    let got = take_all_lines(&mut sink);
     assert_eq(got.len(), 1);
-    assert_eq(got[0].name(), "work".into());
+    assert(got[0].contains(&"work".into()));
 }
 
 @test
 fn test_end_is_idempotent_single_export() {
-    let exporter = InMemoryExporter.new();
-    let provider = make_provider(&exporter);
+    let (exporter, mut sink) = sink_pair();
+    let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"once".into());
     span.end();
     span.end();
     span.end();
-    assert_eq(exporter.len(), 1);
+    assert_eq(take_all_lines(&mut sink).len(), 1);
 }
 
 @test
 fn test_exported_span_carries_identity_and_kind() {
-    let exporter = InMemoryExporter.new();
-    let provider = make_provider(&exporter);
+    let (exporter, mut sink) = sink_pair();
+    let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"identity".into());
     let ctx = span.context();
     span.end();
-    let got = exporter.take();
+    let got = take_all_lines(&mut sink);
     assert_eq(got.len(), 1);
-    let got_ctx = got[0].context();
-    assert(got_ctx.trace_id().eq(&ctx.trace_id()));
-    assert(got_ctx.span_id().eq(&ctx.span_id()));
-    assert(got[0].kind() is SpanKind.KindServer);
-    assert(got[0].context().is_sampled());
-    assert(got[0].parent_span_id() is Maybe.None);
+    assert(got[0].contains(&ctx.trace_id().to_hex()));
+    assert(got[0].contains(&ctx.span_id().to_hex()));
+    assert(got[0].contains(&"kind=SERVER".into()));
+    assert(got[0].contains(&"sampled=true".into()));
+    assert(got[0].contains(&"parent=-".into()));
 }
 
 @test
 fn test_exported_span_carries_attributes_events_status() {
-    let exporter = InMemoryExporter.new();
-    let provider = make_provider(&exporter);
+    let (exporter, mut sink) = sink_pair();
+    let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"detail".into());
     span.set_attribute("http.method".into(), AttributeValue.Text("GET".into()));
     span.set_attribute("http.status_code".into(), AttributeValue.Int(200));
     span.add_event_now("validated".into());
     span.set_status(SpanStatus.ok());
     span.end();
-    let got = exporter.take();
+    let got = take_all_lines(&mut sink);
     assert_eq(got.len(), 1);
-    assert_eq(got[0].attributes().len(), 2);
-    assert_eq(got[0].events().len(), 1);
-    assert(got[0].status().code() is SpanStatusCode.Ok);
-    let attrs_out = got[0].attributes();
-    let method = attrs_out.get(&"http.method".into());
-    assert(method is Maybe.Some);
+    assert(got[0].contains(&"http.method=\"GET\"".into()));
+    assert(got[0].contains(&"http.status_code=200".into()));
+    assert(got[0].contains(&"events=1".into()));
+    assert(got[0].contains(&"status=OK".into()));
 }
 
 @test
 fn test_mutation_after_end_is_ignored() {
-    let exporter = InMemoryExporter.new();
-    let provider = make_provider(&exporter);
+    let (exporter, mut sink) = sink_pair();
+    let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"frozen".into());
     span.set_attribute("kept".into(), AttributeValue.Int(1));
     span.end();
     span.set_attribute("dropped".into(), AttributeValue.Int(2));
     span.add_event_now("late".into());
     span.update_name("renamed".into());
-    let got = exporter.take();
+    let got = take_all_lines(&mut sink);
     assert_eq(got.len(), 1);
-    assert_eq(got[0].name(), "frozen".into());
-    assert_eq(got[0].attributes().len(), 1);
-    assert_eq(got[0].events().len(), 0);
+    assert(got[0].contains(&"frozen".into()));
+    assert(got[0].contains(&"kept=1".into()));
+    assert(!got[0].contains(&"dropped".into()));
+    assert(got[0].contains(&"events=0".into()));
 }
 
 // =============================================================================
@@ -130,26 +147,26 @@ fn test_mutation_after_end_is_ignored() {
 
 @test
 fn test_status_error_wins_over_ok() {
-    let exporter = InMemoryExporter.new();
-    let provider = make_provider(&exporter);
+    let (exporter, mut sink) = sink_pair();
+    let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"status1".into());
     span.set_status(SpanStatus.ok());
     span.set_status(SpanStatus.error("boom".into()));
     span.end();
-    let got = exporter.take();
-    assert(got[0].status().code() is SpanStatusCode.Error);
+    let got = take_all_lines(&mut sink);
+    assert(got[0].contains(&"status=ERROR".into()));
 }
 
 @test
 fn test_status_error_is_final() {
-    let exporter = InMemoryExporter.new();
-    let provider = make_provider(&exporter);
+    let (exporter, mut sink) = sink_pair();
+    let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"status2".into());
     span.set_status(SpanStatus.error("first".into()));
     span.set_status(SpanStatus.ok());
     span.end();
-    let got = exporter.take();
-    assert(got[0].status().code() is SpanStatusCode.Error);
+    let got = take_all_lines(&mut sink);
+    assert(got[0].contains(&"status=ERROR".into()));
 }
 
 // =============================================================================
@@ -158,8 +175,8 @@ fn test_status_error_is_final() {
 
 @test
 fn test_child_span_inherits_trace_and_links_parent() {
-    let exporter = InMemoryExporter.new();
-    let provider = make_provider(&exporter);
+    let (exporter, mut sink) = sink_pair();
+    let provider = make_provider(exporter);
     let tracer = provider.tracer(&"suite".into(), &"1".into());
     let links1: List<SpanLink> = List.new();
     let parent = tracer.start_span(
@@ -175,14 +192,14 @@ fn test_child_span_inherits_trace_and_links_parent() {
     assert(!child_ctx.span_id().eq(&parent_ctx.span_id()));
     child.end();
     parent.end();
-    let got = exporter.take();
+    let got = take_all_lines(&mut sink);
     assert_eq(got.len(), 2);
-    // Child exported first (ended first): its parent_span_id must be
-    // the parent's span id.
-    match got[0].parent_span_id() {
-        Maybe.Some(pid) => assert(pid.eq(&parent_ctx.span_id())),
-        Maybe.None => panic("child must carry parent_span_id"),
-    }
+    // Child exported first (ended first): its line must carry the
+    // parent's span id and the shared trace id.
+    let parent_sid = parent_ctx.span_id().to_hex();
+    let expect = f"parent={parent_sid}";
+    assert(got[0].contains(&expect));
+    assert(got[0].contains(&parent_ctx.trace_id().to_hex()));
 }
 
 // =============================================================================
@@ -192,10 +209,10 @@ fn test_child_span_inherits_trace_and_links_parent() {
 
 @test
 fn test_dropped_span_keeps_valid_context_and_exports_nothing() {
-    let exporter = InMemoryExporter.new();
+    let (exporter, mut sink) = sink_pair();
     let provider = TracerProvider.builder()
         .with_sampler(always_off())
-        .with_processor(ProcessorHandle.simple(ExporterHandle.in_memory(exporter.clone())))
+        .with_processor(ProcessorHandle.simple(ExporterHandle.in_memory(exporter)))
         .build();
     let span = start_simple_span(&provider, &"dropped".into());
     // Traceparent continuity: the context MUST stay valid and unsampled.
@@ -205,7 +222,7 @@ fn test_dropped_span_keeps_valid_context_and_exports_nothing() {
     assert(!span.is_recording());
     span.set_attribute("ignored".into(), AttributeValue.Int(1));
     span.end();
-    assert_eq(exporter.len(), 0);
+    assert_eq(take_all_lines(&mut sink).len(), 0);
 }
 
 @test
@@ -213,7 +230,7 @@ fn test_record_only_span_records_but_never_exports() {
     // A recording span whose context is NOT sampled models the
     // RecordOnly decision: the processor receives it on end(), but the
     // exporter must never see it.
-    let exporter = InMemoryExporter.new();
+    let (exporter, mut sink) = sink_pair();
     let unsampled_ctx = SpanContext.new(
         generate_trace_id(), generate_span_id(),
         TraceFlags.default(), TraceState.empty(), false,
@@ -236,14 +253,14 @@ fn test_record_only_span_records_but_never_exports() {
     let span = Span.recording(
         unsampled_ctx,
         inner,
-        ProcessorHandle.simple(ExporterHandle.in_memory(exporter.clone())),
+        ProcessorHandle.simple(ExporterHandle.in_memory(exporter)),
     );
     assert(span.is_recording());
     assert(!span.context().is_sampled());
     span.set_attribute("recorded".into(), AttributeValue.Int(1));
     span.end();
     // Recording but unsampled: processor received it, exporter must not.
-    assert_eq(exporter.len(), 0);
+    assert_eq(take_all_lines(&mut sink).len(), 0);
 }
 
 // =============================================================================
@@ -393,15 +410,15 @@ fn test_noop_tracer_passes_parent_context_through() {
 
 @test
 fn test_provider_force_flush_and_shutdown_succeed() {
-    let exporter = InMemoryExporter.new();
-    let provider = make_provider(&exporter);
+    let (exporter, mut sink) = sink_pair();
+    let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"lifecycle".into());
     span.end();
     let flushed = provider.force_flush(Duration.from_secs(1));
     assert(flushed.is_success());
     let down = provider.shutdown(Duration.from_secs(1));
     assert(down.is_success());
-    assert_eq(exporter.len(), 1);
+    assert_eq(take_all_lines(&mut sink).len(), 1);
 }
 
 fn main() {}

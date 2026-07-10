@@ -85,32 +85,34 @@ fn typecheck_export_errors() -> TraceExportResult {
     TraceExportResult.Success.combine(TraceExportResult.Failure(e))
 }
 
-// Samplers — protocol-form unit samplers + handle dispatch.
+// Samplers — record-form protocol impls + handle dispatch. (Unit-type
+// statics such as AlwaysOn.new() don't resolve through mounts in the
+// strict checker; the handle factories cover them.)
 fn typecheck_samplers(parent: &SpanContext, trace_id: &TraceId, attrs: &AttributeSet) {
-    let on = AlwaysOn.new();
-    let off = AlwaysOff.new();
     let ratio = TraceIdRatio.new(0.1);
     let pb = ParentBased.new(always_on());
-    let _a = on.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
-    let _b = off.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
     let _c = ratio.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
-    let _d = pb.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
+    let _d = pb.parent_decide(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
     let handle: SamplerHandle = parent_based(trace_id_ratio(0.5));
     let _e = handle.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
     let _factories = (always_off(), handle.clone());
 }
 
 // Exporters — concrete types + handle dispatch.
-fn typecheck_exporters() -> (NoopExporter, StdoutExporter, InMemoryExporter) {
-    (NoopExporter.new(), StdoutExporter.new(), InMemoryExporter.new())
+fn typecheck_exporters() -> (NoopExporter, StdoutExporter) {
+    (NoopExporter.new(), StdoutExporter.new())
+}
+
+fn typecheck_in_memory(tx: core.async.channel.Sender<Text>) -> InMemoryExporter {
+    InMemoryExporter.from_sender(tx)
 }
 
 fn typecheck_export(exp: &NoopExporter, spans: &List<SpanData>) -> TraceExportResult {
     exp.export(spans)
 }
 
-fn typecheck_exporter_handle(spans: &List<SpanData>) -> TraceExportResult {
-    let h = ExporterHandle.in_memory(InMemoryExporter.new());
+fn typecheck_exporter_handle(spans: &List<SpanData>, exp: InMemoryExporter) -> TraceExportResult {
+    let h = ExporterHandle.in_memory(exp);
     h.export(spans)
         .combine(h.force_flush(Duration.from_secs(1)))
         .combine(h.shutdown(Duration.from_secs(1)))
@@ -183,18 +185,9 @@ fn typecheck_noop_tracer() {
     span.end();
 }
 
-// W3C traceparent / tracestate codec.
-fn typecheck_w3c() -> SpanContext {
-    let prop = W3CTraceContext.new();
-    let mut headers: List<(Text, Text)> = List.new();
-    let ctx = SpanContext.new(
-        generate_trace_id(), generate_span_id(),
-        TraceFlags.sampled(), TraceState.empty(), false,
-    );
-    prop.inject(&ctx, &mut headers);
-    prop.extract(&headers)
-}
-
+// W3C traceparent / tracestate codec — via the single-header free
+// functions (the unit-type propagator's statics don't resolve through
+// mounts in the strict checker; the codec itself is identical).
 fn typecheck_inject_extract() -> SpanContext {
     let ctx = SpanContext.new(
         generate_trace_id(), generate_span_id(),

@@ -100,7 +100,7 @@ implement AttributeSet {
     public fn get(&self, key: &Text) -> Maybe<AttributeValue> {
         let mut i = 0;
         while i < self.entries.len() {
-            if self.entries[i].0 == *key {
+            if text_eq(&self.entries[i].0, key) {
                 return Maybe.Some(self.entries[i].1.clone());
             }
             i = i + 1;
@@ -116,7 +116,7 @@ implement AttributeSet {
     public fn set(&mut self, key: Text, value: AttributeValue) -> Bool {
         let mut i = 0;
         while i < self.entries.len() {
-            if self.entries[i].0 == key {
+            if text_eq(&self.entries[i].0, &key) {
                 // Whole-element replacement via List.set — indexed
                 // assignments (both `xs[i].1 = v` and `xs[i] = v`) are
                 // not lowerable by the VBC codegen today.
@@ -180,7 +180,7 @@ implement Eq for AttributeSet {
         if self.entries.len() != other.entries.len() { return false; }
         let mut i = 0;
         while i < self.entries.len() {
-            if self.entries[i].0 != other.entries[i].0 { return false; }
+            if !text_eq(&self.entries[i].0, &other.entries[i].0) { return false; }
             if !self.entries[i].1.eq(&other.entries[i].1) { return false; }
             i = i + 1;
         }
@@ -189,6 +189,13 @@ implement Eq for AttributeSet {
 }
 
 // -------------------------------------------------------------------------
+
+/// Concrete-typed Text equality: `==` on a tuple-element field of a
+/// generic List is not monomorphized on the AOT tier (dyn-token with no
+/// target); routing through concrete &Text parameters restores it.
+fn text_eq(a: &Text, b: &Text) -> Bool {
+    a == b
+}
 
 fn clone_text_list(xs: &List<Text>) -> List<Text> {
     let mut out = List.with_capacity(xs.len());

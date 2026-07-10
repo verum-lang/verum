@@ -27,7 +27,8 @@ mount core.tracing.resource.{Resource};
 mount core.tracing.data.{SpanKind, SpanStatus, SpanLink, TraceExportResult};
 mount core.tracing.sampler.{SamplerHandle, SamplingDecision, always_on, always_off, parent_based};
 mount core.tracing.processor.{ProcessorHandle};
-mount core.tracing.span.{Span, SpanInner};
+mount core.tracing.data.{build_recording_span};
+mount core.tracing.span.{Span};
 
 // =============================================================================
 // Tracer protocol — the contract user-defined tracers implement
@@ -177,23 +178,18 @@ implement SdkTracer {
             Maybe.None
         };
 
-        let inner = SpanInner {
-            name: name.clone(),
-            parent_span_id: parent_span_id,
-            kind: kind,
-            start_time: Instant.now(),
-            start_system_time: SystemTime.now(),
-            end_time: Maybe.None,
-            attributes: attributes,
-            events: List.new(),
-            links: links,
-            status: SpanStatus.unset(),
-            resource: self.resource.clone(),
-            instrumentation_scope: self.scope.clone(),
-            instrumentation_version: self.version.clone(),
-        };
-
-        let span = Span.recording(context.clone(), inner, self.processor.clone());
+        let span = build_recording_span(
+            context.clone(),
+            name.clone(),
+            parent_span_id,
+            kind,
+            attributes,
+            links,
+            self.resource.clone(),
+            self.scope.clone(),
+            self.version.clone(),
+            self.processor.clone(),
+        );
         self.processor.on_start(&context, parent);
         span
     }

@@ -60,7 +60,7 @@ mount time.duration.{Duration, NANOS_PER_SEC, NANOS_PER_MILLI};
 // monotonic clocks with DIFFERENT unspecified epochs (process-start
 // vs boot) inside one program. Any arithmetic mixing `Instant`
 // readings with `Time.monotonic` deadlines was incoherent (pinned by
-// `core-tests/time/mod/integration_test.vr::
+// `core-tests/time/mod/integration_test.vr.
 // test_instant_bracketed_by_monotonic_reads`). The intrinsic
 // dispatches natively at Tier 0 and lowers to the platform
 // CLOCK_MONOTONIC read in AOT — per-tier consistent by construction.

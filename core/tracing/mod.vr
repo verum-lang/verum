@@ -159,21 +159,21 @@ public mount .sampler.parent_based;
 public mount .sampler.custom_sampler;
 
 // Exporter + processor
-public mount .exporter.SpanExporter;
-public mount .exporter.ExporterHandle;
-public mount .exporter.NoopExporter;
-public mount .exporter.StdoutExporter;
-public mount .exporter.InMemoryExporter;
-public mount .processor.SpanProcessor;
-public mount .processor.ProcessorHandle;
-public mount .processor.SimpleProcessor;
-public mount .processor.BatchProcessor;
-public mount .processor.BatchConfig;
-public mount .processor.CompositeProcessor;
+public mount .data.SpanExporter;
+public mount .data.ExporterHandle;
+public mount .data.NoopExporter;
+public mount .data.StdoutExporter;
+public mount .data.InMemoryExporter;
+public mount .data.SpanProcessor;
+public mount .data.ProcessorHandle;
+public mount .data.SimpleProcessor;
+public mount .data.BatchProcessor;
+public mount .data.BatchConfig;
+public mount .data.CompositeProcessor;
 
 // Span
-public mount .span.Span;
-public mount .span.SpanInner;
+public mount .data.Span;
+public mount .data.SpanInner;
 
 // Tracer
 public mount .tracer.Tracer;

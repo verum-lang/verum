@@ -143,21 +143,22 @@ public type TraceIdRatio is {
     ratio: Float,
     /// Sampling bound in the 63-bit key domain: ratio · 2^63.
     bound: UInt64,
+    /// r >= 1.0 — sample unconditionally (no 2^63 arithmetic: wide
+    /// integer literals AND 63-bit shifts both mis-lower in baked
+    /// stdlib modules).
+    all: Bool,
 };
 
 implement TraceIdRatio {
     public fn new(ratio: Float) -> TraceIdRatio {
         let r = if ratio < 0.0 { 0.0 } else if ratio > 1.0 { 1.0 } else { ratio };
-        // Float→UInt64 casts clamp at 2^63-1 (they route through the
-        // signed domain) and wide integer literals mis-lower in baked
-        // stdlib modules, so the r == 1.0 bound is composed by shift:
-        // 2^63 is strictly above every 63-bit key.
-        let bound = if r >= 1.0 {
-            (1 as UInt64) << 63
+        let all = r >= 1.0;
+        let bound = if all {
+            0
         } else {
             (r * 9223372036854775808.0) as UInt64
         };
-        TraceIdRatio { ratio: r, bound: bound }
+        TraceIdRatio { ratio: r, bound: bound, all: all }
     }
 
     /// Low 8 bytes of the trace id, big-endian, masked to 63 bits.
@@ -176,7 +177,7 @@ implement TraceIdRatio {
     public fn ratio(&self) -> Float { self.ratio }
 
     public fn clone(&self) -> TraceIdRatio {
-        TraceIdRatio { ratio: self.ratio, bound: self.bound }
+        TraceIdRatio { ratio: self.ratio, bound: self.bound, all: self.all }
     }
 }
 
@@ -184,6 +185,9 @@ implement TraceIdRatio {
     /// Uniquely-named decision worker so handle dispatch resolves on
     /// any receiver-tracking tier.
     public fn ratio_decide(&self, parent: &SpanContext, trace_id: &TraceId) -> SamplingResult {
+        if self.all {
+            return SamplingResult.new(SamplingDecision.RecordAndSample, parent.trace_state());
+        }
         let key = TraceIdRatio.trace_id_key(trace_id.as_bytes());
         if key < self.bound {
             SamplingResult.new(SamplingDecision.RecordAndSample, parent.trace_state())

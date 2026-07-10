@@ -86,7 +86,7 @@ implement TraceState {
     public fn get(&self, key: &Text) -> Maybe<Text> {
         let mut i = 0;
         while i < self.entries.len() {
-            if self.entries[i].0 == *key {
+            if state_key_eq(&self.entries[i].0, key) {
                 return Maybe.Some(self.entries[i].1.clone());
             }
             i = i + 1;
@@ -105,7 +105,7 @@ implement TraceState {
         let key_ref = &entries[0].0;
         let mut i = 0;
         while i < self.entries.len() {
-            if self.entries[i].0 != *key_ref
+            if !state_key_eq(&self.entries[i].0, key_ref)
                 && entries.len() < TRACESTATE_MAX_MEMBERS
             {
                 entries.push((self.entries[i].0.clone(), self.entries[i].1.clone()));
@@ -135,6 +135,11 @@ implement TraceState {
         }
         out
     }
+}
+
+/// Concrete-typed Text equality (see tracing/attribute.vr text_eq).
+fn state_key_eq(a: &Text, b: &Text) -> Bool {
+    a == b
 }
 
 // =============================================================================
