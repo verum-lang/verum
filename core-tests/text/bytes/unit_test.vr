@@ -1,0 +1,221 @@
+// =============================================================================
+// core-tests/text/bytes/unit_test.vr
+// =============================================================================
+//
+// ARCH-P5 BYTE_SLICE byte-view probes — `Text.as_bytes()` produces ONE
+// representation-tagged object form (`[ObjectHeader(528)][ptr][len]`)
+// on BOTH tiers (Tier-0 heap allocation, Tier-1 header-stamped Pack),
+// retiring the `len <= 1_000_000` FatRef-as-Text consumer heuristic.
+//
+// Covered surfaces: len, indexing, for-in byte iteration (pre-ARCH-P5
+// this SIGSEGV'd on the interpreter), the HttpParser.feed re-slice
+// pattern (`&buf[pos..]`), Text.from_utf8 round-trip, hash + eq of
+// byte views, f-string rendering of an indexed byte.
+// =============================================================================
+
+mount core.text.{Text, Utf8Error};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.protocols.{Hash, DefaultHasher};
+
+// =============================================================================
+// Section 1: len + indexing
+// =============================================================================
+
+@test
+fn bytesview_as_bytes_len_heap_string() {
+    let s: Text = "hello world, this is a heap string";
+    let b = s.as_bytes();
+    assert_eq(b.len(), 34);
+}
+
+@test
+fn bytesview_as_bytes_len_small_string() {
+    let s: Text = "abc";
+    let b = s.as_bytes();
+    assert_eq(b.len(), 3);
+}
+
+@test
+fn bytesview_as_bytes_len_empty() {
+    let s: Text = "";
+    let b = s.as_bytes();
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn bytesview_as_bytes_index() {
+    let s: Text = "hello world, this is a heap string";
+    let b = s.as_bytes();
+    assert_eq(b[0] as Int, 104);  // 'h'
+    assert_eq(b[6] as Int, 119);  // 'w'
+    assert_eq(b[33] as Int, 103); // 'g'
+}
+
+@test
+fn bytesview_as_bytes_index_while_sum() {
+    let s: Text = "identical payload";
+    let b = s.as_bytes();
+    let mut i = 0;
+    let mut acc = 0;
+    while i < b.len() {
+        acc = acc + b[i];
+        i = i + 1;
+    }
+    assert_eq(acc, 1719);
+}
+
+// =============================================================================
+// Section 2: for-in byte iteration
+// =============================================================================
+
+@test
+fn bytesview_for_in_as_bytes_sum() {
+    // Pre-ARCH-P5 this crashed: the byte-view iterable reached the
+    // native iterator's LIST fallback and its payload was read as a
+    // List header.  The BYTE_SLICE header stamp routes it to the
+    // typed byte-iteration arm.
+    let s: Text = "hello world, this is a heap string";
+    let mut sum = 0;
+    for byte_val in s.as_bytes() {
+        sum = sum + byte_val;
+    }
+    assert_eq(sum, 3154);
+}
+
+@test
+fn bytesview_for_in_as_bytes_small_string() {
+    let s: Text = "abc";
+    let mut sum = 0;
+    for byte_val in s.as_bytes() {
+        sum = sum + byte_val;
+    }
+    assert_eq(sum, 294); // 97 + 98 + 99
+}
+
+@test
+fn bytesview_for_in_as_bytes_empty_zero_iterations() {
+    let s: Text = "";
+    let mut count = 0;
+    for _byte_val in s.as_bytes() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Section 3: re-slice (the HttpParser.feed pattern)
+// =============================================================================
+
+fn sum_bytes(buf: &[Byte]) -> Int {
+    let mut total = 0;
+    let mut pos = 0;
+    while pos < buf.len() {
+        total = total + buf[pos];
+        pos = pos + 1;
+    }
+    total
+}
+
+@test
+fn bytesview_reslice_range() {
+    let s: Text = "hello world, this is a heap string";
+    let b = s.as_bytes();
+    let sub = &b[6..11]; // "world"
+    assert_eq(sub.len(), 5);
+    assert_eq(sub[0] as Int, 119); // 'w'
+    assert_eq(sub[4] as Int, 100); // 'd'
+}
+
+@test
+fn bytesview_reslice_feed_pattern() {
+    // Feed a buffer in two chunks via `&buf[pos..]` — the parser
+    // re-slice pattern over a borrowed byte view.
+    let s: Text = "hello world";
+    let b = s.as_bytes();
+    let head = &b[0..5];  // "hello"
+    let rest = &b[5..b.len()]; // " world"
+    assert_eq(head.len() + rest.len(), b.len());
+    assert_eq(sum_bytes(head) + sum_bytes(rest), sum_bytes(b));
+}
+
+@test
+fn bytesview_reslice_of_reslice() {
+    let s: Text = "hello world, this is a heap string";
+    let b = s.as_bytes();
+    let mid = &b[6..17];  // "world, this"
+    let inner = &mid[0..5]; // "world"
+    assert_eq(inner.len(), 5);
+    assert_eq(inner[0] as Int, 119); // 'w'
+    assert_eq(inner[4] as Int, 100); // 'd'
+}
+
+// =============================================================================
+// Section 4: Text.from_utf8 round-trip
+// =============================================================================
+
+@test
+fn bytesview_from_utf8_round_trip() {
+    let s: Text = "identical payload";
+    match Text.from_utf8(s.as_bytes()) {
+        Ok(t) => assert_eq(t, "identical payload"),
+        Err(_e) => assert(false),
+    }
+}
+
+@test
+fn bytesview_from_utf8_round_trip_small() {
+    let s: Text = "abc";
+    match Text.from_utf8(s.as_bytes()) {
+        Ok(t) => assert_eq(t, "abc"),
+        Err(_e) => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 5: eq + hash of byte views
+// =============================================================================
+
+@test
+fn bytesview_as_bytes_eq_same_content() {
+    let a: Text = "identical payload";
+    let b: Text = "identical payload";
+    assert(a.as_bytes() == b.as_bytes());
+}
+
+@test
+fn bytesview_as_bytes_eq_different_content() {
+    let a: Text = "identical payload";
+    let b: Text = "different payload";
+    assert(a.as_bytes() != b.as_bytes());
+}
+
+@test
+fn bytesview_hasher_distinguishes_byte_views() {
+    let mut ha: DefaultHasher = DefaultHasher.new();
+    let mut hb: DefaultHasher = DefaultHasher.new();
+    ha.write("alpha payload bytes".as_bytes());
+    hb.write("beta payload bytes!".as_bytes());
+    assert(ha.finish() != hb.finish());
+}
+
+@test
+fn bytesview_hasher_agrees_on_equal_byte_views() {
+    let mut ha: DefaultHasher = DefaultHasher.new();
+    let mut hb: DefaultHasher = DefaultHasher.new();
+    ha.write("identical payload".as_bytes());
+    hb.write("identical payload".as_bytes());
+    assert_eq(ha.finish(), hb.finish());
+}
+
+// =============================================================================
+// Section 6: f-string of a byte
+// =============================================================================
+
+@test
+fn bytesview_fstring_of_indexed_byte() {
+    let s: Text = "identical payload";
+    let b = s.as_bytes();
+    let one = b[1]; // 'd' == 100
+    assert_eq(f"byte={one}", "byte=100");
+}
