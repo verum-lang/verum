@@ -147,6 +147,38 @@ pub struct CodegenContext {
     /// shadow should migrate to `lookup_function_in_scope(scope, name)`.
     pub scoped_functions: HashMap<(String, String), FunctionInfo>,
 
+    /// **ARCH-P2 stage 1 — content-addressed canonical function index**
+    /// (dual keying, warn-on-divergence).  See
+    /// `docs/architecture/tier-coherence-pillars.md`, Pillar 2,
+    /// Migration stage (1).
+    ///
+    /// Parallel to `functions` / `scoped_functions`: keyed by the
+    /// decl's FULLY-QUALIFIED path — derived from
+    /// `current_source_module` + simple name by EXACTLY the
+    /// descriptor-name promotion rule in `codegen/mod.rs`
+    /// `compile_function` (bare names gain the module prefix;
+    /// `$`-nested and already-dotted names stay as-is) — each path
+    /// holding every DISTINCT content fingerprint ever registered
+    /// under it.  `Vec` len > 1 == two different contents claiming
+    /// one canonical path: the stage-1 divergence corpus that gates
+    /// stage 2 (flip readers to canonical).
+    ///
+    /// Stage-1 contract: NOTHING consults this index for
+    /// dispatch/lookup — zero behavior change.  Writers are
+    /// `register_function` and `register_function_authoritative`
+    /// (primary registrations only; the `name#arity` alt-key mirrors
+    /// those methods maintain are arity-disambiguation shadows, not
+    /// decls, and never land here).  The emit path enriches entries
+    /// with a body fingerprint via
+    /// [`Self::enrich_canonical_body_fingerprint`].
+    ///
+    /// Tracing: `VERUM_TRACE_CANON=1` (or `=<substring>` to filter
+    /// by canonical path) logs `[canon-diverge]` the moment a path
+    /// gains a second distinct fingerprint; module finalization
+    /// additionally emits the `[canon-report]` sweep
+    /// ([`Self::canonical_vs_bare_report`]).
+    pub canonical_index: HashMap<String, Vec<CanonicalFnEntry>>,
+
     /// When true, register_function will not overwrite existing entries.
     /// Used when importing stdlib modules after user code has been registered.
     pub prefer_existing_functions: bool,
@@ -616,6 +648,44 @@ pub enum ConstantEntry {
     Bytes(u32),
     /// Type constant.
     Type(TypeRef),
+}
+
+/// One canonical-identity record in
+/// [`CodegenContext::canonical_index`] (**ARCH-P2 stage 1** — see
+/// `docs/architecture/tier-coherence-pillars.md`, Pillar 2).
+///
+/// `fingerprint` is blake3 (truncated to u64) over the
+/// registration-visible **signature surface** of the decl:
+/// `param_count`, `param_names`, `return_type_name`, `is_async`,
+/// `is_generator`, `is_const`, `parent_type_name`, `variant_tag`.
+/// The function id is deliberately NOT part of the fingerprint —
+/// ids are module-local and re-homed on collision, which is exactly
+/// the disease this identity replaces.
+///
+/// Function BODY content does not exist at registration time, so
+/// body-content addressing arrives when descriptors themselves are
+/// keyed canonically (stage-2 prep).  Until then the emit path
+/// (`compile_function`'s descriptor build) back-fills
+/// `body_fingerprint` from the finalized descriptor surface:
+/// promoted name + decoded instruction count + register count.  The
+/// encoded bytecode byte-length only materialises at serialization
+/// time (`FunctionDescriptor::bytecode_length` is 0 until then) and
+/// joins the fingerprint when descriptors are keyed in stage 2.
+#[derive(Debug, Clone)]
+pub struct CanonicalFnEntry {
+    /// Signature-surface content fingerprint (registration time).
+    pub fingerprint: u64,
+    /// Emit-time descriptor/body fingerprint; `None` until
+    /// `compile_function` finalizes this decl's descriptor (variant
+    /// constructors, consts, and pattern-functions keep `None` in
+    /// stage 1).
+    pub body_fingerprint: Option<u64>,
+    /// Snapshot of the FIRST `FunctionInfo` registered under this
+    /// (path, fingerprint).  Same-fingerprint re-registrations are
+    /// idempotent and keep this snapshot — a later id claiming the
+    /// bare slot surfaces in `canonical_vs_bare_report` (deliberate
+    /// stage-1 evidence, not a lookup input).
+    pub info: FunctionInfo,
 }
 
 /// Information about a function.
@@ -1211,6 +1281,7 @@ impl CodegenContext {
             bytes_intern: HashMap::new(),
             functions: HashMap::new(),
             scoped_functions: HashMap::new(),
+            canonical_index: HashMap::new(),
             prefer_existing_functions: false,
             stage3_stub_names: HashMap::new(),
             current_source_module: None,
@@ -2160,6 +2231,15 @@ impl CodegenContext {
                 self.functions.get(&name).map(|e| (e.id.0, e.param_count)),
             );
         }
+        // ARCH-P2 stage 1 — content-addressed canonical identity,
+        // DUAL keying.  Purely additive parallel index: the bare /
+        // `name#arity` / scoped tables below keep sole lookup
+        // authority (stage-1 contract: zero behavior change).  Runs
+        // FIRST so every early `return` in the collision branches
+        // below still lands the primary registration canonically;
+        // the `name#arity` mirrors those branches create are direct
+        // `functions` inserts that never route back through here.
+        self.register_canonical(&name, &info);
         // FUNC-REGISTRY-QUALIFICATION-1 (phase 2) — module-qualified
         // mirror key.  Every bare simple-name registration that happens
         // while a source-module scope is active ALSO lands under its
@@ -2465,6 +2545,10 @@ impl CodegenContext {
                 self.functions.get(&name).map(|e| (e.id.0, e.param_count)),
             );
         }
+        // ARCH-P2 stage 1 — canonical DUAL keying, same additive
+        // discipline as `register_function` (an authoritative mount
+        // is still a primary registration of the decl's content).
+        self.register_canonical(&name, &info);
         // Mirror the `name#arity` shadow slot so callers that resolve via
         // `lookup_function_with_arity` still find the chosen variant —
         // the authoritative binding owns BOTH `name` AND `name#arity`
@@ -2476,6 +2560,301 @@ impl CodegenContext {
         // unmounted same-name function selected by arg-type overload.
         self.explicit_mount_names.insert(name.clone());
         self.functions.insert(name, info)
+    }
+
+    // ------------------------------------------------------------------
+    // ARCH-P2 stage 1 — content-addressed canonical function identity.
+    //
+    // Contract (docs/architecture/tier-coherence-pillars.md, Pillar 2):
+    // every decl's canonical identity = fully-qualified path +
+    // blake3(content).  Stage 1 computes it and keys a PARALLEL index,
+    // WITHOUT changing any existing winner/lookup semantics; the
+    // divergence corpus this gathers gates stage 2 (flip readers).
+    // ------------------------------------------------------------------
+
+    /// `VERUM_TRACE_CANON` gate.  `"1"` / `"true"` / `"*"` / `"all"`
+    /// (or an empty value) match every path; any other value is a
+    /// substring filter on the canonical path — the
+    /// `VERUM_TRACE_FNREG` convention.
+    fn canon_trace_enabled_for(path: &str) -> bool {
+        match std::env::var("VERUM_TRACE_CANON") {
+            Ok(v) => {
+                v.is_empty()
+                    || v == "1"
+                    || v == "true"
+                    || v == "*"
+                    || v == "all"
+                    || path.contains(&v)
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Fully-qualified canonical path for a registration key —
+    /// EXACTLY the `compile_function` descriptor-name promotion rule
+    /// (`codegen/mod.rs`): prefix `current_source_module` when the
+    /// name is bare (no `.` / `$`) and the scope is a real module;
+    /// keep dotted (`Type.method`, module paths) and `$`-nested
+    /// names as-is.  The context has no `config.module_name`
+    /// fallback — with no source-module scope active the bare name
+    /// IS the canonical path (single-file `main` compiles).
+    pub fn canonical_qualified_path(&self, name: &str) -> String {
+        match self.current_source_module.as_deref() {
+            Some(scope)
+                if !scope.is_empty()
+                    && scope != "main"
+                    && !name.contains('.')
+                    && !name.contains('$') =>
+            {
+                format!("{}.{}", scope, name)
+            }
+            _ => name.to_string(),
+        }
+    }
+
+    /// blake3 (truncated to u64) over the registration-visible
+    /// signature surface of a decl.  Field order and separators are
+    /// FIXED — this is a stable identity input, not a display format.
+    /// See [`CanonicalFnEntry`] for what is (and is not) covered.
+    pub fn signature_fingerprint(info: &FunctionInfo) -> u64 {
+        let mut h = blake3::Hasher::new();
+        h.update(&(info.param_count as u64).to_le_bytes());
+        for p in &info.param_names {
+            h.update(p.as_bytes());
+            // NUL separator: ["ab","c"] must not collide with ["a","bc"].
+            h.update(&[0u8]);
+        }
+        h.update(&[0xFFu8]); // end-of-params sentinel
+        match info.return_type_name.as_deref() {
+            Some(rt) => {
+                h.update(&[1u8]);
+                h.update(rt.as_bytes());
+            }
+            None => {
+                h.update(&[0u8]);
+            }
+        }
+        h.update(&[
+            info.is_async as u8,
+            info.is_generator as u8,
+            info.is_const as u8,
+        ]);
+        match info.parent_type_name.as_deref() {
+            Some(p) => {
+                h.update(&[1u8]);
+                h.update(p.as_bytes());
+            }
+            None => {
+                h.update(&[0u8]);
+            }
+        }
+        match info.variant_tag {
+            Some(t) => {
+                h.update(&[1u8]);
+                h.update(&t.to_le_bytes());
+            }
+            None => {
+                h.update(&[0u8]);
+            }
+        }
+        u64::from_le_bytes(
+            h.finalize().as_bytes()[..8]
+                .try_into()
+                .expect("blake3 output is 32 bytes; [..8] always fits"),
+        )
+    }
+
+    /// Insert a PRIMARY registration into the canonical index.
+    ///
+    /// Additive-only (never consulted by lookups in stage 1).
+    /// `name#arity` alt-keys are excluded — canonical identity
+    /// belongs to the decl, not its arity-disambiguation shadow.
+    /// Re-registering the same (path, fingerprint) is idempotent;
+    /// a second DISTINCT fingerprint on one path appends (that IS
+    /// the divergence corpus) and warns under `VERUM_TRACE_CANON`.
+    ///
+    /// Hot-path budget (28K registrations on mounted scripts): one
+    /// hash lookup + one small blake3 + at most one `String` alloc —
+    /// O(1) amortized; the env read happens only on divergence.
+    fn register_canonical(&mut self, name: &str, info: &FunctionInfo) {
+        if name.contains('#') {
+            return;
+        }
+        let path = self.canonical_qualified_path(name);
+        let fp = Self::signature_fingerprint(info);
+        match self.canonical_index.get_mut(&path) {
+            Some(entries) => {
+                if entries.iter().any(|e| e.fingerprint == fp) {
+                    return; // identical content re-registered
+                }
+                entries.push(CanonicalFnEntry {
+                    fingerprint: fp,
+                    body_fingerprint: None,
+                    info: info.clone(),
+                });
+                if Self::canon_trace_enabled_for(&path) {
+                    let fps: Vec<String> = entries
+                        .iter()
+                        .map(|e| format!("{:016x}", e.fingerprint))
+                        .collect();
+                    let arities: Vec<usize> =
+                        entries.iter().map(|e| e.info.param_count).collect();
+                    let ids: Vec<u32> =
+                        entries.iter().map(|e| e.info.id.0).collect();
+                    eprintln!(
+                        "[canon-diverge] path={} fps=[{}] arities={:?} ids={:?}",
+                        path,
+                        fps.join(","),
+                        arities,
+                        ids
+                    );
+                }
+            }
+            None => {
+                self.canonical_index.insert(
+                    path,
+                    vec![CanonicalFnEntry {
+                        fingerprint: fp,
+                        body_fingerprint: None,
+                        info: info.clone(),
+                    }],
+                );
+            }
+        }
+    }
+
+    /// Emit-path enrichment: back-fill the canonical entry's
+    /// `body_fingerprint` when `compile_function` finalizes the
+    /// decl's descriptor.  `path` is the promoted descriptor name
+    /// (same derivation as [`Self::canonical_qualified_path`]); the
+    /// entry is matched by function id, falling back to the bare
+    /// simple name for registrations that happened without the
+    /// module scope the promotion saw.  A miss is traced under
+    /// `VERUM_TRACE_CANON` — stage-1 evidence, never an error.
+    ///
+    /// The fingerprint input is the descriptor surface available at
+    /// emit time: promoted name + decoded instruction count +
+    /// register count.  Encoded bytecode byte-length exists only at
+    /// serialization time and joins in stage 2 when descriptors are
+    /// keyed canonically.
+    pub fn enrich_canonical_body_fingerprint(
+        &mut self,
+        path: &str,
+        id: FunctionId,
+        instruction_count: usize,
+        register_count: u16,
+    ) {
+        let mut h = blake3::Hasher::new();
+        h.update(path.as_bytes());
+        h.update(&(instruction_count as u64).to_le_bytes());
+        h.update(&(register_count as u64).to_le_bytes());
+        let fp = u64::from_le_bytes(
+            h.finalize().as_bytes()[..8]
+                .try_into()
+                .expect("blake3 output is 32 bytes; [..8] always fits"),
+        );
+        let bare = path.rsplit('.').next().unwrap_or(path);
+        for key in [path, bare] {
+            if let Some(entries) = self.canonical_index.get_mut(key)
+                && let Some(e) =
+                    entries.iter_mut().find(|e| e.info.id.0 == id.0)
+            {
+                e.body_fingerprint = Some(fp);
+                return;
+            }
+            if key == bare {
+                break; // don't probe the same key twice for dotless paths
+            }
+        }
+        if Self::canon_trace_enabled_for(path) {
+            eprintln!(
+                "[canon-body-miss] path={} id={} (no canonical entry)",
+                path, id.0
+            );
+        }
+    }
+
+    /// Canonical paths currently claimed by MORE THAN ONE distinct
+    /// content fingerprint — the stage-1 divergence corpus.  Sorted
+    /// by path for deterministic assertions / report output.
+    pub fn canonical_divergences(&self) -> Vec<(&str, usize)> {
+        let mut v: Vec<(&str, usize)> = self
+            .canonical_index
+            .iter()
+            .filter(|(_, entries)| entries.len() > 1)
+            .map(|(path, entries)| (path.as_str(), entries.len()))
+            .collect();
+        v.sort_unstable();
+        v
+    }
+
+    /// POST-REGISTRATION consistency sweep: compares the BARE-KEY
+    /// winner in `functions` against the canonical-path claimants of
+    /// the same simple name.  Reports two shapes:
+    ///
+    ///  * `ghost-bare-winner` — the bare slot's function id is not
+    ///    among ANY canonical entry for the simple name (a writer
+    ///    bypassed primary registration, or a same-signature
+    ///    re-registration displaced the winner after canonical
+    ///    snapshot);
+    ///  * `cross-module` — more than one canonical path claims the
+    ///    simple name (the first-wins collision class Pillar 2
+    ///    exists to retire).
+    ///
+    /// Skips `name#arity` mirrors, dotted / `$`-nested keys, and
+    /// bare variant-constructor aliases (a variant's canonical form
+    /// is `Parent.Variant`; its module-qualified bare alias would
+    /// report a path-spelling split for every variant in the stdlib
+    /// and drown the signal).  Pure query — no lookup semantics
+    /// change; O(bare names + canonical paths); callers run it only
+    /// under `VERUM_TRACE_CANON`.  Output sorted for determinism.
+    pub fn canonical_vs_bare_report(&self) -> Vec<String> {
+        // simple-name -> canonical paths, one pass over the index.
+        let mut by_simple: HashMap<&str, Vec<&str>> = HashMap::new();
+        for path in self.canonical_index.keys() {
+            let simple = path.rsplit('.').next().unwrap_or(path.as_str());
+            by_simple.entry(simple).or_default().push(path.as_str());
+        }
+        let mut report = Vec::new();
+        for (name, bare) in &self.functions {
+            if name.contains('.')
+                || name.contains('#')
+                || name.contains("::")
+                || name.contains('$')
+                || bare.variant_tag.is_some()
+            {
+                continue;
+            }
+            let Some(paths) = by_simple.get(name.as_str()) else {
+                // Name never canonically registered — nothing to
+                // compare (stage 1 only indexes the two register_*
+                // entry points).
+                continue;
+            };
+            let mut canonical_ids: Vec<u32> = Vec::new();
+            for path in paths {
+                if let Some(entries) = self.canonical_index.get(*path) {
+                    canonical_ids.extend(entries.iter().map(|e| e.info.id.0));
+                }
+            }
+            canonical_ids.sort_unstable();
+            let mut sorted_paths: Vec<&str> = paths.clone();
+            sorted_paths.sort_unstable();
+            if !canonical_ids.contains(&bare.id.0) {
+                report.push(format!(
+                    "ghost-bare-winner name={} bare_id={} canonical_ids={:?} paths={:?}",
+                    name, bare.id.0, canonical_ids, sorted_paths
+                ));
+            }
+            if sorted_paths.len() > 1 {
+                report.push(format!(
+                    "cross-module name={} claimed_by={:?}",
+                    name, sorted_paths
+                ));
+            }
+        }
+        report.sort_unstable();
+        report
     }
 
     /// Sets the intrinsic_name for an existing function.
@@ -3232,6 +3611,11 @@ impl CodegenContext {
         self.strings.clear();
         self.string_intern.clear();
         self.functions.clear();
+        // ARCH-P2 stage 1 — the canonical index is DUAL-keyed with
+        // `functions` and shares its lifetime: clear it at the same
+        // per-module reset boundary so a fresh module never inherits
+        // the previous module's divergence corpus.
+        self.canonical_index.clear();
         // Stage-3 stub-name preservation map — cleared at the per-
         // module reset boundary along with `functions`.  Accumulates
         // stub_id -> name mappings during a single module's compile
@@ -3691,6 +4075,199 @@ mod tests {
         // qualified `Ordering.Lt` registration.
         ctx.register_function("Ordering.Lt".to_string(), variant_info("Ordering", 0, 0));
         assert_eq!(ctx.find_variant_by_suffix_and_args("Lt", 0), Some(0));
+    }
+
+    // ----------------------------------------------------------------
+    // ARCH-P2 stage 1 — content-addressed canonical function index
+    // (dual keying, warn-on-divergence).
+    // ----------------------------------------------------------------
+
+    /// Identical content registered twice under one qualified path
+    /// collapses to ONE canonical entry (idempotent re-registration:
+    /// the fingerprint covers the signature surface, not the id).
+    #[test]
+    fn canonical_index_idempotent_for_identical_content() {
+        let mut ctx = CodegenContext::new();
+        ctx.current_source_module = Some("core.io.file".to_string());
+        ctx.register_function("open".to_string(), plain_info(3, 2));
+        ctx.register_function("open".to_string(), plain_info(3, 2));
+
+        let entries = ctx
+            .canonical_index
+            .get("core.io.file.open")
+            .expect("canonical entry under the qualified path");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].info.id.0, 3);
+        assert!(entries[0].body_fingerprint.is_none());
+        assert!(ctx.canonical_divergences().is_empty());
+    }
+
+    /// Two DIFFERENT contents (arity 1 vs arity 2) claiming one
+    /// canonical path = a divergence: both fingerprints retained,
+    /// `canonical_divergences` reports the path.
+    #[test]
+    fn canonical_index_divergence_on_different_content() {
+        let mut ctx = CodegenContext::new();
+        ctx.current_source_module = Some("core.net.addr".to_string());
+        ctx.register_function("parse".to_string(), plain_info(1, 1));
+        ctx.register_function("parse".to_string(), plain_info(2, 2));
+
+        let entries = ctx.canonical_index.get("core.net.addr.parse").unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_ne!(entries[0].fingerprint, entries[1].fingerprint);
+        assert_eq!(
+            ctx.canonical_divergences(),
+            vec![("core.net.addr.parse", 2)]
+        );
+    }
+
+    /// `name#arity` alt-key mirrors — whether created internally by
+    /// the collision branches or registered directly — never land in
+    /// the canonical index.
+    #[test]
+    fn canonical_index_excludes_arity_mirrors() {
+        let mut ctx = CodegenContext::new();
+        ctx.current_source_module = Some("core.sys.fs".to_string());
+        ctx.register_function("write".to_string(), plain_info(1, 2));
+        ctx.register_function("write".to_string(), plain_info(2, 3));
+
+        // The bare table grew its arity mirrors (dice-8 discipline)…
+        assert!(ctx.functions.contains_key("write#2"));
+        assert!(ctx.functions.contains_key("write#3"));
+        // …the canonical index did not.
+        assert!(ctx.canonical_index.keys().all(|k| !k.contains('#')));
+        // Defensive: a direct registration OF a #-key is excluded too.
+        ctx.register_function("direct#4".to_string(), plain_info(9, 4));
+        assert!(ctx.canonical_index.keys().all(|k| !k.contains('#')));
+    }
+
+    /// The canonical path derivation mirrors the `compile_function`
+    /// descriptor-name promotion: no scope / `main` scope keep the
+    /// bare name; dotted and `$`-nested names are never re-prefixed.
+    #[test]
+    fn canonical_path_matches_descriptor_promotion_rules() {
+        let mut ctx = CodegenContext::new();
+        // No scope: the bare name IS the canonical path.
+        ctx.register_function("standalone".to_string(), plain_info(1, 0));
+        assert!(ctx.canonical_index.contains_key("standalone"));
+        // "main" scope (single-file user compile): no promotion.
+        ctx.current_source_module = Some("main".to_string());
+        ctx.register_function("user_fn".to_string(), plain_info(2, 0));
+        assert!(ctx.canonical_index.contains_key("user_fn"));
+        assert!(!ctx.canonical_index.contains_key("main.user_fn"));
+        // Dotted + $-nested names stay as-is even under a real scope.
+        ctx.current_source_module = Some("core.iter".to_string());
+        ctx.register_function("Iterator.next".to_string(), plain_info(3, 1));
+        assert!(ctx.canonical_index.contains_key("Iterator.next"));
+        ctx.register_function("outer$inner".to_string(), plain_info(4, 0));
+        assert!(ctx.canonical_index.contains_key("outer$inner"));
+        assert!(!ctx.canonical_index.contains_key("core.iter.outer$inner"));
+    }
+
+    /// An authoritative (explicit-mount) registration is a primary
+    /// registration: it lands canonically like any other.
+    #[test]
+    fn canonical_index_covers_authoritative_registration() {
+        let mut ctx = CodegenContext::new();
+        ctx.current_source_module = Some("core.async.future".to_string());
+        ctx.register_function_authoritative(
+            "select".to_string(),
+            plain_info(21, 2),
+        );
+
+        let entries = ctx
+            .canonical_index
+            .get("core.async.future.select")
+            .expect("authoritative registration must land canonically");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].info.id.0, 21);
+        // Its #arity mirror stays out of the canonical index.
+        assert!(ctx.functions.contains_key("select#2"));
+        assert!(ctx.canonical_index.keys().all(|k| !k.contains('#')));
+    }
+
+    /// The consistency sweep finds (a) cross-module claims — two
+    /// canonical paths for one simple name — and (b) ghost bare
+    /// winners — a bare-slot id no canonical entry knows.
+    #[test]
+    fn canonical_vs_bare_report_finds_ghost_and_cross_module() {
+        let mut ctx = CodegenContext::new();
+        // Module A registers foo (id 1); module B registers foo
+        // (id 2, same arity) and last-wins takes the bare slot.
+        ctx.current_source_module = Some("mod.a".to_string());
+        ctx.register_function("foo".to_string(), plain_info(1, 1));
+        ctx.current_source_module = Some("mod.b".to_string());
+        ctx.register_function("foo".to_string(), plain_info(2, 1));
+
+        let report = ctx.canonical_vs_bare_report();
+        assert!(
+            report
+                .iter()
+                .any(|l| l.starts_with("cross-module name=foo")),
+            "expected a cross-module finding, got: {report:?}"
+        );
+        // The bare winner (id 2) IS canonically known — no ghost yet.
+        assert!(
+            !report.iter().any(|l| l.starts_with("ghost-bare-winner")),
+            "no ghost expected while the bare id is canonical: {report:?}"
+        );
+
+        // A writer bypasses primary registration and claims the bare
+        // slot with an id no canonical entry has seen.
+        ctx.functions.insert("foo".to_string(), plain_info(99, 1));
+        let report = ctx.canonical_vs_bare_report();
+        assert!(
+            report.iter().any(|l| l
+                .starts_with("ghost-bare-winner name=foo")
+                && l.contains("bare_id=99")),
+            "expected a ghost-bare-winner finding, got: {report:?}"
+        );
+    }
+
+    /// Emit-path enrichment back-fills `body_fingerprint` on the
+    /// canonical entry (matched by id); unknown paths/ids are a
+    /// traced no-op, never a spurious entry.
+    #[test]
+    fn enrich_canonical_body_fingerprint_backfills_entry() {
+        let mut ctx = CodegenContext::new();
+        ctx.current_source_module = Some("core.text.text".to_string());
+        ctx.register_function("trim".to_string(), plain_info(5, 1));
+        assert!(
+            ctx.canonical_index["core.text.text.trim"][0]
+                .body_fingerprint
+                .is_none()
+        );
+
+        ctx.enrich_canonical_body_fingerprint(
+            "core.text.text.trim",
+            FunctionId(5),
+            12,
+            4,
+        );
+        let entry = &ctx.canonical_index["core.text.text.trim"][0];
+        assert!(entry.body_fingerprint.is_some());
+
+        // Bare-name fallback: registration happened without the scope
+        // the descriptor promotion later saw.
+        let mut ctx2 = CodegenContext::new();
+        ctx2.register_function("helper".to_string(), plain_info(7, 0));
+        ctx2.enrich_canonical_body_fingerprint(
+            "core.late.scope.helper",
+            FunctionId(7),
+            3,
+            1,
+        );
+        assert!(ctx2.canonical_index["helper"][0].body_fingerprint.is_some());
+
+        // Unknown path+id: no panic, no spurious entry.
+        ctx2.enrich_canonical_body_fingerprint(
+            "core.late.scope.nope",
+            FunctionId(77),
+            1,
+            1,
+        );
+        assert!(!ctx2.canonical_index.contains_key("core.late.scope.nope"));
+        assert!(!ctx2.canonical_index.contains_key("nope"));
     }
 
     /// `resolve_function_key`: exact key wins when present and
