@@ -180,6 +180,19 @@ print) read the tag, not heuristics. Tier-0's NaN-box maps 1:1.
 SSO-poisoning producers (already fixed producer-side — becomes
 type-level impossible); the byte-blob special case.
 
+**Status (2026-07-10).** Final leg LANDED at Tier-0: the legacy
+`TypeId(0x0001)` `[len:u64][bytes…]` byte-blob is retired.  Every
+interpreter heap-Text producer emits ONE self-contained TEXT record
+`[ObjectHeader(TEXT)]{ptr,len,cap}[bytes…]` (`Heap::alloc_text` /
+`alloc_text_with_capacity`, heap.rs), readers dispatch through
+`heap::text_record_payload` / `value_as_text_record` — no
+dual-layout branch remains.  `cap == 0` is the immutable/COW marker
+(matches AOT rodata `{ptr,len,0}`); capacity-carrying records
+reserve `cap + 1` bytes per text.vr's owned-buffer convention.
+Follows the BYTE_SLICE(528) `as_bytes` leg (same campaign shape).
+Pinned by `crates/verum_vbc/tests/text_record_arch_p5_tests.rs` +
+`core-tests/text/storage/`.
+
 ---
 
 ## Sequencing (dependency-honest)
