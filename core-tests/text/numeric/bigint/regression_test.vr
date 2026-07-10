@@ -197,4 +197,30 @@ fn regression_a_sub_via_chained_method_receiver() {
     assert_eq(d.digits[0], 7);
 }
 
+// =============================================================================
+// §B TUPLE-TYPE-TRACK-1 (2026-07-10, fixed in-branch; active guard)
+// =============================================================================
+
+// REGRESSION (TUPLE-TYPE-TRACK-1): `extract_inner_types` split
+// `Result<(BigInt, BigInt), BigIntError>` inside the tuple parens
+// (`<>`-only depth), so `Ok(pair)` bound `pair` to the corrupt
+// fragment "(BigInt"; `pair.0.digits` then resolved `digits` through
+// the global field-name scan and PgNumeric's `digits`@4 won the
+// most-fields tie-break over BigInt's `digits`@1 — "field access out
+// of bounds: field index 4 exceeds object data size 16" on BOTH tiers.
+// The splitter is now paren/bracket-aware and tuple element types
+// project positionally.
+@test
+fn regression_b_div_rem_tuple_field_projection() {
+    let a = BigInt.from_int(10);
+    let b = BigInt.from_int(2);
+    match a.div_rem(&b) {
+        Ok(pair) => {
+            assert_eq(pair.0.digits[0], 5);
+            assert(pair.1.is_zero());
+        }
+        Err(_) => panic("10 / 2 must divide"),
+    }
+}
+
 fn main() {}

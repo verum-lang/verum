@@ -105,6 +105,27 @@ fn guard_equal_nocase_distinct() {
 }
 
 // =============================================================================
+// §C RETNAME-CARRY-1 (2026-07-10, fixed in-branch; active guard)
+// =============================================================================
+
+// REGRESSION (RETNAME-CARRY-1): the archive round-trip re-derived
+// `compare_ascii_nocase`'s return-type name from the lowered TypeRef.
+// `Ordering` had baked to the PTR carrier, which re-derives as "USize"
+// (integer-shaped), so `let ba = compare_ascii_nocase(...)` recorded an
+// integer binding and `ba.reverse()` compiled as `Int.reverse` — a
+// runtime dispatch panic listing 7 unrelated `.reverse` candidates.
+// The descriptor now carries the SOURCE-LEVEL name verbatim (VBC v2.6).
+@test
+fn regression_c_return_type_name_carried_for_ordering() {
+    let a: Text = "Apple";
+    let b: Text = "banana";
+    let ab = compare_ascii_nocase(&a, &b);
+    let ba = compare_ascii_nocase(&b, &a);
+    // UNANNOTATED binding + method call is the load-bearing shape.
+    assert_eq(ab, ba.reverse());
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 

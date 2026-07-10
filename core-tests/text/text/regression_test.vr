@@ -855,6 +855,98 @@ fn regression_y_concat_greek_prefix() {
 }
 
 // =============================================================================
+// §Z 2026-07-10 conformance-campaign classes (all fixed in-branch; active guards)
+// =============================================================================
+
+// REGRESSION (RSPLIT-ORDER-1): rsplit/rsplitn returned parts in
+// left-to-right order (a trailing `reverse()`), making full `rsplit`
+// observably identical to `split` and `rsplitn`'s remainder land FIRST.
+// Contract fixed to the industry-standard rightmost-first order
+// (remainder LAST for rsplitn). Audit.md §Z1.
+@test
+fn regression_z_rsplit_rightmost_first() {
+    let parts = "a,b,c".rsplit(&",");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "c");
+    assert_eq(parts[1], "b");
+    assert_eq(parts[2], "a");
+}
+
+@test
+fn regression_z_rsplitn_remainder_last() {
+    let parts = "a,b,c,d".rsplitn(2, &",");
+    assert_eq(parts.len(), 2);
+    assert_eq(parts[0], "d");
+    assert_eq(parts[1], "a,b,c");
+}
+
+// REGRESSION (MAKE-ASCII-INPLACE-1): make_ascii_uppercase/lowercase
+// mutated through `as_ptr()` + byte `memset`, violating the Text
+// representation contract on EVERY form — silent no-op on SSO values
+// and built texts, stride-8 memory corruption on heap literals
+// ("rstuvwxGz-01234H6789…"). Rewritten as rebuild-and-assign.
+// One probe per representation class. Audit.md §Z2.
+@test
+fn regression_z_make_ascii_upper_sso() {
+    let mut s: Text = "abc";
+    s.make_ascii_uppercase();
+    assert_eq(s, "ABC");
+}
+
+@test
+fn regression_z_make_ascii_upper_heap_literal() {
+    let mut h: Text = "abcdefghijklmnopqrstuvwxyz-0123456789";
+    h.make_ascii_uppercase();
+    assert_eq(h, "ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789");
+}
+
+@test
+fn regression_z_make_ascii_lower_built() {
+    let mut c: Text = Text.new();
+    c.push_str(&"XYZ");
+    c.make_ascii_lowercase();
+    assert_eq(c, "xyz");
+}
+
+// REGRESSION (NEVER-ABSORB-1): `let ch = match m { Some(c) => c,
+// None => panic("…") };` typed `ch` from the panic arm as `!` whenever
+// the first arm wasn't derivable — every later method call compiled as
+// `!.method` and died at dispatch ("method '!.len_utf8' not found on
+// receiver of runtime kind Int"). The never type is now absorbing in
+// the arm-type join. Text.remove is the original crash site. Audit §Z3.
+@test
+fn regression_z_never_arm_match_binding_remove() {
+    let mut s: Text = "abc";
+    let c = s.remove(0);
+    assert_eq(c, 'a');
+    assert_eq(s, "bc");
+}
+
+// REGRESSION (SLICE-ELEM-WRITE-1): the Char.encode_utf16 CallM
+// intercept wrote NaN-BOXED Values into the `[Int; 2]` scratch buffer
+// while the FatRef read path (elem_size=8) expects RAW i64 — every
+// code unit read back as the box bits (0x7FF9_0000_0000_0041 for 'A').
+// The writer now honours FatRef.reserved exactly like the reader.
+// Audit §Z4.
+@test
+fn regression_z_encode_utf16_raw_units() {
+    let s: Text = "AB";
+    let units = s.encode_utf16();
+    assert_eq(units.len(), 2);
+    assert_eq(units[0], 65);
+    assert_eq(units[1], 66);
+}
+
+@test
+fn regression_z_utf16_round_trip() {
+    let s: Text = "hello";
+    match Text.from_utf16(&s.encode_utf16()[..]) {
+        Ok(t) => assert_eq(t, "hello"),
+        Err(_) => panic("round trip must succeed"),
+    }
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 

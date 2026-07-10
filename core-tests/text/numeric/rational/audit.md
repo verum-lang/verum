@@ -44,3 +44,15 @@ Every Rational arithmetic delegates to BigInt's `add` / `sub` /
 
 ### Deferred
 - Task #24 close — unblocks all property + integration tests.
+
+
+## Sweep 2026-07-11 — §C `&other.numerator` RefField-through-ref-param (PARKED, precise pin)
+
+`law_mul_commutativity` / `law_mul_one_identity` fail with
+`NullPointerAt BigInt.is_zero pc=0`.  Isolation matrix: `from_int` ✓,
+direct `BigInt.mul` ✓, `Rational.is_zero` (reads OWN field through
+`&self`) ✓ — ONLY `Rational.mul`'s `self.numerator.mul(&other.numerator)`
+fails: taking a ref to a FIELD of a REF-PARAM (`other: &Rational`)
+yields a shape the callee's receiver/arg resolution reads as nil.
+Same class as builder §B (RefField through ref-param).  2 tests;
+reference-model pillar work, not a rational-module defect.

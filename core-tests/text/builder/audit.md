@@ -103,3 +103,17 @@ equal a literal Text comparator. Same root as case_fold §A.
 2. Add a TextBuilder smoke test (`unit_test::test_push_single_text`) to
    the per-PR sanity check — if it ever passes, §A is closed and the
    sweep improves dramatically.
+
+
+## Sweep 2026-07-11 — §B TextBuilder Display via f-string (PARKED, precise pin)
+
+`test_display_renders_buffer` (`f"{b}"` → `<ptr@…>`): dispatch DOES
+reach `TextBuilder.fmt` (VERUM_TRACE_DISPATCH: fid=22212,
+recv_type='TextBuilder') and `format_display(&b)` shows the same
+symptom — the loss is INSIDE the baked body's `f.write_str(&self.buf)`:
+a RefField (interior ref to the `buf` FIELD through the `&self`
+ref-param) reaches write_str, whose text extraction can't resolve the
+double-hop shape and renders the raw pointer.  Same reference-model
+family as the rational `&other.numerator` leg (see numeric/rational
+audit).  1 test; pinned until the RefField-through-ref-param class is
+addressed at the reference-model level (tier-coherence pillar 1).

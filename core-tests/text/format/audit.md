@@ -150,3 +150,38 @@ garbage.  Sibling pattern already established by `format_lower_exp` /
    `value: &Primitive` and `method` takes `self` (value form) — the
    `*value` discipline is currently enforced only by reviewer
    discipline (see commit `460508d8f` for the established pattern).
+
+
+---
+
+## Sweep 2026-07-10 — §K CALLM-KEEP-CLOSURE-1 (CLOSED in-branch)
+
+`test_format_debug_int/bool` + `regression_a_format_debug_int_pinned`
+failed with `f"{n:?}"` rendering `""`. Bisection over this file's mount
+list showed the trigger was mounting any mid-module FUNCTION
+(`int_to_text`, `format_hex`, `WriteError`, …) — each flips the archive
+loader into function-granular merge pruning (UMBRELLA-MOUNT-PRUNE-1,
+commit e572d8943), whose keep-closure followed only `Call`-family
+func-id edges. `CallM` METHOD-dispatch edges (a string-id method key
+resolved at runtime) and the primitive-impl surface were invisible, so
+`Int.fmt_debug` was pruned from the merged table; the runtime's
+bare-suffix fallback then silently executed `Text.fmt_debug` against
+the Int receiver (traced via VERUM_TRACE_DISPATCH: `'fmt_debug' ->
+fid=17151 'Text.fmt_debug'`), producing quoted-empty output.
+
+Fundamental fix in `compute_merge_keep_sets`
+(`crates/verum_compiler/src/archive_ctx_loader.rs`):
+
+1. **CallM edges followed** — qualified keys keep exact
+   2-segment matches; bare/dyn keys keep all same-suffix candidates
+   (presence-only over-keep; dispatch precision stays the runtime's job).
+2. **Primitive-impl surface unconditionally kept** — primitives carry
+   no TypeDescriptor, so no type-surface rule could reach
+   `implement Debug for Int`; the surface is bounded stdlib-wide.
+
+Guards: `regression_k_fspec_debug_int_survives_fn_mount_prune` /
+`..._bool_...` (this file mounts `int_to_text` as the load-bearing
+trigger). Residual related defect (tracked, NOT closed here): a
+bare-suffix dispatch MISS on a dyn call should be LOUD, not silently
+route to an arbitrary same-suffix body — see task notes
+(DYN-MISS-LOUD-1).

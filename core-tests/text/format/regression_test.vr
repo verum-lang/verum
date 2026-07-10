@@ -25,6 +25,7 @@ mount core.text.format.{
     TextAlignment, Sign, FormatSpec,
     format_debug, format_display,
     format_hex, format_binary, format_octal,
+    int_to_text,
 };
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
@@ -167,6 +168,32 @@ fn regression_h_ref_int_to_hex_auto_deref_pinned() {
     // "-6c00000002") because the dispatcher feeds the pointer to
     // `Int.to_hex(self: Int)` without dereferencing.
     assert_eq(r.to_hex(), "ff");
+}
+
+// =============================================================================
+// §K CALLM-KEEP-CLOSURE-1 (2026-07-10, fixed in-branch; active guard)
+// =============================================================================
+
+// REGRESSION (CALLM-KEEP-CLOSURE-1): the mount-prune keep-closure
+// (UMBRELLA-MOUNT-PRUNE-1) followed only `Call`-family func-id edges;
+// `CallM` method-dispatch edges and the primitive-impl surface were
+// invisible, so mounting a mid-module FUNCTION (int_to_text here)
+// pruned `Int.fmt_debug` out of the merged table entirely. The runtime
+// bare-suffix fallback then silently executed `Text.fmt_debug` against
+// the Int receiver and `f"{n:?}"` rendered `""`. The closure now
+// follows CallM edges and unconditionally keeps primitive-impl
+// method surfaces. The mount of `int_to_text` in this file's header
+// is the load-bearing trigger.
+@test
+fn regression_k_fspec_debug_int_survives_fn_mount_prune() {
+    let n: Int = 42;
+    assert_eq(f"{n:?}", "42");
+}
+
+@test
+fn regression_k_fspec_debug_bool_survives_fn_mount_prune() {
+    let b: Bool = true;
+    assert_eq(f"{b:?}", "true");
 }
 
 // =============================================================================

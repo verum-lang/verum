@@ -1,0 +1,191 @@
+// =============================================================================
+// core-tests/text/mod/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/text/mod.vr` — the text module MANIFEST: umbrella
+// re-exports, the `prelude` sub-module surface, and the module-level
+// constants.  These tests pin the REACHABILITY contract: every symbol the
+// manifest re-exports must resolve and behave through the UMBRELLA path
+// (`core.text.X`), not only through its defining file's direct path.
+//
+// Section map:
+//   1. Core type re-exports — Text + error types construct/behave
+//   2. Iterator re-exports — Chars / Lines reachable through the umbrella
+//   3. Char utilities re-exports — CharPattern family + free fns
+//   4. Formatting re-exports — Formatter/FormatSpec surface + print fns
+//   5. TextBuilder re-export (umbrella declaration was historically missing)
+//   6. Regex re-export
+//   7. case_fold sub-module — reachable as `public module`
+//   8. numeric sub-module — Decimal/BigInt umbrellas re-mounted
+//   9. Module constants — SSO_CAPACITY / MAX_UTF8_BYTES / REPLACEMENT_CHARACTER
+// =============================================================================
+
+mount core.text.{
+    Text, Utf8Error, Utf16Error, ParseError,
+    Chars, Lines,
+    GeneralCategory, CharPattern, AnyChar, CharRange, any_of, char_range,
+    Formatter, FormatSpec, Alignment, Sign,
+    TextBuilder,
+    Regex,
+    SSO_CAPACITY, MAX_UTF8_BYTES, REPLACEMENT_CHARACTER,
+};
+mount core.text.case_fold.{fold_char_ascii, equal_ascii_nocase};
+mount core.text.numeric.{BigInt, Decimal};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Core type re-exports
+// =============================================================================
+
+@test
+fn test_umbrella_text_constructs() {
+    let t: Text = "umbrella";
+    assert_eq(t.len(), 8);
+}
+
+@test
+fn test_umbrella_text_new_is_empty() {
+    let t = Text.new();
+    assert(t.is_empty());
+}
+
+@test
+fn test_umbrella_utf8_error_surfaces_on_invalid_input() {
+    // 0xFF is never valid UTF-8 — the umbrella-mounted Utf8Error type
+    // must be the error carrier.
+    let bad: List<Byte> = [0xFF as Byte];
+    match Text.from_utf8(&bad[..]) {
+        Ok(_) => panic("0xFF must not decode"),
+        Err(_e) => {}
+    }
+}
+
+// =============================================================================
+// Section 2: Iterator re-exports
+// =============================================================================
+
+@test
+fn test_umbrella_chars_iterator_reachable() {
+    let t: Text = "ab";
+    let mut it = t.chars();
+    match it.next() {
+        Maybe.Some(c) => assert_eq(c, 'a'),
+        Maybe.None => panic("chars() must yield"),
+    }
+}
+
+@test
+fn test_umbrella_lines_iterator_reachable() {
+    let t: Text = "x\ny";
+    let ls = t.lines();
+    assert_eq(ls.len(), 2);
+}
+
+// =============================================================================
+// Section 3: Char utilities re-exports
+// =============================================================================
+
+@test
+fn test_umbrella_any_of_matches() {
+    let cs: List<Char> = ['a', 'b', 'c'];
+    let p = any_of(&cs[..]);
+    assert(p.matches('b'));
+    assert(!p.matches('z'));
+}
+
+@test
+fn test_umbrella_char_range_matches() {
+    let r = char_range('0', '9');
+    assert(r.matches('5'));
+    assert(!r.matches('x'));
+}
+
+// =============================================================================
+// Section 4: Formatting re-exports
+// =============================================================================
+
+@test
+fn test_umbrella_formatter_write_str() {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    let r = f.write_str(&"via umbrella");
+    assert(r is Ok);
+    assert_eq(buf, "via umbrella");
+}
+
+// =============================================================================
+// Section 5: TextBuilder re-export
+// =============================================================================
+
+@test
+fn test_umbrella_text_builder_reachable() {
+    let mut b = TextBuilder.new();
+    b.push(&"one");
+    b.push_char(' ');
+    b.push(&"two");
+    assert_eq(b.build(), "one two");
+}
+
+// =============================================================================
+// Section 6: Regex re-export
+// =============================================================================
+
+@test
+fn test_umbrella_regex_is_match() {
+    match Regex.new("h.llo") {
+        Ok(re) => assert(re.is_match("hello")),
+        Err(_) => panic("pattern must compile"),
+    }
+}
+
+// =============================================================================
+// Section 7: case_fold sub-module
+// =============================================================================
+
+@test
+fn test_umbrella_case_fold_module_reachable() {
+    assert_eq(fold_char_ascii('A'), 'a');
+    let a: Text = "MiXeD";
+    let b: Text = "mixed";
+    assert(equal_ascii_nocase(&a, &b));
+}
+
+// =============================================================================
+// Section 8: numeric sub-module
+// =============================================================================
+
+@test
+fn test_umbrella_numeric_bigint_reachable() {
+    let n = BigInt.from_int(7);
+    assert(!n.is_zero());
+}
+
+@test
+fn test_umbrella_numeric_decimal_reachable() {
+    let d = Decimal.from_int(3);
+    assert(!d.is_zero());
+}
+
+// =============================================================================
+// Section 9: Module constants
+// =============================================================================
+
+@test
+fn test_umbrella_sso_capacity_pinned() {
+    // The SSO capacity is an ABI-adjacent constant: text.vr's inline
+    // representation stores up to this many bytes without allocation.
+    assert_eq(SSO_CAPACITY, 23);
+}
+
+@test
+fn test_umbrella_max_utf8_bytes_pinned() {
+    assert_eq(MAX_UTF8_BYTES, 4);
+}
+
+@test
+fn test_umbrella_replacement_character_pinned() {
+    assert_eq(REPLACEMENT_CHARACTER as Int, 0xFFFD);
+}
+
+fn main() {}

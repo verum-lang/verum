@@ -489,3 +489,82 @@ MUST return zero broken patterns at every commit.
 * The `regression_test.vr` pins are per-defect-class — when a fix lands,
   remove the `@ignore` from the corresponding test and run the full
   suite to verify the cascade closes too.
+
+
+---
+
+## 6. Sweep 2026-07-10 — conformance-campaign round (§Z classes, ALL CLOSED in-branch)
+
+Live dual-tier baseline surfaced 11 interp failures in this module; four
+distinct root causes, each fixed at its OWN level (no workarounds):
+
+* **§Z1 RSPLIT-ORDER-1** (stdlib contract): `rsplit`/`rsplitn` shipped a
+  trailing `reverse()` returning parts LEFT-TO-RIGHT — full `rsplit` was
+  observably identical to `split`, `rsplitn`'s remainder landed FIRST.
+  Contract corrected to industry-standard rightmost-first (remainder
+  LAST for `rsplitn`); zero stdlib callers depended on the old order.
+  Fixed in `core/text/text.vr`; guards `regression_z_rsplit*`.
+* **§Z2 MAKE-ASCII-INPLACE-1** (stdlib repr contract): `make_ascii_*`
+  mutated through `as_ptr()` + byte `memset` — silent no-op on SSO and
+  built texts, STRIDE-8 CORRUPTION on heap literals (observed
+  `"rstuvwxGz-01234H6789 J K L M N"`). Raw-pointer mutation cannot be
+  representation-correct across SSO/static/heap forms; rewritten as
+  rebuild-and-assign (`*self = self.to_ascii_*()`). Guards
+  `regression_z_make_ascii_*` (one per representation).
+* **§Z3 NEVER-ABSORB-1** (VBC codegen type inference):
+  `extract_expr_type_name`'s Match arm returned the FIRST derivable arm
+  type — a `panic(...)` arm typed the whole match `!`, so
+  `Text.remove`'s `ch` binding compiled `ch.len_utf8()` as
+  `!.len_utf8` → dispatch panic. The never type is now absorbing in the
+  arm-type join (`crates/verum_vbc/src/codegen/expressions.rs`).
+  Guard `regression_z_never_arm_match_binding_remove`.
+* **§Z4 SLICE-ELEM-WRITE-1** (interpreter intercept ABI): the
+  `Char.encode_utf8/16` CallM intercepts probed the buffer as a
+  header-ed heap object; a FatRef slice (also `is_ptr()`) fell into the
+  fixed-array branch and got NaN-BOXED Values where the FatRef read
+  path (`reserved = 8`) expects RAW i64 — every UTF-16 unit read back
+  as box bits (`0x7FF9_…_0041`). Writers now mirror `handle_get_index`'s
+  representation dispatch exactly (`write_fat_ref_int_element`,
+  `crates/verum_vbc/src/interpreter/dispatch_table/handlers/char_runtime.rs`).
+  Guards `regression_z_encode_utf16_raw_units` / `regression_z_utf16_round_trip`.
+
+Cross-module classes surfaced by THIS module's failures but owned
+elsewhere: TUPLE-TYPE-TRACK-1 (bigint audit §B), RETNAME-CARRY-1
+(case_fold audit §C), CALLM-KEEP-CLOSURE-1 (format audit §K).
+
+
+### §Z addendum (2026-07-11 night round)
+
+* **§Z3 corrected**: the first NEVER-ABSORB-1 fix returned `Some("!")`
+  as a FALLBACK when value arms were merely underivable — which typed
+  `Text.remove`'s `ch` as `!` all the same (baked body still carried
+  `!.len_utf8`).  Corrected: never-typed arms contribute NOTHING; a
+  match with no derivable value arm reports UNKNOWN (None), not `!`.
+  Requires a stdlib re-bake to purge the poisoned baked body.
+* **§Z5 SELF-MUT-RECV-COHERENCE-1** (NEW, CLOSED): in prelude-only
+  compiles (no `mount` of the owner type) the call site's
+  `lookup_function("Text.make_ascii_uppercase")` MISSES at codegen
+  time, so no RefMut wrap was emitted and the receiver went BY VALUE —
+  the baked `*self = X` wrote into the callee-frame copy (silent no-op
+  for EVERY `&mut self` stdlib method, mount-set-dependent).  Fix at
+  the RUNTIME invoke: the callee DESCRIPTOR (param[0] = Reference{
+  Mutable} named self) is the authority; a by-value receiver gets a
+  synthesized CBGR ref to the caller's receiver register
+  (method_dispatch.rs).  Oracle: VERUM_TRACE_SELFMUT=<substr>.
+* **§Z6 TupleIndex inference gap** (CLOSED): `pair.0` parses as
+  ExprKind::TupleIndex, which NEITHER name-inferrer had an arm for —
+  the D2 chain stayed broken after the Field-arm projections landed.
+  Both inferrers now project newtype inner / positional tuple element.
+* **§Z7 rsplit-era misc**: rsplit/rsplitn/make_ascii/encode(concat)
+  legs all green on the post-fix binary.
+
+### Parked with precise pins (NOT closed)
+
+* **integration_text_sort_lexicographic_via_cmp** — `words[j].cmp(&words[i])
+  == Less` never true in-suite; `cmp`/`== Less` correct in isolation.
+  Variant-equality compile shape (`==` over Ordering from an INDEXED
+  receiver chain) — likely `==`-lowering to integer compare over
+  (object-ptr, variant).  Needs the Eq-dispatch trace next round.
+* **utf16 through heap-object buffers** — the encode intercept now
+  DEFERS non-FatRef/ThinRef buffer shapes to the compiled body whose
+  SET_E path is representation-correct (SLICE-ELEM-WRITE-1 narrowing).

@@ -136,3 +136,33 @@ unit_test surface (`test_abs_positive_identity`,
 ### Deferred
 - Task #24 close — unblocks all 12 property laws + 7 integration tests
   + 5 §A pins.
+
+
+---
+
+## Sweep 2026-07-10 — §B TUPLE-TYPE-TRACK-1 (CLOSED in-branch)
+
+`test_div_rem_simple_exact` / `test_div_rem_with_remainder` panicked
+with "field access out of bounds: field index 4 (offset 32+8 = 40)
+exceeds object data size 16 type='BigInt'" on BOTH tiers (interp panic,
+AOT SIGSEGV). Root cause chain (VBC codegen, three compounding gaps):
+
+1. `extract_inner_types("Result<(BigInt, BigInt), BigIntError>")`
+   tracked only `<>` depth → split inside the tuple parens → `Ok(pair)`
+   bound `pair` to the corrupt fragment `"(BigInt"`;
+2. no tuple-element projection existed in either type inferrer, so
+   `pair.0` was untyped even with a correct tuple string;
+3. `resolve_field_index(None, "digits")` fell to the global scan whose
+   most-fields tie-break picked `PgNumeric.digits`@4 (5 fields) over
+   `BigInt.digits`@1 — a memory-unsafe GUESS.
+
+Fixes: paren/bracket-aware splitter + `tuple_element_type_name`
+positional projection wired into both inferrers
+(`crates/verum_vbc/src/codegen/{mod,expressions}.rs`); the
+position-disagreeing guess now warns once per (fn, field)
+(FIELD-GUESS-LOUD-1). Architectural retirement of the guessing class —
+runtime by-name field access on both tiers — is tracked as
+FIELD-ACCESS-BYNAME-1 (needs an AOT-side runtime descriptor table; out
+of scope for this branch). Guard:
+`regression_b_div_rem_tuple_field_projection`. The rational-module
+`law_mul_*` NullPointer failures were downstream of the same class.

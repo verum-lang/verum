@@ -1,0 +1,73 @@
+// =============================================================================
+// core-tests/text/mod/integration_test.vr
+// =============================================================================
+//
+// Cross-surface flows through the `core.text` UMBRELLA only: the same
+// value travels Text → chars → case_fold → TextBuilder → Formatter, so a
+// break in any single re-export line surfaces here even when the
+// per-file suites (which mount defining files directly) stay green.
+// Also pins the PRELUDE leg: `Text`, `print`, f-strings and `Formatter`
+// must work with NO explicit text mounts at all.
+// =============================================================================
+
+mount core.text.{Text, TextBuilder, Formatter, any_of};
+mount core.text.case_fold.{fold_text_ascii};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: umbrella round-trip pipeline
+// =============================================================================
+
+@test
+fn integration_umbrella_fold_build_format_pipeline() {
+    let input: Text = "MiXeD Case LINE";
+    let folded = fold_text_ascii(&input);
+    assert_eq(folded, "mixed case line");
+
+    let mut b = TextBuilder.new();
+    for w in folded.words().iter() {
+        b.push(&(*w));
+        b.push_char('.');
+    }
+    let dotted = b.build();
+    assert_eq(dotted, "mixed.case.line.");
+
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    let r = f.write_str(&dotted);
+    assert(r is Ok);
+    assert_eq(buf, "mixed.case.line.");
+}
+
+@test
+fn integration_umbrella_charpattern_over_text_chars() {
+    let vs: List<Char> = ['a', 'e', 'i', 'o', 'u'];
+    let vowels = any_of(&vs[..]);
+    let t: Text = "umbrella";
+    let mut n: Int = 0;
+    for c in t.chars() {
+        if vowels.matches(c) {
+            n = n + 1;
+        }
+    }
+    assert_eq(n, 3);
+}
+
+// =============================================================================
+// Section 2: prelude leg — f-string + Display with zero text mounts
+// =============================================================================
+
+@test
+fn integration_prelude_fstring_int_debug_and_display() {
+    // `f"{..}"` + `{:?}` must work with no core.text.format mount in
+    // scope — the prelude carries the formatting entry points.
+    let n: Int = 7;
+    assert_eq(f"{n}", "7");
+    assert_eq(f"{n:?}", "7");
+    let t: Text = "hi";
+    assert_eq(f"{t}", "hi");
+    assert_eq(f"{t:?}", "\"hi\"");
+}
+
+fn main() {}

@@ -83,3 +83,28 @@ test_fold_text_mixed panic path.
 2. Add `equal_ascii_nocase` and `compare_ascii_nocase` to the WKT pin
    set so that future stdlib refactors that lenient-skip them surface
    immediately.
+
+
+---
+
+## Sweep 2026-07-10 — §C RETNAME-CARRY-1 (CLOSED in-branch)
+
+`property_compare_anti_symmetric` failed with `Int.reverse` dispatched
+on an Ordering receiver. Root cause chain (all in the archive
+round-trip, NOT in this module):
+
+1. bake: `ast_type_to_type_ref("Ordering")` missed `type_name_to_id`
+   at case_fold's compile moment → `TypeId::PTR` carrier baked into
+   `FunctionDescriptor.return_type`;
+2. load: `type_ref_simple_name(PTR)` re-derived `"USize"` —
+   integer-shaped, so `let ba = compare_ascii_nocase(...)` registered an
+   Int-kind binding and method dispatch emitted `Int.reverse`.
+
+Fundamental fix (RETNAME-CARRY-1, VBC format v2.6): the descriptor now
+CARRIES the source-level rendered return-type name verbatim
+(`FunctionDescriptor.return_type_name`, written at every bake site,
+preferred by `archive_ctx_loader` over any re-derivation). This also
+restores generic args the old derivation dropped ("Maybe<Char>" no
+longer collapses to "Maybe"), closing the match-arm payload-typing leg
+of the same class. Guard:
+`regression_c_return_type_name_carried_for_ordering`.
