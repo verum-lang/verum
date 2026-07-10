@@ -93,3 +93,17 @@ public mount core.math.frameworks.msfs.self_containment.{
     msfs_self_containment_theorem,
     msfs_trusted_boundary_corollary,
 };
+
+// Five-axis + bypass statement surface (paper §7/§8) — consumable by
+// downstream corpora (Diakrisis 5x.T / 98.T / 99.T / 102.T dispatch).
+public mount core.math.frameworks.msfs.axis_surface.{
+    msfs_theorem_7_1_horizontal,
+    msfs_theorem_7_2_vertical,
+    msfs_theorem_7_3_meta_vertical,
+    msfs_theorem_7_4_lateral,
+    msfs_theorem_7_6_completeness,
+    msfs_theorem_8_1_universe_polymorphism,
+    msfs_theorem_8_2_reflective_tower,
+    msfs_corollary_8_8_intensional_no_new_axis,
+};
+

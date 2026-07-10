@@ -1,0 +1,123 @@
+// =============================================================================
+// frameworks/msfs/axis_surface.vr — five-axis + bypass statement surface
+// =============================================================================
+//
+// Statement-level surface for the MSFS five-axis absoluteness theorems
+// (paper §7, labels `thm:horizontal` … `thm:completeness`) and the
+// three bypass-path results (paper §8, labels `thm:universe`,
+// `thm:reflective`, `cor:iteration-closure`/intensional corollary),
+// consumable by downstream corpora — in particular the Diakrisis
+// theorem corpus, whose 5x.T / 98.T / 99.T / 102.T proofs dispatch
+// through the MSFS counterparts.
+//
+// Layering: the PROVED theorem-level forms (multi-step apply-chains
+// with kernel-discharge ceremony) live in the MSFS verum corpus
+// (math-msfs/verum-corpus, lib.theorems.msfs.{five_axis,
+// bypass_paths}). Cross-cog mounts are not resolvable today, so this
+// file carries the same statements as `@framework(msfs, …)`-cited
+// axioms over the shared `LAbsCandidate` witness protocol — exactly
+// the pattern of `meta_cls`'s `*_full` forms and
+// `absolute_layer::msfs_id_x_violates_pi_4`. Each axiom's content is
+// "the L_Abs triple remains contradictory along this axis / through
+// this bypass", i.e. requires the triple, ensures false.
+// =============================================================================
+
+module core.math.frameworks.msfs.axis_surface;
+
+mount core.math.absolute_layer.{LAbsCandidate};
+
+// -----------------------------------------------------------------------------
+// Five-axis absoluteness (paper §7)
+// -----------------------------------------------------------------------------
+
+/// **MSFS Theorem 7.1 (label `thm:horizontal`).** Horizontal axis:
+/// AFN-T holds uniformly over every S ∈ \RS — the proof of Theorem
+/// 5.1 invokes only (R1)-(R5), never a specific S.
+@accessibility(omega_1)
+@framework(msfs, "MSFS Theorem 7.1 — horizontal absoluteness over R-S (thm:horizontal)")
+public axiom msfs_theorem_7_1_horizontal(candidate: &LAbsCandidate) -> Bool
+    requires candidate.cond_F_S().has_phi_X()
+          && candidate.cond_Pi_4().is_irreducible_in_s_s()
+          && candidate.cond_Pi_3_max().is_maximally_generative()
+    ensures false;
+
+/// **MSFS Theorem 7.2 (label `thm:vertical`).** Vertical axis: AFN-T
+/// holds uniformly over the categorical level n ∈ ℕ ∪ {∞} — id_X is
+/// an (∞, n)-equivalence at every n.
+@accessibility(omega_1)
+@framework(msfs, "MSFS Theorem 7.2 — vertical absoluteness over n (thm:vertical)")
+public axiom msfs_theorem_7_2_vertical(candidate: &LAbsCandidate) -> Bool
+    requires candidate.cond_F_S().has_phi_X()
+          && candidate.cond_Pi_4().is_irreducible_in_s_s()
+          && candidate.cond_Pi_3_max().is_maximally_generative()
+    ensures false;
+
+/// **MSFS Theorem 7.3 (label `thm:meta-vertical`).** Meta-vertical
+/// axis: μ-iterated meta-classification stabilises (Theorem A.7
+/// idempotence); no L_Abs point appears at any meta-stage.
+@accessibility(omega_1)
+@framework(msfs, "MSFS Theorem 7.3 — meta-vertical absoluteness over mu (thm:meta-vertical)")
+public axiom msfs_theorem_7_3_meta_vertical(candidate: &LAbsCandidate) -> Bool
+    requires candidate.cond_F_S().has_phi_X()
+          && candidate.cond_Pi_4().is_irreducible_in_s_s()
+          && candidate.cond_Pi_3_max().is_maximally_generative()
+    ensures false;
+
+/// **MSFS Theorem 7.4 (label `thm:lateral`).** Lateral axis:
+/// alternative composition orders of Cls/Gen reduce to the canonical
+/// order; no reordering opens an L_Abs escape.
+@accessibility(omega_1)
+@framework(msfs, "MSFS Theorem 7.4 — lateral absoluteness over composition order (thm:lateral)")
+public axiom msfs_theorem_7_4_lateral(candidate: &LAbsCandidate) -> Bool
+    requires candidate.cond_F_S().has_phi_X()
+          && candidate.cond_Pi_4().is_irreducible_in_s_s()
+          && candidate.cond_Pi_3_max().is_maximally_generative()
+    ensures false;
+
+/// **MSFS Theorem 7.6 (label `thm:completeness`).** Completeness
+/// axis: within the Lawvere-characterizable scope (Definition
+/// `def:law-scope`), the four dimensions exhaust the escape space.
+@accessibility(omega_1)
+@framework(msfs, "MSFS Theorem 7.6 — completeness of the axis family (thm:completeness)")
+public axiom msfs_theorem_7_6_completeness(candidate: &LAbsCandidate) -> Bool
+    requires candidate.cond_F_S().has_phi_X()
+          && candidate.cond_Pi_4().is_irreducible_in_s_s()
+          && candidate.cond_Pi_3_max().is_maximally_generative()
+    ensures false;
+
+// -----------------------------------------------------------------------------
+// Three bypass paths (paper §8)
+// -----------------------------------------------------------------------------
+
+/// **MSFS Theorem 8.1 (label `thm:universe`).** Universe-polymorphism
+/// bypass: universe-polymorphic candidates Morita-reduce to their
+/// Π_ℓ-sections in S_S^global; the triple remains contradictory.
+@accessibility(omega_1)
+@framework(msfs, "MSFS Theorem 8.1 — universe-polymorphism bypass closes (thm:universe)")
+public axiom msfs_theorem_8_1_universe_polymorphism(candidate: &LAbsCandidate) -> Bool
+    requires candidate.cond_F_S().has_phi_X()
+          && candidate.cond_Pi_4().is_irreducible_in_s_s()
+          && candidate.cond_Pi_3_max().is_maximally_generative()
+    ensures false;
+
+/// **MSFS Theorem 8.2 (label `thm:reflective`).** Reflective-tower
+/// bypass: the tower {S_κ} stabilises within one additional
+/// inaccessible (Rathjen–Feferman bound); no L_Abs escape occurs.
+@accessibility(omega_1)
+@framework(msfs, "MSFS Theorem 8.2 — reflective-tower bypass closes (thm:reflective)")
+public axiom msfs_theorem_8_2_reflective_tower(candidate: &LAbsCandidate) -> Bool
+    requires candidate.cond_F_S().has_phi_X()
+          && candidate.cond_Pi_4().is_irreducible_in_s_s()
+          && candidate.cond_Pi_3_max().is_maximally_generative()
+    ensures false;
+
+/// **MSFS Corollary 8.8 (intensional reduction).** Intensional
+/// refinement is slice-local over 𝔐 (Theorem `thm:slice-locality`):
+/// it refines fibers, never the base — no new escape axis appears.
+@accessibility(omega_1)
+@framework(msfs, "MSFS Corollary 8.8 — intensional refinement adds no new axis (cor:slice-level)")
+public axiom msfs_corollary_8_8_intensional_no_new_axis(candidate: &LAbsCandidate) -> Bool
+    requires candidate.cond_F_S().has_phi_X()
+          && candidate.cond_Pi_4().is_irreducible_in_s_s()
+          && candidate.cond_Pi_3_max().is_maximally_generative()
+    ensures false;
