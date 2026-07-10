@@ -590,23 +590,70 @@ impl VbcModule {
     /// guard sound regardless of whether stdlib symbols are registered with
     /// short or fully-qualified module paths.
     pub fn find_function_by_name(&self, name: &str) -> Option<FunctionId> {
+        // ARCH-P2 step 0b (dispatch tie-break determinism): among
+        // SAME-NAMED entries the winner used to be "lowest id" — an
+        // interning-order artifact that made runtime dispatch depend
+        // on bake layout (re-idding flipped stub-vs-real winners; the
+        // 39-test signature that gated id canonicalization). Canonical
+        // rule: a REAL BODY (bytecode/instructions present) beats a
+        // synthesized stub regardless of position; ids only break
+        // exact ties (same name, same bodiedness — semantically
+        // interchangeable).
+        let has_body = |desc: &crate::module::FunctionDescriptor| -> bool {
+            desc.bytecode_length > 0
+                || desc
+                    .instructions
+                    .as_ref()
+                    .map(|i| !i.is_empty())
+                    .unwrap_or(false)
+        };
         // Exact match first
+        let mut exact: Option<(bool, u32)> = None;
         for (idx, desc) in self.functions.iter().enumerate() {
             if let Some(fname) = self.get_string(desc.name)
                 && fname == name
             {
-                return Some(FunctionId(idx as u32));
+                let bodied = has_body(desc);
+                match exact {
+                    None => exact = Some((bodied, idx as u32)),
+                    Some((false, _)) if bodied => {
+                        exact = Some((true, idx as u32))
+                    }
+                    _ => {}
+                }
+                if bodied {
+                    // First bodied match is canonical — no later entry
+                    // can outrank it.
+                    break;
+                }
             }
+        }
+        if let Some((_, idx)) = exact {
+            return Some(FunctionId(idx));
         }
         // Suffix match: ".name" against fully-qualified registrations
         if name.contains('.') {
             let suffix = format!(".{}", name);
+            let mut sfx: Option<(bool, u32)> = None;
             for (idx, desc) in self.functions.iter().enumerate() {
                 if let Some(fname) = self.get_string(desc.name)
                     && fname.ends_with(&suffix)
                 {
-                    return Some(FunctionId(idx as u32));
+                    let bodied = has_body(desc);
+                    match sfx {
+                        None => sfx = Some((bodied, idx as u32)),
+                        Some((false, _)) if bodied => {
+                            sfx = Some((true, idx as u32))
+                        }
+                        _ => {}
+                    }
+                    if bodied {
+                        break;
+                    }
                 }
+            }
+            if let Some((_, idx)) = sfx {
+                return Some(FunctionId(idx));
             }
         }
         None

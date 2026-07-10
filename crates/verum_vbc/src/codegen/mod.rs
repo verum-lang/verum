@@ -17215,13 +17215,29 @@ impl VbcCodegen {
 
         // Sort functions by ID so array index matches function ID
         // (closures compiled during parent functions may be pushed out of order)
-        // ARCH-P2 note: a name-canonical sort here was tried and
-        // REVERTED — 39 tests flipped because RUNTIME bare-suffix
-        // dispatch tie-breaks by LOWEST FUNCTION ID ("first match"),
-        // so re-idding changes dispatch winners. P2's canonical ids
-        // require name-deterministic dispatch tie-breaks FIRST (see
-        // tier-coherence-pillars.md, P2 sequencing update).
-        self.functions.sort_by_key(|f| f.descriptor.id.0);
+        // ARCH-P2 canonical writer, RE-ARMED after step 0b: dispatch
+        // tie-breaks are now bodied-beats-stub (module.rs
+        // find_function_by_name) — id order no longer picks winners
+        // among same-named entries, so NAME-canonical ids are safe.
+        // The contiguous re-id + func_id_remap below then propagates
+        // through the existing instruction rewriter; bake function
+        // sections become byte-stable regardless of registration
+        // order. VERUM_NO_CANONICAL_WRITER=1 restores id-order.
+        if std::env::var("VERUM_NO_CANONICAL_WRITER").is_ok() {
+            self.functions.sort_by_key(|f| f.descriptor.id.0);
+        } else {
+            let key_of = |f: &crate::module::VbcFunction| -> (String, u32) {
+                (
+                    self.ctx
+                        .strings
+                        .get(f.descriptor.name.0 as usize)
+                        .cloned()
+                        .unwrap_or_default(),
+                    f.descriptor.id.0,
+                )
+            };
+            self.functions.sort_by(|a, b| key_of(a).cmp(&key_of(b)));
+        }
 
         // **Duplicate-id collapse, the load-bearing dispatch fix.**
         //
